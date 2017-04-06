@@ -215,7 +215,7 @@ namespace Realm {
     if(dense()) {
       // always split in x dimension for now
       assert(count >= 1);
-      T total_x = std::max(bounds.hi.x - bounds.lo.x + 1, 0);
+      T total_x = std::max(bounds.hi.x - bounds.lo.x + 1, T(0));
       subspaces.reserve(count);
       T px = bounds.lo.x;
       for(size_t i = 0; i < count; i++) {
@@ -335,6 +335,19 @@ namespace Realm {
   template <int N, typename T>
   template <int N2, typename T2>
   __attribute__ ((noinline))
+  Event ZIndexSpace<N,T>::create_subspaces_by_image(const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZRect<N,T> > >& field_data,
+							   const std::vector<ZIndexSpace<N2,T2> >& sources,
+							   std::vector<ZIndexSpace<N,T> >& images,
+							   const ProfilingRequestSet &reqs,
+							   Event wait_on /*= Event::NO_EVENT*/) const
+  {
+    assert(0);
+    return wait_on;
+  }
+
+  template <int N, typename T>
+  template <int N2, typename T2>
+  __attribute__ ((noinline))
   Event ZIndexSpace<N,T>::create_subspaces_by_image_with_difference(const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZPoint<N,T> > >& field_data,
 							   const std::vector<ZIndexSpace<N2,T2> >& sources,
 							   const std::vector<ZIndexSpace<N,T> >& diff_rhss,
@@ -373,6 +386,32 @@ namespace Realm {
 
     op->deferred_launch(wait_on);
     return e;
+  }
+
+  template <int N, typename T>
+  template <int N2, typename T2>
+  __attribute__ ((noinline))
+  Event ZIndexSpace<N,T>::create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,ZRect<N2,T2> > >& field_data,
+						       const std::vector<ZIndexSpace<N2,T2> >& targets,
+						       std::vector<ZIndexSpace<N,T> >& preimages,
+						       const ProfilingRequestSet &reqs,
+						       Event wait_on /*= Event::NO_EVENT*/) const
+  {
+    assert(0);
+    return wait_on;
+  }
+
+  template <int N, typename T>
+  template <int N2, typename T2>
+  __attribute__ ((noinline))
+  Event ZIndexSpace<N,T>::create_association(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,
+					                       ZPoint<N2,T2> > >& field_data,
+					     const ZIndexSpace<N2,T2> &range,
+					     const ProfilingRequestSet &reqs,
+					     Event wait_on /*= Event::NO_EVENT*/) const
+  {
+    assert(0);
+    return wait_on;
   }
 
   template <int N, typename T>
@@ -4782,6 +4821,7 @@ namespace Realm {
   // template instantiation goo
 
   namespace {
+#if 0
     template <int N, typename T>
     class InstantiatePartitioningStuff {
     public:
@@ -4838,11 +4878,82 @@ namespace Realm {
 	ZIndexSpace<N,T>::compute_intersection(list, i, Realm::ProfilingRequestSet());
       }
     };
+#endif
+    class NT_Instantiator {
+    public:
+      template <typename NT, typename T>
+      static void demux(int tag)
+      {
+	ZIndexSpace<NT::N,T> i;
+	std::vector<int> weights;
+	std::vector<ZIndexSpace<NT::N,T> > list;
+	i.create_equal_subspaces(0, 0, list, Realm::ProfilingRequestSet());
+	i.create_weighted_subspaces(0, 0, weights, list, Realm::ProfilingRequestSet());
+	ZIndexSpace<NT::N,T>::compute_unions(list, list, list, Realm::ProfilingRequestSet());
+	ZIndexSpace<NT::N,T>::compute_intersections(list, list, list, Realm::ProfilingRequestSet());
+	ZIndexSpace<NT::N,T>::compute_differences(list, list, list, Realm::ProfilingRequestSet());
+	ZIndexSpace<NT::N,T>::compute_union(list, i, Realm::ProfilingRequestSet());
+	ZIndexSpace<NT::N,T>::compute_intersection(list, i, Realm::ProfilingRequestSet());
+      }
+    };
 
-    //
+    class NTF_Instantiator {
+    public:
+      template <typename NT, typename T, typename FT>
+      static void demux(int tag)
+      {
+	ZIndexSpace<NT::N,T> i;
+	std::vector<FieldDataDescriptor<ZIndexSpace<NT::N,T>,FT> > field_data;
+	std::vector<FT> colors;
+	std::vector<ZIndexSpace<NT::N,T> > subspaces;
+	i.create_subspaces_by_field(field_data, colors, subspaces,
+				    Realm::ProfilingRequestSet());
+      }
+    };
+
+    class NTNT_Instantiator {
+    public:
+      template <typename NT, typename T, typename N2T, typename T2>
+      static void demux(int tag)
+      {
+	std::vector<ZIndexSpace<NT::N, T> > list1;
+	std::vector<ZIndexSpace<N2T::N, T2> > list2;
+
+	std::vector<FieldDataDescriptor<ZIndexSpace<NT::N,T>,ZPoint<N2T::N,T2> > > field_ptrs;
+	list2[0].create_subspaces_by_image(field_ptrs, list1, list2,
+					   Realm::ProfilingRequestSet());
+	list2[0].create_subspaces_by_image_with_difference(field_ptrs, list1, list2, list2,
+					   Realm::ProfilingRequestSet());
+
+	list1[0].create_subspaces_by_preimage(field_ptrs, list2, list1,
+					      Realm::ProfilingRequestSet());
+
+	list1[0].create_association(field_ptrs, list2[0],
+				    Realm::ProfilingRequestSet());
+
+	std::vector<FieldDataDescriptor<ZIndexSpace<NT::N,T>,ZRect<N2T::N,T2> > > field_ranges;
+	list2[0].create_subspaces_by_image(field_ranges, list1, list2,
+					   Realm::ProfilingRequestSet());
+	list1[0].create_subspaces_by_preimage(field_ranges, list2, list1,
+					      Realm::ProfilingRequestSet());
+
+	// also do the field based stuff with point/rect types
+	//NTF_Instantiator::demux<NT, T, ZPoint<N2T::N, T2> >(tag);
+      }
+    };
+
+    // use our dynamic template demux stuff to enumerate all possible
+    //  combinations of template paramters
+    void instantiate_stuff(int tag)
+    {
+      NT_TemplateHelper::demux<NT_Instantiator>(tag, tag);
+      NTF_TemplateHelper::demux<NTF_Instantiator>(tag, tag);
+      NTNT_TemplateHelper::demux<NTNT_Instantiator>(tag, tag);
+    }
   };
 
-  void (*dummy)(void) __attribute__((unused)) = &InstantiatePartitioningStuff<1,int>::inst_stuff;
+  //void (*dummy)(void) __attribute__((unused)) = &InstantiatePartitioningStuff<1,int>::inst_stuff;
+  void (*dummy)(int) __attribute__((unused)) = &instantiate_stuff;
   //InstantiatePartitioningStuff<1,int> foo __attribute__((unused));
 };
 
