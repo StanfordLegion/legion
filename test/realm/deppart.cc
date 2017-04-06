@@ -26,6 +26,28 @@ enum {
   INIT_MINIAERO_DATA_TASK,
 };
 
+namespace std {
+  template <typename T>
+  std::ostream& operator<<(std::ostream& os, const std::vector<T>& v)
+  {
+    os << v.size() << "{";
+    if(v.empty()) {
+      os << "}";
+    } else {
+      os << " ";
+      typename std::vector<T>::const_iterator it = v.begin();
+      os << *it;
+      ++it;
+      while(it != v.end()) {
+	os << ", " << *it;
+	++it;
+      }
+      os << " }";
+    }
+    return os;
+  }
+};
+
 // we're going to use alarm() as a watchdog to detect deadlocks
 void sigalrm_handler(int sig)
 {
@@ -1800,6 +1822,270 @@ public:
   }
 };
 
+template <typename PRNG = Philox_2x32<> >
+class RandStream {
+public:
+  RandStream(unsigned _seed)
+    : seed(_seed)
+    , idx(0)
+  {}
+
+  void setpos(unsigned long long _idx) { idx = _idx; }
+  void adjpos(long long _adj) { idx += _adj; }
+
+  unsigned rand_int(unsigned n)
+  {
+    unsigned v = PRNG::rand_int(seed, idx >> 32, idx, n);
+    idx++;
+    return v;
+  }
+
+  float rand_float(void)
+  {
+    float v = PRNG::rand_float(seed, idx >> 32, idx);
+    idx++;
+    return v;
+  }
+
+  unsigned seed;
+  unsigned long long idx;
+};
+
+template <typename FT>
+FT randval(RandStream<>& rs);
+
+template <>
+float randval<float>(RandStream<>& rs)
+{
+  return rs.rand_float();
+}
+
+template <int N1, typename T1, int N2, typename T2, typename FT>
+class RandomTest : public TestInterface {
+public:
+  RandomTest(int argc, const char *argv[]);
+  virtual ~RandomTest(void);
+
+  virtual void print_info(void);
+
+  virtual Event initialize_data(const std::vector<Memory>& memories,
+				const std::vector<Processor>& procs);
+
+  virtual Event perform_partitioning(void);
+
+  virtual int perform_dynamic_checks(void);
+
+  virtual int check_partitioning(void);
+
+  void fill_instance_data(ZIndexSpace<N1,T1> ibounds, RegionInstance inst);
+
+protected:
+  T1 base1_min, base1_max, extent1_min, extent1_max;
+  T2 base2_min, base2_max, extent2_min, extent2_max;
+  int num_pieces, num_colors;
+
+  ZRect<N1,T1> bounds1;
+  ZRect<N2,T2> bounds2;
+  ZIndexSpace<N1,T1> root1;
+  ZIndexSpace<N2,T2> root2;
+  std::vector<FT> colors;
+  std::vector<RegionInstance> ri_data1;
+  std::vector<FieldDataDescriptor<ZIndexSpace<N1,T1>, FT> > fd_vals1;
+  std::vector<FieldDataDescriptor<ZIndexSpace<N1,T1>, ZPoint<N2,T2> > > fd_ptrs1;
+};
+
+template <int N1, typename T1, int N2, typename T2, typename FT>
+RandomTest<N1,T1,N2,T2,FT>::RandomTest(int argc, const char *argv[])
+  : base1_min(0), base1_max(0), extent1_min(4), extent1_max(6)
+  , base2_min(0), base2_max(0), extent2_min(4), extent2_max(6)
+  , num_pieces(2), num_colors(4)
+{
+  RandStream<> rs(random_seed+0);
+
+  for(int i = 0; i < N1; i++) {
+    bounds1.lo[i] = base1_min + rs.rand_int(base1_max - base1_min + 1);
+    bounds1.hi[i] = (bounds1.lo[i] +
+		     extent1_min + rs.rand_int(extent1_max - extent1_min + 1));
+  }
+  for(int i = 0; i < N2; i++) {
+    bounds2.lo[i] = base2_min + rs.rand_int(base2_max - base2_min + 1);
+    bounds2.hi[i] = (bounds2.lo[i] +
+		     extent2_min + rs.rand_int(extent2_max - extent2_min + 1));
+  }
+
+  colors.resize(num_colors);
+  for(int i = 0; i < num_colors; i++)
+    colors[i] = randval<FT>(rs);
+}
+
+template <int N1, typename T1, int N2, typename T2, typename FT>
+RandomTest<N1,T1,N2,T2,FT>::~RandomTest(void)
+{}
+
+template <int N1, typename T1, int N2, typename T2, typename FT>
+void RandomTest<N1,T1,N2,T2,FT>::print_info(void)
+{
+  printf("Realm dependent partitioning test - random\n");
+}
+
+template <int N1, typename T1, int N2, typename T2, typename FT>
+void RandomTest<N1,T1,N2,T2,FT>::fill_instance_data(ZIndexSpace<N1,T1> ibounds,
+						    RegionInstance inst)
+{
+  {
+    // start with value field
+    AffineAccessor<FT,N1,T1> a_vals(inst, 0);
+
+    // iterate over all points in root1 with initial random values
+    RandStream<> rs1(random_seed + 1);
+    for(ZPointInRectIterator<N1,T1> pir(bounds1); pir.valid; pir.step()) {
+      FT v = colors[rs1.rand_int(colors.size())];
+      if(ibounds.contains(pir.p))
+	a_vals.write(pir.p, v);
+    }
+    
+    // print results
+    for(ZPointInRectIterator<N1,T1> pir(bounds1); pir.valid; pir.step()) {
+      if(ibounds.contains(pir.p))
+	log_app.debug() << "v[" << pir.p << "] = " << a_vals.read(pir.p);
+    }
+  }
+
+  {
+    // now pointer field
+    AffineAccessor<ZPoint<N2,T2>,N1,T1> a_ptrs(inst, 0 + sizeof(FT));
+
+    // iterate over all points in root1 with initial random values
+    RandStream<> rs2(random_seed + 2);
+    for(ZPointInRectIterator<N1,T1> pir(bounds1); pir.valid; pir.step()) {
+      ZPoint<N2,T2> p2;
+      for(int i = 0; i < N2; i++)
+	p2[i] = bounds2.lo[i] + rs2.rand_int(bounds2.hi[i] - bounds2.lo[i] + 1);
+      if(ibounds.contains(pir.p))
+	a_ptrs.write(pir.p, p2);
+    }
+    
+    // print results
+    for(ZPointInRectIterator<N1,T1> pir(bounds1); pir.valid; pir.step()) {
+      if(ibounds.contains(pir.p))
+	log_app.debug() << "p[" << pir.p << "] = " << a_ptrs.read(pir.p);
+    }
+  }
+}
+
+template <int N1, typename T1, int N2, typename T2, typename FT>
+Event RandomTest<N1,T1,N2,T2,FT>::initialize_data(const std::vector<Memory>& memories,
+						  const std::vector<Processor>& procs)
+{
+  root1 = ZIndexSpace<N1,T1>(bounds1);
+  root2 = ZIndexSpace<N2,T2>(bounds2);
+  log_app.debug() << "root1 = " << root1;
+  log_app.debug() << "root2 = " << root2;
+
+  // create instances to hold actual data
+  size_t num_insts = memories.size();
+  log_app.debug() << "procs: " << procs;
+  log_app.debug() << "mems: " << memories;
+  std::vector<ZIndexSpace<N1,T1> > ss_inst1;
+  root1.create_equal_subspaces(num_insts, 1, ss_inst1,
+			       Realm::ProfilingRequestSet()).wait();
+
+  std::vector<size_t> field_sizes;
+  field_sizes.push_back(sizeof(FT));
+  field_sizes.push_back(sizeof(ZPoint<N2,T2>));
+
+  ri_data1.resize(num_insts);
+  fd_vals1.resize(num_insts);
+  fd_ptrs1.resize(num_insts);
+
+  for(size_t i = 0; i < num_insts; i++) {
+    RegionInstance ri = RegionInstance::create_instance(memories[i],
+							ss_inst1[i],
+							field_sizes,
+							Realm::ProfilingRequestSet());
+    log_app.debug() << "inst[" << i << "] = " << ri << " (" << ss_inst1[i] << ")";
+    ri_data1[i] = ri;
+
+    fd_vals1[i].index_space = ss_inst1[i];
+    fd_vals1[i].inst = ri;
+    fd_vals1[i].field_offset = 0;
+
+    fd_ptrs1[i].index_space = ss_inst1[i];
+    fd_ptrs1[i].inst = ri;
+    fd_ptrs1[i].field_offset = 0 + sizeof(FT);
+  }
+
+  log_app.debug() << "colors = " << colors;
+
+  for(size_t i = 0; i < num_insts; i++) {
+    fill_instance_data(root1/*ss_inst1[i]*/, ri_data1[i]);
+  }
+
+  return Event::NO_EVENT;
+}
+
+template <int N1, typename T1, int N2, typename T2, typename FT>
+Event RandomTest<N1,T1,N2,T2,FT>::perform_partitioning(void)
+{
+  // start by filtering root1 by color
+  std::vector<FT> piece_colors(colors.begin(), colors.begin() + num_pieces);
+  std::vector<ZIndexSpace<N1,T1> > ss_by_color(num_pieces);
+  Event e1 = root1.create_subspaces_by_field(fd_vals1,
+					     piece_colors,
+					     ss_by_color,
+					     ProfilingRequestSet());
+  e1.wait();
+
+  for(size_t i = 0; i < num_pieces; i++) {
+    log_app.debug() << "bycolor[" << i << "] (" << colors[i] << ") = " << ss_by_color[i];
+    dump_sparse_index_space("", ss_by_color[i]);
+  }
+
+  // images
+  std::vector<ZIndexSpace<N2,T2> > ss_images;
+  Event e2 = root2.create_subspaces_by_image(fd_ptrs1,
+					     ss_by_color,
+					     ss_images,
+					     ProfilingRequestSet(),
+					     e1);
+
+  e2.wait();
+
+  for(size_t i = 0; i < num_pieces; i++) {
+    log_app.debug() << "image[" << i << "] = " << ss_images[i];
+    dump_sparse_index_space("", ss_images[i]);
+  }
+
+  // preimages
+  std::vector<ZIndexSpace<N1,T1> > ss_preimages;
+  Event e3 = root1.create_subspaces_by_preimage(fd_ptrs1,
+						ss_images,
+						ss_preimages,
+						ProfilingRequestSet(),
+						e2);
+
+  e3.wait();
+
+  for(size_t i = 0; i < num_pieces; i++) {
+    log_app.debug() << "preimage[" << i << "] = " << ss_preimages[i];
+    dump_sparse_index_space("", ss_preimages[i]);
+  }
+
+  
+  return Event::NO_EVENT;
+}
+
+template <int N1, typename T1, int N2, typename T2, typename FT>
+int RandomTest<N1,T1,N2,T2,FT>::perform_dynamic_checks(void)
+{
+  return 0;
+}
+
+template <int N1, typename T1, int N2, typename T2, typename FT>
+int RandomTest<N1,T1,N2,T2,FT>::check_partitioning(void)
+{
+  return 0;
+}
 
 void top_level_task(const void *args, size_t arglen,
 		    const void *userdata, size_t userlen, Processor p)
@@ -1925,6 +2211,11 @@ int main(int argc, char **argv)
   
     if(!strcmp(argv[i], "miniaero")) {
       testcfg = new MiniAeroTest(argc-i, const_cast<const char **>(argv+i));
+      break;
+    }
+
+    if(!strcmp(argv[i], "random")) {
+      testcfg = new RandomTest<1,int,2,int,float>(argc-i, const_cast<const char **>(argv+i));
       break;
     }
 
