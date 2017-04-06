@@ -91,6 +91,12 @@ namespace Legion {
                                        PartitionKind part_kind,
                                        ApEvent partition_ready,
             ApUserEvent partial_pending = ApUserEvent::NO_AP_USER_EVENT);
+      void create_pending_cross_product(IndexPartition handle1,
+                                        IndexPartition handle2,
+                  std::map<IndexSpace,IndexPartition> &user_handles,
+                                           PartitionKind kind,
+                                           LegionColor &part_color,
+                                           ApEvent domain_ready);
       void compute_partition_disjointness(IndexPartition handle,
                                           RtUserEvent ready_event);
       void destroy_index_space(IndexSpace handle, AddressSpaceID source);
@@ -119,13 +125,7 @@ namespace Legion {
                                               IndexPartition base,
                                               IndexPartition source,
                                               LegionColor part_color);
-    public: 
-      void create_pending_cross_product(IndexPartition handle1,
-                                        IndexPartition handle2,
-                  std::map<IndexSpace,IndexPartition> &user_handles,
-                                           PartitionKind kind,
-                                           LegionColor &part_color,
-                                           ApEvent domain_ready);
+    public:  
       ApEvent create_partition_by_field(Operation *op,
                                         IndexPartition pending,
                     const std::vector<FieldDataDescriptor> &instances,

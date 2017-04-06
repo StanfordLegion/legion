@@ -206,6 +206,103 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeForest::create_pending_cross_product(IndexPartition handle1,
+                                                        IndexPartition handle2,
+                             std::map<IndexSpace,IndexPartition> &user_handles,
+                                                        PartitionKind kind,
+                                                        LegionColor &part_color,
+                                                        ApEvent domain_ready)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode *base = get_node(handle1);
+      IndexPartNode *source = get_node(handle2);
+      // If we're supposed to compute this, but we already know that
+      // the source is disjoint then we can also conlclude the the 
+      // resulting partitions will also be disjoint under intersection
+      if ((kind == COMPUTE_KIND) && source->is_disjoint(true/*from app*/))
+        kind = DISJOINT_KIND;
+      // If we haven't been given a color yet, we need to find
+      // one that will be valid for all the child partitions
+      if (part_color == INVALID_COLOR)
+      {
+        std::set<LegionColor> existing_colors;
+        if (base->total_children == base->max_linearized_color)
+        {
+          for (LegionColor color = 0; color < base->total_children; color++)
+          {
+            IndexSpaceNode *child_node = base->get_child(color);
+            std::vector<LegionColor> colors;
+            child_node->get_colors(colors);
+            if (!colors.empty())
+              existing_colors.insert(colors.begin(), colors.end());
+          }
+        }
+        else
+        {
+          for (LegionColor color = 0; 
+                color < base->max_linearized_color; color++)
+          {
+            if (!base->color_space->contains_color(color))
+              continue;
+            IndexSpaceNode *child_node = base->get_child(color);
+            std::vector<LegionColor> colors;
+            child_node->get_colors(colors);
+            if (!colors.empty())
+              existing_colors.insert(colors.begin(), colors.end());
+          }
+        }
+        // Now we have the existing colors, so just do something dumb
+        // like add our current runtime ID to the last color
+        const unsigned offset = (runtime->address_space == 0) ?
+                      runtime->runtime_stride : runtime->address_space;
+        if (!existing_colors.empty())
+        {
+          LegionColor last = *(existing_colors.rbegin());
+          part_color = last + offset;
+        }
+        else
+          part_color = offset;
+      }
+      // Iterate over all our sub-regions and generate partitions
+      if (base->total_children == base->max_linearized_color)
+      {
+        for (LegionColor color = 0; color < base->total_children; color++)
+        {
+          IndexSpaceNode *child_node = base->get_child(color);
+          IndexPartition pid(runtime->get_unique_index_partition_id(),
+                             handle1.get_tree_id(), handle1.get_type_tag()); 
+          create_pending_partition(pid, child_node->handle, 
+                                   source->color_space->handle, 
+                                   part_color, kind, domain_ready);
+          // If the user requested the handle for this point return it
+          std::map<IndexSpace,IndexPartition>::iterator finder = 
+            user_handles.find(child_node->handle);
+          if (finder != user_handles.end())
+            finder->second = pid;
+        }
+      }
+      else
+      {
+        for (LegionColor color = 0; color < base->max_linearized_color; color++)
+        {
+          if (!base->color_space->contains_color(color))
+            continue;
+          IndexSpaceNode *child_node = base->get_child(color);
+          IndexPartition pid(runtime->get_unique_index_partition_id(),
+                             handle1.get_tree_id(), handle1.get_type_tag()); 
+          create_pending_partition(pid, child_node->handle, 
+                                   source->color_space->handle,
+                                   part_color, kind, domain_ready);
+          // If the user requested the handle for this point return it
+          std::map<IndexSpace,IndexPartition>::iterator finder = 
+            user_handles.find(child_node->handle);
+          if (finder != user_handles.end())
+            finder->second = pid;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeForest::compute_partition_disjointness(IndexPartition handle,
                                                         RtUserEvent ready_event)
     //--------------------------------------------------------------------------
@@ -328,104 +425,7 @@ namespace Legion {
         }
       }
       return Runtime::merge_events(ready_events);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::create_pending_cross_product(IndexPartition handle1,
-                                                        IndexPartition handle2,
-                             std::map<IndexSpace,IndexPartition> &user_handles,
-                                                        PartitionKind kind,
-                                                        LegionColor &part_color,
-                                                        ApEvent domain_ready)
-    //--------------------------------------------------------------------------
-    {
-      IndexPartNode *base = get_node(handle1);
-      IndexPartNode *source = get_node(handle2);
-      // If we're supposed to compute this, but we already know that
-      // the source is disjoint then we can also conlclude the the 
-      // resulting partitions will also be disjoint under intersection
-      if ((kind == COMPUTE_KIND) && source->is_disjoint(true/*from app*/))
-        kind = DISJOINT_KIND;
-      // If we haven't been given a color yet, we need to find
-      // one that will be valid for all the child partitions
-      if (part_color == INVALID_COLOR)
-      {
-        std::set<LegionColor> existing_colors;
-        if (base->total_children == base->max_linearized_color)
-        {
-          for (LegionColor color = 0; color < base->total_children; color++)
-          {
-            IndexSpaceNode *child_node = base->get_child(color);
-            std::vector<LegionColor> colors;
-            child_node->get_colors(colors);
-            if (!colors.empty())
-              existing_colors.insert(colors.begin(), colors.end());
-          }
-        }
-        else
-        {
-          for (LegionColor color = 0; 
-                color < base->max_linearized_color; color++)
-          {
-            if (!base->color_space->contains_color(color))
-              continue;
-            IndexSpaceNode *child_node = base->get_child(color);
-            std::vector<LegionColor> colors;
-            child_node->get_colors(colors);
-            if (!colors.empty())
-              existing_colors.insert(colors.begin(), colors.end());
-          }
-        }
-        // Now we have the existing colors, so just do something dumb
-        // like add our current runtime ID to the last color
-        const unsigned offset = (runtime->address_space == 0) ?
-                      runtime->runtime_stride : runtime->address_space;
-        if (!existing_colors.empty())
-        {
-          LegionColor last = *(existing_colors.rbegin());
-          part_color = last + offset;
-        }
-        else
-          part_color = offset;
-      }
-      // Iterate over all our sub-regions and generate partitions
-      if (base->total_children == base->max_linearized_color)
-      {
-        for (LegionColor color = 0; color < base->total_children; color++)
-        {
-          IndexSpaceNode *child_node = base->get_child(color);
-          IndexPartition pid(runtime->get_unique_index_partition_id(),
-                             handle1.get_tree_id(), handle1.get_type_tag()); 
-          create_pending_partition(pid, child_node->handle, 
-                                   source->color_space->handle, 
-                                   part_color, kind, domain_ready);
-          // If the user requested the handle for this point return it
-          std::map<IndexSpace,IndexPartition>::iterator finder = 
-            user_handles.find(child_node->handle);
-          if (finder != user_handles.end())
-            finder->second = pid;
-        }
-      }
-      else
-      {
-        for (LegionColor color = 0; color < base->max_linearized_color; color++)
-        {
-          if (!base->color_space->contains_color(color))
-            continue;
-          IndexSpaceNode *child_node = base->get_child(color);
-          IndexPartition pid(runtime->get_unique_index_partition_id(),
-                             handle1.get_tree_id(), handle1.get_type_tag()); 
-          create_pending_partition(pid, child_node->handle, 
-                                   source->color_space->handle,
-                                   part_color, kind, domain_ready);
-          // If the user requested the handle for this point return it
-          std::map<IndexSpace,IndexPartition>::iterator finder = 
-            user_handles.find(child_node->handle);
-          if (finder != user_handles.end())
-            finder->second = pid;
-        }
-      }
-    }
+    } 
 
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_field(Operation *op,
