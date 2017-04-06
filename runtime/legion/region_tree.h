@@ -83,6 +83,12 @@ namespace Legion {
                                        PartitionKind part_kind,
                                        ApEvent partition_ready,
                   ApBarrier partial_pending = ApBarrier::NO_AP_BARRIER);
+      void create_pending_cross_product(IndexPartition handle1,
+                                        IndexPartition handle2,
+                  std::map<IndexSpace,IndexPartition> &user_handles,
+                                           PartitionKind kind,
+                                           LegionColor &part_color,
+                                           ApEvent domain_ready);
       // For control replication contexts
       RtEvent create_pending_partition_shard(bool owner_shard,
                                              IndexPartition pid,
@@ -132,13 +138,7 @@ namespace Legion {
                                               LegionColor part_color,
                                               ShardID shard = 0,
                                               size_t total_shards = 1);
-    public: 
-      void create_pending_cross_product(IndexPartition handle1,
-                                        IndexPartition handle2,
-                  std::map<IndexSpace,IndexPartition> &user_handles,
-                                           PartitionKind kind,
-                                           LegionColor &part_color,
-                                           ApEvent domain_ready);
+    public:  
       ApEvent create_partition_by_field(Operation *op,
                                         IndexPartition pending,
                     const std::vector<FieldDataDescriptor> &instances,
