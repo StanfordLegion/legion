@@ -21,19 +21,6 @@ namespace Legion {
 
     LEGION_EXTERN_LOGGER_DECLARATIONS
 
-    const IndexSpace IndexSpaceReduction::identity = IndexSpace::NO_SPACE;
-    const IndexPartitionID IndexPartitionReduction::identity = 0;
-    const LegionColor ColorReduction::identity = INVALID_COLOR;
-    const FieldSpace FieldSpaceReduction::identity = FieldSpace::NO_SPACE;
-    const FieldID FieldReduction::identity = 0;
-    const RegionTreeID LogicalRegionReduction::identity = 0;
-    const long long TimingReduction::identity = 0;
-    const bool TrueReduction::identity = false;
-    const bool FalseReduction::identity = true;
-#ifdef DEBUG_LEGION
-    const ShardingID ShardingReduction::identity = UINT_MAX;
-#endif
-
     /////////////////////////////////////////////////////////////
     // Repl Individual Task 
     /////////////////////////////////////////////////////////////
@@ -76,6 +63,9 @@ namespace Legion {
     {
       activate_individual_task();
       sharding_functor = UINT_MAX;
+#ifdef DEBUG_LEGION
+      sharding_collective = NULL; 
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -83,28 +73,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      // Check to see if we picked the same shardingID as everyone else
-      // In theory this has already triggered, but we might need to 
-      // explicitly wait to get realm to admit that
-      if (!replicate_mapped_barrier.has_triggered())
-        replicate_mapped_barrier.wait();
-      ShardingID actual;
-#ifndef NDEBUG
-      bool valid = 
-#endif
-        replicate_mapped_barrier.get_result(&actual, sizeof(actual));
-      assert(valid);
-      if (actual != sharding_functor)
-      {
-        if (mapper != NULL)
-          mapper = runtime->find_mapper(current_proc, map_id);
-        log_run.error("ERROR: Mapper %s chose different sharding functions %d "
-                      "and %d for individual task %s (UID %lld) in %s "
-                      "(UID %lld)", mapper->get_mapper_name(), sharding_functor,
-                      actual, get_task_name(), get_unique_id(),
-                      parent_ctx->get_task_name(), parent_ctx->get_unique_id());
-        assert(false);
-      }
+      if (sharding_collective != NULL)
+        delete sharding_collective;
 #endif
       deactivate_individual_task();
       runtime->free_repl_individual_task(this);
@@ -138,17 +108,22 @@ namespace Legion {
         exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
       this->sharding_functor = output.chosen_functor;
-      // Now we can trigger our result barrier indicating when we are mapped
-      // If we're in debug mode we also reduce our ShardingID so we can 
-      // confirm that all the mappers picked the same one for this operation
 #ifdef DEBUG_LEGION
-      // Debug arrival so contribute the sharding ID
-      Runtime::phase_barrier_arrive(replicate_mapped_barrier, 1/*count*/,
-              get_mapped_event(), &sharding_functor, sizeof(sharding_functor));
-#else
-      // Normal arrival
-      Runtime::phase_barrier_arrive(replicate_mapped_barrier, 1/*count*/,
-                                    get_mapped_event());
+      // In debug mode we check to make sure that all the mappers
+      // picked the same sharding function
+      assert(sharding_collective != NULL);
+      // Contribute the result
+      sharding_collective->contribute(this->sharding_functor);
+      if (sharding_collective->is_target() && 
+          !sharding_collective->validate(this->sharding_functor))
+      {
+        log_run.error("ERROR: Mapper %s chose different sharding functions "
+                      "for individual task %s (UID %lld) in %s "
+                      "(UID %lld)", mapper->get_mapper_name(), get_task_name(), 
+                      get_unique_id(), parent_ctx->get_task_name(), 
+                      parent_ctx->get_unique_id());
+        assert(false); 
+      }
 #endif
       // Now we can do the normal prepipeline stage
       IndividualTask::trigger_prepipeline_stage();
@@ -222,37 +197,20 @@ namespace Legion {
     {
       activate_index_task();
       sharding_functor = UINT_MAX;
+#ifdef DEBUG_LEGION
+      sharding_collective = NULL;
+#endif
     }
 
     //--------------------------------------------------------------------------
     void ReplIndexTask::deactivate(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      // Check to see if we picked the same shardingID as everyone else
-      // In theory this has already triggered, but we might need to 
-      // explicitly wait to get realm to admit that
-      if (!replicate_mapped_barrier.has_triggered())
-        replicate_mapped_barrier.wait();
-      ShardingID actual;
-#ifndef NDEBUG
-      bool valid = 
-#endif
-        replicate_mapped_barrier.get_result(&actual, sizeof(actual));
-      assert(valid);
-      if (actual != sharding_functor)
-      {
-        if (mapper != NULL)
-          mapper = runtime->find_mapper(current_proc, map_id);
-        log_run.error("ERROR: Mapper %s chose different sharding functions %d "
-                      "and %d for index task %s (UID %lld) in %s (UID %lld)", 
-                      mapper->get_mapper_name(), sharding_functor, 
-                      actual, get_task_name(), get_unique_id(),
-                      parent_ctx->get_task_name(), parent_ctx->get_unique_id());
-        assert(false);
-      }
-#endif 
       deactivate_index_task();
+#ifdef DEBUG_LEGION
+      if (sharding_collective != NULL)
+        delete sharding_collective;
+#endif
       runtime->free_repl_index_task(this);
     }
 
@@ -284,6 +242,21 @@ namespace Legion {
         exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
       this->sharding_functor = output.chosen_functor;
+#ifdef DEBUG_LEGION
+      assert(sharding_collective != NULL);
+      sharding_collective->contribute(this->sharding_functor);
+      if (sharding_collective->is_target() &&
+          !sharding_collective->validate(this->sharding_functor))
+      {
+        log_run.error("ERROR: Mapper %s chose different sharding functions "
+                      "for index task %s (UID %lld) in %s (UID %lld)", 
+                      mapper->get_mapper_name(), get_task_name(), 
+                      get_unique_id(), parent_ctx->get_task_name(), 
+                      parent_ctx->get_unique_id());
+        assert(false);
+      }
+#endif
+
       // Now we can do the normal prepipeline stage
       IndexTask::trigger_prepipeline_stage();
     }
@@ -359,6 +332,9 @@ namespace Legion {
       activate_index_fill();
       sharding_functor = UINT_MAX;
       mapper = NULL;
+#ifdef DEBUG_LEGION
+      sharding_collective = NULL;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -366,29 +342,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      // Check to see if we picked the same shardingID as everyone else
-      // In theory this has already triggered, but we might need to 
-      // explicitly wait to get realm to admit that
-      if (!replicate_mapped_barrier.has_triggered())
-        replicate_mapped_barrier.wait();
-      ShardingID actual;
-#ifndef NDEBUG
-      bool valid = 
+      if (sharding_collective != NULL)
+        delete sharding_collective;
 #endif
-        replicate_mapped_barrier.get_result(&actual, sizeof(actual));
-      assert(valid);
-      if (actual != sharding_functor)
-      {
-        if (mapper != NULL)
-          mapper = runtime->find_mapper(
-              parent_ctx->get_executing_processor(), map_id);
-        log_run.error("ERROR: Mapper %s chose different sharding functions %d "
-                      "and %d for index fill in task %s (UID %lld)", 
-                      mapper->get_mapper_name(), sharding_functor, actual,
-                      parent_ctx->get_task_name(), parent_ctx->get_unique_id());
-        assert(false);
-      }
-#endif 
       deactivate_index_fill();
       runtime->free_repl_index_fill_op(this);
     }
@@ -423,6 +379,19 @@ namespace Legion {
         exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
       this->sharding_functor = output.chosen_functor;
+#ifdef DEBUG_LEGION
+      assert(sharding_collective != NULL);
+      sharding_collective->contribute(this->sharding_functor);
+      if (sharding_collective->is_target() &&
+          !sharding_collective->validate(this->sharding_functor))
+      {
+        log_run.error("ERROR: Mapper %s chose different sharding functions "
+                      "for index fill in task %s (UID %lld)", 
+                      mapper->get_mapper_name(), parent_ctx->get_task_name(),
+                      parent_ctx->get_unique_id());
+        assert(false);
+      }
+#endif
       // Now we can do the normal prepipeline stage
       IndexFillOp::trigger_prepipeline_stage();
     }
@@ -497,6 +466,9 @@ namespace Legion {
     {
       activate_copy();
       sharding_functor = UINT_MAX;
+#ifdef DEBUG_LEGION
+      sharding_collective = NULL;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -504,28 +476,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      // Check to see if we picked the same shardingID as everyone else
-      // In theory this has already triggered, but we might need to 
-      // explicitly wait to get realm to admit that
-      if (!replicate_mapped_barrier.has_triggered())
-        replicate_mapped_barrier.wait();
-      ShardingID actual;
-#ifndef NDEBUG
-      bool valid = 
-#endif
-        replicate_mapped_barrier.get_result(&actual, sizeof(actual));
-      assert(valid);
-      if (actual != sharding_functor)
-      {
-        if (mapper != NULL)
-          mapper = runtime->find_mapper(
-              parent_ctx->get_executing_processor(), map_id);
-        log_run.error("ERROR: Mapper %s chose different sharding functions %d "
-                      "and %d for copy in task %s (UID %lld)", 
-                      mapper->get_mapper_name(), sharding_functor, actual,
-                      parent_ctx->get_task_name(), parent_ctx->get_unique_id());
-        assert(false);
-      }
+      if (sharding_collective != NULL)
+        delete sharding_collective;
 #endif
       deactivate_copy();
       runtime->free_repl_copy_op(this);
@@ -560,6 +512,19 @@ namespace Legion {
         exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
       this->sharding_functor = output.chosen_functor;
+#ifdef DEBUG_LEGION
+      assert(sharding_collective != NULL);
+      sharding_collective->contribute(this->sharding_functor);
+      if (sharding_collective->is_target() &&
+          !sharding_collective->validate(this->sharding_functor))
+      {
+        log_run.error("ERROR: Mapper %s chose different sharding functions "
+                      "for copy in task %s (UID %lld)", 
+                      mapper->get_mapper_name(), parent_ctx->get_task_name(), 
+                      parent_ctx->get_unique_id());
+        assert(false);
+      }
+#endif
       // Now we can do the normal prepipeline stage
       CopyOp::trigger_prepipeline_stage();
     }
@@ -632,6 +597,9 @@ namespace Legion {
     {
       activate_index_copy();
       sharding_functor = UINT_MAX;
+#ifdef DEBUG_LEGION
+      sharding_collective = NULL;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -639,28 +607,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      // Check to see if we picked the same shardingID as everyone else
-      // In theory this has already triggered, but we might need to 
-      // explicitly wait to get realm to admit that
-      if (!replicate_mapped_barrier.has_triggered())
-        replicate_mapped_barrier.wait();
-      ShardingID actual;
-#ifndef NDEBUG
-      bool valid = 
-#endif
-        replicate_mapped_barrier.get_result(&actual, sizeof(actual));
-      assert(valid);
-      if (actual != sharding_functor)
-      {
-        if (mapper != NULL)
-          mapper = runtime->find_mapper(
-              parent_ctx->get_executing_processor(), map_id);
-        log_run.error("ERROR: Mapper %s chose different sharding functions %d "
-                      "and %d for index copy in task %s (UID %lld)", 
-                      mapper->get_mapper_name(), sharding_functor, actual,
-                      parent_ctx->get_task_name(), parent_ctx->get_unique_id());
-        assert(false);
-      }
+      if (sharding_collective != NULL)
+        delete sharding_collective;
 #endif
       deactivate_index_copy();
       runtime->free_repl_index_copy_op(this);
@@ -696,6 +644,19 @@ namespace Legion {
         exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
       this->sharding_functor = output.chosen_functor;
+#ifdef DEBUG_LEGION
+      assert(sharding_collective != NULL);
+      sharding_collective->contribute(this->sharding_functor);
+      if (sharding_collective->is_target() &&
+          !sharding_collective->validate(this->sharding_functor))
+      {
+        log_run.error("ERROR: Mapper %s chose different sharding functions "
+                      "for index copy in task %s (UID %lld)", 
+                      mapper->get_mapper_name(), parent_ctx->get_task_name(),
+                      parent_ctx->get_unique_id());
+        assert(false);
+      }
+#endif
       // Now we can do the normal prepipeline stage
       IndexCopyOp::trigger_prepipeline_stage();
     }
@@ -1598,7 +1559,7 @@ namespace Legion {
         handle_collective_message(derez);
       }
       else
-        runtime->send_control_rep_collective_stage(target_space, rez);
+        runtime->send_control_rep_collective_message(target_space, rez);
     }
 
     //--------------------------------------------------------------------------
@@ -1712,8 +1673,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ShardManager::handle_collective_stage(Deserializer &derez,
-                                                          Runtime *runtime)
+    /*static*/ void ShardManager::handle_collective_message(Deserializer &derez,
+                                                            Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -1928,7 +1889,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void GatherCollective::perform_collective_wait(void)
+    void GatherCollective::perform_collective_wait(void) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2323,16 +2284,9 @@ namespace Legion {
         {
 #ifdef DEBUG_LEGION
           assert(local_barriers.find(index) == local_barriers.end());
-          // In debug mode we give a reduction to the application barriers
-          // so that we can check that they all used the same ShardingID
-          local_barriers[index] = 
-            RtBarrier(Realm::Barrier::create_barrier(manager->total_shards,
-                  REDOP_SID_REDUCTION, &ShardingReduction::identity,
-                  sizeof(ShardingReduction::identity)));
-#else
+#endif
           local_barriers[index] = 
               RtBarrier(Realm::Barrier::create_barrier(manager->total_shards));
-#endif
         }
       }
       // Now we can start the exchange from this shard 
@@ -2495,6 +2449,103 @@ namespace Legion {
         derez.deserialize(handle);
         derez.deserialize(non_empty_handles[handle]);
       }
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Sharding Gather Collective 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ShardingGatherCollective::ShardingGatherCollective(ReplicateContext *ctx,
+                                                       ShardID target)
+      : GatherCollective(ctx, target)
+    //--------------------------------------------------------------------------
+    {
+    }
+    
+    //--------------------------------------------------------------------------
+    ShardingGatherCollective::ShardingGatherCollective(
+                                            const ShardingGatherCollective &rhs)
+      : GatherCollective(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ShardingGatherCollective::~ShardingGatherCollective(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ShardingGatherCollective& ShardingGatherCollective::operator=(
+                                            const ShardingGatherCollective &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardingGatherCollective::pack_collective(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(results.size());
+      for (std::map<ShardID,ShardingID>::const_iterator it = 
+            results.begin(); it != results.end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize(it->second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardingGatherCollective::unpack_collective(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_results;
+      derez.deserialize(num_results);
+      for (unsigned idx = 0; idx < num_results; idx++)
+      {
+        ShardID shard;
+        derez.deserialize(shard);
+        derez.deserialize(results[shard]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardingGatherCollective::contribute(ShardingID value)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock c_lock(collective_lock);
+#ifdef DEBUG_LEGION
+        assert(results.find(local_shard) == results.end());
+#endif
+        results[local_shard] = value;
+      }
+      perform_collective_async();
+    }
+
+    //--------------------------------------------------------------------------
+    bool ShardingGatherCollective::validate(ShardingID value) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_target());
+#endif
+      // Wait for the results
+      perform_collective_wait();
+      for (std::map<ShardID,ShardingID>::const_iterator it = 
+            results.begin(); it != results.end(); it++)
+      {
+        if (it->second != value)
+          return false;
+      }
+      return true;
     }
 
   }; // namespace Internal

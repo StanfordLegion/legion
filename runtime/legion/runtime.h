@@ -2131,8 +2131,8 @@ namespace Legion {
                                              Serializer &rez);
       void send_control_rep_trigger_commit(AddressSpaceID target,
                                            Serializer &rez);
-      void send_control_rep_collective_stage(AddressSpaceID target,
-                                             Serializer &rez);
+      void send_control_rep_collective_message(AddressSpaceID target,
+                                               Serializer &rez);
       void send_shutdown_notification(AddressSpaceID target, Serializer &rez);
       void send_shutdown_response(AddressSpaceID target, Serializer &rez);
     public:
@@ -2318,7 +2318,7 @@ namespace Legion {
       void handle_control_rep_post_mapped(Deserializer &derez);
       void handle_control_rep_trigger_complete(Deserializer &derez);
       void handle_control_rep_trigger_commit(Deserializer &derez);
-      void handle_control_rep_collective_stage(Deserializer &derez);
+      void handle_control_rep_collective_message(Deserializer &derez);
       void handle_shutdown_notification(Deserializer &derez, 
                                         AddressSpaceID source);
       void handle_shutdown_response(Deserializer &derez);

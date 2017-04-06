@@ -86,7 +86,7 @@ namespace Legion {
       parent_ctx = NULL;
       need_completion_trigger = true;
       mapped_event = Runtime::create_rt_user_event();
-      replicate_mapped_barrier = RtBarrier::NO_RT_BARRIER;
+      replicate_mapped_event = RtEvent::NO_RT_EVENT;
       resolved_event = Runtime::create_rt_user_event();
       completion_event = Runtime::create_ap_user_event();
       if (Runtime::resilient_mode)
@@ -231,13 +231,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::set_replicate_mapped_barrier(RtBarrier replicate_barrier)
+    void Operation::set_replicate_mapped_event(RtEvent replicate_event)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!replicate_mapped_barrier.exists());
+      assert(!replicate_mapped_event.exists());
 #endif
-      replicate_mapped_barrier = replicate_barrier;
+      replicate_mapped_event = replicate_event;
     }
 
     //--------------------------------------------------------------------------
@@ -1092,8 +1092,8 @@ namespace Legion {
             outgoing[op] = op_gen;
             // Record that the operation has a mapping dependence
             // on us as long as we haven't mapped
-            if (replicate_mapped_barrier.exists() && !shard_only_dependence)
-              tracker->add_mapping_dependence(replicate_mapped_barrier);
+            if (replicate_mapped_event.exists() && !shard_only_dependence)
+              tracker->add_mapping_dependence(replicate_mapped_event);
             else
               tracker->add_mapping_dependence(mapped_event);
             tracker->add_resolution_dependence(resolved_event);

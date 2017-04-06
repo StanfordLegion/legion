@@ -6138,9 +6138,9 @@ namespace Legion {
               runtime->handle_control_rep_trigger_commit(derez);
               break;
             }
-          case SEND_CONTROL_REP_COLLECTIVE_STAGE:
+          case SEND_CONTROL_REP_COLLECTIVE_MESSAGE:
             {
-              runtime->handle_control_rep_collective_stage(derez);
+              runtime->handle_control_rep_collective_message(derez);
               break;
             }
           case SEND_SHUTDOWN_NOTIFICATION:
@@ -14101,13 +14101,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_control_rep_collective_stage(AddressSpaceID target,
-                                                    Serializer &rez)
+    void Runtime::send_control_rep_collective_message(AddressSpaceID target,
+                                                      Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, 
-          SEND_CONTROL_REP_COLLECTIVE_STAGE, 
-          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+          SEND_CONTROL_REP_COLLECTIVE_MESSAGE, 
+          COLLECTIVE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -15254,10 +15254,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_control_rep_collective_stage(Deserializer &derez)
+    void Runtime::handle_control_rep_collective_message(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      ShardManager::handle_collective_stage(derez, this);
+      ShardManager::handle_collective_message(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -18880,32 +18880,7 @@ namespace Legion {
       assert(ok); 
       
       {
-	ReductionOpTable& red_table = get_reduction_table();
-        // Fill in our internal runtime reduction operations
-        red_table[REDOP_IS_REDUCTION] = 
-          Realm::ReductionOpUntyped::create_reduction_op<IndexSpaceReduction>();
-        red_table[REDOP_IP_REDUCTION] = 
-          Realm::ReductionOpUntyped::create_reduction_op<
-                                                     IndexPartitionReduction>();
-        red_table[REDOP_COLOR_REDUCTION] = 
-          Realm::ReductionOpUntyped::create_reduction_op<ColorReduction>();
-        red_table[REDOP_FS_REDUCTION] =
-          Realm::ReductionOpUntyped::create_reduction_op<FieldSpaceReduction>();
-        red_table[REDOP_LG_REDUCTION] = 
-          Realm::ReductionOpUntyped::create_reduction_op<
-                                                      LogicalRegionReduction>();
-        red_table[REDOP_FID_REDUCTION] = 
-          Realm::ReductionOpUntyped::create_reduction_op<FieldReduction>();
-        red_table[REDOP_TIMING_REDUCTION] = 
-          Realm::ReductionOpUntyped::create_reduction_op<TimingReduction>();
-        red_table[REDOP_TRUE_REDUCTION] = 
-          Realm::ReductionOpUntyped::create_reduction_op<TrueReduction>();
-        red_table[REDOP_FALSE_REDUCTION] = 
-          Realm::ReductionOpUntyped::create_reduction_op<FalseReduction>();
-#ifdef DEBUG_LEGION
-        red_table[REDOP_SID_REDUCTION] = 
-          Realm::ReductionOpUntyped::create_reduction_op<ShardingReduction>();
-#endif
+	const ReductionOpTable& red_table = get_reduction_table();
 	for(ReductionOpTable::const_iterator it = red_table.begin();
 	    it != red_table.end();
 	    it++)

@@ -8540,6 +8540,8 @@ namespace Legion {
                         "addresss space %d",
                         task->get_unique_id(), task->get_task_name(), 
                         task->get_unique_id(), runtime->address_space);
+      task->set_sharding_collective(
+          new ShardingGatherCollective(this, 0/*owner shard*/));
 #else
       Future result = task->initialize_task(this, launcher,
                                             false/*check privileges*/);
@@ -8662,6 +8664,8 @@ namespace Legion {
                        "address space %d",
                        task->get_unique_id(), task->get_task_name(), 
                        task->get_unique_id(), runtime->address_space);
+      task->set_sharding_collective(
+          new ShardingGatherCollective(this, 0/*owner shard*/));
 #else
       FutureMap result = task->initialize_task(this, launcher, launch_space,
                                                false/*check privileges*/);
@@ -8738,6 +8742,8 @@ namespace Legion {
                        "address space %d",
                        task->get_unique_id(), task->get_task_name(), 
                        task->get_unique_id(), runtime->address_space);
+      task->set_sharding_collective(
+          new ShardingGatherCollective(this, 0/*owner shard*/));
 #else
       Future result = task->initialize_task(this, launcher, launch_space, redop,
                                             false/*check privileges*/);
@@ -8804,6 +8810,8 @@ namespace Legion {
       if (owner_shard->shard_id == 0)
         log_run.debug("Registering an index fill operation in task %s "
                       "(ID %lld)", get_task_name(), get_unique_id());
+      fill_op->set_sharding_collective(
+          new ShardingGatherCollective(this, 0/*owner shard*/));
 #else
       fill_op->initialize(this, launcher, launch_space,
                           false/*check privileges*/);
@@ -8841,6 +8849,8 @@ namespace Legion {
       if (owner_shard->shard_id == 0)
         log_run.debug("Registering a copy operation in task %s (ID %lld)",
                       get_task_name(), get_unique_id());
+      copy_op->set_sharding_collective(
+          new ShardingGatherCollective(this, 0/*owner shard*/));
 #else
       copy_op->initialize(this, launcher, false/*check privileges*/);
 #endif
@@ -8889,6 +8899,8 @@ namespace Legion {
       if (owner_shard->shard_id == 0)
         log_run.debug("Registering an index copy operation in task %s "
                       "(ID %lld)", get_task_name(), get_unique_id());
+      copy_op->set_sharding_collective(
+          new ShardingGatherCollective(this, 0/*owner shard*/));
 #else
       copy_op->initialize(this, launcher, launch_space, 
                           false/*check privileges*/);
@@ -9034,9 +9046,10 @@ namespace Legion {
       if (next_ap_bar_index == application_barriers.size())
         next_ap_bar_index = 0;
       // Set the replicate mapped event
-      op->set_replicate_mapped_barrier(map_barrier);
-      // Don't arrive now, it's up to operations to arrive themselves
-      // (most likely in the prepipeline stage after picking their ShardingID)
+      op->set_replicate_mapped_event(map_barrier);
+      // Arrive on the barrier
+      Runtime::phase_barrier_arrive(map_barrier, 1/*count*/,
+                                    op->get_mapped_event());
       // Advance the barrier for the next operation 
       Runtime::advance_barrier(map_barrier);
       return op_index;
@@ -9053,7 +9066,7 @@ namespace Legion {
       if (next_int_bar_index == internal_barriers.size())
         next_int_bar_index = 0;
       // Set the replicate mapped event
-      op->set_replicate_mapped_barrier(map_barrier);
+      op->set_replicate_mapped_event(map_barrier);
       // Arrive on the barrier 
       Runtime::phase_barrier_arrive(map_barrier, 1/*count*/, 
                                     op->get_mapped_event());

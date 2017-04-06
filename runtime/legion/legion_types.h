@@ -229,18 +229,9 @@ namespace Legion {
     }; 
 
     // Internal reduction operators
+    // Currently we don't use any, but 0 is reserved
     enum {
-      REDOP_IS_REDUCTION    = MAX_APPLICATION_REDUCTION_ID,
-      REDOP_IP_REDUCTION    = REDOP_IS_REDUCTION + 1,
-      REDOP_COLOR_REDUCTION = REDOP_IP_REDUCTION + 1,
-      REDOP_FS_REDUCTION    = REDOP_COLOR_REDUCTION + 1,
-      REDOP_LG_REDUCTION    = REDOP_FS_REDUCTION + 1,
-      REDOP_FID_REDUCTION   = REDOP_LG_REDUCTION + 1,
-      REDOP_SID_REDUCTION   = REDOP_FID_REDUCTION + 1,
-      REDOP_TIMING_REDUCTION= REDOP_SID_REDUCTION + 1,
-      REDOP_TRUE_REDUCTION  = REDOP_TIMING_REDUCTION + 1,
-      REDOP_FALSE_REDUCTION = REDOP_TRUE_REDUCTION + 1,
-      REDOP_ID_AVAILABLE    = REDOP_FALSE_REDUCTION + 1,
+      REDOP_ID_AVAILABLE    = 1,
     };
 
     // Runtime task numbering 
@@ -604,7 +595,8 @@ namespace Legion {
       VERSION_VIRTUAL_CHANNEL = 12,
       VERSION_MANAGER_VIRTUAL_CHANNEL = 13,
       ANALYSIS_VIRTUAL_CHANNEL = 14,
-      MAX_NUM_VIRTUAL_CHANNELS = 15, // this one must be last
+      COLLECTIVE_VIRTUAL_CHANNEL = 15,
+      MAX_NUM_VIRTUAL_CHANNELS = 16, // this one must be last
     };
 
     enum MessageKind {
@@ -735,7 +727,7 @@ namespace Legion {
       SEND_CONTROL_REP_POST_MAPPED,
       SEND_CONTROL_REP_TRIGGER_COMPLETE,
       SEND_CONTROL_REP_TRIGGER_COMMIT,
-      SEND_CONTROL_REP_COLLECTIVE_STAGE,
+      SEND_CONTROL_REP_COLLECTIVE_MESSAGE,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
       LAST_SEND_KIND, // This one must be last
@@ -870,7 +862,7 @@ namespace Legion {
         "Send Control Replication Post Mapped",                       \
         "Send Control Replication Trigger Complete",                  \
         "Send Control Replication Trigger Commit",                    \
-        "Send Control Replication Collective Stage",                  \
+        "Send Control Replication Collective Message",                \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };
@@ -1414,15 +1406,6 @@ namespace Legion {
     typedef Mapping::ProfilingMeasurementID ProfilingMeasurementID;
 
     // legion_replication.h
-    class IndexSpaceReduction;
-    class IndexPartitionReduction;
-    class ColorReduction;
-    class FieldSpaceReduction;
-    class LogicalRegionReduction;
-    class FieldReduction;
-    class TimingReduction;
-    class TrueReduction;
-    class FalseReduction;
     class ReplIndividualTask;
     class ReplIndexTask;
     class ReplFillOp;
@@ -1442,6 +1425,7 @@ namespace Legion {
     class BarrierExchangeCollective;
     template<typename T> class ValueBroadcast;
     class CrossProductCollective;
+    class ShardingGatherCollective;
 
 #define FRIEND_ALL_RUNTIME_CLASSES                          \
     friend class Legion::Runtime;                           \

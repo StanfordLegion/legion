@@ -239,7 +239,7 @@ namespace Legion {
       void set_trace(LegionTrace *trace, bool is_tracing,
                      const std::vector<StaticDependence> *dependences);
       void set_must_epoch(MustEpochOp *epoch, bool do_registration);
-      void set_replicate_mapped_barrier(RtBarrier replicate_mapped);
+      void set_replicate_mapped_event(RtEvent replicate_mapped);
     public:
       // Localize a region requirement to its parent context
       // This means that region == parent and the
@@ -528,7 +528,7 @@ namespace Legion {
       // The replicate mapped barrier for indicating when all instances 
       // of this operation have been mapped across all shards
       // during a control replication execution
-      RtBarrier replicate_mapped_barrier;
+      RtEvent replicate_mapped_event;
       // The resolved event for this operation
       RtUserEvent resolved_event;
       // The event for when any children this operation has are mapped

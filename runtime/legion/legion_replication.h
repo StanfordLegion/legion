@@ -23,338 +23,6 @@ namespace Legion {
   namespace Internal {
 
     /**
-     * \class IndexSpaceReduction
-     * A class for performing reductions of index spaces
-     */
-    class IndexSpaceReduction {
-    public:
-      typedef IndexSpace LHS;
-      typedef IndexSpace RHS;
-      static const IndexSpace identity;
-
-      template<bool EXCLUSIVE>
-      static inline void apply(LHS &lhs, RHS rhs)
-      {
-#ifdef DEBUG_LEGION
-        assert((lhs.exists() && !rhs.exists()) ||
-               (!lhs.exists() && rhs.exists()) ||
-               (lhs.exists() && (lhs == rhs)));
-#endif
-        if (rhs.exists())
-          lhs = rhs;
-      }
-
-      template<bool EXCLUSIVE>
-      static inline void fold(RHS &rhs1, RHS rhs2)
-      {
-#ifdef DEBUG_LEGION
-        assert((rhs1.exists() && !rhs2.exists()) ||
-               (!rhs1.exists() && rhs2.exists()) ||
-               (rhs1.exists() && (rhs1 == rhs2)));
-#endif
-        if (rhs2.exists())
-          rhs1 = rhs2;
-      }
-    };
-
-    /**
-     * \class IndexPartitionReduction
-     * A class for performing reductions of index partition IDs
-     */
-    class IndexPartitionReduction {
-    public:
-      typedef IndexPartitionID LHS;
-      typedef IndexPartitionID RHS;
-      static const IndexPartitionID identity;
-
-      template<bool EXCLUSIVE>
-      static inline void apply(LHS &lhs, RHS rhs)
-      {
-#ifdef DEBUG_LEGION
-        assert(((lhs != 0) && (rhs == 0)) ||
-               ((lhs == 0) && (rhs != 0)) ||
-               ((lhs != 0) && (lhs == rhs)));
-#endif
-        if (rhs != 0)
-          lhs = rhs;
-      }
-
-      template<bool EXCLUSIVE>
-      static inline void fold(RHS &rhs1, RHS rhs2)
-      {
-#ifdef DEBUG_LEGION
-        assert(((rhs1 != 0) && (rhs2 == 0)) ||
-               ((rhs1 == 0) && (rhs2 != 0)) ||
-               ((rhs1 != 0) && (rhs1 == rhs2)));
-#endif
-        if (rhs2 != 0)
-          rhs1 = rhs2;
-      }
-    };
-
-    /**
-     * \class ColorReduction
-     * A class for performing reductions of legion colors
-     */
-    class ColorReduction {
-    public:
-      typedef LegionColor LHS;
-      typedef LegionColor RHS;
-      static const LegionColor identity;
-
-      template<bool EXCLUSIVE>
-      static inline void apply(LHS &lhs, RHS rhs)
-      {
-#ifdef DEBUG_LEGION
-        assert(((lhs != INVALID_COLOR) && (rhs == INVALID_COLOR)) ||
-               ((lhs == INVALID_COLOR) && (rhs != INVALID_COLOR)) ||
-               ((lhs != INVALID_COLOR) && (lhs == rhs)));
-#endif
-        if (rhs != INVALID_COLOR)
-          lhs = rhs;
-      }
-
-      template<bool EXCLUSIVE>
-      static inline void fold(RHS &rhs1, RHS rhs2)
-      {
-#ifdef DEBUG_LEGION
-        assert(((rhs1 != INVALID_COLOR) && (rhs2 == INVALID_COLOR)) ||
-               ((rhs1 == INVALID_COLOR) && (rhs2 != INVALID_COLOR)) ||
-               ((rhs1 != INVALID_COLOR) && (rhs1 == rhs2)));
-#endif
-        if (rhs2 != INVALID_COLOR)
-          rhs1 = rhs2;
-      }
-    };
-
-    /**
-     * \class FieldSpaceReduction
-     * A class for performing reductions of field spaces
-     */
-    class FieldSpaceReduction {
-    public:
-      typedef FieldSpace LHS;
-      typedef FieldSpace RHS;
-      static const FieldSpace identity;
-
-      template<bool EXCLUSIVE>
-      static inline void apply(LHS &lhs, RHS rhs)
-      {
-#ifdef DEBUG_LEGION
-        assert((lhs.exists() && !rhs.exists()) ||
-               (!lhs.exists() && rhs.exists()) ||
-               (lhs.exists() && (lhs == rhs)));
-#endif
-        if (rhs.exists())
-          lhs = rhs;
-      }
-
-      template<bool EXCLUSIVE>
-      static inline void fold(RHS &rhs1, RHS rhs2)
-      {
-#ifdef DEBUG_LEGION
-        assert((rhs1.exists() && !rhs2.exists()) ||
-               (!rhs1.exists() && rhs2.exists()) ||
-               (rhs1.exists() && (rhs1 == rhs2)));
-#endif
-        if (rhs2.exists())
-          rhs1 = rhs2;
-      }
-    };
-
-    /**
-     * \class LogicalRegionReduction
-     * A class for performing reductions of region tree IDs
-     */
-    class LogicalRegionReduction {
-    public:
-      typedef RegionTreeID LHS;
-      typedef RegionTreeID RHS;
-      static const RegionTreeID identity;
-
-      template<bool EXCLUSIVE>
-      static inline void apply(LHS &lhs, RHS rhs)
-      {
-#ifdef DEBUG_LEGION
-        assert(((lhs != 0) && (rhs == 0)) ||
-               ((lhs == 0) && (rhs != 0)) ||
-               ((lhs != 0) && (lhs == rhs)));
-#endif
-        if (rhs != 0)
-          lhs = rhs;
-      }
-
-      template<bool EXCLUSIVE>
-      static inline void fold(RHS &rhs1, RHS rhs2)
-      {
-#ifdef DEBUG_LEGION
-        assert(((rhs1 != 0) && (rhs2 == 0)) ||
-               ((rhs1 == 0) && (rhs2 != 0)) ||
-               ((rhs1 != 0) && (rhs1 == rhs2)));
-#endif
-        if (rhs2 != 0)
-          rhs1 = rhs2;
-      }
-    };
-
-    /**
-     * \class FieldReduction
-     * A class for performing reductions of field IDs
-     */
-    class FieldReduction {
-    public:
-      typedef FieldID LHS;
-      typedef FieldID RHS;
-      static const FieldID identity;
-
-      template<bool EXCLUSIVE>
-      static inline void apply(LHS &lhs, RHS rhs)
-      {
-#ifdef DEBUG_LEGION
-        assert(((lhs != 0) && (rhs == 0)) ||
-               ((lhs == 0) && (rhs != 0)) ||
-               ((lhs != 0) && (lhs == rhs)));
-#endif
-        if (rhs != 0)
-          lhs = rhs;
-      }
-
-      template<bool EXCLUSIVE>
-      static inline void fold(RHS &rhs1, RHS rhs2)
-      {
-#ifdef DEBUG_LEGION
-        assert(((rhs1 != 0) && (rhs2 == 0)) ||
-               ((rhs1 == 0) && (rhs2 != 0)) ||
-               ((rhs1 != 0) && (rhs1 == rhs2)));
-#endif
-        if (rhs2 != 0)
-          rhs1 = rhs2;
-      }
-    };
-
-    /**
-     * \class TimingReduction
-     * A class for reducing a broadcast of timing measurements
-     */
-    class TimingReduction {
-    public:
-      typedef long long LHS;
-      typedef long long RHS;
-      static const long long identity;
-
-      template<bool EXCLUSIVE>
-      static inline void apply(LHS &lhs, RHS rhs)
-      {
-#ifdef DEBUG_LEGION
-        assert(((lhs != 0) && (rhs == 0)) ||
-               ((lhs == 0) && (rhs != 0)) ||
-               ((lhs != 0) && (lhs == rhs)));
-#endif
-        if (rhs != 0)
-          lhs = rhs;
-      }
-
-      template<bool EXCLUSIVE>
-      static inline void fold(RHS &rhs1, RHS rhs2)
-      {
-#ifdef DEBUG_LEGION
-        assert(((rhs1 != 0) && (rhs2 == 0)) ||
-               ((rhs1 == 0) && (rhs2 != 0)) ||
-               ((rhs1 != 0) && (rhs1 == rhs2)));
-#endif
-        if (rhs2 != 0)
-          rhs1 = rhs2;
-      }
-    };
-
-    /**
-     * \class TrueReduction
-     * A class for reduction a broadcast of a true value
-     */
-    class TrueReduction {
-    public:
-      typedef bool LHS;
-      typedef bool RHS;
-      static const bool identity;
-
-      template<bool EXCLUSIVE>
-      static inline void apply(LHS &lhs, RHS rhs)
-      {
-        if (rhs)
-          lhs = true;
-      }
-
-      template<bool EXCLUSIVE>
-      static inline void fold(RHS &rhs1, RHS rhs2)
-      {
-        if (rhs2)
-          rhs1 = true;
-      }
-    };
-
-    /**
-     * \class FalseReduction
-     * A class for reduction a broadcast of a false value
-     */
-    class FalseReduction {
-    public:
-      typedef bool LHS;
-      typedef bool RHS;
-      static const bool identity;
-
-      template<bool EXCLUSIVE>
-      static inline void apply(LHS &lhs, RHS rhs)
-      {
-        if (!rhs)
-          lhs = false;
-      }
-
-      template<bool EXCLUSIVE>
-      static inline void fold(RHS &rhs1, RHS rhs2)
-      {
-        if (!rhs2)
-          rhs1 = false;
-      }
-    };
-
-#ifdef DEBUG_LEGION
-    /**
-     * \class ShardingReduction
-     * A class for performing reductions of ShardingIDs
-     * down to a single ShardingID. This is used in debug
-     * mode to determine if the mappers across all shards
-     * chose the same sharding ID for a given operation.
-     * This is only used in debug mode
-     */
-    class ShardingReduction {
-    public:
-      typedef ShardingID LHS;
-      typedef ShardingID RHS;
-      static const ShardingID identity;
-
-      template<bool EXCLUSIVE>
-      static inline void apply(LHS &lhs, RHS rhs)
-      {
-#ifdef DEBUG_LEGION
-        assert((lhs < UINT_MAX) || (rhs < UINT_MAX));
-#endif
-        if (lhs == UINT_MAX)
-          lhs = rhs;
-      }
-
-      template<bool EXCLUSIVE>
-      static inline void fold(RHS &rhs1, RHS rhs2)
-      {
-#ifdef DEBUG_LEGION
-        assert((rhs1 < UINT_MAX) || (rhs2 < UINT_MAX));
-#endif
-        if (rhs1 == UINT_MAX)
-          rhs1 = rhs2;
-      }
-    };
-#endif
-
-    /**
      * \class ReplIndividualTask
      * An individual task that is aware that it is 
      * being executed in a control replication context.
@@ -374,6 +42,13 @@ namespace Legion {
       virtual void trigger_ready(void);
     protected:
       ShardingID sharding_functor;
+#ifdef DEBUG_LEGION
+    public:
+      inline void set_sharding_collective(ShardingGatherCollective *collective)
+        { sharding_collective = collective; }
+    protected:
+      ShardingGatherCollective *sharding_collective;
+#endif
     };
 
     /**
@@ -396,6 +71,13 @@ namespace Legion {
       virtual void trigger_ready(void);
     protected:
       ShardingID sharding_functor;
+#ifdef DEBUG_LEGION
+    public:
+      inline void set_sharding_collective(ShardingGatherCollective *collective)
+        { sharding_collective = collective; }
+    protected:
+      ShardingGatherCollective *sharding_collective;
+#endif
     };
 
     /**
@@ -419,6 +101,13 @@ namespace Legion {
     protected:
       ShardingID sharding_functor;
       MapperManager *mapper;
+#ifdef DEBUG_LEGION
+    public:
+      inline void set_sharding_collective(ShardingGatherCollective *collective)
+        { sharding_collective = collective; }
+    protected:
+      ShardingGatherCollective *sharding_collective;
+#endif
     };
 
     /**
@@ -441,6 +130,13 @@ namespace Legion {
       virtual void trigger_ready(void);
     protected:
       ShardingID sharding_functor;
+#ifdef DEBUG_LEGION
+    public:
+      inline void set_sharding_collective(ShardingGatherCollective *collective)
+        { sharding_collective = collective; }
+    protected:
+      ShardingGatherCollective *sharding_collective;
+#endif
     };
 
     /**
@@ -463,6 +159,13 @@ namespace Legion {
       virtual void trigger_ready(void);
     protected:
       ShardingID sharding_functor;
+#ifdef DEBUG_LEGION
+    public:
+      inline void set_sharding_collective(ShardingGatherCollective *collective)
+        { sharding_collective = collective; }
+    protected:
+      ShardingGatherCollective *sharding_collective;
+#endif
     };
 
     /**
@@ -657,7 +360,7 @@ namespace Legion {
       static void handle_post_mapped(Deserializer &derez, Runtime *rt);
       static void handle_trigger_complete(Deserializer &derez, Runtime *rt);
       static void handle_trigger_commit(Deserializer &derez, Runtime *rt);
-      static void handle_collective_stage(Deserializer &derez, Runtime *rt);
+      static void handle_collective_message(Deserializer &derez, Runtime *rt);
     public:
       ShardingFunction* find_sharding_function(ShardingID sid);
     public:
@@ -761,8 +464,9 @@ namespace Legion {
       virtual void unpack_collective(Deserializer &derez) = 0;
     public:
       void perform_collective_async(void);
-      void perform_collective_wait(void);
+      void perform_collective_wait(void) const;
       virtual void handle_collective_message(Deserializer &derez);
+      inline bool is_target(void) const { return (target == local_shard); }
     protected:
       void send_message(void);
       int compute_expected_notifications(void) const;
@@ -885,6 +589,29 @@ namespace Legion {
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     protected:
       std::map<IndexSpace,IndexPartition> non_empty_handles;
+    };
+
+    /**
+     * \class ShardingGatherCollective
+     * A class for gathering all the names of the ShardingIDs chosen
+     * by different mappers to confirm that they are all the same.
+     * This is primarily only used in debug mode.
+     */
+    class ShardingGatherCollective : public GatherCollective {
+    public:
+      ShardingGatherCollective(ReplicateContext *ctx, ShardID target);
+      ShardingGatherCollective(const ShardingGatherCollective &rhs);
+      virtual ~ShardingGatherCollective(void);
+    public:
+      ShardingGatherCollective& operator=(const ShardingGatherCollective &rhs);
+    public:
+      virtual void pack_collective(Serializer &rez) const;
+      virtual void unpack_collective(Deserializer &derez);
+    public:
+      void contribute(ShardingID value);
+      bool validate(ShardingID value) const;
+    protected:
+      std::map<ShardID,ShardingID> results;
     };
 
   }; // namespace Internal
