@@ -7342,6 +7342,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Color ReplicateContext::create_cross_product_partitions(
+                                              RegionTreeForest *forest,
+                                              IndexPartition handle1,
+                                              IndexPartition handle2,
+                                std::map<IndexSpace,IndexPartition> &handles,
+                                              PartitionKind kind,
+                                              Color color)
+    //--------------------------------------------------------------------------
+    {
+
+    }
+
+    //--------------------------------------------------------------------------
     void ReplicateContext::create_association(LogicalRegion domain,
                                               LogicalRegion domain_parent,
                                               FieldID domain_fid,

@@ -1132,7 +1132,7 @@ namespace Legion {
                                             IndexSpace color_space,
                                             PartitionKind kind,
                                             Color color);
-      virtual Color create_cross_product_partition(
+      virtual Color create_cross_product_partitions(
                                             RegionTreeForest *forest,
                                             IndexPartition handle1,
                                             IndexPartition handle2,
