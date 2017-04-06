@@ -88,15 +88,17 @@ namespace Legion {
                   std::map<IndexSpace,IndexPartition> &user_handles,
                                            PartitionKind kind,
                                            LegionColor &part_color,
-                                           ApEvent domain_ready);
+                                           ApEvent domain_ready,
+                                           ShardID shard = 0,
+                                           size_t total_shards = 1);
       // For control replication contexts
-      RtEvent create_pending_partition_shard(bool owner_shard,
+      RtEvent create_pending_partition_shard(ShardID owner_shard,
+                                             ReplicateContext *ctx,
                                              IndexPartition pid,
                                              IndexSpace parent,
                                              IndexSpace color_space,
                                              LegionColor &partition_color,
                                              PartitionKind part_kind,
-                                             RtBarrier &disjointness_bar,
                                              ApEvent partition_ready,
                                              ShardMapping *mapping,
                    ApBarrier partial_pending = ApBarrier::NO_AP_BARRIER);
@@ -1405,7 +1407,7 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DISJOINTNESS_TASK_ID;
       public:
         IndexPartition pid;
-        RtBarrier disjointness_barrier;
+        ValueBroadcast<bool> *disjointness_collective;
       };
     public:
       struct DynamicIndependenceArgs : 
@@ -1477,7 +1479,7 @@ namespace Legion {
       void add_child(IndexSpaceNode *child);
       void remove_child(const LegionColor c);
       size_t get_num_children(void) const;
-      void compute_disjointness(RtBarrier disjointness_barrier);
+      void compute_disjointness(ValueBroadcast<bool> *collective);
       void get_subspace_preconditions(std::set<ApEvent> &preconditions);
     public:
       bool is_disjoint(bool from_app = false);

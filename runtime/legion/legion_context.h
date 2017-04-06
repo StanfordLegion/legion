@@ -1315,15 +1315,6 @@ namespace Legion {
       ShardID field_allocator_shard;
       ShardID logical_region_allocator_shard;
     protected:
-      RtBarrier index_space_allocator_barrier;
-      RtBarrier index_partition_allocator_barrier;
-      RtBarrier color_partition_allocator_barrier;
-      RtBarrier field_space_allocator_barrier;
-      RtBarrier field_allocator_barrier;
-      RtBarrier logical_region_allocator_barrier;
-      RtBarrier timing_measurement_barrier;
-      RtBarrier disjointness_barrier;
-    protected:
       ApBarrier pending_partition_barrier;
     protected:
       int shard_collective_radix;

@@ -550,9 +550,10 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void deferred_execute(void);
     public:
-      inline void set_timing_barrier(RtBarrier bar) { timing_barrier = bar; }
+      inline void set_timing_collective(ValueBroadcast<long long> *collective) 
+        { timing_collective = collective; }
     protected:
-      RtBarrier timing_barrier;
+      ValueBroadcast<long long> *timing_collective;
     }; 
 
     /**
@@ -619,22 +620,6 @@ namespace Legion {
     public:
       ShardManager& operator=(const ShardManager &rhs);
     public:
-      inline RtBarrier get_index_space_allocator_barrier(void) const
-        { return index_space_allocator_barrier; }
-      inline RtBarrier get_index_partition_allocator_barrier(void) const
-        { return index_partition_allocator_barrier; }
-      inline RtBarrier get_color_partition_allocator_barrier(void) const
-        { return color_partition_allocator_barrier; }
-      inline RtBarrier get_field_space_allocator_barrier(void) const
-        { return field_space_allocator_barrier; }
-      inline RtBarrier get_field_allocator_barrier(void) const
-        { return field_allocator_barrier; }
-      inline RtBarrier get_logical_region_allocator_barrier(void) const
-        { return logical_region_allocator_barrier; }
-      inline RtBarrier get_timing_measurement_barrier(void) const
-        { return timing_measurement_barrier; }
-      inline RtBarrier get_disjointness_barrier(void) const
-        { return disjointness_barrier; }
       inline ApBarrier get_pending_partition_barrier(void) const
         { return pending_partition_barrier; }
     public:
@@ -702,15 +687,6 @@ namespace Legion {
       unsigned    trigger_local_commit,   trigger_remote_commit;
       unsigned    remote_constituents;
       bool        first_future;
-    protected: // Allocation barriers to be passed to shards
-      RtBarrier index_space_allocator_barrier;
-      RtBarrier index_partition_allocator_barrier;
-      RtBarrier color_partition_allocator_barrier;
-      RtBarrier field_space_allocator_barrier;
-      RtBarrier field_allocator_barrier;
-      RtBarrier logical_region_allocator_barrier;
-      RtBarrier timing_measurement_barrier;
-      RtBarrier disjointness_barrier;
     protected:
       ApBarrier pending_partition_barrier;
     protected:
@@ -758,6 +734,8 @@ namespace Legion {
       void perform_collective_async(void) const;
       void perform_collective_wait(void) const;
       virtual void handle_collective_message(Deserializer &derez);
+    public:
+      RtEvent get_done_event(void) const;
     protected:
       void send_messages(void) const;
     public:
@@ -867,8 +845,8 @@ namespace Legion {
     template<typename T>
     class ValueBroadcast : public BroadcastCollective {
     public:
-      ValueBroadcast(ReplicateContext *ctx, const T &v)
-        : BroadcastCollective(ctx, ctx->owner_shard->shard_id), value(v) { }
+      ValueBroadcast(ReplicateContext *ctx)
+        : BroadcastCollective(ctx, ctx->owner_shard->shard_id) { }
       ValueBroadcast(ReplicateContext *ctx, ShardID origin)
         : BroadcastCollective(ctx, origin) { }
       ValueBroadcast(const ValueBroadcast &rhs) { assert(false); }
@@ -876,7 +854,8 @@ namespace Legion {
     public:
       ValueBroadcast& operator=(const ValueBroadcast &rhs)
         { assert(false); return *this; }
-      inline void broadcast(void) { perform_collective_async(); }
+      inline void broadcast(const T &v) 
+        { value = v; perform_collective_async(); }
       inline operator T(void) const { perform_collective_wait(); return value; }
     public:
       virtual void pack_collective(Serializer &rez) const 
@@ -885,6 +864,27 @@ namespace Legion {
         { derez.deserialize(value); }
     protected:
       T value;
+    };
+
+    /**
+     * \class CrossProductExchange
+     * A class for exchanging the names of partitions created by
+     * a call for making cross-product partitions
+     */
+    class CrossProductCollective : public AllGatherCollective {
+    public:
+      CrossProductCollective(ReplicateContext *ctx);
+      CrossProductCollective(const CrossProductCollective &rhs);
+      virtual ~CrossProductCollective(void);
+    public:
+      CrossProductCollective& operator=(const CrossProductCollective &rhs);
+    public:
+      void exchange_partitions(std::map<IndexSpace,IndexPartition> &handles);
+    public:
+      virtual void pack_collective_stage(Serializer &rez, int stage) const;
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
+    protected:
+      std::map<IndexSpace,IndexPartition> non_empty_handles;
     };
 
   }; // namespace Internal

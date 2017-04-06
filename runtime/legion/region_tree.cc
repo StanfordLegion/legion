@@ -177,6 +177,7 @@ namespace Legion {
       {
         IndexPartNode::DisjointnessArgs args;
         args.pid = pid;
+        args.disjointness_collective = NULL;
         disjointness_event = runtime->issue_runtime_meta_task(args,
             LG_DEFERRED_THROUGHPUT_PRIORITY, NULL,
             Runtime::protect_event(partition_ready));
@@ -205,7 +206,9 @@ namespace Legion {
                              std::map<IndexSpace,IndexPartition> &user_handles,
                                                         PartitionKind kind,
                                                         LegionColor &part_color,
-                                                        ApEvent domain_ready)
+                                                        ApEvent domain_ready,
+                                                        ShardID shard,
+                                                        size_t total_shards)
     //--------------------------------------------------------------------------
     {
       IndexPartNode *base = get_node(handle1);
@@ -260,7 +263,8 @@ namespace Legion {
       // Iterate over all our sub-regions and generate partitions
       if (base->total_children == base->max_linearized_color)
       {
-        for (LegionColor color = 0; color < base->total_children; color++)
+        for (LegionColor color = shard; 
+              color < base->total_children; color += total_shards)
         {
           IndexSpaceNode *child_node = base->get_child(color);
           IndexPartition pid(runtime->get_unique_index_partition_id(),
@@ -277,7 +281,8 @@ namespace Legion {
       }
       else
       {
-        for (LegionColor color = 0; color < base->max_linearized_color; color++)
+        for (LegionColor color = shard; 
+              color < base->max_linearized_color; color += total_shards)
         {
           if (!base->color_space->contains_color(color))
             continue;
@@ -297,13 +302,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent RegionTreeForest::create_pending_partition_shard(bool owner_shard,
+    RtEvent RegionTreeForest::create_pending_partition_shard(
+                                                  ShardID owner_shard,
+                                                  ReplicateContext *ctx,
                                                   IndexPartition pid,
                                                   IndexSpace parent,
                                                   IndexSpace color_space,
                                                   LegionColor &partition_color,
                                                   PartitionKind part_kind,
-                                                  RtBarrier &disjointness_bar,
                                                   ApEvent partition_ready,
                                                   ShardMapping *mapping,
                                                   ApBarrier partial_pending)
@@ -313,7 +319,7 @@ namespace Legion {
       if (partial_pending.exists())
         assert(partition_ready == partial_pending);
 #endif
-      if (owner_shard)
+      if (owner_shard == ctx->owner_shard->shard_id)
       {
         // We're the owner so we do most of the work
         IndexSpaceNode *parent_node = get_node(parent);
@@ -344,12 +350,11 @@ namespace Legion {
         {
           IndexPartNode::DisjointnessArgs args;
           args.pid = pid;
-          args.disjointness_barrier = disjointness_bar;
+          args.disjointness_collective = 
+            new ValueBroadcast<bool>(ctx, owner_shard);
           disjointness_event = runtime->issue_runtime_meta_task(args,
               LG_DEFERRED_THROUGHPUT_PRIORITY, NULL,
               Runtime::protect_event(partition_ready));
-          // Now update the barrier for the next generation
-          Runtime::advance_barrier(disjointness_bar);
         }
         IndexPartNode *partition_node;
         if (part_kind == COMPUTE_KIND)
@@ -384,11 +389,10 @@ namespace Legion {
         {
           IndexPartNode::DisjointnessArgs args;
           args.pid = pid;
-          args.disjointness_barrier = disjointness_bar;
+          args.disjointness_collective = 
+            new ValueBroadcast<bool>(ctx, owner_shard);
           disjointness_event = runtime->issue_runtime_meta_task(args,
-              LG_DEFERRED_THROUGHPUT_PRIORITY, NULL, disjointness_bar);
-          // Now update the barrier for the next generation
-          Runtime::advance_barrier(disjointness_bar);
+                                    LG_DEFERRED_THROUGHPUT_PRIORITY);
         }
         IndexPartNode *partition_node;
         if (part_kind == COMPUTE_KIND)
@@ -5845,7 +5849,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexPartNode::compute_disjointness(RtBarrier disjointness_barrier)
+    void IndexPartNode::compute_disjointness(ValueBroadcast<bool> *collective)
     //--------------------------------------------------------------------------
     {
       if (get_owner_space() == context->runtime->address_space)
@@ -5883,10 +5887,8 @@ namespace Legion {
           }
         }
         // If we have a disjointness barrier, then signal the result
-        if (disjointness_barrier.exists())
-          Runtime::phase_barrier_arrive(disjointness_barrier,
-                                        1/*count*/, RtEvent::NO_RT_EVENT,
-                                        &disjoint, sizeof(disjoint));
+        if (collective != NULL)
+          collective->broadcast(disjoint);
         // Record the result for Legion Spy
         if (Runtime::legion_spy_enabled)
             LegionSpy::log_index_partition(parent->handle.id, handle.id, 
@@ -5897,19 +5899,11 @@ namespace Legion {
         // We're not the owner so we should have a barrier that tells
         // us what the disjointness result is
 #ifdef DEBUG_LEGION
-        assert(disjointness_barrier.exists());
+        assert(collective != NULL);
 #endif
         // No need to wait, we know this was a precondition for launching
         // the task to compute the disjointness
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-        bool result = 
-#endif
-#endif
-          disjointness_barrier.get_result(&disjoint, sizeof(disjoint));
-#ifdef DEBUG_LEGION
-        assert(result);
-#endif
+        disjoint = *collective;
       }
     }
 
@@ -6196,7 +6190,10 @@ namespace Legion {
     {
       const DisjointnessArgs *dargs = (const DisjointnessArgs*)args;
       IndexPartNode *node = forest->get_node(dargs->pid);
-      node->compute_disjointness(dargs->disjointness_barrier);
+      node->compute_disjointness(dargs->disjointness_collective);
+      // We can now delete the collective
+      if (dargs->disjointness_collective != NULL)
+        delete dargs->disjointness_collective;
     }
 
     //--------------------------------------------------------------------------

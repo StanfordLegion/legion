@@ -985,12 +985,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_timing();
+      timing_collective = NULL;
     }
 
     //--------------------------------------------------------------------------
     void ReplTimingOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
+      if (timing_collective != NULL)
+      {
+        delete timing_collective;
+        timing_collective = NULL;
+      }
       deactivate_timing();
       runtime->free_repl_timing_op(this);
     }
@@ -1012,8 +1018,8 @@ namespace Legion {
         // Trigger this when the timing barrier is done
         DeferredExecuteArgs args;
         args.proxy_this = this;
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, 
-                                         this, timing_barrier);
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, this, 
+                                         timing_collective->get_done_event());
       }
       else // Shard 0 does the normal timing operation
         Operation::trigger_mapping();
@@ -1032,16 +1038,7 @@ namespace Legion {
       // Shard 0 will handle the timing operation
       if (repl_ctx->owner_shard->shard_id > 0)     
       {
-        long long value;
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-        bool valid = 
-#endif
-#endif
-          replicate_mapped_barrier.get_result(&value, sizeof(value));
-#ifdef DEBUG_LEGION
-        assert(valid);
-#endif
+        long long value = *timing_collective;
         result.impl->set_result(&value, sizeof(value), false);
       }
       else
@@ -1054,24 +1051,22 @@ namespace Legion {
             {
               double value = Realm::Clock::current_time();
               result.impl->set_result(&value, sizeof(value), false);
-              Runtime::phase_barrier_arrive(timing_barrier, 1/*count*/,
-                  RtEvent::NO_RT_EVENT, &value, sizeof(value));
+              long long *ptr = reinterpret_cast<long long*>(&value);
+              timing_collective->broadcast(*ptr);
               break;
             }
           case MEASURE_MICRO_SECONDS:
             {
               long long value = Realm::Clock::current_time_in_microseconds();
               result.impl->set_result(&value, sizeof(value), false);
-              Runtime::phase_barrier_arrive(timing_barrier, 1/*count*/,
-                  RtEvent::NO_RT_EVENT, &value, sizeof(value));
+              timing_collective->broadcast(value);
               break;
             }
           case MEASURE_NANO_SECONDS:
             {
               long long value = Realm::Clock::current_time_in_nanoseconds();
               result.impl->set_result(&value, sizeof(value), false);
-              Runtime::phase_barrier_arrive(timing_barrier, 1/*count*/,
-                  RtEvent::NO_RT_EVENT, &value, sizeof(value));
+              timing_collective->broadcast(value);
               break;
             }
           default:
@@ -1164,45 +1159,8 @@ namespace Legion {
 #endif
       runtime->register_shard_manager(repl_id, this);
       if (owner_space == runtime->address_space)
-      {
-        // We're the owner space so we have to make the allocation barriers
-        //index_space_allocator_barrier(Realm::Barrier::create_barrier(
-        index_space_allocator_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(1/*arrivers*/,
-                REDOP_IS_REDUCTION, &IndexSpaceReduction::identity,
-                sizeof(IndexSpaceReduction::identity)));
-        index_partition_allocator_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(1/*arrivers*/,
-                REDOP_IP_REDUCTION, &IndexPartitionReduction::identity,
-                sizeof(IndexPartitionReduction::identity)));
-        color_partition_allocator_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(1/*arrivers*/,
-                REDOP_COLOR_REDUCTION, &ColorReduction::identity,
-                sizeof(ColorReduction::identity)));
-        field_space_allocator_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(1/*arrivers*/,
-                REDOP_FS_REDUCTION, &FieldSpaceReduction::identity,
-                sizeof(FieldSpaceReduction::identity)));
-        field_allocator_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(1/*arrivers*/,
-                REDOP_FID_REDUCTION, &FieldReduction::identity,
-                sizeof(FieldReduction::identity)));
-        logical_region_allocator_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(1/*arrivers*/,
-                REDOP_LG_REDUCTION, &LogicalRegionReduction::identity,
-                sizeof(LogicalRegionReduction::identity)));
-        timing_measurement_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(1/*arrivers*/,
-                REDOP_TIMING_REDUCTION, &TimingReduction::identity,
-                sizeof(TimingReduction::identity)));
-        disjointness_barrier = 
-          RtBarrier(Realm::Barrier::create_barrier(1/*arrives*/,
-                REDOP_TRUE_REDUCTION, &TrueReduction::identity,
-                sizeof(TrueReduction::identity)));
-        // Application barriers
         pending_partition_barrier = 
           ApBarrier(Realm::Barrier::create_barrier(total_shards));
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -1232,18 +1190,7 @@ namespace Legion {
       manager_lock.destroy_reservation();
       manager_lock = Reservation::NO_RESERVATION;
       if (owner_manager)
-      {
-        // We're the owner so we have to destroy the allocation barriers
-        index_space_allocator_barrier.destroy_barrier();
-        index_partition_allocator_barrier.destroy_barrier();
-        color_partition_allocator_barrier.destroy_barrier();
-        field_space_allocator_barrier.destroy_barrier();
-        field_allocator_barrier.destroy_barrier();
-        logical_region_allocator_barrier.destroy_barrier();
-        timing_measurement_barrier.destroy_barrier();
-        disjointness_barrier.destroy_barrier();
         pending_partition_barrier.destroy_barrier();
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -1314,14 +1261,6 @@ namespace Legion {
       address_spaces->resize(num_spaces);
       for (unsigned idx = 0; idx < num_spaces; idx++)
         derez.deserialize((*address_spaces)[idx]);
-      derez.deserialize(index_space_allocator_barrier);
-      derez.deserialize(index_partition_allocator_barrier);
-      derez.deserialize(color_partition_allocator_barrier);
-      derez.deserialize(field_space_allocator_barrier);
-      derez.deserialize(field_allocator_barrier);
-      derez.deserialize(logical_region_allocator_barrier);
-      derez.deserialize(timing_measurement_barrier);
-      derez.deserialize(disjointness_barrier);
       derez.deserialize(pending_partition_barrier);
       // Unpack our first shard here
       create_shards();
@@ -1450,14 +1389,6 @@ namespace Legion {
           rez.serialize<size_t>(address_spaces->size());
           for (unsigned idx = 0; idx < address_spaces->size(); idx++)
             rez.serialize((*address_spaces)[idx]);   
-          rez.serialize(index_space_allocator_barrier);
-          rez.serialize(index_partition_allocator_barrier);
-          rez.serialize(color_partition_allocator_barrier);
-          rez.serialize(field_space_allocator_barrier);
-          rez.serialize(field_allocator_barrier);
-          rez.serialize(logical_region_allocator_barrier);
-          rez.serialize(timing_measurement_barrier);
-          rez.serialize(disjointness_barrier);
           rez.serialize(pending_partition_barrier);
           to_clone->pack_as_shard_task(rez, (*address_spaces)[index]); 
         }
@@ -1918,6 +1849,16 @@ namespace Legion {
       send_messages();
       // Then trigger our event to indicate that we are ready
       Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent BroadcastCollective::get_done_event(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(local_shard != origin);
+#endif
+      return done_event;
     }
 
     //--------------------------------------------------------------------------
@@ -2460,6 +2401,99 @@ namespace Legion {
         unsigned index;
         derez.deserialize(index);
         derez.deserialize(local_barriers[index]);
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Cross Product Collective 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    CrossProductCollective::CrossProductCollective(ReplicateContext *ctx)
+      : AllGatherCollective(ctx)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CrossProductCollective::CrossProductCollective(
+                                              const CrossProductCollective &rhs)
+      : AllGatherCollective(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    CrossProductCollective::~CrossProductCollective(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CrossProductCollective& CrossProductCollective::operator=(
+                                              const CrossProductCollective &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void CrossProductCollective::exchange_partitions(
+                                   std::map<IndexSpace,IndexPartition> &handles)
+    //--------------------------------------------------------------------------
+    {
+      // Need the lock in case we are unpacking other things here
+      {
+        AutoLock c_lock(collective_lock);
+        // Only put the non-empty partitions into our local set
+        for (std::map<IndexSpace,IndexPartition>::const_iterator it = 
+              handles.begin(); it != handles.end(); it++)
+        {
+          if (!it->second.exists())
+            continue;
+          non_empty_handles.insert(*it);
+        }
+      }
+      // Now we do the exchange
+      perform_collective_sync();
+      // When we wake up we should have all the handles and no need the lock
+      // to access them
+#ifdef DEBUG_LEGION
+      assert(handles.size() == non_empty_handles.size());
+#endif
+      handles = non_empty_handles;
+    }
+
+    //--------------------------------------------------------------------------
+    void CrossProductCollective::pack_collective_stage(Serializer &rez, 
+                                                       int stage) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(non_empty_handles.size());
+      for (std::map<IndexSpace,IndexPartition>::const_iterator it = 
+            non_empty_handles.begin(); it != non_empty_handles.end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize(it->second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CrossProductCollective::unpack_collective_stage(Deserializer &derez,
+                                                         int stage)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_handles;
+      derez.deserialize(num_handles);
+      for (unsigned idx = 0; idx < num_handles; idx++)
+      {
+        IndexSpace handle;
+        derez.deserialize(handle);
+        derez.deserialize(non_empty_handles[handle]);
       }
     }
 
