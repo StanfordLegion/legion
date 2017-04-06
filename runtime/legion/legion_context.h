@@ -1289,7 +1289,7 @@ namespace Legion {
                                        std::vector<Future> &contributions);
     public:
       void exchange_common_resources(void);
-      void notify_collective_stage(Deserializer &derez);
+      void handle_collective_message(Deserializer &derez);
     public:
       CollectiveID get_next_collective_index(void);
       void register_collective(ShardCollective *collective);

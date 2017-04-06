@@ -659,8 +659,8 @@ namespace Legion {
       void trigger_task_complete(bool local);
       void trigger_task_commit(bool local);
     public:
-      void send_shard_collective_stage(ShardID target, Serializer &rez);
-      void notify_collective_stage(Deserializer &derez);
+      void send_collective_message(ShardID target, Serializer &rez);
+      void handle_collective_message(Deserializer &derez);
     public:
       static void handle_clone(const void *args);
       static void handle_launch(const void *args);
@@ -727,7 +727,10 @@ namespace Legion {
       ShardCollective(ReplicateContext *ctx);
       virtual ~ShardCollective(void);
     public:
-      virtual void handle_unpack_stage(Deserializer &derez) = 0;
+      virtual void handle_collective_message(Deserializer &derez) = 0;
+    protected:
+      int convert_to_index(ShardID id, ShardID origin) const;
+      ShardID convert_to_shard(int index, ShardID origin) const;
     public:
       ShardManager *const manager;
       ReplicateContext *const context;
@@ -738,6 +741,33 @@ namespace Legion {
     };
 
     /**
+     * \class BroadcastCollective
+     * This shard collective has equivalent functionality to 
+     * MPI Broadcast in that it will transmit some data on one
+     * shard to all the other shards.
+     */
+    class BroadcastCollective : public ShardCollective {
+    public:
+      BroadcastCollective(ReplicateContext *ctx, ShardID origin);
+      virtual ~BroadcastCollective(void);
+    public:
+      // We guarantee that these methods will be called atomically
+      virtual void pack_collective(Serializer &rez) const = 0;
+      virtual void unpack_collective(Deserializer &derez) = 0;
+    public:
+      void perform_collective_async(void) const;
+      void perform_collective_wait(void) const;
+      virtual void handle_collective_message(Deserializer &derez);
+    protected:
+      void send_messages(void) const;
+    public:
+      const ShardID origin;
+      const int shard_collective_radix;
+    private:
+      RtUserEvent done_event; // valid on all shards except origin
+    };
+
+    /**
      * \class GatherCollective
      * This shard collective has equivalent functionality to
      * MPI Gather in that it will ensure that data from all
@@ -745,14 +775,26 @@ namespace Legion {
      */
     class GatherCollective : public ShardCollective {
     public:
-      GatherCollective(ReplicateContext *ctx);
+      GatherCollective(ReplicateContext *ctx, ShardID target);
       virtual ~GatherCollective(void);
     public:
       // We guarantee that these methods will be called atomically
-      virtual void pack_collective_stage(Serializer &rez) = 0;
-      virtual void unpack_collective_stage(Deserializer &derez) = 0;
+      virtual void pack_collective(Serializer &rez) const = 0;
+      virtual void unpack_collective(Deserializer &derez) = 0;
     public:
-      virtual void handle_unpack_stage(Deserializer &derez);
+      void perform_collective_async(void);
+      void perform_collective_wait(void);
+      virtual void handle_collective_message(Deserializer &derez);
+    protected:
+      void send_message(void);
+      int compute_expected_notifications(void) const;
+    public:
+      const ShardID target;
+      const int shard_collective_radix;
+      const int expected_notifications;
+    private:
+      RtUserEvent done_event; // only valid on owner shard
+      int received_notifications;
     };
 
     /**
@@ -767,16 +809,17 @@ namespace Legion {
       virtual ~AllGatherCollective(void);
     public:
       // We guarantee that these methods will be called atomically
-      virtual void pack_collective_stage(Serializer &rez, int stage) = 0;
+      virtual void pack_collective_stage(Serializer &rez, int stage) const = 0;
       virtual void unpack_collective_stage(Deserializer &derez, int stage) = 0;
     public:
       void perform_collective_sync(void);
       void perform_collective_async(void);
       void perform_collective_wait(void);
-      virtual void handle_unpack_stage(Deserializer &derez);
+      virtual void handle_collective_message(Deserializer &derez);
     protected:
       void send_explicit_stage(int stage);
       bool send_ready_stages(void);
+      void construct_message(ShardID target, int stage, Serializer &rez) const;
       void unpack_stage(int stage, Deserializer &derez);
     public: 
       const int shard_collective_radix;
@@ -808,12 +851,40 @@ namespace Legion {
       void exchange_barriers_async(void);
       void wait_for_barrier_exchange(void);
     public:
-      virtual void pack_collective_stage(Serializer &rez, int stage);
+      virtual void pack_collective_stage(Serializer &rez, int stage) const;
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     protected:
       const size_t window_size;
       std::vector<RtBarrier> &barriers;
       std::map<unsigned,RtBarrier> local_barriers;
+    };
+
+    /**
+     * \class ValueBroadcast
+     * This will broadcast a value of any type that can be 
+     * trivially serialized to all the shards.
+     */
+    template<typename T>
+    class ValueBroadcast : public BroadcastCollective {
+    public:
+      ValueBroadcast(ReplicateContext *ctx, const T &v)
+        : BroadcastCollective(ctx, ctx->owner_shard->shard_id), value(v) { }
+      ValueBroadcast(ReplicateContext *ctx, ShardID origin)
+        : BroadcastCollective(ctx, origin) { }
+      ValueBroadcast(const ValueBroadcast &rhs) { assert(false); }
+      virtual ~ValueBroadcast(void) { }
+    public:
+      ValueBroadcast& operator=(const ValueBroadcast &rhs)
+        { assert(false); return *this; }
+      inline void broadcast(void) { perform_collective_async(); }
+      inline operator T(void) const { perform_collective_wait(); return value; }
+    public:
+      virtual void pack_collective(Serializer &rez) const 
+        { rez.serialize(value); }
+      virtual void unpack_collective(Deserializer &derez)
+        { derez.deserialize(value); }
+    protected:
+      T value;
     };
 
   }; // namespace Internal

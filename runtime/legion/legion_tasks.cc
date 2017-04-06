@@ -6701,7 +6701,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardTask::notify_collective_stage(Deserializer &derez)
+    void ShardTask::handle_collective_message(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6713,7 +6713,7 @@ namespace Legion {
       ReplicateContext *repl_ctx = 
         static_cast<ReplicateContext*>(execution_context);
 #endif
-      repl_ctx->notify_collective_stage(derez);
+      repl_ctx->handle_collective_message(derez);
     }
 
     /////////////////////////////////////////////////////////////

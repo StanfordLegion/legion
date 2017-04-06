@@ -834,7 +834,7 @@ namespace Legion {
       virtual InnerContext* initialize_inner_execution_context(VariantImpl *v);
     public:
       void return_privilege_state(ResourceTracker *target);
-      void notify_collective_stage(Deserializer &derez);
+      void handle_collective_message(Deserializer &derez);
     public:
       ShardManager *const manager;
       const ShardID shard_id;

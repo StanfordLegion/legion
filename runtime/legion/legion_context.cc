@@ -8122,7 +8122,6 @@ namespace Legion {
       return pid;
     }
 
-#if 0
     //--------------------------------------------------------------------------
     IndexPartition ReplicateContext::create_pending_partition(
                                                       RegionTreeForest *forest,
@@ -8148,74 +8147,65 @@ namespace Legion {
         log_index.debug("Creating pending partition in task %s (ID %lld)", 
                         get_task_name(), get_unique_id());
 #endif
+        // We have to make a barrier to be used for this partition
+        size_t color_space_size = forest->get_domain_volume(color_space);
+        ApBarrier partition_ready(
+                       Realm::Barrier::create_barrier(color_space_size));
         // Tell the region tree forest about this partition
         RtEvent parent_notified = 
           forest->create_pending_partition_shard(true/*owner*/, pid, parent, 
                                            color_space, part_color, 
                                            part_kind, disjointness_barrier,
-
-                                           shard_manager->get_mapping());
-        // Do our arrival on this generation, should be the last one
-        Runtime::phase_barrier_arrive(index_partition_allocator_barrier,
-            1/*count*/, parent_notified, &pid.id, sizeof(pid.id));
+                                           partition_ready,
+                                           shard_manager->get_mapping(),
+                                           partition_ready);
+        // Have to wait for the parent to be notified before broadcasting 
+        if (!parent_notified.has_triggered())
+          parent_notified.wait();
+        // Broadcast the partition first and then the barrier
+        ValueBroadcast<IndexPartition> pid_collective(this, pid);
+        pid_collective.broadcast();
+        ValueBroadcast<ApBarrier> bar_collective(this, partition_ready);
+        bar_collective.broadcast();
         if (color_generated)
         {
 #ifdef DEBUG_LEGION
           assert(part_color != INVALID_COLOR);
 #endif
-          Runtime::phase_barrier_arrive(color_partition_allocator_barrier,
-             1/*count*/, RtEvent::NO_RT_EVENT, &part_color, sizeof(part_color));
+          // Broadcast the color if needed
+          ValueBroadcast<LegionColor> color_collective(this, part_color);
+          color_collective.broadcast();
         }
       }
       else
       {
-        // We need to get the barrier result
-        if (!index_partition_allocator_barrier.has_triggered())
-          index_partition_allocator_barrier.wait();
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-        bool result =  
-#endif
-#endif
-          index_partition_allocator_barrier.get_result(&pid.id, sizeof(pid.id));
-#ifdef DEBUG_LEGION
-        assert(result);
-        assert(pid.exists());
-#endif
+        // Get the partition handle and barrier
+        ValueBroadcast<IndexPartition> pid_collective(this, 
+                            index_partition_allocator_shard); 
+        ValueBroadcast<ApBarrier> bar_collective(this,
+                            index_partition_allocator_shard);
+        pid = pid_collective;
+        ApBarrier partition_ready = bar_collective;
         if (color_generated)
         {
-          if (!color_partition_allocator_barrier.has_triggered())
-            color_partition_allocator_barrier.wait();
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
-          result =  
-#endif
-#endif
-            color_partition_allocator_barrier.get_result(&part_color, 
-                sizeof(part_color));
-#ifdef DEBUG_LEGION
-          assert(result);
-          assert(part_color != INVALID_COLOR);
-#endif
+          ValueBroadcast<LegionColor> color_collective(this,
+                            index_partition_allocator_shard);
+          part_color = color_collective;
         }
         // Tell the region tree forest about this partition
         forest->create_pending_partition_shard(false/*owner*/, pid, parent, 
                                          color_space, part_color, 
                                          part_kind, disjointness_barrier,
-
-                                         shard_manager->get_mapping());
+                                         partition_ready,
+                                         shard_manager->get_mapping(),
+                                         partition_ready);
       }
       // Update our allocation shard
       index_partition_allocator_shard++;
       if (index_partition_allocator_shard == shard_manager->total_shards)
         index_space_allocator_shard = 0;
-      // Advance the barrier to the next generation
-      Runtime::advance_barrier(index_partition_allocator_barrier);
-      if (color_generated)
-        Runtime::advance_barrier(color_partition_allocator_barrier);
       return pid;
     }
-#endif
 
     //--------------------------------------------------------------------------
     IndexSpace ReplicateContext::create_index_space_union(
@@ -9193,12 +9183,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplicateContext::notify_collective_stage(Deserializer &derez)
+    void ReplicateContext::handle_collective_message(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       ShardCollective *collective = find_or_buffer_collective(derez);   
       if (collective != NULL)
-        collective->handle_unpack_stage(derez);
+        collective->handle_collective_message(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -9238,7 +9228,7 @@ namespace Legion {
               to_apply.begin(); it != to_apply.end(); it++)
         {
           Deserializer derez(it->first, it->second);
-          collective->handle_unpack_stage(derez);
+          collective->handle_collective_message(derez);
           free(it->first);
         }
       }

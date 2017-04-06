@@ -1440,6 +1440,7 @@ namespace Legion {
     class GatherCollective;
     class AllGatherCollective;
     class BarrierExchangeCollective;
+    template<typename T> class ValueBroadcast;
 
 #define FRIEND_ALL_RUNTIME_CLASSES                          \
     friend class Legion::Runtime;                           \

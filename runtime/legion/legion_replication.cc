@@ -1649,8 +1649,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::send_shard_collective_stage(ShardID target,
-                                                   Serializer &rez)
+    void ShardManager::send_collective_message(ShardID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1665,14 +1664,14 @@ namespace Legion {
         // Have to unpack the preample we already know
         ControlReplicationID local_repl;
         derez.deserialize(local_repl);
-        notify_collective_stage(derez);
+        handle_collective_message(derez);
       }
       else
         runtime->send_control_rep_collective_stage(target_space, rez);
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::notify_collective_stage(Deserializer &derez)
+    void ShardManager::handle_collective_message(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       // Figure out which shard we are going to
@@ -1683,7 +1682,7 @@ namespace Legion {
       {
         if ((*it)->shard_id == target)
         {
-          (*it)->notify_collective_stage(derez);
+          (*it)->handle_collective_message(derez);
           return;
         }
       }
@@ -1790,7 +1789,7 @@ namespace Legion {
       ControlReplicationID repl_id;
       derez.deserialize(repl_id);
       ShardManager *manager = runtime->find_shard_manager(repl_id);
-      manager->notify_collective_stage(derez);
+      manager->handle_collective_message(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -1846,9 +1845,222 @@ namespace Legion {
       collective_lock = Reservation::NO_RESERVATION;
     }
 
+    //--------------------------------------------------------------------------
+    int ShardCollective::convert_to_index(ShardID id, ShardID origin) const
+    //--------------------------------------------------------------------------
+    {
+      // shift everything so that the target shard is at index 0 and then add 1
+      const int result = 
+        ((id + (manager->total_shards - origin)) % manager->total_shards) + 1;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    ShardID ShardCollective::convert_to_shard(int index, ShardID origin) const
+    //--------------------------------------------------------------------------
+    {
+      // shift back to zero indexing and add target then take the modulus
+      const ShardID result = (index + origin - 1) % manager->total_shards; 
+      return result;
+    }
+
     /////////////////////////////////////////////////////////////
     // Gather Collective 
     /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    BroadcastCollective::BroadcastCollective(ReplicateContext *ctx, ShardID o)
+      : ShardCollective(ctx), origin(o),
+        shard_collective_radix(ctx->get_shard_collective_radix())
+    //--------------------------------------------------------------------------
+    {
+      if (local_shard != origin)
+        done_event = Runtime::create_rt_user_event();
+    }
+
+    //--------------------------------------------------------------------------
+    BroadcastCollective::~BroadcastCollective(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void BroadcastCollective::perform_collective_async(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(local_shard == origin);
+#endif
+      send_messages(); 
+    }
+
+    //--------------------------------------------------------------------------
+    void BroadcastCollective::perform_collective_wait(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(local_shard != origin);
+#endif     
+      if (!done_event.has_triggered())
+        done_event.wait();
+    }
+
+    //--------------------------------------------------------------------------
+    void BroadcastCollective::handle_collective_message(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(local_shard != origin);
+#endif
+      // No need for the lock since this is only written to once
+      unpack_collective(derez);
+      // Send our messages
+      send_messages();
+      // Then trigger our event to indicate that we are ready
+      Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    void BroadcastCollective::send_messages(void) const
+    //--------------------------------------------------------------------------
+    {
+      const int local_index = convert_to_index(local_shard, origin);
+      for (int idx = 0; idx < shard_collective_radix; idx++)
+      {
+        const int target_index = local_index * shard_collective_radix + idx; 
+        if (target_index > manager->total_shards)
+          break;
+        ShardID target = convert_to_shard(target_index, origin);
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(manager->repl_id);
+          rez.serialize(target);
+          rez.serialize(collective_index);
+          pack_collective(rez);
+        }
+        manager->send_collective_message(target, rez);
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Gather Collective 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    GatherCollective::GatherCollective(ReplicateContext *ctx, ShardID t)
+      : ShardCollective(ctx), target(t), 
+        shard_collective_radix(ctx->get_shard_collective_radix()),
+        expected_notifications(compute_expected_notifications()),
+        received_notifications(0)
+    //--------------------------------------------------------------------------
+    {
+      if (local_shard == target)
+        done_event = Runtime::create_rt_user_event();
+    }
+
+    //--------------------------------------------------------------------------
+    GatherCollective::~GatherCollective(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void GatherCollective::perform_collective_async(void)
+    //--------------------------------------------------------------------------
+    {
+      bool done = false;
+      {
+        AutoLock c_lock(collective_lock);
+#ifdef DEBUG_LEGION
+        assert(received_notifications < expected_notifications);
+#endif
+        done = (++received_notifications == expected_notifications);
+      }
+      if (done)
+      {
+        if (local_shard == target)
+          Runtime::trigger_event(done_event);
+        else
+          send_message();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void GatherCollective::perform_collective_wait(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(local_shard == target); // should only be called on the target
+#endif
+      if (!done_event.has_triggered())
+        done_event.wait();
+    }
+
+    //--------------------------------------------------------------------------
+    void GatherCollective::handle_collective_message(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      bool done = false;
+      {
+        // Hold the lock while doing these operations
+        AutoLock c_lock(collective_lock);
+        // Unpack the result
+        unpack_collective(derez);
+ #ifdef DEBUG_LEGION
+        assert(received_notifications < expected_notifications);
+#endif
+        done = (++received_notifications == expected_notifications);       
+      }
+      if (done)
+      {
+        if (local_shard == target)
+          Runtime::trigger_event(done_event);
+        else
+          send_message();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void GatherCollective::send_message(void)
+    //--------------------------------------------------------------------------
+    {
+      // Convert to our local index
+      const int local_index = convert_to_index(local_shard, target);
+#ifdef DEBUG_LEGION
+      assert(local_index >= shard_collective_radix);
+#endif
+      // Always round down to get our target index
+      const int target_index = local_index / shard_collective_radix;
+      // Then convert back to the target
+      ShardID next = convert_to_shard(target_index, target);
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(manager->repl_id);
+        rez.serialize(next);
+        rez.serialize(collective_index);
+        AutoLock c_lock(collective_lock,1,false/*exclusive*/);
+        pack_collective(rez);
+      }
+      manager->send_collective_message(next, rez);
+    } 
+
+    //--------------------------------------------------------------------------
+    int GatherCollective::compute_expected_notifications(void) const
+    //--------------------------------------------------------------------------
+    {
+      int result = 1; // always have one arriver for ourself
+      const int index = convert_to_index(local_shard, target);
+      for (int idx = 0; idx < shard_collective_radix; idx++)
+      {
+        const int source_index = index * shard_collective_radix + idx;
+        if (source_index > int(manager->total_shards))
+          break;
+        result++;
+      }
+      return result;
+    }
 
     /////////////////////////////////////////////////////////////
     // All Gather Collective 
@@ -1934,7 +2146,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AllGatherCollective::handle_unpack_stage(Deserializer &derez)
+    void AllGatherCollective::handle_collective_message(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       int stage;
@@ -1971,15 +2183,8 @@ namespace Legion {
     void AllGatherCollective::send_explicit_stage(int stage) 
     //--------------------------------------------------------------------------
     {
-      Serializer rez;
       {
-        RezCheck z(rez);
-        rez.serialize(manager->repl_id);
-        rez.serialize(local_shard);
-        rez.serialize(collective_index);
-        rez.serialize(stage);
         AutoLock c_lock(collective_lock);
-        pack_collective_stage(rez, stage);
         // Mark that we're sending this stage
         if (stage >= 0)
           sent_stages[stage] = true;
@@ -1993,13 +2198,17 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(target < manager->total_shards);
 #endif
-          manager->send_shard_collective_stage(target, rez);
+          Serializer rez;
+          construct_message(target, stage, rez);
+          manager->send_collective_message(target, rez);
         }
         else
         {
           // Send to a node that is participating
           ShardID target = local_shard % shard_collective_participating_shards;
-          manager->send_shard_collective_stage(target, rez);
+          Serializer rez;
+          construct_message(target, stage, rez);
+          manager->send_collective_message(target, rez);
         }
       }
       else
@@ -2016,7 +2225,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(int(target) < shard_collective_participating_shards);
 #endif
-            manager->send_shard_collective_stage(target, rez);
+            Serializer rez;
+            construct_message(target, stage, rez);
+            manager->send_collective_message(target, rez);
           }
         }
         else
@@ -2028,7 +2239,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(int(target) < shard_collective_participating_shards);
 #endif
-            manager->send_shard_collective_stage(target, rez);
+            Serializer rez;
+            construct_message(target, stage, rez);
+            manager->send_collective_message(target, rez);
           }
         }
       }
@@ -2045,13 +2258,7 @@ namespace Legion {
       // Remember that stages have to be done in order
       for (int stage = 0; stage < shard_collective_stages; stage++)
       {
-        Serializer rez;
         {
-          RezCheck z(rez);
-          rez.serialize(manager->repl_id);
-          rez.serialize(local_shard);
-          rez.serialize(collective_index);
-          rez.serialize(stage);
           AutoLock c_lock(collective_lock);
           // If this stage has already been sent then we can keep going
           if (sent_stages[stage])
@@ -2066,7 +2273,6 @@ namespace Legion {
             return false;
           // If we get here then we can send the stage
           sent_stages[stage] = true;
-          pack_collective_stage(rez, stage);
         }
         // Now we can do the send
         if (stage == (shard_collective_stages-1))
@@ -2078,7 +2284,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(int(target) < shard_collective_participating_shards);
 #endif
-            manager->send_shard_collective_stage(target, rez);
+            Serializer rez;
+            construct_message(target, stage, rez);
+            manager->send_collective_message(target, rez);
           }
         }
         else
@@ -2090,7 +2298,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(int(target) < shard_collective_participating_shards);
 #endif
-            manager->send_shard_collective_stage(target, rez);
+            Serializer rez;
+            construct_message(target, stage, rez);
+            manager->send_collective_message(target, rez);
           }
         }
       }
@@ -2098,6 +2308,20 @@ namespace Legion {
       // if we've seen all the notifications for it
       AutoLock c_lock(collective_lock,1,false/*exclusive*/);
       return (stage_notifications.back() == shard_collective_last_radix);
+    }
+
+    //--------------------------------------------------------------------------
+    void AllGatherCollective::construct_message(ShardID target, int stage,
+                                                Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      RezCheck z(rez);
+      rez.serialize(manager->repl_id);
+      rez.serialize(target);
+      rez.serialize(collective_index);
+      rez.serialize(stage);
+      AutoLock c_lock(collective_lock, 1, false/*exclusive*/);
+      pack_collective_stage(rez, stage);
     }
 
     //--------------------------------------------------------------------------
@@ -2197,7 +2421,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void BarrierExchangeCollective::pack_collective_stage(Serializer &rez, 
-                                                          int stage)
+                                                          int stage) const
     //--------------------------------------------------------------------------
     {
       rez.serialize(window_size);
