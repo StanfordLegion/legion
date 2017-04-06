@@ -1499,11 +1499,11 @@ namespace Legion {
                                                IndexPartition handle2,
                                                IndexSpace color_space,
                                                PartitionKind kind, Color color);
-      Color create_cross_product_partition(Context ctx, 
-                                           IndexPartition handle1,
-                                           IndexPartition handle2,
-                              std::map<IndexSpace,IndexPartition> &handles,
-                                           PartitionKind kind, Color color);
+      Color create_cross_product_partitions(Context ctx, 
+                                            IndexPartition handle1,
+                                            IndexPartition handle2,
+                                std::map<IndexSpace,IndexPartition> &handles,
+                                            PartitionKind kind, Color color);
       void create_association(Context ctx,
                               LogicalRegion domain,
                               LogicalRegion domain_parent,

@@ -9502,10 +9502,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Color Runtime::create_cross_product_partition(Context ctx,
-                                                 IndexPartition handle1,
-                                                 IndexPartition handle2,
-                                  std::map<IndexSpace,IndexPartition> &handles,
+    Color Runtime::create_cross_product_partitions(Context ctx,
+                                                  IndexPartition handle1,
+                                                  IndexPartition handle2,
+                                   std::map<IndexSpace,IndexPartition> &handles,
                                                  PartitionKind kind,Color color)
     //--------------------------------------------------------------------------
     {
@@ -9517,8 +9517,8 @@ namespace Legion {
 #endif
         exit(ERROR_DUMMY_CONTEXT_OPERATION);
       }
-      return ctx->create_cross_product_partition(forest, handle1, handle2, 
-                                                 handles, kind, color);
+      return ctx->create_cross_product_partitions(forest, handle1, handle2, 
+                                                  handles, kind, color);
     }
 
     //--------------------------------------------------------------------------

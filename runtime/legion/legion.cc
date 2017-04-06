@@ -3502,8 +3502,8 @@ namespace Legion {
                                 PartitionKind kind, Color color)
     //--------------------------------------------------------------------------
     {
-      return runtime->create_cross_product_partition(ctx, handle1, handle2, 
-                                                     handles, kind, color);
+      return runtime->create_cross_product_partitions(ctx, handle1, handle2, 
+                                                      handles, kind, color);
     }
 
     //--------------------------------------------------------------------------
