@@ -879,7 +879,39 @@ namespace Realm {
   // simple wrapper for the multiple subspace version
   template <int N, typename T>
   template <int N2, typename T2>
+  inline Event ZIndexSpace<N,T>::create_subspace_by_image(const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZRect<N,T> > >& field_data,
+							  const ZIndexSpace<N2,T2>& source,
+							  ZIndexSpace<N,T>& image,
+							  const ProfilingRequestSet &reqs,
+							  Event wait_on /*= Event::NO_EVENT*/) const
+  {
+    std::vector<ZIndexSpace<N2,T2> > sources(1, source);
+    std::vector<ZIndexSpace<N,T> > images;
+    Event e = create_subspaces_by_image(field_data, sources, images, reqs, wait_on);
+    image = images[0];
+    return e;
+  }
+
+  // simple wrapper for the multiple subspace version
+  template <int N, typename T>
+  template <int N2, typename T2>
   inline Event ZIndexSpace<N,T>::create_subspace_by_preimage(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,ZPoint<N2,T2> > >& field_data,
+							     const ZIndexSpace<N2,T2>& target,
+							     ZIndexSpace<N,T>& preimage,
+							     const ProfilingRequestSet &reqs,
+							     Event wait_on /*= Event::NO_EVENT*/) const
+  {
+    std::vector<ZIndexSpace<N2,T2> > targets(1, target);
+    std::vector<ZIndexSpace<N,T> > preimages;
+    Event e = create_subspaces_by_preimage(field_data, targets, preimages, reqs, wait_on);
+    preimage = preimages[0];
+    return e;
+  }
+
+  // simple wrapper for the multiple subspace version
+  template <int N, typename T>
+  template <int N2, typename T2>
+  inline Event ZIndexSpace<N,T>::create_subspace_by_preimage(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,ZRect<N2,T2> > >& field_data,
 							     const ZIndexSpace<N2,T2>& target,
 							     ZIndexSpace<N,T>& preimage,
 							     const ProfilingRequestSet &reqs,
