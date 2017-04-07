@@ -2447,6 +2447,9 @@ namespace Legion {
       virtual size_t get_region_count(void) const;
       virtual void trigger_commit(void);
     public:
+      void activate_dependent(void);
+      void deactivate_dependent(void);
+    public:
       virtual void select_sources(const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);

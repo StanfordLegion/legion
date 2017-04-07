@@ -871,6 +871,308 @@ namespace Legion {
       return *this;
     }
 
+    //--------------------------------------------------------------------------
+    void ReplDependentPartitionOp::initialize_by_field(ReplicateContext *ctx, 
+                                                       IndexPartition pid,
+                                                       LogicalRegion handle, 
+                                                       LogicalRegion parent,
+                                                       FieldID fid,
+                                                       MapperID id, 
+                                                       MappingTagID t)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      if (!runtime->forest->check_partition_by_field_size(pid, 
+            handle.get_field_space(), fid, false/*range*/, 
+            true/*use color space*/))
+      {
+        log_run.error("ERROR: Field size of field %d does not match the size "
+                      "of the color space elements for 'partition_by_field' "
+                      "call in task %s (UID %lld)", fid, ctx->get_task_name(),
+                      ctx->get_unique_id());
+        assert(false);
+      }
+#endif
+      parent_task = ctx->get_task();
+      initialize_operation(ctx, true/*track*/); 
+      // Start without the projection requirement, we'll ask
+      // the mapper later if it wants to turn this into an index launch
+      requirement = RegionRequirement(handle, READ_ONLY, EXCLUSIVE, parent);
+      requirement.add_field(fid);
+      map_id = id;
+      tag = t;
+#ifdef DEBUG_LEGION
+      assert(thunk == NULL);
+#endif
+      thunk = new ReplByFieldThunk(ctx, pid);
+      if (Runtime::legion_spy_enabled)
+        perform_logging();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplDependentPartitionOp::initialize_by_image(ReplicateContext *ctx, 
+                                                       IndexPartition pid,
+                                                   LogicalPartition projection,
+                                             LogicalRegion parent, FieldID fid,
+                                                   MapperID id, MappingTagID t) 
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      if (!runtime->forest->check_partition_by_field_size(pid, 
+            projection.get_field_space(), fid, false/*range*/))
+      {
+        log_run.error("ERROR: Field size of field %d does not match the size "
+                      "of the destination index space elements for "
+                      "'partition_by_image' call in task %s (UID %lld)",
+                      fid, ctx->get_task_name(), ctx->get_unique_id());
+        assert(false);
+      }
+#endif
+      parent_task = ctx->get_task();
+      initialize_operation(ctx, true/*track*/);
+      // Start without the projection requirement, we'll ask
+      // the mapper later if it wants to turn this into an index launch
+      LogicalRegion proj_parent = 
+        runtime->forest->get_parent_logical_region(projection);
+      requirement = RegionRequirement(proj_parent, READ_ONLY, EXCLUSIVE,parent);
+      requirement.add_field(fid);
+      map_id = id;
+      tag = t;
+#ifdef DEBUG_LEGION
+      assert(thunk == NULL);
+#endif
+      thunk = new ReplByImageThunk(ctx, pid, projection.get_index_partition());
+      if (Runtime::legion_spy_enabled)
+        perform_logging();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplDependentPartitionOp::initialize_by_image_range(
+                                                         ReplicateContext *ctx, 
+                                                         IndexPartition pid,
+                                                LogicalPartition projection,
+                                                LogicalRegion parent,
+                                                FieldID fid, MapperID id,
+                                                MappingTagID t) 
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      if (!runtime->forest->check_partition_by_field_size(pid, 
+            projection.get_field_space(), fid, true/*range*/))
+      {
+        log_run.error("ERROR: Field size of field %d does not match the size "
+                      "of the destination index space elements for "
+                      "'partition_by_image_range' call in task %s (UID %lld)",
+                      fid, ctx->get_task_name(), ctx->get_unique_id());
+        assert(false);
+      }
+#endif
+      parent_task = ctx->get_task();
+      initialize_operation(ctx, true/*track*/);
+      // Start without the projection requirement, we'll ask
+      // the mapper later if it wants to turn this into an index launch
+      LogicalRegion proj_parent = 
+        runtime->forest->get_parent_logical_region(projection);
+      requirement = RegionRequirement(proj_parent, READ_ONLY, EXCLUSIVE,parent);
+      requirement.add_field(fid);
+      map_id = id;
+      tag = t;
+#ifdef DEBUG_LEGION
+      assert(thunk == NULL);
+#endif
+      thunk = 
+        new ReplByImageRangeThunk(ctx, pid, projection.get_index_partition());
+      if (Runtime::legion_spy_enabled)
+        perform_logging();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplDependentPartitionOp::initialize_by_preimage(ReplicateContext *ctx,
+                                    IndexPartition pid, IndexPartition proj,
+                                    LogicalRegion handle, LogicalRegion parent,
+                                    FieldID fid, MapperID id, MappingTagID t)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      if (!runtime->forest->check_partition_by_field_size(pid,
+            handle.get_field_space(), fid, false/*range*/))
+      {
+        log_run.error("ERROR: Field size of field %d does not match the size "
+                      "of the range index space elements for "
+                      "'partition_by_preimage' call in task %s (UID %lld)",
+                      fid, ctx->get_task_name(), ctx->get_unique_id());
+        assert(false);
+      }
+#endif
+      parent_task = ctx->get_task();
+      initialize_operation(ctx, true/*track*/);
+      // Start without the projection requirement, we'll ask
+      // the mapper later if it wants to turn this into an index launch
+      requirement = RegionRequirement(handle, READ_ONLY, EXCLUSIVE, parent);
+      requirement.add_field(fid);
+      map_id = id;
+      tag = t;
+#ifdef DEBUG_LEGION
+      assert(thunk == NULL);
+#endif
+      thunk = new ReplByPreimageThunk(ctx, pid, proj);
+      if (Runtime::legion_spy_enabled)
+        perform_logging();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplDependentPartitionOp::initialize_by_preimage_range(
+                                    ReplicateContext *ctx,
+                                    IndexPartition pid, IndexPartition proj,
+                                    LogicalRegion handle, LogicalRegion parent,
+                                    FieldID fid, MapperID id, MappingTagID t)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      if (!runtime->forest->check_partition_by_field_size(pid,
+            handle.get_field_space(), fid, true/*range*/))
+      {
+        log_run.error("ERROR: Field size of field %d does not match the size "
+                     "of the range index space elements for "
+                     "'partition_by_preimage_range' call in task %s (UID %lld)",
+                     fid, ctx->get_task_name(), ctx->get_unique_id());
+        assert(false);
+      }
+#endif
+      parent_task = ctx->get_task();
+      initialize_operation(ctx, true/*track*/);
+      // Start without the projection requirement, we'll ask
+      // the mapper later if it wants to turn this into an index launch
+      requirement = RegionRequirement(handle, READ_ONLY, EXCLUSIVE, parent);
+      requirement.add_field(fid);
+      map_id = id;
+      tag = t;
+#ifdef DEBUG_LEGION
+      assert(thunk == NULL);
+#endif
+      thunk = new ReplByPreimageRangeThunk(ctx, pid, proj);
+      if (Runtime::legion_spy_enabled)
+        perform_logging();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplDependentPartitionOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_dependent_op();
+      sharding_functor = UINT_MAX;
+#ifdef DEBUG_LEGION
+      sharding_collective = NULL;
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplDependentPartitionOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_dependent_op();
+#ifdef DEBUG_LEGION
+      if (sharding_collective != NULL)
+        delete sharding_collective;
+#endif
+      runtime->free_repl_dependent_partition_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplDependentPartitionOp::trigger_prepipeline_stage(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // Do the mapper call to get the sharding function to use
+      if (mapper == NULL)
+        mapper = runtime->find_mapper(
+            parent_ctx->get_executing_processor(), map_id);
+      Mapper::SelectShardingFunctorInput* input = repl_ctx->shard_manager;
+      Mapper::SelectShardingFunctorOutput output;
+      output.chosen_functor = UINT_MAX;
+      mapper->invoke_partition_select_sharding_functor(this, input, &output);
+      if (output.chosen_functor == UINT_MAX)
+      {
+        log_run.error("Mapper %s failed to pick a valid sharding functor for "
+                      "dependent partition in task %s (UID %lld)", 
+                      mapper->get_mapper_name(),
+                      parent_ctx->get_task_name(), parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+      this->sharding_functor = output.chosen_functor;
+#ifdef DEBUG_LEGION
+      assert(sharding_collective != NULL);
+      sharding_collective->contribute(this->sharding_functor);
+      if (sharding_collective->is_target() &&
+          !sharding_collective->validate(this->sharding_functor))
+      {
+        log_run.error("ERROR: Mapper %s chose different sharding functions "
+                      "for dependent partition op in task %s (UID %lld)", 
+                      mapper->get_mapper_name(), parent_ctx->get_task_name(),
+                      parent_ctx->get_unique_id());
+        assert(false);
+      }
+#endif
+      // Now we can do the normal prepipeline stage
+      DependentPartitionOp::trigger_prepipeline_stage();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplDependentPartitionOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // Get the sharding function implementation to use from our context
+      ShardingFunction *function = 
+        repl_ctx->shard_manager->find_sharding_function(sharding_functor);
+      // Do different things if this is an index space point or a single point
+      if (is_index_space)
+      {
+        // Compute the local index space of points for this shard
+        const Domain &local_domain = 
+          function->find_shard_domain(repl_ctx->owner_shard->shard_id, 
+                                      index_domain);
+        index_domain = local_domain;
+        // If it's empty we're done, otherwise we go back on the queue
+        if (local_domain.get_volume() == 0)
+        {
+          // We have no local points, so we can just trigger
+          complete_mapping();
+          complete_execution();
+        }
+        else // If we have valid points then we do the base call
+          DependentPartitionOp::trigger_ready();
+      }
+      else
+      {
+        // Figure out whether this shard owns this point
+        ShardID owner_shard = function->find_owner(index_point, index_domain); 
+        // If we own it we go on the queue, otherwise we complete early
+        if (owner_shard != repl_ctx->owner_shard->shard_id)
+        {
+          // We don't own it, so we can pretend like we
+          // mapped and executed this task already
+          complete_mapping();
+          complete_execution();
+        }
+        else // If we're the shard then we do the base call
+          DependentPartitionOp::trigger_ready();
+      }
+    }
+
     /////////////////////////////////////////////////////////////
     // Repl Must Epoch Op 
     /////////////////////////////////////////////////////////////

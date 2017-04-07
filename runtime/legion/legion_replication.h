@@ -213,11 +213,95 @@ namespace Legion {
      */
     class ReplDependentPartitionOp : public DependentPartitionOp {
     public:
+      class ReplByFieldThunk : public ByFieldThunk {
+      public:
+        ReplByFieldThunk(ReplicateContext *ctx, IndexPartition p);
+      public:
+        virtual ApEvent perform(DependentPartitionOp *op,
+            RegionTreeForest *forest, ApEvent instances_ready,
+            const std::vector<FieldDataDescriptor> &instances);
+      };
+      class ReplByImageThunk : public ByImageThunk {
+      public:
+        ReplByImageThunk(ReplicateContext *ctx, 
+                         IndexPartition p, IndexPartition proj);
+      public:
+        virtual ApEvent perform(DependentPartitionOp *op,
+            RegionTreeForest *forest, ApEvent instances_ready,
+            const std::vector<FieldDataDescriptor> &instances);
+      };
+      class ReplByImageRangeThunk : public ByImageRangeThunk {
+      public:
+        ReplByImageRangeThunk(ReplicateContext *ctx, 
+                              IndexPartition p, IndexPartition proj);
+      public:
+        virtual ApEvent perform(DependentPartitionOp *op,
+            RegionTreeForest *forest, ApEvent instances_ready,
+            const std::vector<FieldDataDescriptor> &instances);
+      };
+      class ReplByPreimageThunk : public ByPreimageThunk {
+      public:
+        ReplByPreimageThunk(ReplicateContext *ctx,
+                            IndexPartition p, IndexPartition proj);
+      public:
+        virtual ApEvent perform(DependentPartitionOp *op,
+            RegionTreeForest *forest, ApEvent instances_ready,
+            const std::vector<FieldDataDescriptor> &instances);
+      };
+      class ReplByPreimageRangeThunk : public ByPreimageRangeThunk {
+      public:
+        ReplByPreimageRangeThunk(ReplicateContext *ctx,
+                                 IndexPartition p, IndexPartition proj);
+      public:
+        virtual ApEvent perform(DependentPartitionOp *op,
+            RegionTreeForest *forest, ApEvent instances_ready,
+            const std::vector<FieldDataDescriptor> &instances);
+      };
+      // Nothing special about association for control replication
+    public:
       ReplDependentPartitionOp(Runtime *rt);
       ReplDependentPartitionOp(const ReplDependentPartitionOp &rhs);
       virtual ~ReplDependentPartitionOp(void);
     public:
       ReplDependentPartitionOp& operator=(const ReplDependentPartitionOp &rhs);
+    public:
+      void initialize_by_field(ReplicateContext *ctx, IndexPartition pid,
+                               LogicalRegion handle, LogicalRegion parent,
+                               FieldID fid, MapperID id, MappingTagID tag); 
+      void initialize_by_image(ReplicateContext *ctx, IndexPartition pid,
+                               LogicalPartition projection,
+                               LogicalRegion parent, FieldID fid,
+                               MapperID id, MappingTagID tag);
+      void initialize_by_image_range(ReplicateContext *ctx, IndexPartition pid,
+                               LogicalPartition projection,
+                               LogicalRegion parent, FieldID fid,
+                               MapperID id, MappingTagID tag);
+      void initialize_by_preimage(ReplicateContext *ctx, IndexPartition pid,
+                               IndexPartition projection, LogicalRegion handle,
+                               LogicalRegion parent, FieldID fid,
+                               MapperID id, MappingTagID tag);
+      void initialize_by_preimage_range(ReplicateContext *ctx, 
+                               IndexPartition pid,
+                               IndexPartition projection, LogicalRegion handle,
+                               LogicalRegion parent, FieldID fid,
+                               MapperID id, MappingTagID tag);
+      // nothing special about association for control replication
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+    public:
+      // Need to pick our sharding functor
+      virtual void trigger_prepipeline_stage(void);
+      virtual void trigger_ready(void);  
+    protected:
+      ShardingID sharding_functor;
+#ifdef DEBUG_LEGION
+    public:
+      inline void set_sharding_collective(ShardingGatherCollective *collective)
+        { sharding_collective = collective; }
+    protected:
+      ShardingGatherCollective *sharding_collective;
+#endif
     };
 
     /**

@@ -7332,13 +7332,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      ReplDependentPartitionOp *part_op = 
+        runtime->get_available_repl_dependent_partition_op(true);
 #ifdef DEBUG_LEGION
       if (owner_shard->shard_id == 0)
         log_index.debug("Creating association in task %s (ID %lld)", 
                         get_task_name(), get_unique_id());
+      part_op->set_sharding_collective(
+          new ShardingGatherCollective(this, 0/*owner shard*/));
 #endif
-      ReplDependentPartitionOp *part_op = 
-        runtime->get_available_repl_dependent_partition_op(true);
       part_op->initialize_by_association(this, domain, domain_parent, 
                                          domain_fid, range, id, tag);
       // Now figure out if we need to unmap and re-map any inline mappings
@@ -7541,6 +7543,10 @@ namespace Legion {
                                          shard_manager->get_mapping());
       }
       part_op->initialize_by_field(this, pid, handle, parent_priv, fid, id,tag);
+#ifdef DEBUG_LEGION
+      part_op->set_sharding_collective(
+          new ShardingGatherCollective(this, 0/*owner shard*/));
+#endif
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!Runtime::unsafe_launch)
@@ -7655,6 +7661,10 @@ namespace Legion {
                                          shard_manager->get_mapping());
       }
       part_op->initialize_by_image(this, pid, projection, parent, fid, id, tag);
+#ifdef DEBUG_LEGION
+      part_op->set_sharding_collective(
+          new ShardingGatherCollective(this, 0/*owner shard*/));
+#endif
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!Runtime::unsafe_launch)
@@ -7770,6 +7780,10 @@ namespace Legion {
       }
       part_op->initialize_by_image_range(this, pid, projection, parent, 
                                          fid, id, tag);
+#ifdef DEBUG_LEGION
+      part_op->set_sharding_collective(
+          new ShardingGatherCollective(this, 0/*owner shard*/));
+#endif
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!Runtime::unsafe_launch)
@@ -7892,6 +7906,10 @@ namespace Legion {
       }
       part_op->initialize_by_preimage(this, pid, projection, handle, 
                                       parent, fid, id, tag);
+#ifdef DEBUG_LEGION
+      part_op->set_sharding_collective(
+          new ShardingGatherCollective(this, 0/*owner shard*/));
+#endif
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!Runtime::unsafe_launch)
@@ -8006,6 +8024,10 @@ namespace Legion {
       }
       part_op->initialize_by_preimage_range(this, pid, projection, handle,
                                             parent, fid, id, tag);
+#ifdef DEBUG_LEGION
+      part_op->set_sharding_collective(
+          new ShardingGatherCollective(this, 0/*owner shard*/));
+#endif
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!Runtime::unsafe_launch)
