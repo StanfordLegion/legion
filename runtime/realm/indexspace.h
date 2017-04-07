@@ -1400,6 +1400,11 @@ namespace Realm {
   template <int N, typename T>
   std::ostream& operator<<(std::ostream& os, const ZRect<N,T>& p);
 
+  template <int N, typename T, typename T2>
+  bool operator==(const ZRect<N,T>& lhs, const ZRect<N,T2>& rhs);
+  template <int N, typename T, typename T2>
+  bool operator!=(const ZRect<N,T>& lhs, const ZRect<N,T2>& rhs);
+
   // rectangles may be displaced by a vector (i.e. point)
   template <int N, typename T, typename T2>
   ZRect<N,T> operator+(const ZRect<N,T>& lhs, const ZPoint<N,T2>& rhs);

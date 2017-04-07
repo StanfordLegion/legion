@@ -5854,13 +5854,6 @@ namespace Legion {
     void InnerContext::end_task(const void *res, size_t res_size, bool owned)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(owner_task != NULL);
-      runtime->decrement_total_outstanding_tasks(owner_task->task_id, 
-                                                 false/*meta*/);
-#else
-      runtime->decrement_total_outstanding_tasks();
-#endif
       if (overhead_tracker != NULL)
       {
         const long long current = Realm::Clock::current_time_in_nanoseconds();
@@ -5957,6 +5950,13 @@ namespace Legion {
           runtime->add_to_dependence_queue(this, executing_processor, close_op);
         }
       }
+      // Grab some information before doing the next step in case it
+      // results in the deletion of 'this'
+#ifdef DEBUG_LEGION
+      assert(owner_task != NULL);
+      const TaskID owner_task_id = owner_task->task_id;
+#endif
+      Runtime *runtime_ptr = runtime;
       // See if we want to move the rest of this computation onto
       // the utility processor. We also need to be sure that we have 
       // registered all of our operations before we can do the post end task
@@ -5981,6 +5981,12 @@ namespace Legion {
       }
       else
         post_end_task(res, res_size, owned);
+#ifdef DEBUG_LEGION
+      runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
+                                                     false/*meta*/);
+#else
+      runtime_ptr->decrement_total_outstanding_tasks();
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -10871,19 +10877,19 @@ namespace Legion {
     void LeafContext::end_task(const void *res, size_t res_size, bool owned)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(owner_task != NULL);
-      runtime->decrement_total_outstanding_tasks(owner_task->task_id, 
-                                                 false/*meta*/);
-#else
-      runtime->decrement_total_outstanding_tasks();
-#endif
       if (overhead_tracker != NULL)
       {
         const long long current = Realm::Clock::current_time_in_nanoseconds();
         const long long diff = current - previous_profiling_time;
         overhead_tracker->application_time += diff;
       }
+      // Grab some information before doing the next step in case it
+      // results in the deletion of 'this'
+#ifdef DEBUG_LEGION
+      assert(owner_task != NULL);
+      const TaskID owner_task_id = owner_task->task_id;
+#endif
+      Runtime *runtime_ptr = runtime;
       if (runtime->has_explicit_utility_procs)
       {
         PostEndArgs post_end_args;
@@ -10904,6 +10910,12 @@ namespace Legion {
       }
       else
         post_end_task(res, res_size, owned);
+#ifdef DEBUG_LEGION
+      runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
+                                                     false/*meta*/);
+#else
+      runtime_ptr->decrement_total_outstanding_tasks();
+#endif
     }
 
     //--------------------------------------------------------------------------
