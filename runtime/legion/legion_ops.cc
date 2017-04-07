@@ -11840,7 +11840,7 @@ namespace Legion {
       runtime->forest->physical_register_only(requirement, 
                                               version_info, restrict_info,
                                               this, 0/*idx*/,
-                                              completion_event,
+                                              partition_ready,
                                               false/*defer add users*/,
                                               true/*read only locks*/,
                                               map_applied_conditions,
@@ -12249,6 +12249,9 @@ namespace Legion {
       launch_space = IndexSpace::NO_SPACE;
       index_domain = Domain::NO_DOMAIN;
       parent_req_index = 0;
+      thunk = NULL;
+      // can be changed for control rep
+      partition_ready = get_completion_event(); 
       mapper = NULL;
       points_committed = 0;
       commit_request = false;

@@ -2483,6 +2483,7 @@ namespace Legion {
       std::set<RtEvent> map_applied_conditions;
       std::set<ApEvent> restricted_postconditions;
       DepPartThunk *thunk;
+      ApEvent partition_ready;
     protected:
       MapperManager *mapper;
     protected:

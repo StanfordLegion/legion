@@ -23,464 +23,6 @@ namespace Legion {
   namespace Internal {
 
     /**
-     * \class ReplIndividualTask
-     * An individual task that is aware that it is 
-     * being executed in a control replication context.
-     */
-    class ReplIndividualTask : public IndividualTask {
-    public:
-      ReplIndividualTask(Runtime *rt);
-      ReplIndividualTask(const ReplIndividualTask &rhs);
-      virtual ~ReplIndividualTask(void);
-    public:
-      ReplIndividualTask& operator=(const ReplIndividualTask &rhs);
-    public:
-      virtual void activate(void);
-      virtual void deactivate(void);
-    public:
-      virtual void trigger_prepipeline_stage(void);
-      virtual void trigger_ready(void);
-    protected:
-      ShardingID sharding_functor;
-#ifdef DEBUG_LEGION
-    public:
-      inline void set_sharding_collective(ShardingGatherCollective *collective)
-        { sharding_collective = collective; }
-    protected:
-      ShardingGatherCollective *sharding_collective;
-#endif
-    };
-
-    /**
-     * \class ReplIndexTask
-     * An individual task that is aware that it is 
-     * being executed in a control replication context.
-     */
-    class ReplIndexTask : public IndexTask {
-    public:
-      ReplIndexTask(Runtime *rt);
-      ReplIndexTask(const ReplIndexTask &rhs);
-      virtual ~ReplIndexTask(void);
-    public:
-      ReplIndexTask& operator=(const ReplIndexTask &rhs);
-    public:
-      virtual void activate(void);
-      virtual void deactivate(void);
-    public:
-      virtual void trigger_prepipeline_stage(void);
-      virtual void trigger_ready(void);
-    protected:
-      ShardingID sharding_functor;
-#ifdef DEBUG_LEGION
-    public:
-      inline void set_sharding_collective(ShardingGatherCollective *collective)
-        { sharding_collective = collective; }
-    protected:
-      ShardingGatherCollective *sharding_collective;
-#endif
-    };
-
-    /**
-     * \class ReplIndexFillOp
-     * An index fill operation that is aware that it is 
-     * being executed in a control replication context.
-     */
-    class ReplIndexFillOp : public IndexFillOp {
-    public:
-      ReplIndexFillOp(Runtime *rt);
-      ReplIndexFillOp(const ReplIndexFillOp &rhs);
-      virtual ~ReplIndexFillOp(void);
-    public:
-      ReplIndexFillOp& operator=(const ReplIndexFillOp &rhs);
-    public:
-      virtual void activate(void);
-      virtual void deactivate(void);
-    public:
-      virtual void trigger_prepipeline_stage(void);
-      virtual void trigger_ready(void);
-    protected:
-      ShardingID sharding_functor;
-      MapperManager *mapper;
-#ifdef DEBUG_LEGION
-    public:
-      inline void set_sharding_collective(ShardingGatherCollective *collective)
-        { sharding_collective = collective; }
-    protected:
-      ShardingGatherCollective *sharding_collective;
-#endif
-    };
-
-    /**
-     * \class ReplCopyOp
-     * A fill operation that is aware that it is being
-     * executed in a control replication context.
-     */
-    class ReplCopyOp : public CopyOp {
-    public:
-      ReplCopyOp(Runtime *rt);
-      ReplCopyOp(const ReplCopyOp &rhs);
-      virtual ~ReplCopyOp(void);
-    public:
-      ReplCopyOp& operator=(const ReplCopyOp &rhs);
-    public:
-      virtual void activate(void);
-      virtual void deactivate(void);
-    public:
-      virtual void trigger_prepipeline_stage(void);
-      virtual void trigger_ready(void);
-    protected:
-      ShardingID sharding_functor;
-#ifdef DEBUG_LEGION
-    public:
-      inline void set_sharding_collective(ShardingGatherCollective *collective)
-        { sharding_collective = collective; }
-    protected:
-      ShardingGatherCollective *sharding_collective;
-#endif
-    };
-
-    /**
-     * \class ReplIndexCopyOp
-     * An index fill operation that is aware that it is 
-     * being executed in a control replication context.
-     */
-    class ReplIndexCopyOp : public IndexCopyOp {
-    public:
-      ReplIndexCopyOp(Runtime *rt);
-      ReplIndexCopyOp(const ReplIndexCopyOp &rhs);
-      virtual ~ReplIndexCopyOp(void);
-    public:
-      ReplIndexCopyOp& operator=(const ReplIndexCopyOp &rhs);
-    public:
-      virtual void activate(void);
-      virtual void deactivate(void);
-    public:
-      virtual void trigger_prepipeline_stage(void);
-      virtual void trigger_ready(void);
-    protected:
-      ShardingID sharding_functor;
-#ifdef DEBUG_LEGION
-    public:
-      inline void set_sharding_collective(ShardingGatherCollective *collective)
-        { sharding_collective = collective; }
-    protected:
-      ShardingGatherCollective *sharding_collective;
-#endif
-    };
-
-    /**
-     * \class ReplDeletionOp
-     * A deletion operation that is aware that it is
-     * being executed in a control replication context.
-     */
-    class ReplDeletionOp : public DeletionOp {
-    public:
-      ReplDeletionOp(Runtime *rt);
-      ReplDeletionOp(const ReplDeletionOp &rhs);
-      virtual ~ReplDeletionOp(void);
-    public:
-      ReplDeletionOp& operator=(const ReplDeletionOp &rhs);
-    public:
-      virtual void activate(void);
-      virtual void deactivate(void);
-    public:
-      virtual void trigger_ready(void);
-    };
-
-    /**
-     * \class ReplPendingPartitionOp
-     * A pending partition operation that knows that its
-     * being executed in a control replication context
-     */
-    class ReplPendingPartitionOp : public PendingPartitionOp {
-    public:
-      ReplPendingPartitionOp(Runtime *rt);
-      ReplPendingPartitionOp(const ReplPendingPartitionOp &rhs);
-      virtual ~ReplPendingPartitionOp(void);
-    public:
-      ReplPendingPartitionOp& operator=(const ReplPendingPartitionOp &rhs);
-    public:
-      virtual void activate(void);
-      virtual void deactivate(void);
-    public:
-      virtual void trigger_mapping(void);
-    };
-
-    /**
-     * \class ReplDependentPartitionOp
-     * A dependent partitioning operation that knows that it
-     * is being executed in a control replication context
-     */
-    class ReplDependentPartitionOp : public DependentPartitionOp {
-    public:
-      class ReplByFieldThunk : public ByFieldThunk {
-      public:
-        ReplByFieldThunk(ReplicateContext *ctx, IndexPartition p);
-      public:
-        virtual ApEvent perform(DependentPartitionOp *op,
-            RegionTreeForest *forest, ApEvent instances_ready,
-            const std::vector<FieldDataDescriptor> &instances);
-      };
-      class ReplByImageThunk : public ByImageThunk {
-      public:
-        ReplByImageThunk(ReplicateContext *ctx, 
-                         IndexPartition p, IndexPartition proj);
-      public:
-        virtual ApEvent perform(DependentPartitionOp *op,
-            RegionTreeForest *forest, ApEvent instances_ready,
-            const std::vector<FieldDataDescriptor> &instances);
-      };
-      class ReplByImageRangeThunk : public ByImageRangeThunk {
-      public:
-        ReplByImageRangeThunk(ReplicateContext *ctx, 
-                              IndexPartition p, IndexPartition proj);
-      public:
-        virtual ApEvent perform(DependentPartitionOp *op,
-            RegionTreeForest *forest, ApEvent instances_ready,
-            const std::vector<FieldDataDescriptor> &instances);
-      };
-      class ReplByPreimageThunk : public ByPreimageThunk {
-      public:
-        ReplByPreimageThunk(ReplicateContext *ctx,
-                            IndexPartition p, IndexPartition proj);
-      public:
-        virtual ApEvent perform(DependentPartitionOp *op,
-            RegionTreeForest *forest, ApEvent instances_ready,
-            const std::vector<FieldDataDescriptor> &instances);
-      };
-      class ReplByPreimageRangeThunk : public ByPreimageRangeThunk {
-      public:
-        ReplByPreimageRangeThunk(ReplicateContext *ctx,
-                                 IndexPartition p, IndexPartition proj);
-      public:
-        virtual ApEvent perform(DependentPartitionOp *op,
-            RegionTreeForest *forest, ApEvent instances_ready,
-            const std::vector<FieldDataDescriptor> &instances);
-      };
-      // Nothing special about association for control replication
-    public:
-      ReplDependentPartitionOp(Runtime *rt);
-      ReplDependentPartitionOp(const ReplDependentPartitionOp &rhs);
-      virtual ~ReplDependentPartitionOp(void);
-    public:
-      ReplDependentPartitionOp& operator=(const ReplDependentPartitionOp &rhs);
-    public:
-      void initialize_by_field(ReplicateContext *ctx, IndexPartition pid,
-                               LogicalRegion handle, LogicalRegion parent,
-                               FieldID fid, MapperID id, MappingTagID tag); 
-      void initialize_by_image(ReplicateContext *ctx, IndexPartition pid,
-                               LogicalPartition projection,
-                               LogicalRegion parent, FieldID fid,
-                               MapperID id, MappingTagID tag);
-      void initialize_by_image_range(ReplicateContext *ctx, IndexPartition pid,
-                               LogicalPartition projection,
-                               LogicalRegion parent, FieldID fid,
-                               MapperID id, MappingTagID tag);
-      void initialize_by_preimage(ReplicateContext *ctx, IndexPartition pid,
-                               IndexPartition projection, LogicalRegion handle,
-                               LogicalRegion parent, FieldID fid,
-                               MapperID id, MappingTagID tag);
-      void initialize_by_preimage_range(ReplicateContext *ctx, 
-                               IndexPartition pid,
-                               IndexPartition projection, LogicalRegion handle,
-                               LogicalRegion parent, FieldID fid,
-                               MapperID id, MappingTagID tag);
-      // nothing special about association for control replication
-    public:
-      virtual void activate(void);
-      virtual void deactivate(void);
-    public:
-      // Need to pick our sharding functor
-      virtual void trigger_prepipeline_stage(void);
-      virtual void trigger_ready(void);  
-    protected:
-      ShardingID sharding_functor;
-#ifdef DEBUG_LEGION
-    public:
-      inline void set_sharding_collective(ShardingGatherCollective *collective)
-        { sharding_collective = collective; }
-    protected:
-      ShardingGatherCollective *sharding_collective;
-#endif
-    };
-
-    /**
-     * \class ReplMustEpochOp
-     * A must epoch operation that is aware that it is 
-     * being executed in a control replication context
-     */
-    class ReplMustEpochOp : public MustEpochOp {
-    public:
-      ReplMustEpochOp(Runtime *rt);
-      ReplMustEpochOp(const ReplMustEpochOp &rhs);
-      virtual ~ReplMustEpochOp(void);
-    public:
-      ReplMustEpochOp& operator=(const ReplMustEpochOp &rhs);
-    };
-
-    /**
-     * \class ReplTimingOp
-     * A timing operation that is aware that it is 
-     * being executed in a control replication context
-     */
-    class ReplTimingOp : public TimingOp {
-    public:
-      ReplTimingOp(Runtime *rt);
-      ReplTimingOp(const ReplTimingOp &rhs);
-      virtual ~ReplTimingOp(void);
-    public:
-      ReplTimingOp& operator=(const ReplTimingOp &rhs);
-    public:
-      virtual void activate(void);
-      virtual void deactivate(void);
-    public:
-      virtual void trigger_mapping(void);
-      virtual void deferred_execute(void);
-    public:
-      inline void set_timing_collective(ValueBroadcast<long long> *collective) 
-        { timing_collective = collective; }
-    protected:
-      ValueBroadcast<long long> *timing_collective;
-    }; 
-
-    /**
-     * \class ShardMapping
-     * A mapping from the shard IDs to their address spaces
-     */
-    class ShardMapping : public Collectable {
-    public:
-      ShardMapping(void);
-      ShardMapping(const ShardMapping &rhs);
-      ShardMapping(const std::vector<AddressSpaceID> &spaces);
-      ~ShardMapping(void);
-    public:
-      ShardMapping& operator=(const ShardMapping &rhs);
-      AddressSpaceID operator[](unsigned idx) const;
-      AddressSpaceID& operator[](unsigned idx);
-    public:
-      inline size_t size(void) const { return address_spaces.size(); }
-      inline void resize(size_t size) { address_spaces.resize(size); }
-    protected:
-      std::vector<AddressSpaceID> address_spaces;
-    };
-
-    /**
-     * \class ShardManager
-     * This is a class that manages the execution of one or
-     * more shards for a given control replication context on
-     * a single node. It provides support for doing broadcasts,
-     * reductions, and exchanges of information between the 
-     * variaous shard tasks.
-     */
-    class ShardManager : public Mapper::SelectShardingFunctorInput {
-    public:
-      struct ShardManagerCloneArgs :
-        public LgTaskArgs<ShardManagerCloneArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_CONTROL_REP_CLONE_TASK_ID;
-      public:
-        ShardManager *manager;
-        RtEvent ready_event;
-        RtUserEvent to_trigger;
-        ShardTask *first_shard;
-      };
-      struct ShardManagerLaunchArgs :
-        public LgTaskArgs<ShardManagerLaunchArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_CONTROL_REP_LAUNCH_TASK_ID;
-      public:
-        ShardManager *manager;
-      };
-      struct ShardManagerDeleteArgs :
-        public LgTaskArgs<ShardManagerDeleteArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_CONTROL_REP_DELETE_TASK_ID;
-      public:
-        ShardManager *manager;
-      };
-    public:
-      ShardManager(Runtime *rt, ControlReplicationID repl_id, size_t total,
-                   unsigned address_space_index, AddressSpaceID owner_space,
-                   SingleTask *original = NULL);
-      ShardManager(const ShardManager &rhs);
-      ~ShardManager(void);
-    public:
-      ShardManager& operator=(const ShardManager &rhs);
-    public:
-      inline ApBarrier get_pending_partition_barrier(void) const
-        { return pending_partition_barrier; }
-    public:
-      inline ShardMapping* get_mapping(void) const
-        { return address_spaces; }
-    public:
-      void launch(const std::vector<AddressSpaceID> &spaces,
-                  const std::map<ShardID,Processor> &shard_mapping);
-      void unpack_launch(Deserializer &derez);
-      void clone_and_launch(RtEvent ready, RtUserEvent to_trigger, 
-                            ShardTask *first_shard);
-      void create_shards(void);
-      void launch_shards(void) const;
-    public:
-      void broadcast_launch(RtEvent start, RtUserEvent to_trigger,
-                            SingleTask *to_clone);
-      bool broadcast_delete(
-              RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT);
-    public:
-      void handle_post_mapped(bool local);
-      void handle_future(const void *res, size_t res_size, bool owned);
-      void trigger_task_complete(bool local);
-      void trigger_task_commit(bool local);
-    public:
-      void send_collective_message(ShardID target, Serializer &rez);
-      void handle_collective_message(Deserializer &derez);
-    public:
-      static void handle_clone(const void *args);
-      static void handle_launch(const void *args);
-      static void handle_delete(const void *args);
-    public:
-      static void handle_launch(Deserializer &derez, Runtime *rt, 
-                                AddressSpaceID source);
-      static void handle_delete(Deserializer &derez, Runtime *rt);
-      static void handle_post_mapped(Deserializer &derez, Runtime *rt);
-      static void handle_trigger_complete(Deserializer &derez, Runtime *rt);
-      static void handle_trigger_commit(Deserializer &derez, Runtime *rt);
-      static void handle_collective_message(Deserializer &derez, Runtime *rt);
-    public:
-      ShardingFunction* find_sharding_function(ShardingID sid);
-    public:
-      Runtime *const runtime;
-      const ControlReplicationID repl_id;
-      const size_t total_shards;
-      const unsigned address_space_index;
-      const AddressSpaceID owner_space;
-      SingleTask *const original_task;
-    protected:
-      Reservation                      manager_lock;
-      // Inheritted from Mapper::SelectShardingFunctorInput
-      // std::map<ShardID,Processor>   shard_mapping;
-      ShardMapping*                    address_spaces;
-      std::vector<ShardTask*>          local_shards;
-    protected:
-      // There are four kinds of signals that come back from 
-      // the execution of the shards:
-      // - mapping complete
-      // - future result
-      // - task complete
-      // - task commit
-      // The owner applies these to the original task object only
-      // after they have occurred for all the shards
-      unsigned    local_mapping_complete, remote_mapping_complete;
-      unsigned    trigger_local_complete, trigger_remote_complete;
-      unsigned    trigger_local_commit,   trigger_remote_commit;
-      unsigned    remote_constituents;
-      bool        first_future;
-    protected:
-      ApBarrier pending_partition_barrier;
-    protected:
-      std::map<ShardingID,ShardingFunction*> sharding_functions;
-    };
-
-    /**
      * \class ShardCollective
      * The shard collective is the base class for performing
      * collective operations between shards
@@ -697,6 +239,526 @@ namespace Legion {
     protected:
       std::map<ShardID,ShardingID> results;
     };
+    
+    /**
+     * \class FieldDescriptorExchange
+     * A class for doing an all-gather of field descriptors for 
+     * doing dependent partitioning operations
+     */
+    class FieldDescriptorExchange : public AllGatherCollective {
+    public:
+      FieldDescriptorExchange(ReplicateContext *ctx);
+      FieldDescriptorExchange(const FieldDescriptorExchange &rhs);
+      virtual ~FieldDescriptorExchange(void);
+    public:
+      FieldDescriptorExchange& operator=(const FieldDescriptorExchange &rhs);
+    public:
+      ApEvent exchange_descriptors(ApEvent ready_event,
+                                 const std::vector<FieldDataDescriptor> &desc);
+    public:
+      virtual void pack_collective_stage(Serializer &rez, int stage) const;
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
+    public:
+      std::set<ApEvent> ready_events;
+      std::vector<FieldDataDescriptor> descriptors;
+    };
+
+    /**
+     * \class FieldDescriptorGather
+     * A class for doing a gather of field descriptors to a specific
+     * node for doing dependent partitioning operations
+     */
+    class FieldDescriptorGather : public GatherCollective {
+    public:
+      FieldDescriptorGather(ReplicateContext *ctx, ShardID target);
+      FieldDescriptorGather(const FieldDescriptorGather &rhs);
+      virtual ~FieldDescriptorGather(void);
+    public:
+      FieldDescriptorGather& operator=(const FieldDescriptorGather &rhs);
+    public:
+      virtual void pack_collective(Serializer &rez) const;
+      virtual void unpack_collective(Deserializer &derez);
+    public:
+      void contribute(ApEvent ready_event,
+                      const std::vector<FieldDataDescriptor> &descriptors);
+      const std::vector<FieldDataDescriptor>& 
+           get_full_descriptors(ApEvent &ready);
+    protected:
+      std::set<ApEvent> ready_events;
+      std::vector<FieldDataDescriptor> descriptors;
+    };
+
+    /**
+     * \class ReplIndividualTask
+     * An individual task that is aware that it is 
+     * being executed in a control replication context.
+     */
+    class ReplIndividualTask : public IndividualTask {
+    public:
+      ReplIndividualTask(Runtime *rt);
+      ReplIndividualTask(const ReplIndividualTask &rhs);
+      virtual ~ReplIndividualTask(void);
+    public:
+      ReplIndividualTask& operator=(const ReplIndividualTask &rhs);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+    public:
+      virtual void trigger_prepipeline_stage(void);
+      virtual void trigger_ready(void);
+    protected:
+      ShardingID sharding_functor;
+#ifdef DEBUG_LEGION
+    public:
+      inline void set_sharding_collective(ShardingGatherCollective *collective)
+        { sharding_collective = collective; }
+    protected:
+      ShardingGatherCollective *sharding_collective;
+#endif
+    };
+
+    /**
+     * \class ReplIndexTask
+     * An individual task that is aware that it is 
+     * being executed in a control replication context.
+     */
+    class ReplIndexTask : public IndexTask {
+    public:
+      ReplIndexTask(Runtime *rt);
+      ReplIndexTask(const ReplIndexTask &rhs);
+      virtual ~ReplIndexTask(void);
+    public:
+      ReplIndexTask& operator=(const ReplIndexTask &rhs);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+    public:
+      virtual void trigger_prepipeline_stage(void);
+      virtual void trigger_ready(void);
+    protected:
+      ShardingID sharding_functor;
+#ifdef DEBUG_LEGION
+    public:
+      inline void set_sharding_collective(ShardingGatherCollective *collective)
+        { sharding_collective = collective; }
+    protected:
+      ShardingGatherCollective *sharding_collective;
+#endif
+    };
+
+    /**
+     * \class ReplIndexFillOp
+     * An index fill operation that is aware that it is 
+     * being executed in a control replication context.
+     */
+    class ReplIndexFillOp : public IndexFillOp {
+    public:
+      ReplIndexFillOp(Runtime *rt);
+      ReplIndexFillOp(const ReplIndexFillOp &rhs);
+      virtual ~ReplIndexFillOp(void);
+    public:
+      ReplIndexFillOp& operator=(const ReplIndexFillOp &rhs);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+    public:
+      virtual void trigger_prepipeline_stage(void);
+      virtual void trigger_ready(void);
+    protected:
+      ShardingID sharding_functor;
+      MapperManager *mapper;
+#ifdef DEBUG_LEGION
+    public:
+      inline void set_sharding_collective(ShardingGatherCollective *collective)
+        { sharding_collective = collective; }
+    protected:
+      ShardingGatherCollective *sharding_collective;
+#endif
+    };
+
+    /**
+     * \class ReplCopyOp
+     * A fill operation that is aware that it is being
+     * executed in a control replication context.
+     */
+    class ReplCopyOp : public CopyOp {
+    public:
+      ReplCopyOp(Runtime *rt);
+      ReplCopyOp(const ReplCopyOp &rhs);
+      virtual ~ReplCopyOp(void);
+    public:
+      ReplCopyOp& operator=(const ReplCopyOp &rhs);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+    public:
+      virtual void trigger_prepipeline_stage(void);
+      virtual void trigger_ready(void);
+    protected:
+      ShardingID sharding_functor;
+#ifdef DEBUG_LEGION
+    public:
+      inline void set_sharding_collective(ShardingGatherCollective *collective)
+        { sharding_collective = collective; }
+    protected:
+      ShardingGatherCollective *sharding_collective;
+#endif
+    };
+
+    /**
+     * \class ReplIndexCopyOp
+     * An index fill operation that is aware that it is 
+     * being executed in a control replication context.
+     */
+    class ReplIndexCopyOp : public IndexCopyOp {
+    public:
+      ReplIndexCopyOp(Runtime *rt);
+      ReplIndexCopyOp(const ReplIndexCopyOp &rhs);
+      virtual ~ReplIndexCopyOp(void);
+    public:
+      ReplIndexCopyOp& operator=(const ReplIndexCopyOp &rhs);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+    public:
+      virtual void trigger_prepipeline_stage(void);
+      virtual void trigger_ready(void);
+    protected:
+      ShardingID sharding_functor;
+#ifdef DEBUG_LEGION
+    public:
+      inline void set_sharding_collective(ShardingGatherCollective *collective)
+        { sharding_collective = collective; }
+    protected:
+      ShardingGatherCollective *sharding_collective;
+#endif
+    };
+
+    /**
+     * \class ReplDeletionOp
+     * A deletion operation that is aware that it is
+     * being executed in a control replication context.
+     */
+    class ReplDeletionOp : public DeletionOp {
+    public:
+      ReplDeletionOp(Runtime *rt);
+      ReplDeletionOp(const ReplDeletionOp &rhs);
+      virtual ~ReplDeletionOp(void);
+    public:
+      ReplDeletionOp& operator=(const ReplDeletionOp &rhs);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+    public:
+      virtual void trigger_ready(void);
+    };
+
+    /**
+     * \class ReplPendingPartitionOp
+     * A pending partition operation that knows that its
+     * being executed in a control replication context
+     */
+    class ReplPendingPartitionOp : public PendingPartitionOp {
+    public:
+      ReplPendingPartitionOp(Runtime *rt);
+      ReplPendingPartitionOp(const ReplPendingPartitionOp &rhs);
+      virtual ~ReplPendingPartitionOp(void);
+    public:
+      ReplPendingPartitionOp& operator=(const ReplPendingPartitionOp &rhs);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+    public:
+      virtual void trigger_mapping(void);
+    };
+
+    /**
+     * \class ReplDependentPartitionOp
+     * A dependent partitioning operation that knows that it
+     * is being executed in a control replication context
+     */
+    class ReplDependentPartitionOp : public DependentPartitionOp {
+    public:
+      class ReplByFieldThunk : public ByFieldThunk {
+      public:
+        ReplByFieldThunk(ReplicateContext *ctx, IndexPartition p);
+      public:
+        virtual ApEvent perform(DependentPartitionOp *op,
+            RegionTreeForest *forest, ApEvent instances_ready,
+            const std::vector<FieldDataDescriptor> &instances);
+      protected:
+        FieldDescriptorExchange collective; 
+      };
+      class ReplByImageThunk : public ByImageThunk {
+      public:
+        ReplByImageThunk(ReplicateContext *ctx, ShardID target,
+                         IndexPartition p, IndexPartition proj);
+      public:
+        virtual ApEvent perform(DependentPartitionOp *op,
+            RegionTreeForest *forest, ApEvent instances_ready,
+            const std::vector<FieldDataDescriptor> &instances);
+      protected:
+        FieldDescriptorGather gather_collective;
+      };
+      class ReplByImageRangeThunk : public ByImageRangeThunk {
+      public:
+        ReplByImageRangeThunk(ReplicateContext *ctx, ShardID target,
+                              IndexPartition p, IndexPartition proj);
+      public:
+        virtual ApEvent perform(DependentPartitionOp *op,
+            RegionTreeForest *forest, ApEvent instances_ready,
+            const std::vector<FieldDataDescriptor> &instances);
+      protected:
+        FieldDescriptorGather gather_collective;
+      };
+      class ReplByPreimageThunk : public ByPreimageThunk {
+      public:
+        ReplByPreimageThunk(ReplicateContext *ctx, ShardID target,
+                            IndexPartition p, IndexPartition proj);
+      public:
+        virtual ApEvent perform(DependentPartitionOp *op,
+            RegionTreeForest *forest, ApEvent instances_ready,
+            const std::vector<FieldDataDescriptor> &instances);
+      protected:
+        FieldDescriptorGather gather_collective;
+      };
+      class ReplByPreimageRangeThunk : public ByPreimageRangeThunk {
+      public:
+        ReplByPreimageRangeThunk(ReplicateContext *ctx, ShardID target,
+                                 IndexPartition p, IndexPartition proj);
+      public:
+        virtual ApEvent perform(DependentPartitionOp *op,
+            RegionTreeForest *forest, ApEvent instances_ready,
+            const std::vector<FieldDataDescriptor> &instances);
+      protected:
+        FieldDescriptorGather gather_collective;
+      };
+      // Nothing special about association for control replication
+    public:
+      ReplDependentPartitionOp(Runtime *rt);
+      ReplDependentPartitionOp(const ReplDependentPartitionOp &rhs);
+      virtual ~ReplDependentPartitionOp(void);
+    public:
+      ReplDependentPartitionOp& operator=(const ReplDependentPartitionOp &rhs);
+    public:
+      void initialize_by_field(ReplicateContext *ctx, ApEvent ready_event,
+                               IndexPartition pid,
+                               LogicalRegion handle, LogicalRegion parent,
+                               FieldID fid, MapperID id, MappingTagID tag); 
+      void initialize_by_image(ReplicateContext *ctx, ShardID target,
+                               ApEvent ready_event, IndexPartition pid,
+                               LogicalPartition projection,
+                               LogicalRegion parent, FieldID fid,
+                               MapperID id, MappingTagID tag);
+      void initialize_by_image_range(ReplicateContext *ctx, ShardID target,
+                               ApEvent ready_event, IndexPartition pid,
+                               LogicalPartition projection,
+                               LogicalRegion parent, FieldID fid,
+                               MapperID id, MappingTagID tag);
+      void initialize_by_preimage(ReplicateContext *ctx, ShardID target,
+                               ApEvent ready_event, IndexPartition pid,
+                               IndexPartition projection, LogicalRegion handle,
+                               LogicalRegion parent, FieldID fid,
+                               MapperID id, MappingTagID tag);
+      void initialize_by_preimage_range(ReplicateContext *ctx, ShardID target, 
+                               ApEvent ready_event, IndexPartition pid,
+                               IndexPartition projection, LogicalRegion handle,
+                               LogicalRegion parent, FieldID fid,
+                               MapperID id, MappingTagID tag);
+      // nothing special about association for control replication
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+    public:
+      // Need to pick our sharding functor
+      virtual void trigger_prepipeline_stage(void);
+      virtual void trigger_ready(void);  
+    protected:
+      ShardingID sharding_functor;
+#ifdef DEBUG_LEGION
+    public:
+      inline void set_sharding_collective(ShardingGatherCollective *collective)
+        { sharding_collective = collective; }
+    protected:
+      ShardingGatherCollective *sharding_collective;
+#endif
+    };
+
+    /**
+     * \class ReplMustEpochOp
+     * A must epoch operation that is aware that it is 
+     * being executed in a control replication context
+     */
+    class ReplMustEpochOp : public MustEpochOp {
+    public:
+      ReplMustEpochOp(Runtime *rt);
+      ReplMustEpochOp(const ReplMustEpochOp &rhs);
+      virtual ~ReplMustEpochOp(void);
+    public:
+      ReplMustEpochOp& operator=(const ReplMustEpochOp &rhs);
+    };
+
+    /**
+     * \class ReplTimingOp
+     * A timing operation that is aware that it is 
+     * being executed in a control replication context
+     */
+    class ReplTimingOp : public TimingOp {
+    public:
+      ReplTimingOp(Runtime *rt);
+      ReplTimingOp(const ReplTimingOp &rhs);
+      virtual ~ReplTimingOp(void);
+    public:
+      ReplTimingOp& operator=(const ReplTimingOp &rhs);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+    public:
+      virtual void trigger_mapping(void);
+      virtual void deferred_execute(void);
+    public:
+      inline void set_timing_collective(ValueBroadcast<long long> *collective) 
+        { timing_collective = collective; }
+    protected:
+      ValueBroadcast<long long> *timing_collective;
+    }; 
+
+    /**
+     * \class ShardMapping
+     * A mapping from the shard IDs to their address spaces
+     */
+    class ShardMapping : public Collectable {
+    public:
+      ShardMapping(void);
+      ShardMapping(const ShardMapping &rhs);
+      ShardMapping(const std::vector<AddressSpaceID> &spaces);
+      ~ShardMapping(void);
+    public:
+      ShardMapping& operator=(const ShardMapping &rhs);
+      AddressSpaceID operator[](unsigned idx) const;
+      AddressSpaceID& operator[](unsigned idx);
+    public:
+      inline size_t size(void) const { return address_spaces.size(); }
+      inline void resize(size_t size) { address_spaces.resize(size); }
+    protected:
+      std::vector<AddressSpaceID> address_spaces;
+    };
+
+    /**
+     * \class ShardManager
+     * This is a class that manages the execution of one or
+     * more shards for a given control replication context on
+     * a single node. It provides support for doing broadcasts,
+     * reductions, and exchanges of information between the 
+     * variaous shard tasks.
+     */
+    class ShardManager : public Mapper::SelectShardingFunctorInput {
+    public:
+      struct ShardManagerCloneArgs :
+        public LgTaskArgs<ShardManagerCloneArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_CONTROL_REP_CLONE_TASK_ID;
+      public:
+        ShardManager *manager;
+        RtEvent ready_event;
+        RtUserEvent to_trigger;
+        ShardTask *first_shard;
+      };
+      struct ShardManagerLaunchArgs :
+        public LgTaskArgs<ShardManagerLaunchArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_CONTROL_REP_LAUNCH_TASK_ID;
+      public:
+        ShardManager *manager;
+      };
+      struct ShardManagerDeleteArgs :
+        public LgTaskArgs<ShardManagerDeleteArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_CONTROL_REP_DELETE_TASK_ID;
+      public:
+        ShardManager *manager;
+      };
+    public:
+      ShardManager(Runtime *rt, ControlReplicationID repl_id, size_t total,
+                   unsigned address_space_index, AddressSpaceID owner_space,
+                   SingleTask *original = NULL);
+      ShardManager(const ShardManager &rhs);
+      ~ShardManager(void);
+    public:
+      ShardManager& operator=(const ShardManager &rhs);
+    public:
+      inline ApBarrier get_pending_partition_barrier(void) const
+        { return pending_partition_barrier; }
+    public:
+      inline ShardMapping* get_mapping(void) const
+        { return address_spaces; }
+    public:
+      void launch(const std::vector<AddressSpaceID> &spaces,
+                  const std::map<ShardID,Processor> &shard_mapping);
+      void unpack_launch(Deserializer &derez);
+      void clone_and_launch(RtEvent ready, RtUserEvent to_trigger, 
+                            ShardTask *first_shard);
+      void create_shards(void);
+      void launch_shards(void) const;
+    public:
+      void broadcast_launch(RtEvent start, RtUserEvent to_trigger,
+                            SingleTask *to_clone);
+      bool broadcast_delete(
+              RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT);
+    public:
+      void handle_post_mapped(bool local);
+      void handle_future(const void *res, size_t res_size, bool owned);
+      void trigger_task_complete(bool local);
+      void trigger_task_commit(bool local);
+    public:
+      void send_collective_message(ShardID target, Serializer &rez);
+      void handle_collective_message(Deserializer &derez);
+    public:
+      static void handle_clone(const void *args);
+      static void handle_launch(const void *args);
+      static void handle_delete(const void *args);
+    public:
+      static void handle_launch(Deserializer &derez, Runtime *rt, 
+                                AddressSpaceID source);
+      static void handle_delete(Deserializer &derez, Runtime *rt);
+      static void handle_post_mapped(Deserializer &derez, Runtime *rt);
+      static void handle_trigger_complete(Deserializer &derez, Runtime *rt);
+      static void handle_trigger_commit(Deserializer &derez, Runtime *rt);
+      static void handle_collective_message(Deserializer &derez, Runtime *rt);
+    public:
+      ShardingFunction* find_sharding_function(ShardingID sid);
+    public:
+      Runtime *const runtime;
+      const ControlReplicationID repl_id;
+      const size_t total_shards;
+      const unsigned address_space_index;
+      const AddressSpaceID owner_space;
+      SingleTask *const original_task;
+    protected:
+      Reservation                      manager_lock;
+      // Inheritted from Mapper::SelectShardingFunctorInput
+      // std::map<ShardID,Processor>   shard_mapping;
+      ShardMapping*                    address_spaces;
+      std::vector<ShardTask*>          local_shards;
+    protected:
+      // There are four kinds of signals that come back from 
+      // the execution of the shards:
+      // - mapping complete
+      // - future result
+      // - task complete
+      // - task commit
+      // The owner applies these to the original task object only
+      // after they have occurred for all the shards
+      unsigned    local_mapping_complete, remote_mapping_complete;
+      unsigned    trigger_local_complete, trigger_remote_complete;
+      unsigned    trigger_local_commit,   trigger_remote_commit;
+      unsigned    remote_constituents;
+      bool        first_future;
+    protected:
+      ApBarrier pending_partition_barrier;
+    protected:
+      std::map<ShardingID,ShardingFunction*> sharding_functions;
+    }; 
 
   }; // namespace Internal
 }; // namespace Legion

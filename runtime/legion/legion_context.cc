@@ -7542,7 +7542,8 @@ namespace Legion {
                                          pending_partition_barrier,
                                          shard_manager->get_mapping());
       }
-      part_op->initialize_by_field(this, pid, handle, parent_priv, fid, id,tag);
+      part_op->initialize_by_field(this, pending_partition_barrier,
+                                   pid, handle, parent_priv, fid, id,tag);
 #ifdef DEBUG_LEGION
       part_op->set_sharding_collective(
           new ShardingGatherCollective(this, 0/*owner shard*/));
@@ -7660,7 +7661,9 @@ namespace Legion {
                                          pending_partition_barrier,
                                          shard_manager->get_mapping());
       }
-      part_op->initialize_by_image(this, pid, projection, parent, fid, id, tag);
+      part_op->initialize_by_image(this, index_partition_allocator_shard,
+                                   pending_partition_barrier, 
+                                   pid, projection, parent, fid, id, tag);
 #ifdef DEBUG_LEGION
       part_op->set_sharding_collective(
           new ShardingGatherCollective(this, 0/*owner shard*/));
@@ -7778,8 +7781,9 @@ namespace Legion {
                                          pending_partition_barrier,
                                          shard_manager->get_mapping());
       }
-      part_op->initialize_by_image_range(this, pid, projection, parent, 
-                                         fid, id, tag);
+      part_op->initialize_by_image_range(this, index_partition_allocator_shard,
+                                         pending_partition_barrier,
+                                         pid, projection, parent, fid, id, tag);
 #ifdef DEBUG_LEGION
       part_op->set_sharding_collective(
           new ShardingGatherCollective(this, 0/*owner shard*/));
@@ -7904,7 +7908,9 @@ namespace Legion {
                                          pending_partition_barrier,
                                          shard_manager->get_mapping());
       }
-      part_op->initialize_by_preimage(this, pid, projection, handle, 
+      part_op->initialize_by_preimage(this, index_partition_allocator_shard,
+                                      pending_partition_barrier,
+                                      pid, projection, handle,
                                       parent, fid, id, tag);
 #ifdef DEBUG_LEGION
       part_op->set_sharding_collective(
@@ -8022,7 +8028,10 @@ namespace Legion {
                                          pending_partition_barrier,
                                          shard_manager->get_mapping());
       }
-      part_op->initialize_by_preimage_range(this, pid, projection, handle,
+      part_op->initialize_by_preimage_range(this, 
+                                            index_partition_allocator_shard, 
+                                            pending_partition_barrier,
+                                            pid, projection, handle,
                                             parent, fid, id, tag);
 #ifdef DEBUG_LEGION
       part_op->set_sharding_collective(

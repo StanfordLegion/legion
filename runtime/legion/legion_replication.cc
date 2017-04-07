@@ -873,6 +873,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplDependentPartitionOp::initialize_by_field(ReplicateContext *ctx, 
+                                                       ApEvent ready_event,
                                                        IndexPartition pid,
                                                        LogicalRegion handle, 
                                                        LogicalRegion parent,
@@ -905,12 +906,15 @@ namespace Legion {
       assert(thunk == NULL);
 #endif
       thunk = new ReplByFieldThunk(ctx, pid);
+      partition_ready = ready_event;
       if (Runtime::legion_spy_enabled)
         perform_logging();
     }
 
     //--------------------------------------------------------------------------
     void ReplDependentPartitionOp::initialize_by_image(ReplicateContext *ctx, 
+                                                       ShardID target_shard,
+                                                       ApEvent ready_event,
                                                        IndexPartition pid,
                                                    LogicalPartition projection,
                                              LogicalRegion parent, FieldID fid,
@@ -941,7 +945,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
-      thunk = new ReplByImageThunk(ctx, pid, projection.get_index_partition());
+      thunk = new ReplByImageThunk(ctx, target_shard, 
+                                   pid, projection.get_index_partition());
+      partition_ready = ready_event;
       if (Runtime::legion_spy_enabled)
         perform_logging();
     }
@@ -949,6 +955,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void ReplDependentPartitionOp::initialize_by_image_range(
                                                          ReplicateContext *ctx, 
+                                                         ShardID target_shard,
+                                                         ApEvent ready_event,
                                                          IndexPartition pid,
                                                 LogicalPartition projection,
                                                 LogicalRegion parent,
@@ -980,14 +988,16 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
-      thunk = 
-        new ReplByImageRangeThunk(ctx, pid, projection.get_index_partition());
+      thunk = new ReplByImageRangeThunk(ctx, target_shard, 
+                                        pid, projection.get_index_partition());
+      partition_ready = ready_event;
       if (Runtime::legion_spy_enabled)
         perform_logging();
     }
 
     //--------------------------------------------------------------------------
     void ReplDependentPartitionOp::initialize_by_preimage(ReplicateContext *ctx,
+                                    ShardID target_shard, ApEvent ready_event,
                                     IndexPartition pid, IndexPartition proj,
                                     LogicalRegion handle, LogicalRegion parent,
                                     FieldID fid, MapperID id, MappingTagID t)
@@ -1015,14 +1025,16 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
-      thunk = new ReplByPreimageThunk(ctx, pid, proj);
+      thunk = new ReplByPreimageThunk(ctx, target_shard, pid, proj);
+      partition_ready = ready_event;
       if (Runtime::legion_spy_enabled)
         perform_logging();
     }
 
     //--------------------------------------------------------------------------
     void ReplDependentPartitionOp::initialize_by_preimage_range(
-                                    ReplicateContext *ctx,
+                                    ReplicateContext *ctx, ShardID target_shard,
+                                    ApEvent ready_event,
                                     IndexPartition pid, IndexPartition proj,
                                     LogicalRegion handle, LogicalRegion parent,
                                     FieldID fid, MapperID id, MappingTagID t)
@@ -1050,7 +1062,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
-      thunk = new ReplByPreimageRangeThunk(ctx, pid, proj);
+      thunk = new ReplByPreimageRangeThunk(ctx, target_shard, pid, proj);
+      partition_ready = ready_event;
       if (Runtime::legion_spy_enabled)
         perform_logging();
     }
@@ -1171,6 +1184,182 @@ namespace Legion {
         else // If we're the shard then we do the base call
           DependentPartitionOp::trigger_ready();
       }
+    }
+
+    //--------------------------------------------------------------------------
+    ReplDependentPartitionOp::ReplByFieldThunk::ReplByFieldThunk(
+                                        ReplicateContext *ctx, IndexPartition p)
+      : ByFieldThunk(p), collective(FieldDescriptorExchange(ctx))
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent ReplDependentPartitionOp::ReplByFieldThunk::perform(
+                              DependentPartitionOp *op,
+                              RegionTreeForest *forest, ApEvent instances_ready,
+                              const std::vector<FieldDataDescriptor> &instances)
+    //--------------------------------------------------------------------------
+    {
+      if (op->is_index_space)
+      {
+        // Do the all-to-all gather of the field data descriptors
+        ApEvent all_ready = collective.exchange_descriptors(instances_ready,
+                                                            instances);
+        return forest->create_partition_by_field(op, pid, 
+                                    collective.descriptors, all_ready); 
+      }
+      else // singular so just do the normal thing
+        return forest->create_partition_by_field(op, pid, 
+                                                 instances, instances_ready);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplDependentPartitionOp::ReplByImageThunk::ReplByImageThunk(
+                                          ReplicateContext *ctx, ShardID target,
+                                          IndexPartition p, IndexPartition proj)
+      : ByImageThunk(p, proj), 
+        gather_collective(FieldDescriptorGather(ctx, target))
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent ReplDependentPartitionOp::ReplByImageThunk::perform(
+                              DependentPartitionOp *op,
+                              RegionTreeForest *forest, ApEvent instances_ready,
+                              const std::vector<FieldDataDescriptor> &instances)
+    //--------------------------------------------------------------------------
+    {
+      if (op->is_index_space)
+      {
+        gather_collective.contribute(instances_ready, instances);
+        if (gather_collective.is_target())
+        {
+          ApEvent all_ready;
+          const std::vector<FieldDataDescriptor> &full_descriptors =
+            gather_collective.get_full_descriptors(all_ready);
+          // Perform the operation
+          return forest->create_partition_by_image(op, pid, projection, 
+                                          full_descriptors, all_ready);
+        }
+        else // nothing else for us to do
+          return ApEvent::NO_AP_EVENT;
+      }
+      else // singular so just do the normal thing
+        return forest->create_partition_by_image(op, pid, projection, 
+                                                 instances, instances_ready);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplDependentPartitionOp::ReplByImageRangeThunk::ReplByImageRangeThunk(
+                                          ReplicateContext *ctx, ShardID target,
+                                          IndexPartition p, IndexPartition proj)
+      : ByImageRangeThunk(p, proj), 
+        gather_collective(FieldDescriptorGather(ctx, target))
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent ReplDependentPartitionOp::ReplByImageRangeThunk::perform(
+                              DependentPartitionOp *op,
+                              RegionTreeForest *forest, ApEvent instances_ready,
+                              const std::vector<FieldDataDescriptor> &instances)
+    //--------------------------------------------------------------------------
+    {
+      if (op->is_index_space)
+      {
+        gather_collective.contribute(instances_ready, instances);
+        if (gather_collective.is_target())
+        {
+          ApEvent all_ready;
+          const std::vector<FieldDataDescriptor> &full_descriptors =
+            gather_collective.get_full_descriptors(all_ready);
+          // Perform the operation
+          return forest->create_partition_by_image_range(op, pid, projection,
+                                                full_descriptors, all_ready);
+        }
+        else // nothing else for us to do
+          return ApEvent::NO_AP_EVENT;
+      }
+      else // singular so just do the normal thing
+        return forest->create_partition_by_image(op, pid, projection, 
+                                                 instances, instances_ready);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplDependentPartitionOp::ReplByPreimageThunk::ReplByPreimageThunk(
+                                          ReplicateContext *ctx, ShardID target,
+                                          IndexPartition p, IndexPartition proj)
+      : ByPreimageThunk(p, proj), 
+        gather_collective(FieldDescriptorGather(ctx, target))
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent ReplDependentPartitionOp::ReplByPreimageThunk::perform(
+                              DependentPartitionOp *op,
+                              RegionTreeForest *forest, ApEvent instances_ready,
+                              const std::vector<FieldDataDescriptor> &instances)
+    //--------------------------------------------------------------------------
+    {
+      if (op->is_index_space)
+      {
+        gather_collective.contribute(instances_ready, instances);
+        if (gather_collective.is_target())
+        {
+          ApEvent all_ready;
+          const std::vector<FieldDataDescriptor> &full_descriptors =
+            gather_collective.get_full_descriptors(all_ready);
+          // Perform the operation
+          return forest->create_partition_by_preimage(op, pid, projection,
+                                              full_descriptors, all_ready);
+        }
+        else // nothing else for us to do
+          return ApEvent::NO_AP_EVENT;
+      }
+      else // singular so just do the normal thing
+        return forest->create_partition_by_image(op, pid, projection, 
+                                                 instances, instances_ready);
+    }
+    
+    //--------------------------------------------------------------------------
+    ReplDependentPartitionOp::ReplByPreimageRangeThunk::
+                 ReplByPreimageRangeThunk(ReplicateContext *ctx, ShardID target,
+                                          IndexPartition p, IndexPartition proj)
+      : ByPreimageRangeThunk(p, proj), 
+        gather_collective(FieldDescriptorGather(ctx, target))
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent ReplDependentPartitionOp::ReplByPreimageRangeThunk::perform(
+                              DependentPartitionOp *op,
+                              RegionTreeForest *forest, ApEvent instances_ready,
+                              const std::vector<FieldDataDescriptor> &instances)
+    //--------------------------------------------------------------------------
+    {
+      if (op->is_index_space)
+      {
+        gather_collective.contribute(instances_ready, instances);
+        if (gather_collective.is_target())
+        {
+          ApEvent all_ready;
+          const std::vector<FieldDataDescriptor> &full_descriptors =
+            gather_collective.get_full_descriptors(all_ready);
+          // Perform the operation
+          return forest->create_partition_by_preimage_range(op, pid, projection,
+                                                   full_descriptors, all_ready);
+        }
+        else // nothing else for us to do
+          return ApEvent::NO_AP_EVENT;
+      }
+      else // singular so just do the normal thing
+        return forest->create_partition_by_image(op, pid, projection, 
+                                                 instances, instances_ready);
     }
 
     /////////////////////////////////////////////////////////////
@@ -2848,6 +3037,188 @@ namespace Legion {
           return false;
       }
       return true;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Field Descriptor Exchange 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    FieldDescriptorExchange::FieldDescriptorExchange(ReplicateContext *ctx)
+      : AllGatherCollective(ctx)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    FieldDescriptorExchange::FieldDescriptorExchange(
+                                             const FieldDescriptorExchange &rhs)
+      : AllGatherCollective(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    FieldDescriptorExchange::~FieldDescriptorExchange(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    FieldDescriptorExchange& FieldDescriptorExchange::operator=(
+                                             const FieldDescriptorExchange &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent FieldDescriptorExchange::exchange_descriptors(ApEvent ready_event,
+                                  const std::vector<FieldDataDescriptor> &descs)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock c_lock(collective_lock);
+        ready_events.insert(ready_event);
+        descriptors.insert(descriptors.end(), descs.begin(), descs.end());
+      }
+      perform_collective_sync();
+      return Runtime::merge_events(ready_events);
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldDescriptorExchange::pack_collective_stage(Serializer &rez,
+                                                        int stage) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(ready_events.size());
+      for (std::set<ApEvent>::const_iterator it = ready_events.begin();
+            it != ready_events.end(); it++)
+        rez.serialize(*it);
+      rez.serialize<size_t>(descriptors.size());
+      for (std::vector<FieldDataDescriptor>::const_iterator it = 
+            descriptors.begin(); it != descriptors.end(); it++)
+        rez.serialize(*it);
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldDescriptorExchange::unpack_collective_stage(Deserializer &derez,
+                                                          int stage)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_events;
+      derez.deserialize(num_events);
+      for (unsigned idx = 0; idx < num_events; idx++)
+      {
+        ApEvent ready;
+        derez.deserialize(ready);
+        ready_events.insert(ready);
+      }
+      unsigned offset = descriptors.size();
+      size_t num_descriptors;
+      derez.deserialize(num_descriptors);
+      descriptors.resize(offset + num_descriptors);
+      for (unsigned idx = 0; idx < num_descriptors; idx++)
+        derez.deserialize(descriptors[offset + idx]);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Field Descriptor Gather 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    FieldDescriptorGather::FieldDescriptorGather(ReplicateContext *ctx,
+                                                 ShardID target)
+      : GatherCollective(ctx, target)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    FieldDescriptorGather::FieldDescriptorGather(
+                                               const FieldDescriptorGather &rhs)
+      : GatherCollective(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    FieldDescriptorGather::~FieldDescriptorGather(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    FieldDescriptorGather& FieldDescriptorGather::operator=(
+                                               const FieldDescriptorGather &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldDescriptorGather::pack_collective(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(ready_events.size());
+      for (std::set<ApEvent>::const_iterator it = ready_events.begin();
+            it != ready_events.end(); it++)
+        rez.serialize(*it);
+      rez.serialize<size_t>(descriptors.size());
+      for (std::vector<FieldDataDescriptor>::const_iterator it = 
+            descriptors.begin(); it != descriptors.end(); it++)
+        rez.serialize(*it);
+    }
+    
+    //--------------------------------------------------------------------------
+    void FieldDescriptorGather::unpack_collective(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_events;
+      derez.deserialize(num_events);
+      for (unsigned idx = 0; idx < num_events; idx++)
+      {
+        ApEvent ready;
+        derez.deserialize(ready);
+        ready_events.insert(ready);
+      }
+      unsigned offset = descriptors.size();
+      size_t num_descriptors;
+      derez.deserialize(num_descriptors);
+      descriptors.resize(offset + num_descriptors);
+      for (unsigned idx = 0; idx < num_descriptors; idx++)
+        derez.deserialize(descriptors[offset + idx]);
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldDescriptorGather::contribute(ApEvent ready_event,
+                                  const std::vector<FieldDataDescriptor> &descs)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock c_lock(collective_lock);
+        ready_events.insert(ready_event);
+        descriptors.insert(descriptors.end(), descs.begin(), descs.end());
+      }
+      perform_collective_async();
+    }
+
+    //--------------------------------------------------------------------------
+    const std::vector<FieldDataDescriptor>& 
+                     FieldDescriptorGather::get_full_descriptors(ApEvent &ready)
+    //--------------------------------------------------------------------------
+    {
+      perform_collective_wait();
+      ready = Runtime::merge_events(ready_events);
+      return descriptors;
     }
 
   }; // namespace Internal

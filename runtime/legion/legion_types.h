@@ -1426,6 +1426,8 @@ namespace Legion {
     template<typename T> class ValueBroadcast;
     class CrossProductCollective;
     class ShardingGatherCollective;
+    class FieldDescriptorExchange;
+    class FieldDescriptorGather;
 
 #define FRIEND_ALL_RUNTIME_CLASSES                          \
     friend class Legion::Runtime;                           \
