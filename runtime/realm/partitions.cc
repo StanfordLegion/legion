@@ -33,8 +33,165 @@ namespace Realm {
     }
   };
 
-  struct NTF_TemplateHelper : public DynamicTemplates::ListProduct3<DIMCOUNTS, DIMTYPES, FLDTYPES> {
-    typedef DynamicTemplates::ListProduct3<DIMCOUNTS, DIMTYPES, FLDTYPES> SUPER;
+  // we need an augmented field list that includes ZPoint<N,T> and ZRect<N,T>
+  //  for all DIMCOUNTS/DIMTYPES
+  struct FLDTYPES_AUG {
+    template <typename T>
+    struct TypePresent {
+      static const bool value = FLDTYPES::TypePresent<T>::value;
+    };
+
+    template <int N, typename T>
+    struct TypePresent<ZPoint<N,T> > {
+      static const bool value = false;
+    };
+
+    template <typename T>
+    struct TypeToIndex {
+      static const int INDEX = FLDTYPES::TypeToIndex<T>::INDEX << 2;
+    };
+
+    template <int N, typename T>
+    struct TypeToIndex<ZPoint<N,T> > {
+      static const int INDEX = (((N << 8) + 
+				 DIMTYPES::TypeToIndex<T>::INDEX) << 2) + 1;
+    };
+
+    template <int N, typename T>
+    struct TypeToIndex<ZRect<N,T> > {
+      static const int INDEX = (((N << 8) +
+				 DIMTYPES::TypeToIndex<T>::INDEX) << 2) + 3;
+    };
+
+    template <typename TARGET, typename T1>
+    struct PointDemux1 {
+      template <typename NT, typename T>
+      static void demux(T1 arg1)
+      {
+	TARGET::template demux<ZPoint<NT::N, T> >(arg1);
+      }
+    };
+
+    template <typename TARGET, typename T1, typename T2>
+    struct PointDemux2 {
+      template <typename NT, typename T>
+      static void demux(T1 arg1, T2 arg2)
+      {
+	TARGET::template demux<ZPoint<NT::N, T> >(arg1, arg2);
+      }
+    };
+
+    template <typename TARGET, typename T1, typename T2, typename T3>
+    struct PointDemux3 {
+      template <typename NT, typename T>
+      static void demux(T1 arg1, T2 arg2, T3 arg3)
+      {
+	TARGET::template demux<ZPoint<NT::N, T> >(arg1, arg2, arg3);
+      }
+    };
+
+    template <typename TARGET, typename T1>
+    struct RectDemux1 {
+      template <typename NT, typename T>
+      static void demux(T1 arg1)
+      {
+	TARGET::template demux<ZRect<NT::N, T> >(arg1);
+      }
+    };
+
+    template <typename TARGET, typename T1, typename T2>
+    struct RectDemux2 {
+      template <typename NT, typename T>
+      static void demux(T1 arg1, T2 arg2)
+      {
+	TARGET::template demux<ZRect<NT::N, T> >(arg1, arg2);
+      }
+    };
+
+    template <typename TARGET, typename T1, typename T2, typename T3>
+    struct RectDemux3 {
+      template <typename NT, typename T>
+      static void demux(T1 arg1, T2 arg2, T3 arg3)
+      {
+	TARGET::template demux<ZRect<NT::N, T> >(arg1, arg2, arg3);
+      }
+    };
+
+    template <typename TARGET, typename T1>
+    static void demux(int index, T1 arg1)
+    {
+      switch(index & 3) {
+      case 0: // fall through to base type list
+	{
+	  FLDTYPES::demux<TARGET,T1>(index >> 2, arg1);
+	  break;
+	}
+
+      case 1: // index encodes N,T for ZPoint<N,T>
+	{
+	  NT_TemplateHelper::demux<PointDemux1<TARGET,T1> >(index >> 2, arg1);
+	  break;
+	}
+
+      case 3: // index encodes N,T for ZRect<N,T>
+	{
+	  NT_TemplateHelper::demux<RectDemux1<TARGET,T1> >(index >> 2, arg1);
+	  break;
+	}
+      }
+    }
+
+    template <typename TARGET, typename T1, typename T2>
+    static void demux(int index, T1 arg1, T2 arg2)
+    {
+      switch(index & 3) {
+      case 0: // fall through to base type list
+	{
+	  FLDTYPES::demux<TARGET,T1,T2>(index >> 2, arg1, arg2);
+	  break;
+	}
+
+      case 1: // index encodes N,T for ZPoint<N,T>
+	{
+	  NT_TemplateHelper::demux<PointDemux2<TARGET,T1,T2> >(index >> 2, arg1, arg2);
+	  break;
+	}
+
+      case 3: // index encodes N,T for ZRect<N,T>
+	{
+	  NT_TemplateHelper::demux<RectDemux2<TARGET,T1,T2> >(index >> 2, arg1, arg2);
+	  break;
+	}
+      }
+    }
+
+    template <typename TARGET, typename T1, typename T2, typename T3>
+    static void demux(int index, T1 arg1, T2 arg2, T3 arg3)
+    {
+      switch(index & 3) {
+      case 0: // fall through to base type list
+	{
+	  FLDTYPES::demux<TARGET,T1,T2,T3>(index >> 2, arg1, arg2, arg3);
+	  break;
+	}
+
+      case 1: // index encodes N,T for ZPoint<N,T>
+	{
+	  NT_TemplateHelper::demux<PointDemux3<TARGET,T1,T2,T3> >(index >> 2, arg1, arg2, arg3);
+	  break;
+	}
+
+      case 3: // index encodes N,T for ZRect<N,T>
+	{
+	  NT_TemplateHelper::demux<RectDemux3<TARGET,T1,T2,T3> >(index >> 2, arg1, arg2, arg3);
+	  break;
+	}
+      }
+    }
+  };
+
+  struct NTF_TemplateHelper : public DynamicTemplates::ListProduct3<DIMCOUNTS, DIMTYPES, FLDTYPES_AUG> {
+    typedef DynamicTemplates::ListProduct3<DIMCOUNTS, DIMTYPES, FLDTYPES_AUG> SUPER;
     template <int N, typename T, typename FT>
     static DynamicTemplates::TagType encode_tag(void) {
       return SUPER::template encode_tag<DynamicTemplates::Int<N>, T, FT>();
