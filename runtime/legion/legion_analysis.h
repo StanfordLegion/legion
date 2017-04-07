@@ -1306,7 +1306,7 @@ namespace Legion {
       LegionColor get_child(unsigned depth) const;
 #else
       inline bool has_child(unsigned depth) const
-        { return path[depth].is_valid(); }
+        { return path[depth] != INVALID_COLOR; }
       inline LegionColor get_child(unsigned depth) const
         { return path[depth]; }
 #endif
