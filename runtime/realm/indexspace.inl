@@ -414,6 +414,18 @@ namespace Realm {
     return os;
   }
 
+  template <int N, typename T, typename T2> 
+  inline bool operator==(const ZRect<N,T>& lhs, const ZRect<N,T2>& rhs)
+  {
+    return (lhs.lo == rhs.lo) && (lhs.hi == rhs.hi);
+  }
+    
+  template <int N, typename T, typename T2>
+  inline bool operator!=(const ZRect<N,T>& lhs, const ZRect<N,T2>& rhs)
+  {
+    return (lhs.lo != rhs.lo) || (lhs.hi != rhs.hi);
+  }
+
   // rectangles may be displaced by a vector (i.e. point)
   template <int N, typename T, typename T2>
   inline ZRect<N,T> operator+(const ZRect<N,T>& lhs, const ZPoint<N,T2>& rhs)
