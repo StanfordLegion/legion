@@ -2252,7 +2252,9 @@ namespace Legion {
         AutoLock o_lock(op_lock); 
 #ifdef DEBUG_LEGION
         assert(!children_complete);
-        assert(!children_commit);
+        // Small race condition here which is alright as
+        // long as we haven't committed yet
+        assert(!children_commit || !commit_received);
 #endif
         children_complete = true;
         task_complete = complete_received;
@@ -2269,7 +2271,9 @@ namespace Legion {
       {
         AutoLock o_lock(op_lock);
 #ifdef DEBUG_LEGION
-        assert(children_complete);
+        // There is a small race condition here which is alright
+        // as long as we haven't committed yet
+        assert(children_complete || !commit_received);
         assert(!children_commit);
 #endif
         children_commit = true;

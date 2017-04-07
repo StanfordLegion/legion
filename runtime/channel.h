@@ -1209,6 +1209,7 @@ namespace LegionRuntime{
         DmaRequest* dma_request;
         gasnet_node_t launch_node;
         XferDesID guid, pre_xd_guid, next_xd_guid;
+        bool mark_started;
         uint64_t max_req_size;
         long max_nr;
         int priority;
@@ -1230,6 +1231,7 @@ namespace LegionRuntime{
 
       static void send_request(gasnet_node_t target, DmaRequest* dma_request, gasnet_node_t launch_node,
                                XferDesID guid, XferDesID pre_xd_guid, XferDesID next_xd_guid,
+                               bool mark_started,
                                const Buffer& src_buf, const Buffer& dst_buf,
                                const Domain& domain, const std::vector<OffsetsAndSize>& oas_vec,
                                uint64_t max_req_size, long max_nr, int priority,
@@ -1243,6 +1245,7 @@ namespace LegionRuntime{
         payload->guid = guid;
         payload->pre_xd_guid = pre_xd_guid;
         payload->next_xd_guid = next_xd_guid;
+        payload->mark_started = mark_started;
         payload->max_req_size = max_req_size;
         payload->max_nr = max_nr;
         payload->priority = priority;
