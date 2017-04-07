@@ -345,9 +345,6 @@ function getMouseOver() {
     var p = d3.mouse(this);
     var x = parseFloat(p[0]);
     var y = timelineLevelCalculator(d) - 5;
-    var relativeX = (x - $("#timeline").scrollLeft())
-    var anchor = relativeX < left ? "start" :
-                 relativeX < right ? "middle" : "end";
     var descView = state.timelineSvg.append("g")
                         .attr("id", "desc");
     var text = descView.append("text")
@@ -375,15 +372,12 @@ function getMouseOver() {
     var title = text.append("tspan")
       .attr("x", x)
       .attr("dy", -12)
-      .attr("text-anchor", anchor)
       .attr("class", "desc")
       .text(descTexts[0].replace(/ /g, "\u00A0")); // preserve spacing
 
-    var titleX = title.node().getBBox().x;
-    
     for (var i = 1; i < descTexts.length; ++i) {
       var elem = text.append("tspan")
-        .attr("x", titleX)
+        .attr("x", x)
         .attr("dy", -12)
         .attr("class", "desc")
         .text(descTexts[i].replace(/ /g, "\u00A0")); // preserve spacing
@@ -398,6 +392,15 @@ function getMouseOver() {
         .attr("height", bbox.height + (padding*2))
         .style("fill", "#222")
         .style("opacity", "0.7");
+
+    var bboxRight = bbox.x + bbox.width;
+    var timelineRight = $("#timeline").scrollLeft() + $("#timeline").width();
+
+    // If the box moves off the screen, nudge it back
+    if (bboxRight > timelineRight) {
+      var translation = -(bboxRight - timelineRight + 20);
+      descView.attr("transform", "translate(" + translation + ",0)");
+    }
   };
 }
 

@@ -1389,28 +1389,28 @@ namespace LegionRuntime {
         case 0:
           create_xfer_des<0>(payload->dma_request, payload->launch_node,
                              payload->guid, payload->pre_xd_guid, payload->next_xd_guid,
-                             false/*mark_started*/, src_buf, dst_buf, payload->domain, oas_vec,
+                             payload->mark_started, src_buf, dst_buf, payload->domain, oas_vec,
                              payload->max_req_size, payload->max_nr, payload->priority,
                              payload->order, payload->kind, args.fence, args.inst);
           break;
         case 1:
           create_xfer_des<1>(payload->dma_request, payload->launch_node,
                              payload->guid, payload->pre_xd_guid, payload->next_xd_guid,
-                             false/*mark_started*/, src_buf, dst_buf, payload->domain, oas_vec,
+                             payload->mark_started, src_buf, dst_buf, payload->domain, oas_vec,
                              payload->max_req_size, payload->max_nr, payload->priority,
                              payload->order, payload->kind, args.fence, args.inst);
           break;
         case 2:
           create_xfer_des<2>(payload->dma_request, payload->launch_node,
                              payload->guid, payload->pre_xd_guid, payload->next_xd_guid,
-                             false/*mark_started*/, src_buf, dst_buf, payload->domain, oas_vec,
+                             payload->mark_started, src_buf, dst_buf, payload->domain, oas_vec,
                              payload->max_req_size, payload->max_nr, payload->priority,
                              payload->order, payload->kind, args.fence, args.inst);
           break;
         case 3:
           create_xfer_des<3>(payload->dma_request, payload->launch_node,
                              payload->guid, payload->pre_xd_guid, payload->next_xd_guid,
-                             false/*mark_started*/, src_buf, dst_buf, payload->domain, oas_vec,
+                             payload->mark_started, src_buf, dst_buf, payload->domain, oas_vec,
                              payload->max_req_size, payload->max_nr, payload->priority,
                              payload->order, payload->kind, args.fence, args.inst);
           break;
@@ -1577,7 +1577,6 @@ namespace LegionRuntime {
       void XferDesQueue::start_worker(int count, int max_nr, ChannelManager* channel_manager) 
       {
         log_new_dma.info("XferDesQueue: start_workers");
-        // TODO: count is currently ignored
         // num_memcpy_threads = 0;
 #ifdef USE_HDF
         // Need a dedicated thread for handling HDF requests
@@ -1811,6 +1810,7 @@ namespace LegionRuntime {
         XferDesCreateMessage::send_request(ID(_src_buf.memory).memory.owner_node,
                                            _dma_request, _launch_node,
                                            _guid, _pre_xd_guid, _next_xd_guid,
+                                           mark_started,
                                            _src_buf, _dst_buf, _domain, _oas_vec,
                                            _max_req_size, max_nr, _priority,
                                            _order, _kind, _complete_fence, inst);
