@@ -364,6 +364,14 @@ namespace Realm {
     return ctns;
   }
 
+  // true if all points in other are in this rectangle
+  // FIXME: the bounds of an index space aren't necessarily tight - is that ok?
+  template <int N, typename T>
+  inline bool ZRect<N,T>::contains(const ZIndexSpace<N,T>& other) const
+  {
+    return contains(other.bounds);
+  }
+
   // true if there are any points in the intersection of the two rectangles
   template <int N, typename T>
   inline bool ZRect<N,T>::overlaps(const ZRect<N,T>& other) const
@@ -407,8 +415,8 @@ namespace Realm {
   }
 
   // rectangles may be displaced by a vector (i.e. point)
-  template <int N, typename T>
-  inline ZRect<N,T> operator+(const ZRect<N,T>& lhs, const ZPoint<N,T>& rhs)
+  template <int N, typename T, typename T2>
+  inline ZRect<N,T> operator+(const ZRect<N,T>& lhs, const ZPoint<N,T2>& rhs)
   {
     return ZRect<N,T>(lhs.lo + rhs, lhs.hi + rhs);
   }
@@ -421,14 +429,14 @@ namespace Realm {
     return lhs;
   }
 
-  template <int N, typename T>
-  inline ZRect<N,T> operator-(const ZRect<N,T>& lhs, const ZPoint<N,T>& rhs)
+  template <int N, typename T, typename T2>
+  inline ZRect<N,T> operator-(const ZRect<N,T>& lhs, const ZPoint<N,T2>& rhs)
   {
     return ZRect<N,T>(lhs.lo - rhs, lhs.hi - rhs);
   }
 
-  template <int N, typename T>
-  inline ZRect<N,T>& operator-=(ZRect<N,T>& lhs, const ZRect<N,T>& rhs)
+  template <int N, typename T, typename T2>
+  inline ZRect<N,T>& operator-=(ZRect<N,T>& lhs, const ZRect<N,T2>& rhs)
   {
     lhs.lo -= rhs;
     lhs.hi -= rhs;
@@ -536,6 +544,12 @@ namespace Realm {
   template <int N, typename T>
   inline ZIndexSpace<N,T>::ZIndexSpace(const ZRect<N,T>& _bounds, SparsityMap<N,T> _sparsity)
     : bounds(_bounds), sparsity(_sparsity)
+  {}
+
+  // reclaim any physical resources associated with this index space
+  //  will clear the sparsity map of this index space if it exists
+  template <int N, typename T>
+  inline void ZIndexSpace<N,T>::destroy(Event wait_on /*= Event::NO_EVENT*/)
   {}
 
   // true if we're SURE that there are no points in the space (may be imprecise due to
@@ -842,6 +856,43 @@ namespace Realm {
       total += it->volume();
 
     return total;
+  }
+
+  // copy and fill operations
+
+  template <int N, typename T>
+  inline Event ZIndexSpace<N,T>::fill(const std::vector<CopySrcDstField> &dsts,
+				      const ProfilingRequestSet &requests,
+				      const void *fill_value, size_t fill_value_size,
+				      Event wait_on /*= Event::NO_EVENT*/) const
+  {
+    assert(0);
+    return wait_on;
+  }
+
+  template <int N, typename T>
+  inline Event ZIndexSpace<N,T>::copy(const std::vector<CopySrcDstField> &srcs,
+				      const std::vector<CopySrcDstField> &dsts,
+				      const ProfilingRequestSet &requests,
+				      Event wait_on /*= Event::NO_EVENT*/,
+				      ReductionOpID redop_id /*= 0*/,
+				      bool red_fold /*= false*/) const
+  {
+    assert(0);
+    return wait_on;
+  }
+
+  template <int N, typename T>
+  inline Event ZIndexSpace<N,T>::copy(const std::vector<CopySrcDstField> &srcs,
+				      const std::vector<CopySrcDstField> &dsts,
+				      const ZIndexSpace<N,T> &mask,
+				      const ProfilingRequestSet &requests,
+				      Event wait_on /*= Event::NO_EVENT*/,
+				      ReductionOpID redop_id /*= 0*/,
+				      bool red_fold /*= false*/) const
+  {
+    assert(0);
+    return wait_on;
   }
 
   // simple wrapper for the multiple subspace version
@@ -1438,6 +1489,29 @@ namespace Realm {
       assert(false);
       return RegionInstance::NO_INST;
     }
+  }
+
+  template <int N, typename T>
+  inline /*static*/ RegionInstance RegionInstance::create_file_instance(const char *file_name,
+									const ZIndexSpace<N,T>& space,
+									const std::vector<size_t> &field_sizes,
+									legion_lowlevel_file_mode_t file_mode,
+									const ProfilingRequestSet& prs)
+  {
+    assert(0);
+    return RegionInstance::NO_INST;
+  }
+
+  template <int N, typename T>
+  inline /*static*/ RegionInstance RegionInstance::create_hdf5_instance(const char *file_name,
+									const ZIndexSpace<N,T>& space,
+									const std::vector<size_t> &field_sizes,
+									const std::vector<const char*> &field_files,
+									bool read_only,
+									const ProfilingRequestSet& prs)
+  {
+    assert(0);
+    return RegionInstance::NO_INST;
   }
 
   template <int N, typename T>
