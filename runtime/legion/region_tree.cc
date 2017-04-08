@@ -172,18 +172,17 @@ namespace Legion {
         parent_notified = notified_event;
       }
       RtUserEvent disjointness_event;
-      IndexPartNode *partition_node;
       if (part_kind == COMPUTE_KIND)
       {
         disjointness_event = Runtime::create_rt_user_event();
-        partition_node = create_node(pid, parent_node, color_node,
-         partition_color, disjointness_event, partition_ready, partial_pending);
+        create_node(pid, parent_node, color_node, partition_color, 
+            disjointness_event, partition_ready, partial_pending);
       }
       else
       {
         const bool disjoint = (part_kind == DISJOINT_KIND);
-        partition_node = create_node(pid, parent_node, color_node,
-                   partition_color, disjoint, partition_ready, partial_pending);
+        create_node(pid, parent_node, color_node, partition_color, 
+                    disjoint, partition_ready, partial_pending);
         if (Runtime::legion_spy_enabled)
           LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
                                          partition_color);
@@ -8707,7 +8706,7 @@ namespace Legion {
       const unsigned depth = get_depth();
       const bool arrived = !path.has_child(depth);
       FieldMask open_below;
-      LegionColor next_child;
+      LegionColor next_child = INVALID_COLOR;
       if (!arrived)
         next_child = path.get_child(depth);
       // Now check to see if we need to do any close operations
