@@ -144,7 +144,9 @@ namespace Legion {
       ApEvent create_partition_by_field(Operation *op,
                                         IndexPartition pending,
                     const std::vector<FieldDataDescriptor> &instances,
-                                        ApEvent instances_ready);
+                                        ApEvent instances_ready,
+                                        ShardID shard = 0,
+                                        size_t total_shards = 1);
       ApEvent create_partition_by_image(Operation *op,
                                         IndexPartition pending,
                                         IndexPartition projection,
@@ -902,7 +904,9 @@ namespace Legion {
       virtual ApEvent create_by_field(Operation *op,
                                       IndexPartNode *partition,
                 const std::vector<FieldDataDescriptor> &instances,
-                                      ApEvent instances_ready) = 0;
+                                      ApEvent instances_ready,
+                                      ShardID shard, 
+                                      size_t total_shards) = 0;
       virtual ApEvent create_by_image(Operation *op,
                                       IndexPartNode *partition,
                                       IndexPartNode *projection,
@@ -1116,12 +1120,16 @@ namespace Legion {
       virtual ApEvent create_by_field(Operation *op,
                                       IndexPartNode *partition,
                 const std::vector<FieldDataDescriptor> &instances,
-                                      ApEvent instances_ready);
+                                      ApEvent instances_ready,
+                                      ShardID shard_id,
+                                      size_t total_shards);
       template<int COLOR_DIM, typename COLOR_T>
       ApEvent create_by_field_helper(Operation *op,
                                      IndexPartNode *partition,
                 const std::vector<FieldDataDescriptor> &instances,
-                                     ApEvent instances_ready);
+                                     ApEvent instances_ready,
+                                     ShardID shard,
+                                     size_t total_shards);
       virtual ApEvent create_by_image(Operation *op,
                                       IndexPartNode *partition,
                                       IndexPartNode *projection,
@@ -1225,15 +1233,17 @@ namespace Legion {
         CreateByFieldHelper(IndexSpaceNodeT<DIM,T> *n,
                             Operation *o, IndexPartNode *p,
                             const std::vector<FieldDataDescriptor> &i,
-                            ApEvent r)
-          : node(n), op(o), partition(p), instances(i), ready(r) { }
+                            ApEvent r, ShardID s, size_t t)
+          : node(n), op(o), partition(p), instances(i), 
+            ready(r), shard(s), total_shards(t) { }
       public:
         template<typename COLOR_DIM, typename COLOR_T>
         static inline void demux(CreateByFieldHelper *creator)
         {
           creator->result = 
            creator->node->template create_by_field_helper<COLOR_DIM::N,COLOR_T>(
-           creator->op, creator->partition, creator->instances, creator->ready);
+                         creator->op, creator->partition, creator->instances,
+                         creator->ready, creator->shard, creator->total_shards);
         }
       public:
         IndexSpaceNodeT<DIM,T> *node;
@@ -1241,6 +1251,8 @@ namespace Legion {
         IndexPartNode *partition;
         const std::vector<FieldDataDescriptor> &instances;
         ApEvent ready, result;
+        ShardID shard;
+        size_t total_shards;
       };
       struct CreateByImageHelper {
       public:

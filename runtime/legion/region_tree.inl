@@ -1924,15 +1924,17 @@ namespace Legion {
     ApEvent IndexSpaceNodeT<DIM,T>::create_by_field(Operation *op,
                                                     IndexPartNode *partition,
                               const std::vector<FieldDataDescriptor> &instances,
-                                                    ApEvent instances_ready)
+                                                    ApEvent instances_ready,
+                                                    ShardID shard,
+                                                    size_t total_shards)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(partition->parent == this);
 #endif
       // Demux the color space type to do the actual operations 
-      CreateByFieldHelper creator(this, op, partition, 
-                                  instances, instances_ready);
+      CreateByFieldHelper creator(this, op, partition, instances, 
+                                  instances_ready, shard, total_shards);
       NT_TemplateHelper::demux<CreateByFieldHelper>(
                    partition->color_space->handle.get_type_tag(), &creator);
       return creator.result;
@@ -1943,7 +1945,9 @@ namespace Legion {
     ApEvent IndexSpaceNodeT<DIM,T>::create_by_field_helper(Operation *op,
                                                       IndexPartNode *partition,
                              const std::vector<FieldDataDescriptor> &instances,
-                                                       ApEvent instances_ready)
+                                                       ApEvent instances_ready,
+                                                       ShardID shard,
+                                                       size_t total_shards)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNodeT<COLOR_DIM,COLOR_T> *color_space = 
@@ -1953,19 +1957,47 @@ namespace Legion {
         color_space->index_space_ready.wait();
       Realm::ZIndexSpace<COLOR_DIM,COLOR_T> realm_color_space;
       color_space->get_realm_index_space(realm_color_space);
-      const size_t num_colors = realm_color_space.volume();
-      std::vector<Realm::ZPoint<COLOR_DIM,COLOR_T> > colors(num_colors);
-      unsigned index = 0;
-      for (Realm::ZIndexSpaceIterator<COLOR_DIM,COLOR_T> 
-            rect_iter(realm_color_space); rect_iter.valid; rect_iter.step())
+      std::vector<Realm::ZPoint<COLOR_DIM,COLOR_T> > colors;
+      std::vector<LegionColor> linearized_colors;
+      const TypeTag color_type = color_space->handle.get_type_tag();
+      if (total_shards == 1)
       {
-        for (Realm::ZPointInRectIterator<COLOR_DIM,COLOR_T> 
-              itr(rect_iter.rect); itr.valid; itr.step())
+        // This is the normal case for non-control replication codes
+        const size_t num_colors = realm_color_space.volume();
+        colors.resize(num_colors);
+        linearized_colors.resize(num_colors);
+        unsigned index = 0;
+        for (Realm::ZIndexSpaceIterator<COLOR_DIM,COLOR_T> 
+              rect_iter(realm_color_space); rect_iter.valid; rect_iter.step())
         {
+          for (Realm::ZPointInRectIterator<COLOR_DIM,COLOR_T> 
+                itr(rect_iter.rect); itr.valid; itr.step(), index++)
+          {
 #ifdef DEBUG_LEGION
-          assert(index < colors.size());
+            assert(index < colors.size());
 #endif
-          colors[index++] = itr.p;
+            colors[index] = itr.p;
+            linearized_colors[index] = 
+              color_space->linearize_color(&itr.p, color_type);
+          }
+        }
+      }
+      else
+      {
+        // Only handle the colors that are local to our shard
+        for (Realm::ZIndexSpaceIterator<COLOR_DIM,COLOR_T> 
+              rect_iter(realm_color_space); rect_iter.valid; rect_iter.step())
+        {
+          for (Realm::ZPointInRectIterator<COLOR_DIM,COLOR_T> 
+                itr(rect_iter.rect); itr.valid; itr.step())
+          {
+            const LegionColor color = 
+              color_space->linearize_color(&itr.p, color_type);
+            if ((color % total_shards) != shard)
+              continue;
+            colors.push_back(itr.p);
+            linearized_colors.push_back(color);
+          }
         }
       }
       // Translate the instances to realm field data descriptors
@@ -1997,10 +2029,8 @@ namespace Legion {
       // Update the children with the names of their subspaces 
       for (unsigned idx = 0; idx < colors.size(); idx++)
       {
-        LegionColor child_color = color_space->linearize_color(&colors[idx],
-                                        color_space->handle.get_type_tag());
         IndexSpaceNodeT<DIM,T> *child = static_cast<IndexSpaceNodeT<DIM,T>*>(
-                                            partition->get_child(child_color));
+                                  partition->get_child(linearized_colors[idx]));
         child->set_realm_index_space(context->runtime->address_space,
                                      subspaces[idx]);
       }
