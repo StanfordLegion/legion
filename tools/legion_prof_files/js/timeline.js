@@ -352,7 +352,6 @@ function getMouseOver() {
                        .attr("y", y)
                        .attr("class", "desc");
 
-
     if ((d.in.length != 0) || (d.out.length != 0)) {
       d3.select(this).style("cursor", "pointer")
     }
@@ -641,8 +640,11 @@ function drawTimeline() {
   updateURL(state.zoom, state.scale);
   var timelineGroup = state.timelineSvg.select("g#timeline");
   timelineGroup.selectAll("rect").remove();
+  timelineGroup.selectAll("text").remove();
   var timeline = timelineGroup.selectAll("rect")
     .data(state.dataToDraw, function(d) { return d.proc.base + "-" + d.id; });
+  var timelineText = timelineGroup.selectAll("text")
+    .data(state.memoryTexts);
   var mouseOver = getMouseOver();
 
   timeline.enter().append("rect");
@@ -688,6 +690,32 @@ function drawTimeline() {
       state.timelineSvg.selectAll("#desc").remove();
     })
     .on("mousedown", timelineEventMouseDown);
+
+
+  timelineText.enter().append("text");
+
+  timelineText
+    .attr("class", "timeline")
+    .attr("y", timelineTextLevelCalculator)
+    .attr("text-anchor", "start")
+    .text(function(d) { 
+       var sizeRegex = /Size=(.*)/;
+       var match = sizeRegex.exec(d.title);
+       return match[1];
+    })
+    .attr("visibility", function(d) {
+      var textWidth = this.getComputedTextLength();
+      var startX = convertToPos(state, d.start);
+      var endX = convertToPos(state, d.end);
+      var boxWidth = endX - startX;
+      return boxWidth > textWidth ? "visible" : "hidden";
+    })
+    .attr("x", function(d) { 
+      var textWidth = this.getComputedTextLength();
+      var midPoint = convertToPos(state, d.start + (d.end - d.start) / 2); 
+      midPoint -= textWidth / 2;
+      return midPoint
+    });
 
   drawUtil();
   timeline.on("mouseover", mouseOver);
@@ -859,6 +887,11 @@ function utilLevelCalculator(timelineElement) {
 function timelineLevelCalculator(timelineEvent) {  
   return constants.margin_top + 
          (timelineEvent.proc.base + timelineEvent.level) * state.thickness;
+};
+
+function timelineTextLevelCalculator(timelineEvent) {  
+  return constants.margin_top + 
+         (timelineEvent.proc.base + timelineEvent.level + 0.75) * state.thickness;
 };
 
 function dependencyLineLevelCalculator(level) {
