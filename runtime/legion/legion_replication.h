@@ -30,6 +30,7 @@ namespace Legion {
     class ShardCollective {
     public:
       ShardCollective(ReplicateContext *ctx);
+      ShardCollective(ReplicateContext *ctx, CollectiveID id);
       virtual ~ShardCollective(void);
     public:
       virtual void handle_collective_message(Deserializer &derez) = 0;
@@ -54,6 +55,8 @@ namespace Legion {
     class BroadcastCollective : public ShardCollective {
     public:
       BroadcastCollective(ReplicateContext *ctx, ShardID origin);
+      BroadcastCollective(ReplicateContext *ctx, 
+                          CollectiveID id, ShardID origin); 
       virtual ~BroadcastCollective(void);
     public:
       // We guarantee that these methods will be called atomically
@@ -289,6 +292,28 @@ namespace Legion {
     };
 
     /**
+     * \class FutureBroadcast
+     * A class for broadcasting a future result to all the shards
+     */
+    class FutureBroadcast : public BroadcastCollective {
+    public:
+      FutureBroadcast(ReplicateContext *ctx, CollectiveID id, ShardID source);
+      FutureBroadcast(const FutureBroadcast &rhs);
+      virtual ~FutureBroadcast(void);
+    public:
+      FutureBroadcast& operator=(const FutureBroadcast &rhs);
+    public:
+      virtual void pack_collective(Serializer &rez) const;
+      virtual void unpack_collective(Deserializer &derez);
+    public:
+      void broadcast_future(const void *result, size_t result_size);
+      void receive_future(FutureImpl *f);
+    protected:
+      void *result;
+      size_t result_size;
+    };
+
+    /**
      * \class ReplIndividualTask
      * An individual task that is aware that it is 
      * being executed in a control replication context.
@@ -306,8 +331,13 @@ namespace Legion {
     public:
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_ready(void);
+    public:
+      virtual void handle_future(const void *res, size_t res_size, bool owned);
+    public:
+      void initialize_replication(ReplicateContext *ctx);
     protected:
       ShardingID sharding_functor;
+      CollectiveID future_collective_id; // id for the future broadcast 
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)

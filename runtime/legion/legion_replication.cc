@@ -63,6 +63,7 @@ namespace Legion {
     {
       activate_individual_task();
       sharding_functor = UINT_MAX;
+      future_collective_id = UINT_MAX;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL; 
 #endif
@@ -150,10 +151,39 @@ namespace Legion {
         // We don't own it, so we can pretend like we
         // mapped and executed this task already
         complete_mapping();
+        // Get the future result and set it before completing
+        FutureBroadcast future_collective(repl_ctx, future_collective_id,
+                                          owner_shard);
+        future_collective.receive_future(result.impl);
         complete_execution();
       }
       else // We own it, so it goes on the ready queue
         enqueue_ready_operation(); 
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndividualTask::handle_future(const void *res, 
+                                           size_t res_size, bool owned)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // Broadcast it and then do the normal thing 
+      FutureBroadcast future_collective(repl_ctx, future_collective_id,
+                                        repl_ctx->owner_shard->shard_id);
+      future_collective.broadcast_future(res, res_size);
+      IndividualTask::handle_future(res, res_size, owned);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndividualTask::initialize_replication(ReplicateContext *ctx)
+    //--------------------------------------------------------------------------
+    {
+      future_collective_id = ctx->get_next_collective_index();
     }
 
     /////////////////////////////////////////////////////////////
@@ -2219,6 +2249,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ShardCollective::ShardCollective(ReplicateContext *ctx, CollectiveID id)
+      : manager(ctx->shard_manager), context(ctx), 
+        local_shard(ctx->owner_shard->shard_id), collective_index(id),
+        collective_lock(Reservation::create_reservation())
+    //--------------------------------------------------------------------------
+    {
+      // Register this with the context
+      context->register_collective(this);
+    }
+
+    //--------------------------------------------------------------------------
     ShardCollective::~ShardCollective(void)
     //--------------------------------------------------------------------------
     {
@@ -2254,6 +2295,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     BroadcastCollective::BroadcastCollective(ReplicateContext *ctx, ShardID o)
       : ShardCollective(ctx), origin(o),
+        shard_collective_radix(ctx->get_shard_collective_radix())
+    //--------------------------------------------------------------------------
+    {
+      if (local_shard != origin)
+        done_event = Runtime::create_rt_user_event();
+    }
+
+    //--------------------------------------------------------------------------
+    BroadcastCollective::BroadcastCollective(ReplicateContext *ctx, 
+                                             CollectiveID id, ShardID o)
+      : ShardCollective(ctx, id), origin(o),
         shard_collective_radix(ctx->get_shard_collective_radix())
     //--------------------------------------------------------------------------
     {
@@ -3219,6 +3271,98 @@ namespace Legion {
       perform_collective_wait();
       ready = Runtime::merge_events(ready_events);
       return descriptors;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Future Broadcast 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    FutureBroadcast::FutureBroadcast(ReplicateContext *ctx, CollectiveID id,
+                                     ShardID source)
+      : BroadcastCollective(ctx, id, source), result(NULL), result_size(0)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    FutureBroadcast::FutureBroadcast(const FutureBroadcast &rhs)
+      : BroadcastCollective(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    FutureBroadcast::~FutureBroadcast(void)
+    //--------------------------------------------------------------------------
+    {
+      if (result != NULL)
+        free(result);
+    }
+
+    //--------------------------------------------------------------------------
+    FutureBroadcast& FutureBroadcast::operator=(const FutureBroadcast &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureBroadcast::pack_collective(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(result_size);
+      if (result_size > 0)
+        rez.serialize(result, result_size);
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureBroadcast::unpack_collective(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      derez.deserialize(result_size);
+      if (result_size > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(result == NULL);
+#endif
+        result = malloc(result_size);
+        derez.deserialize(result, result_size);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureBroadcast::broadcast_future(const void *res, size_t size)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(result == NULL); 
+#endif
+      result_size = size;
+      if (result_size > 0)
+      {
+        result = malloc(result_size);
+        memcpy(result, res, result_size);
+      }
+      perform_collective_async();
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureBroadcast::receive_future(FutureImpl *f)
+    //--------------------------------------------------------------------------
+    {
+      perform_collective_wait();
+      if (result != NULL)
+      {
+        f->set_result(result, result_size, true/*own*/);
+        result = NULL;
+      }
+      else
+        f->set_result(NULL, 0, false/*own*/);
     }
 
   }; // namespace Internal

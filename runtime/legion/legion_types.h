@@ -1428,6 +1428,7 @@ namespace Legion {
     class ShardingGatherCollective;
     class FieldDescriptorExchange;
     class FieldDescriptorGather;
+    class FutureBroadcast;
 
 #define FRIEND_ALL_RUNTIME_CLASSES                          \
     friend class Legion::Runtime;                           \

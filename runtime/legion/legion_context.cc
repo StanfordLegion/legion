@@ -8583,6 +8583,8 @@ namespace Legion {
       Future result = task->initialize_task(this, launcher,
                                             false/*check privileges*/);
 #endif
+      // Now initialize the particular information for replication 
+      task->initialize_replication(this);
       execute_task_launch(task, false/*index*/, current_trace, 
                           launcher.silence_warnings, launcher.enable_inlining);
       return result;
@@ -8788,40 +8790,6 @@ namespace Legion {
       execute_task_launch(task, true/*index*/, current_trace, 
                           launcher.silence_warnings, launcher.enable_inlining);
       return result;
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalRegion ReplicateContext::map_region(const InlineLauncher &launcher)
-    //--------------------------------------------------------------------------
-    {
-      log_run.error("Inline mappings are not currently supported in control "
-                    "replication context for task %s (UID %lld). They may be "
-                    "supported in the future.", 
-                    get_task_name(), get_unique_id());
-      assert(false);
-      return PhysicalRegion();
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplicateContext::remap_region(PhysicalRegion region)
-    //--------------------------------------------------------------------------
-    {
-      log_run.error("Remapping of physical regions is not currently supported "
-                    "in control replication contexts for task %s (UID %lld). "
-                    "It may be supported in the future.", 
-                    get_task_name(), get_unique_id());
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplicateContext::unmap_region(PhysicalRegion region)
-    //--------------------------------------------------------------------------
-    {
-      log_run.error("Unmapping of physical regions is not currently supported "
-                    "in control replication contexts for task %s (UID %lld). "
-                    "It may be supported in the future.",
-                    get_task_name(), get_unique_id());
-      assert(false);
     }
 
     //--------------------------------------------------------------------------

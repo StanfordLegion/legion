@@ -5735,7 +5735,14 @@ namespace Legion {
       ResourceTracker::unpack_privilege_state(derez, parent_ctx);
       // Unpack the future result
       if (must_epoch == NULL)
-        result.impl->unpack_future(derez);
+      {
+        DerezCheck z(derez);
+        size_t future_size;
+        derez.deserialize(future_size);
+        const void *future_ptr = derez.get_current_pointer();
+        handle_future(future_ptr, future_size, false/*owned*/); 
+        derez.advance_pointer(future_size);
+      }
       else
         must_epoch->unpack_future(index_point, derez);
       // Mark that we have both finished executing and that our
