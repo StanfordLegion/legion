@@ -314,6 +314,29 @@ namespace Legion {
     };
 
     /**
+     * \class FutureExchange
+     * A class for doing an all-to-all exchange of future values
+     */
+    class FutureExchange : public AllGatherCollective {
+    public:
+      FutureExchange(ReplicateContext *ctx, size_t future_size);
+      FutureExchange(const FutureExchange &rhs);
+      virtual ~FutureExchange(void);
+    public:
+      FutureExchange& operator=(const FutureExchange &rhs);
+    public:
+      virtual void pack_collective_stage(Serializer &rez, int stage) const;
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
+    public:
+      // This takes ownership of the buffer
+      void reduce_futures(void *value, ReplIndexTask *target);
+    public:
+      const size_t future_size;
+    protected:
+      std::map<ShardID,void*> results;
+    };
+
+    /**
      * \class ReplIndividualTask
      * An individual task that is aware that it is 
      * being executed in a control replication context.
@@ -332,10 +355,13 @@ namespace Legion {
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_ready(void);
     public:
+      // Override these so we can broadcast the future result
       virtual void handle_future(const void *res, size_t res_size, bool owned);
+      virtual void trigger_task_complete(void);
     public:
       void initialize_replication(ReplicateContext *ctx);
     protected:
+      ShardID owner_shard;
       ShardingID sharding_functor;
       CollectiveID future_collective_id; // id for the future broadcast 
 #ifdef DEBUG_LEGION
@@ -365,8 +391,14 @@ namespace Legion {
     public:
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_ready(void);
+    public:
+      // Override this so we can exchange reduction results
+      virtual void trigger_task_complete(void);
+    public:
+      void initialize_replication(ReplicateContext *ctx);
     protected:
       ShardingID sharding_functor;
+      FutureExchange *reduction_collective;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)

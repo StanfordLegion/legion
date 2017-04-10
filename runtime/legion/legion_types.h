@@ -1429,6 +1429,7 @@ namespace Legion {
     class FieldDescriptorExchange;
     class FieldDescriptorGather;
     class FutureBroadcast;
+    class FutureExchange;
 
 #define FRIEND_ALL_RUNTIME_CLASSES                          \
     friend class Legion::Runtime;                           \

@@ -1876,7 +1876,6 @@ namespace Legion {
       void register_slice_task(SliceTask *slice);
       void set_future(const DomainPoint &point, 
                       const void *result, size_t result_size, bool owned);
-      void unpack_future(const DomainPoint &point, Deserializer &derez);
     public:
       // Methods for keeping track of when we can complete and commit
       void register_subop(Operation *op);

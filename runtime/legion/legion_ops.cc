@@ -10658,15 +10658,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochOp::unpack_future(const DomainPoint &point, 
-                                    Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      Future f = result_map.impl->get_future(point);
-      f.impl->unpack_future(derez);
-    }
-
-    //--------------------------------------------------------------------------
     void MustEpochOp::register_subop(Operation *op)
     //--------------------------------------------------------------------------
     {

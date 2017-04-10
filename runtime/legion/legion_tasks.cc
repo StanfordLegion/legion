@@ -5734,17 +5734,14 @@ namespace Legion {
       // First unpack the privilege state
       ResourceTracker::unpack_privilege_state(derez, parent_ctx);
       // Unpack the future result
-      if (must_epoch == NULL)
       {
-        DerezCheck z(derez);
+        DerezCheck z2(derez);
         size_t future_size;
         derez.deserialize(future_size);
         const void *future_ptr = derez.get_current_pointer();
         handle_future(future_ptr, future_size, false/*owned*/); 
         derez.advance_pointer(future_size);
       }
-      else
-        must_epoch->unpack_future(index_point, derez);
       // Mark that we have both finished executing and that our
       // children are complete
       complete_execution();
@@ -7823,8 +7820,9 @@ namespace Legion {
         assert(reduction_state_size == reduction_op->sizeof_rhs);
 #endif
         const void *reduc_ptr = derez.get_current_pointer();
-        fold_reduction_future(reduc_ptr, reduction_state_size,
-                              false /*owner*/, false/*exclusive*/);
+        DomainPoint dummy_point;
+        handle_future(dummy_point, reduc_ptr, 
+                      reduction_state_size, false/*owner*/);
         // Advance the pointer on the deserializer
         derez.advance_pointer(reduction_state_size);
       }
@@ -7834,13 +7832,13 @@ namespace Legion {
         {
           DomainPoint p;
           derez.deserialize(p);
-          if (must_epoch == NULL)
-          {
-            Future f = future_map.impl->get_future(p);
-            f.impl->unpack_future(derez);
-          }
-          else
-            must_epoch->unpack_future(p, derez);
+          DerezCheck z2(derez);
+          size_t future_size;
+          derez.deserialize(future_size);
+          const void *future_ptr = derez.get_current_pointer();
+          handle_future(p, future_ptr, future_size, false/*owner*/);
+          // Advance the pointer on the deserializer
+          derez.advance_pointer(future_size);
         }
       }
       return_slice_complete(points);

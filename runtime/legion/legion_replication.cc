@@ -62,6 +62,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_individual_task();
+      owner_shard = 0;
       sharding_functor = UINT_MAX;
       future_collective_id = UINT_MAX;
 #ifdef DEBUG_LEGION
@@ -144,18 +145,15 @@ namespace Legion {
       ShardingFunction *function = 
         repl_ctx->shard_manager->find_sharding_function(sharding_functor);
       // Figure out whether this shard owns this point
-      ShardID owner_shard = function->find_owner(index_point, index_domain); 
+      owner_shard = function->find_owner(index_point, index_domain); 
       // If we own it we go on the queue, otherwise we complete early
       if (owner_shard != repl_ctx->owner_shard->shard_id)
       {
         // We don't own it, so we can pretend like we
         // mapped and executed this task already
         complete_mapping();
-        // Get the future result and set it before completing
-        FutureBroadcast future_collective(repl_ctx, future_collective_id,
-                                          owner_shard);
-        future_collective.receive_future(result.impl);
         complete_execution();
+        trigger_children_complete();
       }
       else // We own it, so it goes on the ready queue
         enqueue_ready_operation(); 
@@ -166,17 +164,46 @@ namespace Legion {
                                            size_t res_size, bool owned)
     //--------------------------------------------------------------------------
     {
+      // We have to save the future for locally for when we broadcast it
+      if (owned)
+      {
+        future_store = const_cast<void*>(res);
+        future_size = res_size;
+      }
+      else
+      {
+        future_size = res_size;
+        future_store = legion_malloc(FUTURE_RESULT_ALLOC, future_size);
+        memcpy(future_store, res, future_size);
+      }
+      IndividualTask::handle_future(future_store, future_size, false/*owned*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndividualTask::trigger_task_complete(void)
+    //--------------------------------------------------------------------------
+    {
 #ifdef DEBUG_LEGION
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      // Broadcast it and then do the normal thing 
-      FutureBroadcast future_collective(repl_ctx, future_collective_id,
-                                        repl_ctx->owner_shard->shard_id);
-      future_collective.broadcast_future(res, res_size);
-      IndividualTask::handle_future(res, res_size, owned);
+      // Before doing the normal thing we have to exchange broadcast/receive
+      // the future result
+      if (owner_shard != repl_ctx->owner_shard->shard_id)
+      {
+        FutureBroadcast future_collective(repl_ctx, 
+                                          future_collective_id, owner_shard);
+        future_collective.broadcast_future(future_store, future_size);
+      }
+      else
+      {
+        FutureBroadcast future_collective(repl_ctx, 
+                                          future_collective_id, owner_shard);
+        future_collective.receive_future(result.impl);
+      }
+      IndividualTask::trigger_task_complete();
     }
 
     //--------------------------------------------------------------------------
@@ -227,6 +254,7 @@ namespace Legion {
     {
       activate_index_task();
       sharding_functor = UINT_MAX;
+      reduction_collective = NULL;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
 #endif
@@ -237,6 +265,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_index_task();
+      if (reduction_collective != NULL)
+      {
+        delete reduction_collective;
+        reduction_collective = NULL;
+      }
 #ifdef DEBUG_LEGION
       if (sharding_collective != NULL)
         delete sharding_collective;
@@ -318,6 +351,41 @@ namespace Legion {
       }
       else // We have valid points, so it goes on the ready queue
         enqueue_ready_operation();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexTask::trigger_task_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      // If we have a reduction operator, exchange the future results
+      if (redop > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(reduction_collective != NULL);
+#endif
+        // Grab the reduction state buffer and then reinitialize it so
+        // that all the shards can be applied to it in the same order 
+        // so that we have bit equivalence across the shards
+        void *shard_buffer = reduction_state;
+        reduction_state = NULL;
+        initialize_reduction_state();
+        // The collective takes ownership of the buffer here
+        reduction_collective->reduce_futures(shard_buffer, this);
+      }
+      // Then we do the base class thing
+      IndexTask::trigger_task_complete();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexTask::initialize_replication(ReplicateContext *ctx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(reduction_collective == NULL);
+#endif
+      // If we have a reduction op then we need an exchange
+      if (redop > 0)
+        reduction_collective = new FutureExchange(ctx, reduction_state_size);
     }
 
     /////////////////////////////////////////////////////////////
@@ -3363,6 +3431,99 @@ namespace Legion {
       }
       else
         f->set_result(NULL, 0, false/*own*/);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Future Exchange 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    FutureExchange::FutureExchange(ReplicateContext *ctx, size_t size)
+      : AllGatherCollective(ctx), future_size(size)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    FutureExchange::FutureExchange(const FutureExchange &rhs)
+      : AllGatherCollective(rhs), future_size(0)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    FutureExchange::~FutureExchange(void)
+    //--------------------------------------------------------------------------
+    {
+      // Delete all the futures except our local shard one since we know
+      // that we don't actually own that memory
+      for (std::map<ShardID,void*>::const_iterator it = results.begin();
+            it != results.end(); it++)
+        free(it->second);
+    }
+
+    //--------------------------------------------------------------------------
+    FutureExchange& FutureExchange::operator=(const FutureExchange &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureExchange::pack_collective_stage(Serializer &rez, int stage) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(results.size());
+      for (std::map<ShardID,void*>::const_iterator it = results.begin();
+            it != results.end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize(it->second, future_size);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureExchange::unpack_collective_stage(Deserializer &derez, int stage)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_results;
+      derez.deserialize(num_results);
+      for (unsigned idx = 0; idx < num_results; idx++)
+      {
+        ShardID shard;
+        derez.deserialize(shard);
+#ifdef DEBUG_LEGION
+        assert(results.find(shard) == results.end());
+#endif
+        void *buffer = malloc(future_size);
+        derez.deserialize(buffer, future_size);
+        results[shard] = buffer;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureExchange::reduce_futures(void *value, ReplIndexTask *target)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock c_lock(collective_lock);
+#ifdef DEBUG_LEGION
+        assert(results.find(local_shard) == results.end());
+#endif
+        results[local_shard] = value;
+      }
+      perform_collective_sync();
+      // Now we apply the shard results in order to ensure that we get
+      // the same bitwise order across all the shards
+      // No need for the lock anymore since we know we're done
+      for (std::map<ShardID,void*>::const_iterator it = results.begin();
+            it != results.end(); it++)
+        target->fold_reduction_future(it->second, future_size, 
+                                      false/*owner*/, true/*exclusive*/);
     }
 
   }; // namespace Internal

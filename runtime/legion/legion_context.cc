@@ -8787,6 +8787,7 @@ namespace Legion {
       Future result = task->initialize_task(this, launcher, launch_space, redop,
                                             false/*check privileges*/);
 #endif
+      task->initialize_replication(this);
       execute_task_launch(task, true/*index*/, current_trace, 
                           launcher.silence_warnings, launcher.enable_inlining);
       return result;
