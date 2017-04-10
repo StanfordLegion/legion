@@ -179,6 +179,7 @@ function filterAndMergeBlocks(state) {
   var windowStart = $("#timeline").scrollLeft();
   var windowEnd = windowStart + $("#timeline").width();
   state.dataToDraw = Array();
+  state.memoryTexts = Array();
   var startTime = convertToTime(state, windowStart);
   var endTime = convertToTime(state, windowEnd);
   var min_feature_time = convertToTime(state, constants.min_feature_width);
@@ -187,6 +188,8 @@ function filterAndMergeBlocks(state) {
     var timelineElement = state.flattenedLayoutData[index];
     if (timelineElement.type == "proc" && timelineElement.enabled && timelineElement.visible) {
       var items = state.processorData[timelineElement.full_text];
+      var memoryRegex = /Memory/;
+      var isMemory = memoryRegex.exec(timelineElement.text);
       for (var level in items) {
         // gap merging below assumes intervals are sorted - do that first
         //items[level].sort(function(a,b) { return a.start - b.start; });
@@ -233,7 +236,7 @@ function filterAndMergeBlocks(state) {
               });
               i += (count - 1);
             } else {
-              state.dataToDraw.push({
+              var elem = {
                 id: d.id,
                 proc: timelineElement,
                 level: d.level,
@@ -244,10 +247,14 @@ function filterAndMergeBlocks(state) {
                 title: d.title + " (expanded for visibility)",
                 in: d.in,
                 out: d.out
-              });
+              }
+              state.dataToDraw.push(elem);
+              if (isMemory) {
+                state.memoryTexts.push(elem);
+              }
             }
           } else {
-            state.dataToDraw.push({
+            var elem = {
               id: d.id,
               proc: timelineElement,
               level: d.level,
@@ -260,7 +267,11 @@ function filterAndMergeBlocks(state) {
               title: d.title,
               in: d.in,
               out: d.out
-            });
+            }
+            state.dataToDraw.push(elem);
+            if (isMemory) {
+              state.memoryTexts.push(elem);
+            }
           }
         }
       }
