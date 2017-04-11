@@ -5119,7 +5119,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VirtualChannel::package_message(Serializer &rez, MessageKind k,
-                  bool flush, Runtime *runtime, Processor target, bool shutdown)
+                         bool flush, Runtime *runtime, Processor target, 
+                         bool response, bool shutdown)
     //--------------------------------------------------------------------------
     {
       // First check to see if the message fits in the current buffer    
@@ -5135,7 +5136,7 @@ namespace Legion {
         // Since there is no partial data we can fake the flush
         if ((sending_buffer_size - sending_index) <= 
             (sizeof(k)+sizeof(buffer_size)))
-          send_message(true/*complete*/, runtime, target, shutdown);
+          send_message(true/*complete*/, runtime, target, response, shutdown);
         // Now can package up the meta data
         packaged_messages++;
         *((MessageKind*)(sending_buffer+sending_index)) = k;
@@ -5146,7 +5147,8 @@ namespace Legion {
         {
           unsigned remaining = sending_buffer_size - sending_index;
           if (remaining == 0)
-            send_message(false/*complete*/, runtime, target, shutdown);
+            send_message(false/*complete*/, runtime, 
+                         target, response, shutdown);
           remaining = sending_buffer_size - sending_index;
 #ifdef DEBUG_LEGION
           assert(remaining > 0); // should be space after the send
@@ -5173,12 +5175,12 @@ namespace Legion {
         sending_index += buffer_size;
       }
       if (flush)
-        send_message(true/*complete*/, runtime, target, shutdown);
+        send_message(true/*complete*/, runtime, target, response, shutdown);
     }
 
     //--------------------------------------------------------------------------
     void VirtualChannel::send_message(bool complete, Runtime *runtime,
-                                      Processor target, bool shutdown)
+                                 Processor target, bool response, bool shutdown)
     //--------------------------------------------------------------------------
     {
       // See if we need to switch the header file
@@ -5211,11 +5213,13 @@ namespace Legion {
         Realm::ProfilingRequestSet requests;
         LegionProfiler::add_message_request(requests, target);
         last_message_event = RtEvent(target.spawn(LG_TASK_ID, sending_buffer, 
-            sending_index, requests, last_message_event, LG_LATENCY_PRIORITY));
+            sending_index, requests, last_message_event, 
+            response ? LG_RESPONSE_PRIORITY : LG_LATENCY_PRIORITY));
       }
       else
         last_message_event = RtEvent(target.spawn(LG_TASK_ID, sending_buffer, 
-              sending_index, last_message_event, LG_LATENCY_PRIORITY));
+              sending_index, last_message_event, 
+              response ? LG_RESPONSE_PRIORITY : LG_LATENCY_PRIORITY));
       // Reset the state of the buffer
       sending_index = base_size + sizeof(header) + sizeof(unsigned);
       if (partial)
@@ -6123,11 +6127,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MessageManager::send_message(Serializer &rez, MessageKind kind,
-                          VirtualChannelKind channel, bool flush, bool shutdown)
+           VirtualChannelKind channel, bool flush, bool response, bool shutdown)
     //--------------------------------------------------------------------------
     {
       channels[channel].package_message(rez, kind, flush, runtime, 
-                                        target, shutdown);
+                                        target, response, shutdown);
     }
 
     //--------------------------------------------------------------------------
@@ -13040,7 +13044,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INDEX_SPACE_RETURN,
-                                INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+            INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13058,7 +13062,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INDEX_SPACE_CHILD_RESPONSE,
-                                INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+                  INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13076,7 +13080,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez,SEND_INDEX_SPACE_COLORS_RESPONSE,
-                                INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+                  INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13113,7 +13117,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INDEX_PARTITION_RETURN,
-                                INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+              INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13133,7 +13137,8 @@ namespace Legion {
     {
       find_messenger(target)->send_message(rez, 
                                 SEND_INDEX_PARTITION_CHILD_RESPONSE, 
-                                INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/); 
+                                INDEX_SPACE_VIRTUAL_CHANNEL, 
+                                true/*flush*/, true/*response*/); 
     }
 
     //--------------------------------------------------------------------------
@@ -13153,7 +13158,8 @@ namespace Legion {
     {
       find_messenger(target)->send_message(rez,
                                 SEND_INDEX_PARTITION_CHILDREN_RESPONSE,
-                                INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+                                INDEX_SPACE_VIRTUAL_CHANNEL, 
+                                true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13179,7 +13185,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FIELD_SPACE_RETURN,
-                                FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+            FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13197,7 +13203,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FIELD_ALLOC_NOTIFICATION,
-                                FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+                FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13232,7 +13238,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_LOCAL_FIELD_ALLOC_RESPONSE,
-                                FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+                  FIELD_SPACE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13266,7 +13272,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_TOP_LEVEL_REGION_RETURN,
-                                  LOGICAL_TREE_VIRTUAL_CHANNEL, true/*flush*/);
+                LOGICAL_TREE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13360,7 +13366,7 @@ namespace Legion {
       // Very important that this goes on the physical state channel
       // so that it is properly serialized with state updates
       find_messenger(target)->send_message(rez, INDIVIDUAL_REMOTE_MAPPED,
-                                           DEFAULT_VIRTUAL_CHANNEL, flush);
+                       DEFAULT_VIRTUAL_CHANNEL, flush, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13371,7 +13377,7 @@ namespace Legion {
       // Very important that this goes on the physical state channel
       // so that it is properly serialized with state updates
       find_messenger(target)->send_message(rez, INDIVIDUAL_REMOTE_COMPLETE,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                  DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13382,7 +13388,7 @@ namespace Legion {
       // Very important that this goes on the physical state channel
       // so that it is properly serialized with state updates
       find_messenger(target)->send_message(rez, INDIVIDUAL_REMOTE_COMMIT,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13392,7 +13398,7 @@ namespace Legion {
       // Very important that this goes on the physical state channel
       // so that it is properly serialized with state updates
       find_messenger(target)->send_message(rez, SLICE_REMOTE_MAPPED,
-                                       DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+           DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13402,7 +13408,7 @@ namespace Legion {
       // Very important that this goes on the physical state channel
       // so that it is properly serialized with state updates
       find_messenger(target)->send_message(rez, SLICE_REMOTE_COMPLETE,
-                                       DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+             DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13412,7 +13418,7 @@ namespace Legion {
       // Very important that this goes on the physical state channel
       // so that it is properly serialized with state updates
       find_messenger(target)->send_message(rez, SLICE_REMOTE_COMMIT,
-                                       DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+           DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13421,7 +13427,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, DISTRIBUTED_REMOTE_REGISTRATION,
-                                    DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                      DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13502,7 +13508,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez,SEND_ATOMIC_RESERVATION_RESPONSE,
-                                        VIEW_VIRTUAL_CHANNEL, true/*flush*/);
+                         VIEW_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13576,7 +13582,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_CREATE_TOP_VIEW_RESPONSE,
-                                        VIEW_VIRTUAL_CHANNEL, true/*flush*/);
+                        VIEW_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13594,7 +13600,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_SUBVIEW_DID_RESPONSE,
-                                        VIEW_VIRTUAL_CHANNEL, true/*flush*/);
+                    VIEW_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13612,7 +13618,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_VIEW_UPDATE_RESPONSE,
-                                        UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
+                  UPDATE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13738,7 +13744,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_TASK_IMPL_SEMANTIC_INFO,
-                                  SEMANTIC_INFO_VIRTUAL_CHANNEL, true/*flush*/);
+              SEMANTIC_INFO_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13747,7 +13753,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INDEX_SPACE_SEMANTIC_INFO,
-                                 SEMANTIC_INFO_VIRTUAL_CHANNEL, true/*flush*/);
+               SEMANTIC_INFO_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13757,7 +13763,7 @@ namespace Legion {
     {
       find_messenger(target)->send_message(rez, 
           SEND_INDEX_PARTITION_SEMANTIC_INFO, SEMANTIC_INFO_VIRTUAL_CHANNEL,
-                                                                 true/*flush*/);
+                                             true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13766,7 +13772,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FIELD_SPACE_SEMANTIC_INFO,
-                                  SEMANTIC_INFO_VIRTUAL_CHANNEL, true/*flush*/);
+                SEMANTIC_INFO_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13775,7 +13781,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FIELD_SEMANTIC_INFO,
-                                SEMANTIC_INFO_VIRTUAL_CHANNEL, true/*flush*/);
+          SEMANTIC_INFO_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13785,7 +13791,7 @@ namespace Legion {
     {
       find_messenger(target)->send_message(rez, 
               SEND_LOGICAL_REGION_SEMANTIC_INFO, SEMANTIC_INFO_VIRTUAL_CHANNEL,
-                                                                true/*flush*/);
+                                              true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13795,7 +13801,7 @@ namespace Legion {
     {
       find_messenger(target)->send_message(rez,
             SEND_LOGICAL_PARTITION_SEMANTIC_INFO, SEMANTIC_INFO_VIRTUAL_CHANNEL,
-                                                                 true/*flush*/);
+                                               true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13813,7 +13819,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_REMOTE_CONTEXT_RESPONSE, 
-                                        CONTEXT_VIRTUAL_CHANNEL, true/*flush*/);
+                    CONTEXT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13840,7 +13846,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_VERSION_OWNER_RESPONSE,
-                            VERSION_MANAGER_VIRTUAL_CHANNEL, true/*flush*/);
+            VERSION_MANAGER_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13849,7 +13855,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_VERSION_STATE_RESPONSE,
-                                        VERSION_VIRTUAL_CHANNEL, true/*flush*/);
+                    VERSION_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13869,7 +13875,8 @@ namespace Legion {
     {
       find_messenger(target)->send_message(rez, 
                                 SEND_VERSION_STATE_UPDATE_RESPONSE,
-                                ANALYSIS_VIRTUAL_CHANNEL, true/*flush*/);
+                                ANALYSIS_VIRTUAL_CHANNEL, 
+                                true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13919,7 +13926,7 @@ namespace Legion {
       // This comes back on the version manager channel in case we need to page
       // in any version managers from remote nodes
       find_messenger(target)->send_message(rez, SEND_VERSION_MANAGER_RESPONSE,
-                               VERSION_MANAGER_VIRTUAL_CHANNEL, true/*flush*/);
+             VERSION_MANAGER_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13935,7 +13942,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INSTANCE_RESPONSE,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+              DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13967,7 +13974,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_ACQUIRE_RESPONSE,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+              DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13983,7 +13990,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_VARIANT_RESPONSE,
-                                        VARIANT_VIRTUAL_CHANNEL, true/*flush*/);
+              VARIANT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14011,7 +14018,7 @@ namespace Legion {
     {
       // This is paging in constraints so it needs its own virtual channel
       find_messenger(target)->send_message(rez, SEND_CONSTRAINT_RESPONSE,
-                              LAYOUT_CONSTRAINT_VIRTUAL_CHANNEL, true/*flush*/);
+        LAYOUT_CONSTRAINT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14046,7 +14053,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_SHUTDOWN_NOTIFICATION,
-                      DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*shutdown*/);
+                                    DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, 
+                                    false/*response*/, true/*shutdown*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14054,7 +14062,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_SHUTDOWN_RESPONSE,
-                      DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*shutdown*/);
+                                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/,
+                                false/*response*/, true/*shutdown*/);
     }
 
     //--------------------------------------------------------------------------
