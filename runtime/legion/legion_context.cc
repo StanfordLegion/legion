@@ -8536,7 +8536,7 @@ namespace Legion {
         // Otherwise check to see if we have a value
         FutureImpl *result = legion_new<FutureImpl>(runtime, true/*register*/,
           runtime->get_available_distributed_id(true), 
-          runtime->address_space, runtime->address_space);
+          runtime->address_space);
         if (launcher.predicate_false_result.get_size() > 0)
           result->set_result(launcher.predicate_false_result.get_ptr(),
                              launcher.predicate_false_result.get_size(),
@@ -8607,7 +8607,9 @@ namespace Legion {
       // Quick out for predicate false
       if (launcher.predicate == Predicate::FALSE_PRED)
       {
-        FutureMapImpl *result = legion_new<FutureMapImpl>(this, runtime);
+        FutureMapImpl *result = legion_new<FutureMapImpl>(this, runtime,
+            runtime->get_available_distributed_id(true/*needs continuation*/),
+            runtime->address_space);
         if (launcher.predicate_false_future.impl != NULL)
         {
           ApEvent ready_event = 
@@ -8631,7 +8633,7 @@ namespace Legion {
             // Otherwise launch a task to complete the future map,
             // add the necessary references to prevent premature
             // garbage collection by the runtime
-            result->add_reference();
+            result->add_base_gc_ref(DEFERRED_TASK_REF);
             launcher.predicate_false_future.impl->add_base_gc_ref(
                                                 FUTURE_HANDLE_REF);
             Runtime::DeferredFutureMapSetArgs args;
@@ -8730,7 +8732,7 @@ namespace Legion {
         // Otherwise check to see if we have a value
         FutureImpl *result = legion_new<FutureImpl>(runtime, true/*register*/, 
           runtime->get_available_distributed_id(true), 
-          runtime->address_space, runtime->address_space);
+          runtime->address_space);
         if (launcher.predicate_false_result.get_size() > 0)
           result->set_result(launcher.predicate_false_result.get_ptr(),
                              launcher.predicate_false_result.get_size(),
