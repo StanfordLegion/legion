@@ -2648,7 +2648,7 @@ namespace Legion {
                                         const PointColoring &coloring,
                                         PartitionKind part_kind = COMPUTE_KIND,
                                         int color = AUTO_GENERATE_ID,
-                                        bool allocable = true);
+                                        bool allocable = false);
       /**
        * @deprecated
        * See the previous create_index_partition call
