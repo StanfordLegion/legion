@@ -20419,10 +20419,10 @@ namespace Legion {
                 f.impl->set_result(result, result_size, false/*own*/);
             }
             future_args->future_map->complete_all_futures();
-            if (future_args->future_map->remove_base_resource_ref(
+            if (future_args->future_map->remove_base_gc_ref(
                                                         DEFERRED_TASK_REF))
               legion_delete(future_args->future_map);
-            if (future_args->result->remove_base_gc_ref(DEFERRED_TASK_REF)) 
+            if (future_args->result->remove_base_gc_ref(FUTURE_HANDLE_REF))
               legion_delete(future_args->result);
             future_args->task_op->complete_execution();
             break;
