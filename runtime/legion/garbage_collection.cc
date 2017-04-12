@@ -104,10 +104,10 @@ namespace Legion {
     DistributedCollectable::DistributedCollectable(Runtime *rt,
                                                    DistributedID id,
                                                    AddressSpaceID own_space,
-                                                   AddressSpaceID loc_space,
                                                    bool do_registration)
       : runtime(rt), did(id), owner_space(own_space), 
-        local_space(loc_space), gc_lock(Reservation::create_reservation()),
+        local_space(rt->address_space), 
+        gc_lock(Reservation::create_reservation()),
         current_state(INACTIVE_STATE), has_gc_references(false),
         has_valid_references(false), has_resource_references(false), 
         gc_references(0), valid_references(0), resource_references(0), 

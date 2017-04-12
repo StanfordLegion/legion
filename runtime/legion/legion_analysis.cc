@@ -5590,8 +5590,7 @@ namespace Legion {
     {
       DistributedID did = runtime->get_available_distributed_id(false);
       return legion_new<VersionState>(vid, runtime, did, 
-          runtime->address_space, runtime->address_space,
-          node, true/*register now*/);
+          runtime->address_space, node, true/*register now*/);
     }
 
     //--------------------------------------------------------------------------
@@ -6109,9 +6108,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     VersionState::VersionState(VersionID vid, Runtime *rt, DistributedID id,
-                               AddressSpaceID own_sp, AddressSpaceID local_sp, 
+                               AddressSpaceID own_sp, 
                                RegionTreeNode *node, bool register_now)
-      : DistributedCollectable(rt, id, own_sp, local_sp, register_now), 
+      : DistributedCollectable(rt, id, own_sp, register_now), 
         version_number(vid), logical_node(node), 
         state_lock(Reservation::create_reservation())
 #ifdef DEBUG_LEGION
@@ -6130,7 +6129,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     VersionState::VersionState(const VersionState &rhs)
-      : DistributedCollectable(rhs.runtime, rhs.did, rhs.local_space,
+      : DistributedCollectable(rhs.runtime, rhs.did,
                                rhs.owner_space, false/*register now*/),
         version_number(0), logical_node(NULL)
     //--------------------------------------------------------------------------
@@ -7158,12 +7157,10 @@ namespace Legion {
       if (runtime->find_pending_collectable_location(did, location))
         state = legion_new_in_place<VersionState>(location, version_number,
                                                   runtime, did, source, 
-                                                  runtime->address_space,
                                                   node, false/*register now*/);
       else
         state = legion_new<VersionState>(version_number, runtime, did,
-                                         source, runtime->address_space,
-                                         node, false/*register now*/);
+                                         source, node, false/*register now*/);
       // Once construction is complete then we do the registration
       state->register_with_runtime(NULL/*no remote registration needed*/);
     }

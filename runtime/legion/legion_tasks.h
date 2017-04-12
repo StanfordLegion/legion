@@ -565,7 +565,7 @@ namespace Legion {
       Domain internal_domain;
       ReductionOpID redop;
       const ReductionOp *reduction_op;
-      ArgumentMap argument_map;
+      FutureMap point_arguments;
       // For handling reductions of types with serdez methods
       const SerdezRedopFns *serdez_redop_fns;
       size_t reduction_state_size;
@@ -1080,20 +1080,15 @@ namespace Legion {
     public:
       inline void add_domain_point(const DomainPoint &p) { dp = p; }
       void add_projection_region(unsigned index, LogicalRegion handle);
-      void add_argument(const TaskArgument &arg, bool own);
+      void add_argument(const Future &f);
     public:
       inline const DomainPoint& get_domain_point(void) const { return dp; }
       void assign_argument(void *&local_arg, size_t &local_arglen);
       LogicalRegion find_logical_region(unsigned index) const;
-    public:
-      void pack(Serializer &rez);
-      void unpack(Deserializer &derez);
     protected:
       DomainPoint dp;
       std::map<unsigned,LogicalRegion> projections;
-      void *arg;
-      size_t arglen;
-      bool own_arg;
+      Future arg;
     };
 
   }; // namespace Internal 

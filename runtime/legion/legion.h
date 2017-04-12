@@ -438,9 +438,11 @@ namespace Legion {
     class ArgumentMap {
     public:
       ArgumentMap(void);
+      ArgumentMap(const FutureMap &rhs);
       ArgumentMap(const ArgumentMap &rhs);
       ~ArgumentMap(void);
     public:
+      ArgumentMap& operator=(const FutureMap &rhs);
       ArgumentMap& operator=(const ArgumentMap &rhs);
       inline bool operator==(const ArgumentMap &rhs) const
         { return (impl == rhs.impl); }

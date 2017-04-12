@@ -364,6 +364,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ArgumentMap::ArgumentMap(const FutureMap &rhs)
+    //--------------------------------------------------------------------------
+    {
+      impl = Internal::legion_new<Internal::ArgumentMapImpl>(rhs);
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      impl->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
     ArgumentMap::ArgumentMap(const ArgumentMap &rhs)
       : impl(rhs.impl)
     //--------------------------------------------------------------------------
@@ -395,6 +406,24 @@ namespace Legion {
         }
         impl = NULL;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    ArgumentMap& ArgumentMap::operator=(const FutureMap &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // Check to see if our current impl is not NULL,
+      // if so remove our reference
+      if (impl != NULL)
+      {
+        if (impl->remove_reference())
+        {
+          Internal::legion_delete(impl);
+        }
+      }
+      impl = Internal::legion_new<Internal::ArgumentMapImpl>(rhs);
+      impl->add_reference();
+      return *this;
     }
     
     //--------------------------------------------------------------------------
@@ -1875,7 +1904,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        impl->add_reference();
+        impl->add_base_gc_ref(Internal::FUTURE_HANDLE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -1884,7 +1913,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        impl->add_reference();
+        impl->add_base_gc_ref(Internal::FUTURE_HANDLE_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -1893,7 +1922,7 @@ namespace Legion {
     {
       if (impl != NULL)
       {
-        if (impl->remove_reference())
+        if (impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
           Internal::legion_delete(impl);
         impl = NULL;
       }
@@ -1905,12 +1934,12 @@ namespace Legion {
     {
       if (impl != NULL)
       {
-        if (impl->remove_reference())
+        if (impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
           Internal::legion_delete(impl);
       }
       impl = rhs.impl;
       if (impl != NULL)
-        impl->add_reference();
+        impl->add_base_gc_ref(Internal::FUTURE_HANDLE_REF);
       return *this;
     }
 

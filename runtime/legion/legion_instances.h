@@ -112,8 +112,8 @@ namespace Legion {
       PhysicalManager(RegionTreeForest *ctx, MemoryManager *memory_manager,
                       LayoutDescription *layout, const PointerConstraint &cons,
                       DistributedID did, AddressSpaceID owner_space, 
-                      AddressSpaceID local_space, RegionNode *node,
-                      PhysicalInstance inst, const Domain &intance_domain,
+                      RegionNode *node, PhysicalInstance inst, 
+                      const Domain &intance_domain,
                       bool own_domain, bool register_now);
       virtual ~PhysicalManager(void);
     public:
@@ -243,7 +243,7 @@ namespace Legion {
       static const AllocationType alloc_type = INSTANCE_MANAGER_ALLOC;
     public:
       InstanceManager(RegionTreeForest *ctx, DistributedID did,
-                      AddressSpaceID owner_space, AddressSpaceID local_space,
+                      AddressSpaceID owner_space,
                       MemoryManager *memory, PhysicalInstance inst, 
                       const Domain &instance_domain, bool own_domain,
                       RegionNode *node, LayoutDescription *desc, 
@@ -306,7 +306,7 @@ namespace Legion {
     class ReductionManager : public PhysicalManager {
     public:
       ReductionManager(RegionTreeForest *ctx, DistributedID did,
-                       AddressSpaceID owner_space, AddressSpaceID local_space,
+                       AddressSpaceID owner_space,
                        MemoryManager *mem, PhysicalInstance inst, 
                        LayoutDescription *description,
                        const PointerConstraint &constraint,
@@ -373,7 +373,6 @@ namespace Legion {
     public:
       ListReductionManager(RegionTreeForest *ctx, DistributedID did,
                            AddressSpaceID owner_space, 
-                           AddressSpaceID local_space,
                            MemoryManager *mem, PhysicalInstance inst, 
                            LayoutDescription *description,
                            const PointerConstraint &constraint,
@@ -419,7 +418,6 @@ namespace Legion {
     public:
       FoldReductionManager(RegionTreeForest *ctx, DistributedID did,
                            AddressSpaceID owner_space, 
-                           AddressSpaceID local_space,
                            MemoryManager *mem, PhysicalInstance inst, 
                            LayoutDescription *description,
                            const PointerConstraint &constraint,
@@ -465,7 +463,7 @@ namespace Legion {
     public:
       VirtualManager(RegionTreeForest *ctx, LayoutDescription *desc,
                      const PointerConstraint &constraint,
-                     DistributedID did, AddressSpaceID local_space);
+                     DistributedID did);
       VirtualManager(const VirtualManager &rhs);
       virtual ~VirtualManager(void);
     public:

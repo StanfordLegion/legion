@@ -36,10 +36,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LogicalView::LogicalView(RegionTreeForest *ctx, DistributedID did,
-                             AddressSpaceID own_addr, AddressSpace loc_space,
+                             AddressSpaceID own_addr,
                              RegionTreeNode *node, bool register_now)
-      : DistributedCollectable(ctx->runtime, did, own_addr, loc_space, 
-                               register_now), 
+      : DistributedCollectable(ctx->runtime, did, own_addr, register_now), 
         context(ctx), logical_node(node), 
         view_lock(Reservation::create_reservation()) 
     //--------------------------------------------------------------------------
@@ -130,10 +129,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceView::InstanceView(RegionTreeForest *ctx, DistributedID did,
-                               AddressSpaceID owner_sp, AddressSpaceID local_sp,
+                               AddressSpaceID owner_sp,
                                AddressSpaceID log_own, RegionTreeNode *node, 
                                UniqueID own_ctx, bool register_now)
-      : LogicalView(ctx, did, owner_sp, local_sp, node, register_now), 
+      : LogicalView(ctx, did, owner_sp, node, register_now), 
         owner_context(own_ctx), logical_owner(log_own)
     //--------------------------------------------------------------------------
     {
@@ -236,12 +235,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     MaterializedView::MaterializedView(
                                RegionTreeForest *ctx, DistributedID did,
-                               AddressSpaceID own_addr, AddressSpaceID loc_addr,
+                               AddressSpaceID own_addr,
                                AddressSpaceID log_own, RegionTreeNode *node, 
                                InstanceManager *man, MaterializedView *par, 
                                UniqueID own_ctx, bool register_now)
       : InstanceView(ctx, encode_materialized_did(did, par == NULL), own_addr, 
-         loc_addr, log_own, node, own_ctx, register_now), 
+                     log_own, node, own_ctx, register_now), 
         manager(man), parent(par), 
         disjoint_children(node->are_all_children_disjoint())
     //--------------------------------------------------------------------------
@@ -266,7 +265,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MaterializedView::MaterializedView(const MaterializedView &rhs)
-      : InstanceView(NULL, 0, 0, 0, 0, NULL, 0, false),
+      : InstanceView(NULL, 0, 0, 0, NULL, 0, false),
         manager(NULL), parent(NULL), disjoint_children(false)
     //--------------------------------------------------------------------------
     {
@@ -407,10 +406,9 @@ namespace Legion {
           {
             // Otherwise we get to make it
             child_view = legion_new<MaterializedView>(context, child_did, 
-                                              owner_space, local_space,
-                                              logical_owner, child_node, 
-                                              manager, this, owner_context,
-                                              true/*reg now*/);
+                                              owner_space, logical_owner, 
+                                              child_node, manager, this, 
+                                              owner_context, true/*reg now*/);
             children[c] = child_view;
           }
           if (free_child_did)
@@ -3050,16 +3048,14 @@ namespace Legion {
       if (runtime->find_pending_collectable_location(did, location))
         view = legion_new_in_place<MaterializedView>(location, runtime->forest,
                                               did, owner_space, 
-                                              runtime->address_space,
                                               logical_owner, 
                                               target_node, inst_manager,
                                               parent, context_uid,
                                               false/*register now*/);
       else
         view = legion_new<MaterializedView>(runtime->forest, did, owner_space,
-                                     runtime->address_space, logical_owner,
-                                     target_node, inst_manager, parent, 
-                                     context_uid, false/*register now*/);
+                                     logical_owner, target_node, inst_manager, 
+                                     parent, context_uid,false/*register now*/);
       if (parent != NULL)
         parent->add_remote_child(view);
       // Register only after construction
@@ -3717,9 +3713,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     DeferredView::DeferredView(RegionTreeForest *ctx, DistributedID did,
-                               AddressSpaceID owner_sp, AddressSpaceID local_sp,
+                               AddressSpaceID owner_sp,
                                RegionTreeNode *node, bool register_now)
-      : LogicalView(ctx, did, owner_sp, local_sp, node, register_now)
+      : LogicalView(ctx, did, owner_sp, node, register_now)
     //--------------------------------------------------------------------------
     {
     }
@@ -4817,10 +4813,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CompositeView::CompositeView(RegionTreeForest *ctx, DistributedID did,
                               AddressSpaceID owner_proc, RegionTreeNode *node,
-                              AddressSpaceID local_proc, 
                               DeferredVersionInfo *info, ClosedNode *tree, 
                               InnerContext *context, bool register_now)
-      : DeferredView(ctx, encode_composite_did(did), owner_proc, local_proc, 
+      : DeferredView(ctx, encode_composite_did(did), owner_proc, 
                      node, register_now), CompositeBase(view_lock),
         version_info(info), closed_tree(tree), owner_context(context)
     {
@@ -4841,7 +4836,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CompositeView::CompositeView(const CompositeView &rhs)
-      : DeferredView(NULL, 0, 0, 0, NULL, false), CompositeBase(view_lock),
+      : DeferredView(NULL, 0, 0, NULL, false), CompositeBase(view_lock),
         version_info(NULL), closed_tree(NULL), owner_context(NULL)
     //--------------------------------------------------------------------------
     {
@@ -4926,8 +4921,8 @@ namespace Legion {
       Runtime *runtime = context->runtime; 
       DistributedID result_did = runtime->get_available_distributed_id(false);
       CompositeView *result = legion_new<CompositeView>(context, result_did,
-          runtime->address_space, logical_node, runtime->address_space,
-          version_info, closed_tree, owner_context, true/*register now*/);
+          runtime->address_space, logical_node, version_info, closed_tree, 
+          owner_context, true/*register now*/);
       // Clone the children
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
             children.begin(); it != children.end(); it++)
@@ -5453,15 +5448,13 @@ namespace Legion {
       if (runtime->find_pending_collectable_location(did, location))
         view = legion_new_in_place<CompositeView>(location, runtime->forest, 
                                            did, owner, target_node, 
-                                           runtime->address_space,
                                            version_info, closed_tree,
                                            owner_context,
                                            false/*register now*/);
       else
         view = legion_new<CompositeView>(runtime->forest, did, owner, 
-                           target_node, runtime->address_space,
-                           version_info, closed_tree, owner_context,
-                           false/*register now*/);
+                           target_node, version_info, closed_tree, 
+                           owner_context, false/*register now*/);
       // Unpack all the internal data structures
       std::set<RtEvent> ready_events;
       view->unpack_composite_view(derez, ready_events);
@@ -6361,14 +6354,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FillView::FillView(RegionTreeForest *ctx, DistributedID did,
-                       AddressSpaceID owner_proc, AddressSpaceID local_proc,
-                       RegionTreeNode *node, FillViewValue *val, 
-                       bool register_now
+                       AddressSpaceID owner_proc, RegionTreeNode *node, 
+                       FillViewValue *val, bool register_now
 #ifdef LEGION_SPY
                        , UniqueID op_uid
 #endif
                        )
-      : DeferredView(ctx, encode_fill_did(did), owner_proc, local_proc, 
+      : DeferredView(ctx, encode_fill_did(did), owner_proc,
                      node, register_now), value(val)
 #ifdef LEGION_SPY
         , fill_op_uid(op_uid)
@@ -6387,7 +6379,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FillView::FillView(const FillView &rhs)
-      : DeferredView(NULL, 0, 0, 0, NULL, false), value(NULL)
+      : DeferredView(NULL, 0, 0, NULL, false), value(NULL)
 #ifdef LEGION_SPY
         , fill_op_uid(0)
 #endif
@@ -6601,8 +6593,7 @@ namespace Legion {
       FillView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))
         view = legion_new_in_place<FillView>(location, runtime->forest, did,
-                                      owner_space, runtime->address_space,
-                                      target_node, fill_value,
+                                      owner_space, target_node, fill_value,
                                       false/*register now*/
 #ifdef LEGION_SPY
                                       , op_uid
@@ -6610,8 +6601,7 @@ namespace Legion {
                                       );
       else
         view = legion_new<FillView>(runtime->forest, did, owner_space,
-                                    runtime->address_space, target_node, 
-                                    fill_value, false/*register now*/
+                                    target_node,fill_value,false/*register now*/
 #ifdef LEGION_SPY
                                     , op_uid
 #endif
@@ -6625,11 +6615,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhiView::PhiView(RegionTreeForest *ctx, DistributedID did, 
-                     AddressSpaceID owner_space, AddressSpaceID local_space,
+                     AddressSpaceID owner_space,
                      DeferredVersionInfo *info, RegionTreeNode *node, 
                      PredEvent tguard, PredEvent fguard, bool register_now) 
-      : DeferredView(ctx, encode_phi_did(did), owner_space, local_space, node, 
-          register_now), 
+      : DeferredView(ctx, encode_phi_did(did), owner_space, node, 
+                     register_now), 
         true_guard(tguard), false_guard(fguard), version_info(info)
     //--------------------------------------------------------------------------
     {
@@ -6642,7 +6632,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhiView::PhiView(const PhiView &rhs)
-      : DeferredView(NULL, 0, 0, 0, NULL, false),
+      : DeferredView(NULL, 0, 0, NULL, false),
         true_guard(PredEvent::NO_PRED_EVENT), 
         false_guard(PredEvent::NO_PRED_EVENT), version_info(NULL)
     //--------------------------------------------------------------------------
@@ -7122,14 +7112,13 @@ namespace Legion {
       PhiView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))
         view = legion_new_in_place<PhiView>(location, runtime->forest,
-                                        did, owner, runtime->address_space,
-                                        version_info, target_node, true_guard,
-                                        false_guard, false/*register_now*/);
+                                        did, owner, version_info, target_node, 
+                                        true_guard, false_guard, 
+                                        false/*register_now*/);
       else
         view = legion_new<PhiView>(runtime->forest, did, owner,
-                                   runtime->address_space, version_info,
-                                   target_node, true_guard, false_guard, 
-                                   false/*register now*/);
+                                   version_info, target_node, true_guard, 
+                                   false_guard, false/*register now*/);
       // Unpack all the internal data structures
       std::set<RtEvent> ready_events;
       view->unpack_phi_view(derez, ready_events);
@@ -7168,12 +7157,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReductionView::ReductionView(RegionTreeForest *ctx, DistributedID did,
-                                 AddressSpaceID own_sp, AddressSpaceID loc_sp,
+                                 AddressSpaceID own_sp,
                                  AddressSpaceID log_own, RegionTreeNode *node, 
                                  ReductionManager *man, UniqueID own_ctx, 
                                  bool register_now)
-      : InstanceView(ctx, encode_reduction_did(did), own_sp, loc_sp, log_own, 
-          node, own_ctx, register_now), 
+      : InstanceView(ctx, encode_reduction_did(did), own_sp, log_own, 
+                     node, own_ctx, register_now), 
         manager(man), remote_request_event(RtEvent::NO_RT_EVENT)
     //--------------------------------------------------------------------------
     {
@@ -7191,7 +7180,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReductionView::ReductionView(const ReductionView &rhs)
-      : InstanceView(NULL, 0, 0, 0, 0, NULL, 0, false), manager(NULL)
+      : InstanceView(NULL, 0, 0, 0, NULL, 0, false), manager(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -8136,16 +8125,13 @@ namespace Legion {
       ReductionView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))
         view = legion_new_in_place<ReductionView>(location, runtime->forest,
-                                           did, owner_space,
-                                           runtime->address_space,
-                                           logical_owner,
+                                           did, owner_space, logical_owner,
                                            target_node, red_manager,
                                            context_uid, false/*register now*/);
       else
         view = legion_new<ReductionView>(runtime->forest, did, owner_space,
-                                  runtime->address_space, logical_owner,
-                                  target_node, red_manager, context_uid,
-                                  false/*register now*/);
+                                  logical_owner, target_node, red_manager, 
+                                  context_uid, false/*register now*/);
       // Only register after construction
       view->register_with_runtime(NULL/*remote registration not needed*/);
     }
