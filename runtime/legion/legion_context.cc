@@ -4102,7 +4102,7 @@ namespace Legion {
             // Otherwise launch a task to complete the future map,
             // add the necessary references to prevent premature
             // garbage collection by the runtime
-            result->add_base_valid_ref(DEFERRED_TASK_REF);
+            result->add_base_gc_ref(DEFERRED_TASK_REF);
             launcher.predicate_false_future.impl->add_base_gc_ref(
                                                 FUTURE_HANDLE_REF);
             Runtime::DeferredFutureMapSetArgs args;
