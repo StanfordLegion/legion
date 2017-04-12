@@ -216,6 +216,15 @@ ifeq ($(strip $(USE_PYTHON)),1)
   CC_FLAGS += -DREALM_USE_PYTHON
 endif
 
+USE_DLMOPEN ?= 0
+ifeq ($(strip $(USE_DLMOPEN)),1)
+  ifneq ($(strip $(USE_LIBDL)),1)
+    $(error USE_DLMOPEN requires USE_LIBDL)
+  endif
+
+  CC_FLAGS += -DREALM_USE_DLMOPEN
+endif
+
 # Flags for Realm
 
 # Realm uses CUDA if requested

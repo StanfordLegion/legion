@@ -146,7 +146,6 @@ namespace Realm {
 
   PythonInterpreter::PythonInterpreter() 
   {
-// #define REALM_USE_DLMOPEN
 #ifdef REALM_USE_DLMOPEN
     handle = dlmopen(LM_ID_NEWLM, "libpython2.7.so", RTLD_DEEPBIND | RTLD_LOCAL | RTLD_LAZY);
 #else
@@ -569,6 +568,14 @@ namespace Realm {
         delete m;
         return 0;
       }
+
+#ifndef REALM_USE_DLMOPEN
+      // Multiple CPUs are only allowed if we're using dlmopen.
+      if(m->cfg_num_python_cpus > 1) {
+        log_py.fatal() << "support for multiple Python CPUs is not available: recompile with USE_DLMOPEN";
+        assert(false);
+      }
+#endif
 
       // get number/sizes of NUMA nodes -
       //   disable (with a warning) numa binding if support not found
