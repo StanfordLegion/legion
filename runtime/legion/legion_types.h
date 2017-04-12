@@ -558,7 +558,8 @@ namespace Legion {
       LG_THROUGHPUT_PRIORITY = 0,
       LG_DEFERRED_THROUGHPUT_PRIORITY = 1,
       LG_LATENCY_PRIORITY = 2,
-      LG_RESOURCE_PRIORITY = 3,
+      LG_RESPONSE_PRIORITY = 3,
+      LG_RESOURCE_PRIORITY = 4,
     };
 
     enum VirtualChannelKind {
@@ -577,7 +578,8 @@ namespace Legion {
       VERSION_VIRTUAL_CHANNEL = 12,
       VERSION_MANAGER_VIRTUAL_CHANNEL = 13,
       ANALYSIS_VIRTUAL_CHANNEL = 14,
-      MAX_NUM_VIRTUAL_CHANNELS = 15, // this one must be last
+      FUTURE_VIRTUAL_CHANNEL = 15,
+      MAX_NUM_VIRTUAL_CHANNELS = 16, // this one must be last
     };
 
     enum MessageKind {
@@ -652,6 +654,8 @@ namespace Legion {
       SEND_MANAGER_REQUEST,
       SEND_FUTURE_RESULT,
       SEND_FUTURE_SUBSCRIPTION,
+      SEND_FUTURE_MAP_REQUEST,
+      SEND_FUTURE_MAP_RESPONSE,
       SEND_MAPPER_MESSAGE,
       SEND_MAPPER_BROADCAST,
       SEND_TASK_IMPL_SEMANTIC_REQ,
@@ -776,6 +780,8 @@ namespace Legion {
         "Send Manager Request",                                       \
         "Send Future Result",                                         \
         "Send Future Subscription",                                   \
+        "Send Future Map Future Request",                             \
+        "Send Future Map Future Response",                            \
         "Send Mapper Message",                                        \
         "Send Mapper Broadcast",                                      \
         "Send Task Impl Semantic Req",                                \
@@ -1154,7 +1160,6 @@ namespace Legion {
     // runtime.h
     class Collectable;
     class ArgumentMapImpl;
-    class ArgumentMapStore;
     class FutureImpl;
     class FutureMapImpl;
     class PhysicalRegionImpl;
@@ -1394,6 +1399,7 @@ namespace Legion {
     friend class Internal::PointTask;                       \
     friend class Internal::IndexTask;                       \
     friend class Internal::SliceTask;                       \
+    friend class Internal::MinimalPoint;                    \
     friend class Internal::RegionTreeForest;                \
     friend class Internal::IndexSpaceNode;                  \
     friend class Internal::IndexPartNode;                   \
@@ -1419,6 +1425,7 @@ namespace Legion {
     friend class Internal::MapperManager;                   \
     friend class Internal::InstanceRef;                     \
     friend class Internal::MPILegionHandshakeImpl;          \
+    friend class Internal::ArgumentMapImpl;                 \
     friend class Internal::FutureMapImpl;                   \
     friend class Internal::TaskContext;                     \
     friend class Internal::InnerContext;                    \

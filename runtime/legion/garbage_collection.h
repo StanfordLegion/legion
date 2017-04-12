@@ -250,7 +250,6 @@ namespace Legion {
     public:
       DistributedCollectable(Runtime *rt, DistributedID did,
                              AddressSpaceID owner_space,
-                             AddressSpaceID local_space,
                              bool register_with_runtime = true);
       virtual ~DistributedCollectable(void);
     public:

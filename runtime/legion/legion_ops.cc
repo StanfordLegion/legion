@@ -1719,7 +1719,7 @@ namespace Legion {
         Future temp = Future(
               legion_new<FutureImpl>(runtime, true/*register*/,
                 runtime->get_available_distributed_id(true),
-                runtime->address_space, runtime->address_space, this));
+                runtime->address_space, this));
         AutoLock o_lock(op_lock);
         // See if we lost the race
         if (result_future.impl == NULL)
@@ -9061,7 +9061,7 @@ namespace Legion {
     {
       initialize_operation(ctx, true/*track*/);
       future = Future(legion_new<FutureImpl>(runtime, true/*register*/,
-            runtime->get_available_distributed_id(true), runtime->address_space,
+            runtime->get_available_distributed_id(true), 
             runtime->address_space, this));
       collective = dc;
       if (Runtime::legion_spy_enabled)
@@ -9879,7 +9879,9 @@ namespace Legion {
       mapper_tag = launcher.mapping_tag;
       // Make a new future map for storing our results
       // We'll fill it in later
-      result_map = FutureMap(legion_new<FutureMapImpl>(ctx, this, runtime)); 
+      result_map = FutureMap(legion_new<FutureMapImpl>(ctx, this, runtime,
+            runtime->get_available_distributed_id(true/*need continuation*/),
+            runtime->address_space));
 #ifdef DEBUG_LEGION
       size_t total_points = 0;
       for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
@@ -14365,7 +14367,7 @@ namespace Legion {
       preconditions = launcher.preconditions;
       result = Future(legion_new<FutureImpl>(runtime, true/*register*/,
                   runtime->get_available_distributed_id(true),
-                  runtime->address_space, runtime->address_space, this));
+                  runtime->address_space, this));
       if (Runtime::legion_spy_enabled)
       {
         LegionSpy::log_timing_operation(ctx->get_unique_id(), unique_op_id);

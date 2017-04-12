@@ -1131,7 +1131,7 @@ namespace Legion {
       };
     public:
       VersionState(VersionID vid, Runtime *rt, DistributedID did,
-                   AddressSpaceID owner_space, AddressSpaceID local_space, 
+                   AddressSpaceID owner_space, 
                    RegionTreeNode *node, bool register_now);
       VersionState(const VersionState &rhs);
       virtual ~VersionState(void);

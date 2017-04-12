@@ -8007,7 +8007,6 @@ namespace Legion {
         context->runtime->find_memory_manager(inst.get_location());
       InstanceManager *result = legion_new<InstanceManager>(context, did, 
                                          context->runtime->address_space,
-                                         context->runtime->address_space,
                                          memory, inst, node->row_source, 
                                          false/*own*/, node, layout, 
                                          pointer_constraint,
@@ -11361,7 +11360,7 @@ namespace Legion {
       version_info.copy_to(*view_info);
       // Make the view
       CompositeView *result = legion_new<CompositeView>(context, did, 
-                           local_space, this, local_space, view_info, 
+                           local_space, this, view_info, 
                            closed_tree, owner_ctx, true/*register now*/);
       // Capture the state of the top of the composite view
       PhysicalState *state = get_physical_state(version_info);
@@ -14055,7 +14054,7 @@ namespace Legion {
       FillView::FillViewValue *fill_value = 
         new FillView::FillViewValue(value, value_size);
       FillView *fill_view = 
-        legion_new<FillView>(context, did, local_space, local_space, 
+        legion_new<FillView>(context, did, local_space,
                              this, fill_value, true/*register now*/
 #ifdef LEGION_SPY
                              , fill_op_uid
@@ -14076,8 +14075,8 @@ namespace Legion {
         DeferredVersionInfo *view_info = new DeferredVersionInfo();
         version_info.copy_to(*view_info); 
         PhiView *phi_view = legion_new<PhiView>(context, did, local_space,
-                                                local_space, view_info,
-                                                this, true_guard, false_guard,
+                                                view_info, this, true_guard, 
+                                                false_guard,
                                                 true/*register now*/);
         // Record the true and false views
         phi_view->record_true_view(fill_view, fill_mask);
