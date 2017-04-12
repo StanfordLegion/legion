@@ -77,11 +77,8 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = ARGUMENT_MAP_ALLOC;
     public:
-      FRIEND_ALL_RUNTIME_CLASSES
       ArgumentMapImpl(void);
-      ArgumentMapImpl(ArgumentMapStore *st);
-      ArgumentMapImpl(ArgumentMapStore *st, 
-                  const std::map<DomainPoint,TaskArgument> &);
+      ArgumentMapImpl(const FutureMap &rhs);
       ArgumentMapImpl(const ArgumentMapImpl &impl);
       ~ArgumentMapImpl(void);
     public:
@@ -91,41 +88,16 @@ namespace Legion {
       void set_point(const DomainPoint &point, const TaskArgument &arg,
                      bool replace);
       bool remove_point(const DomainPoint &point);
-      TaskArgument get_point(const DomainPoint &point) const;
+      TaskArgument get_point(const DomainPoint &point);
     public:
-      void pack_arguments(Serializer &rez, const Domain &domain);
-      void unpack_arguments(Deserializer &derez);
-    protected:
-      ArgumentMapImpl* freeze(void);
-      ArgumentMapImpl* clone(void);
+      FutureMapImpl* freeze(TaskContext *ctx);
+      void unfreeze(void);
+    public:
+      Runtime *const runtime;
     private:
-      std::map<DomainPoint,TaskArgument> arguments;
-      ArgumentMapImpl *next;
-      ArgumentMapStore *const store;
-      bool frozen;
-    };
-
-    /**
-     * \class ArgumentMapStore
-     * Argument map stores are the backing stores for a chain of
-     * argument maps so that the actual values of the arguments do
-     * not need to be duplicated across every version of the
-     * argument map.
-     */
-    class ArgumentMapStore {
-    public:
-      static const AllocationType alloc_type = ARGUMENT_MAP_STORE_ALLOC;
-    public:
-      FRIEND_ALL_RUNTIME_CLASSES
-      ArgumentMapStore(void);
-      ArgumentMapStore(const ArgumentMapStore &rhs);
-      ~ArgumentMapStore(void);
-    public:
-      ArgumentMapStore& operator=(const ArgumentMapStore &rhs);
-    public:
-      TaskArgument add_arg(const TaskArgument &arg);
-    private:
-      std::vector<TaskArgument> values;
+      FutureMapImpl *future_map;
+      std::map<DomainPoint,Future> arguments;
+      bool equivalent; // argument and future_map the same
     };
 
     /**
@@ -152,8 +124,7 @@ namespace Legion {
       };
     public:
       FutureImpl(Runtime *rt, bool register_future, DistributedID did, 
-                 AddressSpaceID owner_space, AddressSpaceID local_space,
-                 Operation *op = NULL);
+                 AddressSpaceID owner_space, Operation *op = NULL);
       FutureImpl(const FutureImpl &rhs);
       virtual ~FutureImpl(void);
     public:
@@ -218,47 +189,60 @@ namespace Legion {
 
     /**
      * \class FutureMapImpl
-     * The base implementation of a future map object.  Note
-     * that while future objects can move from one node to
-     * another, future maps will never leave the node on
-     * which they are created.  The futures contained within
-     * a future map are permitted to migrate.
+     * The base implementation of a future map object. Note
+     * that this is now a distributed collectable object too
+     * that can be used to find the name of a future for a
+     * given point anywhere in the machine.
      */
-    class FutureMapImpl : public Collectable {
+    class FutureMapImpl : public DistributedCollectable {
     public:
       static const AllocationType alloc_type = FUTURE_MAP_ALLOC;
     public:
-      FutureMapImpl(TaskContext *ctx, Operation *op, Runtime *rt);
-      FutureMapImpl(TaskContext *ctx, Runtime *rt); // empty map
+      FutureMapImpl(TaskContext *ctx, Operation *op, 
+                    Runtime *rt, DistributedID did, AddressSpaceID owner_space);
+      FutureMapImpl(TaskContext *ctx, Runtime *rt, 
+                    DistributedID did, AddressSpaceID owner_space,
+                    bool register_now = true); // empty map
       FutureMapImpl(const FutureMapImpl &rhs);
       ~FutureMapImpl(void);
     public:
       FutureMapImpl& operator=(const FutureMapImpl &rhs);
     public:
-      Future get_future(const DomainPoint &point);
+      virtual void notify_active(ReferenceMutator *mutator);
+      virtual void notify_valid(ReferenceMutator *mutator);
+      virtual void notify_invalid(ReferenceMutator *mutator);
+      virtual void notify_inactive(ReferenceMutator *mutator);
+    public:
+      Future get_future(const DomainPoint &point, bool allow_empty = false);
+      void set_future(const DomainPoint &point, FutureImpl *impl);
       void get_void_result(const DomainPoint &point, 
                             bool silence_warnings = true);
       void wait_all_results(bool silence_warnings = true);
       void complete_all_futures(void);
       bool reset_all_futures(void);
+    public:
+      void get_all_futures(std::map<DomainPoint,Future> &futures) const;
+      void set_all_futures(const std::map<DomainPoint,Future> &futures);
 #ifdef DEBUG_LEGION
     public:
       void add_valid_domain(const Domain &d);
       void add_valid_point(const DomainPoint &dp);
 #endif
     public:
+      void record_future_map_registered(ReferenceMutator *creator);
+      static void handle_future_map_future_request(Deserializer &derez,
+                              Runtime *runtime, AddressSpaceID source);
+      static void handle_future_map_future_response(Deserializer &derez,
+                                                    Runtime *runtime);
+    public:
       TaskContext *const context;
       // Either an index space task or a must epoch op
       Operation *const op;
       const GenerationID op_gen;
-      const bool valid;
-      Runtime *const runtime;
     private:
       ApEvent ready_event;
       std::map<DomainPoint,Future> futures;
-      // Unlike futures, the future map is never used remotely
-      // so it can create and destroy its own lock.
-      Reservation lock;
+      bool valid;
 #ifdef DEBUG_LEGION
     private:
       std::vector<Domain> valid_domains;
@@ -833,13 +817,14 @@ namespace Legion {
       VirtualChannel& operator=(const VirtualChannel &rhs);
     public:
       void package_message(Serializer &rez, MessageKind k, bool flush,
-                           Runtime *runtime, Processor target, bool shutdown);
+                           Runtime *runtime, Processor target, 
+                           bool response, bool shutdown);
       void process_message(const void *args, size_t arglen, 
                         Runtime *runtime, AddressSpaceID remote_address_space);
       void confirm_shutdown(ShutdownManager *shutdown_manager, bool phase_one);
     private:
       void send_message(bool complete, Runtime *runtime, 
-                        Processor target, bool shutdown);
+                        Processor target, bool response, bool shutdown);
       void handle_messages(unsigned num_messages, Runtime *runtime, 
                            AddressSpaceID remote_address_space,
                            const char *args, size_t arglen);
@@ -896,7 +881,7 @@ namespace Legion {
     public:
       void send_message(Serializer &rez, MessageKind kind, 
                         VirtualChannelKind channel, bool flush, 
-                        bool shutdown = false);
+                        bool response = false, bool shutdown = false);
       void receive_message(const void *args, size_t arglen);
       void confirm_shutdown(ShutdownManager *shutdown_manager,
                             bool phase_one);
@@ -2065,6 +2050,10 @@ namespace Legion {
                                              Serializer &rez);
       void send_future_result(AddressSpaceID target, Serializer &rez);
       void send_future_subscription(AddressSpaceID target, Serializer &rez);
+      void send_future_map_request_future(AddressSpaceID target, 
+                                          Serializer &rez);
+      void send_future_map_response_future(AddressSpaceID target,
+                                           Serializer &rez);
       void send_mapper_message(AddressSpaceID target, Serializer &rez);
       void send_mapper_broadcast(AddressSpaceID target, Serializer &rez);
       void send_task_impl_semantic_request(AddressSpaceID target, 
@@ -2246,6 +2235,9 @@ namespace Legion {
       void handle_manager_request(Deserializer &derez, AddressSpaceID source);
       void handle_future_result(Deserializer &derez);
       void handle_future_subscription(Deserializer &derez);
+      void handle_future_map_future_request(Deserializer &derez,
+                                            AddressSpaceID source);
+      void handle_future_map_future_response(Deserializer &derez);
       void handle_mapper_message(Deserializer &derez);
       void handle_mapper_broadcast(Deserializer &derez);
       void handle_task_impl_semantic_request(Deserializer &derez,
@@ -2414,6 +2406,8 @@ namespace Legion {
     public:
       FutureImpl* find_or_create_future(DistributedID did,
                                         ReferenceMutator *mutator);
+      FutureMapImpl* find_or_create_future_map(DistributedID did, 
+                      TaskContext *ctx, ReferenceMutator *mutator);
       IndexSpace find_index_launch_space(Context ctx,
                                          const Domain &launch_domain);
     public:
@@ -3013,7 +3007,7 @@ namespace Legion {
     public:
       // Static member variables
       static Runtime *the_runtime;
-      // the runtime map is only valid when running with -hl:separate
+      // the runtime map is only valid when running with -lg:separate
       static std::map<Processor,Runtime*> *runtime_map;
       static std::vector<RegistrationCallbackFnptr> registration_callbacks;
       static Processor::TaskFuncID legion_main_id;

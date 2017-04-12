@@ -17,4 +17,4 @@ RUN LLVM_CONFIG=llvm-config-3.5 /usr/local/legion/language/install.py --rdir=aut
     ln -s /usr/local/legion/language/regent.py /usr/local/bin/regent
 
 # Configure container startup.
-CMD ["/usr/local/bin/regent"]
+CMD ["/bin/bash"]

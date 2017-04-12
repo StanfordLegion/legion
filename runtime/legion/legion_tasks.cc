@@ -495,7 +495,7 @@ namespace Legion {
       derez.deserialize(local_arglen);
       if (local_arglen > 0)
       {
-        local_args = legion_malloc(LOCAL_ARGS_ALLOC, local_arglen);
+        local_args = malloc(local_arglen);
         derez.deserialize(local_args,local_arglen);
       }
       derez.deserialize(orig_proc);
@@ -764,7 +764,7 @@ namespace Legion {
       }
       if (local_args != NULL)
       {
-        legion_free(LOCAL_ARGS_ALLOC, local_args, local_arglen);
+        free(local_args);
         local_args = NULL;
         local_arglen = 0;
       }
@@ -4284,8 +4284,8 @@ namespace Legion {
         reduction_state = NULL;
         reduction_state_size = 0;
       }
-      // Remove our reference to the argument map
-      argument_map = ArgumentMap();
+      // Remove our reference to the point arguments 
+      point_arguments = FutureMap();
       slices.clear(); 
       version_infos.clear();
       restrict_infos.clear();
@@ -4425,7 +4425,7 @@ namespace Legion {
       this->must_epoch_task = rhs->must_epoch_task;
       this->sliced = !recurse;
       this->redop = rhs->redop;
-      this->argument_map = rhs->argument_map;
+      this->point_arguments = rhs->point_arguments;
       if (this->redop != 0)
       {
         this->reduction_op = rhs->reduction_op;
@@ -4859,7 +4859,7 @@ namespace Legion {
       // Get a future from the parent context to use as the result
       result = Future(legion_new<FutureImpl>(runtime, true/*register*/,
             runtime->get_available_distributed_id(!top_level_task), 
-            runtime->address_space, runtime->address_space, this));
+            runtime->address_space, this));
       check_empty_field_requirements(); 
       if (Runtime::legion_spy_enabled)
       {
@@ -6849,7 +6849,8 @@ namespace Legion {
         args = arg_manager->get_allocation();
         memcpy(args, launcher.global_arg.get_ptr(), arglen);
       }
-      argument_map = ArgumentMap(launcher.argument_map.impl->freeze());
+      point_arguments = 
+        FutureMap(launcher.argument_map.impl->freeze(parent_ctx));
       map_id = launcher.map_id;
       tag = launcher.tag;
       is_index_space = true;
@@ -6865,7 +6866,9 @@ namespace Legion {
       if (launcher.predicate != Predicate::TRUE_PRED)
         initialize_predicate(launcher.predicate_false_future,
                              launcher.predicate_false_result);
-      future_map = FutureMap(legion_new<FutureMapImpl>(ctx, this, runtime));
+      future_map = FutureMap(legion_new<FutureMapImpl>(ctx, this, runtime,
+            runtime->get_available_distributed_id(true/*needs continuation*/),
+            runtime->address_space));
 #ifdef DEBUG_LEGION
       future_map.impl->add_valid_domain(index_domain);
 #endif
@@ -6917,7 +6920,8 @@ namespace Legion {
         args = arg_manager->get_allocation();
         memcpy(args, launcher.global_arg.get_ptr(), arglen);
       }
-      argument_map = ArgumentMap(launcher.argument_map.impl->freeze());
+      point_arguments = 
+        FutureMap(launcher.argument_map.impl->freeze(parent_ctx));
       map_id = launcher.map_id;
       tag = launcher.tag;
       is_index_space = true;
@@ -6950,7 +6954,7 @@ namespace Legion {
                              launcher.predicate_false_result);
       reduction_future = Future(legion_new<FutureImpl>(runtime,
             true/*register*/, runtime->get_available_distributed_id(true), 
-            runtime->address_space, runtime->address_space, this));
+            runtime->address_space, this));
       check_empty_field_requirements();
       if (check_privileges)
         perform_privilege_checks();
@@ -7220,7 +7224,7 @@ namespace Legion {
           else
           {
             // Add references so things won't be prematurely collected
-            future_map.impl->add_reference();
+            future_map.impl->add_base_resource_ref(DEFERRED_TASK_REF);
             predicate_false_future.impl->add_base_gc_ref(DEFERRED_TASK_REF,
                                                          this);
             Runtime::DeferredFutureMapSetArgs args;
@@ -7535,9 +7539,20 @@ namespace Legion {
         index_point = itr.p; 
         compute_point_region_requirements();
         // Get our local args
-        TaskArgument local = argument_map.impl->get_point(index_point);
-        local_args = local.get_ptr();
-        local_arglen = local.get_size();
+        Future local_arg = point_arguments.impl->get_future(index_point);
+        if (local_arg.impl != NULL)
+        {
+          ApEvent local_ready = local_arg.impl->get_ready_event();
+          if (!local_ready.has_triggered())
+            local_ready.wait();
+          local_args = local_arg.impl->get_untyped_result();
+          local_arglen = local_arg.impl->get_untyped_size();
+        }
+        else
+        {
+          local_args = NULL;
+          local_arglen = 0;
+        }
         InlineContext *inline_ctx = new InlineContext(runtime, enclosing, this);
         // Save the inner context as the parent ctx
         parent_ctx = inline_ctx;
@@ -8386,25 +8401,13 @@ namespace Legion {
       {
         points[idx]->pack_task(rez, target);
       }
-      // If we don't have any points, we have to pack the arguments
+      // If we don't have any points, we have to pack up the argument map
       if (points.empty())
       {
-        std::map<DomainPoint,TaskArgument> non_empty_args;
-        for (Domain::DomainPointIterator itr(internal_domain); itr; itr++)
-        {
-          TaskArgument arg = argument_map.impl->get_point(itr.p);
-          if (arg.get_size() > 0)
-            non_empty_args[itr.p] = arg;
-        }
-        rez.serialize<size_t>(non_empty_args.size());
-        for (std::map<DomainPoint,TaskArgument>::const_iterator it = 
-              non_empty_args.begin(); it != non_empty_args.end(); it++)
-        {
-          rez.serialize(it->first);
-          size_t arg_size = it->second.get_size();
-          rez.serialize(arg_size);
-          rez.serialize(it->second.get_ptr(), arg_size);
-        }
+        if (point_arguments.impl != NULL)
+          rez.serialize(point_arguments.impl->did);
+        else
+          rez.serialize<DistributedID>(0);
       }
       bool deactivate_now = true;
       if (!is_remote() && is_locally_mapped())
@@ -8492,22 +8495,14 @@ namespace Legion {
       }
       if (num_points == 0)
       {
-        size_t num_local_args;
-        derez.deserialize(num_local_args);
-        if (num_local_args > 0)
+        DistributedID future_map_did;
+        derez.deserialize(future_map_did);
+        if (future_map_did > 0)
         {
-          // We also have to unpack our point arguments
-          argument_map = runtime->create_argument_map();
-          for (unsigned idx = 0; idx < num_local_args; idx++)
-          {
-            DomainPoint dp;
-            derez.deserialize(dp);
-            size_t arg_size;
-            derez.deserialize(arg_size);
-            argument_map.set_point(dp, 
-                TaskArgument(derez.get_current_pointer(), arg_size));
-            derez.advance_pointer(arg_size);
-          }
+          WrapperReferenceMutator mutator(ready_events);
+          point_arguments = 
+            FutureMap(runtime->find_or_create_future_map(future_map_did, 
+                                                         parent_ctx, &mutator));
         }
       }
       // Return true to add this to the ready queue
@@ -8643,8 +8638,9 @@ namespace Legion {
         MinimalPoint &mp = minimal_points[point_idx];
         mp.add_domain_point(itr.p);
         // Find the argument for this point if it exists
-        TaskArgument arg = argument_map.impl->get_point(itr.p);
-        mp.add_argument(arg, false/*own*/);
+        if (point_arguments.impl != NULL)
+          mp.add_argument(
+              point_arguments.impl->get_future(itr.p, true/*allow empty*/));
       }
       // Compute any projection region requirements
       project_region_requirements(minimal_points);  
@@ -9258,21 +9254,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MinimalPoint::MinimalPoint(void)
-      : arg(NULL), arglen(0), own_arg(false)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     MinimalPoint::MinimalPoint(const MinimalPoint &rhs)
-      : arg(NULL), arglen(0), own_arg(false)
     //--------------------------------------------------------------------------
     {
       // should only be called with rhs being empty
 #ifdef DEBUG_LEGION
       assert(rhs.dp.dim == 0);
-      assert(rhs.arg == NULL);
-      assert(rhs.arglen == 0);
 #endif
     }
 
@@ -9280,14 +9272,6 @@ namespace Legion {
     MinimalPoint::~MinimalPoint(void)
     //--------------------------------------------------------------------------
     {
-      if (own_arg)
-      {
-#ifdef DEBUG_LEGION
-        assert(arg != NULL);
-        assert(arglen > 0);
-#endif
-        free(arg);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -9310,37 +9294,34 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    void MinimalPoint::add_argument(const TaskArgument &argument, bool own)
+    void MinimalPoint::add_argument(const Future &f)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(arg == NULL);
-#endif
-      arg = argument.get_ptr();
-      arglen = argument.get_size();
-      own_arg = own;
+      arg = f;
     }
 
     //--------------------------------------------------------------------------
     void MinimalPoint::assign_argument(void *&local_arg, size_t &local_arglen)
     //--------------------------------------------------------------------------
     {
-      // If we own it, we can just give it      
-      if (own_arg)
+      if (arg.impl != NULL)
       {
-        local_arg = arg;
-        local_arglen = arglen;
-        arg = 0;
-        arglen = 0;
-        own_arg = false;
+        ApEvent ready = arg.impl->get_ready_event();
+        if (!ready.has_triggered())
+          ready.wait();
+        local_arglen = arg.impl->get_untyped_size();
+        // Have to make a local copy since the point takes ownership
+        if (local_arglen > 0)
+        {
+          local_arg = malloc(local_arglen);
+          memcpy(local_arg, arg.impl->get_untyped_result(), local_arglen);
+        }
       }
-      else if (arg != NULL)
+      else
       {
-        local_arglen = arglen;
-        local_arg = malloc(arglen);
-        memcpy(local_arg, arg, arglen);
+        local_arg = NULL;
+        local_arglen = 0;
       }
-      // Otherwise there is no argument so we are done
     }
 
     //--------------------------------------------------------------------------
@@ -9353,43 +9334,6 @@ namespace Legion {
       assert(finder != projections.end());
 #endif
       return finder->second;
-    }
-
-    //--------------------------------------------------------------------------
-    void MinimalPoint::pack(Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      rez.serialize<size_t>(projections.size());
-      for (std::map<unsigned,LogicalRegion>::const_iterator it = 
-            projections.begin(); it != projections.end(); it++)
-      {
-        rez.serialize(it->first);
-        rez.serialize(it->second);
-      }
-      rez.serialize(arglen);
-      if (arglen > 0)
-        rez.serialize(arg, arglen);
-    }
-
-    //--------------------------------------------------------------------------
-    void MinimalPoint::unpack(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      size_t num_projections;
-      derez.deserialize(num_projections);
-      for (unsigned idx = 0; idx < num_projections; idx++)
-      {
-        unsigned index;
-        derez.deserialize(index);
-        derez.deserialize(projections[index]);
-      }
-      derez.deserialize(arglen);
-      if (arglen > 0)
-      {
-        arg = malloc(arglen);
-        derez.deserialize(arg, arglen);
-        own_arg = true;
-      }
     }
 
   }; // namespace Internal 

@@ -521,9 +521,11 @@ namespace Legion {
     class ArgumentMap {
     public:
       ArgumentMap(void);
+      ArgumentMap(const FutureMap &rhs);
       ArgumentMap(const ArgumentMap &rhs);
       ~ArgumentMap(void);
     public:
+      ArgumentMap& operator=(const FutureMap &rhs);
       ArgumentMap& operator=(const ArgumentMap &rhs);
       inline bool operator==(const ArgumentMap &rhs) const
         { return (impl == rhs.impl); }
@@ -2923,7 +2925,7 @@ namespace Legion {
                                         const PointColoring &coloring,
                                         PartitionKind part_kind = COMPUTE_KIND,
                                         Color color = AUTO_GENERATE_ID,
-                                        bool allocable = true);
+                                        bool allocable = false);
       /**
        * @deprecated
        * See the previous create_index_partition call
