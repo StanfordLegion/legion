@@ -835,6 +835,7 @@ namespace Legion {
     public:
       void return_privilege_state(ResourceTracker *target);
       void handle_collective_message(Deserializer &derez);
+      void handle_future_map_request(Deserializer &derez);
     public:
       ShardManager *const manager;
       const ShardID shard_id;

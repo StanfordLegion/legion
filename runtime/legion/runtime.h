@@ -222,7 +222,7 @@ namespace Legion {
       void complete_all_futures(void);
       bool reset_all_futures(void);
     public:
-      virtual void get_all_futures(std::map<DomainPoint,Future> &futures) const;
+      virtual void get_all_futures(std::map<DomainPoint,Future> &futures);
       void set_all_futures(const std::map<DomainPoint,Future> &futures);
 #ifdef DEBUG_LEGION
     public:
@@ -240,12 +240,12 @@ namespace Legion {
       // Either an index space task or a must epoch op
       Operation *const op;
       const GenerationID op_gen;
-    private:
+    protected:
       ApEvent ready_event;
       std::map<DomainPoint,Future> futures;
       bool valid;
 #ifdef DEBUG_LEGION
-    private:
+    protected:
       std::vector<Domain> valid_domains;
       std::set<DomainPoint> valid_points;
 #endif
@@ -259,7 +259,8 @@ namespace Legion {
     class ReplFutureMapImpl : public FutureMapImpl {
     public:
       ReplFutureMapImpl(ReplicateContext *ctx, Operation *op, 
-                    Runtime *rt, DistributedID did, AddressSpaceID owner_space);
+                        const Domain &full_domain, Runtime *rt, 
+                        DistributedID did, AddressSpaceID owner_space);
       ReplFutureMapImpl(const ReplFutureMapImpl &rhs);
       virtual ~ReplFutureMapImpl(void);
     public:
@@ -270,16 +271,22 @@ namespace Legion {
     public:
       virtual Future get_future(const DomainPoint &point,
                                 bool allow_empty = false);
-      virtual void get_all_futures(std::map<DomainPoint,Future> &futures) const;
+      virtual void get_all_futures(std::map<DomainPoint,Future> &futures);
     public:
       void set_sharding_function(ShardingFunction *function);
+      void handle_future_map_request(Deserializer &derez);
+    public:
+      static void handle_repl_future_map_response(Deserializer &derez,
+                                                  Runtime *runtime);
     public:
       ReplicateContext *const repl_ctx;
+      const Domain full_domain;
       const ApBarrier future_map_barrier;
       const CollectiveID collective_index; // in case we have to do all-to-all
     protected:
       RtUserEvent sharding_function_ready;
       ShardingFunction *sharding_function;
+      bool collective_performed;
     };
 
     /**
@@ -2086,6 +2093,8 @@ namespace Legion {
                                           Serializer &rez);
       void send_future_map_response_future(AddressSpaceID target,
                                            Serializer &rez);
+      void send_repl_future_map_request(AddressSpaceID target, Serializer &rez);
+      void send_repl_future_map_response(AddressSpaceID target,Serializer &rez);
       void send_mapper_message(AddressSpaceID target, Serializer &rez);
       void send_mapper_broadcast(AddressSpaceID target, Serializer &rez);
       void send_task_impl_semantic_request(AddressSpaceID target, 
@@ -2270,6 +2279,8 @@ namespace Legion {
       void handle_future_map_future_request(Deserializer &derez,
                                             AddressSpaceID source);
       void handle_future_map_future_response(Deserializer &derez);
+      void handle_repl_future_map_request(Deserializer &derez);
+      void handle_repl_future_map_response(Deserializer &derez);
       void handle_mapper_message(Deserializer &derez);
       void handle_mapper_broadcast(Deserializer &derez);
       void handle_task_impl_semantic_request(Deserializer &derez,

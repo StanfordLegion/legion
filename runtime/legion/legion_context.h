@@ -1297,6 +1297,7 @@ namespace Legion {
     public:
       void exchange_common_resources(void);
       void handle_collective_message(Deserializer &derez);
+      void handle_future_map_request(Deserializer &derez);
     public:
       // Collective methods
       CollectiveID get_next_collective_index(void);
@@ -1307,6 +1308,7 @@ namespace Legion {
       // Future map methods
       ApBarrier get_next_future_map_barrier(void);
       void register_future_map(ReplFutureMapImpl *map);
+      ReplFutureMapImpl* find_or_buffer_future_map_request(Deserializer &derez);
       void unregister_future_map(ReplFutureMapImpl *map);
       static void handle_future_map_reclaim(const void *args);
     public:
@@ -1345,6 +1347,8 @@ namespace Legion {
                 std::pair<void*,size_t> > > pending_collective_updates;
     protected:
       std::map<ApEvent,ReplFutureMapImpl*> future_maps;
+      std::map<ApEvent,std::vector<
+                std::pair<void*,size_t> > > pending_future_map_requests;
     };
 
     /**

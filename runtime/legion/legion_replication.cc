@@ -414,7 +414,7 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(ctx);
 #endif
       // Make a replicate future map 
-      return legion_new<ReplFutureMapImpl>(repl_ctx, this, runtime,
+      return legion_new<ReplFutureMapImpl>(repl_ctx, this, index_domain,runtime,
           runtime->get_available_distributed_id(true/*need continuation*/),
           runtime->address_space);
     }
@@ -2212,6 +2212,48 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShardManager::send_future_map_request(ShardID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+ #ifdef DEBUG_LEGION
+      assert(target < address_spaces->size());
+#endif
+      AddressSpaceID target_space = (*address_spaces)[target];
+      // Check to see if this is a local shard
+      if (target_space == runtime->address_space)
+      {
+        Deserializer derez(rez.get_buffer(), rez.get_used_bytes());
+        DerezCheck z(derez);
+        // Have to unpack the preample we already know
+        ControlReplicationID local_repl;
+        derez.deserialize(local_repl);     
+        handle_future_map_request(derez);
+      }
+      else
+        runtime->send_repl_future_map_request(target_space, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::handle_future_map_request(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      // Figure out which shard we are going to
+      ShardID target;
+      derez.deserialize(target);
+      for (std::vector<ShardTask*>::const_iterator it = 
+            local_shards.begin(); it != local_shards.end(); it++)
+      {
+        if ((*it)->shard_id == target)
+        {
+          (*it)->handle_future_map_request(derez);
+          return;
+        }
+      }
+      // Should never get here
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void ShardManager::handle_clone(const void *args)
     //--------------------------------------------------------------------------
     {
@@ -2311,6 +2353,18 @@ namespace Legion {
       derez.deserialize(repl_id);
       ShardManager *manager = runtime->find_shard_manager(repl_id);
       manager->handle_collective_message(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_future_map_request(Deserializer &derez,
+                                                            Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      ControlReplicationID repl_id;
+      derez.deserialize(repl_id);
+      ShardManager *manager = runtime->find_shard_manager(repl_id);
+      manager->handle_future_map_request(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -2633,6 +2687,36 @@ namespace Legion {
         participating(local_shard < shard_collective_participating_shards) 
     //--------------------------------------------------------------------------
     { 
+      if (participating)
+      {
+        stage_notifications.resize(shard_collective_stages, 1);
+        sent_stages.resize(shard_collective_stages, false);
+        // Special case: if we expect a stage -1 message from a 
+        // non-participating shard, we'll count that as part of stage 0
+        if ((shard_collective_stages > 0) &&
+            (local_shard < 
+             (manager->total_shards - shard_collective_participating_shards)))
+          stage_notifications[0]--;
+      }
+      if (manager->total_shards > 1)
+        done_event = Runtime::create_rt_user_event();
+    }
+
+    //--------------------------------------------------------------------------
+    AllGatherCollective::AllGatherCollective(ReplicateContext *ctx,
+                                             CollectiveID id)
+      : ShardCollective(ctx, id),
+        shard_collective_radix(ctx->get_shard_collective_radix()),
+        shard_collective_log_radix(ctx->get_shard_collective_log_radix()),
+        shard_collective_stages(ctx->get_shard_collective_stages()),
+        shard_collective_participating_shards(
+            ctx->get_shard_collective_participating_shards()),
+        shard_collective_last_radix(ctx->get_shard_collective_last_radix()),
+        shard_collective_last_log_radix(
+            ctx->get_shard_collective_last_log_radix()),
+        participating(local_shard < shard_collective_participating_shards)
+    //--------------------------------------------------------------------------
+    {
       if (participating)
       {
         stage_notifications.resize(shard_collective_stages, 1);
@@ -3564,6 +3648,94 @@ namespace Legion {
             it != results.end(); it++)
         target->fold_reduction_future(it->second, future_size, 
                                       false/*owner*/, true/*exclusive*/);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Future Name Exchange 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    FutureNameExchange::FutureNameExchange(ReplicateContext *ctx,
+                                           CollectiveID id)
+      : AllGatherCollective(ctx, id)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    FutureNameExchange::FutureNameExchange(const FutureNameExchange &rhs)
+      : AllGatherCollective(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    FutureNameExchange::~FutureNameExchange(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    FutureNameExchange& FutureNameExchange::operator=(
+                                                  const FutureNameExchange &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureNameExchange::pack_collective_stage(Serializer &rez, 
+                                                   int stage) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(results.size());
+      for (std::map<DomainPoint,Future>::const_iterator it = 
+            results.begin(); it != results.end(); it++)
+      {
+        rez.serialize(it->first);
+        if (it->second.impl != NULL)
+          rez.serialize(it->second.impl->did);
+        else
+          rez.serialize<DistributedID>(0);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureNameExchange::unpack_collective_stage(Deserializer &derez,
+                                                     int stage)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_futures;
+      derez.deserialize(num_futures);
+      for (unsigned idx = 0; idx < num_futures; idx++)
+      {
+        DomainPoint point;
+        derez.deserialize(point);
+        DistributedID did;
+        derez.deserialize(did);
+        if (did > 0)
+          results[point] = 
+            Future(context->runtime->find_or_create_future(did, &mutator));
+        else
+          results[point] = Future();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureNameExchange::exchange_future_names(
+                                          std::map<DomainPoint,Future> &futures)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock c_lock(collective_lock);
+        results.insert(futures.begin(), futures.end());
+      }
+      perform_collective_sync();
+      futures = results;
     }
 
   }; // namespace Internal

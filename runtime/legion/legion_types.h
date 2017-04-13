@@ -682,6 +682,8 @@ namespace Legion {
       SEND_FUTURE_SUBSCRIPTION,
       SEND_FUTURE_MAP_REQUEST,
       SEND_FUTURE_MAP_RESPONSE,
+      SEND_REPL_FUTURE_MAP_REQUEST,
+      SEND_REPL_FUTURE_MAP_RESPONSE,
       SEND_MAPPER_MESSAGE,
       SEND_MAPPER_BROADCAST,
       SEND_TASK_IMPL_SEMANTIC_REQ,
@@ -819,6 +821,8 @@ namespace Legion {
         "Send Future Subscription",                                   \
         "Send Future Map Future Request",                             \
         "Send Future Map Future Response",                            \
+        "Send Replicate Future Map Request",                          \
+        "Send Replicate Future Map Response",                         \
         "Send Mapper Message",                                        \
         "Send Mapper Broadcast",                                      \
         "Send Task Impl Semantic Req",                                \
@@ -1438,6 +1442,7 @@ namespace Legion {
     class FieldDescriptorGather;
     class FutureBroadcast;
     class FutureExchange;
+    class FutureNameExchange;
 
 #define FRIEND_ALL_RUNTIME_CLASSES                          \
     friend class Legion::Runtime;                           \
@@ -1537,6 +1542,7 @@ namespace Legion {
     friend class Internal::InlineContext;                   \
     friend class Internal::ReplicateContext;                \
     friend class Internal::InstanceBuilder;                 \
+    friend class Internal::FutureNameExchange;              \
     friend class BindingLib::Utility;                       \
     friend class CObjectWrapper;                  
 

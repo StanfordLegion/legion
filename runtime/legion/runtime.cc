@@ -904,9 +904,6 @@ namespace Legion {
     void FutureMapImpl::set_future(const DomainPoint &point, FutureImpl *impl)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!is_owner()); // should never be called on the owner node
-#endif
       AutoLock g_lock(gc_lock);
       futures[point] = Future(impl);
     }
@@ -976,8 +973,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureMapImpl::get_all_futures(
-                                     std::map<DomainPoint,Future> &others) const
+    void FutureMapImpl::get_all_futures(std::map<DomainPoint,Future> &others)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1107,12 +1103,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplFutureMapImpl::ReplFutureMapImpl(ReplicateContext *ctx, Operation *op,
-                           Runtime *rt, DistributedID did, AddressSpaceID owner)
-      : FutureMapImpl(ctx, op, rt, did, owner), repl_ctx(ctx), 
+                                         const Domain &dom, Runtime *rt, 
+                                         DistributedID did,AddressSpaceID owner)
+      : FutureMapImpl(ctx, op, rt, did, owner), 
+        repl_ctx(ctx), full_domain(dom), 
         future_map_barrier(ctx->get_next_future_map_barrier()),
         collective_index(ctx->get_next_collective_index()),
         sharding_function_ready(Runtime::create_rt_user_event()), 
-        sharding_function(NULL)
+        sharding_function(NULL), collective_performed(false)
     //--------------------------------------------------------------------------
     {
       // Now register ourselves with the context
@@ -1121,7 +1119,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplFutureMapImpl::ReplFutureMapImpl(const ReplFutureMapImpl &rhs)
-      : FutureMapImpl(rhs), repl_ctx(NULL), collective_index(0)
+      : FutureMapImpl(rhs), repl_ctx(NULL), 
+        full_domain(Domain::NO_DOMAIN), collective_index(0)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1154,6 +1153,88 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Future ReplFutureMapImpl::get_future(const DomainPoint &point,
+                                         bool allow_empty)
+    //--------------------------------------------------------------------------
+    {
+      // Do a quick check to see if we've already got it
+      {
+        AutoLock m_lock(gc_lock,1,false/*exclusive*/);
+        std::map<DomainPoint,Future>::const_iterator finder = 
+          futures.find(point);
+        if (finder != futures.end())
+          return finder->second;
+      }
+      // Now we need to figure out which shard we're on, see if we know
+      // the sharding function yet, if not we have to wait
+      if (!sharding_function_ready.has_triggered())
+        sharding_function_ready.wait();
+      ShardID owner_shard = sharding_function->find_owner(point, full_domain);
+      // If we're the owner shard we can just do the normal thing
+      if (owner_shard != repl_ctx->owner_shard->shard_id)
+      {
+        // We have to figure out the name of the future from the owner shard
+        RtUserEvent done_event = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(repl_ctx->shard_manager->repl_id);
+          rez.serialize(owner_shard);
+          rez.serialize<ApEvent>(future_map_barrier);
+          rez.serialize(point);
+          rez.serialize<bool>(allow_empty);
+          rez.serialize(did);
+          rez.serialize(done_event);
+        }
+        repl_ctx->shard_manager->send_future_map_request(owner_shard, rez);
+        // Wait for the event
+        done_event.wait();
+        // Now we can wake up see if we found it
+        AutoLock m_lock(gc_lock,1,false/*exclusive*/);
+        std::map<DomainPoint,Future>::const_iterator finder = 
+          futures.find(point);
+        if (finder == futures.end())
+        {
+          if (allow_empty)
+            return Future();
+          else
+            assert(false);
+        }
+        return finder->second;
+      }
+      else // If we're the owner shard we can just do the normal thing
+        return FutureMapImpl::get_future(point, allow_empty);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplFutureMapImpl::get_all_futures(
+                                           std::map<DomainPoint,Future> &others)
+    //--------------------------------------------------------------------------
+    {
+      // We know this call only comes from the application so we don't
+      // need to worry about thread safety
+      if (collective_performed)
+      {
+        // No need for the lock, we know we have all the futures
+        others = futures;
+        return;
+      }
+      // Wait for all the local futures to be completed
+      if (!ready_event.has_triggered())
+        ready_event.wait();
+      // Now we've got all our local futures so we can do the exchange
+      // Have to hold the lock when doing this as there might be
+      // other requests for the future map
+      AutoLock m_lock(gc_lock);
+      FutureNameExchange collective(repl_ctx, collective_index);
+      collective.exchange_future_names(futures);
+      // When the collective is done we can mark that we've done it
+      // and then copy the results
+      collective_performed = true;
+      others = futures;
+    }
+
+    //--------------------------------------------------------------------------
     void ReplFutureMapImpl::set_sharding_function(ShardingFunction *function)
     //--------------------------------------------------------------------------
     {
@@ -1162,6 +1243,81 @@ namespace Legion {
 #endif
       sharding_function = function;
       Runtime::trigger_event(sharding_function_ready);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplFutureMapImpl::handle_future_map_request(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DomainPoint point;
+      derez.deserialize(point);
+      bool allow_empty;
+      derez.deserialize(allow_empty);
+      DistributedID src_did;
+      derez.deserialize(src_did);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+
+      const AddressSpaceID source = runtime->determine_owner(src_did);
+
+      Future result = get_future(point, allow_empty);
+      if (source != runtime->address_space)
+      {
+        // Remote future map so send the answer back
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(src_did);
+          rez.serialize(point);
+          if (result.impl != NULL)
+            rez.serialize(result.impl->did);
+          else
+            rez.serialize<DistributedID>(0);
+          rez.serialize(done_event);
+        }
+        runtime->send_repl_future_map_response(source, rez);
+      }
+      else
+      {
+        // Local future map so we should be able to find it and set it
+        FutureMapImpl *target = 
+          runtime->find_or_create_future_map(src_did, NULL, NULL);
+        target->set_future(point, result.impl);
+        Runtime::trigger_event(done_event);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ReplFutureMapImpl::handle_repl_future_map_response(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID map_did;
+      derez.deserialize(map_did);
+      DomainPoint point;
+      derez.deserialize(point);
+      DistributedID future_did;
+      derez.deserialize(future_did);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+
+      // It should already exist so we're just finding it
+      FutureMapImpl *target = 
+        runtime->find_or_create_future_map(map_did, NULL, NULL);
+      std::set<RtEvent> done_events;
+      if (future_did > 0)
+      {
+        WrapperReferenceMutator mutator(done_events);
+        FutureImpl *impl = runtime->find_or_create_future(future_did, &mutator);
+        target->set_future(point, impl);
+      }
+      else
+        target->set_future(point, NULL);
+      if (!done_events.empty())
+        Runtime::trigger_event(done_event, Runtime::merge_events(done_events));
+      else
+        Runtime::trigger_event(done_event);
     }
 
     /////////////////////////////////////////////////////////////
@@ -6014,6 +6170,16 @@ namespace Legion {
           case SEND_FUTURE_MAP_RESPONSE:
             {
               runtime->handle_future_map_future_response(derez);
+              break;
+            }
+          case SEND_REPL_FUTURE_MAP_REQUEST:
+            {
+              runtime->handle_repl_future_map_request(derez); 
+              break;
+            }
+          case SEND_REPL_FUTURE_MAP_RESPONSE:
+            {
+              runtime->handle_repl_future_map_response(derez);
               break;
             }
           case SEND_MAPPER_MESSAGE:
@@ -13835,6 +14001,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_repl_future_map_request(AddressSpaceID target, 
+                                               Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_REPL_FUTURE_MAP_REQUEST,
+                                  COLLECTIVE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_repl_future_map_response(AddressSpaceID target,
+                                                Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_REPL_FUTURE_MAP_RESPONSE,
+                      FUTURE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_mapper_message(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -14958,6 +15142,20 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       FutureMapImpl::handle_future_map_future_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_repl_future_map_request(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardManager::handle_future_map_request(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_repl_future_map_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ReplFutureMapImpl::handle_repl_future_map_response(derez, this);
     }
 
     //--------------------------------------------------------------------------

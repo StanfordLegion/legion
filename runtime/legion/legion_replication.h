@@ -117,6 +117,7 @@ namespace Legion {
     class AllGatherCollective : public ShardCollective {
     public:
       AllGatherCollective(ReplicateContext *ctx);
+      AllGatherCollective(ReplicateContext *ctx, CollectiveID id);
       virtual ~AllGatherCollective(void);
     public:
       // We guarantee that these methods will be called atomically
@@ -334,6 +335,27 @@ namespace Legion {
       const size_t future_size;
     protected:
       std::map<ShardID,void*> results;
+    };
+
+    /**
+     * \class FutureNameExchange
+     * A class for doing an all-to-all exchange of future names
+     */
+    class FutureNameExchange : public AllGatherCollective {
+    public:
+      FutureNameExchange(ReplicateContext *ctx, CollectiveID id);
+      FutureNameExchange(const FutureNameExchange &rhs);
+      virtual ~FutureNameExchange(void);
+    public:
+      FutureNameExchange& operator=(const FutureNameExchange &rhs);
+    public:
+      virtual void pack_collective_stage(Serializer &rez, int stage) const;
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
+    public:
+      void exchange_future_names(std::map<DomainPoint,Future> &futures);
+    protected:
+      std::map<DomainPoint,Future> results;
+      LocalReferenceMutator mutator;
     };
 
     /**
@@ -779,6 +801,9 @@ namespace Legion {
       void send_collective_message(ShardID target, Serializer &rez);
       void handle_collective_message(Deserializer &derez);
     public:
+      void send_future_map_request(ShardID target, Serializer &rez);
+      void handle_future_map_request(Deserializer &derez);
+    public:
       static void handle_clone(const void *args);
       static void handle_launch(const void *args);
       static void handle_delete(const void *args);
@@ -790,6 +815,7 @@ namespace Legion {
       static void handle_trigger_complete(Deserializer &derez, Runtime *rt);
       static void handle_trigger_commit(Deserializer &derez, Runtime *rt);
       static void handle_collective_message(Deserializer &derez, Runtime *rt);
+      static void handle_future_map_request(Deserializer &derez, Runtime *rt);
     public:
       ShardingFunction* find_sharding_function(ShardingID sid);
     public:

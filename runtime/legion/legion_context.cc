@@ -9110,6 +9110,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplicateContext::handle_future_map_request(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ReplFutureMapImpl *impl = find_or_buffer_future_map_request(derez);
+      // If impl is NULL then the request was buffered
+      if (impl == NULL)
+        return;
+      impl->handle_future_map_request(derez);
+    }
+
+    //--------------------------------------------------------------------------
     CollectiveID ReplicateContext::get_next_collective_index(void)
     //--------------------------------------------------------------------------
     {
@@ -9161,7 +9172,7 @@ namespace Legion {
       derez.deserialize(collective_index);
       AutoLock ctx_lock(context_lock);
       // See if we already have the collective in which case we can just
-      // return it otherwise, we need to buffer the deserializer
+      // return it, otherwise we need to buffer the deserializer
       std::map<CollectiveID,ShardCollective*>::const_iterator finder = 
         collectives.find(collective_index);
       if (finder != collectives.end())
@@ -9174,7 +9185,7 @@ namespace Legion {
       pending_collective_updates[collective_index].push_back(
           std::pair<void*,size_t>(buffer, remaining_bytes));
       return NULL;
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void ReplicateContext::unregister_collective(ShardCollective *collective)
@@ -9203,12 +9214,31 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       map->add_base_resource_ref(FUTURE_HANDLE_REF);
+      std::vector<std::pair<void*,size_t> > to_apply;
       {
         AutoLock ctx_lock(context_lock);
 #ifdef DEBUG_LEGION
         assert(future_maps.find(map->future_map_barrier) == future_maps.end());
 #endif
         future_maps[map->future_map_barrier] = map; 
+        // Check to see if we have any pending requests to perform
+        std::map<ApEvent,std::vector<std::pair<void*,size_t> > >::iterator
+          finder = pending_future_map_requests.find(map->future_map_barrier);
+        if (finder != pending_future_map_requests.end())
+        {
+          to_apply = finder->second;
+          pending_future_map_requests.erase(finder);
+        }
+      }
+      if (!to_apply.empty())
+      {
+        for (std::vector<std::pair<void*,size_t> >::const_iterator it = 
+              to_apply.begin(); it != to_apply.end(); it++)
+        {
+          Deserializer derez(it->first, it->second);
+          map->handle_future_map_request(derez);
+          free(it->first);
+        }
       }
       // Then launch a task to reclaim it when the barrier has triggered
       ReclaimFutureMapArgs args;
@@ -9216,6 +9246,30 @@ namespace Legion {
       args.impl = map;
       runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, map->op,
                           Runtime::protect_event(map->future_map_barrier));
+    }
+
+    //--------------------------------------------------------------------------
+    ReplFutureMapImpl* ReplicateContext::find_or_buffer_future_map_request(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ApEvent future_map_event;
+      derez.deserialize(future_map_event);
+      AutoLock ctx_lock(context_lock);
+      // See if we already have the future map in which case we can just
+      // return it, otherwise we need to buffer the deserializer
+      std::map<ApEvent,ReplFutureMapImpl*>::const_iterator finder = 
+        future_maps.find(future_map_event);
+      if (finder != future_maps.end())
+        return finder->second;
+      // If we couldn't find it then we have to buffer it for the future
+      const size_t remaining_bytes = derez.get_remaining_bytes();
+      void *buffer = malloc(remaining_bytes);
+      memcpy(buffer, derez.get_current_pointer(), remaining_bytes);
+      derez.advance_pointer(remaining_bytes);
+      pending_future_map_requests[future_map_event].push_back(
+          std::pair<void*,size_t>(buffer, remaining_bytes));
+      return NULL;
     }
 
     //--------------------------------------------------------------------------
