@@ -204,7 +204,7 @@ namespace Legion {
                     DistributedID did, AddressSpaceID owner_space,
                     bool register_now = true); // empty map
       FutureMapImpl(const FutureMapImpl &rhs);
-      ~FutureMapImpl(void);
+      virtual ~FutureMapImpl(void);
     public:
       FutureMapImpl& operator=(const FutureMapImpl &rhs);
     public:
