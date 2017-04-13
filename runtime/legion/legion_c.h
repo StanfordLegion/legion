@@ -381,22 +381,14 @@ extern "C" {
   /**
    * @see ptr_t::nil()
    */
-  inline legion_ptr_t
-  legion_ptr_nil(void)
-  {
-    legion_ptr_t ptr;
-    ptr.value = -1LL;
-    return ptr;
-  }
+  legion_ptr_t
+  legion_ptr_nil(void);
 
   /**
    * @see ptr_t::is_null()
    */
-  inline bool
-  legion_ptr_is_null(legion_ptr_t ptr)
-  {
-    return ptr.value == -1LL;
-  }
+  bool
+  legion_ptr_is_null(legion_ptr_t ptr);
 
   /**
    * @see Legion::Runtime::safe_cast(
