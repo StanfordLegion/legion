@@ -396,6 +396,7 @@ namespace Legion {
       virtual void trigger_task_complete(void);
     public:
       void initialize_replication(ReplicateContext *ctx);
+      virtual FutureMapImpl* create_future_map(TaskContext *ctx);
     protected:
       ShardingID sharding_functor;
       FutureExchange *reduction_collective;
@@ -751,6 +752,8 @@ namespace Legion {
     public:
       inline ApBarrier get_pending_partition_barrier(void) const
         { return pending_partition_barrier; }
+      inline ApBarrier get_future_map_barrier(void) const
+        { return future_map_barrier; }
     public:
       inline ShardMapping* get_mapping(void) const
         { return address_spaces; }
@@ -818,6 +821,7 @@ namespace Legion {
       bool        first_future;
     protected:
       ApBarrier pending_partition_barrier;
+      ApBarrier future_map_barrier;
     protected:
       std::map<ShardingID,ShardingFunction*> sharding_functions;
     }; 

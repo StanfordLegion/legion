@@ -213,7 +213,8 @@ namespace Legion {
       virtual void notify_invalid(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);
     public:
-      Future get_future(const DomainPoint &point, bool allow_empty = false);
+      virtual Future get_future(const DomainPoint &point, 
+                                bool allow_empty = false);
       void set_future(const DomainPoint &point, FutureImpl *impl);
       void get_void_result(const DomainPoint &point, 
                             bool silence_warnings = true);
@@ -221,7 +222,7 @@ namespace Legion {
       void complete_all_futures(void);
       bool reset_all_futures(void);
     public:
-      void get_all_futures(std::map<DomainPoint,Future> &futures) const;
+      virtual void get_all_futures(std::map<DomainPoint,Future> &futures) const;
       void set_all_futures(const std::map<DomainPoint,Future> &futures);
 #ifdef DEBUG_LEGION
     public:
@@ -248,6 +249,37 @@ namespace Legion {
       std::vector<Domain> valid_domains;
       std::set<DomainPoint> valid_points;
 #endif
+    };
+
+    /**
+     * \class ReplFutureMapImpl
+     * This a special kind of future map that is created
+     * in control replication contexts
+     */
+    class ReplFutureMapImpl : public FutureMapImpl {
+    public:
+      ReplFutureMapImpl(ReplicateContext *ctx, Operation *op, 
+                    Runtime *rt, DistributedID did, AddressSpaceID owner_space);
+      ReplFutureMapImpl(const ReplFutureMapImpl &rhs);
+      virtual ~ReplFutureMapImpl(void);
+    public:
+      ReplFutureMapImpl& operator=(const ReplFutureMapImpl &rhs);
+    public:
+      // Override this so we can trigger our deletion barrier
+      virtual void notify_inactive(ReferenceMutator *mutator);
+    public:
+      virtual Future get_future(const DomainPoint &point,
+                                bool allow_empty = false);
+      virtual void get_all_futures(std::map<DomainPoint,Future> &futures) const;
+    public:
+      void set_sharding_function(ShardingFunction *function);
+    public:
+      ReplicateContext *const repl_ctx;
+      const ApBarrier future_map_barrier;
+      const CollectiveID collective_index; // in case we have to do all-to-all
+    protected:
+      RtUserEvent sharding_function_ready;
+      ShardingFunction *sharding_function;
     };
 
     /**

@@ -6532,8 +6532,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Get our allocation barriers
-      pending_partition_barrier = 
-        manager->get_pending_partition_barrier();
+      pending_partition_barrier = manager->get_pending_partition_barrier();
+      future_map_barrier = manager->get_future_map_barrier();
       // Configure our collective settings
       configure_collective_settings(manager->total_shards, owner->shard_id,
           shard_collective_radix, shard_collective_log_radix,
@@ -9187,6 +9187,60 @@ namespace Legion {
       assert(finder != collectives.end());
 #endif
       collectives.erase(finder);
+    }
+
+    //--------------------------------------------------------------------------
+    ApBarrier ReplicateContext::get_next_future_map_barrier(void)
+    //--------------------------------------------------------------------------
+    {
+      ApBarrier result = future_map_barrier;
+      Runtime::advance_barrier(future_map_barrier);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::register_future_map(ReplFutureMapImpl *map)
+    //--------------------------------------------------------------------------
+    {
+      map->add_base_resource_ref(FUTURE_HANDLE_REF);
+      {
+        AutoLock ctx_lock(context_lock);
+#ifdef DEBUG_LEGION
+        assert(future_maps.find(map->future_map_barrier) == future_maps.end());
+#endif
+        future_maps[map->future_map_barrier] = map; 
+      }
+      // Then launch a task to reclaim it when the barrier has triggered
+      ReclaimFutureMapArgs args;
+      args.ctx = this;
+      args.impl = map;
+      runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, map->op,
+                          Runtime::protect_event(map->future_map_barrier));
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::unregister_future_map(ReplFutureMapImpl *map)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock ctx_lock(context_lock);
+        std::map<ApEvent,ReplFutureMapImpl*>::const_iterator finder = 
+          future_maps.find(map->future_map_barrier);
+#ifdef DEBUG_LEGION
+        assert(finder != future_maps.end());
+#endif
+        future_maps.erase(finder);
+      }
+      if (map->remove_base_resource_ref(FUTURE_HANDLE_REF))
+        legion_delete(map);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ReplicateContext::handle_future_map_reclaim(const void *arg)
+    //--------------------------------------------------------------------------
+    {
+      const ReclaimFutureMapArgs *recl_args = (const ReclaimFutureMapArgs*)arg;
+      recl_args->ctx->unregister_future_map(recl_args->impl);
     }
 
     /////////////////////////////////////////////////////////////

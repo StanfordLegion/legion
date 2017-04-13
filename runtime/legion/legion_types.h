@@ -342,6 +342,7 @@ namespace Legion {
       LG_CONTROL_REP_CLONE_TASK_ID,
       LG_CONTROL_REP_LAUNCH_TASK_ID,
       LG_CONTROL_REP_DELETE_TASK_ID,
+      LG_RECLAIM_FUTURE_MAP_TASK_ID,
       LG_MESSAGE_ID, // These two must be the last two
       LG_RETRY_SHUTDOWN_TASK_ID,
       LG_LAST_TASK_ID, // This one should always be last
@@ -438,6 +439,7 @@ namespace Legion {
         "Control Replication Clone",                              \
         "Control Replication Launch",                             \
         "Control Replciation Delete",                             \
+        "Reclaim Future Map",                                     \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \
       };
@@ -1203,6 +1205,7 @@ namespace Legion {
     class ArgumentMapImpl;
     class FutureImpl;
     class FutureMapImpl;
+    class ReplFutureMapImpl;
     class PhysicalRegionImpl;
     class GrantImpl;
     class PredicateImpl;
@@ -1525,6 +1528,7 @@ namespace Legion {
     friend class Internal::MPILegionHandshakeImpl;          \
     friend class Internal::ArgumentMapImpl;                 \
     friend class Internal::FutureMapImpl;                   \
+    friend class Internal::ReplFutureMapImpl;               \
     friend class Internal::TaskContext;                     \
     friend class Internal::InnerContext;                    \
     friend class Internal::TopLevelContext;                 \

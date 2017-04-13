@@ -1102,6 +1102,69 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Repl Future Map Impl 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ReplFutureMapImpl::ReplFutureMapImpl(ReplicateContext *ctx, Operation *op,
+                           Runtime *rt, DistributedID did, AddressSpaceID owner)
+      : FutureMapImpl(ctx, op, rt, did, owner), repl_ctx(ctx), 
+        future_map_barrier(ctx->get_next_future_map_barrier()),
+        collective_index(ctx->get_next_collective_index()),
+        sharding_function_ready(Runtime::create_rt_user_event()), 
+        sharding_function(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // Now register ourselves with the context
+      repl_ctx->register_future_map(this);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplFutureMapImpl::ReplFutureMapImpl(const ReplFutureMapImpl &rhs)
+      : FutureMapImpl(rhs), repl_ctx(NULL), collective_index(0)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplFutureMapImpl::~ReplFutureMapImpl(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplFutureMapImpl& ReplFutureMapImpl::operator=(
+                                                   const ReplFutureMapImpl &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplFutureMapImpl::notify_inactive(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      // Do the base version, then arrive on our barrier
+      FutureMapImpl::notify_inactive(mutator);
+      Runtime::phase_barrier_arrive(future_map_barrier, 1/*count*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplFutureMapImpl::set_sharding_function(ShardingFunction *function)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(sharding_function == NULL);
+#endif
+      sharding_function = function;
+      Runtime::trigger_event(sharding_function_ready);
+    }
+
+    /////////////////////////////////////////////////////////////
     // Physical Region Impl 
     /////////////////////////////////////////////////////////////
 
@@ -20768,6 +20831,11 @@ namespace Legion {
         case LG_CONTROL_REP_DELETE_TASK_ID:
           {
             ShardManager::handle_delete(args);
+            break;
+          }
+        case LG_RECLAIM_FUTURE_MAP_TASK_ID:
+          {
+            ReplicateContext::handle_future_map_reclaim(args);
             break;
           }
         case LG_RETRY_SHUTDOWN_TASK_ID:

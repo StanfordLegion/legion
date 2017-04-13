@@ -319,7 +319,22 @@ namespace Legion {
         assert(false);
       }
 #endif
-
+      // If we have a future map then set the sharding function
+      if (redop == 0)
+      {
+        ShardingFunction *function = 
+          repl_ctx->shard_manager->find_sharding_function(sharding_functor);
+#ifdef DEBUG_LEGION
+        assert(future_map.impl != NULL);
+        ReplFutureMapImpl *impl = 
+          dynamic_cast<ReplFutureMapImpl*>(future_map.impl);
+        assert(impl != NULL);
+#else
+        ReplFutureMapImpl *impl = 
+          static_cast<ReplFutureMapImpl*>(future_map.impl);
+#endif
+        impl->set_sharding_function(function);
+      }
       // Now we can do the normal prepipeline stage
       IndexTask::trigger_prepipeline_stage();
     }
@@ -386,6 +401,22 @@ namespace Legion {
       // If we have a reduction op then we need an exchange
       if (redop > 0)
         reduction_collective = new FutureExchange(ctx, reduction_state_size);
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMapImpl* ReplIndexTask::create_future_map(TaskContext *ctx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(ctx);
+#endif
+      // Make a replicate future map 
+      return legion_new<ReplFutureMapImpl>(repl_ctx, this, runtime,
+          runtime->get_available_distributed_id(true/*need continuation*/),
+          runtime->address_space);
     }
 
     /////////////////////////////////////////////////////////////
@@ -1709,8 +1740,12 @@ namespace Legion {
 #endif
       runtime->register_shard_manager(repl_id, this);
       if (owner_space == runtime->address_space)
+      {
         pending_partition_barrier = 
           ApBarrier(Realm::Barrier::create_barrier(total_shards));
+        future_map_barrier = 
+          ApBarrier(Realm::Barrier::create_barrier(total_shards));
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1740,7 +1775,10 @@ namespace Legion {
       manager_lock.destroy_reservation();
       manager_lock = Reservation::NO_RESERVATION;
       if (owner_manager)
+      {
         pending_partition_barrier.destroy_barrier();
+        future_map_barrier.destroy_barrier();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1812,6 +1850,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < num_spaces; idx++)
         derez.deserialize((*address_spaces)[idx]);
       derez.deserialize(pending_partition_barrier);
+      derez.deserialize(future_map_barrier);
       // Unpack our first shard here
       create_shards();
       ShardTask *first_shard = local_shards[0];
@@ -1940,6 +1979,7 @@ namespace Legion {
           for (unsigned idx = 0; idx < address_spaces->size(); idx++)
             rez.serialize((*address_spaces)[idx]);   
           rez.serialize(pending_partition_barrier);
+          rez.serialize(future_map_barrier);
           to_clone->pack_as_shard_task(rez, (*address_spaces)[index]); 
         }
         // Send the message

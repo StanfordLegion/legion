@@ -1069,6 +1069,15 @@ namespace Legion {
      */
     class ReplicateContext : public InnerContext {
     public:
+      struct ReclaimFutureMapArgs :
+        public LgTaskArgs<ReclaimFutureMapArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_RECLAIM_FUTURE_MAP_TASK_ID;
+      public:
+        ReplicateContext *ctx;
+        ReplFutureMapImpl *impl;
+      };
+    public:
       ReplicateContext(Runtime *runtime, ShardTask *owner, bool full_inner,
                        const std::vector<RegionRequirement> &reqs,
                        const std::vector<unsigned> &parent_indexes,
@@ -1289,10 +1298,17 @@ namespace Legion {
       void exchange_common_resources(void);
       void handle_collective_message(Deserializer &derez);
     public:
+      // Collective methods
       CollectiveID get_next_collective_index(void);
       void register_collective(ShardCollective *collective);
       ShardCollective* find_or_buffer_collective(Deserializer &derez);
       void unregister_collective(ShardCollective *collective);
+    public:
+      // Future map methods
+      ApBarrier get_next_future_map_barrier(void);
+      void register_future_map(ReplFutureMapImpl *map);
+      void unregister_future_map(ReplFutureMapImpl *map);
+      static void handle_future_map_reclaim(const void *args);
     public:
       ShardTask *const owner_shard;
       ShardManager *const shard_manager;
@@ -1314,6 +1330,7 @@ namespace Legion {
       ShardID logical_region_allocator_shard;
     protected:
       ApBarrier pending_partition_barrier;
+      ApBarrier future_map_barrier;
     protected:
       int shard_collective_radix;
       int shard_collective_log_radix;
@@ -1326,6 +1343,8 @@ namespace Legion {
       std::map<CollectiveID,ShardCollective*> collectives;
       std::map<CollectiveID,std::vector<
                 std::pair<void*,size_t> > > pending_collective_updates;
+    protected:
+      std::map<ApEvent,ReplFutureMapImpl*> future_maps;
     };
 
     /**

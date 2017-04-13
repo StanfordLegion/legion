@@ -6866,14 +6866,11 @@ namespace Legion {
       if (launcher.predicate != Predicate::TRUE_PRED)
         initialize_predicate(launcher.predicate_false_future,
                              launcher.predicate_false_result);
-      future_map = FutureMap(legion_new<FutureMapImpl>(ctx, this, runtime,
-            runtime->get_available_distributed_id(true/*needs continuation*/),
-            runtime->address_space));
+      future_map = FutureMap(create_future_map(ctx));
 #ifdef DEBUG_LEGION
       future_map.impl->add_valid_domain(index_domain);
 #endif
       check_empty_field_requirements(); 
-
       if (check_privileges)
         perform_privilege_checks();
       if (Runtime::legion_spy_enabled)
@@ -7647,6 +7644,15 @@ namespace Legion {
     {
       // should never be called
       assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMapImpl* IndexTask::create_future_map(TaskContext *ctx) 
+    //--------------------------------------------------------------------------
+    {
+      return legion_new<FutureMapImpl>(ctx, this, runtime,
+            runtime->get_available_distributed_id(true/*needs continuation*/),
+            runtime->address_space);
     }
 
     //--------------------------------------------------------------------------
