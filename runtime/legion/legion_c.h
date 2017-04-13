@@ -126,7 +126,16 @@ extern "C" {
   typedef struct legion_domain_t {
     legion_lowlevel_id_t is_id;
     int dim;
-    coord_t rect_data[2 * MAX_RECT_DIM];
+// Hack: Python CFFI isn't smart enough to do constant folding so we
+// have to do this by hand here. To avoid this bitrotting, at least
+// make the preprocessor check that the value is equal to what we
+// expect.
+#define MAX_DOMAIN_DIM 6 // 2 * MAX_RECT_DIM
+#if MAX_DOMAIN_DIM != 2 * MAX_RECT_DIM // sanity check value
+#error Mismatch in MAX_DOMAIN_DIM
+#endif
+    coord_t rect_data[MAX_DOMAIN_DIM];
+#undef MAX_DOMAIN_DIM
   } legion_domain_t;
 
   /**
