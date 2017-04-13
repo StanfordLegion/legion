@@ -19,46 +19,17 @@ from __future__ import print_function
 
 import cffi
 import os
+import subprocess
 import sys
 
-root_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-legion_dir = os.path.join(root_dir, "runtime", "legion")
+root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+runtime_dir = os.path.join(root_dir, "runtime")
+legion_dir = os.path.join(runtime_dir, "legion")
+
+header = subprocess.check_output(["gcc", "-I", runtime_dir, "-I", legion_dir, "-E", "-P", os.path.join(legion_dir, "legion_c.h")])
 
 ffi = cffi.FFI()
-ffi.cdef(r"""
-  typedef unsigned long long legion_lowlevel_id_t;
-
-  typedef struct legion_runtime_t { void *impl; } legion_runtime_t;
-  typedef struct legion_context_t { void *impl; } legion_context_t;
-  typedef struct legion_task_t { void *impl; } legion_task_t;
-  typedef struct legion_physical_region_t { void *impl; } legion_physical_region_t;
-
-  typedef struct legion_processor_t {
-    legion_lowlevel_id_t id;
-  } legion_processor_t;
-
-  legion_processor_t
-  legion_runtime_get_executing_processor(legion_runtime_t runtime,
-                                         legion_context_t ctx);
-
-  void
-  legion_task_preamble(
-    const void *data,
-    size_t datalen,
-    legion_lowlevel_id_t proc_id,
-    legion_task_t *taskptr,
-    const legion_physical_region_t **regionptr,
-    unsigned * num_regions_ptr,
-    legion_context_t * ctxptr,
-    legion_runtime_t * runtimeptr);
-
-  void
-  legion_task_postamble(
-    legion_runtime_t runtime,
-    legion_context_t ctx,
-    const void *retval,
-    size_t retsize);
-""")
+ffi.cdef(header)
 c = ffi.dlopen(None)
 
 def legion_task(body):
