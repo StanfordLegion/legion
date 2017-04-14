@@ -130,8 +130,8 @@ extern "C" {
 // have to do this by hand here. To avoid this bitrotting, at least
 // make the preprocessor check that the value is equal to what we
 // expect.
-#define MAX_DOMAIN_DIM 6 // 2 * MAX_RECT_DIM
-#if MAX_DOMAIN_DIM != 2 * MAX_RECT_DIM // sanity check value
+#define MAX_DOMAIN_DIM 6 // 2 * REALM_MAX_RECT_DIM
+#if MAX_DOMAIN_DIM != 2 * REALM_MAX_RECT_DIM // sanity check value
 #error Mismatch in MAX_DOMAIN_DIM
 #endif
     coord_t rect_data[MAX_DOMAIN_DIM];

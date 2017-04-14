@@ -79,11 +79,11 @@ typedef enum legion_lowlevel_file_mode_t {
 } legion_lowlevel_file_mode_t;
 
 // Keep this in sync with Domain::MAX_RECT_DIM in lowlevel.h
-#define MAX_POINT_DIM 3
-#define MAX_RECT_DIM 3
+#define REALM_MAX_POINT_DIM 3
+#define REALM_MAX_RECT_DIM 3
 typedef enum legion_lowlevel_domain_max_rect_dim_t {
-  _MAX_POINT_DIM = MAX_POINT_DIM,
-  _MAX_RECT_DIM = MAX_RECT_DIM,
+  MAX_POINT_DIM = REALM_MAX_POINT_DIM,
+  MAX_RECT_DIM = REALM_MAX_RECT_DIM,
 } legion_lowlevel_domain_max_rect_dim_t;
 
 // Prototype for a Realm task
