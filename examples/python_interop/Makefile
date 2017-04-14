@@ -36,7 +36,7 @@ GEN_GPU_SRC	?=		# .cu files
 
 # You can modify these variables, some will be appended to by the runtime makefile
 INC_FLAGS	?=
-CC_FLAGS	?=
+CC_FLAGS	?= -DPYTHON_MODULES_PATH="\"$(LG_RT_DIR)/../bindings/python:$(dir $(abspath $(firstword $(MAKEFILE_LIST))))\""
 NVCC_FLAGS	?=
 GASNET_FLAGS	?=
 LD_FLAGS	?=

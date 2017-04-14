@@ -48,10 +48,11 @@ void top_level_task(const Task *task,
 
 int main(int argc, char **argv)
 {
-#ifdef REALM_USE_PYTHON
   // do this before any threads are spawned
-  setenv("PYTHONPATH", ".", true /*overwrite*/);
+#ifndef PYTHON_MODULES_PATH
+#error PYTHON_MODULES_PATH not available at compile time
 #endif
+  setenv("PYTHONPATH", PYTHON_MODULES_PATH, true /*overwrite*/);
 
   {
     TaskVariantRegistrar registrar(TOP_LEVEL_TASK_ID, "top_level_task");
