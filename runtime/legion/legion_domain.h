@@ -34,7 +34,7 @@ namespace Legion {
      */
     class DomainPoint {
     public:
-      enum { MAX_POINT_DIM = 3 };
+      enum { MAX_POINT_DIM = ::MAX_POINT_DIM };
 
       DomainPoint(void) : dim(0)
       {

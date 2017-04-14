@@ -5411,12 +5411,8 @@ namespace Legion {
                                           DynamicCollective dc, const Future &f) 
     //--------------------------------------------------------------------------
     {
-      // This is a little Realm specific, but can't avoid it at the moment
-      // 20 bits for the generation and everything else is ID
-      const unsigned long id = dc.phase_barrier.id & 0xFFFFFFFFFFF00000UL;
-      const unsigned gen = dc.phase_barrier.id & 0xFFFFF;
       AutoLock ctx(context_lock);
-      collective_contributions[id][gen].push_back(f);
+      collective_contributions[dc.phase_barrier].push_back(f);
     }
 
     //--------------------------------------------------------------------------
@@ -5427,30 +5423,13 @@ namespace Legion {
       // Find any future contributions and record dependences for the op
       // Contributions were made to the previous phase
       ApEvent previous = Runtime::get_previous_phase(dc.phase_barrier);
-      const unsigned long id = previous.id & 0xFFFFFFFFFFF00000UL;
-      const unsigned gen = previous.id & 0xFFFFF;
       AutoLock ctx(context_lock);
-      std::map<unsigned long, std::map<unsigned,
-        std::vector<Future> > >::iterator finder = 
-          collective_contributions.find(id);
+      std::map<ApEvent,std::vector<Future> >::iterator finder = 
+          collective_contributions.find(previous);
       if (finder == collective_contributions.end())
         return;
-      std::map<unsigned,std::vector<Future> >::iterator it = 
-        finder->second.begin();
-      while ((it != finder->second.end()) && (it->first <= gen))
-      {
-        if (it->first == gen)
-        {
-          contributions = it->second;
-          it++;
-        }
-        else
-        {
-          std::map<unsigned,std::vector<Future> >::iterator to_erase = it;
-          it++;
-          finder->second.erase(to_erase);
-        }
-      }
+      contributions = finder->second;
+      collective_contributions.erase(finder);
     }
 
     //--------------------------------------------------------------------------

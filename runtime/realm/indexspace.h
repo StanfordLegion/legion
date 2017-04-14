@@ -316,7 +316,9 @@ namespace Realm {
 
     class DomainPoint {
     public:
-      enum { MAX_POINT_DIM = 3 };
+      // Keep this in sync with legion_lowlevel_domain_max_point_dim_t
+      // in lowlevel_config.h
+      enum { MAX_POINT_DIM = ::MAX_POINT_DIM };
 
       DomainPoint(void) : dim(0)
       {

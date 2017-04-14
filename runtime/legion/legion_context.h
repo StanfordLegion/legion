@@ -1020,8 +1020,7 @@ namespace Legion {
       std::map<AddressSpaceID,RemoteContext*> remote_instances;
     protected:
       // Tracking information for dynamic collectives
-      std::map<unsigned long/*ID*/,std::map<unsigned/*gen*/,
-               std::vector<Future> > > collective_contributions; 
+      std::map<ApEvent,std::vector<Future> > collective_contributions;
     protected:
       // Track information for locally allocated fields
       std::map<FieldSpace,std::vector<LocalFieldInfo> > local_fields;
