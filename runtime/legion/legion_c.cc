@@ -37,6 +37,20 @@ using namespace LegionRuntime::Arrays;
 // -----------------------------------------------------------------------
 
 legion_ptr_t
+legion_ptr_nil(void)
+{
+  legion_ptr_t ptr;
+  ptr.value = -1LL;
+  return ptr;
+}
+
+bool
+legion_ptr_is_null(legion_ptr_t ptr)
+{
+  return ptr.value == -1LL;
+}
+
+legion_ptr_t
 legion_ptr_safe_cast(legion_runtime_t runtime_,
                      legion_context_t ctx_,
                      legion_ptr_t pointer_,
