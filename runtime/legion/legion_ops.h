@@ -1851,6 +1851,10 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
+    public:
+      void activate_must_epoch_op(void);
+      void deactivate_must_epoch_op(void);
+    public:
       virtual const char* get_logging_name(void) const;
       virtual size_t get_region_count(void) const;
       virtual OpKind get_operation_kind(void) const;
@@ -1875,6 +1879,9 @@ namespace Legion {
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                                        get_acquired_instances_ref(void);
     public:
+      // Make this a virtual method to override it for control replication
+      virtual MapperManager* invoke_mapper(void);
+    public:
       void add_mapping_dependence(RtEvent precondition);
       void register_single_task(SingleTask *single, unsigned index);
       void register_slice_task(SliceTask *slice);
@@ -1891,6 +1898,8 @@ namespace Legion {
       int find_operation_index(Operation *op, GenerationID generation);
       TaskOp* find_task_by_index(int index);
     protected:
+      static bool single_task_sorter(const Task *t1, const Task *t2);
+    protected:
       std::vector<IndividualTask*>        indiv_tasks;
       std::vector<bool>                   indiv_triggered;
       std::vector<IndexTask*>             index_tasks;
@@ -1900,7 +1909,7 @@ namespace Legion {
       std::set<SliceTask*>         slice_tasks;
       // The actual base operations
       // Use a deque to keep everything in order
-      std::deque<SingleTask*>      single_tasks;
+      std::vector<SingleTask*>     single_tasks;
     protected:
       Mapper::MapMustEpochInput    input;
       Mapper::MapMustEpochOutput   output;
@@ -1992,7 +2001,7 @@ namespace Legion {
     public:
       MustEpochMapper& operator=(const MustEpochMapper &rhs);
     public:
-      void map_tasks(const std::deque<SingleTask*> &single_tasks,
+      void map_tasks(const std::vector<SingleTask*> &single_tasks,
             const std::vector<std::set<unsigned> > &dependences);
       void map_task(SingleTask *task);
     public:

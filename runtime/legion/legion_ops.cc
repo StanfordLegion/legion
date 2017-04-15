@@ -10163,6 +10163,13 @@ namespace Legion {
     void MustEpochOp::activate(void)
     //--------------------------------------------------------------------------
     {
+      activate_must_epoch_op(); 
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochOp::activate_must_epoch_op(void)
+    //--------------------------------------------------------------------------
+    {
       activate_operation();
       mapper_id = 0;
       mapper_tag = 0;
@@ -10174,6 +10181,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MustEpochOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_must_epoch_op();      
+      // Return this operation to the free list
+      runtime->free_epoch_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochOp::deactivate_must_epoch_op(void)
     //--------------------------------------------------------------------------
     {
       deactivate_operation();
@@ -10205,8 +10221,6 @@ namespace Legion {
       input.constraints.clear();
       output.task_processors.clear();
       output.constraint_mappings.clear();
-      // Return this operation to the free list
-      runtime->free_epoch_op(this);
     }
 
     //--------------------------------------------------------------------------
@@ -10268,6 +10282,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ bool MustEpochOp::single_task_sorter(const Task *t1, 
+                                                    const Task *t2)
+    //--------------------------------------------------------------------------
+    {
+      return (t1->index_point < t2->index_point);
+    }
+
+    //--------------------------------------------------------------------------
     void MustEpochOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
@@ -10291,6 +10313,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(!single_tasks.empty());
 #endif 
+        // Sort the points so that they are in order for determinism
+        // across runs and for control replication
+        std::sort(single_tasks.begin(), single_tasks.end(), single_task_sorter);
+        // Then construct the inverse mapping
+        for (unsigned idx = 0; idx < single_tasks.size(); idx++)
+          single_task_map[single_tasks[idx]] = idx;
         // Next build the set of single tasks and all their constraints.
         // Iterate over all the recorded dependences
         std::vector<Mapper::MappingConstraint> &constraints = input.constraints;
@@ -10358,10 +10386,8 @@ namespace Legion {
       // Also resize the outputs so the mapper knows what it is doing
       output.constraint_mappings.resize(input.constraints.size());
       output.task_processors.resize(single_tasks.size(), Processor::NO_PROC);
-      Processor mapper_proc = parent_ctx->get_executing_processor();
-      MapperManager *mapper = runtime->find_mapper(mapper_proc, mapper_id);
-      // We've got all our meta-data set up so go ahead and issue the call
-      mapper->invoke_map_must_epoch(this, &input, &output);
+      // Now we can invoke the mapper
+      MapperManager *mapper = invoke_mapper(); 
       // Check that all the tasks have been assigned to different processors
       {
         std::map<Processor,SingleTask*> target_procs;
@@ -10437,6 +10463,17 @@ namespace Legion {
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
       complete_execution(all_complete);
+    }
+
+    //--------------------------------------------------------------------------
+    MapperManager* MustEpochOp::invoke_mapper(void)
+    //--------------------------------------------------------------------------
+    {
+      Processor mapper_proc = parent_ctx->get_executing_processor();
+      MapperManager *mapper = runtime->find_mapper(mapper_proc, mapper_id);
+      // We've got all our meta-data set up so go ahead and issue the call
+      mapper->invoke_map_must_epoch(this, &input, &output);
+      return mapper;
     }
 
     //--------------------------------------------------------------------------
@@ -10646,9 +10683,7 @@ namespace Legion {
 #endif
       task_sets[index].insert(single);
       AutoLock o_lock(op_lock);
-      const unsigned single_task_index = single_tasks.size();
       single_tasks.push_back(single);
-      single_task_map[single] = single_task_index;
     }
 
     //--------------------------------------------------------------------------
@@ -10923,7 +10958,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochMapper::map_tasks(const std::deque<SingleTask*> &single_tasks,
+    void MustEpochMapper::map_tasks(
+                                   const std::vector<SingleTask*> &single_tasks,
                             const std::vector<std::set<unsigned> > &dependences)
     //--------------------------------------------------------------------------
     {

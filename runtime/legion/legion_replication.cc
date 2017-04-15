@@ -1527,6 +1527,35 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplMustEpochOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_must_epoch_op();
+      sharding_functor = UINT_MAX;
+      broadcast = NULL;
+      exchange = NULL;
+#ifdef DEBUG_LEGION
+      sharding_collective = NULL;
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplMustEpochOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_must_epoch_op();
+      if (broadcast != NULL)
+        delete broadcast;
+      if (exchange != NULL)
+        delete exchange;
+#ifdef DEBUG_LEGION
+      if (sharding_collective != NULL)
+        delete sharding_collective;
+#endif
+      runtime->free_repl_epoch_op(this);
+    }
+
+    //--------------------------------------------------------------------------
     FutureMapImpl* ReplMustEpochOp::create_future_map(TaskContext *ctx,
                                                         IndexSpace launch_space)
     //--------------------------------------------------------------------------
@@ -1543,6 +1572,75 @@ namespace Legion {
       return legion_new<ReplFutureMapImpl>(repl_ctx, this,launch_domain,runtime,
           runtime->get_available_distributed_id(true/*need continuation*/),
           runtime->address_space);
+    }
+
+    //--------------------------------------------------------------------------
+    MapperManager* ReplMustEpochOp::invoke_mapper(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // Fill in the shard map so that we get the sharding ID
+      input.shard_mapping = repl_ctx->shard_manager->shard_mapping; 
+      output.chosen_functor = UINT_MAX;
+      // Shard the constraints so that each mapper call handles 
+      // a subset of the constraints when performing the mapping 
+      std::vector<Mapper::MappingConstraint> copy_constraints=input.constraints;
+      input.constraints.clear();
+      for (unsigned idx = repl_ctx->owner_shard->shard_id; 
+            idx < copy_constraints.size(); 
+            idx += repl_ctx->shard_manager->total_shards)
+        input.constraints.push_back(copy_constraints[idx]);
+      // Do the mapper call
+      Processor mapper_proc = parent_ctx->get_executing_processor();
+      MapperManager *mapper = runtime->find_mapper(mapper_proc, mapper_id);
+      // We've got all our meta-data set up so go ahead and issue the call
+      mapper->invoke_map_must_epoch(this, &input, &output);
+      // Check that we have a sharding ID
+      if (output.chosen_functor == UINT_MAX)
+      {
+        log_run.error("Invalid mapper output from invocation of "
+            "'map_must_epoch' on mapper %s. Mapper failed to specify "
+            "a valid sharding ID for a must epoch operation in control "
+            "replicated context of task %s (UID %lld).",
+            mapper->get_mapper_name(), repl_ctx->get_task_name(),
+            repl_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+#ifdef DEBUG_LEGION
+      // Check that the sharding IDs are all the same
+      assert(sharding_collective != NULL);
+      // Contribute the result
+      sharding_collective->contribute(this->sharding_functor);
+      if (sharding_collective->is_target() && 
+          !sharding_collective->validate(this->sharding_functor))
+      {
+        log_run.error("ERROR: Mapper %s chose different sharding functions "
+                      "for must epoch launch in %s (UID %lld)", 
+                      mapper->get_mapper_name(), parent_ctx->get_task_name(),
+                      parent_ctx->get_unique_id());
+        assert(false); 
+      }
+      assert(broadcast != NULL);
+      assert(exchange != NULL);
+#endif
+      // Broadcast the processor decisions from shard 0
+      if (repl_ctx->owner_shard->shard_id == 0)
+        broadcast->broadcast_processors(output.task_processors);
+      // Exchange the constraint mappings so that all ops have all the mappings
+      exchange->exchange_must_epoch_mappings(repl_ctx->owner_shard->shard_id,
+          repl_ctx->shard_manager->total_shards, output.constraint_mappings);
+      // Receive processor decisions from shard 0
+      if (repl_ctx->owner_shard->shard_id != 0)
+        broadcast->receive_processors(output.task_processors);
+      return mapper;
     }
 
     /////////////////////////////////////////////////////////////

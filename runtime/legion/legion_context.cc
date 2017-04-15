@@ -8986,6 +8986,8 @@ namespace Legion {
                       get_task_name(), get_unique_id());
       FutureMap result = epoch_op->initialize(this, launcher, launch_space,
                                               Runtime::check_privileges);
+      epoch_op->set_sharding_collective(
+          new ShardingGatherCollective(this, 0/*owner shard*/));
 #else
       FutureMap result = epoch_op->initialize(this, launcher, launch_space,
                                               false/*check privileges*/);

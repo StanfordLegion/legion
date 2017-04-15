@@ -359,6 +359,47 @@ namespace Legion {
     };
 
     /**
+     * \class MustEpochProcessorBroadcast 
+     * A class for broadcasting the processor mapping for
+     * a must epoch launch
+     */
+    class MustEpochProcessorBroadcast : public BroadcastCollective {
+    public:
+      MustEpochProcessorBroadcast(ReplicateContext *ctx, ShardID origin);
+      MustEpochProcessorBroadcast(const MustEpochProcessorBroadcast &rhs);
+      virtual ~MustEpochProcessorBroadcast(void);
+    public:
+      MustEpochProcessorBroadcast& operator=(
+                                  const MustEpochProcessorBroadcast &rhs);
+    public:
+      virtual void pack_collective(Serializer &rez) const;
+      virtual void unpack_collective(Deserializer &derez);
+    public:
+      void broadcast_processors(const std::vector<Processor> &processors);
+      void receive_processors(std::vector<Processor> &processors);
+    };
+
+    /**
+     * \class MustEpochMappingExchange
+     * A class for exchanging the mapping decisions for
+     * specific constraints for a must epoch launch
+     */
+    class MustEpochMappingExchange : public AllGatherCollective {
+    public:
+      MustEpochMappingExchange(ReplicateContext *ctx);
+      MustEpochMappingExchange(const MustEpochMappingExchange &rhs);
+      virtual ~MustEpochMappingExchange(void);
+    public:
+      MustEpochMappingExchange& operator=(const MustEpochMappingExchange &rhs);
+    public:
+      virtual void pack_collective_stage(Serializer &rez, int stage) const;
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
+    public:
+      void exchange_must_epoch_mappings(ShardID shard_id, size_t total_shards,
+              std::vector<std::vector<Mapping::PhysicalInstance> > &mappings);
+    };
+
+    /**
      * \class ReplIndividualTask
      * An individual task that is aware that it is 
      * being executed in a control replication context.
@@ -682,8 +723,22 @@ namespace Legion {
     public:
       ReplMustEpochOp& operator=(const ReplMustEpochOp &rhs);
     public:
+      virtual void activate(void);
+      virtual void deactivate(void);
       virtual FutureMapImpl* create_future_map(TaskContext *ctx,
                                                IndexSpace launch_space);
+      virtual MapperManager* invoke_mapper(void);
+    protected:
+      ShardingID sharding_functor;
+      MustEpochProcessorBroadcast *broadcast;
+      MustEpochMappingExchange *exchange;
+#ifdef DEBUG_LEGION
+    public:
+      inline void set_sharding_collective(ShardingGatherCollective *collective)
+        { sharding_collective = collective; }
+    protected:
+      ShardingGatherCollective *sharding_collective;
+#endif
     };
 
     /**

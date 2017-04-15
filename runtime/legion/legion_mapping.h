@@ -1519,7 +1519,10 @@ namespace Legion {
        * must abide by the mapping constraints specified in the 'constraints' 
        * field which says which logical regions in different tasks must be 
        * mapped to the same physical instance. The mapper is also given 
-       * the mapping tag passed at the callsite in 'mapping_tag'.
+       * the mapping tag passed at the callsite in 'mapping_tag'. Finally,
+       * if the 'shard_mapping' input is not empty then this must epoch
+       * operation was launched in a control replicated context and it 
+       * therefore must specify a 'chosen_functor' for the ShardingID.
        */
       struct MappingConstraint {
         std::vector<Task*>                          constrained_tasks;
@@ -1530,10 +1533,12 @@ namespace Legion {
         std::vector<const Task*>                    tasks;
         std::vector<MappingConstraint>              constraints;
         MappingTagID                                mapping_tag;
+        std::map<ShardID,Processor>                 shard_mapping;
       };
       struct MapMustEpochOutput {
         std::vector<Processor>                      task_processors;
         std::vector<std::vector<PhysicalInstance> > constraint_mappings;
+        ShardingID                                  chosen_functor; 
       };
       //------------------------------------------------------------------------
       virtual void map_must_epoch(const MapperContext           ctx,

@@ -1443,6 +1443,8 @@ namespace Legion {
     class FutureBroadcast;
     class FutureExchange;
     class FutureNameExchange;
+    class MustEpochProcessorBroadcast;
+    class MustEpochMappingExchange;
 
 #define FRIEND_ALL_RUNTIME_CLASSES                          \
     friend class Legion::Runtime;                           \
