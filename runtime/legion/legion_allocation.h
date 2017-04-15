@@ -31,7 +31,7 @@
 #include <malloc.h>
 #endif
 #include "legion_template_help.h" // StaticAssert
-#if __cplusplus == 201103L
+#if __cplusplus >= 201103L
 #include <utility>
 #endif
 
@@ -1077,7 +1077,7 @@ namespace Legion {
         return std::numeric_limits<size_type>::max() / sizeof(T);
       }
     public:
-#if __cplusplus == 201103L
+#if __cplusplus >= 201103L
       template<class U, class... Args>
       inline void construct(U *p, Args&&... args) 
         { ::new((void*)p) U(std::forward<Args>(args)...); }
