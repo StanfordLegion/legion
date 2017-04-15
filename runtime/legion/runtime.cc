@@ -18654,6 +18654,8 @@ namespace Legion {
     {
       if (separate_runtime_instances)
       {
+        if (!p.exists())
+          p = Processor::get_executing_processor();
 #ifdef DEBUG_LEGION
         assert(runtime_map != NULL);
         assert(the_runtime == NULL);
