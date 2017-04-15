@@ -4271,7 +4271,7 @@ legion_runtime_issue_execution_fence(legion_runtime_t runtime_,
 legion_runtime_t
 legion_runtime_get_runtime()
 {
-  Runtime *runtime = runtime->get_runtime();
+  Runtime *runtime = Runtime::get_runtime();
   return CObjectWrapper::wrap(runtime);
 }
 
