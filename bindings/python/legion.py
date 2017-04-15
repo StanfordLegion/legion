@@ -32,41 +32,51 @@ ffi = cffi.FFI()
 ffi.cdef(header)
 c = ffi.dlopen(None)
 
-_local_tasks = {}
 class Task (object):
-    __slots__ = ['body', 'wrapper']
+    __slots__ = ['body', 'task_id']
 
     def __init__(self, body):
         self.body = body
-        self.wrapper = Task.make_wrapper(body)
+        self.task_id = None
 
-    @staticmethod
-    def make_wrapper(body):
-        def wrapper(args, user_data, proc):
-            arg_ptr = ffi.new("char[]", bytes(args))
-            arg_size = len(args)
+    def __call__(self, *args):
+        # Hack: This entrypoint needs to be able to handle both being
+        # called in user code (to launch a task) and as the task
+        # wrapper when the task itself executes. Unfortunately isn't a
+        # good way to disentangle these. Detect if we're in the task
+        # wrapper case by checking the number and types of arguments.
+        if len(args) == 3 and \
+           isinstance(args[0], bytearray) and \
+           isinstance(args[1], bytearray) and \
+           isinstance(args[2], long):
+            self.execute_task(*args)
+        else:
+            assert False # FIXME: Implement task spawn
 
-            task = ffi.new("legion_task_t *")
-            raw_regions = ffi.new("legion_physical_region_t **")
-            num_regions = ffi.new("unsigned *")
-            context = ffi.new("legion_context_t *")
-            runtime = ffi.new("legion_runtime_t *")
-            c.legion_task_preamble(
-                arg_ptr, arg_size, proc,
-                task, raw_regions, num_regions, context, runtime)
+    def execute_task(self, args, user_data, proc):
+        arg_ptr = ffi.new("char[]", bytes(args))
+        arg_size = len(args)
 
-            regions = []
-            for i in xrange(num_regions[0]):
-                regions.append(raw_regions[0][i])
+        task = ffi.new("legion_task_t *")
+        raw_regions = ffi.new("legion_physical_region_t **")
+        num_regions = ffi.new("unsigned *")
+        context = ffi.new("legion_context_t *")
+        runtime = ffi.new("legion_runtime_t *")
+        c.legion_task_preamble(
+            arg_ptr, arg_size, proc,
+            task, raw_regions, num_regions, context, runtime)
 
-            value = body(task[0], regions, context[0], runtime[0])
-            assert(value is None) # FIXME: Support return values
+        regions = []
+        for i in xrange(num_regions[0]):
+            regions.append(raw_regions[0][i])
 
-            c.legion_task_postamble(runtime[0], context[0], ffi.NULL, 0)
-        return wrapper
+        value = self.body(task[0], regions, context[0], runtime[0])
+        assert(value is None) # FIXME: Support return values
+
+        c.legion_task_postamble(runtime[0], context[0], ffi.NULL, 0)
 
     def register(self):
-        assert(self not in _local_tasks)
+        assert(self.task_id is None)
 
         execution_constraints = c.legion_execution_constraint_set_create()
         c.legion_execution_constraint_set_add_processor_constraint(
@@ -96,10 +106,8 @@ class Task (object):
         c.legion_execution_constraint_set_destroy(execution_constraints)
         c.legion_task_layout_constraint_set_destroy(layout_constraints)
 
-        _local_tasks[self] = task_id
-        return task_id
+        self.task_id = task_id
+        return self
 
 def task(body):
-    t = Task(body)
-    t.register()
-    return t.wrapper
+    return Task(body).register()
