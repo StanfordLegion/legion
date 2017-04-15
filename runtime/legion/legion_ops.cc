@@ -10050,6 +10050,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureMap MustEpochOp::initialize(TaskContext *ctx,
                                               const MustEpochLauncher &launcher,
+                                              IndexSpace launch_space,
                                               bool check_privileges)
     //--------------------------------------------------------------------------
     {
@@ -10093,9 +10094,7 @@ namespace Legion {
       mapper_tag = launcher.mapping_tag;
       // Make a new future map for storing our results
       // We'll fill it in later
-      result_map = FutureMap(legion_new<FutureMapImpl>(ctx, this, runtime,
-            runtime->get_available_distributed_id(true/*need continuation*/),
-            runtime->address_space));
+      result_map = FutureMap(create_future_map(ctx, launch_space));
 #ifdef DEBUG_LEGION
       size_t total_points = 0;
       for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
@@ -10124,6 +10123,16 @@ namespace Legion {
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_must_epoch_operation(ctx->get_unique_id(), unique_op_id);
       return result_map;
+    }
+
+    //--------------------------------------------------------------------------
+    FutureMapImpl* MustEpochOp::create_future_map(TaskContext *ctx,
+                                                  IndexSpace launch_space)
+    //--------------------------------------------------------------------------
+    {
+      return legion_new<FutureMapImpl>(ctx, this, runtime,
+            runtime->get_available_distributed_id(true/*need continuation*/),
+            runtime->address_space);
     }
 
     //--------------------------------------------------------------------------

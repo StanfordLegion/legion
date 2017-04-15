@@ -1841,7 +1841,11 @@ namespace Legion {
     public:
       FutureMap initialize(TaskContext *ctx,
                            const MustEpochLauncher &launcher,
-                           bool check_privileges);
+                           IndexSpace launch_space, bool check_privileges);
+      // Make this a virtual method so it can be overridden for
+      // control replicated version of must epoch op
+      virtual FutureMapImpl* create_future_map(TaskContext *ctx,
+                                               IndexSpace launch_space);
       void find_conflicted_regions(
           std::vector<PhysicalRegion> &unmapped); 
     public:

@@ -681,6 +681,9 @@ namespace Legion {
       virtual ~ReplMustEpochOp(void);
     public:
       ReplMustEpochOp& operator=(const ReplMustEpochOp &rhs);
+    public:
+      virtual FutureMapImpl* create_future_map(TaskContext *ctx,
+                                               IndexSpace launch_space);
     };
 
     /**

@@ -1722,7 +1722,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     MustEpochLauncher::MustEpochLauncher(MapperID id /*= 0*/,   
                                          MappingTagID tag/*= 0*/)
-      : map_id(id), mapping_tag(tag), silence_warnings(false)
+      : map_id(id), mapping_tag(tag), launch_domain(Domain::NO_DOMAIN),
+        launch_space(IndexSpace::NO_SPACE), silence_warnings(false)
     //--------------------------------------------------------------------------
     {
     }

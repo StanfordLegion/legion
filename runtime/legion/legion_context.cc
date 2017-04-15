@@ -4287,10 +4287,11 @@ namespace Legion {
       log_run.debug("Executing a must epoch in task %s (ID %lld)",
                     get_task_name(), get_unique_id());
       FutureMap result = 
-        epoch_op->initialize(this, launcher, Runtime::check_privileges);
+        epoch_op->initialize(this, launcher, launcher.launch_space,
+                             Runtime::check_privileges);
 #else
       FutureMap result = epoch_op->initialize(this, launcher, 
-                                              false/*check privileges*/);
+            launcher.launch_space, false/*check privileges*/);
 #endif
       // Now find all the parent task regions we need to invalidate
       std::vector<PhysicalRegion> unmapped_regions;
@@ -8967,14 +8968,26 @@ namespace Legion {
     {
       AutoRuntimeCall call(this);
       ReplMustEpochOp *epoch_op = runtime->get_available_repl_epoch_op(true);
+      if (!launcher.launch_space.exists() && !launcher.launch_domain.exists())
+      {
+        log_run.error("Must epoch launch in control replicated task %s "
+                      "(UID %lld) is missing an explicit launch index space "
+                      "or launch domain. These are required for must epoch "
+                      "launches in control replicated tasks",
+                      get_task_name(), get_unique_id());
+        assert(false);
+      }
+      IndexSpace launch_space = launcher.launch_space;
+      if (!launch_space.exists())
+        launch_space = find_index_launch_space(launcher.launch_domain);
 #ifdef DEBUG_LEGION
       if (owner_shard->shard_id == 0)
         log_run.debug("Executing a must epoch in task %s (ID %lld)",
                       get_task_name(), get_unique_id());
-      FutureMap result = 
-        epoch_op->initialize(this, launcher, Runtime::check_privileges);
+      FutureMap result = epoch_op->initialize(this, launcher, launch_space,
+                                              Runtime::check_privileges);
 #else
-      FutureMap result = epoch_op->initialize(this, launcher, 
+      FutureMap result = epoch_op->initialize(this, launcher, launch_space,
                                               false/*check privileges*/);
 #endif
       // Now find all the parent task regions we need to invalidate
@@ -9059,6 +9072,28 @@ namespace Legion {
                                     op->get_mapped_event());
       // Advance the barrier for the next operation 
       Runtime::advance_barrier(map_barrier);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::record_dynamic_collective_contribution(
+                                          DynamicCollective dc, const Future &f)
+    //--------------------------------------------------------------------------
+    {
+      log_run.error("Illegal dynamic collective operation used in "
+                    "control replicated task %s (UID %lld)", 
+                    get_task_name(), get_unique_id());
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::find_collective_contributions(DynamicCollective dc,
+                                             std::vector<Future> &contributions)
+    //--------------------------------------------------------------------------
+    {
+      log_run.error("Illegal dynamic collective operation used in "
+                    "control replicated task %s (UID %lld)",
+                    get_task_name(), get_unique_id());
+      assert(false);
     }
 
     //--------------------------------------------------------------------------

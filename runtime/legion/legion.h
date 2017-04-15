@@ -2186,6 +2186,9 @@ namespace Legion {
       std::vector<TaskLauncher>      single_tasks;
       std::vector<IndexTaskLauncher> index_tasks;
     public:
+      Domain                         launch_domain;
+      IndexSpace                     launch_space;
+    public:
       bool                           silence_warnings;
     };
 

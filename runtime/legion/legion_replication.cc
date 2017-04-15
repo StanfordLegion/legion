@@ -1526,6 +1526,25 @@ namespace Legion {
       return *this;
     }
 
+    //--------------------------------------------------------------------------
+    FutureMapImpl* ReplMustEpochOp::create_future_map(TaskContext *ctx,
+                                                        IndexSpace launch_space)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(launch_space.exists());
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(ctx);
+#endif
+      Domain launch_domain;
+      runtime->forest->find_launch_space_domain(launch_space, launch_domain);
+      return legion_new<ReplFutureMapImpl>(repl_ctx, this,launch_domain,runtime,
+          runtime->get_available_distributed_id(true/*need continuation*/),
+          runtime->address_space);
+    }
+
     /////////////////////////////////////////////////////////////
     // Repl Timing Op 
     /////////////////////////////////////////////////////////////
