@@ -5766,7 +5766,7 @@ namespace Legion {
        * @param processor the task will run on
        * @return the high-level runtime pointer for the specified processor
        */
-      static Runtime* get_runtime(Processor p);
+      static Runtime* get_runtime(Processor p = Processor::NO_PROC);
     private:
       friend class FieldAllocator;
       FieldID allocate_field(Context ctx, FieldSpace space, 
