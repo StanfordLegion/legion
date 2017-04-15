@@ -1614,6 +1614,7 @@ namespace Legion {
 #endif
         exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
+      sharding_functor = output.chosen_functor;
 #ifdef DEBUG_LEGION
       // Check that the sharding IDs are all the same
       assert(sharding_collective != NULL);
@@ -1630,7 +1631,18 @@ namespace Legion {
       }
       assert(broadcast != NULL);
       assert(exchange != NULL);
+      assert(result_map.impl != NULL);
+      ReplFutureMapImpl *impl = 
+          dynamic_cast<ReplFutureMapImpl*>(result_map.impl);
+      assert(impl != NULL);
+#else
+      ReplFutureMapImpl *impl = 
+          static_cast<ReplFutureMapImpl*>(result_map.impl);
 #endif
+      // Set the future map sharding functor
+      ShardingFunction *sharding_function = 
+          repl_ctx->shard_manager->find_sharding_function(sharding_functor);
+      impl->set_sharding_function(sharding_function);
       // Broadcast the processor decisions from shard 0
       if (repl_ctx->owner_shard->shard_id == 0)
         broadcast->broadcast_processors(output.task_processors);
@@ -1641,6 +1653,18 @@ namespace Legion {
       if (repl_ctx->owner_shard->shard_id != 0)
         broadcast->receive_processors(output.task_processors);
       return mapper;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplMustEpochOp::initialize_collectives(ReplicateContext *ctx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(broadcast == NULL);
+      assert(exchange == NULL);
+#endif
+      broadcast = new MustEpochProcessorBroadcast(ctx, 0/*owner shard*/);
+      exchange = new MustEpochMappingExchange(ctx);
     }
 
     /////////////////////////////////////////////////////////////

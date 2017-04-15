@@ -728,6 +728,8 @@ namespace Legion {
       virtual FutureMapImpl* create_future_map(TaskContext *ctx,
                                                IndexSpace launch_space);
       virtual MapperManager* invoke_mapper(void);
+    public:
+      void initialize_collectives(ReplicateContext *ctx);
     protected:
       ShardingID sharding_functor;
       MustEpochProcessorBroadcast *broadcast;

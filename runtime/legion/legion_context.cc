@@ -8992,6 +8992,7 @@ namespace Legion {
       FutureMap result = epoch_op->initialize(this, launcher, launch_space,
                                               false/*check privileges*/);
 #endif
+      epoch_op->initialize_collectives(this);
       // Now find all the parent task regions we need to invalidate
       std::vector<PhysicalRegion> unmapped_regions;
       if (!Runtime::unsafe_launch)

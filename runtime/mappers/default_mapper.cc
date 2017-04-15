@@ -3392,6 +3392,10 @@ namespace Legion {
 	}
 	constraint_mapping.push_back(inst);
       }
+      // If we're in a control replicated context then use the
+      // base cyclic sharding function to stripe the points
+      if (!input.shard_mapping.empty())
+        output.chosen_functor = 0;
     }
 
     //--------------------------------------------------------------------------
