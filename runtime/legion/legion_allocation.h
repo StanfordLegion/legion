@@ -31,7 +31,7 @@
 #include <malloc.h>
 #endif
 #include "legion_template_help.h" // StaticAssert
-#if __cplusplus == 201103L
+#if __cplusplus >= 201103L
 #include <utility>
 #endif
 
@@ -1054,6 +1054,25 @@ namespace Legion {
       inline pointer address(reference r) { return &r; }
       inline const_pointer address(const_reference r) { return &r; }
     public:
+#if __cplusplus > 201402L
+      inline T* allocate(std::size_t cnt) { 
+        // This was failing to compile before because the compiler
+        // couldn't find the align_val_t type in the std namespace
+        // Hopefully this gets fixed soon
+        T *result = static_cast<T*>(::operator new (cnt*sizeof(T),
+                                    std::align_val_t(alignof(T))));
+#ifdef TRACE_ALLOCATION
+        LegionAllocation::trace_allocation(runtime, A, sizeof(T), cnt);
+#endif
+        return result;
+      }
+      inline void deallocate(T *ptr, std::size_t size) { 
+#ifdef TRACE_ALLOCATION
+        LegionAllocation::trace_free(runtime, A, sizeof(T), size);
+#endif
+        ::operator delete (ptr); 
+      }
+#else
       inline pointer allocate(size_type cnt,
                       typename std::allocator<void>::const_pointer = 0) {
 #ifdef TRACE_ALLOCATION
@@ -1072,12 +1091,13 @@ namespace Legion {
 #endif
         free(p);
       }
+#endif // After/Before C++17
     public:
       inline size_type max_size(void) const {
         return std::numeric_limits<size_type>::max() / sizeof(T);
       }
     public:
-#if __cplusplus == 201103L
+#if __cplusplus >= 201103L
       template<class U, class... Args>
       inline void construct(U *p, Args&&... args) 
         { ::new((void*)p) U(std::forward<Args>(args)...); }
