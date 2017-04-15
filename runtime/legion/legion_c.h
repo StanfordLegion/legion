@@ -2709,6 +2709,12 @@ extern "C" {
   // -----------------------------------------------------------------------
 
   /**
+   * @see Legion::Runtime::get_runtime()
+   */
+  legion_runtime_t
+  legion_runtime_get_runtime();
+
+  /**
    * @see Legion::Runtime::get_executing_processor()
    */
   legion_processor_t

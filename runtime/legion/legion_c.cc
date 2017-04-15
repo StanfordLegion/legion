@@ -4285,6 +4285,13 @@ legion_runtime_issue_execution_fence(legion_runtime_t runtime_,
 // Miscellaneous Operations
 // -----------------------------------------------------------------------
 
+legion_runtime_t
+legion_runtime_get_runtime()
+{
+  Runtime *runtime = runtime->get_runtime();
+  return CObjectWrapper::wrap(runtime);
+}
+
 legion_processor_t
 legion_runtime_get_executing_processor(legion_runtime_t runtime_,
                                        legion_context_t ctx_)
