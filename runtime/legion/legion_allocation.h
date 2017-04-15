@@ -1054,6 +1054,22 @@ namespace Legion {
       inline pointer address(reference r) { return &r; }
       inline const_pointer address(const_reference r) { return &r; }
     public:
+#if __cplusplus > 201402L
+      inline T* allocate(std::size_t cnt) { 
+        T *result = static_cast<T*>(::operator new (cnt*sizeof(T),
+                                    AlignmentTrait<T>::AlignmentOf));
+#ifdef TRACE_ALLOCATION
+        LegionAllocation::trace_allocation(runtime, A, sizeof(T), cnt);
+#endif
+        return result;
+      }
+      inline void deallocate(T *ptr, std::size_t size) { 
+#ifdef TRACE_ALLOCATION
+        LegionAllocation::trace_free(runtime, A, sizeof(T), size);
+#endif
+        ::operator delete (ptr); 
+      }
+#else
       inline pointer allocate(size_type cnt,
                       typename std::allocator<void>::const_pointer = 0) {
 #ifdef TRACE_ALLOCATION
@@ -1072,13 +1088,14 @@ namespace Legion {
 #endif
         free(p);
       }
+#endif // After/Before C++17
     public:
       inline size_type max_size(void) const {
         return std::numeric_limits<size_type>::max() / sizeof(T);
       }
     public:
 #if __cplusplus > 201402L
-#error "NEED C++17 Support for Legion Custom Allocators"
+      // Nothing for C++17 or later      
 #elif __cplusplus >= 201103L
       template<class U, class... Args>
       inline void construct(U *p, Args&&... args) 
