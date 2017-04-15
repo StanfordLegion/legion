@@ -1056,8 +1056,11 @@ namespace Legion {
     public:
 #if __cplusplus > 201402L
       inline T* allocate(std::size_t cnt) { 
+        // This was failing to compile before because the compiler
+        // couldn't find the align_val_t type in the std namespace
+        // Hopefully this gets fixed soon
         T *result = static_cast<T*>(::operator new (cnt*sizeof(T),
-                                    AlignmentTrait<T>::AlignmentOf));
+                                    std::align_val_t(alignof(T))));
 #ifdef TRACE_ALLOCATION
         LegionAllocation::trace_allocation(runtime, A, sizeof(T), cnt);
 #endif
@@ -1094,9 +1097,7 @@ namespace Legion {
         return std::numeric_limits<size_type>::max() / sizeof(T);
       }
     public:
-#if __cplusplus > 201402L
-      // Nothing for C++17 or later      
-#elif __cplusplus >= 201103L
+#if __cplusplus >= 201103L
       template<class U, class... Args>
       inline void construct(U *p, Args&&... args) 
         { ::new((void*)p) U(std::forward<Args>(args)...); }
