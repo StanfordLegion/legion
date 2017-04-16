@@ -407,9 +407,10 @@ namespace Legion {
     public:
       ProjectionInfo(void)
         : projection(NULL), projection_type(SINGULAR),
-          projection_space(NULL), dirty_reduction(false) { }
+          projection_space(NULL), sharding_function(NULL),
+          dirty_reduction(false) { }
       ProjectionInfo(Runtime *runtime, const RegionRequirement &req,
-                     IndexSpace launch_space);
+                     IndexSpace launch_space, ShardingFunction *func = NULL);
     public:
       inline bool is_projecting(void) const { return (projection != NULL); }
       inline const LegionMap<ProjectionEpochID,FieldMask>::aligned&
@@ -427,6 +428,7 @@ namespace Legion {
       ProjectionFunction *projection;
       ProjectionType projection_type;
       IndexSpaceNode *projection_space;
+      ShardingFunction *sharding_function;
     protected:
       // Use this information to deduplicate between different points
       // trying to advance information for the same projection epoch

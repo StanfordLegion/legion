@@ -782,6 +782,7 @@ namespace Legion {
       void activate_copy(void);
       void deactivate_copy(void);
       void log_copy_requirements(void) const;
+      void perform_base_dependence_analysis(void);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -2639,6 +2640,7 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void trigger_commit(void);
     public:
+      void perform_base_dependence_analysis(void);
       void handle_point_commit(void);
 #ifdef DEBUG_LEGION
       void check_point_requirements(void);

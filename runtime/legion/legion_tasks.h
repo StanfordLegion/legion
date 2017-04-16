@@ -618,6 +618,7 @@ namespace Legion {
                              bool check_privileges,
                              bool track = true);
       void set_top_level(void);
+      void perform_base_dependence_analysis(void);
     public:
       RtEvent perform_versioning_analysis(void);
       virtual RtEvent perform_must_epoch_version_analysis(MustEpochOp *own);
@@ -877,6 +878,7 @@ namespace Legion {
                              bool track = true);
       void initialize_predicate(const Future &pred_future,
                                 const TaskArgument &pred_arg);
+      void perform_base_dependence_analysis(void);
     public:
       virtual void activate(void);
       virtual void deactivate(void);

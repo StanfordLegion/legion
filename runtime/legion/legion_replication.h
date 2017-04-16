@@ -424,6 +424,7 @@ namespace Legion {
       virtual void deactivate(void);
     public:
       virtual void trigger_prepipeline_stage(void);
+      virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
     public:
       // Override these so we can broadcast the future result
@@ -434,6 +435,9 @@ namespace Legion {
     protected:
       ShardID owner_shard;
       ShardingID sharding_functor;
+      ShardingFunction *sharding_function;
+      IndexSpace launch_space;
+      std::vector<ProjectionInfo> projection_infos;
       CollectiveID future_collective_id; // id for the future broadcast 
 #ifdef DEBUG_LEGION
     public:
@@ -461,6 +465,7 @@ namespace Legion {
       virtual void deactivate(void);
     public:
       virtual void trigger_prepipeline_stage(void);
+      virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
     public:
       // Override this so we can exchange reduction results
@@ -470,6 +475,7 @@ namespace Legion {
       virtual FutureMapImpl* create_future_map(TaskContext *ctx);
     protected:
       ShardingID sharding_functor;
+      ShardingFunction *sharding_function;
       FutureExchange *reduction_collective;
 #ifdef DEBUG_LEGION
     public:
@@ -497,9 +503,11 @@ namespace Legion {
       virtual void deactivate(void);
     public:
       virtual void trigger_prepipeline_stage(void);
+      virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
     protected:
       ShardingID sharding_functor;
+      ShardingFunction *sharding_function;
       MapperManager *mapper;
 #ifdef DEBUG_LEGION
     public:
@@ -523,13 +531,21 @@ namespace Legion {
     public:
       ReplCopyOp& operator=(const ReplCopyOp &rhs);
     public:
+      void initialize_replication(ReplicateContext *ctx);
+    public:
       virtual void activate(void);
       virtual void deactivate(void);
     public:
       virtual void trigger_prepipeline_stage(void);
+      virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
     protected:
       ShardingID sharding_functor;
+      ShardingFunction *sharding_function;
+      IndexSpace launch_space;
+    public:
+      std::vector<ProjectionInfo>   src_projection_infos;
+      std::vector<ProjectionInfo>   dst_projection_infos;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)
@@ -556,9 +572,11 @@ namespace Legion {
       virtual void deactivate(void);
     public:
       virtual void trigger_prepipeline_stage(void);
+      virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
     protected:
       ShardingID sharding_functor;
+      ShardingFunction *sharding_function;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)

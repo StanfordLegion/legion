@@ -64,6 +64,8 @@ namespace Legion {
       activate_individual_task();
       owner_shard = 0;
       sharding_functor = UINT_MAX;
+      sharding_function = NULL;
+      launch_space = IndexSpace::NO_SPACE;
       future_collective_id = UINT_MAX;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL; 
@@ -79,6 +81,7 @@ namespace Legion {
         delete sharding_collective;
 #endif
       deactivate_individual_task();
+      projection_infos.clear();
       runtime->free_repl_individual_task(this);
     }
 
@@ -110,7 +113,10 @@ namespace Legion {
         exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
       this->sharding_functor = output.chosen_functor;
+      sharding_function = 
+        repl_ctx->shard_manager->find_sharding_function(sharding_functor);
 #ifdef DEBUG_LEGION
+      assert(sharding_function != NULL);
       // In debug mode we check to make sure that all the mappers
       // picked the same sharding function
       assert(sharding_collective != NULL);
@@ -132,20 +138,42 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplIndividualTask::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      perform_base_dependence_analysis();
+      projection_infos.resize(regions.size());
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        RegionRequirement &req = regions[idx];
+#ifdef DEBUG_LEGION
+        assert(req.handle_type == SINGULAR);
+        assert(req.projection == 0); // should be the default projection func
+#endif
+        req.handle_type = REG_PROJECTION; // Do this temporarily 
+        ProjectionInfo &info = projection_infos[idx];
+        info = ProjectionInfo(runtime, req, launch_space, sharding_function);
+        runtime->forest->perform_dependence_analysis(this, idx, req,
+                                                     restrict_infos[idx],
+                                                     version_infos[idx], info,
+                                                     privilege_paths[idx]);
+        req.handle_type = SINGULAR; // Switch it back
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void ReplIndividualTask::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(sharding_function != NULL);
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      // Get the sharding function implementation to use from our context
-      ShardingFunction *function = 
-        repl_ctx->shard_manager->find_sharding_function(sharding_functor);
       // Figure out whether this shard owns this point
-      owner_shard = function->find_owner(index_point, index_domain); 
+      owner_shard = sharding_function->find_owner(index_point, index_domain);
       // If we own it we go on the queue, otherwise we complete early
       if (owner_shard != repl_ctx->owner_shard->shard_id)
       {
@@ -211,6 +239,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       future_collective_id = ctx->get_next_collective_index();
+      // Also initialize our index domain of a single point
+      index_domain = Domain(index_point, index_point);
+      launch_space = ctx->find_index_launch_space(index_domain);
     }
 
     /////////////////////////////////////////////////////////////
@@ -254,6 +285,7 @@ namespace Legion {
     {
       activate_index_task();
       sharding_functor = UINT_MAX;
+      sharding_function = NULL;
       reduction_collective = NULL;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
@@ -305,7 +337,10 @@ namespace Legion {
         exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
       this->sharding_functor = output.chosen_functor;
+      sharding_function = 
+        repl_ctx->shard_manager->find_sharding_function(sharding_functor);
 #ifdef DEBUG_LEGION
+      assert(sharding_function != NULL);
       assert(sharding_collective != NULL);
       sharding_collective->contribute(this->sharding_functor);
       if (sharding_collective->is_target() &&
@@ -322,8 +357,6 @@ namespace Legion {
       // If we have a future map then set the sharding function
       if (redop == 0)
       {
-        ShardingFunction *function = 
-          repl_ctx->shard_manager->find_sharding_function(sharding_functor);
 #ifdef DEBUG_LEGION
         assert(future_map.impl != NULL);
         ReplFutureMapImpl *impl = 
@@ -333,7 +366,7 @@ namespace Legion {
         ReplFutureMapImpl *impl = 
           static_cast<ReplFutureMapImpl*>(future_map.impl);
 #endif
-        impl->set_sharding_function(function);
+        impl->set_sharding_function(sharding_function);
       }
       // Now we can do the normal prepipeline stage
       IndexTask::trigger_prepipeline_stage();
@@ -349,13 +382,10 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      // Get the sharding function implementation to use from our context
-      ShardingFunction *function = 
-        repl_ctx->shard_manager->find_sharding_function(sharding_functor);
       // Compute the local index space of points for this shard
       const Domain &local_domain = 
-        function->find_shard_domain(repl_ctx->owner_shard->shard_id, 
-                                    index_domain);
+        sharding_function->find_shard_domain(repl_ctx->owner_shard->shard_id,
+                                             index_domain);
       index_domain = local_domain;
       // If it's empty we're done, otherwise we go back on the queue
       if (local_domain.get_volume() == 0)
@@ -366,6 +396,23 @@ namespace Legion {
       }
       else // We have valid points, so it goes on the ready queue
         enqueue_ready_operation();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexTask::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      perform_base_dependence_analysis();
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        projection_infos[idx] = 
+         ProjectionInfo(runtime, regions[idx], launch_space, sharding_function);
+        runtime->forest->perform_dependence_analysis(this, idx, regions[idx], 
+                                                     restrict_infos[idx],
+                                                     version_infos[idx],
+                                                     projection_infos[idx],
+                                                     privilege_paths[idx]);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -460,6 +507,7 @@ namespace Legion {
     {
       activate_index_fill();
       sharding_functor = UINT_MAX;
+      sharding_function = NULL;
       mapper = NULL;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
@@ -508,6 +556,8 @@ namespace Legion {
         exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
       this->sharding_functor = output.chosen_functor;
+      sharding_function = 
+        repl_ctx->shard_manager->find_sharding_function(sharding_functor);
 #ifdef DEBUG_LEGION
       assert(sharding_collective != NULL);
       sharding_collective->contribute(this->sharding_functor);
@@ -524,6 +574,21 @@ namespace Legion {
       // Now we can do the normal prepipeline stage
       IndexFillOp::trigger_prepipeline_stage();
     }
+    
+    //--------------------------------------------------------------------------
+    void ReplIndexFillOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      perform_base_dependence_analysis();
+      projection_info = ProjectionInfo(runtime, requirement, 
+                                       launch_space, sharding_function);
+      runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
+                                                   requirement,
+                                                   restrict_info,
+                                                   version_info,
+                                                   projection_info,
+                                                   privilege_path);
+    }
 
     //--------------------------------------------------------------------------
     void ReplIndexFillOp::trigger_ready(void)
@@ -535,13 +600,10 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      // Get the sharding function implementation to use from our context
-      ShardingFunction *function = 
-        repl_ctx->shard_manager->find_sharding_function(sharding_functor);
       // Compute the local index space of points for this shard
       const Domain &local_domain = 
-        function->find_shard_domain(repl_ctx->owner_shard->shard_id, 
-                                    index_domain);
+        sharding_function->find_shard_domain(repl_ctx->owner_shard->shard_id, 
+                                             index_domain);
       index_domain = local_domain;
       // If it's empty we're done, otherwise we go back on the queue
       if (local_domain.get_volume() == 0)
@@ -590,11 +652,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplCopyOp::initialize_replication(ReplicateContext *ctx)
+    //--------------------------------------------------------------------------
+    {
+      // Initialize our index domain of a single point
+      index_domain = Domain(index_point, index_point);
+      launch_space = ctx->find_index_launch_space(index_domain);
+    }
+
+    //--------------------------------------------------------------------------
     void ReplCopyOp::activate(void)
     //--------------------------------------------------------------------------
     {
       activate_copy();
       sharding_functor = UINT_MAX;
+      sharding_function = NULL;
+      launch_space = IndexSpace::NO_SPACE;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
 #endif
@@ -609,6 +682,8 @@ namespace Legion {
         delete sharding_collective;
 #endif
       deactivate_copy();
+      src_projection_infos.clear();
+      dst_projection_infos.clear();
       runtime->free_repl_copy_op(this);
     }
 
@@ -641,6 +716,8 @@ namespace Legion {
         exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
       this->sharding_functor = output.chosen_functor;
+      sharding_function = 
+        repl_ctx->shard_manager->find_sharding_function(sharding_functor);
 #ifdef DEBUG_LEGION
       assert(sharding_collective != NULL);
       sharding_collective->contribute(this->sharding_functor);
@@ -659,6 +736,56 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplCopyOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      perform_base_dependence_analysis(); 
+      src_projection_infos.resize(src_requirements.size());
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+      {
+        RegionRequirement &req = src_requirements[idx];
+#ifdef DEBUG_LEGION
+        assert(req.handle_type == SINGULAR);
+        assert(req.projection == 0); // should be the default projection func
+#endif
+        req.handle_type = REG_PROJECTION; // Do this temporarily
+        ProjectionInfo &info = src_projection_infos[idx];
+        info = ProjectionInfo(runtime, req, launch_space, sharding_function);
+        runtime->forest->perform_dependence_analysis(this, idx, req,
+                                                     src_restrict_infos[idx],
+                                                     src_versions[idx], info,
+                                                     src_privilege_paths[idx]);
+        req.handle_type = SINGULAR; // Switch it back
+      }
+      dst_projection_infos.resize(dst_requirements.size());
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+      {
+        unsigned index = src_requirements.size()+idx;
+        RegionRequirement &req = dst_requirements[idx];
+        // Perform this dependence analysis as if it was READ_WRITE
+        // so that we can get the version numbers correct
+        const bool is_reduce_req = IS_REDUCE(req);
+        if (is_reduce_req)
+          req.privilege = READ_WRITE;
+#ifdef DEBUG_LEGION
+        assert(req.handle_type == SINGULAR);
+        assert(req.projection == 0); // should be the default projection func
+#endif
+        req.handle_type = REG_PROJECTION; // Do this temporarily
+        ProjectionInfo &info = dst_projection_infos[idx];
+        info = ProjectionInfo(runtime, req, launch_space, sharding_function);
+        runtime->forest->perform_dependence_analysis(this, index, req, 
+                                                     dst_restrict_infos[idx],
+                                                     dst_versions[idx], info,
+                                                     dst_privilege_paths[idx]);
+        // Switch the privileges back when we are done
+        if (is_reduce_req)
+          req.privilege = REDUCE;
+        req.handle_type = SINGULAR; // Switch it back
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void ReplCopyOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
@@ -668,11 +795,9 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      // Get the sharding function implementation to use from our context
-      ShardingFunction *function = 
-        repl_ctx->shard_manager->find_sharding_function(sharding_functor);
       // Figure out whether this shard owns this point
-      ShardID owner_shard = function->find_owner(index_point, index_domain); 
+      ShardID owner_shard = 
+        sharding_function->find_owner(index_point, index_domain); 
       // If we own it we go on the queue, otherwise we complete early
       if (owner_shard != repl_ctx->owner_shard->shard_id)
       {
@@ -726,6 +851,7 @@ namespace Legion {
     {
       activate_index_copy();
       sharding_functor = UINT_MAX;
+      sharding_function = NULL;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
 #endif
@@ -773,6 +899,8 @@ namespace Legion {
         exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
       this->sharding_functor = output.chosen_functor;
+      sharding_function = 
+        repl_ctx->shard_manager->find_sharding_function(sharding_functor); 
 #ifdef DEBUG_LEGION
       assert(sharding_collective != NULL);
       sharding_collective->contribute(this->sharding_functor);
@@ -791,6 +919,46 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplIndexCopyOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      perform_base_dependence_analysis();
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+      {
+        src_projection_infos[idx] = 
+          ProjectionInfo(runtime, src_requirements[idx], 
+                         launch_space, sharding_function);
+        runtime->forest->perform_dependence_analysis(this, idx, 
+                                                     src_requirements[idx],
+                                                     src_restrict_infos[idx],
+                                                     src_versions[idx],
+                                                     src_projection_infos[idx],
+                                                     src_privilege_paths[idx]);
+      }
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+      {
+        dst_projection_infos[idx] = 
+          ProjectionInfo(runtime, dst_requirements[idx], 
+                         launch_space, sharding_function);
+        unsigned index = src_requirements.size()+idx;
+        // Perform this dependence analysis as if it was READ_WRITE
+        // so that we can get the version numbers correct
+        const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = READ_WRITE;
+        runtime->forest->perform_dependence_analysis(this, index, 
+                                                     dst_requirements[idx],
+                                                     dst_restrict_infos[idx],
+                                                     dst_versions[idx],
+                                                     dst_projection_infos[idx],
+                                                     dst_privilege_paths[idx]);
+        // Switch the privileges back when we are done
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = REDUCE;
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void ReplIndexCopyOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
@@ -800,13 +968,10 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      // Get the sharding function implementation to use from our context
-      ShardingFunction *function = 
-        repl_ctx->shard_manager->find_sharding_function(sharding_functor);
       // Compute the local index space of points for this shard
       const Domain &local_domain = 
-        function->find_shard_domain(repl_ctx->owner_shard->shard_id, 
-                                    index_domain);
+        sharding_function->find_shard_domain(repl_ctx->owner_shard->shard_id,
+                                             index_domain);
       index_domain = local_domain;
       // If it's empty we're done, otherwise we go back on the queue
       if (local_domain.get_volume() == 0)

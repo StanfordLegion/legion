@@ -4931,6 +4931,22 @@ namespace Legion {
     void IndividualTask::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+      perform_base_dependence_analysis();
+      ProjectionInfo projection_info;
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        runtime->forest->perform_dependence_analysis(this, idx, regions[idx], 
+                                                     restrict_infos[idx],
+                                                     version_infos[idx],
+                                                     projection_info,
+                                                     privilege_paths[idx]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualTask::perform_base_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
 #ifdef DEBUG_LEGION
       assert(privilege_paths.size() == regions.size());
 #endif
@@ -4973,15 +4989,6 @@ namespace Legion {
       register_predicate_dependence();
       restrict_infos.resize(regions.size());
       version_infos.resize(regions.size());
-      ProjectionInfo projection_info;
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        runtime->forest->perform_dependence_analysis(this, idx, regions[idx], 
-                                                     restrict_infos[idx],
-                                                     version_infos[idx],
-                                                     projection_info,
-                                                     privilege_paths[idx]);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -7107,6 +7114,23 @@ namespace Legion {
     void IndexTask::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+      perform_base_dependence_analysis();
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        projection_infos[idx] = 
+          ProjectionInfo(runtime, regions[idx], launch_space);
+        runtime->forest->perform_dependence_analysis(this, idx, regions[idx], 
+                                                     restrict_infos[idx],
+                                                     version_infos[idx],
+                                                     projection_infos[idx],
+                                                     privilege_paths[idx]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexTask::perform_base_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
 #ifdef DEBUG_LEGION
       assert(privilege_paths.size() == regions.size());
 #endif 
@@ -7150,16 +7174,6 @@ namespace Legion {
       version_infos.resize(regions.size());
       restrict_infos.resize(regions.size());
       projection_infos.resize(regions.size());
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        projection_infos[idx] = 
-          ProjectionInfo(runtime, regions[idx], launch_space);
-        runtime->forest->perform_dependence_analysis(this, idx, regions[idx], 
-                                                     restrict_infos[idx],
-                                                     version_infos[idx],
-                                                     projection_infos[idx],
-                                                     privilege_paths[idx]);
-      }
     }
 
     //--------------------------------------------------------------------------

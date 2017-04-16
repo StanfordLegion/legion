@@ -3510,10 +3510,7 @@ namespace Legion {
     void CopyOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      // Register a dependence on our predicate
-      register_predicate_dependence();
       ProjectionInfo projection_info;
-      src_versions.resize(src_requirements.size());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         runtime->forest->perform_dependence_analysis(this, idx, 
                                                      src_requirements[idx],
@@ -3521,7 +3518,6 @@ namespace Legion {
                                                      src_versions[idx],
                                                      projection_info,
                                                      src_privilege_paths[idx]);
-      dst_versions.resize(dst_requirements.size());
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
         unsigned index = src_requirements.size()+idx;
@@ -3540,6 +3536,16 @@ namespace Legion {
         if (is_reduce_req)
           dst_requirements[idx].privilege = REDUCE;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::perform_base_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      // Register a dependence on our predicate
+      register_predicate_dependence();
+      src_versions.resize(src_requirements.size());
+      dst_versions.resize(dst_requirements.size());
     }
 
     //--------------------------------------------------------------------------
@@ -4848,8 +4854,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Register a dependence on our predicate
-      register_predicate_dependence();
-      src_versions.resize(src_requirements.size());
+      perform_base_dependence_analysis();
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
         src_projection_infos[idx] = 
@@ -4861,7 +4866,6 @@ namespace Legion {
                                                      src_projection_infos[idx],
                                                      src_privilege_paths[idx]);
       }
-      dst_versions.resize(dst_requirements.size());
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
         dst_projection_infos[idx] = 
@@ -13539,11 +13543,7 @@ namespace Legion {
     void IndexFillOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      // Register a dependence on our predicate
-      register_predicate_dependence();
-      // If we are waiting on a future register a dependence
-      if (future.impl != NULL)
-        future.impl->register_dependence(this);
+      perform_base_dependence_analysis(); 
       projection_info = ProjectionInfo(runtime, requirement, launch_space);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
@@ -13551,6 +13551,17 @@ namespace Legion {
                                                    version_info,
                                                    projection_info,
                                                    privilege_path);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexFillOp::perform_base_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      // Register a dependence on our predicate
+      register_predicate_dependence();
+      // If we are waiting on a future register a dependence
+      if (future.impl != NULL)
+        future.impl->register_dependence(this);
     }
 
     //--------------------------------------------------------------------------

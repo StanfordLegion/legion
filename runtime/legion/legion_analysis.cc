@@ -1970,13 +1970,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ProjectionInfo::ProjectionInfo(Runtime *runtime, 
-                      const RegionRequirement &req, IndexSpace launch_space)
+                                   const RegionRequirement &req, 
+                                   IndexSpace launch_space, ShardingFunction *f)
       : projection((req.handle_type != SINGULAR) ? 
           runtime->find_projection_function(req.projection) : NULL),
         projection_type(req.handle_type),
         projection_space((req.handle_type != SINGULAR) ?
             runtime->forest->get_node(launch_space) : NULL),
-        dirty_reduction(false)
+        sharding_function(f), dirty_reduction(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -2002,6 +2003,7 @@ namespace Legion {
       projection_type = SINGULAR;
       projection_space = NULL;
       projection_epochs.clear();
+      sharding_function = NULL;
       dirty_reduction = false;
     }
 

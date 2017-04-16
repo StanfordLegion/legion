@@ -221,6 +221,16 @@ namespace Legion {
 	  rect_data[i] = other.rect_data[i];
       }
 
+      Domain(const DomainPoint &lo, const DomainPoint &hi)
+        : is_id(0), dim(lo.dim)
+      {
+        assert(lo.dim == hi.dim);
+        for (int i = 0; i < dim; i++)
+          rect_data[i] = lo[i];
+        for (int i = 0; i < dim; i++)
+          rect_data[i+dim] = hi[i];
+      }
+
       template<int DIM, typename T>
       Domain(const Realm::ZRect<DIM,T> &other) : is_id(0), dim(DIM)
       {

@@ -8842,6 +8842,7 @@ namespace Legion {
 #else
       copy_op->initialize(this, launcher, false/*check privileges*/);
 #endif
+      copy_op->initialize_replication(this);
       // Check to see if we need to do any unmappings and remappings
       // before we can issue this copy operation
       std::vector<PhysicalRegion> unmapped_regions;
