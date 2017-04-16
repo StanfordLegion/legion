@@ -1532,6 +1532,7 @@ namespace Legion {
     {
       activate_must_epoch_op();
       sharding_functor = UINT_MAX;
+      index_domain = Domain::NO_DOMAIN;
       broadcast = NULL;
       exchange = NULL;
 #ifdef DEBUG_LEGION
@@ -1567,9 +1568,8 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(ctx);
 #endif
-      Domain launch_domain;
-      runtime->forest->find_launch_space_domain(launch_space, launch_domain);
-      return legion_new<ReplFutureMapImpl>(repl_ctx, this,launch_domain,runtime,
+      runtime->forest->find_launch_space_domain(launch_space, index_domain);
+      return legion_new<ReplFutureMapImpl>(repl_ctx, this, index_domain,runtime,
           runtime->get_available_distributed_id(true/*need continuation*/),
           runtime->address_space);
     }
@@ -1664,6 +1664,22 @@ namespace Legion {
         assert(false);
 #endif
         exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+      // Last we need to prune out any tasks which aren't local to our shard
+      std::vector<SingleTask*> local_single_tasks;
+      for (std::vector<SingleTask*>::const_iterator it = single_tasks.begin();
+            it != single_tasks.end(); it++)
+      {
+        // Figure out which shard this point belongs to
+        ShardID shard = 
+          sharding_function->find_owner((*it)->index_point, index_domain);
+        // If it's local we can keep going
+        if (shard == repl_ctx->owner_shard->shard_id)
+          continue;
+        // Otherwise we need to make it look like it is already done
+        // TODO: Figure out how to make our must epoch operation only
+        // run the points for our local shard
+        assert(false);
       }
       return mapper;
     }

@@ -740,6 +740,7 @@ namespace Legion {
       void initialize_collectives(ReplicateContext *ctx);
     protected:
       ShardingID sharding_functor;
+      Domain index_domain;
       MustEpochProcessorBroadcast *broadcast;
       MustEpochMappingExchange *exchange;
 #ifdef DEBUG_LEGION
