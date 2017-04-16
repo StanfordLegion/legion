@@ -1589,12 +1589,13 @@ namespace Legion {
       output.chosen_functor = UINT_MAX;
       // Shard the constraints so that each mapper call handles 
       // a subset of the constraints when performing the mapping 
-      std::vector<Mapper::MappingConstraint> copy_constraints=input.constraints;
-      input.constraints.clear();
+      std::vector<Mapper::MappingConstraint> local_constraints;
       for (unsigned idx = repl_ctx->owner_shard->shard_id; 
-            idx < copy_constraints.size(); 
+            idx < input.constraints.size(); 
             idx += repl_ctx->shard_manager->total_shards)
-        input.constraints.push_back(copy_constraints[idx]);
+        local_constraints.push_back(input.constraints[idx]);
+      const size_t total_constraints = input.constraints.size();
+      input.constraints = local_constraints;
       // Do the mapper call
       Processor mapper_proc = parent_ctx->get_executing_processor();
       MapperManager *mapper = runtime->find_mapper(mapper_proc, mapper_id);
@@ -1644,14 +1645,26 @@ namespace Legion {
           repl_ctx->shard_manager->find_sharding_function(sharding_functor);
       impl->set_sharding_function(sharding_function);
       // Broadcast the processor decisions from shard 0
+      // so we can check that they are all the same
       if (repl_ctx->owner_shard->shard_id == 0)
         broadcast->broadcast_processors(output.task_processors);
       // Exchange the constraint mappings so that all ops have all the mappings
       exchange->exchange_must_epoch_mappings(repl_ctx->owner_shard->shard_id,
-          repl_ctx->shard_manager->total_shards, output.constraint_mappings);
+          repl_ctx->shard_manager->total_shards, total_constraints,
+          output.constraint_mappings);
       // Receive processor decisions from shard 0
-      if (repl_ctx->owner_shard->shard_id != 0)
-        broadcast->receive_processors(output.task_processors);
+      if ((repl_ctx->owner_shard->shard_id != 0) &&
+          !broadcast->validate_processors(output.task_processors))
+      {
+        log_run.error("ERROR: Mapper %s chose different processor mappings "
+                      "for 'map_must_epoch' call across different shards in "
+                      "task %s (UID %lld).", mapper->get_mapper_name(),
+                      parent_ctx->get_task_name(), parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
       return mapper;
     }
 
@@ -3877,6 +3890,208 @@ namespace Legion {
       }
       perform_collective_sync();
       futures = results;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Must Epoch Processor Broadcast 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    MustEpochProcessorBroadcast::MustEpochProcessorBroadcast(
+                                          ReplicateContext *ctx, ShardID origin)
+      : BroadcastCollective(ctx, origin)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    MustEpochProcessorBroadcast::MustEpochProcessorBroadcast(
+                                         const MustEpochProcessorBroadcast &rhs)
+      : BroadcastCollective(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    MustEpochProcessorBroadcast::~MustEpochProcessorBroadcast(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+    
+    //--------------------------------------------------------------------------
+    MustEpochProcessorBroadcast& MustEpochProcessorBroadcast::operator=(
+                                         const MustEpochProcessorBroadcast &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochProcessorBroadcast::pack_collective(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(origin_processors.size());
+      for (unsigned idx = 0; idx < origin_processors.size(); idx++)
+        rez.serialize(origin_processors[idx]);
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochProcessorBroadcast::unpack_collective(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_procs;
+      derez.deserialize(num_procs);
+      origin_processors.resize(num_procs);
+      for (unsigned idx = 0; idx < num_procs; idx++)
+        derez.deserialize(origin_processors[idx]);
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochProcessorBroadcast::broadcast_processors(
+                                       const std::vector<Processor> &processors)
+    //--------------------------------------------------------------------------
+    {
+      origin_processors = processors;
+      perform_collective_async();
+    }
+
+    //--------------------------------------------------------------------------
+    bool MustEpochProcessorBroadcast::validate_processors(
+                                       const std::vector<Processor> &processors)
+    //--------------------------------------------------------------------------
+    {
+      perform_collective_wait();
+#ifdef DEBUG_LEGION
+      assert(origin_processors.size() == processors.size());
+#endif
+      for (unsigned idx = 0; idx < processors.size(); idx++)
+        if (processors[idx] != origin_processors[idx])
+          return false;
+      return true;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Must Epoch Mapping Exchange
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    MustEpochMappingExchange::MustEpochMappingExchange(ReplicateContext *ctx)
+      : AllGatherCollective(ctx)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    MustEpochMappingExchange::MustEpochMappingExchange(
+                                            const MustEpochMappingExchange &rhs)
+      : AllGatherCollective(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    MustEpochMappingExchange::~MustEpochMappingExchange(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+    
+    //--------------------------------------------------------------------------
+    MustEpochMappingExchange& MustEpochMappingExchange::operator=(
+                                            const MustEpochMappingExchange &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochMappingExchange::pack_collective_stage(Serializer &rez,
+                                                         int stage) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(instances.size());
+      for (std::map<unsigned,std::vector<DistributedID> >::const_iterator it = 
+            instances.begin(); it != instances.end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize<size_t>(it->second.size());
+        for (unsigned idx = 0; idx < it->second.size(); idx++)
+          rez.serialize(it->second[idx]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochMappingExchange::unpack_collective_stage(Deserializer &derez,
+                                                           int stage)
+    //--------------------------------------------------------------------------
+    {
+      Runtime *runtime = manager->runtime;
+      size_t num_mappings;
+      derez.deserialize(num_mappings);
+      for (unsigned idx1 = 0; idx1 < num_mappings; idx1++)
+      {
+        unsigned constraint_index;
+        derez.deserialize(constraint_index);
+#ifdef DEBUG_LEGION
+        assert(constraint_index < results.size());
+#endif
+        std::vector<DistributedID> &dids = instances[constraint_index];
+        std::vector<Mapping::PhysicalInstance> &mapping = 
+          results[constraint_index];
+        size_t num_instances;
+        derez.deserialize(num_instances);
+        dids.resize(num_instances);
+        mapping.resize(num_instances);
+        for (unsigned idx2 = 0; idx2 < num_instances; idx2++)
+        {
+          derez.deserialize(dids[idx2]);
+          RtEvent ready;
+          mapping[idx2].impl = 
+            runtime->find_or_request_physical_manager(dids[idx2], ready);
+          if (!ready.has_triggered())
+            ready_events.insert(ready);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MustEpochMappingExchange::exchange_must_epoch_mappings(
+                ShardID shard_id, size_t total_shards, size_t total_constraints,
+                std::vector<std::vector<Mapping::PhysicalInstance> > &mappings)
+    //--------------------------------------------------------------------------
+    {
+      results.resize(total_constraints);
+      {
+        AutoLock c_lock(collective_lock);
+        unsigned constraint_index = shard_id;
+        for (unsigned idx1 = 0; idx1 < mappings.size(); 
+              idx1++, constraint_index+=total_shards)
+        {
+#ifdef DEBUG_LEGION
+          assert(constraint_index < total_constraints);
+#endif
+          results[constraint_index] = mappings[idx1];
+          std::vector<DistributedID> &dids = instances[constraint_index];
+          for (unsigned idx2 = 0; idx2 < mappings[idx1].size(); idx2++)
+            dids[idx2] = mappings[idx1][idx2].impl->did;
+        }
+      }
+      perform_collective_sync();
+      // Wait for all the instances to be ready
+      if (!ready_events.empty())
+      {
+        RtEvent ready = Runtime::merge_events(ready_events);
+        if (!ready.has_triggered())
+          ready.wait();
+      }
+      mappings = results;
     }
 
   }; // namespace Internal

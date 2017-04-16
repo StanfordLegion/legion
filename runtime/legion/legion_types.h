@@ -1545,6 +1545,7 @@ namespace Legion {
     friend class Internal::ReplicateContext;                \
     friend class Internal::InstanceBuilder;                 \
     friend class Internal::FutureNameExchange;              \
+    friend class Internal::MustEpochMappingExchange;        \
     friend class BindingLib::Utility;                       \
     friend class CObjectWrapper;                  
 

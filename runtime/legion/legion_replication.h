@@ -376,7 +376,9 @@ namespace Legion {
       virtual void unpack_collective(Deserializer &derez);
     public:
       void broadcast_processors(const std::vector<Processor> &processors);
-      void receive_processors(std::vector<Processor> &processors);
+      bool validate_processors(const std::vector<Processor> &processors);
+    protected:
+      std::vector<Processor> origin_processors;
     };
 
     /**
@@ -395,8 +397,14 @@ namespace Legion {
       virtual void pack_collective_stage(Serializer &rez, int stage) const;
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
-      void exchange_must_epoch_mappings(ShardID shard_id, size_t total_shards,
+      void exchange_must_epoch_mappings(ShardID shard_id, 
+              size_t total_shards, size_t total_constraints,
               std::vector<std::vector<Mapping::PhysicalInstance> > &mappings);
+    protected:
+      std::map<unsigned/*constraint index*/,
+               std::vector<DistributedID> > instances;
+      std::vector<std::vector<Mapping::PhysicalInstance> > results;
+      std::set<RtEvent> ready_events;
     };
 
     /**
