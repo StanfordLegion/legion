@@ -9503,6 +9503,13 @@ namespace Legion {
         legion_delete(*it);
       }
       available_repl_index_tasks.clear();
+      for (std::deque<ReplInterCloseOp*>::const_iterator it = 
+            available_repl_inter_close_ops.begin(); it !=
+            available_repl_inter_close_ops.end(); it++)
+      {
+        legion_delete(*it);
+      }
+      available_repl_inter_close_ops.clear();
       for (std::deque<ReplIndexFillOp*>::const_iterator it = 
             available_repl_index_fill_ops.begin(); it !=
             available_repl_index_fill_ops.end(); it++)
@@ -17434,6 +17441,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ReplInterCloseOp* Runtime::get_available_repl_inter_close_op(bool need_cont,
+                                                                 bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_LEGION
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<ReplInterCloseOp*,
+                        &Runtime::get_available_repl_inter_close_op>
+                          continuation(this, inter_close_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(inter_close_op_lock,
+                           available_repl_inter_close_ops, has_lock);
+    }
+
+    //--------------------------------------------------------------------------
     ReplIndexFillOp* Runtime::get_available_repl_index_fill_op(bool need_cont, 
                                                                bool has_lock)
     //--------------------------------------------------------------------------
@@ -17921,6 +17947,14 @@ namespace Legion {
     {
       AutoLock i_lock(index_task_lock);
       release_operation<false>(available_repl_index_tasks, task);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_repl_inter_close_op(ReplInterCloseOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock i_lock(inter_close_op_lock);
+      release_operation<false>(available_repl_inter_close_ops, op);
     }
 
     //--------------------------------------------------------------------------

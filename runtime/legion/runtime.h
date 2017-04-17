@@ -2525,7 +2525,7 @@ namespace Legion {
       PostCloseOp*          get_available_post_close_op(bool need_cont,
                                                   bool has_lock = false);
       VirtualCloseOp*       get_available_virtual_close_op(bool need_cont,
-                                                  bool has_lock = false);
+                                                  bool has_lock = false); 
       DynamicCollectiveOp*  get_available_dynamic_collective_op(bool need_cont,
                                                   bool has_lock = false);
       FuturePredOp*         get_available_future_pred_op(bool need_cont,
@@ -2568,6 +2568,8 @@ namespace Legion {
       ReplIndividualTask*   get_available_repl_individual_task(bool need_cont,
                                                   bool has_lock = false);
       ReplIndexTask*        get_available_repl_index_task(bool need_cont,
+                                                  bool has_lock = false);
+      ReplInterCloseOp*     get_available_repl_inter_close_op(bool need_cont,
                                                   bool has_lock = false);
       ReplIndexFillOp*      get_available_repl_index_fill_op(bool need_cont,
                                                   bool has_lock = false);
@@ -2629,6 +2631,7 @@ namespace Legion {
     public: // Control replication operations
       void free_repl_individual_task(ReplIndividualTask *task);
       void free_repl_index_task(ReplIndexTask *task);
+      void free_repl_inter_close_op(ReplInterCloseOp *op);
       void free_repl_index_fill_op(ReplIndexFillOp *op);
       void free_repl_copy_op(ReplCopyOp *op);
       void free_repl_index_copy_op(ReplIndexCopyOp *op);
@@ -2956,6 +2959,7 @@ namespace Legion {
     protected: // Control replication operations
       std::deque<ReplIndividualTask*>   available_repl_individual_tasks;
       std::deque<ReplIndexTask*>        available_repl_index_tasks;
+      std::deque<ReplInterCloseOp*>     available_repl_inter_close_ops;
       std::deque<ReplIndexFillOp*>      available_repl_index_fill_ops;
       std::deque<ReplCopyOp*>           available_repl_copy_ops;
       std::deque<ReplIndexCopyOp*>      available_repl_index_copy_ops;

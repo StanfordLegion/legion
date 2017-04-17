@@ -329,6 +329,10 @@ namespace Legion {
       virtual void increment_frame(void) = 0;
       virtual void decrement_frame(void) = 0;
     public:
+      virtual InterCloseOp* get_inter_close_op(void) = 0;
+      virtual IndexCloseOp* get_index_close_op(void) = 0;
+      virtual ReadCloseOp*  get_read_only_close_op(void) = 0;
+    public:
       virtual InnerContext* find_parent_logical_context(unsigned index) = 0;
       virtual InnerContext* find_parent_physical_context(unsigned index) = 0;
       virtual void find_parent_version_info(unsigned index, unsigned depth, 
@@ -890,6 +894,10 @@ namespace Legion {
       virtual void increment_frame(void);
       virtual void decrement_frame(void);
     public:
+      virtual InterCloseOp* get_inter_close_op(void);
+      virtual IndexCloseOp* get_index_close_op(void);
+      virtual ReadCloseOp*  get_read_only_close_op(void);
+    public:
       virtual InnerContext* find_parent_logical_context(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index);
       virtual void find_parent_version_info(unsigned index, unsigned depth, 
@@ -1294,6 +1302,9 @@ namespace Legion {
       virtual void find_collective_contributions(DynamicCollective dc,
                                        std::vector<Future> &contributions);
     public:
+      virtual InterCloseOp* get_inter_close_op(void);
+      virtual IndexCloseOp* get_index_close_op(void);
+    public:
       void exchange_common_resources(void);
       void handle_collective_message(Deserializer &derez);
       void handle_future_map_request(Deserializer &derez);
@@ -1676,6 +1687,10 @@ namespace Legion {
       virtual void increment_frame(void);
       virtual void decrement_frame(void);
     public:
+      virtual InterCloseOp* get_inter_close_op(void);
+      virtual IndexCloseOp* get_index_close_op(void);
+      virtual ReadCloseOp*  get_read_only_close_op(void);
+    public:
       virtual InnerContext* find_parent_logical_context(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index);
       virtual void find_parent_version_info(unsigned index, unsigned depth, 
@@ -1980,6 +1995,10 @@ namespace Legion {
       virtual void decrement_pending(void);
       virtual void increment_frame(void);
       virtual void decrement_frame(void);
+    public:
+      virtual InterCloseOp* get_inter_close_op(void);
+      virtual IndexCloseOp* get_index_close_op(void);
+      virtual ReadCloseOp*  get_read_only_close_op(void);
     public:
       virtual InnerContext* find_parent_logical_context(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index);

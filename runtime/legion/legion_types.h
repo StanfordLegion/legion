@@ -1270,6 +1270,7 @@ namespace Legion {
     // legion_control.h
     class ReplIndividualTask;
     class ReplIndexTask;
+    class ReplInterCloseOp;
     // No need for ReplFillOp
     class ReplIndexFillOp;
     class ReplCopyOp;

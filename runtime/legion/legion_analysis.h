@@ -703,7 +703,7 @@ namespace Legion {
     };
  
     /**
-     * \struct LogicalCloser
+     * \class LogicalCloser
      * This structure helps keep track of the state
      * necessary for performing a close operation
      * on the logical region tree.

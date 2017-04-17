@@ -5311,6 +5311,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    InterCloseOp* InnerContext::get_inter_close_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_available_inter_close_op(false/*need continuation*/);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexCloseOp* InnerContext::get_index_close_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_available_index_close_op(false/*need continuation*/);
+    }
+
+    //--------------------------------------------------------------------------
+    ReadCloseOp* InnerContext::get_read_only_close_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_available_read_close_op(false/*needs continuation*/);
+    }
+
+    //--------------------------------------------------------------------------
     void InnerContext::add_acquisition(AcquireOp *op,
                                        const RegionRequirement &req)
     //--------------------------------------------------------------------------
@@ -9101,6 +9122,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    InterCloseOp* ReplicateContext::get_inter_close_op(void)
+    //--------------------------------------------------------------------------
+    {
+      ReplInterCloseOp *result = 
+        runtime->get_available_repl_inter_close_op(false/*need continuation*/);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexCloseOp* ReplicateContext::get_index_close_op(void)
+    //--------------------------------------------------------------------------
+    {
+      // Should never get this call for replicate contexts
+      // We should only ever be making normal close operations
+      // for control replication contexts
+      assert(false);
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
     void ReplicateContext::exchange_common_resources(void)
     //--------------------------------------------------------------------------
     {
@@ -10898,6 +10939,30 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    InterCloseOp* LeafContext::get_inter_close_op(void)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexCloseOp* LeafContext::get_index_close_op(void)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return NULL;
+    }
+    
+    //--------------------------------------------------------------------------
+    ReadCloseOp* LeafContext::get_read_only_close_op(void)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
     InnerContext* LeafContext::find_parent_logical_context(unsigned index)
     //--------------------------------------------------------------------------
     {
@@ -12025,6 +12090,27 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       enclosing->decrement_frame();
+    }
+
+    //--------------------------------------------------------------------------
+    InterCloseOp* InlineContext::get_inter_close_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->get_inter_close_op();
+    }
+
+    //--------------------------------------------------------------------------
+    IndexCloseOp* InlineContext::get_index_close_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->get_index_close_op();
+    }
+
+    //--------------------------------------------------------------------------
+    ReadCloseOp* InlineContext::get_read_only_close_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->get_read_only_close_op();
     }
 
     //--------------------------------------------------------------------------

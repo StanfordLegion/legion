@@ -487,6 +487,23 @@ namespace Legion {
     };
 
     /**
+     * \class ReplInterCloseOp
+     * A close operation that is aware that it is being
+     * executed in a control replication context.
+     */
+    class ReplInterCloseOp : public InterCloseOp {
+    public:
+      ReplInterCloseOp(Runtime *runtime);
+      ReplInterCloseOp(const ReplInterCloseOp &rhs);
+      virtual ~ReplInterCloseOp(void);
+    public:
+      ReplInterCloseOp& operator=(const ReplInterCloseOp &rhs);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+    };
+
+    /**
      * \class ReplIndexFillOp
      * An index fill operation that is aware that it is 
      * being executed in a control replication context.

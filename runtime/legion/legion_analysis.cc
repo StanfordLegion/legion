@@ -3627,10 +3627,10 @@ namespace Legion {
       else
         req = RegionRequirement(root_node->as_partition_node()->handle, 0,
                                 READ_WRITE, EXCLUSIVE, trace_info.req.parent);
-      
+      TaskContext *ctx = creator->get_context(); 
       if (!!normal_close_mask)
       {
-        normal_close_op = creator->runtime->get_available_inter_close_op(false);
+        normal_close_op = ctx->get_inter_close_op();
         // Compute the set of fields that we need
         root_node->column_source->get_field_set(normal_close_mask,
                                                trace_info.req.privilege_fields,
@@ -3649,7 +3649,7 @@ namespace Legion {
       }
       if (!!disjoint_close_mask)
       {
-        index_close_op = creator->runtime->get_available_index_close_op(false);
+        index_close_op = ctx->get_index_close_op();
         // Compute the set of fields that we need
         req.privilege_fields.clear();
         root_node->column_source->get_field_set(disjoint_close_mask,
@@ -3670,8 +3670,7 @@ namespace Legion {
       }
       if (!!read_only_close_mask)
       {
-        read_only_close_op = 
-          creator->runtime->get_available_read_close_op(false);
+        read_only_close_op = ctx->get_read_only_close_op(); 
         req.privilege_fields.clear();
         root_node->column_source->get_field_set(read_only_close_mask,
                                                trace_info.req.privilege_fields,
@@ -3684,8 +3683,7 @@ namespace Legion {
       // make a close operation for them and add it to force close
       if (!!flush_only_close_mask)
       {
-        flush_only_close_op =
-          creator->runtime->get_available_inter_close_op(false);
+        flush_only_close_op = ctx->get_inter_close_op();
         req.privilege_fields.clear();
         // Compute the set of fields that we need
         root_node->column_source->get_field_set(flush_only_close_mask,
