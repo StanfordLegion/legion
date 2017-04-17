@@ -2794,9 +2794,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldState::FieldState(const RegionUsage &usage, const FieldMask &m,
                            ProjectionFunction *proj, IndexSpaceNode *proj_space,
-                           bool disjoint, bool dirty_reduction)
+                           ShardingFunction *fn, bool disjoint, 
+                           bool dirty_reduction)
       : ChildState(m), redop(0), projection(proj), 
-        projection_space(proj_space), rebuild_timeout(1)
+        projection_space(proj_space), sharding_function(fn), rebuild_timeout(1)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2889,6 +2890,61 @@ namespace Legion {
             open_state = OPEN_MULTI_REDUCE;
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    bool FieldState::can_elide_close_operation(const ProjectionInfo &info) const
+    //--------------------------------------------------------------------------
+    {
+      // Different projection functions are means we can't elide it
+      if (projection != info.projection)
+        return false;
+      if (sharding_function != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(info.sharding_function != NULL);
+#endif
+        // First the shard functions must be the same
+        if (sharding_function != info.sharding_function)
+          return false;
+        // Then the index spaces must be the same
+        return (projection_space == info.projection_space);
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(info.sharding_function == NULL);
+#endif
+        // The current domain just needs to dominate the existing domain
+        return projection_domain_dominates(info.projection_space);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool FieldState::can_elide_close_operation_shallow(
+                                               const ProjectionInfo &info) const
+    //--------------------------------------------------------------------------
+    {
+      // If the projection info isn't depth 0 then we can't elide it
+      if (info.projection->depth > 0)
+        return false;
+      if (sharding_function != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(info.sharding_function != NULL);
+#endif
+        // If we have different projection functions or sharding functions
+        // then we can't elide the close operation
+        if (projection != info.projection)
+          return false;
+        if (sharding_function != info.sharding_function)
+          return false;
+      }
+#ifdef DEBUG_LEGION
+      else
+        assert(info.sharding_function == NULL);
+#endif
+      return true;
     }
 
     //--------------------------------------------------------------------------

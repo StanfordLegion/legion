@@ -9271,7 +9271,8 @@ namespace Legion {
       if (arrived && proj_info.is_projecting())
       {
         FieldState new_state(user.usage, open_mask, proj_info.projection,
-           proj_info.projection_space, are_all_children_disjoint());
+           proj_info.projection_space, proj_info.sharding_function,
+           are_all_children_disjoint());
         merge_new_field_state(state, new_state);
       }
       else if (next_child != INVALID_COLOR)
@@ -9887,7 +9888,9 @@ namespace Legion {
       // dirty data can only live at the leaves of the open tree. Therefore
       // we must either being going into a disjoint shallow mode or any
       // mode which is read only that permits us to go to disjoint shallow
+      // Also cannot have a sharding function for control replication
       const bool disjoint_close = !is_region() && are_all_children_disjoint() &&
+        (proj_info.sharding_function == NULL) && 
         (IS_READ_ONLY(closer.user.usage) || (proj_info.projection->depth == 0));
       // Now we can look at all the children
       for (LegionList<FieldState>::aligned::iterator it = 
@@ -9972,8 +9975,7 @@ namespace Legion {
               // Can only avoid a close operation if we have the 
               // same projection function with the same or smaller
               // size domain as the original index space launch
-              if ((it->projection == proj_info.projection) &&
-                  it->projection_domain_dominates(proj_info.projection_space)) 
+              if (it->can_elide_close_operation(proj_info))
               {
                 // If we're a reduction we have to go into a dirty 
                 // reduction mode since we know we're already open below
@@ -9986,6 +9988,7 @@ namespace Legion {
                   // Make the new state to add
                   new_states.push_back(FieldState(closer.user.usage, overlap, 
                            proj_info.projection, proj_info.projection_space, 
+                           proj_info.sharding_function,
                            are_all_children_disjoint(), true/*dirty reduce*/));
                   // If we are a reduction, we can go straight there
                   it->valid_fields -= overlap;
@@ -10029,7 +10032,7 @@ namespace Legion {
                       as_partition_node()->row_source->color_space;
                     new_states.push_back(FieldState(close_usage, overlap,
                         context->runtime->find_projection_function(0),
-                        color_space, true/*disjoint*/));
+                        color_space, NULL/*sharding func*/, true/*disjoint*/));
                   }
                 }
                 it->valid_fields -= current_mask;
@@ -10046,7 +10049,8 @@ namespace Legion {
               // Can only be here if all children are disjoint
               assert(are_all_children_disjoint());
 #endif
-              if (IS_REDUCE(closer.user.usage) &&
+              if (IS_REDUCE(closer.user.usage) && 
+                  (it->sharding_function == NULL) &&
                   it->projection_domain_dominates(proj_info.projection_space))
               {
                 const FieldMask overlap = it->valid_fields & current_mask;
@@ -10055,6 +10059,7 @@ namespace Legion {
                 // Make the new state to add
                 new_states.push_back(FieldState(closer.user.usage, overlap, 
                          proj_info.projection, proj_info.projection_space, 
+                         proj_info.sharding_function, 
                          are_all_children_disjoint(), true/*dirty reduce*/));
                 // If we are a reduction, we can go straight there
                 it->valid_fields -= overlap;
@@ -10072,7 +10077,7 @@ namespace Legion {
                 // index spaces without needing a close operation
                 it++;
               }
-              else if ((proj_info.projection->depth == 0) && 
+              else if (it->can_elide_close_operation_shallow(proj_info) &&
                         !IS_REDUCE(closer.user.usage))
               {
                 // If we are also disjoint shallow we can stay in this mode
@@ -10136,7 +10141,7 @@ namespace Legion {
                       as_partition_node()->row_source->color_space;
                     new_states.push_back(FieldState(close_usage, overlap,
                         context->runtime->find_projection_function(0),
-                        color_space, true/*disjoint*/));
+                        color_space, NULL/*sharding func*/, true/*disjoint*/));
                   }
                 }
                 it->valid_fields -= current_mask;
@@ -10167,7 +10172,7 @@ namespace Legion {
       {
         new_states.push_back(FieldState(closer.user.usage, open_mask, 
               proj_info.projection, proj_info.projection_space, 
-              are_all_children_disjoint()));
+              proj_info.sharding_function, are_all_children_disjoint()));
       }
       merge_new_field_states(state, new_states);
 #ifdef DEBUG_LEGION

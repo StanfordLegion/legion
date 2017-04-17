@@ -535,7 +535,8 @@ namespace Legion {
                  LegionColor child);
       FieldState(const RegionUsage &u, const FieldMask &m,
                  ProjectionFunction *proj, IndexSpaceNode *proj_space, 
-                 bool dis, bool dirty_reduction = false);
+                 ShardingFunction *sharding_function, bool dis, 
+                 bool dirty_reduction = false);
     public:
       inline bool is_projection_state(void) const 
         { return (open_state >= OPEN_READ_ONLY_PROJ); } 
@@ -543,6 +544,8 @@ namespace Legion {
       bool overlaps(const FieldState &rhs) const;
       void merge(const FieldState &rhs, RegionTreeNode *node);
     public:
+      bool can_elide_close_operation(const ProjectionInfo &info) const;
+      bool can_elide_close_operation_shallow(const ProjectionInfo &info) const;
       bool projection_domain_dominates(IndexSpaceNode *next_space) const;
     public:
       void print_state(TreeStateLogger *logger, 
@@ -552,6 +555,7 @@ namespace Legion {
       ReductionOpID redop;
       ProjectionFunction *projection;
       IndexSpaceNode *projection_space;
+      ShardingFunction *sharding_function;
       unsigned rebuild_timeout;
     };  
 
