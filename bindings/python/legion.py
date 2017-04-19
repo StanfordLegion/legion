@@ -18,6 +18,7 @@
 from __future__ import print_function
 
 import cffi
+import cPickle
 import os
 import subprocess
 import sys
@@ -65,39 +66,54 @@ class Task (object):
 
     def spawn_task(self, ctx, *args):
         assert(isinstance(ctx, Context))
-        assert(len(args) == 0)
-        print("spawn_task")
 
+        # Encode arguments in Pickle format.
+        arg_str = bytes(cPickle.dumps(args))
         task_args = ffi.new("legion_task_argument_t *")
-        task_args[0].args = ffi.NULL
-        task_args[0].arglen = 0
+        task_args[0].args = ffi.new("char[]", arg_str)
+        task_args[0].arglen = len(arg_str)
+
+        # Launch the task.
         launcher = c.legion_task_launcher_create(
             self.task_id, task_args[0], c.legion_predicate_true(), 0, 0)
         c.legion_task_launcher_execute(ctx.runtime, ctx.context, launcher)
         c.legion_task_launcher_destroy(launcher)
 
-    def execute_task(self, args, user_data, proc):
-        arg_ptr = ffi.new("char[]", bytes(args))
-        arg_size = len(args)
+    def execute_task(self, raw_args, user_data, proc):
+        raw_arg_ptr = ffi.new("char[]", bytes(raw_args))
+        raw_arg_size = len(raw_args)
 
+        # Execute preamble to obtain Legion API context.
         task = ffi.new("legion_task_t *")
         raw_regions = ffi.new("legion_physical_region_t **")
         num_regions = ffi.new("unsigned *")
         context = ffi.new("legion_context_t *")
         runtime = ffi.new("legion_runtime_t *")
         c.legion_task_preamble(
-            arg_ptr, arg_size, proc,
+            raw_arg_ptr, raw_arg_size, proc,
             task, raw_regions, num_regions, context, runtime)
 
+        # Decode arguments from Pickle format.
+        arg_ptr = ffi.cast("char *", c.legion_task_get_args(task[0]))
+        arg_size = c.legion_task_get_arglen(task[0])
+        if arg_size > 0:
+            args = cPickle.loads(ffi.unpack(arg_ptr, arg_size))
+        else:
+            args = ()
+
+        # Unpack regions.
         regions = []
         for i in xrange(num_regions[0]):
             regions.append(raw_regions[0][i])
 
+        # Build context.
         ctx = Context(context[0], runtime[0], task[0], regions)
 
-        value = self.body(ctx)
+        # Execute task body.
+        value = self.body(ctx, *args)
         assert(value is None) # FIXME: Support return values
 
+        # Execute postamble.
         c.legion_task_postamble(runtime[0], context[0], ffi.NULL, 0)
 
     def register(self):
