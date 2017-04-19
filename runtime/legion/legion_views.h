@@ -19,6 +19,7 @@
 #include "legion_types.h"
 #include "legion_analysis.h"
 #include "legion_utilities.h"
+#include "legion_instances.h"
 #include "legion_allocation.h"
 #include "garbage_collection.h"
 
@@ -1221,6 +1222,15 @@ namespace Legion {
       public:
         CompositeView *view;
       };
+      struct DeferInvalidateArgs :
+        public LgTaskArgs<DeferInvalidateArgs> {
+      public:
+        static const LgTaskID TASK_ID = 
+          LG_DEFER_COMPOSITE_VIEW_INVALIDATION_TASK_ID;
+      public:
+        CompositeView *view;
+        RtUserEvent invalidated;
+      };
     public:
       struct NodeVersionInfo {
       public:
@@ -1298,6 +1308,7 @@ namespace Legion {
       static void handle_send_composite_view(Runtime *runtime, 
                               Deserializer &derez, AddressSpaceID source);
       static void handle_deferred_view_registration(const void *args);
+      static void handle_deferred_view_invalidation(const void *args);
     public:
       void record_dirty_fields(const FieldMask &dirty_mask);
       void record_valid_view(LogicalView *view, const FieldMask &mask);
@@ -1314,6 +1325,8 @@ namespace Legion {
                                   RtEvent precondition) const;
       static void handle_deferred_view_ref(const void *args);
     public:
+      void set_shard_invalid_barrier(RtBarrier shard_invalid_barrier);
+    public:
       // The path version info for this composite instance
       DeferredVersionInfo *const version_info;
       // The abstraction of the tree that we closed
@@ -1327,6 +1340,10 @@ namespace Legion {
       LegionMap<CompositeView*,FieldMask>::aligned nested_composite_views;
     protected:
       LegionMap<RegionTreeNode*,NodeVersionInfo>::aligned node_versions;
+    protected:
+      // Used for composite instances created during control replication
+      // to know when the whole composite view is invalid
+      RtBarrier shard_invalid_barrier;
     };
 
     /**

@@ -137,6 +137,11 @@
 #ifndef DEFAULT_MAX_CONTROL_REPLICATION_CONTEXTS
 #define DEFAULT_MAX_CONTROL_REPLICATION_CONTEXTS    1
 #endif
+// Number of phase barriers for communication of
+// close operation composite view meta data
+#ifndef CONTROL_REPLICATION_COMMUNICATION_BARRIERS
+#define CONTROL_REPLICATION_COMMUNICATION_BARRIERS  32
+#endif
 
 // Used for debugging memory leaks
 // How often tracing information is dumped

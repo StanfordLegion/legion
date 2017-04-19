@@ -1322,6 +1322,10 @@ namespace Legion {
       void unregister_future_map(ReplFutureMapImpl *map);
       static void handle_future_map_reclaim(const void *args);
     public:
+      // Composite view methods
+      void register_composite_view(CompositeView* view, RtEvent close_done);
+      void unregister_composite_view(CompositeView *view, RtEvent close_done);
+    public:
       ShardTask *const owner_shard;
       ShardManager *const shard_manager;
     protected:
@@ -1333,7 +1337,8 @@ namespace Legion {
       // control replicaiton context
       std::vector<RtBarrier>  application_barriers;
       std::vector<RtBarrier>  internal_barriers;
-      unsigned next_ap_bar_index, next_int_bar_index;
+      std::vector<RtBarrier>  inter_close_barriers;
+      unsigned next_ap_bar_index, next_int_bar_index, next_close_bar_index;
     protected:
       ShardID index_space_allocator_shard;
       ShardID index_partition_allocator_shard;
@@ -1359,6 +1364,9 @@ namespace Legion {
       std::map<ApEvent,ReplFutureMapImpl*> future_maps;
       std::map<ApEvent,std::vector<
                 std::pair<void*,size_t> > > pending_future_map_requests;
+    protected:
+      // Composite views that are still valid across the shards
+      std::map<RtEvent/*done event*/,CompositeView*> live_composite_views;
     };
 
     /**

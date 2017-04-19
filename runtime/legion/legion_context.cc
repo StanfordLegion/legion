@@ -6526,7 +6526,7 @@ namespace Legion {
                                    UniqueID ctx_uid, ShardManager *manager)
       : InnerContext(rt, owner, full, reqs, parent_indexes, virt_mapped, 
           ctx_uid), owner_shard(owner), shard_manager(manager),
-        next_ap_bar_index(0), next_int_bar_index(0), 
+        next_ap_bar_index(0), next_int_bar_index(0), next_close_bar_index(0), 
         index_space_allocator_shard(0), index_partition_allocator_shard(0),
         field_space_allocator_shard(0), field_allocator_shard(0),
         logical_region_allocator_shard(0), next_available_collective_index(0)
@@ -6566,6 +6566,12 @@ namespace Legion {
             idx < internal_barriers.size(); idx += shard_manager->total_shards)
       {
         Realm::Barrier bar = internal_barriers[idx];
+        bar.destroy_barrier();
+      }
+      for (unsigned idx = owner_shard->shard_id;
+          idx < inter_close_barriers.size(); idx += shard_manager->total_shards)
+      {
+        Realm::Barrier bar = inter_close_barriers[idx];
         bar.destroy_barrier();
       }
     }
@@ -9127,6 +9133,13 @@ namespace Legion {
     {
       ReplInterCloseOp *result = 
         runtime->get_available_repl_inter_close_op(false/*need continuation*/);
+      // Get the next barrier for the close operations
+      RtBarrier &bar = inter_close_barriers[next_close_bar_index++];
+      if (next_close_bar_index == inter_close_barriers.size())
+        next_close_bar_index = 0;
+      result->set_close_barrier(bar);
+      // Advance the phase for the next time through
+      Runtime::advance_barrier(bar);
       return result;
     }
 
@@ -9154,9 +9167,13 @@ namespace Legion {
       BarrierExchangeCollective internal_collective(this, window_size,
                                                     internal_barriers);
       internal_collective.exchange_barriers_async();
+      // Exchange the close operation barriers across all the shards
+      BarrierExchangeCollective close_collective(this, 
+          CONTROL_REPLICATION_COMMUNICATION_BARRIERS, inter_close_barriers);
       // Wait for everything to be done
       application_collective.wait_for_barrier_exchange();
       internal_collective.wait_for_barrier_exchange();
+      close_collective.wait_for_barrier_exchange();
     }
 
     //--------------------------------------------------------------------------
@@ -9354,6 +9371,41 @@ namespace Legion {
     {
       const ReclaimFutureMapArgs *recl_args = (const ReclaimFutureMapArgs*)arg;
       recl_args->ctx->unregister_future_map(recl_args->impl);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::register_composite_view(CompositeView *view,
+                                                   RtEvent close_done)
+    //--------------------------------------------------------------------------
+    {
+      // Add a GC reference prior to registering it
+      view->add_base_gc_ref(CONTEXT_REF);
+      AutoLock ctx_lock(context_lock);
+#ifdef DEBUG_LEGION
+      assert(live_composite_views.find(close_done) == 
+              live_composite_views.end());
+#endif
+      live_composite_views[close_done] = view;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::unregister_composite_view(CompositeView *view,
+                                                     RtEvent close_done)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock ctx_lock(context_lock);
+        std::map<RtEvent,CompositeView*>::iterator finder = 
+          live_composite_views.find(close_done);
+#ifdef DEBUG_LEGION
+        assert(finder != live_composite_views.end());
+        assert(finder->second == view);
+#endif
+        live_composite_views.erase(finder);
+      }
+      // Now we can remove our GC reference
+      if (view->remove_base_gc_ref(CONTEXT_REF))
+        legion_delete(view);
     }
 
     /////////////////////////////////////////////////////////////

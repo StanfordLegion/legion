@@ -6841,18 +6841,21 @@ namespace Legion {
               static_cast<RegionTreeNode*>(
                   runtime->forest->get_node(requirement.region));
       // Now we can perform our close operation
-      runtime->forest->physical_perform_close(requirement,
-                                              version_info, this, 0/*idx*/,
-                                              closed_tree, 
-                                              close_node, close_mask,
-                                              map_applied_conditions,
-                                              restrict_info,
-                                              chosen_instances
+      CompositeView *view = runtime->forest->physical_perform_close(requirement,
+                                                  version_info, this, 0/*idx*/,
+                                                  closed_tree, 
+                                                  close_node, close_mask,
+                                                  map_applied_conditions,
+                                                  restrict_info,
+                                                  chosen_instances
 #ifdef DEBUG_LEGION
-                                              , get_logging_name()
-                                              , unique_op_id
+                                                  , get_logging_name()
+                                                  , unique_op_id
 #endif
-                                              );
+                                                  );
+      // This is a virtual method call back in case we need to do something
+      // extra with the view (i.e. in the case of control replication)
+      post_process_composite_view(view);
       // The physical perform close call took ownership
       closed_tree = NULL;
       if (Runtime::legion_spy_enabled)

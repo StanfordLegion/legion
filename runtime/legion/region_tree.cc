@@ -2193,7 +2193,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::physical_perform_close(const RegionRequirement &req,
+    CompositeView* RegionTreeForest::physical_perform_close(
+                const RegionRequirement &req,
                 VersionInfo &version_info, Operation *op, unsigned index, 
                 ClosedNode *closed_tree, RegionTreeNode *close_node,
                 const FieldMask &closing_mask, std::set<RtEvent> &map_applied, 
@@ -2221,7 +2222,7 @@ namespace Legion {
                           composite_mask, version_info, logical_ctx_uid, 
                           context, closed_tree, map_applied);
       if (targets.empty())
-        return;
+        return result;
       PhysicalState *physical_state = 
         close_node->get_physical_state(version_info);
       LegionMap<LogicalView*,FieldMask>::aligned valid_instances;
@@ -2259,6 +2260,7 @@ namespace Legion {
         close_node->update_valid_views(physical_state, target_mask,
                                        false/*dirty*/, target_view);
       }
+      return result;
     }
 
     //--------------------------------------------------------------------------

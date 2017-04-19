@@ -393,7 +393,7 @@ namespace Legion {
                    std::vector<RestrictInfo> &restrict_infos,
                    std::deque<InstanceSet> &targets,
                    std::set<RtEvent> &map_applied_events);
-      void physical_perform_close(const RegionRequirement &req,
+      CompositeView* physical_perform_close(const RegionRequirement &req,
                                   VersionInfo &version_info,
                                   Operation *op, unsigned index,
                                   ClosedNode *closed_tree,

@@ -20945,6 +20945,11 @@ namespace Legion {
             CompositeView::handle_deferred_view_registration(args);
             break;
           }
+        case LG_DEFER_COMPOSITE_VIEW_INVALIDATION_TASK_ID:
+          {
+            CompositeView::handle_deferred_view_invalidation(args);
+            break;
+          }
         case LG_DEFER_COMPOSITE_NODE_REF_TASK_ID:
           {
             CompositeNode::handle_deferred_node_ref(args);

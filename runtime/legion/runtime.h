@@ -3137,6 +3137,7 @@ namespace Legion {
       static inline ApBarrier get_previous_phase(const PhaseBarrier &bar);
       static inline void alter_arrival_count(PhaseBarrier &bar, int delta);
       static inline void advance_barrier(PhaseBarrier &bar);
+      static inline void advance_barrier(RtBarrier &bar);
       static inline void advance_barrier(ApBarrier &bar);
       static inline bool get_barrier_result(ApBarrier bar, void *result,
                                             size_t result_size);
@@ -3145,7 +3146,6 @@ namespace Legion {
       static inline void phase_barrier_arrive(const RtBarrier &bar,
                 unsigned cnt, RtEvent precondition = RtEvent::NO_RT_EVENT,
                 const void *reduce_value = NULL, size_t reduce_value_size = 0);
-      static inline void advance_barrier(RtBarrier &bar);
     public:
       static inline ApEvent acquire_ap_reservation(Reservation r,bool exclusive,
                                    ApEvent precondition = ApEvent::NO_AP_EVENT);

@@ -501,6 +501,11 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
+    public:
+      void set_close_barrier(RtBarrier close_barrier);
+      virtual void post_process_composite_view(CompositeView *view);
+    protected:
+      RtBarrier close_barrier;
     };
 
     /**

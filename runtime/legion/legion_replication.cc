@@ -13,6 +13,7 @@
  * limitations under the License.
  */
 
+#include "legion_views.h"
 #include "legion_context.h"
 #include "legion_replication.h"
 
@@ -506,6 +507,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_inter_close();
+      close_barrier = RtBarrier::NO_RT_BARRIER;
     }
 
     //--------------------------------------------------------------------------
@@ -514,6 +516,23 @@ namespace Legion {
     {
       deactivate_inter_close();
       runtime->free_repl_inter_close_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplInterCloseOp::set_close_barrier(RtBarrier close_bar)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!close_barrier.exists());
+#endif
+      close_barrier = close_bar;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplInterCloseOp::post_process_composite_view(CompositeView *view)
+    //--------------------------------------------------------------------------
+    {
+      view->set_shard_invalid_barrier(close_barrier);
     }
 
     /////////////////////////////////////////////////////////////

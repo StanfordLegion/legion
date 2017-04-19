@@ -5524,6 +5524,28 @@ namespace Legion {
     void CompositeView::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
+      if (shard_invalid_barrier.exists() && 
+          !shard_invalid_barrier.has_triggered())
+      {
+#ifdef DEBUG_LEGION
+        assert(is_owner());
+#endif
+        // Do our arrival for our shard
+        Runtime::phase_barrier_arrive(shard_invalid_barrier, 1/*count*/);
+        // See if we've triggered yet and can actually do the arrival
+        // or whether we still need to defer it
+        if (!shard_invalid_barrier.has_triggered())
+        {
+          DeferInvalidateArgs args;
+          args.view = this;
+          args.invalidated = Runtime::create_rt_user_event();
+          runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+                                           NULL/*op*/, shard_invalid_barrier);
+          mutator->record_reference_mutation_effect(args.invalidated);
+          return;
+        }
+        // Otherwise we can fall through and do the rest of the invalidation
+      }
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
             children.begin(); it != children.end(); it++)
         it->first->notify_invalid(mutator, true/*root*/);
@@ -5537,6 +5559,17 @@ namespace Legion {
       for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
             reduction_views.begin(); it != reduction_views.end(); it++)
         it->first->remove_nested_valid_ref(did, mutator);
+      if (shard_invalid_barrier.exists())
+      {
+#ifdef DEBUG_LEGION
+        assert(is_owner());
+        ReplicateContext *ctx = dynamic_cast<ReplicateContext*>(owner_context);
+        assert(ctx != NULL);
+#else
+        ReplicateContext *ctx = static_cast<ReplicateContext*>(owner_context);
+#endif
+        ctx->unregister_composite_view(this, shard_invalid_barrier);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -6323,6 +6356,38 @@ namespace Legion {
       const DeferCompositeViewRefArgs *ref_args = 
         (const DeferCompositeViewRefArgs*)args;
       ref_args->dc->add_nested_resource_ref(ref_args->did);
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeView::set_shard_invalid_barrier(RtBarrier shard_invalid)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+      assert(!shard_invalid_barrier.exists());
+      ReplicateContext *ctx = dynamic_cast<ReplicateContext*>(owner_context);
+      assert(ctx != NULL);
+#else
+      ReplicateContext *ctx = static_cast<ReplicateContext*>(owner_context);
+#endif
+      shard_invalid_barrier = shard_invalid;
+      ctx->register_composite_view(this, shard_invalid_barrier);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CompositeView::handle_deferred_view_invalidation(
+                                                               const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferInvalidateArgs *iargs = (const DeferInvalidateArgs*)args;
+      std::set<RtEvent> preconditions;
+      WrapperReferenceMutator mutator(preconditions);
+      iargs->view->notify_invalid(&mutator);
+      if (!preconditions.empty())
+        Runtime::trigger_event(iargs->invalidated, 
+            Runtime::merge_events(preconditions));
+      else
+        Runtime::trigger_event(iargs->invalidated);
     }
 
     /////////////////////////////////////////////////////////////
