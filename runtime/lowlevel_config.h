@@ -53,7 +53,7 @@ typedef enum legion_lowlevel_processor_kind_t {
   PROC_GROUP, // Processor group
   PROC_SET, // Set of Processors for OpenMP/Kokkos etc.
   OMP_PROC, // OpenMP (or similar) thread pool
-  PY_PROC, // Python processor
+  PY_PROC, // Python interpreter
 } legion_lowlevel_processor_kind_t;
 
 // Different Memory types
