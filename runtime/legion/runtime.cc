@@ -19241,7 +19241,6 @@ namespace Legion {
       CodeDescriptor launch_top_level_task(Runtime::launch_top_level);
       CodeDescriptor mpi_interop_task(Runtime::init_mpi_interop);
       CodeDescriptor mpi_sync_task(Runtime::init_mpi_sync);
-      CodeDescriptor dummy_barrier(Runtime::dummy_barrier);
       Realm::ProfilingRequestSet no_requests;
       // We'll just register these on all the processor kinds
       std::set<RtEvent> registered_events;
@@ -19274,12 +19273,11 @@ namespace Legion {
         registered_events.insert(RtEvent(
             Processor::register_task_by_kind(kinds[idx], false/*global*/,
                           LG_MPI_SYNC_ID, mpi_sync_task, no_requests)));
-        registered_events.insert(RtEvent(
-            Processor::register_task_by_kind(kinds[idx], false/*global*/,
-                          LG_DUMMY_BARRIER_ID, dummy_barrier, no_requests)));
       }
       if (record_registration)
       {
+        log_run.print("Legion dummy barrier task has Realm ID %d",
+                      LG_DUMMY_BARRIER_ID);
         log_run.print("Legion runtime initialization task "
                             "has Realm ID %d", INIT_TASK_ID);
         log_run.print("Legion runtime shutdown task has "
@@ -19292,8 +19290,6 @@ namespace Legion {
                       LG_MAPPER_PROFILING_ID);
         log_run.print("Legion launch top-level task has Realm ID %d",
                       LG_LAUNCH_TOP_LEVEL_ID);
-        log_run.print("Legion dummy barrier task has Realm ID %d",
-                      LG_DUMMY_BARRIER_ID);
       }
       return Runtime::merge_events(registered_events);
     }
@@ -20231,16 +20227,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       log_run.debug() << "MPI sync task";
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void Runtime::dummy_barrier(
-                                   const void *args, size_t arglen, 
-				   const void *userdata, size_t userlen,
-				   Processor p)
-    //--------------------------------------------------------------------------
-    {
-      // Intentionally do nothing
     }
 
     //--------------------------------------------------------------------------
