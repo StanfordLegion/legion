@@ -35,9 +35,11 @@ c = ffi.dlopen(None)
 class Task (object):
     __slots__ = ['body', 'task_id']
 
-    def __init__(self, body):
+    def __init__(self, body, register=True):
         self.body = body
         self.task_id = None
+        if register:
+            self.register()
 
     def __call__(self, *args):
         # Hack: This entrypoint needs to be able to handle both being
@@ -90,11 +92,9 @@ class Task (object):
         options[0].inner = False
         options[0].idempotent = False
 
-        task_id = c.legion_runtime_register_task_variant_python_source(
-            c.legion_runtime_get_runtime(),
+        task_id = c.legion_runtime_preregister_task_variant_python_source(
             ffi.cast("legion_task_id_t", -1), # AUTO_GENERATE_ID
             '%s.%s' % (self.body.__module__, self.body.__name__),
-            False, # global
             execution_constraints,
             layout_constraints,
             options[0],
@@ -109,5 +109,7 @@ class Task (object):
         self.task_id = task_id
         return self
 
-def task(body):
-    return Task(body).register()
+def task(body=None, **kwargs):
+    if body is None:
+        return lambda body: task(body, **kwargs)
+    return Task(body, **kwargs)
