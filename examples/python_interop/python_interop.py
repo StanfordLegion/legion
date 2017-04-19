@@ -20,10 +20,12 @@ from __future__ import print_function
 import legion
 
 @legion.task
-def f(ctx, *args):
-    print("inside task f%s" % (args,))
+def f(ctx, x, y, z):
+    print("inside task f%s" % ((x, y, z),))
+    return x+1
 
 @legion.task
 def main_task(ctx):
     print("inside main()")
-    f(ctx, 1, "asdf", True)
+    x = f(ctx, 1, "asdf", True)
+    print("result of f is %s" % x) # x.get() # FIXME: Breaks on x.get()
