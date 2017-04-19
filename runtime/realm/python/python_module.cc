@@ -596,6 +596,8 @@ namespace Realm {
     //
     // class PythonModule
 
+    /*static*/ std::vector<std::string> PythonModule::extra_import_modules;
+
     PythonModule::PythonModule(void)
       : Module("python")
       , cfg_num_python_cpus(0)
@@ -606,6 +608,11 @@ namespace Realm {
 
     PythonModule::~PythonModule(void)
     {}
+
+    /*static*/ void PythonModule::import_python_module(const char *module_name)
+    {
+      extra_import_modules.push_back(module_name);
+    }
 
     /*static*/ Module *PythonModule::create_module(RuntimeImpl *runtime,
                                                  std::vector<std::string>& cmdline)
@@ -630,6 +637,11 @@ namespace Realm {
           assert(false);
         }
       }
+
+      // add extra module imports requested by the application
+      m->cfg_import_modules.insert(m->cfg_import_modules.end(),
+                                   extra_import_modules.begin(),
+                                   extra_import_modules.end());
 
       // if no cpus were requested, there's no point
       if(m->cfg_num_python_cpus == 0) {

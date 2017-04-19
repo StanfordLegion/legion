@@ -34,6 +34,9 @@ namespace Realm {
     public:
       virtual ~PythonModule(void);
 
+      // Request that the named Python module be imported
+      static void import_python_module(const char *module_name);
+
       static Module *create_module(RuntimeImpl *runtime, std::vector<std::string>& cmdline);
 
       // do any general initialization - this is called after all configuration is
@@ -60,6 +63,8 @@ namespace Realm {
       virtual void cleanup(void);
 
     public:
+      static std::vector<std::string> extra_import_modules;
+
       int cfg_num_python_cpus;
       bool cfg_use_numa;
       size_t cfg_stack_size_in_mb;
