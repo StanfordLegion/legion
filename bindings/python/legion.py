@@ -32,6 +32,14 @@ ffi = cffi.FFI()
 ffi.cdef(header)
 c = ffi.dlopen(None)
 
+class Context(object):
+    __slots__ = ['context', 'runtime', 'task', 'regions']
+    def __init__(self, context, runtime, task, regions):
+        self.context = context
+        self.runtime = runtime
+        self.task = task
+        self.regions = regions
+
 class Task (object):
     __slots__ = ['body', 'task_id']
 
@@ -53,7 +61,20 @@ class Task (object):
            isinstance(args[2], long):
             self.execute_task(*args)
         else:
-            assert False # FIXME: Implement task spawn
+            self.spawn_task(*args)
+
+    def spawn_task(self, ctx, *args):
+        assert(isinstance(ctx, Context))
+        assert(len(args) == 0)
+        print("spawn_task")
+
+        task_args = ffi.new("legion_task_argument_t *")
+        task_args[0].args = ffi.NULL
+        task_args[0].arglen = 0
+        launcher = c.legion_task_launcher_create(
+            self.task_id, task_args[0], c.legion_predicate_true(), 0, 0)
+        c.legion_task_launcher_execute(ctx.runtime, ctx.context, launcher)
+        c.legion_task_launcher_destroy(launcher)
 
     def execute_task(self, args, user_data, proc):
         arg_ptr = ffi.new("char[]", bytes(args))
@@ -72,7 +93,9 @@ class Task (object):
         for i in xrange(num_regions[0]):
             regions.append(raw_regions[0][i])
 
-        value = self.body(task[0], regions, context[0], runtime[0])
+        ctx = Context(context[0], runtime[0], task[0], regions)
+
+        value = self.body(ctx)
         assert(value is None) # FIXME: Support return values
 
         c.legion_task_postamble(runtime[0], context[0], ffi.NULL, 0)
