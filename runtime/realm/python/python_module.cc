@@ -478,7 +478,6 @@ namespace Realm {
 					Event start_event, Event finish_event,
 					int priority)
   {
-    assert(func_id != 0);
     // create a task object for this
     Task *task = new Task(me, func_id, args, arglen, reqs,
 			  start_event, finish_event, priority);
@@ -545,7 +544,7 @@ namespace Realm {
     if(it == task_table.end()) {
       // TODO: remove this hack once the tools are available to the HLR to call these directly
       if(func_id < Processor::TASK_ID_FIRST_AVAILABLE) {
-	log_py.warning() << "task " << func_id << " not registered on " << me << ": ignoring missing legacy setup/shutdown task";
+	log_py.info() << "task " << func_id << " not registered on " << me << ": ignoring missing legacy setup/shutdown task";
 	return;
       }
       log_py.fatal() << "task " << func_id << " not registered on " << me;
