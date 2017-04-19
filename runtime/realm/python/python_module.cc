@@ -70,6 +70,8 @@ namespace Realm {
 
     PyObject *(*PyImport_ImportModule)(const char *);
 
+    PyObject *(*PyModule_GetDict)(PyObject *);
+
     PyObject *(*PyLong_FromUnsignedLong)(unsigned long);
 
     PyObject *(*PyObject_CallFunction)(PyObject *, const char *, ...);
@@ -78,6 +80,7 @@ namespace Realm {
     int (*PyObject_Print)(PyObject *, FILE *, int);
 
     void (*PyRun_SimpleString)(const char *);
+    PyObject *(*PyRun_String)(const char *, int, PyObject *, PyObject *);
 
     PyObject *(*PyTuple_New)(Py_ssize_t len);
     int (*PyTuple_SetItem)(PyObject *p, Py_ssize_t pos, PyObject *o);
@@ -100,6 +103,7 @@ namespace Realm {
     get_symbol(this->PyErr_PrintEx, "PyErr_PrintEx");
 
     get_symbol(this->PyImport_ImportModule, "PyImport_ImportModule");
+    get_symbol(this->PyModule_GetDict, "PyModule_GetDict");
 
     get_symbol(this->PyLong_FromUnsignedLong, "PyLong_FromUnsignedLong");
 
@@ -109,6 +113,7 @@ namespace Realm {
     get_symbol(this->PyObject_Print, "PyObject_Print");
 
     get_symbol(this->PyRun_SimpleString, "PyRun_SimpleString");
+    get_symbol(this->PyRun_String, "PyRun_String");
 
     get_symbol(this->PyTuple_New, "PyTuple_New");
     get_symbol(this->PyTuple_SetItem, "PyTuple_SetItem");
@@ -136,6 +141,9 @@ namespace Realm {
     ~PythonInterpreter();
 
     PyObject *find_or_import_function(const PythonSourceImplementation *psi);
+
+    void import_module(const std::string& module_name);
+    void run_string(const std::string& script_text);
 
   protected:
     void *handle;
@@ -194,6 +202,8 @@ namespace Realm {
     //(api->PyEval_AcquireLock)();
     //log_py.print() << "lock acquired";
 
+    // not calling PythonInterpreter::import_module here because we want the
+    //  PyObject result
     log_py.debug() << "attempting to import module: " << psi->module_name;
     PyObject *module = (api->PyImport_ImportModule)(psi->module_name.c_str());
     if (!module) {
@@ -214,8 +224,47 @@ namespace Realm {
 
     //(api->PyObject_CallFunction)(function, "iii", 1, 2, 3);
 
+    (api->Py_DecRef)(module);
+
     return function;
   }
+
+  void PythonInterpreter::import_module(const std::string& module_name)
+  {
+    log_py.debug() << "attempting to import module: " << module_name;
+    PyObject *module = (api->PyImport_ImportModule)(module_name.c_str());
+    if (!module) {
+      log_py.fatal() << "unable to import Python module " << module_name;
+      (api->PyErr_PrintEx)(0);
+      assert(0);
+    }
+    (api->Py_DecRef)(module);
+  }
+
+  void PythonInterpreter::run_string(const std::string& script_text)
+  {
+    // from Python.h
+    const int Py_file_input = 257;
+
+    log_py.debug() << "running python string: " << script_text;
+    PyObject *mainmod = (api->PyImport_ImportModule)("__main__");
+    assert(mainmod != 0);
+    PyObject *globals = (api->PyModule_GetDict)(mainmod);
+    assert(globals != 0);
+    PyObject *res = (api->PyRun_String)(script_text.c_str(),
+					Py_file_input,
+					globals,
+					globals);
+    if(!res) {
+      log_py.fatal() << "unable to run python string:" << script_text;
+      (api->PyErr_PrintEx)(0);
+      assert(0);
+    }
+    (api->Py_DecRef)(res);
+    (api->Py_DecRef)(globals);
+    (api->Py_DecRef)(mainmod);
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -227,7 +276,9 @@ namespace Realm {
   class LocalPythonProcessor : public ProcessorImpl {
   public:
     LocalPythonProcessor(Processor _me, int _numa_node,
-                         CoreReservationSet& crs, size_t _stack_size);
+                         CoreReservationSet& crs, size_t _stack_size,
+			 const std::vector<std::string>& _import_modules,
+			 const std::vector<std::string>& _init_scripts);
     virtual ~LocalPythonProcessor(void);
 
     virtual void enqueue_task(Task *task);
@@ -254,6 +305,9 @@ namespace Realm {
   protected:
     int numa_node;
     CoreReservation *core_rsrv;
+    const std::vector<std::string>& import_modules;
+    const std::vector<std::string>& init_scripts;
+
     Thread *worker_thread;
     GASNetHSL mutex;
     GASNetCondVar condvar;
@@ -280,9 +334,13 @@ namespace Realm {
 
   LocalPythonProcessor::LocalPythonProcessor(Processor _me, int _numa_node,
                                              CoreReservationSet& crs,
-                                             size_t _stack_size)
+                                             size_t _stack_size,
+					     const std::vector<std::string>& _import_modules,
+					     const std::vector<std::string>& _init_scripts)
     : ProcessorImpl(_me, Processor::PY_PROC)
     , numa_node(_numa_node)
+    , import_modules(_import_modules)
+    , init_scripts(_init_scripts)
     , condvar(mutex)
     , interpreter(0)
     , shutdown_requested(false)
@@ -332,6 +390,16 @@ namespace Realm {
 
     // create a python interpreter that stays entirely within this thread
     interpreter = new PythonInterpreter;
+
+    for(std::vector<std::string>::const_iterator it = import_modules.begin();
+	it != import_modules.end();
+	++it)
+      interpreter->import_module(*it);
+
+    for(std::vector<std::string>::const_iterator it = init_scripts.begin();
+	it != init_scripts.end();
+	++it)
+      interpreter->run_string(*it);
 
     while(!shutdown_requested) {
       TaskRegistration *todo_reg = 0;
@@ -553,7 +621,9 @@ namespace Realm {
 
         cp.add_option_int("-ll:py", m->cfg_num_python_cpus)
 	  .add_option_int("-ll:pynuma", m->cfg_use_numa)
-	  .add_option_int("-ll:pystack", m->cfg_stack_size_in_mb);
+	  .add_option_int("-ll:pystack", m->cfg_stack_size_in_mb)
+	  .add_option_stringlist("-ll:pyimport", m->cfg_import_modules)
+	  .add_option_stringlist("-ll:pyinit", m->cfg_init_scripts);
 
         bool ok = cp.parse_command_line(cmdline);
         if(!ok) {
@@ -633,7 +703,9 @@ namespace Realm {
           Processor p = runtime->next_local_processor_id();
           ProcessorImpl *pi = new LocalPythonProcessor(p, cpu_node,
                                                        runtime->core_reservation_set(),
-                                                       cfg_stack_size_in_mb << 20);
+                                                       cfg_stack_size_in_mb << 20,
+						       cfg_import_modules,
+						       cfg_init_scripts);
           runtime->add_processor(pi);
 
           // create affinities between this processor and system/reg memories
