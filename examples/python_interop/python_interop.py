@@ -20,5 +20,9 @@ from __future__ import print_function
 import legion
 
 @legion.task
+def f(task, regions, context, runtime):
+    print("inside task f")
+
+@legion.task
 def main_task(task, regions, context, runtime):
     print("%x" % legion.c.legion_runtime_get_executing_processor(runtime, context).id)

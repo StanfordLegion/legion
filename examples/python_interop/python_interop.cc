@@ -14,6 +14,7 @@
  */
 
 #include "legion.h"
+#include "realm/python/python_module.h"
 #include "realm/python/python_source.h"
 
 using namespace Legion;
@@ -40,7 +41,7 @@ VariantID preregister_python_task_variant(
 
 void top_level_task(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
-                    Context ctx, HighLevelRuntime *runtime)
+                    Context ctx, Runtime *runtime)
 {
   TaskLauncher launcher(MAIN_TASK_ID, TaskArgument());
   runtime->execute_task(ctx, launcher);
@@ -54,6 +55,8 @@ int main(int argc, char **argv)
 #endif
   setenv("PYTHONPATH", PYTHON_MODULES_PATH, true /*overwrite*/);
 
+  Realm::Python::PythonModule::import_python_module("python_interop");
+
   {
     TaskVariantRegistrar registrar(TOP_LEVEL_TASK_ID, "top_level_task");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
@@ -66,7 +69,7 @@ int main(int argc, char **argv)
     preregister_python_task_variant(registrar, "python_interop", "main_task");
   }
 
-  HighLevelRuntime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
+  Runtime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
 
-  return HighLevelRuntime::start(argc, argv);
+  return Runtime::start(argc, argv);
 }
