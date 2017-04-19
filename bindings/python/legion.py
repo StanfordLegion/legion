@@ -41,6 +41,22 @@ class Context(object):
         self.task = task
         self.regions = regions
 
+class Future(object):
+    __slots__ = ['handle']
+    def __init__(self, handle):
+        self.handle = c.legion_future_copy(handle)
+
+    def __del__(self):
+        c.legion_future_destroy(self.handle)
+
+    def get(self):
+        value_ptr = c.legion_future_get_untyped_pointer(self.handle)
+        value_size = c.legion_future_get_untyped_size(self.handle)
+        assert value_size > 0
+        value_str = ffi.unpack(value_ptr, value_size)
+        value = cPickle.loads(value_str)
+        return value
+
 class Task (object):
     __slots__ = ['body', 'task_id']
 
@@ -60,9 +76,9 @@ class Task (object):
            isinstance(args[0], bytearray) and \
            isinstance(args[1], bytearray) and \
            isinstance(args[2], long):
-            self.execute_task(*args)
+            return self.execute_task(*args)
         else:
-            self.spawn_task(*args)
+            return self.spawn_task(*args)
 
     def spawn_task(self, ctx, *args):
         assert(isinstance(ctx, Context))
@@ -76,8 +92,14 @@ class Task (object):
         # Launch the task.
         launcher = c.legion_task_launcher_create(
             self.task_id, task_args[0], c.legion_predicate_true(), 0, 0)
-        c.legion_task_launcher_execute(ctx.runtime, ctx.context, launcher)
+        result = c.legion_task_launcher_execute(
+            ctx.runtime, ctx.context, launcher)
         c.legion_task_launcher_destroy(launcher)
+
+        # Build future of result.
+        future = Future(result)
+        c.legion_future_destroy(result)
+        return future
 
     def execute_task(self, raw_args, user_data, proc):
         raw_arg_ptr = ffi.new("char[]", bytes(raw_args))
@@ -97,7 +119,8 @@ class Task (object):
         arg_ptr = ffi.cast("char *", c.legion_task_get_args(task[0]))
         arg_size = c.legion_task_get_arglen(task[0])
         if arg_size > 0:
-            args = cPickle.loads(ffi.unpack(arg_ptr, arg_size))
+            arg_str = ffi.unpack(arg_ptr, arg_size)
+            args = cPickle.loads(arg_str)
         else:
             args = ()
 
@@ -110,11 +133,19 @@ class Task (object):
         ctx = Context(context[0], runtime[0], task[0], regions)
 
         # Execute task body.
-        value = self.body(ctx, *args)
-        assert(value is None) # FIXME: Support return values
+        result = self.body(ctx, *args)
+
+        # Encode result in Pickle format.
+        if result is not None:
+            result_str = bytes(cPickle.dumps(result))
+            result_size = len(result_str)
+            result_ptr = ffi.new("char[]", result_size)
+        else:
+            result_size = 0
+            result_ptr = ffi.NULL
 
         # Execute postamble.
-        c.legion_task_postamble(runtime[0], context[0], ffi.NULL, 0)
+        c.legion_task_postamble(runtime[0], context[0], result_ptr, result_size)
 
     def register(self):
         assert(self.task_id is None)
