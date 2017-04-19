@@ -233,7 +233,8 @@ namespace Legion {
       LG_LAUNCH_TOP_LEVEL_ID  = Realm::Processor::TASK_ID_FIRST_AVAILABLE+3,
       LG_MPI_INTEROP_ID       = Realm::Processor::TASK_ID_FIRST_AVAILABLE+4,
       LG_MPI_SYNC_ID          = Realm::Processor::TASK_ID_FIRST_AVAILABLE+5,
-      TASK_ID_AVAILABLE       = Realm::Processor::TASK_ID_FIRST_AVAILABLE+6,
+      LG_DUMMY_BARRIER_ID     = Realm::Processor::TASK_ID_FIRST_AVAILABLE+6,
+      TASK_ID_AVAILABLE       = Realm::Processor::TASK_ID_FIRST_AVAILABLE+7,
     };
 
     // Enumeration of Legion runtime tasks

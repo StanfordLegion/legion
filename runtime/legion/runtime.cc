@@ -9088,20 +9088,20 @@ namespace Legion {
     void Runtime::initialize_legion_prof(void)
     //--------------------------------------------------------------------------
     {
-      LG_TASK_DESCRIPTIONS(hlr_task_descriptions);
+      LG_TASK_DESCRIPTIONS(lg_task_descriptions);
       profiler = new LegionProfiler((local_utils.empty() ? 
                                     Processor::NO_PROC : utility_group), 
                                     machine, LG_LAST_TASK_ID,
-                                    hlr_task_descriptions, 
+                                    lg_task_descriptions, 
                                     Operation::LAST_OP_KIND, 
                                     Operation::op_names); 
-      LG_MESSAGE_DESCRIPTIONS(hlr_message_descriptions);
-      profiler->record_message_kinds(hlr_message_descriptions, LAST_SEND_KIND);
-      MAPPER_CALL_NAMES(hlr_mapper_calls);
-      profiler->record_mapper_call_kinds(hlr_mapper_calls, LAST_MAPPER_CALL);
+      LG_MESSAGE_DESCRIPTIONS(lg_message_descriptions);
+      profiler->record_message_kinds(lg_message_descriptions, LAST_SEND_KIND);
+      MAPPER_CALL_NAMES(lg_mapper_calls);
+      profiler->record_mapper_call_kinds(lg_mapper_calls, LAST_MAPPER_CALL);
 #ifdef DETAILED_LEGION_PROF
-      RUNTIME_CALL_DESCRIPTIONS(hlr_runtime_calls);
-      profiler->record_runtime_call_kinds(hlr_runtime_calls, 
+      RUNTIME_CALL_DESCRIPTIONS(lg_runtime_calls);
+      profiler->record_runtime_call_kinds(lg_runtime_calls, 
                                           LAST_RUNTIME_CALL_KIND);
 #endif
     }
@@ -18832,6 +18832,13 @@ namespace Legion {
           top_level_proc = local_procs.first();
         }
       }
+      // Right now we launch a dummy barrier task on all the processors
+      // to ensure that Realm has started them such that any interpreter
+      // processors have loaded all their code
+      // TODO: Remove this once Realm gives us a startup event
+      RtEvent procs_started(realm.collective_spawn_by_kind(
+            Processor::NO_KIND, LG_DUMMY_BARRIER_ID, NULL, 0,
+            false/*one per node*/, tasks_registered));
       // Now perform a collective spawn to initialize the runtime everywhere
       // Save the precondition in case we are the node that needs to start
       // the top-level task.
@@ -18841,7 +18848,7 @@ namespace Legion {
       RtEvent runtime_startup_event(realm.collective_spawn_by_kind(
           (separate_runtime_instances ? Processor::NO_KIND : 
            Processor::LOC_PROC), INIT_TASK_ID, NULL, 0,
-          !separate_runtime_instances, tasks_registered));
+          !separate_runtime_instances, procs_started));
       // See if we need to do any initialization for MPI interoperability
       if (mpi_rank >= 0)
       {
@@ -19228,12 +19235,13 @@ namespace Legion {
       // Make the code descriptors for our tasks
       CodeDescriptor init_task(Runtime::initialize_runtime);
       CodeDescriptor shutdown_task(Runtime::shutdown_runtime);
-      CodeDescriptor hlr_task(Runtime::legion_runtime_task);
+      CodeDescriptor lg_task(Runtime::legion_runtime_task);
       CodeDescriptor rt_profiling_task(Runtime::profiling_runtime_task);
       CodeDescriptor map_profiling_task(Runtime::profiling_mapper_task);
       CodeDescriptor launch_top_level_task(Runtime::launch_top_level);
       CodeDescriptor mpi_interop_task(Runtime::init_mpi_interop);
       CodeDescriptor mpi_sync_task(Runtime::init_mpi_sync);
+      CodeDescriptor dummy_barrier(Runtime::dummy_barrier);
       Realm::ProfilingRequestSet no_requests;
       // We'll just register these on all the processor kinds
       std::set<RtEvent> registered_events;
@@ -19250,7 +19258,7 @@ namespace Legion {
                                SHUTDOWN_TASK_ID, shutdown_task, no_requests)));
         registered_events.insert(RtEvent(
             Processor::register_task_by_kind(kinds[idx], false/*global*/,
-                                         LG_TASK_ID, hlr_task, no_requests)));
+                                         LG_TASK_ID, lg_task, no_requests)));
         registered_events.insert(RtEvent(
             Processor::register_task_by_kind(kinds[idx], false/*global*/,
                     LG_LEGION_PROFILING_ID, rt_profiling_task, no_requests)));
@@ -19266,6 +19274,9 @@ namespace Legion {
         registered_events.insert(RtEvent(
             Processor::register_task_by_kind(kinds[idx], false/*global*/,
                           LG_MPI_SYNC_ID, mpi_sync_task, no_requests)));
+        registered_events.insert(RtEvent(
+            Processor::register_task_by_kind(kinds[idx], false/*global*/,
+                          LG_DUMMY_BARRIER_ID, dummy_barrier, no_requests)));
       }
       if (record_registration)
       {
@@ -19281,6 +19292,8 @@ namespace Legion {
                       LG_MAPPER_PROFILING_ID);
         log_run.print("Legion launch top-level task has Realm ID %d",
                       LG_LAUNCH_TOP_LEVEL_ID);
+        log_run.print("Legion dummy barrier task has Realm ID %d",
+                      LG_DUMMY_BARRIER_ID);
       }
       return Runtime::merge_events(registered_events);
     }
@@ -20218,6 +20231,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       log_run.debug() << "MPI sync task";
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::dummy_barrier(
+                                   const void *args, size_t arglen, 
+				   const void *userdata, size_t userlen,
+				   Processor p)
+    //--------------------------------------------------------------------------
+    {
+      // Intentionally do nothing
     }
 
     //--------------------------------------------------------------------------
