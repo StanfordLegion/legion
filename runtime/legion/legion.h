@@ -998,6 +998,10 @@ namespace Legion {
        * @param silence_warnings silence any warnings for this blocking call
        */
       inline const void* get_untyped_pointer(bool silence_warnings = false);
+      /**
+       * Return the number of bytes contained in the future.
+       */
+      size_t get_untyped_size(void);
     public:
       /**
        * Allow users to generate their own futures. These

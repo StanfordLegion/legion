@@ -3199,6 +3199,13 @@ legion_future_get_result_bytes(legion_future_t handle_, void *buffer, size_t siz
   memcpy(buffer, handle->get_untyped_pointer(), size);
 }
 
+size_t
+legion_future_get_result_size(legion_future_t handle_)
+{
+  Future *handle = CObjectWrapper::unwrap(handle_);
+  return handle->get_untyped_size();
+}
+
 bool
 legion_future_is_empty(legion_future_t handle_,
                        bool block /* = false */)
@@ -3214,6 +3221,13 @@ legion_future_get_untyped_pointer(legion_future_t handle_)
   Future *handle = CObjectWrapper::unwrap(handle_);
 
   return handle->get_untyped_pointer();
+}
+
+size_t
+legion_future_get_untyped_size(legion_future_t handle_)
+{
+  Future *handle = CObjectWrapper::unwrap(handle_);
+  return handle->get_untyped_size();
 }
 
 // -----------------------------------------------------------------------

@@ -1886,6 +1886,12 @@ extern "C" {
   legion_future_get_result_bytes(legion_future_t handle_, void *buffer, size_t size);
 
   /**
+   * @see Legion::Future::get_untyped_size()
+   */
+  size_t
+  legion_future_get_result_size(legion_future_t handle_);
+
+  /**
    * @see Legion::Future::is_empty()
    */
   bool
@@ -1897,6 +1903,12 @@ extern "C" {
    */
   const void *
   legion_future_get_untyped_pointer(legion_future_t handle);
+
+  /**
+   * @see Legion::Future::get_untyped_size()
+   */
+  size_t
+  legion_future_get_untyped_size(legion_future_t handle);
 
   // -----------------------------------------------------------------------
   // Task Result Operations
