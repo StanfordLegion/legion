@@ -27,5 +27,10 @@ def f(ctx, x, y, z):
 @legion.task
 def main_task(ctx):
     print("inside main()")
+
     x = f(ctx, 1, "asdf", True)
-    print("result of f is %s" % x) # x.get() # FIXME: Breaks on x.get()
+    print("result of f is %s" % x)
+
+    R = legion.Region.create(ctx, [4, 4], {'x': legion.double})
+    print("region %s" % R)
+    print("field %s" % R.x)

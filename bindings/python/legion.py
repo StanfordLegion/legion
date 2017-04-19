@@ -57,6 +57,87 @@ class Future(object):
         value = cPickle.loads(value_str)
         return value
 
+class Type(object):
+    __slots__ = ['size']
+    def __init__(self, size):
+        self.size = size
+double = Type(8)
+
+class Ispace(object):
+    __slots__ = ['ctx', 'handle']
+
+    def __init__(self, ctx, handle):
+        self.ctx = ctx
+        self.handle = handle
+
+    @staticmethod
+    def create(ctx, extent, start=None):
+        if start is not None:
+            assert len(start) == len(extent)
+        else:
+            start = [0 for _ in extent]
+        assert 1 <= len(extent) <= 3
+        rect = ffi.new("legion_rect_{}d_t *".format(len(extent)))
+        for i in xrange(len(extent)):
+            rect[0].lo.x[i] = start[i]
+            rect[0].hi.x[i] = start[i] + extent[i] - 1
+        domain = getattr(c, "legion_domain_from_rect_{}d".format(len(extent)))(rect[0])
+        handle = c.legion_index_space_create_domain(ctx.runtime, ctx.context, domain)
+        return Ispace(ctx, handle)
+
+class Fspace(object):
+    __slots__ = ['ctx', 'handle', 'field_ids']
+
+    def __init__(self, ctx, handle, field_ids):
+        self.ctx = ctx
+        self.handle = handle
+        self.field_ids = field_ids
+
+    @staticmethod
+    def create(ctx, fields):
+        handle = c.legion_field_space_create(ctx.runtime, ctx.context)
+        alloc = c.legion_field_allocator_create(
+            ctx.runtime, ctx.context, handle)
+        field_ids = {}
+        for field_name, field_type in fields.items():
+            field_id = c.legion_field_allocator_allocate_field(
+                alloc, field_type.size,
+                ffi.cast("legion_field_id_t", -1)) # AUTO_GENERATE_ID
+            c.legion_field_id_attach_name(
+                ctx.runtime, handle, field_id, field_name, False)
+            field_ids[field_name] = field_id
+        c.legion_field_allocator_destroy(alloc)
+        return Fspace(ctx, handle, field_ids)
+
+class Region(object):
+    __slots__ = ['ctx', 'handle', 'ispace', 'fspace']
+
+    def __init__(self, ctx, handle, ispace, fspace):
+        self.ctx = ctx
+        self.handle = handle
+        self.ispace = ispace
+        self.fspace = fspace
+
+    @staticmethod
+    def create(ctx, ispace, fspace):
+        if not isinstance(ispace, Ispace):
+            ispace = Ispace.create(ctx, ispace)
+        if not isinstance(fspace, Fspace):
+            fspace = Fspace.create(ctx, fspace)
+        handle = c.legion_logical_region_create(
+            ctx.runtime, ctx.context, ispace.handle, fspace.handle)
+        return Region(ctx, handle, ispace, fspace)
+
+    def __getattr__(self, field_name):
+        if field_name in self.fspace.field_ids:
+            return RegionField(self.ctx, self, field_name)
+        else:
+            raise AttributeError()
+
+class RegionField(object):
+    def __init__(self, ctx, region, field_name):
+        pass # FIXME
+
 class Task (object):
     __slots__ = ['body', 'task_id']
 
