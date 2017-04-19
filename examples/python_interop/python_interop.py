@@ -20,10 +20,10 @@ from __future__ import print_function
 import legion
 
 @legion.task
-def f(ctx):
-    print("inside task f")
+def f(ctx, *args):
+    print("inside task f%s" % (args,))
 
 @legion.task
 def main_task(ctx):
-    print("%x" % legion.c.legion_runtime_get_executing_processor(ctx.runtime, ctx.context).id)
-    f(ctx)
+    print("inside main()")
+    f(ctx, 1, "asdf", True)
