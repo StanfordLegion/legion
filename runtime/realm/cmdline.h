@@ -36,6 +36,9 @@ namespace Realm {
     template <typename T>
     CommandLineParser& add_option_string(const std::string& optname, T& target, bool keep = false);
 
+    template <typename T>
+    CommandLineParser& add_option_stringlist(const std::string& optname, T& target, bool keep = false);
+
     CommandLineParser& add_option_bool(const std::string& optname, bool& target, bool keep = false);
 
     template <typename T>
@@ -89,6 +92,18 @@ namespace Realm {
 
   protected:
     std::string& target;
+  };
+
+  class StringListCommandLineOption : public CommandLineOption {
+  public:
+    StringListCommandLineOption(const std::string& _optname, bool _keep, std::vector<std::string>& _target);
+    
+    virtual bool parse_argument(std::vector<std::string>& cmdline,
+				std::vector<std::string>::iterator& pos);
+    virtual bool parse_argument(int& pos, int argc, const char *argv[]);
+
+  protected:
+    std::vector<std::string>& target;
   };
 
   class BooleanCommandLineOption : public CommandLineOption {
