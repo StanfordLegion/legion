@@ -1511,7 +1511,8 @@ namespace Legion {
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         // Verify that the requirement is self-consistent
-        FieldID bad_field;
+        FieldID bad_field = AUTO_GENERATE_ID;
+        int bad_index = -1;
         LegionErrorType et = runtime->verify_requirement(regions[idx], 
                                                          bad_field); 
         if ((et == NO_ERROR) && !is_index_space && 
@@ -1520,7 +1521,7 @@ namespace Legion {
           et = ERROR_BAD_PROJECTION_USE;
         // If that worked, then check the privileges with the parent context
         if (et == NO_ERROR)
-          et = parent_ctx->check_privilege(regions[idx], bad_field);
+          et = parent_ctx->check_privilege(regions[idx], bad_field, bad_index);
         switch (et)
         {
           case NO_ERROR:
@@ -1617,17 +1618,47 @@ namespace Legion {
             }
           case ERROR_BAD_PARENT_REGION:
             {
-              log_region.error("Parent task %s (ID %lld) of task %s "
-                                "(ID %lld) does not have a region "
-                                "requirement for region " 
-                                "(%x,%x,%x) as a parent of child task's "
-                                "region requirement index %d",
-                                parent_ctx->get_task_name(), 
-                                parent_ctx->get_unique_id(),
-                                get_task_name(), get_unique_id(),
-                                regions[idx].region.index_space.id,
-                                regions[idx].region.field_space.id, 
-                                regions[idx].region.tree_id, idx);
+              if (bad_index < 0)
+                log_region.error("Parent task %s (ID %lld) of task %s "
+                                  "(ID %lld) does not have a region "
+                                  "requirement for region " 
+                                  "(%x,%x,%x) as a parent of child task's "
+                                  "region requirement index %d because "
+                                  "no 'parent' region had that name.",
+                                  parent_ctx->get_task_name(), 
+                                  parent_ctx->get_unique_id(),
+                                  get_task_name(), get_unique_id(),
+                                  regions[idx].region.index_space.id,
+                                  regions[idx].region.field_space.id, 
+                                  regions[idx].region.tree_id, idx);
+              else if (bad_field == AUTO_GENERATE_ID)
+                log_region.error("Parent task %s (ID %lld) of task %s "
+                                  "(ID %lld) does not have a region "
+                                  "requirement for region " 
+                                  "(%x,%x,%x) as a parent of child task's "
+                                  "region requirement index %d because "
+                                  "parent requirement %d did not have "
+                                  "sufficient privileges.",
+                                  parent_ctx->get_task_name(), 
+                                  parent_ctx->get_unique_id(),
+                                  get_task_name(), get_unique_id(),
+                                  regions[idx].region.index_space.id,
+                                  regions[idx].region.field_space.id, 
+                                  regions[idx].region.tree_id, idx, bad_index);
+              else
+                log_region.error("Parent task %s (ID %lld) of task %s "
+                                  "(ID %lld) does not have a region "
+                                  "requirement for region " 
+                                  "(%x,%x,%x) as a parent of child task's "
+                                  "region requirement index %d because "
+                                  "parent requirement %d was missing field %d.",
+                                  parent_ctx->get_task_name(), 
+                                  parent_ctx->get_unique_id(),
+                                  get_task_name(), get_unique_id(),
+                                  regions[idx].region.index_space.id,
+                                  regions[idx].region.field_space.id, 
+                                  regions[idx].region.tree_id, idx,
+                                  bad_index, bad_field);
 #ifdef DEBUG_LEGION
               assert(false);
 #endif

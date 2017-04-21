@@ -76,7 +76,7 @@ namespace Realm {
       // special task IDs
       enum {
         // Save ID 0 for the force shutdown function
-	TASK_ID_REQUEST_SHUTDOWN   = 0,
+	TASK_ID_PROCESSOR_NOP      = 0,
 	TASK_ID_PROCESSOR_INIT     = 1,
 	TASK_ID_PROCESSOR_SHUTDOWN = 2,
 	TASK_ID_FIRST_AVAILABLE    = 4,

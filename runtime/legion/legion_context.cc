@@ -1729,21 +1729,26 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LegionErrorType TaskContext::check_privilege(const RegionRequirement &req,
                                                  FieldID &bad_field,
+                                                 int &bad_index,
                                                  bool skip_privilege) const
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, CHECK_PRIVILEGE_CALL);
+#ifdef DEBUG_LEGION
+      assert(bad_index < 0);
+#endif
       if (req.flags & VERIFIED_FLAG)
         return NO_ERROR;
       // Copy privilege fields for check
       std::set<FieldID> privilege_fields(req.privilege_fields);
+      unsigned index = 0;
       // Try our original region requirements first
       for (std::vector<RegionRequirement>::const_iterator it = 
-            regions.begin(); it != regions.end(); it++)
+            regions.begin(); it != regions.end(); it++, index++)
       {
         LegionErrorType et = 
           check_privilege_internal(req, *it, privilege_fields, bad_field,
-                                   skip_privilege);
+                                   index, bad_index, skip_privilege);
         // No error so we are done
         if (et == NO_ERROR)
           return et;
@@ -1754,11 +1759,11 @@ namespace Legion {
       }
       // If none of that worked, we now get to try the created requirements
       AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
-      for (unsigned idx = 0; idx < created_requirements.size(); idx++)
+      for (unsigned idx = 0; idx < created_requirements.size(); idx++, index++)
       {
         LegionErrorType et = 
           check_privilege_internal(req, created_requirements[idx], 
-                      privilege_fields, bad_field, skip_privilege);
+                privilege_fields, bad_field, index, bad_index, skip_privilege);
         // No error so we are done
         if (et == NO_ERROR)
           return et;
@@ -1790,8 +1795,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LegionErrorType TaskContext::check_privilege_internal(
         const RegionRequirement &req, const RegionRequirement &our_req,
-        std::set<FieldID>& privilege_fields,
-        FieldID &bad_field, bool skip_privilege) const
+        std::set<FieldID>& privilege_fields, FieldID &bad_field, 
+        int local_index, int &bad_index, bool skip_privilege) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1800,6 +1805,10 @@ namespace Legion {
       // Check to see if we found the requirement in the parent
       if (our_req.region == req.parent)
       {
+        // If we make it in here then we know we have at least found
+        // the parent name so we can set the bad index
+        bad_index = local_index;
+        bad_field = AUTO_GENERATE_ID; // set it to an invalid field
         if ((req.handle_type == SINGULAR) || 
             (req.handle_type == REG_PROJECTION))
         {
@@ -1848,7 +1857,11 @@ namespace Legion {
         }
       }
 
-      if (!privilege_fields.empty()) return ERROR_BAD_PARENT_REGION;
+      if (!privilege_fields.empty()) 
+      {
+        bad_field = *(privilege_fields.begin());
+        return ERROR_BAD_PARENT_REGION;
+      }
         // If we make it here then we are good
       return NO_ERROR;
     }

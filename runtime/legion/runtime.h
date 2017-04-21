@@ -2723,6 +2723,9 @@ namespace Legion {
       static void init_mpi_sync(const void *args, size_t arglen, 
 			  const void *userdata, size_t userlen,
 			  Processor p);
+      static void dummy_barrier(const void *args, size_t arglen,
+                          const void *userdata, size_t userlen,
+                          Processor p);
     protected:
       // Internal runtime methods invoked by the above static methods
       // after the find the right runtime instance to call

@@ -793,6 +793,15 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
+   * @see Legion::Runtime::get_parent_index_partition()
+   */
+  legion_index_partition_t
+  legion_index_space_get_parent_index_partition(legion_runtime_t runtime,
+                                                legion_index_space_t handle);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
    * @see Legion::Runtime::destroy_index_space()
    */
   void
@@ -1884,6 +1893,12 @@ extern "C" {
   legion_future_get_result_bytes(legion_future_t handle_, void *buffer, size_t size);
 
   /**
+   * @see Legion::Future::get_untyped_size()
+   */
+  size_t
+  legion_future_get_result_size(legion_future_t handle_);
+
+  /**
    * @see Legion::Future::is_empty()
    */
   bool
@@ -1895,6 +1910,12 @@ extern "C" {
    */
   const void *
   legion_future_get_untyped_pointer(legion_future_t handle);
+
+  /**
+   * @see Legion::Future::get_untyped_size()
+   */
+  size_t
+  legion_future_get_untyped_size(legion_future_t handle);
 
   // -----------------------------------------------------------------------
   // Task Result Operations

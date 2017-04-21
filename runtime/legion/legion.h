@@ -1081,6 +1081,18 @@ namespace Legion {
        * @param silence_warnings silence any warnings for this blocking call
        */
       inline const void* get_untyped_pointer(bool silence_warnings = false);
+      /**
+       * Return the number of bytes contained in the future.
+       */
+      size_t get_untyped_size(void);
+    public:
+      // These methods provide partial support the C++ future interface
+      template<typename T>
+      inline T get(void);
+
+      inline bool valid(void) const;
+
+      inline void wait(void) const;
     public:
       /**
        * Allow users to generate their own futures. These

@@ -236,6 +236,7 @@ namespace Legion {
 
     // Runtime task numbering 
     enum {
+      LG_DUMMY_BARRIER_ID     = Realm::Processor::TASK_ID_PROCESSOR_NOP,
       INIT_TASK_ID            = Realm::Processor::TASK_ID_PROCESSOR_INIT,
       SHUTDOWN_TASK_ID        = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
       LG_TASK_ID              = Realm::Processor::TASK_ID_FIRST_AVAILABLE,

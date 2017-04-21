@@ -19328,9 +19328,7 @@ namespace Legion {
       LEGION_STATIC_ASSERT(DEFAULT_MAX_TASK_WINDOW > 0);
       LEGION_STATIC_ASSERT(DEFAULT_MIN_TASKS_TO_SCHEDULE > 0);
       LEGION_STATIC_ASSERT(DEFAULT_SUPERSCALAR_WIDTH > 0);
-      LEGION_STATIC_ASSERT(DEFAULT_MAX_MESSAGE_SIZE > 0);
-      // Once we've made this call, the Legion runtime is started
-      runtime_started = true;
+      LEGION_STATIC_ASSERT(DEFAULT_MAX_MESSAGE_SIZE > 0); 
       // Need to pass argc and argv to low-level runtime before we can record 
       // their values as they might be changed by GASNet or MPI or whatever.
       // Note that the logger isn't initialized until after this call returns 
@@ -19749,6 +19747,13 @@ namespace Legion {
         }
         top_level_proc = local_procs.first();
       }
+      // Right now we launch a dummy barrier task on all the processors
+      // to ensure that Realm has started them such that any interpreter
+      // processors have loaded all their code
+      // TODO: Remove this once Realm gives us a startup event
+      RtEvent procs_started(realm.collective_spawn_by_kind(
+            Processor::NO_KIND, LG_DUMMY_BARRIER_ID, NULL, 0,
+            false/*one per node*/, tasks_registered));
       // Now perform a collective spawn to initialize the runtime everywhere
       // Save the precondition in case we are the node that needs to start
       // the top-level task.
@@ -19758,7 +19763,7 @@ namespace Legion {
       RtEvent runtime_startup_event(realm.collective_spawn_by_kind(
           (separate_runtime_instances ? Processor::NO_KIND : 
            Processor::LOC_PROC), INIT_TASK_ID, NULL, 0,
-          !separate_runtime_instances, tasks_registered));
+          !separate_runtime_instances, procs_started));
       // See if we need to do any initialization for MPI interoperability
       if (mpi_rank >= 0)
       {
@@ -20154,7 +20159,7 @@ namespace Legion {
       // Make the code descriptors for our tasks
       CodeDescriptor init_task(Runtime::initialize_runtime);
       CodeDescriptor shutdown_task(Runtime::shutdown_runtime);
-      CodeDescriptor hlr_task(Runtime::legion_runtime_task);
+      CodeDescriptor lg_task(Runtime::legion_runtime_task);
       CodeDescriptor rt_profiling_task(Runtime::profiling_runtime_task);
       CodeDescriptor map_profiling_task(Runtime::profiling_mapper_task);
       CodeDescriptor launch_top_level_task(Runtime::launch_top_level);
@@ -20163,10 +20168,10 @@ namespace Legion {
       Realm::ProfilingRequestSet no_requests;
       // We'll just register these on all the processor kinds
       std::set<RtEvent> registered_events;
-      Processor::Kind kinds[5] = { Processor::TOC_PROC, Processor::LOC_PROC,
+      Processor::Kind kinds[6] = { Processor::TOC_PROC, Processor::LOC_PROC,
                                    Processor::UTIL_PROC, Processor::IO_PROC,
-                                   Processor::PROC_SET };
-      for (unsigned idx = 0; idx < 5; idx++)
+                                   Processor::PROC_SET, Processor::OMP_PROC };
+      for (unsigned idx = 0; idx < 6; idx++)
       {
         registered_events.insert(RtEvent(
             Processor::register_task_by_kind(kinds[idx], false/*global*/,
@@ -20176,7 +20181,7 @@ namespace Legion {
                                SHUTDOWN_TASK_ID, shutdown_task, no_requests)));
         registered_events.insert(RtEvent(
             Processor::register_task_by_kind(kinds[idx], false/*global*/,
-                                         LG_TASK_ID, hlr_task, no_requests)));
+                                         LG_TASK_ID, lg_task, no_requests)));
         registered_events.insert(RtEvent(
             Processor::register_task_by_kind(kinds[idx], false/*global*/,
                     LG_LEGION_PROFILING_ID, rt_profiling_task, no_requests)));
@@ -20195,6 +20200,8 @@ namespace Legion {
       }
       if (record_registration)
       {
+        log_run.print("Legion dummy barrier task has Realm ID %d",
+                      LG_DUMMY_BARRIER_ID);
         log_run.print("Legion runtime initialization task "
                             "has Realm ID %d", INIT_TASK_ID);
         log_run.print("Legion runtime shutdown task has "
@@ -20381,7 +20388,7 @@ namespace Legion {
                                           const void *userdata, size_t userlen,
                                           Processor p)
     //--------------------------------------------------------------------------
-    {
+    { 
       // We now know that this task will only get called once for each runtime 
       // instance that is supposed to be created which wasn't always true
       Machine machine = Machine::get_machine();
@@ -20497,7 +20504,9 @@ namespace Legion {
         mpi_rank_table = new MPIRankTable(local_rt); 
       }
       else // We can initialize the mappers now
-        local_rt->initialize_mappers();
+        local_rt->initialize_mappers(); 
+      // Once we're done with this task, the Legion runtime is started
+      runtime_started = true;
     }
 
     //--------------------------------------------------------------------------

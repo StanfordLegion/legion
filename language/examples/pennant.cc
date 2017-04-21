@@ -1275,6 +1275,7 @@ void PennantMapper::map_must_epoch(const MapperContext           ctx,
       task->regions[constraint.requirement_indexes[owner_id]];
     Memory target_memory = sysmems_list[task_indices[task]];
     LayoutConstraintSet layout_constraints;
+    default_policy_select_constraints(ctx, layout_constraints, target_memory, req);
     layout_constraints.add_constraint(
       FieldConstraint(req.privilege_fields, false /*!contiguous*/));
 

@@ -2000,6 +2000,22 @@ namespace Legion {
       return impl->get_untyped_result(silence_warnings);
     }
 
+    //--------------------------------------------------------------------------
+    size_t Future::get_untyped_size(void)
+    //--------------------------------------------------------------------------
+    {
+      if (impl == NULL)
+      {
+        Internal::log_run.error("Illegal request for future "
+                                "size from empty future");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_REQUEST_FOR_EMPTY_FUTURE);
+      }
+      return impl->get_untyped_size();
+    }
+
     /////////////////////////////////////////////////////////////
     // Future Map 
     /////////////////////////////////////////////////////////////
