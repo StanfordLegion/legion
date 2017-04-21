@@ -218,6 +218,50 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class StringListCommandLineOption
+
+  StringListCommandLineOption::StringListCommandLineOption(const std::string& _optname,
+							   bool _keep,
+							   std::vector<std::string>& _target)
+    : CommandLineOption(_optname, _keep)
+    , target(_target)
+  {}
+
+  bool StringListCommandLineOption::parse_argument(std::vector<std::string>& cmdline,
+						   std::vector<std::string>::iterator& pos)
+  {
+    // requires an additional argument
+    if(pos == cmdline.end()) return false;
+
+    // parse into a copy to avoid corrupting the value on failure
+    target.push_back(*pos);
+
+    if(keep) {
+      ++pos;
+    } else {
+      pos = cmdline.erase(pos);
+    }
+    
+    return true;
+  }
+
+  bool StringListCommandLineOption::parse_argument(int& pos, int argc, const char *argv[])
+  {
+    // requires an additional argument
+    if(pos >= argc) return false;
+
+    // parse into a copy to avoid corrupting the value on failure
+    target.push_back(argv[pos]);
+
+    // always keep
+    ++pos;
+    
+    return true;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class BooleanCommandLineOption
 
   BooleanCommandLineOption::BooleanCommandLineOption(const std::string& _optname,
