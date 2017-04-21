@@ -18410,9 +18410,7 @@ namespace Legion {
       LEGION_STATIC_ASSERT(DEFAULT_MAX_TASK_WINDOW > 0);
       LEGION_STATIC_ASSERT(DEFAULT_MIN_TASKS_TO_SCHEDULE > 0);
       LEGION_STATIC_ASSERT(DEFAULT_SUPERSCALAR_WIDTH > 0);
-      LEGION_STATIC_ASSERT(DEFAULT_MAX_MESSAGE_SIZE > 0);
-      // Once we've made this call, the Legion runtime is started
-      runtime_started = true;
+      LEGION_STATIC_ASSERT(DEFAULT_MAX_MESSAGE_SIZE > 0); 
       // Need to pass argc and argv to low-level runtime before we can record 
       // their values as they might be changed by GASNet or MPI or whatever.
       // Note that the logger isn't initialized until after this call returns 
@@ -19244,10 +19242,10 @@ namespace Legion {
       Realm::ProfilingRequestSet no_requests;
       // We'll just register these on all the processor kinds
       std::set<RtEvent> registered_events;
-      Processor::Kind kinds[5] = { Processor::TOC_PROC, Processor::LOC_PROC,
+      Processor::Kind kinds[6] = { Processor::TOC_PROC, Processor::LOC_PROC,
                                    Processor::UTIL_PROC, Processor::IO_PROC,
-                                   Processor::PROC_SET };
-      for (unsigned idx = 0; idx < 5; idx++)
+                                   Processor::PROC_SET, Processor::OMP_PROC };
+      for (unsigned idx = 0; idx < 6; idx++)
       {
         registered_events.insert(RtEvent(
             Processor::register_task_by_kind(kinds[idx], false/*global*/,
@@ -19464,7 +19462,7 @@ namespace Legion {
                                           const void *userdata, size_t userlen,
                                           Processor p)
     //--------------------------------------------------------------------------
-    {
+    { 
       // We now know that this task will only get called once for each runtime 
       // instance that is supposed to be created which wasn't always true
       Machine machine = Machine::get_machine();
@@ -19572,7 +19570,9 @@ namespace Legion {
         mpi_rank_table = new MPIRankTable(local_rt); 
       }
       else // We can initialize the mappers now
-        local_rt->initialize_mappers();
+        local_rt->initialize_mappers(); 
+      // Once we're done with this task, the Legion runtime is started
+      runtime_started = true;
     }
 
     //--------------------------------------------------------------------------
