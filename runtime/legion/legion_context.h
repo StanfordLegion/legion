@@ -484,15 +484,15 @@ namespace Legion {
       PrivilegeMode find_parent_privilege_mode(unsigned idx);
       LegionErrorType check_privilege(const IndexSpaceRequirement &req) const;
       LegionErrorType check_privilege(const RegionRequirement &req, 
-                                      FieldID &bad_field, 
+                                      FieldID &bad_field, int &bad_index, 
                                       bool skip_privileges = false) const; 
       LogicalRegion find_logical_region(unsigned index);
     protected:
       LegionErrorType check_privilege_internal(const RegionRequirement &req,
                                       const RegionRequirement &parent_req,
                                       std::set<FieldID>& privilege_fields,
-                                      FieldID &bad_field, 
-                                      bool skip_privileges) const; 
+                                      FieldID &bad_field, int local, int &bad,
+                                      bool skip_privileges) const;
     public:
       void add_physical_region(const RegionRequirement &req, bool mapped,
           MapperID mid, MappingTagID tag, ApUserEvent unmap_event,
