@@ -953,6 +953,15 @@ function specialize.expr_list_ispace(cx, node, allow_lists)
   }
 end
 
+function specialize.expr_list_from_element(cx, node, allow_lists)
+  return ast.specialized.expr.ListFromElement {
+    list = specialize.expr(cx, node.list),
+    value = specialize.expr(cx, node.value),
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 function specialize.expr_phase_barrier(cx, node, allow_lists)
   return ast.specialized.expr.PhaseBarrier {
     value = specialize.expr(cx, node.value),
@@ -1223,6 +1232,9 @@ function specialize.expr(cx, node, allow_lists)
 
   elseif node:is(ast.unspecialized.expr.ListIspace) then
     return specialize.expr_list_ispace(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.ListFromElement) then
+    return specialize.expr_list_from_element(cx, node)
 
   elseif node:is(ast.unspecialized.expr.PhaseBarrier) then
     return specialize.expr_phase_barrier(cx, node, allow_lists)

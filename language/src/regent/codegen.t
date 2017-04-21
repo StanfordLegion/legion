@@ -4696,6 +4696,63 @@ function codegen.expr_list_ispace(cx, node)
     expr_type)
 end
 
+local function gen_expr_list_from_element(expr_type, result, list, value)
+  if not std.is_list(expr_type.element_type) then
+    return quote
+      var len = [list].__size
+      var data = c.malloc(terralib.sizeof([expr_type.element_type]) * len)
+      [result] = expr_type {
+        __size = len,
+        __data = data,
+      }
+      for i = 0, len do
+        [expr_type:data(result)][i] = [value]
+      end
+    end
+  else
+    return quote
+      var len = [list].__size
+      var data = c.malloc(terralib.sizeof([expr_type.element_type]) * len)
+      [result] = expr_type {
+        __size = len,
+        __data = data,
+      }
+      for i = 0, len do
+        [gen_expr_list_from_element(
+            expr_type.element_type,
+            `([expr_type:data(result)][i]),
+            `([expr_type:data(list)][i]),
+            value)]
+      end
+    end
+  end
+end
+
+function codegen.expr_list_from_element(cx, node)
+  local list_type = std.as_read(node.list.expr_type)
+  local list = codegen.expr(cx, node.list):read(cx, list_type)
+  local value_type = std.as_read(node.value.expr_type)
+  local value = codegen.expr(cx, node.value):read(cx, value_type)
+
+  local expr_type = std.as_read(node.expr_type)
+
+  local result = terralib.newsymbol(expr_type, "result")
+  local result_len = terralib.newsymbol(uint64, "result_len")
+
+  local actions = quote
+    [list.actions]
+    [value.actions]
+    [emit_debuginfo(node)]
+    var [result]
+    [gen_expr_list_from_element(expr_type, result, list.value, value.value)]
+  end
+
+  return values.value(
+    node,
+    expr.just(actions, result),
+    expr_type)
+end
+
 function codegen.expr_phase_barrier(cx, node)
   local value_type = std.as_read(node.value.expr_type)
   local value = codegen.expr(cx, node.value):read(cx, value_type)
@@ -6387,6 +6444,9 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.ListIspace) then
     return codegen.expr_list_ispace(cx, node)
+
+  elseif node:is(ast.typed.expr.ListFromElement) then
+    return codegen.expr_list_from_element(cx, node)
 
   elseif node:is(ast.typed.expr.PhaseBarrier) then
     return codegen.expr_phase_barrier(cx, node)
