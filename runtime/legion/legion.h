@@ -1003,6 +1003,14 @@ namespace Legion {
        */
       size_t get_untyped_size(void);
     public:
+      // These methods provide partial support the C++ future interface
+      template<typename T>
+      inline T get(void);
+
+      inline bool valid(void) const;
+
+      inline void wait(void) const;
+    public:
       /**
        * Allow users to generate their own futures. These
        * futures are guaranteed to always have completed
