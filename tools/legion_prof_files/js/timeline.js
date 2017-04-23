@@ -278,12 +278,21 @@ function turnOffMouseHandlers() {
   state.timelineSvg.on("mousedown", null);
   state.timelineSvg.on("mouseup", null);
   state.timelineSvg.on("mousemove", null);
+  state.timelineSvg.on("mousemove", null);
+  // prevent right-click menu
+  state.timelineSvg.on("contextmenu", function () {
+                          d3.event.preventDefault();
+                        });
 }
 
 function turnOnMouseHandlers() {
   state.timelineSvg.on("mousedown", mouseDownHandler);
   state.timelineSvg.on("mouseup", mouseUpHandler);
   state.timelineSvg.on("mousemove", mouseMoveHandlerWhenUp);
+  // prevent right-click menu
+  state.timelineSvg.on("contextmenu", function () {
+                          d3.event.preventDefault();
+                        });
 }
 
 function drawLoaderIcon() {
@@ -352,7 +361,8 @@ function getMouseOver() {
                        .attr("y", y)
                        .attr("class", "desc");
 
-    if ((d.in.length != 0) || (d.out.length != 0)) {
+    if ((d.in.length != 0) || (d.out.length != 0) || 
+        (d.children.length !== 0) || (d.parents.length !==0 )) {
       d3.select(this).style("cursor", "pointer")
     }
     // descTexts is an array of Texts we will store in the desc view
@@ -546,6 +556,98 @@ function calculateLayout() {
   });
 }
 
+function getElemXY(elem) {
+  var proc = elem.proc;
+  var level = elem.level;
+  var time = (elem.end - elem.start) / 2 + elem.start;
+  var x = convertToPos(state, time);
+  var endBase = +proc.base;
+  var endLevel = endBase + level;
+  var y = dependencyLineLevelCalculator(endLevel);
+  return [x, y];
+}
+
+function drawCriticalPath() {
+  state.timelineSvg.select("g.critical_path_lines").remove();
+  if (state.critical_path == undefined || !state.display_critical_path) {
+    return;
+  }
+  state.critical_path.forEach(function(op) {
+    expandElement(op[0], op[1]);
+  });
+  var depGroup = state.timelineSvg.append("g")
+      .attr("class", "critical_path_lines");
+  var prevElem = undefined;
+
+  state.critical_path.forEach(function(op) {
+    var proc = base_map[op[0] + "," + op[1]]; // set in calculateBases
+    if (proc != undefined && proc.visible && proc.enabled && proc.loaded) {
+        var elem = prof_uid_map[op[2]];
+        if (elem != undefined) {
+          var coords = getElemXY(elem)
+          var x = coords[0];
+          var y = coords[1];
+          depGroup.append("circle")
+            .attr("cx", x)
+            .attr("cy", y)
+            .attr("fill", "white")
+            .attr("stroke", "grey")
+            .attr("r", 2.5)
+            .style("stroke-width", "1px");
+          elem.out.forEach(function(dep) {
+            if (dep[2] in state.critical_path_prof_uids) {
+              var depElem = prof_uid_map[dep[2]];
+              if (depElem != undefined) { // if the op was too small we don't draw it
+                var depCoords = getElemXY(depElem);
+                var depX = depCoords[0];
+                var depY = depCoords[1];
+                depGroup.append("line")
+                  .style("stroke", "grey")
+                  .attr("x1", depX)
+                  .attr("y1", depY)
+                  .attr("x2", x)
+                  .attr("y2", y)
+                  .style("stroke-width", "1px");
+              }
+            }
+          });
+          // Draw parent-child lines
+          var lastChild = undefined;
+          var firstChild = undefined;
+          elem.children.forEach(function(child) {
+            if (child[2] in state.critical_path_prof_uids) {
+              var childElem = prof_uid_map[child[2]];
+              if (childElem !== undefined) {
+                if (lastChild === undefined || childElem.start > lastChild.start) {
+                  lastChild = childElem;
+                }
+                if (firstChild === undefined || childElem.start < firstChild.start) {
+                  firstChild = childElem;
+                }
+              }
+            }
+          });
+          [lastChild, firstChild].forEach(function(child) {
+            if (child !== undefined) {
+              var childCoords = getElemXY(child);
+              depGroup.append("line")
+                .style("stroke", "grey")
+                .style("stroke-dasharray", "3,3")
+                .attr("x1", childCoords[0])
+                .attr("y1", childCoords[1])
+                .attr("x2", x)
+                .attr("y2", y)
+                .style("stroke-width", "1px");
+            }
+          });
+          prevElem = elem;
+        }
+    } else {
+      prevElem = undefined;
+    }
+  });
+}
+
 function drawDependencies() {
   state.timelineSvg.select("g.dependencies").remove();
   var timelineEvent = state.dependencyEvent;
@@ -563,7 +665,7 @@ function drawDependencies() {
 
   var drewOne = false;
 
-  var addDependency = function(dep) {
+  var addDependency = function(dep, dashed) {
     var depProc = base_map[dep[0] + "," + dep[1]]; // set in calculateBases
     if (depProc.visible && depProc.enabled) {
       var depElement = prof_uid_map[dep[2]];
@@ -572,17 +674,27 @@ function drawDependencies() {
         var level = depElement.level;
         var time = (depElement.end - depElement.start) / 2 + depElement.start;
         var endX = convertToPos(state, time);
-        var endBase = +depProc.base
-        // create a dummy element so we can reuse timelineLevelCalculator
+        var endBase = +depProc.base;
         var endLevel = endBase + level;
         var endY = dependencyLineLevelCalculator(endLevel);
-        depGroup.append("line")
-          .style("stroke", "black")
-          .attr("x1", startX)
-          .attr("y1", startY)
-          .attr("x2", endX)
-          .attr("y2", endY)
-          .style("stroke-width", "1px");
+        if (dashed) {
+          depGroup.append("line")
+            .style("stroke", "black")
+            .style("stroke-dasharray", "3,3")
+            .attr("x1", startX)
+            .attr("y1", startY)
+            .attr("x2", endX)
+            .attr("y2", endY)
+            .style("stroke-width", "1px");
+        } else {
+          depGroup.append("line")
+            .style("stroke", "black")
+            .attr("x1", startX)
+            .attr("y1", startY)
+            .attr("x2", endX)
+            .attr("y2", endY)
+            .style("stroke-width", "1px");
+        }
 
         depGroup.append("circle")
           .attr("cx", endX)
@@ -595,8 +707,14 @@ function drawDependencies() {
     }
   }
 
-  timelineEvent.in.forEach(addDependency);
-  timelineEvent.out.forEach(addDependency);
+  if (state.drawDeps) {
+    timelineEvent.in.forEach(function(dep) {addDependency(dep, false)});
+    timelineEvent.out.forEach(function(dep) {addDependency(dep, false)});
+  }
+  if (state.drawChildren) {
+    timelineEvent.children.forEach(function(dep) {addDependency(dep, true)});
+    timelineEvent.parents.forEach(function(dep) {addDependency(dep, true)});
+  }
 
   if (drewOne) {
     depGroup.append("circle")
@@ -609,11 +727,21 @@ function drawDependencies() {
   }
 }
 
-function timelineEventsExistsAndEqual(a, b) {
+function timelineEventsExistAndEqual(a, b) {
   if (a == undefined || b == undefined) {
     return false;
   }
-  return (a.proc.base == b.proc.base) && (a.id == b.id);
+  return (a.proc.base == b.proc.base) && (a.prof_uid == b.prof_uid);
+}
+
+function timelineElementStrokeCalculator(elem) {
+  if (timelineEventsExistAndEqual(elem, state.dependencyEvent)) {
+    return true;
+  } else if (state.display_critical_path &&
+             elem.prof_uid in state.critical_path_prof_uids) {
+    return true;
+  }
+  return false;
 }
 
 function timelineEventMouseDown(timelineEvent) {
@@ -621,14 +749,25 @@ function timelineEventMouseDown(timelineEvent) {
                          (timelineEvent.out.length != 0));
 
   if (hasDependencies) {
-    if (timelineEventsExistsAndEqual(timelineEvent, state.dependencyEvent)) {
-      state.dependencyEvent = undefined;
+    if (timelineEventsExistAndEqual(timelineEvent, state.dependencyEvent)) {
+      if (d3.event.button === 0) {
+        state.drawDeps = !state.drawDeps;
+      } else if (d3.event.button === 2) {
+        state.drawChildren = !state.drawChildren;
+      }
+      if (state.drawDeps === false && state.drawChildren === false) {
+        state.dependencyEvent = undefined;
+      }
     } else {
       timelineEvent.in.concat(timelineEvent.out).forEach(function(dep) {
         expandElement(dep[0], dep[1])
       });
-      
       state.dependencyEvent = timelineEvent;
+      if (d3.event.button === 0) {
+        state.drawDeps = true;
+      } else if (d3.event.button === 2) {
+        state.drawChildren = true;
+      }
     }
     redraw();
   }
@@ -663,14 +802,14 @@ function drawTimeline() {
       return Math.max(constants.min_feature_width, convertToPos(state, d.end - d.start));
     })
     .attr("stroke", function(d) {
-      if (timelineEventsExistsAndEqual(d, state.dependencyEvent)) {
+      if (timelineElementStrokeCalculator(d)) {
         return "red";
       } else {
         return "black";
       }
     })
     .attr("stroke-width", function(d) {
-      if (timelineEventsExistsAndEqual(d, state.dependencyEvent)) {
+      if (timelineElementStrokeCalculator(d)) {
         return "1.5";
       } else {
         return "0.5";
@@ -689,7 +828,7 @@ function drawTimeline() {
       }
       state.timelineSvg.selectAll("#desc").remove();
     })
-    .on("mousedown", timelineEventMouseDown);
+    .on("mousedown", timelineEventMouseDown)
 
 
   timelineText.enter().append("text");
@@ -731,6 +870,7 @@ function redraw() {
     recalculateHeight();
     drawTimeline();
     drawDependencies();
+    drawCriticalPath();
     drawLayout();
   }
 }
@@ -1245,6 +1385,7 @@ function adjustZoom(newZoom, scroll) {
     drawTimeline();
   }
   drawDependencies();
+  drawCriticalPath();
 }
 
 function recalculateHeight() {
@@ -1360,7 +1501,6 @@ function defaultKeydown(e) {
     setKeyHandler(makeModalKeyHandler(['enter', 'esc'], function(key) {
       if (key == 'enter') {
         var re = $("input.search-box").val();
-        //console.log("Search Expression: " + re);
         if (re.trim() != "") {
           if (searchRegex == null) {
             searchRegex = new Array(sizeHistory);
@@ -1451,6 +1591,10 @@ function defaultKeydown(e) {
       }
     }
   }
+  else if (commandType == Command.toggle_critical_path) {
+    state.display_critical_path = !state.display_critical_path;
+    redraw();
+  }
   return false;
 }
 
@@ -1473,6 +1617,8 @@ function load_proc_timeline(proc) {
         var total = end - start;
         var _in = d.in === "" ? [] : JSON.parse(d.in)
         var out = d.out === "" ? [] : JSON.parse(d.out)
+        var children = d.children === "" ? [] : JSON.parse(d.children)
+        var parents = d.parents === "" ? [] : JSON.parse(d.parents)
         if (total > state.resolution) {
             return {
                 id: i,
@@ -1485,7 +1631,10 @@ function load_proc_timeline(proc) {
                 title: d.title,
                 in: _in,
                 out: out,
-                prof_uid: d.prof_uid
+                children: children,
+                parents: parents,
+                prof_uid: d.prof_uid,
+                proc: proc
             };
         }
     },
@@ -1592,6 +1741,9 @@ function load_procs(callback) {
       calculateBases();
       drawLayout();
       callback();
+      
+      // TODO: fix
+      load_critical_path();
     }
   );
 }
@@ -1753,6 +1905,16 @@ function load_util(elem) {
   );
 }
 
+function load_critical_path() {
+  $.getJSON("json/critical_path.json", function(json) {
+    state.critical_path = json.map(function(p) {return p.tuple});
+    state.critical_path_prof_uids = {};
+    state.critical_path.forEach(function(p) { 
+      state.critical_path_prof_uids[p[2]] = 1;
+    });
+  });
+}
+
 function load_data() {
   load_procs(load_ops_and_timeline);
 }
@@ -1766,6 +1928,8 @@ function initializeState() {
   state.zoomHistory = Array();
   state.numLoading = 0;
   state.dependencyEvent = undefined;
+  state.drawDeps = false;
+  state.drawChildren = false;
 
   state.layoutData = [];
   state.flattenedLayoutData = [];
@@ -1782,6 +1946,7 @@ function initializeState() {
   state.searchEnabled = false;
   state.rangeZoom = true;
   state.collapseAll = false;
+  state.display_critical_path = false;
 
   // TODO: change this
   state.x = d3.scale.linear().range([0, state.width]);

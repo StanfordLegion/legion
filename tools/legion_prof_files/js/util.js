@@ -12,6 +12,7 @@ var helpMessage = [
   "Reset zoom (y-axis): Ctrl-Alt 0 / `",
   "Range Zoom-in      : drag-select",
   "Measure duration   : Alt + drag-select",
+  "Draw Critical Path : a / A",
   "Search             : s / S",
   "Search History     : h / H",
   "Previous Search    : p / P",
@@ -33,9 +34,10 @@ var Command = {
   search : 9,
   clear_search : 10,
   toggle_search : 11,
-  search_history : 12,
-  previous_search : 13,
-  next_search : 14
+  toggle_critical_path: 12,
+  search_history : 13,
+  previous_search : 14,
+  next_search : 15
 };
 
 // commands without a modifier key pressed
@@ -50,6 +52,7 @@ var noModifierCommands = {
   'n': Command.next_search,
   'p': Command.previous_search,
   's': Command.search,
+  'a': Command.toggle_critical_path,
   't': Command.toggle_search,
   'u': Command.zux,
   '/': Command.help
@@ -76,6 +79,7 @@ var keys = {
   51  : '3',
   52  : '4',
   61  : '+', // Firefox
+  65  : 'a',
   67  : 'c',
   72  : 'h',
   78  : 'n',
@@ -225,6 +229,7 @@ function filterAndMergeBlocks(state) {
             if (count > 1) {
               state.dataToDraw.push({
                 id: d.id,
+                prof_uid: d.prof_uid,
                 proc: timelineElement,
                 level: d.level,
                 start: d.start,
@@ -232,12 +237,15 @@ function filterAndMergeBlocks(state) {
                 color: "#808080",
                 title: count + " merged tasks",
                 in: [],
-                out: []
+                out: [],
+                children: [],
+                parents: []
               });
               i += (count - 1);
             } else {
               var elem = {
                 id: d.id,
+                prof_uid: d.prof_uid,
                 proc: timelineElement,
                 level: d.level,
                 start: d.start,
@@ -246,7 +254,9 @@ function filterAndMergeBlocks(state) {
                 initiation: d.initiation,
                 title: d.title + " (expanded for visibility)",
                 in: d.in,
-                out: d.out
+                out: d.out,
+                children: d.children,
+                parents: d.parents
               }
               state.dataToDraw.push(elem);
               if (isMemory) {
@@ -256,6 +266,7 @@ function filterAndMergeBlocks(state) {
           } else {
             var elem = {
               id: d.id,
+              prof_uid: d.prof_uid,
               proc: timelineElement,
               level: d.level,
               start: d.start,
@@ -266,7 +277,9 @@ function filterAndMergeBlocks(state) {
               initiation: d.initiation,
               title: d.title,
               in: d.in,
-              out: d.out
+              out: d.out,
+              children: d.children,
+              parents: d.parents
             }
             state.dataToDraw.push(elem);
             if (isMemory) {
