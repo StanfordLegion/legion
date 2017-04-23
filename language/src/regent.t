@@ -100,6 +100,7 @@ local language = {
     "list_phase_barriers",
     "list_range",
     "list_ispace",
+    "list_from_element",
     "max",
     "min",
     "must_epoch",

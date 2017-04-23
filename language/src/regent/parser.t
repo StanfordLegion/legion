@@ -868,6 +868,19 @@ function parser.expr_prefix(p)
       span = ast.span(start, p),
     }
 
+  elseif p:nextif("list_from_element") then
+    p:expect("(")
+    local list = p:expr()
+    p:expect(",")
+    local value = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.ListFromElement {
+      list = list,
+      value = value,
+      annotations = ast.default_annotations(),
+      span = ast.span(start, p),
+    }
+
   elseif p:nextif("phase_barrier") then
     p:expect("(")
     local value = p:expr()
