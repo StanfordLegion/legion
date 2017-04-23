@@ -452,8 +452,8 @@ end
 function pretty.expr_list_from_element(cx, node)
   return join({
       "list_from_element(",
-      commas({pretty.expr(cx, node.list)}),
-      commas({pretty.expr(cx, node.value)}),
+      commas({pretty.expr(cx, node.list),
+             pretty.expr(cx, node.value)}),
       ")"})
 end
 
