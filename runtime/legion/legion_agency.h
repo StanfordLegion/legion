@@ -97,9 +97,9 @@ namespace Legion {
     using execution_category = agency::parallel_execution_tag;
     using shape_type = Shape;
     using index_type = Index;
-  public:
     template<class T>
     using future = LegionExecutorFuture<T>;
+  public:
     // Optional task name for error messages
     LegionExecutor(const char *task_name = NULL);
     // Optionally pass in the Task* for the executor to get error messages
