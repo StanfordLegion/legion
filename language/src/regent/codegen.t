@@ -5003,6 +5003,23 @@ function codegen.expr_adjust(cx, node)
     expr_type)
 end
 
+local function gen_expr_arrive(expr_type, cx, value)
+  if std.is_phase_barrier(expr_type) then
+    return quote
+      c.legion_phase_barrier_arrive(
+        [cx.runtime], [cx.context], value.impl, 1)
+    end
+  else
+    assert(std.is_list_of_phase_barriers(expr_type))
+    return quote
+      for i = 0, [value].__size do
+        var l = [expr_type:data(value)][i]
+        [gen_expr_arrive(expr_type.element_type, cx, `([expr_type:data(value)][i]))]
+      end
+    end
+  end
+end
+
 function codegen.expr_arrive(cx, node)
   local barrier_type = std.as_read(node.barrier.expr_type)
   local barrier = codegen.expr(cx, node.barrier):read(cx, barrier_type)
@@ -5015,11 +5032,10 @@ function codegen.expr_arrive(cx, node)
     [emit_debuginfo(node)]
   end
 
-  if std.is_phase_barrier(barrier_type) then
+  if std.is_phase_barrier(barrier_type) or std.is_list_of_phase_barriers(barrier_type) then
     actions = quote
       [actions]
-      c.legion_phase_barrier_arrive(
-        [cx.runtime], [cx.context], [barrier.value].impl, 1)
+      [gen_expr_arrive(barrier_type, cx, barrier.value)]
     end
   elseif std.is_dynamic_collective(barrier_type) then
     if std.is_future(value_type) then
@@ -5048,6 +5064,23 @@ function codegen.expr_arrive(cx, node)
     expr_type)
 end
 
+local function gen_expr_await(expr_type, cx, value)
+  if std.is_phase_barrier(expr_type) then
+    return quote
+      c.legion_phase_barrier_wait(
+        [cx.runtime], [cx.context], [value].impl)
+    end
+  else
+    assert(std.is_list_of_phase_barriers(expr_type))
+    return quote
+      for i = 0, [value].__size do
+        var l = [expr_type:data(value)][i]
+        [gen_expr_await(expr_type.element_type, cx, `([expr_type:data(value)][i]))]
+      end
+    end
+  end
+end
+
 function codegen.expr_await(cx, node)
   local barrier_type = std.as_read(node.barrier.expr_type)
   local barrier = codegen.expr(cx, node.barrier):read(cx, barrier_type)
@@ -5057,11 +5090,10 @@ function codegen.expr_await(cx, node)
     [emit_debuginfo(node)]
   end
 
-  if std.is_phase_barrier(barrier_type) then
+  if std.is_phase_barrier(barrier_type) or std.is_list_of_phase_barriers(barrier_type) then
     actions = quote
       [actions]
-      c.legion_phase_barrier_wait(
-        [cx.runtime], [cx.context], [barrier.value].impl)
+      [gen_expr_await(barrier_type, cx, barrier.value)]
     end
   else
     assert(false)

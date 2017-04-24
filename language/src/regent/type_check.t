@@ -2276,7 +2276,9 @@ function type_check.expr_arrive(cx, node)
   local barrier_type = std.check_read(cx, barrier)
   local value = node.value and type_check.expr(cx, node.value)
   local value_type = node.value and std.check_read(cx, value)
-  if not (std.is_phase_barrier(barrier_type) or std.is_dynamic_collective(barrier_type)) then
+  if not (std.is_phase_barrier(barrier_type) or
+          std.is_list_of_phase_barriers(barrier_type) or
+          std.is_dynamic_collective(barrier_type)) then
     report.error(node, "type mismatch in argument 1: expected a phase barrier but got " .. tostring(barrier_type))
   end
   if std.is_phase_barrier(barrier_type) and value_type then
@@ -2301,7 +2303,7 @@ end
 function type_check.expr_await(cx, node)
   local barrier = type_check.expr(cx, node.barrier)
   local barrier_type = std.check_read(cx, barrier)
-  if not std.is_phase_barrier(barrier_type) then
+  if not (std.is_phase_barrier(barrier_type) or std.is_list_of_phase_barriers(barrier_type)) then
     report.error(node, "type mismatch in argument 1: expected a phase barrier but got " .. tostring(barrier_type))
   end
   local expr_type = terralib.types.unit
