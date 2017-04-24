@@ -24,13 +24,29 @@ def f(ctx, x, y, z):
     print("inside task f%s" % ((x, y, z),))
     return x+1
 
+@legion.task(privileges = [legion.RW])
+def g(ctx, R):
+    print("inside task g%s" % ((R,),))
+
+    print(ctx)
+    print(R.ctx)
+    print(R.handle.tree_id,
+          R.handle.index_space.tid,
+          R.handle.index_space.id,
+          R.handle.field_space.id)
+
+    print(R.x)
+    print(R.x._as_ndarray())
+
 @legion.task
 def main_task(ctx):
-    print("inside main()")
+    print("inside main_task()")
 
     x = f(ctx, 1, "asdf", True)
     print("result of f is %s" % x)
 
     R = legion.Region.create(ctx, [4, 4], {'x': legion.double})
     print("region %s" % R)
-    print("field %s" % R.x)
+    # print("field %s" % R.x)
+
+    g(ctx, R)
