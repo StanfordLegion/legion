@@ -1807,10 +1807,14 @@ namespace LegionRuntime {
         log_new_dma.info("Create remote XferDes: id(" IDFMT "),"
                          " pre(" IDFMT "), next(" IDFMT "), type(%d)",
                          _guid, _pre_xd_guid, _next_xd_guid, _kind);
+        // If the remote XD is the first one on the path, we mark start on the source
+        // node. This is sort of a hack, but this case only happens with GASNet Memory
+        if (mark_started)
+          _dma_request->mark_started();
         XferDesCreateMessage::send_request(ID(_src_buf.memory).memory.owner_node,
                                            _dma_request, _launch_node,
                                            _guid, _pre_xd_guid, _next_xd_guid,
-                                           mark_started,
+                                           false,
                                            _src_buf, _dst_buf, _domain, _oas_vec,
                                            _max_req_size, max_nr, _priority,
                                            _order, _kind, _complete_fence, inst);
