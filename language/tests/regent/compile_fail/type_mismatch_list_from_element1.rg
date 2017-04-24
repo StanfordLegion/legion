@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mistmatch_list_from_element1.rg:23: type mismatch in argument 1: expected a list but got int32
+-- type_mismatch_list_from_element1.rg:23: type mismatch in argument 1: expected a list but got int32
 --   var x = list_from_element(1, 1)
 --                           ^
 
