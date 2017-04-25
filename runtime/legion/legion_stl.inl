@@ -23,13 +23,13 @@ namespace Legion {
   namespace STL {
 
     template<typename T>
-    size_t set<T>::legion_buffer_size(void) const
+    inline size_t set<T>::legion_buffer_size(void) const
     {
       return (sizeof(size_t) + (sizeof(T) * this->size()));
     }
 
     template<typename T>
-    void set<T>::legion_serialize(void *buffer) const
+    inline void set<T>::legion_serialize(void *buffer) const
     {
       Serializer rez;
       rez.serialize<size_t>(this->size());
@@ -43,7 +43,7 @@ namespace Legion {
     }
 
     template<typename T>
-    void set<T>::legion_deserialize(const void *buffer)
+    inline void set<T>::legion_deserialize(const void *buffer)
     {
       const char *ptr = (const char*)buffer;
       size_t elements = *((const size_t*)ptr);
@@ -58,13 +58,13 @@ namespace Legion {
     }
 
     template<typename T1, typename T2>
-    size_t map<T1,T2>::legion_buffer_size(void) const
+    inline size_t map<T1,T2>::legion_buffer_size(void) const
     {
       return (sizeof(size_t) + (sizeof(T1) + sizeof(T2)) * this->size());
     }
 
     template<typename T1, typename T2>
-    void map<T1,T2>::legion_serialize(void *buffer) const
+    inline void map<T1,T2>::legion_serialize(void *buffer) const
     {
       Serializer rez;
       rez.serialize<size_t>(this->size());
@@ -81,7 +81,7 @@ namespace Legion {
     }
 
     template<typename T1, typename T2>
-    void map<T1,T2>::legion_deserialize(const void *buffer)
+    inline void map<T1,T2>::legion_deserialize(const void *buffer)
     {
       const char *ptr = (const char*)buffer;
       size_t elements = *((const size_t*)ptr);
@@ -96,13 +96,13 @@ namespace Legion {
     }
 
     template<typename T>
-    size_t vector<T>::legion_buffer_size(void) const
+    inline size_t vector<T>::legion_buffer_size(void) const
     {
       return (sizeof(size_t) + (sizeof(T) * this->size()));
     }
 
     template<typename T>
-    void vector<T>::legion_serialize(void *buffer) const
+    inline void vector<T>::legion_serialize(void *buffer) const
     {
       Serializer rez;
       rez.serialize<size_t>(this->size());
@@ -116,7 +116,7 @@ namespace Legion {
     }
 
     template<typename T>
-    void vector<T>::legion_deserialize(const void *buffer)
+    inline void vector<T>::legion_deserialize(const void *buffer)
     {
       const char *ptr = (const char*)buffer;
       size_t elements = *((const size_t*)ptr);

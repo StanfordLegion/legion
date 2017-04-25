@@ -31,25 +31,25 @@ namespace Legion {
     template<typename T>
     class set : public std::set<T> {
     public:
-      size_t legion_buffer_size(void) const;
-      void legion_serialize(void *buffer) const;
-      void legion_deserialize(const void *buffer);
+      inline size_t legion_buffer_size(void) const;
+      inline void legion_serialize(void *buffer) const;
+      inline void legion_deserialize(const void *buffer);
     };
 
     template<typename T1, typename T2>
     class map : public std::map<T1,T2> {
     public:
-      size_t legion_buffer_size(void) const;
-      void legion_serialize(void *buffer) const;
-      void legion_deserialize(const void *buffer);
+      inline size_t legion_buffer_size(void) const;
+      inline void legion_serialize(void *buffer) const;
+      inline void legion_deserialize(const void *buffer);
     };
 
     template<typename T>
     class vector : public std::vector<T> {
     public:
-      size_t legion_buffer_size(void) const;
-      void legion_serialize(void *buffer) const;
-      void legion_deserialize(const void *buffer);
+      inline size_t legion_buffer_size(void) const;
+      inline void legion_serialize(void *buffer) const;
+      inline void legion_deserialize(const void *buffer);
     };
 
     /*
