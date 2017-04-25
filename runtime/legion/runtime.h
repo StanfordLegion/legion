@@ -1816,6 +1816,7 @@ namespace Legion {
     public:
       const std::map<int,AddressSpace>& find_forward_MPI_mapping(void);
       const std::map<AddressSpace,int>& find_reverse_MPI_mapping(void);
+      int find_local_MPI_rank(void);
     public:
       Mapping::MapperRuntime* get_mapper_runtime(void);
       MapperID generate_dynamic_mapper_id(void);
