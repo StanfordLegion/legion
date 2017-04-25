@@ -7580,7 +7580,12 @@ namespace Legion {
         // We can cache the result if we know the domains
         // has dimension greater than zero indicating we have
         // a structured index space
+#ifdef ASSUME_UNALLOCABLE
+        // We can cache the result also when the indexspace is unallocable
+        can_cache = true;
+#else
         can_cache = (dom.get_dim() > 0);
+#endif
       }
       for (std::map<ColorPoint,IndexSpaceNode*>::const_iterator it = 
             color_map.begin(); it != color_map.end(); it++)
