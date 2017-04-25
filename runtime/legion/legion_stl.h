@@ -23,6 +23,34 @@ namespace Legion {
   namespace STL {
 
     /*
+     * Provide some wrappers for serializing and deserializing STL
+     * data structures when returning them as results from Legion tasks
+     */
+    template<typename T>
+    class LegionSTLSet : public std::set<T> {
+    public:
+      size_t legion_buffer_size(void) const;
+      void legion_serialize(void *buffer) const;
+      void legion_deserialize(const void *buffer);
+    };
+
+    template<typename T1, typename T2>
+    class LegionSTLMap : public std::map<T1,T2> {
+    public:
+      size_t legion_buffer_size(void) const;
+      void legion_serialize(void *buffer) const;
+      void legion_deserialize(const void *buffer);
+    };
+
+    template<typename T>
+    class LegionSTLVector : public std::vector<T> {
+    public:
+      size_t legion_buffer_size(void) const;
+      void legion_serialize(void *buffer) const;
+      void legion_deserialize(const void *buffer);
+    };
+
+    /*
      * These methods can be used to create a Legion task from a function
      * that simply wants vectors of pointers for each field and the associated
      * offsets for using the pointer to stride through an index space.
