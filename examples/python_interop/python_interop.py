@@ -28,15 +28,8 @@ def f(ctx, x, y, z):
 def g(ctx, R):
     print("inside task g%s" % ((R,),))
 
-    print(ctx)
-    print(R.ctx)
-    print(R.handle.tree_id,
-          R.handle.index_space.tid,
-          R.handle.index_space.id,
-          R.handle.field_space.id)
-
     print(R.x)
-    print(R.x._as_ndarray())
+    print(R.x._get_ndarray())
 
 @legion.task
 def main_task(ctx):
