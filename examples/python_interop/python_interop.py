@@ -30,6 +30,8 @@ def g(ctx, R):
 
     print(R.x)
     print(R.x._get_ndarray())
+    R.x._get_ndarray().fill(1)
+    print(R.x._get_ndarray())
 
 @legion.task
 def main_task(ctx):
