@@ -16,6 +16,8 @@
 #ifndef __LEGION_STL_H__
 #define __LEGION_STL_H__
 
+#include <set>
+#include <map>
 #include <vector>
 #include "legion.h"
 
@@ -27,7 +29,7 @@ namespace Legion {
      * data structures when returning them as results from Legion tasks
      */
     template<typename T>
-    class LegionSTLSet : public std::set<T> {
+    class set : public std::set<T> {
     public:
       size_t legion_buffer_size(void) const;
       void legion_serialize(void *buffer) const;
@@ -35,7 +37,7 @@ namespace Legion {
     };
 
     template<typename T1, typename T2>
-    class LegionSTLMap : public std::map<T1,T2> {
+    class map : public std::map<T1,T2> {
     public:
       size_t legion_buffer_size(void) const;
       void legion_serialize(void *buffer) const;
@@ -43,7 +45,7 @@ namespace Legion {
     };
 
     template<typename T>
-    class LegionSTLVector : public std::vector<T> {
+    class vector : public std::vector<T> {
     public:
       size_t legion_buffer_size(void) const;
       void legion_serialize(void *buffer) const;
