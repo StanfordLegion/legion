@@ -56,6 +56,7 @@ local language = {
     "__fields",
     "__forbid",
     "__inline",
+    "__openmp",
     "__parallel",
     "__physical",
     "__raw",

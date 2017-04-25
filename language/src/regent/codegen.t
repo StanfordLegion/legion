@@ -21,6 +21,7 @@ local std = require("regent/std")
 local symbol_table = require("regent/symbol_table")
 local codegen_hooks = require("regent/codegen_hooks")
 local cudahelper = require("regent/cudahelper")
+local openmphelper = require("regent/openmphelper")
 
 -- Configuration Variables
 
@@ -6730,7 +6731,10 @@ function codegen.stat_for_list(cx, node)
     end
   end
 
-  if not cx.task_meta:getcuda() then
+  local cuda = cx.task_meta:getcuda()
+  local openmp = std.config["openmp"] and node.annotations.openmp:is(ast.annotation.Demand)
+
+  if not cuda then
     if ispace_type.dim == 0 then
       return quote
         [actions]
@@ -6753,9 +6757,7 @@ function codegen.stat_for_list(cx, node)
     else
       local fields = ispace_type.index_type.fields
       if fields then
-        local rect_type = c["legion_rect_" .. tostring(ispace_type.dim) .. "d_t"]
         local domain_get_rect = c["legion_domain_get_rect_" .. tostring(ispace_type.dim) .. "d"]
-        local rect = terralib.newsymbol(rect_type, "rect")
         local index = fields:map(function(field) return terralib.newsymbol(c.coord_t, tostring(field)) end)
         local body = quote
           var [symbol] = [symbol.type] { __ptr = [symbol.type.index_type.impl_type]{ index } }
@@ -6763,31 +6765,90 @@ function codegen.stat_for_list(cx, node)
             [block]
           end
         end
-        for i = 1, ispace_type.dim do
-          local rect_i = i - 1 -- C is zero-based, Lua is one-based
-          body = quote
-            for [ index[i] ] = rect.lo.x[rect_i], rect.hi.x[rect_i] + 1 do
-              [body]
+        if not openmp then
+          local rect_type = c["legion_rect_" .. tostring(ispace_type.dim) .. "d_t"]
+          local rect = terralib.newsymbol(rect_type, "rect")
+          for i = 1, ispace_type.dim do
+            local rect_i = i - 1 -- C is zero-based, Lua is one-based
+            body = quote
+              for [ index[i] ] = [rect].lo.x[rect_i], [rect].hi.x[rect_i] + 1 do
+                [body]
+              end
             end
           end
-        end
-        return quote
-          [actions]
-          var [rect] = [domain_get_rect]([domain])
-          [body]
-          [cleanup_actions]
+          return quote
+            [actions]
+            var [rect] = [domain_get_rect]([domain])
+            [body]
+            [cleanup_actions]
+          end
+        else
+          local rect_type = c["legion_rect_" .. tostring(ispace_type.dim) .. "d_t"]
+          local rect = terralib.newsymbol(&rect_type, "rect")
+          for i = 1, ispace_type.dim do
+            local rect_i = i - 1 -- C is zero-based, Lua is one-based
+            if i ~= ispace_type.dim then
+              body = quote
+                for [ index[i] ] = [rect].lo.x[rect_i], [rect].hi.x[rect_i] + 1 do
+                  [body]
+                end
+              end
+            else
+              local start_idx = terralib.newsymbol(int64, "start_idx")
+              local end_idx = terralib.newsymbol(int64, "end_idx")
+              body = quote
+                [openmphelper.generate_preamble_structured(rect, rect_i, start_idx, end_idx)]
+                for [ index[i] ] = [start_idx], [end_idx] do
+                  [body]
+                end
+              end
+            end
+          end
+          local terra omp_worker(data : &opaque)
+            var [rect] = [&rect_type](data)
+            [body]
+          end
+          return quote
+            [actions]
+            var rect = [domain_get_rect]([domain])
+            [openmphelper.launch]([omp_worker], &rect, [openmphelper.get_num_threads](), 0)
+            [cleanup_actions]
+          end
         end
       else
-        return quote
-          [actions]
-          var rect = c.legion_domain_get_rect_1d([domain])
-          for i = rect.lo.x[0], rect.hi.x[0] + 1 do
-            var [symbol] = [symbol.type]{ __ptr = i }
-            do
-              [block]
+        if not openmp then
+          return quote
+            [actions]
+            var rect = c.legion_domain_get_rect_1d([domain])
+            for i = rect.lo.x[0], rect.hi.x[0] + 1 do
+              var [symbol] = [symbol.type]{ __ptr = i }
+              do
+                [block]
+              end
+            end
+            [cleanup_actions]
+          end
+        else
+          local start_idx = terralib.newsymbol(int64, "start_idx")
+          local end_idx = terralib.newsymbol(int64, "end_idx")
+          local rect_type = c.legion_rect_1d_t
+          local rect = terralib.newsymbol(&rect_type, "rect")
+          local terra omp_worker(data : &opaque)
+            var [rect] = [&rect_type](data)
+            [openmphelper.generate_preamble_structured(rect, 0, start_idx, end_idx)]
+            for i = [start_idx], [end_idx] do
+              var [symbol] = [symbol.type]{ __ptr = i }
+              do
+                [block]
+              end
             end
           end
-          [cleanup_actions]
+          return quote
+            [actions]
+            var rect = c.legion_domain_get_rect_1d([domain])
+            [openmphelper.launch]([omp_worker], &rect, [openmphelper.get_num_threads](), 0)
+            [cleanup_actions]
+          end
         end
       end
     end
@@ -7016,7 +7077,7 @@ function codegen.stat_for_list(cx, node)
 end
 
 function codegen.stat_for_list_vectorized(cx, node)
-  if cx.task_meta:getcuda() then
+  if cx.task_meta:getcuda() or node.annotations.openmp:is(ast.annotation.Demand) then
     return codegen.stat_for_list(cx,
       ast.typed.stat.ForList {
         symbol = node.symbol,
