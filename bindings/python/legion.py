@@ -19,6 +19,8 @@ from __future__ import print_function
 
 import cffi
 import cPickle
+import ctypes
+import numpy
 import os
 import subprocess
 import sys
@@ -60,16 +62,17 @@ class Future(object):
         return value
 
 class Type(object):
-    __slots__ = ['size']
+    __slots__ = ['ctype', 'size']
 
-    def __init__(self, size):
-        self.size = size
+    def __init__(self, ctype):
+        self.ctype = ctype
+        self.size = ctypes.sizeof(self.ctype)
 
     def __reduce__(self):
-        return (Type, (self.size,))
+        return (Type, (self.ctype,))
 
 # Pre-defined Types
-double = Type(8)
+double = Type(ctypes.c_double)
 
 class Privilege(object):
     __slots__ = ['read', 'write', 'discard']
@@ -236,8 +239,6 @@ class Region(object):
         self.privileges[field_name] = privilege
 
     def __getattr__(self, field_name):
-        print(self.fspace.field_ids)
-        print(self.instances)
         if field_name in self.fspace.field_ids and \
            field_name in self.instances:
             if field_name not in self.instance_wrappers:
@@ -248,28 +249,35 @@ class Region(object):
             raise AttributeError()
 
 class RegionField(object):
-    __slots__ = ['ctx', 'region', 'field_name', 'accessor']
+    __slots__ = ['ctx', 'region', 'field_name', 'accessor', 'ndarray']
 
     def __init__(self, ctx, region, field_name):
         self.ctx = ctx
         self.region = region
         self.field_name = field_name
         self.accessor = None
+        self.ndarray = None
 
-    def _as_ndarray(self):
-        assert self.accessor is None
+    def _get_accessor(self):
+        if self.accessor is not None:
+            return
+
+        # Accessor needs to be kept alive, so save it in an instance variable.
+        instance = self.region.instances[self.field_name]
+        self.accessor = c.legion_physical_region_get_field_accessor_generic(
+            instance, self.region.fspace.field_ids[self.field_name])
+        return self.accessor
+
+    def _get_base_and_stride(self):
+        accessor = self._get_accessor()
 
         domain = c.legion_index_space_get_domain(
             self.ctx.runtime, self.region.ispace.handle[0])
         dim = domain.dim
         rect = getattr(c, 'legion_domain_get_rect_{}d'.format(dim))(domain)
-
         subrect = ffi.new('legion_rect_{}d_t *'.format(dim))
         offsets = ffi.new('legion_byte_offset_t[]', dim)
 
-        instance = self.region.instances[self.field_name]
-        self.accessor = c.legion_physical_region_get_field_accessor_generic(
-            instance, self.region.fspace.field_ids[self.field_name])
         base_ptr = getattr(c, 'legion_accessor_generic_raw_rect_ptr_{}d'.format(dim))(
             self.accessor, rect, subrect, offsets)
         assert base_ptr
@@ -277,6 +285,38 @@ class RegionField(object):
             assert subrect[0].lo.x[i] == rect.lo.x[i]
             assert subrect[0].hi.x[i] == rect.hi.x[i]
         assert offsets[0].offset == self.region.fspace.field_types[self.field_name].size
+
+        shape = tuple(rect.hi.x[i] - rect.lo.x[i] + 1 for i in xrange(dim))
+        strides = tuple(offsets[i].offset for i in xrange(dim))
+
+        return base_ptr, shape, strides
+
+    def _get_ndarray(self):
+        if self.ndarray is not None:
+            return self.ndarray
+
+        base_ptr, shape, strides = self._get_base_and_stride()
+        field_type = self.region.fspace.field_types[self.field_name]
+
+        # Numpy doesn't know about CFFI pointers, so we have to cast
+        # this to a Python long before we can hand it off to Numpy.
+        base_ptr = long(ffi.cast("size_t", base_ptr))
+
+        internal = _RegionNdarray(shape, field_type, base_ptr, strides, False)
+        self.ndarray = numpy.array(internal, copy=False)
+        return self.ndarray
+
+class _RegionNdarray(object):
+    __slots__ = ['__array_interface__']
+    def __init__(self, shape, field_type, base_ptr, strides, read_only):
+        # See: https://docs.scipy.org/doc/numpy/reference/arrays.interface.html
+        self.__array_interface__ = {
+            'version': 3,
+            'shape': shape,
+            'typestr': numpy.dtype(field_type.ctype).str,
+            'data': (base_ptr, read_only),
+            'strides': strides,
+        }
 
 class Task (object):
     __slots__ = ['body', 'privileges', 'task_id']
