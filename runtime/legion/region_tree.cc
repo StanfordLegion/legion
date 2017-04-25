@@ -7580,7 +7580,12 @@ namespace Legion {
         // We can cache the result if we know the domains
         // has dimension greater than zero indicating we have
         // a structured index space
+#ifdef ASSUME_UNALLOCABLE
+        // We can cache the result also when the indexspace is unallocable
+        can_cache = true;
+#else
         can_cache = (dom.get_dim() > 0);
+#endif
       }
       for (std::map<ColorPoint,IndexSpaceNode*>::const_iterator it = 
             color_map.begin(); it != color_map.end(); it++)
@@ -8378,6 +8383,8 @@ namespace Legion {
             rez.serialize(parent->handle); 
             rez.serialize(color);
             rez.serialize<bool>(disjoint_result);
+            rez.serialize<bool>(has_complete);
+            rez.serialize<bool>(complete);
             rez.serialize<size_t>(semantic_info.size());
             for (LegionMap<SemanticTag,SemanticInfo>::aligned::iterator it = 
                   semantic_info.begin(); it != semantic_info.end(); it++)
@@ -8448,6 +8455,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(node != NULL);
 #endif
+      derez.deserialize(node->has_complete);
+      derez.deserialize(node->complete);
       node->add_creation_source(source);
       size_t num_semantic;
       derez.deserialize(num_semantic);
