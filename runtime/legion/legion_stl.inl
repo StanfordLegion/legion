@@ -53,7 +53,7 @@ namespace Legion {
       {
         T elem;
         deserialize(elem);
-        insert(elem);
+        this->insert(elem);
       }
     }
 
