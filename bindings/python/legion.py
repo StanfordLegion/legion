@@ -248,64 +248,60 @@ class Region(object):
         else:
             raise AttributeError()
 
-class RegionField(object):
-    __slots__ = ['ctx', 'region', 'field_name', 'accessor', 'ndarray']
+class RegionField(numpy.ndarray):
+    def __new__(cls, ctx, region, field_name):
+        accessor = RegionField._get_accessor(ctx, region, field_name)
+        initializer = RegionField._get_array_initializer(ctx, region, field_name, accessor)
+        obj = numpy.asarray(initializer).view(cls)
 
-    def __init__(self, ctx, region, field_name):
-        self.ctx = ctx
-        self.region = region
-        self.field_name = field_name
-        self.accessor = None
-        self.ndarray = None
+        obj.accessor = accessor
+        return obj
 
-    def _get_accessor(self):
-        if self.accessor is not None:
-            return
+    @staticmethod
+    def _get_accessor(ctx, region, field_name):
+        # Note: the accessor needs to be kept alive, to make sure to
+        # save the result of this function in an instance variable.
+        instance = region.instances[field_name]
+        return c.legion_physical_region_get_field_accessor_generic(
+            instance, region.fspace.field_ids[field_name])
 
-        # Accessor needs to be kept alive, so save it in an instance variable.
-        instance = self.region.instances[self.field_name]
-        self.accessor = c.legion_physical_region_get_field_accessor_generic(
-            instance, self.region.fspace.field_ids[self.field_name])
-        return self.accessor
-
-    def _get_base_and_stride(self):
-        accessor = self._get_accessor()
-
+    @staticmethod
+    def _get_base_and_stride(ctx, region, field_name, accessor):
         domain = c.legion_index_space_get_domain(
-            self.ctx.runtime, self.region.ispace.handle[0])
+            ctx.runtime, region.ispace.handle[0])
         dim = domain.dim
         rect = getattr(c, 'legion_domain_get_rect_{}d'.format(dim))(domain)
         subrect = ffi.new('legion_rect_{}d_t *'.format(dim))
         offsets = ffi.new('legion_byte_offset_t[]', dim)
 
         base_ptr = getattr(c, 'legion_accessor_generic_raw_rect_ptr_{}d'.format(dim))(
-            self.accessor, rect, subrect, offsets)
+            accessor, rect, subrect, offsets)
         assert base_ptr
         for i in xrange(dim):
             assert subrect[0].lo.x[i] == rect.lo.x[i]
             assert subrect[0].hi.x[i] == rect.hi.x[i]
-        assert offsets[0].offset == self.region.fspace.field_types[self.field_name].size
+        assert offsets[0].offset == region.fspace.field_types[field_name].size
 
         shape = tuple(rect.hi.x[i] - rect.lo.x[i] + 1 for i in xrange(dim))
         strides = tuple(offsets[i].offset for i in xrange(dim))
 
         return base_ptr, shape, strides
 
-    def _get_ndarray(self):
-        if self.ndarray is not None:
-            return self.ndarray
-
-        base_ptr, shape, strides = self._get_base_and_stride()
-        field_type = self.region.fspace.field_types[self.field_name]
+    @staticmethod
+    def _get_array_initializer(ctx, region, field_name, accessor):
+        base_ptr, shape, strides = RegionField._get_base_and_stride(
+            ctx, region, field_name, accessor)
+        field_type = region.fspace.field_types[field_name]
 
         # Numpy doesn't know about CFFI pointers, so we have to cast
         # this to a Python long before we can hand it off to Numpy.
         base_ptr = long(ffi.cast("size_t", base_ptr))
 
-        internal = _RegionNdarray(shape, field_type, base_ptr, strides, False)
-        self.ndarray = numpy.array(internal, copy=False)
-        return self.ndarray
+        return _RegionNdarray(shape, field_type, base_ptr, strides, False)
 
+# This is a dummy object that is only used as an initializer for the
+# RegionField object above. It is thrown away as soon as the
+# RegionField is constructed.
 class _RegionNdarray(object):
     __slots__ = ['__array_interface__']
     def __init__(self, shape, field_type, base_ptr, strides, read_only):

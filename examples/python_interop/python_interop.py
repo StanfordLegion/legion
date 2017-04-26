@@ -18,6 +18,7 @@
 from __future__ import print_function
 
 import legion
+import numpy
 
 @legion.task
 def f(ctx, x, y, z):
@@ -28,10 +29,35 @@ def f(ctx, x, y, z):
 def g(ctx, R):
     print("inside task g%s" % ((R,),))
 
+    # Use generic accessors to fill the array with some pattern. This
+    # is to sanity check that NumPy is using the same indexing as
+    # Legion.
+
+    point = legion.ffi.new("legion_point_2d_t *")
+    value = legion.ffi.new("double *")
+    for x in xrange(0, 4):
+        for y in xrange(0, 4):
+            point.x[0] = x
+            point.x[1] = y
+            value[0] = float(x*4 + y)
+            legion.c.legion_accessor_generic_write_domain_point(
+                R.x.accessor,
+                legion.c.legion_domain_point_from_point_2d(point[0]),
+                value, legion.ffi.sizeof("double"))
+
+    # If we access elements through the NumPy array, we should get the
+    # same values back.
     print(R.x)
-    print(R.x._get_ndarray())
-    R.x._get_ndarray().fill(1)
-    print(R.x._get_ndarray())
+    for x in xrange(0, 4):
+        for y in xrange(0, 4):
+            assert int(R.x[x][y]) == x*4 + y
+
+    ones = numpy.ones([4, 4])
+    numpy.add(R.x, ones, out=R.x)
+    print(R.x)
+
+    R.x.fill(1)
+    print(R.x)
 
 @legion.task
 def main_task(ctx):
