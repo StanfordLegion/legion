@@ -93,7 +93,6 @@ PIXELS_PER_LEVEL = 40
 # Pixels per tick mark
 PIXELS_PER_TICK = 200
 
-
 # prof_uid counter
 prof_uid_ctr = 0
 
@@ -103,14 +102,14 @@ def get_prof_uid():
     return prof_uid_ctr
 
 def data_tsv_str(level, start, end, color, opacity, title, 
-                 initiation, _in, out, prof_uid):
+                 initiation, _in, out, children, parents, prof_uid):
     # replace None with ''
     def xstr(s):
         return str(s or '')
     return xstr(level) + "\t" + xstr(start) + "\t" + xstr(end) + "\t" + \
            xstr(color) + "\t" + xstr(opacity) + "\t" + xstr(title) + "\t" + \
            xstr(initiation) + "\t" + xstr(_in) + "\t" + xstr(out) + "\t" + \
-           xstr(prof_uid) + "\n"
+           xstr(children) + "\t" + xstr(parents) + "\t" + xstr(prof_uid) + "\n"
 
 def slugify(filename):
     # convert spaces to underscores
@@ -167,20 +166,45 @@ def color_helper(step, num_steps):
 def read_time(string):
     return long(string)/1000
 
+class PathRange(object):
+    def __init__(self, start, stop, path):
+        assert start <= stop
+        self.start = start
+        self.stop = stop
+        self.path = list(path)
+    def __cmp__(self, other):
+        self_elapsed = self.elapsed()
+        other_elapsed = other.elapsed()
+        if self_elapsed == other_elapsed:
+            return cmp(len(self.path), len(other.path))
+        else:
+            return cmp(self_elapsed, other_elapsed)
+    def clone(self):
+        return PathRange(self.start, self.stop, self.path)
+    def elapsed(self):
+        return self.stop - self.start
+    def __repr__(self):
+        return "(" + str(self.start) + "," + str(self.stop) + ")"
+
 class HasDependencies(object):
     def __init__(self):
-        self.deps = {"in": set(), "out": set()}
+        self.deps = {"in": set(), "out": set(), "parents": set(), "children" : set()}
         self.initiation_op = None
         self.initiation = ''
+
+        # for critical path analysis
+        self.path = PathRange(0, 0, [])
+        self.visited = False
     
     def add_initiation_dependencies(self, state, op_dependencies, transitive_map):
         pass
 
     def attach_dependencies(self, state, op_dependencies, transitive_map):
-        if self.op_id in transitive_map["out"]:
+        if self.op_id in op_dependencies:
             self.deps["out"] |= op_dependencies[self.op_id]["out"]
-        if self.op_id in transitive_map["in"]:
             self.deps["in"] |=  op_dependencies[self.op_id]["in"]
+            self.deps["parents"] |=  op_dependencies[self.op_id]["parents"]
+            self.deps["children"] |=  op_dependencies[self.op_id]["children"]
 
     def get_unique_tuple(self):
         assert self.proc is not None #TODO: move to owner
@@ -195,16 +219,33 @@ class HasInitiationDependencies(HasDependencies):
 
     def add_initiation_dependencies(self, state, op_dependencies, transitive_map):
         unique_tuple = self.get_unique_tuple()
-        if self.initiation in transitive_map["in"]: # this op exists
-            for in_op_id in transitive_map["in"][self.initiation]:
-                op_dependencies[in_op_id]["out"].add(unique_tuple)
+        if self.initiation in state.operations:
+            op = state.find_op(self.initiation)
+            # this op exists
+            if op.proc is not None:
+                if self.initiation not in op_dependencies:
+                    op_dependencies[self.initiation] = {
+                        "in" : set(), 
+                        "out" : set(),
+                        "parents" : set(),
+                        "children" : set()
+                    }
+                if op.start < self.start:
+                    op_dependencies[self.initiation]["in"].add(unique_tuple)
+                else:
+                    op_dependencies[self.initiation]["out"].add(unique_tuple)
 
     def attach_dependencies(self, state, op_dependencies, transitive_map):
-        # add the in direction
-        if self.initiation in transitive_map["in"]:
-            op_tuples = set(map(lambda op: state.find_op(op).get_unique_tuple(),
-                            transitive_map["in"][self.initiation]))
-            self.deps["in"] |= op_tuples
+        # add the out direction
+        if self.initiation in state.operations:
+            op = state.find_op(self.initiation)
+            if op.proc is not None: # this op exists
+                op_tuple = op.get_unique_tuple()
+                if op.start < self.start:
+                    self.deps["out"].add(op_tuple)
+                else:
+                    self.deps["in"].add(op_tuple)
+
 
     def get_color(self):
         return self.initiation_op.get_color()
@@ -244,13 +285,6 @@ class TimeRange(object):
         if self.stop < other.stop:
             return 1
         return 0
-
-    def contains(self, other):
-        if self.start <= other.start and \
-            other.stop <= self.stop:
-            return True
-        return False
-
 
     def __repr__(self):
         return "Start: %d us  Stop: %d us  Total: %d us" % (
@@ -465,7 +499,7 @@ class Memory(object):
     def sort_time_range(self):
         self.max_live_instances = 0
         for inst in self.instances:
-            self.time_points.append(TimePoint(inst.create, inst, True))
+            self.time_points.append(TimePoint(inst.start, inst, True))
             self.time_points.append(TimePoint(inst.stop, inst, False))
         # Keep track of which levels are free
         self.time_points.sort(key=lambda p: p.time_key)
@@ -868,6 +902,8 @@ class HasWaiters(object):
 
         _in = json.dumps(list(self.deps["in"])) if len(self.deps["in"]) > 0 else ""
         out = json.dumps(list(self.deps["out"])) if len(self.deps["out"]) > 0 else ""
+        children = json.dumps(list(self.deps["children"])) if len(self.deps["children"]) > 0 else ""
+        parents = json.dumps(list(self.deps["parents"])) if len(self.deps["parents"]) > 0 else ""
 
         if len(self.wait_intervals) > 0:
             start = self.start
@@ -882,6 +918,8 @@ class HasWaiters(object):
                                     initiation = initiation,
                                     _in = _in,
                                     out = out,
+                                    children = children,
+                                    parents = parents,
                                     prof_uid = self.prof_uid)
                 wait = data_tsv_str(level = cur_level,
                                     start = wait_interval.start,
@@ -892,6 +930,8 @@ class HasWaiters(object):
                                     initiation = initiation,
                                     _in = _in,
                                     out = out,
+                                    children = children,
+                                    parents = parents,
                                     prof_uid = self.prof_uid)
                 ready = data_tsv_str(level = cur_level,
                                      start = wait_interval.ready,
@@ -902,6 +942,8 @@ class HasWaiters(object):
                                      initiation = initiation,
                                      _in = _in,
                                      out = out,
+                                     children = children,
+                                     parents = parents,
                                      prof_uid = None)
 
                 tsv_file.write(init)
@@ -918,6 +960,8 @@ class HasWaiters(object):
                                    initiation = initiation,
                                    _in = _in,
                                    out = out,
+                                   children = children,
+                                   parents = parents,
                                    prof_uid = None)
 
                 tsv_file.write(end)
@@ -931,6 +975,8 @@ class HasWaiters(object):
                                 initiation = initiation,
                                 _in = _in,
                                 out = out,
+                                children = children,
+                                parents = parents,
                                 prof_uid = self.prof_uid)
             tsv_file.write(line)
 
@@ -1056,6 +1102,8 @@ class ProfTask(Base, TimeRange, HasNoDependencies):
                                 initiation = None,
                                 _in = None,
                                 out = None,
+                                children = None,
+                                parents = None,
                                 prof_uid = self.prof_uid)
         tsv_file.write(tsv_line)
 
@@ -1096,6 +1144,8 @@ class UserMarker(Base, TimeRange, HasNoDependencies):
                                 initiation = None,
                                 _in = None,
                                 out = None,
+                                children = None,
+                                parents = None,
                                 prof_uid = self.prof_uid)
         tsv_file.write(tsv_line)
 
@@ -1131,6 +1181,8 @@ class Copy(Base, TimeRange, HasInitiationDependencies):
         copy_name = repr(self)
         _in = json.dumps(self.deps["in"]) if len(self.deps["in"]) > 0 else ""
         out = json.dumps(self.deps["out"]) if len(self.deps["out"]) > 0 else ""
+        children = json.dumps(list(self.deps["children"])) if len(self.deps["children"]) > 0 else ""
+        parents = json.dumps(list(self.deps["parents"])) if len(self.deps["parents"]) > 0 else ""
 
         tsv_line = data_tsv_str(level = base_level + (max_levels - level),
                                 start = self.start,
@@ -1141,6 +1193,8 @@ class Copy(Base, TimeRange, HasInitiationDependencies):
                                 initiation = self.initiation,
                                 _in = _in,
                                 out = out,
+                                children = children,
+                                parents = parents,
                                 prof_uid = self.prof_uid)
         tsv_file.write(tsv_line)
 
@@ -1164,6 +1218,8 @@ class Fill(Base, TimeRange, HasInitiationDependencies):
         fill_name = repr(self)
         _in = json.dumps(self.deps["in"]) if len(self.deps["in"]) > 0 else ""
         out = json.dumps(self.deps["out"]) if len(self.deps["out"]) > 0 else ""
+        children = json.dumps(list(self.deps["children"])) if len(self.deps["children"]) > 0 else ""
+        parents = json.dumps(list(self.deps["parents"])) if len(self.deps["parents"]) > 0 else ""
 
         tsv_line = data_tsv_str(level = base_level + (max_levels - level),
                                 start = self.start,
@@ -1174,6 +1230,8 @@ class Fill(Base, TimeRange, HasInitiationDependencies):
                                 initiation = self.initiation,
                                 _in = _in,
                                 out = out,
+                                children = children,
+                                parents = parents,
                                 prof_uid = self.prof_uid)
         tsv_file.write(tsv_line)
 
@@ -1189,20 +1247,22 @@ class Instance(Base, TimeRange, HasInitiationDependencies):
 
     def get_unique_tuple(self):
         assert self.mem is not None
-        cur_level = self.mem.max_live_copies+1 - self.level
+        cur_level = self.mem.max_live_instances+1 - self.level
         return (str(self.mem), self.prof_uid)
 
     def emit_tsv(self, tsv_file, base_level, max_levels, level):
         assert self.level is not None
-        assert self.create is not None
+        assert self.start is not None
         assert self.stop is not None
         inst_name = repr(self)
 
         _in = json.dumps(self.deps["in"]) if len(self.deps["in"]) > 0 else ""
         out = json.dumps(self.deps["out"]) if len(self.deps["out"]) > 0 else ""
+        children = json.dumps(list(self.deps["children"])) if len(self.deps["children"]) > 0 else ""
+        parents = json.dumps(list(self.deps["parents"])) if len(self.deps["parents"]) > 0 else ""
 
         tsv_line = data_tsv_str(level = base_level + (max_levels - level),
-                                start = self.create,
+                                start = self.start,
                                 end = self.stop,
                                 color = self.get_color(),
                                 opacity = "1.0",
@@ -1210,10 +1270,14 @@ class Instance(Base, TimeRange, HasInitiationDependencies):
                                 initiation = self.initiation,
                                 _in = _in,
                                 out = out,
+                                children = children,
+                                parents = parents,
                                 prof_uid = self.prof_uid)
 
         tsv_file.write(tsv_line)
 
+    def total_time(self):
+        return self.stop - self.start
 
     def get_color(self):
         # Get the color from the operation
@@ -1290,6 +1354,8 @@ class Message(Base, TimeRange, HasNoDependencies):
                                 initiation = None,
                                 _in = None,
                                 out = None,
+                                children = None,
+                                parents = None,
                                 prof_uid = self.prof_uid)
         tsv_file.write(tsv_line)
 
@@ -1328,6 +1394,8 @@ class MapperCall(Base, TimeRange, HasInitiationDependencies):
         title = repr(self)
         _in = json.dumps(list(self.deps["in"])) if len(self.deps["in"]) > 0 else ""
         out = json.dumps(list(self.deps["out"])) if len(self.deps["out"]) > 0 else ""
+        children = json.dumps(list(self.deps["children"])) if len(self.deps["children"]) > 0 else ""
+        parents = json.dumps(list(self.deps["parents"])) if len(self.deps["parents"]) > 0 else ""
 
         tsv_line = data_tsv_str(level = base_level + (max_levels - level),
                                 start = self.start,
@@ -1338,6 +1406,8 @@ class MapperCall(Base, TimeRange, HasInitiationDependencies):
                                 initiation = self.initiation,
                                 _in = _in,
                                 out = out,
+                                children = children,
+                                parents = parents,
                                 prof_uid = self.prof_uid)
 
         tsv_file.write(tsv_line)
@@ -1398,6 +1468,8 @@ class RuntimeCall(Base, TimeRange, HasNoDependencies):
                                 initiation = None,
                                 _in = None,
                                 out = None,
+                                children = None,
+                                parents = None,
                                 prof_uid = self.prof_uid)
 
         tsv_file.write(tsv_line)
@@ -1540,6 +1612,7 @@ class State(object):
         self.meta_variants = {}
         self.op_kinds = {}
         self.operations = {}
+        self.prof_uid_map = {}
         self.multi_tasks = {}
         self.first_times = {}
         self.last_times = {}
@@ -1551,7 +1624,8 @@ class State(object):
         self.runtime_call_kinds = {}
         self.runtime_calls = {}
         self.instances = {}
-        self.has_spy_state = False
+        self.has_spy_data = False
+        self.spy_state = None
 
     def parse_log_file(self, file_name, verbose):
         skipped = 0
@@ -1561,10 +1635,10 @@ class State(object):
             first_time = 0L
             last_time = 0L
             for line in log:
-                if not self.has_spy_state and \
+                if not self.has_spy_data and \
                     (legion_spy.config_pat.match(line) or \
                      legion_spy.detailed_config_pat.match(line)):
-                    self.has_spy_state = True
+                    self.has_spy_data = True
                 matches += 1  
                 m = task_info_pat.match(line)
                 if m is not None:
@@ -1815,7 +1889,7 @@ class State(object):
         # don't overwrite if we have already captured the (more precise)
         #  timeline info
         if inst.stop is None:
-            inst.create = create
+            inst.start = create
 
     def log_inst_usage(self, op_id, inst_id, mem_id, size):
         op = self.find_op(op_id)
@@ -1828,7 +1902,7 @@ class State(object):
     def log_inst_timeline(self, op_id, inst_id, create, destroy):
         op = self.find_op(op_id)
         inst = self.create_instance(inst_id, op)
-        inst.create = create
+        inst.start = create
         inst.stop = destroy
         if destroy > self.last_time:
             self.last_time = destroy 
@@ -1942,6 +2016,8 @@ class State(object):
             self.last_time = stop
         call = MapperCall(self.mapper_call_kinds[kind],
                           self.find_op(op_id), start, stop)
+        # update prof_uid map
+        self.prof_uid_map[call.prof_uid] = call
         proc = self.find_processor(proc_id)
         proc.add_mapper_call(call)
 
@@ -2000,34 +2076,47 @@ class State(object):
 
     def find_op(self, op_id):
         if op_id not in self.operations:
-            self.operations[op_id] = Operation(op_id) 
+            op = Operation(op_id) 
+            self.operations[op_id] = op
+            # update prof_uid map
+            self.prof_uid_map[op.prof_uid] = op
         return self.operations[op_id]
 
     def find_task(self, op_id, variant, create=None, ready=None, start=None, stop=None):
-        op = self.find_op(op_id)
+        task = self.find_op(op_id)
         # Upgrade this operation to a task if necessary
-        if not op.is_task:
+        if not task.is_task:
             assert create is not None
             assert ready is not None
             assert start is not None
             assert stop is not None
-            op = Task(variant, op, create, ready, start, stop) 
-            variant.op[op_id] = op
-            self.operations[op_id] = op
+            task = Task(variant, task, create, ready, start, stop) 
+            variant.op[op_id] = task
+            self.operations[op_id] = task
+            # update prof_uid map
+            self.prof_uid_map[task.prof_uid] = task
         else:
-            assert op.variant == variant
-        return op
+            assert task.variant == variant
+        return task
 
     def create_meta(self, variant, op, create, ready, start, stop):
-        result = MetaTask(variant, op, create, ready, start, stop)
-        variant.op[op.op_id] = result
-        return result
+        meta = MetaTask(variant, op, create, ready, start, stop)
+        variant.op[op.op_id] = meta
+        # update prof_uid map
+        self.prof_uid_map[meta.prof_uid] = meta
+        return meta
 
     def create_copy(self, src, dst, op, size, create, ready, start, stop):
-        return Copy(src, dst, op, size, create, ready, start, stop)
+        copy = Copy(src, dst, op, size, create, ready, start, stop)
+        # update prof_uid map
+        self.prof_uid_map[copy.prof_uid] = copy
+        return copy
 
     def create_fill(self, dst, op, create, ready, start, stop):
-        return Fill(dst, op, create, ready, start, stop)
+        fill = Fill(dst, op, create, ready, start, stop)
+        # update prof_uid map
+        self.prof_uid_map[fill.prof_uid] = fill
+        return fill
 
     def create_instance(self, inst_id, op):
         # neither instance id nor op id are unique on their own
@@ -2035,12 +2124,17 @@ class State(object):
         if key not in self.instances:
             inst = Instance(inst_id, op)
             self.instances[key] = inst
+            # update prof_uid map
+            self.prof_uid_map[inst.prof_uid] = inst
         else:
             inst = self.instances[key]
         return inst
 
     def create_user_marker(self, name):
-        return UserMarker(name)
+        user = UserMarker(name)
+        # update prof_uid map
+        self.prof_uid_map[user.prof_uid] = user
+        return user
 
     def build_time_ranges(self):
         assert self.last_time is not None 
@@ -2335,10 +2429,10 @@ class State(object):
                 for util_point in utilization:
                     util_tsv_file.write("%.2f\t%.2f\n" % util_point)
 
-    def simplify_op(self, op_dependencies, op_existence_map, transitive_map, op_path, _dir):
+    def simplify_op(self, op_dependencies, op_existence_set, transitive_map, op_path, _dir):
         cur_op_id = op_path[-1]
 
-        if op_existence_map[cur_op_id]:
+        if cur_op_id in op_existence_set:
             # we're done, we've found an op that exists
             for op_id in op_path:
                 # for the children that exist, add it to the transitive map
@@ -2349,23 +2443,23 @@ class State(object):
             children = op_dependencies[cur_op_id][_dir]
             for child_op_id in children:
                 new_op_path = op_path + [child_op_id]
-                self.simplify_op(op_dependencies, op_existence_map, transitive_map,
+                self.simplify_op(op_dependencies, op_existence_set, transitive_map,
                                  new_op_path, _dir)
 
-    def simplify_op_dependencies(self, op_dependencies, op_existence_map):
+    def simplify_op_dependencies(self, op_dependencies, op_existence_set):
         # The dependence relation is transitive. We take advantage of this to
         # remove non-existant ops in the graph by following "out" and "in"
         # pointers until we get to an existing op
-        transitive_map = {"in": {}, "out": {}}
+        transitive_map = {"in": {}, "out": {}, "parents": {}, "children": {}}
 
-        for _dir in ["in", "out"]:
+        for _dir in transitive_map.iterkeys():
             for op_id in op_dependencies.iterkeys():
                 if not op_id in transitive_map[_dir]:
-                    self.simplify_op(op_dependencies, op_existence_map, transitive_map,
-                                     [op_id], _dir)
+                    self.simplify_op(op_dependencies, op_existence_set,
+                                     transitive_map, [op_id], _dir)
 
         for op_id in op_dependencies.iterkeys():
-            for _dir in ["in", "out"]:
+            for _dir in transitive_map.iterkeys():
                 if len(op_dependencies[op_id][_dir]) > 0:
                     # replace each op with the transitive map
                     transformed_dependencies = [transitive_map[_dir][op]
@@ -2386,54 +2480,84 @@ class State(object):
     # Here, we read the legion spy data! We will use this to draw dependency
     # lines in the prof
     def get_op_dependencies(self, file_names):
-        spy_state = legion_spy.State(False, True, True, True)
+        self.spy_state = legion_spy.State(False, True, True, True)
 
         total_matches = 0
 
         for file_name in file_names:
-            total_matches += spy_state.parse_log_file(file_name)
+            total_matches += self.spy_state.parse_log_file(file_name)
         print('Matched %d lines across all files.' % total_matches)
         op_dependencies = {}
 
         # compute the slice_index, slice_slice, and point_slice dependencies
         # (which legion_spy throws away). We just need to copy this data over
         # before legion spy throws it away
-        for _slice, index in spy_state.slice_index.iteritems():
-            while _slice in spy_state.slice_slice:
-                _slice = spy_state.slice_slice[_slice]
+        for _slice, index in self.spy_state.slice_index.iteritems():
+            while _slice in self.spy_state.slice_slice:
+                _slice = self.spy_state.slice_slice[_slice]
             if index.uid not in op_dependencies:
-                op_dependencies[index.uid] = {"in": set(), "out": set()}
+                op_dependencies[index.uid] = {
+                    "in" : set(), 
+                    "out" : set(),
+                    "parents" : set(),
+                    "children" : set()
+                }
             if _slice not in op_dependencies:
-                op_dependencies[_slice] = {"in": set(), "out": set()}
+                op_dependencies[_slice] = {
+                    "in" : set(), 
+                    "out" : set(),
+                    "parents" : set(),
+                    "children" : set()
+                }
             op_dependencies[index.uid]["out"].add(_slice)
             op_dependencies[_slice]["in"].add(index.uid)
 
-        for _slice1, _slice2 in spy_state.slice_slice.iteritems():
+        for _slice1, _slice2 in self.spy_state.slice_slice.iteritems():
             if _slice1 not in op_dependencies:
-                op_dependencies[_slice1] = {"in": set(), "out": set()}
+                op_dependencies[_slice1] = {
+                    "in" : set(), 
+                    "out" : set(),
+                    "parents" : set(),
+                    "children" : set()
+                }
             if _slice2 not in op_dependencies:
-                op_dependencies[_slice2] = {"in": set(), "out": set()}
+                op_dependencies[_slice2] = {
+                    "in" : set(), 
+                    "out" : set(),
+                    "parents" : set(),
+                    "children" : set()
+                }
             op_dependencies[_slice1]["out"].add(_slice2)
             op_dependencies[_slice2]["in"].add(_slice1)
 
-        for point, _slice in spy_state.point_slice.iteritems():
-            while _slice in spy_state.slice_slice:
-                _slice = spy_state.slice_slice[_slice]
+        for point, _slice in self.spy_state.point_slice.iteritems():
+            while _slice in self.spy_state.slice_slice:
+                _slice = self.spy_state.slice_slice[_slice]
             if _slice not in op_dependencies:
-                op_dependencies[_slice] = {"in": set(), "out": set()}
+                op_dependencies[_slice] = {
+                    "in" : set(), 
+                    "out" : set(),
+                    "parents" : set(),
+                    "children" : set()
+                }
             if point.op.uid not in op_dependencies:
-                op_dependencies[point.op.uid] = {"in": set(), "out": set()}
+                op_dependencies[point.op.uid] = {
+                    "in" : set(), 
+                    "out" : set(),
+                    "parents" : set(),
+                    "children" : set()
+                }
             op_dependencies[_slice]["out"].add(point.op.uid)
             op_dependencies[point.op.uid]["in"].add(_slice)
 
         # don't simplify graphs
-        spy_state.post_parse(False, True)
+        self.spy_state.post_parse(False, True)
 
         print("Performing physical analysis...")
-        # don't perform any checks (too slow!)
-        spy_state.perform_physical_analysis(False, False)
+        self.spy_state.perform_physical_analysis(False, False)
+        self.spy_state.simplify_physical_graph(need_cycle_check=False)
 
-        op = spy_state.get_operation(spy_state.top_level_uid)
+        op = self.spy_state.get_operation(self.spy_state.top_level_uid)
         elevate = dict()
         all_nodes = set()
         printer = legion_spy.GraphPrinter("./", "temp")
@@ -2444,21 +2568,56 @@ class State(object):
                 for src in node.physical_incoming:
                     if hasattr(src, 'uid'):
                         if src.uid not in op_dependencies:
-                            op_dependencies[src.uid] = {"in" : set(), "out" : set()}
+                            op_dependencies[src.uid] = {
+                                "in" : set(), 
+                                "out" : set(),
+                                "parents" : set(),
+                                "children" : set()
+                            }
                         if node.uid not in op_dependencies:
-                            op_dependencies[node.uid] = {"in" : set(), "out" : set()}
+                            op_dependencies[node.uid] = {
+                                "in" : set(), 
+                                "out" : set(),
+                                "parents" : set(),
+                                "children" : set()
+                            }
                         op_dependencies[src.uid]["in"].add(node.uid)
                         op_dependencies[node.uid]["out"].add(src.uid)
 
+
+        # compute implicit dependencies
+        for op in self.spy_state.ops.itervalues():
+            if op.context is not None:
+                child_uid = op.uid
+                parent_uid = op.context.op.uid
+                if child_uid not in op_dependencies:
+                    op_dependencies[child_uid] = {
+                        "in" : set(), 
+                        "out" : set(),
+                        "parents" : set(),
+                        "children" : set()
+                    }
+                if parent_uid not in op_dependencies:
+                    op_dependencies[parent_uid] = {
+                    "in" : set(), 
+                    "out" : set(),
+                    "parents" : set(),
+                    "children" : set()
+                }
+                op_dependencies[parent_uid]["children"].add(child_uid)
+                op_dependencies[child_uid]["parents"].add(parent_uid)
+
+
         # have an existence map for the uids (some uids in the event graph are not
         # actually executed
-        op_existence_map = {}
+        op_existence_set = set()
 
         for op_id, operation in self.operations.iteritems():
-            op_existence_map[op_id] = operation.proc is not None
+            if operation.proc is not None:
+                op_existence_set.add(op_id)
 
         # now apply the existence map
-        op_dependencies, transitive_map = self.simplify_op_dependencies(op_dependencies, op_existence_map)
+        op_dependencies, transitive_map = self.simplify_op_dependencies(op_dependencies, op_existence_set)
 
         return op_dependencies, transitive_map
 
@@ -2472,18 +2631,96 @@ class State(object):
                         return self.find_op(elem).get_unique_tuple()
                     else:
                         return elem
-                        
                 op_dependencies[op_id][_dir] = set(map(convert_to_tuple, 
                                                    op_dependencies[op_id][_dir]))
-
 
     def add_initiation_dependencies(self, state, op_dependencies, transitive_map):
         for proc in self.processors.itervalues():
             proc.add_initiation_dependencies(state, op_dependencies, transitive_map)
 
-    def attach_dependencies(self, state, op_dependencies, transitive_map):
+    def attach_dependencies(self, op_dependencies, transitive_map):
         for proc in self.processors.itervalues():
-            proc.attach_dependencies(state, op_dependencies, transitive_map)
+            proc.attach_dependencies(self, op_dependencies, transitive_map)
+
+    # traverse one op to get the max outbound path from this point
+    def traverse_op_for_critical_path(self, op):
+        cur_path  = PathRange(0, 0, [])
+        if isinstance(op, HasDependencies):
+            if op.visited:
+                cur_path = op.path
+            else:
+                paths = list()
+                for op_tuple in op.deps["out"]:
+                    out_op = self.prof_uid_map[op_tuple[2]]
+                    path = self.traverse_op_for_critical_path(out_op)
+                    start = min(path.start, op.start)
+                    stop = max(path.stop, op.stop)
+                    newPath = PathRange(start, stop, path.path)
+                    newPath.path.append(op)
+                    paths.append(newPath)
+                if len(paths) > 0:
+                    # pick max outbound path
+                    cur_path = max(paths)
+                    op.path = cur_path
+                else:
+                    op.path = PathRange(op.start, op.stop, [op])
+
+                cur_path = op.path
+            op.visited = True
+        return cur_path
+
+    def get_longest_child(self, op):
+        children = []
+        for child in op.deps["children"]:
+            child_prof_uid = child[2]
+            child_op = self.prof_uid_map[child_prof_uid]
+            if isinstance(child_op, HasDependencies):
+                children.append(child_op)
+        if len(children) > 0:
+            longest_child = max(children, key=lambda op: op.path)
+            return longest_child.path.path + self.get_longest_child(longest_child)
+        else:
+            return []
+
+    def compute_critical_path(self):
+        paths = []
+        for proc in self.processors.itervalues():
+            for task in proc.tasks:
+                if (len(task.deps["parents"]) > 0) or (len(task.deps["out"]) > 0):
+                    path = self.traverse_op_for_critical_path(task)
+                    paths.append(path)
+        critical_path = max(paths).clone()
+
+        all_children = []
+        for op in critical_path.path:
+            all_children = all_children + self.get_longest_child(op)
+        critical_path.path = critical_path.path + all_children
+
+        if len(critical_path.path) > 0:
+            critical_path_set = set(map(lambda p: p.get_unique_tuple(), critical_path.path))
+            def get_path_obj(p):
+                return {
+                    "tuple": p.get_unique_tuple(),
+                    "obj"  : list(p.deps["out"].intersection(critical_path_set))
+                }
+
+            critical_path = map(lambda p: get_path_obj(p), critical_path.path)
+        return critical_path
+
+    def simplify_critical_path(self, critical_path):
+        simplified_critical_path = set()
+        if len(critical_path) > 0:
+            critical_path_set = set(critical_path)
+            p_prof_uid = critical_path[-1][2]
+            p = self.prof_uid_map[p_prof_uid]
+            intersection = p.deps["out"].intersection(critical_path_set)
+            while len(intersection) != 0:
+                simplified_critical_path.add(p.get_unique_tuple())
+                p_prof_uid = next(iter(intersection))[2]
+                p = self.prof_uid_map[p_prof_uid]
+                intersection = p.deps["out"].intersection(critical_path_set)
+            simplified_critical_path.add(p.get_unique_tuple())
+        return list(simplified_critical_path)
 
 
     def emit_interactive_visualization(self, output_dirname, show_procs,
@@ -2517,12 +2754,13 @@ class State(object):
                                           "legion_prof_data.tsv")
         processor_tsv_file_name = os.path.join(output_dirname, 
                                                "legion_prof_processor.tsv")
+
         scale_json_file_name = os.path.join(output_dirname, "json", 
                                             "scale.json")
         dep_json_file_name = os.path.join(output_dirname, "json", 
                                           "op_dependencies.json")
 
-        data_tsv_header = "level\tstart\tend\tcolor\topacity\ttitle\tinitiation\tin\tout\tprof_uid\n"
+        data_tsv_header = "level\tstart\tend\tcolor\topacity\ttitle\tinitiation\tin\tout\tchildren\tparents\tprof_uid\n"
 
         tsv_dir = os.path.join(output_dirname, "tsv")
         json_dir = os.path.join(output_dirname, "json")
@@ -2531,7 +2769,7 @@ class State(object):
             os.mkdir(json_dir)
         
         op_dependencies, transitive_map = None, None
-        if self.has_spy_state:
+        if self.has_spy_data:
             op_dependencies, transitive_map = self.get_op_dependencies(file_names)
 
         # with open(dep_json_file_name, "w") as dep_json_file:
@@ -2551,13 +2789,14 @@ class State(object):
 
         if show_procs:
             for proc in self.processors.itervalues():
-                if self.has_spy_state and len(proc.tasks) > 0:
-                    proc.add_initiation_dependencies(self, op_dependencies, transitive_map)
+                if self.has_spy_data and len(proc.tasks) > 0:
+                    proc.add_initiation_dependencies(self, op_dependencies,
+                                                     transitive_map)
                     self.convert_op_ids_to_tuples(op_dependencies)
 
             for p,proc in sorted(self.processors.iteritems(), key=lambda x: x[1]):
                 if len(proc.tasks) > 0:
-                    if self.has_spy_state:
+                    if self.has_spy_data:
                         proc.attach_dependencies(self, op_dependencies,
                                                  transitive_map)
                     proc_name = slugify("Proc_" + str(hex(p)))
@@ -2605,6 +2844,19 @@ class State(object):
                     mem_list.append(mem)
 
                     last_time = max(last_time, mem.last_time)
+
+        critical_path = list()
+        if self.has_spy_data:
+            critical_path = self.compute_critical_path()
+            # critical_path = self.simplify_critical_path(critical_path)
+            # print("Critical path is " + str(critical_range.elapsed()) + "us")
+
+        # print(str(op) + ", " + str(op.path) + ", " + str(op.path_range))
+
+
+        critical_path_json_file_name = os.path.join(json_dir, "critical_path.json")
+        with open(critical_path_json_file_name, "w") as critical_path_json_file:
+            json.dump(critical_path, critical_path_json_file)
 
         processor_tsv_file = open(processor_tsv_file_name, "w")
         processor_tsv_file.write("full_text\ttext\ttsv\tlevels\n")
@@ -2711,4 +2963,7 @@ def main():
             state.show_copy_matrix(copy_output_prefix)
 
 if __name__ == '__main__':
+    start = time.time()
     main()
+    end = time.time()
+    print("elapsed: " + str(end - start) + "s")

@@ -12305,6 +12305,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    int Runtime::find_local_MPI_rank(void)
+    //-------------------------------------------------------------------------
+    {
+      if (mpi_rank_table == NULL)
+      {
+        log_run.error("Findling local MPI rank not supported without "
+                      "calling configure_MPI_interoperability during "
+                      "start up");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_MPI_INTEROPERABILITY_NOT_CONFIGURED);
+      }
+      return mpi_rank;
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::add_mapper(MapperID map_id, Mapper *mapper, Processor proc)
     //--------------------------------------------------------------------------
     {

@@ -1944,13 +1944,13 @@ function type_check.expr_list_slice_partition(cx, node)
   indices = insert_implicit_cast(indices, indices_type, std.list(int))
   local expr_type = std.list(
     std.region(
-      terralib.newsymbol(std.ispace(partition_type:parent_region():ispace().index_type)),
+      std.ispace(partition_type:parent_region():ispace().index_type),
       partition_type:parent_region():fspace()),
     partition_type, 1)
   -- FIXME: The privileges for these region aren't necessarily exactly
   -- one level up.
 
-  std.copy_privileges(cx, partition_type, expr_type)
+  std.copy_privileges(cx, partition_type:parent_region(), expr_type)
   -- FIXME: Copy constraints.
   cx:intern_region(expr_type)
 
@@ -2154,6 +2154,27 @@ function type_check.expr_list_ispace(cx, node)
   }
 end
 
+function type_check.expr_list_from_element(cx, node)
+  local list = type_check.expr(cx, node.list)
+  local list_type = std.check_read(cx, list)
+  if not std.is_list(list_type) then
+    report.error(node, "type mismatch in argument 1: expected a list but got " .. tostring(list_type))
+  end
+  local value = type_check.expr(cx, node.value)
+  local expr_type = std.as_read(value.expr_type)
+  for i = 1, list_type:list_depth() do
+    expr_type = std.list(expr_type)
+  end
+
+  return ast.typed.expr.ListFromElement {
+    list = list,
+    value = value,
+    expr_type = expr_type,
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 function type_check.expr_phase_barrier(cx, node)
   local value = type_check.expr(cx, node.value)
   local value_type = std.check_read(cx, value)
@@ -2255,7 +2276,9 @@ function type_check.expr_arrive(cx, node)
   local barrier_type = std.check_read(cx, barrier)
   local value = node.value and type_check.expr(cx, node.value)
   local value_type = node.value and std.check_read(cx, value)
-  if not (std.is_phase_barrier(barrier_type) or std.is_dynamic_collective(barrier_type)) then
+  if not (std.is_phase_barrier(barrier_type) or
+          std.is_list_of_phase_barriers(barrier_type) or
+          std.is_dynamic_collective(barrier_type)) then
     report.error(node, "type mismatch in argument 1: expected a phase barrier but got " .. tostring(barrier_type))
   end
   if std.is_phase_barrier(barrier_type) and value_type then
@@ -2280,7 +2303,7 @@ end
 function type_check.expr_await(cx, node)
   local barrier = type_check.expr(cx, node.barrier)
   local barrier_type = std.check_read(cx, barrier)
-  if not std.is_phase_barrier(barrier_type) then
+  if not (std.is_phase_barrier(barrier_type) or std.is_list_of_phase_barriers(barrier_type)) then
     report.error(node, "type mismatch in argument 1: expected a phase barrier but got " .. tostring(barrier_type))
   end
   local expr_type = terralib.types.unit
@@ -2997,6 +3020,9 @@ function type_check.expr(cx, node)
 
   elseif node:is(ast.specialized.expr.ListIspace) then
     return type_check.expr_list_ispace(cx, node)
+
+  elseif node:is(ast.specialized.expr.ListFromElement) then
+    return type_check.expr_list_from_element(cx, node)
 
   elseif node:is(ast.specialized.expr.PhaseBarrier) then
     return type_check.expr_phase_barrier(cx, node)

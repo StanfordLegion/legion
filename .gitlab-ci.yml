@@ -171,55 +171,55 @@ before_script:
 gcc49_cxx98_release_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc49, *terra35, *release, *cxx98_normal, *legion]
+    <<: [*gcc49, *terra38, *release, *cxx98_normal, *legion]
 gcc49_cxx98_release_regent:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc49, *terra35, *release, *cxx98_normal, *regent]
+    <<: [*gcc49, *terra38, *release, *cxx98_normal, *regent]
 gcc49_cxx98_debug_checks_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc49, *terra35, *debug, *cxx98_checks, *legion]
+    <<: [*gcc49, *terra38, *debug, *cxx98_checks, *legion]
 gcc49_cxx98_debug_spy_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc49, *terra35, *debug, *cxx98_spy, *legion]
+    <<: [*gcc49, *terra38, *debug, *cxx98_spy, *legion]
 gcc49_cxx98_debug_spy_regent:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc49, *terra35, *debug, *cxx98_spy, *regent]
+    <<: [*gcc49, *terra38, *debug, *cxx98_spy, *regent]
 gcc49_cxx11_release_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc49, *terra35, *release, *cxx11_normal, *legion]
+    <<: [*gcc49, *terra38, *release, *cxx11_normal, *legion]
 gcc49_cxx98_debug_checks_hdf5_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc49, *terra35, *debug, *cxx98_checks, *hdf5, *legion]
+    <<: [*gcc49, *terra38, *debug, *cxx98_checks, *hdf5, *legion]
 gcc49_cxx98_debug_checks_hdf5_regent:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc49, *terra35, *debug, *cxx98_checks, *hdf5, *regent]
+    <<: [*gcc49, *terra38, *debug, *cxx98_checks, *hdf5, *regent]
 gcc49_cxx98_debug_checks_gasnet_legion:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra35, *debug, *cxx98_checks, *gasnet, *legion]
+    <<: [*gcc49, *terra38, *debug, *cxx98_checks, *gasnet, *legion]
 gcc49_cxx98_debug_checks_gasnet_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
-    <<: [*gcc49, *terra35, *debug, *cxx98_checks, *gasnet, *regent]
+    <<: [*gcc49, *terra38, *debug, *cxx98_checks, *gasnet, *regent]
 gcc49_cxx98_32bit_debug_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc49, *terra35, *debug, *cxx98_32bit_normal, *legion]
+    <<: [*gcc49, *terra38, *debug, *cxx98_32bit_normal, *legion]
 gcc49_cxx98_debug_checks_cmake_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc49, *terra35, *debug, *cxx98_checks, *cmake, *legion]
+    <<: [*gcc49, *terra38, *debug, *cxx98_checks, *cmake, *legion]
 gcc49_cxx98_debug_checks_external:
   <<: [*linux_compute, *image, *external_tests]
   variables:
-    <<: [*gcc49, *terra35, *debug, *cxx98_checks]
+    <<: [*gcc49, *terra38, *debug, *cxx98_checks]
 
 # Linux with Clang 3.5
 clang35_cxx98_release_legion:
@@ -288,27 +288,27 @@ clang35_cxx98_debug_checks_external:
 gcc48_cxx98_debug_checks_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc48, *terra35, *debug, *cxx98_checks, *legion]
+    <<: [*gcc48, *terra38, *debug, *cxx98_checks, *legion]
 gcc48_cxx98_debug_checks_regent:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc48, *terra35, *debug, *cxx98_checks, *regent]
+    <<: [*gcc48, *terra38, *debug, *cxx98_checks, *regent]
 gcc5_cxx98_debug_checks_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc5, *terra35, *debug, *cxx98_checks, *legion]
+    <<: [*gcc5, *terra38, *debug, *cxx98_checks, *legion]
 gcc5_cxx98_debug_checks:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc5, *terra35, *debug, *cxx98_checks, *regent]
+    <<: [*gcc5, *terra38, *debug, *cxx98_checks, *regent]
 gcc6_cxx98_debug_checks_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc6, *terra35, *debug, *cxx98_checks, *legion]
+    <<: [*gcc6, *terra38, *debug, *cxx98_checks, *legion]
 gcc6_cxx98_debug_checks_regent:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc6, *terra35, *debug, *cxx98_checks, *regent]
+    <<: [*gcc6, *terra38, *debug, *cxx98_checks, *regent]
 
 # Linux with Clang 3.8
 clang38_cxx98_debug_checks_legion:
@@ -324,4 +324,4 @@ clang38_cxx98_debug_checks_regent:
 n0004_gcc49_cxx98_release_perf:
   <<: [*linux_n0004, *image, *perf_tests]
   variables:
-    <<: [*gcc49, *terra35, *release, *cxx98_normal]
+    <<: [*gcc49, *terra38, *release, *cxx98_normal]

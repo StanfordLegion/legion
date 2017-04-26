@@ -6305,6 +6305,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(node != NULL);
 #endif
+      derez.deserialize(node->has_complete);
+      derez.deserialize(node->complete);
       node->add_creation_source(source);
       size_t num_semantic;
       derez.deserialize(num_semantic);

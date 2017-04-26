@@ -16,11 +16,41 @@
 #ifndef __LEGION_STL_H__
 #define __LEGION_STL_H__
 
+#include <set>
+#include <map>
 #include <vector>
 #include "legion.h"
 
 namespace Legion {
   namespace STL {
+
+    /*
+     * Provide some wrappers for serializing and deserializing STL
+     * data structures when returning them as results from Legion tasks
+     */
+    template<typename T>
+    class set : public std::set<T> {
+    public:
+      inline size_t legion_buffer_size(void) const;
+      inline void legion_serialize(void *buffer) const;
+      inline void legion_deserialize(const void *buffer);
+    };
+
+    template<typename T1, typename T2>
+    class map : public std::map<T1,T2> {
+    public:
+      inline size_t legion_buffer_size(void) const;
+      inline void legion_serialize(void *buffer) const;
+      inline void legion_deserialize(const void *buffer);
+    };
+
+    template<typename T>
+    class vector : public std::vector<T> {
+    public:
+      inline size_t legion_buffer_size(void) const;
+      inline void legion_serialize(void *buffer) const;
+      inline void legion_deserialize(const void *buffer);
+    };
 
     /*
      * These methods can be used to create a Legion task from a function

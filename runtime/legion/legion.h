@@ -1039,7 +1039,8 @@ namespace Legion {
        * @param silence_warnings silence any warnings for this blocking call
        * @return the value of the future cast as the template type
        */
-      template<typename T> inline T get_result(bool silence_warnings = false) const;
+      template<typename T> 
+        inline T get_result(bool silence_warnings = false) const;
       /**
        * Block until the future completes.
        * @param silence_warnings silence any warnings for this blocking call
@@ -5328,6 +5329,11 @@ namespace Legion {
        * @return a const reference to the reverse map
        */
       const std::map<AddressSpace,int/*rank*/>& find_reverse_MPI_mapping(void);
+
+      /**
+       * Return the local MPI rank ID for the current Legion runtime
+       */
+      int find_local_MPI_rank(void);
     public:
       //------------------------------------------------------------------------
       // Semantic Information 
