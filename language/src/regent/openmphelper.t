@@ -38,4 +38,28 @@ function omp.generate_preamble_structured(rect, idx, start_idx, end_idx)
   end
 end
 
+function omp.generate_argument_type(symbols)
+  local arg_type = terralib.types.newstruct("omp_worker_arg")
+  arg_type.entries = terralib.newlist()
+  local mapping = {}
+  for i, symbol in pairs(symbols) do
+    local field_name = "_arg" .. tostring(i)
+    arg_type.entries:insert({ field_name, symbol.type })
+    mapping[field_name] = symbol
+  end
+  return arg_type, mapping
+end
+
+function omp.generate_argument_init(arg, arg_type, mapping)
+  local worker_init = arg_type.entries:map(function(pair)
+    local field_name, field_type = unpack(pair)
+    return quote var [ mapping[field_name] ] = [arg].[field_name] end
+  end)
+  local launch_init = arg_type.entries:map(function(pair)
+    local field_name, field_type = unpack(pair)
+    return quote [arg].[field_name] = [ mapping[field_name] ] end
+  end)
+  return worker_init, launch_init
+end
+
 return omp

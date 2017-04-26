@@ -6666,6 +6666,90 @@ function codegen.stat_for_num_vectorized(cx, node)
   end
 end
 
+-- Find variables defined from the outer scope
+local function collect_symbols(cx, node)
+  local result = terralib.newlist()
+
+  local undefined = {}
+  local defined = { [node.symbol] = true }
+  local accesses = {}
+  local function collect_symbol_pre(node)
+    if rawget(node, "node_type") then
+      if node:is(ast.typed.stat.Var) then
+        node.symbols:map(function(sym) defined[sym] = true end)
+      elseif node:is(ast.typed.stat.ForNum) or
+             node:is(ast.typed.stat.ForList) then
+        defined[node.symbol] = true
+      end
+    end
+  end
+  local function collect_symbol_post(node)
+    if rawget(node, "node_type") then
+      if node:is(ast.typed.expr.ID) and
+             not defined[node.value] and
+             not std.is_region(std.as_read(node.expr_type)) then
+        undefined[node.value] = true
+      elseif (node:is(ast.typed.expr.FieldAccess) or
+              node:is(ast.typed.expr.IndexAccess)) and
+             std.is_ref(node.expr_type) then
+        accesses[node] = true
+        if accesses[node.value] and
+           std.is_ref(node.expr_type) and
+           std.is_ref(node.value.expr_type) and
+           node.expr_type:bounds() == node.value.expr_type:bounds() then
+           accesses[node.value] = nil
+        end
+      elseif node:is(ast.typed.expr.FieldAccess) and
+             node.field_name == "bounds" and
+             (std.is_region(std.as_read(node.value.expr_type)) or
+              std.is_ispace(std.as_read(node.value.expr_type))) then
+        local ispace_type = std.as_read(node.value.expr_type)
+        if std.is_region(ispace_type) then
+          ispace_type = ispace_type:ispace()
+        end
+        undefined[cx:ispace(ispace_type).bounds] = true
+      elseif node:is(ast.typed.expr.Deref) and
+             std.is_ref(node.expr_type) and
+             node.expr_type:bounds() ~= node.value.expr_type:bounds() then
+        accesses[node] = true
+      end
+    end
+  end
+  ast.traverse_node_prepostorder(collect_symbol_pre,
+                                 collect_symbol_post,
+                                 node.block)
+
+  -- Base pointers need a special treatment to find them
+  local base_pointers = {}
+  local strides = {}
+  for node, _ in pairs(accesses) do
+    local value_type = std.as_read(node.expr_type)
+    node.expr_type:bounds():map(function(region)
+      local prefix = node.expr_type.field_path
+      local field_paths = std.flatten_struct_fields(value_type)
+      local absolute_field_paths = field_paths:map(
+        function(field_path) return prefix .. field_path end)
+      absolute_field_paths:map(function(field_path)
+        base_pointers[cx:region(region):base_pointer(field_path)] = true
+        local stride = cx:region(region):stride(field_path)
+        for idx = 2, #stride do strides[stride[idx]] = true end
+      end)
+    end)
+  end
+
+  for base_pointer, _ in pairs(base_pointers) do
+    result:insert(base_pointer)
+  end
+  for stride, _ in pairs(strides) do
+    result:insert(stride) end
+  for symbol, _ in pairs(undefined) do
+    if std.is_symbol(symbol) then symbol = symbol:getsymbol() end
+    result:insert(symbol)
+  end
+
+  return result
+end
+
 function codegen.stat_for_list(cx, node)
   local symbol = node.symbol:getsymbol()
   local cx = cx:new_local_scope()
@@ -6804,14 +6888,24 @@ function codegen.stat_for_list(cx, node)
               end
             end
           end
+          local symbols = collect_symbols(cx, node)
+          symbols:insert(rect)
+          local arg_type, mapping = openmphelper.generate_argument_type(symbols)
+          local arg = terralib.newsymbol(&arg_type, "arg")
+          local worker_init, launch_init = openmphelper.generate_argument_init(arg, arg_type, mapping)
           local terra omp_worker(data : &opaque)
-            var [rect] = [&rect_type](data)
+            var [arg] = [&arg_type](data)
+            [worker_init]
             [body]
           end
           return quote
             [actions]
-            var rect = [domain_get_rect]([domain])
-            [openmphelper.launch]([omp_worker], &rect, [openmphelper.get_num_threads](), 0)
+            var r = [domain_get_rect]([domain])
+            var [rect] = &r
+            var arg_obj : arg_type
+            var [arg] = &arg_obj
+            [launch_init]
+            [openmphelper.launch]([omp_worker], [arg], [openmphelper.get_num_threads](), 0)
             [cleanup_actions]
           end
         end
@@ -6833,8 +6927,14 @@ function codegen.stat_for_list(cx, node)
           local end_idx = terralib.newsymbol(int64, "end_idx")
           local rect_type = c.legion_rect_1d_t
           local rect = terralib.newsymbol(&rect_type, "rect")
+          local symbols = collect_symbols(cx, node)
+          symbols:insert(rect)
+          local arg_type, mapping = openmphelper.generate_argument_type(symbols)
+          local arg = terralib.newsymbol(&arg_type, "arg")
+          local worker_init, launch_init = openmphelper.generate_argument_init(arg, arg_type, mapping)
           local terra omp_worker(data : &opaque)
-            var [rect] = [&rect_type](data)
+            var [arg] = [&arg_type](data)
+            [worker_init]
             [openmphelper.generate_preamble_structured(rect, 0, start_idx, end_idx)]
             for i = [start_idx], [end_idx] do
               var [symbol] = [symbol.type]{ __ptr = i }
@@ -6845,84 +6945,19 @@ function codegen.stat_for_list(cx, node)
           end
           return quote
             [actions]
-            var rect = c.legion_domain_get_rect_1d([domain])
-            [openmphelper.launch]([omp_worker], &rect, [openmphelper.get_num_threads](), 0)
+            var r = c.legion_domain_get_rect_1d([domain])
+            var [rect] = &r
+            var arg_obj : arg_type
+            var [arg] = &arg_obj
+            [launch_init]
+            [openmphelper.launch]([omp_worker], [arg], [openmphelper.get_num_threads](), 0)
             [cleanup_actions]
           end
         end
       end
     end
   else
-    -- Find variables defined from the outer scope
-    local undefined = {}
-    local defined = { [node.symbol] = true }
-    local accesses = {}
-    local function collect_symbol_pre(node)
-      if rawget(node, "node_type") then
-        if node:is(ast.typed.stat.Var) then
-          node.symbols:map(function(sym) defined[sym] = true end)
-        elseif node:is(ast.typed.stat.ForNum) or
-               node:is(ast.typed.stat.ForList) then
-          defined[node.symbol] = true
-        end
-      end
-    end
-    local function collect_symbol_post(node)
-      if rawget(node, "node_type") then
-        if node:is(ast.typed.expr.ID) and
-               not defined[node.value] and
-               not std.is_region(std.as_read(node.expr_type)) then
-          undefined[node.value] = true
-        elseif (node:is(ast.typed.expr.FieldAccess) or
-                node:is(ast.typed.expr.IndexAccess)) and
-               std.is_ref(node.expr_type) then
-          accesses[node] = true
-          if accesses[node.value] and
-             std.is_ref(node.expr_type) and
-             std.is_ref(node.value.expr_type) and
-             node.expr_type:bounds() == node.value.expr_type:bounds() then
-             accesses[node.value] = nil
-          end
-        elseif node:is(ast.typed.expr.FieldAccess) and
-               node.field_name == "bounds" and
-               (std.is_region(std.as_read(node.value.expr_type)) or
-                std.is_ispace(std.as_read(node.value.expr_type))) then
-          local ispace_type = std.as_read(node.value.expr_type)
-          if std.is_region(ispace_type) then
-            ispace_type = ispace_type:ispace()
-          end
-          undefined[cx:ispace(ispace_type).bounds] = true
-        elseif node:is(ast.typed.expr.Deref) and
-               std.is_ref(node.expr_type) and
-               node.expr_type:bounds() ~= node.value.expr_type:bounds() then
-          accesses[node] = true
-        end
-      end
-    end
-    ast.traverse_node_prepostorder(collect_symbol_pre,
-                                   collect_symbol_post,
-                                   node.block)
-
-    -- Base pointers need a special treatment to find them
-    local base_pointers = {}
-    local strides = {}
-    for node, _ in pairs(accesses) do
-      local value_type = std.as_read(node.expr_type)
-      node.expr_type:bounds():map(function(region)
-        local prefix = node.expr_type.field_path
-        local field_paths = std.flatten_struct_fields(value_type)
-        local absolute_field_paths = field_paths:map(
-          function(field_path) return prefix .. field_path end)
-        absolute_field_paths:map(function(field_path)
-          base_pointers[cx:region(region):base_pointer(field_path)] = true
-          local stride = cx:region(region):stride(field_path)
-          for idx = 2, #stride do strides[stride[idx]] = true end
-        end)
-      end)
-    end
-
     -- Now wrap the body as a terra function
-
     local indices = terralib.newlist()
     local lower_bounds = terralib.newlist()
     local upper_bounds = terralib.newlist()
@@ -7012,13 +7047,7 @@ function codegen.stat_for_list(cx, node)
       [body]
     end
 
-    local args = terralib.newlist()
-    for base_pointer, _ in pairs(base_pointers) do args:insert(base_pointer) end
-    for stride, _ in pairs(strides) do args:insert(stride) end
-    for symbol, _ in pairs(undefined) do
-      if std.is_symbol(symbol) then symbol = symbol:getsymbol() end
-      args:insert(symbol)
-    end
+    local args = collect_symbols(cx, node)
     args:insertall(lower_bounds)
     args:insertall(upper_bounds)
     args:sort(function(s1, s2) return sizeof(s1.type) > sizeof(s2.type) end)
