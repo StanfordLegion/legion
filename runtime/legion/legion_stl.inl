@@ -17,9 +17,116 @@
 
 #include "arrays.h"
 #include "accessor.h"
+#include "legion_utilities.h"
 
 namespace Legion {
   namespace STL {
+
+    template<typename T>
+    inline size_t set<T>::legion_buffer_size(void) const
+    {
+      return (sizeof(size_t) + (sizeof(T) * this->size()));
+    }
+
+    template<typename T>
+    inline void set<T>::legion_serialize(void *buffer) const
+    {
+      Serializer rez;
+      rez.serialize<size_t>(this->size());
+      for (typename std::set<T>::const_iterator it = 
+            this->begin(); it != this->end(); it++)
+        rez.serialize(*it);
+#ifdef DEBUG_LEGION
+      assert(rez.get_used_bytes() == legion_buffer_size());
+#endif
+      memcpy(buffer, rez.get_buffer(), rez.get_used_bytes());
+    }
+
+    template<typename T>
+    inline void set<T>::legion_deserialize(const void *buffer)
+    {
+      const char *ptr = (const char*)buffer;
+      size_t elements = *((const size_t*)ptr);
+      ptr += sizeof(elements);
+      Deserializer derez(ptr, elements * sizeof(T));
+      for (unsigned idx = 0; idx < elements; idx++)
+      {
+        T elem;
+        deserialize(elem);
+        this->insert(elem);
+      }
+    }
+
+    template<typename T1, typename T2>
+    inline size_t map<T1,T2>::legion_buffer_size(void) const
+    {
+      return (sizeof(size_t) + (sizeof(T1) + sizeof(T2)) * this->size());
+    }
+
+    template<typename T1, typename T2>
+    inline void map<T1,T2>::legion_serialize(void *buffer) const
+    {
+      Serializer rez;
+      rez.serialize<size_t>(this->size());
+      for (typename std::map<T1,T2>::const_iterator it = 
+            this->begin(); it != this->end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize(it->second);
+      }
+#ifdef DEBUG_LEGION
+      assert(rez.get_used_bytes() == legion_buffer_size());
+#endif
+      memcpy(buffer, rez.get_buffer(), rez.get_used_bytes());
+    }
+
+    template<typename T1, typename T2>
+    inline void map<T1,T2>::legion_deserialize(const void *buffer)
+    {
+      const char *ptr = (const char*)buffer;
+      size_t elements = *((const size_t*)ptr);
+      ptr += sizeof(elements);
+      Deserializer derez(ptr, elements * (sizeof(T1) + sizeof(T2)));
+      for (unsigned idx = 0; idx < elements; idx++)
+      {
+        T1 key;
+        derez.deserialize(key);
+        derez.deserialize((*this)[key]);
+      }
+    }
+
+    template<typename T>
+    inline size_t vector<T>::legion_buffer_size(void) const
+    {
+      return (sizeof(size_t) + (sizeof(T) * this->size()));
+    }
+
+    template<typename T>
+    inline void vector<T>::legion_serialize(void *buffer) const
+    {
+      Serializer rez;
+      rez.serialize<size_t>(this->size());
+      for (typename std::vector<T>::const_iterator it = 
+            this->begin(); it != this->end(); it++)
+        rez.serialize(*it);
+#ifdef DEBUG_LEGION
+      assert(rez.get_used_bytes() == legion_buffer_size());
+#endif
+      memcpy(buffer, rez.get_buffer(), rez.get_used_bytes());
+    }
+
+    template<typename T>
+    inline void vector<T>::legion_deserialize(const void *buffer)
+    {
+      const char *ptr = (const char*)buffer;
+      size_t elements = *((const size_t*)ptr);
+      ptr += sizeof(elements);
+      Deserializer derez(ptr, elements * sizeof(T));
+      this->resize(elements);
+      for (unsigned idx = 0; idx < elements; idx++)
+        derez.deserialize((*this)[idx]);
+    }
+
 #define GET_RAW_POINTERS(x)                                                   \
   std::vector<T##x *> ptrs_##x(task->regions[x].privilege_fields.size(),NULL);\
   ByteOffset offsets_##x[DIM##x];                                             \

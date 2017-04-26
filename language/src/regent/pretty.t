@@ -449,6 +449,14 @@ function pretty.expr_list_ispace(cx, node)
       ")"})
 end
 
+function pretty.expr_list_from_element(cx, node)
+  return join({
+      "list_from_element(",
+      commas({pretty.expr(cx, node.list),
+             pretty.expr(cx, node.value)}),
+      ")"})
+end
+
 function pretty.expr_phase_barrier(cx, node)
   return join({
       "phase_barrier(", commas({pretty.expr(cx, node.value)}), ")"})
@@ -704,6 +712,9 @@ function pretty.expr(cx, node)
 
   elseif node:is(ast.typed.expr.ListIspace) then
     return pretty.expr_list_ispace(cx, node)
+
+  elseif node:is(ast.typed.expr.ListFromElement) then
+    return pretty.expr_list_from_element(cx, node)
 
   elseif node:is(ast.typed.expr.PhaseBarrier) then
     return pretty.expr_phase_barrier(cx, node)

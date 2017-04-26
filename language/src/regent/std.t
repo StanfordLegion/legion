@@ -3253,6 +3253,20 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
     end
   end
 
+  if not std.is_list(element_type) then
+    terra st:num_leaves() : uint64
+      return self.__size
+    end
+  else
+    terra st:num_leaves() : uint64
+      var sum : uint64 = 0
+      for i = 0, self.__size do
+        sum = sum + [st:data(self)][i]:num_leaves()
+      end
+      return sum
+    end
+  end
+
   return st
 end)
 

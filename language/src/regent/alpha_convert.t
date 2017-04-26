@@ -171,6 +171,7 @@ local function alpha_convert_node(cx)
       node:is(ast.specialized.expr.ListInvert) or
       node:is(ast.specialized.expr.ListRange) or
       node:is(ast.specialized.expr.ListIspace) or
+      node:is(ast.specialized.expr.ListFromElement) or
       node:is(ast.specialized.expr.PhaseBarrier) or
       node:is(ast.specialized.expr.DynamicCollective) or
       node:is(ast.specialized.expr.DynamicCollectiveGetResult) or
