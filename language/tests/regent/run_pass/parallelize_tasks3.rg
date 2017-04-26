@@ -16,7 +16,8 @@
 -- [
 --  ["-ll:cpu", "4", "-fbounds-checks", "1", "-fdebug", "1",
 --   "-fparallelize-dop", "5"],
---  ["-ll:cpu", "4", "-fparallelize-dop", "7"]
+--  ["-ll:cpu", "4", "-fparallelize-dop", "7"],
+--  ["-ll:cpu", "4", "-fparallelize-dop", "4", "-fopenmp", "1"]
 -- ]
 
 import "regent"
@@ -44,6 +45,7 @@ task stencil(r : region(ispace(int1d), fs))
 where reads(r.f), reads writes(r.g)
 do
   var ts_start = c.legion_get_current_time_in_micros()
+  __demand(__openmp)
   for e in r do
     e.g = 0.5 * (e.f +
                  r[(e + 2) % r.bounds].f +

@@ -21,6 +21,7 @@ local std = require("regent/std")
 local symbol_table = require("regent/symbol_table")
 local codegen_hooks = require("regent/codegen_hooks")
 local cudahelper = require("regent/cudahelper")
+local openmphelper = require("regent/openmphelper")
 
 -- Configuration Variables
 
@@ -6665,6 +6666,90 @@ function codegen.stat_for_num_vectorized(cx, node)
   end
 end
 
+-- Find variables defined from the outer scope
+local function collect_symbols(cx, node)
+  local result = terralib.newlist()
+
+  local undefined = {}
+  local defined = { [node.symbol] = true }
+  local accesses = {}
+  local function collect_symbol_pre(node)
+    if rawget(node, "node_type") then
+      if node:is(ast.typed.stat.Var) then
+        node.symbols:map(function(sym) defined[sym] = true end)
+      elseif node:is(ast.typed.stat.ForNum) or
+             node:is(ast.typed.stat.ForList) then
+        defined[node.symbol] = true
+      end
+    end
+  end
+  local function collect_symbol_post(node)
+    if rawget(node, "node_type") then
+      if node:is(ast.typed.expr.ID) and
+             not defined[node.value] and
+             not std.is_region(std.as_read(node.expr_type)) then
+        undefined[node.value] = true
+      elseif (node:is(ast.typed.expr.FieldAccess) or
+              node:is(ast.typed.expr.IndexAccess)) and
+             std.is_ref(node.expr_type) then
+        accesses[node] = true
+        if accesses[node.value] and
+           std.is_ref(node.expr_type) and
+           std.is_ref(node.value.expr_type) and
+           node.expr_type:bounds() == node.value.expr_type:bounds() then
+           accesses[node.value] = nil
+        end
+      elseif node:is(ast.typed.expr.FieldAccess) and
+             node.field_name == "bounds" and
+             (std.is_region(std.as_read(node.value.expr_type)) or
+              std.is_ispace(std.as_read(node.value.expr_type))) then
+        local ispace_type = std.as_read(node.value.expr_type)
+        if std.is_region(ispace_type) then
+          ispace_type = ispace_type:ispace()
+        end
+        undefined[cx:ispace(ispace_type).bounds] = true
+      elseif node:is(ast.typed.expr.Deref) and
+             std.is_ref(node.expr_type) and
+             node.expr_type:bounds() ~= node.value.expr_type:bounds() then
+        accesses[node] = true
+      end
+    end
+  end
+  ast.traverse_node_prepostorder(collect_symbol_pre,
+                                 collect_symbol_post,
+                                 node.block)
+
+  -- Base pointers need a special treatment to find them
+  local base_pointers = {}
+  local strides = {}
+  for node, _ in pairs(accesses) do
+    local value_type = std.as_read(node.expr_type)
+    node.expr_type:bounds():map(function(region)
+      local prefix = node.expr_type.field_path
+      local field_paths = std.flatten_struct_fields(value_type)
+      local absolute_field_paths = field_paths:map(
+        function(field_path) return prefix .. field_path end)
+      absolute_field_paths:map(function(field_path)
+        base_pointers[cx:region(region):base_pointer(field_path)] = true
+        local stride = cx:region(region):stride(field_path)
+        for idx = 2, #stride do strides[stride[idx]] = true end
+      end)
+    end)
+  end
+
+  for base_pointer, _ in pairs(base_pointers) do
+    result:insert(base_pointer)
+  end
+  for stride, _ in pairs(strides) do
+    result:insert(stride) end
+  for symbol, _ in pairs(undefined) do
+    if std.is_symbol(symbol) then symbol = symbol:getsymbol() end
+    result:insert(symbol)
+  end
+
+  return result
+end
+
 function codegen.stat_for_list(cx, node)
   local symbol = node.symbol:getsymbol()
   local cx = cx:new_local_scope()
@@ -6730,7 +6815,18 @@ function codegen.stat_for_list(cx, node)
     end
   end
 
-  if not cx.task_meta:getcuda() then
+  local cuda = cx.task_meta:getcuda()
+  local openmp = node.annotations.openmp:is(ast.annotation.Demand) and
+                 openmphelper.check_openmp_available()
+  if node.annotations.openmp:is(ast.annotation.Demand) and
+     not openmphelper.check_openmp_available() then
+    report.warn(node,
+      "ignoring demand pragma at " .. node.span.source ..
+      ":" .. tostring(node.span.start.line) ..
+      " since the OpenMP module is unavailable")
+  end
+
+  if not cuda then
     if ispace_type.dim == 0 then
       return quote
         [actions]
@@ -6753,9 +6849,7 @@ function codegen.stat_for_list(cx, node)
     else
       local fields = ispace_type.index_type.fields
       if fields then
-        local rect_type = c["legion_rect_" .. tostring(ispace_type.dim) .. "d_t"]
         local domain_get_rect = c["legion_domain_get_rect_" .. tostring(ispace_type.dim) .. "d"]
-        local rect = terralib.newsymbol(rect_type, "rect")
         local index = fields:map(function(field) return terralib.newsymbol(c.coord_t, tostring(field)) end)
         local body = quote
           var [symbol] = [symbol.type] { __ptr = [symbol.type.index_type.impl_type]{ index } }
@@ -6763,105 +6857,115 @@ function codegen.stat_for_list(cx, node)
             [block]
           end
         end
-        for i = 1, ispace_type.dim do
-          local rect_i = i - 1 -- C is zero-based, Lua is one-based
-          body = quote
-            for [ index[i] ] = rect.lo.x[rect_i], rect.hi.x[rect_i] + 1 do
-              [body]
+        if not openmp then
+          local rect_type = c["legion_rect_" .. tostring(ispace_type.dim) .. "d_t"]
+          local rect = terralib.newsymbol(rect_type, "rect")
+          for i = 1, ispace_type.dim do
+            local rect_i = i - 1 -- C is zero-based, Lua is one-based
+            body = quote
+              for [ index[i] ] = [rect].lo.x[rect_i], [rect].hi.x[rect_i] + 1 do
+                [body]
+              end
             end
           end
-        end
-        return quote
-          [actions]
-          var [rect] = [domain_get_rect]([domain])
-          [body]
-          [cleanup_actions]
+          return quote
+            [actions]
+            var [rect] = [domain_get_rect]([domain])
+            [body]
+            [cleanup_actions]
+          end
+        else
+          local rect_type = c["legion_rect_" .. tostring(ispace_type.dim) .. "d_t"]
+          local rect = terralib.newsymbol(&rect_type, "rect")
+          for i = 1, ispace_type.dim do
+            local rect_i = i - 1 -- C is zero-based, Lua is one-based
+            if i ~= ispace_type.dim then
+              body = quote
+                for [ index[i] ] = [rect].lo.x[rect_i], [rect].hi.x[rect_i] + 1 do
+                  [body]
+                end
+              end
+            else
+              local start_idx = terralib.newsymbol(int64, "start_idx")
+              local end_idx = terralib.newsymbol(int64, "end_idx")
+              body = quote
+                [openmphelper.generate_preamble_structured(rect, rect_i, start_idx, end_idx)]
+                for [ index[i] ] = [start_idx], [end_idx] do
+                  [body]
+                end
+              end
+            end
+          end
+          local symbols = collect_symbols(cx, node)
+          symbols:insert(rect)
+          local arg_type, mapping = openmphelper.generate_argument_type(symbols)
+          local arg = terralib.newsymbol(&arg_type, "arg")
+          local worker_init, launch_init = openmphelper.generate_argument_init(arg, arg_type, mapping)
+          local terra omp_worker(data : &opaque)
+            var [arg] = [&arg_type](data)
+            [worker_init]
+            [body]
+          end
+          return quote
+            [actions]
+            var r = [domain_get_rect]([domain])
+            var [rect] = &r
+            var arg_obj : arg_type
+            var [arg] = &arg_obj
+            [launch_init]
+            [openmphelper.launch]([omp_worker], [arg], [openmphelper.get_num_threads](), 0)
+            [cleanup_actions]
+          end
         end
       else
-        return quote
-          [actions]
-          var rect = c.legion_domain_get_rect_1d([domain])
-          for i = rect.lo.x[0], rect.hi.x[0] + 1 do
-            var [symbol] = [symbol.type]{ __ptr = i }
-            do
-              [block]
+        if not openmp then
+          return quote
+            [actions]
+            var rect = c.legion_domain_get_rect_1d([domain])
+            for i = rect.lo.x[0], rect.hi.x[0] + 1 do
+              var [symbol] = [symbol.type]{ __ptr = i }
+              do
+                [block]
+              end
+            end
+            [cleanup_actions]
+          end
+        else
+          local start_idx = terralib.newsymbol(int64, "start_idx")
+          local end_idx = terralib.newsymbol(int64, "end_idx")
+          local rect_type = c.legion_rect_1d_t
+          local rect = terralib.newsymbol(&rect_type, "rect")
+          local symbols = collect_symbols(cx, node)
+          symbols:insert(rect)
+          local arg_type, mapping = openmphelper.generate_argument_type(symbols)
+          local arg = terralib.newsymbol(&arg_type, "arg")
+          local worker_init, launch_init = openmphelper.generate_argument_init(arg, arg_type, mapping)
+          local terra omp_worker(data : &opaque)
+            var [arg] = [&arg_type](data)
+            [worker_init]
+            [openmphelper.generate_preamble_structured(rect, 0, start_idx, end_idx)]
+            for i = [start_idx], [end_idx] do
+              var [symbol] = [symbol.type]{ __ptr = i }
+              do
+                [block]
+              end
             end
           end
-          [cleanup_actions]
+          return quote
+            [actions]
+            var r = c.legion_domain_get_rect_1d([domain])
+            var [rect] = &r
+            var arg_obj : arg_type
+            var [arg] = &arg_obj
+            [launch_init]
+            [openmphelper.launch]([omp_worker], [arg], [openmphelper.get_num_threads](), 0)
+            [cleanup_actions]
+          end
         end
       end
     end
   else
-    -- Find variables defined from the outer scope
-    local undefined = {}
-    local defined = { [node.symbol] = true }
-    local accesses = {}
-    local function collect_symbol_pre(node)
-      if rawget(node, "node_type") then
-        if node:is(ast.typed.stat.Var) then
-          node.symbols:map(function(sym) defined[sym] = true end)
-        elseif node:is(ast.typed.stat.ForNum) or
-               node:is(ast.typed.stat.ForList) then
-          defined[node.symbol] = true
-        end
-      end
-    end
-    local function collect_symbol_post(node)
-      if rawget(node, "node_type") then
-        if node:is(ast.typed.expr.ID) and
-               not defined[node.value] and
-               not std.is_region(std.as_read(node.expr_type)) then
-          undefined[node.value] = true
-        elseif (node:is(ast.typed.expr.FieldAccess) or
-                node:is(ast.typed.expr.IndexAccess)) and
-               std.is_ref(node.expr_type) then
-          accesses[node] = true
-          if accesses[node.value] and
-             std.is_ref(node.expr_type) and
-             std.is_ref(node.value.expr_type) and
-             node.expr_type:bounds() == node.value.expr_type:bounds() then
-             accesses[node.value] = nil
-          end
-        elseif node:is(ast.typed.expr.FieldAccess) and
-               node.field_name == "bounds" and
-               (std.is_region(std.as_read(node.value.expr_type)) or
-                std.is_ispace(std.as_read(node.value.expr_type))) then
-          local ispace_type = std.as_read(node.value.expr_type)
-          if std.is_region(ispace_type) then
-            ispace_type = ispace_type:ispace()
-          end
-          undefined[cx:ispace(ispace_type).bounds] = true
-        elseif node:is(ast.typed.expr.Deref) and
-               std.is_ref(node.expr_type) and
-               node.expr_type:bounds() ~= node.value.expr_type:bounds() then
-          accesses[node] = true
-        end
-      end
-    end
-    ast.traverse_node_prepostorder(collect_symbol_pre,
-                                   collect_symbol_post,
-                                   node.block)
-
-    -- Base pointers need a special treatment to find them
-    local base_pointers = {}
-    local strides = {}
-    for node, _ in pairs(accesses) do
-      local value_type = std.as_read(node.expr_type)
-      node.expr_type:bounds():map(function(region)
-        local prefix = node.expr_type.field_path
-        local field_paths = std.flatten_struct_fields(value_type)
-        local absolute_field_paths = field_paths:map(
-          function(field_path) return prefix .. field_path end)
-        absolute_field_paths:map(function(field_path)
-          base_pointers[cx:region(region):base_pointer(field_path)] = true
-          local stride = cx:region(region):stride(field_path)
-          for idx = 2, #stride do strides[stride[idx]] = true end
-        end)
-      end)
-    end
-
     -- Now wrap the body as a terra function
-
     local indices = terralib.newlist()
     local lower_bounds = terralib.newlist()
     local upper_bounds = terralib.newlist()
@@ -6951,13 +7055,7 @@ function codegen.stat_for_list(cx, node)
       [body]
     end
 
-    local args = terralib.newlist()
-    for base_pointer, _ in pairs(base_pointers) do args:insert(base_pointer) end
-    for stride, _ in pairs(strides) do args:insert(stride) end
-    for symbol, _ in pairs(undefined) do
-      if std.is_symbol(symbol) then symbol = symbol:getsymbol() end
-      args:insert(symbol)
-    end
+    local args = collect_symbols(cx, node)
     args:insertall(lower_bounds)
     args:insertall(upper_bounds)
     args:sort(function(s1, s2) return sizeof(s1.type) > sizeof(s2.type) end)
@@ -7016,7 +7114,7 @@ function codegen.stat_for_list(cx, node)
 end
 
 function codegen.stat_for_list_vectorized(cx, node)
-  if cx.task_meta:getcuda() then
+  if cx.task_meta:getcuda() or node.annotations.openmp:is(ast.annotation.Demand) then
     return codegen.stat_for_list(cx,
       ast.typed.stat.ForList {
         symbol = node.symbol,
