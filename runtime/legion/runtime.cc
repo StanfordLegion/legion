@@ -1833,9 +1833,10 @@ namespace Legion {
         // Stage 0 always starts with 0 notifications since we'll 
         // explictcly arrive on it
         stage_notifications[0] = 0;
-	// Special case: if we expect a stage -1 message from a non-participating
-	//  space, we'll count that as part of stage 0, it will make it a
-        //  negative count, but the type is 'int' so we're good
+	// Special case: if we expect a stage -1 message from a 
+        // non-participating space, we'll count that as part of 
+        // stage 0, it will make it a negative count, but the 
+        // type is 'int' so we're good
 	if ((Runtime::legion_collective_stages > 0) &&
 	    (runtime->address_space <
 	     (runtime->total_address_spaces -
