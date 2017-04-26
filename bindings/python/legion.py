@@ -249,6 +249,8 @@ class Region(object):
             raise AttributeError()
 
 class RegionField(numpy.ndarray):
+    # NumPy requires us to implement __new__ for subclasses of ndarray:
+    # https://docs.scipy.org/doc/numpy/user/basics.subclassing.html
     def __new__(cls, ctx, region, field_name):
         accessor = RegionField._get_accessor(ctx, region, field_name)
         initializer = RegionField._get_array_initializer(ctx, region, field_name, accessor)
