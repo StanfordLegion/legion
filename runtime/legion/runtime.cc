@@ -1957,7 +1957,7 @@ namespace Legion {
         if (stage >= 0)
         {
 #ifdef DEBUG_LEGION
-          assert(stage < stage_notifications.size());
+          assert(stage < int(stage_notifications.size()));
           if (stage == (Runtime::legion_collective_stages-1))
             assert(stage_notifications[stage] <= 
                   Runtime::legion_collective_last_radix); 
