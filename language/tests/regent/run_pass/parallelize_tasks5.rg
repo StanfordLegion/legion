@@ -16,7 +16,8 @@
 -- [
 --  ["-ll:cpu", "4", "-fbounds-checks", "1", "-fdebug", "1",
 --   "-fparallelize-dop", "9"],
---  ["-ll:cpu", "4"]
+--  ["-ll:cpu", "4"],
+--  ["-ll:cpu", "4", "-fparallelize-dop", "4", "-fopenmp", "1"]
 -- ]
 
 import "regent"
@@ -45,6 +46,7 @@ task stencil1(interior : region(ispace(int2d), fs),
 where reads(r.f), reads writes(r.g), interior <= r
 do
   var ts_start = c.legion_get_current_time_in_micros()
+  __demand(__openmp)
   for e in interior do
     r[e].g = 0.5 * (r[e].f +
                     r[e + {-2, 0}].f + r[e + {0, -1}].f +
@@ -60,6 +62,7 @@ task stencil2(interior : region(ispace(int2d), fs),
 where reads(r.f), reads writes(r.g), interior <= r
 do
   var ts_start = c.legion_get_current_time_in_micros()
+  __demand(__openmp)
   for e in interior do
     r[e].g = 0.5 * (r[e].f +
                     r[e + {-1, 0}].f + r[e + {0, -1}].f +
@@ -74,6 +77,7 @@ task stencil3(r : region(ispace(int2d), fs))
 where reads(r.f), reads writes(r.g)
 do
   var ts_start = c.legion_get_current_time_in_micros()
+  __demand(__openmp)
   for e in r do
     r[e].g = 0.5 * (r[e].f + r[(e + {2, 0}) % r.bounds].f)
   end
