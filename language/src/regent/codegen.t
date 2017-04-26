@@ -6816,7 +6816,15 @@ function codegen.stat_for_list(cx, node)
   end
 
   local cuda = cx.task_meta:getcuda()
-  local openmp = std.config["openmp"] and node.annotations.openmp:is(ast.annotation.Demand)
+  local openmp = node.annotations.openmp:is(ast.annotation.Demand) and
+                 openmphelper.check_openmp_available()
+  if node.annotations.openmp:is(ast.annotation.Demand) and
+     not openmphelper.check_openmp_available() then
+    report.warn(node,
+      "ignoring demand pragma at " .. node.span.source ..
+      ":" .. tostring(node.span.start.line) ..
+      " since the OpenMP module is unavailable")
+  end
 
   if not cuda then
     if ispace_type.dim == 0 then

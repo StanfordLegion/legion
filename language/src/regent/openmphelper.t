@@ -12,17 +12,46 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-local omp_abi = terralib.includecstring [[
-extern int omp_get_num_threads(void);
-extern int omp_get_thread_num(void);
-extern void GOMP_parallel(void (*fnptr)(void *data), void *data, int nthreads, unsigned flags);
-]]
+local config = require("regent/config")
 
-local omp = {
-  get_num_threads = omp_abi.omp_get_num_threads,
-  get_thread_num = omp_abi.omp_get_thread_num,
-  launch = omp_abi.GOMP_parallel,
-}
+local omp = {}
+
+local has_openmp = false
+do
+  local dlfcn = terralib.includec("dlfcn.h")
+  local terra find_openmp_symbols()
+    var lib = dlfcn.dlopen([&int8](0), dlfcn.RTLD_LAZY)
+    var has_openmp = 
+      dlfcn.dlsym(lib, "GOMP_parallel") ~= [&opaque](0) and
+      dlfcn.dlsym(lib, "omp_get_num_threads") ~= [&opaque](0) and
+      dlfcn.dlsym(lib, "omp_get_thread_num") ~= [&opaque](0)
+    dlfcn.dlclose(lib)
+    return has_openmp
+  end
+  has_openmp = find_openmp_symbols()
+end
+
+if not (config.args()["openmp"] and has_openmp) then
+  omp.check_openmp_available = function() return false end
+  terra omp.get_num_threads() return 1 end
+  terra omp.get_thread_num() return 0 end
+  local omp_worker_type =
+    terralib.types.functype(terralib.newlist({&opaque}), terralib.types.unit, false)
+  terra omp.launch(fnptr : &omp_worker_type, data : &opaque, nthreads : int32, flags : uint32)
+    fnptr(data)
+  end
+else
+  omp.check_openmp_available = function() return true end
+  local omp_abi = terralib.includecstring [[
+    extern int omp_get_num_threads(void);
+    extern int omp_get_thread_num(void);
+    extern void GOMP_parallel(void (*fnptr)(void *data), void *data, int nthreads, unsigned flags);
+  ]]
+
+  omp.get_num_threads = omp_abi.omp_get_num_threads
+  omp.get_thread_num = omp_abi.omp_get_thread_num
+  omp.launch = omp_abi.GOMP_parallel
+end
 
 function omp.generate_preamble_structured(rect, idx, start_idx, end_idx)
   return quote
