@@ -1829,10 +1829,12 @@ namespace Legion {
       if (participating)
       {
         sent_stages.resize(Runtime::legion_collective_stages, false);
+#ifdef DEBUG_LEGION
+        assert(Runtime::legion_collective_stages > 0);
+#endif
         stage_notifications.resize(Runtime::legion_collective_stages, 1);
         // Stage 0 always starts with 0 notifications since we'll 
         // explictcly arrive on it
-        stage_notifications[0] = 0;
 	// Special case: if we expect a stage -1 message from a 
         // non-participating space, we'll count that as part of 
         // stage 0, it will make it a negative count, but the 
@@ -1841,7 +1843,9 @@ namespace Legion {
 	    (runtime->address_space <
 	     (runtime->total_address_spaces -
 	      Runtime::legion_collective_participating_spaces)))
-	  stage_notifications[0]--;
+	  stage_notifications[0] = -1;
+        else
+          stage_notifications[0] = 0;
       }
       if (runtime->total_address_spaces > 1)
         done_event = Runtime::create_rt_user_event();
