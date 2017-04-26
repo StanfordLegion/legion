@@ -31,7 +31,8 @@ def f(ctx, x, y, z):
 def inc(ctx, R, step):
     print("inside task inc%s" % ((R,),))
 
-    # Sanity check that the values written by init are here.
+    # Sanity check that the values written by init are here, and that
+    # they follow the same array ordering.
     print(R.x)
     for x in xrange(0, 4):
         for y in xrange(0, 4):
