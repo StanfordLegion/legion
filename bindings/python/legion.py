@@ -179,10 +179,14 @@ class Fspace(object):
             ctx.runtime, ctx.context, handle)
         field_ids = {}
         field_types = {}
-        for field_name, field_type in fields.items():
+        for field_name, field_entry in fields.items():
+            try:
+                field_type, field_id = field_entry
+            except TypeError:
+                field_type = field_entry
+                field_id = ffi.cast('legion_field_id_t', -1) # AUTO_GENERATE_ID
             field_id = c.legion_field_allocator_allocate_field(
-                alloc, field_type.size,
-                ffi.cast('legion_field_id_t', -1)) # AUTO_GENERATE_ID
+                alloc, field_type.size, field_id)
             c.legion_field_id_attach_name(
                 ctx.runtime, handle, field_id, field_name, False)
             field_ids[field_name] = field_id
@@ -316,6 +320,65 @@ class _RegionNdarray(object):
             'strides': strides,
         }
 
+class ExternTask(object):
+    __slots__ = ['privileges', 'task_id']
+
+    def __init__(self, task_id, privileges=None):
+        if privileges is not None:
+            privileges = [(x if x is not None else N) for x in privileges]
+        self.privileges = privileges
+
+        assert isinstance(task_id, int)
+        self.task_id = task_id
+
+    def __call__(self, *args):
+        return self.spawn_task(*args)
+
+    def spawn_task(self, ctx, *args):
+        assert(isinstance(ctx, Context))
+
+        # FIXME: Encode arguments.
+        task_args = ffi.new('legion_task_argument_t *')
+        task_args[0].args = ffi.NULL
+        task_args[0].arglen = 0
+
+        # Construct the task launcher.
+        launcher = c.legion_task_launcher_create(
+            self.task_id, task_args[0], c.legion_predicate_true(), 0, 0)
+        if self.privileges is not None:
+            assert(len(self.privileges) == len(args))
+        for i, arg in zip(range(len(args)), args):
+            if isinstance(arg, Region):
+                priv = self.privileges[i]
+                req = c.legion_task_launcher_add_region_requirement_logical_region(
+                    launcher, arg.handle[0],
+                    priv._legion_privilege(),
+                    0, # EXCLUSIVE
+                    arg.handle[0], 0, False)
+                if hasattr(priv, 'fields'):
+                    assert set(priv.fields) <= set(arg.fspace.field_ids.keys())
+                for name, fid in arg.fspace.field_ids.items():
+                    if not hasattr(priv, 'fields') or name in priv.fields:
+                        c.legion_task_launcher_add_field(
+                            launcher, req, fid, True)
+            else:
+                # FIXME: Task arguments aren't being encoded AT ALL;
+                # at least throw an exception so that the user knows
+                raise Exception('External tasks do not support non-region arguments')
+
+        # Launch the task.
+        result = c.legion_task_launcher_execute(
+            ctx.runtime, ctx.context, launcher)
+        c.legion_task_launcher_destroy(launcher)
+
+        # Build future of result.
+        future = Future(result)
+        c.legion_future_destroy(result)
+        return future
+
+def extern_task(**kwargs):
+    return ExternTask(**kwargs)
+
 class Task (object):
     __slots__ = ['body', 'privileges', 'task_id']
 
@@ -411,10 +474,10 @@ class Task (object):
 
         # Unpack physical regions.
         if self.privileges is not None:
-            assert num_regions[0] == len(self.privileges)
             req = 0
             for i, arg in zip(range(len(args)), args):
                 if isinstance(arg, Region):
+                    assert req < num_regions[0]
                     instance = raw_regions[0][req]
                     req += 1
 
@@ -424,6 +487,7 @@ class Task (object):
                     for name, fid in arg.fspace.field_ids.items():
                         if not hasattr(priv, 'fields') or name in priv.fields:
                             arg.set_instance(name, instance, priv)
+            assert req == num_regions[0]
 
         # Build context.
         ctx = Context(context[0], runtime[0], task[0], regions)

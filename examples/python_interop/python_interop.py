@@ -20,43 +20,24 @@ from __future__ import print_function
 import legion
 import numpy
 
+init = legion.extern_task(task_id=3, privileges=[legion.RW])
+
 @legion.task
 def f(ctx, x, y, z):
     print("inside task f%s" % ((x, y, z),))
     return x+1
 
-@legion.task(privileges = [legion.RW])
-def g(ctx, R):
-    print("inside task g%s" % ((R,),))
+@legion.task(privileges=[legion.RW, None])
+def inc(ctx, R, step):
+    print("inside task inc%s" % ((R,),))
 
-    # Use generic accessors to fill the array with some pattern. This
-    # is to sanity check that NumPy is using the same indexing as
-    # Legion.
-
-    point = legion.ffi.new("legion_point_2d_t *")
-    value = legion.ffi.new("double *")
-    for x in xrange(0, 4):
-        for y in xrange(0, 4):
-            point.x[0] = x
-            point.x[1] = y
-            value[0] = float(x*4 + y)
-            legion.c.legion_accessor_generic_write_domain_point(
-                R.x.accessor,
-                legion.c.legion_domain_point_from_point_2d(point[0]),
-                value, legion.ffi.sizeof("double"))
-
-    # If we access elements through the NumPy array, we should get the
-    # same values back.
+    # Sanity check that the values written by init are here.
     print(R.x)
     for x in xrange(0, 4):
         for y in xrange(0, 4):
             assert int(R.x[x][y]) == x*4 + y
 
-    ones = numpy.ones([4, 4])
-    numpy.add(R.x, ones, out=R.x)
-    print(R.x)
-
-    R.x.fill(1)
+    numpy.add(R.x, step, out=R.x)
     print(R.x)
 
 @legion.task
@@ -66,8 +47,6 @@ def main_task(ctx):
     x = f(ctx, 1, "asdf", True)
     print("result of f is %s" % x)
 
-    R = legion.Region.create(ctx, [4, 4], {'x': legion.double})
-    print("region %s" % R)
-    # print("field %s" % R.x)
-
-    g(ctx, R)
+    R = legion.Region.create(ctx, [4, 4], {'x': (legion.double, 1)})
+    init(ctx, R)
+    inc(ctx, R, 1)
