@@ -6103,16 +6103,7 @@ namespace Legion {
           preconditions.insert(precondition);
         }
         else
-        {
           state->add_nested_resource_ref(owner_did);
-          // We are the root so add our valid ref too
-          WrapperReferenceMutator mutator(preconditions);
-          if (state->is_owner())
-            state->add_nested_valid_ref(owner_did, &mutator);
-          else
-            state->send_remote_valid_update(state->owner_space, &mutator,
-                                            1/*count*/, true/*add*/);
-        }
       }
       return result;
     }
@@ -6124,13 +6115,6 @@ namespace Legion {
       const DeferCompositeNodeRefArgs *nargs = 
         (const DeferCompositeNodeRefArgs*)args;
       nargs->state->add_nested_resource_ref(nargs->owner_did);
-      // We are the root so add our valid ref too
-      LocalReferenceMutator mutator;
-      if (nargs->state->is_owner())
-        nargs->state->add_nested_valid_ref(nargs->owner_did, &mutator);
-      else
-        nargs->state->send_remote_valid_update(nargs->state->owner_space,
-                                      &mutator, 1/*count*/, true/*add*/);
     }
 
     //--------------------------------------------------------------------------
