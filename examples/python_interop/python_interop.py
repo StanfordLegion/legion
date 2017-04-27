@@ -27,7 +27,7 @@ def f(ctx, x, y, z):
     print("inside task f%s" % ((x, y, z),))
     return x+1
 
-@legion.task(privileges=[legion.RW, None])
+@legion.task(privileges=[legion.RW])
 def inc(ctx, R, step):
     print("inside task inc%s" % ((R,),))
 

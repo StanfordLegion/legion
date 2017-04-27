@@ -418,10 +418,9 @@ class Task (object):
         # Construct the task launcher.
         launcher = c.legion_task_launcher_create(
             self.task_id, task_args[0], c.legion_predicate_true(), 0, 0)
-        if self.privileges is not None:
-            assert(len(self.privileges) == len(args))
         for i, arg in zip(range(len(args)), args):
             if isinstance(arg, Region):
+                assert i < len(self.privileges)
                 priv = self.privileges[i]
                 req = c.legion_task_launcher_add_region_requirement_logical_region(
                     launcher, arg.handle[0],
@@ -477,7 +476,7 @@ class Task (object):
             req = 0
             for i, arg in zip(range(len(args)), args):
                 if isinstance(arg, Region):
-                    assert req < num_regions[0]
+                    assert req < num_regions[0] and req < len(self.privileges)
                     instance = raw_regions[0][req]
                     req += 1
 
