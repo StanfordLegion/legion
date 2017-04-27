@@ -14,7 +14,7 @@
 
 -- runs-with:
 -- [
---   ["-ll:cpu", "2"],
+--   ["-ll:cpu", "2", "-fflow-spmd", "0"],
 --   ["-ll:cpu", "4", "-fflow-spmd", "1"],
 --   ["-ll:cpu", "2", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "2"]
 -- ]
