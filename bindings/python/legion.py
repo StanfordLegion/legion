@@ -335,46 +335,11 @@ class ExternTask(object):
         return self.spawn_task(*args)
 
     def spawn_task(self, ctx, *args):
-        assert(isinstance(ctx, Context))
-
-        # FIXME: Encode arguments.
-        task_args = ffi.new('legion_task_argument_t *')
-        task_args[0].args = ffi.NULL
-        task_args[0].arglen = 0
-
-        # Construct the task launcher.
-        launcher = c.legion_task_launcher_create(
-            self.task_id, task_args[0], c.legion_predicate_true(), 0, 0)
-        if self.privileges is not None:
-            assert(len(self.privileges) == len(args))
-        for i, arg in zip(range(len(args)), args):
-            if isinstance(arg, Region):
-                priv = self.privileges[i]
-                req = c.legion_task_launcher_add_region_requirement_logical_region(
-                    launcher, arg.handle[0],
-                    priv._legion_privilege(),
-                    0, # EXCLUSIVE
-                    arg.handle[0], 0, False)
-                if hasattr(priv, 'fields'):
-                    assert set(priv.fields) <= set(arg.fspace.field_ids.keys())
-                for name, fid in arg.fspace.field_ids.items():
-                    if not hasattr(priv, 'fields') or name in priv.fields:
-                        c.legion_task_launcher_add_field(
-                            launcher, req, fid, True)
-            else:
-                # FIXME: Task arguments aren't being encoded AT ALL;
-                # at least throw an exception so that the user knows
-                raise Exception('External tasks do not support non-region arguments')
-
-        # Launch the task.
-        result = c.legion_task_launcher_execute(
-            ctx.runtime, ctx.context, launcher)
-        c.legion_task_launcher_destroy(launcher)
-
-        # Build future of result.
-        future = Future(result)
-        c.legion_future_destroy(result)
-        return future
+        launcher = _TaskLauncher(
+            task_id=self.task_id,
+            privileges=self.privileges,
+            calling_convention=None)
+        return launcher.spawn_task(ctx, *args)
 
 def extern_task(**kwargs):
     return ExternTask(**kwargs)
@@ -406,43 +371,11 @@ class Task (object):
             return self.spawn_task(*args)
 
     def spawn_task(self, ctx, *args):
-        assert(isinstance(ctx, Context))
-
-        # Encode arguments in Pickle format.
-        arg_str = cPickle.dumps(args, protocol=_pickle_version)
-        task_args = ffi.new('legion_task_argument_t *')
-        task_args_buffer = ffi.new('char[]', arg_str)
-        task_args[0].args = task_args_buffer
-        task_args[0].arglen = len(arg_str)
-
-        # Construct the task launcher.
-        launcher = c.legion_task_launcher_create(
-            self.task_id, task_args[0], c.legion_predicate_true(), 0, 0)
-        for i, arg in zip(range(len(args)), args):
-            if isinstance(arg, Region):
-                assert i < len(self.privileges)
-                priv = self.privileges[i]
-                req = c.legion_task_launcher_add_region_requirement_logical_region(
-                    launcher, arg.handle[0],
-                    priv._legion_privilege(),
-                    0, # EXCLUSIVE
-                    arg.handle[0], 0, False)
-                if hasattr(priv, 'fields'):
-                    assert set(priv.fields) <= set(arg.fspace.field_ids.keys())
-                for name, fid in arg.fspace.field_ids.items():
-                    if not hasattr(priv, 'fields') or name in priv.fields:
-                        c.legion_task_launcher_add_field(
-                            launcher, req, fid, True)
-
-        # Launch the task.
-        result = c.legion_task_launcher_execute(
-            ctx.runtime, ctx.context, launcher)
-        c.legion_task_launcher_destroy(launcher)
-
-        # Build future of result.
-        future = Future(result)
-        c.legion_future_destroy(result)
-        return future
+        launcher = _TaskLauncher(
+            task_id=self.task_id,
+            privileges=self.privileges,
+            calling_convention='python')
+        return launcher.spawn_task(ctx, *args)
 
     def execute_task(self, raw_args, user_data, proc):
         raw_arg_ptr = ffi.new('char[]', bytes(raw_args))
@@ -547,3 +480,60 @@ def task(body=None, **kwargs):
     if body is None:
         return lambda body: task(body, **kwargs)
     return Task(body, **kwargs)
+
+class _TaskLauncher(object):
+    __slots__ = ['task_id', 'privileges', 'calling_convention']
+
+    def __init__(self, task_id, privileges, calling_convention):
+        self.task_id = task_id
+        self.privileges = privileges
+        self.calling_convention = calling_convention
+
+    def spawn_task(self, ctx, *args):
+        assert(isinstance(ctx, Context))
+
+        # Encode task arguments.
+        task_args = ffi.new('legion_task_argument_t *')
+        if self.calling_convention == 'python':
+            arg_str = cPickle.dumps(args, protocol=_pickle_version)
+            task_args_buffer = ffi.new('char[]', arg_str)
+            task_args[0].args = task_args_buffer
+            task_args[0].arglen = len(arg_str)
+        else:
+            # FIXME: External tasks need a dedicated calling
+            # convention to permit the passing of task arguments.
+            task_args[0].args = ffi.NULL
+            task_args[0].arglen = 0
+
+        # Construct the task launcher.
+        launcher = c.legion_task_launcher_create(
+            self.task_id, task_args[0], c.legion_predicate_true(), 0, 0)
+        for i, arg in zip(range(len(args)), args):
+            if isinstance(arg, Region):
+                assert i < len(self.privileges)
+                priv = self.privileges[i]
+                req = c.legion_task_launcher_add_region_requirement_logical_region(
+                    launcher, arg.handle[0],
+                    priv._legion_privilege(),
+                    0, # EXCLUSIVE
+                    arg.handle[0], 0, False)
+                if hasattr(priv, 'fields'):
+                    assert set(priv.fields) <= set(arg.fspace.field_ids.keys())
+                for name, fid in arg.fspace.field_ids.items():
+                    if not hasattr(priv, 'fields') or name in priv.fields:
+                        c.legion_task_launcher_add_field(
+                            launcher, req, fid, True)
+            elif self.calling_convention is None:
+                # FIXME: Task arguments aren't being encoded AT ALL;
+                # at least throw an exception so that the user knows
+                raise Exception('External tasks do not support non-region arguments')
+
+        # Launch the task.
+        result = c.legion_task_launcher_execute(
+            ctx.runtime, ctx.context, launcher)
+        c.legion_task_launcher_destroy(launcher)
+
+        # Build future of result.
+        future = Future(result)
+        c.legion_future_destroy(result)
+        return future
