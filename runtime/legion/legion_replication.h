@@ -129,10 +129,11 @@ namespace Legion {
       void perform_collective_wait(void);
       virtual void handle_collective_message(Deserializer &derez);
     protected:
-      void send_explicit_stage(int stage);
+      bool send_explicit_stage(int stage);
       bool send_ready_stages(void);
       void construct_message(ShardID target, int stage, Serializer &rez) const;
       void unpack_stage(int stage, Deserializer &derez);
+      void complete_exchange(void);
     public: 
       const int shard_collective_radix;
       const int shard_collective_log_radix;

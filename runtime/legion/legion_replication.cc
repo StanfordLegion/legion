@@ -3093,14 +3093,23 @@ namespace Legion {
     { 
       if (participating)
       {
+#ifdef DEBUG_LEGION
+        assert(shard_collective_stages > 0);
+#endif
         stage_notifications.resize(shard_collective_stages, 1);
         sent_stages.resize(shard_collective_stages, false);
-        // Special case: if we expect a stage -1 message from a 
-        // non-participating shard, we'll count that as part of stage 0
+        // Stage 0 always starts with 0 notifications since we'll 
+        // explictcly arrive on it
+	// Special case: if we expect a stage -1 message from a 
+        // non-participating space, we'll count that as part of 
+        // stage 0, it will make it a negative count, but the 
+        // type is 'int' so we're good
         if ((shard_collective_stages > 0) &&
             (local_shard < 
              (manager->total_shards - shard_collective_participating_shards)))
-          stage_notifications[0]--;
+          stage_notifications[0] = -1;
+        else
+          stage_notifications[0] = 0;
       }
       if (manager->total_shards > 1)
         done_event = Runtime::create_rt_user_event();
@@ -3123,14 +3132,23 @@ namespace Legion {
     {
       if (participating)
       {
+#ifdef DEBUG_LEGION
+        assert(shard_collective_stages > 0);
+#endif
         stage_notifications.resize(shard_collective_stages, 1);
         sent_stages.resize(shard_collective_stages, false);
-        // Special case: if we expect a stage -1 message from a 
-        // non-participating shard, we'll count that as part of stage 0
+        // Stage 0 always starts with 0 notifications since we'll 
+        // explictcly arrive on it
+	// Special case: if we expect a stage -1 message from a 
+        // non-participating space, we'll count that as part of 
+        // stage 0, it will make it a negative count, but the 
+        // type is 'int' so we're good
         if ((shard_collective_stages > 0) &&
             (local_shard < 
              (manager->total_shards - shard_collective_participating_shards)))
-          stage_notifications[0]--;
+          stage_notifications[0] = -1;
+        else
+          stage_notifications[0] = 0;
       }
       if (manager->total_shards > 1)
         done_event = Runtime::create_rt_user_event();
@@ -3166,7 +3184,11 @@ namespace Legion {
               shard_collective_participating_shards) ||
             (local_shard >= (manager->total_shards - 
                              shard_collective_participating_shards)))
-          send_explicit_stage(0);
+        {
+          const bool all_stages_done = send_explicit_stage(0);
+          if (all_stages_done)
+            complete_exchange();
+        }
       }
       else
       {
@@ -3196,39 +3218,53 @@ namespace Legion {
       assert(participating || (stage == -1));
 #endif
       unpack_stage(stage, derez);
+      bool all_stages_done = false;
       if (stage == -1)
       {
         if (!participating)
-        {
           Runtime::trigger_event(done_event);
-          return;
-        }
         else
-          send_explicit_stage(0); // we can now send stage 0
+          all_stages_done = send_explicit_stage(0); // we can now send stage 0
       }
-      const bool all_stages_done = send_ready_stages();
+      else
+        all_stages_done = send_ready_stages();
       if (all_stages_done)
-      {
-        // We are done
-        Runtime::trigger_event(done_event);
-        // See if we have to send a message back to a
-        // non-participating shard 
-        if ((int(manager->total_shards) > shard_collective_participating_shards)
-            && (int(local_shard) < int(manager->total_shards - 
-                                        shard_collective_participating_shards)))
-          send_explicit_stage(-1);
-      }
+        complete_exchange();
     }
 
     //--------------------------------------------------------------------------
-    void AllGatherCollective::send_explicit_stage(int stage) 
+    bool AllGatherCollective::send_explicit_stage(int stage) 
     //--------------------------------------------------------------------------
     {
+      bool all_stages_done = false;
       {
         AutoLock c_lock(collective_lock);
         // Mark that we're sending this stage
         if (stage >= 0)
+        {
+#ifdef DEBUG_LEGION
+          assert(stage < int(stage_notifications.size()));
+          if (stage == (shard_collective_stages-1))
+            assert(stage_notifications[stage] < shard_collective_last_radix);
+          else
+            assert(stage_notifications[stage] < shard_collective_radix);
+#endif
+          stage_notifications[stage]++;
           sent_stages[stage] = true;
+          // Check to see if all the stages are done
+          all_stages_done = 
+            (stage_notifications.back() == shard_collective_last_radix);
+          if (all_stages_done)
+          {
+            for (int stage = 1; stage < shard_collective_stages; stage++)
+            {
+              if (stage_notifications[stage-1] == shard_collective_radix)
+                continue;
+              all_stages_done = false;
+              break;
+            }
+          }
+        }
       }
       if (stage == -1)
       {
@@ -3286,6 +3322,7 @@ namespace Legion {
           }
         }
       }
+      return all_stages_done;
     }
 
     //--------------------------------------------------------------------------
@@ -3297,16 +3334,13 @@ namespace Legion {
 #endif
       // Iterate through the stages and send any that are ready
       // Remember that stages have to be done in order
-      for (int stage = 0; stage < shard_collective_stages; stage++)
+      for (int stage = 1; stage < shard_collective_stages; stage++)
       {
         {
           AutoLock c_lock(collective_lock);
           // If this stage has already been sent then we can keep going
           if (sent_stages[stage])
             continue;
-          // Stage 0 should always be explicitly sent
-          if (stage == 0)
-            return false;
           // Check to see if we're sending this stage
           // We need all the notifications from the previous stage before
           // we can send this stage
@@ -3371,6 +3405,20 @@ namespace Legion {
     {
       AutoLock c_lock(collective_lock);
       unpack_collective_stage(derez, stage);
+    }
+
+    //--------------------------------------------------------------------------
+    void AllGatherCollective::complete_exchange(void)
+    //--------------------------------------------------------------------------
+    {
+      // We are done
+      Runtime::trigger_event(done_event);
+      // See if we have to send a message back to a
+      // non-participating shard 
+      if ((int(manager->total_shards) > shard_collective_participating_shards)
+          && (int(local_shard) < int(manager->total_shards - 
+                                      shard_collective_participating_shards)))
+        send_explicit_stage(-1);
     }
 
     /////////////////////////////////////////////////////////////
