@@ -61,6 +61,8 @@ function parser.annotation_name(p, required)
     return "external"
   elseif p:nextif("__inline") then
     return "inline"
+  elseif p:nextif("__openmp") then
+    return "openmp"
   elseif p:nextif("__parallel") then
     return "parallel"
   elseif p:nextif("__spmd") then

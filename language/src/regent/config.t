@@ -30,6 +30,7 @@ local default_options = {
   ["leaf"] = true,
   ["inner"] = true,
   ["mapping"] = true,
+  ["openmp"] = false,
   ["vectorize"] = true,
   ["vectorize-unsafe"] = false,
 
