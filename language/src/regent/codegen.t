@@ -6671,6 +6671,7 @@ local function collect_symbols(cx, node)
   local result = terralib.newlist()
 
   local undefined = {}
+  local reduction_variables = {}
   local defined = { [node.symbol] = true }
   local accesses = {}
   local function collect_symbol_pre(node)
@@ -6712,6 +6713,11 @@ local function collect_symbols(cx, node)
              std.is_ref(node.expr_type) and
              node.expr_type:bounds() ~= node.value.expr_type:bounds() then
         accesses[node] = true
+      elseif node:is(ast.typed.stat.Reduce) then
+        local lh = node.lhs[1]
+        if lh:is(ast.typed.expr.ID) then
+          reduction_variables[lh.value:getsymbol()] = node.op
+        end
       end
     end
   end
@@ -6747,7 +6753,7 @@ local function collect_symbols(cx, node)
     result:insert(symbol)
   end
 
-  return result
+  return result, reduction_variables
 end
 
 function codegen.stat_for_list(cx, node)
@@ -6896,15 +6902,21 @@ function codegen.stat_for_list(cx, node)
               end
             end
           end
-          local symbols = collect_symbols(cx, node)
+          local symbols, reductions = collect_symbols(cx, node)
           symbols:insert(rect)
-          local arg_type, mapping = openmphelper.generate_argument_type(symbols)
+          local arg_type, mapping = openmphelper.generate_argument_type(symbols, reductions)
           local arg = terralib.newsymbol(&arg_type, "arg")
-          local worker_init, launch_init = openmphelper.generate_argument_init(arg, arg_type, mapping)
+          local worker_init, launch_init =
+            openmphelper.generate_argument_init(arg, arg_type, mapping, reductions)
+          local worker_cleanup =
+            openmphelper.generate_worker_cleanup(arg, arg_type, mapping, reductions)
+          local launcher_cleanup =
+            openmphelper.generate_launcher_cleanup(arg, arg_type, mapping, reductions)
           local terra omp_worker(data : &opaque)
             var [arg] = [&arg_type](data)
             [worker_init]
             [body]
+            [worker_cleanup]
           end
           return quote
             [actions]
@@ -6913,7 +6925,8 @@ function codegen.stat_for_list(cx, node)
             var arg_obj : arg_type
             var [arg] = &arg_obj
             [launch_init]
-            [openmphelper.launch]([omp_worker], [arg], [openmphelper.get_num_threads](), 0)
+            [openmphelper.launch]([omp_worker], [arg], [openmphelper.get_max_threads](), 0)
+            [launcher_cleanup]
             [cleanup_actions]
           end
         end
@@ -6935,11 +6948,16 @@ function codegen.stat_for_list(cx, node)
           local end_idx = terralib.newsymbol(int64, "end_idx")
           local rect_type = c.legion_rect_1d_t
           local rect = terralib.newsymbol(&rect_type, "rect")
-          local symbols = collect_symbols(cx, node)
+          local symbols, reductions = collect_symbols(cx, node)
           symbols:insert(rect)
-          local arg_type, mapping = openmphelper.generate_argument_type(symbols)
+          local arg_type, mapping = openmphelper.generate_argument_type(symbols, reductions)
           local arg = terralib.newsymbol(&arg_type, "arg")
-          local worker_init, launch_init = openmphelper.generate_argument_init(arg, arg_type, mapping)
+          local worker_init, launch_init =
+            openmphelper.generate_argument_init(arg, arg_type, mapping, reductions)
+          local worker_cleanup =
+            openmphelper.generate_worker_cleanup(arg, arg_type, mapping, reductions)
+          local launcher_cleanup =
+            openmphelper.generate_launcher_cleanup(arg, arg_type, mapping, reductions)
           local terra omp_worker(data : &opaque)
             var [arg] = [&arg_type](data)
             [worker_init]
@@ -6950,6 +6968,7 @@ function codegen.stat_for_list(cx, node)
                 [block]
               end
             end
+            [worker_cleanup]
           end
           return quote
             [actions]
@@ -6958,7 +6977,8 @@ function codegen.stat_for_list(cx, node)
             var arg_obj : arg_type
             var [arg] = &arg_obj
             [launch_init]
-            [openmphelper.launch]([omp_worker], [arg], [openmphelper.get_num_threads](), 0)
+            [openmphelper.launch]([omp_worker], [arg], [openmphelper.get_max_threads](), 0)
+            [launcher_cleanup]
             [cleanup_actions]
           end
         end
