@@ -48,10 +48,28 @@ do
   for e in r do e.f += e.f + c end
 end
 
+__demand(__parallel)
+task reduce(r : region(fs))
+where reads writes(r.f)
+do
+  var sum = 0
+  __demand(__openmp)
+  for e in r do sum += e.f end
+  return sum
+end
+
 task increment_serial(r : region(fs), c : double)
 where reads writes(r.g)
 do
   for e in r do e.g += e.g + c end
+end
+
+task reduce_serial(r : region(fs))
+where reads writes(r.f)
+do
+  var sum = 0
+  for e in r do sum += e.f end
+  return sum
 end
 
 local cmath = terralib.includec("math.h")
@@ -76,6 +94,10 @@ task test(size : int)
     increment_serial(primary_region, i + 1.5)
     check(primary_region)
   end
+
+  var sum1 = reduce(primary_region)
+  var sum2 = reduce_serial(primary_region)
+  regentlib.assert(cmath.fabs(sum1 - sum2) < 1e-3, "test failed")
 end
 
 task toplevel()
