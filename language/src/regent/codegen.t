@@ -6834,23 +6834,72 @@ function codegen.stat_for_list(cx, node)
 
   if not cuda then
     if ispace_type.dim == 0 then
-      return quote
-        [actions]
-        while iterator_has_next([it]) do
-          var count : c.size_t = 0
-          var base = iterator_next_span([it], &count, -1).value
-          for i = 0, count do
-            var [symbol] = [symbol.type]{
-              __ptr = c.legion_ptr_t {
-                value = base + i
+      if not openmp then
+        return quote
+          [actions]
+          while iterator_has_next([it]) do
+            var count : c.size_t = 0
+            var base = iterator_next_span([it], &count, -1).value
+            for i = 0, count do
+              var [symbol] = [symbol.type]{
+                __ptr = c.legion_ptr_t {
+                  value = base + i
+                }
               }
-            }
+              do
+                [block]
+              end
+            end
+          end
+          [cleanup_actions]
+        end
+      else
+        local count = terralib.newsymbol(uint64, "count")
+        local base = terralib.newsymbol(int64, "base")
+        local symbols, reductions = collect_symbols(cx, node)
+        symbols:insert(count)
+        symbols:insert(base)
+        local arg_type, mapping = openmphelper.generate_argument_type(symbols, reductions)
+        local arg = terralib.newsymbol(&arg_type, "arg")
+        local worker_init, launch_init =
+          openmphelper.generate_argument_init(arg, arg_type, mapping, reductions)
+        local worker_cleanup =
+          openmphelper.generate_worker_cleanup(arg, arg_type, mapping, reductions)
+        local launcher_cleanup =
+          openmphelper.generate_launcher_cleanup(arg, arg_type, mapping, reductions)
+
+        local terra omp_worker(data : &opaque)
+          var [arg] = [&arg_type](data)
+          [worker_init]
+          var num_threads = [openmphelper.get_num_threads]()
+          var thread_id = [openmphelper.get_thread_num]()
+          var chunk = (count + num_threads - 1) / num_threads
+          if chunk == 0 then chunk = 1 end
+          var start_idx = thread_id * chunk + base
+          var end_idx = (thread_id + 1) * chunk + base
+          if end_idx > base + count then end_idx = base + count end
+          for i = start_idx, end_idx do
+            var [symbol] = [symbol.type]{ __ptr = c.legion_ptr_t { value = i } }
             do
               [block]
             end
           end
+          [worker_cleanup]
         end
-        [cleanup_actions]
+
+        return quote
+          [actions]
+          while iterator_has_next([it]) do
+            var [count] = 0
+            var [base] = iterator_next_span([it], &count, -1).value
+            var arg_obj : arg_type
+            var [arg] = &arg_obj
+            [launch_init]
+            [openmphelper.launch]([omp_worker], [arg], [openmphelper.get_max_threads](), 0)
+            [launcher_cleanup]
+          end
+          [cleanup_actions]
+        end
       end
     else
       local fields = ispace_type.index_type.fields
