@@ -63,6 +63,11 @@ if platform.system() != 'Darwin':
         ['test/attach_file_mini/attach_file_mini', []],
     ]
 
+legion_openmp_cxx_tests = [
+    # Examples
+    ['examples/omp_saxpy/omp_saxpy', []],
+]
+
 legion_hdf_cxx_tests = [
     # Examples
     ['examples/attach_file/attach_file', []],
@@ -126,6 +131,10 @@ def run_regent(tests, flags, launcher, root_dir, env, thread_count):
 def run_test_legion_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
     run_cxx(legion_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count)
+
+def run_test_legion_openmp_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
+    flags = ['-logfile', 'out_%.log']
+    run_cxx(legion_openmp_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count)
 
 def run_test_legion_hdf_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
@@ -473,6 +482,7 @@ def run_tests(test_modules=None,
         ('USE_GASNET', '1' if use_gasnet else '0'),
         ('USE_CUDA', '1' if use_cuda else '0'),
         ('USE_OPENMP', '1' if use_openmp else '0'),
+        ('TEST_OPENMP', '1' if use_openmp else '0'),
         ('USE_LLVM', '1' if use_llvm else '0'),
         ('USE_HDF', '1' if use_hdf else '0'),
         ('TEST_HDF', '1' if use_hdf else '0'),
@@ -512,6 +522,8 @@ def run_tests(test_modules=None,
         if test_legion_cxx:
             with Stage('legion_cxx'):
                 run_test_legion_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
+                if use_openmp:
+                    run_test_legion_openmp_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
                 if use_hdf:
                     run_test_legion_hdf_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
         if test_fuzzer:
