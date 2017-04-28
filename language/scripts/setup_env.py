@@ -175,8 +175,10 @@ if __name__ == '__main__':
         git_clone(terra_dir, 'https://github.com/elliottslaughter/terra.git', 'compiler-sc17-snapshot')
         build_terra(terra_dir, llvm_install_dir, is_cray, thread_count)
 
+    use_cuda = 'USE_CUDA' in os.environ and os.environ['USE_CUDA'] == '1'
+    use_openmp = 'USE_OPENMP' in os.environ and os.environ['USE_OPENMP'] == '1'
     use_hdf = 'USE_HDF' in os.environ and os.environ['USE_HDF'] == '1'
     install.install(
-        gasnet=True, cuda=False, hdf=use_hdf,
+        gasnet=True, cuda=use_cuda, openmp=use_openmp, hdf=use_hdf,
         external_terra_dir=terra_dir, gasnet_dir=gasnet_release_dir, conduit=conduit,
         debug=False, thread_count=thread_count)
