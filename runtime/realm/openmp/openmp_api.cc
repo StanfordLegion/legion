@@ -34,6 +34,15 @@ namespace Realm {
 	return 1;
     }
 
+    int omp_get_max_threads(void)
+    {
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+      if(wi)
+	return wi->pool->get_num_workers() + 1;
+      else
+	return 1;
+    }
+
     int omp_get_thread_num(void)
     {
       Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
