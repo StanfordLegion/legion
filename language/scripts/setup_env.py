@@ -177,6 +177,6 @@ if __name__ == '__main__':
 
     use_hdf = 'USE_HDF' in os.environ and os.environ['USE_HDF'] == '1'
     install.install(
-        shared_llr=False, general_llr=True, gasnet=True, cuda=False, hdf=use_hdf,
+        gasnet=True, cuda=False, hdf=use_hdf,
         external_terra_dir=terra_dir, gasnet_dir=gasnet_release_dir, conduit=conduit,
         debug=False, thread_count=thread_count)
