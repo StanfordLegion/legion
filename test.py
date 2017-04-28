@@ -394,7 +394,8 @@ class Stage(object):
 
 def report_mode(test_regent, test_legion_cxx, test_fuzzer, test_realm,
                 test_external, test_private, test_perf, use_gasnet,
-                use_cuda, use_llvm, use_hdf, use_spy, use_cmake, use_rdir):
+                use_cuda, use_openmp, use_llvm, use_hdf, use_spy, use_cmake,
+                use_rdir):
     print()
     print('#'*60)
     print('### Test Suite Configuration')
@@ -411,9 +412,10 @@ def report_mode(test_regent, test_legion_cxx, test_fuzzer, test_realm,
     print('### Build Flags:')
     print('###   * GASNet:     %s' % use_gasnet)
     print('###   * CUDA:       %s' % use_cuda)
+    print('###   * OpenMP:     %s' % use_openmp)
     print('###   * LLVM:       %s' % use_llvm)
     print('###   * HDF5:       %s' % use_hdf)
-    print('###   * SPY:        %s' % use_spy)
+    print('###   * Spy:        %s' % use_spy)
     print('###   * CMake:      %s' % use_cmake)
     print('###   * RDIR:       %s' % use_rdir)
     print('#'*60)
@@ -450,6 +452,7 @@ def run_tests(test_modules=None,
         return option_enabled(feature, use_features, 'USE_', default)
     use_gasnet = feature_enabled('gasnet', False)
     use_cuda = feature_enabled('cuda', False)
+    use_openmp = feature_enabled('openmp', False)
     use_llvm = feature_enabled('llvm', False)
     use_hdf = feature_enabled('hdf', False)
     use_spy = feature_enabled('spy', False)
@@ -469,6 +472,7 @@ def run_tests(test_modules=None,
         ('LAUNCHER', ' '.join(launcher)),
         ('USE_GASNET', '1' if use_gasnet else '0'),
         ('USE_CUDA', '1' if use_cuda else '0'),
+        ('USE_OPENMP', '1' if use_openmp else '0'),
         ('USE_LLVM', '1' if use_llvm else '0'),
         ('USE_HDF', '1' if use_hdf else '0'),
         ('TEST_HDF', '1' if use_hdf else '0'),
@@ -480,7 +484,8 @@ def run_tests(test_modules=None,
 
     report_mode(test_regent, test_legion_cxx, test_fuzzer, test_realm,
                 test_external, test_private, test_perf, use_gasnet,
-                use_cuda, use_llvm, use_hdf, use_spy, use_cmake, use_rdir)
+                use_cuda, use_openmp, use_llvm, use_hdf, use_spy, use_cmake,
+                use_rdir)
 
     tmp_dir = tempfile.mkdtemp(dir=root_dir)
     if verbose:
@@ -534,10 +539,6 @@ def run_tests(test_modules=None,
                 print('  %s' % tmp_dir)
             shutil.rmtree(tmp_dir)
 
-    report_mode(test_regent, test_legion_cxx, test_fuzzer, test_realm,
-                test_external, test_private, test_perf, use_gasnet,
-                use_cuda, use_llvm, use_hdf, use_spy, use_cmake, use_rdir)
-
 def driver():
     parser = argparse.ArgumentParser(
         description = 'Legion test suite')
@@ -556,7 +557,8 @@ def driver():
         help='Build Legion in debug mode (also via DEBUG).')
     parser.add_argument(
         '--use', dest='use_features', action='append',
-        choices=['gasnet', 'cuda', 'llvm', 'hdf', 'spy', 'cmake', 'rdir'],
+        choices=['gasnet', 'cuda', 'openmp', 'llvm', 'hdf', 'spy', 'cmake',
+                 'rdir'],
         default=None,
         help='Build Legion with features (also via USE_*).')
     parser.add_argument(
