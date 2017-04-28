@@ -50,6 +50,8 @@ variables:
   LD_FLAGS: "-m32"
   MARCH: "i686"
 
+.openmp: &openmp
+  USE_OPENMP: "1"
 .hdf5: &hdf5
   USE_HDF: "1"
 .gasnet: &gasnet
@@ -192,6 +194,14 @@ gcc49_cxx11_release_legion:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *release, *cxx11_normal, *legion]
+gcc49_cxx98_debug_checks_openmp_legion:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *debug, *cxx98_checks, *openmp, *legion]
+gcc49_cxx98_debug_checks_openmp_regent:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *debug, *cxx98_checks, *openmp, *regent]
 gcc49_cxx98_debug_checks_hdf5_legion:
   <<: [*linux, *image, *tests]
   variables:
@@ -246,6 +256,14 @@ clang38_cxx11_release_legion:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*clang38, *terra38, *release, *cxx11_normal, *legion]
+clang38_cxx98_debug_checks_openmp_legion:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*clang38, *terra38, *debug, *cxx98_checks, *openmp, *legion]
+clang38_cxx98_debug_checks_openmp_regent:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*clang38, *terra38, *debug, *cxx98_checks, *openmp, *regent]
 clang38_cxx98_debug_checks_hdf5_legion:
   <<: [*linux, *image, *tests]
   variables:
