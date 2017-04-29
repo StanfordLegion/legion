@@ -341,6 +341,42 @@ def run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
          'https://github.com/StanfordLegion/perf-data.git'],
         env=env)
 
+def check_test_legion_cxx(root_dir):
+    print('Checking that tests that SHOULD tested are ACTUALLY tested...')
+    print()
+
+    # These are the directories we SHOULD have coverage for.
+    should_dirs = ['tutorial', 'examples', 'test']
+    should_tests = []
+    for dir in should_dirs:
+        entries = os.listdir(os.path.join(root_dir, dir))
+        for entry in entries:
+            if os.path.isdir(os.path.join(root_dir, dir, entry)):
+                should_tests.append(os.path.join(dir, entry))
+    assert len(should_tests) > 0
+
+    # These are the tests we ACTUALLY have coverage for.
+    tests = legion_cxx_tests + legion_openmp_cxx_tests + legion_hdf_cxx_tests
+    actual_tests = set()
+    for test_file, test_flags in tests:
+        actual_tests.add(os.path.dirname(test_file))
+
+    actual_tests.add('test/realm') # We test Realm separately.
+    actual_tests.add('test/performance') # We test performance separately.
+
+    # Check that all tests that SHOULD be covered are ACTUALLY covered.
+    not_tests = []
+    for should_test in should_tests:
+        if should_test not in actual_tests:
+            not_tests.append(should_test)
+    if len(not_tests) > 0:
+        print('The following tests are NOT currently being tested:')
+        print()
+        for not_test in not_tests:
+            print('   %s' % not_test)
+        print()
+        raise Exception('There are tests that are NOT in the test suite')
+
 def build_cmake(root_dir, tmp_dir, env, thread_count, test_legion_cxx, test_perf):
     build_dir = os.path.join(tmp_dir, 'build')
     install_dir = os.path.join(tmp_dir, 'install')
@@ -437,6 +473,7 @@ def run_tests(test_modules=None,
               launcher=None,
               thread_count=None,
               root_dir=None,
+              check_ownership=False,
               keep_tmp_dir=False,
               verbose=False):
     if thread_count is None:
@@ -491,6 +528,10 @@ def run_tests(test_modules=None,
         ('USE_RDIR', '1' if use_rdir else '0'),
         ('LG_RT_DIR', os.path.join(root_dir, 'runtime')),
     ])
+
+    if check_ownership:
+        check_test_legion_cxx(root_dir)
+        return
 
     report_mode(test_regent, test_legion_cxx, test_fuzzer, test_realm,
                 test_external, test_private, test_perf, use_gasnet,
@@ -585,6 +626,10 @@ def driver():
     parser.add_argument(
         '-j', dest='thread_count', nargs='?', type=int,
         help='Number threads used to compile.')
+
+    parser.add_argument(
+        '--check', dest='check_ownership', action='store_true',
+        help='Check for tests that are being skipped.')
 
     parser.add_argument(
         '--keep', dest='keep_tmp_dir', action='store_true',
