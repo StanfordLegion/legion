@@ -2612,22 +2612,28 @@ namespace Legion {
           dead_events.insert(cit->first);
           continue;
         }
-        if (preconditions.find(cit->first) != preconditions.end())
-          continue;
 #endif
         const EventUsers &event_users = cit->second;
-        const FieldMask overlap = event_users.user_mask & user_mask;
+        FieldMask overlap = event_users.user_mask & user_mask;
         if (!overlap)
           continue;
         else if (TRACK_DOM)
           observed |= overlap;
+        LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
+          preconditions.find(cit->first);
+#ifndef LEGION_SPY
+        if (finder != preconditions.end())
+        {
+          overlap -= finder->second;
+          if (!overlap)
+            continue;
+        }
+#endif
         if (event_users.single)
         {
           if (has_local_precondition(event_users.users.single_user, usage,
                                      child_color, op_id, index, origin_node))
           {
-            LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
-              preconditions.find(cit->first);
             if (finder == preconditions.end())
               preconditions[cit->first] = overlap;
             else
@@ -2650,8 +2656,6 @@ namespace Legion {
             if (has_local_precondition(it->first, usage, child_color, 
                                        op_id, index, origin_node))
             {
-              LegionMap<ApEvent,FieldMask>::aligned::iterator finder =
-                preconditions.find(cit->first);
               if (finder == preconditions.end())
                 preconditions[cit->first] = overlap;
               else
