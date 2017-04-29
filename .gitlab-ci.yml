@@ -92,6 +92,9 @@ before_script:
     if [[ "$USE_GASNET" -eq 1 ]]; then
       export CONDUIT=mpi
       export GASNET_ROOT="$PWD/gasnet/release"
+      # OpenMPI:
+      # export LAUNCHER="mpirun -n 2 -x TERRA_PATH -x INCLUDE_PATH -x LD_LIBRARY_PATH -x LG_RT_DIR -x USE_RDIR"
+      # MPICH:
       export LAUNCHER="mpirun -n 2"
       unset WARN_AS_ERROR
       git clone https://github.com/StanfordLegion/gasnet.git gasnet
