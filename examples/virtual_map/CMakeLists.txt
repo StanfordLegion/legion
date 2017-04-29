@@ -15,20 +15,15 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.1)
+project(LegionExample_virtual_map)
 
+# Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_subdirectory(attach_file)
-add_subdirectory(circuit)
-add_subdirectory(dynamic_registration)
-add_subdirectory(ghost)
-add_subdirectory(ghost_pull)
-add_subdirectory(realm_saxpy)
-add_subdirectory(spmd_cgsolver)
-add_subdirectory(virtual_map)
-
-if(Legion_USE_CUDA)
-  add_subdirectory(thrust_interop)
+add_executable(virtual_map virtual_map.cc)
+target_link_libraries(virtual_map Legion::Legion)
+if(Legion_ENABLE_TESTING)
+  add_test(NAME virtual_map COMMAND $<TARGET_FILE:virtual_map>)
 endif()
