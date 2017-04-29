@@ -18,6 +18,7 @@ env:
   - CC_FLAGS="-std=c++98 -DPRIVILEGE_CHECKS -DBOUNDS_CHECKS" DEBUG=1 TEST_REGENT=0
   - CC_FLAGS="-std=c++98 -DLEGION_SPY" DEBUG=1 USE_SPY=1 TEST_REGENT=0
   - CC_FLAGS="-std=c++98 -DLEGION_SPY" DEBUG=1 USE_SPY=1 TEST_LEGION_CXX=0 TEST_REALM=0
+  - CC_FLAGS="-std=c++98" USE_HDF=1 TEST_REGENT=0
   - CC_FLAGS="-std=c++0x" DEBUG=0 TEST_REGENT=0
 matrix:
   exclude:
@@ -36,12 +37,12 @@ before_install:
       sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
       sudo add-apt-repository ppa:pypy/ppa -y
       sudo apt-get update -qq
-      sudo apt-get install -qq g++-4.9 clang-3.5 libclang-3.5-dev llvm-3.5-dev openmpi-bin libopenmpi-dev libblas-dev liblapack-dev pypy
+      sudo apt-get install -qq g++-4.9 clang-3.5 libclang-3.5-dev llvm-3.5-dev openmpi-bin libopenmpi-dev libblas-dev liblapack-dev libhdf5-dev pypy
     fi
   - |
     if [[ "$(uname)" = "Darwin" ]]; then
       brew update
-      brew install pypy llvm@3.9
+      brew install pypy llvm@3.9 homebrew/science/hdf5
       export CLANG="$(brew --prefix)/opt/llvm@3.9/bin/clang"
       export LLVM_CONFIG="$(brew --prefix)/opt/llvm@3.9/bin/llvm-config"
     fi
