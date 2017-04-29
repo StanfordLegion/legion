@@ -835,7 +835,7 @@ namespace LegionRuntime {
     }
 
 
-#define IB_MAX_SIZE (128 * 1024 * 1024)
+#define IB_MAX_SIZE (64 * 1024 * 1024)
 
     void free_intermediate_buffer(DmaRequest* req, Memory mem, off_t offset, size_t size)
     {
