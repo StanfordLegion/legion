@@ -50,6 +50,8 @@ variables:
   LD_FLAGS: "-m32"
   MARCH: "i686"
 
+.openmp: &openmp
+  USE_OPENMP: "1"
 .hdf5: &hdf5
   USE_HDF: "1"
 .gasnet: &gasnet
@@ -90,7 +92,10 @@ before_script:
     if [[ "$USE_GASNET" -eq 1 ]]; then
       export CONDUIT=mpi
       export GASNET_ROOT="$PWD/gasnet/release"
-      export LAUNCHER="mpirun -n 2 -x TERRA_PATH -x INCLUDE_PATH -x LD_LIBRARY_PATH -x LG_RT_DIR -x USE_RDIR"
+      # OpenMPI:
+      # export LAUNCHER="mpirun -n 2 -x TERRA_PATH -x INCLUDE_PATH -x LD_LIBRARY_PATH -x LG_RT_DIR -x USE_RDIR"
+      # MPICH:
+      export LAUNCHER="mpirun -n 2"
       unset WARN_AS_ERROR
       git clone https://github.com/StanfordLegion/gasnet.git gasnet
       pushd gasnet
@@ -192,6 +197,14 @@ gcc49_cxx11_release_legion:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *release, *cxx11_normal, *legion]
+gcc49_cxx98_debug_checks_openmp_legion:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *debug, *cxx98_checks, *openmp, *legion]
+gcc49_cxx98_debug_checks_openmp_regent:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *debug, *cxx98_checks, *openmp, *regent]
 gcc49_cxx98_debug_checks_hdf5_legion:
   <<: [*linux, *image, *tests]
   variables:
@@ -246,6 +259,14 @@ clang38_cxx11_release_legion:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*clang38, *terra38, *release, *cxx11_normal, *legion]
+clang38_cxx98_debug_checks_openmp_legion:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*clang38, *terra38, *debug, *cxx98_checks, *openmp, *legion]
+clang38_cxx98_debug_checks_openmp_regent:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*clang38, *terra38, *debug, *cxx98_checks, *openmp, *regent]
 clang38_cxx98_debug_checks_hdf5_legion:
   <<: [*linux, *image, *tests]
   variables:

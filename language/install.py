@@ -149,8 +149,8 @@ def symlink(from_path, to_path):
     if not os.path.lexists(to_path):
         os.symlink(from_path, to_path)
 
-def install_bindings(bindings_dir, runtime_dir, terra_dir, debug, general_llr,
-                     cuda, hdf, spy, gasnet, gasnet_dir, conduit,
+def install_bindings(bindings_dir, runtime_dir, terra_dir, debug,
+                     cuda, openmp, hdf, spy, gasnet, gasnet_dir, conduit,
                      clean_first, thread_count, extra_flags):
     env = dict(list(os.environ.items()) + [
         ('LG_RT_DIR', runtime_dir),
@@ -159,8 +159,8 @@ def install_bindings(bindings_dir, runtime_dir, terra_dir, debug, general_llr,
 
     flags = (
         ['DEBUG=%s' % (1 if debug else 0),
-         'SHARED_LOWLEVEL=%s' % (0 if general_llr else 1),
          'USE_CUDA=%s' % (1 if cuda else 0),
+         'USE_OPENMP=%s' % (1 if openmp else 0),
          'USE_GASNET=%s' % (1 if gasnet else 0),
          'USE_HDF=%s' % (1 if hdf else 0),
          'USE_SPY=%s' % (1 if spy else 0),
@@ -204,20 +204,9 @@ def install_bindings(bindings_dir, runtime_dir, terra_dir, debug, general_llr,
              '/usr/local/lib/libluajit-5.1.2.dylib', 'libluajit-5.1.2.dylib',
              os.path.join(bindings_dir, 'liblegion_terra.so')])
 
-def install(shared_llr=False, general_llr=True, gasnet=False, cuda=False, hdf=False,
+def install(gasnet=False, cuda=False, openmp=False, hdf=False,
             spy=False, conduit=None, rdir=None, external_terra_dir=None, gasnet_dir=None,
             debug=False, clean_first=True, thread_count=None, extra_flags=[]):
-    if shared_llr:
-        raise Exception('Shared LLR is deprecated. Please use general LLR.')
-
-    general = not shared_llr
-
-    if gasnet and not general:
-        raise Exception('General LLR is required for GASNet.')
-
-    if cuda and not general:
-        raise Exception('General LLR is required for CUDA.')
-
     if spy and not debug:
         raise Exception('Debugging mode is required for detailed Legion Spy.')
 
@@ -244,7 +233,7 @@ def install(shared_llr=False, general_llr=True, gasnet=False, cuda=False, hdf=Fa
 
     bindings_dir = os.path.join(legion_dir, 'bindings', 'terra')
     install_bindings(bindings_dir, runtime_dir, terra_dir, debug,
-                     general, cuda, hdf, spy, gasnet, gasnet_dir, conduit,
+                     cuda, openmp, hdf, spy, gasnet, gasnet_dir, conduit,
                      clean_first, thread_count, extra_flags)
 
 def driver():
@@ -257,12 +246,6 @@ def driver():
         '--debug', dest = 'debug', action = 'store_true', required = False,
         help = 'Build Legion with debugging enabled.')
     parser.add_argument(
-        '--shared', dest = 'shared_llr', action = 'store_true', required = False,
-        help = 'Build Legion with the shared low-level runtime.')
-    parser.add_argument(
-        '--general', dest = 'general_llr', action = 'store_true', required = False,
-        help = 'Build Legion with the general low-level runtime.')
-    parser.add_argument(
         '--gasnet', dest = 'gasnet', action = 'store_true', required = False,
         default = 'USE_GASNET' in os.environ and os.environ['USE_GASNET'] == '1',
         help = 'Build Legion with GASNet.')
@@ -270,6 +253,10 @@ def driver():
         '--cuda', dest = 'cuda', action = 'store_true', required = False,
         default = 'USE_CUDA' in os.environ and os.environ['USE_CUDA'] == '1',
         help = 'Build Legion with CUDA.')
+    parser.add_argument(
+        '--openmp', dest = 'openmp', action = 'store_true', required = False,
+        default = 'USE_OPENMP' in os.environ and os.environ['USE_OPENMP'] == '1',
+        help = 'Build Legion with OpenMP support.')
     parser.add_argument(
         '--hdf5', '--hdf', dest = 'hdf', action = 'store_true', required = False,
         default = 'USE_HDF' in os.environ and os.environ['USE_HDF'] == '1',
