@@ -64,6 +64,11 @@ if platform.system() != 'Darwin':
         ['test/attach_file_mini/attach_file_mini', []],
     ]
 
+legion_gasnet_cxx_tests = [
+    # Examples
+    ['examples/mpi_interop/mpi_interop', []],
+]
+
 legion_openmp_cxx_tests = [
     # Examples
     ['examples/omp_saxpy/omp_saxpy', []],
@@ -132,6 +137,10 @@ def run_regent(tests, flags, launcher, root_dir, env, thread_count):
 def run_test_legion_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
     run_cxx(legion_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count)
+
+def run_test_legion_gasnet_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
+    flags = ['-logfile', 'out_%.log']
+    run_cxx(legion_gasnet_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count)
 
 def run_test_legion_openmp_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
@@ -357,7 +366,8 @@ def check_test_legion_cxx(root_dir):
     assert len(should_tests) > 0
 
     # These are the tests we ACTUALLY have coverage for.
-    tests = legion_cxx_tests + legion_openmp_cxx_tests + legion_hdf_cxx_tests
+    tests = legion_cxx_tests + legion_gasnet_cxx_tests + \
+            legion_openmp_cxx_tests + legion_hdf_cxx_tests
     actual_tests = set()
     for test_file, test_flags in tests:
         actual_tests.add(os.path.dirname(test_file))
@@ -518,6 +528,7 @@ def run_tests(test_modules=None,
         ('DEBUG', '1' if debug else '0'),
         ('LAUNCHER', ' '.join(launcher)),
         ('USE_GASNET', '1' if use_gasnet else '0'),
+        ('TEST_GASNET', '1' if use_gasnet else '0'),
         ('USE_CUDA', '1' if use_cuda else '0'),
         ('USE_OPENMP', '1' if use_openmp else '0'),
         ('TEST_OPENMP', '1' if use_openmp else '0'),
@@ -564,6 +575,8 @@ def run_tests(test_modules=None,
         if test_legion_cxx:
             with Stage('legion_cxx'):
                 run_test_legion_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
+                if use_gasnet:
+                    run_test_legion_gasnet_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
                 if use_openmp:
                     run_test_legion_openmp_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
                 if use_hdf:
