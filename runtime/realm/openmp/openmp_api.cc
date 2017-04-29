@@ -430,12 +430,12 @@ namespace Realm {
 	T whole = iters / wi->num_threads;
 	T leftover = iters - (whole * wi->num_threads);
 	*plower += incr * (whole * wi->thread_id +
-			   ((wi->thread_id < leftover) ? wi->thread_id : leftover));
+			   ((((T)(wi->thread_id)) < leftover) ? wi->thread_id : leftover));
 	*pupper = *plower + incr * (whole +
-				    ((wi->thread_id < leftover) ? 1 : 0)) - 1;
+				    ((((T)(wi->thread_id)) < leftover) ? 1 : 0)) - 1;
 	// special case for when some threads get no iterations at all
 	*plastiter = ((whole > 0) ? (wi->thread_id == (wi->num_threads - 1)) :
-		                    (wi->thread_id == (leftover - 1)));
+		                    (((T)(wi->thread_id)) == (leftover - 1)));
 	//printf("static(%d, %d, %d, %d, %d)\n", *plower, *pupper, *pstride, incr, *plastiter);
 	return;
       }
