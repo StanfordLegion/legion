@@ -78,7 +78,7 @@ bool generate_hdf_file(const char *file_name, const char *dataset_name, int num_
 {
   hid_t file_id = H5Fcreate(file_name, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
   if(file_id < 0) {
-    printf("H5Fcreate failed: %d\n", file_id);
+    printf("H5Fcreate failed: %lld\n", (long long)file_id);
     return false;
   }
 
@@ -86,7 +86,7 @@ bool generate_hdf_file(const char *file_name, const char *dataset_name, int num_
   dims[0] = num_elements;
   hid_t dataspace_id = H5Screate_simple(1, dims, NULL);
   if(dataspace_id < 0) {
-    printf("H5Screate_simple failed: %d\n", dataspace_id);
+    printf("H5Screate_simple failed: %lld\n", (long long)dataspace_id);
     H5Fclose(file_id);
     return false;
   }
@@ -95,7 +95,7 @@ bool generate_hdf_file(const char *file_name, const char *dataset_name, int num_
 			     H5T_IEEE_F64LE, dataspace_id,
 			     H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
   if(dataset < 0) {
-    printf("H5Dcreate2 failed: %d\n", dataset);
+    printf("H5Dcreate2 failed: %lld\n", (long long)dataset);
     H5Sclose(dataspace_id);
     H5Fclose(file_id);
     return false;
