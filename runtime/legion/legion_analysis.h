@@ -1166,8 +1166,6 @@ namespace Legion {
       void handle_version_state_valid_notification(AddressSpaceID source);
       static void process_version_state_valid_notification(Deserializer &derez,
                                       Runtime *runtime, AddressSpaceID source);
-      static void process_version_state_child_update(Deserializer &derez,
-                                                     Runtime *runtime);
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);
@@ -1257,17 +1255,13 @@ namespace Legion {
       FieldMask reduction_mask;
       // Note that we make the StateVersions type not local which
       // is how we keep the distributed version state tree live
-      // This is NOT monotonic so we have to make the owner the
-      // point of serialization that keeps everyone consistent
-      // Remote copies will only fill in this data structure when
-      // requesting the final version of the version state
       typedef VersioningSet<VERSION_STATE_TREE_REF,
                             false/*LOCAL*/> StateVersions;
       LegionMap<ColorPoint,StateVersions>::aligned open_children;
-      // The valid instance views (monotonic)
+      // The valid instance views
       LegionMap<LogicalView*, FieldMask,
                 VALID_VIEW_ALLOC>::track_aligned valid_views;
-      // The valid reduction veiws (monotonic)
+      // The valid reduction veiws
       LegionMap<ReductionView*, FieldMask,
                 VALID_REDUCTION_ALLOC>::track_aligned reduction_views;
 #ifdef DEBUG_LEGION
