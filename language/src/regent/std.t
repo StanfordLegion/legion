@@ -3722,6 +3722,9 @@ function std.setup(main_task, extra_setup_thunk)
 
       local proc_types = {c.LOC_PROC, c.IO_PROC}
       if task:getcuda() then proc_types = {c.TOC_PROC} end
+      if std.config["cuda"] and task:is_shard_task() then
+        proc_types[#proc_types + 1] = c.TOC_PROC
+      end
 
       local wrapped_task = make_task_wrapper(task:getdefinition())
 

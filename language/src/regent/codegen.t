@@ -8400,7 +8400,7 @@ function codegen.top_task(cx, node)
   -- FIXME: This is an obnoxious hack to avoid inline mappings in shard tasks.
   --        Will be fixed with a proper handling of list of regions in
   --        the inline mapping optimizer.
-  if string.sub(tostring(node.name), 0, 6) == "<shard" then
+  if cx.task_meta:is_shard_task() then
     task_setup:insert(quote
       c.legion_runtime_unmap_all_regions([c_runtime], [c_context])
     end)
