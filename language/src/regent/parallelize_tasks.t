@@ -145,8 +145,8 @@ local get_ghost_rect = {
   [std.rect1d] = terra(root : std.rect1d, r : std.rect1d, s : std.rect1d, polarity : std.int1d) : std.rect1d
     var sz = root:size()
     var diff_rect : std.rect1d
-    diff_rect.lo = root.lo
-    diff_rect.hi = root.lo
+    diff_rect.lo.__ptr = 0
+    diff_rect.hi.__ptr = -1
     [clear_unnecessary_polarity(root, r, polarity)]
     -- If the ghost region is not necessary at all for this stencil,
     -- make a dummy region with only one element.
@@ -158,8 +158,8 @@ local get_ghost_rect = {
   [std.rect2d] = terra(root : std.rect2d, r : std.rect2d, s : std.rect2d, polarity : std.int2d) : std.rect2d
     var sz = root:size()
     var diff_rect : std.rect2d
-    diff_rect.lo = root.lo
-    diff_rect.hi = root.lo
+    diff_rect.lo.__ptr.x, diff_rect.lo.__ptr.y = 0, 0
+    diff_rect.hi.__ptr.x, diff_rect.hi.__ptr.y = -1, -1
     [clear_unnecessary_polarity(root, r, polarity, "x")]
     [clear_unnecessary_polarity(root, r, polarity, "y")]
     -- If the ghost region is not necessary at all for this stencil,
@@ -173,8 +173,8 @@ local get_ghost_rect = {
   [std.rect3d] = terra(root : std.rect3d, r : std.rect3d, s : std.rect3d, polarity : std.int3d) : std.rect3d
     var sz = root:size()
     var diff_rect : std.rect3d
-    diff_rect.lo = root.lo
-    diff_rect.hi = root.lo
+    diff_rect.lo.__ptr.x, diff_rect.lo.__ptr.y, diff_rect.lo.__ptr.z = 0, 0, 0
+    diff_rect.hi.__ptr.x, diff_rect.hi.__ptr.y, diff_rect.hi.__ptr.z = -1, -1, -1
     [clear_unnecessary_polarity(root, r, polarity, "x")]
     [clear_unnecessary_polarity(root, r, polarity, "y")]
     [clear_unnecessary_polarity(root, r, polarity, "z")]
