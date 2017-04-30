@@ -2615,6 +2615,8 @@ namespace Legion {
         FieldMask overlap = event_users.user_mask & user_mask;
         if (!overlap)
           continue;
+        else if (TRACK_DOM)
+          observed |= overlap;
         LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
           preconditions.find(cit->first);
 #ifndef LEGION_SPY
@@ -2625,8 +2627,6 @@ namespace Legion {
             continue;
         }
 #endif
-        if (TRACK_DOM)
-          observed |= overlap;
         if (event_users.single)
         {
           if (has_local_precondition(event_users.users.single_user, usage,
