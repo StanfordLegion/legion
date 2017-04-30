@@ -2553,14 +2553,12 @@ namespace Legion {
           dead_events.insert(pit->first);
           continue;
         }
+        if (preconditions.find(pit->first) != preconditions.end())
+          continue;
 #endif
         const EventUsers &event_users = pit->second;
         if (user_mask * event_users.user_mask)
           continue;
-#ifndef LEGION_SPY
-        if (preconditions.find(pit->first) != preconditions.end())
-          continue;
-#endif
         if (event_users.single)
         {
           if (has_local_precondition(event_users.users.single_user, usage,
