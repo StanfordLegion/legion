@@ -381,7 +381,7 @@ namespace Legion {
           finder->second |= mask;
         valid_fields |= mask;
       }
-      return RtEvent::NO_RT_EVENT;
+      return pre;
     }
 
     //--------------------------------------------------------------------------
@@ -6470,6 +6470,45 @@ namespace Legion {
                                             bool need_lock, bool local_update)
     //--------------------------------------------------------------------------
     {
+      // If this is a local update and we're not the owner we have
+      // to send this update back to the owner to perform too
+      // Make sure to only do it the first time through though
+      if (local_update && !is_owner() && need_lock)
+      {
+        // Figure out how many have to be sent
+        size_t to_send = 0;
+        for (VersioningSet<>::iterator it = new_states.begin();
+              it != new_states.end(); it++)
+        {
+          if (it->second * update_mask)
+            continue;
+          to_send++;
+        }
+        // If there aren't any to send then we are done
+        if (to_send == 0)
+          return;
+        RtUserEvent done_event = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(done_event);
+          rez.serialize(child_color);
+          rez.serialize(update_mask);
+          rez.serialize(to_send);
+          for (VersioningSet<>::iterator it = new_states.begin();
+                it != new_states.end(); it++)
+          {
+            const FieldMask overlap = it->second & update_mask;
+            if (!overlap)
+              continue;
+            rez.serialize(it->first->did);
+            rez.serialize(overlap);
+          }
+        }
+        runtime->send_version_state_child_update(owner_space, rez);
+        applied_events.insert(done_event);
+      }
       if (need_lock)
       {
         // Hold the lock in exclusive mode since we might change things
@@ -6501,14 +6540,8 @@ namespace Legion {
       }
       else
         finder->second.reduce(update_mask, new_states, &mutator);
-      if (local_update)
-      {
-        // Tell our owner node that we have valid data
-        if (!is_owner() && !update_fields)
-          send_valid_notification(applied_events);
-        // Update the valid fields
+      if (local_update && is_owner()) // Update the valid fields
         update_fields |= update_mask;
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -6535,6 +6568,9 @@ namespace Legion {
                                                           AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+#endif
       AutoLock s_lock(state_lock);
       remote_valid_instances.add(source);
     }
@@ -6559,6 +6595,60 @@ namespace Legion {
 #endif
       vs->handle_version_state_valid_notification(source);
       Runtime::trigger_event(done);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void VersionState::process_version_state_child_update(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtUserEvent done;
+      derez.deserialize(done);
+      ColorPoint child_color;
+      derez.deserialize(child_color);
+      FieldMask update_mask;
+      derez.deserialize(update_mask);
+      size_t num_states;
+      derez.deserialize(num_states);
+      VersioningSet<> new_states;
+      std::set<RtEvent> ready_events;
+      for (unsigned idx = 0; idx < num_states; idx++)
+      {
+        DistributedID state_did;
+        derez.deserialize(state_did);
+        RtEvent ready;
+        VersionState *state = 
+          runtime->find_or_request_version_state(state_did, ready);
+        FieldMask state_mask;
+        derez.deserialize(state_mask);
+        ready = new_states.insert(state, state_mask, runtime, ready);
+        if (ready.exists() && !ready.has_triggered())
+          ready_events.insert(ready);
+      }
+      // Wait for the version states to be empty
+      if (!ready_events.empty())
+      {
+        RtEvent wait_on = Runtime::merge_events(ready_events);
+        ready_events.clear();
+        wait_on.wait();
+      }
+      DistributedCollectable *target = 
+        runtime->find_distributed_collectable(did);
+#ifdef DEBUG_LEGION
+      VersionState *vs = dynamic_cast<VersionState*>(target);
+      assert(vs != NULL);
+#else
+      VersionState *vs = static_cast<VersionState*>(target);
+#endif
+      vs->reduce_open_children(child_color, update_mask, new_states,
+                               ready_events, true/*need lock*/, true/*local*/);
+      if (!ready_events.empty())
+        Runtime::trigger_event(done, Runtime::merge_events(ready_events));
+      else
+        Runtime::trigger_event(done);
     }
 
     //--------------------------------------------------------------------------
@@ -6852,19 +6942,27 @@ namespace Legion {
           // Only send this if request is for child or final
           if (request_kind != INITIAL_VERSION_REQUEST)
           {
-            rez.serialize<size_t>(open_children.size());
-            for (LegionMap<ColorPoint,StateVersions>::aligned::const_iterator 
-                 cit = open_children.begin(); cit != open_children.end(); cit++)
+            // Only the owner sends anything here since it
+            // has the current copy of the open children
+            if (is_owner())
             {
-              rez.serialize(cit->first);
-              rez.serialize<size_t>(cit->second.size());
-              for (StateVersions::iterator it = cit->second.begin();
-                    it != cit->second.end(); it++)
+              rez.serialize<size_t>(open_children.size());
+              for (LegionMap<ColorPoint,StateVersions>::aligned::const_iterator
+                   cit = open_children.begin(); 
+                   cit != open_children.end(); cit++)
               {
-                rez.serialize(it->first->did);
-                rez.serialize(it->second);
+                rez.serialize(cit->first);
+                rez.serialize<size_t>(cit->second.size());
+                for (StateVersions::iterator it = cit->second.begin();
+                      it != cit->second.end(); it++)
+                {
+                  rez.serialize(it->first->did);
+                  rez.serialize(it->second);
+                }
               }
             }
+            else
+              rez.serialize<size_t>(0);
           }
           // Only send this if we are not doing child
           if (request_kind != CHILD_VERSION_REQUEST)
@@ -7183,25 +7281,7 @@ namespace Legion {
         FieldMask overlap = update_fields & request_mask;
         if (!overlap)
           Runtime::trigger_event(to_trigger);
-        else if (request_kind == CHILD_VERSION_REQUEST)
-        {
-          // See if we have any children we need to send
-          bool has_children = false;
-          for (LegionMap<ColorPoint,StateVersions>::aligned::const_iterator it =
-                open_children.begin(); it != open_children.end(); it++)
-          {
-            if (it->second.get_valid_mask() * overlap)
-              continue;
-            has_children = true;
-            break;
-          }
-          if (has_children)
-            launch_send_version_state_update(source, context, to_trigger, 
-                                             overlap, request_kind);
-          else // no children so we can trigger now
-            Runtime::trigger_event(to_trigger);
-        }
-        else
+        else if (request_kind != CHILD_VERSION_REQUEST)
         {
 #ifdef DEBUG_LEGION
           assert((request_kind == INITIAL_VERSION_REQUEST) || 
@@ -7210,6 +7290,8 @@ namespace Legion {
           launch_send_version_state_update(source, context, to_trigger, 
                                            overlap, request_kind);
         }
+        else // We should never get one of these requests directly
+          assert(false);
       }
       else
       {
@@ -7290,21 +7372,15 @@ namespace Legion {
           AutoLock s_lock(state_lock,1,false/*exclusive*/);
           // We're the owner handling a child or final version request
           // See if we have any remote instances to handle ourselves
-          if (!remote_valid_instances.empty())
+          // Child version requests get handled locally with no
+          // requests needing to be sent to remote nodes
+          if ((request_kind == FINAL_VERSION_REQUEST) &&
+              !remote_valid_instances.empty())
           {
             std::set<RtEvent> local_preconditions;
-            if (request_kind == CHILD_VERSION_REQUEST)
-            {
-              RequestFunctor<CHILD_VERSION_REQUEST> functor(this, context,
-                  source, request_mask, local_preconditions);
-              remote_valid_instances.map(functor);
-            }
-            else
-            {
-              RequestFunctor<FINAL_VERSION_REQUEST> functor(this, context,
-                  source, request_mask, local_preconditions);
-              remote_valid_instances.map(functor);
-            }
+            RequestFunctor<FINAL_VERSION_REQUEST> functor(this, context,
+                source, request_mask, local_preconditions);
+            remote_valid_instances.map(functor);
             if (!local_preconditions.empty())
             {
               FieldMask overlap = update_fields & request_mask;

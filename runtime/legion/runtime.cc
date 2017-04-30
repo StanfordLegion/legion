@@ -6009,6 +6009,11 @@ namespace Legion {
                                                  remote_address_space);
               break;
             }
+          case SEND_VERSION_STATE_CHILD_UPDATE:
+            {
+              runtime->handle_version_state_child_update(derez);
+              break;
+            }
           case SEND_VERSION_MANAGER_ADVANCE:
             {
               runtime->handle_version_manager_advance(derez,
@@ -14052,6 +14057,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_version_state_child_update(AddressSpaceID target, 
+                                                  Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+                                SEND_VERSION_STATE_CHILD_UPDATE,
+                                ANALYSIS_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_version_manager_advance(AddressSpaceID target,
                                                Serializer &rez)
     //--------------------------------------------------------------------------
@@ -15067,6 +15082,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       VersionState::process_version_state_valid_notification(derez,this,source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_version_state_child_update(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      VersionState::process_version_state_child_update(derez, this);
     }
 
     //--------------------------------------------------------------------------
