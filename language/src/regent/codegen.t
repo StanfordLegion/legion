@@ -504,7 +504,7 @@ local function physical_region_get_base_pointer(cx, index_type, field_type, fiel
       -- return a different value. In those cases, force the stride to
       -- its expected value to avoid problems downstream.
       std.assert(offsets[0].offset == [expected_stride] or
-                 c.legion_domain_get_volume(domain) == 1,
+                 c.legion_domain_get_volume(domain) <= 1,
                  "stride does not match expected value")
       offsets[0].offset = [expected_stride]
 
