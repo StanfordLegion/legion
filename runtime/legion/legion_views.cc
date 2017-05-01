@@ -4197,7 +4197,7 @@ namespace Legion {
                              info.map_applied_events);
           temporary_dst->add_copy_user(0/*redop*/, copy_post, 
                              &info.version_info, info.op->get_unique_op_id(),
-                             info.index, it->set_mask, false/*reading*/,
+                             info.index, it->set_mask, true/*reading*/,
                              false/*restrict out*/, local_space, 
                              info.map_applied_events);
           postconditions[copy_post] = it->set_mask;
