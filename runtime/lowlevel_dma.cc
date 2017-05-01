@@ -5496,62 +5496,68 @@ namespace Realm {
 	  Memory src_mem = it->first.first;
 	  Memory dst_mem = it->first.second;
 	  OASByInst *oas_by_inst = it->second;
-
-	  Event ev = GenEventImpl::create_genevent()->current_event();
+          for (OASByInst::const_iterator it2 = (*oas_by_inst).begin(); it2 != (*oas_by_inst).end(); it2++) {
+	    OASByInst *new_oas_by_inst = new OASByInst;
+            InstPair ip = it2->first;
+            OASVec oasvec(it2->second);
+            (*new_oas_by_inst)[ip] = oasvec;
+            Event ev = GenEventImpl::create_genevent()->current_event();
 #ifdef EVENT_GRAPH_TRACE
-          Event enclosing = find_enclosing_termination_event();
-          log_event_graph.info("Copy Request: (" IDFMT ",%d) (" IDFMT ",%d) "
-                                "(" IDFMT ",%d) " IDFMT " " IDFMT "",
-                                ev.id, ev.gen, wait_on.id, wait_on.gen,
-                                enclosing.id, enclosing.gen,
-                                src_mem.id, dst_mem.id);
+            Event enclosing = find_enclosing_termination_event();
+            log_event_graph.info("Copy Request: (" IDFMT ",%d) (" IDFMT ",%d) "
+                                  "(" IDFMT ",%d) " IDFMT " " IDFMT "",
+                                  ev.id, ev.gen, wait_on.id, wait_on.gen,
+                                  enclosing.id, enclosing.gen,
+                                  src_mem.id, dst_mem.id);
 #endif
 
-	  int priority = 0;
-	  if (get_runtime()->get_memory_impl(src_mem)->kind == MemoryImpl::MKIND_GPUFB)
-	    priority = 1;
-	  else if (get_runtime()->get_memory_impl(dst_mem)->kind == MemoryImpl::MKIND_GPUFB)
-	    priority = 1;
+	    int priority = 0;
+	    if (get_runtime()->get_memory_impl(src_mem)->kind == MemoryImpl::MKIND_GPUFB)
+	      priority = 1;
+	    else if (get_runtime()->get_memory_impl(dst_mem)->kind == MemoryImpl::MKIND_GPUFB)
+	      priority = 1;
 
-	  CopyRequest *r = new CopyRequest(*this, oas_by_inst, 
-					   wait_on, ev, priority, requests);
+	    CopyRequest *r = new CopyRequest(*this, new_oas_by_inst, 
+	  				   wait_on, ev, priority, requests);
 
-	  // ask which node should perform the copy
-	  int dma_node = select_dma_node(src_mem, dst_mem, redop_id, red_fold);
-	  log_dma.debug("copy: srcmem=" IDFMT " dstmem=" IDFMT " node=%d", src_mem.id, dst_mem.id, dma_node);
-	  
-	  if(((unsigned)dma_node) == gasnet_mynode()) {
-	    log_dma.debug("performing copy on local node");
+	    // ask which node should perform the copy
+	    int dma_node = select_dma_node(src_mem, dst_mem, redop_id, red_fold);
+	    log_dma.debug("copy: srcmem=" IDFMT " dstmem=" IDFMT " node=%d", src_mem.id, dst_mem.id, dma_node);
 
-	    get_runtime()->optable.add_local_operation(ev, r);
-	  
-	    r->check_readiness(false, dma_queue);
+	    if(((unsigned)dma_node) == gasnet_mynode()) {
+	      log_dma.debug("performing copy on local node");
 
-	    finish_events.insert(ev);
-	  } else {
-	    RemoteCopyArgs args;
-	    args.redop_id = 0;
-	    args.red_fold = false;
-	    args.before_copy = wait_on;
-	    args.after_copy = ev;
-	    args.priority = priority;
+	      get_runtime()->optable.add_local_operation(ev, r);
 
-            size_t msglen = r->compute_size();
-            void *msgdata = malloc(msglen);
+	      r->check_readiness(false, dma_queue);
 
-            r->serialize(msgdata);
+	      finish_events.insert(ev);
+	    } else {
+	      RemoteCopyArgs args;
+	      args.redop_id = 0;
+	      args.red_fold = false;
+	      args.before_copy = wait_on;
+	      args.after_copy = ev;
+	      args.priority = priority;
 
-	    log_dma.debug("performing copy on remote node (%d), event=" IDFMT, dma_node, args.after_copy.id);
-	    get_runtime()->optable.add_remote_operation(ev, dma_node);
-	    RemoteCopyMessage::request(dma_node, args, msgdata, msglen, PAYLOAD_FREE);
-	  
-	    finish_events.insert(ev);
+              size_t msglen = r->compute_size();
+              void *msgdata = malloc(msglen);
 
-	    // done with the local copy of the request
-	    r->remove_reference();
-	  }
-	}
+              r->serialize(msgdata);
 
+	      log_dma.debug("performing copy on remote node (%d), event=" IDFMT, dma_node, args.after_copy.id);
+	      get_runtime()->optable.add_remote_operation(ev, dma_node);
+	      RemoteCopyMessage::request(dma_node, args, msgdata, msglen, PAYLOAD_FREE);
+
+	      finish_events.insert(ev);
+
+	      // done with the local copy of the request
+	      r->remove_reference();
+	    }
+	  } // for OASByInst::iterator
+          // avoid memory leakage
+          delete oas_by_inst;
+        } // for OASByMem::iterator
 	// final event is merge of all individual copies' events
 	return GenEventImpl::merge_events(finish_events, false /*!ignore faults*/);
       } else {
