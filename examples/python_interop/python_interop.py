@@ -20,16 +20,34 @@ from __future__ import print_function
 import legion
 import numpy
 
+# This task is defined in C++. See init_task in python_interop.cc.
 init = legion.extern_task(task_id=3, privileges=[legion.RW])
 
+# Define a Python task. This task takes two arguments: a region and a
+# number, and increments every element of the region by that number.
 @legion.task(privileges=[legion.RW])
 def inc(ctx, R, step):
+    # The fields of regions are numpy arrays, so you can call normal
+    # numpy methods on them. Be careful about where the output is
+    # directed if you want to avoid making extra copies of the data.
     print(R.x)
     numpy.add(R.x, step, out=R.x)
     print(R.x)
 
+# Define the main Python task. This task is called from C++. See
+# top_level_task in python_iterop.cc.
 @legion.task
 def main_task(ctx):
-    R = legion.Region.create(ctx, [4, 4], {'x': (legion.double, 1)})
+    # Create a 2D index space of size 4x4.
+    I = legion.Ispace.create(ctx, [4, 4])
+
+    # Create a field space with a single field x of type double. For
+    # interop with C++, we have to choose an explicit field ID here
+    # (in this case, 1). We could leave this out if the code were pure
+    # Python.
+    F = legion.Fspace.create(ctx, {'x': (legion.double, 1)})
+
+    # Create a region from I and F and launch two tasks.
+    R = legion.Region.create(ctx, I, F)
     init(ctx, R)
     inc(ctx, R, 1)
