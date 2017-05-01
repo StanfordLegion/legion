@@ -818,6 +818,9 @@ class Base(object):
         cur_level = self.proc.max_levels - self.level
         return (self.proc.node_id, self.proc.proc_in_node, self.prof_uid)
 
+    def get_owner(self):
+        return self.proc
+
 class Operation(Base):
     def __init__(self, op_id):
         Base.__init__(self)
@@ -1162,6 +1165,9 @@ class Copy(Base, TimeRange, HasInitiationDependencies):
         self.size = size
         self.chan = None
 
+    def get_owner(self):
+        return self.chan
+
     def get_color(self):
         # Get the color from the initiator
         return self.initiation_op.get_color()
@@ -1206,6 +1212,9 @@ class Fill(Base, TimeRange, HasInitiationDependencies):
         self.dst = dst
         self.chan = None
 
+    def get_owner(self):
+        return self.chan
+
     def __repr__(self):
         return 'Fill'
 
@@ -1244,6 +1253,9 @@ class Instance(Base, TimeRange, HasInitiationDependencies):
         self.inst_id = inst_id
         self.mem = None
         self.size = None
+
+    def get_owner(self):
+        return self.mem
 
     def get_unique_tuple(self):
         assert self.mem is not None
@@ -2280,28 +2292,45 @@ class State(object):
                 return potential_dir
             i += 1
 
-    def calculate_utilization_data(self, timepoints, max_count, num_points=100000):
+    def calculate_utilization_data(self, timepoints, owners):
         # we assume that the timepoints are sorted before this step
 
         # loop through all the timepoints. Get the earliest. If it's first,
         # add to the count. if it's second, decrement the count. Store the
         # (time, count) pair.
 
-        # times = list()
-        # counts = list()
+        assert len(owners) > 0
+        
+        isMemory = False
+        max_count = 0
+        if isinstance(owners[0], Memory):
+            isMemory = True
+            for mem in owners:
+                max_count += mem.total_size
+        else:
+            max_count = len(owners)
+
+        max_count = float(max_count)
+
         utilization = list()
         count = 0
         last_time = None
-        increment = 1.0 / float(max_count)
+        increment = 1.0 / max_count
         for point in timepoints:
-            if point.first:
-                count += increment
+            if isMemory:
+                if point.first:
+                    count += point.thing.size
+                else:
+                    count -= point.thing.size
             else:
-                count -= increment
+                if point.first:
+                    count += 1
+                else:
+                    count -= 1
             if point.time == last_time:
-                utilization[-1] = (point.time, count) # update the count
+                utilization[-1] = (point.time, count / max_count) # update the count
             else:
-                utilization.append((point.time, count))
+                utilization.append((point.time, count / max_count))
             last_time = point.time
         return utilization
 
@@ -2327,22 +2356,26 @@ class State(object):
     #
     # adds points where there are one or more events occurring.
     # removes a point when the count drops to 0.
-    def convert_to_utilization(self, timepoints):
+    def convert_to_utilization(self, timepoints, owner):
         proc_utilization = []
         count = 0
-        for point in timepoints:
-            if point.first:
-                count += 1
-                if count == 1:
-                    proc_utilization.append(point)
-            else:
-                count -= 1
-                if count == 0:
-                    proc_utilization.append(point)
+        if isinstance(owner, Processor):
+            for point in timepoints:
+                if point.first:
+                    count += 1
+                    if count == 1:
+                        proc_utilization.append(point)
+                else:
+                    count -= 1
+                    if count == 0:
+                        proc_utilization.append(point)
+        else: # For memories, we want just the points
+            proc_utilization = timepoints
         return proc_utilization
 
     # group by processor kind per node. Also compute the children relationships
     def group_node_proc_kind_timepoints(self, timepoints_dict):
+        # procs
         for proc in self.processors.itervalues():
             if len(proc.tasks) > 0:
                 # add this processor kind to both all and the node group
@@ -2353,17 +2386,17 @@ class State(object):
                         timepoints_dict[group] = [proc.util_time_points]
                     else:
                         timepoints_dict[group].append(proc.util_time_points)
-
-    def group_node_proc_timepoints(self, timepoints_dict):
-        for proc in self.processors.itervalues():
-            if len(proc.tasks) > 0:
-                # add this processor to both all and the node group
-                groups = [str(proc.node_id), "all"]
-                for group in groups:
+        # memories
+        for mem in self.memories.itervalues():
+            if len(mem.time_points) > 0:
+                # add this memory kind to both the all and the node group
+                groups = [str(mem.node_id), "all"]
+                for node in groups:
+                    group = node + " (" + mem.kind + " Memory)"
                     if group not in timepoints_dict:
-                        timepoints_dict[group] = [proc.time_points]
+                        timepoints_dict[group] = [mem.time_points]
                     else:
-                        timepoints_dict[group].append(proc.time_points)
+                        timepoints_dict[group].append(mem.time_points)
 
     def get_nodes(self):
         nodes = {}
@@ -2382,13 +2415,7 @@ class State(object):
         # this is a map from node ids to a list of timepoints in that node
         timepoints_dict = {}
 
-        #self.group_node_proc_timepoints(timepoints_dict)
         self.group_node_proc_kind_timepoints(timepoints_dict)
-
-        # add in the all group
-        timepoints_dict["all"] = [proc.util_time_points 
-                                    for proc in self.processors.values()
-                                    if len(proc.tasks) > 0]
 
         # now we compute the structure of the stats (the parent-child
         # relationships
@@ -2401,6 +2428,10 @@ class State(object):
                 group = str(node) + " (" + kind + ")"
                 if group in timepoints_dict:
                     stats_structure[node].append(group)
+            for kind in memory_kinds.itervalues():
+                group = str(node) + " (" + kind + " Memory)"
+                if group in timepoints_dict:
+                    stats_structure[node].append(group)
 
         json_file_name = os.path.join(output_dirname, "json", "utils.json")
 
@@ -2411,16 +2442,21 @@ class State(object):
         # here we write out the actual tsv stats files
         for tp_group in timepoints_dict:
             timepoints = timepoints_dict[tp_group]
-            utilizations = [self.convert_to_utilization(tp)
-                            for tp in timepoints]
+            utilizations = [self.convert_to_utilization(tp, tp[0].thing.get_owner())
+                            for tp in timepoints if len(tp) > 0]
 
-            max_count = len(timepoints)
+            owners = set()
+            for tp in timepoints:
+                if len(tp) > 0:
+                    owners.add(tp[0].thing.get_owner())
+            owners = list(owners)
+
             utilization = None
-            if max_count == 0:
+            if len(owners) == 0:
                 print("WARNING: node " + str(tp_group) + " has no prof events. Is this what you expected?")
                 utilization = list()
             else:
-                utilization = self.calculate_utilization_data(sorted(itertools.chain(*utilizations)), max_count)
+                utilization = self.calculate_utilization_data(sorted(itertools.chain(*utilizations)), owners)
 
             util_tsv_filename = os.path.join(output_dirname, "tsv", str(tp_group) + "_util.tsv")
             with open(util_tsv_filename, "w") as util_tsv_file:
