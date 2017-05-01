@@ -570,6 +570,8 @@ namespace Legion {
       void add_current_user(PhysicalUser *user, ApEvent term_event,
                             const FieldMask &user_mask);
       void filter_local_users(ApEvent term_event);
+      void filter_local_users(const FieldMask &filter_mask,
+          LegionMap<ApEvent,EventUsers>::aligned &local_epoch_users);
       void filter_current_user(ApEvent user_event, 
                                const FieldMask &filter_mask);
       void filter_previous_user(ApEvent user_event, 

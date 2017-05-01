@@ -748,14 +748,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Default mapper is ignorant about task IDs so just do whatever
-      ranking.resize(4);
       // GPU > procset > IO > cpu
       // It is up to the caller to filter out processor kinds that aren't
       // suitable for a given task
-      ranking[0] = Processor::TOC_PROC;
-      ranking[1] = Processor::PROC_SET;
-      ranking[2] = Processor::LOC_PROC;
-      ranking[3] = Processor::IO_PROC;
+      if (local_gpus.size() > 0) ranking.push_back(Processor::TOC_PROC);
+      if (local_procsets.size() > 0) ranking.push_back(Processor::PROC_SET);
+      ranking.push_back(Processor::LOC_PROC);
+      if (local_ios.size() > 0) ranking.push_back(Processor::IO_PROC);
     }
 
     //--------------------------------------------------------------------------

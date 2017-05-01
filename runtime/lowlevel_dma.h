@@ -220,6 +220,8 @@ namespace LegionRuntime {
       };
     };
 
+    void free_intermediate_buffer(DmaRequest* req, Memory mem, off_t offset, size_t size);
+
     struct OffsetsAndSize {
       off_t src_offset, dst_offset;
       int size;

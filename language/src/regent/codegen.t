@@ -504,7 +504,7 @@ local function physical_region_get_base_pointer(cx, index_type, field_type, fiel
       -- return a different value. In those cases, force the stride to
       -- its expected value to avoid problems downstream.
       std.assert(offsets[0].offset == [expected_stride] or
-                 c.legion_domain_get_volume(domain) == 1,
+                 c.legion_domain_get_volume(domain) <= 1,
                  "stride does not match expected value")
       offsets[0].offset = [expected_stride]
 
@@ -6671,6 +6671,7 @@ local function collect_symbols(cx, node)
   local result = terralib.newlist()
 
   local undefined = {}
+  local reduction_variables = {}
   local defined = { [node.symbol] = true }
   local accesses = {}
   local function collect_symbol_pre(node)
@@ -6712,6 +6713,11 @@ local function collect_symbols(cx, node)
              std.is_ref(node.expr_type) and
              node.expr_type:bounds() ~= node.value.expr_type:bounds() then
         accesses[node] = true
+      elseif node:is(ast.typed.stat.Reduce) then
+        local lh = node.lhs[1]
+        if lh:is(ast.typed.expr.ID) then
+          reduction_variables[lh.value:getsymbol()] = node.op
+        end
       end
     end
   end
@@ -6747,7 +6753,7 @@ local function collect_symbols(cx, node)
     result:insert(symbol)
   end
 
-  return result
+  return result, reduction_variables
 end
 
 function codegen.stat_for_list(cx, node)
@@ -6828,23 +6834,72 @@ function codegen.stat_for_list(cx, node)
 
   if not cuda then
     if ispace_type.dim == 0 then
-      return quote
-        [actions]
-        while iterator_has_next([it]) do
-          var count : c.size_t = 0
-          var base = iterator_next_span([it], &count, -1).value
-          for i = 0, count do
-            var [symbol] = [symbol.type]{
-              __ptr = c.legion_ptr_t {
-                value = base + i
+      if not openmp then
+        return quote
+          [actions]
+          while iterator_has_next([it]) do
+            var count : c.size_t = 0
+            var base = iterator_next_span([it], &count, -1).value
+            for i = 0, count do
+              var [symbol] = [symbol.type]{
+                __ptr = c.legion_ptr_t {
+                  value = base + i
+                }
               }
-            }
+              do
+                [block]
+              end
+            end
+          end
+          [cleanup_actions]
+        end
+      else
+        local count = terralib.newsymbol(uint64, "count")
+        local base = terralib.newsymbol(int64, "base")
+        local symbols, reductions = collect_symbols(cx, node)
+        symbols:insert(count)
+        symbols:insert(base)
+        local arg_type, mapping = openmphelper.generate_argument_type(symbols, reductions)
+        local arg = terralib.newsymbol(&arg_type, "arg")
+        local worker_init, launch_init =
+          openmphelper.generate_argument_init(arg, arg_type, mapping, reductions)
+        local worker_cleanup =
+          openmphelper.generate_worker_cleanup(arg, arg_type, mapping, reductions)
+        local launcher_cleanup =
+          openmphelper.generate_launcher_cleanup(arg, arg_type, mapping, reductions)
+
+        local terra omp_worker(data : &opaque)
+          var [arg] = [&arg_type](data)
+          [worker_init]
+          var num_threads = [openmphelper.get_num_threads]()
+          var thread_id = [openmphelper.get_thread_num]()
+          var chunk = (count + num_threads - 1) / num_threads
+          if chunk == 0 then chunk = 1 end
+          var start_idx = thread_id * chunk + base
+          var end_idx = (thread_id + 1) * chunk + base
+          if end_idx > base + count then end_idx = base + count end
+          for i = start_idx, end_idx do
+            var [symbol] = [symbol.type]{ __ptr = c.legion_ptr_t { value = i } }
             do
               [block]
             end
           end
+          [worker_cleanup]
         end
-        [cleanup_actions]
+
+        return quote
+          [actions]
+          while iterator_has_next([it]) do
+            var [count] = 0
+            var [base] = iterator_next_span([it], &count, -1).value
+            var arg_obj : arg_type
+            var [arg] = &arg_obj
+            [launch_init]
+            [openmphelper.launch]([omp_worker], [arg], [openmphelper.get_max_threads](), 0)
+            [launcher_cleanup]
+          end
+          [cleanup_actions]
+        end
       end
     else
       local fields = ispace_type.index_type.fields
@@ -6896,15 +6951,21 @@ function codegen.stat_for_list(cx, node)
               end
             end
           end
-          local symbols = collect_symbols(cx, node)
+          local symbols, reductions = collect_symbols(cx, node)
           symbols:insert(rect)
-          local arg_type, mapping = openmphelper.generate_argument_type(symbols)
+          local arg_type, mapping = openmphelper.generate_argument_type(symbols, reductions)
           local arg = terralib.newsymbol(&arg_type, "arg")
-          local worker_init, launch_init = openmphelper.generate_argument_init(arg, arg_type, mapping)
+          local worker_init, launch_init =
+            openmphelper.generate_argument_init(arg, arg_type, mapping, reductions)
+          local worker_cleanup =
+            openmphelper.generate_worker_cleanup(arg, arg_type, mapping, reductions)
+          local launcher_cleanup =
+            openmphelper.generate_launcher_cleanup(arg, arg_type, mapping, reductions)
           local terra omp_worker(data : &opaque)
             var [arg] = [&arg_type](data)
             [worker_init]
             [body]
+            [worker_cleanup]
           end
           return quote
             [actions]
@@ -6913,7 +6974,8 @@ function codegen.stat_for_list(cx, node)
             var arg_obj : arg_type
             var [arg] = &arg_obj
             [launch_init]
-            [openmphelper.launch]([omp_worker], [arg], [openmphelper.get_num_threads](), 0)
+            [openmphelper.launch]([omp_worker], [arg], [openmphelper.get_max_threads](), 0)
+            [launcher_cleanup]
             [cleanup_actions]
           end
         end
@@ -6935,11 +6997,16 @@ function codegen.stat_for_list(cx, node)
           local end_idx = terralib.newsymbol(int64, "end_idx")
           local rect_type = c.legion_rect_1d_t
           local rect = terralib.newsymbol(&rect_type, "rect")
-          local symbols = collect_symbols(cx, node)
+          local symbols, reductions = collect_symbols(cx, node)
           symbols:insert(rect)
-          local arg_type, mapping = openmphelper.generate_argument_type(symbols)
+          local arg_type, mapping = openmphelper.generate_argument_type(symbols, reductions)
           local arg = terralib.newsymbol(&arg_type, "arg")
-          local worker_init, launch_init = openmphelper.generate_argument_init(arg, arg_type, mapping)
+          local worker_init, launch_init =
+            openmphelper.generate_argument_init(arg, arg_type, mapping, reductions)
+          local worker_cleanup =
+            openmphelper.generate_worker_cleanup(arg, arg_type, mapping, reductions)
+          local launcher_cleanup =
+            openmphelper.generate_launcher_cleanup(arg, arg_type, mapping, reductions)
           local terra omp_worker(data : &opaque)
             var [arg] = [&arg_type](data)
             [worker_init]
@@ -6950,6 +7017,7 @@ function codegen.stat_for_list(cx, node)
                 [block]
               end
             end
+            [worker_cleanup]
           end
           return quote
             [actions]
@@ -6958,7 +7026,8 @@ function codegen.stat_for_list(cx, node)
             var arg_obj : arg_type
             var [arg] = &arg_obj
             [launch_init]
-            [openmphelper.launch]([omp_worker], [arg], [openmphelper.get_num_threads](), 0)
+            [openmphelper.launch]([omp_worker], [arg], [openmphelper.get_max_threads](), 0)
+            [launcher_cleanup]
             [cleanup_actions]
           end
         end
@@ -8331,7 +8400,7 @@ function codegen.top_task(cx, node)
   -- FIXME: This is an obnoxious hack to avoid inline mappings in shard tasks.
   --        Will be fixed with a proper handling of list of regions in
   --        the inline mapping optimizer.
-  if string.sub(tostring(node.name), 0, 6) == "<shard" then
+  if cx.task_meta:is_shard_task() then
     task_setup:insert(quote
       c.legion_runtime_unmap_all_regions([c_runtime], [c_context])
     end)

@@ -648,19 +648,19 @@ namespace LegionRuntime {
       }
       // free intermediate buffers
       {
-        AutoHSLLock al(ib_mutex);
-        for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
-          IBVec& ib_vec = ib_by_inst[it->first];
-          for (IBVec::iterator it2 = ib_vec.begin(); it2 != ib_vec.end(); it2++) {
-            if(ID(it2->memory).memory.owner_node == gasnet_mynode()) {
-              get_runtime()->get_memory_impl(it2->memory)->free_bytes(it2->offset, it2->size);
-              ib_req_queue->dequeue_request(it2->memory);
-            } else {
-              RemoteIBFreeRequestAsync::send_request(ID(it2->memory).memory.owner_node,
-                  it2->memory, it2->offset, it2->size);
-            }
-          }
-        }
+      //  AutoHSLLock al(ib_mutex);
+      //  for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
+      //    IBVec& ib_vec = ib_by_inst[it->first];
+      //    for (IBVec::iterator it2 = ib_vec.begin(); it2 != ib_vec.end(); it2++) {
+      //      if(ID(it2->memory).memory.owner_node == gasnet_mynode()) {
+      //        get_runtime()->get_memory_impl(it2->memory)->free_bytes(it2->offset, it2->size);
+      //        ib_req_queue->dequeue_request(it2->memory);
+      //      } else {
+      //        RemoteIBFreeRequestAsync::send_request(ID(it2->memory).memory.owner_node,
+      //            it2->memory, it2->offset, it2->size);
+      //      }
+      //    }
+      //  }
       }
       delete ib_req;
       //</NEWDMA>
@@ -835,7 +835,21 @@ namespace LegionRuntime {
     }
 
 
-#define IB_MAX_SIZE (128 * 1024 * 1024)
+#define IB_MAX_SIZE (64 * 1024 * 1024)
+
+    void free_intermediate_buffer(DmaRequest* req, Memory mem, off_t offset, size_t size)
+    {
+      //CopyRequest* cr = (CopyRequest*) req;
+      //AutoHSLLock al(cr->ib_mutex);
+      if(ID(mem).memory.owner_node == gasnet_mynode()) {
+        get_runtime()->get_memory_impl(mem)->free_bytes(offset, size);
+        ib_req_queue->dequeue_request(mem);
+      } else {
+        RemoteIBFreeRequestAsync::send_request(ID(mem).memory.owner_node,
+            mem, offset, size);
+      }
+    }
+
 
     void CopyRequest::alloc_intermediate_buffer(InstPair inst_pair, Memory tgt_mem, int idx)
     {
