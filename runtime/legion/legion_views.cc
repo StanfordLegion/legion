@@ -2061,6 +2061,93 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MaterializedView::filter_local_users(const FieldMask &filter_mask,
+                      LegionMap<ApEvent,EventUsers>::aligned &local_epoch_users)
+    //--------------------------------------------------------------------------
+    {
+      // lock better be held by caller
+      DETAILED_PROFILER(context->runtime, 
+                        MATERIALIZED_VIEW_FILTER_LOCAL_USERS_CALL);
+      std::vector<ApEvent> to_delete;
+      for (LegionMap<ApEvent,EventUsers>::aligned::iterator lit = 
+           local_epoch_users.begin(); lit != local_epoch_users.end(); lit++)
+      {
+        const FieldMask overlap = lit->second.user_mask & filter_mask;
+        if (!overlap)
+          continue;
+        EventUsers &local_users = lit->second;
+        local_users.user_mask -= overlap;
+        if (!local_users.user_mask)
+        {
+          // Total removal of the entry
+          to_delete.push_back(lit->first);
+          if (local_users.single)
+          {
+            PhysicalUser *user = local_users.users.single_user;
+            if (user->remove_reference())
+              legion_delete(user);
+          }
+          else
+          {
+            for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
+                  it = local_users.users.multi_users->begin(); it !=
+                  local_users.users.multi_users->end(); it++)
+            {
+              if (it->first->remove_reference())
+                legion_delete(it->first);
+            }
+            // Delete the map too
+            delete local_users.users.multi_users;
+          }
+        }
+        else if (!local_users.single) // only need to filter for non-single
+        {
+          // Partial removal of the entry
+          std::vector<PhysicalUser*> to_erase;
+          for (LegionMap<PhysicalUser*,FieldMask>::aligned::iterator it = 
+                local_users.users.multi_users->begin(); it !=
+                local_users.users.multi_users->end(); it++)
+          {
+            it->second -= overlap;
+            if (!it->second)
+              to_erase.push_back(it->first);
+          }
+          if (!to_erase.empty())
+          {
+            for (std::vector<PhysicalUser*>::const_iterator it = 
+                  to_erase.begin(); it != to_erase.end(); it++)
+            {
+              local_users.users.multi_users->erase(*it);
+              if ((*it)->remove_reference())
+                legion_delete(*it);
+            }
+            // See if we can shrink this back down
+            if (local_users.users.multi_users->size() == 1)
+            {
+              LegionMap<PhysicalUser*,FieldMask>::aligned::iterator first_it =
+                            local_users.users.multi_users->begin();     
+#ifdef DEBUG_LEGION
+              // This summary mask should dominate
+              assert(!(first_it->second - local_users.user_mask));
+#endif
+              PhysicalUser *user = first_it->first;
+              local_users.user_mask = first_it->second;
+              delete local_users.users.multi_users;
+              local_users.users.single_user = user;
+              local_users.single = true;
+            }
+          }
+        }
+      }
+      if (!to_delete.empty())
+      {
+        for (std::vector<ApEvent>::const_iterator it = to_delete.begin();
+              it != to_delete.end(); it++)
+          local_epoch_users.erase(*it);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void MaterializedView::filter_current_user(ApEvent user_event, 
                                                const FieldMask &filter_mask)
     //--------------------------------------------------------------------------
@@ -2553,14 +2640,12 @@ namespace Legion {
           dead_events.insert(pit->first);
           continue;
         }
+        if (preconditions.find(pit->first) != preconditions.end())
+          continue;
 #endif
         const EventUsers &event_users = pit->second;
         if (user_mask * event_users.user_mask)
           continue;
-#ifndef LEGION_SPY
-        if (preconditions.find(pit->first) != preconditions.end())
-          continue;
-#endif
         if (event_users.single)
         {
           if (has_local_precondition(event_users.users.single_user, usage,
@@ -2612,22 +2697,28 @@ namespace Legion {
           dead_events.insert(cit->first);
           continue;
         }
-        if (preconditions.find(cit->first) != preconditions.end())
-          continue;
 #endif
         const EventUsers &event_users = cit->second;
-        const FieldMask overlap = event_users.user_mask & user_mask;
+        FieldMask overlap = event_users.user_mask & user_mask;
         if (!overlap)
           continue;
-        else if (TRACK_DOM)
+        LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
+          preconditions.find(cit->first);
+#ifndef LEGION_SPY
+        if (finder != preconditions.end())
+        {
+          overlap -= finder->second;
+          if (!overlap)
+            continue;
+        }
+#endif
+        if (TRACK_DOM)
           observed |= overlap;
         if (event_users.single)
         {
           if (has_local_precondition(event_users.users.single_user, usage,
                                      child_color, op_id, index, origin_node))
           {
-            LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
-              preconditions.find(cit->first);
             if (finder == preconditions.end())
               preconditions[cit->first] = overlap;
             else
@@ -2650,8 +2741,6 @@ namespace Legion {
             if (has_local_precondition(it->first, usage, child_color, 
                                        op_id, index, origin_node))
             {
-              LegionMap<ApEvent,FieldMask>::aligned::iterator finder =
-                preconditions.find(cit->first);
               if (finder == preconditions.end())
                 preconditions[cit->first] = overlap;
               else
@@ -3691,6 +3780,11 @@ namespace Legion {
       {
         AutoLock v_lock(view_lock);
         remote_valid_mask -= invalid_mask;
+        // We also have to filter out the current and previous epoch 
+        // user lists so that when we get an update then we know we
+        // won't have polluting users in the list to start
+        filter_local_users(invalid_mask, current_epoch_users);
+        filter_local_users(invalid_mask, previous_epoch_users);
       }
       Runtime::trigger_event(done_event);
     }
@@ -4077,7 +4171,7 @@ namespace Legion {
                              info.map_applied_events);
           temporary_dst->add_copy_user(0/*redop*/, copy_post, 
                              &info.version_info, info.op->get_unique_op_id(),
-                             info.index, it->set_mask, false/*reading*/,
+                             info.index, it->set_mask, true/*reading*/,
                              false/*restrict out*/, local_space, 
                              info.map_applied_events);
           postconditions[copy_post] = it->set_mask;
@@ -4134,7 +4228,15 @@ namespace Legion {
           else if (!it->preconditions.empty())
             post = Runtime::merge_events(it->preconditions);
           if (post.exists())
-            postconditions[post] = it->set_mask;
+          {
+            // post is not guaranteed to be unique!
+            LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
+              postconditions.find(post);
+            if (finder == postconditions.end())
+              postconditions[post] = it->set_mask;
+            else
+              finder->second |= it->set_mask;
+          }
         }
       }
     }
@@ -4282,7 +4384,15 @@ namespace Legion {
           else if (!it->preconditions.empty())
             post = Runtime::merge_events(it->preconditions);
           if (post.exists())
-            postconditions[post] = it->set_mask;
+          {
+            // post is not guaranteed to be unique!
+            LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
+              postconditions.find(post);
+            if (finder == postconditions.end())
+              postconditions[post] = it->set_mask;
+            else
+              finder->second |= it->set_mask;
+          }
         }  
       }
     }
@@ -6768,7 +6878,15 @@ namespace Legion {
       {
         ApEvent post = Runtime::merge_events(it->preconditions);
         if (post.exists())
-          postconditions[post] = it->set_mask;
+        {
+          // post is not guaranteed to be unique
+          LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
+            postconditions.find(post);
+          if (finder == postconditions.end())
+            postconditions[post] = it->set_mask;
+          else
+            finder->second |= it->set_mask;
+        }
       }
     }
 

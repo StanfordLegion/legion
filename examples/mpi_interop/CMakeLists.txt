@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2017 Kitware, Inc.
+# Copyright 2017 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,24 +15,15 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.1)
+project(LegionExample_mpi_interop)
 
+# Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_subdirectory(attach_file)
-add_subdirectory(circuit)
-add_subdirectory(dynamic_registration)
-add_subdirectory(ghost)
-add_subdirectory(ghost_pull)
-add_subdirectory(realm_saxpy)
-add_subdirectory(spmd_cgsolver)
-add_subdirectory(virtual_map)
-
-if(Legion_USE_GASNet)
-  add_subdirectory(mpi_interop)
-endif()
-
-if(Legion_USE_CUDA)
-  add_subdirectory(thrust_interop)
+add_executable(mpi_interop mpi_interop.cc)
+target_link_libraries(mpi_interop Legion::Legion)
+if(Legion_ENABLE_TESTING)
+  add_test(NAME mpi_interop COMMAND $<TARGET_FILE:mpi_interop>)
 endif()

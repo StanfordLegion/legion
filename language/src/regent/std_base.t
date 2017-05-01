@@ -364,6 +364,11 @@ function base.task:get_cuda_variant()
   return self.cuda_variant
 end
 
+function base.task:is_shard_task()
+  -- FIXME: This will break if we pick different names for shard tasks
+  return string.sub(tostring(self:getname()), 0, 6) == "<shard"
+end
+
 function base.task:make_variant()
   local variant_task = base.newtask(self.name)
   variant_task:settaskid(self:gettaskid())

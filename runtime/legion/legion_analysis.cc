@@ -588,7 +588,7 @@ namespace Legion {
         // This VersionState doesn't apply locally if there are no fields
         if (!overlap)
           continue;
-        // We can remove these fields from the new states becasue
+        // We can remove these fields from the new states because
         // we know that we are going to handle it
         nit->second -= overlap;
         if (!nit->second)

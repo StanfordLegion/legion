@@ -74,6 +74,8 @@ namespace Realm {
 		      void (*fnptr)(void *data), void *data,
 		      WorkItem *work_item);
 
+    int get_num_workers() const { return num_workers; }
+
   protected:
     int num_workers;
     std::vector<Thread *> worker_threads;

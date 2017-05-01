@@ -34,6 +34,15 @@ namespace Realm {
 	return 1;
     }
 
+    int omp_get_max_threads(void)
+    {
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+      if(wi)
+	return wi->pool->get_num_workers() + 1;
+      else
+	return 1;
+    }
+
     int omp_get_thread_num(void)
     {
       Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
@@ -421,12 +430,12 @@ namespace Realm {
 	T whole = iters / wi->num_threads;
 	T leftover = iters - (whole * wi->num_threads);
 	*plower += incr * (whole * wi->thread_id +
-			   ((wi->thread_id < leftover) ? wi->thread_id : leftover));
+			   ((((T)(wi->thread_id)) < leftover) ? wi->thread_id : leftover));
 	*pupper = *plower + incr * (whole +
-				    ((wi->thread_id < leftover) ? 1 : 0)) - 1;
+				    ((((T)(wi->thread_id)) < leftover) ? 1 : 0)) - 1;
 	// special case for when some threads get no iterations at all
 	*plastiter = ((whole > 0) ? (wi->thread_id == (wi->num_threads - 1)) :
-		                    (wi->thread_id == (leftover - 1)));
+		                    (((T)(wi->thread_id)) == (leftover - 1)));
 	//printf("static(%d, %d, %d, %d, %d)\n", *plower, *pupper, *pstride, incr, *plastiter);
 	return;
       }

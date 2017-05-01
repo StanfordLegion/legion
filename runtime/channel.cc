@@ -1485,6 +1485,13 @@ namespace LegionRuntime {
               // We flush all changes into destination before mark this XferDes as completed
               xd->flush();
               log_new_dma.info("Finish XferDes : id(" IDFMT ")", xd->guid);
+              // We eagerly free intermediate buffers here for better performance
+              if(xd->src_buf.is_ib) {
+                free_intermediate_buffer(xd->dma_request,
+                                         xd->src_buf.memory,
+                                         xd->src_buf.alloc_offset,
+                                         xd->src_buf.buf_size);
+              }
               xd->mark_completed();
               /*bool need_to_delete_dma_request = xd->mark_completed();
               if (need_to_delete_dma_request) {

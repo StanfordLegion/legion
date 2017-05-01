@@ -1,6 +1,6 @@
 // Some of the constants are read in from load_scale_json
 var constants = {
-  margin_left: 200,
+  margin_left: 250,
   margin_right: 50,
   margin_bottom: 50,
   margin_top: 50,
@@ -9,8 +9,6 @@ var constants = {
   util_height: 100,
   util_levels: 4,
   elem_separation: 2,
-  line_colors: ["limegreen", "crimson", "goldenrod", "sienna", "orangered",
-                "palevioletred", "olivedrab", "cornflowerblue"]
 }
 
 var op_dependencies = {};
@@ -183,13 +181,33 @@ function mouseDownHandler() {
   $(document).off("keydown");
 }
 
+function get_kind(name) {
+  var util_regex = /\((.*?)\)/;
+  var kind_match = util_regex.exec(name);
+  if (kind_match) {
+    return kind_match[1];
+  }
+}
+
 function getLineColor(elem) {
-  var kind = elem.text.split(" ")[2];
+  var kind = get_kind(elem.text);
   const colorMap = {
-    "(CPU)": "steelblue",
-    "(GPU)": "olivedrab",
-    "(Utility)": "crimson",
-    "(IO)": "orangered"
+    "CPU": "steelblue",
+    "GPU": "olivedrab",
+    "Utility": "crimson",
+    "IO": "orangered",
+    "System Memory": "olivedrab",
+    "GASNet Global Memory": "crimson",
+    "Registered Memory": "darkmagenta",
+    "Socket Memory": "orangered",
+    "Zero-Copy Memory": "crimson",
+    "Framebuffer Memory": "",
+    "Disk Memory": "darkgoldenrod",
+    "HDF5 Memory": "olivedrab",
+    "File Memory": "orangered",
+    "L3 Cache Memory": "crimson",
+    "L2 Cache Memory": "darkmagenta",
+    "L1 Cache Memory": "olivedrab"
   };
   return colorMap[kind];
 }
@@ -429,22 +447,28 @@ function flattenLayout() {
 }
 
 function getProcessors(util_name) {
-  // returns processors for a given node
-  var util_regex = /(node )?(\d+) \((\w+)\)/;
-  var util_match = util_regex.exec(util_name);
   var matched_procs = [];
+
+  // returns processors for a given node
+  var util_regex = /(node )?(\d+) \((.+?)\)/;
+  var util_match = util_regex.exec(util_name);
 
   if (util_match) {
     var util_node_id = parseInt(util_match[2], 10);
-    var util_proc_type = util_match[3];
+    var util_type = util_match[3];
+    var proc_regex;
+    if (util_type.includes("Memory")) {
+      proc_regex = /(\w+ Memory) 0x1e([a-fA-f0-9]{4})[a-fA-f0-9]{10}$/;
+    } else {
+      proc_regex = /(\w+) Processor 0x1d([a-fA-f0-9]{4})/;
+    }
     state.processors.forEach(function(proc) {
-      var proc_regex = /(\w+) Processor 0x1d([a-fA-f0-9]{4})/;
       var proc_match = proc_regex.exec(proc.full_text);
       if (proc_match) {
         var proc_type = proc_match[1];
         var proc_node_id = parseInt(proc_match[2], 16);
         if ((proc_node_id == util_node_id)   &&
-            (proc_type    == util_proc_type)) {
+            (proc_type    == util_type)) {
           matched_procs.push(proc);
         }
       }
@@ -515,12 +539,12 @@ function calculateLayout() {
   var num_nodes = Object.keys(util_files).length;
   if (num_nodes > 1) {
     var proc_kinds = util_files["all"];
-    proc_kinds.forEach(function(kind) {
-      var tokens = kind.split(" ");
-      var util_name = "all nodes " + tokens[1];
+    proc_kinds.forEach(function(name) {
+      var kind = "(" + get_kind(name) + ")";
+      var util_name = "all nodes " + kind;
       var kind_element = getElement(0, util_name, undefined, "util", 
                                      constants.util_levels, load_util,
-                                     "tsv/" + kind + "_util.tsv",
+                                     "tsv/" + name + "_util.tsv",
                                      undefined, util_files[kind], false, true);
       state.layoutData.push(kind_element);
     });
@@ -529,10 +553,10 @@ function calculateLayout() {
   var seen_nodes = {};
   state.processors.forEach(function(proc) {
     // PROCESSOR:   tag:8 = 0x1d, owner_node:16,   (unused):28, proc_idx: 12
-    var proc_regex = /Processor 0x1d([a-fA-f0-9]{4})/;
+    var proc_regex = /(Processor|Memory) 0x1(e|d)([a-fA-f0-9]{4})[a-fA-f0-9]{10}$/;
     var proc_match = proc_regex.exec(proc.full_text);
     if (proc_match) {
-      var node_id = parseInt(proc_match[1], 16);
+      var node_id = parseInt(proc_match[3], 16);
       if (!(node_id in seen_nodes)) {
         seen_nodes[node_id] = 1;
         var proc_kinds = util_files[node_id];
@@ -890,23 +914,22 @@ function calculateVisibileLevels() {
 
 function get_node_id(text) {
   // PROCESSOR:   tag:8 = 0x1d, owner_node:16,   (unused):28, proc_idx: 12
-  var proc_regex = /Processor 0x1d([a-fA-f0-9]{4})/;
+  var proc_regex = /(Memory|Processor) 0x1(e|d)([a-fA-f0-9]{4})/;
   var proc_match = proc_regex.exec(text);
   // if there's only one node, then per-node graphs are redundant
   if (proc_match) {
-    var node_id = parseInt(proc_match[1], 16);
+    var node_id = parseInt(proc_match[3], 16);
     return node_id
   }
 }
 
 function get_proc_in_node(text) {
   // PROCESSOR:   tag:8 = 0x1d, owner_node:16,   (unused):28, proc_idx: 12
-  var proc_regex = /Processor 0x1d[a-fA-f0-9]{11}([a-fA-f0-9]{3})/;
-    0x1d00000000000001
+  var proc_regex = /(Memory|Processor) 0x1(e|d)[a-fA-f0-9]{11}([a-fA-f0-9]{3})/;
   var proc_match = proc_regex.exec(text);
   // if there's only one node, then per-node graphs are redundant
   if (proc_match) {
-    var proc_in_node = parseInt(proc_match[1], 16);
+    var proc_in_node = parseInt(proc_match[3], 16);
     return proc_in_node;
   }
 }

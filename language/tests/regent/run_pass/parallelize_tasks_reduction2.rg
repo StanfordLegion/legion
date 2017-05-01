@@ -24,14 +24,14 @@ import "regent"
 local c = regentlib.c
 
 __demand(__parallel)
-task init(r : region(ispace(int2d), double))
+task init(r : region(ispace(int1d), double))
 where reads writes(r)
 do
-  for e in r do @e = 0.3 * (e.x + 1) + 0.7 * (e.y + 1) end
+  for e in r do @e = 0.7 * (e + 1) end
 end
 
 __demand(__parallel)
-task stencil(r : region(ispace(int2d), double))
+task stencil(r : region(ispace(int1d), double))
 where reads(r)
 do
   var sum : double = 0.03
@@ -39,23 +39,23 @@ do
   __demand(__openmp)
   for e in r do
     sum += 0.5 * (@e +
-                  r[(e - {0, 1}) % r.bounds] +
-                  r[(e + {1, 0}) % r.bounds])
+                  r[(e - 1) % r.bounds] +
+                  r[(e + 1) % r.bounds])
   end
   var ts_end = c.legion_get_current_time_in_micros()
   c.printf("parallel version: %lu us\n", ts_end - ts_start)
   return sum
 end
 
-task stencil_serial(r : region(ispace(int2d), double))
+task stencil_serial(r : region(ispace(int1d), double))
 where reads(r)
 do
   var sum : double = 0.03
   var ts_start = c.legion_get_current_time_in_micros()
   for e in r do
     sum += 0.5 * (@e +
-                  r[(e - {0, 1}) % r.bounds] +
-                  r[(e + {1, 0}) % r.bounds])
+                  r[(e - 1) % r.bounds] +
+                  r[(e + 1) % r.bounds])
   end
   var ts_end = c.legion_get_current_time_in_micros()
   c.printf("serial version: %lu us\n", ts_end - ts_start)
@@ -68,7 +68,7 @@ terra wait_for(x : double) return 1 end
 
 task test(size : int)
   c.srand48(12345)
-  var is = ispace(int2d, {size, size})
+  var is = ispace(int1d, size)
   var primary_region = region(is, double)
   init(primary_region)
   var result1 = stencil(primary_region)
@@ -88,8 +88,7 @@ task test(size : int)
 end
 
 task toplevel()
-  wait_for(test(10))
-  wait_for(test(500))
+  wait_for(test(50000))
 end
 
 regentlib.start(toplevel)
