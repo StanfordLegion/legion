@@ -11568,6 +11568,9 @@ namespace Legion {
             it->first->as_instance_view()->as_materialized_view();
           if (!!(space_mask - current->get_physical_mask()))
             continue;
+          // Also check for empty instances
+          if (current->manager->instance_domain.get_volume() == 0)
+            continue;
         }
         // If we're looking for instances with space, we want the instances
         // even if they have no valid fields, otherwise if we're not looking
@@ -13732,6 +13735,11 @@ namespace Legion {
       {
         pull_valid_instance_views(ctx, state, 
             valid_mask, true/*needs space*/, version_info);
+#ifdef DEBUG_LEGION
+        // Useful for checking premapping of actual regions
+        std::vector<LogicalRegion> to_check(1, req.handle_type != 
+            PART_PROJECTION ? req.region : LogicalRegion::NO_REGION);
+#endif
         // Record the instances and the fields for which they are valid 
         for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
               state->valid_views.begin(); it != state->valid_views.end();it++)
@@ -13751,6 +13759,10 @@ namespace Legion {
             continue;
           // Now see if it has any valid fields already
           FieldMask valid_fields = it->second & valid_mask;
+#ifdef DEBUG_LEGION
+          if (req.handle_type != PART_PROJECTION)
+            assert(cur_view->manager->meets_regions(to_check));
+#endif
           // Save the reference
           targets.add_instance(InstanceRef(cur_view->manager, valid_fields));
         }

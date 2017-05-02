@@ -19911,6 +19911,20 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(rank >= 0);
 #endif
+      // Check to see if it was already set
+      if (mpi_rank >= 0)
+      {
+        if (rank != mpi_rank)
+        {
+          log_run.error("ERROR: multiple calls to "
+              "configure_MPI_interoperability with different ranks "
+              "%d and %d on the same Legion runtime!", mpi_rank, rank);
+          assert(false);
+        }
+        else
+          log_run.warning("WARNING: duplicate calls to "
+              "configure_MPI_interoperability on rank %d!", rank);
+      }
       mpi_rank = rank;
     }
 

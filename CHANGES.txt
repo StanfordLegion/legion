@@ -1,6 +1,13 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
+Version ??.??.? (?? ??, ????)
+  * Build system
+    - Finally removed long-obsolete SHARED_LOWLEVEL flag
+  * Regent
+    - Added support running normal tasks on I/O processors
+    - Added support for OpenMP code generation via __demand(__openmp)
+
 Version 17.02.0 (February 14, 2017)
   * General
     - Bumped copyright dates
