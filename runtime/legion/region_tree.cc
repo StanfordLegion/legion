@@ -16159,7 +16159,9 @@ namespace Legion {
         pull_valid_instance_views(ctx, state, 
             valid_mask, true/*needs space*/, version_info);
 #ifdef DEBUG_LEGION
-        std::vector<LogicalRegion> to_check(1, req.region);
+        // Useful for checking premapping of actual regions
+        std::vector<LogicalRegion> to_check(1, req.handle_type != 
+            PART_PROJECTION ? req.region : LogicalRegion::NO_REGION);
 #endif
         // Record the instances and the fields for which they are valid 
         for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
@@ -16181,7 +16183,8 @@ namespace Legion {
           // Now see if it has any valid fields already
           FieldMask valid_fields = it->second & valid_mask;
 #ifdef DEBUG_LEGION
-          assert(cur_view->manager->meets_regions(to_check));
+          if (req.handle_type != PART_PROJECTION)
+            assert(cur_view->manager->meets_regions(to_check));
 #endif
           // Save the reference
           targets.add_instance(InstanceRef(cur_view->manager, valid_fields));
