@@ -395,7 +395,13 @@ def build_cmake(root_dir, tmp_dir, env, thread_count, test_legion_cxx, test_perf
     os.mkdir(install_dir)
     cmd(['cmake', '-DCMAKE_INSTALL_PREFIX=%s' % install_dir,
          '-DCMAKE_BUILD_TYPE=%s' % (
-             'Debug' if env['DEBUG'] == '1' else 'Release')] +
+             'Debug' if env['DEBUG'] == '1' else 'Release'),
+         '-DLegion_USE_GASNet=%s' % (
+             'ON' if env['USE_GASNET'] == '1' else 'OFF'),
+         '-DLegion_USE_CUDA=%s' % (
+             'ON' if env['USE_CUDA'] == '1' else 'OFF'),
+         '-DLegion_USE_LLVM=%s' % (
+             'ON' if env['USE_LLVM'] == '1' else 'OFF')] +
         (['-DCMAKE_CXX_FLAGS=%s' % env['CC_FLAGS']]
           if 'CC_FLAGS' in env else []) +
         (['-DLegion_BUILD_TUTORIAL=ON',
