@@ -4254,7 +4254,15 @@ namespace Legion {
           else if (!it->preconditions.empty())
             post = Runtime::merge_events(it->preconditions);
           if (post.exists())
-            postconditions[post] = it->set_mask;
+          {
+            // post is not guaranteed to be unique!
+            LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
+              postconditions.find(post);
+            if (finder == postconditions.end())
+              postconditions[post] = it->set_mask;
+            else
+              finder->second |= it->set_mask;
+          }
         }
       }
     }
@@ -4402,7 +4410,15 @@ namespace Legion {
           else if (!it->preconditions.empty())
             post = Runtime::merge_events(it->preconditions);
           if (post.exists())
-            postconditions[post] = it->set_mask;
+          {
+            // post is not guaranteed to be unique!
+            LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
+              postconditions.find(post);
+            if (finder == postconditions.end())
+              postconditions[post] = it->set_mask;
+            else
+              finder->second |= it->set_mask;
+          }
         }  
       }
     }
@@ -6888,7 +6904,15 @@ namespace Legion {
       {
         ApEvent post = Runtime::merge_events(it->preconditions);
         if (post.exists())
-          postconditions[post] = it->set_mask;
+        {
+          // post is not guaranteed to be unique
+          LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
+            postconditions.find(post);
+          if (finder == postconditions.end())
+            postconditions[post] = it->set_mask;
+          else
+            finder->second |= it->set_mask;
+        }
       }
     }
 
