@@ -139,7 +139,7 @@ set_target_properties(LowLevelRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(LowLevelRuntime PROPERTIES SOVERSION ${SOVERSION})
 target_compile_definitions(LowLevelRuntime
   PRIVATE
-    $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:DEBUG_LOW_LEVEL>
+    $<$<CONFIG:Debug>:DEBUG_REALM>
   PUBLIC
     COMPILE_TIME_MIN_LEVEL=LEVEL_${Legion_OUTPUT_LEVEL}
 )
@@ -237,7 +237,7 @@ set_target_properties(HighLevelRuntime PROPERTIES SOVERSION ${SOVERSION})
 target_compile_definitions(HighLevelRuntime
   PRIVATE
     ASSUME_UNALLOCABLE
-    $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:DEBUG_HIGH_LEVEL>
+    $<$<CONFIG:Debug>:DEBUG_LEGION>
   PUBLIC
     MAX_FIELDS=${Legion_MAX_FIELDS}
 )
