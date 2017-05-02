@@ -925,14 +925,18 @@ namespace LegionRuntime {
 
     void CopyRequest::handle_ib_response(int idx, InstPair inst_pair, size_t ib_size, off_t ib_offset)
     {
-      AutoHSLLock al(ib_mutex);
-      IBByInst::iterator ib_it = ib_by_inst.find(inst_pair);
-      assert(ib_it != ib_by_inst.end());
-      IBVec& ibvec = ib_it->second;
-      assert((int)ibvec.size() > idx);
-      ibvec[idx].size = ib_size;
-      ibvec[idx].offset = ib_offset;
-      GenEventImpl::trigger(ibvec[idx].event, false/*!poisoned*/);
+      Event event_to_trigger = Event::NO_EVENT;
+      {
+        AutoHSLLock al(ib_mutex);
+        IBByInst::iterator ib_it = ib_by_inst.find(inst_pair);
+        assert(ib_it != ib_by_inst.end());
+        IBVec& ibvec = ib_it->second;
+        assert((int)ibvec.size() > idx);
+        ibvec[idx].size = ib_size;
+        ibvec[idx].offset = ib_offset;
+        event_to_trigger = ibvec[idx].event;
+      }
+      GenEventImpl::trigger(event_to_trigger, false/*!poisoned*/);
       //ibvec[idx].fence->mark_finished(true);
     }
 
