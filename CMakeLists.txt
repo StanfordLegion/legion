@@ -133,8 +133,6 @@ endif()
 #------------------------------------------------------------------------------#
 # Miscelaneous other options
 #------------------------------------------------------------------------------#
-option(Legion_USE_SHARED_LOWLEVEL     "Use shared-memory runtime" OFF)
-
 set(Legion_MAX_FIELDS 512 CACHE STRING "Maximum number of fields allocated to a single field space")
 set_property(CACHE Legion_MAX_FIELDS PROPERTY STRINGS 32 64 128 256 512 1024)
 mark_as_advanced(Legion_MAX_FIELDS)
