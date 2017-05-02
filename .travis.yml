@@ -24,6 +24,8 @@ matrix:
   exclude:
     - os: osx
       compiler: gcc
+    - os: osx
+      env: CC_FLAGS="-std=c++98" USE_HDF=1 TEST_REGENT=0
 # blacklist some branches
 branches:
   only:
