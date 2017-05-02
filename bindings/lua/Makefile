@@ -30,7 +30,6 @@ endif
 #Flags for directing the runtime makefile what to include
 DEBUG?=1                   # Include debugging symbols
 OUTPUT_LEVEL=LEVEL_DEBUG  # Compile time print level
-SHARED_LOWLEVEL=1	  # Use the shared low level
 #ALT_MAPPERS=1		  # Include the alternative mappers
 WITH_TERRA?=0
 WITH_TERRA_STATIC_LINKING?=0

@@ -6,7 +6,6 @@ endif
 #Flags for directing the runtime makefile what to include
 DEBUG ?= 0                   # Include debugging symbols
 OUTPUT_LEVEL ?= LEVEL_PRINT  # Compile time print level
-SHARED_LOWLEVEL ?= 0 	     # Use the shared low level
 
 # GASNet and CUDA off by default for now
 USE_GASNET ?= 0
