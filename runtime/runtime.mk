@@ -22,8 +22,7 @@ else
 CC_FLAGS += -DUSE_DISK 
 endif
 
-# If using the general low-level runtime
-# select a target GPU architecture
+# If using CUDA select a target GPU architecture
 GPU_ARCH ?= fermi
 #GPU_ARCH ?= kepler
 #GPU_ARCH ?= k20
@@ -44,18 +43,10 @@ ifdef GASNET_ROOT
 GASNET ?= $(GASNET_ROOT)
 endif
 
-# For backwards compatibility
-SHARED_LOWLEVEL ?= 0
 # generate libraries for Legion and Realm
 SLIB_LEGION     := liblegion.a
-ifeq ($(strip $(SHARED_LOWLEVEL)),0)
 SLIB_REALM      := librealm.a
 LEGION_LIBS     := -L. -llegion -lrealm
-else
-$(error Error: SHARED_LOWLEVEL=1 is no longer supported)
-SLIB_SHAREDLLR  := libsharedllr.a
-LEGION_LIBS     := -L. -llegion -lsharedllr
-endif
 
 # Handle some of the common machines we frequent
 
@@ -216,10 +207,9 @@ ifeq ($(strip $(USE_OPENMP)),1)
   endif
 endif
 
-# Flags for running in the general low-level runtime
-ifeq ($(strip $(SHARED_LOWLEVEL)),0)
+# Flags for Realm
 
-# general low-level uses CUDA if requested
+# Realm uses CUDA if requested
 ifeq ($(strip $(CUDA)),)
   USE_CUDA ?= 0
   ifeq ($(strip $(USE_CUDA)),1)
@@ -265,7 +255,7 @@ endif
 NVCC_FLAGS	+= -Xptxas "-v" #-abi=no"
 endif
 
-# general low-level uses GASNet if requested
+# Realm uses GASNet if requested
 ifeq ($(strip $(GASNET)),)
   USE_GASNET ?= 0
   ifeq ($(strip $(USE_GASNET)),1)
@@ -330,7 +320,7 @@ ifeq ($(strip $(USE_GASNET)),1)
 
 endif
 
-# general low-level doesn't use HDF by default
+# Realm doesn't use HDF by default
 USE_HDF ?= 0
 HDF_LIBNAME ?= hdf5
 ifeq ($(strip $(USE_HDF)), 1)
@@ -351,7 +341,6 @@ ifeq ($(strip $(USE_MPI)),1)
   endif
 endif
 
-endif # ifeq SHARED_LOWLEVEL
 
 
 ifeq ($(strip $(DEBUG)),1)
@@ -379,7 +368,6 @@ MAPPER_SRC	?=
 ASM_SRC		?=
 
 # Set the source files
-ifeq ($(strip $(SHARED_LOWLEVEL)),0)
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/runtime_impl.cc \
 	           $(LG_RT_DIR)/channel.cc \
 	           $(LG_RT_DIR)/channel_disk.cc \
@@ -425,10 +413,7 @@ ifeq ($(strip $(USE_GASNET)),1)
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/activemsg.cc
 endif
 GPU_RUNTIME_SRC +=
-else
-CC_FLAGS	+= -DSHARED_LOWLEVEL
-LOW_RUNTIME_SRC	+= $(LG_RT_DIR)/shared_lowlevel.cc 
-endif
+
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/logging.cc \
 	           $(LG_RT_DIR)/realm/cmdline.cc \
 		   $(LG_RT_DIR)/realm/profiling.cc \
@@ -501,8 +486,8 @@ ifndef NO_BUILD_RULES
 .PHONY: all
 all: $(OUTFILE)
 
-# If we're using the general low-level runtime we have to link with nvcc
-$(OUTFILE) : $(GEN_OBJS) $(GEN_GPU_OBJS) $(SLIB_LEGION) $(SLIB_REALM) $(SLIB_SHAREDLLR)
+# If we're using CUDA we have to link with nvcc
+$(OUTFILE) : $(GEN_OBJS) $(GEN_GPU_OBJS) $(SLIB_LEGION) $(SLIB_REALM)
 	@echo "---> Linking objects into one binary: $(OUTFILE)"
 	$(CXX) -o $(OUTFILE) $(GEN_OBJS) $(GEN_GPU_OBJS) $(LD_FLAGS) $(LEGION_LIBS) $(LEGION_LD_FLAGS) $(GASNET_FLAGS)
 
@@ -510,15 +495,9 @@ $(SLIB_LEGION) : $(HIGH_RUNTIME_OBJS) $(MAPPER_OBJS)
 	rm -f $@
 	$(AR) rc $@ $^
 
-ifeq ($(strip $(SHARED_LOWLEVEL)),0)
 $(SLIB_REALM) : $(LOW_RUNTIME_OBJS)
 	rm -f $@
 	$(AR) rc $@ $^
-else
-$(SLIB_SHAREDLLR) : $(LOW_RUNTIME_OBJS)
-	rm -f $@
-	$(AR) rc $@ $^
-endif
 
 $(GEN_OBJS) : %.o : %.cc
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
@@ -542,7 +521,7 @@ $(GPU_RUNTIME_OBJS): %.o : %.cu
 	$(NVCC) -o $@ -c $< $(NVCC_FLAGS) $(INC_FLAGS)
 
 clean::
-	$(RM) -f $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(SLIB_SHAREDLLR) $(GEN_OBJS) $(GEN_GPU_OBJS) $(LOW_RUNTIME_OBJS) $(HIGH_RUNTIME_OBJS) $(GPU_RUNTIME_OBJS) $(MAPPER_OBJS) $(ASM_OBJS)
+	$(RM) -f $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(GEN_OBJS) $(GEN_GPU_OBJS) $(LOW_RUNTIME_OBJS) $(HIGH_RUNTIME_OBJS) $(GPU_RUNTIME_OBJS) $(MAPPER_OBJS) $(ASM_OBJS)
 
 endif
 
