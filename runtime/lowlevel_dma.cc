@@ -85,11 +85,38 @@ namespace LegionRuntime {
     };
 
     struct IBInfo {
+      enum Status {
+        INIT,
+        SENT,
+        COMPLETED
+      };
       Memory memory;
       off_t offset;
       size_t size;
-      IBFence* fence;
+      Status status;
+      //IBFence* fence;
+      Event event;
     };
+
+    struct PendingIBInfo {
+      Memory memory;
+      int idx;
+      InstPair ip;
+    };
+
+    class ComparePendingIBInfo {
+    public:
+      bool operator() (const PendingIBInfo& a, const PendingIBInfo& b) {
+        if (a.memory.id == b.memory.id) {
+          assert(a.idx != b.idx);
+          return a.idx < b.idx;
+        }
+        else
+          return a.memory.id < b.memory.id;
+      }
+    };
+
+    typedef std::set<PendingIBInfo, ComparePendingIBInfo> PriorityIBQueue;
     typedef std::vector<IBInfo> IBVec;
     typedef std::map<InstPair, IBVec> IBByInst;
     typedef std::map<MemPair, OASByInst *> OASByMem;
@@ -243,6 +270,7 @@ namespace LegionRuntime {
 
       void handle_ib_response(int idx, InstPair inst_pair, size_t ib_size, off_t ib_offset);
 
+      PriorityIBQueue priority_ib_queue;
       // operations on ib_by_inst are protected by ib_mutex
       IBByInst ib_by_inst;
       GASNetHSL ib_mutex;
@@ -548,6 +576,7 @@ namespace LegionRuntime {
       ib_completion = GenEventImpl::create_genevent()->current_event();
       ib_req = new IBAllocOp(ib_completion);
       ib_by_inst.clear();
+      priority_ib_queue.clear();
       // </NEW_DMA>
 
       size_t num_pairs = *idata++;
@@ -623,6 +652,7 @@ namespace LegionRuntime {
       ib_completion = GenEventImpl::create_genevent()->current_event();
       ib_req = new IBAllocOp(ib_completion);
       ib_by_inst.clear();
+      priority_ib_queue.clear();
       // </NEW_DMA>
       log_dma.info() << "dma request " << (void *)this << " created - is="
 		     << domain << " before=" << before_copy << " after=" << get_finish_event();
@@ -902,7 +932,8 @@ namespace LegionRuntime {
       assert((int)ibvec.size() > idx);
       ibvec[idx].size = ib_size;
       ibvec[idx].offset = ib_offset;
-      ibvec[idx].fence->mark_finished(true);
+      GenEventImpl::trigger(ibvec[idx].event, false/*!poisoned*/);
+      //ibvec[idx].fence->mark_finished(true);
     }
 
     bool CopyRequest::check_readiness(bool just_check, DmaRequestQueue *rq)
@@ -1019,30 +1050,56 @@ namespace LegionRuntime {
           for (size_t i = 1; i < mem_path.size() - 1; i++) {
             IBInfo ib_info;
             ib_info.memory = mem_path[i];
-            ib_info.fence = new IBFence(ib_req);
-            ib_req->add_async_work_item(ib_info.fence); 
+            //ib_info.fence = new IBFence(ib_req);
+            ib_info.status = IBInfo::INIT;
+            ib_info.event = GenEventImpl::create_genevent()->current_event();
+            //ib_req->add_async_work_item(ib_info.fence); 
             ib_vec.push_back(ib_info);
+            PendingIBInfo pid_info;
+            pid_info.idx = i - 1;
+            pid_info.ip = it->first;
+            pid_info.memory = mem_path[i];
+            priority_ib_queue.insert(pid_info);
           }
         }
         // Pass 2: send ib allocation requests
-        for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
-          for (size_t i = 1; i < mem_path.size() - 1; i++) {
-            alloc_intermediate_buffer(it->first, mem_path[i], i - 1);
-          }
-        }
+        //for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
+        //  for (size_t i = 1; i < mem_path.size() - 1; i++) {
+        //    alloc_intermediate_buffer(it->first, mem_path[i], i - 1);
+        //  }
+        //}
         ib_req->mark_finished(true);
         state = STATE_ALLOC_IB;
       }
 
       if(state == STATE_ALLOC_IB) {
         log_dma.debug("wait for the ib allocations to complete");
-        if (ib_completion.has_triggered()) {
-          state = STATE_BEFORE_EVENT;
-        } else {
-          if (just_check) return false;
-          waiter.sleep_on_event(ib_completion);
-          return false;
+        PriorityIBQueue::iterator it;
+        for (it = priority_ib_queue.begin(); it != priority_ib_queue.end(); it++) {
+          IBVec& ibvec = ib_by_inst[(*it).ip];
+          if (ibvec[(*it).idx].status == IBInfo::INIT) {
+            // launch ib allocation requests
+            alloc_intermediate_buffer((*it).ip, (*it).memory, (*it).idx);
+            ibvec[(*it).idx].status = IBInfo::SENT;
+          }
+          if (ibvec[(*it).idx].status == IBInfo::SENT) {
+            if (ibvec[(*it).idx].event.has_triggered()) {
+              ibvec[(*it).idx].status = IBInfo::COMPLETED;
+            } else {
+              if (just_check) return false;
+              waiter.sleep_on_event(ibvec[(*it).idx].event);
+              return false;
+            }
+          }
         }
+        state = STATE_BEFORE_EVENT;
+        //if (ib_completion.has_triggered()) {
+        //  state = STATE_BEFORE_EVENT;
+        //} else {
+        //  if (just_check) return false;
+        //  waiter.sleep_on_event(ib_completion);
+        //  return false;
+        //}
       }
 
       // make sure our functional precondition has occurred
