@@ -1,6 +1,10 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
+Version ??.??.? (?? ??, ????)
+  * Build system
+    - Finally removed long-obsolete SHARED_LOWLEVEL flag
+
 Version 17.02.0 (February 14, 2017)
   * General
     - Bumped copyright dates
