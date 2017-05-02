@@ -1418,7 +1418,8 @@ namespace Legion {
      */
     class ShardingFunction {
     public:
-      ShardingFunction(ShardingFunctor *functor, ShardID max_shard);
+      ShardingFunction(ShardingFunctor *functor, 
+                       ShardingID sharding_id, ShardID max_shard);
       ShardingFunction(const ShardingFunction &rhs);
       virtual ~ShardingFunction(void);
     public:
@@ -1428,6 +1429,7 @@ namespace Legion {
       const Domain& find_shard_domain(ShardID shard, const Domain &full_space);
     public:
       ShardingFunctor *const functor;
+      const ShardingID sharding_id;
       const ShardID max_shard;
     };
 

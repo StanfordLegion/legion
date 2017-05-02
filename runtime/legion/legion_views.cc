@@ -6117,9 +6117,9 @@ namespace Legion {
       }
       DeferredVersionInfo *version_info = new DeferredVersionInfo();
       version_info->unpack_version_numbers(derez, runtime->forest);
-      ClosedNode *closed_tree = 
-        ClosedNode::unpack_closed_node(derez, runtime, is_region);
       InnerContext *owner_context = runtime->find_context(owner_uid);
+      ClosedNode *closed_tree = 
+        ClosedNode::unpack_closed_node(derez, owner_context, runtime,is_region);
       // Make the composite view, but don't register it yet
       void *location;
       CompositeView *view = NULL;

@@ -578,11 +578,13 @@ namespace Legion {
       void* operator new(size_t count);
       void operator delete(void *ptr);
     public:
-      void insert(ProjectionFunction *function, IndexSpaceNode *space);
+      void insert(ProjectionFunction *function, IndexSpaceNode *space,
+                  ShardingFunction *sharding_function);
     public:
       const ProjectionEpochID epoch_id;
       FieldMask valid_fields;
     public:
+      ShardingFunction *sharding_function;
       std::map<ProjectionFunction*,std::set<IndexSpaceNode*> > projections;
     };
 
@@ -682,23 +684,25 @@ namespace Legion {
                                    FieldMask &non_dominated_mask) const;
     protected:
       void filter_dominated_projection_fields(FieldMask &non_dominated_mask,
-          const std::map<ProjectionFunction*,
+          const std::map<std::pair<ProjectionFunction*,ShardingFunction*>,
              LegionMap<IndexSpaceNode*,
                        FieldMask>::aligned> &new_projections) const;
       void filter_dominated_children(FieldMask &non_dominated_mask,
           const std::map<RegionTreeNode*,ClosedNode*> &new_children) const;
     public:
       void pack_closed_node(Serializer &rez) const;
-      void perform_unpack(Deserializer &derez, Runtime *runtime,bool is_region);
+      void perform_unpack(Deserializer &derez, InnerContext *ctx,
+                          Runtime *runtime, bool is_region);
       static ClosedNode* unpack_closed_node(Deserializer &derez, 
-                                            Runtime *runtime, bool is_region);
+                          InnerContext *ctx, Runtime *runtime, bool is_region);
     public:
       RegionTreeNode *const node;
     protected:
       FieldMask valid_fields; // Fields that are summarized in this tree
       FieldMask covered_fields; // Fields totally written to at this node
       std::map<RegionTreeNode*,ClosedNode*> children;
-      std::map<ProjectionFunction*,
+      // For tracking index space projections 
+      std::map<std::pair<ProjectionFunction*,ShardingFunction*>,
                LegionMap<IndexSpaceNode*,FieldMask>::aligned> projections;
     };
  

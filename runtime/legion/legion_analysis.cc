@@ -25,6 +25,7 @@
 #include "legion_views.h"
 #include "legion_analysis.h"
 #include "legion_context.h"
+#include "legion_replication.h"
 
 namespace Legion {
   namespace Internal {
@@ -2414,14 +2415,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ProjectionEpoch::ProjectionEpoch(ProjectionEpochID id, const FieldMask &m)
-      : epoch_id(id), valid_fields(m)
+      : epoch_id(id), valid_fields(m), sharding_function(NULL)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     ProjectionEpoch::ProjectionEpoch(const ProjectionEpoch &rhs)
-      : epoch_id(rhs.epoch_id), valid_fields(rhs.valid_fields)
+      : epoch_id(rhs.epoch_id), valid_fields(rhs.valid_fields) 
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2459,10 +2460,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ProjectionEpoch::insert(ProjectionFunction *function, 
-                                 IndexSpaceNode* node)
+                                 IndexSpaceNode* node, ShardingFunction *shard)
     //--------------------------------------------------------------------------
     {
+      if (sharding_function == NULL)
+        sharding_function = shard;
 #ifdef DEBUG_LEGION
+      // There should only ever be one sharding function for a single
+      // projection epoch, if there is more than one then the logical
+      // analysis has really messed up
+      else
+        assert(sharding_function == shard);
       assert(!!valid_fields);
 #endif
       projections[function].insert(node);
@@ -2710,7 +2718,8 @@ namespace Legion {
       // If it didn't already exist, start a new projection epoch
       ProjectionEpoch *new_epoch = 
         new ProjectionEpoch(ProjectionEpoch::first_epoch, capture_mask);
-      new_epoch->insert(info.projection, info.projection_space);
+      new_epoch->insert(info.projection, info.projection_space, 
+                        info.sharding_function);
       projection_epochs.push_back(new_epoch);
       // Record it
       info.record_projection_epoch(ProjectionEpoch::first_epoch, capture_mask);
@@ -2745,7 +2754,8 @@ namespace Legion {
         FieldMask overlap = (*it)->valid_fields & update_mask;
         if (!overlap)
           continue;
-        (*it)->insert(info.projection, info.projection_space);
+        (*it)->insert(info.projection, info.projection_space, 
+                      info.sharding_function);
         update_mask -= overlap;
         if (!update_mask)
           return;
@@ -2756,7 +2766,8 @@ namespace Legion {
       // If we get here will still have an update mask so make an epoch
       ProjectionEpoch *new_epoch = 
         new ProjectionEpoch(ProjectionEpoch::first_epoch, update_mask);
-      new_epoch->insert(info.projection, info.projection_space);
+      new_epoch->insert(info.projection, info.projection_space, 
+                        info.sharding_function);
       projection_epochs.push_back(new_epoch);
     }
 
@@ -3099,7 +3110,7 @@ namespace Legion {
       assert(children.empty()); // should never have any children here
 #endif
       ClosedNode *result = new ClosedNode(child_node);
-      for (std::map<ProjectionFunction*,
+      for (std::map<std::pair<ProjectionFunction*,ShardingFunction*>,
             LegionMap<IndexSpaceNode*,FieldMask>::aligned>::const_iterator pit =
             projections.begin(); pit != projections.end(); pit++)
       {
@@ -3109,7 +3120,7 @@ namespace Legion {
           FieldMask overlap = it->second & close_mask;
           if (!overlap)
             continue;
-          result->record_projection(pit->first, it->first, overlap);
+          result->record_projection(pit->first.first, it->first, overlap);
         }
       }
       return result;
@@ -3120,7 +3131,8 @@ namespace Legion {
                                    IndexSpaceNode *space, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
-      projections[function][space] |= mask;
+      std::pair<ProjectionFunction*,ShardingFunction*> key(function, NULL);
+      projections[key][space] |= mask;
     }
 
     //--------------------------------------------------------------------------
@@ -3149,8 +3161,11 @@ namespace Legion {
             const_iterator pit = epoch->projections.begin(); 
             pit != epoch->projections.end(); pit++)
       {
-        std::map<ProjectionFunction*,LegionMap<IndexSpaceNode*,FieldMask>::
-          aligned>::iterator finder = projections.find(pit->first);
+        const std::pair<ProjectionFunction*,ShardingFunction*> 
+          key(pit->first, epoch->sharding_function);
+        std::map<std::pair<ProjectionFunction*,ShardingFunction*>,
+                 LegionMap<IndexSpaceNode*,FieldMask>::aligned>::iterator 
+                   finder = projections.find(key);
         if (finder != projections.end())
         {
           for (std::set<IndexSpaceNode*>::const_iterator it = 
@@ -3168,7 +3183,7 @@ namespace Legion {
         {
           // Didn't exist before so we can just insert 
           LegionMap<IndexSpaceNode*,FieldMask>::aligned &spaces = 
-            projections[pit->first];
+            projections[key];
           for (std::set<IndexSpaceNode*>::const_iterator it = 
                 pit->second.begin(); it != pit->second.end(); it++)
             spaces[*it] = fields;
@@ -3218,7 +3233,7 @@ namespace Legion {
       // Finally update our valid fields based on any projections
       if (!projections.empty())
       {
-        for (std::map<ProjectionFunction*,
+        for (std::map<std::pair<ProjectionFunction*,ShardingFunction*>,
                   LegionMap<IndexSpaceNode*,FieldMask>::aligned>::const_iterator
               pit = projections.begin(); pit != projections.end(); pit++) 
         {
@@ -3261,20 +3276,20 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void ClosedNode::filter_dominated_projection_fields(
         FieldMask &non_dominated_mask,
-        const std::map<ProjectionFunction*,
+        const std::map<std::pair<ProjectionFunction*,ShardingFunction*>,
           LegionMap<IndexSpaceNode*,FieldMask>::aligned> &new_projections) const
     //--------------------------------------------------------------------------
     {
       // In order to remove a dominated field, for each of our projection
       // operations, we need to find one in the new set that dominates it
       FieldMask dominated_mask = non_dominated_mask;
-      for (std::map<ProjectionFunction*,
+      for (std::map<std::pair<ProjectionFunction*,ShardingFunction*>,
               LegionMap<IndexSpaceNode*,FieldMask>::aligned>::const_iterator 
             pit = projections.begin(); pit != projections.end(); pit++)
       {
         // Set this iterator to the begining to start
         // Use it later to find domains with the same projection function
-        std::map<ProjectionFunction*,
+        std::map<std::pair<ProjectionFunction*,ShardingFunction*>,
                  LegionMap<IndexSpaceNode*,FieldMask>::aligned>::const_iterator
                    finder = new_projections.begin();
         for (LegionMap<IndexSpaceNode*,FieldMask>::aligned::const_iterator dit =
@@ -3336,7 +3351,7 @@ namespace Legion {
       // TODO: make this analysis more precise
       if (!projections.empty())
       {
-        for (std::map<ProjectionFunction*,
+        for (std::map<std::pair<ProjectionFunction*,ShardingFunction*>,
                 LegionMap<IndexSpaceNode*,FieldMask>::aligned>::const_iterator
               pit = projections.begin(); pit != projections.end(); pit++)
         {
@@ -3387,11 +3402,18 @@ namespace Legion {
       rez.serialize(valid_fields);
       rez.serialize(covered_fields);
       rez.serialize<size_t>(projections.size());
-      for (std::map<ProjectionFunction*,
+      for (std::map<std::pair<ProjectionFunction*,ShardingFunction*>,
               LegionMap<IndexSpaceNode*,FieldMask>::aligned>::const_iterator 
             pit = projections.begin(); pit != projections.end(); pit++)
       {
-        rez.serialize(pit->first->projection_id);
+        rez.serialize(pit->first.first->projection_id);
+        if (pit->first.second != NULL)
+        {
+          rez.serialize<bool>(true);
+          rez.serialize(pit->first.second->sharding_id);
+        }
+        else
+          rez.serialize<bool>(false);
         rez.serialize<size_t>(pit->second.size());
         for (LegionMap<IndexSpaceNode*,FieldMask>::aligned::const_iterator it =
               pit->second.begin(); it != pit->second.end(); it++)
@@ -3407,7 +3429,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ClosedNode::perform_unpack(Deserializer &derez, 
+    void ClosedNode::perform_unpack(Deserializer &derez, InnerContext *ctx, 
                                     Runtime *runtime, bool is_region)
     //--------------------------------------------------------------------------
     {
@@ -3419,9 +3441,24 @@ namespace Legion {
       {
         ProjectionID pid;
         derez.deserialize(pid);
-        ProjectionFunction *function = runtime->find_projection_function(pid);
+        std::pair<ProjectionFunction*,ShardingFunction*> key(
+            runtime->find_projection_function(pid), NULL);
+        bool has_sharding_function;
+        derez.deserialize(has_sharding_function);
+        if (has_sharding_function)
+        {
+          ShardingID sid;
+          derez.deserialize(sid);
+#ifdef DEBUG_LEGION
+          ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(ctx);
+          assert(repl_ctx != NULL);
+#else
+          ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(ctx);
+#endif
+          key.second = repl_ctx->shard_manager->find_sharding_function(sid);
+        }
         LegionMap<IndexSpaceNode*,FieldMask>::aligned &spaces = 
-          projections[function];
+          projections[key];
         size_t num_doms;
         derez.deserialize(num_doms);
         for (unsigned idx2 = 0; idx2 < num_doms; idx2++)
@@ -3436,14 +3473,14 @@ namespace Legion {
       derez.deserialize(num_children);
       for (unsigned idx = 0; idx < num_children; idx++)
       {
-        ClosedNode *child = unpack_closed_node(derez, runtime, !is_region); 
+        ClosedNode *child = unpack_closed_node(derez, ctx, runtime, !is_region);
         children[child->node] = child;
       }
     }
 
     //--------------------------------------------------------------------------
     /*static*/ ClosedNode* ClosedNode::unpack_closed_node(Deserializer &derez,
-                                               Runtime *runtime, bool is_region)
+                            InnerContext *ctx, Runtime *runtime, bool is_region)
     //--------------------------------------------------------------------------
     {
       RegionTreeNode *node = NULL;
@@ -3460,7 +3497,7 @@ namespace Legion {
         node = runtime->forest->get_node(handle);
       }
       ClosedNode *result = legion_new<ClosedNode>(node);
-      result->perform_unpack(derez, runtime, is_region);
+      result->perform_unpack(derez, ctx, runtime, is_region);
       return result;
     }
 

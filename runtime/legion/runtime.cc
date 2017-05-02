@@ -8964,15 +8964,16 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ShardingFunction::ShardingFunction(ShardingFunctor *func, ShardID max)
-      : functor(func), max_shard(max)
+    ShardingFunction::ShardingFunction(ShardingFunctor *func, 
+                                       ShardingID id, ShardID max)
+      : functor(func), sharding_id(id), max_shard(max)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     ShardingFunction::ShardingFunction(const ShardingFunction &rhs)
-      : functor(NULL), max_shard(0)
+      : functor(NULL), sharding_id(0), max_shard(0)
     //--------------------------------------------------------------------------
     {
       // should never be called

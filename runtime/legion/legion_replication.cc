@@ -2792,7 +2792,8 @@ namespace Legion {
         sharding_functions.find(sid);
       if (finder != sharding_functions.end())
         return finder->second;
-      ShardingFunction *result = new ShardingFunction(functor, total_shards-1);
+      ShardingFunction *result = 
+        new ShardingFunction(functor, sid, total_shards-1);
       // Save the result for the future
       sharding_functions[sid] = result;
       return result;
