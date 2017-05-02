@@ -393,7 +393,11 @@ def build_cmake(root_dir, tmp_dir, env, thread_count, test_legion_cxx, test_perf
     install_dir = os.path.join(tmp_dir, 'install')
     os.mkdir(build_dir)
     os.mkdir(install_dir)
-    cmd(['cmake', '-DCMAKE_INSTALL_PREFIX=%s' % install_dir] +
+    cmd(['cmake', '-DCMAKE_INSTALL_PREFIX=%s' % install_dir,
+         '-DCMAKE_BUILD_TYPE=%s' % (
+             'Debug' if env['DEBUG'] == '1' else 'Release')] +
+        (['-DCMAKE_CXX_FLAGS=%s' % env['CC_FLAGS']]
+          if 'CC_FLAGS' in env else []) +
         (['-DLegion_BUILD_TUTORIAL=ON',
           '-DLegion_BUILD_EXAMPLES=ON',
           '-DLegion_BUILD_TESTS=ON',
