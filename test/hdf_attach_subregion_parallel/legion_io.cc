@@ -441,6 +441,7 @@ void PersistentRegion::create_persistent_subregions(Context ctx,
 
       size_t field_size = runtime->get_field_size(ctx, fs, fid);
       status = H5Tset_size(dtype_id, field_size);
+      assert(status >= 0);
 
       if(H5Lexists(shard_file_id, gp, H5P_DEFAULT)) { 
         shard_group_id = H5Gopen2(shard_file_id, gp, H5P_DEFAULT);
@@ -468,6 +469,7 @@ void PersistentRegion::create_persistent_subregions(Context ctx,
           H5P_DEFAULT, H5P_DEFAULT);
 
       status = H5Awrite(attr_id, H5T_NATIVE_INT, shard_dims);
+      assert(status >= 0);
       H5Aclose(attr_id);
 
       H5Dclose(shard_ds_id);
@@ -477,6 +479,7 @@ void PersistentRegion::create_persistent_subregions(Context ctx,
       status = H5Lcreate_external(pieces[i].shard_name, iterator->second.c_str(),
           link_group_2_id, ds_name_stream.str().c_str(),
           H5P_DEFAULT, H5P_DEFAULT);
+      assert(status >= 0);
 
       shard_file_id = H5Fopen(pieces[i].shard_name, H5F_ACC_RDWR, H5P_DEFAULT);      
       H5Gclose(link_group_2_id);

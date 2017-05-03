@@ -1,4 +1,4 @@
-# Copyright 2015 Stanford University
+# Copyright 2017 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,38 +13,37 @@
 # limitations under the License.
 #
 
-LG_RT_DIR=../../runtime/
 
-#Flags for directing the runtime makefile what to include
-DEBUG=1                   # Include debugging symbols
-OUTPUT_LEVEL=LEVEL_DEBUG  # Compile time print level
-USE_GASNET=1
+ifndef LG_RT_DIR
+$(error LG_RT_DIR variable is not defined, aborting build)
+endif
 
-#ALT_MAPPERS=1		  # Compile the alternative mappers
-USE_CUDA	=0 # no cuda thank you
+# Flags for directing the runtime makefile what to include
+DEBUG           ?= 1		# Include debugging symbols
+OUTPUT_LEVEL    ?= LEVEL_DEBUG	# Compile time logging level
+USE_CUDA        ?= 0		# Include CUDA support (requires CUDA)
+USE_GASNET      ?= 0		# Include GASNet support (requires GASNet)
+USE_HDF         ?= 1		# Include HDF5 support (requires HDF5)
+ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
 
-GASNET		:= ${HOME}/local
-CONDUIT		:= ibv
 # Put the binary file name here
-OUTFILE		:= tester_io
+OUTFILE		?= tester_io
 # List all the application source files here
-GEN_SRC		:= legion_io.cc tester_io.cc	# .cc files
-GEN_GPU_SRC	:=				# .cu files
-USE_HDF 	= 1
+GEN_SRC		?= tester_io.cc legion_io.cc		# .cc files
+GEN_GPU_SRC	?=		# .cu files
 
 # You can modify these variables, some will be appended to by the runtime makefile
-INC_FLAGS	:= -I/opt/local/include/ 
-CC_FLAGS	:= -g -Wno-array-bounds $(DEBUG_FLAGS)
-NVCC_FLAGS	:=
-GASNET_FLAGS	:=
-LD_FLAGS	:= -L/opt/local/lib -lhdf5
+INC_FLAGS	?=
+CC_FLAGS	?=
+NVCC_FLAGS	?=
+GASNET_FLAGS	?=
+LD_FLAGS	?=
 
 ###########################################################################
 #
 #   Don't change anything below here
 #   
 ###########################################################################
-
 
 include $(LG_RT_DIR)/runtime.mk
 
