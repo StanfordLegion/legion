@@ -11457,7 +11457,7 @@ namespace Legion {
           if (!!(space_mask - current->get_physical_mask()))
             continue;
           // Also check for empty instances
-          if (current->manager->instance_domain.get_volume() == 0)
+          if (current->manager->instance_domain->get_volume() == 0)
             continue;
         }
         // If we're looking for instances with space, we want the instances
