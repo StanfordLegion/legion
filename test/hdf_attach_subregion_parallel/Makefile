@@ -27,7 +27,7 @@ USE_HDF         ?= 1		# Include HDF5 support (requires HDF5)
 ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
 
 # Put the binary file name here
-OUTFILE		?= tester_io
+OUTFILE		?= hdf_attach_subregion_parallel
 # List all the application source files here
 GEN_SRC		?= tester_io.cc legion_io.cc		# .cc files
 GEN_GPU_SRC	?=		# .cu files
