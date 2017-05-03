@@ -411,15 +411,19 @@ namespace LegionRuntime {
 
         return;
       }
-      log_ib_alloc.info() << "IBAllocRequest (" << req->src_inst_id << "," 
-        << req->dst_inst_id << "): no enough space in memory" << tgt_mem;
+      log_ib_alloc.info("enqueue_request: src_inst(%llx) dst_inst(%llx) "
+                        "no enough space in memory(%llx)", req->src_inst_id, req->dst_inst_id, tgt_mem.id);
+      //log_ib_alloc.info() << " (" << req->src_inst_id << "," 
+      //  << req->dst_inst_id << "): no enough space in memory" << tgt_mem;
       std::map<Memory, std::queue<IBAllocRequest*> *>::iterator it = queues.find(tgt_mem);
       if (it == queues.end()) {
         std::queue<IBAllocRequest*> *q = new std::queue<IBAllocRequest*>;
         q->push(req);
         queues[tgt_mem] = q;
+        //log_ib_alloc.info("enqueue_request: queue_length(%lu)", q->size());
       } else {
         it->second->push(req);
+        //log_ib_alloc.info("enqueue_request: queue_length(%lu)", it->second->size());
       }
     }
 
@@ -910,7 +914,7 @@ namespace LegionRuntime {
         ib_size = domain_size * ib_elmnt_size;
       else
         ib_size = IB_MAX_SIZE;
-      //printf("alloc_ib: src_inst_id(%llx) dst_inst_id(%llx) idx(%d) size(%lu)\n", inst_pair.first.id, inst_pair.second.id, idx, ib_size);
+      //log_ib_alloc.info("alloc_ib: src_inst_id(%llx) dst_inst_id(%llx) idx(%d) size(%lu) memory(%llx)", inst_pair.first.id, inst_pair.second.id, idx, ib_size, tgt_mem.id);
       if (ID(tgt_mem).memory.owner_node == gasnet_mynode()) {
         // create local intermediate buffer
         IBAllocRequest* ib_req
@@ -925,14 +929,18 @@ namespace LegionRuntime {
 
     void CopyRequest::handle_ib_response(int idx, InstPair inst_pair, size_t ib_size, off_t ib_offset)
     {
-      AutoHSLLock al(ib_mutex);
-      IBByInst::iterator ib_it = ib_by_inst.find(inst_pair);
-      assert(ib_it != ib_by_inst.end());
-      IBVec& ibvec = ib_it->second;
-      assert((int)ibvec.size() > idx);
-      ibvec[idx].size = ib_size;
-      ibvec[idx].offset = ib_offset;
-      GenEventImpl::trigger(ibvec[idx].event, false/*!poisoned*/);
+      Event event_to_trigger = Event::NO_EVENT;
+      {
+        AutoHSLLock al(ib_mutex);
+        IBByInst::iterator ib_it = ib_by_inst.find(inst_pair);
+        assert(ib_it != ib_by_inst.end());
+        IBVec& ibvec = ib_it->second;
+        assert((int)ibvec.size() > idx);
+        ibvec[idx].size = ib_size;
+        ibvec[idx].offset = ib_offset;
+        event_to_trigger = ibvec[idx].event;
+      }
+      GenEventImpl::trigger(event_to_trigger, false/*!poisoned*/);
       //ibvec[idx].fence->mark_finished(true);
     }
 
@@ -1069,37 +1077,7 @@ namespace LegionRuntime {
         //  }
         //}
         ib_req->mark_finished(true);
-        state = STATE_ALLOC_IB;
-      }
-
-      if(state == STATE_ALLOC_IB) {
-        log_dma.debug("wait for the ib allocations to complete");
-        PriorityIBQueue::iterator it;
-        for (it = priority_ib_queue.begin(); it != priority_ib_queue.end(); it++) {
-          IBVec& ibvec = ib_by_inst[(*it).ip];
-          if (ibvec[(*it).idx].status == IBInfo::INIT) {
-            // launch ib allocation requests
-            alloc_intermediate_buffer((*it).ip, (*it).memory, (*it).idx);
-            ibvec[(*it).idx].status = IBInfo::SENT;
-          }
-          if (ibvec[(*it).idx].status == IBInfo::SENT) {
-            if (ibvec[(*it).idx].event.has_triggered()) {
-              ibvec[(*it).idx].status = IBInfo::COMPLETED;
-            } else {
-              if (just_check) return false;
-              waiter.sleep_on_event(ibvec[(*it).idx].event);
-              return false;
-            }
-          }
-        }
         state = STATE_BEFORE_EVENT;
-        //if (ib_completion.has_triggered()) {
-        //  state = STATE_BEFORE_EVENT;
-        //} else {
-        //  if (just_check) return false;
-        //  waiter.sleep_on_event(ib_completion);
-        //  return false;
-        //}
       }
 
       // make sure our functional precondition has occurred
@@ -1113,7 +1091,7 @@ namespace LegionRuntime {
 	    return true;  // not enqueued, but never going to be
 	  } else {
 	    log_dma.debug("request %p - before event triggered", this);
-	    state = STATE_READY;
+	    state = STATE_ALLOC_IB;
 	  }
 	} else {
 	  log_dma.debug("request %p - before event not triggered", this);
@@ -1123,6 +1101,40 @@ namespace LegionRuntime {
 	  waiter.sleep_on_event(before_copy);
 	  return false;
 	}
+      }
+
+      if(state == STATE_ALLOC_IB) {
+        // log_dma.debug("wait for the ib allocations to complete");
+        PriorityIBQueue::iterator it;
+        for (it = priority_ib_queue.begin(); it != priority_ib_queue.end(); it++) {
+          IBVec& ibvec = ib_by_inst[(*it).ip];
+          if (ibvec[(*it).idx].status == IBInfo::INIT) {
+            // launch ib allocation requests
+            ibvec[(*it).idx].status = IBInfo::SENT;
+            alloc_intermediate_buffer((*it).ip, (*it).memory, (*it).idx);
+          }
+          if (ibvec[(*it).idx].status == IBInfo::SENT) {
+            Event e = ibvec[(*it).idx].event;
+            if (e.has_triggered()) {
+              ibvec[(*it).idx].status = IBInfo::COMPLETED;
+              //log_ib_alloc.info("alloc complete: copy_request(%llx) src_inst(%lx) dst_inst(%lx) idx(%lx)", this, (*it).ip.first.id, (*it).ip.second.id, (*it).idx);
+            } else {
+              if (just_check) return false;
+              waiter.sleep_on_event(e);
+              return false;
+            }
+          }
+        }
+        //if (priority_ib_queue.size() > 0)
+          //log_ib_alloc.info("alloc complete: copy_request(%llx) all intermediate buffers allocated!", this);
+        state = STATE_READY;
+        //if (ib_completion.has_triggered()) {
+        //  state = STATE_BEFORE_EVENT;
+        //} else {
+        //  if (just_check) return false;
+        //  waiter.sleep_on_event(ib_completion);
+        //  return false;
+        //}
       }
 
       if(state == STATE_READY) {
