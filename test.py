@@ -79,7 +79,7 @@ legion_hdf_cxx_tests = [
     ['examples/attach_file/attach_file', []],
 
     # Tests
-    #['test/hdf_attach/hdf_attach', []], # FIXME: Broken: https://github.com/StanfordLegion/legion/issues/221
+    ['test/hdf_attach_subregion_parallel/hdf_attach_subregion_parallel', ['-ll:cpu', '4']],
 ]
 
 legion_cxx_perf_tests = [
