@@ -2193,7 +2193,8 @@ namespace Legion {
       RegionTreeContext ctx = context->get_context();
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
-      assert(req.handle_type == SINGULAR);
+      assert((req.handle_type == SINGULAR) || 
+              (req.handle_type == REG_PROJECTION));
       assert(!targets.empty());
       assert(!targets.is_virtual_mapping());
 #endif
@@ -2930,12 +2931,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_CONVERT_MAPPING_CALL);
-#ifdef DEBUG_LEGION
       // Can be a part projection if we are closing to a partition node
-      assert((req.handle_type == SINGULAR) || 
-              (req.handle_type == PART_PROJECTION));
-#endif
-      RegionTreeNode *tree_node = (req.handle_type == SINGULAR) ? 
+      RegionTreeNode *tree_node = (req.handle_type != PART_PROJECTION) ? 
         static_cast<RegionTreeNode*>(get_node(req.region)) : 
         static_cast<RegionTreeNode*>(get_node(req.partition));      
       // Get the field mask for the fields we need
@@ -3077,10 +3074,8 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(Runtime::legion_spy_enabled); 
-      assert((req.handle_type == SINGULAR) || 
-          (req.handle_type == PART_PROJECTION));
 #endif
-      FieldSpaceNode *node = (req.handle_type == SINGULAR) ? 
+      FieldSpaceNode *node = (req.handle_type != PART_PROJECTION) ? 
         get_node(req.region.get_field_space()) : 
         get_node(req.partition.get_field_space());
       for (unsigned idx = 0; idx < targets.size(); idx++)
@@ -13818,6 +13813,9 @@ namespace Legion {
             it->first->as_instance_view()->as_materialized_view();
           if (!!(space_mask - current->get_physical_mask()))
             continue;
+          // Also check for empty instances
+          if (current->manager->instance_domain.get_volume() == 0)
+            continue;
         }
         // If we're looking for instances with space, we want the instances
         // even if they have no valid fields, otherwise if we're not looking
@@ -16155,6 +16153,11 @@ namespace Legion {
       {
         pull_valid_instance_views(ctx, state, 
             valid_mask, true/*needs space*/, version_info);
+#ifdef DEBUG_LEGION
+        // Useful for checking premapping of actual regions
+        std::vector<LogicalRegion> to_check(1, req.handle_type != 
+            PART_PROJECTION ? req.region : LogicalRegion::NO_REGION);
+#endif
         // Record the instances and the fields for which they are valid 
         for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
               state->valid_views.begin(); it != state->valid_views.end();it++)
@@ -16174,6 +16177,10 @@ namespace Legion {
             continue;
           // Now see if it has any valid fields already
           FieldMask valid_fields = it->second & valid_mask;
+#ifdef DEBUG_LEGION
+          if (req.handle_type != PART_PROJECTION)
+            assert(cur_view->manager->meets_regions(to_check));
+#endif
           // Save the reference
           targets.add_instance(InstanceRef(cur_view->manager, valid_fields));
         }
