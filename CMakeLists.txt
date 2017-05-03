@@ -131,6 +131,19 @@ if(Legion_USE_CUDA)
 endif()
 
 #------------------------------------------------------------------------------#
+# HDF5 configuration
+#------------------------------------------------------------------------------#
+option(Legion_USE_HDF5 "Enable support for HDF5" OFF)
+if(Legion_USE_HDF5)
+  if(NOT BUILD_SHARED_LIBS)
+    set(HDF5_USE_STATIC_LIBRARIES ON)
+  else()
+    set(HDF5_USE_STATIC_LIBRARIES OFF)
+  endif()
+  find_package(HDF5 REQUIRED)
+endif()
+
+#------------------------------------------------------------------------------#
 # Miscelaneous other options
 #------------------------------------------------------------------------------#
 set(Legion_MAX_FIELDS 512 CACHE STRING "Maximum number of fields allocated to a single field space")
