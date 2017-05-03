@@ -171,7 +171,7 @@ endif()
 if(Legion_USE_HDF5)
   target_compile_definitions(LowLevelRuntime PUBLIC USE_HDF)
   target_include_directories(LowLevelRuntime PRIVATE ${HDF5_INCLUDE_DIRS})
-  target_link_libraries(LowLevelRuntime PRIVATE ${HDF5_C_LIBRARIES})
+  target_link_libraries(LowLevelRuntime PRIVATE ${HDF5_LIBRARIES})
 endif()
 
 set_target_properties(LowLevelRuntime PROPERTIES OUTPUT_NAME realm)
