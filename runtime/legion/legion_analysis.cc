@@ -4913,7 +4913,8 @@ namespace Legion {
                                           ProjectionEpochID open_epoch,
                                           bool dedup_advances, 
                                           ProjectionEpochID advance_epoch,
-                                          const FieldMask *dirty_previous)
+                                          const FieldMask *dirty_previous,
+                                    const VersioningSet<> *remote_states_to_use)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(node->context->runtime, 

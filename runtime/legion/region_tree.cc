@@ -1524,6 +1524,34 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeForest::advance_remote_versions(Operation *op, unsigned idx,
+                                                const RegionRequirement &req,
+                                                bool parent_is_upper_bound,
+                                                UniqueID logical_ctx_uid,
+                                                const VersioningSet<> &versions,
+                                                std::set<RtEvent> &ready_events)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(req.handle_type == SINGULAR);
+#endif
+      RegionNode *node = get_node(req.region);
+      const FieldMask advance_mask = 
+        node->column_source->get_field_mask(req.privilege_fields);
+      InnerContext *context = op->find_physical_context(idx);
+      const AddressSpaceID local = runtime->address_space;
+      RegionTreeContext ctx = context->get_context(); 
+#ifdef DEBUG_LEGION
+      assert(ctx.exists());
+#endif
+      VersionManager &manager = node->get_current_version_manager(ctx.get_id());
+      manager.advance_versions(advance_mask, logical_ctx_uid, context,
+          !parent_is_upper_bound, local, ready_events, false/*dedup open*/, 
+          0/*open epoch*/, false/*dedup advance*/, 0/*advance epoch*/,
+          NULL/*dirty previous*/, &versions/*states to use*/);
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeForest::invalidate_versions(RegionTreeContext ctx, 
                                                LogicalRegion handle)
     //--------------------------------------------------------------------------
