@@ -2193,7 +2193,8 @@ namespace Legion {
       RegionTreeContext ctx = context->get_context();
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
-      assert(req.handle_type == SINGULAR);
+      assert((req.handle_type == SINGULAR) || 
+              (req.handle_type == REG_PROJECTION));
       assert(!targets.empty());
       assert(!targets.is_virtual_mapping());
 #endif
@@ -2930,12 +2931,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_CONVERT_MAPPING_CALL);
-#ifdef DEBUG_LEGION
       // Can be a part projection if we are closing to a partition node
-      assert((req.handle_type == SINGULAR) || 
-              (req.handle_type == PART_PROJECTION));
-#endif
-      RegionTreeNode *tree_node = (req.handle_type == SINGULAR) ? 
+      RegionTreeNode *tree_node = (req.handle_type != PART_PROJECTION) ? 
         static_cast<RegionTreeNode*>(get_node(req.region)) : 
         static_cast<RegionTreeNode*>(get_node(req.partition));      
       // Get the field mask for the fields we need
@@ -3077,10 +3074,8 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(Runtime::legion_spy_enabled); 
-      assert((req.handle_type == SINGULAR) || 
-          (req.handle_type == PART_PROJECTION));
 #endif
-      FieldSpaceNode *node = (req.handle_type == SINGULAR) ? 
+      FieldSpaceNode *node = (req.handle_type != PART_PROJECTION) ? 
         get_node(req.region.get_field_space()) : 
         get_node(req.partition.get_field_space());
       for (unsigned idx = 0; idx < targets.size(); idx++)

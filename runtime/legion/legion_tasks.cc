@@ -2124,10 +2124,12 @@ namespace Legion {
         // could result in the generation of a copy
         set_current_mapping_index(*it);
         // Passed all the error checking tests so register it
+        // Always defer the users, the point tasks will do that
+        // for themselves when they map their regions
         runtime->forest->physical_register_only(regions[*it], 
                               version_info, restrict_info, this, *it,
-                              completion_event, (regions.size() > 1), 
-                              true/*need read only reservatins*/,
+                              completion_event, true/*defer users*/, 
+                              true/*need read only reservations*/,
                               applied_conditions, chosen_instances
 #ifdef DEBUG_LEGION
                               , get_logging_name(), unique_op_id
