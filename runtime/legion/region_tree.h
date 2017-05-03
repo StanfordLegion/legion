@@ -335,6 +335,12 @@ namespace Legion {
                                    const FieldMask &advance_mask,
              const LegionMap<unsigned,FieldMask>::aligned &dirty_previous,
                                    std::set<RtEvent> &ready_events);
+      void advance_remote_versions(Operation *op, unsigned idx,
+                                   const RegionRequirement &req,
+                                   bool parent_is_upper_bound,
+                                   UniqueID logical_ctx_uid,
+                                   const VersioningSet<> &versions,
+                                   std::set<RtEvent> &ready_events);
       void invalidate_versions(RegionTreeContext ctx, LogicalRegion handle);
       void invalidate_all_versions(RegionTreeContext ctx);
     public:

@@ -409,6 +409,28 @@ namespace Legion {
     };
 
     /**
+     * \class VersioningInfoBroadcast
+     * A class for broadcasting the names of version state
+     * objects for one or more region requirements
+     */
+    class VersioningInfoBroadcast : public BroadcastCollective {
+    public:
+      VersioningInfoBroadcast(ReplicateContext *ctx,
+                    CollectiveID id, ShardID owner);
+      VersioningInfoBroadcast(const VersioningInfoBroadcast &rhs);
+      virtual ~VersioningInfoBroadcast(void);
+    public:
+      VersioningInfoBroadcast& operator=(const VersioningInfoBroadcast &rhs);
+    public:
+      virtual void pack_collective(Serializer &rez) const;
+      virtual void unpack_collective(Deserializer &derez);
+    public:
+      void pack_advance_states(unsigned index, const VersionInfo &version_info);
+      void wait_for_states(std::set<RtEvent> &applied_events);
+      const VersioningSet<>& find_advance_states(unsigned index) const;
+    };
+
+    /**
      * \class ReplIndividualTask
      * An individual task that is aware that it is 
      * being executed in a control replication context.
@@ -425,8 +447,8 @@ namespace Legion {
       virtual void deactivate(void);
     public:
       virtual void trigger_prepipeline_stage(void);
-      virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
+      virtual RtEvent perform_mapping(MustEpochOp *owner = NULL);
     public:
       // Override these so we can broadcast the future result
       virtual void handle_future(const void *res, size_t res_size, bool owned);
@@ -439,6 +461,7 @@ namespace Legion {
       ShardingFunction *sharding_function;
       IndexSpace launch_space;
       std::vector<ProjectionInfo> projection_infos;
+      CollectiveID versioning_collective_id; // id for version state broadcasts
       CollectiveID future_collective_id; // id for the future broadcast 
 #ifdef DEBUG_LEGION
     public:
@@ -560,7 +583,6 @@ namespace Legion {
       virtual void deactivate(void);
     public:
       virtual void trigger_prepipeline_stage(void);
-      virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
     protected:
       ShardingID sharding_functor;

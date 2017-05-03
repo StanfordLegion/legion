@@ -67,6 +67,7 @@ namespace Legion {
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
       launch_space = IndexSpace::NO_SPACE;
+      versioning_collective_id = UINT_MAX;
       future_collective_id = UINT_MAX;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL; 
@@ -139,30 +140,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndividualTask::trigger_dependence_analysis(void)
-    //--------------------------------------------------------------------------
-    {
-      perform_base_dependence_analysis();
-      projection_infos.resize(regions.size());
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        RegionRequirement &req = regions[idx];
-#ifdef DEBUG_LEGION
-        assert(req.handle_type == SINGULAR);
-        assert(req.projection == 0); // should be the default projection func
-#endif
-        req.handle_type = REG_PROJECTION; // Do this temporarily 
-        ProjectionInfo &info = projection_infos[idx];
-        info = ProjectionInfo(runtime, req, launch_space, sharding_function);
-        runtime->forest->perform_dependence_analysis(this, idx, req,
-                                                     restrict_infos[idx],
-                                                     version_infos[idx], info,
-                                                     privilege_paths[idx]);
-        req.handle_type = SINGULAR; // Switch it back
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void ReplIndividualTask::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
@@ -180,12 +157,67 @@ namespace Legion {
       {
         // We don't own it, so we can pretend like we
         // mapped and executed this task already
-        complete_mapping();
+        // Before we can do that though we have to get the version state
+        // names for any writes so we can update our local state
+        VersioningInfoBroadcast version_broadcast(repl_ctx, 
+                      versioning_collective_id, owner_shard);
+        version_broadcast.wait_for_states(map_applied_conditions);
+        const UniqueID logical_context_uid = parent_ctx->get_context_uid();
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
+          if (IS_WRITE(regions[idx]))
+          {
+            const VersioningSet<> &remote_advance_states = 
+              version_broadcast.find_advance_states(idx);
+            const RegionRequirement &req = regions[idx];
+            const bool parent_is_upper_bound = (req.region == req.parent);
+            runtime->forest->advance_remote_versions(this, idx, req,
+                parent_is_upper_bound, logical_context_uid, 
+                remote_advance_states, map_applied_conditions);
+          }
+        }
+        if (!map_applied_conditions.empty())
+          complete_mapping(Runtime::merge_events(map_applied_conditions));
+        else
+          complete_mapping();
         complete_execution();
         trigger_children_complete();
       }
       else // We own it, so it goes on the ready queue
         enqueue_ready_operation(); 
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ReplIndividualTask::perform_mapping(
+                                         MustEpochOp *must_epoch_owner/*=NULL*/)
+    //--------------------------------------------------------------------------
+    {
+      // Do the base call  
+      RtEvent result = IndividualTask::perform_mapping(must_epoch_owner);
+      // If there is an event then the mapping isn't done so we don't have
+      // the final versions yet and can't do the broadcast
+      if (result.exists())
+        return result;
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // Then broadcast the versioning results for any region requirements
+      // that are writes which are going to advance the version numbers
+      VersioningInfoBroadcast version_broadcast(repl_ctx, 
+                    versioning_collective_id, owner_shard);
+#ifdef DEBUG_LEGION
+      assert(regions.size() == version_infos.size());
+#endif
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        if (IS_WRITE(regions[idx]))
+          version_broadcast.pack_advance_states(idx, version_infos[idx]);
+      }
+      version_broadcast.perform_collective_async();
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -239,6 +271,7 @@ namespace Legion {
     void ReplIndividualTask::initialize_replication(ReplicateContext *ctx)
     //--------------------------------------------------------------------------
     {
+      versioning_collective_id = ctx->get_next_collective_index();
       future_collective_id = ctx->get_next_collective_index();
       // Also initialize our index domain of a single point
       index_domain = Domain(index_point, index_point);
@@ -802,56 +835,6 @@ namespace Legion {
 #endif
       // Now we can do the normal prepipeline stage
       CopyOp::trigger_prepipeline_stage();
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplCopyOp::trigger_dependence_analysis(void)
-    //--------------------------------------------------------------------------
-    {
-      perform_base_dependence_analysis(); 
-      src_projection_infos.resize(src_requirements.size());
-      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-      {
-        RegionRequirement &req = src_requirements[idx];
-#ifdef DEBUG_LEGION
-        assert(req.handle_type == SINGULAR);
-        assert(req.projection == 0); // should be the default projection func
-#endif
-        req.handle_type = REG_PROJECTION; // Do this temporarily
-        ProjectionInfo &info = src_projection_infos[idx];
-        info = ProjectionInfo(runtime, req, launch_space, sharding_function);
-        runtime->forest->perform_dependence_analysis(this, idx, req,
-                                                     src_restrict_infos[idx],
-                                                     src_versions[idx], info,
-                                                     src_privilege_paths[idx]);
-        req.handle_type = SINGULAR; // Switch it back
-      }
-      dst_projection_infos.resize(dst_requirements.size());
-      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-      {
-        unsigned index = src_requirements.size()+idx;
-        RegionRequirement &req = dst_requirements[idx];
-        // Perform this dependence analysis as if it was READ_WRITE
-        // so that we can get the version numbers correct
-        const bool is_reduce_req = IS_REDUCE(req);
-        if (is_reduce_req)
-          req.privilege = READ_WRITE;
-#ifdef DEBUG_LEGION
-        assert(req.handle_type == SINGULAR);
-        assert(req.projection == 0); // should be the default projection func
-#endif
-        req.handle_type = REG_PROJECTION; // Do this temporarily
-        ProjectionInfo &info = dst_projection_infos[idx];
-        info = ProjectionInfo(runtime, req, launch_space, sharding_function);
-        runtime->forest->perform_dependence_analysis(this, index, req, 
-                                                     dst_restrict_infos[idx],
-                                                     dst_versions[idx], info,
-                                                     dst_privilege_paths[idx]);
-        // Switch the privileges back when we are done
-        if (is_reduce_req)
-          req.privilege = REDUCE;
-        req.handle_type = SINGULAR; // Switch it back
-      }
     }
 
     //--------------------------------------------------------------------------
