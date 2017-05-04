@@ -339,7 +339,7 @@ namespace Realm {
     static DynamicTemplates::TagType type_tag(void);
 
     ImageMicroOp(ZIndexSpace<N,T> _parent_space, ZIndexSpace<N2,T2> _inst_space,
-		   RegionInstance _inst, size_t _field_offset);
+		 RegionInstance _inst, size_t _field_offset, bool _is_ranged);
     virtual ~ImageMicroOp(void);
 
     void add_sparsity_output(ZIndexSpace<N2,T2> _source, SparsityMap<N,T> _sparsity);
@@ -362,15 +362,22 @@ namespace Realm {
     ImageMicroOp(gasnet_node_t _requestor, AsyncMicroOp *_async_microop, S& s);
 
     template <typename BM>
-    void populate_bitmasks(std::map<int, BM *>& bitmasks);
+    void populate_bitmasks_ptrs(std::map<int, BM *>& bitmasks);
 
     template <typename BM>
-    void populate_approx_bitmask(BM& bitmask);
+    void populate_bitmasks_ranges(std::map<int, BM *>& bitmasks);
+
+    template <typename BM>
+    void populate_approx_bitmask_ptrs(BM& bitmask);
+
+    template <typename BM>
+    void populate_approx_bitmask_ranges(BM& bitmask);
 
     ZIndexSpace<N,T> parent_space;
     ZIndexSpace<N2,T2> inst_space;
     RegionInstance inst;
     size_t field_offset;
+    bool is_ranged;
     std::vector<ZIndexSpace<N2,T2> > sources;
     std::vector<ZIndexSpace<N,T> > diff_rhss;
     std::vector<SparsityMap<N,T> > sparsity_outputs;
@@ -391,7 +398,7 @@ namespace Realm {
     static DynamicTemplates::TagType type_tag(void);
 
     PreimageMicroOp(ZIndexSpace<N,T> _parent_space, ZIndexSpace<N,T> _inst_space,
-		   RegionInstance _inst, size_t _field_offset);
+		    RegionInstance _inst, size_t _field_offset, bool _is_ranged);
     virtual ~PreimageMicroOp(void);
 
     void add_sparsity_output(ZIndexSpace<N2,T2> _target, SparsityMap<N,T> _sparsity);
@@ -410,11 +417,15 @@ namespace Realm {
     PreimageMicroOp(gasnet_node_t _requestor, AsyncMicroOp *_async_microop, S& s);
 
     template <typename BM>
-    void populate_bitmasks(std::map<int, BM *>& bitmasks);
+    void populate_bitmasks_ptrs(std::map<int, BM *>& bitmasks);
+
+    template <typename BM>
+    void populate_bitmasks_ranges(std::map<int, BM *>& bitmasks);
 
     ZIndexSpace<N,T> parent_space, inst_space;
     RegionInstance inst;
     size_t field_offset;
+    bool is_ranged;
     std::vector<ZIndexSpace<N2,T2> > targets;
     std::vector<SparsityMap<N,T> > sparsity_outputs;
   };
@@ -574,6 +585,11 @@ namespace Realm {
 		   const ProfilingRequestSet &reqs,
 		   Event _finish_event);
 
+    ImageOperation(const ZIndexSpace<N,T>& _parent,
+		   const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZRect<N,T> > >& _field_data,
+		   const ProfilingRequestSet &reqs,
+		   Event _finish_event);
+
     virtual ~ImageOperation(void);
 
     ZIndexSpace<N,T> add_source(const ZIndexSpace<N2,T2>& source);
@@ -588,7 +604,8 @@ namespace Realm {
 
   protected:
     ZIndexSpace<N,T> parent;
-    std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZPoint<N,T> > > field_data;
+    std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZPoint<N,T> > > ptr_data;
+    std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZRect<N,T> > > range_data;
     std::vector<ZIndexSpace<N2,T2> > sources;
     std::vector<ZIndexSpace<N,T> > diff_rhss;
     std::vector<SparsityMap<N,T> > images;
@@ -599,6 +616,11 @@ namespace Realm {
   public:
     PreimageOperation(const ZIndexSpace<N,T>& _parent,
 		      const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,ZPoint<N2,T2> > >& _field_data,
+		      const ProfilingRequestSet &reqs,
+		      Event _finish_event);
+
+    PreimageOperation(const ZIndexSpace<N,T>& _parent,
+		      const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,ZRect<N2,T2> > >& _field_data,
 		      const ProfilingRequestSet &reqs,
 		      Event _finish_event);
 
@@ -616,7 +638,8 @@ namespace Realm {
 
   protected:
     ZIndexSpace<N,T> parent;
-    std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,ZPoint<N2,T2> > > field_data;
+    std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,ZPoint<N2,T2> > > ptr_data;
+    std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,ZRect<N2,T2> > > range_data;
     std::vector<ZIndexSpace<N2,T2> > targets;
     std::vector<SparsityMap<N,T> > preimages;
     GASNetHSL mutex;

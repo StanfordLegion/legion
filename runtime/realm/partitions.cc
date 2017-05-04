@@ -498,8 +498,16 @@ namespace Realm {
 							   const ProfilingRequestSet &reqs,
 							   Event wait_on /*= Event::NO_EVENT*/) const
   {
-    assert(0);
-    return wait_on;
+    Event e = GenEventImpl::create_genevent()->current_event();
+    ImageOperation<N,T,N2,T2> *op = new ImageOperation<N,T,N2,T2>(*this, field_data, reqs, e);
+
+    size_t n = sources.size();
+    images.resize(n);
+    for(size_t i = 0; i < n; i++)
+      images[i] = op->add_source(sources[i]);
+
+    op->deferred_launch(wait_on);
+    return e;
   }
 
   template <int N, typename T>
@@ -554,8 +562,16 @@ namespace Realm {
 						       const ProfilingRequestSet &reqs,
 						       Event wait_on /*= Event::NO_EVENT*/) const
   {
-    assert(0);
-    return wait_on;
+    Event e = GenEventImpl::create_genevent()->current_event();
+    PreimageOperation<N,T,N2,T2> *op = new PreimageOperation<N,T,N2,T2>(*this, field_data, reqs, e);
+
+    size_t n = targets.size();
+    preimages.resize(n);
+    for(size_t i = 0; i < n; i++)
+      preimages[i] = op->add_target(targets[i]);
+
+    op->deferred_launch(wait_on);
+    return e;
   }
 
   template <int N, typename T>
@@ -1087,6 +1103,62 @@ namespace Realm {
 	    last = p.x;
 	  as_map[p.x] = last;
 	}
+      }
+    }
+    // mergers can cause us to drop below LWM
+    if(as_map.size() < LOW_WATER_MARK)
+      convert_to_vector();
+  }
+
+  template <typename T>
+  void HybridRectangleList<1,T>::add_rect(const ZRect<1,T>& r)
+  {
+    if(is_vector) {
+      DenseRectangleList<1,T>::add_rect(r);
+      if(this->rects.size() > HIGH_WATER_MARK)
+	convert_to_map();
+      return;
+    }
+
+    // otherwise add to the map
+    assert(!as_map.empty());
+    typename std::map<T, T>::iterator it = as_map.lower_bound(r.lo.x);
+    if(it == as_map.end()) {
+      //std::cout << "add " << p << " BIGGER " << as_map.rbegin()->first << "," << as_map.rbegin()->second << "\n";
+      // bigger than everything - see if we can merge with the last guy
+      T& last = as_map.rbegin()->second;
+      if(last == (r.lo.x - 1))
+	last = r.hi.x;
+      else if(last < (r.lo.x - 1))
+	as_map[r.lo.x] = r.hi.x;
+    } else {
+      // if the interval we found isn't the first, we may need to back up one to
+      //  find the one that overlaps the start of our range
+      if(it != as_map.begin()) {
+	typename std::map<T, T>::iterator it2 = it;
+	--it2;
+	if(it2->second >= (r.lo.x - 1))
+	  it = it2;
+      }
+
+      if(it->first <= r.lo.x) {
+	assert(it->second >= r.lo.x); // it had better overlap
+
+	if(it->second < r.hi.x)
+	  it->second = r.hi.x;
+      } else {
+	// we are the low end of a range (but may absorb other ranges)
+	it = as_map.insert(std::make_pair(r.lo.x, r.hi.x)).first;
+      }
+
+      // have we subsumed or merged with anything?
+      typename std::map<T, T>::iterator it2 = it;
+      ++it2;
+      while((it2 != as_map.end()) && (it2->first <= (it->second + 1))) {
+	if(it2->second > it->second) it->second = it2->second;
+	typename std::map<T, T>::iterator it3 = it2;
+	++it2;
+	as_map.erase(it3);
       }
     }
     // mergers can cause us to drop below LWM
@@ -2344,11 +2416,13 @@ namespace Realm {
   ImageMicroOp<N,T,N2,T2>::ImageMicroOp(ZIndexSpace<N,T> _parent_space,
 					ZIndexSpace<N2,T2> _inst_space,
 					RegionInstance _inst,
-					size_t _field_offset)
+					size_t _field_offset,
+					bool _is_ranged)
     : parent_space(_parent_space)
     , inst_space(_inst_space)
     , inst(_inst)
     , field_offset(_field_offset)
+    , is_ranged(_is_ranged)
     , approx_output_index(-1)
     , approx_output_op(0)
   {}
@@ -2385,11 +2459,10 @@ namespace Realm {
 
   template <int N, typename T, int N2, typename T2>
   template <typename BM>
-  void ImageMicroOp<N,T,N2,T2>::populate_bitmasks(std::map<int, BM *>& bitmasks)
+  void ImageMicroOp<N,T,N2,T2>::populate_bitmasks_ptrs(std::map<int, BM *>& bitmasks)
   {
     // for now, one access for the whole instance
     AffineAccessor<ZPoint<N,T>,N2,T2> a_data(inst, field_offset);
-    //std::cout << "a_data = " << a_data << "\n";
 
     // double iteration - use the instance's space first, since it's probably smaller
     for(ZIndexSpaceIterator<N2,T2> it(inst_space); it.valid; it.step()) {
@@ -2421,7 +2494,42 @@ namespace Realm {
 
   template <int N, typename T, int N2, typename T2>
   template <typename BM>
-  void ImageMicroOp<N,T,N2,T2>::populate_approx_bitmask(BM& bitmask)
+  void ImageMicroOp<N,T,N2,T2>::populate_bitmasks_ranges(std::map<int, BM *>& bitmasks)
+  {
+    // for now, one access for the whole instance
+    AffineAccessor<ZRect<N,T>,N2,T2> a_data(inst, field_offset);
+
+    // double iteration - use the instance's space first, since it's probably smaller
+    for(ZIndexSpaceIterator<N2,T2> it(inst_space); it.valid; it.step()) {
+      for(size_t i = 0; i < sources.size(); i++) {
+	for(ZIndexSpaceIterator<N2,T2> it2(sources[i], it.rect); it2.valid; it2.step()) {
+	  BM **bmpp = 0;
+
+	  // iterate over each point in the source and see if it points into the parent space	  
+	  for(ZPointInRectIterator<N2,T2> pir(it2.rect); pir.valid; pir.step()) {
+	    ZRect<N,T> rng = a_data.read(pir.p);
+
+	    if(parent_space.contains_any(rng)) {
+              // optional filter
+              if(!diff_rhss.empty())
+                if(diff_rhss[i].contains_all(rng)) {
+                  //std::cout << "point " << ptr << " filtered!\n";
+                  continue;
+                }
+	      //std::cout << "image " << i << "(" << sources[i] << ") -> " << pir.p << " -> " << ptr << std::endl;
+	      if(!bmpp) bmpp = &bitmasks[i];
+	      if(!*bmpp) *bmpp = new BM;
+	      (*bmpp)->add_rect(rng);
+	    }
+	  }
+	}
+      }
+    }
+  }
+
+  template <int N, typename T, int N2, typename T2>
+  template <typename BM>
+  void ImageMicroOp<N,T,N2,T2>::populate_approx_bitmask_ptrs(BM& bitmask)
   {
     // for now, one access for the whole instance
     AffineAccessor<ZPoint<N,T>,N2,T2> a_data(inst, field_offset);
@@ -2439,6 +2547,25 @@ namespace Realm {
   }
 
   template <int N, typename T, int N2, typename T2>
+  template <typename BM>
+  void ImageMicroOp<N,T,N2,T2>::populate_approx_bitmask_ranges(BM& bitmask)
+  {
+    // for now, one access for the whole instance
+    AffineAccessor<ZRect<N,T>,N2,T2> a_data(inst, field_offset);
+    //std::cout << "a_data = " << a_data << "\n";
+
+    // simple image operation - project ever 
+    for(ZIndexSpaceIterator<N2,T2> it(inst_space); it.valid; it.step()) {
+      // iterate over each point in the source and mark what it touches
+      for(ZPointInRectIterator<N2,T2> pir(it.rect); pir.valid; pir.step()) {
+	ZRect<N,T> rng = a_data.read(pir.p);
+
+	bitmask.add_rect(rng);
+      }
+    }
+  }
+
+  template <int N, typename T, int N2, typename T2>
   void ImageMicroOp<N,T,N2,T2>::execute(void)
   {
     TimeStamp ts("ImageMicroOp::execute", true, &log_uop_timing);
@@ -2447,7 +2574,10 @@ namespace Realm {
       //std::map<int, DenseRectangleList<N,T> *> rect_map;
       std::map<int, HybridRectangleList<N,T> *> rect_map;
 
-      populate_bitmasks(rect_map);
+      if(is_ranged)
+	populate_bitmasks_ranges(rect_map);
+      else
+	populate_bitmasks_ptrs(rect_map);
 
 #ifdef DEBUG_PARTITIONING
       std::cout << rect_map.size() << " non-empty images present in instance " << inst << std::endl;
@@ -2473,7 +2603,10 @@ namespace Realm {
     if(approx_output_index != -1) {
       DenseRectangleList<N,T> approx_rects(cfg_max_rects_in_approximation);
 
-      populate_approx_bitmask(approx_rects);
+      if(is_ranged)
+	populate_approx_bitmask_ranges(approx_rects);
+      else
+	populate_approx_bitmask_ptrs(approx_rects);
 
       if(requestor == gasnet_mynode()) {
 	PreimageOperation<N2,T2,N,T> *op = reinterpret_cast<PreimageOperation<N2,T2,N,T> *>(approx_output_op);
@@ -2547,6 +2680,7 @@ namespace Realm {
 	   (s << inst_space) &&
 	   (s << inst) &&
 	   (s << field_offset) &&
+	   (s << is_ranged) &&
 	   (s << sources) &&
 	   (s << diff_rhss) &&
 	   (s << sparsity_outputs) &&
@@ -2564,6 +2698,7 @@ namespace Realm {
 	       (s >> inst_space) &&
 	       (s >> inst) &&
 	       (s >> field_offset) &&
+	       (s >> is_ranged) &&
 	       (s >> sources) &&
 	       (s >> diff_rhss) &&
 	       (s >> sparsity_outputs) &&
@@ -2587,11 +2722,13 @@ namespace Realm {
   PreimageMicroOp<N,T,N2,T2>::PreimageMicroOp(ZIndexSpace<N,T> _parent_space,
 					 ZIndexSpace<N,T> _inst_space,
 					 RegionInstance _inst,
-					 size_t _field_offset)
+					 size_t _field_offset,
+					 bool _is_ranged)
     : parent_space(_parent_space)
     , inst_space(_inst_space)
     , inst(_inst)
     , field_offset(_field_offset)
+    , is_ranged(_is_ranged)
   {}
 
   template <int N, typename T, int N2, typename T2>
@@ -2608,7 +2745,7 @@ namespace Realm {
 
   template <int N, typename T, int N2, typename T2>
   template <typename BM>
-  void PreimageMicroOp<N,T,N2,T2>::populate_bitmasks(std::map<int, BM *>& bitmasks)
+  void PreimageMicroOp<N,T,N2,T2>::populate_bitmasks_ptrs(std::map<int, BM *>& bitmasks)
   {
     // for now, one access for the whole instance
     AffineAccessor<ZPoint<N2,T2>,N,T> a_data(inst, field_offset);
@@ -2633,12 +2770,41 @@ namespace Realm {
   }
 
   template <int N, typename T, int N2, typename T2>
+  template <typename BM>
+  void PreimageMicroOp<N,T,N2,T2>::populate_bitmasks_ranges(std::map<int, BM *>& bitmasks)
+  {
+    // for now, one access for the whole instance
+    AffineAccessor<ZRect<N2,T2>,N,T> a_data(inst, field_offset);
+
+    // double iteration - use the instance's space first, since it's probably smaller
+    for(ZIndexSpaceIterator<N,T> it(inst_space); it.valid; it.step()) {
+      for(ZIndexSpaceIterator<N,T> it2(parent_space, it.rect); it2.valid; it2.step()) {
+	// now iterate over each point
+	for(ZPointInRectIterator<N,T> pir(it2.rect); pir.valid; pir.step()) {
+	  // fetch the pointer and test it against every possible target (ugh)
+	  ZRect<N2,T2> rng = a_data.read(pir.p);
+
+	  for(size_t i = 0; i < targets.size(); i++)
+	    if(targets[i].contains_any(rng)) {
+	      BM *&bmp = bitmasks[i];
+	      if(!bmp) bmp = new BM;
+	      bmp->add_point(pir.p);
+	    }
+	}
+      }
+    }
+  }
+
+  template <int N, typename T, int N2, typename T2>
   void PreimageMicroOp<N,T,N2,T2>::execute(void)
   {
     TimeStamp ts("PreimageMicroOp::execute", true, &log_uop_timing);
     std::map<int, DenseRectangleList<N,T> *> rect_map;
 
-    populate_bitmasks(rect_map);
+    if(is_ranged)
+      populate_bitmasks_ranges(rect_map);
+    else
+      populate_bitmasks_ptrs(rect_map);
 
 #ifdef DEBUG_PARTITIONING
     std::cout << rect_map.size() << " non-empty preimages present in instance " << inst << std::endl;
@@ -2717,6 +2883,7 @@ namespace Realm {
 	   (s << inst_space) &&
 	   (s << inst) &&
 	   (s << field_offset) &&
+	   (s << is_ranged) &&
 	   (s << targets) &&
 	   (s << sparsity_outputs));
   }
@@ -2731,6 +2898,7 @@ namespace Realm {
 	       (s >> inst_space) &&
 	       (s >> inst) &&
 	       (s >> field_offset) &&
+	       (s >> is_ranged) &&
 	       (s >> targets) &&
 	       (s >> sparsity_outputs));
     assert(ok);
@@ -4139,7 +4307,17 @@ namespace Realm {
 					    Event _finish_event)
     : PartitioningOperation(reqs, _finish_event)
     , parent(_parent)
-    , field_data(_field_data)
+    , ptr_data(_field_data)
+  {}
+
+  template <int N, typename T, int N2, typename T2>
+  ImageOperation<N,T,N2,T2>::ImageOperation(const ZIndexSpace<N,T>& _parent,
+					    const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZRect<N,T> > >& _field_data,
+					    const ProfilingRequestSet &reqs,
+					    Event _finish_event)
+    : PartitioningOperation(reqs, _finish_event)
+    , parent(_parent)
+    , range_data(_field_data)
   {}
 
   template <int N, typename T, int N2, typename T2>
@@ -4163,7 +4341,10 @@ namespace Realm {
     if(!source.dense())
       target_node = ID(source.sparsity).sparsity.creator_node;
     else
-      target_node = ID(field_data[sources.size() % field_data.size()].inst).sparsity.creator_node;
+      if(!ptr_data.empty())
+	target_node = ID(ptr_data[sources.size() % ptr_data.size()].inst).sparsity.creator_node;
+      else
+	target_node = ID(range_data[sources.size() % range_data.size()].inst).sparsity.creator_node;
     SparsityMap<N,T> sparsity;
     if(target_node == gasnet_mynode()) {
       SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
@@ -4196,7 +4377,10 @@ namespace Realm {
     if(!source.dense())
       target_node = ID(source.sparsity).sparsity.creator_node;
     else
-      target_node = ID(field_data[sources.size() % field_data.size()].inst).sparsity.creator_node;
+      if(!ptr_data.empty())
+	target_node = ID(ptr_data[sources.size() % ptr_data.size()].inst).sparsity.creator_node;
+      else
+	target_node = ID(range_data[sources.size() % range_data.size()].inst).sparsity.creator_node;
     SparsityMap<N,T> sparsity;
     if(target_node == gasnet_mynode()) {
       SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
@@ -4220,8 +4404,11 @@ namespace Realm {
       //  denser
       ComputeOverlapMicroOp<N2,T2> *uop = new ComputeOverlapMicroOp<N2,T2>(this);
 
-      for(size_t i = 0; i < field_data.size(); i++)
-	uop->add_input_space(field_data[i].index_space);
+      for(size_t i = 0; i < ptr_data.size(); i++)
+	uop->add_input_space(ptr_data[i].index_space);
+
+      for(size_t i = 0; i < range_data.size(); i++)
+	uop->add_input_space(range_data[i].index_space);
 
       // we will ask this uop to also prefetch the sources we will intersect test against it
       for(size_t i = 0; i < sources.size(); i++)
@@ -4231,13 +4418,30 @@ namespace Realm {
     } else {
       // launch full cross-product of image micro ops right away
       for(size_t i = 0; i < sources.size(); i++)
-	SparsityMapImpl<N,T>::lookup(images[i])->set_contributor_count(field_data.size());
+	SparsityMapImpl<N,T>::lookup(images[i])->set_contributor_count(ptr_data.size() +
+								       range_data.size());
 
-      for(size_t i = 0; i < field_data.size(); i++) {
+      for(size_t i = 0; i < ptr_data.size(); i++) {
 	ImageMicroOp<N,T,N2,T2> *uop = new ImageMicroOp<N,T,N2,T2>(parent,
-								   field_data[i].index_space,
-								   field_data[i].inst,
-								   field_data[i].field_offset);
+								   ptr_data[i].index_space,
+								   ptr_data[i].inst,
+								   ptr_data[i].field_offset,
+								   false /*ptrs*/);
+	for(size_t j = 0; j < sources.size(); j++)
+          if(diff_rhss.empty())
+	    uop->add_sparsity_output(sources[j], images[j]);
+          else
+	    uop->add_sparsity_output_with_difference(sources[j], diff_rhss[j], images[j]);
+
+	uop->dispatch(this, true /* ok to run in this thread */);
+      }
+
+      for(size_t i = 0; i < range_data.size(); i++) {
+	ImageMicroOp<N,T,N2,T2> *uop = new ImageMicroOp<N,T,N2,T2>(parent,
+								   range_data[i].index_space,
+								   range_data[i].inst,
+								   range_data[i].field_offset,
+								   true /*ranges*/);
 	for(size_t j = 0; j < sources.size(); j++)
           if(diff_rhss.empty())
 	    uop->add_sparsity_output(sources[j], images[j]);
@@ -4256,7 +4460,8 @@ namespace Realm {
 
     // we asked the overlap tester to prefetch all the source data we need, so we can use it
     //  right away (and then delete it)
-    std::vector<std::set<int> > overlaps_by_field_data(field_data.size());
+    std::vector<std::set<int> > overlaps_by_field_data(ptr_data.size() +
+						       range_data.size());
     for(size_t i = 0; i < sources.size(); i++) {
       std::set<int> overlaps_by_source;
 
@@ -4274,16 +4479,40 @@ namespace Realm {
     }
     delete overlap_tester;
 
-    for(size_t i = 0; i < field_data.size(); i++) {
-      size_t n = overlaps_by_field_data[i].size();
+    for(size_t i = 0; i < ptr_data.size(); i++) {
+      const std::set<int>& overlaps = overlaps_by_field_data[i];
+      size_t n = overlaps.size();
       if(n == 0) continue;
 
       ImageMicroOp<N,T,N2,T2> *uop = new ImageMicroOp<N,T,N2,T2>(parent,
-								 field_data[i].index_space,
-								 field_data[i].inst,
-								 field_data[i].field_offset);
-      for(std::set<int>::const_iterator it = overlaps_by_field_data[i].begin();
-	  it != overlaps_by_field_data[i].end();
+								 ptr_data[i].index_space,
+								 ptr_data[i].inst,
+								 ptr_data[i].field_offset,
+								 false /*ptrs*/);
+      for(std::set<int>::const_iterator it = overlaps.begin();
+	  it != overlaps.end();
+	  it++) {
+	int j = *it;
+        if(diff_rhss.empty())
+	  uop->add_sparsity_output(sources[j], images[j]);
+        else
+	  uop->add_sparsity_output_with_difference(sources[j], diff_rhss[j], images[j]);
+      }
+      uop->dispatch(this, true /* ok to run in this thread */);
+    }
+
+    for(size_t i = 0; i < range_data.size(); i++) {
+      const std::set<int>& overlaps = overlaps_by_field_data[i + ptr_data.size()];
+      size_t n = overlaps.size();
+      if(n == 0) continue;
+
+      ImageMicroOp<N,T,N2,T2> *uop = new ImageMicroOp<N,T,N2,T2>(parent,
+								 range_data[i].index_space,
+								 range_data[i].inst,
+								 range_data[i].field_offset,
+								 true /*ranges*/);
+      for(std::set<int>::const_iterator it = overlaps.begin();
+	  it != overlaps.end();
 	  it++) {
 	int j = *it;
         if(diff_rhss.empty())
@@ -4313,7 +4542,19 @@ namespace Realm {
 						  Event _finish_event)
     : PartitioningOperation(reqs, _finish_event)
     , parent(_parent)
-    , field_data(_field_data)
+    , ptr_data(_field_data)
+    , overlap_tester(0)
+    , dummy_overlap_uop(0)
+  {}
+
+  template <int N, typename T, int N2, typename T2>
+  PreimageOperation<N,T,N2,T2>::PreimageOperation(const ZIndexSpace<N,T>& _parent,
+						  const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,ZRect<N2,T2> > >& _field_data,
+						  const ProfilingRequestSet &reqs,
+						  Event _finish_event)
+    : PartitioningOperation(reqs, _finish_event)
+    , parent(_parent)
+    , range_data(_field_data)
     , overlap_tester(0)
     , dummy_overlap_uop(0)
   {}
@@ -4339,7 +4580,10 @@ namespace Realm {
     if(!target.dense())
       target_node = ID(target.sparsity).sparsity.creator_node;
     else
-      target_node = ID(field_data[targets.size() % field_data.size()].inst).sparsity.creator_node;
+      if(!ptr_data.empty())
+	target_node = ID(ptr_data[targets.size() % ptr_data.size()].inst).sparsity.creator_node;
+      else
+	target_node = ID(range_data[targets.size() % range_data.size()].inst).sparsity.creator_node;
     SparsityMap<N,T> sparsity;
     if(target_node == gasnet_mynode()) {
       SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
@@ -4361,7 +4605,7 @@ namespace Realm {
       // build the overlap tester based on the targets, since they're at least known
       ComputeOverlapMicroOp<N2,T2> *uop = new ComputeOverlapMicroOp<N2,T2>(this);
 
-      remaining_sparse_images = field_data.size();
+      remaining_sparse_images = ptr_data.size() + range_data.size();
       contrib_counts.resize(preimages.size(), 0);
 
       // create a dummy async microop that lives until we've received all the sparse images
@@ -4378,27 +4622,53 @@ namespace Realm {
 	  target_bbox = target_bbox.union_bbox(targets[i].bounds);
       }
 
-      for(size_t i = 0; i < field_data.size(); i++) {
+      for(size_t i = 0; i < ptr_data.size(); i++) {
 	// in parallel, we will request the approximate images of each instance's
 	//  data (ideally limited to the target_bbox)
 	ImageMicroOp<N2,T2,N,T> *img = new ImageMicroOp<N2,T2,N,T>(target_bbox,
-								   field_data[i].index_space,
-								   field_data[i].inst,
-								   field_data[i].field_offset);
+								   ptr_data[i].index_space,
+								   ptr_data[i].inst,
+								   ptr_data[i].field_offset,
+								   false /*ptrs*/);
 	img->add_approx_output(i, this);
+	img->dispatch(this, false /* do not run in this thread */);
+      }
+
+      for(size_t i = 0; i < range_data.size(); i++) {
+	// in parallel, we will request the approximate images of each instance's
+	//  data (ideally limited to the target_bbox)
+	ImageMicroOp<N2,T2,N,T> *img = new ImageMicroOp<N2,T2,N,T>(target_bbox,
+								   range_data[i].index_space,
+								   range_data[i].inst,
+								   range_data[i].field_offset,
+								   true /*ranges*/);
+	img->add_approx_output(i + ptr_data.size(), this);
 	img->dispatch(this, false /* do not run in this thread */);
       }
 
       uop->dispatch(this, true /* ok to run in this thread */);
     } else {
       for(size_t i = 0; i < preimages.size(); i++)
-	SparsityMapImpl<N,T>::lookup(preimages[i])->set_contributor_count(field_data.size());
+	SparsityMapImpl<N,T>::lookup(preimages[i])->set_contributor_count(ptr_data.size() +
+									  range_data.size());
 
-      for(size_t i = 0; i < field_data.size(); i++) {
+      for(size_t i = 0; i < ptr_data.size(); i++) {
 	PreimageMicroOp<N,T,N2,T2> *uop = new PreimageMicroOp<N,T,N2,T2>(parent,
-									 field_data[i].index_space,
-									 field_data[i].inst,
-									 field_data[i].field_offset);
+									 ptr_data[i].index_space,
+									 ptr_data[i].inst,
+									 ptr_data[i].field_offset,
+									 false /*ptrs*/);
+	for(size_t j = 0; j < targets.size(); j++)
+	  uop->add_sparsity_output(targets[j], preimages[j]);
+	uop->dispatch(this, true /* ok to run in this thread */);
+      }
+
+      for(size_t i = 0; i < range_data.size(); i++) {
+	PreimageMicroOp<N,T,N2,T2> *uop = new PreimageMicroOp<N,T,N2,T2>(parent,
+									 range_data[i].index_space,
+									 range_data[i].inst,
+									 range_data[i].field_offset,
+									 true /*ranges*/);
 	for(size_t j = 0; j < targets.size(); j++)
 	  uop->add_sparsity_output(targets[j], preimages[j]);
 	uop->dispatch(this, true /* ok to run in this thread */);
@@ -4425,19 +4695,39 @@ namespace Realm {
       // see which of the targets this image overlaps
       std::set<int> overlaps;
       overlap_tester->test_overlap(rects, count, overlaps);
-      log_part.info() << "image of field_data[" << index << "] overlaps " << overlaps.size() << " targets";
-      PreimageMicroOp<N,T,N2,T2> *uop = new PreimageMicroOp<N,T,N2,T2>(parent,
-								       field_data[index].index_space,
-								       field_data[index].inst,
-								       field_data[index].field_offset);
-      for(std::set<int>::const_iterator it2 = overlaps.begin();
-	  it2 != overlaps.end();
-	  it2++) {
-	int j = *it2;
-	__sync_fetch_and_add(&contrib_counts[j], 1);
-	uop->add_sparsity_output(targets[j], preimages[j]);
+      if(index < ptr_data.size()) {
+	log_part.info() << "image of ptr_data[" << index << "] overlaps " << overlaps.size() << " targets";
+	PreimageMicroOp<N,T,N2,T2> *uop = new PreimageMicroOp<N,T,N2,T2>(parent,
+									 ptr_data[index].index_space,
+									 ptr_data[index].inst,
+									 ptr_data[index].field_offset,
+									 false /*ptrs*/);
+	for(std::set<int>::const_iterator it2 = overlaps.begin();
+	    it2 != overlaps.end();
+	    it2++) {
+	  int j = *it2;
+	  __sync_fetch_and_add(&contrib_counts[j], 1);
+	  uop->add_sparsity_output(targets[j], preimages[j]);
+	}
+	uop->dispatch(this, false /* do not run in this thread */);
+      } else {
+	int rel_index = index - ptr_data.size();
+	assert(rel_index < range_data.size());
+	log_part.info() << "image of range_data[" << rel_index << "] overlaps " << overlaps.size() << " targets";
+	PreimageMicroOp<N,T,N2,T2> *uop = new PreimageMicroOp<N,T,N2,T2>(parent,
+									 range_data[rel_index].index_space,
+									 range_data[rel_index].inst,
+									 range_data[rel_index].field_offset,
+									 true /*ranges*/);
+	for(std::set<int>::const_iterator it2 = overlaps.begin();
+	    it2 != overlaps.end();
+	    it2++) {
+	  int j = *it2;
+	  __sync_fetch_and_add(&contrib_counts[j], 1);
+	  uop->add_sparsity_output(targets[j], preimages[j]);
+	}
+	uop->dispatch(this, false /* do not run in this thread */);
       }
-      uop->dispatch(this, false /* do not run in this thread */);
 
       // if these were the last sparse images, we can now set the contributor counts
       int v = __sync_sub_and_fetch(&remaining_sparse_images, 1);
@@ -4473,19 +4763,39 @@ namespace Realm {
 	// see which of the targets that image overlaps
 	std::set<int> overlaps;
 	overlap_tester->test_overlap(&it->second[0], it->second.size(), overlaps);
-	log_part.info() << "image of field_data[" << idx << "] overlaps " << overlaps.size() << " targets";
-	PreimageMicroOp<N,T,N2,T2> *uop = new PreimageMicroOp<N,T,N2,T2>(parent,
-									 field_data[idx].index_space,
-									 field_data[idx].inst,
-									 field_data[idx].field_offset);
-	for(std::set<int>::const_iterator it2 = overlaps.begin();
-	    it2 != overlaps.end();
-	    it2++) {
-	  int j = *it2;
-	  __sync_fetch_and_add(&contrib_counts[j], 1);
-	  uop->add_sparsity_output(targets[j], preimages[j]);
+	if(idx < ptr_data.size()) {
+	  log_part.info() << "image of ptr_data[" << idx << "] overlaps " << overlaps.size() << " targets";
+	  PreimageMicroOp<N,T,N2,T2> *uop = new PreimageMicroOp<N,T,N2,T2>(parent,
+									   ptr_data[idx].index_space,
+									   ptr_data[idx].inst,
+									   ptr_data[idx].field_offset,
+									   false /*ptrs*/);
+	  for(std::set<int>::const_iterator it2 = overlaps.begin();
+	      it2 != overlaps.end();
+	      it2++) {
+	    int j = *it2;
+	    __sync_fetch_and_add(&contrib_counts[j], 1);
+	    uop->add_sparsity_output(targets[j], preimages[j]);
+	  }
+	  uop->dispatch(this, true /* ok to run in this thread */);
+	} else {
+	  int rel_index = idx - ptr_data.size();
+	  assert(rel_index < range_data.size());
+	  log_part.info() << "image of range_data[" << rel_index << "] overlaps " << overlaps.size() << " targets";
+	  PreimageMicroOp<N,T,N2,T2> *uop = new PreimageMicroOp<N,T,N2,T2>(parent,
+									   range_data[rel_index].index_space,
+									   range_data[rel_index].inst,
+									   range_data[rel_index].field_offset,
+									   true /*ranges*/);
+	  for(std::set<int>::const_iterator it2 = overlaps.begin();
+	      it2 != overlaps.end();
+	      it2++) {
+	    int j = *it2;
+	    __sync_fetch_and_add(&contrib_counts[j], 1);
+	    uop->add_sparsity_output(targets[j], preimages[j]);
+	  }
+	  uop->dispatch(this, true /* ok to run in this thread */);
 	}
-	uop->dispatch(this, true /* ok to run in this thread */);
       }
 
       // if these were the last sparse images, we can now set the contributor counts
