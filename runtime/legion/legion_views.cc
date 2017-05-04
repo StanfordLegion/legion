@@ -3289,16 +3289,16 @@ namespace Legion {
           parent->perform_remote_valid_check(check_mask, versions,
                                              reading, &local_wait_on);
       }
-      // If we are the base caller, then we do the wait
+      // If we have any events to wait on do the right thing with them
       if (!local_wait_on.empty())
       {
         if (wait_on == NULL)
         {
-          // We do the wait right here
+          // If we are the base caller, then we do the wait
           RtEvent wait_for = Runtime::merge_events(local_wait_on);
           wait_for.wait();
         }
-        else // add the events to the set to wait on
+        else // Otherwise add the events to the set to wait on
           wait_on->insert(local_wait_on.begin(), local_wait_on.end());
       }
     }
