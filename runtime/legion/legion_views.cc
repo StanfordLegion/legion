@@ -3290,10 +3290,16 @@ namespace Legion {
                                              reading, &local_wait_on);
       }
       // If we are the base caller, then we do the wait
-      if ((wait_on == NULL) && !local_wait_on.empty())
+      if (!local_wait_on.empty())
       {
-        RtEvent wait_for = Runtime::merge_events(local_wait_on);
-        wait_for.wait();
+        if (wait_on == NULL)
+        {
+          // We do the wait right here
+          RtEvent wait_for = Runtime::merge_events(local_wait_on);
+          wait_for.wait();
+        }
+        else // add the events to the set to wait on
+          wait_on->insert(local_wait_on.begin(), local_wait_on.end());
       }
     }
 
