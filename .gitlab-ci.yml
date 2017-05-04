@@ -228,7 +228,7 @@ gcc49_cxx98_32bit_debug_legion:
 gcc49_cxx98_debug_checks_cmake_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc49, *terra38, *debug, *cxx98_checks, *cmake, *legion]
+    <<: [*gcc49, *terra38, *debug, *cxx98_checks, *cmake, *hdf5, *legion]
 gcc49_cxx98_debug_checks_external:
   <<: [*linux_compute, *image, *external_tests]
   variables:
@@ -291,7 +291,7 @@ clang38_cxx98_32bit_debug_legion:
 clang38_cxx98_debug_checks_cmake_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*clang38, *terra38, *debug, *cxx98_checks, *cmake, *legion]
+    <<: [*clang38, *terra38, *debug, *cxx98_checks, *cmake, *hdf5, *legion]
 clang38_cxx98_debug_checks_external:
   <<: [*linux_compute, *image, *external_tests]
   variables:

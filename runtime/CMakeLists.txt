@@ -70,7 +70,13 @@ if(Legion_USE_LLVM)
     realm/llvmjit/llvmjit.inl
     realm/llvmjit/llvmjit_internal.h  realm/llvmjit/llvmjit_internal.cc
     realm/llvmjit/llvmjit_module.h    realm/llvmjit/llvmjit_module.cc
-)
+  )
+endif()
+if(Legion_USE_HDF5)
+  list(APPEND LOW_RUNTIME_SRC
+    realm/hdf5/hdf5_module.h realm/hdf5/hdf5_module.cc
+    realm/hdf5/hdf5_internal.h realm/hdf5/hdf5_internal.cc
+  )
 endif()
 if(Legion_USE_GASNet)
   list(APPEND LOW_RUNTIME_SRC activemsg.h activemsg.cc)
@@ -80,7 +86,6 @@ list(APPEND LOW_RUNTIME_SRC
   accessor.h
   arrays.h
   atomics.h
-  common.h
   realm/bytearray.h
   realm/bytearray.inl
   realm/circ_queue.h
@@ -160,6 +165,12 @@ if(Legion_USE_CUDA)
   target_compile_definitions(LowLevelRuntime PUBLIC USE_CUDA)
   target_include_directories(LowLevelRuntime PRIVATE ${CUDA_INCLUDE_DIRS})
   target_link_libraries(LowLevelRuntime PRIVATE ${CUDA_CUDA_LIBRARY})
+endif()
+
+if(Legion_USE_HDF5)
+  target_compile_definitions(LowLevelRuntime PUBLIC USE_HDF)
+  target_include_directories(LowLevelRuntime PRIVATE ${HDF5_INCLUDE_DIRS})
+  target_link_libraries(LowLevelRuntime PRIVATE ${HDF5_LIBRARIES})
 endif()
 
 set_target_properties(LowLevelRuntime PROPERTIES OUTPUT_NAME realm)

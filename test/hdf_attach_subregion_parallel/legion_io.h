@@ -68,8 +68,10 @@ class PersistentRegion {
     LogicalRegion parent_lr;
     Domain dom;
   std::map<FieldID, std::string> field_map;
+#ifdef TESTERIO_SERIALIZE
   void * field_map_serial;
   size_t field_map_size; 
+#endif
 #ifdef TESTERIO_PHASER_TIMERS
   PhaseBarrier pb_write;
   PhaseBarrier pb_timer; 

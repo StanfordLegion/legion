@@ -802,8 +802,23 @@ namespace Legion {
           if (up_node != region_node)
             return false;
         }
-        else // we can just continue in this case since we know we are good
-          continue;
+        else
+        {
+          // We have the same region name, all we have to do is 
+          // a check for empty which is not actually allowed
+          if (instance_domain.get_volume() == 0)
+          {
+            // Check to see if the region really is empty or not
+            const Domain &actual_domain = 
+              region_node->row_source->get_domain_blocking();
+            if (actual_domain.get_volume() == 0)
+              continue;
+            else
+              return false;
+          }
+          else // Not empty so this is the proper region
+            continue;
+        }
         // Now check to see if our instance domain dominates the region
         IndexSpaceNode *index_node = handle_node->row_source; 
         if (!instance_domain->dominates(index_node))

@@ -19,7 +19,7 @@
 #define REALM_CUSTOM_SERDEZ_H
 
 #include "lowlevel_config.h"
-#include "common.h"
+#include "accessor.h"
 
 #include "serialize.h"
 
