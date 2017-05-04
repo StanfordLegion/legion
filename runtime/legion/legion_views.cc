@@ -2742,9 +2742,9 @@ namespace Legion {
                                        op_id, index, origin_node))
             {
               if (finder == preconditions.end())
-                preconditions[cit->first] = overlap;
+                preconditions[cit->first] = user_overlap;
               else
-                finder->second |= overlap;
+                finder->second |= user_overlap;
               if (TRACK_DOM)
                 filter_events[cit->first] |= user_overlap;
             }
@@ -3277,11 +3277,17 @@ namespace Legion {
           parent->perform_remote_valid_check(check_mask, versions,
                                              reading, &local_wait_on);
       }
-      // If we are the base caller, then we do the wait
-      if ((wait_on == NULL) && !local_wait_on.empty())
+      // If we have any events to wait on do the right thing with them
+      if (!local_wait_on.empty())
       {
-        RtEvent wait_for = Runtime::merge_events(local_wait_on);
-        wait_for.wait();
+        if (wait_on == NULL)
+        {
+          // If we are the base caller, then we do the wait
+          RtEvent wait_for = Runtime::merge_events(local_wait_on);
+          wait_for.wait();
+        }
+        else // Otherwise add the events to the set to wait on
+          wait_on->insert(local_wait_on.begin(), local_wait_on.end());
       }
     }
 

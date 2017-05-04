@@ -12,6 +12,7 @@ var helpMessage = [
   "Reset zoom (y-axis): Ctrl-Alt 0 / `",
   "Range Zoom-in      : drag-select",
   "Measure duration   : Alt + drag-select",
+  "Expand             : e / E",
   "Draw Critical Path : a / A",
   "Search             : s / S",
   "Search History     : h / H",
@@ -34,10 +35,11 @@ var Command = {
   search : 9,
   clear_search : 10,
   toggle_search : 11,
-  toggle_critical_path: 12,
-  search_history : 13,
-  previous_search : 14,
-  next_search : 15
+  expand: 12,
+  toggle_critical_path: 13,
+  search_history : 14,
+  previous_search : 15,
+  next_search : 16
 };
 
 // commands without a modifier key pressed
@@ -48,6 +50,7 @@ var noModifierCommands = {
   '3': Command.zox,
   '4': Command.zix,
   'c': Command.clear_search,
+  'e': Command.expand,
   'h': Command.search_history,
   'n': Command.next_search,
   'p': Command.previous_search,
@@ -81,6 +84,7 @@ var keys = {
   61  : '+', // Firefox
   65  : 'a',
   67  : 'c',
+  69  : 'e',
   72  : 'h',
   78  : 'n',
   80  : 'p',
