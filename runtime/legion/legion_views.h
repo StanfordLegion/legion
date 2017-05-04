@@ -446,7 +446,7 @@ namespace Legion {
                           std::set<RtEvent> &applied_events);
       bool add_local_user(const RegionUsage &usage, ApEvent term_event,
                           const ColorPoint &child_color, 
-                          RegionNode *origin_node,
+                          RegionNode *origin_node, const bool base_user,
                           VersionTracker *version_tracker,
                           const UniqueID op_id, const unsigned index,
                           const FieldMask &user_mask,
