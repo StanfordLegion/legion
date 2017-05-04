@@ -19,7 +19,7 @@
 #define REALM_REDOP_H
 
 #include "lowlevel_config.h"
-#include "common.h"
+#include "accessor.h"
 
 #include <sys/types.h>
 #include <map>

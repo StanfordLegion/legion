@@ -5585,7 +5585,6 @@ class Operation(object):
                                "operation %s is self interfering in %s") %
                                (req.index,str(self),str(self.context)))
                         return True
-                all_reqs.append(req)
         for point_task in self.points.itervalues():
             for req in point_task.op.reqs.itervalues():
                 all_reqs.append(req)
