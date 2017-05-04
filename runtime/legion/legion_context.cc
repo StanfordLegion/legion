@@ -2902,11 +2902,13 @@ namespace Legion {
       // Allocate the partition operation
       DependentPartitionOp *part_op = 
         runtime->get_available_dependent_partition_op(true);
-      part_op->initialize_by_field(this, pid, handle, parent_priv, fid, id,tag);
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition 
       forest->create_pending_partition(pid, parent, color_space, part_color,
                                        DISJOINT_KIND, term_event); 
+      // Do this after creating the pending partition so the node exists
+      // in case we need to look at it during initialization
+      part_op->initialize_by_field(this, pid, handle, parent_priv, fid, id,tag);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!Runtime::unsafe_launch)
@@ -2955,11 +2957,13 @@ namespace Legion {
       // Allocate the partition operation
       DependentPartitionOp *part_op = 
         runtime->get_available_dependent_partition_op(true);
-      part_op->initialize_by_image(this, pid, projection, parent, fid, id, tag);
       ApEvent term_event = part_op->get_completion_event(); 
       // Tell the region tree forest about this partition
       forest->create_pending_partition(pid, handle, color_space, part_color,
                                        part_kind, term_event); 
+      // Do this after creating the pending partition so the node exists
+      // in case we need to look at it during initialization
+      part_op->initialize_by_image(this, pid, projection, parent, fid, id, tag);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!Runtime::unsafe_launch)
@@ -3008,12 +3012,14 @@ namespace Legion {
       // Allocate the partition operation
       DependentPartitionOp *part_op = 
         runtime->get_available_dependent_partition_op(true);
-      part_op->initialize_by_image_range(this, pid, projection, parent, 
-                                         fid, id, tag);
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
       forest->create_pending_partition(pid, handle, color_space, part_color,
                                        part_kind, term_event); 
+      // Do this after creating the pending partition so the node exists
+      // in case we need to look at it during initialization
+      part_op->initialize_by_image_range(this, pid, projection, parent, 
+                                         fid, id, tag);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!Runtime::unsafe_launch)
@@ -3061,9 +3067,7 @@ namespace Legion {
         part_color = color;
       // Allocate the partition operation
       DependentPartitionOp *part_op = 
-        runtime->get_available_dependent_partition_op(true);
-      part_op->initialize_by_preimage(this, pid, projection, handle, 
-                                      parent, fid, id, tag);
+        runtime->get_available_dependent_partition_op(true); 
       ApEvent term_event = part_op->get_completion_event();
       // If the source of the preimage is disjoint then the result is disjoint
       // Note this only applies here and not to range
@@ -3077,6 +3081,10 @@ namespace Legion {
       forest->create_pending_partition(pid, handle.get_index_space(), 
                                        color_space, part_color, part_kind,
                                        term_event);
+      // Do this after creating the pending partition so the node exists
+      // in case we need to look at it during initialization
+      part_op->initialize_by_preimage(this, pid, projection, handle, 
+                                      parent, fid, id, tag);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!Runtime::unsafe_launch)
@@ -3124,14 +3132,16 @@ namespace Legion {
         part_color = color;
       // Allocate the partition operation
       DependentPartitionOp *part_op = 
-        runtime->get_available_dependent_partition_op(true);
-      part_op->initialize_by_preimage_range(this, pid, projection, handle,
-                                            parent, fid, id, tag);
+        runtime->get_available_dependent_partition_op(true); 
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
       forest->create_pending_partition(pid, handle.get_index_space(), 
                                        color_space, part_color, part_kind,
                                        term_event);
+      // Do this after creating the pending partition so the node exists
+      // in case we need to look at it during initialization
+      part_op->initialize_by_preimage_range(this, pid, projection, handle,
+                                            parent, fid, id, tag);
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
       if (!Runtime::unsafe_launch)

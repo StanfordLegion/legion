@@ -8016,7 +8016,7 @@ namespace Legion {
 #endif
       min_depth = min;
       max_depth = max;
-      path.resize(max_depth+1);
+      path.resize(max_depth+1, INVALID_COLOR);
     }
 
     //--------------------------------------------------------------------------
