@@ -90,7 +90,7 @@ function makeTimelineTransparent() {
   $("#timeline").css("overflow-x", "hidden");
   state.timelineSvg.select("g#lines").style("opacity", "0.1");
   state.timelineSvg.select("g.locator").style("opacity", "0.1");
-  state.timelineSvg.selectAll("path.line").style("opacity", "0.1");
+  state.timelineSvg.selectAll("path.util").style("opacity", "0.1");
 }
 
 function makeTimelineOpaque() {
@@ -98,7 +98,7 @@ function makeTimelineOpaque() {
   $("#timeline").css("overflow-x", "scroll");
   state.timelineSvg.select("g#lines").style("opacity", "1.0");
   state.timelineSvg.select("g.locator").style("opacity", "1.0");
-  state.timelineSvg.selectAll("path.line").style("opacity", "1.0");
+  state.timelineSvg.selectAll("path.util").style("opacity", "1.0");
 }
 
 function mouseMoveHandlerWhenDown() {
@@ -228,52 +228,48 @@ function drawUtil() {
 
   state.x = d3.scale.linear().range([0, convertToPos(state, end_time)]);
   state.x.domain([0, end_time]);
-  state.timelineSvg.selectAll("path").remove();
+  state.timelineSvg.selectAll("rect.util").remove();
+  state.timelineSvg.selectAll("path.util").remove();
   var paths = state.timelineSvg.selectAll("path")
     .data(filteredUtilData);
-
-  paths.enter().append("path")
-    .attr("class", "line")
-    .attr("d", function (d) { return utilline(d.data); })
+  var totalWidth = windowStart + $("#timeline").width();
+  paths.enter().append("rect")
+    .attr("class", "util")
     .attr("base_y", lineLevelCalculator)
+    .attr("y", lineLevelCalculator)
+    .attr("x", 0)
+    .attr("fill", "transparent")
+    .attr("width", totalWidth)
+    .attr("height", constants.util_levels * state.thickness)
+    .on("mouseover", mouseover)
+    .on("mousemove", mousemove)
+    .on("mouseout", function() {
+      state.timelineSvg.select("g.focus").remove();
+      state.timelineSvg.select("g.utilDesc").remove();
+    });
+  paths.enter().append("path")
+    .attr("base_y", lineLevelCalculator)
+    .attr("class", "util")
+    .attr("id", function(d, i) { return "util" + i})
+    .attr("d", function (d) { return utilline(d.data); })
+    .attr("stroke", getLineColor)
+    .on("mouseover", mouseover)
+    .on("mousemove", mousemove)
+    .on("mouseout", function() {
+      state.timelineSvg.select("g.focus").remove();
+      state.timelineSvg.select("g.utilDesc").remove();
+    })
     .attr("transform",
       function(d) {
         var y = lineLevelCalculator(d);
         return "translate(0," + y + ")"
-    })
-    .attr("stroke", getLineColor)
-    .on("mouseover", function() { 
-        var focus = state.timelineSvg.append("g")
-          .attr("class", "focus");
-
-        var text = focus.append("text")
-          .attr("x", 7)
-          .attr("y", -4.5)
-          .attr("class", "desc")
-          .attr("dy", ".35em");
-
-        focus.append("circle")
-          .attr("fill", "none")
-          .attr("stroke", "black")
-          .attr("r", 4.5);
-
-        var rect = focus.insert("rect", "text")
-          .style("fill", "#222")
-          .style("opacity", "0.7");
-    })
-    .on("mouseout", function() {
-      state.timelineSvg.select("g.focus").remove();
-    })
-    .on("mousemove", mousemove); 
-
-  var paths = state.timelineSvg.selectAll("path.line");
+    });
 }
 
 
 function mouseUpHandler() {
   var p = d3.mouse(this);
   var select_block = state.timelineSvg.select("rect.select-block");
-  var select_text = state.timelineSvg.select("text.select-block");
   var prevZoom = state.zoom;
   var selectWidth = parseInt(select_block.attr("width"));
   var svgWidth = state.timelineSvg.attr("width");
@@ -1678,6 +1674,7 @@ function defaultKeydown(e) {
   } else if (commandType == Command.zrx) {
     state.zoomHistory = Array();
     adjustZoom(1.0, false);
+    $("#timeline").scrollLeft(0);
   } else if (commandType == Command.zux) {
     if (state.zoomHistory.length > 0) {
       var previousZoomHistory = state.zoomHistory.pop();
@@ -1927,7 +1924,7 @@ function filterUtilData(timelineElem) {
   var elem = {time: 0, count: 0};
   var startTime = data[startIndex].time;
   var startX = convertToPos(state, startTime);
-  var endTime;
+  var endTime = 0;
 
   for (var i = startIndex; i < endIndex - 1; i++) {
     endTime = data[i+1].time;
@@ -1956,60 +1953,81 @@ function filterUtilData(timelineElem) {
   };
 }
 
-function mousemove(timelineElem) {
-  var data = timelineElem.data;
-  var focus = state.timelineSvg.select("g.focus");
-  var px = d3.mouse(this)[0],
-      py = d3.mouse(this)[1],
-      xMin = state.x.invert(px-3), // search within a 3 pixel radius
-      xMax = state.x.invert(px+3),
-      i = timeBisector(data, state.x.invert(px)),
-      iMin = Math.min(i-1, timeBisector(data, xMin)),
-      iMax = Math.max(i+1, timeBisector(data, xMax));
+function mouseover() { 
+  var focus = state.timelineSvg.append("g")
+    .attr("class", "focus");
 
-  // search window
-  var start = Math.max(0, iMin-1);
-  var end = Math.min(iMax+1, data.length);
-  var searchWindow = []; // (end - start) * 2 - 1; // FIXME: CORRECT WAY TO PREALLOCATE?
+  focus.append("circle")
+    .attr("fill", "none")
+    .attr("stroke", "black")
+    .attr("r", 4.5);
 
-  for (var i = start; i < end-1; i++) {
-    searchWindow.push(data[i]);
-    var newPoint = {time: data[i].time, count: data[i+1].count}
-    searchWindow.push(newPoint);
-  }
-  searchWindow.push(data[end-1]);
+  var utilDescView = state.timelineSvg.append("g")
+                        .attr("class", "utilDesc");
+  utilDescView.append("text")
+    .attr("x", 7)
+    .attr("y", -4.5)
+    .attr("class", "desc")
+    .attr("dy", ".35em");
+  utilDescView.insert("rect", "text")
+    .style("fill", "#222")
+    .style("opacity", "0.7");
+}
 
-  // get the closest point within the 3 pixel radius
-  var d = getMinElement(searchWindow, function(elem) { 
-      var dx = px - state.x(elem.time);
-      var dy = py - state.y(elem.count);
-      return dx*dx + dy*dy;
-  });
-
-  var dist = Math.abs(px-state.x(d.time));;
-
-  // if the distance is too far away, just pick the current mouse position
-  if (dist > 6) {
-    d = {time: state.x.invert(px), count: state.y.invert(py)};
-  }
+function mousemove(d, i) {
+  var line = document.getElementById("util" + i);
 
   // offset for this particular line grapgh
-  var base_y = +this.getAttribute("base_y");
+  var base_y = +line.getAttribute("base_y");
+  var px = d3.mouse(line)[0];
+  var py = d3.mouse(line)[1] + base_y;
+  
+  var start = 0;
+  var end = line.getTotalLength();
+  var target = undefined;
+  var pos = undefined;
 
-  var cx = state.x(d.time);
-  var cy = state.y(d.count) + base_y;
+  // https://bl.ocks.org/larsenmtl/e3b8b7c2ca4787f77d78f58d41c3da91
+  while (true){
+    target = Math.floor((start + end) / 2);
+    pos = line.getPointAtLength(target);
+    if ((target === end || target === start) && pos.x !== px) {
+        break;
+    }
+    if (pos.x > px)      end = target;
+    else if (pos.x < px) start = target;
+    else break; //position found
+  }
+
+
+  var cx = pos.x;
+  var cy = pos.y + base_y;
+
+  var focus = state.timelineSvg.select("g.focus");
   focus.attr("transform", "translate(" + cx + "," + cy + ")");
-  var text = focus.select("text");
-  text.text((d.count * 100).toFixed(2) + "% utilization" )
+
+  var utilDescView = state.timelineSvg.select("g.utilDesc");
+  utilDescView.attr("transform", "translate(" + (px + 10) + "," + (py - 10) + ")");
+  var text = utilDescView.select("text")
+
+  text.text(Math.round(state.y.invert(pos.y) * 100) + "% utilization");
 
   var bbox = text.node().getBBox();
   var padding = 2;
-  var rect = focus.select("rect", "text")
-      .attr("x", bbox.x - padding)
+  var rect = utilDescView.select("rect", "text");
+  rect.attr("x", bbox.x - padding)
       .attr("y", bbox.y - padding)
       .attr("width", bbox.width + (padding*2))
       .attr("height", bbox.height + (padding*2));
 
+  var timelineRight = $("#timeline").scrollLeft() + $("#timeline").width();
+  var bboxRight = px + bbox.x + bbox.width;
+  // If the box moves off the screen, nudge it back
+  if (bboxRight > timelineRight) {
+    var translation = -(bboxRight - timelineRight + 20);
+    text.attr("transform", "translate(" + translation + ",0)");
+    rect.attr("transform", "translate(" + translation + ",0)");
+  }
 }
 
 // Get the data
