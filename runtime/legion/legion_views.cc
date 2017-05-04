@@ -2742,9 +2742,9 @@ namespace Legion {
                                        op_id, index, origin_node))
             {
               if (finder == preconditions.end())
-                preconditions[cit->first] = overlap;
+                preconditions[cit->first] = user_overlap;
               else
-                finder->second |= overlap;
+                finder->second |= user_overlap;
               if (TRACK_DOM)
                 filter_events[cit->first] |= user_overlap;
             }
