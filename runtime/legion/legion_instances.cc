@@ -806,12 +806,10 @@ namespace Legion {
         {
           // We have the same region name, all we have to do is 
           // a check for empty which is not actually allowed
-          if (instance_domain.get_volume() == 0)
+          if (instance_domain->get_volume() == 0)
           {
             // Check to see if the region really is empty or not
-            const Domain &actual_domain = 
-              region_node->row_source->get_domain_blocking();
-            if (actual_domain.get_volume() == 0)
+            if (region_node->row_source->get_volume() == 0)
               continue;
             else
               return false;
