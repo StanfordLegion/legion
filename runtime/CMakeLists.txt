@@ -86,7 +86,6 @@ list(APPEND LOW_RUNTIME_SRC
   accessor.h
   arrays.h
   atomics.h
-  common.h
   realm/bytearray.h
   realm/bytearray.inl
   realm/circ_queue.h
