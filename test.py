@@ -79,7 +79,7 @@ legion_hdf_cxx_tests = [
     ['examples/attach_file/attach_file', []],
 
     # Tests
-    #['test/hdf_attach/hdf_attach', []], # FIXME: Broken: https://github.com/StanfordLegion/legion/issues/221
+    ['test/hdf_attach_subregion_parallel/hdf_attach_subregion_parallel', ['-ll:cpu', '4']],
 ]
 
 legion_cxx_perf_tests = [
@@ -401,7 +401,9 @@ def build_cmake(root_dir, tmp_dir, env, thread_count, test_legion_cxx, test_perf
          '-DLegion_USE_CUDA=%s' % (
              'ON' if env['USE_CUDA'] == '1' else 'OFF'),
          '-DLegion_USE_LLVM=%s' % (
-             'ON' if env['USE_LLVM'] == '1' else 'OFF')] +
+             'ON' if env['USE_LLVM'] == '1' else 'OFF'),
+         '-DLegion_USE_HDF5=%s' % (
+             'ON' if env['USE_HDF'] == '1' else 'OFF')] +
         (['-DCMAKE_CXX_FLAGS=%s' % env['CC_FLAGS']]
           if 'CC_FLAGS' in env else []) +
         (['-DLegion_BUILD_TUTORIAL=ON',

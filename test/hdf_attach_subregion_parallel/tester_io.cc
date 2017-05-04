@@ -1,5 +1,5 @@
-/* Copyright 2015 Stanford University
- * Copyright 2015 Los Alamos National Laboratory 
+/* Copyright 2017 Stanford University
+ * Copyright 2017 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.

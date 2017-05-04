@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2016 Kitware, Inc.
+# Copyright 2017 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,22 +15,15 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.1)
-project(LegionExample_full_circuit)
+project(LegionTest_hdf_attach_subregion_parallel)
 
 # Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-set(CPU_SOURCES
-  circuit.h         circuit.cc
-                    circuit_cpu.cc
-  circuit_mapper.h  circuit_mapper.cc
-)
-if(Legion_USE_CUDA)
-  set(GPU_SOURCES circuit_gpu.cu)
-  cuda_add_executable(full_circuit ${CPU_SOURCES} ${GPU_SOURCES})
-else()
-  add_executable(full_circuit ${CPU_SOURCES})
+add_executable(hdf_attach_subregion_parallel tester_io.cc legion_io.cc)
+target_link_libraries(hdf_attach_subregion_parallel Legion::Legion)
+if(Legion_ENABLE_TESTING)
+  add_test(NAME hdf_attach_subregion_parallel COMMAND $<TARGET_FILE:hdf_attach_subregion_parallel> -ll:cpu 4) 
 endif()
-target_link_libraries(full_circuit Legion::Legion)
