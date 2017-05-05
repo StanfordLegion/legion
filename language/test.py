@@ -225,10 +225,10 @@ def get_test_specs(test_run, test_spy, test_hdf5, extra_flags):
          )),
     ]
 
-    if test_run or test_spy or test_hdf5:
-        result = []
-    else:
-        result = base
+    result = []
+    if not test_run and not test_spy and not test_hdf5:
+        result.extend(base)
+        result.extend(run)
     if test_run:
         result.extend(run)
     if test_spy:
