@@ -599,7 +599,8 @@ namespace Legion {
         find_local_copy_preconditions_above(redop, reading, single_copy, 
                                       restrict_out, copy_mask, INVALID_COLOR, 
                                       origin_node, versions,creator_op_id,index,
-                                      source, preconditions, applied_events);
+                                      source, preconditions, applied_events,
+                                      false/*actually above*/);
       if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
       {
         const LegionColor local_point = logical_node->get_color();
@@ -761,13 +762,17 @@ namespace Legion {
                                                   const unsigned index,
                                                   const AddressSpaceID source,
                            LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                                              std::set<RtEvent> &applied_events)
+                                              std::set<RtEvent> &applied_events,
+                                                  const bool actually_above)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
                         MATERIALIZED_VIEW_FIND_LOCAL_COPY_PRECONDITIONS_CALL);
-      // If we are not the logical owner, we need to see if we are up to date 
-      if (!is_logical_owner())
+      // If we are not the logical owner and we're not actually already above
+      // the base level, then we need to see if we are up to date 
+      // Otherwise we did this check at the base level and it went all
+      // the way up the tree so we are already good
+      if (!is_logical_owner() && !actually_above)
       {
         // We are also reading if we are doing reductions
         perform_remote_valid_check(copy_mask, versions,reading || (redop != 0));
@@ -960,6 +965,7 @@ namespace Legion {
           FieldMask local_split;
           versions->get_split_mask(logical_node, copy_mask, local_split);
           rez.serialize(local_split);
+          rez.serialize<bool>(base_user);
         }
         runtime->send_view_remote_update(logical_owner, rez);
         // Tell the operation it has to wait for this event
@@ -1145,13 +1151,18 @@ namespace Legion {
                                                 const unsigned index,
                                                 const FieldMask &user_mask,
                                               std::set<ApEvent> &preconditions,
-                                              std::set<RtEvent> &applied_events)
+                                              std::set<RtEvent> &applied_events,
+                                                const bool actually_above)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
                         MATERIALIZED_VIEW_FIND_LOCAL_PRECONDITIONS_CALL);
-      // If we are not the logical owner, we need to see if we are up to date 
-      if (!is_logical_owner())
+      // If we are not the logical owner and we are not actually above the
+      // base level, then we need to see if we are up to date 
+      // If we are actually above then we already did this check at the
+      // base level and went all the way up the tree so there is no need
+      // to do it again here
+      if (!is_logical_owner() && !actually_above)
       {
 #ifdef DEBUG_LEGION
         assert(!IS_REDUCE(usage)); // no reductions for now, might change
@@ -1234,8 +1245,8 @@ namespace Legion {
       }
       // Add our local user
       const bool issue_collect = add_local_user(usage, term_event, 
-                         INVALID_COLOR, origin_node, versions, op_id, 
-                         index, user_mask, source, applied_events);
+                         INVALID_COLOR, origin_node, true/*base*/, versions,
+                         op_id, index, user_mask, source, applied_events);
       // Launch the garbage collection task, if it doesn't exist
       // then the user wasn't registered anyway, see add_local_user
       if (issue_collect)
@@ -1278,8 +1289,8 @@ namespace Legion {
             versions, op_id, index, user_mask, need_update_above, 
             source, applied_events);
       }
-      add_local_user(usage, term_event, child_color, origin_node, versions,
-                     op_id, index, user_mask, source, applied_events);
+      add_local_user(usage, term_event, child_color, origin_node, false/*base*/,
+                     versions, op_id, index, user_mask, source, applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -1287,6 +1298,7 @@ namespace Legion {
                                           ApEvent term_event,
                                           const LegionColor child_color,
                                           RegionNode *origin_node,
+                                          const bool base_user,
                                           VersionTracker *versions,
                                           const UniqueID op_id,
                                           const unsigned index,
@@ -1344,6 +1356,7 @@ namespace Legion {
           FieldMask local_split;
           versions->get_split_mask(logical_node, user_mask, local_split);
           rez.serialize(local_split);
+          rez.serialize<bool>(base_user);
         }
         runtime->send_view_remote_update(logical_owner, rez);
         // Tell the operation it has to wait for this event to
@@ -1415,8 +1428,8 @@ namespace Legion {
       }
       // Add our local user
       const bool issue_collect = add_local_user(usage, term_event, 
-                         INVALID_COLOR, origin_node, versions, op_id, 
-                         index, user_mask, source, applied_events);
+                         INVALID_COLOR, origin_node, true/*base*/, versions,
+                         op_id, index, user_mask, source, applied_events);
       // Launch the garbage collection task, if it doesn't exist
       // then the user wasn't registered anyway, see add_local_user
       if (issue_collect)
@@ -1472,8 +1485,8 @@ namespace Legion {
                               preconditions, applied_events, need_update_above);
       }
       // Add the user on the way back down
-      add_local_user(usage, term_event, child_color, origin_node, versions,
-                     op_id, index, user_mask, source, applied_events);
+      add_local_user(usage, term_event, child_color, origin_node, false/*base*/,
+                     versions, op_id, index, user_mask, source, applied_events);
       // No need to launch a collect user task, the child takes care of that
     }
 
@@ -3080,7 +3093,8 @@ namespace Legion {
           args.logical_owner = logical_owner;
           args.target_node = target_node;
           args.manager = phy_man;
-          args.parent = parent;
+          // Have to static cast this since it might not be ready
+          args.parent = static_cast<MaterializedView*>(par_view);
           args.context_uid = context_uid;
           runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
              NULL/*op*/, Runtime::merge_events(par_ready, man_ready));
@@ -3251,6 +3265,11 @@ namespace Legion {
         {
           request_event = Runtime::create_rt_user_event();
           remote_update_requests[request_event] = need_valid_update;
+          // We also have to filter out the current and previous epoch 
+          // user lists so that when we get the update then we know we
+          // won't have polluting users in the list to start
+          filter_local_users(need_valid_update, current_epoch_users);
+          filter_local_users(need_valid_update, previous_epoch_users);
         }
       }
       // If we have a request event, send the request now
@@ -3445,13 +3464,24 @@ namespace Legion {
           }
           else
           {
-            rez.serialize<size_t>(users.users.multi_users->size());
+            // Figure out how many to send
+            std::vector<PhysicalUser*> to_send;
+            LegionVector<FieldMask>::aligned send_masks;
             for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
                   uit = users.users.multi_users->begin(); uit !=
                   users.users.multi_users->end(); uit++)
             {
-              uit->first->pack_user(rez);
-              rez.serialize(uit->second);
+              const FieldMask user_mask = uit->second & request_mask;
+              if (!user_mask)
+                continue;
+              to_send.push_back(uit->first);
+              send_masks.push_back(user_mask);
+            }
+            rez.serialize<size_t>(to_send.size());
+            for (unsigned idx = 0; idx < to_send.size(); idx++)
+            {
+              to_send[idx]->pack_user(rez);
+              rez.serialize(send_masks[idx]);
             }
           }
         }
@@ -3469,13 +3499,24 @@ namespace Legion {
           }
           else
           {
-            rez.serialize<size_t>(users.users.multi_users->size());
-            for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator
+            // Figure out how many to send
+            std::vector<PhysicalUser*> to_send;
+            LegionVector<FieldMask>::aligned send_masks;
+            for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
                   uit = users.users.multi_users->begin(); uit !=
                   users.users.multi_users->end(); uit++)
             {
-              uit->first->pack_user(rez);
-              rez.serialize(uit->second);
+              const FieldMask user_mask = uit->second & request_mask;
+              if (!user_mask)
+                continue;
+              to_send.push_back(uit->first);
+              send_masks.push_back(user_mask);
+            }
+            rez.serialize<size_t>(to_send.size());
+            for (unsigned idx = 0; idx < to_send.size(); idx++)
+            {
+              to_send[idx]->pack_user(rez);
+              rez.serialize(send_masks[idx]);
             }
           }
         }
@@ -3726,6 +3767,8 @@ namespace Legion {
       }
       FieldMask split_mask;
       derez.deserialize(split_mask);
+      bool base_user;
+      derez.deserialize(base_user);
       
       // Make a dummy version info for doing the analysis calls
       // and put our split mask in it
@@ -3738,15 +3781,24 @@ namespace Legion {
       {
         // Do analysis and register the user
         LegionMap<ApEvent,FieldMask>::aligned dummy_preconditions;
-        // Always safe to assume single copy here since we don't
-        // actually use the results and assuming single copy means
-        // that fewer users will potentially be filtered
-        find_local_copy_preconditions(usage.redop, IS_READ_ONLY(usage),
-                                    true/*single copy*/, restrict_out,
-                                    user_mask, child_color, origin_node,
-                                    &dummy_version_info, op_id, index, source,
-                                    dummy_preconditions, applied_conditions);
-        add_local_copy_user(usage, term_event, true/*base user*/, 
+        // Do different things depending on whether we are a base
+        // user or a user being registered above in the tree
+        if (base_user)
+          // Always safe to assume single copy here since we don't
+          // actually use the results and assuming single copy means
+          // that fewer users will potentially be filtered
+          find_local_copy_preconditions(usage.redop, IS_READ_ONLY(usage),
+                                      true/*single copy*/, restrict_out,
+                                      user_mask, child_color, origin_node,
+                                      &dummy_version_info, op_id, index, source,
+                                      dummy_preconditions, applied_conditions);
+        else
+          find_local_copy_preconditions_above(usage.redop, IS_READ_ONLY(usage),
+                                      true/*single copy*/, restrict_out,
+                                      user_mask, child_color, origin_node,
+                                      &dummy_version_info, op_id, index, source,
+                                      dummy_preconditions, applied_conditions);
+        add_local_copy_user(usage, term_event, base_user, 
                             restrict_out, child_color, origin_node,
                             &dummy_version_info, op_id, index,
                             user_mask, source, applied_conditions);
@@ -3755,16 +3807,24 @@ namespace Legion {
       {
         // Do analysis and register the user
         std::set<ApEvent> dummy_preconditions;
-        find_local_user_preconditions(usage, term_event, child_color,
-                                      origin_node, &dummy_version_info, op_id,
-                                      index,user_mask, dummy_preconditions, 
-                                      applied_conditions);
+        // We do different things depending on whether we are the base
+        // user or whether we are being registered above in the tree
+        if (base_user)
+          find_local_user_preconditions(usage, term_event, child_color,
+                                        origin_node, &dummy_version_info, op_id,
+                                        index,user_mask, dummy_preconditions, 
+                                        applied_conditions);
+        else
+          find_local_user_preconditions_above(usage, term_event, child_color,
+                                        origin_node, &dummy_version_info, op_id,
+                                        index,user_mask, dummy_preconditions, 
+                                        applied_conditions);
         if (IS_WRITE(usage))
           update_version_numbers(user_mask, field_versions,
                                  source, applied_conditions);
-        if (add_local_user(usage, term_event, child_color, origin_node,
-                           &dummy_version_info, op_id, index, user_mask, 
-                           source, applied_conditions))
+        if (add_local_user(usage, term_event, child_color, origin_node, 
+                           base_user, &dummy_version_info, op_id, index, 
+                           user_mask, source, applied_conditions))
         {
           WrapperReferenceMutator mutator(applied_conditions);
           defer_collect_user(term_event, &mutator);
@@ -3786,11 +3846,6 @@ namespace Legion {
       {
         AutoLock v_lock(view_lock);
         remote_valid_mask -= invalid_mask;
-        // We also have to filter out the current and previous epoch 
-        // user lists so that when we get an update then we know we
-        // won't have polluting users in the list to start
-        filter_local_users(invalid_mask, current_epoch_users);
-        filter_local_users(invalid_mask, previous_epoch_users);
       }
       Runtime::trigger_event(done_event);
     }
