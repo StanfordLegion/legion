@@ -59,6 +59,7 @@ def run(filename, debug, verbose, flags, env):
     retcode = proc.wait()
     if retcode != 0:
         raise TestFailure(' '.join(args), output.decode('utf-8') if output is not None else None)
+    return ' '.join(args)
 
 def run_spy(logfiles, verbose):
     cmd = ['pypy', os.path.join(regent.root_dir(), 'tools', 'legion_spy.py'),
@@ -138,12 +139,17 @@ def test_spy(filename, debug, verbose, flags, env):
     runs_with = find_labeled_flags(filename, 'runs-with')
     try:
         for params in runs_with:
-            run(filename, debug, verbose, flags + params + spy_flags, env)
-            spy_logs = glob.glob(os.path.join(spy_dir, 'spy_*.log'))
-            assert len(spy_logs) > 0
-            run_spy(spy_logs, verbose)
-    except TestFailure as e:
-        raise Exception('Command failed:\n%s\n\nOutput:\n%s' % (e.command, e.output))
+            try:
+                cmd = run(filename, debug, verbose, flags + params + spy_flags, env)
+            except TestFailure as e:
+                raise Exception('Command failed:\n%s\n\nOutput:\n%s' % (e.command, e.output))
+
+            try:
+                spy_logs = glob.glob(os.path.join(spy_dir, 'spy_*.log'))
+                assert len(spy_logs) > 0
+                run_spy(spy_logs, verbose)
+            except TestFailure as e:
+                raise Exception('Command failed:\n%s\n%s\n\nOutput:\n%s' % (cmd, e.command, e.output))
     finally:
         shutil.rmtree(spy_dir)
 
