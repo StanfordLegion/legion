@@ -621,7 +621,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_association(Operation *op,
                                                  IndexSpace dom, IndexSpace ran,
-                              const std::vector<FieldDataDescriptor> &instances, 
+                              const std::vector<FieldDataDescriptor> &instances,
                                                  ApEvent instances_ready)
     //--------------------------------------------------------------------------
     {

@@ -90,7 +90,7 @@ function makeTimelineTransparent() {
   $("#timeline").css("overflow-x", "hidden");
   state.timelineSvg.select("g#lines").style("opacity", "0.1");
   state.timelineSvg.select("g.locator").style("opacity", "0.1");
-  state.timelineSvg.selectAll("path.line").style("opacity", "0.1");
+  state.timelineSvg.selectAll("path.util").style("opacity", "0.1");
 }
 
 function makeTimelineOpaque() {
@@ -98,7 +98,7 @@ function makeTimelineOpaque() {
   $("#timeline").css("overflow-x", "scroll");
   state.timelineSvg.select("g#lines").style("opacity", "1.0");
   state.timelineSvg.select("g.locator").style("opacity", "1.0");
-  state.timelineSvg.selectAll("path.line").style("opacity", "1.0");
+  state.timelineSvg.selectAll("path.util").style("opacity", "1.0");
 }
 
 function mouseMoveHandlerWhenDown() {
@@ -228,52 +228,48 @@ function drawUtil() {
 
   state.x = d3.scale.linear().range([0, convertToPos(state, end_time)]);
   state.x.domain([0, end_time]);
-  state.timelineSvg.selectAll("path").remove();
+  state.timelineSvg.selectAll("rect.util").remove();
+  state.timelineSvg.selectAll("path.util").remove();
   var paths = state.timelineSvg.selectAll("path")
     .data(filteredUtilData);
-
-  paths.enter().append("path")
-    .attr("class", "line")
-    .attr("d", function (d) { return utilline(d.data); })
+  var totalWidth = windowStart + $("#timeline").width();
+  paths.enter().append("rect")
+    .attr("class", "util")
     .attr("base_y", lineLevelCalculator)
+    .attr("y", lineLevelCalculator)
+    .attr("x", 0)
+    .attr("fill", "transparent")
+    .attr("width", totalWidth)
+    .attr("height", constants.util_levels * state.thickness)
+    .on("mouseover", mouseover)
+    .on("mousemove", mousemove)
+    .on("mouseout", function() {
+      state.timelineSvg.select("g.focus").remove();
+      state.timelineSvg.select("g.utilDesc").remove();
+    });
+  paths.enter().append("path")
+    .attr("base_y", lineLevelCalculator)
+    .attr("class", "util")
+    .attr("id", function(d, i) { return "util" + i})
+    .attr("d", function (d) { return utilline(d.data); })
+    .attr("stroke", getLineColor)
+    .on("mouseover", mouseover)
+    .on("mousemove", mousemove)
+    .on("mouseout", function() {
+      state.timelineSvg.select("g.focus").remove();
+      state.timelineSvg.select("g.utilDesc").remove();
+    })
     .attr("transform",
       function(d) {
         var y = lineLevelCalculator(d);
         return "translate(0," + y + ")"
-    })
-    .attr("stroke", getLineColor)
-    .on("mouseover", function() { 
-        var focus = state.timelineSvg.append("g")
-          .attr("class", "focus");
-
-        var text = focus.append("text")
-          .attr("x", 7)
-          .attr("y", -4.5)
-          .attr("class", "desc")
-          .attr("dy", ".35em");
-
-        focus.append("circle")
-          .attr("fill", "none")
-          .attr("stroke", "black")
-          .attr("r", 4.5);
-
-        var rect = focus.insert("rect", "text")
-          .style("fill", "#222")
-          .style("opacity", "0.7");
-    })
-    .on("mouseout", function() {
-      state.timelineSvg.select("g.focus").remove();
-    })
-    .on("mousemove", mousemove); 
-
-  var paths = state.timelineSvg.selectAll("path.line");
+    });
 }
 
 
 function mouseUpHandler() {
   var p = d3.mouse(this);
   var select_block = state.timelineSvg.select("rect.select-block");
-  var select_text = state.timelineSvg.select("text.select-block");
   var prevZoom = state.zoom;
   var selectWidth = parseInt(select_block.attr("width"));
   var svgWidth = state.timelineSvg.attr("width");
@@ -592,13 +588,10 @@ function getElemXY(elem) {
 }
 
 function drawCriticalPath() {
-  state.timelineSvg.select("g.critical_path_lines").remove();
+  state.timelineSvg.selectAll("g.critical_path_lines").remove();
   if (state.critical_path == undefined || !state.display_critical_path) {
     return;
   }
-  state.critical_path.forEach(function(op) {
-    expandElement(op[0], op[1]);
-  });
   var depGroup = state.timelineSvg.append("g")
       .attr("class", "critical_path_lines");
   var prevElem = undefined;
@@ -621,7 +614,8 @@ function drawCriticalPath() {
           elem.out.forEach(function(dep) {
             if (dep[2] in state.critical_path_prof_uids) {
               var depElem = prof_uid_map[dep[2]];
-              if (depElem != undefined) { // if the op was too small we don't draw it
+              var depProc = depElem.proc;
+              if (depElem != undefined && depProc.visible && depProc.enabled && depProc.loaded) { // is the op visible?
                 var depCoords = getElemXY(depElem);
                 var depX = depCoords[0];
                 var depY = depCoords[1];
@@ -631,6 +625,14 @@ function drawCriticalPath() {
                   .attr("y1", depY)
                   .attr("x2", x)
                   .attr("y2", y)
+                  .style("stroke-width", "1px");
+
+                depGroup.append("circle")
+                  .attr("cx", depX)
+                  .attr("cy", depY)
+                  .attr("fill", "white")
+                  .attr("stroke", "grey")
+                  .attr("r", 2.5)
                   .style("stroke-width", "1px");
               }
             }
@@ -784,7 +786,7 @@ function timelineEventMouseDown(timelineEvent) {
       }
     } else {
       timelineEvent.in.concat(timelineEvent.out).forEach(function(dep) {
-        expandElement(dep[0], dep[1])
+        expandByNodeProc(dep[0], dep[1])
       });
       state.dependencyEvent = timelineEvent;
       if (d3.event.button === 0) {
@@ -925,11 +927,11 @@ function get_node_id(text) {
 
 function get_proc_in_node(text) {
   // PROCESSOR:   tag:8 = 0x1d, owner_node:16,   (unused):28, proc_idx: 12
-  var proc_regex = /(Memory|Processor) 0x1(e|d)[a-fA-f0-9]{11}([a-fA-f0-9]{3})/;
+  var proc_regex = /Processor 0x1d[a-fA-f0-9]{11}([a-fA-f0-9]{3})/;
   var proc_match = proc_regex.exec(text);
   // if there's only one node, then per-node graphs are redundant
   if (proc_match) {
-    var proc_in_node = parseInt(proc_match[3], 16);
+    var proc_in_node = parseInt(proc_match[1], 16);
     return proc_in_node;
   }
 }
@@ -993,24 +995,10 @@ function collapseHandler(d, index) {
 }
 
 // This expands a particular element and its parents if necessary
-function expandElement(node, proc) {
-  // PROCESSOR:   tag:8 = 0x1d, owner_node:16,   (unused):28, proc_idx: 12
-  // ugh why isn't there string formatting
-  var nodeHex = ("0000" + node.toString(16)).slice(-4);
-  var procHex = ("000" + proc.toString(16)).slice(-3);
-  var expectedTitle = "0x1d" + nodeHex + "0000000" + procHex;
-  var matchedElement = undefined;
-  for (var i = 0; i < state.flattenedLayoutData.length; i++) {
-    var timelineElement = state.flattenedLayoutData[i];
-    if ((timelineElement.full_text != undefined) &&
-        (timelineElement.full_text.indexOf(expectedTitle) !=-1)) {  
-      matchedElement = timelineElement;
-      break;
-    }
-  }
-  if (matchedElement != undefined) {
+function expandElementAndParents(elem) {
+  if (elem !== undefined) {
     var elemPath = []; // path up to parent
-    var curElem = matchedElement;
+    var curElem = elem;
     while (curElem != undefined) {
       elemPath.push(curElem);
       curElem = curElem.parent;
@@ -1027,6 +1015,25 @@ function expandElement(node, proc) {
       }
     }
   }
+}
+
+
+function expandByNodeProc(node, proc) {
+  // PROCESSOR:   tag:8 = 0x1d, owner_node:16,   (unused):28, proc_idx: 12
+  // ugh why isn't there string formatting
+  var nodeHex = ("0000" + node.toString(16)).slice(-4);
+  var procHex = ("000" + proc.toString(16)).slice(-3);
+  var expectedTitle = "0x1d" + nodeHex + "0000000" + procHex;
+  var matchedElement = undefined;
+  for (var i = 0; i < state.flattenedLayoutData.length; i++) {
+    var timelineElement = state.flattenedLayoutData[i];
+    if ((timelineElement.full_text != undefined) &&
+        (timelineElement.full_text.indexOf(expectedTitle) !=-1)) {  
+      matchedElement = timelineElement;
+      break;
+    }
+  }
+  expandElementAndParents(matchedElement)
 }
 
 
@@ -1270,6 +1277,78 @@ function drawHelpBox() {
       .text(helpMessage[i]);
     off = 0;
   }
+}
+
+function evalExpandRequest(re) {
+  var re = new RegExp(re);
+  state.flattenedLayoutData.forEach(function(elem) {
+    if (re.exec(elem.text)) {
+      expandElementAndParents(elem);
+    }
+  });
+  removePopUp();
+  makeTimelineOpaque();
+  setKeyHandler(defaultKeydown);
+  turnOnMouseHandlers();
+}
+
+function drawExpandBox() {
+  var width = $(window).width();
+  var height = $(window).height();
+  var popUpSvg = d3.select("#pop-up").select("svg");
+  var expandBoxGroup = popUpSvg.append("g");
+  var expandBoxWidth = Math.min(450, width - 100);
+  var expandBoxHeight = Math.min(220, height - 100);
+
+  var thicknessRatio = state.thickness / state.baseThickness;
+  var boxStartX = (width - expandBoxWidth) / 2;
+  var boxStartY = (height - expandBoxHeight) / 2;
+
+  expandBoxGroup.append("rect")
+    .attr({
+        rx: 30,
+        ry: 30,
+        x: boxStartX,
+        y: boxStartY,
+        width: expandBoxWidth,
+        height: expandBoxHeight,
+        style: "fill: #222; opacity: 0.8;"
+    });
+  var expandText = expandBoxGroup.append("text")
+    .attr("class", "expand-box")
+    .style("width", expandBoxWidth);
+  expandText.append("tspan")
+    .attr({ x: boxStartX + expandBoxWidth / 2, y: boxStartY + 50})
+    .attr("text-anchor", "middle")
+    .style("font-size", "20pt")
+    .text("expand");
+  var expandInputWidth = expandBoxWidth - 40;
+  var expandInputHeight = 50;
+  var expandInputStartY = 65;
+
+
+  expandBoxGroup.append("foreignObject")
+    .attr({ x: boxStartX + 20, y: boxStartY + expandInputStartY,
+            width: expandInputWidth, height: expandBoxHeight - expandInputStartY})
+    .attr("text-anchor", "middle")
+    .html(
+        "<input type='text' placeholder='expand by regex' class='expand-box' style='height: "
+        + expandInputHeight + "px; width: "
+        + expandInputWidth + "px; font-size: 20pt; font-family: Consolas, monospace;'></input>"
+        + "<div style='margin: 0 auto; margin-top: 10px; text-align: center;'>" 
+          + "<text class='expand-box'>" 
+            + "Presets"
+          + "</text>"
+        + "</div>"
+        + "<div style='margin: 0 auto; margin-top: 10px; text-align: center;'>" 
+          + "<input class='button' type='button' value='CPUs' onclick='evalExpandRequest(\"CPU\")'></input>" 
+          + "<input class='button' type='button' value='GPUs' onclick='evalExpandRequest(\"GPU\")'></input>" 
+          + "<input class='button' type='button' value='Utilities' onclick='evalExpandRequest(\"Utility\")'></input>" 
+          + "<input class='button' type='button' value='IOs' onclick='evalExpandRequest(\"IO\")'></input>" 
+          + "<input class='button' type='button' value='Memories' onclick='evalExpandRequest(\"Memory\")'></input>" 
+        + "</div>"
+        );
+  $("input.expand-box").focus();
 }
 
 function drawSearchBox() {
@@ -1547,6 +1626,30 @@ function defaultKeydown(e) {
     }));
     return false;
   }
+  else if (commandType == Command.expand) {
+    turnOffMouseHandlers();
+    makeTimelineTransparent();
+    displayPopUp();
+    drawExpandBox();
+    setKeyHandler(makeModalKeyHandler(['enter', 'esc'], function(key) {
+      if (key == 'enter') {
+        var re = $("input.expand-box").val();
+        if (re.trim() != "") {
+          re = new RegExp(re);
+          state.flattenedLayoutData.forEach(function(elem) {
+            if (re.exec(elem.text)) {
+              expandElementAndParents(elem);
+            }
+          });
+        }
+      }
+      removePopUp();
+      makeTimelineOpaque();
+      setKeyHandler(defaultKeydown);
+      turnOnMouseHandlers();
+    }));
+    return false;
+  }
   else if (commandType == Command.search_history) {
     turnOffMouseHandlers();
     makeTimelineTransparent();
@@ -1571,6 +1674,7 @@ function defaultKeydown(e) {
   } else if (commandType == Command.zrx) {
     state.zoomHistory = Array();
     adjustZoom(1.0, false);
+    $("#timeline").scrollLeft(0);
   } else if (commandType == Command.zux) {
     if (state.zoomHistory.length > 0) {
       var previousZoomHistory = state.zoomHistory.pop();
@@ -1616,6 +1720,11 @@ function defaultKeydown(e) {
   }
   else if (commandType == Command.toggle_critical_path) {
     state.display_critical_path = !state.display_critical_path;
+    if (state.display_critical_path) {
+      state.critical_path.forEach(function(op) {
+        expandByNodeProc(op[0], op[1]);
+      });
+    }
     redraw();
   }
   return false;
@@ -1815,7 +1924,7 @@ function filterUtilData(timelineElem) {
   var elem = {time: 0, count: 0};
   var startTime = data[startIndex].time;
   var startX = convertToPos(state, startTime);
-  var endTime;
+  var endTime = 0;
 
   for (var i = startIndex; i < endIndex - 1; i++) {
     endTime = data[i+1].time;
@@ -1844,60 +1953,81 @@ function filterUtilData(timelineElem) {
   };
 }
 
-function mousemove(timelineElem) {
-  var data = timelineElem.data;
-  var focus = state.timelineSvg.select("g.focus");
-  var px = d3.mouse(this)[0],
-      py = d3.mouse(this)[1],
-      xMin = state.x.invert(px-3), // search within a 3 pixel radius
-      xMax = state.x.invert(px+3),
-      i = timeBisector(data, state.x.invert(px)),
-      iMin = Math.min(i-1, timeBisector(data, xMin)),
-      iMax = Math.max(i+1, timeBisector(data, xMax));
+function mouseover() { 
+  var focus = state.timelineSvg.append("g")
+    .attr("class", "focus");
 
-  // search window
-  var start = Math.max(0, iMin-1);
-  var end = Math.min(iMax+1, data.length);
-  var searchWindow = []; // (end - start) * 2 - 1; // FIXME: CORRECT WAY TO PREALLOCATE?
+  focus.append("circle")
+    .attr("fill", "none")
+    .attr("stroke", "black")
+    .attr("r", 4.5);
 
-  for (var i = start; i < end-1; i++) {
-    searchWindow.push(data[i]);
-    var newPoint = {time: data[i].time, count: data[i+1].count}
-    searchWindow.push(newPoint);
-  }
-  searchWindow.push(data[end-1]);
+  var utilDescView = state.timelineSvg.append("g")
+                        .attr("class", "utilDesc");
+  utilDescView.append("text")
+    .attr("x", 7)
+    .attr("y", -4.5)
+    .attr("class", "desc")
+    .attr("dy", ".35em");
+  utilDescView.insert("rect", "text")
+    .style("fill", "#222")
+    .style("opacity", "0.7");
+}
 
-  // get the closest point within the 3 pixel radius
-  var d = getMinElement(searchWindow, function(elem) { 
-      var dx = px - state.x(elem.time);
-      var dy = py - state.y(elem.count);
-      return dx*dx + dy*dy;
-  });
-
-  var dist = Math.abs(px-state.x(d.time));;
-
-  // if the distance is too far away, just pick the current mouse position
-  if (dist > 6) {
-    d = {time: state.x.invert(px), count: state.y.invert(py)};
-  }
+function mousemove(d, i) {
+  var line = document.getElementById("util" + i);
 
   // offset for this particular line grapgh
-  var base_y = +this.getAttribute("base_y");
+  var base_y = +line.getAttribute("base_y");
+  var px = d3.mouse(line)[0];
+  var py = d3.mouse(line)[1] + base_y;
+  
+  var start = 0;
+  var end = line.getTotalLength();
+  var target = undefined;
+  var pos = undefined;
 
-  var cx = state.x(d.time);
-  var cy = state.y(d.count) + base_y;
+  // https://bl.ocks.org/larsenmtl/e3b8b7c2ca4787f77d78f58d41c3da91
+  while (true){
+    target = Math.floor((start + end) / 2);
+    pos = line.getPointAtLength(target);
+    if ((target === end || target === start) && pos.x !== px) {
+        break;
+    }
+    if (pos.x > px)      end = target;
+    else if (pos.x < px) start = target;
+    else break; //position found
+  }
+
+
+  var cx = pos.x;
+  var cy = pos.y + base_y;
+
+  var focus = state.timelineSvg.select("g.focus");
   focus.attr("transform", "translate(" + cx + "," + cy + ")");
-  var text = focus.select("text");
-  text.text((d.count * 100).toFixed(2) + "% utilization" )
+
+  var utilDescView = state.timelineSvg.select("g.utilDesc");
+  utilDescView.attr("transform", "translate(" + (px + 10) + "," + (py - 10) + ")");
+  var text = utilDescView.select("text")
+
+  text.text(Math.round(state.y.invert(pos.y) * 100) + "% utilization");
 
   var bbox = text.node().getBBox();
   var padding = 2;
-  var rect = focus.select("rect", "text")
-      .attr("x", bbox.x - padding)
+  var rect = utilDescView.select("rect", "text");
+  rect.attr("x", bbox.x - padding)
       .attr("y", bbox.y - padding)
       .attr("width", bbox.width + (padding*2))
       .attr("height", bbox.height + (padding*2));
 
+  var timelineRight = $("#timeline").scrollLeft() + $("#timeline").width();
+  var bboxRight = px + bbox.x + bbox.width;
+  // If the box moves off the screen, nudge it back
+  if (bboxRight > timelineRight) {
+    var translation = -(bboxRight - timelineRight + 20);
+    text.attr("transform", "translate(" + translation + ",0)");
+    rect.attr("transform", "translate(" + translation + ",0)");
+  }
 }
 
 // Get the data
