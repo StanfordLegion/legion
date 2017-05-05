@@ -184,7 +184,7 @@ class Counter:
         self.passed = 0
         self.failed = 0
 
-def get_test_specs(test_run, test_spy, test_hdf5, extra_flags):
+def get_test_specs(use_run, use_spy, use_hdf5, extra_flags):
     base = [
         # FIXME: Move this flag into a per-test parameter so we don't use it everywhere.
         # Don't include backtraces on those expected to fail
@@ -226,14 +226,14 @@ def get_test_specs(test_run, test_spy, test_hdf5, extra_flags):
     ]
 
     result = []
-    if not test_run and not test_spy and not test_hdf5:
+    if not use_run and not use_spy and not use_hdf5:
         result.extend(base)
         result.extend(run)
-    if test_run:
+    if use_run:
         result.extend(run)
-    if test_spy:
+    if use_spy:
         result.extend(spy)
-    if test_hdf5:
+    if use_hdf5:
         result.extend(hdf5)
     return result
 
