@@ -111,7 +111,7 @@ def test_compile_fail(filename, debug, verbose, flags, env):
     runs_with = find_labeled_flags(filename, 'runs-with')
     try:
         for params in runs_with:
-            run(filename, debug, False, flags + params, env)
+            run(filename, debug, False, params + flags, env)
     except TestFailure as e:
         failure = e.output
         lines = set(line.strip() for line in failure.strip().split('\n')
@@ -127,7 +127,7 @@ def test_run_pass(filename, debug, verbose, flags, env):
     runs_with = find_labeled_flags(filename, 'runs-with')
     try:
         for params in runs_with:
-            run(filename, debug, verbose, flags + params, env)
+            run(filename, debug, verbose, params + flags, env)
     except TestFailure as e:
         raise Exception('Command failed:\n%s\n\nOutput:\n%s' % (e.command, e.output))
 
@@ -140,7 +140,7 @@ def test_spy(filename, debug, verbose, flags, env):
     try:
         for params in runs_with:
             try:
-                cmd = run(filename, debug, verbose, flags + params + spy_flags, env)
+                cmd = run(filename, debug, verbose, params + flags + spy_flags, env)
             except TestFailure as e:
                 raise Exception('Command failed:\n%s\n\nOutput:\n%s' % (e.command, e.output))
 
