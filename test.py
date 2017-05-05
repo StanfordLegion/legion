@@ -555,15 +555,15 @@ def run_tests(test_modules=None,
         ('TEST_SPY', '1' if use_spy else '0'),
         ('TEST_GCOV', '1' if use_gcov else '0'),
         ('USE_RDIR', '1' if use_rdir else '0'),
-        ('LG_RT_DIR', os.path.join(root_dir, 'runtime')),
+        ('LG_RT_DIR', os.path.join(root_dir, 'runtime'))] + (
 
         # Gcov doesn't get a USE_GCOV flag, but instead stuff the GCC
         # options for Gcov on to the compile and link flags.
-        ('CC_FLAGS', (os.environ['CC_FLAGS'] + gcov_flags
-                      if 'CC_FLAGS' in os.environ else gcov_flags)),
-        ('LD_FLAGS', (os.environ['LD_FLAGS'] + gcov_flags
-                      if 'LD_FLAGS' in os.environ else gcov_flags)),
-    ])
+        [('CC_FLAGS', (os.environ['CC_FLAGS'] + gcov_flags
+                       if 'CC_FLAGS' in os.environ else gcov_flags)),
+         ('LD_FLAGS', (os.environ['LD_FLAGS'] + gcov_flags
+                       if 'LD_FLAGS' in os.environ else gcov_flags)),
+        ] if use_gcov else []))
 
     if check_ownership:
         check_test_legion_cxx(root_dir)
