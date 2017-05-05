@@ -534,7 +534,7 @@ namespace Realm {
   //
   // class LoggerMessage
 
-  LoggerMessage& LoggerMessage::vprintf(const char *fmt, va_list args)
+  LoggerMessage& LoggerMessage::vprintf(LoggerMessageDescriptor descriptor, const char *fmt, va_list args)
   {
     if(active) {
       static const int MAXLEN = 4096;
@@ -554,5 +554,11 @@ namespace Realm {
     }
     return *this;
   }
+    
+    LoggerMessage& LoggerMessage::vprintf(const char *fmt, va_list args)
+    {
+        LoggerMessageDescriptor nullDescriptor;
+        return vprintf(nullDescriptor, fmt, args);
+    }
 
 }; // namespace Realm
