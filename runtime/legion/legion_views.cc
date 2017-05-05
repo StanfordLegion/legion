@@ -3095,7 +3095,8 @@ namespace Legion {
           args.logical_owner = logical_owner;
           args.target_node = target_node;
           args.manager = phy_man;
-          args.parent = parent;
+          // Have to static cast this since it might not be ready
+          args.parent = static_cast<MaterializedView*>(par_view);
           args.context_uid = context_uid;
           runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
              NULL/*op*/, Runtime::merge_events(par_ready, man_ready));
