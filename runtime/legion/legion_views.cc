@@ -3267,6 +3267,11 @@ namespace Legion {
         {
           request_event = Runtime::create_rt_user_event();
           remote_update_requests[request_event] = need_valid_update;
+          // We also have to filter out the current and previous epoch 
+          // user lists so that when we get the update then we know we
+          // won't have polluting users in the list to start
+          filter_local_users(need_valid_update, current_epoch_users);
+          filter_local_users(need_valid_update, previous_epoch_users);
         }
       }
       // If we have a request event, send the request now
@@ -3843,11 +3848,6 @@ namespace Legion {
       {
         AutoLock v_lock(view_lock);
         remote_valid_mask -= invalid_mask;
-        // We also have to filter out the current and previous epoch 
-        // user lists so that when we get an update then we know we
-        // won't have polluting users in the list to start
-        filter_local_users(invalid_mask, current_epoch_users);
-        filter_local_users(invalid_mask, previous_epoch_users);
       }
       Runtime::trigger_event(done_event);
     }
