@@ -672,6 +672,9 @@ namespace Legion {
     }
 #endif
 
+    // Make sure this one gets instantiated
+    template class VersioningSet<>;
+
     /////////////////////////////////////////////////////////////
     // VersionInfo 
     /////////////////////////////////////////////////////////////
@@ -1273,6 +1276,23 @@ namespace Legion {
         derez.deserialize(handle);
         upper_bound_node = forest->get_node(handle);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionInfo::capture_base_advance_states(
+                 LegionMap<DistributedID,FieldMask>::aligned &base_states) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!physical_states.empty());
+      assert(base_states.empty());
+#endif
+      const PhysicalState *base_state = physical_states.back();
+      const VersioningSet<PHYSICAL_STATE_REF> &states = 
+        base_state->get_advance_states();
+      for (VersioningSet<PHYSICAL_STATE_REF>::iterator it = 
+            states.begin(); it != states.end(); it++)
+        base_states[it->first->did] = it->second;
     }
 
     /////////////////////////////////////////////////////////////

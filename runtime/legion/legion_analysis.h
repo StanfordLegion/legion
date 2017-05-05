@@ -282,6 +282,10 @@ namespace Legion {
       virtual void pack_upper_bound_node(Serializer &rez) const;
       void unpack_upper_bound_node(Deserializer &derez, 
                                    RegionTreeForest *forest);
+    public:
+      // Used by control replication for grabbing base advance states
+      void capture_base_advance_states(
+          LegionMap<DistributedID,FieldMask>::aligned &base_states) const;
     protected:
       RegionTreeNode                   *upper_bound_node;
       // All of these are indexed by depth in the region tree
@@ -805,6 +809,7 @@ namespace Legion {
     class PhysicalState {
     public:
       static const AllocationType alloc_type = PHYSICAL_STATE_ALLOC;
+      typedef VersioningSet<PHYSICAL_STATE_REF> PhysicalVersions;
     public:
       PhysicalState(RegionTreeNode *node, bool path_only);
       PhysicalState(const PhysicalState &rhs);
@@ -828,6 +833,8 @@ namespace Legion {
       inline bool has_advance_states(void) const 
         { return (!advance_states.empty()); } 
       void apply_state(std::set<RtEvent> &applied_conditions) const; 
+      inline const PhysicalVersions& get_advance_states(void) const
+        { return advance_states; }
     public:
       void filter_composite_mask(FieldMask &composite_mask);
       void capture_composite_root(CompositeView *composite_view,
@@ -855,7 +862,6 @@ namespace Legion {
       LegionMap<ReductionView*, FieldMask,
                 VALID_REDUCTION_ALLOC>::track_aligned reduction_views;
     protected:
-      typedef VersioningSet<PHYSICAL_STATE_REF> PhysicalVersions;
       PhysicalVersions version_states;
       PhysicalVersions advance_states;
     protected:

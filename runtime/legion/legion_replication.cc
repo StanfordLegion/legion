@@ -757,6 +757,7 @@ namespace Legion {
     void ReplCopyOp::initialize_replication(ReplicateContext *ctx)
     //--------------------------------------------------------------------------
     {
+      versioning_collective_id = ctx->get_next_collective_index();
       // Initialize our index domain of a single point
       index_domain = Domain(index_point, index_point);
       launch_space = ctx->find_index_launch_space(index_domain);
@@ -773,6 +774,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
 #endif
+      versioning_collective_id = UINT_MAX;
     }
 
     //--------------------------------------------------------------------------
@@ -855,11 +857,52 @@ namespace Legion {
       {
         // We don't own it, so we can pretend like we
         // mapped and executed this copy already
-        complete_mapping();
+        // Before we do this though we have to get the version state
+        // names for any writes so we can update our local state
+        VersioningInfoBroadcast version_broadcast(repl_ctx, 
+                      versioning_collective_id, owner_shard);
+        version_broadcast.wait_for_states(map_applied_conditions);
+        const UniqueID logical_context_uid = parent_ctx->get_context_uid();
+        for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+        {
+          const VersioningSet<> &remote_advance_states = 
+            version_broadcast.find_advance_states(idx);
+          RegionRequirement &req = dst_requirements[idx];
+          // Switch the privileges to read-write if necessary
+          const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
+          if (is_reduce_req)
+            req.privilege = READ_WRITE;
+          const bool parent_is_upper_bound = (req.region == req.parent);
+          runtime->forest->advance_remote_versions(this, 
+              src_requirements.size() + idx, req,
+              parent_is_upper_bound, logical_context_uid, 
+              remote_advance_states, map_applied_conditions);
+          // Switch the privileges back when we are done
+          if (is_reduce_req)
+            req.privilege = REDUCE;
+        }
+        if (!map_applied_conditions.empty())
+          complete_mapping(Runtime::merge_events(map_applied_conditions));
+        else
+          complete_mapping();
         complete_execution();
       }
       else // We own it, so do the base call
-        CopyOp::trigger_ready();
+      {
+        // Do the versioning analysis
+        RtEvent ready = perform_local_versioning_analysis();
+        // Broadcast the versioning information
+        VersioningInfoBroadcast version_broadcast(repl_ctx, 
+                      versioning_collective_id, owner_shard);
+#ifdef DEBUG_LEGION
+        assert(dst_requirements.size() == dst_versions.size());
+#endif
+        for (unsigned idx = 0; idx < dst_versions.size(); idx++)
+          version_broadcast.pack_advance_states(idx, dst_versions[idx]);
+        version_broadcast.perform_collective_async();
+        // Then we can do the enqueue
+        enqueue_ready_operation(ready);
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -4412,6 +4455,102 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void VersioningInfoBroadcast::pack_collective(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(versions.size());
+      for (std::map<unsigned,LegionMap<DistributedID,FieldMask>::aligned>::
+            const_iterator vit = versions.begin(); vit != versions.end(); vit++)
+      {
+        rez.serialize(vit->first);
+        rez.serialize<size_t>(vit->second.size());
+        for (LegionMap<DistributedID,FieldMask>::aligned::const_iterator it = 
+              vit->second.begin(); it != vit->second.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersioningInfoBroadcast::unpack_collective(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(versions.empty());
+#endif
+      size_t num_versions;
+      derez.deserialize(num_versions);
+      for (unsigned idx1 = 0; idx1 < num_versions; idx1++)
+      {
+        unsigned index;
+        derez.deserialize(index);
+        LegionMap<DistributedID,FieldMask>::aligned &target = versions[index];
+        size_t num_states;
+        derez.deserialize(num_states);
+        for (unsigned idx2 = 0; idx2 < num_states; idx2++)
+        {
+          DistributedID did;
+          derez.deserialize(did);
+          derez.deserialize(target[did]);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersioningInfoBroadcast::pack_advance_states(unsigned index,
+                                                const VersionInfo &version_info)
+    //--------------------------------------------------------------------------
+    {
+      version_info.capture_base_advance_states(versions[index]);
+    }
+
+    //--------------------------------------------------------------------------
+    void VersioningInfoBroadcast::wait_for_states(
+                                              std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      perform_collective_wait(); 
+      std::set<RtEvent> wait_on;
+      Runtime *runtime = context->runtime;
+      // Now convert everything over to the results
+      for (std::map<unsigned,LegionMap<DistributedID,FieldMask>::aligned>::
+            const_iterator vit = versions.begin(); vit != versions.end(); vit++)
+      {
+        VersioningSet<> &target = results[vit->first];
+        for (LegionMap<DistributedID,FieldMask>::aligned::const_iterator it = 
+              vit->second.begin(); it != vit->second.end(); it++)
+        {
+          RtEvent ready;
+          VersionState *state = 
+            runtime->find_or_request_version_state(it->first, ready);
+          ready = target.insert(state, it->second, runtime, ready);
+          if (ready.exists() && !ready.has_triggered())
+            wait_on.insert(ready);
+        }
+      }
+      if (!wait_on.empty())
+      {
+        RtEvent wait_for = Runtime::merge_events(wait_on);
+        wait_for.wait();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    const VersioningSet<>& 
+              VersioningInfoBroadcast::find_advance_states(unsigned index) const
+    //--------------------------------------------------------------------------
+    {
+      std::map<unsigned,VersioningSet<> >::const_iterator finder = 
+        results.find(index);
+#ifdef DEBUG_LEGION
+      assert(finder != results.end());
+#endif
+      return finder->second;
     }
 
   }; // namespace Internal

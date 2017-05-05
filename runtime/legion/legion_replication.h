@@ -428,6 +428,10 @@ namespace Legion {
       void pack_advance_states(unsigned index, const VersionInfo &version_info);
       void wait_for_states(std::set<RtEvent> &applied_events);
       const VersioningSet<>& find_advance_states(unsigned index) const;
+    protected:
+      std::map<unsigned/*index*/,
+               LegionMap<DistributedID,FieldMask>::aligned> versions;
+      std::map<unsigned/*index*/,VersioningSet<> > results;
     };
 
     /**
@@ -598,6 +602,8 @@ namespace Legion {
     protected:
       ShardingGatherCollective *sharding_collective;
 #endif
+    protected:
+      CollectiveID versioning_collective_id; // id for version state broadcasts
     };
 
     /**

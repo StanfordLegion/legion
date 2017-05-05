@@ -834,6 +834,8 @@ namespace Legion {
                                       Realm::ProfilingRequestSet &reqeusts);
       virtual void report_profiling_response(
                                 const Realm::ProfilingResponse &response);
+      // Separate function for this so it can be called by base classes
+      RtEvent perform_local_versioning_analysis(void);
     public:
       std::vector<RegionTreePath> src_privilege_paths;
       std::vector<RegionTreePath> dst_privilege_paths;

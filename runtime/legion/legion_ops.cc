@@ -3640,10 +3640,9 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void CopyOp::trigger_ready(void)
+    RtEvent CopyOp::perform_local_versioning_analysis(void)
     //--------------------------------------------------------------------------
     {
-      // Do our versioning analysis and then add it to the ready queue
       std::set<RtEvent> preconditions;
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         runtime->forest->perform_versioning_analysis(this, idx,
@@ -3669,9 +3668,17 @@ namespace Legion {
           dst_requirements[idx].privilege = REDUCE;
       }
       if (!preconditions.empty())
-        enqueue_ready_operation(Runtime::merge_events(preconditions));
-      else
-        enqueue_ready_operation();
+        return Runtime::merge_events(preconditions);
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      // Do our versioning analysis and then add it to the ready queue
+      RtEvent ready = perform_local_versioning_analysis();
+      enqueue_ready_operation(ready);
     }
 
     //--------------------------------------------------------------------------
