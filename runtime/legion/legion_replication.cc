@@ -4376,6 +4376,44 @@ namespace Legion {
       mappings = results;
     }
 
+    /////////////////////////////////////////////////////////////
+    // Versioning Info Broadcast 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    VersioningInfoBroadcast::VersioningInfoBroadcast(ReplicateContext *ctx,
+                                                   CollectiveID id, ShardID own)
+      : BroadcastCollective(ctx, id, own)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    VersioningInfoBroadcast::VersioningInfoBroadcast(
+                                             const VersioningInfoBroadcast &rhs)
+      : BroadcastCollective(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    VersioningInfoBroadcast::~VersioningInfoBroadcast(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    VersioningInfoBroadcast& VersioningInfoBroadcast::operator=(
+                                             const VersioningInfoBroadcast &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
   }; // namespace Internal
 }; // namespace Legion
 
