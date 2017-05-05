@@ -599,7 +599,8 @@ namespace Legion {
         find_local_copy_preconditions_above(redop, reading, single_copy, 
                                       restrict_out, copy_mask, ColorPoint(), 
                                       origin_node, versions,creator_op_id,index,
-                                      source, preconditions, applied_events);
+                                      source, preconditions, applied_events,
+                                      false/*actually above*/);
       if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_point = logical_node->get_color();
@@ -761,13 +762,17 @@ namespace Legion {
                                                   const unsigned index,
                                                   const AddressSpaceID source,
                            LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                                              std::set<RtEvent> &applied_events)
+                                              std::set<RtEvent> &applied_events,
+                                                  const bool actually_above)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
                         MATERIALIZED_VIEW_FIND_LOCAL_COPY_PRECONDITIONS_CALL);
-      // If we are not the logical owner, we need to see if we are up to date 
-      if (!is_logical_owner())
+      // If we are not the logical owner and we're not actually already above
+      // the base level, then we need to see if we are up to date 
+      // Otherwise we did this check at the base level and it went all
+      // the way up the tree so we are already good
+      if (!is_logical_owner() && !actually_above)
       {
         // We are also reading if we are doing reductions
         perform_remote_valid_check(copy_mask, versions,reading || (redop != 0));
@@ -1146,13 +1151,18 @@ namespace Legion {
                                                 const unsigned index,
                                                 const FieldMask &user_mask,
                                               std::set<ApEvent> &preconditions,
-                                              std::set<RtEvent> &applied_events)
+                                              std::set<RtEvent> &applied_events,
+                                                const bool actually_above)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
                         MATERIALIZED_VIEW_FIND_LOCAL_PRECONDITIONS_CALL);
-      // If we are not the logical owner, we need to see if we are up to date 
-      if (!is_logical_owner())
+      // If we are not the logical owner and we are not actually above the
+      // base level, then we need to see if we are up to date 
+      // If we are actually above then we already did this check at the
+      // base level and went all the way up the tree so there is no need
+      // to do it again here
+      if (!is_logical_owner() && !actually_above)
       {
 #ifdef DEBUG_LEGION
         assert(!IS_REDUCE(usage)); // no reductions for now, might change
