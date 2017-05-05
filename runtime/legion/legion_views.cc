@@ -3460,13 +3460,24 @@ namespace Legion {
           }
           else
           {
-            rez.serialize<size_t>(users.users.multi_users->size());
+            // Figure out how many to send
+            std::vector<PhysicalUser*> to_send;
+            LegionVector<FieldMask>::aligned send_masks;
             for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
                   uit = users.users.multi_users->begin(); uit !=
                   users.users.multi_users->end(); uit++)
             {
-              uit->first->pack_user(rez);
-              rez.serialize(uit->second);
+              const FieldMask user_mask = uit->second & request_mask;
+              if (!user_mask)
+                continue;
+              to_send.push_back(uit->first);
+              send_masks.push_back(user_mask);
+            }
+            rez.serialize<size_t>(to_send.size());
+            for (unsigned idx = 0; idx < to_send.size(); idx++)
+            {
+              to_send[idx]->pack_user(rez);
+              rez.serialize(send_masks[idx]);
             }
           }
         }
@@ -3484,13 +3495,24 @@ namespace Legion {
           }
           else
           {
-            rez.serialize<size_t>(users.users.multi_users->size());
-            for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator
+            // Figure out how many to send
+            std::vector<PhysicalUser*> to_send;
+            LegionVector<FieldMask>::aligned send_masks;
+            for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
                   uit = users.users.multi_users->begin(); uit !=
                   users.users.multi_users->end(); uit++)
             {
-              uit->first->pack_user(rez);
-              rez.serialize(uit->second);
+              const FieldMask user_mask = uit->second & request_mask;
+              if (!user_mask)
+                continue;
+              to_send.push_back(uit->first);
+              send_masks.push_back(user_mask);
+            }
+            rez.serialize<size_t>(to_send.size());
+            for (unsigned idx = 0; idx < to_send.size(); idx++)
+            {
+              to_send[idx]->pack_user(rez);
+              rez.serialize(send_masks[idx]);
             }
           }
         }
