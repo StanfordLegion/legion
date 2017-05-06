@@ -18,7 +18,7 @@
 from __future__ import print_function
 import argparse, os, platform, subprocess
 
-def test(root_dir, install_only, debug, spy, hdf5, env):
+def test(root_dir, install_only, debug, spy, gcov, hdf5, env):
     threads = ['-j', '2'] if 'TRAVIS' in env else []
     terra = ['--with-terra', env['TERRA_DIR']] if 'TERRA_DIR' in env else []
     debug_flag = ['--debug'] if debug else []
@@ -38,21 +38,16 @@ def test(root_dir, install_only, debug, spy, hdf5, env):
         env = env,
         cwd = root_dir)
     if not install_only:
-        if spy:
-            subprocess.check_call(
-                ['time', './test.py', '-q', '--spy'] + threads + inner_flag,
-                env = env,
-                cwd = root_dir)
-        elif hdf5:
-            subprocess.check_call(
-                ['time', './test.py', '-q', '--hdf5'] + threads + inner_flag,
-                env = env,
-                cwd = root_dir)
-        else:
-            subprocess.check_call(
-                ['time', './test.py', '-q'] + threads + debug_flag + inner_flag,
-                env = env,
-                cwd = root_dir)
+        extra_flags = []
+        if spy: extra_flags.append('--spy')
+        if gcov: extra_flags.append('--run')
+        if hdf5: extra_flags.append('--hdf5')
+        if not spy and not gcov and not hdf5: extra_flags.append('--debug')
+
+        subprocess.check_call(
+            ['time', './test.py', '-q'] + threads + extra_flags + inner_flag,
+            env = env,
+            cwd = root_dir)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Regent compiler test suite')
@@ -74,5 +69,6 @@ if __name__ == '__main__':
 
     debug = env['DEBUG'] == '1'
     spy = 'TEST_SPY' in env and env['TEST_SPY'] == '1'
+    gcov = 'TEST_GCOV' in env and env['TEST_GCOV'] == '1'
     hdf5 = 'TEST_HDF' in env and env['TEST_HDF'] == '1'
-    test(root_dir, args.install_only, debug, spy, hdf5, env)
+    test(root_dir, args.install_only, debug, spy, gcov, hdf5, env)

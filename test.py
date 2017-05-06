@@ -462,8 +462,8 @@ class Stage(object):
 
 def report_mode(test_regent, test_legion_cxx, test_fuzzer, test_realm,
                 test_external, test_private, test_perf, use_gasnet,
-                use_cuda, use_openmp, use_llvm, use_hdf, use_spy, use_cmake,
-                use_rdir):
+                use_cuda, use_openmp, use_llvm, use_hdf, use_spy, use_gcov,
+                use_cmake, use_rdir):
     print()
     print('#'*60)
     print('### Test Suite Configuration')
@@ -484,6 +484,7 @@ def report_mode(test_regent, test_legion_cxx, test_fuzzer, test_realm,
     print('###   * LLVM:       %s' % use_llvm)
     print('###   * HDF5:       %s' % use_hdf)
     print('###   * Spy:        %s' % use_spy)
+    print('###   * Gcov:       %s' % use_gcov)
     print('###   * CMake:      %s' % use_cmake)
     print('###   * RDIR:       %s' % use_rdir)
     print('#'*60)
@@ -525,6 +526,7 @@ def run_tests(test_modules=None,
     use_llvm = feature_enabled('llvm', False)
     use_hdf = feature_enabled('hdf', False)
     use_spy = feature_enabled('spy', False)
+    use_gcov = feature_enabled('gcov', False)
     use_cmake = feature_enabled('cmake', False)
     use_rdir = feature_enabled('rdir', True)
 
@@ -534,6 +536,8 @@ def run_tests(test_modules=None,
     if use_gasnet and launcher is None:
         raise Exception('GASNet is enabled but launcher is not set (use --launcher or LAUNCHER)')
     launcher = launcher.split() if launcher is not None else []
+
+    gcov_flags = ' -ftest-coverage -fprofile-arcs'
 
     # Normalize the test environment.
     env = dict(list(os.environ.items()) + [
@@ -549,9 +553,17 @@ def run_tests(test_modules=None,
         ('TEST_HDF', '1' if use_hdf else '0'),
         ('USE_SPY', '1' if use_spy else '0'),
         ('TEST_SPY', '1' if use_spy else '0'),
+        ('TEST_GCOV', '1' if use_gcov else '0'),
         ('USE_RDIR', '1' if use_rdir else '0'),
-        ('LG_RT_DIR', os.path.join(root_dir, 'runtime')),
-    ])
+        ('LG_RT_DIR', os.path.join(root_dir, 'runtime'))] + (
+
+        # Gcov doesn't get a USE_GCOV flag, but instead stuff the GCC
+        # options for Gcov on to the compile and link flags.
+        [('CC_FLAGS', (os.environ['CC_FLAGS'] + gcov_flags
+                       if 'CC_FLAGS' in os.environ else gcov_flags)),
+         ('LD_FLAGS', (os.environ['LD_FLAGS'] + gcov_flags
+                       if 'LD_FLAGS' in os.environ else gcov_flags)),
+        ] if use_gcov else []))
 
     if check_ownership:
         check_test_legion_cxx(root_dir)
@@ -559,8 +571,8 @@ def run_tests(test_modules=None,
 
     report_mode(test_regent, test_legion_cxx, test_fuzzer, test_realm,
                 test_external, test_private, test_perf, use_gasnet,
-                use_cuda, use_openmp, use_llvm, use_hdf, use_spy, use_cmake,
-                use_rdir)
+                use_cuda, use_openmp, use_llvm, use_hdf, use_spy, use_gcov,
+                use_cmake, use_rdir)
 
     tmp_dir = tempfile.mkdtemp(dir=root_dir)
     if verbose:
@@ -636,8 +648,8 @@ def driver():
         help='Build Legion in debug mode (also via DEBUG).')
     parser.add_argument(
         '--use', dest='use_features', action='append',
-        choices=['gasnet', 'cuda', 'openmp', 'llvm', 'hdf', 'spy', 'cmake',
-                 'rdir'],
+        choices=['gasnet', 'cuda', 'openmp', 'llvm', 'hdf', 'spy', 'gcov',
+                 'cmake', 'rdir'],
         default=None,
         help='Build Legion with features (also via USE_*).')
     parser.add_argument(

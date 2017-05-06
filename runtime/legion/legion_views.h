@@ -360,7 +360,8 @@ namespace Legion {
                                          const unsigned index,
                                          const AddressSpaceID source,
                            LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                                         std::set<RtEvent> &applied_events);
+                                         std::set<RtEvent> &applied_events,
+                                         const bool actually_above = true);
     public:
       virtual void add_copy_user(ReductionOpID redop, ApEvent copy_term,
                                  VersionTracker *version_tracker,
@@ -427,7 +428,8 @@ namespace Legion {
                                          const unsigned index,
                                          const FieldMask &user_mask,
                                          std::set<ApEvent> &preconditions,
-                                         std::set<RtEvent> &applied_events);
+                                         std::set<RtEvent> &applied_events,
+                                         const bool actually_above = true);
     public:
       virtual void add_user(const RegionUsage &user, ApEvent term_event,
                             const FieldMask &user_mask, Operation *op,

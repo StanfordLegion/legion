@@ -599,7 +599,8 @@ namespace Legion {
         find_local_copy_preconditions_above(redop, reading, single_copy, 
                                       restrict_out, copy_mask, ColorPoint(), 
                                       origin_node, versions,creator_op_id,index,
-                                      source, preconditions, applied_events);
+                                      source, preconditions, applied_events,
+                                      false/*actually above*/);
       if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_point = logical_node->get_color();
@@ -761,13 +762,17 @@ namespace Legion {
                                                   const unsigned index,
                                                   const AddressSpaceID source,
                            LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                                              std::set<RtEvent> &applied_events)
+                                              std::set<RtEvent> &applied_events,
+                                                  const bool actually_above)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
                         MATERIALIZED_VIEW_FIND_LOCAL_COPY_PRECONDITIONS_CALL);
-      // If we are not the logical owner, we need to see if we are up to date 
-      if (!is_logical_owner())
+      // If we are not the logical owner and we're not actually already above
+      // the base level, then we need to see if we are up to date 
+      // Otherwise we did this check at the base level and it went all
+      // the way up the tree so we are already good
+      if (!is_logical_owner() && !actually_above)
       {
         // We are also reading if we are doing reductions
         perform_remote_valid_check(copy_mask, versions,reading || (redop != 0));
@@ -1146,13 +1151,18 @@ namespace Legion {
                                                 const unsigned index,
                                                 const FieldMask &user_mask,
                                               std::set<ApEvent> &preconditions,
-                                              std::set<RtEvent> &applied_events)
+                                              std::set<RtEvent> &applied_events,
+                                                const bool actually_above)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
                         MATERIALIZED_VIEW_FIND_LOCAL_PRECONDITIONS_CALL);
-      // If we are not the logical owner, we need to see if we are up to date 
-      if (!is_logical_owner())
+      // If we are not the logical owner and we are not actually above the
+      // base level, then we need to see if we are up to date 
+      // If we are actually above then we already did this check at the
+      // base level and went all the way up the tree so there is no need
+      // to do it again here
+      if (!is_logical_owner() && !actually_above)
       {
 #ifdef DEBUG_LEGION
         assert(!IS_REDUCE(usage)); // no reductions for now, might change
@@ -3095,7 +3105,8 @@ namespace Legion {
           args.logical_owner = logical_owner;
           args.target_node = target_node;
           args.manager = phy_man;
-          args.parent = parent;
+          // Have to static cast this since it might not be ready
+          args.parent = static_cast<MaterializedView*>(par_view);
           args.context_uid = context_uid;
           runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
              NULL/*op*/, Runtime::merge_events(par_ready, man_ready));
@@ -3266,6 +3277,11 @@ namespace Legion {
         {
           request_event = Runtime::create_rt_user_event();
           remote_update_requests[request_event] = need_valid_update;
+          // We also have to filter out the current and previous epoch 
+          // user lists so that when we get the update then we know we
+          // won't have polluting users in the list to start
+          filter_local_users(need_valid_update, current_epoch_users);
+          filter_local_users(need_valid_update, previous_epoch_users);
         }
       }
       // If we have a request event, send the request now
@@ -3842,11 +3858,6 @@ namespace Legion {
       {
         AutoLock v_lock(view_lock);
         remote_valid_mask -= invalid_mask;
-        // We also have to filter out the current and previous epoch 
-        // user lists so that when we get an update then we know we
-        // won't have polluting users in the list to start
-        filter_local_users(invalid_mask, current_epoch_users);
-        filter_local_users(invalid_mask, previous_epoch_users);
       }
       Runtime::trigger_event(done_event);
     }
