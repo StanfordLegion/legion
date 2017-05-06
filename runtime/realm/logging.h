@@ -23,6 +23,7 @@
 #include <string>
 #include <sstream>
 
+
 namespace Realm {
    // this can be set at compile time to eliminate instructions for some/all logging
 #ifndef REALM_LOGGING_MIN_LEVEL
@@ -35,44 +36,10 @@ namespace Realm {
 #endif
    
    class LoggerMessage;
-   class LoggerMessageDescriptor;
+   typedef int LoggerMessageID;
+   static const LoggerMessageID RESERVED_LOGGER_MESSAGE_ID = 0;
    class LoggerConfig;
    class LoggerOutputStream;
-   
-   
-   
-   class LoggerMessageDescriptor {
-   public:
-      typedef unsigned long LoggerMessageDescriptorID;
-      LoggerMessageDescriptor() : mID(0), mDescription("") {}
-      LoggerMessageDescriptor(LoggerMessageDescriptorID id, std::string htmlDescription){
-         mID = id;
-#ifdef LOG_MESSAGE_KEEP_DESCRIPTION
-         mDescription = htmlDescription;
-#endif
-      }
-      LoggerMessageDescriptor::LoggerMessageDescriptorID id() const{ return mID; }
-      std::string description() const{
-#ifdef LOG_MESSAGE_KEEP_DESCRIPTION
-         return mDescription;
-#else
-         return missingDescription();
-#endif
-      }
-      std::string formattedOutput() const {
-         return "{ " + std::to_string(mID) + ", \"" + description() + "\" },";
-      }
-
-   private:
-      std::string missingDescription() const {
-         return "LoggerMessageDescriptor description not saved, recompile with LOG_MESSAGE_KEEP_DESCRIPTION to save it";
-      }
-      LoggerMessageDescriptorID mID;
-      std::string mDescription;
-   };
-
-   
-   
    
    class Logger {
    public:
@@ -103,13 +70,13 @@ namespace Realm {
       LoggerMessage error(void);
       LoggerMessage fatal(void);
       
-      LoggerMessage spew(LoggerMessageDescriptor);
-      LoggerMessage debug(LoggerMessageDescriptor);
-      LoggerMessage info(LoggerMessageDescriptor);
-      LoggerMessage print(LoggerMessageDescriptor);
-      LoggerMessage warning(LoggerMessageDescriptor);
-      LoggerMessage error(LoggerMessageDescriptor);
-      LoggerMessage fatal(LoggerMessageDescriptor);
+      LoggerMessage spew(LoggerMessageID);
+      LoggerMessage debug(LoggerMessageID);
+      LoggerMessage info(LoggerMessageID);
+      LoggerMessage print(LoggerMessageID);
+      LoggerMessage warning(LoggerMessageID);
+      LoggerMessage error(LoggerMessageID);
+      LoggerMessage fatal(LoggerMessageID);
       
       // use this only if you want a dynamic level for some reason
       LoggerMessage newmsg(LoggingLevel level);
@@ -124,16 +91,16 @@ namespace Realm {
       void fatal(const char *fmt, ...) __attribute__((format (printf, 2, 3)));
       
       // newer collated messages
-      void spew(LoggerMessageDescriptor descriptor, const char *fmt, ...) __attribute__((format (printf, 3, 4)));
-      void debug(LoggerMessageDescriptor descriptor, const char *fmt, ...) __attribute__((format (printf, 3, 4)));
-      void info(LoggerMessageDescriptor descriptor, const char *fmt, ...) __attribute__((format (printf, 3, 4)));
-      void print(LoggerMessageDescriptor descriptor, const char *fmt, ...) __attribute__((format (printf, 3, 4)));
-      void warning(LoggerMessageDescriptor descriptor, const char *fmt, ...) __attribute__((format (printf, 3, 4)));
-      void error(LoggerMessageDescriptor descriptor, const char *fmt, ...) __attribute__((format (printf, 3, 4)));
-      void fatal(LoggerMessageDescriptor descriptor, const char *fmt, ...) __attribute__((format (printf, 3, 4)));
+      void spew(LoggerMessageID, const char *fmt, ...) __attribute__((format (printf, 3, 4)));
+      void debug(LoggerMessageID, const char *fmt, ...) __attribute__((format (printf, 3, 4)));
+      void info(LoggerMessageID, const char *fmt, ...) __attribute__((format (printf, 3, 4)));
+      void print(LoggerMessageID, const char *fmt, ...) __attribute__((format (printf, 3, 4)));
+      void warning(LoggerMessageID, const char *fmt, ...) __attribute__((format (printf, 3, 4)));
+      void error(LoggerMessageID, const char *fmt, ...) __attribute__((format (printf, 3, 4)));
+      void fatal(LoggerMessageID, const char *fmt, ...) __attribute__((format (printf, 3, 4)));
       
-
-
+      
+      
       
    protected:
       friend class LoggerMessage;
@@ -164,7 +131,7 @@ namespace Realm {
       
       LoggerMessage(void);  // default constructor makes an inactive message
       LoggerMessage(Logger *_logger, bool _active, Logger::LoggingLevel _level);
-      LoggerMessage(LoggerMessageDescriptor descriptor, Logger *_logger, bool _active, Logger::LoggingLevel _level);
+      LoggerMessage(LoggerMessageID messageID, Logger *_logger, bool _active, Logger::LoggingLevel _level);
       
       
    public:
@@ -176,14 +143,14 @@ namespace Realm {
       
       // vprintf-style
       LoggerMessage& vprintf(const char *fmt, va_list ap);
-      LoggerMessage& vprintf(LoggerMessageDescriptor descriptor, const char *fmt, va_list ap);
+      LoggerMessage& vprintf(LoggerMessageID messageID, const char *fmt, va_list ap);
       
       bool is_active(void) const;
       
       std::ostream& get_stream(void);
       
    protected:
-      LoggerMessageDescriptor descriptor;
+      LoggerMessageID messageID;
       Logger *logger;
       bool active;
       Logger::LoggingLevel level;
