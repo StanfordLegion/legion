@@ -59,6 +59,7 @@ def run(filename, debug, verbose, flags, env):
     retcode = proc.wait()
     if retcode != 0:
         raise TestFailure(' '.join(args), output.decode('utf-8') if output is not None else None)
+    return ' '.join(args)
 
 def run_spy(logfiles, verbose):
     cmd = ['pypy', os.path.join(regent.root_dir(), 'tools', 'legion_spy.py'),
@@ -110,7 +111,7 @@ def test_compile_fail(filename, debug, verbose, flags, env):
     runs_with = find_labeled_flags(filename, 'runs-with')
     try:
         for params in runs_with:
-            run(filename, debug, False, flags + params, env)
+            run(filename, debug, False, params + flags, env)
     except TestFailure as e:
         failure = e.output
         lines = set(line.strip() for line in failure.strip().split('\n')
@@ -126,7 +127,7 @@ def test_run_pass(filename, debug, verbose, flags, env):
     runs_with = find_labeled_flags(filename, 'runs-with')
     try:
         for params in runs_with:
-            run(filename, debug, verbose, flags + params, env)
+            run(filename, debug, verbose, params + flags, env)
     except TestFailure as e:
         raise Exception('Command failed:\n%s\n\nOutput:\n%s' % (e.command, e.output))
 
@@ -138,12 +139,17 @@ def test_spy(filename, debug, verbose, flags, env):
     runs_with = find_labeled_flags(filename, 'runs-with')
     try:
         for params in runs_with:
-            run(filename, debug, verbose, flags + params + spy_flags, env)
-            spy_logs = glob.glob(os.path.join(spy_dir, 'spy_*.log'))
-            assert len(spy_logs) > 0
-            run_spy(spy_logs, verbose)
-    except TestFailure as e:
-        raise Exception('Command failed:\n%s\n\nOutput:\n%s' % (e.command, e.output))
+            try:
+                cmd = run(filename, debug, verbose, params + flags + spy_flags, env)
+            except TestFailure as e:
+                raise Exception('Command failed:\n%s\n\nOutput:\n%s' % (e.command, e.output))
+
+            try:
+                spy_logs = glob.glob(os.path.join(spy_dir, 'spy_*.log'))
+                assert len(spy_logs) > 0
+                run_spy(spy_logs, verbose)
+            except TestFailure as e:
+                raise Exception('Command failed:\n%s\n%s\n\nOutput:\n%s' % (cmd, e.command, e.output))
     finally:
         shutil.rmtree(spy_dir)
 
@@ -178,8 +184,7 @@ class Counter:
         self.passed = 0
         self.failed = 0
 
-
-def get_test_specs(only_spy, only_hdf5, extra_flags):
+def get_test_specs(use_run, use_spy, use_hdf5, extra_flags):
     base = [
         # FIXME: Move this flag into a per-test parameter so we don't use it everywhere.
         # Don't include backtraces on those expected to fail
@@ -194,6 +199,8 @@ def get_test_specs(only_spy, only_hdf5, extra_flags):
           os.path.join('examples'),
           os.path.join('..', 'tutorial'),
          )),
+    ]
+    run = [
         ('run_pass', (test_run_pass, ([] + extra_flags, {'REALM_BACKTRACE': '1'})),
          (os.path.join('tests', 'regent', 'run_pass'),
           os.path.join('tests', 'regent', 'perf'),
@@ -218,20 +225,25 @@ def get_test_specs(only_spy, only_hdf5, extra_flags):
          )),
     ]
 
-    if only_spy:
-        return spy
-    elif only_hdf5:
-        return hdf5
-    else:
-        return base
+    result = []
+    if not use_run and not use_spy and not use_hdf5:
+        result.extend(base)
+        result.extend(run)
+    if use_run:
+        result.extend(run)
+    if use_spy:
+        result.extend(spy)
+    if use_hdf5:
+        result.extend(hdf5)
+    return result
 
-def run_all_tests(thread_count, debug, spy, hdf5, extra_flags, verbose, quiet,
+def run_all_tests(thread_count, debug, run, spy, hdf5, extra_flags, verbose, quiet,
                   only_patterns, skip_patterns):
     thread_pool = multiprocessing.Pool(thread_count)
     results = []
 
     # Run tests asynchronously.
-    tests = get_test_specs(spy, hdf5, extra_flags)
+    tests = get_test_specs(run, spy, hdf5, extra_flags)
     for test_name, test_fn, test_dirs in tests:
         test_paths = []
         for test_dir in test_dirs:
@@ -336,6 +348,10 @@ def test_driver(argv):
                         action='store_true',
                         help='enable debug mode',
                         dest='debug')
+    parser.add_argument('--run_pass',
+                        action='store_true',
+                        help='limit to run_pass tests',
+                        dest='run_pass')
     parser.add_argument('--spy', '-s',
                         action='store_true',
                         help='run Legion Spy tests',
@@ -373,6 +389,7 @@ def test_driver(argv):
     run_all_tests(
         args.thread_count,
         args.debug,
+        args.run_pass,
         args.spy,
         args.hdf5,
         args.extra_flags,
