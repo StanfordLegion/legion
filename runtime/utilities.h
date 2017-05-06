@@ -39,7 +39,6 @@
 
 #include "realm/logging.h"
 #include "realm/timers.h"
-#include "realm/logger_message_descriptor.h"
 
 //#define DETAILED_TIMING
 
@@ -47,7 +46,6 @@ namespace LegionRuntime {
   // map old Logger::Category to new Realm::Logger
   namespace Logger {
     typedef Realm::Logger Category;
-    typedef Realm::LoggerMessageDescriptor MessageDescriptor;
   };
   
 #ifdef DEBUG_REALM

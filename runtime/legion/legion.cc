@@ -21,6 +21,7 @@
 #include "legion_context.h"
 #include "legion_profiling.h"
 #include "legion_allocation.h"
+#include "logger_message_descriptor.h"
 
 namespace Legion {
     
