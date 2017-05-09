@@ -280,15 +280,15 @@ clang38_cxx98_debug_checks_hdf5_regent:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_checks, *hdf5, *regent]
-# # FIXME: Clang with GASNet freezes
-# clang38_cxx98_debug_checks_gasnet_legion:
-#   <<: [*linux_compute, *image, *tests]
-#   variables:
-#     <<: [*clang38, *terra38, *debug, *cxx98_checks, *gasnet, *legion]
-# clang38_cxx98_debug_checks_gasnet_regent:
-#   <<: [*linux_compute, *image, *tests]
-#   variables:
-#     <<: [*clang38, *terra38, *debug, *cxx98_checks, *gasnet, *regent]
+# FIXME: Clang with GASNet freezes
+clang38_cxx98_debug_checks_gasnet_legion:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*clang38, *terra38, *debug, *cxx98_checks, *gasnet, *legion]
+clang38_cxx98_debug_checks_gasnet_regent:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*clang38, *terra38, *debug, *cxx98_checks, *gasnet, *regent]
 # clang38_cxx98_debug_spy_gasnet_regent:
 #   <<: [*linux_compute, *image, *tests]
 #   variables:
