@@ -33,6 +33,7 @@
 #include <list>
 #include <deque>
 #include <vector>
+#include <typeinfo>
 
 #include "legion_config.h"
 #include "legion_template_help.h"
@@ -1971,6 +1972,16 @@ namespace Legion {
   public:
     Realm::Barrier::timestamp_t timestamp;
   }; 
+  
+  // A class for preventing serialization of Legion objects
+  // which cannot be serialized
+  template<typename T>
+  class Unserializable {
+  public:
+    inline size_t legion_buffer_size(void);
+    inline size_t legion_serialize(void *buffer);
+    inline size_t legion_deserialize(const void *buffer);
+  };
 
 }; // Legion namespace
 

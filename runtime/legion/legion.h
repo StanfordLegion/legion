@@ -78,7 +78,8 @@ namespace Legion {
       inline bool exists(void) const { return (id != 0); }
       inline TypeTag get_type_tag(void) const { return type_tag; }
     protected:
-      friend std::ostream& operator<<(std::ostream& os, const IndexSpace& is);
+      friend std::ostream& operator<<(std::ostream& os, 
+                                      const IndexSpace& is);
       IndexSpaceID id;
       IndexTreeID tid;
       TypeTag type_tag;
@@ -223,8 +224,8 @@ namespace Legion {
       inline TypeTag get_type_tag(void) const 
         { return index_space.get_type_tag(); }
     protected:
-      friend std::ostream& operator<<(
-          std::ostream& os, const LogicalRegion& lr);
+      friend std::ostream& operator<<(std::ostream& os, 
+                                      const LogicalRegion& lr);
       // These are private so the user can't just arbitrarily change them
       RegionTreeID tree_id;
       IndexSpace index_space;
@@ -334,7 +335,7 @@ namespace Legion {
      *
      * @see Runtime
      */
-    class IndexAllocator {
+    class IndexAllocator : public Unserializable<IndexAllocator> {
     public:
       IndexAllocator(void);
       IndexAllocator(const IndexAllocator &allocator);
@@ -383,7 +384,7 @@ namespace Legion {
      * @see FieldSpace
      * @see Runtime
      */
-    class FieldAllocator {
+    class FieldAllocator : public Unserializable<FieldAllocator> {
     public:
       FieldAllocator(void);
       FieldAllocator(const FieldAllocator &allocator);
@@ -486,7 +487,7 @@ namespace Legion {
      * It is up to the user to make sure that the the data described by
      * a task argument is valid throughout the duration of its lifetime.
      */
-    class TaskArgument {
+    class TaskArgument : public Unserializable<TaskArgument> {
       public:
       TaskArgument(void) : args(NULL), arglen(0) { }
       TaskArgument(const void *arg, size_t argsize)
@@ -518,7 +519,7 @@ namespace Legion {
      * calls, especially if there are very few changes applied to
      * the map between task call launches.
      */
-    class ArgumentMap {
+    class ArgumentMap : public Unserializable<ArgumentMap> {
     public:
       ArgumentMap(void);
       ArgumentMap(const FutureMap &rhs);
@@ -600,7 +601,7 @@ namespace Legion {
      * collected by the runtime.  Except for predicates with constant
      * value, all other predicates should be created by the runtime.
      */
-    class Predicate {
+    class Predicate : public Unserializable<Predicate> {
     public:
       static const Predicate TRUE_PRED;
       static const Predicate FALSE_PRED;
@@ -1014,7 +1015,7 @@ namespace Legion {
      * futures which come from tasks which predicates that resolve
      * to false.
      */
-    class Future {
+    class Future : public Unserializable<Future> {
     public:
       Future(void);
       Future(const Future &f);
@@ -1127,7 +1128,7 @@ namespace Legion {
      * context in which they are created as the runtime garbage collects
      * them after the enclosing task context completes execution.
      */
-    class FutureMap {
+    class FutureMap : public Unserializable<FutureMap> {
     public:
       FutureMap(void);
       FutureMap(const FutureMap &map);
@@ -1220,7 +1221,7 @@ namespace Legion {
      * runtime overhead. These static dependences need only
      * be specified for dependences based on region requirements.
      */
-    struct StaticDependence {
+    struct StaticDependence : public Unserializable<StaticDependence> {
     public:
       StaticDependence(void);
       StaticDependence(unsigned previous_offset,
@@ -1941,7 +1942,7 @@ namespace Legion {
      * by value.  They should never escape the context in which
      * they are created.
      */
-    class PhysicalRegion {
+    class PhysicalRegion : public Unserializable<PhysicalRegion> {
     public:
       PhysicalRegion(void);
       PhysicalRegion(const PhysicalRegion &rhs);
@@ -2209,7 +2210,7 @@ namespace Legion {
     //                     MPI Interoperability Classes
     //==========================================================================
 
-    class MPILegionHandshake {
+    class MPILegionHandshake : public Unserializable<MPILegionHandshake> {
     public:
       MPILegionHandshake(void);
       MPILegionHandshake(const MPILegionHandshake &rhs);
