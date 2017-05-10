@@ -1879,10 +1879,7 @@ namespace Legion {
     {
         if (impl == NULL)
         {
-            LegionInternal::Logger::MessageDescriptor
-            ILLEGAL_REQ_EMPTY_FUTURE(1000,
-                                     "this is an html description of what to do if you see the subsequent error"
-                                     " and this is additional string that should be captured");
+            LegionInternal::Logger::MessageDescriptor ILLEGAL_REQ_EMPTY_FUTURE(1000, "undefined");
             Internal::log_run.error(ILLEGAL_REQ_EMPTY_FUTURE.id(), "Illegal request for future "
                                     "value from empty future");
 #ifdef DEBUG_LEGION
@@ -1899,7 +1896,8 @@ namespace Legion {
     {
         if (impl == NULL)
         {
-            Internal::log_run.error("Illegal request for future "
+            LegionInternal::Logger::MessageDescriptor ILLEGAL_REQ_EMPTY_FUTURE1(1001, "undefined");
+            Internal::log_run.error(ILLEGAL_REQ_EMPTY_FUTURE1.id(), "Illegal request for future "
                                     "size from empty future");
 #ifdef DEBUG_LEGION
             assert(false);
@@ -2230,7 +2228,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-        Internal::log_run.warning("THERE ARE NEW METHODS FOR PROJECTION FUNCTORS "
+        LegionInternal::Logger::MessageDescriptor NEW_METHODS_PROJECTION_FUNCTIONS(1002, "undefined");
+        Internal::log_run.warning(NEW_METHODS_PROJECTION_FUNCTIONS.id(),
+                                  "THERE ARE NEW METHODS FOR PROJECTION FUNCTORS "
                                   "THAT MUST BE OVERRIDEN! CALLING DEPRECATED METHODS FOR NOW!");
 #endif
         switch (mappable->get_mappable_type())
@@ -2239,7 +2239,8 @@ namespace Legion {
                 return project(0/*dummy ctx*/, const_cast<Task*>(mappable->as_task()),
                                index, upper_bound, point);
             default:
-                Internal::log_run.error("Unknown mappable type passed to projection "
+                LegionInternal::Logger::MessageDescriptor UNKNOWN_MAPPABLE(1003, "undefined");
+                Internal::log_run.error(UNKNOWN_MAPPABLE.id(), "Unknown mappable type passed to projection "
                                         "functor! You must override the default "
                                         "implementations of the non-deprecated "
                                         "'project' methods!");
@@ -2254,7 +2255,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-        Internal::log_run.warning("THERE ARE NEW METHODS FOR PROJECTION FUNCTORS "
+        LegionInternal::Logger::MessageDescriptor NEW_METHODS_PROJECTION_FUNCTIONS3(1004, "undefined");
+        Internal::log_run.warning(NEW_METHODS_PROJECTION_FUNCTIONS3.id(),
+                                  "THERE ARE NEW METHODS FOR PROJECTION FUNCTORS "
                                   "THAT MUST BE OVERRIDEN! CALLING DEPRECATED METHODS FOR NOW!");
 #endif
         switch (mappable->get_mappable_type())
@@ -2263,7 +2266,9 @@ namespace Legion {
                 return project(0/*dummy ctx*/, const_cast<Task*>(mappable->as_task()),
                                index, upper_bound, point);
             default:
-                Internal::log_run.error("Unknown mappable type passed to projection "
+                LegionInternal::Logger::MessageDescriptor UNKNOWN_MAPPABLE2(1005, "undefined");
+                Internal::log_run.error(UNKNOWN_MAPPABLE2.id(),
+                                        "Unknown mappable type passed to projection "
                                         "functor! You must override the default "
                                         "implementations of the non-deprecated "
                                         "'project' methods!");
@@ -2277,7 +2282,9 @@ namespace Legion {
                                              unsigned index, LogicalRegion upper_bound, const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
-        Internal::log_run.error("ERROR: INVOCATION OF DEPRECATED PROJECTION "
+        LegionInternal::Logger::MessageDescriptor DEPRECATED_PROJECTION_FUNCTOR(1005, "undefined");
+        Internal::log_run.error(DEPRECATED_PROJECTION_FUNCTOR.id(),
+                                "ERROR: INVOCATION OF DEPRECATED PROJECTION "
                                 "FUNCTOR METHOD WITHOUT AN OVERRIDE!");
         assert(false);
         return LogicalRegion::NO_REGION;
@@ -2288,7 +2295,9 @@ namespace Legion {
                                              unsigned index, LogicalPartition upper_bound, const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
-        Internal::log_run.error("ERROR: INVOCATION OF DEPRECATED PROJECTION "
+        LegionInternal::Logger::MessageDescriptor DEPRECATED_PROJECTION_FUNCTOR2(1006, "undefined");
+        Internal::log_run.error(DEPRECATED_PROJECTION_FUNCTOR2.id(),
+                                "ERROR: INVOCATION OF DEPRECATED PROJECTION "
                                 "FUNCTOR METHOD WITHOUT AN OVERRIDE!");
         assert(false);
         return LogicalRegion::NO_REGION;

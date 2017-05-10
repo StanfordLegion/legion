@@ -19,49 +19,53 @@ import sys
 
 DECLARATION = "MessageDescriptor"
 
-def quotedString(lineSplit, index):
+def quotedString(sourceFile, tokens, index):
     result = ''
     for i in range(100):
-        token = lineSplit[i + index];
+        ensureLookahead(sourceFile, tokens, i + index);
+        token = tokens[i + index];
         if(token[0] == "\""):
             result = result + token[1:-1]
         else:
             return result;
 
 
-def tokenize(lines):
-    result = []
+def tokenize(line, tokens):
     splitters = ':;,().#'
     whitespace = ' \n\t\r'
     token = ''
     
-    i = 0;
-    for index in range(len(lines)):
-        if lines[i] == '\"':
-            for j in range(i + 1, len(lines)):
-                if lines[j] == '\"':
-                    token = lines[i : j + 1]
-                    result.append(token)
+    i = 0
+    for index in range(len(line)):
+        if line[i] == '\"':
+            for j in range(i + 1, len(line)):
+                if line[j] == '\"':
+                    token = line[i : j + 1]
+                    tokens.append(token)
                     token = ''
                     i = j
                     break
     
-        elif lines[i] in splitters or lines[i] in whitespace:
+        elif line[i] in splitters or line[i] in whitespace:
             if token != '':
-                result.append(token)
-            if(lines[i] not in whitespace):
-                result.append(lines[i])
+                tokens.append(token)
+            if(line[i] not in whitespace):
+                tokens.append(line[i])
             token = ''
         else:
-            token = token + lines[i]
+            token = token + line[i]
         i = i + 1
-        if(i >= len(lines)):
+        if(i >= len(line)):
             break
-    return result;
 
 
-def parseInput(multipleLines):
-    tokens = tokenize(multipleLines.strip())
+def ensureLookahead(sourceFile, tokens, lookahead):
+    while(len(tokens) <= lookahead):
+        line = sourceFile.readline()
+        tokenize(line, tokens)
+
+
+def parseInput(sourceFile, tokens):
     
     declaration = ''
     name = ''
@@ -70,14 +74,16 @@ def parseInput(multipleLines):
     type = ''
     message = ''
     
-    for i in range(len(tokens)):
+    i = 0;
+    while 1:
+        ensureLookahead(sourceFile, tokens, i + 6)
         token = tokens[i]
         
         if(type == '' and name != '' and token == name):
             type = tokens[i - 2]
             assert tokens[i + 1] == '.'
             assert tokens[i + 2] == 'id'
-            message = quotedString(tokens, i + 6);
+            message = quotedString(sourceFile, tokens, i + 6);
             break
         
         if(declaration != '' and name == ''):
@@ -85,31 +91,26 @@ def parseInput(multipleLines):
             assert tokens[i + 1] == '('
             code = tokens[i + 2]
             assert tokens[i + 3] == ','
-            whatToDo = quotedString(tokens, i + 4)
+            whatToDo = quotedString(sourceFile, tokens, i + 4)
         
         if(DECLARATION in token):
             declaration = token
+        i = i + 1
 
-    return declaration, name, code, whatToDo, type, message
-
-
-def readMultipleLines(line, sourceFile):
-    result = line
-    for i in range(50):
-        result = result + sourceFile.readline()
-    return result
+    return declaration, name, code, whatToDo, type, message, i
 
 
 
 def parseSourceFile(file_name):
     with open(file_name, 'rt') as sourceFile:
         line = ' '
+        tokens = []
         while len(line) > 0:
             line = sourceFile.readline()
             if(DECLARATION in line):
-                multipleLines = readMultipleLines(line, sourceFile)
-                declaration, name, code, whatToDo, type, message = parseInput(multipleLines)
-                #print '"' + type + '",', code, ',', message, ',', whatToDo
+                tokenize(line, tokens)
+                declaration, name, code, whatToDo, type, message, index = parseInput(sourceFile, tokens)
+                tokens = tokens[index:]
                 print '<p><b>' + type + ' ' + code + '</b>'
                 print '<br>Message: ' + message
                 print '<br>Remedy: ' + whatToDo
