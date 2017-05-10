@@ -5509,10 +5509,23 @@ namespace Legion {
       closed_local_node->compute_needed_shards(check_mask,target,needed_shards);
       if (!needed_shards.empty())
       {
-        // Send the request for the update to this node from the remote shards
-         
-        // Wait for the result to be valid
+        // Compute the path to this node and get the RtEvent that 
+        // uniquely identifies the composite view 
+        std::vector<LegionColor> path;
 
+        // Send the request for the update to this node from the remote shards
+        std::set<RtEvent> wait_on;
+        for (LegionMap<ShardID,FieldMask>::aligned::const_iterator it = 
+              needed_shards.begin(); it != needed_shards.end(); it++)
+        {
+          RtUserEvent shard_ready = Runtime::create_user_rt_event(); 
+
+
+          wait_on.insert(shard_ready);
+        }
+        // Wait for the result to be valid
+        RtEvent wait_for = Runtime::merge_events(wait_on);
+        wait_for.wait();
       }
       // Once we're done then we can add this to the set of checks
       AutoLock b_lock(base_lock);
