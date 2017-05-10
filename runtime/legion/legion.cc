@@ -1879,9 +1879,10 @@ namespace Legion {
     {
         if (impl == NULL)
         {
-            LegionRuntime::Logger::MessageDescriptor
+            LegionInternal::Logger::MessageDescriptor
             ILLEGAL_REQ_EMPTY_FUTURE(1000,
-                                     "this is an html description of what to do if you see the subsequent error");
+                                     "this is an html description of what to do if you see the subsequent error"
+                                     " and this is additional string that should be captured");
             Internal::log_run.error(ILLEGAL_REQ_EMPTY_FUTURE.id(), "Illegal request for future "
                                     "value from empty future");
 #ifdef DEBUG_LEGION
