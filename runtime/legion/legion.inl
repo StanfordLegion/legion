@@ -3333,6 +3333,45 @@ namespace Legion {
       return os;
     }
 
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline size_t Unserializable<T>::legion_buffer_size(void)
+    //--------------------------------------------------------------------------
+    {
+      const std::type_info &info = typeid(T);
+      fprintf(stderr,"ERROR: Illegal attempt to serialize Legion type %s. "
+          "Objects of type %s are not allowed to be passed by value into or "
+          "out of tasks.\n", info.name(), info.name());
+      assert(false);
+      return 0;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline size_t Unserializable<T>::legion_serialize(void *buffer)
+    //--------------------------------------------------------------------------
+    {
+      const std::type_info &info = typeid(T);
+      fprintf(stderr,"ERROR: Illegal attempt to serialize Legion type %s. "
+          "Objects of type %s are not allowed to be passed by value into or "
+          "out of tasks.\n", info.name(), info.name());
+      assert(false);
+      return 0;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline size_t Unserializable<T>::legion_deserialize(const void *buffer)
+    //--------------------------------------------------------------------------
+    {
+      const std::type_info &info = typeid(T);
+      fprintf(stderr,"ERROR: Illegal attempt to deserialize Legion type %s. "
+          "Objects of type %s are not allowed to be passed by value into or "
+          "out of tasks.\n", info.name(), info.name());
+      assert(false);
+      return 0;
+    }
+
 }; // namespace Legion
 
 // This is for backwards compatibility with the old namespace scheme
