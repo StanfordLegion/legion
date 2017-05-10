@@ -18,14 +18,14 @@ env:
   - CC_FLAGS="-std=c++98 -DPRIVILEGE_CHECKS -DBOUNDS_CHECKS" DEBUG=1 TEST_REGENT=0
   - CC_FLAGS="-std=c++98 -DLEGION_SPY" DEBUG=1 USE_SPY=1 TEST_REGENT=0
   - CC_FLAGS="-std=c++98 -DLEGION_SPY" DEBUG=1 USE_SPY=1 TEST_LEGION_CXX=0 TEST_REALM=0
-  - CC_FLAGS="-std=c++98" USE_HDF=1 TEST_REGENT=0
+  - CC_FLAGS="-std=c++98" USE_GASNET=1 USE_HDF=1 TEST_REGENT=0
   - CC_FLAGS="-std=c++0x" DEBUG=0 TEST_REGENT=0
 matrix:
   exclude:
     - os: osx
       compiler: gcc
     - os: osx
-      env: CC_FLAGS="-std=c++98" USE_HDF=1 TEST_REGENT=0
+      env: CC_FLAGS="-std=c++98" USE_GASNET=1 USE_HDF=1 TEST_REGENT=0
 # blacklist some branches
 branches:
   only:
@@ -39,7 +39,9 @@ before_install:
       sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
       sudo add-apt-repository ppa:pypy/ppa -y
       sudo apt-get update -qq
-      sudo apt-get install -qq g++-4.9 clang-3.5 libclang-3.5-dev llvm-3.5-dev openmpi-bin libopenmpi-dev libblas-dev liblapack-dev libhdf5-dev pypy
+      # OpenMPI packages: openmpi-bin libopenmpi-dev
+      # MPICH packages: mpich2 libmpich-dev
+      sudo apt-get install -qq g++-4.9 clang-3.5 libclang-3.5-dev llvm-3.5-dev mpich2 libmpich-dev libblas-dev liblapack-dev libhdf5-dev pypy
     fi
   - |
     if [[ "$(uname)" = "Darwin" ]]; then
@@ -55,7 +57,10 @@ before_install:
     if [[ "$USE_GASNET" -eq 1 ]]; then
       export CONDUIT=mpi
       export GASNET_ROOT="$PWD/gasnet/release"
-      export LAUNCHER="mpirun -n 2 -bind-to none -x TERRA_PATH -x INCLUDE_PATH -x LD_LIBRARY_PATH -x LG_RT_DIR"
+      # OpenMPI:
+      # export LAUNCHER="mpirun -n 2 -bind-to none -x TERRA_PATH -x INCLUDE_PATH -x LD_LIBRARY_PATH -x LG_RT_DIR"
+      # MPICH:
+      export LAUNCHER="mpirun -n 2"
       unset WARN_AS_ERROR
       git clone https://github.com/StanfordLegion/gasnet.git gasnet
       pushd gasnet
