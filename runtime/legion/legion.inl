@@ -2581,6 +2581,7 @@ namespace Legion {
           "Objects of type %s are not allowed to be passed by value into or "
           "out of tasks.\n", info.name(), info.name());
       assert(false);
+      return 0;
     }
 
     //--------------------------------------------------------------------------
@@ -2593,6 +2594,7 @@ namespace Legion {
           "Objects of type %s are not allowed to be passed by value into or "
           "out of tasks.\n", info.name(), info.name());
       assert(false);
+      return 0;
     }
 
     //--------------------------------------------------------------------------
@@ -2605,6 +2607,7 @@ namespace Legion {
           "Objects of type %s are not allowed to be passed by value into or "
           "out of tasks.\n", info.name(), info.name());
       assert(false);
+      return 0;
     }
 
 }; // namespace Legion
