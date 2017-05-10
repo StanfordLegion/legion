@@ -1166,6 +1166,7 @@ namespace Legion {
       virtual ~CompositeBase(void);
     protected:
       CompositeCopyNode* construct_copy_tree(MaterializedView *dst,
+                                             ClosedNode *closed_node,
                                              RegionTreeNode *logical_node,
                                              FieldMask &copy_mask,
                                              FieldMask &locally_complete,
@@ -1181,9 +1182,14 @@ namespace Legion {
                                          CompositeCopier &copier,
                                          CompositeCopyNode *result,
            LegionMap<CompositeNode*,FieldMask>::aligned &children_to_traverse);
+      void perform_sharding_check(FieldMask check_mask,
+                                  ClosedNode *closed_local_node,
+                                  RegionTreeNode *target);
     public:
       virtual InnerContext* get_owner_context(void) const = 0;
-      virtual void perform_ready_check(FieldMask mask) = 0;
+      virtual void perform_ready_check(FieldMask mask,
+                                       ClosedNode *closed_local_node,
+                                       RegionTreeNode *target) = 0;
       virtual void find_valid_views(const FieldMask &update_mask,
                                     const FieldMask &up_mask,
                   LegionMap<LogicalView*,FieldMask>::aligned &valid_views,
@@ -1197,6 +1203,10 @@ namespace Legion {
       LegionMap<CompositeNode*,FieldMask>::aligned children;
       LegionMap<LogicalView*,FieldMask>::aligned valid_views;
       LegionMap<ReductionView*,FieldMask>::aligned reduction_views;
+    protected:
+      // For control replication to determine which shard checks
+      // we've performed for different sub-nodes
+      LegionMap<RegionTreeNode*,FieldMask>::aligned shard_checks; 
     };
 
     /**
@@ -1299,11 +1309,15 @@ namespace Legion {
       virtual void pack_upper_bound_node(Serializer &rez) const;
     protected:
       CompositeNode* capture_above(RegionTreeNode *node,
-                                   const FieldMask &needed_fields);
+                                   const FieldMask &needed_fields,
+                                   RegionTreeNode *target,
+                                   ClosedNode *&child_closed);
     public:
       // From CompositeBase
       virtual InnerContext* get_owner_context(void) const;
-      virtual void perform_ready_check(FieldMask mask);
+      virtual void perform_ready_check(FieldMask mask,
+                                       ClosedNode *closed_local_node,
+                                       RegionTreeNode *target);
       virtual void find_valid_views(const FieldMask &update_mask,
                                     const FieldMask &up_mask,
                   LegionMap<LogicalView*,FieldMask>::aligned &valid_views,
@@ -1387,7 +1401,9 @@ namespace Legion {
     public:
       // From CompositeBase
       virtual InnerContext* get_owner_context(void) const;
-      virtual void perform_ready_check(FieldMask mask);
+      virtual void perform_ready_check(FieldMask mask,
+                                       ClosedNode *closed_local_node,
+                                       RegionTreeNode *target);
       virtual void find_valid_views(const FieldMask &update_mask,
                                     const FieldMask &up_mask,
                   LegionMap<LogicalView*,FieldMask>::aligned &valid_views,

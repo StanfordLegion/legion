@@ -3166,6 +3166,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ClosedNode* ClosedNode::get_child_node(RegionTreeNode *child) const
+    //--------------------------------------------------------------------------
+    {
+      std::map<RegionTreeNode*,ClosedNode*>::const_iterator finder = 
+        children.find(child);
+      if (finder != children.end())
+        return finder->second;
+      else
+        return NULL;
+    }
+
+    //--------------------------------------------------------------------------
     void ClosedNode::record_closed_fields(const FieldMask &fields)
     //--------------------------------------------------------------------------
     {
@@ -3207,6 +3219,69 @@ namespace Legion {
           for (std::set<IndexSpaceNode*>::const_iterator it = 
                 pit->second.begin(); it != pit->second.end(); it++)
             spaces[*it] = fields;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool ClosedNode::has_sharded_projection(const FieldMask &mask) const
+    //--------------------------------------------------------------------------
+    {
+      if (projections.empty())
+        return false;
+      for (std::map<std::pair<ProjectionFunction*,ShardingFunction*>,
+               LegionMap<IndexSpaceNode*,FieldMask>::aligned>::const_iterator
+            pit = projections.begin(); pit != projections.end(); pit++)
+      {
+        if (pit->first.second == NULL)
+          continue;
+        for (LegionMap<IndexSpaceNode*,FieldMask>::aligned::const_iterator it =
+              pit->second.begin(); it != pit->second.end(); it++)
+        {
+          if (it->second * mask)
+            continue;
+          return true;
+        }
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void ClosedNode::compute_needed_shards(const FieldMask &mask,
+                                           RegionTreeNode *target,
+                     LegionMap<ShardID,FieldMask>::aligned &needed_shards) const
+    //--------------------------------------------------------------------------
+    {
+      if (!projections.empty())
+        return;
+      for (std::map<std::pair<ProjectionFunction*,ShardingFunction*>,
+               LegionMap<IndexSpaceNode*,FieldMask>::aligned>::const_iterator
+            pit = projections.begin(); pit != projections.end(); pit++)
+      {
+        if (pit->first.second == NULL)
+          continue;
+        for (LegionMap<IndexSpaceNode*,FieldMask>::aligned::const_iterator it =
+              pit->second.begin(); it != pit->second.end(); it++)
+        {
+          const FieldMask overlap = it->second & mask;
+          if (!overlap)
+            continue;
+          // Invert the projection function to find the interfering points
+          std::set<DomainPoint> interfering_points;
+          pit->first.first->find_interfering_points(node, it->first, 
+                                                    target, interfering_points);
+          if (!interfering_points.empty())
+          {
+            Domain full_space;
+            it->first->get_launch_space_domain(full_space);
+            for (std::set<DomainPoint>::const_iterator dit = 
+                  interfering_points.begin(); dit != 
+                  interfering_points.end(); dit++)
+            {
+              ShardID shard = pit->first.second->find_owner(*dit, full_space);
+              needed_shards[shard] |= it->second; 
+            }
+          }
         }
       }
     }

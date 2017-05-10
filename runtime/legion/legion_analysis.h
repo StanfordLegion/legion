@@ -677,11 +677,15 @@ namespace Legion {
                                             const FieldMask &close_mask) const;
     public:
       void add_child_node(ClosedNode *child);
+      ClosedNode* get_child_node(RegionTreeNode *child) const;
       void record_closed_fields(const FieldMask &closed_fields);
       void record_projections(const ProjectionEpoch *epoch,
                               const FieldMask &closed_fields);
       void record_projection(ProjectionFunction *function,
                              IndexSpaceNode *domain, const FieldMask &mask);
+      bool has_sharded_projection(const FieldMask &mask) const;
+      void compute_needed_shards(const FieldMask &mask, RegionTreeNode *target,
+                   LegionMap<ShardID,FieldMask>::aligned &needed_shards) const;
     public:
       void fix_closed_tree(void);
       void filter_dominated_fields(const ClosedNode *old_tree,

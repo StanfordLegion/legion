@@ -1364,6 +1364,12 @@ namespace Legion {
       void project_points(Operation *op, unsigned idx, 
                           const RegionRequirement &req, Runtime *runtime,
                           const std::vector<ProjectionPoint*> &points);
+      // For inverting the projection function and finding interfering
+      // points given a specific target in the region tree
+      void find_interfering_points(RegionTreeNode *upper_bound,
+                                   IndexSpaceNode *launch_space,
+                                   RegionTreeNode *target,
+                                   std::set<DomainPoint> &interfering_points);
     protected:
       // Old checking code explicitly for tasks
       void check_projection_region_result(const RegionRequirement &req,
