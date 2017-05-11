@@ -158,7 +158,6 @@ function(_GASNet_create_component_target _GASNet_MAKEFILE COMPONENT_NAME
     set(MPI_C_COMPILER ${_GASNet_LD})
     find_package(MPI REQUIRED COMPONENTS C)
     list(APPEND COMPONENT_DEPS ${MPI_C_LIBRARIES})
-    list(APPEND IDIRS ${MPI_C_INCLUDE_PATH})
   endif()
   add_library(GASNet::${COMPONENT_NAME} UNKNOWN IMPORTED)
   set_target_properties(GASNet::${COMPONENT_NAME} PROPERTIES
