@@ -2282,7 +2282,7 @@ namespace Legion {
                                              unsigned index, LogicalRegion upper_bound, const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
-        LegionInternal::Logger::MessageDescriptor DEPRECATED_PROJECTION_FUNCTOR(1005, "undefined");
+        LegionInternal::Logger::MessageDescriptor DEPRECATED_PROJECTION_FUNCTOR(1006, "undefined");
         Internal::log_run.error(DEPRECATED_PROJECTION_FUNCTOR.id(),
                                 "ERROR: INVOCATION OF DEPRECATED PROJECTION "
                                 "FUNCTOR METHOD WITHOUT AN OVERRIDE!");
@@ -2295,7 +2295,7 @@ namespace Legion {
                                              unsigned index, LogicalPartition upper_bound, const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
-        LegionInternal::Logger::MessageDescriptor DEPRECATED_PROJECTION_FUNCTOR2(1006, "undefined");
+        LegionInternal::Logger::MessageDescriptor DEPRECATED_PROJECTION_FUNCTOR2(1007, "undefined");
         Internal::log_run.error(DEPRECATED_PROJECTION_FUNCTOR2.id(),
                                 "ERROR: INVOCATION OF DEPRECATED PROJECTION "
                                 "FUNCTOR METHOD WITHOUT AN OVERRIDE!");
