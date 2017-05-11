@@ -1627,9 +1627,9 @@ namespace Legion {
                                   parent_ctx->get_task_name(), 
                                   parent_ctx->get_unique_id(),
                                   get_task_name(), get_unique_id(),
-                                  regions[idx].region.index_space.id,
-                                  regions[idx].region.field_space.id, 
-                                  regions[idx].region.tree_id, idx);
+                                  regions[idx].parent.index_space.id,
+                                  regions[idx].parent.field_space.id, 
+                                  regions[idx].parent.tree_id, idx);
               else if (bad_field == AUTO_GENERATE_ID)
                 log_region.error("Parent task %s (ID %lld) of task %s "
                                   "(ID %lld) does not have a region "
@@ -1641,9 +1641,9 @@ namespace Legion {
                                   parent_ctx->get_task_name(), 
                                   parent_ctx->get_unique_id(),
                                   get_task_name(), get_unique_id(),
-                                  regions[idx].region.index_space.id,
-                                  regions[idx].region.field_space.id, 
-                                  regions[idx].region.tree_id, idx, bad_index);
+                                  regions[idx].parent.index_space.id,
+                                  regions[idx].parent.field_space.id, 
+                                  regions[idx].parent.tree_id, idx, bad_index);
               else
                 log_region.error("Parent task %s (ID %lld) of task %s "
                                   "(ID %lld) does not have a region "
@@ -1654,9 +1654,9 @@ namespace Legion {
                                   parent_ctx->get_task_name(), 
                                   parent_ctx->get_unique_id(),
                                   get_task_name(), get_unique_id(),
-                                  regions[idx].region.index_space.id,
-                                  regions[idx].region.field_space.id, 
-                                  regions[idx].region.tree_id, idx,
+                                  regions[idx].parent.index_space.id,
+                                  regions[idx].parent.field_space.id, 
+                                  regions[idx].parent.tree_id, idx,
                                   bad_index, bad_field);
 #ifdef DEBUG_LEGION
               assert(false);
