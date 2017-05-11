@@ -1059,10 +1059,12 @@ namespace Legion {
       FRIEND_ALL_RUNTIME_CLASSES
       explicit FutureMap(Internal::FutureMapImpl *impl);
     public:
-      bool operator==(const FutureMap &f) const
+      inline bool operator==(const FutureMap &f) const
         { return impl == f.impl; }
-      bool operator<(const FutureMap &f) const
+      inline bool operator<(const FutureMap &f) const
         { return impl < f.impl; }
+      inline Future operator[](const DomainPoint &point)
+        { return get_future(point); }
       FutureMap& operator=(const FutureMap &f);
     public:
       /**
