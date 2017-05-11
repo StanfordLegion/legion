@@ -1773,7 +1773,11 @@ namespace Legion {
         // If we got a BAD_PARENT_REGION, see if this a returnable
         // privilege in which case we know we have privileges on all fields
         if (returnable_privileges[idx])
-          return NO_ERROR;
+        {
+          // Still have to check the parent region is right
+          if (req.parent == created_requirements[idx].region)
+            return NO_ERROR;
+        }
         // Otherwise we just keep going
       }
       // Finally see if we created all the fields in which case we know
@@ -1787,6 +1791,10 @@ namespace Legion {
         if (created_fields.find(key) == created_fields.end())
           return ERROR_BAD_PARENT_REGION;
       }
+      // Check that the parent is the root of the tree, if not it is bad
+      RegionNode *parent_region = runtime->forest->get_node(req.parent);
+      if (parent_region->parent != NULL)
+        return ERROR_BAD_PARENT_REGION;
       // Otherwise we have privileges on these fields for all regions
       // so we are good on privileges
       return NO_ERROR;
