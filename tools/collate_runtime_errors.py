@@ -152,35 +152,101 @@ def parseSourceFiles(connection):
         connection.commit()
         filename = sys.stdin.readline().strip()
 
+def htmlMarker(type, field, code):
+    if code == None:
+        return type + "_" + field
+    else:
+        return type + "_" + field + "_" + str(code)
 
-def writeHtmlEntry(type, outputFile, row):
+
+def writeHtmlEntry(type, field, outputFile, row):
     (code, message, whatToDo) = row
-    outputFile.write("<p> <b>" + type + " " + str(code) + "</b>\n")
+    outputFile.write("<p id=\"" + htmlMarker(type, field, code) + "\">")
+    outputFile.write("<b>" + type + " " + str(code) + "</b>\n")
     outputFile.write("<br>Message: " + message + "\n");
     outputFile.write("<br>Remedy:" + whatToDo + "\n</p>\n");
 
 
-def writeHtmlSortedByField(field, connection):
+def tables(connection):
     cursor = connection.cursor()
     cursor.execute("select name from sqlite_master where type = 'table' order by name;")
     tables = cursor.fetchall()
-    for table in tables:
+    return tables
+
+
+def writeHtmlSortedByField(field, connection):
+    for table in tables(connection):
         tableName = table[0]
-        outputFileName = tableName + "_" + field + ".html"
+        outputFileName = htmlMarker(tableName, field, None) + ".html"
         outputFile = open(outputFileName, "wt")
-        indexName = tableName + "_" + field + "_index"
-        indexCommand = "create index " + indexName + " on " + tableName + "(" + field + ");"
-        cursor.execute(indexCommand);
         selectCommand = "select * from " + tableName + " order by " + field  + ";"
-        cursor.execute(selectCommand);
-        row = cursor.fetchone();
+        cursor = connection.cursor()
+        cursor.execute(selectCommand)
+        row = cursor.fetchone()
         while row != None:
-              writeHtmlEntry(tableName, outputFile, row)
+              writeHtmlEntry(tableName, field, outputFile, row)
               row = cursor.fetchone()
         outputFile.close()
 
 
+def writeHtmlIndexTable(connection, tableName, field, file):
+    file.write("<center>")
+    file.write("<TABLE border=\"1\">\n")
+    file.write("<CAPTION>" + tableName + " messages ordered by " + field + "</CAPTION>\n")
+    file.write("<TR>")
+
+    if field == "code":
+        maxFieldCounter = 20
+    elif field == "message":
+        maxFieldCounter = 8
+    else:
+        maxFieldCounter = 12;
+
+    selectCommand = "select * from " + tableName + " order by " + field  + ";"
+    cursor = connection.cursor()
+    cursor.execute(selectCommand)
+    row = cursor.fetchone()
+
+    fieldCounter = 0
+    while row != None:
+        if fieldCounter == maxFieldCounter:
+            file.write("<TR>")
+            fieldCounter = 0
+        file.write("<TD>")
+        first = False
+        (code, message, whatToDo) = row
+        if field == "code":
+            text = str(code)
+        elif field == "message":
+            text = message[:20]
+        file.write("<A href=\"" + htmlMarker(tableName, field, None) + ".html#" + htmlMarker(tableName, field, code) + "\">" + text + "</a>")
+        row = cursor.fetchone()
+        fieldCounter = fieldCounter + 1
+
+    file.write("\n</TABLE>\n")
+    file.write("</center>\n")
+    file.write("<p></p>\n")
+
+
+def writeHtmlLinks(indexFile, connection, field):
+    indexFile.write("<center>")
+    for table in tables(connection):
+        indexFile.write("<a href=\"" + htmlMarker(table[0], field, None) + ".html\">" + table[0] + " messages ordered by " + field + "</a>&nbsp;&nbsp;&nbsp;\n")
+    indexFile.write("</center>\n<p>\n")
+
+
+def writeHtmlIndexes(connection):
+    indexFile = open("index.html", "wt")
+    writeHtmlLinks(indexFile, connection, "code");
+    writeHtmlLinks(indexFile, connection, "message");
+    for table in tables(connection):
+        writeHtmlIndexTable(connection, table[0], "code", indexFile)
+        writeHtmlIndexTable(connection, table[0], "message", indexFile)
+    indexFile.close()
+
+
 def writeHtmlOutput(connection):
+    writeHtmlIndexes(connection);
     writeHtmlSortedByField("code", connection)
     writeHtmlSortedByField("message", connection)
 
