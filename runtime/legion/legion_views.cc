@@ -24,6 +24,7 @@
 #include "legion_views.h"
 #include "legion_analysis.h"
 #include "legion_context.h"
+#include "legion_replication.h"
 
 namespace Legion {
   namespace Internal {
@@ -5511,16 +5512,28 @@ namespace Legion {
       {
         // Compute the path to this node and get the RtEvent that 
         // uniquely identifies the composite view 
+        RtEvent composite_name;
         std::vector<LegionColor> path;
-
+        ShardManager *manager = prepare_sharding_request(composite_name, path);
         // Send the request for the update to this node from the remote shards
         std::set<RtEvent> wait_on;
         for (LegionMap<ShardID,FieldMask>::aligned::const_iterator it = 
               needed_shards.begin(); it != needed_shards.end(); it++)
         {
-          RtUserEvent shard_ready = Runtime::create_user_rt_event(); 
-
-
+          RtUserEvent shard_ready = Runtime::create_rt_user_event(); 
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(manager->repl_id);
+            rez.serialize(it->first);
+            rez.serialize(composite_name);
+            rez.serialize<size_t>(path.size());
+            for (unsigned idx = 0; idx < path.size(); idx++)
+              rez.serialize(path[idx]);
+            rez.serialize(it->second);
+            rez.serialize(shard_ready); 
+          }
+          manager->send_composite_view_request(it->first, rez);
           wait_on.insert(shard_ready);
         }
         // Wait for the result to be valid
@@ -6159,6 +6172,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ShardManager* CompositeView::prepare_sharding_request(RtEvent &name,
+                                                std::vector<LegionColor> &path,
+                                                LegionColor child_color)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+      assert(shard_invalid_barrier.exists());
+#endif
+      name = shard_invalid_barrier;
+      if (child_color != INVALID_COLOR)
+        path.push_back(child_color);
+#ifdef DEBUG_LEGION
+      ReplicateContext *ctx = dynamic_cast<ReplicateContext*>(owner_context);
+      assert(ctx != NULL);
+#else
+      ReplicateContext *ctx = static_cast<ReplicateContext*>(owner_context);
+#endif
+      return ctx->shard_manager;
+    }
+
+    //--------------------------------------------------------------------------
     InnerContext* CompositeView::get_owner_context(void) const
     //--------------------------------------------------------------------------
     {
@@ -6709,6 +6744,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       free(ptr);
+    }
+
+    //--------------------------------------------------------------------------
+    ShardManager* CompositeNode::prepare_sharding_request(RtEvent &name,
+                                                std::vector<LegionColor> &path,
+                                                LegionColor child_color)
+    //--------------------------------------------------------------------------
+    {
+      // Go up the tree
+      ShardManager *result = parent->prepare_sharding_request(name, path,
+                                              logical_node->get_color());
+      // Then add our child color if it exists
+      if (child_color != INVALID_COLOR)
+        path.push_back(child_color);
+      return result;
     }
 
     //--------------------------------------------------------------------------

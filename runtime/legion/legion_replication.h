@@ -942,6 +942,9 @@ namespace Legion {
       void send_future_map_request(ShardID target, Serializer &rez);
       void handle_future_map_request(Deserializer &derez);
     public:
+      void send_composite_view_request(ShardID target, Serializer &rez);
+      void handle_composite_view_request(Deserializer &derez);
+    public:
       static void handle_clone(const void *args);
       static void handle_launch(const void *args);
       static void handle_delete(const void *args);
@@ -954,6 +957,8 @@ namespace Legion {
       static void handle_trigger_commit(Deserializer &derez, Runtime *rt);
       static void handle_collective_message(Deserializer &derez, Runtime *rt);
       static void handle_future_map_request(Deserializer &derez, Runtime *rt);
+      static void handle_composite_view_request(Deserializer &derez, 
+                                                Runtime *rt);
     public:
       ShardingFunction* find_sharding_function(ShardingID sid);
     public:

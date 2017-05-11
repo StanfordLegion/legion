@@ -1182,9 +1182,11 @@ namespace Legion {
                                          CompositeCopier &copier,
                                          CompositeCopyNode *result,
            LegionMap<CompositeNode*,FieldMask>::aligned &children_to_traverse);
+    protected:
+      // These are for composite views in control replication contexts
       void perform_sharding_check(FieldMask check_mask,
                                   ClosedNode *closed_local_node,
-                                  RegionTreeNode *target);
+                                  RegionTreeNode *target); 
     public:
       virtual InnerContext* get_owner_context(void) const = 0;
       virtual void perform_ready_check(FieldMask mask,
@@ -1194,6 +1196,9 @@ namespace Legion {
                                     const FieldMask &up_mask,
                   LegionMap<LogicalView*,FieldMask>::aligned &valid_views,
                                     bool needs_lock = true) = 0;
+      virtual ShardManager* prepare_sharding_request(RtEvent &name,
+                                  std::vector<LegionColor> &path,
+                                  LegionColor child_color = INVALID_COLOR) = 0;
     public:
       CompositeNode* find_child_node(RegionTreeNode *child);
     private:
@@ -1322,6 +1327,9 @@ namespace Legion {
                                     const FieldMask &up_mask,
                   LegionMap<LogicalView*,FieldMask>::aligned &valid_views,
                                     bool need_lock = true);
+      virtual ShardManager* prepare_sharding_request(RtEvent &name,
+                                  std::vector<LegionColor> &path,
+                                  LegionColor child_color = INVALID_COLOR);
     public:
       static void handle_send_composite_view(Runtime *runtime, 
                               Deserializer &derez, AddressSpaceID source);
@@ -1408,6 +1416,9 @@ namespace Legion {
                                     const FieldMask &up_mask,
                   LegionMap<LogicalView*,FieldMask>::aligned &valid_views,
                                     bool needs_lock = true);
+      virtual ShardManager* prepare_sharding_request(RtEvent &name,
+                                  std::vector<LegionColor> &path,
+                                  LegionColor child_color = INVALID_COLOR);
       void capture(RtUserEvent capture_event, ReferenceMutator *mutator);
       static void handle_deferred_capture(const void *args);
     public:

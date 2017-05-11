@@ -1308,6 +1308,7 @@ namespace Legion {
       void exchange_common_resources(void);
       void handle_collective_message(Deserializer &derez);
       void handle_future_map_request(Deserializer &derez);
+      void handle_composite_view_request(Deserializer &derez);
     public:
       // Collective methods
       CollectiveID get_next_collective_index(void);

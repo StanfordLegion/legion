@@ -2105,6 +2105,8 @@ namespace Legion {
                                            Serializer &rez);
       void send_repl_future_map_request(AddressSpaceID target, Serializer &rez);
       void send_repl_future_map_response(AddressSpaceID target,Serializer &rez);
+      void send_repl_composite_view_request(AddressSpaceID target, 
+                                            Serializer &rez);
       void send_mapper_message(AddressSpaceID target, Serializer &rez);
       void send_mapper_broadcast(AddressSpaceID target, Serializer &rez);
       void send_task_impl_semantic_request(AddressSpaceID target, 
@@ -2291,6 +2293,7 @@ namespace Legion {
       void handle_future_map_future_response(Deserializer &derez);
       void handle_repl_future_map_request(Deserializer &derez);
       void handle_repl_future_map_response(Deserializer &derez);
+      void handle_repl_composite_view_request(Deserializer &derez);
       void handle_mapper_message(Deserializer &derez);
       void handle_mapper_broadcast(Deserializer &derez);
       void handle_task_impl_semantic_request(Deserializer &derez,

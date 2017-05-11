@@ -2645,7 +2645,7 @@ namespace Legion {
     void ShardManager::send_future_map_request(ShardID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
- #ifdef DEBUG_LEGION
+#ifdef DEBUG_LEGION
       assert(target < address_spaces->size());
 #endif
       AddressSpaceID target_space = (*address_spaces)[target];
@@ -2676,6 +2676,49 @@ namespace Legion {
         if ((*it)->shard_id == target)
         {
           (*it)->handle_future_map_request(derez);
+          return;
+        }
+      }
+      // Should never get here
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::send_composite_view_request(ShardID target, 
+                                                   Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(target < address_spaces->size());
+#endif
+      AddressSpaceID target_space = (*address_spaces)[target];
+      // Check to see if this is a local shard
+      if (target_space == runtime->address_space)
+      {
+        Deserializer derez(rez.get_buffer(), rez.get_used_bytes());
+        DerezCheck z(derez);
+        // Have to unpack the preample we already know
+        ControlReplicationID local_repl;
+        derez.deserialize(local_repl);
+        handle_composite_view_request(derez);
+      }
+      else
+        runtime->send_repl_composite_view_request(target_space, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::handle_composite_view_request(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      // Figure out which shard we are going to
+      ShardID target;
+      derez.deserialize(target);
+      for (std::vector<ShardTask*>::const_iterator it = 
+            local_shards.begin(); it != local_shards.end(); it++)
+      {
+        if ((*it)->shard_id == target)
+        {
+          (*it)->handle_composite_view_request(derez);
           return;
         }
       }
@@ -2795,6 +2838,18 @@ namespace Legion {
       derez.deserialize(repl_id);
       ShardManager *manager = runtime->find_shard_manager(repl_id);
       manager->handle_future_map_request(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_composite_view_request(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      ControlReplicationID repl_id;
+      derez.deserialize(repl_id);
+      ShardManager *manager = runtime->find_shard_manager(repl_id);
+      manager->handle_composite_view_request(derez);
     }
 
     //--------------------------------------------------------------------------
