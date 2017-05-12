@@ -1325,6 +1325,7 @@ namespace Legion {
     public:
       // Composite view methods
       void register_composite_view(CompositeView* view, RtEvent close_done);
+      CompositeView* find_or_buffer_composite_view_request(Deserializer &derez);
       void unregister_composite_view(CompositeView *view, RtEvent close_done);
     public:
       ShardTask *const owner_shard;
@@ -1368,6 +1369,8 @@ namespace Legion {
     protected:
       // Composite views that are still valid across the shards
       std::map<RtEvent/*done event*/,CompositeView*> live_composite_views;
+      std::map<RtEvent,std::vector<
+                std::pair<void*,size_t> > > pending_composite_view_requests;
     };
 
     /**

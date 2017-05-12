@@ -1182,11 +1182,15 @@ namespace Legion {
                                          CompositeCopier &copier,
                                          CompositeCopyNode *result,
            LegionMap<CompositeNode*,FieldMask>::aligned &children_to_traverse);
-    protected:
+    public:
       // These are for composite views in control replication contexts
       void perform_sharding_check(FieldMask check_mask,
                                   ClosedNode *closed_local_node,
                                   RegionTreeNode *target); 
+      void handle_sharding_update_request(const FieldMask &mask,
+                                          RegionTreeNode *node,
+                                          size_t remaining_depth,
+                                          Deserializer &derez);
     public:
       virtual InnerContext* get_owner_context(void) const = 0;
       virtual void perform_ready_check(FieldMask mask,
@@ -1351,6 +1355,7 @@ namespace Legion {
                                   RtEvent precondition) const;
       static void handle_deferred_view_ref(const void *args);
     public:
+      // For control replication
       void set_shard_invalid_barrier(RtBarrier shard_invalid_barrier);
     public:
       // The path version info for this composite instance

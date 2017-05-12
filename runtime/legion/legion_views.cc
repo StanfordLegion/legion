@@ -5493,6 +5493,10 @@ namespace Legion {
                                                RegionTreeNode *target)
     //--------------------------------------------------------------------------
     {
+      // If we have no target then we're doing this traversal for
+      // a composite view update so we don't need to any sharding analysis
+      if (target == NULL)
+        return;
       // Ask the closed node to find the sets of interfering points
       {
         AutoLock b_lock(base_lock,1,false/*exclusive*/);
@@ -5527,10 +5531,10 @@ namespace Legion {
             rez.serialize(manager->repl_id);
             rez.serialize(it->first);
             rez.serialize(composite_name);
+            rez.serialize(it->second);
             rez.serialize<size_t>(path.size());
             for (unsigned idx = 0; idx < path.size(); idx++)
               rez.serialize(path[idx]);
-            rez.serialize(it->second);
             rez.serialize(shard_ready); 
           }
           manager->send_composite_view_request(it->first, rez);
@@ -5543,6 +5547,36 @@ namespace Legion {
       // Once we're done then we can add this to the set of checks
       AutoLock b_lock(base_lock);
       shard_checks[target] |= check_mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeBase::handle_sharding_update_request(const FieldMask &mask,
+                                                       RegionTreeNode *node,
+                                                       size_t remaining_depth,
+                                                       Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      // We don't need to do the sharding check when doing the ready
+      // check because we are only being asked to provide data about
+      // our local composite view in this case 
+      perform_ready_check(mask, NULL, NULL);
+      // Perform the ready check on the way down the tree
+      if (remaining_depth == 0)
+      {
+        // We've arrived at our destination, send the information about
+        // the version states for each each of the children
+        
+      }
+      else
+      {
+        // Continue traversing
+        LegionColor child_color;
+        derez.deserialize(child_color);
+        RegionTreeNode *child_node = node->get_tree_child(child_color); 
+        CompositeNode *child = find_child_node(child_node);
+        child->handle_sharding_update_request(mask, child_node, 
+                                              remaining_depth-1, derez);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -6633,22 +6667,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeView::set_shard_invalid_barrier(RtBarrier shard_invalid)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-      assert(!shard_invalid_barrier.exists());
-      ReplicateContext *ctx = dynamic_cast<ReplicateContext*>(owner_context);
-      assert(ctx != NULL);
-#else
-      ReplicateContext *ctx = static_cast<ReplicateContext*>(owner_context);
-#endif
-      shard_invalid_barrier = shard_invalid;
-      ctx->register_composite_view(this, shard_invalid_barrier);
-    }
-
-    //--------------------------------------------------------------------------
     /*static*/ void CompositeView::handle_deferred_view_invalidation(
                                                                const void *args)
     //--------------------------------------------------------------------------
@@ -6663,6 +6681,22 @@ namespace Legion {
       else
         Runtime::trigger_event(iargs->invalidated);
     }
+
+    //--------------------------------------------------------------------------
+    void CompositeView::set_shard_invalid_barrier(RtBarrier shard_invalid)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+      assert(!shard_invalid_barrier.exists());
+      ReplicateContext *ctx = dynamic_cast<ReplicateContext*>(owner_context);
+      assert(ctx != NULL);
+#else
+      ReplicateContext *ctx = static_cast<ReplicateContext*>(owner_context);
+#endif
+      shard_invalid_barrier = shard_invalid;
+      ctx->register_composite_view(this, shard_invalid_barrier);
+    } 
 
     /////////////////////////////////////////////////////////////
     // CompositeNode 
@@ -6774,6 +6808,11 @@ namespace Legion {
                                             RegionTreeNode *target)
     //--------------------------------------------------------------------------
     {
+      // See if we need to do a sharding test for control replication
+      // This has to come even before doing our local test
+      if ((closed_local_node != NULL) && 
+          closed_local_node->has_sharded_projection(mask))
+        perform_sharding_check(mask, closed_local_node, target);
       // Do a quick test with read-only lock first
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
@@ -6782,11 +6821,6 @@ namespace Legion {
         if (!mask)
           return;
       }
-      // See if we need to do a sharding test for control replication
-      if ((closed_local_node != NULL) && 
-          closed_local_node->has_sharded_projection(mask))
-        perform_sharding_check(mask, closed_local_node, target);
-
       RtUserEvent capture_event;
       std::set<RtEvent> preconditions; 
       LegionMap<VersionState*,FieldMask>::aligned needed_states;

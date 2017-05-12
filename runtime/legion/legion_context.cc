@@ -9228,6 +9228,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplicateContext::handle_composite_view_request(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      CompositeView *view = find_or_buffer_composite_view_request(derez);
+      if (view == NULL)
+        return;
+      FieldMask request_mask;
+      derez.deserialize(request_mask);
+      size_t depth;
+      derez.deserialize(depth);
+      view->handle_sharding_update_request(request_mask, 
+                        view->logical_node, depth, derez);
+    }
+
+    //--------------------------------------------------------------------------
     CollectiveID ReplicateContext::get_next_collective_index(void)
     //--------------------------------------------------------------------------
     {
@@ -9411,12 +9426,61 @@ namespace Legion {
     {
       // Add a GC reference prior to registering it
       view->add_base_gc_ref(CONTEXT_REF);
-      AutoLock ctx_lock(context_lock);
+      std::vector<std::pair<void*,size_t> > to_perform;
+      {
+        AutoLock ctx_lock(context_lock);
 #ifdef DEBUG_LEGION
-      assert(live_composite_views.find(close_done) == 
-              live_composite_views.end());
+        assert(live_composite_views.find(close_done) == 
+                live_composite_views.end());
 #endif
-      live_composite_views[close_done] = view;
+        live_composite_views[close_done] = view;
+        // Check to see if we have any pending requests to perform
+        std::map<RtEvent,std::vector<std::pair<void*,size_t> > >::iterator
+          finder = pending_composite_view_requests.find(close_done);
+        if (finder != pending_composite_view_requests.end())
+        {
+          to_perform = finder->second;
+          pending_composite_view_requests.erase(finder);
+        }
+      }
+      if (!to_perform.empty())
+      {
+        for (std::vector<std::pair<void*,size_t> >::const_iterator it = 
+              to_perform.begin(); it != to_perform.end(); it++)
+        {
+          Deserializer derez(it->first, it->second);
+          FieldMask request_mask;
+          derez.deserialize(request_mask);
+          size_t depth;
+          derez.deserialize(depth);
+          view->handle_sharding_update_request(request_mask, 
+                            view->logical_node, depth, derez);
+          free(it->first);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    CompositeView* ReplicateContext::find_or_buffer_composite_view_request(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      RtEvent composite_name;
+      derez.deserialize(composite_name);
+      AutoLock ctx_lock(context_lock);
+      // See if we already have the composite view registered 
+      std::map<RtEvent,CompositeView*>::const_iterator finder = 
+        live_composite_views.find(composite_name);
+      if (finder != live_composite_views.end())
+        return finder->second;
+      // If we couldn't find it then we have to buffer it for the future
+      const size_t remaining_bytes = derez.get_remaining_bytes();
+      void *buffer = malloc(remaining_bytes);
+      memcpy(buffer, derez.get_current_pointer(), remaining_bytes);
+      derez.advance_pointer(remaining_bytes);
+      pending_composite_view_requests[composite_name].push_back(
+          std::pair<void*,size_t>(buffer, remaining_bytes));
+      return NULL;
     }
 
     //--------------------------------------------------------------------------
