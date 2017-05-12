@@ -154,10 +154,16 @@ namespace Realm {
 
   PythonInterpreter::PythonInterpreter() 
   {
-#ifdef REALM_USE_DLMOPEN
-    handle = dlmopen(LM_ID_NEWLM, "libpython2.7.so", RTLD_DEEPBIND | RTLD_LOCAL | RTLD_LAZY);
+#ifdef REALM_PYTHON_LIB
+    const char *python_lib = REALM_PYTHON_LIB;
 #else
-    handle = dlopen("libpython2.7.so", RTLD_GLOBAL | RTLD_LAZY);
+    const char *python_lib = "libpython2.7.so";
+#endif
+
+#ifdef REALM_USE_DLMOPEN
+    handle = dlmopen(LM_ID_NEWLM, python_lib, RTLD_DEEPBIND | RTLD_LOCAL | RTLD_LAZY);
+#else
+    handle = dlopen(python_lib, RTLD_GLOBAL | RTLD_LAZY);
 #endif
     if (!handle) {
       const char *error = dlerror();

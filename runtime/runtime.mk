@@ -213,6 +213,44 @@ ifeq ($(strip $(USE_PYTHON)),1)
     $(error USE_PYTHON requires USE_LIBDL)
   endif
 
+  # Attempt to auto-detect location of Python shared library based on
+  # the location of Python executable on PATH. We do this because the
+  # shared library may not be on LD_LIBRARY_PATH even when the
+  # executable is on PATH.
+
+  # Note: Set PYTHON_ROOT to an empty string to skip this logic and
+  # defer to the normal search of LD_LIBRARY_PATH instead. Or set
+  # PYTHON_LIB to specify the path to the shared library directly.
+  ifndef PYTHON_LIB
+    ifndef PYTHON_ROOT
+      PYTHON_EXE := $(shell which python)
+      ifeq ($(PYTHON_EXE),)
+        $(error cannot find python - set PYTHON_ROOT if not in PATH)
+      endif
+      PYTHON_ROOT := $(dir $(PYTHON_EXE))
+    endif
+
+    # Try searching for common locations of the Python shared library.
+    ifneq ($(strip $(PYTHON_ROOT)),)
+      PYTHON_LIB := $(PYTHON_ROOT)/libpython2.7.so
+      ifeq ($(wildcard $(PYTHON_LIB)),)
+        PYTHON_LIB := $(abspath $(PYTHON_ROOT)/../lib/libpython2.7.so)
+        ifeq ($(wildcard $(PYTHON_LIB)),)
+          $(warning cannot find libpython2.7.so - falling back to using LD_LIBRARY_PATH)
+          PYTHON_LIB :=
+        endif
+      endif
+    endif
+  endif
+
+  ifneq ($(strip $(PYTHON_LIB)),)
+    ifeq ($(wildcard $(PYTHON_LIB)),)
+      $(error cannot find libpython2.7.so - PYTHON_LIB set but file does not exist)
+    else
+      CC_FLAGS += -DREALM_PYTHON_LIB="\"$(PYTHON_LIB)\""
+    endif
+  endif
+
   CC_FLAGS += -DREALM_USE_PYTHON
 endif
 
