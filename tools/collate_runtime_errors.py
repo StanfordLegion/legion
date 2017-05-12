@@ -196,7 +196,7 @@ def writeHtmlEntry(type, field, outputFile, row):
     outputFile.write("<b>" + type + " " + str(code) + "</b>\n")
     outputFile.write("<br>Message: " + message + "\n");
     outputFile.write("<br>Remedy:" + whatToDo + "\n");
-    outputFile.write("<br>Location: line " + str(lineNumber) + " " + fileName + "\n")
+    outputFile.write("<br>Location: line " + str(lineNumber) + " <a href=\"" + fileName + "\">" + fileName + "</a>\n")
     outputFile.write("<p>\n")
 
 
