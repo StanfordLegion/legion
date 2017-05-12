@@ -66,7 +66,7 @@ namespace Legion {
     };
 
 #ifdef ENABLE_LEGION_TLS
-#if __cplusplus >= 201103L
+#ifdef HAS_LEGION_THREAD_LOCAL
     thread_local TaskContext *implicit_context = NULL;
 #else
     pthread_key_t implicit_context;
@@ -18508,7 +18508,7 @@ namespace Legion {
       LEGION_STATIC_ASSERT(DEFAULT_SUPERSCALAR_WIDTH > 0);
       LEGION_STATIC_ASSERT(DEFAULT_MAX_MESSAGE_SIZE > 0); 
 #ifdef ENABLE_LEGION_TLS
-#if __cplusplus < 201103L
+#ifndef HAS_LEGION_THREAD_LOCAL
       pthread_key_create(&implicit_context, NULL/*destructor function*/);
 #endif
 #endif

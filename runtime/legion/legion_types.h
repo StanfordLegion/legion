@@ -43,7 +43,11 @@
 #include "realm.h"
 
 #ifdef ENABLE_LEGION_TLS
-#if __cplusplus < 201103L || !HAS_CXX11_THREAD_LOCAL
+#if HAS_CXX11_THREAD_LOCAL // for clang 
+#define HAS_LEGION_THREAD_LOCAL
+#elif defined(__GNUC__) && __cplusplus >= 201103L // for gcc
+#define HAS_LEGION_THREAD_LOCAL
+#else
 #include <pthread.h> // needed for thread local storage before C++11
 #endif
 #endif
@@ -1228,7 +1232,7 @@ namespace Legion {
     // Nasty global variable for TLS support of figuring out
     // our context implicitly, this is experimental only
 #ifdef ENABLE_LEGION_TLS
-#if __cplusplus >= 201103L && HAS_CXX11_THREAD_LOCAL
+#ifdef HAS_LEGION_THREAD_LOCAL
     extern thread_local TaskContext *implicit_context;
 #else
     extern pthread_key_t implicit_context;
@@ -1679,7 +1683,7 @@ namespace Legion {
         if (!has_triggered())
         {
           // Save the context locally
-#if __cplusplus >= 201103L && HAS_CXX11_THREAD_LOCAL
+#ifdef HAS_LEGION_THREAD_LOCAL
           Context local_ctx = Internal::implicit_context; 
 #else
           Context local_ctx = static_cast<Context>(
@@ -1688,7 +1692,7 @@ namespace Legion {
           // Do the wait
           wait();
           // Write the context back
-#if __cplusplus >= 201103L && HAS_CXX11_THREAD_LOCAL
+#ifdef HAS_LEGION_THREAD_LOCAL
           Internal::implicit_context = local_ctx;
 #else
           pthread_setspecific(Internal::implicit_context, local_ctx);

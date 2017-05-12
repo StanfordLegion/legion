@@ -1940,7 +1940,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef ENABLE_LEGION_TLS
-#if __cplusplus >= 201103L && HAS_CXX11_THREAD_LOCAL
+#ifdef HAS_LEGION_THREAD_LOCAL
       implicit_context = this;
 #else
       pthread_setspecific(implicit_context, this);
