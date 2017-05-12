@@ -204,14 +204,14 @@ namespace Legion {
 	RtEvent retry_event(r.try_acquire(false /*!retry*/,
 	                                  mode, exclusive, wait_on));
 	while(retry_event.exists()) {
- 	  retry_event.wait();
+ 	  retry_event.lg_wait();
 	  retry_event = RtEvent(r.try_acquire(true /*retry*/,
                                               mode, exclusive, wait_on));
 	}
 #else
         RtEvent lock_event(r.acquire(mode,exclusive,wait_on));
         if (lock_event.exists())
-          lock_event.wait();
+          lock_event.lg_wait();
 #endif
       }
     public:

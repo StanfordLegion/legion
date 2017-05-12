@@ -44,7 +44,7 @@ namespace Legion {
       if (!mutation_effects.empty())
       {
         RtEvent wait_on = Runtime::merge_events(mutation_effects);
-        wait_on.wait();
+        wait_on.lg_wait();
       }
     }
 

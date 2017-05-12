@@ -237,7 +237,7 @@ namespace Legion {
       }
       // Wait for the parent index space to be notified if necessary
       if (parent_notified.exists())
-        parent_notified.wait();
+        parent_notified.lg_wait();
     }
 
     //--------------------------------------------------------------------------
@@ -367,7 +367,7 @@ namespace Legion {
       }
       // Wait for the parent index space to be notified if necessary
       if (parent_notified.exists())
-        parent_notified.wait();
+        parent_notified.lg_wait();
     }
 
     //--------------------------------------------------------------------------
@@ -1223,8 +1223,8 @@ namespace Legion {
     {
       FieldSpaceNode *node = get_node(handle);
       RtEvent ready = node->allocate_field(fid, field_size, serdez_id);
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
+      if (ready.exists())
+        ready.lg_wait();
       return false;
     }
 
@@ -1250,8 +1250,8 @@ namespace Legion {
       FieldSpaceNode *node = get_node(handle);
       RtEvent ready = node->allocate_fields(sizes, fields, serdez_id);
       // Wait for this to exist
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
+      if (ready.exists())
+        ready.lg_wait();
     }
 
     //--------------------------------------------------------------------------
@@ -2235,7 +2235,7 @@ namespace Legion {
         }
         // Have to wait for all the locks to be acquired
         if (precondition.exists())
-          precondition.wait();
+          precondition.lg_wait();
         // Now do the mapping with our own applied event set
         std::set<RtEvent> local_applied;
         // Construct the traversal info
@@ -3149,7 +3149,7 @@ namespace Legion {
         if (!done_events.empty())
         {
           RtEvent ready = Runtime::merge_events(done_events);
-          ready.wait();
+          ready.lg_wait();
         }
         // Now figure out which ones we successfully acquired and which 
         // ones failed to be acquired
@@ -3743,7 +3743,7 @@ namespace Legion {
           wait_on = wait_finder->second;
       }
       // Wait on the event
-      wait_on.wait();
+      wait_on.lg_wait();
       AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
       std::map<IndexSpace,IndexSpaceNode*>::const_iterator finder = 
           index_nodes.find(space);
@@ -3806,7 +3806,7 @@ namespace Legion {
           wait_on = wait_finder->second;
       }
       // Wait for the event
-      wait_on.wait();
+      wait_on.lg_wait();
       AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
       std::map<IndexPartition,IndexPartNode*>::const_iterator finder = 
         index_parts.find(part);
@@ -3869,7 +3869,7 @@ namespace Legion {
           wait_on = wait_finder->second;
       }
       // Wait for the event to be ready
-      wait_on.wait();
+      wait_on.lg_wait();
       AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
       std::map<FieldSpace,FieldSpaceNode*>::const_iterator finder = 
         field_nodes.find(space);
@@ -3951,8 +3951,7 @@ namespace Legion {
         // If we did find something to wait on, do that now
         if (wait_on.exists())
         {
-          if (!wait_on.has_triggered())
-            wait_on.wait();
+          wait_on.lg_wait();
           // Retake the lock and see again if the handle we
           // were looking for was the top-level node or not
           AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
@@ -4056,7 +4055,7 @@ namespace Legion {
         else
           wait_on = req_finder->second;
       }
-      wait_on.wait();
+      wait_on.lg_wait();
       AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
       std::map<RegionTreeID,RegionNode*>::const_iterator finder = 
           tree_nodes.find(tid);
@@ -5087,7 +5086,7 @@ namespace Legion {
         exit(ERROR_INVALID_SEMANTIC_TAG);
       }
       // Now wait
-      wait_on.wait();
+      wait_on.lg_wait();
       // When we wake up, we should be able to find everything
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
       LegionMap<SemanticTag,SemanticInfo>::aligned::const_iterator finder = 
@@ -5798,7 +5797,7 @@ namespace Legion {
         rez.serialize(ready_event);
       }
       context->runtime->send_index_space_child_request(owner_space, rez);
-      ready_event.wait();
+      ready_event.lg_wait();
       // Stupid volatile-ness
       IndexPartition handle_copy = *handle_ptr;
 #ifdef DEBUG_LEGION
@@ -5872,7 +5871,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!handle_ready.has_triggered())
-        handle_ready.wait();
+        handle_ready.lg_wait();
       return domain_ready;
     }
 
@@ -5881,9 +5880,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!handle_ready.has_triggered())
-        handle_ready.wait();
+        handle_ready.lg_wait();
       if (!domain_ready.has_triggered())
-        domain_ready.wait();
+        domain_ready.lg_wait();
       return domain;
     }
 
@@ -5892,7 +5891,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!handle_ready.has_triggered())
-        handle_ready.wait();
+        handle_ready.lg_wait();
       precondition = domain_ready;
       return domain;
     }
@@ -5903,7 +5902,7 @@ namespace Legion {
     {
       // We still need to wait for the handle to be valid
       if (!handle_ready.has_triggered())
-        handle_ready.wait();
+        handle_ready.lg_wait();
       return domain;
     }
 
@@ -5919,9 +5918,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!handle_ready.has_triggered())
-        handle_ready.wait();
+        handle_ready.lg_wait();
       if (!domain_ready.has_triggered())
-        domain_ready.wait();
+        domain_ready.lg_wait();
       if (has_component_domains())
       {
         domains.insert(domains.end(), 
@@ -5937,7 +5936,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!handle_ready.has_triggered())
-        handle_ready.wait();
+        handle_ready.lg_wait();
       precondition = domain_ready;
       if (has_component_domains())
       {
@@ -5953,9 +5952,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!handle_ready.has_triggered())
-        handle_ready.wait();
+        handle_ready.lg_wait();
       if (!domain_ready.has_triggered())
-        domain_ready.wait();
+        domain_ready.lg_wait();
       if (domain.get_dim() == 0)
       {
         const Realm::ElementMask &mask = 
@@ -6031,7 +6030,7 @@ namespace Legion {
           ready = finder->second;
       }
       // Wait for the ready event and then get the result
-      ready.wait();
+      ready.lg_wait();
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
       if (disjoint_subsets.find(key) != disjoint_subsets.end())
         return true;
@@ -6116,7 +6115,7 @@ namespace Legion {
           rez.serialize(ready_event); 
         }
         context->runtime->send_index_space_colors_request(owner_space, rez);
-        ready_event.wait();
+        ready_event.lg_wait();
       }
       else
       {
@@ -6219,9 +6218,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!handle_ready.has_triggered())
-        handle_ready.wait();
+        handle_ready.lg_wait();
       if (!domain_ready.has_triggered())
-        domain_ready.wait();
+        domain_ready.lg_wait();
       return component_domains;
     }
 
@@ -6231,7 +6230,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!handle_ready.has_triggered())
-        handle_ready.wait();
+        handle_ready.lg_wait();
       ready = domain_ready;
       return component_domains;
     }
@@ -6664,8 +6663,7 @@ namespace Legion {
       if (up && (parent != NULL))
         parent->send_node(target, true/*up*/, false/*down*/);
       // Check to see if we need to wait for the handle event to be ready
-      if (!handle_ready.has_triggered())
-          handle_ready.wait();
+      handle_ready.lg_wait();
       // Check to see if our creation set includes the target
       std::map<ColorPoint,IndexPartNode*> valid_copy;
       {
@@ -7365,7 +7363,7 @@ namespace Legion {
           rez.serialize(ready_event);
         }
         context->runtime->send_index_partition_child_request(owner_space, rez);
-        ready_event.wait();
+        ready_event.lg_wait();
         IndexSpace copy_handle = *handle_ptr;
 #ifdef DEBUG_LEGION
         assert(copy_handle.exists());
@@ -7453,7 +7451,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!disjoint_ready.has_triggered())
-        disjoint_ready.wait();
+        disjoint_ready.lg_wait();
       return disjoint;
     }
 
@@ -7519,7 +7517,7 @@ namespace Legion {
         else
           ready_event = finder->second;
       }
-      ready_event.wait();
+      ready_event.lg_wait();
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
       if (disjoint_subspaces.find(key) != disjoint_subspaces.end())
         return true;
@@ -8068,7 +8066,7 @@ namespace Legion {
         context->runtime->send_index_partition_children_request(target, rez);
       }
       // Wait for all the children, then recurse 
-      wait_on.wait();
+      wait_on.lg_wait();
       // Now we can call this and know that all the children are there
       get_subspace_domains(subspaces);
     }
@@ -9033,7 +9031,7 @@ namespace Legion {
         exit(ERROR_INVALID_SEMANTIC_TAG);
       }
       // Now wait
-      wait_on.wait();
+      wait_on.lg_wait();
       // When we wake up, we should be able to find everything
       AutoLock n_lock(node_lock,1,false/*exclusive*/); 
       LegionMap<SemanticTag,SemanticInfo>::aligned::const_iterator finder = 
@@ -9122,7 +9120,7 @@ namespace Legion {
         exit(ERROR_INVALID_SEMANTIC_TAG);
       }
       // Now wait
-      wait_on.wait();
+      wait_on.lg_wait();
       // When we wake up, we should be able to find everything
       AutoLock n_lock(node_lock,1,false/*exclusive*/); 
       LegionMap<std::pair<FieldID,SemanticTag>,
@@ -9709,8 +9707,7 @@ namespace Legion {
         }
         context->runtime->send_local_field_alloc_request(owner, rez);
         // Wait for the result
-        if (!allocated_event.has_triggered())
-          allocated_event.wait();
+        allocated_event.lg_wait();
         if (new_indexes.empty())
           return false;
         // When we wake up then fill in the field information
@@ -9951,8 +9948,8 @@ namespace Legion {
     {
       RtEvent wait_on = add_instance(inst->handle, 
                                      context->runtime->address_space);
-      if (wait_on.exists() && !wait_on.has_triggered())
-        wait_on.wait();
+      if (wait_on.exists())
+        wait_on.lg_wait();
     }
 
     //--------------------------------------------------------------------------
@@ -11018,7 +11015,7 @@ namespace Legion {
         exit(ERROR_INVALID_SEMANTIC_TAG);
       }
       // Now wait
-      wait_on.wait();
+      wait_on.lg_wait();
       // When we wake up, we should be able to find everything
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
       LegionMap<SemanticTag,SemanticInfo>::aligned::const_iterator finder = 

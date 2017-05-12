@@ -593,8 +593,7 @@ namespace Legion {
       assert(reservation_lock.exists());
 #endif
       ApEvent lock_event(reservation_lock.acquire(mode,exclusive));
-      if (!lock_event.has_triggered())
-        lock_event.wait();
+      lock_event.lg_wait();
     }
 
     //--------------------------------------------------------------------------
@@ -720,8 +719,7 @@ namespace Legion {
       assert(phase_barrier.exists());
 #endif
       ApEvent e = Internal::Runtime::get_previous_phase(*this);
-      if (!e.has_triggered())
-        e.wait();
+      e.lg_wait();
     }
 
     //--------------------------------------------------------------------------

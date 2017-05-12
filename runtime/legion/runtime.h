@@ -2984,7 +2984,7 @@ namespace Legion {
         // Otherwise we didn't get so issue the deferred task
         // to avoid waiting for a reservation in an application task
         RtEvent done_event = defer(runtime, acquire_event);
-        done_event.wait();
+        done_event.lg_wait();
         return result;
       }
       virtual void execute(void)

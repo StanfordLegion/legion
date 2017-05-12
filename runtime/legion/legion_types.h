@@ -43,9 +43,9 @@
 #include "realm.h"
 
 #ifdef ENABLE_LEGION_TLS
-#if HAS_CXX11_THREAD_LOCAL // for clang 
+#if HAS_CXX11_THREAD_LOCAL // for clang on OSX
 #define HAS_LEGION_THREAD_LOCAL
-#elif defined(__GNUC__) && __cplusplus >= 201103L // for gcc
+#elif !defined(__MACH__) && __cplusplus >= 201103L // for non-OSX
 #define HAS_LEGION_THREAD_LOCAL
 #else
 #include <pthread.h> // needed for thread local storage before C++11
@@ -1677,7 +1677,7 @@ namespace Legion {
     inline LgEvent& operator=(const LgEvent &rhs)
       { id = rhs.id; return *this; }
   public:
-    inline void legion_wait(void) const
+    inline void lg_wait(void) const
       {
 #ifdef ENABLE_LEGION_TLS
         if (!has_triggered())

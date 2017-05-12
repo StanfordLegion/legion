@@ -1884,8 +1884,7 @@ namespace Legion {
       }
       if (wait_event.exists())
       {
-        if (!wait_event.has_triggered())
-          wait_event.wait();
+        wait_event.lg_wait();
         // Might be a little bit of a race here with cleanup
 #ifdef DEBUG_LEGION
         assert((speculation_state == RESOLVE_TRUE_STATE) ||
@@ -2002,7 +2001,7 @@ namespace Legion {
       // Handle the waiting case if necessary
       if (wait_on.exists())
       {
-        wait_on.wait();
+        wait_on.lg_wait();
         // Now retake the lock and see if anything changed
         AutoLock o_lock(op_lock);
         switch (speculation_state)
@@ -7327,7 +7326,7 @@ namespace Legion {
       if (!done_events.empty())
       {
         RtEvent wait_on = Runtime::merge_events(done_events);
-        wait_on.wait();
+        wait_on.lg_wait();
       }
     }
 
@@ -10770,7 +10769,7 @@ namespace Legion {
       if (!wait_events.empty())
       {
         RtEvent trigger_event = Runtime::merge_events(wait_events);
-        trigger_event.wait();
+        trigger_event.lg_wait();
       }
     }
 
@@ -10883,7 +10882,7 @@ namespace Legion {
       if (!wait_events.empty())
       {
         RtEvent mapped_event = Runtime::merge_events(wait_events);
-        mapped_event.wait();
+        mapped_event.lg_wait();
       }
     }
 
@@ -10894,13 +10893,13 @@ namespace Legion {
       // Before we can actually map, we have to perform our versioning analysis
       RtEvent versions_ready = task->perform_must_epoch_version_analysis(owner);
       if (versions_ready.exists())
-        versions_ready.wait();
+        versions_ready.lg_wait();
       // Note we don't need to hold a lock here because this is
       // a monotonic change.  Once it fails for anyone then it
       // fails for everyone.
       RtEvent done_mapping = task->perform_mapping(owner);
       if (done_mapping.exists())
-        done_mapping.wait();
+        done_mapping.lg_wait();
     }
 
     //--------------------------------------------------------------------------
@@ -11004,7 +11003,7 @@ namespace Legion {
       if (!wait_events.empty())
       {
         RtEvent dist_event = Runtime::merge_events(wait_events);
-        dist_event.wait();
+        dist_event.lg_wait();
       }
     }
 

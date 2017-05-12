@@ -1171,7 +1171,7 @@ namespace Legion {
       RtEvent ready;
       instance.impl = runtime->find_or_request_physical_manager(did, ready);
       if (ready.exists())
-        ready.wait();
+        ready.lg_wait();
       resume_mapper_call(ctx);
     }
 
@@ -1249,7 +1249,7 @@ namespace Legion {
           wait_on = finder->second;
       }
       if (wait_on.exists())
-        wait_on.wait();
+        wait_on.lg_wait();
       resume_mapper_call(ctx);
     }
 
@@ -1857,7 +1857,7 @@ namespace Legion {
       RtEvent wait_on = 
         manager->memory_manager->acquire_instances(instances, results);
       if (wait_on.exists())
-        wait_on.wait(); // wait for the results to be ready
+        wait_on.lg_wait(); // wait for the results to be ready
       bool success = results[0];
       if (success)
         record_acquired_instance(ctx, manager, false/*created*/);
@@ -2114,7 +2114,7 @@ namespace Legion {
       if (!done_events.empty())
       {
         RtEvent ready = Runtime::merge_events(done_events);
-        ready.wait();
+        ready.lg_wait();
       }
       // Now find out which ones we acquired and which ones didn't
       bool all_acquired = true;
@@ -3027,7 +3027,7 @@ namespace Legion {
           RtUserEvent ready_event = Runtime::create_rt_user_event();
           info->resume = ready_event;
           non_reentrant_calls.push_back(info);
-          ready_event.wait();
+          ready_event.lg_wait();
           // When we wake up, we should be non-reentrant
 #ifdef DEBUG_LEGION
           assert(!permit_reentrant);
@@ -3136,7 +3136,7 @@ namespace Legion {
           executing_call = info;
       }
       if (wait_on.exists())
-        wait_on.wait();
+        wait_on.lg_wait();
 #ifdef DEBUG_LEGION
       assert(executing_call == info);
 #endif
@@ -3301,7 +3301,7 @@ namespace Legion {
         }
       }
       if (wait_on.exists())
-        wait_on.wait();
+        wait_on.lg_wait();
     }
 
     //--------------------------------------------------------------------------
@@ -3489,7 +3489,7 @@ namespace Legion {
       args.continuation = this;
       RtEvent wait_on = runtime->issue_runtime_meta_task(args,
                        LG_LATENCY_PRIORITY, op, precondition);
-      wait_on.wait();
+      wait_on.lg_wait();
     }
 
     //--------------------------------------------------------------------------

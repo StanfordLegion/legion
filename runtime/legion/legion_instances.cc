@@ -1499,7 +1499,7 @@ namespace Legion {
       if (copy_domain_pre.exists() && !copy_domain_pre.has_triggered())
       {
         RtEvent wait_on = Runtime::protect_event(copy_domain_pre);
-        wait_on.wait();
+        wait_on.lg_wait();
       }
       Domain result = Domain::NO_DOMAIN;
       AutoLock m_lock(manager_lock);
