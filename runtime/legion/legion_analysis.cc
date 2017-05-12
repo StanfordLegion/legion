@@ -25,6 +25,7 @@
 #include "legion_views.h"
 #include "legion_analysis.h"
 #include "legion_context.h"
+#include "logger_message_descriptor.h"
 
 namespace Legion {
   namespace Internal {
@@ -1608,7 +1609,7 @@ namespace Legion {
       {
         if (local_node->intersects_with(node))
         {
-            LegionInternal::Logger::MessageDescriptor ILLEGAL_PARTIAL_ACQUIRE(1100, "undefined");
+            MessageDescriptor ILLEGAL_PARTIAL_ACQUIRE(1100, "undefined");
           log_run.error(ILLEGAL_PARTIAL_ACQUIRE.id(),
                         "Illegal partial acquire operation (ID %lld) "
                         "performed in task %s (ID %lld)", op->get_unique_id(),
@@ -1685,7 +1686,7 @@ namespace Legion {
           return;
       }
       // It's bad if we get here
-        LegionInternal::Logger::MessageDescriptor ILLEGAL_INTERFERING_RESTRICTON(1101, "undefined");
+        MessageDescriptor ILLEGAL_INTERFERING_RESTRICTON(1101, "undefined");
       log_run.error(ILLEGAL_INTERFERING_RESTRICTON.id(),
                     "Illegal interfering restriction performed by attach "
                     "operation (ID %lld) in task %s (ID %lld)",
@@ -1844,7 +1845,7 @@ namespace Legion {
           return;
       }
       // It's bad if we get here
-        LegionInternal::Logger::MessageDescriptor ILLEGAL_INTERFERING_ACQUIRE(1102, "undefined");
+        MessageDescriptor ILLEGAL_INTERFERING_ACQUIRE(1102, "undefined");
       log_run.error(ILLEGAL_INTERFERING_ACQUIRE.id(),
                     "Illegal interfering acquire operation performed by "
                     "acquire operation (ID %lld) in task %s (ID %lld)",
@@ -1886,7 +1887,7 @@ namespace Legion {
       {
         if (local_node->intersects_with(node))
         {
-            LegionInternal::Logger::MessageDescriptor ILLEGAL_PARTIAL_RESTRICTION(1103, "undefined");
+            MessageDescriptor ILLEGAL_PARTIAL_RESTRICTION(1103, "undefined");
           log_run.error(ILLEGAL_PARTIAL_RESTRICTION.id(),
                         "Illegal partial restriction operation performed by "
                         "attach operation (ID %lld) in task %s (ID %lld)",

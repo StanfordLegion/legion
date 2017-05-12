@@ -938,7 +938,7 @@ namespace Legion {
         if (regions[idx].privilege != NO_ACCESS && 
             regions[idx].privilege_fields.empty())
         {
-          log_task.warning("WARNING: REGION REQUIREMENT %d OF "
+          log_task.warning("REGION REQUIREMENT %d OF "
                            "TASK %s (ID %lld) HAS NO PRIVILEGE "
                            "FIELDS! DID YOU FORGET THEM?!?",
                            idx, get_task_name(), get_unique_id());
@@ -2068,7 +2068,7 @@ namespace Legion {
             }
           }
           // If we did successfully acquire them, still issue the warning
-          log_run.warning("WARNING: mapper %s failed to acquire instances "
+          log_run.warning("mapper %s failed to acquire instances "
                           "for region requirement %d of task %s (ID %lld) "
                           "in 'premap_task' call. You may experience "
                           "undefined behavior as a consequence.",
@@ -2948,7 +2948,7 @@ namespace Legion {
             }
           }
           // Event if we did successfully acquire them, still issue the warning
-          log_run.warning("WARNING: mapper %s failed to acquire instances "
+          log_run.warning("mapper %s failed to acquire instances "
                           "for region requirement %d of task %s (ID %lld) "
                           "in 'map_task' call. You may experience "
                           "undefined behavior as a consequence.",
@@ -3551,7 +3551,7 @@ namespace Legion {
         RegionRequirement &req = regions[idx];
         if (has_restrictions(idx, req.region))
         {
-          log_run.warning("WARNING: Mapper %s requested post mapping "
+          log_run.warning("Mapper %s requested post mapping "
                           "instances be created for region requirement %d "
                           "of task %s (ID %lld), but this region requirement "
                           "is restricted. The request is being ignored.",
@@ -3561,7 +3561,7 @@ namespace Legion {
         }
         if (IS_NO_ACCESS(req))
         {
-          log_run.warning("WARNING: Mapper %s requested post mapping "
+          log_run.warning("Mapper %s requested post mapping "
                           "instances be created for region requirement %d "
                           "of task %s (ID %lld), but this region requirement "
                           "has NO_ACCESS privileges. The request is being "
@@ -3571,7 +3571,7 @@ namespace Legion {
         }
         if (IS_REDUCE(req))
         {
-          log_run.warning("WARNING: Mapper %s requested post mapping "
+          log_run.warning("Mapper %s requested post mapping "
                           "instances be created for region requirement %d "
                           "of task %s (ID %lld), but this region requirement "
                           "has REDUCE privileges. The request is being "
@@ -3629,7 +3629,7 @@ namespace Legion {
             }
           }
           // If we did successfully acquire them, still issue the warning
-          log_run.warning("WARNING: mapper %s failed to acquires instances "
+          log_run.warning("mapper %s failed to acquires instances "
                           "for region requirement %d of task %s (ID %lld) "
                           "in 'postmap_task' call. You may experience "
                           "undefined behavior as a consequence.",
@@ -3638,7 +3638,7 @@ namespace Legion {
         }
         if (had_composite)
         {
-          log_run.warning("WARNING: Mapper %s requested a composite "
+          log_run.warning("Mapper %s requested a composite "
                           "instance be created for region requirement %d "
                           "of task %s (ID %lld) for a post mapping. The "
                           "request is being ignored.",
@@ -4701,7 +4701,7 @@ namespace Legion {
       {
         const bool inline_task = select_task_options();
         if (inline_task)
-          log_run.warning("WARNING: Mapper %s requested to inline task %s "
+          log_run.warning("Mapper %s requested to inline task %s "
                           "(UID %lld) but the 'enable_inlining' option was "
                           "not set on the task launcher so the request is "
                           "being ignored", mapper->get_mapper_name(),
@@ -6548,7 +6548,7 @@ namespace Legion {
       {
         const bool inline_task = select_task_options();
         if (inline_task)
-          log_run.warning("WARNING: Mapper %s requested to inline task %s "
+          log_run.warning("Mapper %s requested to inline task %s "
                           "(UID %lld) but the 'enable_inlining' option was "
                           "not set on the task launcher so the request is "
                           "being ignored", mapper->get_mapper_name(),
@@ -7445,7 +7445,7 @@ namespace Legion {
                   other_reqs[it->second].get_index_space()))
             {
               if (pit->first.get_dim() <= 1)
-                log_run.error("ERROR: Index space task launch has intefering "
+                log_run.error("Index space task launch has intefering "
                               "region requirements %d of point %lld and region "
                               "requirement %d of point %lld of %s (UID %lld) "
                               "in parent task %s (UID %lld) are interfering.",
@@ -7454,7 +7454,7 @@ namespace Legion {
                               parent_ctx->get_task_name(), 
                               parent_ctx->get_unique_id());
               else if (pit->first.get_dim() == 2)
-                log_run.error("ERROR: Index space task launch has intefering "
+                log_run.error("Index space task launch has intefering "
                               "region requirements %d of point (%lld,%lld) and "
                               "region requirement %d of point (%lld,%lld) of "
                               "%s (UID %lld) in parent task %s (UID %lld) are "
@@ -7464,7 +7464,7 @@ namespace Legion {
                               parent_ctx->get_task_name(), 
                               parent_ctx->get_unique_id());
               else if (pit->first.get_dim() == 3)
-                log_run.error("ERROR: Index space task launch has intefering "
+                log_run.error("Index space task launch has intefering "
                               "region requirements %d of point (%lld,%lld,%lld)"
                               " and region requirement %d of point "
                               "(%lld,%lld,%lld) of %s (UID %lld) in parent "

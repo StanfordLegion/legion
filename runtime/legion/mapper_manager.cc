@@ -3075,7 +3075,7 @@ namespace Legion {
     {
       if (executing_call != info)
       {
-        log_run.error("ERROR: Invalid mapper context passed to mapper_rt "
+        log_run.error("Invalid mapper context passed to mapper_rt "
                       "call by mapper %s. Mapper contexts are only valid "
                       "for the mapper call to which they are passed. They "
                       "cannot be stored beyond the lifetime of the "

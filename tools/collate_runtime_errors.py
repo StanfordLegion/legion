@@ -23,18 +23,19 @@ splitters = ':;,().#'
 whitespace = ' \n\t\r'
 
 
-def quotedString(sourceFile, tokens, index):
+def quotedString(sourceFile, tokens, index, lineNumber):
     result = ''
     for i in range(100):
-        ensureLookahead(sourceFile, tokens, i + index);
-        token = tokens[i + index];
+        lineNumber = ensureLookahead(sourceFile, tokens, i + index, lineNumber)
+        tuple = tokens[i + index]
+        (token, tokenLineNumber) = tuple
         if(token[0] == "\""):
-            result = result + token[1:-1]
+            result = result + token[1 : -1]
         else:
-            return result;
+            return result, i + index, lineNumber
 
 
-def tokenize(line, tokens):
+def tokenize(line, tokens, lineNumber):
     token = ''
     
     i = 0
@@ -43,16 +44,19 @@ def tokenize(line, tokens):
             for j in range(i + 1, len(line)):
                 if line[j] == '\"':
                     token = line[i : j + 1]
-                    tokens.append(token)
+                    tuple = (token, lineNumber)
+                    tokens.append(tuple)
                     token = ''
                     i = j
                     break
     
         elif line[i] in splitters or line[i] in whitespace:
             if token != '':
-                tokens.append(token)
+                tuple = (token, lineNumber)
+                tokens.append(tuple)
             if(line[i] not in whitespace):
-                tokens.append(line[i])
+                tuple = (line[i], lineNumber)
+                tokens.append(tuple)
             token = ''
         else:
             token = token + line[i]
@@ -61,45 +65,67 @@ def tokenize(line, tokens):
             break
 
 
-def ensureLookahead(sourceFile, tokens, lookahead):
-    while(len(tokens) <= lookahead):
+def ensureLookahead(sourceFile, tokens, lookahead, lineNumber):
+    line = ' '
+    while(len(tokens) <= lookahead and len(line) > 0):
         line = sourceFile.readline()
-        tokenize(line, tokens)
+        lineNumber = lineNumber + 1
+        tokenize(line, tokens, lineNumber)
+    return lineNumber
 
 
-def parseInput(sourceFile, tokens):
+def deleteTokens(tokens, index):
+    for i in range(index):
+        del tokens[0]
+    return tokens
+
+
+def parseInput(sourceFile, tokens, lineNumber):
     
-    declaration = ''
-    name = ''
-    code = ''
-    whatToDo = ''
-    type = ''
-    message = ''
+    declaration = None
+    name = None
+    code = None
+    whatToDo = None
+    type = None
+    message = None
     
     i = 0;
-    while 1:
-        ensureLookahead(sourceFile, tokens, i + 6)
-        token = tokens[i]
+    while i < 100:
         
-        if(type == '' and name != '' and token == name):
-            type = tokens[i - 2]
-            assert tokens[i + 1] == '.'
-            assert tokens[i + 2] == 'id'
-            message = quotedString(sourceFile, tokens, i + 6);
+        lineNumber = ensureLookahead(sourceFile, tokens, i + 20, lineNumber)
+        tuple = tokens[i]
+        (token, tokenLineNumber) = tuple
+        
+        if(type == None and name != None and token == name):
+            type = tokens[i - 2][0]
+            assert tokens[i + 1][0] == '.'
+            assert tokens[i + 2][0] == 'id'
+            message, index, lineNumber = quotedString(sourceFile, tokens, i + 6, lineNumber);
+            tokens = deleteTokens(tokens, index)
+            i = 0
             break
         
-        if(declaration != '' and name == ''):
+        if(declaration != None and name == None):
             name = token
-            assert tokens[i + 1] == '('
-            code = tokens[i + 2]
-            assert tokens[i + 3] == ','
-            whatToDo = quotedString(sourceFile, tokens, i + 4)
+            assert tokens[i + 1][0] == '('
+            code = tokens[i + 2][0]
+            assert tokens[i + 3][0] == ','
+            whatToDo, index, lineNumber = quotedString(sourceFile, tokens, i + 4, lineNumber)
+            tokens = deleteTokens(tokens, index)
+            i = 0
+            continue
         
         if(DECLARATION in token):
             declaration = token
+            declarationLineNumber = tokenLineNumber
+        
         i = i + 1
 
-    return declaration, name, code, whatToDo, type, message, i
+    if declaration == None or name == None or code == None or whatToDo == None or type == None or message == None or lineNumber == None:
+        return None, None, None, None, None, None, lineNumber, None
+    else:
+        deleteTokens(tokens, i)
+    return declaration, name, code, whatToDo, type, message, lineNumber, declarationLineNumber
 
 
 
@@ -121,28 +147,33 @@ def sanitizedMessage(message):
 
 
 
-def addToDatabase(type, code, message, whatToDo, connection):
-    createTableCommand = "create table if not exists " + type + "(code int key, message text key, whatToDo text);"
+def addToDatabase(type, name, code, message, whatToDo, connection, sourceFile, lineNumber):
+    createTableCommand = "create table if not exists " + type + "(code int key, name text, message text key, whatToDo text, filename text, lineNumber int);"
     connection.execute(createTableCommand)
-    insertCommand = "insert into " + type + "(code, message, whatToDo) values (" + code + ", \"" + sanitizedMessage(message) + "\", \"" + whatToDo + "\");"
+    filename = sourceFile.name
+    insertCommand = "insert into " + type + "(code, name, message, whatToDo, filename, lineNumber) values (" + code + ", \"" + name + "\", \"" + sanitizedMessage(message) + "\", \"" + whatToDo + "\", \"" + filename + "\", " + str(lineNumber) + ");"
     connection.execute(insertCommand)
 
 
 
 def parseSourceFile(fileName, connection):
+    print fileName
     
     with open(fileName, 'rt') as sourceFile:
-        line = sourceFile.readline()
+        lineNumber = 0
         tokens = []
-        outputFiles = []
-        while len(line) > 0:
-            if(DECLARATION in line):
-                tokenize(line, tokens)
-                declaration, name, code, whatToDo, type, message, index = parseInput(sourceFile, tokens)
-                tokens = tokens[index:]
-                addToDatabase(type, code, message, whatToDo, connection)
-                print type, code, name
-            line = sourceFile.readline()
+        while len(tokens) > 0 or lineNumber == 0:
+            lineNumber = ensureLookahead(sourceFile, tokens, 100, lineNumber)
+            tuple = tokens[0]
+            (token, tokenLineNumber) = tuple
+            if(DECLARATION in token):
+                declaration, name, code, whatToDo, type, message, lineNumber, declarationLineNumber = parseInput(sourceFile, tokens, lineNumber)
+                index = 0
+                if declaration != None:
+                    addToDatabase(type, name, code, message, whatToDo, connection, sourceFile, declarationLineNumber)
+                    print type, code, name
+            else:
+                del tokens[0]
 
 
 def parseSourceFiles(connection):
@@ -160,11 +191,13 @@ def htmlMarker(type, field, code):
 
 
 def writeHtmlEntry(type, field, outputFile, row):
-    (code, message, whatToDo) = row
+    (code, name, message, whatToDo, fileName, lineNumber) = row
     outputFile.write("<p id=\"" + htmlMarker(type, field, code) + "\">")
     outputFile.write("<b>" + type + " " + str(code) + "</b>\n")
     outputFile.write("<br>Message: " + message + "\n");
-    outputFile.write("<br>Remedy:" + whatToDo + "\n</p>\n");
+    outputFile.write("<br>Remedy:" + whatToDo + "\n");
+    outputFile.write("<br>Location: line " + str(lineNumber) + " " + fileName + "\n")
+    outputFile.write("<p>\n")
 
 
 def tables(connection):
@@ -214,7 +247,7 @@ def writeHtmlIndexTable(connection, tableName, field, file):
             fieldCounter = 0
         file.write("<TD>")
         first = False
-        (code, message, whatToDo) = row
+        (code, name, message, whatToDo, fileName, lineNumber) = row
         if field == "code":
             text = str(code)
         elif field == "message":

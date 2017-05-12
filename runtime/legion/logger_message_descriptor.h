@@ -11,8 +11,8 @@
 
 #include "realm/logging.h"
 
-namespace LegionInternal {
-    namespace Logger {
+namespace Legion{
+    namespace Internal {
         class MessageDescriptor {
         public:
             MessageDescriptor() : mID(0), mDescription(nullptr) {}

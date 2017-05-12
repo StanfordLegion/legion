@@ -317,7 +317,7 @@ namespace Legion {
       {
         TaskContext *context = producer_op->get_context();
         if (!context->is_leaf_context())
-          log_run.warning("WARNING: Waiting on a future in non-leaf task %s "
+          log_run.warning("Waiting on a future in non-leaf task %s "
              "(UID %lld) is a violation of Legion's deferred execution model "
              "best practices. You may notice a severe performance degradation.",
              context->get_task_name(), context->get_unique_id());
@@ -357,7 +357,7 @@ namespace Legion {
       {
         TaskContext *context = producer_op->get_context();
         if (!context->is_leaf_context())
-          log_run.warning("WARNING: Waiting on a future in non-leaf task %s "
+          log_run.warning("Waiting on a future in non-leaf task %s "
              "(UID %lld) is a violation of Legion's deferred execution model "
              "best practices. You may notice a severe performance degradation.",
              context->get_task_name(), context->get_unique_id());
@@ -407,7 +407,7 @@ namespace Legion {
       {
         TaskContext *context = producer_op->get_context();
         if (!context->is_leaf_context())
-          log_run.warning("WARNING: Performing a blocking is_empty test on a "
+          log_run.warning("Performing a blocking is_empty test on a "
               "in non-leaf task %s (UID %lld) is a violation of Legion's "
               "deferred execution model best practices. You may notice a "
               "severe performance degradation.", context->get_task_name(), 
@@ -928,7 +928,7 @@ namespace Legion {
 #endif
       if (Runtime::runtime_warnings && !silence_warnings && 
           (context != NULL) && !context->is_leaf_context())
-        log_run.warning("WARNING: Waiting for all futures in a future map in "
+        log_run.warning("Waiting for all futures in a future map in "
             "non-leaf task %s (UID %lld) is a violation of Legion's deferred "
             "execution model best practices. You may notice a severe "
             "performance degredation.", context->get_task_name(),
@@ -1165,13 +1165,13 @@ namespace Legion {
           (context != NULL) && !context->is_leaf_context())
       {
         if (source != NULL)
-          log_run.warning("WARNING: Waiting for a physical region to be valid "
+          log_run.warning("Waiting for a physical region to be valid "
               "for call %s in non-leaf task %s (UID %lld) is a violation of "
               "Legion's deferred execution model best practices. You may "
               "notice a severe performance degradation.", source,
               context->get_task_name(), context->get_unique_id());
         else
-          log_run.warning("WARNING: Waiting for a physical region to be valid "
+          log_run.warning("Waiting for a physical region to be valid "
               "in non-leaf task %s (UID %lld) is a violation of Legion's "
               "deferred execution model best practices. You may notice a "
               "severe performance degradation.", context->get_task_name(), 
@@ -1186,7 +1186,7 @@ namespace Legion {
       if (!ready_event.has_triggered())
       {
         if (warn && !silence_warnings && (source != NULL))
-          log_run.warning("WARNING: Request for %s was performed on a "
+          log_run.warning("Request for %s was performed on a "
               "physical region in task %s (ID %lld) without first waiting "
               "for the physical region to be valid. Legion is performing "
               "the wait for you.", source, context->get_task_name(), 
@@ -1266,7 +1266,7 @@ namespace Legion {
         }
         else if (Runtime::runtime_warnings && !silence_warnings &&
                   !context->is_leaf_context())
-          log_run.warning("WARNING: Call to 'get_accessor' in non-leaf task %s "
+          log_run.warning("Call to 'get_accessor' in non-leaf task %s "
               "(UID %lld) is a blocking operation in violation of Legion's "
               "deferred execution model best practices. You may notice a "
               "severe performance degradation.", context->get_task_name(),
@@ -1287,7 +1287,7 @@ namespace Legion {
           exit(ERROR_ILLEGAL_IMPLICIT_MAPPING);
         }
         if (Runtime::runtime_warnings && !silence_warnings)
-          log_run.warning("WARNING: Request for 'get_accessor' was "
+          log_run.warning("Request for 'get_accessor' was "
                           "performed on an unmapped region in task %s "
                           "(UID %lld). Legion is mapping it for you. "
                           "Please try to be more careful.",
@@ -1353,7 +1353,7 @@ namespace Legion {
         }
         else if (Runtime::runtime_warnings && !silence_warnings &&
                   !context->is_leaf_context())
-          log_run.warning("WARNING: Call to 'get_field_accessor' in non-leaf "
+          log_run.warning("Call to 'get_field_accessor' in non-leaf "
               "task %s (UID %lld) is a blocking operation in violation of "
               "Legion's deferred execution model best practices. You may "
               "notice a severe performance degradation.", 
@@ -1374,7 +1374,7 @@ namespace Legion {
           exit(ERROR_ILLEGAL_IMPLICIT_MAPPING);
         }
         if (Runtime::runtime_warnings && !silence_warnings)
-          log_run.warning("WARNING: Request for 'get_field_accessor' was "
+          log_run.warning("Request for 'get_field_accessor' was "
                           "performed on an unmapped region in task %s "
                           "(UID %lld). Legion is mapping it for you. "
                           "Please try to be more careful.",
@@ -6985,7 +6985,7 @@ namespace Legion {
               // Note mutable so check to make sure that the bits are the same
               if (size != finder->second.size)
               {
-                log_run.error("ERROR: Inconsistent Semantic Tag value "
+                log_run.error("Inconsistent Semantic Tag value "
                               "for tag %ld with different sizes of %zd"
                               " and %zd for task impl", 
                               tag, size, finder->second.size);
@@ -7003,7 +7003,7 @@ namespace Legion {
                   char diff = orig[idx] ^ next[idx];
                   if (diff)
                   {
-                    log_run.error("ERROR: Inconsistent Semantic Tag value "
+                    log_run.error("Inconsistent Semantic Tag value "
                                   "for tag %ld with different values at"
                                   "byte %d for task impl, %x != %x",
                                   tag, idx, orig[idx], next[idx]);
@@ -7118,7 +7118,7 @@ namespace Legion {
       {
         if (can_fail)
           return false;
-        log_run.error("ERROR: invalid semantic tag %ld for "
+        log_run.error("invalid semantic tag %ld for "
                             "task implementation", tag);   
 #ifdef DEBUG_LEGION
         assert(false);
@@ -7500,7 +7500,7 @@ namespace Legion {
       if (constraint.is_valid())
         return constraint.get_kind();
       if (warn)
-        log_run.warning("WARNING: NO PROCESSOR CONSTRAINT SPECIFIED FOR VARIANT"
+        log_run.warning("NO PROCESSOR CONSTRAINT SPECIFIED FOR VARIANT"
                         " %s (ID %ld) OF TASK %s (ID %d)! ASSUMING LOC_PROC!",
                       variant_name, vid, owner->get_name(false),owner->task_id);
       return Processor::LOC_PROC;
@@ -9593,7 +9593,7 @@ namespace Legion {
             em1.overlaps_with(em2, 1/*effort level*/);
           if (result == Realm::ElementMask::OVERLAP_YES)
           {
-            log_run.error("ERROR: colors %d and %d of partition %d "
+            log_run.error("colors %d and %d of partition %d "
                           "are not disjoint when they were claimed to be!",
                           (int)it1->first.get_index(),
                           (int)it2->first.get_index(), pid.id);
@@ -9602,7 +9602,7 @@ namespace Legion {
           }
           else if (result == Realm::ElementMask::OVERLAP_MAYBE)
           {
-            log_run.warning("WARNING: colors %d and %d of partition "
+            log_run.warning("colors %d and %d of partition "
                           "%d may not be disjoint when they were claimed to be!"
                            "(At least according to the low-level runtime.  You "
                             "might also try telling the the low-level runtime "
@@ -9638,7 +9638,7 @@ namespace Legion {
                 LegionRuntime::Arrays::Rect<1> d2 = it2->second.get_rect<1>();
                 if (d1.overlaps(d2))
                 {
-                  log_run.error("ERROR: colors %d and %d of "
+                  log_run.error("colors %d and %d of "
                                        "partition %d are not disjoint "
                                        "when they are claimed to be!",
                                 (int)it1->first[0], (int)it2->first[0], pid.id);
@@ -9653,7 +9653,7 @@ namespace Legion {
                 LegionRuntime::Arrays::Rect<2> d2 = it2->second.get_rect<2>();
                 if (d1.overlaps(d2))
                 {
-                  log_run.error("ERROR: colors (%d,%d) and "
+                  log_run.error("colors (%d,%d) and "
                                       "(%d,%d) of partition %d are "
                                       "not disjoint when they are "
                                       "claimed to be!",
@@ -9670,7 +9670,7 @@ namespace Legion {
                 LegionRuntime::Arrays::Rect<3> d2 = it2->second.get_rect<3>();
                 if (d1.overlaps(d2))
                 {
-                  log_run.error("ERROR: colors (%d,%d,%d) and "
+                  log_run.error("colors (%d,%d,%d) and "
                                        "(%d,%d,%d) of partition %d are "
                                        "not disjoint when they are "
                                        "claimed to be!",
@@ -9722,7 +9722,7 @@ namespace Legion {
                     LegionRuntime::Arrays::Rect<1> d2 = it4->get_rect<1>();
                     if (d1.overlaps(d2))
                     {
-                      log_run.error("ERROR: colors %d and %d of "
+                      log_run.error("colors %d and %d of "
                                            "multi-domain partition %d are "
                                            "not disjoint when they are "
                                            "claimed to be!", 
@@ -9739,7 +9739,7 @@ namespace Legion {
                     LegionRuntime::Arrays::Rect<2> d2 = it4->get_rect<2>();
                     if (d1.overlaps(d2))
                     {
-                      log_run.error("ERROR: colors (%d,%d) and (%d,%d) "
+                      log_run.error("colors (%d,%d) and (%d,%d) "
                                            "of multi-domain partition %d are "
                                            "not disjoint when they are "
                                            "claimed to be!", 
@@ -9758,7 +9758,7 @@ namespace Legion {
                     LegionRuntime::Arrays::Rect<3> d2 = it4->get_rect<3>();
                     if (d1.overlaps(d2))
                     {
-                      log_run.error("ERROR: colors (%d,%d,%d) and "
+                      log_run.error("colors (%d,%d,%d) and "
                                            "(%d,%d,%d) of multi-domain "
                                            "partition %d are not disjoint "
                                            "when they are claimed to be!", 
@@ -12400,7 +12400,7 @@ namespace Legion {
     {
       if (need_zero_check && (pid == 0))
       {
-        log_run.error("ERROR: ProjectionID zero is reserved.\n");
+        log_run.error("ProjectionID zero is reserved.\n");
 #ifdef DEBUG_LEGION
         assert(false);
 #endif
@@ -12414,7 +12414,7 @@ namespace Legion {
         const_iterator finder = projection_functions.find(pid);
       if (finder != projection_functions.end())
       {
-        log_run.error("ERROR: ProjectionID %d has already been used in "
+        log_run.error("ProjectionID %d has already been used in "
                                     "the region projection table\n", pid);
 #ifdef DEBUG_LEGION
         assert(false);
@@ -12442,7 +12442,7 @@ namespace Legion {
       }
       if (pid == 0)
       {
-        log_run.error("ERROR: ProjectionID zero is reserved.\n");
+        log_run.error("ProjectionID zero is reserved.\n");
 #ifdef DEBUG_LEGION
         assert(false);
 #endif
@@ -12454,7 +12454,7 @@ namespace Legion {
         pending_projection_functors.find(pid);
       if (finder != pending_projection_functors.end())
       {
-        log_run.error("ERROR: ProjectionID %d has already been used in "
+        log_run.error("ProjectionID %d has already been used in "
                                     "the region projection table\n", pid);
 #ifdef DEBUG_LEGION
         assert(false);
@@ -18609,13 +18609,13 @@ namespace Legion {
 #else
           if (!strcmp(argv[i],"-lg:tree"))
           {
-            log_run.warning("WARNING: Region tree state logging is "
+            log_run.warning("Region tree state logging is "
                           "disabled.  To enable region tree state logging "
                                                   "compile in debug mode.");
           }
           if (!strcmp(argv[i],"-lg:disjointness"))
           {
-            log_run.warning("WARNING: Disjointness verification for "
+            log_run.warning("Disjointness verification for "
                       "partition creation is disabled.  To enable dynamic "
                               "disjointness testing compile in debug mode.");
           }
@@ -18663,13 +18663,13 @@ namespace Legion {
 #else
           if (!strcmp(argv[i],"-hl:tree"))
           {
-            log_run.warning("WARNING: Region tree state logging is "
+            log_run.warning("Region tree state logging is "
                           "disabled.  To enable region tree state logging "
                                                   "compile in debug mode.");
           }
           if (!strcmp(argv[i],"-hl:disjointness"))
           {
-            log_run.warning("WARNING: Disjointness verification for "
+            log_run.warning("Disjointness verification for "
                       "partition creation is disabled.  To enable dynamic "
                               "disjointness testing compile in debug mode.");
           }
@@ -18998,13 +18998,13 @@ namespace Legion {
       {
         if (rank != mpi_rank)
         {
-          log_run.error("ERROR: multiple calls to "
+          log_run.error("multiple calls to "
               "configure_MPI_interoperability with different ranks "
               "%d and %d on the same Legion runtime!", mpi_rank, rank);
           assert(false);
         }
         else
-          log_run.warning("WARNING: duplicate calls to "
+          log_run.warning("duplicate calls to "
               "configure_MPI_interoperability on rank %d!", rank);
       }
       mpi_rank = rank;
@@ -19035,7 +19035,7 @@ namespace Legion {
     {
       if (redop_id == 0)
       {
-        log_run.error("ERROR: ReductionOpID zero is reserved.");
+        log_run.error("ReductionOpID zero is reserved.");
 #ifdef DEBUG_LEGION
         assert(false);
 #endif
@@ -19059,7 +19059,7 @@ namespace Legion {
     {
       if (serdez_id == 0)
       {
-        log_run.error("ERROR: CustomSerdezID zero is reserved.");
+        log_run.error("CustomSerdezID zero is reserved.");
 #ifdef DEBUG_LEGION
         assert(false);
 #endif

@@ -5378,7 +5378,7 @@ namespace LegionRuntime {
       if(src_is_rdma) {
 	if(dst_is_rdma) {
 	  // gasnet -> gasnet - blech
-	  log_dma.warning("WARNING: gasnet->gasnet copy being serialized on local node (%d)", gasnet_mynode());
+	  log_dma.warning("gasnet->gasnet copy being serialized on local node (%d)", gasnet_mynode());
 	  return gasnet_mynode();
 	} else {
 	  // gathers by the receiver
