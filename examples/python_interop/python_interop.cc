@@ -79,10 +79,11 @@ int main(int argc, char **argv)
 #error PYTHON_MODULES_PATH not available at compile time
 #endif
   char *previous_python_path = getenv("PYTHONPATH");
-  size_t bufsize = 8192;
-  char *buffer = (char *)malloc(bufsize);
-  assert(buffer != 0);
   if (previous_python_path != 0) {
+    size_t bufsize = 8192;
+    char *buffer = (char *)calloc(bufsize, sizeof(char));
+    assert(buffer != 0);
+
     assert(strlen(previous_python_path) + strlen(PYTHON_MODULES_PATH) + 2 < bufsize);
     // Concatenate PYTHON_MODULES_PATH to the end of PYTHONPATH.
     bufsize--;
@@ -90,7 +91,6 @@ int main(int argc, char **argv)
     bufsize -= strlen(previous_python_path);
     strncat(buffer, ":" PYTHON_MODULES_PATH, bufsize);
     bufsize -= strlen(":" PYTHON_MODULES_PATH);
-    printf("%s", buffer);
     setenv("PYTHONPATH", buffer, true /*overwrite*/);
   } else {
     setenv("PYTHONPATH", PYTHON_MODULES_PATH, true /*overwrite*/);
