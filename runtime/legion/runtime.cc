@@ -65,6 +65,14 @@ namespace Legion {
       LegionRuntime::Logger::Category log_spy("legion_spy");
     };
 
+#ifdef ENABLE_LEGION_TLS
+#if __cplusplus >= 201103L
+    thread_local TaskContext *implicit_context = NULL;
+#else
+    pthread_key_t implicit_context;
+#endif
+#endif
+
     /////////////////////////////////////////////////////////////
     // Argument Map Impl
     /////////////////////////////////////////////////////////////
@@ -197,9 +205,6 @@ namespace Legion {
       std::map<DomainPoint,Future>::const_iterator finder=arguments.find(point);
       if ((finder == arguments.end()) || (finder->second.impl == NULL))
         return TaskArgument();
-      ApEvent ready = finder->second.impl->get_ready_event();
-      if (!ready.has_triggered())
-        ready.wait();
       return TaskArgument(finder->second.impl->get_untyped_result(),
                           finder->second.impl->get_untyped_size());
     }
@@ -414,7 +419,18 @@ namespace Legion {
               context->get_unique_id());
       }
       if (block && !ready_event.has_triggered())
-        ready_event.wait();
+      {
+        TaskContext *context = 
+          (producer_op == NULL) ? NULL : producer_op->get_context();
+        if (context != NULL)
+        {
+          context->begin_task_wait(false/*from runtime*/);
+          ready_event.wait();
+          context->end_task_wait();
+        }
+        else
+          ready_event.wait();
+      }
       if (block)
         mark_sampled();
       return empty;
@@ -935,7 +951,16 @@ namespace Legion {
             context->get_unique_id());
       // Wait on the event that indicates the entire task has finished
       if (valid && !ready_event.has_triggered())
-        ready_event.wait();
+      {
+        if (context != NULL)
+        {
+          context->begin_task_wait(false/*from runtime*/);
+          ready_event.wait();
+          context->end_task_wait();
+        }
+        else
+          ready_event.wait();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -984,7 +1009,16 @@ namespace Legion {
       assert(valid);
 #endif
       if (!ready_event.has_triggered())
-        ready_event.wait();
+      {
+        if (context != NULL)
+        {
+          context->begin_task_wait(false/*from runtime*/);
+          ready_event.wait();
+          context->end_task_wait();
+        }
+        else
+          ready_event.wait();
+      }
       // No need for the lock since the map should be fixed at this point
       others = futures;
     }
@@ -18473,6 +18507,11 @@ namespace Legion {
       LEGION_STATIC_ASSERT(DEFAULT_MIN_TASKS_TO_SCHEDULE > 0);
       LEGION_STATIC_ASSERT(DEFAULT_SUPERSCALAR_WIDTH > 0);
       LEGION_STATIC_ASSERT(DEFAULT_MAX_MESSAGE_SIZE > 0); 
+#ifdef ENABLE_LEGION_TLS
+#if __cplusplus < 201103L
+      pthread_key_create(&implicit_context, NULL/*destructor function*/);
+#endif
+#endif
       // Need to pass argc and argv to low-level runtime before we can record 
       // their values as they might be changed by GASNet or MPI or whatever.
       // Note that the logger isn't initialized until after this call returns 

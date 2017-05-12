@@ -42,6 +42,12 @@
 #define REALM_USE_LEGION_LAYOUT_CONSTRAINTS
 #include "realm.h"
 
+#ifdef ENABLE_LEGION_TLS
+#if __cplusplus < 201103L || !HAS_CXX11_THREAD_LOCAL
+#include <pthread.h> // needed for thread local storage before C++11
+#endif
+#endif
+
 namespace BindingLib { class Utility; } // BindingLib namespace
 
 namespace Legion { 
@@ -203,7 +209,7 @@ namespace Legion {
     };
   };
   
-  namespace Internal {
+  namespace Internal { 
 
     enum OpenState {
       NOT_OPEN                = 0,
@@ -1219,6 +1225,15 @@ namespace Legion {
       inline TaskContext* as_context(void) 
         { return reinterpret_cast<TaskContext*>(this); }
     };
+    // Nasty global variable for TLS support of figuring out
+    // our context implicitly, this is experimental only
+#ifdef ENABLE_LEGION_TLS
+#if __cplusplus >= 201103L && HAS_CXX11_THREAD_LOCAL
+    extern thread_local TaskContext *implicit_context;
+#else
+    extern pthread_key_t implicit_context;
+#endif
+#endif
     
     // legion_trace.h
     class LegionTrace;
@@ -1657,6 +1672,33 @@ namespace Legion {
   public:
     inline LgEvent& operator=(const LgEvent &rhs)
       { id = rhs.id; return *this; }
+  public:
+    inline void legion_wait(void) const
+      {
+#ifdef ENABLE_LEGION_TLS
+        if (!has_triggered())
+        {
+          // Save the context locally
+#if __cplusplus >= 201103L && HAS_CXX11_THREAD_LOCAL
+          Context local_ctx = Internal::implicit_context; 
+#else
+          Context local_ctx = static_cast<Context>(
+              pthread_getspecific(Internal::implicit_context));
+#endif
+          // Do the wait
+          wait();
+          // Write the context back
+#if __cplusplus >= 201103L && HAS_CXX11_THREAD_LOCAL
+          Internal::implicit_context = local_ctx;
+#else
+          pthread_setspecific(Internal::implicit_context, local_ctx);
+#endif
+        }
+#else
+        // Just do the normal wait call
+        wait(); 
+#endif
+      }
   };
 
   class PredEvent : public LgEvent {

@@ -1939,6 +1939,13 @@ namespace Legion {
     const std::vector<PhysicalRegion>& TaskContext::begin_task(void)
     //--------------------------------------------------------------------------
     {
+#ifdef ENABLE_LEGION_TLS
+#if __cplusplus >= 201103L && HAS_CXX11_THREAD_LOCAL
+      implicit_context = this;
+#else
+      pthread_setspecific(implicit_context, this);
+#endif
+#endif
       if (overhead_tracker != NULL)
         previous_profiling_time = Realm::Clock::current_time_in_nanoseconds();
       // Switch over the executing processor to the one
