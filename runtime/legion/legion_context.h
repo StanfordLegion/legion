@@ -509,7 +509,9 @@ namespace Legion {
       void remap_unmapped_regions(LegionTrace *current_trace,
                            const std::vector<PhysicalRegion> &unmapped_regions);
     public:
-      void perform_inlining(TaskContext *ctx, VariantImpl *variant); 
+      void* get_local_task_variable(LocalVariableID id);
+      void set_local_task_variable(LocalVariableID id, const void *value,
+                                   void (*destructor)(void*));
     public:
       Runtime *const runtime;
       TaskOp *const owner_task;
@@ -547,6 +549,9 @@ namespace Legion {
     protected:
       // Some help for performing fast safe casts
       std::map<IndexSpace,Domain> safe_cast_domains;   
+    protected:
+      std::map<LocalVariableID,
+               std::pair<void*,void (*)(void*)> > task_local_variables;
     protected:
       RtEvent pending_done;
       bool task_executed;

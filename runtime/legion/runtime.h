@@ -1810,6 +1810,10 @@ namespace Legion {
                             MapperID mid, MappingTagID tag);
       void perform_tunable_selection(const SelectTunableArgs *args);
     public:
+      void* get_local_task_variable(Context ctx, LocalVariableID id);
+      void set_local_task_variable(Context ctx, LocalVariableID id,
+                      const void *value, void (*destructor)(void*));
+    public:
       Mapper* get_mapper(Context ctx, MapperID id, Processor target);
       Processor get_executing_processor(Context ctx);
       void raise_region_exception(Context ctx, PhysicalRegion region, 

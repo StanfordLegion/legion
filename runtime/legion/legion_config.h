@@ -367,6 +367,7 @@ typedef enum legion_error_t {
   ERROR_INNER_TASK_VIOLATION = 161,
   ERROR_REQUEST_FOR_EMPTY_FUTURE = 162,
   ERROR_ILLEGAL_REMAP_IN_STATIC_TRACE = 163,
+  ERROR_MISSING_LOCAL_VARIABLE = 164,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well
@@ -588,6 +589,7 @@ typedef unsigned int legion_projection_id_t;
 typedef unsigned int legion_region_tree_id_t;
 typedef unsigned int legion_address_space_id_t;
 typedef unsigned int legion_tunable_id_t;
+typedef unsigned int legion_local_variable_id_t;
 typedef unsigned int legion_generator_id_t;
 typedef unsigned long long legion_distributed_id_t;
 typedef unsigned long legion_mapping_tag_id_t;

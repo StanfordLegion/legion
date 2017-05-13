@@ -1481,6 +1481,7 @@ namespace Legion {
   typedef ::legion_distributed_id_t DistributedID;
   typedef ::legion_address_space_id_t AddressSpaceID;
   typedef ::legion_tunable_id_t TunableID;
+  typedef ::legion_local_variable_id_t LocalVariableID;
   typedef ::legion_generator_id_t GeneratorID;
   typedef ::legion_mapping_tag_id_t MappingTagID;
   typedef ::legion_semantic_tag_t SemanticTag;

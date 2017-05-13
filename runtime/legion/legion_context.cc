@@ -56,6 +56,18 @@ namespace Legion {
     {
       context_lock.destroy_reservation();
       context_lock = Reservation::NO_RESERVATION;
+      // Clean up any local variables that we have
+      if (!task_local_variables.empty())
+      {
+        for (std::map<LocalVariableID,
+                      std::pair<void*,void (*)(void*)> >::iterator it = 
+              task_local_variables.begin(); it != 
+              task_local_variables.end(); it++)
+        {
+          if (it->second.second != NULL)
+            (*it->second.second)(it->second.first);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2105,6 +2117,45 @@ namespace Legion {
         mapped_event.lg_wait();
         end_task_wait();
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void* TaskContext::get_local_task_variable(LocalVariableID id)
+    //--------------------------------------------------------------------------
+    {
+      std::map<LocalVariableID,std::pair<void*,void (*)(void*)> >::
+        const_iterator finder = task_local_variables.find(id);
+      if (finder == task_local_variables.end())
+      {
+        log_run.error("Unable to find task local variable %d in task %s "
+                      "(UID %lld)", id, get_task_name(), get_unique_id());  
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_MISSING_LOCAL_VARIABLE);
+      }
+      return finder->second.first;
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskContext::set_local_task_variable(LocalVariableID id,
+                                              const void *value,
+                                              void (*destructor)(void*))
+    //--------------------------------------------------------------------------
+    {
+      std::map<LocalVariableID,std::pair<void*,void (*)(void*)> >::iterator
+        finder = task_local_variables.find(id);
+      if (finder != task_local_variables.end())
+      {
+        // See if we need to clean things up first
+        if (finder->second.second != NULL)
+          (*finder->second.second)(finder->second.first);
+        finder->second = 
+          std::pair<void*,void (*)(void*)>(const_cast<void*>(value),destructor);
+      }
+      else
+        task_local_variables[id] = 
+          std::pair<void*,void (*)(void*)>(const_cast<void*>(value),destructor);
     }
 
 #ifdef LEGION_SPY

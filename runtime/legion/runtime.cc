@@ -12167,6 +12167,37 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void* Runtime::get_local_task_variable(Context ctx, LocalVariableID id)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context get local task variable!");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      return ctx->get_local_task_variable(id);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::set_local_task_variable(Context ctx, LocalVariableID id,
+                                   const void *value, void (*destructor)(void*))
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+      {
+        log_run.error("Illegal dummy context set local task variable!");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_DUMMY_CONTEXT_OPERATION);
+      }
+      ctx->set_local_task_variable(id, value, destructor);
+    }
+
+    //--------------------------------------------------------------------------
     Mapper* Runtime::get_mapper(Context ctx, MapperID id, Processor target)
     //--------------------------------------------------------------------------
     {

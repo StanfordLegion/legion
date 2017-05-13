@@ -4009,6 +4009,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const Task* Runtime::get_local_task(Context ctx)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->get_task();
+    }
+
+    //--------------------------------------------------------------------------
+    void* Runtime::get_local_task_variable_untyped(Context ctx,
+                                                   LocalVariableID id)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_local_task_variable(ctx, id);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::set_local_task_variable_untyped(Context ctx,
+               LocalVariableID id, const void* value, void (*destructor)(void*))
+    //--------------------------------------------------------------------------
+    {
+      runtime->set_local_task_variable(ctx, id, value, destructor);
+    }
+
+    //--------------------------------------------------------------------------
     Future Runtime::get_current_time(Context ctx, Future precondition)
     //--------------------------------------------------------------------------
     {
@@ -4579,6 +4602,20 @@ namespace Legion {
     {
       return Internal::Runtime::get_runtime(p)->external;
     }
+
+#ifdef ENABLE_LEGION_TLS
+    //--------------------------------------------------------------------------
+    /*static*/ Context Runtime::get_context(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef HAS_LEGION_THREAD_LOCAL
+      return Internal::implicit_context;
+#else
+      return static_cast<Context>(
+          pthread_getspecific(Internal::implicit_context));
+#endif
+    }
+#endif
 
     //--------------------------------------------------------------------------
     /*static*/ ReductionOpTable& Runtime::get_reduction_table(void)
