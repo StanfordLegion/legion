@@ -1191,8 +1191,13 @@ namespace Legion {
                                           RegionTreeNode *node,
                                           size_t remaining_depth,
                                           Deserializer &derez);
+      void unpack_composite_view_response(Deserializer &derez,
+                                          Runtime *runtime);
+      static void handle_composite_view_response(Deserializer &derez,
+                                                 Runtime *runtime);
     public:
       virtual InnerContext* get_owner_context(void) const = 0;
+      virtual DistributedID get_owner_did(void) const = 0;
       virtual void perform_ready_check(FieldMask mask,
                                        ClosedNode *closed_local_node,
                                        RegionTreeNode *target) = 0;
@@ -1204,7 +1209,7 @@ namespace Legion {
                                   std::vector<LegionColor> &path,
                                   LegionColor child_color = INVALID_COLOR) = 0;
     public:
-      CompositeNode* find_child_node(RegionTreeNode *child);
+      CompositeNode* find_child_node(RegionTreeNode *child); 
     private:
       Reservation &base_lock;
     protected:
@@ -1216,6 +1221,7 @@ namespace Legion {
       // For control replication to determine which shard checks
       // we've performed for different sub-nodes
       LegionMap<RegionTreeNode*,FieldMask>::aligned shard_checks; 
+      std::map<ShardID,RtEvent> requested_shards;
     };
 
     /**
@@ -1324,6 +1330,7 @@ namespace Legion {
     public:
       // From CompositeBase
       virtual InnerContext* get_owner_context(void) const;
+      virtual DistributedID get_owner_did(void) const { return did; }
       virtual void perform_ready_check(FieldMask mask,
                                        ClosedNode *closed_local_node,
                                        RegionTreeNode *target);
@@ -1414,6 +1421,7 @@ namespace Legion {
     public:
       // From CompositeBase
       virtual InnerContext* get_owner_context(void) const;
+      virtual DistributedID get_owner_did(void) const { return owner_did; }
       virtual void perform_ready_check(FieldMask mask,
                                        ClosedNode *closed_local_node,
                                        RegionTreeNode *target);
@@ -1432,6 +1440,11 @@ namespace Legion {
       static CompositeNode* unpack_composite_node(Deserializer &derez,
                      CompositeView *parent, Runtime *runtime, 
                      DistributedID owner_did, std::set<RtEvent> &preconditions);
+      // For merging composite node children from different shards
+      static CompositeNode* unpack_composite_node(Deserializer &derez,
+                 CompositeBase *parent, Runtime *runtime, 
+                 DistributedID owner_did, std::set<RtEvent> &preconditions,
+                 const LegionMap<CompositeNode*,FieldMask>::aligned &existing);
       static void handle_deferred_node_ref(const void *args);
     public:
       void notify_valid(ReferenceMutator *mutator, bool root);

@@ -6232,6 +6232,11 @@ namespace Legion {
               runtime->handle_repl_composite_view_request(derez);
               break;
             }
+          case SEND_REPL_COMPOSITE_VIEW_RESPONSE:
+            {
+              runtime->handle_repl_composite_view_response(derez);
+              break;
+            }
           case SEND_MAPPER_MESSAGE:
             {
               runtime->handle_mapper_message(derez);
@@ -14104,6 +14109,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_repl_composite_view_response(AddressSpaceID target,
+                                                    Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+                SEND_REPL_COMPOSITE_VIEW_RESPONSE,
+                COLLECTIVE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_mapper_message(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -15248,6 +15263,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ShardManager::handle_composite_view_request(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_repl_composite_view_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      CompositeBase::handle_composite_view_response(derez, this); 
     }
 
     //--------------------------------------------------------------------------

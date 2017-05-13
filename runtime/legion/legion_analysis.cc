@@ -3263,8 +3263,7 @@ namespace Legion {
         for (LegionMap<IndexSpaceNode*,FieldMask>::aligned::const_iterator it =
               pit->second.begin(); it != pit->second.end(); it++)
         {
-          const FieldMask overlap = it->second & mask;
-          if (!overlap)
+          if (it->second * mask)
             continue;
           // Invert the projection function to find the interfering points
           std::set<DomainPoint> interfering_points;

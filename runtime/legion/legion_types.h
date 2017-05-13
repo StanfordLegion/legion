@@ -689,6 +689,7 @@ namespace Legion {
       SEND_REPL_FUTURE_MAP_REQUEST,
       SEND_REPL_FUTURE_MAP_RESPONSE,
       SEND_REPL_COMPOSITE_VIEW_REQUEST,
+      SEND_REPL_COMPOSITE_VIEW_RESPONSE,
       SEND_MAPPER_MESSAGE,
       SEND_MAPPER_BROADCAST,
       SEND_TASK_IMPL_SEMANTIC_REQ,
@@ -829,6 +830,7 @@ namespace Legion {
         "Send Replicate Future Map Request",                          \
         "Send Replicate Future Map Response",                         \
         "Send Replicate Composite View Request",                      \
+        "Send Replicate Composite View Response",                     \
         "Send Mapper Message",                                        \
         "Send Mapper Broadcast",                                      \
         "Send Task Impl Semantic Req",                                \

@@ -5524,7 +5524,24 @@ namespace Legion {
         for (LegionMap<ShardID,FieldMask>::aligned::const_iterator it = 
               needed_shards.begin(); it != needed_shards.end(); it++)
         {
-          RtUserEvent shard_ready = Runtime::create_rt_user_event(); 
+          RtUserEvent shard_ready; 
+          // See if we already sent the request for this shard
+          {
+            AutoLock b_lock(base_lock);
+            std::map<ShardID,RtEvent>::const_iterator finder = 
+              requested_shards.find(it->first);
+            if (finder != requested_shards.end())
+            {
+              // Already sent the request
+              wait_on.insert(finder->second);
+              continue;
+            }
+            else
+            {
+              shard_ready = Runtime::create_rt_user_event(); 
+              requested_shards[it->first] = shard_ready;
+            }
+          } 
           Serializer rez;
           {
             RezCheck z(rez);
@@ -5536,6 +5553,8 @@ namespace Legion {
             for (unsigned idx = 0; idx < path.size(); idx++)
               rez.serialize(path[idx]);
             rez.serialize(shard_ready); 
+            rez.serialize(this);
+            rez.serialize(target->context->runtime->address_space);
           }
           manager->send_composite_view_request(it->first, rez);
           wait_on.insert(shard_ready);
@@ -5563,9 +5582,45 @@ namespace Legion {
       // Perform the ready check on the way down the tree
       if (remaining_depth == 0)
       {
+        RtUserEvent done_event;
+        derez.deserialize(done_event);
+        CompositeBase *target;
+        derez.deserialize(target);
+        AddressSpaceID source;
+        derez.deserialize(source);
         // We've arrived at our destination, send the information about
         // the version states for each each of the children
-        
+        LegionMap<CompositeNode*,FieldMask>::aligned children_to_send;    
+        {
+          AutoLock b_lock(base_lock);
+          for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
+                children.begin(); it != children.end(); it++)
+          {
+            const FieldMask overlap = it->second & mask;
+            if (!overlap)
+              continue;
+            children_to_send[it->first] = overlap;
+          }
+        }
+#ifdef DEBUG_LEGION
+        // If we fail this is assertion it is because there is
+        // a bug in our projection analysis
+        assert(!children_to_send.empty());
+#endif
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(target);
+          rez.serialize<size_t>(children_to_send.size());
+          for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
+                children_to_send.begin(); it != children_to_send.end(); it++)
+          {
+            it->first->pack_composite_node(rez);
+            rez.serialize(it->second);
+          }
+          rez.serialize(done_event); 
+        }
+        node->context->runtime->send_repl_composite_view_response(source, rez);
       }
       else
       {
@@ -5577,6 +5632,46 @@ namespace Legion {
         child->handle_sharding_update_request(mask, child_node, 
                                               remaining_depth-1, derez);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeBase::unpack_composite_view_response(Deserializer &derez,
+                                                       Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_children;
+      derez.deserialize(num_children);
+      DistributedID owner_did = get_owner_did();
+      std::set<RtEvent> ready_events;
+      {
+        AutoLock b_lock(base_lock);
+        for (unsigned idx = 0; idx < num_children; idx++)
+        {
+          CompositeNode *child = CompositeNode::unpack_composite_node(derez,
+              this, runtime, owner_did, ready_events, children);
+          FieldMask child_mask;
+          derez.deserialize(child_mask);
+          // Have to do a merge of field masks here
+          children[child] |= child_mask;
+        }
+      }
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      if (!ready_events.empty())
+        Runtime::trigger_event(done_event, Runtime::merge_events(ready_events));
+      else
+        Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CompositeBase::handle_composite_view_response(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      CompositeBase *base;
+      derez.deserialize(base);
+      base->unpack_composite_view_response(derez, runtime);
     }
 
     //--------------------------------------------------------------------------
@@ -7038,6 +7133,67 @@ namespace Legion {
       }
       CompositeNode *result = 
         legion_new<CompositeNode>(node, parent, owner_did);
+      size_t num_versions;
+      derez.deserialize(num_versions);
+      for (unsigned idx = 0; idx < num_versions; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        VersionState *state = 
+          runtime->find_or_request_version_state(did, ready); 
+        derez.deserialize(result->version_states[state]);
+        if (ready.exists() && !ready.has_triggered())
+        {
+          DeferCompositeNodeRefArgs args;
+          args.state = state;
+          args.owner_did = owner_did;
+          RtEvent precondition = 
+            runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+                                             NULL/*op*/, ready);
+          preconditions.insert(precondition);
+        }
+        else
+          state->add_nested_resource_ref(owner_did);
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ CompositeNode* CompositeNode::unpack_composite_node(
+        Deserializer &derez, CompositeBase *parent, Runtime *runtime, 
+        DistributedID owner_did, std::set<RtEvent> &preconditions,
+        const LegionMap<CompositeNode*,FieldMask>::aligned &existing)
+    //--------------------------------------------------------------------------
+    {
+      bool is_region;
+      derez.deserialize(is_region);
+      RegionTreeNode *node;
+      if (is_region)
+      {
+        LogicalRegion handle;
+        derez.deserialize(handle);
+        node = runtime->forest->get_node(handle);
+      }
+      else
+      {
+        LogicalPartition handle;
+        derez.deserialize(handle);
+        node = runtime->forest->get_node(handle);
+      }
+      CompositeNode *result = NULL; 
+      // Check for it in the existing nodes
+      for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
+            existing.begin(); it != existing.end(); it++)
+      {
+        if (it->first->logical_node != node)
+          continue;
+        result = it->first;
+        break;
+      }
+      // If we didn't find it then we get to make it
+      if (result == NULL)
+        result = legion_new<CompositeNode>(node, parent, owner_did);
       size_t num_versions;
       derez.deserialize(num_versions);
       for (unsigned idx = 0; idx < num_versions; idx++)
