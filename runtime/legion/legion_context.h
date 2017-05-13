@@ -519,7 +519,9 @@ namespace Legion {
       void remap_unmapped_regions(LegionTrace *current_trace,
                            const std::vector<PhysicalRegion> &unmapped_regions);
     public:
-      void perform_inlining(TaskContext *ctx, VariantImpl *variant); 
+      void* get_local_task_variable(LocalVariableID id);
+      void set_local_task_variable(LocalVariableID id, const void *value,
+                                   void (*destructor)(void*));
     public:
       Runtime *const runtime;
       TaskOp *const owner_task;
@@ -554,6 +556,9 @@ namespace Legion {
       // Resources that can build up over a task's lifetime
       LegionDeque<Reservation,TASK_RESERVATION_ALLOC>::tracked context_locks;
       LegionDeque<ApBarrier,TASK_BARRIER_ALLOC>::tracked context_barriers;
+    protected:
+      std::map<LocalVariableID,
+               std::pair<void*,void (*)(void*)> > task_local_variables;
     protected:
       RtEvent pending_done;
       bool task_executed;

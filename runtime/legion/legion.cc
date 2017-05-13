@@ -606,8 +606,7 @@ namespace Legion {
       assert(reservation_lock.exists());
 #endif
       ApEvent lock_event(reservation_lock.acquire(mode,exclusive));
-      if (!lock_event.has_triggered())
-        lock_event.wait();
+      lock_event.lg_wait();
     }
 
     //--------------------------------------------------------------------------
@@ -733,8 +732,7 @@ namespace Legion {
       assert(phase_barrier.exists());
 #endif
       ApEvent e = Internal::Runtime::get_previous_phase(*this);
-      if (!e.has_triggered())
-        e.wait();
+      e.lg_wait();
     }
 
     //--------------------------------------------------------------------------
@@ -2676,10 +2674,10 @@ namespace Legion {
               spaces[index] = Realm::ZIndexSpace<1,coord_t>(bounds);
             }
             Realm::ZIndexSpace<1,coord_t> realm_index_space;
-            Realm::Event ready = Realm::ZIndexSpace<1,coord_t>::compute_union(
-                spaces, realm_index_space, empty_requests);
+            LgEvent ready(Realm::ZIndexSpace<1,coord_t>::compute_union(
+                spaces, realm_index_space, empty_requests));
             // Wait for the space to be ready
-            ready.wait();
+            ready.lg_wait();
             return create_index_space_internal(ctx, &realm_index_space,
                 Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
           }
@@ -2694,10 +2692,10 @@ namespace Legion {
               spaces[index] = Realm::ZIndexSpace<2,coord_t>(bounds);
             }
             Realm::ZIndexSpace<2,coord_t> realm_index_space;
-            Realm::Event ready = Realm::ZIndexSpace<2,coord_t>::compute_union(
-                spaces, realm_index_space, empty_requests);
+            LgEvent ready(Realm::ZIndexSpace<2,coord_t>::compute_union(
+                spaces, realm_index_space, empty_requests));
             // Wait for the space to be ready
-            ready.wait();
+            ready.lg_wait();
             return create_index_space_internal(ctx, &realm_index_space,
                 Internal::NT_TemplateHelper::encode_tag<2,coord_t>());
           }
@@ -2712,10 +2710,10 @@ namespace Legion {
               spaces[index] = Realm::ZIndexSpace<3,coord_t>(bounds);
             }
             Realm::ZIndexSpace<3,coord_t> realm_index_space;
-            Realm::Event ready = Realm::ZIndexSpace<3,coord_t>::compute_union(
-                spaces, realm_index_space, empty_requests);
+            LgEvent ready(Realm::ZIndexSpace<3,coord_t>::compute_union(
+                spaces, realm_index_space, empty_requests));
             // Wait for the space to be ready
-            ready.wait();
+            ready.lg_wait();
             return create_index_space_internal(ctx, &realm_index_space,
                 Internal::NT_TemplateHelper::encode_tag<3,coord_t>());
           }
@@ -5550,6 +5548,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const Task* Runtime::get_local_task(Context ctx)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->get_task();
+    }
+
+    //--------------------------------------------------------------------------
+    void* Runtime::get_local_task_variable_untyped(Context ctx,
+                                                   LocalVariableID id)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->get_local_task_variable(ctx, id);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::set_local_task_variable_untyped(Context ctx,
+               LocalVariableID id, const void* value, void (*destructor)(void*))
+    //--------------------------------------------------------------------------
+    {
+      runtime->set_local_task_variable(ctx, id, value, destructor);
+    }
+
+    //--------------------------------------------------------------------------
     Future Runtime::get_current_time(Context ctx, Future precondition)
     //--------------------------------------------------------------------------
     {
@@ -6136,6 +6157,20 @@ namespace Legion {
     {
       return Internal::Runtime::get_runtime(p)->external;
     }
+
+#ifdef ENABLE_LEGION_TLS
+    //--------------------------------------------------------------------------
+    /*static*/ Context Runtime::get_context(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef HAS_LEGION_THREAD_LOCAL
+      return Internal::implicit_context;
+#else
+      return static_cast<Context>(
+          pthread_getspecific(Internal::implicit_context));
+#endif
+    }
+#endif
 
     //--------------------------------------------------------------------------
     /*static*/ ReductionOpTable& Runtime::get_reduction_table(void)

@@ -385,6 +385,7 @@ typedef enum legion_error_t {
   ERROR_RESERVED_SHARDING_ID = 166,
   ERROR_DUPLICATE_SHARDING_ID = 167,
   ERROR_INVALID_SHARDING_ID = 168,
+  ERROR_MISSING_LOCAL_VARIABLE = 169,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well
@@ -602,6 +603,7 @@ typedef unsigned int legion_sharding_id_t;
 typedef unsigned int legion_region_tree_id_t;
 typedef unsigned int legion_address_space_id_t;
 typedef unsigned int legion_tunable_id_t;
+typedef unsigned int legion_local_variable_id_t;
 typedef unsigned int legion_generator_id_t;
 typedef unsigned int legion_control_replication_id_t;
 typedef unsigned int legion_shard_id_t;

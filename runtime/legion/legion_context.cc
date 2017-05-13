@@ -57,6 +57,18 @@ namespace Legion {
     {
       context_lock.destroy_reservation();
       context_lock = Reservation::NO_RESERVATION;
+      // Clean up any local variables that we have
+      if (!task_local_variables.empty())
+      {
+        for (std::map<LocalVariableID,
+                      std::pair<void*,void (*)(void*)> >::iterator it = 
+              task_local_variables.begin(); it != 
+              task_local_variables.end(); it++)
+        {
+          if (it->second.second != NULL)
+            (*it->second.second)(it->second.first);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1892,6 +1904,13 @@ namespace Legion {
     const std::vector<PhysicalRegion>& TaskContext::begin_task(void)
     //--------------------------------------------------------------------------
     {
+#ifdef ENABLE_LEGION_TLS
+#ifdef HAS_LEGION_THREAD_LOCAL
+      implicit_context = this;
+#else
+      pthread_setspecific(implicit_context, this);
+#endif
+#endif
       if (overhead_tracker != NULL)
         previous_profiling_time = Realm::Clock::current_time_in_nanoseconds();
       // Switch over the executing processor to the one
@@ -2030,7 +2049,7 @@ namespace Legion {
         if (mapped_event.has_triggered())
           return;
         begin_task_wait(true/*from runtime*/);
-        mapped_event.wait();
+        mapped_event.lg_wait();
         end_task_wait();
       }
       else
@@ -2048,9 +2067,48 @@ namespace Legion {
         if (mapped_event.has_triggered())
           return;
         begin_task_wait(true/*from runtime*/);
-        mapped_event.wait();
+        mapped_event.lg_wait();
         end_task_wait();
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void* TaskContext::get_local_task_variable(LocalVariableID id)
+    //--------------------------------------------------------------------------
+    {
+      std::map<LocalVariableID,std::pair<void*,void (*)(void*)> >::
+        const_iterator finder = task_local_variables.find(id);
+      if (finder == task_local_variables.end())
+      {
+        log_run.error("Unable to find task local variable %d in task %s "
+                      "(UID %lld)", id, get_task_name(), get_unique_id());  
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_MISSING_LOCAL_VARIABLE);
+      }
+      return finder->second.first;
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskContext::set_local_task_variable(LocalVariableID id,
+                                              const void *value,
+                                              void (*destructor)(void*))
+    //--------------------------------------------------------------------------
+    {
+      std::map<LocalVariableID,std::pair<void*,void (*)(void*)> >::iterator
+        finder = task_local_variables.find(id);
+      if (finder != task_local_variables.end())
+      {
+        // See if we need to clean things up first
+        if (finder->second.second != NULL)
+          (*finder->second.second)(finder->second.first);
+        finder->second = 
+          std::pair<void*,void (*)(void*)>(const_cast<void*>(value),destructor);
+      }
+      else
+        task_local_variables[id] = 
+          std::pair<void*,void (*)(void*)>(const_cast<void*>(value),destructor);
     }
 
 #ifdef LEGION_SPY
@@ -3447,8 +3505,7 @@ namespace Legion {
       if (!done_events.empty())
       {
         RtEvent wait_on = Runtime::merge_events(done_events);
-        if (!wait_on.has_triggered())
-          wait_on.wait();
+        wait_on.lg_wait();
       }
       return fid;
     }
@@ -3566,8 +3623,7 @@ namespace Legion {
       if (!done_events.empty())
       {
         RtEvent wait_on = Runtime::merge_events(done_events);
-        if (!wait_on.has_triggered())
-          wait_on.wait();
+        wait_on.lg_wait();
       }
     }
 
@@ -4565,7 +4621,7 @@ namespace Legion {
           RtEvent wait_done = 
             runtime->issue_runtime_meta_task(args, LG_RESOURCE_PRIORITY,
                                              owner_task, precondition);
-          wait_done.wait();
+          wait_done.lg_wait();
         }
         else // we can do the wait inline
           perform_window_wait();
@@ -4613,8 +4669,7 @@ namespace Legion {
       }
       // Release our lock now
       context_lock.release();
-      if (wait_event.exists() && !wait_event.has_triggered())
-        wait_event.wait();
+      wait_event.lg_wait();
     }
 
     //--------------------------------------------------------------------------
@@ -5087,7 +5142,7 @@ namespace Legion {
         // we launch this meta-task which blocks the application task
         RtEvent wait_on = runtime->issue_runtime_meta_task(args,
                                       LG_LATENCY_PRIORITY, owner_task);
-        wait_on.wait();
+        wait_on.lg_wait();
       }
     }
 
@@ -5110,7 +5165,7 @@ namespace Legion {
       }
       frame->set_previous(previous);
       if (!wait_on.has_triggered())
-        wait_on.wait();
+        wait_on.lg_wait();
     }
 
     //--------------------------------------------------------------------------
@@ -5159,7 +5214,7 @@ namespace Legion {
       }
       if (to_trigger.exists())
       {
-        wait_on.wait();
+        wait_on.lg_wait();
         runtime->activate_context(this);
         Runtime::trigger_event(to_trigger);
       }
@@ -5199,7 +5254,7 @@ namespace Legion {
       }
       if (to_trigger.exists())
       {
-        wait_on.wait();
+        wait_on.lg_wait();
         runtime->deactivate_context(this);
         Runtime::trigger_event(to_trigger);
       }
@@ -5228,7 +5283,7 @@ namespace Legion {
       }
       if (to_trigger.exists())
       {
-        wait_on.wait();
+        wait_on.lg_wait();
         runtime->deactivate_context(this);
         Runtime::trigger_event(to_trigger);
       }
@@ -5274,7 +5329,7 @@ namespace Legion {
       // Do anything that we need to do
       if (to_trigger.exists())
       {
-        wait_on.wait();
+        wait_on.lg_wait();
         runtime->activate_context(this);
         Runtime::trigger_event(to_trigger);
       }
@@ -5303,7 +5358,7 @@ namespace Legion {
       }
       if (to_trigger.exists())
       {
-        wait_on.wait();
+        wait_on.lg_wait();
         runtime->deactivate_context(this);
         Runtime::trigger_event(to_trigger);
       }
@@ -5335,7 +5390,7 @@ namespace Legion {
       }
       if (to_trigger.exists())
       {
-        wait_on.wait();
+        wait_on.lg_wait();
         runtime->activate_context(this);
         Runtime::trigger_event(to_trigger);
       }
@@ -5680,7 +5735,7 @@ namespace Legion {
           rez.serialize(wait_on); 
         }
         runtime->send_create_top_view_request(manager->owner_space, rez);
-        wait_on.wait();
+        wait_on.lg_wait();
 #ifdef DEBUG_LEGION
         assert(result != NULL); // when we wake up we should have the result
 #endif
@@ -5713,7 +5768,7 @@ namespace Legion {
       if (wait_on.exists())
       {
         // Someone else is making it so we just have to wait for it
-        wait_on.wait();
+        wait_on.lg_wait();
         // Retake the lock and read out the result
         AutoLock ctx_lock(context_lock, 1, false/*exclusive*/);
         std::map<PhysicalManager*,InstanceView*>::const_iterator finder = 
@@ -6280,8 +6335,7 @@ namespace Legion {
       if (!wait_events.empty())
       {
         ApEvent wait_on = Runtime::merge_events(wait_events);
-        if (!wait_on.has_triggered())
-          wait_on.wait();
+        wait_on.lg_wait();
       }
     }
 
@@ -9787,7 +9841,7 @@ namespace Legion {
                           runtime->get_runtime_owner(context_uid);
         runtime->send_version_owner_request(target, rez);
       }
-      wait_on.wait();
+      wait_on.lg_wait();
       // Retake the lock in read-only mode and get the answer
       AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
       std::map<RegionTreeNode*,

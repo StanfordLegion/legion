@@ -4502,7 +4502,7 @@ namespace Legion {
             RtEvent lock_reacquired = Runtime::acquire_rt_reservation(
                             manager_lock, false/*exclusive*/, wait_on);
             // Might as well wait since we just sent a message
-            lock_reacquired.wait();
+            lock_reacquired.lg_wait();
 #ifdef DEBUG_LEGION
             // When we wake up everything should be good
             assert(!(version_mask - remote_valid_fields));
@@ -4562,7 +4562,7 @@ namespace Legion {
             RtEvent lock_reacquired = Runtime::acquire_rt_reservation(
                             manager_lock, false/*exclusive*/, wait_on);
             // Might as well wait since we just sent a message
-            lock_reacquired.wait();
+            lock_reacquired.lg_wait();
 #ifdef DEBUG_LEGION
             // When we wake up everything should be good
             assert(!(version_mask - remote_valid_fields));
@@ -4683,7 +4683,7 @@ namespace Legion {
           RtEvent lock_reacquired = Runtime::acquire_rt_reservation(
                           manager_lock, false/*exclusive*/, wait_on);
           // Might as well wait since we're sending a remote message
-          lock_reacquired.wait();
+          lock_reacquired.lg_wait();
 #ifdef DEBUG_LEGION
           // When we wake up everything should be good
           assert(!(version_mask - remote_valid_fields));
@@ -4742,7 +4742,7 @@ namespace Legion {
           RtEvent lock_reacquired = Runtime::acquire_rt_reservation(
                           manager_lock, false/*exclusive*/, wait_on);
           // Might as well wait since we're sending a remote message
-          lock_reacquired.wait();
+          lock_reacquired.lg_wait();
 #ifdef DEBUG_LEGION
           // When we wake up everything should be good
           assert(!(version_mask - remote_valid_fields));
@@ -4803,7 +4803,7 @@ namespace Legion {
           RtEvent lock_reacquired = Runtime::acquire_rt_reservation(
                           manager_lock, false/*exclusive*/, wait_on);
           // Might as well wait since we're sending a remote message
-          lock_reacquired.wait();
+          lock_reacquired.lg_wait();
 #ifdef DEBUG_LEGION
           // When we wake up everything should be good
           assert(!(version_mask - remote_valid_fields));
@@ -5523,7 +5523,7 @@ namespace Legion {
           RtEvent lock_reacquired = Runtime::acquire_rt_reservation(
                           manager_lock, false/*exclusive*/, wait_on);
           // Might as well wait since we're sending a remote message
-          lock_reacquired.wait();
+          lock_reacquired.lg_wait();
 #ifdef DEBUG_LEGION
           // When we wake up everything should be good
           assert(!(new_states.get_valid_mask() - remote_valid_fields));
@@ -6043,7 +6043,7 @@ namespace Legion {
       if (!preconditions.empty())
       {
         RtEvent wait_on = Runtime::merge_events(preconditions);
-        wait_on.wait();
+        wait_on.lg_wait();
       }
       // Take our lock and apply our updates
       {
@@ -7780,7 +7780,7 @@ namespace Legion {
       if (!done_events.empty())
       {
         RtEvent done = Runtime::merge_events(done_events);
-        done.wait();
+        done.lg_wait();
       }
     }
 

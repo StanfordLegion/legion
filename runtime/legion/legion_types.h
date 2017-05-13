@@ -43,6 +43,16 @@
 #include "realm.h"
 #include "dynamic_templates.h"
 
+#ifdef ENABLE_LEGION_TLS
+#if HAS_CXX11_THREAD_LOCAL // for clang on OSX
+#define HAS_LEGION_THREAD_LOCAL
+#elif !defined(__MACH__) && __cplusplus >= 201103L // for non-OSX
+#define HAS_LEGION_THREAD_LOCAL
+#else
+#include <pthread.h> // needed for thread local storage before C++11
+#endif
+#endif
+
 namespace BindingLib { class Utility; } // BindingLib namespace
 
 namespace Legion { 
@@ -213,7 +223,7 @@ namespace Legion {
     };
   };
   
-  namespace Internal {
+  namespace Internal { 
 
     enum OpenState {
       NOT_OPEN                = 0,
@@ -1329,6 +1339,15 @@ namespace Legion {
       inline TaskContext* as_context(void) 
         { return reinterpret_cast<TaskContext*>(this); }
     };
+    // Nasty global variable for TLS support of figuring out
+    // our context implicitly, this is experimental only
+#ifdef ENABLE_LEGION_TLS
+#ifdef HAS_LEGION_THREAD_LOCAL
+    extern thread_local TaskContext *implicit_context;
+#else
+    extern pthread_key_t implicit_context;
+#endif
+#endif
     
     // legion_trace.h
     class LegionTrace;
@@ -1620,6 +1639,7 @@ namespace Legion {
   typedef ::legion_distributed_id_t DistributedID;
   typedef ::legion_address_space_id_t AddressSpaceID;
   typedef ::legion_tunable_id_t TunableID;
+  typedef ::legion_local_variable_id_t LocalVariableID;
   typedef ::legion_generator_id_t GeneratorID;
   typedef ::legion_mapping_tag_id_t MappingTagID;
   typedef ::legion_semantic_tag_t SemanticTag;
@@ -1853,6 +1873,33 @@ namespace Legion {
   public:
     inline LgEvent& operator=(const LgEvent &rhs)
       { id = rhs.id; return *this; }
+  public:
+    inline void lg_wait(void) const
+      {
+#ifdef ENABLE_LEGION_TLS
+        if (!has_triggered())
+        {
+          // Save the context locally
+#ifdef HAS_LEGION_THREAD_LOCAL
+          Context local_ctx = Internal::implicit_context; 
+#else
+          Context local_ctx = static_cast<Context>(
+              pthread_getspecific(Internal::implicit_context));
+#endif
+          // Do the wait
+          wait();
+          // Write the context back
+#ifdef HAS_LEGION_THREAD_LOCAL
+          Internal::implicit_context = local_ctx;
+#else
+          pthread_setspecific(Internal::implicit_context, local_ctx);
+#endif
+        }
+#else
+        // Just do the normal wait call
+        wait(); 
+#endif
+      }
   };
 
   class PredEvent : public LgEvent {

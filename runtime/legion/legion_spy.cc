@@ -90,7 +90,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       RtEvent lock_event(logger_lock.acquire(0, true/*exclusive*/));
-      lock_event.wait();
+      lock_event.lg_wait();
       va_list args;
       va_start(args, fmt);
       vsnprintf(block_buffer, 127, fmt, args);

@@ -17,6 +17,7 @@
 #define __LEGION_DOMAIN_H__
 
 #include "realm.h"
+#include "legion_types.h"
 
 /**
  * \file legion_domain.h
@@ -449,11 +450,11 @@ namespace Legion {
               Realm::ZIndexSpace<1,coord_t> is1 = *this;
               Realm::ZIndexSpace<1,coord_t> is2 = other;
               Realm::ZIndexSpace<1,coord_t> result;
-              Realm::Event wait_on = 
+              LgEvent wait_on( 
                 Realm::ZIndexSpace<1,coord_t>::compute_intersection(is1,is2,
-                                                      result,dummy_requests);
+                                                      result,dummy_requests));
               if (wait_on.exists())
-                wait_on.wait();
+                wait_on.lg_wait();
               return Domain(result);
             }
           case 2:
@@ -461,11 +462,11 @@ namespace Legion {
               Realm::ZIndexSpace<2,coord_t> is1 = *this;
               Realm::ZIndexSpace<2,coord_t> is2 = other;
               Realm::ZIndexSpace<2,coord_t> result;
-              Realm::Event wait_on = 
+              LgEvent wait_on(
                 Realm::ZIndexSpace<2,coord_t>::compute_intersection(is1,is2,
-                                                      result,dummy_requests);
+                                                      result,dummy_requests));
               if (wait_on.exists())
-                wait_on.wait();
+                wait_on.lg_wait();
               return Domain(result);
             }
           case 3:
@@ -473,11 +474,11 @@ namespace Legion {
               Realm::ZIndexSpace<3,coord_t> is1 = *this;
               Realm::ZIndexSpace<3,coord_t> is2 = other;
               Realm::ZIndexSpace<3,coord_t> result;
-              Realm::Event wait_on = 
+              LgEvent wait_on(
                 Realm::ZIndexSpace<3,coord_t>::compute_intersection(is1,is2,
-                                                      result,dummy_requests);
+                                                      result,dummy_requests));
               if (wait_on.exists())
-                wait_on.wait();
+                wait_on.lg_wait();
               return Domain(result);
             }
           default:
@@ -499,11 +500,11 @@ namespace Legion {
               Realm::ZIndexSpace<1,coord_t> is1 = *this;
               Realm::ZIndexSpace<1,coord_t> is2(Realm::ZRect<1,coord_t>(p, p));
               Realm::ZIndexSpace<1,coord_t> result;
-              Realm::Event wait_on = 
+              LgEvent wait_on( 
                 Realm::ZIndexSpace<1,coord_t>::compute_union(is1,is2,
-                                              result,dummy_requests);
+                                              result,dummy_requests));
               if (wait_on.exists())
-                wait_on.wait();
+                wait_on.lg_wait();
               return Domain(result);
             }
           case 2:
@@ -511,11 +512,11 @@ namespace Legion {
               Realm::ZIndexSpace<2,coord_t> is1 = *this;
               Realm::ZIndexSpace<2,coord_t> is2(Realm::ZRect<2,coord_t>(p, p));
               Realm::ZIndexSpace<2,coord_t> result;
-              Realm::Event wait_on = 
+              LgEvent wait_on(
                 Realm::ZIndexSpace<2,coord_t>::compute_union(is1,is2,
-                                              result,dummy_requests);
+                                              result,dummy_requests));
               if (wait_on.exists())
-                wait_on.wait();
+                wait_on.lg_wait();
               return Domain(result);
             }
           case 3:
@@ -523,11 +524,11 @@ namespace Legion {
               Realm::ZIndexSpace<3,coord_t> is1 = *this;
               Realm::ZIndexSpace<3,coord_t> is2(Realm::ZRect<3,coord_t>(p, p));
               Realm::ZIndexSpace<3,coord_t> result;
-              Realm::Event wait_on = 
+              LgEvent wait_on(
                 Realm::ZIndexSpace<3,coord_t>::compute_union(is1,is2,
-                                              result,dummy_requests);
+                                              result,dummy_requests));
               if (wait_on.exists())
-                wait_on.wait();
+                wait_on.lg_wait();
               return Domain(result);
             }
           default:
