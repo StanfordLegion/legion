@@ -6623,7 +6623,7 @@ namespace Legion {
       // block here to avoid a race with the shard manager deactivating
       // us before we are done with this object
       if (profiling_reported.exists() && !profiling_reported.has_triggered())
-        profiling_reported.wait();
+        profiling_reported.lg_wait();
     }
 
     //--------------------------------------------------------------------------

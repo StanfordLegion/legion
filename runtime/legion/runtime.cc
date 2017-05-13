@@ -1202,7 +1202,7 @@ namespace Legion {
       // Now we need to figure out which shard we're on, see if we know
       // the sharding function yet, if not we have to wait
       if (!sharding_function_ready.has_triggered())
-        sharding_function_ready.wait();
+        sharding_function_ready.lg_wait();
       ShardID owner_shard = sharding_function->find_owner(point, full_domain);
       // If we're the owner shard we can just do the normal thing
       if (owner_shard != repl_ctx->owner_shard->shard_id)
@@ -1222,7 +1222,7 @@ namespace Legion {
         }
         repl_ctx->shard_manager->send_future_map_request(owner_shard, rez);
         // Wait for the event
-        done_event.wait();
+        done_event.lg_wait();
         // Now we can wake up see if we found it
         AutoLock m_lock(gc_lock,1,false/*exclusive*/);
         std::map<DomainPoint,Future>::const_iterator finder = 
@@ -1255,7 +1255,7 @@ namespace Legion {
       }
       // Wait for all the local futures to be completed
       if (!ready_event.has_triggered())
-        ready_event.wait();
+        ready_event.lg_wait();
       // Now we've got all our local futures so we can do the exchange
       // Have to hold the lock when doing this as there might be
       // other requests for the future map

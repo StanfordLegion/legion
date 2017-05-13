@@ -2985,7 +2985,7 @@ namespace Legion {
       assert(local_shard != origin);
 #endif     
       if (!done_event.has_triggered())
-        done_event.wait();
+        done_event.lg_wait();
     }
 
     //--------------------------------------------------------------------------
@@ -3087,7 +3087,7 @@ namespace Legion {
       assert(local_shard == target); // should only be called on the target
 #endif
       if (!done_event.has_triggered())
-        done_event.wait();
+        done_event.lg_wait();
     }
 
     //--------------------------------------------------------------------------
@@ -3287,7 +3287,7 @@ namespace Legion {
       if (manager->total_shards <= 1)
         return;
       if (!done_event.has_triggered())
-        done_event.wait();
+        done_event.lg_wait();
     }
 
     //--------------------------------------------------------------------------
@@ -4469,7 +4469,7 @@ namespace Legion {
       {
         RtEvent ready = Runtime::merge_events(ready_events);
         if (!ready.has_triggered())
-          ready.wait();
+          ready.lg_wait();
       }
       mappings = results;
     }
@@ -4591,7 +4591,7 @@ namespace Legion {
       if (!wait_on.empty())
       {
         RtEvent wait_for = Runtime::merge_events(wait_on);
-        wait_for.wait();
+        wait_for.lg_wait();
       }
     }
 

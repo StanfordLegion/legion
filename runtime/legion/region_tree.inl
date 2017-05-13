@@ -1123,7 +1123,7 @@ namespace Legion {
       const size_t count = partition->color_space->get_volume();
       std::set<ApEvent> done_events;
       if (!realm_index_space_set.has_triggered())
-        realm_index_space_set.wait();
+        realm_index_space_set.lg_wait();
       // In the case of control replication we do things 
       // one point at a time for the subspaces owned by this shard
       if (partition->total_children == partition->max_linearized_color)

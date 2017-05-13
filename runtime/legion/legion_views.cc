@@ -241,7 +241,7 @@ namespace Legion {
       RtEvent ready;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
       if (ready.exists())
-        ready.wait();
+        ready.lg_wait();
 #ifdef DEBUG_LEGION
       assert(view->is_instance_view());
 #endif
@@ -333,7 +333,7 @@ namespace Legion {
       RtEvent ready;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
       if (ready.exists())
-        ready.wait();
+        ready.lg_wait();
 #ifdef DEBUG_LEGION
       assert(view->is_instance_view());
 #endif
@@ -383,7 +383,7 @@ namespace Legion {
       RtEvent ready;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
       if (ready.exists())
-        ready.wait();
+        ready.lg_wait();
 #ifdef DEBUG_LEGION
       assert(view->is_instance_view());
 #endif
@@ -432,7 +432,7 @@ namespace Legion {
       RtEvent ready;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
       if (ready.exists())
-        ready.wait();
+        ready.lg_wait();
 #ifdef DEBUG_LEGION
       assert(view->is_instance_view());
 #endif
@@ -478,7 +478,7 @@ namespace Legion {
       RtEvent ready;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
       if (ready.exists())
-        ready.wait();
+        ready.lg_wait();
 #ifdef DEBUG_LEGION
       assert(view->is_instance_view());
 #endif
@@ -5561,7 +5561,7 @@ namespace Legion {
         }
         // Wait for the result to be valid
         RtEvent wait_for = Runtime::merge_events(wait_on);
-        wait_for.wait();
+        wait_for.lg_wait();
       }
       // Once we're done then we can add this to the set of checks
       AutoLock b_lock(base_lock);

@@ -6551,7 +6551,7 @@ namespace Legion {
         // Send it to the owner space 
         runtime->send_version_owner_request(owner_space, rez);
       }
-      wait_on.wait();
+      wait_on.lg_wait();
       // Retake the lock in read-only mode and get the answer
       AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
       std::map<RegionTreeNode*,
@@ -6921,7 +6921,7 @@ namespace Legion {
                                            shard_manager->get_mapping());
         // We have to wait before broadcasting the value to other shards
         if (!parent_notified.has_triggered())
-          parent_notified.wait();
+          parent_notified.lg_wait();
         ValueBroadcast<IndexPartition> pid_collective(this);
         pid_collective.broadcast(pid);
         if (color_generated)
@@ -7047,7 +7047,7 @@ namespace Legion {
                                            shard_manager->get_mapping());
         // We have to wait before broadcasting the value to other shards
         if (!parent_notified.has_triggered())
-          parent_notified.wait();
+          parent_notified.lg_wait();
         ValueBroadcast<IndexPartition> pid_collective(this);
         pid_collective.broadcast(pid);
         if (color_generated)
@@ -7172,7 +7172,7 @@ namespace Legion {
                                            shard_manager->get_mapping());
         // We have to wait before broadcasting the value to other shards
         if (!parent_notified.has_triggered())
-          parent_notified.wait();
+          parent_notified.lg_wait();
         ValueBroadcast<IndexPartition> pid_collective(this);
         pid_collective.broadcast(pid);
         if (color_generated)
@@ -7294,7 +7294,7 @@ namespace Legion {
                                            shard_manager->get_mapping());
         // We have to wait before broadcasting the value to other shards
         if (!parent_notified.has_triggered())
-          parent_notified.wait();
+          parent_notified.lg_wait();
         ValueBroadcast<IndexPartition> pid_collective(this);
         pid_collective.broadcast(pid);
         if (color_generated)
@@ -7504,7 +7504,7 @@ namespace Legion {
                                            shard_manager->get_mapping());
         // We have to wait before broadcasting the value to other shards
         if (!parent_notified.has_triggered())
-          parent_notified.wait();
+          parent_notified.lg_wait();
         ValueBroadcast<IndexPartition> pid_collective(this);
         pid_collective.broadcast(pid);
         if (color_generated)
@@ -7601,7 +7601,7 @@ namespace Legion {
                                            shard_manager->get_mapping());
         // We have to wait before broadcasting the value to other shards
         if (!parent_notified.has_triggered())
-          parent_notified.wait();
+          parent_notified.lg_wait();
         ValueBroadcast<IndexPartition> pid_collective(this);
         pid_collective.broadcast(pid);
         if (color_generated)
@@ -7720,7 +7720,7 @@ namespace Legion {
                                            shard_manager->get_mapping());
         // We have to wait before broadcasting the value to other shards
         if (!parent_notified.has_triggered())
-          parent_notified.wait();
+          parent_notified.lg_wait();
         ValueBroadcast<IndexPartition> pid_collective(this);
         pid_collective.broadcast(pid);
         if (color_generated)
@@ -7840,7 +7840,7 @@ namespace Legion {
                                            shard_manager->get_mapping());
         // We have to wait before broadcasting the value to other shards
         if (!parent_notified.has_triggered())
-          parent_notified.wait();
+          parent_notified.lg_wait();
         ValueBroadcast<IndexPartition> pid_collective(this);
         pid_collective.broadcast(pid);
         if (color_generated)
@@ -7967,7 +7967,7 @@ namespace Legion {
                                            shard_manager->get_mapping());
         // We have to wait before broadcasting the value to other shards
         if (!parent_notified.has_triggered())
-          parent_notified.wait();
+          parent_notified.lg_wait();
         ValueBroadcast<IndexPartition> pid_collective(this);
         pid_collective.broadcast(pid);
         if (color_generated)
@@ -8087,7 +8087,7 @@ namespace Legion {
                                            shard_manager->get_mapping());
         // We have to wait before broadcasting the value to other shards
         if (!parent_notified.has_triggered())
-          parent_notified.wait();
+          parent_notified.lg_wait();
         ValueBroadcast<IndexPartition> pid_collective(this);
         pid_collective.broadcast(pid);
         if (color_generated)
@@ -8205,7 +8205,7 @@ namespace Legion {
                                            partition_ready);
         // Have to wait for the parent to be notified before broadcasting 
         if (!parent_notified.has_triggered())
-          parent_notified.wait();
+          parent_notified.lg_wait();
         // Broadcast the partition first and then the barrier
         ValueBroadcast<IndexPartition> pid_collective(this);
         pid_collective.broadcast(pid);
