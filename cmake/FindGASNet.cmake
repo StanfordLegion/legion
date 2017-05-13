@@ -154,7 +154,7 @@ function(_GASNet_create_component_target _GASNet_MAKEFILE COMPONENT_NAME
     endif()
     mark_as_advanced(GASNet_${L}_LIBRARY)
   endforeach()
-  if(COMPONENT_NAME MATCHES "^mpi-.*" AND NOT (_GASNet_LD STREQUAL CMAKE_C_COMPILER))
+  if(_GASNet_LD MATCHES "^(/.*/)?mpi[^/]*" AND NOT (_GASNet_LD STREQUAL CMAKE_C_COMPILER))
     set(MPI_C_COMPILER ${_GASNet_LD})
     find_package(MPI REQUIRED COMPONENTS C)
     list(APPEND COMPONENT_DEPS ${MPI_C_LIBRARIES})

@@ -157,7 +157,7 @@ namespace Legion {
       RtEvent ready = RtEvent::NO_RT_EVENT;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
       if (ready.exists())
-        ready.wait();
+        ready.lg_wait();
 #ifdef DEBUG_LEGION
       assert(view->is_instance_view());
 #endif
@@ -178,7 +178,7 @@ namespace Legion {
       RtEvent ready = RtEvent::NO_RT_EVENT;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
       if (ready.exists())
-        ready.wait();
+        ready.lg_wait();
 #ifdef DEBUG_LEGION
       assert(view->is_instance_view());
 #endif
@@ -197,7 +197,7 @@ namespace Legion {
       RtEvent ready = RtEvent::NO_RT_EVENT;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
       if (ready.exists())
-        ready.wait();
+        ready.lg_wait();
 #ifdef DEBUG_LEGION
       assert(view->is_instance_view());
 #endif
@@ -220,7 +220,7 @@ namespace Legion {
       RtEvent ready = RtEvent::NO_RT_EVENT;
       LogicalView *view = runtime->find_or_request_logical_view(did, ready);
       if (ready.exists())
-        ready.wait();
+        ready.lg_wait();
 #ifdef DEBUG_LEGION
       assert(view->is_instance_view());
 #endif
@@ -430,12 +430,12 @@ namespace Legion {
           rez.serialize(wait_on);
         }
         runtime->send_subview_did_request(owner_space, rez); 
-        wait_on.wait();
+        wait_on.lg_wait();
         RtEvent ready;
         LogicalView *child_view = 
           context->runtime->find_or_request_logical_view(child_did, ready);
         if (ready.exists())
-          ready.wait();
+          ready.lg_wait();
 #ifdef DEBUG_LEGION
         assert(child_view->is_materialized_view());
 #endif
@@ -2911,7 +2911,7 @@ namespace Legion {
               rez.serialize(wait_on);
             }
             runtime->send_atomic_reservation_request(owner_space, rez);
-            wait_on.wait();
+            wait_on.lg_wait();
             // Now retake the lock and get the remaining reservations
             AutoLock v_lock(view_lock, 1, false);
             for (std::vector<FieldID>::const_iterator it = 
@@ -3106,7 +3106,7 @@ namespace Legion {
         parent = par_view->as_materialized_view();
       }
       if (man_ready.exists())
-        man_ready.wait();
+        man_ready.lg_wait();
 #ifdef DEBUG_LEGION
       assert(phy_man->is_instance_manager());
 #endif
@@ -3303,7 +3303,7 @@ namespace Legion {
         {
           // If we are the base caller, then we do the wait
           RtEvent wait_for = Runtime::merge_events(local_wait_on);
-          wait_for.wait();
+          wait_for.lg_wait();
         }
         else // Otherwise add the events to the set to wait on
           wait_on->insert(local_wait_on.begin(), local_wait_on.end());
@@ -6102,7 +6102,7 @@ namespace Legion {
       if (!preconditions.empty())
       {
         RtEvent wait_on = Runtime::merge_events(preconditions);
-        wait_on.wait();
+        wait_on.lg_wait();
       }
     }
 
@@ -8253,7 +8253,7 @@ namespace Legion {
       PhysicalManager *phy_man = 
         runtime->find_or_request_physical_manager(manager_did, man_ready);
       if (man_ready.exists())
-        man_ready.wait();
+        man_ready.lg_wait();
 #ifdef DEBUG_LEGION
       assert(phy_man->is_reduction_manager());
 #endif
@@ -8304,7 +8304,7 @@ namespace Legion {
         context->runtime->send_view_update_request(logical_owner, rez);
       }
       if (!remote_request_event.has_triggered())
-        remote_request_event.wait();
+        remote_request_event.lg_wait();
     }
 
     //--------------------------------------------------------------------------

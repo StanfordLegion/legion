@@ -1942,7 +1942,7 @@ namespace Legion {
       {
         RtEvent wait_on = Runtime::merge_events(version_ready_events);
         // This wait sucks but whatever for now
-        wait_on.wait();
+        wait_on.lg_wait();
       }
       for (std::vector<unsigned>::const_iterator it = must_premap.begin();
             it != must_premap.end(); it++)
@@ -3443,7 +3443,7 @@ namespace Legion {
           }
           // Wait until we have our read-only locks
           if (precondition.exists())
-            precondition.wait();
+            precondition.lg_wait();
         }
       }
       // After we've got our results, apply the state to the region tree
@@ -4898,7 +4898,7 @@ namespace Legion {
             check_future_size(predicate_false_future.impl);
           if (result_size > 0)
             result.impl->set_result(
-                predicate_false_future.impl->get_untyped_result(),
+                predicate_false_future.impl->get_untyped_result(true),
                 result_size, false/*own*/);
         }
         else
@@ -5301,7 +5301,7 @@ namespace Legion {
       {
         // Wait for the future to be ready
         ApEvent wait_on = predicate_false_future.impl->get_ready_event();
-        wait_on.wait();
+        wait_on.lg_wait();
         void *ptr = predicate_false_future.impl->get_untyped_result(true);
         size_t size = predicate_false_future.impl->get_untyped_size();
         execution_context->end_task(ptr, size, false/*owned*/); 
@@ -5480,8 +5480,8 @@ namespace Legion {
       // Set the context to be the current inline context
       parent_ctx = inline_ctx;
       // See if we need to wait for anything
-      if (start_condition.exists() && !start_condition.has_triggered())
-        start_condition.wait();
+      if (start_condition.exists())
+        start_condition.lg_wait();
       variant->dispatch_inline(current, inline_ctx); 
       // Return any created privilege state
       inline_ctx->return_privilege_state(enclosing);
@@ -6068,8 +6068,8 @@ namespace Legion {
       // If we still have to report profiling information then we must
       // block here to avoid a race with the slice owner deactivating
       // us before we are done with this object
-      if (profiling_reported.exists() && !profiling_reported.has_triggered())
-        profiling_reported.wait();
+      if (profiling_reported.exists())
+        profiling_reported.lg_wait();
       // Then tell our slice owner that we're done
       slice_owner->record_child_committed();
     }
@@ -6715,7 +6715,7 @@ namespace Legion {
             const size_t result_size = 
               check_future_size(predicate_false_future.impl);
             const void *result = 
-              predicate_false_future.impl->get_untyped_result();
+              predicate_false_future.impl->get_untyped_result(true);
             for (Domain::DomainPointIterator itr(index_domain); itr; itr++)
             {
               Future f = future_map.get_future(itr.p);
@@ -6762,7 +6762,7 @@ namespace Legion {
                         check_future_size(predicate_false_future.impl);
             if (result_size > 0)
               reduction_future.impl->set_result(
-                  predicate_false_future.impl->get_untyped_result(),
+                  predicate_false_future.impl->get_untyped_result(true),
                   result_size, false/*own*/);
           }
           else
@@ -7018,8 +7018,8 @@ namespace Legion {
       // Select the variant to use
       VariantImpl *variant = parent_ctx->select_inline_variant(this);
       // See if we need to wait for anything
-      if (start_condition.exists() && !start_condition.has_triggered())
-        start_condition.wait();
+      if (start_condition.exists())
+        start_condition.lg_wait();
       // Save this for when things are being returned
       TaskContext *enclosing = parent_ctx;
       // Make a copy of our region requirements
@@ -7044,10 +7044,7 @@ namespace Legion {
         Future local_arg = point_arguments.impl->get_future(index_point);
         if (local_arg.impl != NULL)
         {
-          ApEvent local_ready = local_arg.impl->get_ready_event();
-          if (!local_ready.has_triggered())
-            local_ready.wait();
-          local_args = local_arg.impl->get_untyped_result();
+          local_args = local_arg.impl->get_untyped_result(true);
           local_arglen = local_arg.impl->get_untyped_size();
         }
         else
@@ -8182,7 +8179,7 @@ namespace Legion {
       {
         // Wait for the future to be ready
         ApEvent wait_on = predicate_false_future.impl->get_ready_event();
-        wait_on.wait(); 
+        wait_on.lg_wait(); 
         result_size = predicate_false_future.impl->get_untyped_size();
         return predicate_false_future.impl->get_untyped_result(true);
       }
@@ -8730,7 +8727,7 @@ namespace Legion {
       if (!wait_events.empty())
       {
         RtEvent sliced_event = Runtime::merge_events(wait_events);
-        sliced_event.wait();
+        sliced_event.lg_wait();
       }
     }
 
@@ -8808,8 +8805,7 @@ namespace Legion {
       if (arg.impl != NULL)
       {
         ApEvent ready = arg.impl->get_ready_event();
-        if (!ready.has_triggered())
-          ready.wait();
+        ready.lg_wait();
         local_arglen = arg.impl->get_untyped_size();
         // Have to make a local copy since the point takes ownership
         if (local_arglen > 0)

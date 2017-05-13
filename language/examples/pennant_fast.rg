@@ -16,14 +16,14 @@
 -- [
 --   ["pennant.tests/sedovsmall/sedovsmall.pnt",
 --    "-npieces", "1", "-seq_init", "1", "-par_init", "1", "-interior", "0",
---    "-fflow-spmd", "1"],
+--    "-fflow-spmd", "1", "-fvectorize-unsafe", "1"],
 --   ["pennant.tests/sedov/sedov.pnt",
 --    "-npieces", "3", "-ll:cpu", "3", "-seq_init", "1", "-par_init", "1", "-interior", "0",
 --    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10",
---    "-fflow-spmd", "1"],
+--    "-fflow-spmd", "1", "-fvectorize-unsafe", "1"],
 --   ["pennant.tests/leblanc/leblanc.pnt",
 --    "-npieces", "2", "-ll:cpu", "2", "-seq_init", "1", "-par_init", "1", "-interior", "0",
---    "-fflow-spmd", "1"]
+--    "-fflow-spmd", "1", "-fvectorize-unsafe", "1"]
 -- ]
 
 -- Inspired by https://github.com/losalamos/PENNANT
@@ -31,6 +31,59 @@
 import "regent"
 
 require("pennant_common")
+
+sqrt = regentlib.sqrt(double)
+fabs = regentlib.fabs(double)
+
+__demand(__inline)
+task vec2_add(a : vec2, b : vec2) : vec2
+  a.x += b.x
+  a.y += b.y
+  return a
+end
+
+__demand(__inline)
+task vec2_sub(a : vec2, b : vec2) : vec2
+  a.x -= b.x
+  a.y -= b.y
+  return a
+end
+
+__demand(__inline)
+task vec2_neg(a : vec2) : vec2
+  a.x = -a.x
+  a.y = -a.y
+  return a
+end
+
+__demand(__inline)
+task vec2_mul_lhs(a : double, b : vec2) : vec2
+  b.x *= a
+  b.y *= a
+  return b
+end
+
+__demand(__inline)
+task vec2_mul_rhs(a : vec2, b : double) : vec2
+  a.x *= b
+  a.y *= b
+  return a
+end
+
+__demand(__inline)
+task vec2_dot(a : vec2, b : vec2) : double
+  return a.x*b.x + a.y*b.y
+end
+
+__demand(__inline)
+task vec2_cross(a : vec2, b : vec2) : double
+  return a.x*b.y - a.y*b.x
+end
+
+__demand(__inline)
+task vec2_length(a : vec2) : double
+  return sqrt(a.x * a.x + a.y * a.y)
+end
 
 local c = regentlib.c
 
@@ -81,6 +134,7 @@ where
   reads(rz_spans)
 do
   for z_span in rz_spans do
+    __demand(__vectorize)
     for z_raw = z_span.start, z_span.stop do
       var z = unsafe_cast(ptr(zone, rz), z_raw)
 
@@ -284,19 +338,19 @@ do
   for p_span in rp_spans do
     -- Save off point variable values from previous cycle.
     -- Initialize fields used in reductions.
-    -- __demand(__vectorize)
+    __demand(__vectorize)
     for p_raw = p_span.start, p_span.stop do
       var p = unsafe_cast(ptr(point, rp), p_raw)
 
       p.pmaswt = 0.0
     end
-    -- __demand(__vectorize)
+    __demand(__vectorize)
     for p_raw = p_span.start, p_span.stop do
       var p = unsafe_cast(ptr(point, rp), p_raw)
 
       p.pf.x = 0.0
     end
-    -- __demand(__vectorize)
+    __demand(__vectorize)
     for p_raw = p_span.start, p_span.stop do
       var p = unsafe_cast(ptr(point, rp), p_raw)
 
@@ -308,7 +362,7 @@ do
     --
 
     -- Copy state variables from previous time step and update position.
-    -- __demand(__vectorize)
+    __demand(__vectorize)
     for p_raw = p_span.start, p_span.stop do
       var p = unsafe_cast(ptr(point, rp), p_raw)
 
@@ -318,7 +372,7 @@ do
       p.pu0.x = pu0_x
       p.pxp.x = px0_x + dth*pu0_x
     end
-    -- __demand(__vectorize)
+    __demand(__vectorize)
     for p_raw = p_span.start, p_span.stop do
       var p = unsafe_cast(ptr(point, rp), p_raw)
 
@@ -395,7 +449,7 @@ do
 
     -- Save off zone variable value from previous cycle.
     -- Copy state variables from previous time step.
-    -- __demand(__vectorize)
+    __demand(__vectorize)
     for z_raw = z_span.start, z_span.stop do
       var z = unsafe_cast(ptr(zone, rz), z_raw)
 
@@ -419,7 +473,7 @@ do
         var e = s
 
         var p1_pxp = p1.pxp
-        e.exp = 0.5*(p1_pxp + p2.pxp)
+        e.exp = vec2_mul_lhs(0.5, vec2_add(p1_pxp, p2.pxp))
 
         zxp += p1_pxp
 
@@ -442,7 +496,7 @@ do
         var e = s
 
         var p1_pxp = p1.pxp
-        e.exp = 0.5*(p1_pxp + p2.pxp)
+        e.exp = vec2_mul_lhs(0.5, vec2_add(p1_pxp, p2.pxp))
 
         zxp += p1_pxp
 
@@ -461,6 +515,7 @@ do
       var zareap = 0.0
       var zvolp = 0.0
       var nside = 1
+      var numsbad = 0
       for s_raw = s_span.start, s_span.stop do
         var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -470,11 +525,11 @@ do
 
         var p1_pxp = p1.pxp
         var p2_pxp = p2.pxp
-        var sa = 0.5 * cross(p2_pxp - p1_pxp, z.zxp - p1_pxp)
+        var sa = 0.5 * vec2_cross(vec2_sub(p2_pxp, p1_pxp), vec2_sub(z.zxp, p1_pxp))
         var sv = sa * (p1_pxp.x + p2_pxp.x + z.zxp.x)
         s.sareap = sa
         -- s.svolp = sv
-        s.elen = length(p2_pxp - p1_pxp)
+        s.elen = vec2_length(vec2_sub(p2_pxp, p1_pxp))
 
         zareap += sa
         zvolp += sv
@@ -488,12 +543,14 @@ do
         end
         nside += 1
 
-        regentlib.assert(sv > 0.0, "sv negative")
+        numsbad += int(sv <= 0.0)
       end
+      regentlib.assert(numsbad == 0, "sv negative")
     else
       var zareap = 0.0
       var zvolp = 0.0
       var nside = 1
+      var numsbad = 0
       for s_raw = s_span.start, s_span.stop do
         var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -503,11 +560,11 @@ do
 
         var p1_pxp = p1.pxp
         var p2_pxp = p2.pxp
-        var sa = 0.5 * cross(p2_pxp - p1_pxp, z.zxp - p1_pxp)
+        var sa = 0.5 * vec2_cross(vec2_sub(p2_pxp, p1_pxp), vec2_sub(z.zxp, p1_pxp))
         var sv = sa * (p1_pxp.x + p2_pxp.x + z.zxp.x)
         s.sareap = sa
         -- s.svolp = sv
-        s.elen = length(p2_pxp - p1_pxp)
+        s.elen = vec2_length(vec2_sub(p2_pxp, p1_pxp))
 
         zareap += sa
         zvolp += sv
@@ -521,8 +578,9 @@ do
         end
         nside += 1
 
-        regentlib.assert(sv > 0.0, "sv negative")
+        numsbad += int(sv <= 0.0)
       end
+      regentlib.assert(numsbad == 0, "sv negative")
     end
 
     -- Compute zone characteristic lengths.
@@ -537,12 +595,7 @@ do
 
         var area = s.sareap
         var base = e.elen
-        var fac = 0.0
-        if z.znump == 3 then
-          fac = 3.0
-        else
-          fac = 4.0
-        end
+        var fac = 3.0 + [int](z.znump ~= 3) * 1.0
         var sdl = fac * area / base
         zdl = min(zdl, sdl)
 
@@ -560,7 +613,7 @@ do
     --
 
     -- Compute zone densities.
-    -- __demand(__vectorize)
+    __demand(__vectorize)
     for z_raw = z_span.start, z_span.stop do
       var z = unsafe_cast(ptr(zone, rz), z_raw)
 
@@ -569,6 +622,7 @@ do
 
     -- Reduce masses into points.
     if s_span.internal then
+      __demand(__vectorize)
       for s_raw = s_span.start, s_span.stop do
         var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -580,6 +634,7 @@ do
         p1.pmaswt += m
       end
     else
+      __demand(__vectorize)
       for s_raw = s_span.start, s_span.stop do
         var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -601,22 +656,22 @@ do
       var ss2 = max(ssmin * ssmin, 1e-99)
       var dth = 0.5 * dt
 
+      __demand(__vectorize)
       for z_raw = z_span.start, z_span.stop do
         var z = unsafe_cast(ptr(zone, rz), z_raw)
 
         var rx = z.zr
         var ex = max(z.ze, 0.0)
-        var px = gm1 * rx * ex
         var prex = gm1 * ex
         var perx = gm1 * rx
-        var csqd = max(ss2, prex + perx * px / (rx * rx))
+        var px = perx * ex
+        var csqd = max(ss2, prex + gm1 * prex)
         var z0per = perx
-        var zss = sqrt(csqd)
-        z.zss = zss
+        z.zss = sqrt(csqd)
 
         var zminv = 1.0 / z.zm
         var dv = (z.zvolp - z.zvol0) * zminv
-        var bulk = z.zr * zss * zss
+        var bulk = z.zr * csqd
         var denom = 1.0 + 0.5 * z0per * dv
         var src = z.zwrate * dth * zminv
         z.zp = px + (z0per * src - z.zr * bulk * dv) / denom
@@ -628,16 +683,25 @@ do
     --
 
     -- Compute PolyGas and TTS forces.
+    __demand(__vectorize)
     for s_raw = s_span.start, s_span.stop do
       var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
       var z = s.mapsz
 
       -- Compute surface vectors of sides.
-      var ssurfp = rotateCCW(s.exp - z.zxp)
+      var ssurfp = s.exp
+      ssurfp.x -= z.zxp.x
+      ssurfp.y -= z.zxp.y
+      var tmp = -ssurfp.y
+      ssurfp.y = ssurfp.x
+      ssurfp.x = tmp
 
       -- Compute PolyGas forces.
-      var sfx = (-z.zp)*ssurfp
+      var sfx = ssurfp
+      var zp = -z.zp
+      sfx.x *= zp
+      sfx.y *= zp
       s.sfp = sfx
 
       -- Compute TTS forces.
@@ -646,8 +710,8 @@ do
       var sstmp = max(z.zss, ssmin)
       sstmp = alfa * sstmp * sstmp
       var sdp = sstmp * (srho - z.zrp)
-      var sqq = (-sdp)*ssurfp
-      s.sft = sfx + sqq
+      var sqq = vec2_mul_lhs(-sdp, ssurfp)
+      s.sft = vec2_add(sfx, sqq)
     end
 
     -- Compute QCS forces.
@@ -662,10 +726,10 @@ do
         var z = s.mapsz
         var p1 = unsafe_cast(ptr(point, rpp), s.mapsp1)
 
-        zuc += (1.0 / double(z.znump))*p1.pu
+        zuc += p1.pu
 
         if nside == z.znump then
-          z.zuc = zuc
+          z.zuc = (1.0 / double(z.znump))*zuc
           zuc = vec2 { x = 0.0, y = 0.0 }
           nside = 0
         end
@@ -680,10 +744,10 @@ do
         var z = s.mapsz
         var p1 = s.mapsp1
 
-        zuc += (1.0 / double(z.znump))*p1.pu
+        zuc += p1.pu
 
         if nside == z.znump then
-          z.zuc = zuc
+          z.zuc = (1.0 / double(z.znump))*zuc
           zuc = vec2 { x = 0.0, y = 0.0 }
           nside = 0
         end
@@ -693,6 +757,7 @@ do
 
     -- QCS corner divergence.
     if s_span.internal then
+      __demand(__vectorize)
       for s_raw = s_span.start, s_span.stop do
         var s2 = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -710,73 +775,67 @@ do
         var up0 = p.pu
         var xp0 = p.pxp
         -- edge e2
-        var up1 = 0.5*(p.pu + p2.pu)
+        var up1 = vec2_mul_lhs(0.5, vec2_add(p.pu, p2.pu))
         var xp1 = e2.exp
         -- zone center z
         var up2 = z.zuc
         var xp2 = z.zxp
         -- edge e1
-        var up3 = 0.5*(p1.pu + p.pu)
+        var up3 = vec2_mul_lhs(0.5, vec2_add(p1.pu, p.pu))
         var xp3 = e1.exp
 
         -- compute 2d cartesian volume of corner
-        var cvolume = 0.5 * cross(xp2 - xp0, xp3 - xp1)
+        var xp2sub0 = vec2_sub(xp2, xp0)
+        var xp3sub1 = vec2_sub(xp3, xp1)
+        var cvolume = 0.5 * vec2_cross(xp2sub0, xp3sub1)
         c.carea = cvolume
 
         -- compute cosine angle
-        var v1 = xp3 - xp0
-        var v2 = xp1 - xp0
+        var v1 = vec2_sub(xp3, xp0)
+        var v2 = vec2_sub(xp1, xp0)
         var de1 = e1.elen
         var de2 = e2.elen
         var minelen = min(de1, de2)
-        if minelen < 1e-12 then
-          c.ccos = 0.0
-        else
-          c.ccos = 4.0 * dot(v1, v2) / (de1 * de2)
-        end
+        var cond1 = [int](minelen >= 1e-12)
+        c.ccos = cond1 * 4.0 * vec2_dot(v1, v2) / (de1 * de2)
 
         -- compute divergence of corner
-        var cdiv = (cross(up2 - up0, xp3 - xp1) -
-                    cross(up3 - up1, xp2 - xp0)) / (2.0 * cvolume)
+        var up2sub0 = vec2_sub(up2, up0)
+        var up3sub1 = vec2_sub(up3, up1)
+        var cdiv = (vec2_cross(up2sub0, xp3sub1) -
+                    vec2_cross(up3sub1, xp2sub0)) / (2.0 * cvolume)
         c.cdiv = cdiv
 
         -- compute evolution factor
-        var dxx1 = 0.5*(((xp1 + xp2) - xp0) - xp3)
-        var dxx2 = 0.5*(((xp2 + xp3) - xp0) - xp1)
-        var dx1 = length(dxx1)
-        var dx2 = length(dxx2)
+        var dxx1 = vec2_mul_lhs(0.5, vec2_add(vec2_neg(xp3sub1), xp2sub0))
+        var dxx2 = vec2_mul_lhs(0.5, vec2_add(xp2sub0, xp3sub1))
+        var dx1 = vec2_length(dxx1)
+        var dx2 = vec2_length(dxx2)
 
         -- average corner-centered velocity
-        var duav = 0.25*(((up0 + up1) + up2) + up3)
+        var duav = vec2_mul_lhs(0.25, vec2_add(vec2_add(vec2_add(up0, up1), up2), up3))
 
-        var test1 = abs(dot(dxx1, duav) * dx2)
-        var test2 = abs(dot(dxx2, duav) * dx1)
-        var num = 0.0
-        var den = 0.0
-        if test1 > test2 then
-          num = dx1
-          den = dx2
-        else
-          num = dx2
-          den = dx1
-        end
+        var tmp1 = vec2_dot(dxx1, duav)
+        var test1 = fabs(tmp1 * dx2)
+        var tmp2 = vec2_dot(dxx2, duav)
+        var test2 = fabs(tmp2 * dx1)
+        var cond2 = [int](test1 > test2)
+        var num = cond2 * dx1 + (1 - cond2) * dx2
+        var den = cond2 * dx2 + (1 - cond2) * dx1
         var r = num / den
         var evol = min(sqrt(4.0 * cvolume * r), 2.0 * minelen)
 
         -- compute delta velocity
-        var dv1 = length(((up1 + up2) - up0) - up3)
-        var dv2 = length(((up2 + up3) - up0) - up1)
+        var dv1 = vec2_length(vec2_add(vec2_neg(up3sub1), up2sub0))
+        var dv2 = vec2_length(vec2_add(up2sub0, up3sub1))
         var du = max(dv1, dv2)
 
-        if cdiv < 0.0 then
-          c.cevol = evol
-          c.cdu = du
-        else
-          c.cevol = 0.0
-          c.cdu = 0.0
-        end
+        var cond3 = [int](cdiv < 0.0)
+        c.cevol = cond3 * evol
+        c.cdu = cond3 * du
       end
     else
+      __demand(__vectorize)
       for s_raw = s_span.start, s_span.stop do
         var s2 = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -794,71 +853,64 @@ do
         var up0 = p.pu
         var xp0 = p.pxp
         -- edge e2
-        var up1 = 0.5*(p.pu + p2.pu)
+        var up1 = vec2_mul_lhs(0.5, vec2_add(p.pu, p2.pu))
         var xp1 = e2.exp
         -- zone center z
         var up2 = z.zuc
         var xp2 = z.zxp
         -- edge e1
-        var up3 = 0.5*(p1.pu + p.pu)
+        var up3 = vec2_mul_lhs(0.5, vec2_add(p1.pu, p.pu))
         var xp3 = e1.exp
 
         -- compute 2d cartesian volume of corner
-        var cvolume = 0.5 * cross(xp2 - xp0, xp3 - xp1)
+        var xp2sub0 = vec2_sub(xp2, xp0)
+        var xp3sub1 = vec2_sub(xp3, xp1)
+        var cvolume = 0.5 * vec2_cross(xp2sub0, xp3sub1)
         c.carea = cvolume
 
         -- compute cosine angle
-        var v1 = xp3 - xp0
-        var v2 = xp1 - xp0
+        var v1 = vec2_sub(xp3, xp0)
+        var v2 = vec2_sub(xp1, xp0)
         var de1 = e1.elen
         var de2 = e2.elen
         var minelen = min(de1, de2)
-        if minelen < 1e-12 then
-          c.ccos = 0.0
-        else
-          c.ccos = 4.0 * dot(v1, v2) / (de1 * de2)
-        end
+        var cond1 = [int](minelen >= 1e-12)
+        c.ccos = cond1 * 4.0 * vec2_dot(v1, v2) / (de1 * de2)
 
         -- compute divergence of corner
-        var cdiv = (cross(up2 - up0, xp3 - xp1) -
-                    cross(up3 - up1, xp2 - xp0)) / (2.0 * cvolume)
+        var up2sub0 = vec2_sub(up2, up0)
+        var up3sub1 = vec2_sub(up3, up1)
+        var cdiv = (vec2_cross(up2sub0, xp3sub1) -
+                    vec2_cross(up3sub1, xp2sub0)) / (2.0 * cvolume)
         c.cdiv = cdiv
 
         -- compute evolution factor
-        var dxx1 = 0.5*(((xp1 + xp2) - xp0) - xp3)
-        var dxx2 = 0.5*(((xp2 + xp3) - xp0) - xp1)
-        var dx1 = length(dxx1)
-        var dx2 = length(dxx2)
+        var dxx1 = vec2_mul_lhs(0.5, vec2_add(vec2_neg(xp3sub1), xp2sub0))
+        var dxx2 = vec2_mul_lhs(0.5, vec2_add(xp2sub0, xp3sub1))
+        var dx1 = vec2_length(dxx1)
+        var dx2 = vec2_length(dxx2)
 
         -- average corner-centered velocity
-        var duav = 0.25*(((up0 + up1) + up2) + up3)
+        var duav = vec2_mul_lhs(0.25, vec2_add(vec2_add(vec2_add(up0, up1), up2), up3))
 
-        var test1 = abs(dot(dxx1, duav) * dx2)
-        var test2 = abs(dot(dxx2, duav) * dx1)
-        var num = 0.0
-        var den = 0.0
-        if test1 > test2 then
-          num = dx1
-          den = dx2
-        else
-          num = dx2
-          den = dx1
-        end
+        var tmp1 = vec2_dot(dxx1, duav)
+        var test1 = fabs(tmp1 * dx2)
+        var tmp2 = vec2_dot(dxx2, duav)
+        var test2 = fabs(tmp2 * dx1)
+        var cond2 = [int](test1 > test2)
+        var num = cond2 * dx1 + (1 - cond2) * dx2
+        var den = cond2 * dx2 + (1 - cond2) * dx1
         var r = num / den
         var evol = min(sqrt(4.0 * cvolume * r), 2.0 * minelen)
 
         -- compute delta velocity
-        var dv1 = length(((up1 + up2) - up0) - up3)
-        var dv2 = length(((up2 + up3) - up0) - up1)
+        var dv1 = vec2_length(vec2_add(vec2_neg(up3sub1), up2sub0))
+        var dv2 = vec2_length(vec2_add(up2sub0, up3sub1))
         var du = max(dv1, dv2)
 
-        if cdiv < 0.0 then
-          c.cevol = evol
-          c.cdu = du
-        else
-          c.cevol = 0.0
-          c.cdu = 0.0
-        end
+        var cond3 = [int](cdiv < 0.0)
+        c.cevol = cond3 * evol
+        c.cdu = cond3 * du
       end
     end
 
@@ -866,6 +918,7 @@ do
     if s_span.internal then
       var gammap1 = gamma + 1.0
 
+      __demand(__vectorize)
       for s_raw = s_span.start, s_span.stop do
         var s4 = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -875,10 +928,7 @@ do
         var ztmp2 = q2 * 0.25 * gammap1 * c.cdu
         var ztmp1 = q1 * z.zss
         var zkur = ztmp2 + sqrt(ztmp2 * ztmp2 + ztmp1 * ztmp1)
-        var rmu = zkur * z.zrp * c.cevol
-        if c.cdiv > 0.0 then
-          rmu = 0.0
-        end
+        var rmu = [int](c.cdiv <= 0.0) * (zkur * z.zrp * c.cevol)
 
         var s = c.mapss3
         var p = unsafe_cast(ptr(point, rpp), s.mapsp2)
@@ -887,12 +937,15 @@ do
         var p2 = unsafe_cast(ptr(point, rpp), s4.mapsp2)
         var e2 = s4
 
-        c.cqe1 = rmu / e1.elen*(p.pu - p1.pu)
-        c.cqe2 = rmu / e2.elen*(p2.pu - p.pu)
+        c.cqe1.x = rmu / e1.elen*(p.pu.x - p1.pu.x)
+        c.cqe1.y = rmu / e1.elen*(p.pu.y - p1.pu.y)
+        c.cqe2.x = rmu / e2.elen*(p2.pu.x - p.pu.x)
+        c.cqe2.y = rmu / e2.elen*(p2.pu.y - p.pu.y)
       end
     else
       var gammap1 = gamma + 1.0
 
+      __demand(__vectorize)
       for s_raw = s_span.start, s_span.stop do
         var s4 = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -902,10 +955,7 @@ do
         var ztmp2 = q2 * 0.25 * gammap1 * c.cdu
         var ztmp1 = q1 * z.zss
         var zkur = ztmp2 + sqrt(ztmp2 * ztmp2 + ztmp1 * ztmp1)
-        var rmu = zkur * z.zrp * c.cevol
-        if c.cdiv > 0.0 then
-          rmu = 0.0
-        end
+        var rmu = [int](c.cdiv <= 0.0) * (zkur * z.zrp * c.cevol)
 
         var s = c.mapss3
         var p = s.mapsp2
@@ -914,12 +964,15 @@ do
         var p2 = s4.mapsp2
         var e2 = s4
 
-        c.cqe1 = rmu / e1.elen*(p.pu - p1.pu)
-        c.cqe2 = rmu / e2.elen*(p2.pu - p.pu)
+        c.cqe1.x = rmu / e1.elen*(p.pu.x - p1.pu.x)
+        c.cqe1.y = rmu / e1.elen*(p.pu.y - p1.pu.y)
+        c.cqe2.x = rmu / e2.elen*(p2.pu.x - p.pu.x)
+        c.cqe2.y = rmu / e2.elen*(p2.pu.y - p.pu.y)
       end
     end
 
     -- QCS force.
+    __demand(__vectorize)
     for s_raw = s_span.start, s_span.stop do
       var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -929,33 +982,31 @@ do
       var el = e.elen
 
       var c1sin2 = 1.0 - c1.ccos * c1.ccos
-      var c1w = 0.0
-      var c1cos = 0.0
-      if c1sin2 >= 1e-4 then
-        c1w = c1.carea / c1sin2
-        c1cos = c1.ccos
-      end
+      var cond1 = [int](c1sin2 >= 1e-4)
+      var c1w = cond1 * (c1.carea / c1sin2)
+      var c1cos = cond1 * c1.ccos
 
       var c2sin2 = 1.0 - c2.ccos * c2.ccos
-      var c2w = 0.0
-      var c2cos = 0.0
-      if c2sin2 >= 1e-4 then
-        c2w = c2.carea / c2sin2
-        c2cos = c2.ccos
-      end
+      var cond2 = [int](c2sin2 >= 1e-4)
+      var c2w = cond2 * (c2.carea / c2sin2)
+      var c2cos = cond2 * c2.ccos
 
-      s.sfq = (1.0 / el)*(c1w*(c1.cqe2 + c1cos*c1.cqe1) +
-                            c2w*(c2.cqe1 + c2cos*c2.cqe2))
+      s.sfq.x = (1.0 / el)*(c1w*(c1.cqe2.x + c1cos*c1.cqe1.x) +
+                            c2w*(c2.cqe1.x + c2cos*c2.cqe2.x))
+      s.sfq.y = (1.0 / el)*(c1w*(c1.cqe2.y + c1cos*c1.cqe1.y) +
+                            c2w*(c2.cqe1.y + c2cos*c2.cqe2.y))
     end
 
     -- QCS vel diff.
     if s_span.internal then
+      __demand(__vectorize)
       for z_raw = z_span.start, z_span.stop do
         var z = unsafe_cast(ptr(zone, rz), z_raw)
 
         z.z0tmp = 0.0
       end
 
+      __demand(__vectorize)
       for s_raw = s_span.start, s_span.stop do
         var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -964,30 +1015,29 @@ do
         var z = s.mapsz
         var e = s
 
-        var dx = p2.pxp - p1.pxp
-        var du = p2.pu - p1.pu
+        var dx = vec2_sub(p2.pxp, p1.pxp)
+        var du = vec2_sub(p2.pu, p1.pu)
         var lenx = e.elen
-        var dux = dot(du, dx)
-        if lenx > 0.0 then
-          dux = abs(dux) / lenx
-        else
-          dux = 0.0
-        end
-        z.z0tmp = max(z.z0tmp, dux)
+        var dux = vec2_dot(du, dx)
+        dux = [int](lenx > 0.0) * (fabs(dux) / lenx)
+        z.z0tmp max= dux
       end
 
+      __demand(__vectorize)
       for z_raw = z_span.start, z_span.stop do
         var z = unsafe_cast(ptr(zone, rz), z_raw)
 
         z.zdu = q1 * z.zss + 2.0 * q2 * z.z0tmp
       end
     else
+      __demand(__vectorize)
       for z_raw = z_span.start, z_span.stop do
         var z = unsafe_cast(ptr(zone, rz), z_raw)
 
         z.z0tmp = 0.0
       end
 
+      __demand(__vectorize)
       for s_raw = s_span.start, s_span.stop do
         var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -996,18 +1046,15 @@ do
         var z = s.mapsz
         var e = s
 
-        var dx = p2.pxp - p1.pxp
-        var du = p2.pu - p1.pu
+        var dx = vec2_sub(p2.pxp, p1.pxp)
+        var du = vec2_sub(p2.pu, p1.pu)
         var lenx = e.elen
-        var dux = dot(du, dx)
-        if lenx > 0.0 then
-          dux = abs(dux) / lenx
-        else
-          dux = 0.0
-        end
-        z.z0tmp = max(z.z0tmp, dux)
+        var dux = du.x * dx.x + du.y * dx.y
+        dux = [int](lenx > 0.0) * (fabs(dux) / lenx)
+        z.z0tmp max= dux
       end
 
+      __demand(__vectorize)
       for z_raw = z_span.start, z_span.stop do
         var z = unsafe_cast(ptr(zone, rz), z_raw)
 
@@ -1017,24 +1064,26 @@ do
 
     -- Reduce forces into points.
     if s_span.internal then
+      __demand(__vectorize)
       for s_raw = s_span.start, s_span.stop do
         var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
         var p1 = unsafe_cast(ptr(point, rpp), s.mapsp1)
         var s3 = s.mapss3
 
-        var f = (s.sfq + s.sft) - (s3.sfq + s3.sft)
+        var f = vec2_sub(vec2_add(s.sfq, s.sft), vec2_add(s3.sfq, s3.sft))
         p1.pf.x += f.x
         p1.pf.y += f.y
       end
     else
+      __demand(__vectorize)
       for s_raw = s_span.start, s_span.stop do
         var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
         var p1 = s.mapsp1
         var s3 = s.mapss3
 
-        var f = (s.sfq + s.sft) - (s3.sfq + s3.sft)
+        var f = vec2_sub(vec2_add(s.sfq, s.sft), vec2_add(s3.sfq, s3.sft))
         p1.pf.x += f.x
         p1.pf.y += f.y
       end
@@ -1062,21 +1111,16 @@ do
     -- 4a. Apply boundary conditions.
     --
 
-    do
-      var vfixx = {x = 1.0, y = 0.0}
-      var vfixy = {x = 0.0, y = 1.0}
-      for p_raw = p_span.start, p_span.stop do
-        var p = unsafe_cast(ptr(point, rp), p_raw)
+    __demand(__vectorize)
+    for p_raw = p_span.start, p_span.stop do
+      var p = unsafe_cast(ptr(point, rp), p_raw)
 
-        if p.has_bcx then
-          p.pu0 = project(p.pu0, vfixx)
-          p.pf = project(p.pf, vfixx)
-        end
-        if p.has_bcy then
-          p.pu0 = project(p.pu0, vfixy)
-          p.pf = project(p.pf, vfixy)
-        end
-      end
+      var cond_x = 1 - [int](p.has_bcx)
+      var cond_y = 1 - [int](p.has_bcy)
+      p.pu0.x *= cond_x
+      p.pf.x *= cond_x
+      p.pu0.y *= cond_y
+      p.pf.y *= cond_y
     end
 
     --
@@ -1087,7 +1131,7 @@ do
     do
       var fuzz = 1e-99
       var dth = 0.5 * dt
-      -- __demand(__vectorize)
+      __demand(__vectorize)
       for p_raw = p_span.start, p_span.stop do
         var p = unsafe_cast(ptr(point, rp), p_raw)
 
@@ -1151,7 +1195,7 @@ do
         var e = s
 
         var p1_px = p1.px
-        e.ex = 0.5*(p1_px + p2.px)
+        e.ex = vec2_mul_lhs(0.5, vec2_add(p1_px, p2.px))
 
         zx += p1_px
 
@@ -1174,7 +1218,7 @@ do
         var e = s
 
         var p1_px = p1.px
-        e.ex = 0.5*(p1_px + p2.px)
+        e.ex = vec2_mul_lhs(0.5, vec2_add(p1_px, p2.px))
 
         zx += p1_px
 
@@ -1192,6 +1236,7 @@ do
       var zarea = 0.0
       var zvol = 0.0
       var nside = 1
+      var numsbad = 0
       for s_raw = s_span.start, s_span.stop do
         var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -1218,12 +1263,14 @@ do
         end
         nside += 1
 
-        regentlib.assert(sv > 0.0, "sv negative")
+        numsbad += int(sv <= 0.0)
       end
+      regentlib.assert(numsbad == 0, "sv negative")
     else
       var zarea = 0.0
       var zvol = 0.0
       var nside = 1
+      var numsbad = 0
       for s_raw = s_span.start, s_span.stop do
         var s = unsafe_cast(ptr(side(rz, rpp, rpg, rs), rs), s_raw)
 
@@ -1250,8 +1297,9 @@ do
         end
         nside += 1
 
-        regentlib.assert(sv > 0.0, "sv negative")
+        numsbad += int(sv <= 0.0)
       end
+      regentlib.assert(numsbad == 0, "sv negative")
     end
 
     --
@@ -1268,9 +1316,9 @@ do
         var p1 = unsafe_cast(ptr(point, rpp), s.mapsp1)
         var p2 = unsafe_cast(ptr(point, rpp), s.mapsp2)
 
-        var sftot = s.sfp + s.sfq
-        var sd1 = dot(sftot, p1.pu0 + p1.pu)
-        var sd2 = dot(-1.0*sftot, p2.pu0 + p2.pu)
+        var sftot = vec2_add(s.sfp, s.sfq)
+        var sd1 = vec2_dot(sftot, vec2_add(p1.pu0, p1.pu))
+        var sd2 = vec2_dot(vec2_mul_lhs(-1.0, sftot), vec2_add(p2.pu0, p2.pu))
         var dwork = -0.5 * dt * (sd1 * p1.pxp.x + sd2 * p2.pxp.x)
 
         zdwork += dwork
@@ -1293,9 +1341,9 @@ do
         var p1 = s.mapsp1
         var p2 = s.mapsp2
 
-        var sftot = s.sfp + s.sfq
-        var sd1 = dot(sftot, p1.pu0 + p1.pu)
-        var sd2 = dot(-1.0*sftot, p2.pu0 + p2.pu)
+        var sftot = vec2_add(s.sfp, s.sfq)
+        var sd1 = vec2_dot(sftot, vec2_add(p1.pu0, p1.pu))
+        var sd2 = vec2_dot(vec2_mul_lhs(-1.0, sftot), vec2_add(p2.pu0, p2.pu))
         var dwork = -0.5 * dt * (sd1 * p1.pxp.x + sd2 * p2.pxp.x)
 
         zdwork += dwork
@@ -1316,7 +1364,7 @@ do
 
     do
       var dtiny = 1.0 / dt
-      -- __demand(__vectorize)
+      __demand(__vectorize)
       for z_raw = z_span.start, z_span.stop do
         var z = unsafe_cast(ptr(zone, rz), z_raw)
 
@@ -1331,7 +1379,7 @@ do
 
     do
       var fuzz = 1e-99
-      -- __demand(__vectorize)
+      __demand(__vectorize)
       for z_raw = z_span.start, z_span.stop do
         var z = unsafe_cast(ptr(zone, rz), z_raw)
 
@@ -1339,7 +1387,7 @@ do
       end
     end
 
-    -- __demand(__vectorize)
+    __demand(__vectorize)
     for z_raw = z_span.start, z_span.stop do
       var z = unsafe_cast(ptr(zone, rz), z_raw)
 
@@ -1371,6 +1419,7 @@ do
   do
     var fuzz = 1e-99
     var dtnew = dtmax
+    --__demand(__vectorize)
     for z in rz do
       var cdu = max(z.zdu, max(z.zss, fuzz))
       var zdthyd = z.zdl * cfl / cdu
@@ -1384,6 +1433,7 @@ do
   -- Calc dt volume.
   do
     var dvovmax = 1e-99
+    --__demand(__vectorize)
     for z in rz do
       var zdvov = abs((z.zvol - z.zvol0) / z.zvol0)
       dvovmax max= zdvov
@@ -1871,7 +1921,21 @@ task toplevel()
 end
 if os.getenv('SAVEOBJ') == '1' then
   local root_dir = arg[0]:match(".*/") or "./"
-  local link_flags = {"-L" .. root_dir, "-lpennant", "-lm"}
+  local link_flags = terralib.newlist({"-L" .. root_dir, "-lpennant", "-lm"})
+  if os.getenv('CRAYPE_VERSION') then
+    local new_flags = terralib.newlist({"-Wl,-Bdynamic"})
+    new_flags:insertall(link_flags)
+    for flag in os.getenv('CRAY_UGNI_POST_LINK_OPTS'):gmatch("%S+") do
+      new_flags:insert(flag)
+    end
+    new_flags:insert("-lugni")
+    for flag in os.getenv('CRAY_UDREG_POST_LINK_OPTS'):gmatch("%S+") do
+      new_flags:insert(flag)
+    end
+    new_flags:insert("-ludreg")
+    link_flags = new_flags
+  end
+
   regentlib.saveobj(toplevel, "pennant", "executable", cpennant.register_mappers, link_flags)
 else
   regentlib.start(toplevel, cpennant.register_mappers)

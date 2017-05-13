@@ -2612,6 +2612,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    template<typename T>
+    T* Runtime::get_local_task_variable(Context ctx, LocalVariableID id)
+    //--------------------------------------------------------------------------
+    {
+      return static_cast<T*>(get_local_task_variable_untyped(ctx, id));
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    void Runtime::set_local_task_variable(Context ctx, LocalVariableID id,
+                                      const T* value, void (*destructor)(void*))
+    //--------------------------------------------------------------------------
+    {
+      set_local_task_variable_untyped(ctx, id, value, destructor);
+    }
+
+    //--------------------------------------------------------------------------
     template<typename REDOP>
     /*static*/ void Runtime::register_reduction_op(ReductionOpID redop_id)
     //--------------------------------------------------------------------------

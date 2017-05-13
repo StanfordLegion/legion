@@ -5182,6 +5182,43 @@ namespace Legion {
                             MapperID mapper = 0, MappingTagID tag = 0);
     public:
       //------------------------------------------------------------------------
+      // Task Local Interface
+      //------------------------------------------------------------------------
+      /**
+       * Get a reference to the task for the current context.
+       * @param the enclosing task context 
+       * @return a pointer to the task for the context
+       */
+      const Task* get_local_task(Context ctx);
+
+      /**
+       * Get the value of a task-local variable named by the ID. This
+       * variable only has the lifetime of the task
+       * @param ctx the enclosing task context
+       * @param id the ID of the task-local variable to return
+       * @return pointer to the value of the variable if any
+       */
+      void* get_local_task_variable_untyped(Context ctx, LocalVariableID id);
+      template<typename T>
+      T* get_local_task_variable(Context ctx, LocalVariableID id);
+
+      /**
+       * Set the value of a task-local variable named by ID. This 
+       * variable will only have the lifetime of the task. The user
+       * can also specify an optional destructor function which will
+       * implicitly be called at the end the task's execution
+       * @param ctx the enclosing task context
+       * @param id the ID of the task-local variable to set
+       * @param value the value to set the variable to
+       * @param destructor optional method to delete the value
+       */
+      void set_local_task_variable_untyped(Context ctx, LocalVariableID id, 
+          const void *value, void (*destructor)(void*) = NULL);
+      template<typename T>
+      void set_local_task_variable(Context ctx, LocalVariableID id,
+          const T* value, void (*destructor)(void*) = NULL);
+    public:
+      //------------------------------------------------------------------------
       // Timing Operations 
       //------------------------------------------------------------------------
       /**
@@ -5740,7 +5777,7 @@ namespace Legion {
        *  Messaging
        * -------------
        * -lg:message <int> Maximum size in bytes of the active messages
-       *              to be sent between instances of the high-level 
+       *              to be sent between instances of the Legion
        *              runtime.  This can help avoid the use of expensive
        *              per-pair-of-node RDMA buffers in the low-level
        *              runtime.  Default value is 4K which should guarantee
@@ -6342,31 +6379,25 @@ namespace Legion {
                               TaskConfigOptions options = TaskConfigOptions(),
                                          const char *task_name = NULL);
     public:
-      //------------------------------------------------------------------------
-      // Runtime calls for Mappers 
-      //------------------------------------------------------------------------
-      /* 
-       * All of the methods in this block are utility methods that mappers
-       * can use as part of their execution. They are differentiated from
-       * normal runtime calls by the requirement that they take a mapper
-       * context instead of a normal context. These contexts can only be 
-       * obtained through a normal mapper call. Any one of these calls may 
-       * result in the mapper being pre-empted. The mapper can control 
-       * whether other mapper calls can be made during this time by setting 
-       * the mapper model in the 'get_mapper_sync_model' mapper call and/or 
-       * enabling/disabling the re-entrancy of mapper calls using the 
-       * methods below.
-       */
-
-    public:
       /**
-       * Provide a mechanism for finding the high-level runtime
+       * Provide a mechanism for finding the Legion runtime
        * pointer for a processor wrapper tasks that are starting
        * a new application level task.
        * @param processor the task will run on
-       * @return the high-level runtime pointer for the specified processor
+       * @return the Legion runtime pointer for the specified processor
        */
       static Runtime* get_runtime(Processor p = Processor::NO_PROC);
+#ifdef ENABLE_LEGION_TLS
+      /**
+       * Provisional support for a way to implicitly find the context
+       * of the task in which we are running. This is only supported
+       * if the runtime is built with the ENABLE_LEGION_TLS macro.
+       * This macro has not been performance tested and may cause 
+       * performance degradation in the runtime. Use at your own risk.
+       * @return the context for the enclosing task in which we are executing
+       */
+      static Context get_context(void);
+#endif
     private:
       // Helper methods for templates
       IndexSpace create_index_space_internal(Context ctx, const void *realm_is,
