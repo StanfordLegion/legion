@@ -334,7 +334,6 @@ namespace Realm {
     Table& table = tables[subtable];
 
     bool cancel_immediately = false;
-    bool need_cleaner = true;
     void *reason_data = 0;
     size_t reason_size = 0;
     {
@@ -362,7 +361,6 @@ namespace Realm {
 	e.local_op = local_op;
 	local_op->add_reference();
 	cancel_immediately = true;
-        need_cleaner = false;
 	reason_data = e.reason_data;
 	reason_size = e.reason_size;
       }
@@ -370,8 +368,7 @@ namespace Realm {
 
     // either way there's an entry in the table for this now, so make sure our cleaner knows
     //  to clean it up
-    if (need_cleaner)
-      EventImpl::add_waiter(finish_event, &cleaner);
+    EventImpl::add_waiter(finish_event, &cleaner);
 
     // and finally, perform a delayed cancellation if requested
     if(cancel_immediately) {
