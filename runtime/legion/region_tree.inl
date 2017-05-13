@@ -89,7 +89,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!realm_index_space_set.has_triggered())
-        realm_index_space_set.wait();
+        realm_index_space_set.lg_wait();
       result = realm_index_space;
     }
 
@@ -261,9 +261,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!realm_index_space_set.has_triggered())
-        realm_index_space_set.wait();
+        realm_index_space_set.lg_wait();
       if (!index_space_ready.has_triggered())
-        index_space_ready.wait();
+        index_space_ready.lg_wait();
       if (!realm_index_space.empty())
       {
         // Iterate over the rectangles and print them out 
@@ -506,11 +506,11 @@ namespace Legion {
       Realm::ZIndexSpace<DIM,T> *target = 
         static_cast<Realm::ZIndexSpace<DIM,T>*>(realm_is);
       if (!realm_index_space_set.has_triggered())
-        realm_index_space_set.wait();
+        realm_index_space_set.lg_wait();
       *target = realm_index_space;
       // If the event isn't ready we have to wait 
       if (!index_space_ready.has_triggered())
-        index_space_ready.wait();
+        index_space_ready.lg_wait();
     }
 
     //--------------------------------------------------------------------------
@@ -519,9 +519,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!realm_index_space_set.has_triggered())
-        realm_index_space_set.wait();
+        realm_index_space_set.lg_wait();
       if (!index_space_ready.has_triggered())
-        index_space_ready.wait();
+        index_space_ready.lg_wait();
       return realm_index_space.volume();
     }
 
@@ -542,9 +542,9 @@ namespace Legion {
       const Realm::ZPoint<DIM,T> *point = 
         static_cast<const Realm::ZPoint<DIM,T>*>(realm_point);
       if (!realm_index_space_set.has_triggered())
-        realm_index_space_set.wait();
+        realm_index_space_set.lg_wait();
       if (!index_space_ready.has_triggered())
-        index_space_ready.wait();
+        index_space_ready.lg_wait();
       return realm_index_space.contains(*point);
     }
 
@@ -554,9 +554,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!realm_index_space_set.has_triggered())
-        realm_index_space_set.wait();
+        realm_index_space_set.lg_wait();
       if (!index_space_ready.has_triggered())
-        index_space_ready.wait();
+        index_space_ready.lg_wait();
       return new IndexSpaceAllocator(Domain(realm_index_space));
     }
 
@@ -588,7 +588,7 @@ namespace Legion {
         (*it)->destroy_node(source);
       }
       if (!realm_index_space_set.has_triggered())
-        realm_index_space_set.wait();
+        realm_index_space_set.lg_wait();
       if (get_owner_space() == context->runtime->address_space)
         realm_index_space.destroy();
       for (typename std::map<IndexTreeNode*,IntersectInfo>::iterator it =
@@ -605,7 +605,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!realm_index_space_set.has_triggered())
-        realm_index_space_set.wait();
+        realm_index_space_set.lg_wait();
       return realm_index_space.bounds.volume();
     }
 
@@ -615,7 +615,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!realm_index_space_set.has_triggered())
-        realm_index_space_set.wait();
+        realm_index_space_set.lg_wait();
       // Don't need to wait for full index space since we just need bounds
       const Realm::ZRect<DIM,T> &bounds = realm_index_space.bounds;
       const size_t volume = bounds.volume();
@@ -698,9 +698,9 @@ namespace Legion {
       Realm::ZPoint<DIM,T> point;
       delinearize_color(color, &point, handle.get_type_tag());
       if (!realm_index_space_set.has_triggered())
-        realm_index_space_set.wait();
+        realm_index_space_set.lg_wait();
       if (!index_space_ready.has_triggered())
-        index_space_ready.wait();
+        index_space_ready.lg_wait();
       if (!realm_index_space.contains(point))
       {
         if (report_error)
@@ -724,13 +724,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!index_space_ready.has_triggered())
-        index_space_ready.wait();
+        index_space_ready.lg_wait();
       colors.resize(get_volume());
       unsigned idx = 0;
       if (!realm_index_space_set.has_triggered())
-        realm_index_space_set.wait();
+        realm_index_space_set.lg_wait();
       if (!index_space_ready.has_triggered())
-        index_space_ready.wait();
+        index_space_ready.lg_wait();
       for (Realm::ZIndexSpaceIterator<DIM,T> rect_itr(realm_index_space); 
             rect_itr.valid; rect_itr.step())
       {
@@ -746,9 +746,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!realm_index_space_set.has_triggered())
-        realm_index_space_set.wait();
+        realm_index_space_set.lg_wait();
       if (!index_space_ready.has_triggered())
-        index_space_ready.wait();
+        index_space_ready.lg_wait();
       return Domain(realm_index_space);
     }
 
@@ -814,13 +814,13 @@ namespace Legion {
         context->runtime->profiler->add_partition_request(requests,
                     (Operation*)NULL/*op*/, DEP_PART_INTERSECTION);
       if (!realm_index_space_set.has_triggered())
-        realm_index_space_set.wait();
+        realm_index_space_set.lg_wait();
       ApEvent ready(Realm::ZIndexSpace<DIM,T>::compute_intersection(
         realm_index_space, rhs_space, intersection, requests,
         Runtime::merge_events(index_space_ready, rhs_node->index_space_ready)));
       // Wait for the result to be ready
       if (!ready.has_triggered())
-        ready.wait();
+        ready.lg_wait();
       bool result = !intersection.empty();
       AutoLock n_lock(node_lock);
       if (result)
@@ -884,12 +884,12 @@ namespace Legion {
         context->runtime->profiler->add_partition_request(requests,
                     (Operation*)NULL/*op*/, DEP_PART_INTERSECTION);
       if (!realm_index_space_set.has_triggered())
-        realm_index_space_set.wait();
+        realm_index_space_set.lg_wait();
       ApEvent ready(Realm::ZIndexSpace<DIM,T>::compute_intersection(
             realm_index_space, rhs_space, intersection, requests,
             Runtime::merge_events(index_space_ready, rhs_precondition)));
       if (!ready.has_triggered())
-        ready.wait();
+        ready.lg_wait();
       bool result = !intersection.empty();
       AutoLock n_lock(node_lock);
       if (result)
@@ -946,7 +946,7 @@ namespace Legion {
       Realm::ZIndexSpace<DIM,T> rhs_space, difference; 
       rhs_node->get_realm_index_space(rhs_space);
       if (!realm_index_space_set.has_triggered())
-        realm_index_space_set.wait();
+        realm_index_space_set.lg_wait();
       bool result = false;
       if (!realm_index_space.dense() || 
           !rhs_node->index_space_ready.has_triggered())
@@ -960,7 +960,7 @@ namespace Legion {
           Runtime::merge_events(index_space_ready, 
                                 rhs_node->index_space_ready)));
         if (!ready.has_triggered())
-          ready.wait();
+          ready.lg_wait();
         result = difference.empty();
         difference.destroy();
       }
@@ -1005,7 +1005,7 @@ namespace Legion {
       Realm::ZIndexSpace<DIM,T> rhs_space, difference;
       ApEvent rhs_precondition = rhs_node->get_union_index_space(rhs_space);
       if (!realm_index_space_set.has_triggered())
-        realm_index_space_set.wait();
+        realm_index_space_set.lg_wait();
       bool result = false;
       if (!realm_index_space.dense() || !rhs_precondition.has_triggered())
       {
@@ -1017,7 +1017,7 @@ namespace Legion {
               rhs_space, realm_index_space, difference, requests,
               Runtime::merge_events(index_space_ready, rhs_precondition)));
         if (!ready.has_triggered())
-          ready.wait();
+          ready.lg_wait();
         result = difference.empty();
         difference.destroy();
       }
@@ -1074,7 +1074,7 @@ namespace Legion {
         context->runtime->profiler->add_partition_request(requests,
                                                 op, DEP_PART_EQUAL);
       if (!realm_index_space_set.has_triggered())
-        realm_index_space_set.wait();
+        realm_index_space_set.lg_wait();
       ApEvent result(realm_index_space.create_equal_subspaces(count, 
             granularity, subspaces, requests, index_space_ready));
       // Enumerate the colors and assign the spaces
@@ -1366,7 +1366,7 @@ namespace Legion {
         context->runtime->profiler->add_partition_request(requests,
                                         op, DEP_PART_INTERSECTIONS);
       if (!realm_index_space_set.has_triggered())
-        realm_index_space_set.wait();
+        realm_index_space_set.lg_wait();
       ApEvent result(Realm::ZIndexSpace<DIM,T>::compute_intersections(
             realm_index_space, rhs_spaces, subspaces, requests,
             Runtime::merge_events(preconditions)));
@@ -1568,9 +1568,9 @@ namespace Legion {
       parent->get_realm_index_space(parent_is);
       // Wait for our index space to be ready if necessary
       if (!realm_index_space_set.has_triggered())
-        realm_index_space_set.wait();
+        realm_index_space_set.lg_wait();
       if (!index_space_ready.has_triggered())
-        index_space_ready.wait();
+        index_space_ready.lg_wait();
       // Iterate over our points (colors) and fill in the bounds
       for (Realm::ZIndexSpaceIterator<N,T> rect_itr(realm_index_space); 
             rect_itr.valid; rect_itr.step())
@@ -1628,7 +1628,7 @@ namespace Legion {
        static_cast<IndexSpaceNodeT<COLOR_DIM,COLOR_T>*>(partition->color_space);
       // Enumerate the color space
       if (!color_space->index_space_ready.has_triggered())
-        color_space->index_space_ready.wait();
+        color_space->index_space_ready.lg_wait();
       Realm::ZIndexSpace<COLOR_DIM,COLOR_T> realm_color_space;
       color_space->get_realm_index_space(realm_color_space);
       const size_t num_colors = realm_color_space.volume();
@@ -1668,7 +1668,7 @@ namespace Legion {
       // Perform the operation
       std::vector<Realm::ZIndexSpace<DIM,T> > subspaces(colors.size());
       if (!realm_index_space_set.has_triggered())
-        realm_index_space_set.wait();
+        realm_index_space_set.lg_wait();
       ApEvent result = ApEvent(realm_index_space.create_subspaces_by_field(
             descriptors, colors, subspaces, requests, 
             Runtime::merge_events(instances_ready, index_space_ready)));
@@ -1768,7 +1768,7 @@ namespace Legion {
       // Perform the operation
       std::vector<Realm::ZIndexSpace<DIM1,T1> > subspaces(sources.size());
       if (!realm_index_space_set.has_triggered())
-        realm_index_space_set.wait();
+        realm_index_space_set.lg_wait();
       ApEvent result(realm_index_space.create_subspaces_by_image(descriptors,
             sources, subspaces, requests, 
             Runtime::merge_events(index_space_ready, instances_ready)));
@@ -1889,7 +1889,7 @@ namespace Legion {
       // Perform the operation
       std::vector<Realm::ZIndexSpace<DIM1,T1> > subspaces(sources.size());
       if (!realm_index_space_set.has_triggered())
-        realm_index_space_set.wait();
+        realm_index_space_set.lg_wait();
       ApEvent result(realm_index_space.create_subspaces_by_image(descriptors,
             sources, subspaces, requests, 
             Runtime::merge_events(index_space_ready, instances_ready)));
@@ -2009,7 +2009,7 @@ namespace Legion {
       // Perform the operation
       std::vector<Realm::ZIndexSpace<DIM1,T1> > subspaces(targets.size());
       if (!realm_index_space_set.has_triggered())
-        realm_index_space_set.wait();
+        realm_index_space_set.lg_wait();
       ApEvent result(realm_index_space.create_subspaces_by_preimage(
             descriptors, targets, subspaces, requests,
             Runtime::merge_events(index_space_ready, instances_ready)));
@@ -2130,7 +2130,7 @@ namespace Legion {
       // Perform the operation
       std::vector<Realm::ZIndexSpace<DIM1,T1> > subspaces(targets.size());
       if (!realm_index_space_set.has_triggered())
-        realm_index_space_set.wait();
+        realm_index_space_set.lg_wait();
       ApEvent result(realm_index_space.create_subspaces_by_preimage(
             descriptors, targets, subspaces, requests,
             Runtime::merge_events(index_space_ready, instances_ready)));
@@ -2216,7 +2216,7 @@ namespace Legion {
         context->runtime->profiler->add_partition_request(requests,
                                           op, DEP_PART_ASSOCIATION);
       if (!realm_index_space_set.has_triggered())
-        realm_index_space_set.wait();
+        realm_index_space_set.lg_wait();
       // Issue the operation
       return ApEvent(realm_index_space.create_association(descriptors,
             range_space, requests, Runtime::merge_events(instances_ready,
@@ -2256,7 +2256,7 @@ namespace Legion {
         if (!index_space_ready.has_triggered())
           precondition = Runtime::merge_events(precondition, index_space_ready);
         if (!realm_index_space_set.has_triggered())
-          realm_index_space_set.wait();
+          realm_index_space_set.lg_wait();
         // Have to protect against misspeculation
         if (predicate_guard.exists())
         {
@@ -2353,7 +2353,7 @@ namespace Legion {
         if (!index_space_ready.has_triggered())
           precondition = Runtime::merge_events(precondition, index_space_ready);
         if (!realm_index_space_set.has_triggered())
-          realm_index_space_set.wait();
+          realm_index_space_set.lg_wait();
         // Have to protect against misspeculation
         if (predicate_guard.exists())
         {
@@ -2439,9 +2439,9 @@ namespace Legion {
       DETAILED_PROFILER(context->runtime, REALM_CREATE_INSTANCE_CALL);
       // Have to wait for the index space to be ready if necessary
       if (!realm_index_space_set.has_triggered())
-          realm_index_space_set.wait();
+          realm_index_space_set.lg_wait();
       if (!index_space_ready.has_triggered())
-        index_space_ready.wait();
+        index_space_ready.lg_wait();
       Realm::ProfilingRequestSet requests;
       if (context->runtime->profiler != NULL)
       {
@@ -2476,9 +2476,9 @@ namespace Legion {
       DETAILED_PROFILER(context->runtime, REALM_CREATE_INSTANCE_CALL);
       // Have to wait for the index space to be ready if necessary
       if (!realm_index_space_set.has_triggered())
-          realm_index_space_set.wait();
+          realm_index_space_set.lg_wait();
       if (!index_space_ready.has_triggered())
-        index_space_ready.wait();
+        index_space_ready.lg_wait();
       // No profiling for these kinds of instances currently
       Realm::ProfilingRequestSet requests;
       return PhysicalInstance::create_file_instance(file_name, 
@@ -2497,9 +2497,9 @@ namespace Legion {
       DETAILED_PROFILER(context->runtime, REALM_CREATE_INSTANCE_CALL);
       // Have to wait for the index space to be ready if necessary
       if (!realm_index_space_set.has_triggered())
-          realm_index_space_set.wait();
+          realm_index_space_set.lg_wait();
       if (!index_space_ready.has_triggered())
-        index_space_ready.wait();
+        index_space_ready.lg_wait();
       // No profiling for these kinds of instances currently
       Realm::ProfilingRequestSet requests;
       return PhysicalInstance::create_hdf5_instance(file_name, 
@@ -2512,9 +2512,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!realm_index_space_set.has_triggered())
-          realm_index_space_set.wait();
+          realm_index_space_set.lg_wait();
       if (!index_space_ready.has_triggered())
-        index_space_ready.wait();
+        index_space_ready.lg_wait();
       launch_domain = realm_index_space;
     }
 
@@ -2524,9 +2524,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!realm_index_space_set.has_triggered())
-          realm_index_space_set.wait();
+          realm_index_space_set.lg_wait();
       if (!index_space_ready.has_triggered())
-        index_space_ready.wait();
+        index_space_ready.lg_wait();
       for (Realm::ZIndexSpaceIterator<DIM,T> itr(realm_index_space); 
             itr.valid; itr.step())
         LegionSpy::log_launch_index_space_rect<DIM>(op_id, itr.rect);
@@ -2629,7 +2629,7 @@ namespace Legion {
             parent_space, union_space, difference_space, requests,
             Runtime::merge_events(parent->index_space_ready, union_ready)));
       if (!diff_ready.has_triggered())
-        diff_ready.wait();
+        diff_ready.lg_wait();
       bool complete = difference_space.empty();
       if (!complete)
         difference_space.destroy();
@@ -2684,7 +2684,7 @@ namespace Legion {
             Runtime::merge_events(union_precondition, 
                                   rhs_node->index_space_ready)));
       if (!ready.has_triggered())
-        ready.wait();
+        ready.lg_wait();
       bool result = !intersection.empty();
       AutoLock n_lock(node_lock);
       if (result)
@@ -2752,7 +2752,7 @@ namespace Legion {
             lhs_space, rhs_space, intersection, requests,
             Runtime::merge_events(union_precondition, rhs_precondition)));
       if (!ready.has_triggered())
-        ready.wait();
+        ready.lg_wait();
       bool result = !intersection.empty();
       AutoLock n_lock(node_lock);
       if (result)
@@ -2818,7 +2818,7 @@ namespace Legion {
               Runtime::merge_events(union_precondition, 
                                     rhs_node->index_space_ready)));
         if (!ready.has_triggered())
-          ready.wait();
+          ready.lg_wait();
         result = difference.empty();
         difference.destroy();
       }
@@ -2877,7 +2877,7 @@ namespace Legion {
               rhs_space, union_space, difference, requests,
               Runtime::merge_events(union_precondition, rhs_precondition))); 
         if (!ready.has_triggered())
-          ready.wait();
+          ready.lg_wait();
         result = difference.empty();
         difference.destroy();
       } 

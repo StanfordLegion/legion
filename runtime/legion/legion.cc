@@ -2655,10 +2655,10 @@ namespace Legion {
               spaces[index] = Realm::ZIndexSpace<1,coord_t>(bounds);
             }
             Realm::ZIndexSpace<1,coord_t> realm_index_space;
-            Realm::Event ready = Realm::ZIndexSpace<1,coord_t>::compute_union(
-                spaces, realm_index_space, empty_requests);
+            LgEvent ready(Realm::ZIndexSpace<1,coord_t>::compute_union(
+                spaces, realm_index_space, empty_requests));
             // Wait for the space to be ready
-            ready.wait();
+            ready.lg_wait();
             return create_index_space_internal(ctx, &realm_index_space,
                 Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
           }
@@ -2673,10 +2673,10 @@ namespace Legion {
               spaces[index] = Realm::ZIndexSpace<2,coord_t>(bounds);
             }
             Realm::ZIndexSpace<2,coord_t> realm_index_space;
-            Realm::Event ready = Realm::ZIndexSpace<2,coord_t>::compute_union(
-                spaces, realm_index_space, empty_requests);
+            LgEvent ready(Realm::ZIndexSpace<2,coord_t>::compute_union(
+                spaces, realm_index_space, empty_requests));
             // Wait for the space to be ready
-            ready.wait();
+            ready.lg_wait();
             return create_index_space_internal(ctx, &realm_index_space,
                 Internal::NT_TemplateHelper::encode_tag<2,coord_t>());
           }
@@ -2691,10 +2691,10 @@ namespace Legion {
               spaces[index] = Realm::ZIndexSpace<3,coord_t>(bounds);
             }
             Realm::ZIndexSpace<3,coord_t> realm_index_space;
-            Realm::Event ready = Realm::ZIndexSpace<3,coord_t>::compute_union(
-                spaces, realm_index_space, empty_requests);
+            LgEvent ready(Realm::ZIndexSpace<3,coord_t>::compute_union(
+                spaces, realm_index_space, empty_requests));
             // Wait for the space to be ready
-            ready.wait();
+            ready.lg_wait();
             return create_index_space_internal(ctx, &realm_index_space,
                 Internal::NT_TemplateHelper::encode_tag<3,coord_t>());
           }

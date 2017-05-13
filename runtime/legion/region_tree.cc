@@ -95,7 +95,7 @@ namespace Legion {
       if (Runtime::legion_spy_enabled)
       {
         if (!node->index_space_ready.has_triggered())
-          node->index_space_ready.wait();
+          node->index_space_ready.lg_wait();
         node->log_index_space_points();
       }
     }
@@ -112,7 +112,7 @@ namespace Legion {
       if (Runtime::legion_spy_enabled)
       {
         if (!node->index_space_ready.has_triggered())
-          node->index_space_ready.wait();
+          node->index_space_ready.lg_wait();
         node->log_index_space_points();
       }
     }
@@ -129,7 +129,7 @@ namespace Legion {
       if (Runtime::legion_spy_enabled)
       {
         if (!node->index_space_ready.has_triggered())
-          node->index_space_ready.wait();
+          node->index_space_ready.lg_wait();
         node->log_index_space_points();
       }
     }
