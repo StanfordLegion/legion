@@ -1533,8 +1533,8 @@ namespace Realm {
 
 	    // update generation last, with a synchronization to make sure poisoned generation
 	    // list is valid to any observer of this update
-	    __sync_synchronize();
 	    generation = gen_triggered;
+	    __sync_synchronize();
 	  } else 
 	    if(gen_triggered > (generation + 1)) {
 	      // we can't update the main state because there are generations that we know
