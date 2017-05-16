@@ -42,16 +42,6 @@
 #define REALM_USE_LEGION_LAYOUT_CONSTRAINTS
 #include "realm.h"
 
-#ifdef ENABLE_LEGION_TLS
-#if HAS_CXX11_THREAD_LOCAL // for clang on OSX
-#define HAS_LEGION_THREAD_LOCAL
-#elif !defined(__MACH__) && __cplusplus >= 201103L // for non-OSX
-#define HAS_LEGION_THREAD_LOCAL
-#else
-#include <pthread.h> // needed for thread local storage before C++11
-#endif
-#endif
-
 namespace BindingLib { class Utility; } // BindingLib namespace
 
 namespace Legion { 
@@ -1232,11 +1222,7 @@ namespace Legion {
     // Nasty global variable for TLS support of figuring out
     // our context implicitly, this is experimental only
 #ifdef ENABLE_LEGION_TLS
-#ifdef HAS_LEGION_THREAD_LOCAL
-    extern thread_local TaskContext *implicit_context;
-#else
-    extern pthread_key_t implicit_context;
-#endif
+    extern __thread TaskContext *implicit_context;
 #endif
     
     // legion_trace.h
@@ -1681,24 +1667,12 @@ namespace Legion {
     inline void lg_wait(void) const
       {
 #ifdef ENABLE_LEGION_TLS
-        if (!has_triggered())
-        {
-          // Save the context locally
-#ifdef HAS_LEGION_THREAD_LOCAL
-          Context local_ctx = Internal::implicit_context; 
-#else
-          Context local_ctx = static_cast<Context>(
-              pthread_getspecific(Internal::implicit_context));
-#endif
-          // Do the wait
-          wait();
-          // Write the context back
-#ifdef HAS_LEGION_THREAD_LOCAL
-          Internal::implicit_context = local_ctx;
-#else
-          pthread_setspecific(Internal::implicit_context, local_ctx);
-#endif
-        }
+        // Save the context locally
+        TaskContext *local_ctx = Internal::implicit_context; 
+        // Do the wait
+        wait();
+        // Write the context back
+        Internal::implicit_context = local_ctx;
 #else
         // Just do the normal wait call
         wait(); 
