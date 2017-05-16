@@ -252,7 +252,7 @@ namespace Legion {
       SemanticInfo(RtUserEvent ready)
         : buffer(NULL), size(0), ready_event(ready), is_mutable(true) { }
     public:
-      inline bool is_valid(void) const { return !ready_event.exists(); }
+      inline bool is_valid(void) const { return ready_event.has_triggered(); }
     public:
       void *buffer;
       size_t size;
