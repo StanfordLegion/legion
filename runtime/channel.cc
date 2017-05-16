@@ -1171,7 +1171,6 @@ namespace LegionRuntime {
 
       long RemoteWriteChannel::submit(Request** requests, long nr)
       {
-        AutoHSLLock al(channel_mutex);
         assert(nr <= capacity);
         for (long i = 0; i < nr; i ++) {
           RemoteWriteRequest* req = (RemoteWriteRequest*) requests[i];
@@ -1186,7 +1185,7 @@ namespace LegionRuntime {
                 req->dst_node, req->dst_base, req->src_base, req->nbytes,
                 req->src_str, req->nlines, req);
           }
-          capacity--;
+          __sync_fetch_and_sub(&capacity, 1);
         /*RemoteWriteRequest* req = (RemoteWriteRequest*) requests[i];
           req->complete_event = GenEventImpl::create_genevent()->current_event();
           Realm::RemoteWriteMessage::RequestArgs args;
@@ -1206,12 +1205,10 @@ namespace LegionRuntime {
 
       void RemoteWriteChannel::pull()
       {
-        AutoHSLLock al(channel_mutex);
       }
 
       long RemoteWriteChannel::available()
       {
-        AutoHSLLock al(channel_mutex);
         return capacity;
       }
    
