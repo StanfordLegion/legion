@@ -1092,14 +1092,15 @@ namespace Legion {
       void find_valid_variants(std::vector<VariantID> &valid_variants, 
                                Processor::Kind kind) const;
     public:
-      const char* get_name(bool needs_lock = true) const;
+      const char* get_name(bool needs_lock = true);
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
          const void *buffer, size_t size, bool is_mutable, bool send_to_owner);
       bool retrieve_semantic_information(SemanticTag tag,
                                          const void *&buffer, size_t &size,
                                          bool can_fail, bool wait_until);
       void send_semantic_info(AddressSpaceID target, SemanticTag tag,
-                              const void *value, size_t size, bool is_mutable);
+                        const void *value, size_t size, bool is_mutable,
+                        RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT);
       void send_semantic_request(AddressSpaceID target, SemanticTag tag, 
                              bool can_fail, bool wait_until, RtUserEvent ready);
       void process_semantic_request(SemanticTag tag, AddressSpaceID target, 
@@ -1118,6 +1119,7 @@ namespace Legion {
     public:
       const TaskID task_id;
       Runtime *const runtime;
+      char *const initial_name;
     private:
       Reservation task_lock;
       std::map<VariantID,VariantImpl*> variants;
