@@ -7152,20 +7152,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TaskImpl::TaskImpl(TaskID tid, Runtime *rt, const char *name/*=NULL*/)
-      : task_id(tid), runtime(rt), task_lock(Reservation::create_reservation()),
+      : task_id(tid), runtime(rt), initial_name(static_cast<char*>(
+          malloc(((name == NULL) ? 64 : strlen(name) + 1) * sizeof(char)))),
+        task_lock(Reservation::create_reservation()),
         has_return_type(false), all_idempotent(false)
     //--------------------------------------------------------------------------
     {
       // Always fill in semantic info 0 with a name for the task
-      if (name == NULL)
-      {
-        const size_t name_size = 64 * sizeof(char);
-        char *noname = (char*)legion_malloc(SEMANTIC_INFO_ALLOC, name_size);
-        snprintf(noname,name_size,"unnamed_task_%d", task_id);
-        semantic_infos[NAME_SEMANTIC_TAG] = 
-          SemanticInfo(noname, name_size, true/*mutable*/);
-      }
-      else
+      if (name != NULL)
       {
         const size_t name_size = strlen(name) + 1; // for \0
         char *name_copy = (char*)legion_malloc(SEMANTIC_INFO_ALLOC, name_size);
@@ -7174,7 +7168,11 @@ namespace Legion {
           SemanticInfo(name_copy, name_size, false/*mutable*/);
         if (Runtime::legion_spy_enabled)
           LegionSpy::log_task_name(task_id, name);
+        // Also set the initial name to be safe
+        memcpy(initial_name, name, name_size);
       }
+      else // Just set the initial name
+        snprintf(initial_name,64,"unnamed_task_%d", task_id);
       // Register this task with the profiler if necessary
       if (runtime->profiler != NULL)
       {
@@ -7186,7 +7184,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TaskImpl::TaskImpl(const TaskImpl &rhs)
-      : task_id(rhs.task_id), runtime(rhs.runtime)
+      : task_id(rhs.task_id), runtime(rhs.runtime), initial_name(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -7206,6 +7204,7 @@ namespace Legion {
                     it->second.size);
       }
       semantic_infos.clear();
+      free(initial_name);
     }
 
     //--------------------------------------------------------------------------
@@ -7283,7 +7282,7 @@ namespace Legion {
         if (can_fail)
           return NULL;
         log_run.error("Unable to find variant %ld of task %s!",
-                      variant_id, get_name(false));
+                      variant_id, get_name());
 #ifdef DEBUG_LEGION
         assert(false);
 #endif
@@ -7366,28 +7365,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const char* TaskImpl::get_name(bool needs_lock /*= true*/) const
+    const char* TaskImpl::get_name(bool needs_lock /*= true*/)
     //--------------------------------------------------------------------------
     {
       if (needs_lock)
       {
-        AutoLock t_lock(task_lock,1,false/*exclusive*/);
-        std::map<SemanticTag,SemanticInfo>::const_iterator finder = 
-          semantic_infos.find(NAME_SEMANTIC_TAG);
-#ifdef DEBUG_LEGION
-        assert(finder != semantic_infos.end());
-#endif
-        return reinterpret_cast<const char*>(finder->second.buffer);
+        // Do the request through the semantic information
+        const void *result = NULL; size_t dummy_size;
+        if (retrieve_semantic_information(NAME_SEMANTIC_TAG, result, dummy_size,
+                                          true/*can fail*/,false/*wait until*/))
+          return reinterpret_cast<const char*>(result);
       }
       else
       {
+        // If we're already holding the lock then we can just do
+        // the local look-up regardless of if we're the owner or not
         std::map<SemanticTag,SemanticInfo>::const_iterator finder = 
           semantic_infos.find(NAME_SEMANTIC_TAG);
-#ifdef DEBUG_LEGION
-        assert(finder != semantic_infos.end());
-#endif
-        return reinterpret_cast<const char*>(finder->second.buffer);
+        if (finder != semantic_infos.end())
+          return reinterpret_cast<const char*>(finder->second.buffer);
       }
+      // Couldn't find it so use the initial name
+      return initial_name;
     }
 
     //--------------------------------------------------------------------------
@@ -7484,7 +7483,22 @@ namespace Legion {
           // from the owner, then send it
           if ((owner_space != runtime->address_space) && 
               (source != owner_space))
-            send_semantic_info(owner_space, tag, buffer, size, is_mutable);
+          {
+            if (tag == NAME_SEMANTIC_TAG)
+            {
+              // Special case here for task names, the user can reasonably
+              // expect all tasks to have an initial name so we have to 
+              // guarantee that this update is propagated before continuing
+              // because otherwise we can't distinguish the case where a 
+              // name hasn't propagated from one where it was never set
+              RtUserEvent wait_on = Runtime::create_rt_user_event();
+              send_semantic_info(owner_space, tag, buffer, size, 
+                                 is_mutable, wait_on);
+              wait_on.lg_wait();
+            }
+            else
+              send_semantic_info(owner_space, tag, buffer, size, is_mutable);
+          }
         }
       }
       else
@@ -7496,7 +7510,10 @@ namespace Legion {
               const void *&result, size_t &size, bool can_fail, bool wait_until)
     //--------------------------------------------------------------------------
     {
-      RtUserEvent wait_on;
+      RtEvent wait_on;
+      RtUserEvent request;
+      const AddressSpaceID owner_space = get_owner_space();
+      const bool is_remote = (owner_space != runtime->address_space);
       {
         AutoLock t_lock(task_lock);
         std::map<SemanticTag,SemanticInfo>::const_iterator finder = 
@@ -7510,31 +7527,42 @@ namespace Legion {
             size = finder->second.size;
             return true;
           }
-          else if (!can_fail && wait_until)
+          else if (is_remote)
+          {
+            if (can_fail)
+            {
+              // Have to make our own event
+              request = Runtime::create_rt_user_event();
+              wait_on = request;
+            }
+            else // can use the canonical event
+              wait_on = finder->second.ready_event; 
+          }
+          else if (wait_until) // local so use the canonical event
             wait_on = finder->second.ready_event;
-          else // we can fail, so make our own user event
-            wait_on = Runtime::create_rt_user_event();
         }
         else
         {
           // Otherwise we make an event to wait on
           if (!can_fail && wait_until)
           {
-            // Make the ready event and record it
-            wait_on = Runtime::create_rt_user_event();
-            semantic_infos[tag] = SemanticInfo(wait_on);
+            // Make a canonical ready event
+            request = Runtime::create_rt_user_event();
+            semantic_infos[tag] = SemanticInfo(request);
+            wait_on = request;
           }
-          else
-            wait_on = Runtime::create_rt_user_event();
+          else if (is_remote)
+          {
+            // Make an event just for us to use
+            request = Runtime::create_rt_user_event();
+            wait_on = request;
+          }
         }
       }
-      // If we are not the owner, send a request otherwise we are
-      // the owner and the information will get sent here
-      AddressSpaceID owner_space = get_owner_space();
-      if (owner_space != runtime->address_space)
-        send_semantic_request(owner_space, tag, can_fail, wait_until, wait_on);
-      else if (!wait_until)
+      // We didn't find it yet, see if we have something to wait on
+      if (!wait_on.exists())
       {
+        // Nothing to wait on so we have to do something
         if (can_fail)
           return false;
         log_run.error("Invalid semantic tag %ld for task implementation", tag);
@@ -7543,7 +7571,13 @@ namespace Legion {
 #endif
         exit(ERROR_INVALID_SEMANTIC_TAG);
       }
-      wait_on.lg_wait();
+      else
+      {
+        // Send a request if necessary
+        if (is_remote && request.exists())
+          send_semantic_request(owner_space, tag, can_fail, wait_until,request);
+        wait_on.lg_wait();
+      }
       // When we wake up, we should be able to find everything
       AutoLock t_lock(task_lock,1,false/*exclusive*/);
       std::map<SemanticTag,SemanticInfo>::const_iterator finder = 
@@ -7566,7 +7600,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TaskImpl::send_semantic_info(AddressSpaceID target, SemanticTag tag,
-                               const void *buffer, size_t size, bool is_mutable)
+                                      const void *buffer, size_t size, 
+                                      bool is_mutable, RtUserEvent to_trigger)
     //--------------------------------------------------------------------------
     {
       Serializer rez;
@@ -7577,6 +7612,7 @@ namespace Legion {
         rez.serialize(size);
         rez.serialize(buffer, size);
         rez.serialize(is_mutable);
+        rez.serialize(to_trigger);
       }
       runtime->send_task_impl_semantic_info(target, rez);
     }
@@ -7690,9 +7726,13 @@ namespace Legion {
       derez.advance_pointer(size);
       bool is_mutable;
       derez.deserialize(is_mutable);
+      RtUserEvent to_trigger;
+      derez.deserialize(to_trigger);
       TaskImpl *impl = runtime->find_or_create_task_impl(task_id);
       impl->attach_semantic_information(tag, source, buffer, size, 
                                         is_mutable, false/*send to owner*/);
+      if (to_trigger.exists())
+        Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------

@@ -4633,7 +4633,10 @@ namespace Legion {
                                                       bool wait_until)
     //--------------------------------------------------------------------------
     {
-      RtUserEvent wait_on;
+      RtEvent wait_on;
+      RtUserEvent request;
+      const AddressSpaceID owner_space = get_owner_space();
+      const bool is_remote = (owner_space != context->runtime->address_space);
       {
         AutoLock n_lock(node_lock);
         LegionMap<SemanticTag,SemanticInfo>::aligned::const_iterator finder = 
@@ -4647,30 +4650,42 @@ namespace Legion {
             size = finder->second.size;
             return true;
           }
-          else if (!can_fail && wait_until)
+          else if (is_remote)
+          {
+            if (can_fail)
+            {
+              // Have to make our own event
+              request = Runtime::create_rt_user_event();
+              wait_on = request;
+            }
+            else // can use the canonical event
+              wait_on = finder->second.ready_event; 
+          }
+          else if (wait_until) // local so use the canonical event
             wait_on = finder->second.ready_event;
-          else // we can fail, so make our user event
-            wait_on = Runtime::create_rt_user_event();
         }
         else
         {
+          // Otherwise we make an event to wait on
           if (!can_fail && wait_until)
           {
-            // Otherwise make an event to wait on
-            wait_on = Runtime::create_rt_user_event();
-            semantic_info[tag] = SemanticInfo(wait_on);
+            // Make a canonical ready event
+            request = Runtime::create_rt_user_event();
+            semantic_info[tag] = SemanticInfo(request);
+            wait_on = request;
           }
-          else
-            wait_on = Runtime::create_rt_user_event();
+          else if (is_remote)
+          {
+            // Make an event just for us to use
+            request = Runtime::create_rt_user_event();
+            wait_on = request;
+          }
         }
       }
-      // If we are not the owner, send a request, otherwise we are
-      // the owner and the information will get sent here
-      AddressSpaceID owner_space = get_owner_space();
-      if (owner_space != context->runtime->address_space)
-        send_semantic_request(owner_space, tag, can_fail, wait_until, wait_on);
-      else
+      // We didn't find it yet, see if we have something to wait on
+      if (!wait_on.exists())
       {
+        // Nothing to wait on so we have to do something
         if (can_fail)
           return false;
         log_run.error("ERROR: invalid semantic tag %ld for "
@@ -4680,8 +4695,13 @@ namespace Legion {
 #endif
         exit(ERROR_INVALID_SEMANTIC_TAG);
       }
-      // Now wait
-      wait_on.lg_wait();
+      else
+      {
+        // Send a request if necessary
+        if (is_remote && request.exists())
+          send_semantic_request(owner_space, tag, can_fail, wait_until,request);
+        wait_on.lg_wait();
+      }
       // When we wake up, we should be able to find everything
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
       LegionMap<SemanticTag,SemanticInfo>::aligned::const_iterator finder = 
@@ -6774,7 +6794,10 @@ namespace Legion {
               const void *&result, size_t &size, bool can_fail, bool wait_until)
     //--------------------------------------------------------------------------
     {
-      RtUserEvent wait_on;
+      RtEvent wait_on;
+      RtUserEvent request;
+      const AddressSpaceID owner_space = get_owner_space();
+      const bool is_remote = (owner_space != context->runtime->address_space);
       {
         AutoLock n_lock(node_lock);
         LegionMap<SemanticTag,SemanticInfo>::aligned::const_iterator finder = 
@@ -6788,40 +6811,42 @@ namespace Legion {
             size = finder->second.size;
             return true;
           }
-          else if (!can_fail && wait_until)
+          else if (is_remote)
+          {
+            if (can_fail)
+            {
+              // Have to make our own event
+              request = Runtime::create_rt_user_event();
+              wait_on = request;
+            }
+            else // can use the canonical event
+              wait_on = finder->second.ready_event; 
+          }
+          else if (wait_until) // local so use the canonical event
             wait_on = finder->second.ready_event;
-          else
-            wait_on = Runtime::create_rt_user_event();
         }
         else
         {
-          // Otherwise make an event to wait on
+          // Otherwise we make an event to wait on
           if (!can_fail && wait_until)
           {
-            wait_on = Runtime::create_rt_user_event();
-            semantic_info[tag] = SemanticInfo(wait_on);
+            // Make a canonical ready event
+            request = Runtime::create_rt_user_event();
+            semantic_info[tag] = SemanticInfo(request);
+            wait_on = request;
           }
-          else
-            wait_on = Runtime::create_rt_user_event();
+          else if (is_remote)
+          {
+            // Make an event just for us to use
+            request = Runtime::create_rt_user_event();
+            wait_on = request;
+          }
         }
       }
-      // If we are not the owner, send a request, otherwise we are
-      // the owner and the information will get sent here
-      AddressSpaceID owner_space = get_owner_space();
-      if (owner_space != context->runtime->address_space)
+      // We didn't find it yet, see if we have something to wait on
+      if (!wait_on.exists())
       {
-        Serializer rez;
-        {
-          rez.serialize(handle);
-          rez.serialize(tag);
-          rez.serialize(can_fail);
-          rez.serialize(wait_until);
-          rez.serialize(wait_on);
-        }
-        context->runtime->send_field_space_semantic_request(owner_space, rez);
-      }
-      else
-      {
+        // Nothing to wait on so we have to do something
         if (can_fail)
           return false;
         log_run.error("ERROR: invalid semantic tag %ld for "
@@ -6831,8 +6856,23 @@ namespace Legion {
 #endif
         exit(ERROR_INVALID_SEMANTIC_TAG);
       }
-      // Now wait
-      wait_on.lg_wait();
+      else
+      {
+        // Send a request if necessary
+        if (is_remote && request.exists())
+        {
+          Serializer rez;
+          {
+            rez.serialize(handle);
+            rez.serialize(tag);
+            rez.serialize(can_fail);
+            rez.serialize(wait_until);
+            rez.serialize(wait_on);
+          }
+          context->runtime->send_field_space_semantic_request(owner_space, rez);
+        }
+        wait_on.lg_wait();
+      }
       // When we wake up, we should be able to find everything
       AutoLock n_lock(node_lock,1,false/*exclusive*/); 
       LegionMap<SemanticTag,SemanticInfo>::aligned::const_iterator finder = 
@@ -6859,7 +6899,10 @@ namespace Legion {
                              bool can_fail, bool wait_until)
     //--------------------------------------------------------------------------
     {
-      RtUserEvent wait_on;
+      RtEvent wait_on;
+      RtUserEvent request;
+      const AddressSpaceID owner_space = get_owner_space();
+      const bool is_remote = (owner_space != context->runtime->address_space);
       {
         AutoLock n_lock(node_lock);
         LegionMap<std::pair<FieldID,SemanticTag>,
@@ -6874,42 +6917,40 @@ namespace Legion {
             size = finder->second.size;
             return true;
           }
-          else if (!can_fail && wait_until)
+          else if (is_remote)
+          {
+            if (can_fail)
+            {
+              // Have to make our own event
+              request = Runtime::create_rt_user_event();
+              wait_on = request;
+            }
+            else // can use the canonical event
+              wait_on = finder->second.ready_event; 
+          }
+          else if (wait_until) // local so use the canonical event
             wait_on = finder->second.ready_event;
-          else
-            wait_on = Runtime::create_rt_user_event();
         }
         else
         {
-          // Otherwise make an event to wait on
+          // Otherwise we make an event to wait on
           if (!can_fail && wait_until)
           {
-            wait_on = Runtime::create_rt_user_event();
-            semantic_field_info[std::pair<FieldID,SemanticTag>(fid,tag)] = 
-              SemanticInfo(wait_on);
+            // Make a canonical ready event
+            request = Runtime::create_rt_user_event();
+            semantic_info[tag] = SemanticInfo(request);
+            wait_on = request;
           }
-          else
-            wait_on = Runtime::create_rt_user_event();
+          else if (is_remote)
+          {
+            // Make an event just for us to use
+            request = Runtime::create_rt_user_event();
+            wait_on = request;
+          }
         }
       }
-      // If we are not the owner, send a request, otherwise we are
-      // the owner and the information will get sent here
-      AddressSpaceID owner_space = get_owner_space();
-      if (owner_space != context->runtime->address_space)
-      {
-        Serializer rez;
-        {
-	  RezCheck z(rez);
-          rez.serialize(handle);
-          rez.serialize(fid);
-          rez.serialize(tag);
-          rez.serialize(can_fail);
-          rez.serialize(wait_until);
-          rez.serialize(wait_on);
-        }
-        context->runtime->send_field_semantic_request(owner_space, rez);
-      }
-      else
+      // We didn't find it yet, see if we have something to wait on
+      if (!wait_on.exists())
       {
         if (can_fail)
           return false;
@@ -6920,8 +6961,25 @@ namespace Legion {
 #endif
         exit(ERROR_INVALID_SEMANTIC_TAG);
       }
-      // Now wait
-      wait_on.lg_wait();
+      else
+      {
+        // Send a request if necessary
+        if (is_remote && request.exists())
+        {
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(handle);
+            rez.serialize(fid);
+            rez.serialize(tag);
+            rez.serialize(can_fail);
+            rez.serialize(wait_until);
+            rez.serialize(wait_on);
+          }
+          context->runtime->send_field_semantic_request(owner_space, rez);
+        }
+        wait_on.lg_wait();
+      }
       // When we wake up, we should be able to find everything
       AutoLock n_lock(node_lock,1,false/*exclusive*/); 
       LegionMap<std::pair<FieldID,SemanticTag>,
@@ -8768,7 +8826,10 @@ namespace Legion {
                                                        bool wait_until)
     //--------------------------------------------------------------------------
     {
-      RtUserEvent wait_on;
+      RtEvent wait_on;
+      RtUserEvent request;
+      const AddressSpaceID owner_space = get_owner_space();
+      const bool is_remote = (owner_space != context->runtime->address_space);
       {
         AutoLock n_lock(node_lock);
         LegionMap<SemanticTag,SemanticInfo>::aligned::const_iterator finder = 
@@ -8782,29 +8843,40 @@ namespace Legion {
             size = finder->second.size;
             return true;
           }
-          else if (!can_fail && wait_until)
+          else if (is_remote)
+          {
+            if (can_fail)
+            {
+              // Have to make our own event
+              request = Runtime::create_rt_user_event();
+              wait_on = request;
+            }
+            else // can use the canonical event
+              wait_on = finder->second.ready_event; 
+          }
+          else if (wait_until) // local so use the canonical event
             wait_on = finder->second.ready_event;
-          else
-            wait_on = Runtime::create_rt_user_event();
         }
         else
         {
-          // Otherwise make an event to wait on
+          // Otherwise we make an event to wait on
           if (!can_fail && wait_until)
           {
-            wait_on = Runtime::create_rt_user_event();
-            semantic_info[tag] = SemanticInfo(wait_on);
+            // Make a canonical ready event
+            request = Runtime::create_rt_user_event();
+            semantic_info[tag] = SemanticInfo(request);
+            wait_on = request;
           }
-          else
-            wait_on = Runtime::create_rt_user_event();
+          else if (is_remote)
+          {
+            // Make an event just for us to use
+            request = Runtime::create_rt_user_event();
+            wait_on = request;
+          }
         }
       }
-      // If we are not the owner, send a request, otherwise we are
-      // the owner and the information will get sent here
-      AddressSpaceID owner_space = get_owner_space();
-      if (owner_space != context->runtime->address_space)
-        send_semantic_request(owner_space, tag, can_fail, wait_until, wait_on);
-      else
+      // We didn't find it yet, see if we have something to wait on
+      if (!wait_on.exists())
       {
         if (can_fail)
           return false;
@@ -8815,8 +8887,12 @@ namespace Legion {
 #endif
         exit(ERROR_INVALID_SEMANTIC_TAG);
       }
-      // Now wait
-      wait_on.lg_wait();
+      else
+      {
+        if (is_remote && request.exists())
+          send_semantic_request(owner_space, tag, can_fail, wait_until,request);
+        wait_on.lg_wait();
+      }
       // When we wake up, we should be able to find everything
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
       LegionMap<SemanticTag,SemanticInfo>::aligned::const_iterator finder = 
