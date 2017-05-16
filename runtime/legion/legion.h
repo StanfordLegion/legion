@@ -2727,6 +2727,30 @@ namespace Legion {
                                     const DomainPoint &point);
 
       /**
+       * This method corresponds to the one above for projecting from
+       * a logical region but is only invoked if the 'is_functional' 
+       * method for this projection functor returns true. It must always 
+       * return the same result when called with the same parameters
+       * @param upper_bound the upper bound logical region
+       * @param point the point being projected
+       * @return logical region result
+       */
+      virtual LogicalRegion project(LogicalRegion upper_bound,
+                                    const DomainPoint &point);
+
+      /**
+       * This method corresponds to the one above for projecting from
+       * a logical partition but is only invoked if the 'is_functional' 
+       * method for this projection functor returns true. It must always 
+       * return the same result when called with the same parameters
+       * @param upper_bound the upper bound logical partition 
+       * @param point the point being projected
+       * @return logical region result
+       */
+      virtual LogicalRegion project(LogicalPartition upper_bound,
+                                    const DomainPoint &point);
+
+      /**
        * @deprecated
        * Compute the projection for a logical region projection
        * requirement down to a specific logical region.
@@ -2764,6 +2788,14 @@ namespace Legion {
        * state for memoizing results.
        */
       virtual bool is_exclusive(void) const { return false; }
+
+      /**
+       * Indicate whether this is a functional projection
+       * functor or whether it depends on the operation being
+       * launched. This will determine which project method
+       * is invoked by the runtime.
+       */
+      virtual bool is_functional(void) const { return false; }
 
       /**
        * Specify the depth which this projection function goes

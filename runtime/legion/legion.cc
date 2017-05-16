@@ -2402,6 +2402,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    LogicalRegion ProjectionFunctor::project(LogicalRegion upper_bound,
+                                             const DomainPoint &point)
+    //--------------------------------------------------------------------------
+    {
+      Internal::log_run.error("ERROR: INVOCATION OF FUNCTIONAL PROJECTION "
+                              "FUNCTOR METHOD WITHOUT AN OVERRIDE!");
+      assert(false);
+      return LogicalRegion::NO_REGION;
+    }
+
+    //--------------------------------------------------------------------------
+    LogicalRegion ProjectionFunctor::project(LogicalPartition upper_bound,
+                                             const DomainPoint &point)
+    //--------------------------------------------------------------------------
+    {
+      Internal::log_run.error("ERROR: INVOCATION OF FUNCTIONAL PROJECTION "
+                              "FUNCTOR METHOD WITHOUT AN OVERRIDE!");
+      assert(false);
+      return LogicalRegion::NO_REGION;
+    }
+
+    //--------------------------------------------------------------------------
     LogicalRegion ProjectionFunctor::project(Context ctx, Task *task,
             unsigned index, LogicalRegion upper_bound, const DomainPoint &point)
     //--------------------------------------------------------------------------

@@ -478,6 +478,25 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(reduction_collective == NULL);
+      // Check for any non-functional projection functions
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        if (regions[idx].handle_type == SINGULAR)
+          continue;
+        ProjectionFunction *function = 
+          runtime->find_projection_function(regions[idx].projection);
+        if (!function->is_functional)
+        {
+          log_run.error("Region requirement %d of task %s (UID %lld) in "
+                        "parent task %s (UID %lld) has non-functional "
+                        "projection function. All projection functions "
+                        "for control replication must be functional.",
+                        idx, get_task_name(), get_unique_id(),
+                        parent_ctx->get_task_name(), 
+                        parent_ctx->get_unique_id());
+          assert(false);
+        }
+      }
 #endif
       // If we have a reduction op then we need an exchange
       if (redop > 0)
@@ -716,6 +735,30 @@ namespace Legion {
       }
       else // We have valid points, so it goes on the ready queue
         IndexFillOp::trigger_ready();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexFillOp::initialize_replication(ReplicateContext *ctx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      // Check for any non-functional projection functions
+      if (requirement.handle_type != SINGULAR)
+      {
+        ProjectionFunction *function = 
+          runtime->find_projection_function(requirement.projection);
+        if (!function->is_functional)
+        {
+          log_run.error("Region requirement of index fill op (UID %lld) in "
+                        "parent task %s (UID %lld) has non-functional "
+                        "projection function. All projection functions "
+                        "for control replication must be functional.",
+                        get_unique_id(), parent_ctx->get_task_name(), 
+                        parent_ctx->get_unique_id());
+          assert(false);
+        }
+      }
+#endif
     }
 
     /////////////////////////////////////////////////////////////
@@ -1077,6 +1120,31 @@ namespace Legion {
       }
       else // If we have any valid points do the base call
         IndexCopyOp::trigger_ready();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexCopyOp::initialize_replication(ReplicateContext *ctx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+      {
+        if (dst_requirements[idx].handle_type == SINGULAR)
+          continue;
+        ProjectionFunction *function = 
+          runtime->find_projection_function(dst_requirements[idx].projection);
+        if (!function->is_functional)
+        {
+          log_run.error("Destination region requirement %d of index copy "
+                        "(UID %lld) in parent task %s (UID %lld) has "
+                        "non-functional projection function. All projection "
+                        "functions for control replication must be functional.",
+                        idx, get_unique_id(), parent_ctx->get_task_name(), 
+                        parent_ctx->get_unique_id());
+          assert(false);
+        }
+      }
+#endif
     }
 
     /////////////////////////////////////////////////////////////

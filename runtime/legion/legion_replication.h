@@ -555,6 +555,8 @@ namespace Legion {
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
+    public:
+      void initialize_replication(ReplicateContext *ctx);
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
@@ -625,6 +627,8 @@ namespace Legion {
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
+    public:
+      void initialize_replication(ReplicateContext *ctx);
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;

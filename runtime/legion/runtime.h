@@ -1329,6 +1329,11 @@ namespace Legion {
       virtual LogicalRegion project(const Mappable *mappable, unsigned index,
                                     LogicalPartition upper_bound,
                                     const DomainPoint &point);
+      virtual LogicalRegion project(LogicalRegion upper_bound,
+                                    const DomainPoint &point);
+      virtual LogicalRegion project(LogicalPartition upper_bound,
+                                    const DomainPoint &point);
+      virtual bool is_functional(void) const;
       virtual unsigned get_depth(void) const;
     };
 
@@ -1366,7 +1371,8 @@ namespace Legion {
                           const std::vector<ProjectionPoint*> &points);
       // For inverting the projection function and finding interfering
       // points given a specific target in the region tree
-      void find_interfering_points(RegionTreeNode *upper_bound,
+      void find_interfering_points(RegionTreeForest *forest,
+                                   RegionTreeNode *upper_bound,
                                    IndexSpaceNode *launch_space,
                                    RegionTreeNode *target,
                                    std::set<DomainPoint> &interfering_points);
@@ -1388,10 +1394,12 @@ namespace Legion {
     public:
       const int depth; 
       const bool is_exclusive;
+      const bool is_functional;
       const ProjectionID projection_id;
       ProjectionFunctor *const functor;
-    private:
+    protected:
       Reservation projection_reservation;
+      std::map<RegionTreeNode*,std::set<DomainPoint> > interfering_points;
     }; 
 
     /**
