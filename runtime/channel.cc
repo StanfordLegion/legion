@@ -1171,6 +1171,7 @@ namespace LegionRuntime {
 
       long RemoteWriteChannel::submit(Request** requests, long nr)
       {
+        AutoHSLLock al(channel_mutex);
         assert(nr <= capacity);
         for (long i = 0; i < nr; i ++) {
           RemoteWriteRequest* req = (RemoteWriteRequest*) requests[i];
@@ -1205,10 +1206,12 @@ namespace LegionRuntime {
 
       void RemoteWriteChannel::pull()
       {
+        AutoHSLLock al(channel_mutex);
       }
 
       long RemoteWriteChannel::available()
       {
+        AutoHSLLock al(channel_mutex);
         return capacity;
       }
    

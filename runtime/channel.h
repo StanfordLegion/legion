@@ -865,8 +865,15 @@ namespace LegionRuntime{
       long submit(Request** requests, long nr);
       void pull();
       long available();
-      void notify_completion() {capacity ++;}
+      void notify_completion() {
+        AutoHSLLock al(channel_mutex);
+        capacity ++;
+      }
     private:
+      // RemoteWriteChannel is maintained by dma threads
+      // and active message threads, so we need a lock
+      // for preventing data race
+      GASNetHSL channel_mutex;
       long capacity;
     };
    
