@@ -19,6 +19,7 @@
 #include "legion_context.h"
 #include "legion_instances.h"
 #include "legion_views.h"
+#include "logger_message_descriptor.h"
 
 namespace Legion {
   namespace Internal {
@@ -2044,14 +2045,19 @@ namespace Legion {
         {
           if (Runtime::runtime_warnings && !silence_warnings)
           {
-            if (index)
-              log_run.warning("WARNING: Runtime is unmapping and remapping "
+             if (index) {
+               MessageDescriptor RUNTIME_UNMAPPING_REMAPPING(1200, "undefined");
+              log_run.warning(RUNTIME_UNMAPPING_REMAPPING.id(),
+                              "Runtime is unmapping and remapping "
                   "physical regions around execute_index_space call in "
                   "task %s (UID %lld).", get_task_name(), get_unique_id());
-            else
-              log_run.warning("WARNING: Runtime is unmapping and remapping "
+             } else {
+                MessageDescriptor RUNTIME_UNMAPPING_REMAPPING2(1201, "undefined");
+              log_run.warning(RUNTIME_UNMAPPING_REMAPPING2.id(),
+                              "Runtime is unmapping and remapping "
                   "physical regions around execute_task call in "
                   "task %s (UID %lld).", get_task_name(), get_unique_id());
+             }
           }
           for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
             unmapped_regions[idx].impl->unmap_region();
@@ -2074,7 +2080,9 @@ namespace Legion {
 #endif
       if ((trace != NULL) && trace->is_static_trace())
       {
-        log_run.error("Illegal runtime remapping in static trace inside of "
+         MessageDescriptor ILLEGAL_RUNTIME_REMAPPING(1202, "undefined");
+        log_run.error(ILLEGAL_RUNTIME_REMAPPING.id(),
+                      "Illegal runtime remapping in static trace inside of "
                       "task %s (UID %lld). Static traces must perfectly "
                       "manage their physical mappings with no runtime help.",
                       get_task_name(), get_unique_id());
@@ -2771,7 +2779,9 @@ namespace Legion {
 #endif
       if (coloring.empty())
       {
-        log_run.error("Attempt to create index partition with no colors in "
+         MessageDescriptor ATTEMPT_CREATE_INDEX_PARTITION(1203, "undefined");
+        log_run.error(ATTEMPT_CREATE_INDEX_PARTITION.id(),
+                      "Attempt to create index partition with no colors in "
                       "task %s (ID %lld). Index partitions must have at least "
                       "one color.", get_task_name(), get_unique_id());
 #ifdef DEBUG_LEGION
@@ -2896,7 +2906,9 @@ namespace Legion {
 #endif
       if (coloring.empty())
       {
-        log_run.error("Attempt to create index partition with no colors in "
+         MessageDescriptor ATTEMPT_CREATE_INDEX_PARTITION2(1204, "undefined");
+        log_run.error(ATTEMPT_CREATE_INDEX_PARTITION2.id(),
+                      "Attempt to create index partition with no colors in "
                       "task %s (ID %lld). Index partitions must have at least "
                       "one color.", get_task_name(), get_unique_id());
 #ifdef DEBUG_LEGION
@@ -2984,7 +2996,9 @@ namespace Legion {
 #endif
       if (coloring.empty())
       {
-        log_run.error("Attempt to create index partition with no colors in "
+         MessageDescriptor ATTEMPT_CREATE_INDEX_PARTITION3(1205, "undefined");
+        log_run.error(ATTEMPT_CREATE_INDEX_PARTITION3.id(),
+                      "Attempt to create index partition with no colors in "
                       "task %s (ID %lld). Index partitions must have at least "
                       "one color.", get_task_name(), get_unique_id());
 #ifdef DEBUG_LEGION
@@ -3456,10 +3470,13 @@ namespace Legion {
         find_conflicting_regions(part_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
-        if (Runtime::runtime_warnings)
-          log_run.warning("WARNING: Runtime is unmapping and remapping "
+         if (Runtime::runtime_warnings) {
+            MessageDescriptor RUNTIME_UNMAPPING_REMAPPING3(1206, "undefined");
+          log_run.warning(RUNTIME_UNMAPPING_REMAPPING3.id(),
+                          "Runtime is unmapping and remapping "
               "physical regions around create_partition_by_field call "
               "in task %s (UID %lld).", get_task_name(), get_unique_id());
+         }
         for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
           unmapped_regions[idx].impl->unmap_region();
       }
@@ -3510,10 +3527,13 @@ namespace Legion {
         find_conflicting_regions(part_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
-        if (Runtime::runtime_warnings)
-          log_run.warning("WARNING: Runtime is unmapping and remapping "
+         if (Runtime::runtime_warnings) {
+            MessageDescriptor RUNTIME_UNMAPPING_REMAPPING4(1207, "undefined");
+          log_run.warning(RUNTIME_UNMAPPING_REMAPPING4.id(),
+                          "Runtime is unmapping and remapping "
               "physical regions around create_partition_by_image call "
               "in task %s (UID %lld).", get_task_name(), get_unique_id());
+         }
         for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
           unmapped_regions[idx].impl->unmap_region();
       }
@@ -3564,10 +3584,13 @@ namespace Legion {
         find_conflicting_regions(part_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
-        if (Runtime::runtime_warnings)
-          log_run.warning("WARNING: Runtime is unmapping and remapping "
+         if (Runtime::runtime_warnings) {
+            MessageDescriptor RUNTIME_UNMAPPING_REMAPPING5(1208, "undefined");
+          log_run.warning(RUNTIME_UNMAPPING_REMAPPING5.id(),
+                          "Runtime is unmapping and remapping "
               "physical regions around create_partition_by_preimage call "
               "in task %s (UID %lld).", get_task_name(), get_unique_id());
+         }
         for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
           unmapped_regions[idx].impl->unmap_region();
       }
@@ -3803,7 +3826,9 @@ namespace Legion {
         std::vector<LocalFieldInfo> &infos = local_fields[space];
         if (infos.size() == Runtime::max_local_fields)
         {
-          log_run.error("Exceeded maximum number of local fields in "
+           MessageDescriptor EXCEEDED_MAXIMUM_LOCAL_FIELDS(1209, "undefined");
+          log_run.error(EXCEEDED_MAXIMUM_LOCAL_FIELDS.id(),
+                        "Exceeded maximum number of local fields in "
                         "context of task %s (UID %lld). The maximum "
                         "is currently set to %d, but can be modified "
                         "with the -lg:local flag.", get_task_name(),
@@ -3823,7 +3848,9 @@ namespace Legion {
         if (!forest->allocate_local_fields(space, fields, sizes, serdez_id, 
                                            current_indexes, new_indexes))
         {
-          log_run.error("Unable to allocate local field in context of "
+           MessageDescriptor UNABLE_ALLOCATE_LOCAL_FIELD(1210, "undefined");
+          log_run.error(UNABLE_ALLOCATE_LOCAL_FIELD.id(),
+                        "Unable to allocate local field in context of "
                         "task %s (UID %lld) due to local field size "
                         "fragmentation. This situation can be improved "
                         "by increasing the maximum number of permitted "
@@ -3920,7 +3947,9 @@ namespace Legion {
         std::vector<LocalFieldInfo> &infos = local_fields[space];
         if ((infos.size() + sizes.size()) > Runtime::max_local_fields)
         {
-          log_run.error("Exceeded maximum number of local fields in "
+           MessageDescriptor EXCEEDED_MAXIMUM_LOCAL_FIELDS2(1211, "undefined");
+          log_run.error(EXCEEDED_MAXIMUM_LOCAL_FIELDS2.id(),
+                        "Exceeded maximum number of local fields in "
                         "context of task %s (UID %lld). The maximum "
                         "is currently set to %d, but can be modified "
                         "with the -lg:local flag.", get_task_name(),
@@ -3938,7 +3967,9 @@ namespace Legion {
         if (!forest->allocate_local_fields(space, resulting_fields, sizes, 
                                   serdez_id, current_indexes, new_indexes))
         {
-          log_run.error("Unable to allocate local field in context of "
+           MessageDescriptor UNABLE_ALLOCATE_LOCAL_FIELD2(1212, "undefined");
+          log_run.error(UNABLE_ALLOCATE_LOCAL_FIELD2.id(),
+                        "Unable to allocate local field in context of "
                         "task %s (UID %lld) due to local field size "
                         "fragmentation. This situation can be improved "
                         "by increasing the maximum number of permitted "
@@ -4096,7 +4127,9 @@ namespace Legion {
           TaskImpl *impl = runtime->find_or_create_task_impl(launcher.task_id);
           if (impl->returns_value())
           {
-            log_run.error("Predicated task launch for task %s in parent "
+             MessageDescriptor PREDICATED_TASK_NONVOID_RETURN(1213, "undefined");
+            log_run.error(PREDICATED_TASK_NONVOID_RETURN.id(),
+                          "Predicated task launch for task %s in parent "
                           "task %s (UID %lld) has non-void return type "
                           "but no default value for its future if the task "
                           "predicate evaluates to false.  Please set either "
@@ -4194,7 +4227,9 @@ namespace Legion {
           TaskImpl *impl = runtime->find_or_create_task_impl(launcher.task_id);
           if (impl->returns_value())
           {
-            log_run.error("Predicated index task launch for task %s "
+             MessageDescriptor PREDICATED_INDEX_TASK_NONVOID_RETURN(1214, "undefined");
+            log_run.error(PREDICATED_INDEX_TASK_NONVOID_RETURN.id(),
+                          "Predicated index task launch for task %s "
                           "in parent task %s (UID %lld) has non-void "
                           "return type but no default value for its "
                           "future if the task predicate evaluates to "
@@ -4272,7 +4307,9 @@ namespace Legion {
           TaskImpl *impl = runtime->find_or_create_task_impl(launcher.task_id);
           if (impl->returns_value())
           {
-            log_run.error("Predicated index task launch for task %s "
+             MessageDescriptor PREDICATED_INDEX_TASK_NONVOID_RETURN2(1215, "undefined");
+            log_run.error(PREDICATED_INDEX_TASK_NONVOID_RETURN2.id(),
+                          "Predicated index task launch for task %s "
                           "in parent task %s (UID %lld) has non-void "
                           "return type but no default value for its "
                           "future if the task predicate evaluates to "
@@ -4335,7 +4372,9 @@ namespace Legion {
         has_conflicting_regions(map_op, parent_conflict, inline_conflict);
       if (parent_conflict)
       {
-        log_run.error("Attempted an inline mapping of region "
+         MessageDescriptor INLINE_MAPPING_CONFLICT_DEADLOCK(1216, "undefined");
+        log_run.error(INLINE_MAPPING_CONFLICT_DEADLOCK.id(),
+                      "Attempted an inline mapping of region "
                       "(%x,%x,%x) that conflicts with mapped region " 
                       "(%x,%x,%x) at index %d of parent task %s "
                       "(ID %lld) that would ultimately result in "
@@ -4354,7 +4393,9 @@ namespace Legion {
       }
       if (inline_conflict)
       {
-        log_run.error("Attempted an inline mapping of region (%x,%x,%x) "
+         MessageDescriptor INLINE_MAPPING_CONFLICT_DEADLOCK2(1217, "undefined");
+        log_run.error(INLINE_MAPPING_CONFLICT_DEADLOCK2.id(),
+                      "Attempted an inline mapping of region (%x,%x,%x) "
                       "that conflicts with previous inline mapping in "
                       "task %s (ID %lld) that would ultimately result in "
                       "deadlock.  Instead you receive this error message.",
@@ -4418,10 +4459,13 @@ namespace Legion {
         find_conflicting_regions(fill_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
-        if (Runtime::runtime_warnings && !launcher.silence_warnings)
-          log_run.warning("WARNING: Runtime is unmapping and remapping "
+         if (Runtime::runtime_warnings && !launcher.silence_warnings) {
+            MessageDescriptor RUNTIME_UNMAPPING_REMAPPING_6(1218, "undefined");
+          log_run.warning(RUNTIME_UNMAPPING_REMAPPING_6.id(),
+                          "Runtime is unmapping and remapping "
               "physical regions around fill_fields call in task %s (UID %lld).",
               get_task_name(), get_unique_id());
+         }
         // Unmap any regions which are conflicting
         for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
           unmapped_regions[idx].impl->unmap_region();
@@ -4440,7 +4484,9 @@ namespace Legion {
       AutoRuntimeCall call(this);
       if (launcher.domain.get_volume() == 0)
       {
-        log_run.warning("Ignoring empty index space fill in task %s (ID %lld)",
+         MessageDescriptor IGNORING_EMPTY_INDEX_FILL(1236, "undefined");
+        log_run.warning(IGNORING_EMPTY_INDEX_FILL.id(),
+                        "Ignoring empty index space fill in task %s (ID %lld)",
                         get_task_name(), get_unique_id());
         return;
       }
@@ -4459,10 +4505,13 @@ namespace Legion {
         find_conflicting_regions(fill_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
-        if (Runtime::runtime_warnings && !launcher.silence_warnings)
-          log_run.warning("WARNING: Runtime is unmapping and remapping "
+         if (Runtime::runtime_warnings && !launcher.silence_warnings) {
+            MessageDescriptor RUNTIME_UNMAPPING_REMAPPING_7(1219, "undefined");
+          log_run.warning(RUNTIME_UNMAPPING_REMAPPING_7.id(),
+                          "Runtime is unmapping and remapping "
               "physical regions around fill_fields call in task %s (UID %lld).",
               get_task_name(), get_unique_id());
+         }
         // Unmap any regions which are conflicting
         for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
           unmapped_regions[idx].impl->unmap_region();
@@ -4494,10 +4543,13 @@ namespace Legion {
         find_conflicting_regions(copy_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
-        if (Runtime::runtime_warnings && !launcher.silence_warnings)
-          log_run.warning("WARNING: Runtime is unmapping and remapping "
+         if (Runtime::runtime_warnings && !launcher.silence_warnings) {
+            MessageDescriptor RUNTIME_UNMAPPING_REMAPPING_8(1220, "undefined");
+          log_run.warning(RUNTIME_UNMAPPING_REMAPPING_8.id(),
+                          "Runtime is unmapping and remapping "
               "physical regions around issue_copy_operation call in "
               "task %s (UID %lld).", get_task_name(), get_unique_id());
+         }
         // Unmap any regions which are conflicting
         for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
           unmapped_regions[idx].impl->unmap_region();
@@ -4516,7 +4568,9 @@ namespace Legion {
       AutoRuntimeCall call(this);
       if (launcher.domain.get_volume() == 0)
       {
-        log_run.warning("Ignoring empty index space copy in task %s (ID %lld)",
+         MessageDescriptor IGNORE_EMPTY_COPY(1221, "undefined");
+        log_run.warning(IGNORE_EMPTY_COPY.id(),
+                        "Ignoring empty index space copy in task %s (ID %lld)",
                         get_task_name(), get_unique_id());
         return;
       }
@@ -4535,10 +4589,13 @@ namespace Legion {
         find_conflicting_regions(copy_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
-        if (Runtime::runtime_warnings && !launcher.silence_warnings)
-          log_run.warning("WARNING: Runtime is unmapping and remapping "
+         if (Runtime::runtime_warnings && !launcher.silence_warnings) {
+            MessageDescriptor RUNTIME_UNMAPPING_REMAPPING_9(1222, "undefined");
+          log_run.warning(RUNTIME_UNMAPPING_REMAPPING_9.id(),
+                          "Runtime is unmapping and remapping "
               "physical regions around issue_copy_operation call in "
               "task %s (UID %lld).", get_task_name(), get_unique_id());
+         }
         // Unmap any regions which are conflicting
         for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
           unmapped_regions[idx].impl->unmap_region();
@@ -4570,10 +4627,13 @@ namespace Legion {
         find_conflicting_regions(acquire_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
-        if (Runtime::runtime_warnings && !launcher.silence_warnings)
-          log_run.warning("WARNING: Runtime is unmapping and remapping "
+         if (Runtime::runtime_warnings && !launcher.silence_warnings) {
+            MessageDescriptor RUNTIME_UNMAPPING_REMAPPING_10(1223, "undefined");
+          log_run.warning(RUNTIME_UNMAPPING_REMAPPING_10.id(),
+                          "Runtime is unmapping and remapping "
               "physical regions around issue_acquire call in "
               "task %s (UID %lld).", get_task_name(), get_unique_id());
+         }
         for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
           unmapped_regions[idx].impl->unmap_region();
       }
@@ -4604,10 +4664,13 @@ namespace Legion {
         find_conflicting_regions(release_op, unmapped_regions);
       if (!unmapped_regions.empty())
       {
-        if (Runtime::runtime_warnings && !launcher.silence_warnings)
-          log_run.warning("WARNING: Runtime is unmapping and remapping "
+         if (Runtime::runtime_warnings && !launcher.silence_warnings) {
+            MessageDescriptor RUNTIME_UNMAPPING_REMAPPING_11(1224, "undefined");
+          log_run.warning(RUNTIME_UNMAPPING_REMAPPING_11.id(),
+                          "Runtime is unmapping and remapping "
               "physical regions around issue_release call in "
               "task %s (UID %lld).", get_task_name(), get_unique_id());
+         }
         for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
           unmapped_regions[idx].impl->unmap_region();
       }
@@ -4636,7 +4699,9 @@ namespace Legion {
                                           parent_conflict, inline_conflict);
       if (parent_conflict)
       {
-        log_run.error("Attempted an attach hdf5 file operation on region " 
+         MessageDescriptor ATTACH_HDF5_CONFLICT(1225, "undefined");
+        log_run.error(ATTACH_HDF5_CONFLICT.id(),
+                      "Attempted an attach hdf5 file operation on region "
                       "(%x,%x,%x) that conflicts with mapped region " 
                       "(%x,%x,%x) at index %d of parent task %s (ID %lld) "
                       "that would ultimately result in deadlock. Instead you "
@@ -4656,7 +4721,9 @@ namespace Legion {
       }
       if (inline_conflict)
       {
-        log_run.error("Attempted an attach hdf5 file operation on region " 
+         MessageDescriptor ATTACH_HDF5_CONFLICT2(1226, "undefined");
+        log_run.error(ATTACH_HDF5_CONFLICT2.id(),
+                      "Attempted an attach hdf5 file operation on region "
                       "(%x,%x,%x) that conflicts with previous inline "
                       "mapping in task %s (ID %lld) "
                       "that would ultimately result in deadlock. Instead you "
@@ -4713,10 +4780,13 @@ namespace Legion {
         epoch_op->find_conflicted_regions(unmapped_regions);
       if (!unmapped_regions.empty())
       {
-        if (Runtime::runtime_warnings && !launcher.silence_warnings)
-          log_run.warning("WARNING: Runtime is unmapping and remapping "
+         if (Runtime::runtime_warnings && !launcher.silence_warnings) {
+            MessageDescriptor RUNTIME_UNMAPPING_REMAPPING_12(1226, "undefined");
+          log_run.warning(RUNTIME_UNMAPPING_REMAPPING_12.id(),
+                          "Runtime is unmapping and remapping "
               "physical regions around issue_release call in "
               "task %s (UID %lld).", get_task_name(), get_unique_id());
+         }
         for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
           unmapped_regions[idx].impl->unmap_region();
       }
@@ -4792,7 +4862,9 @@ namespace Legion {
       AutoRuntimeCall call(this);
       if (f.impl == NULL)
       {
-        log_run.error("Illegal predicate creation performed on "
+         MessageDescriptor ILLEGAL_PREDICATE_CREATION(1227, "undefined");
+        log_run.error(ILLEGAL_PREDICATE_CREATION.id(),
+                      "Illegal predicate creation performed on "
                       "empty future inside of task %s (ID %lld).",
                       get_task_name(), get_unique_id());
 #ifdef DEBUG_LEGION
@@ -4828,7 +4900,9 @@ namespace Legion {
       AutoRuntimeCall call(this);
       if (launcher.predicates.empty())
       {
-        log_run.error("Illegal predicate creation performed on a "
+         MessageDescriptor ILLEGAL_PREDICATE_CREATION2(1228, "undefined");
+        log_run.error(ILLEGAL_PREDICATE_CREATION2.id(),
+                      "Illegal predicate creation performed on a "
                       "set of empty previous predicates in task %s (ID %lld).",
                       get_task_name(), get_unique_id());
 #ifdef DEBUG_LEGION
@@ -5722,7 +5796,9 @@ namespace Legion {
       if (!runtime->forest->add_acquisition(coherence_restrictions, op, req))
       {
         // We faiiled to acquire, report the error
-        log_run.error("Illegal acquire operation (ID %lld) performed in "
+         MessageDescriptor ILLEGAL_ACQUIRE_OPERATION(1229, "undefined");
+        log_run.error(ILLEGAL_ACQUIRE_OPERATION.id(),
+                      "Illegal acquire operation (ID %lld) performed in "
                       "task %s (ID %lld). Acquire was performed on a non-"
                       "restricted region.", op->get_unique_op_id(),
                       get_task_name(), get_unique_id());
@@ -5741,7 +5817,9 @@ namespace Legion {
       if (!runtime->forest->remove_acquisition(coherence_restrictions, op, req))
       {
         // We failed to release, report the error
-        log_run.error("Illegal release operation (ID %lld) performed in "
+         MessageDescriptor ILLEGAL_RELEASE_OPERATION(1230, "undefined");
+        log_run.error(ILLEGAL_RELEASE_OPERATION.id(),
+                      "Illegal release operation (ID %lld) performed in "
                       "task %s (ID %lld). Release was performed on a region "
                       "that had not previously been acquired.",
                       op->get_unique_op_id(), get_task_name(), 
@@ -5769,7 +5847,9 @@ namespace Legion {
       if (!runtime->forest->remove_restriction(coherence_restrictions, op, req))
       {
         // We failed to remove the restriction
-        log_run.error("Illegal detach operation (ID %lld) performed in "
+         MessageDescriptor ILLEGAL_DETACH_OPERATION(1231, "undefined");
+        log_run.error(ILLEGAL_DETACH_OPERATION.id(),
+                      "Illegal detach operation (ID %lld) performed in "
                       "task %s (ID %lld). Detach was performed on an region "
                       "that had not previously been attached.",
                       op->get_unique_op_id(), get_task_name(),
@@ -5848,7 +5928,9 @@ namespace Legion {
       if ((context_configuration.min_tasks_to_schedule == 0) && 
           (context_configuration.min_frames_to_schedule == 0))
       {
-        log_run.error("Invalid mapper output from call 'configure_context' "
+         MessageDescriptor ILLEGAL_MAPPER_OUTPUT(1232, "undefined");
+        log_run.error(ILLEGAL_MAPPER_OUTPUT.id(),
+                      "Invalid mapper output from call 'configure_context' "
                       "on mapper %s. One of 'min_tasks_to_schedule' and "
                       "'min_frames_to_schedule' must be non-zero for task "
                       "%s (ID %lld)", mapper->get_mapper_name(),
@@ -6262,7 +6344,9 @@ namespace Legion {
           VariantImpl *impl = 
             runtime->find_variant_impl(single_task->task_id, 
                                        single_task->get_selected_variant());
-          log_run.warning("WARNING: Variant %s of task %s (UID %lld) was "
+           MessageDescriptor VARIANT_NOT_MARKED_AS_LEAF(1233, "undefined");
+          log_run.warning(VARIANT_NOT_MARKED_AS_LEAF.id(),
+                          "Variant %s of task %s (UID %lld) was "
               "not marked as a 'leaf' variant but it didn't execute any "
               "operations. Did you forget the 'leaf' annotation?", 
               impl->get_name(), get_task_name(), get_unique_id());
@@ -6284,7 +6368,9 @@ namespace Legion {
             VariantImpl *impl = 
               runtime->find_variant_impl(single_task->task_id, 
                                          single_task->get_selected_variant());
-            log_run.warning("WARNING: Variant %s of task %s (UID %lld) was "
+             MessageDescriptor VARIANT_NOT_MARKED_AS_INNER(1234, "undefined");
+            log_run.warning(VARIANT_NOT_MARKED_AS_INNER.id(),
+                            "Variant %s of task %s (UID %lld) was "
                 "not marked as an 'inner' variant but it only launched "
                 "operations and did not make any accessors. Did you "
                 "forget the 'inner' annotation?",
@@ -6677,7 +6763,9 @@ namespace Legion {
                                   output.chosen_variant, true/*can fail*/);
       if (variant_impl == NULL)
       {
-        log_run.error("Invalid mapper output from invoction of "
+         MessageDescriptor INVALID_MAPPER_OUTPUT2(1235, "undefined");
+        log_run.error(INVALID_MAPPER_OUTPUT2.id(),
+                      "Invalid mapper output from invocation of "
                       "'select_task_variant' on mapper %s. Mapper selected "
                       "an invalidate variant ID %ld for inlining of task %s "
                       "(UID %lld).", child_mapper->get_mapper_name(),

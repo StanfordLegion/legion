@@ -4957,7 +4957,7 @@ namespace Legion {
               // sure that the bits are the same
               if (size != finder->second.size)
               {
-                log_run.error("ERROR: Inconsistent Semantic Tag value "
+                log_run.error("Inconsistent Semantic Tag value "
                               "for tag %ld with different sizes of %zd"
                               " and %zd for index tree node", 
                               tag, size, finder->second.size);
@@ -4975,7 +4975,7 @@ namespace Legion {
                   char diff = orig[idx] ^ next[idx];
                   if (diff)
                   {
-                    log_run.error("ERROR: Inconsistent Semantic Tag value "
+                    log_run.error("Inconsistent Semantic Tag value "
                                   "for tag %ld with different values at"
                                   "byte %d for index tree node, %x != %x",
                                   tag, idx, orig[idx], next[idx]);
@@ -5078,7 +5078,7 @@ namespace Legion {
       {
         if (can_fail)
           return false;
-        log_run.error("ERROR: invalid semantic tag %ld for "
+        log_run.error("invalid semantic tag %ld for "
                       "index tree node", tag);
 #ifdef DEBUG_LEGION
         assert(false);
@@ -5095,7 +5095,7 @@ namespace Legion {
       {
         if (can_fail)
           return false;
-        log_run.error("ERROR: invalid semantic tag %ld for "
+        log_run.error("invalid semantic tag %ld for "
                             "index tree node", tag);   
 #ifdef DEBUG_LEGION
         assert(false);
@@ -8793,7 +8793,7 @@ namespace Legion {
               // Check to make sure that the bits are the same
               if (size != finder->second.size)
               {
-                log_run.error("ERROR: Inconsistent Semantic Tag value "
+                log_run.error("Inconsistent Semantic Tag value "
                               "for tag %ld with different sizes of %zd"
                               " and %zd for index tree node", 
                               tag, size, finder->second.size);
@@ -8811,7 +8811,7 @@ namespace Legion {
                   char diff = orig[idx] ^ next[idx];
                   if (diff)
                   {
-                    log_run.error("ERROR: Inconsistent Semantic Tag value "
+                    log_run.error("Inconsistent Semantic Tag value "
                                   "for tag %ld with different values at"
                                   "byte %d for index tree node, %x != %x", 
                                   tag, idx, orig[idx], next[idx]);
@@ -8893,7 +8893,7 @@ namespace Legion {
               // Check to make sure that the bits are the same
               if (size != finder->second.size)
               {
-                log_run.error("ERROR: Inconsistent Semantic Tag value "
+                log_run.error("Inconsistent Semantic Tag value "
                               "for tag %ld with different sizes of %zd"
                               " and %zd for index tree node", 
                               tag, size, finder->second.size);
@@ -8911,7 +8911,7 @@ namespace Legion {
                   char diff = orig[idx] ^ next[idx];
                   if (diff)
                   {
-                    log_run.error("ERROR: Inconsistent Semantic Tag value "
+                    log_run.error("Inconsistent Semantic Tag value "
                                   "for tag %ld with different values at"
                                   "byte %d for index tree node, %x != %x", 
                                   tag, idx, orig[idx], next[idx]);
@@ -9023,7 +9023,7 @@ namespace Legion {
       {
         if (can_fail)
           return false;
-        log_run.error("ERROR: invalid semantic tag %ld for "
+        log_run.error("invalid semantic tag %ld for "
                       "field space %d", tag, handle.id);
 #ifdef DEBUG_LEGION
         assert(false);
@@ -9040,7 +9040,7 @@ namespace Legion {
       {
         if (can_fail)
           return false;
-        log_run.error("ERROR: invalid semantic tag %ld for "
+        log_run.error("invalid semantic tag %ld for "
                             "field space %d", tag, handle.id);
 #ifdef DEBUG_LEGION
         assert(false);
@@ -9112,7 +9112,7 @@ namespace Legion {
       {
         if (can_fail)
           return false;
-        log_run.error("ERROR: invalid semantic tag %ld for field %d "
+        log_run.error("invalid semantic tag %ld for field %d "
                       "of field space %d", tag, fid, handle.id);
 #ifdef DEBUG_LEGION
         assert(false);
@@ -9130,7 +9130,7 @@ namespace Legion {
       {
         if (can_fail)
           return false;
-        log_run.error("ERROR: invalid semantic tag %ld for field %d "
+        log_run.error("invalid semantic tag %ld for field %d "
                             "of field space %d", tag, fid, handle.id);
 #ifdef DEBUG_LEGION
         assert(false);
@@ -10888,7 +10888,7 @@ namespace Legion {
               // Check to make sure that the bits are the same
               if (size != finder->second.size)
               {
-                log_run.error("ERROR: Inconsistent Semantic Tag value "
+                log_run.error("Inconsistent Semantic Tag value "
                               "for tag %ld with different sizes of %zd"
                               " and %zd for region tree node", 
                               tag, size, finder->second.size);
@@ -10906,7 +10906,7 @@ namespace Legion {
                   char diff = orig[idx] ^ next[idx];
                   if (diff)
                   {
-                    log_run.error("ERROR: Inconsistent Semantic Tag value "
+                    log_run.error("Inconsistent Semantic Tag value "
                                   "for tag %ld with different values at"
                                   "byte %d for region tree node, %x != %x", 
                                   tag, idx, orig[idx], next[idx]);
@@ -11007,7 +11007,7 @@ namespace Legion {
       {
         if (can_fail)
           return false;
-        log_run.error("ERROR: invalid semantic tag %ld for "
+        log_run.error("invalid semantic tag %ld for "
                       "region tree node", tag);
 #ifdef DEBUG_LEGION
         assert(false);
@@ -11024,7 +11024,7 @@ namespace Legion {
       {
         if (can_fail)
           return false;
-        log_run.error("ERROR: invalid semantic tag %ld for "
+        log_run.error("invalid semantic tag %ld for "
                             "region tree node", tag);   
 #ifdef DEBUG_LEGION
         assert(false);
@@ -12884,7 +12884,7 @@ namespace Legion {
 #endif
       LogicalRegion handle = as_region_node()->handle;
       char *field_string = column_source->to_string(uninit);
-      log_run.warning("WARNING: Region requirement %d of operation %s "
+      log_run.warning("Region requirement %d of operation %s "
                       "(UID %lld) is using uninitialized data for field(s) %s "
                       "of logical region (%d,%d,%d)", idx, 
                       op->get_logging_name(), op->get_unique_op_id(),

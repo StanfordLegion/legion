@@ -2149,7 +2149,7 @@ namespace Legion {
           unsigned memory_bandwidth = 0;
           if (affinity.empty()) {
             // TODO: More graceful way of dealing with multi-hop copies
-            log_mapper.warning("WARNING: Default mapper is potentially "
+            log_mapper.warning("Default mapper is potentially "
                                "requesting a multi-hop copy between memories "
                                IDFMT " and " IDFMT "!", location.id,
                                destination_memory.id);
