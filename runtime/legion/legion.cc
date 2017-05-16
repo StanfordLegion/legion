@@ -6163,12 +6163,7 @@ namespace Legion {
     /*static*/ Context Runtime::get_context(void)
     //--------------------------------------------------------------------------
     {
-#ifdef HAS_LEGION_THREAD_LOCAL
       return Internal::implicit_context;
-#else
-      return static_cast<Context>(
-          pthread_getspecific(Internal::implicit_context));
-#endif
     }
 #endif
 

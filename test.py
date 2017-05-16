@@ -108,7 +108,8 @@ regent_perf_tests = [
      ['pennant.tests/sedovbig3x30/sedovbig.pnt',
       '-seq_init', '0', '-par_init', '1', '-print_ts', '1', '-prune', '5',
       '-npieces', str(app_cores), '-numpcx', '1', '-numpcy', str(app_cores),
-      '-ll:csize', '8192', '-ll:cpu', str(app_cores), '-fflow-spmd-shardsize', str(app_cores)]],
+      '-ll:csize', '8192', '-ll:cpu', str(app_cores), '-fflow-spmd-shardsize', str(app_cores),
+      '-fvectorize-unsafe', '1']],
 ]
 
 def cmd(command, env=None, cwd=None):

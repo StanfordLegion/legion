@@ -334,10 +334,10 @@ void init_field_task(const Task *task,
   assert((ptr != NULL) && (rect == subrect) && (stride.offset == sizeof(double)));
 
   // Make a LegionExecutor to handle execution for any processor kind
-  LegionExecutor<> legion_executor(task);
+  LegionExecutor legion_executor(task);
   // Initialize the array with random data
-  agency::bulk_invoke(agency::par(rect.volume()).on(legion_executor), 
-                      [&](agency::parallel_agent& self)
+  agency::bulk_invoke(agency::unseq(rect.volume()).on(legion_executor), 
+                      [&](agency::unsequenced_agent& self)
   {
     int i = self.index();
     ptr[i] = drand48();
@@ -377,10 +377,10 @@ void daxpy_task(const Task *task,
           alpha, point);
 
   // Make a LegionExecutor to handle the execution for any processor kind
-  LegionExecutor<> legion_executor(task);
+  LegionExecutor legion_executor(task);
   // Perform the saxpy computation in parallel
-  agency::bulk_invoke(agency::par(rect.volume()).on(legion_executor),
-                      [&](agency::parallel_agent& self)
+  agency::bulk_invoke(agency::unseq(rect.volume()).on(legion_executor),
+                      [&](agency::unsequenced_agent& self)
   {
     int i = self.index();
     z_ptr[i] = alpha * x_ptr[i] + y_ptr[i];

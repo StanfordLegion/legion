@@ -1905,11 +1905,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef ENABLE_LEGION_TLS
-#ifdef HAS_LEGION_THREAD_LOCAL
       implicit_context = this;
-#else
-      pthread_setspecific(implicit_context, this);
-#endif
 #endif
       if (overhead_tracker != NULL)
         previous_profiling_time = Realm::Clock::current_time_in_nanoseconds();
