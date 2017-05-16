@@ -13,7 +13,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-#
 
 from __future__ import print_function
 
@@ -27,40 +26,7 @@ from math import sqrt, log
 from cgi import escape
 from operator import itemgetter
 from os.path import dirname, exists, basename
-
-prefix = r'\[(?P<node>[0-9]+) - (?P<thread>[0-9a-f]+)\] \{\w+\}\{legion_prof\}: '
-task_info_pat = re.compile(prefix + r'Prof Task Info (?P<opid>[0-9]+) (?P<vid>[0-9]+) (?P<pid>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
-meta_info_pat = re.compile(prefix + r'Prof Meta Info (?P<opid>[0-9]+) (?P<hlr>[0-9]+) (?P<pid>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
-copy_info_pat = re.compile(prefix + r'Prof Copy Info (?P<opid>[0-9]+) (?P<src>[a-f0-9]+) (?P<dst>[a-f0-9]+) (?P<size>[0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
-copy_info_old_pat = re.compile(prefix + r'Prof Copy Info (?P<opid>[0-9]+) (?P<src>[a-f0-9]+) (?P<dst>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
-fill_info_pat = re.compile(prefix + r'Prof Fill Info (?P<opid>[0-9]+) (?P<dst>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
-inst_create_pat = re.compile(prefix + r'Prof Inst Create (?P<opid>[0-9]+) (?P<inst>[a-f0-9]+) (?P<create>[0-9]+)')
-inst_usage_pat = re.compile(prefix + r'Prof Inst Usage (?P<opid>[0-9]+) (?P<inst>[a-f0-9]+) (?P<mem>[a-f0-9]+) (?P<bytes>[0-9]+)')
-inst_timeline_pat = re.compile(prefix + r'Prof Inst Timeline (?P<opid>[0-9]+) (?P<inst>[a-f0-9]+) (?P<create>[0-9]+) (?P<destroy>[0-9]+)')
-user_info_pat = re.compile(prefix + r'Prof User Info (?P<pid>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<name>[$()a-zA-Z0-9_]+)')
-task_wait_info_pat = re.compile(prefix + r'Prof Task Wait Info (?P<opid>[0-9]+) (?P<vid>[0-9]+) (?P<start>[0-9]+) (?P<ready>[0-9]+) (?P<end>[0-9]+)')
-meta_wait_info_pat = re.compile(prefix + r'Prof Meta Wait Info (?P<opid>[0-9]+) (?P<hlr>[0-9]+) (?P<start>[0-9]+) (?P<ready>[0-9]+) (?P<end>[0-9]+)')
-kind_pat = re.compile(prefix + r'Prof Task Kind (?P<tid>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+)')
-kind_pat_over = re.compile(prefix + r'Prof Task Kind (?P<tid>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+) (?P<over>[0-1])')
-variant_pat = re.compile(prefix + r'Prof Task Variant (?P<tid>[0-9]+) (?P<vid>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+)')
-operation_pat = re.compile(prefix + r'Prof Operation (?P<opid>[0-9]+) (?P<kind>[0-9]+)')
-multi_pat = re.compile(prefix + r'Prof Multi (?P<opid>[0-9]+) (?P<tid>[0-9]+)')
-owner_pat = re.compile(prefix + r'Prof Slice Owner (?P<pid>[0-9]+) (?P<opid>[0-9]+)')
-meta_desc_pat = re.compile(prefix + r'Prof Meta Desc (?P<hlr>[0-9]+) (?P<kind>[a-zA-Z0-9_ ]+)')
-op_desc_pat = re.compile(prefix + r'Prof Op Desc (?P<opkind>[0-9]+) (?P<kind>[a-zA-Z0-9_ ]+)')
-proc_desc_pat = re.compile(prefix + r'Prof Proc Desc (?P<pid>[a-f0-9]+) (?P<kind>[0-9]+)')
-mem_desc_pat = re.compile(prefix + r'Prof Mem Desc (?P<mid>[a-f0-9]+) (?P<kind>[0-9]+) (?P<size>[0-9]+)')
-# Extensions for messages
-message_desc_pat = re.compile(prefix + r'Prof Message Desc (?P<mid>[0-9]+) (?P<desc>[a-zA-Z0-9_ ]+)')
-message_info_pat = re.compile(prefix + r'Prof Message Info (?P<mid>[0-9]+) (?P<pid>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
-# Extensions for mapper calls
-mapper_call_desc_pat = re.compile(prefix + r'Prof Mapper Call Desc (?P<mid>[0-9]+) (?P<desc>[a-zA-Z0-9_ ]+)')
-mapper_call_info_pat = re.compile(prefix + r'Prof Mapper Call Info (?P<mid>[0-9]+) (?P<pid>[a-f0-9]+) (?P<uid>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
-# Extensions for runtime calls
-runtime_call_desc_pat = re.compile(prefix + r'Prof Runtime Call Desc (?P<rid>[0-9]+) (?P<desc>[a-zA-Z0-9_ ]+)')
-runtime_call_info_pat = re.compile(prefix + r'Prof Runtime Call Info (?P<rid>[0-9]+) (?P<pid>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
-# Self-profiling
-proftask_info_pat = re.compile(prefix + r'Prof ProfTask Info (?P<pid>[a-f0-9]+) (?P<opid>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
+from legion_serializer import LegionProfRegexDeserializer
 
 # Make sure this is up to date with lowlevel.h
 processor_kinds = {
@@ -163,8 +129,6 @@ def color_helper(step, num_steps):
     b = "%02x" % b
     return ("#"+r+g+b)
 
-def read_time(string):
-    return long(string)/1000
 
 class PathRange(object):
     def __init__(self, start, stop, path):
@@ -776,7 +740,6 @@ class StatObject(object):
                         self.max_call[proc], max_dev,
                         self.min_call[proc], min_dev)
                 print()
-
 
 class Variant(StatObject):
     def __init__(self, variant_id, name):
@@ -1638,289 +1601,101 @@ class State(object):
         self.instances = {}
         self.has_spy_data = False
         self.spy_state = None
+        self.callbacks = {
+            "Task Info": self.log_task_info,
+            "Meta Info": self.log_meta_info,
+            "Copy Info": self.log_copy_info,
+            "Fill Info": self.log_fill_info,
+            "Inst Create": self.log_inst_create,
+            "Inst Usage": self.log_inst_usage,
+            "Inst Timeline": self.log_inst_timeline,
+            "User Info": self.log_user_info,
+            "Task Wait Info": self.log_task_wait_info,
+            "Meta Wait Info": self.log_meta_wait_info,
+            "Task Kind": self.log_kind,
+            "Task Kind Over": self.log_kind_over,
+            "Task Variant": self.log_variant,
+            "Operation": self.log_operation,
+            "Multi": self.log_multi,
+            "Slice Owner": self.log_slice_owner,
+            "Meta Desc": self.log_meta_desc,
+            "Op Desc": self.log_op_desc,
+            "Prof Desc": self.log_proc_desc,
+            "Mem Desc": self.log_mem_desc,
+            "Message Desc": self.log_message_desc,
+            "Message Info": self.log_message_info,
+            "Mapper Call Desc": self.log_mapper_call_desc,
+            "Mapper Call Info": self.log_mapper_call_info,
+            "Runtime Call Desc": self.log_runtime_call_desc,
+            "Runtime Call Info": self.log_runtime_call_info,
+            "Proftask Info": self.log_proftask_info
+        }
 
-    def parse_log_file(self, file_name, verbose):
-        skipped = 0
-        with open(file_name, 'rb') as log:  
-            matches = 0
-            # Keep track of the first and last times
-            first_time = 0L
-            last_time = 0L
-            for line in log:
-                if not self.has_spy_data and \
-                    (legion_spy.config_pat.match(line) or \
-                     legion_spy.detailed_config_pat.match(line)):
-                    self.has_spy_data = True
-                matches += 1  
-                m = task_info_pat.match(line)
-                if m is not None:
-                    self.log_task_info(long(m.group('opid')),
-                                       int(m.group('vid')),
-                                       int(m.group('pid'),16),
-                                       read_time(m.group('create')),
-                                       read_time(m.group('ready')),
-                                       read_time(m.group('start')),
-                                       read_time(m.group('stop')))
-                    continue
-                m = meta_info_pat.match(line)
-                if m is not None:
-                    self.log_meta_info(long(m.group('opid')),
-                                       int(m.group('hlr')),
-                                       int(m.group('pid'),16),
-                                       read_time(m.group('create')),
-                                       read_time(m.group('ready')),
-                                       read_time(m.group('start')),
-                                       read_time(m.group('stop')))
-                    continue
-                m = copy_info_pat.match(line)
-                if m is not None:
-                    self.log_copy_info(long(m.group('opid')),
-                                       int(m.group('src'),16),
-                                       int(m.group('dst'),16),
-                                       int(m.group('size')),
-                                       read_time(m.group('create')),
-                                       read_time(m.group('ready')),
-                                       read_time(m.group('start')),
-                                       read_time(m.group('stop')))
-                    continue
-                m = copy_info_old_pat.match(line)
-                if m is not None:
-                    self.log_copy_info(long(m.group('opid')),
-                                       int(m.group('src'),16),
-                                       int(m.group('dst'),16),
-                                       0,
-                                       read_time(m.group('create')),
-                                       read_time(m.group('ready')),
-                                       read_time(m.group('start')),
-                                       read_time(m.group('stop')))
-                    continue
-                m = fill_info_pat.match(line)
-                if m is not None:
-                    self.log_fill_info(long(m.group('opid')),
-                                       int(m.group('dst'),16),
-                                       read_time(m.group('create')),
-                                       read_time(m.group('ready')),
-                                       read_time(m.group('start')),
-                                       read_time(m.group('stop')))
-                    continue
-                m = inst_create_pat.match(line)
-                if m is not None:
-                    self.log_inst_create(long(m.group('opid')),
-                                         int(m.group('inst'),16),
-                                         read_time(m.group('create')))
-                    continue
-                m = inst_usage_pat.match(line)
-                if m is not None:
-                    self.log_inst_usage(long(m.group('opid')),
-                                        int(m.group('inst'),16),
-                                        int(m.group('mem'),16),
-                                        long(m.group('bytes')))
-                    continue
-                m = inst_timeline_pat.match(line)
-                if m is not None:
-                    self.log_inst_timeline(long(m.group('opid')),
-                                           int(m.group('inst'),16),
-                                           read_time(m.group('create')),
-                                           read_time(m.group('destroy')))
-                    continue
-                m = user_info_pat.match(line)
-                if m is not None:
-                    self.log_user_info(int(m.group('pid'), 16),
-                                       read_time(m.group('start')),
-                                       read_time(m.group('stop')),
-                                       m.group('name'))
-                    continue
-                m = task_wait_info_pat.match(line)
-                if m is not None:
-                    self.log_task_wait_info(long(m.group('opid')),
-                                            int(m.group('vid')),
-                                            read_time(m.group('start')),
-                                            read_time(m.group('ready')),
-                                            read_time(m.group('end')))
-                    continue
-                m = meta_wait_info_pat.match(line)
-                if m is not None:
-                    self.log_meta_wait_info(long(m.group('opid')),
-                                            int(m.group('hlr')),
-                                            read_time(m.group('start')),
-                                            read_time(m.group('ready')),
-                                            read_time(m.group('end')))
-                    continue
-                # Put this one first for maximal munch
-                m = kind_pat_over.match(line)
-                if m is not None:
-                    self.log_kind(int(m.group('tid')),
-                                  m.group('name'), int(m.group('over')))
-                    continue
-                m = kind_pat.match(line)
-                if m is not None:
-                    self.log_kind(int(m.group('tid')), m.group('name'), 1)
-                    continue
-                m = variant_pat.match(line)
-                if m is not None:
-                    self.log_variant(int(m.group('tid')),
-                                     int(m.group('vid')),
-                                     m.group('name'))
-                    continue
-                m = operation_pat.match(line)
-                if m is not None:
-                    self.log_operation(long(m.group('opid')),
-                                       int(m.group('kind')))
-                    continue
-                m = multi_pat.match(line)
-                if m is not None:
-                    self.log_multi(long(m.group('opid')),
-                                   int(m.group('tid')))
-                    continue
-                m = owner_pat.match(line)
-                if m is not None:
-                    self.log_slice_owner(long(m.group('pid')),
-                                         long(m.group('opid')))
-                    continue
-                m = meta_desc_pat.match(line)
-                if m is not None:
-                    self.log_meta_desc(int(m.group('hlr')),
-                                       m.group('kind'))
-                    continue
-                m = op_desc_pat.match(line)
-                if m is not None:
-                    self.log_op_desc(int(m.group('opkind')),
-                                     m.group('kind'))
-                    continue
-                m = proc_desc_pat.match(line)
-                if m is not None:
-                    kind = int(m.group('kind'))
-                    assert kind in processor_kinds
-                    self.log_proc_desc(int(m.group('pid'),16),
-                                       processor_kinds[kind])
-                    continue
-                m = mem_desc_pat.match(line)
-                if m is not None:
-                    kind = int(m.group('kind'))
-                    assert kind in memory_kinds
-                    self.log_mem_desc(int(m.group('mid'),16),
-                                      memory_kinds[kind],
-                                      long(m.group('size')))
-                    continue
-                m = message_desc_pat.match(line)
-                if m is not None:
-                    self.log_message_desc(int(m.group('mid')),
-                                          m.group('desc'))
-                    continue
-                m = message_info_pat.match(line)
-                if m is not None:
-                    self.log_message_info(int(m.group('mid')),
-                                          int(m.group('pid'),16),
-                                          read_time(m.group('start')),
-                                          read_time(m.group('stop')))
-                    continue
-                m = mapper_call_desc_pat.match(line)
-                if m is not None:
-                    self.log_mapper_call_desc(int(m.group('mid')),
-                                              m.group('desc'))
-                    continue
-                m = mapper_call_info_pat.match(line)
-                if m is not None:
-                    self.log_mapper_call_info(int(m.group('mid')),
-                                              int(m.group('pid'),16),
-                                              int(m.group('uid')),
-                                              read_time(m.group('start')),
-                                              read_time(m.group('stop')))
-                    continue
-                m = runtime_call_desc_pat.match(line)
-                if m is not None:
-                    self.log_runtime_call_desc(int(m.group('rid')),
-                                               m.group('desc'))
-                    continue
-                m = runtime_call_info_pat.match(line)
-                if m is not None:
-                    self.log_runtime_call_info(int(m.group('rid')),
-                                               int(m.group('pid'),16),
-                                               read_time(m.group('start')),
-                                               read_time(m.group('stop')))
-                    continue
-                m = proftask_info_pat.match(line)
-                if m is not None:
-                    self.log_proftask_info(int(m.group('pid'),16),
-                                           long(m.group('opid')),
-                                           read_time(m.group('start')),
-                                           read_time(m.group('stop')))
-                    continue
-                # If we made it here then we failed to match
-                matches -= 1 
-                skipped += 1
-                if verbose:
-                    print('Skipping line: %s' % line.strip())
-        if skipped > 0:
-            print('WARNING: Skipped %d lines in %s' % (skipped, file_name))
-        return matches
-
-    def log_task_info(self, op_id, variant_id, proc_id,
+    def log_task_info(self, op_id, vid, pid,
                       create, ready, start, stop):
-        variant = self.find_variant(variant_id)
+        variant = self.find_variant(vid)
         task = self.find_task(op_id, variant, create, ready, start, stop)
         if stop > self.last_time:
             self.last_time = stop
-        proc = self.find_processor(proc_id)
+        proc = self.find_processor(pid)
         proc.add_task(task)
 
-    def log_meta_info(self, op_id, hlr, proc_id, 
+    def log_meta_info(self, op_id, hlr, pid, 
                       create, ready, start, stop):
         op = self.find_op(op_id)
         variant = self.find_meta_variant(hlr)
         meta = self.create_meta(variant, op, create, ready, start, stop)
         if stop > self.last_time:
             self.last_time = stop
-        proc = self.find_processor(proc_id)
+        proc = self.find_processor(pid)
         proc.add_task(meta)
 
-    def log_copy_info(self, op_id, src_mem, dst_mem, size,
+    def log_copy_info(self, op_id, src, dst, size,
                       create, ready, start, stop):
         op = self.find_op(op_id)
-        src = self.find_memory(src_mem)
-        dst = self.find_memory(dst_mem)
+        src = self.find_memory(src)
+        dst = self.find_memory(dst)
         copy = self.create_copy(src, dst, op, size, create, ready, start, stop)
         if stop > self.last_time:
             self.last_time = stop
         channel = self.find_channel(src, dst)
         channel.add_copy(copy)
 
-    def log_fill_info(self, op_id, dst_mem,
-                      create, ready, start, stop):
+    def log_fill_info(self, op_id, dst, create, ready, start, stop):
         op = self.find_op(op_id)
-        dst = self.find_memory(dst_mem)
+        dst = self.find_memory(dst)
         fill = self.create_fill(dst, op, create, ready, start, stop)
         if stop > self.last_time:
             self.last_time = stop
         channel = self.find_channel(None, dst)
         channel.add_copy(fill)
 
-    def log_inst_create(self, op_id, inst_id, create):
+    def log_inst_create(self, op_id, inst, create):
         op = self.find_op(op_id)
-        inst = self.create_instance(inst_id, op)
+        inst = self.create_instance(inst, op)
         # don't overwrite if we have already captured the (more precise)
         #  timeline info
         if inst.stop is None:
             inst.start = create
 
-    def log_inst_usage(self, op_id, inst_id, mem_id, size):
+    def log_inst_usage(self, op_id, inst, mem, size):
         op = self.find_op(op_id)
-        mem = self.find_memory(mem_id)
-        inst = self.create_instance(inst_id, op)
+        mem = self.find_memory(mem)
+        inst = self.create_instance(inst, op)
         inst.mem = mem
         inst.size = size
         mem.add_instance(inst)
 
-    def log_inst_timeline(self, op_id, inst_id, create, destroy):
+    def log_inst_timeline(self, op_id, inst, create, destroy):
         op = self.find_op(op_id)
-        inst = self.create_instance(inst_id, op)
+        inst = self.create_instance(inst, op)
         inst.start = create
         inst.stop = destroy
         if destroy > self.last_time:
             self.last_time = destroy 
 
-    def log_user_info(self, proc_id, start, stop, name):
-        proc = self.find_processor(proc_id)
+    def log_user_info(self, pid, start, stop, name):
+        proc = self.find_processor(pid)
         user = self.create_user_marker(name)
         user.start = start
         user.stop = stop
@@ -1928,8 +1703,8 @@ class State(object):
             self.last_time = stop 
         proc.add_task(user)
 
-    def log_task_wait_info(self, op_id, variant_id, start, ready, end):
-        variant = self.find_variant(variant_id)
+    def log_task_wait_info(self, op_id, vid, start, ready, end):
+        variant = self.find_variant(vid)
         task = self.find_task(op_id, variant)
         assert ready >= start
         assert end >= ready
@@ -1943,20 +1718,23 @@ class State(object):
         assert op_id in variant.op
         variant.op[op_id].add_wait_interval(start, ready, end)
 
-    def log_kind(self, task_id, name, overwrite):
-        if task_id not in self.task_kinds:
-            self.task_kinds[task_id] = TaskKind(task_id, name)
+    def log_kind_over(self, tid, name, overwrite):
+        if tid not in self.task_kinds:
+            self.task_kinds[tid] = TaskKind(tid, name)
         elif overwrite == 1:
-            self.task_kinds[task_id].name = name
+            self.task_kinds[tid].name = name
 
-    def log_variant(self, task_id, variant_id, name):
-        assert task_id in self.task_kinds
-        task_kind = self.task_kinds[task_id]
-        if variant_id not in self.variants:
-            self.variants[variant_id] = Variant(variant_id, name)
+    def log_kind(self, tid, name):
+        self.log_kind_over(tid, name, 1)
+
+    def log_variant(self, tid, vid, name):
+        assert tid in self.task_kinds
+        task_kind = self.task_kinds[tid]
+        if vid not in self.variants:
+            self.variants[vid] = Variant(vid, name)
         else:
-            self.variants[variant_id].name = name
-        self.variants[variant_id].set_task_kind(task_kind)
+            self.variants[vid].name = name
+        self.variants[vid].set_task_kind(task_kind)
 
     def log_operation(self, op_id, kind):
         op = self.find_op(op_id)
@@ -1964,15 +1742,15 @@ class State(object):
         op.kind_num = kind
         op.kind = self.op_kinds[kind]
 
-    def log_multi(self, op_id, task_id):
+    def log_multi(self, op_id, tid):
         op = self.find_op(op_id)
-        task_kind = TaskKind(task_id, None)
-        if task_id in self.task_kinds:
-            task_kind = self.task_kinds[task_id]
+        task_kind = TaskKind(tid, None)
+        if tid in self.task_kinds:
+            task_kind = self.task_kinds[tid]
         else:
-            self.task_kinds[task_id] = task_kind
+            self.task_kinds[tid] = task_kind
         op.is_multi = True
-        op.task_kind = self.task_kinds[task_id]
+        op.task_kind = self.task_kinds[tid]
 
     def log_slice_owner(self, parent_id, op_id):
         parent = self.find_op(parent_id)
@@ -1985,13 +1763,17 @@ class State(object):
         else:
             self.meta_variants[hlr].name = name
 
-    def log_proc_desc(self, proc_id, kind):
-        if proc_id not in self.processors:
-            self.processors[proc_id] = Processor(proc_id, kind)
+    def log_proc_desc(self, pid, kind):
+        assert kind in processor_kinds
+        kind = processor_kinds[kind]
+        if pid not in self.processors:
+            self.processors[pid] = Processor(pid, kind)
         else:
-            self.processors[proc_id].kind = kind
+            self.processors[pid].kind = kind
 
     def log_mem_desc(self, mem_id, kind, size):
+        assert kind in memory_kinds
+        kind = memory_kinds[kind]
         if mem_id not in self.memories:
             self.memories[mem_id] = Memory(mem_id, kind, size)
         else:
@@ -2005,20 +1787,20 @@ class State(object):
         if kind not in self.message_kinds:
             self.message_kinds[kind] = MessageKind(kind, desc) 
 
-    def log_message_info(self, kind, proc_id, start, stop):
+    def log_message_info(self, kind, pid, start, stop):
         assert start <= stop
         assert kind in self.message_kinds
         if stop > self.last_time:
             self.last_time = stop
         message = Message(self.message_kinds[kind], start, stop)
-        proc = self.find_processor(proc_id)
+        proc = self.find_processor(pid)
         proc.add_message(message)
 
     def log_mapper_call_desc(self, kind, desc):
         if kind not in self.mapper_call_kinds:
             self.mapper_call_kinds[kind] = MapperCallKind(kind, desc)
 
-    def log_mapper_call_info(self, kind, proc_id, op_id, start, stop):
+    def log_mapper_call_info(self, kind, pid, op_id, start, stop):
         assert start <= stop
         assert kind in self.mapper_call_kinds
         # For now we'll only add very expensive mapper calls (more than 100 us)
@@ -2030,27 +1812,27 @@ class State(object):
                           self.find_op(op_id), start, stop)
         # update prof_uid map
         self.prof_uid_map[call.prof_uid] = call
-        proc = self.find_processor(proc_id)
+        proc = self.find_processor(pid)
         proc.add_mapper_call(call)
 
     def log_runtime_call_desc(self, kind, desc):
         if kind not in self.runtime_call_kinds:
             self.runtime_call_kinds[kind] = RuntimeCallKind(kind, desc)
 
-    def log_runtime_call_info(self, kind, proc_id, start, stop):
+    def log_runtime_call_info(self, kind, pid, start, stop):
         assert start <= stop 
         assert kind in self.runtime_call_kinds
         if stop > self.last_time:
             self.last_time = stop
         call = RuntimeCall(self.runtime_call_kinds[kind], start, stop)
-        proc = self.find_processor(proc_id)
+        proc = self.find_processor(pid)
         proc.add_runtime_call(call)
 
-    def log_proftask_info(self, proc_id, op_id, start, stop):
+    def log_proftask_info(self, pid, op_id, start, stop):
         # we don't have a unique op_id for the profiling task itself, so we don't 
         # add to self.operations
         proftask = ProfTask(Operation(op_id), start, start, start, stop) 
-        proc = self.find_processor(proc_id)
+        proc = self.find_processor(pid)
         proc.add_task(proftask)
 
     def find_processor(self, proc_id):
@@ -2148,7 +1930,7 @@ class State(object):
         self.prof_uid_map[user.prof_uid] = user
         return user
 
-    def build_time_ranges(self):
+    def sort_time_ranges(self):
         assert self.last_time is not None 
         # Processors first
         for proc in self.processors.itervalues():
@@ -2597,6 +2379,11 @@ class State(object):
         elevate = dict()
         all_nodes = set()
         printer = legion_spy.GraphPrinter("./", "temp")
+        try:
+            os.remove("temp.dot")
+        except:
+            print("Error remove temp.dot file")
+
         op.print_event_graph(printer, elevate, all_nodes, True) 
         # Now print the edges at the very end
         for node in all_nodes:
@@ -2977,9 +2764,10 @@ def main():
 
     state = State()
     has_matches = False
+    deserializer = LegionProfRegexDeserializer(state, state.callbacks)
     for file_name in file_names:
         print('Reading log file %s...' % file_name)
-        total_matches = state.parse_log_file(file_name, verbose)
+        total_matches = deserializer.parse(file_name, verbose)
         print('Matched %s lines' % total_matches)
         if total_matches > 0:
             has_matches = True
@@ -2988,10 +2776,10 @@ def main():
         return
 
     # Once we are done loading everything, do the sorting
-    state.build_time_ranges()
+    state.sort_time_ranges()
 
     if print_stats:
-        state.print_stats(verbose) 
+        state.print_stats(verbose)
     else:
         state.emit_interactive_visualization(output_dirname, show_procs,
                              file_names, show_channels, show_instances, force)
