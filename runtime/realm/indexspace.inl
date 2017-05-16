@@ -19,6 +19,7 @@
 #include "indexspace.h"
 
 #include "instance.h"
+#include "inst_layout.h"
 
 #include "serialize.h"
 
@@ -1478,65 +1479,6 @@ namespace Realm {
     return os;
   }
 
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class RegionInstance
-
-  template <int N, typename T>
-  inline /*static*/ RegionInstance RegionInstance::create_instance(Memory memory,
-								   const ZIndexSpace<N,T>& space,
-								   const std::vector<size_t> &field_sizes,
-								   const ProfilingRequestSet& reqs)
-  {
-    if(N == 1) {
-      assert(space.dense());
-      LegionRuntime::Arrays::Rect<1> r;
-      r.lo = space.bounds.lo.x;
-      r.hi = space.bounds.hi.x;
-      Domain d = Domain::from_rect<1>(r);
-      return d.create_instance(memory, field_sizes, space.bounds.volume(), reqs);
-    } else {
-      // TODO: all sorts of serialization fun...
-      assert(false);
-      return RegionInstance::NO_INST;
-    }
-  }
-
-  template <int N, typename T>
-  inline /*static*/ RegionInstance RegionInstance::create_file_instance(const char *file_name,
-									const ZIndexSpace<N,T>& space,
-									const std::vector<size_t> &field_sizes,
-									legion_lowlevel_file_mode_t file_mode,
-									const ProfilingRequestSet& prs)
-  {
-    assert(0);
-    return RegionInstance::NO_INST;
-  }
-
-  template <int N, typename T>
-  inline /*static*/ RegionInstance RegionInstance::create_hdf5_instance(const char *file_name,
-									const ZIndexSpace<N,T>& space,
-									const std::vector<size_t> &field_sizes,
-									const std::vector<const char*> &field_files,
-									bool read_only,
-									const ProfilingRequestSet& prs)
-  {
-    assert(0);
-    return RegionInstance::NO_INST;
-  }
-
-  template <int N, typename T>
-  inline const ZIndexSpace<N,T>& RegionInstance::get_indexspace(void) const
-  {
-    return get_lis().as_dim<N,T>().indexspace;
-  }
-		
-  template <int N>
-  inline const ZIndexSpace<N,int>& RegionInstance::get_indexspace(void) const
-  {
-    return get_lis().as_dim<N,int>().indexspace;
-  }
 
 }; // namespace Realm
 

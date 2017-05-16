@@ -39,6 +39,7 @@ namespace Realm {
 
   template <int N, typename T> struct ZIndexSpace;
   class LinearizedIndexSpaceIntfc;
+  class InstanceLayoutGeneric;
   class ProfilingRequestSet;
 
   class RegionInstance {
@@ -55,6 +56,10 @@ namespace Realm {
 
     Memory get_location(void) const;
     const LinearizedIndexSpaceIntfc& get_lis(void) const;
+
+    static RegionInstance create_instance(Memory memory,
+					  InstanceLayoutGeneric *ilg,
+					  const ProfilingRequestSet& prs);
 
     template <int N, typename T>
     static RegionInstance create_instance(Memory memory,
@@ -83,10 +88,10 @@ namespace Realm {
     // apparently we can't use default template parameters on methods without C++11, but we
     //  can provide templates of two different arities...
     template <int N, typename T>
-    const ZIndexSpace<N,T>& get_indexspace(void) const;
+    ZIndexSpace<N,T> get_indexspace(void) const;
 
     template <int N>
-    const ZIndexSpace<N,int>& get_indexspace(void) const;
+    ZIndexSpace<N,int> get_indexspace(void) const;
 
     LegionRuntime::Accessor::RegionAccessor<LegionRuntime::Accessor::AccessorType::Generic> get_accessor(void) const;
 
@@ -120,8 +125,10 @@ namespace Realm {
   std::ostream& operator<<(std::ostream& os, RegionInstance r);
 		
 }; // namespace Realm
-
-#include "instance.inl"
-
 #endif // ifndef REALM_INSTANCE_H
+
+#ifndef REALM_SKIP_INLINES
+#include "instance.inl"
+#endif
+
 

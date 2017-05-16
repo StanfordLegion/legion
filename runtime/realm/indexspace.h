@@ -20,7 +20,9 @@
 
 #include "event.h"
 #include "memory.h"
+#define REALM_SKIP_INLINES
 #include "instance.h"
+#undef REALM_SKIP_INLINES
 
 #include "lowlevel_config.h"
 #include "arrays.h"
