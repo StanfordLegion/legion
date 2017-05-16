@@ -66,11 +66,7 @@ namespace Legion {
     };
 
 #ifdef ENABLE_LEGION_TLS
-#ifdef HAS_LEGION_THREAD_LOCAL
-    thread_local TaskContext *implicit_context = NULL;
-#else
-    pthread_key_t implicit_context;
-#endif
+    __thread TaskContext *implicit_context = NULL;
 #endif
 
     /////////////////////////////////////////////////////////////
@@ -18162,11 +18158,7 @@ namespace Legion {
       LEGION_STATIC_ASSERT(DEFAULT_MIN_TASKS_TO_SCHEDULE > 0);
       LEGION_STATIC_ASSERT(DEFAULT_SUPERSCALAR_WIDTH > 0);
       LEGION_STATIC_ASSERT(DEFAULT_MAX_MESSAGE_SIZE > 0); 
-#ifdef ENABLE_LEGION_TLS
-#ifndef HAS_LEGION_THREAD_LOCAL
-      pthread_key_create(&implicit_context, NULL/*destructor function*/);
-#endif
-#endif
+
       // Need to pass argc and argv to low-level runtime before we can record 
       // their values as they might be changed by GASNet or MPI or whatever.
       // Note that the logger isn't initialized until after this call returns 
