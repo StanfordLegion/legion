@@ -234,7 +234,7 @@ def writeHtmlSortedByField(field, connection, hrefPrefix, strip):
         tableName = table[0]
         outputFileName = htmlMarker(tableName, field, None) + ".html"
         outputFile = open(outputFileName, "wt")
-        outputFile.write("---\nlayout:page\n---\n\n")
+        outputFile.write("---\nlayout: page\n---\n\n")
         selectCommand = "select * from " + tableName + " order by " + field  + ";"
         cursor = connection.cursor()
         cursor.execute(selectCommand)
@@ -293,7 +293,7 @@ def writeHtmlLinks(indexFile, connection, field):
 
 def writeHtmlIndexes(connection):
     indexFile = open("index.html", "wt")
-    indexFile.write("---\nlayout:page\n---\n\n")
+    indexFile.write("---\nlayout: page\n---\n\n")
     writeHtmlLinks(indexFile, connection, "code");
     writeHtmlLinks(indexFile, connection, "message")
     for table in tables(connection):
