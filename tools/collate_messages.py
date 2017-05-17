@@ -193,13 +193,26 @@ def htmlMarker(type, field, code):
         return type + "_" + field + "_" + str(code)
 
 
-def writeHtmlEntry(type, field, outputFile, row):
+def fileName_(fileName):
+    splitFileName = fileName.split('/')
+    if len(splitFileName) > 0:
+        fileName = splitFileName[-1:][0]
+    return fileName
+
+
+def prefixedPath(fileName, prefix):
+    if prefix == None:
+        return fileName
+    return prefix + '/' + fileName
+
+
+def writeHtmlEntry(type, field, outputFile, row, hrefPrefix):
     (code, name, message, whatToDo, fileName, lineNumber) = row
     outputFile.write("<p id=\"" + htmlMarker(type, field, code) + "\">")
     outputFile.write("<b>" + type + " " + str(code) + "</b>\n")
     outputFile.write("<br>Message: " + message + "\n");
     outputFile.write("<br>Remedy:" + whatToDo + "\n");
-    outputFile.write("<br>Location: line " + str(lineNumber) + " <a href=\"" + fileName + "\">" + fileName + "</a>\n")
+    outputFile.write("<br>Location: line " + str(lineNumber) + " <a href=\"" + prefixedPath(fileName, hrefPrefix) + "\">" + fileName_(fileName) + "</a>\n")
     outputFile.write("<p>\n")
 
 
@@ -210,17 +223,18 @@ def tables(connection):
     return tables
 
 
-def writeHtmlSortedByField(field, connection):
+def writeHtmlSortedByField(field, connection, hrefPrefix):
     for table in tables(connection):
         tableName = table[0]
         outputFileName = htmlMarker(tableName, field, None) + ".html"
         outputFile = open(outputFileName, "wt")
+        outputFile.write("layout:page\n")
         selectCommand = "select * from " + tableName + " order by " + field  + ";"
         cursor = connection.cursor()
         cursor.execute(selectCommand)
         row = cursor.fetchone()
         while row != None:
-              writeHtmlEntry(tableName, field, outputFile, row)
+              writeHtmlEntry(tableName, field, outputFile, row, hrefPrefix)
               row = cursor.fetchone()
         outputFile.close()
 
@@ -273,23 +287,39 @@ def writeHtmlLinks(indexFile, connection, field):
 
 def writeHtmlIndexes(connection):
     indexFile = open("index.html", "wt")
+    indexFile.write("layout:page\n")
     writeHtmlLinks(indexFile, connection, "code");
-    writeHtmlLinks(indexFile, connection, "message");
+    writeHtmlLinks(indexFile, connection, "message")
     for table in tables(connection):
         writeHtmlIndexTable(connection, table[0], "code", indexFile)
         writeHtmlIndexTable(connection, table[0], "message", indexFile)
     indexFile.close()
 
 
-def writeHtmlOutput(connection):
+def writeHtmlOutput(connection, hrefPrefix):
     writeHtmlIndexes(connection);
-    writeHtmlSortedByField("code", connection)
-    writeHtmlSortedByField("message", connection)
+    writeHtmlSortedByField("code", connection, hrefPrefix)
+    writeHtmlSortedByField("message", connection, hrefPrefix)
+
+
+def parseOptions(argv):
+    hrefPrefix = None
+    result = []
+    for arg in argv:
+        print arg
+        if arg.find("prefix=") == 0:
+            hrefPrefix = arg[7:]
+        else:
+            result.append(arg)
+    return (result, hrefPrefix)
 
 
 connection = sqlite3.connect(":memory:")
-if(len(sys.argv) == 2):
-    parseSourceFile(sys.argv[1], connection)
+(argv, hrefPrefix) = parseOptions(sys.argv)
+if hrefPrefix == None:
+    print "use prefix=<path> to point to the legion sources"
+if(len(argv) == 2):
+    parseSourceFile(argv[1], connection)
 else:
     parseSourceFiles(connection)
-writeHtmlOutput(connection)
+writeHtmlOutput(connection, hrefPrefix)
