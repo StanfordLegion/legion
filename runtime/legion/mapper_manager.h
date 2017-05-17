@@ -92,6 +92,10 @@ namespace Legion {
                            Mapper::MapTaskOutput *output, 
                            bool first_invocation = true,
                            MappingCallInfo *info = NULL);
+      void invoke_map_replicate_task(TaskOp *task, Mapper::MapTaskInput *input,
+                                     Mapper::MapReplicateTaskOutput *output,
+                                     bool first_invocation = true,
+                                     MappingCallInfo *info = NULL);
       void invoke_select_task_variant(TaskOp *task, 
                                       Mapper::SelectVariantInput *input,
                                       Mapper::SelectVariantOutput *output,

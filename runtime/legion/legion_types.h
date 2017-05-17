@@ -455,6 +455,7 @@ namespace Legion {
       PREMAP_TASK_CALL,
       SLICE_TASK_CALL,
       MAP_TASK_CALL,
+      MAP_REPLICATE_TASK_CALL,
       SELECT_VARIANT_CALL,
       POSTMAP_TASK_CALL,
       TASK_SELECT_SOURCES_CALL,
@@ -514,6 +515,7 @@ namespace Legion {
       "premap_task",                                \
       "slice_task",                                 \
       "map_task",                                   \
+      "map_replicate_task",                         \
       "select_task_variant",                        \
       "postmap_task",                               \
       "select_task_sources",                        \

@@ -2288,6 +2288,7 @@ namespace Legion {
       return *this;
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void ShardManager::launch(const std::vector<AddressSpaceID> &spaces,
                               const std::map<ShardID,Processor> &mapping)
@@ -2319,6 +2320,7 @@ namespace Legion {
       else
         launch_shards();
     }
+#endif
 
     //--------------------------------------------------------------------------
     void ShardManager::unpack_launch(Deserializer &derez)

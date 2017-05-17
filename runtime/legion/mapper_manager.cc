@@ -176,6 +176,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MapperManager::invoke_map_replicate_task(TaskOp *task,
+                                     Mapper::MapTaskInput *input,
+                                     Mapper::MapReplicateTaskOutput *output,
+                                     bool first_invocation,
+                                     MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(MAP_REPLICATE_TASK_CALL,
+                             task, first_invocation, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<TaskOp,Mapper::MapTaskInput,
+                              Mapper::MapReplicateTaskOutput,
+                              &MapperManager::invoke_map_replicate_task>
+                                continuation(this, task, input, output, info);
+          continuation.defer(runtime, continuation_precondition, task);
+          return;
+        }
+      }
+      mapper->map_replicate_task(info, *task, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
     void MapperManager::invoke_select_task_variant(TaskOp *task,
                                             Mapper::SelectVariantInput *input,
                                             Mapper::SelectVariantOutput *output,

@@ -725,6 +725,7 @@ namespace Legion {
       stealable = false;
       options_selected = false;
       map_locally = false;
+      replicate = false;
       true_guard = PredEvent::NO_PRED_EVENT;
       false_guard = PredEvent::NO_PRED_EVENT;
       local_cached = false;
@@ -806,6 +807,7 @@ namespace Legion {
           rez.serialize(it->second);
         }
       }
+      rez.serialize(replicate);
       rez.serialize(true_guard);
       rez.serialize(false_guard);
       rez.serialize(early_mapped_regions.size());
@@ -842,6 +844,7 @@ namespace Legion {
           derez.deserialize(atomic_locks[lock]);
         }
       }
+      derez.deserialize(replicate);
       derez.deserialize(true_guard);
       derez.deserialize(false_guard);
       size_t num_early;
@@ -989,11 +992,47 @@ namespace Legion {
       options.inline_task = false;
       options.stealable = false;
       options.map_locally = false;
+      options.replicate = false;
       mapper->invoke_select_task_options(this, &options);
       options_selected = true;
       target_proc = options.initial_proc;
       stealable = options.stealable;
       map_locally = options.map_locally;
+      replicate = options.replicate;
+      if (replicate && !Runtime::unsafe_mapper)
+      {
+        // Reduction-only privileges and relaxed coherence modes
+        // are not permitted for tasks that are going to be replicated
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
+          if (IS_REDUCE(regions[idx]))
+          {
+            log_run.error("Mapper %s requested to replicate task %s (UID %lld) "
+                          "but region requirement %d has reduction privileges. "
+                          "Tasks with reduction-only privileges are not "
+                          "permitted to be replicated.", 
+                          mapper->get_mapper_name(), get_task_name(),
+                          get_unique_id(), idx);
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
+          }
+          else if (!IS_EXCLUSIVE(regions[idx]))
+          {
+            log_run.error("Mapper %s requested to replicate task %s (UID %lld) "
+                          "but region requirement %d has relaxed coherence. "
+                          "Tasks with relaxed coherence modes are not "
+                          "permitted to be replicated.", 
+                          mapper->get_mapper_name(), get_task_name(),
+                          get_unique_id(), idx);
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
+          }
+        }
+      }
       return options.inline_task;
     }
 
@@ -1820,6 +1859,7 @@ namespace Legion {
       this->speculated = rhs->speculated;
       this->parent_task = rhs->parent_task;
       this->map_locally = rhs->map_locally;
+      this->replicate = rhs->replicate;
       // From TaskOp
       this->atomic_locks = rhs->atomic_locks;
       this->early_mapped_regions = rhs->early_mapped_regions;
@@ -2383,7 +2423,6 @@ namespace Legion {
       deactivate_task();
       target_processors.clear();
       physical_instances.clear();
-      control_replication_map.clear();
       virtual_mapped.clear();
       no_access_regions.clear();
       map_applied_conditions.clear();
@@ -2434,13 +2473,6 @@ namespace Legion {
         inner_cached = true;
       }
       return is_inner_result;
-    }
-
-    //--------------------------------------------------------------------------
-    bool SingleTask::is_control_replicated(void) const
-    //--------------------------------------------------------------------------
-    {
-      return !control_replication_map.empty();
     }
 
     //--------------------------------------------------------------------------
@@ -2925,29 +2957,6 @@ namespace Legion {
 #endif
                 exit(ERROR_INVALID_MAPPER_OUTPUT);
               }
-              else if (!output.control_replication_map.empty() && 
-                        IS_READ_ONLY(regions[idx]))
-              {
-                // Make sure we flush Realm's buffers here
-                for (int i = 0; i < 20; i++)
-                  log_run.warning("WARNING WARNING WARNING WARNING WARNING");
-                log_run.warning("Mapper %s mapped input region %d of task %s "
-                                "(UID %lld) to a concrete instance without "
-                                "specifying the NO-ACCESS flag. Mapping any "
-                                "input region with non-READ-ONLY privileges and"
-                                " no NO-ACCESS flag for a control replicated "
-                                "task is almost guaranteed to result in "
-                                "undefined behavior for your application. To "
-                                "ensure that you do not see non-determinism "
-                                "please describe your use case to Sean to "
-                                "verify that you will not see non-determinism "
-                                "during the execution of your application.",
-                                mapper->get_mapper_name(), idx, get_task_name(),
-                                get_unique_id());
-                // Make sure we flush Realm's buffers here
-                for (int i = 0; i < 20; i++)
-                  log_run.warning("WARNING WARNING WARNING WARNING WARNING");
-              }
             }
           }
           if (Runtime::legion_spy_enabled)
@@ -3160,29 +3169,6 @@ namespace Legion {
 #endif
                 exit(ERROR_INVALID_MAPPER_OUTPUT);
               }
-              else if (!output.control_replication_map.empty() && 
-                        !IS_READ_ONLY(regions[idx]))
-              {
-                // Make sure we flush Realm's buffers here
-                for (int i = 0; i < 20; i++)
-                  log_run.warning("WARNING WARNING WARNING WARNING WARNING");
-                log_run.warning("Mapper %s mapped input region %d of task %s "
-                                "(UID %lld) to a concrete instance without "
-                                "specifying the NO-ACCESS flag. Mapping any "
-                                "input region with non-READ-ONLY privileges and"
-                                " no NO-ACCESS flag for a control replicated "
-                                "task is almost guaranteed to result in "
-                                "undefined behavior for your application. To "
-                                "ensure that you do not see non-determinism "
-                                "please describe your use case to Sean to "
-                                "verify that you will not see non-determinism "
-                                "during the execution of your application.",
-                                mapper->get_mapper_name(), idx, get_task_name(),
-                                get_unique_id());
-                // Make sure we flush Realm's buffers here
-                for (int i = 0; i < 20; i++)
-                  log_run.warning("WARNING WARNING WARNING WARNING WARNING");
-              }
             }
           }
           // If this is a reduction region requirement make sure all the 
@@ -3287,6 +3273,7 @@ namespace Legion {
 #endif
         exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
+#if 0
       // If we're doing control replication then we need a replicated task
       if (!output.control_replication_map.empty() && 
           !variant_impl->is_replicable())
@@ -3302,6 +3289,7 @@ namespace Legion {
 #endif
         exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
+#endif
       // Now that we know which variant to use, we can validate it
       if (!Runtime::unsafe_mapper)
         validate_variant_selection(mapper, variant_impl, "map_task"); 
@@ -3309,7 +3297,6 @@ namespace Legion {
       selected_variant = output.chosen_variant;
       task_priority = output.task_priority;
       perform_postmap = output.postmap_task;
-      control_replication_map = output.control_replication_map;
     }
 
     //--------------------------------------------------------------------------
@@ -3873,6 +3860,7 @@ namespace Legion {
       }
     } 
 
+#if 0
     //--------------------------------------------------------------------------
     void SingleTask::control_replicate_task(void)
     //--------------------------------------------------------------------------
@@ -3911,6 +3899,7 @@ namespace Legion {
                                        0/*idx*/, runtime->address_space, this);
       shard_manager->launch(address_spaces, control_replication_map);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void SingleTask::launch_task(void)
@@ -3921,9 +3910,11 @@ namespace Legion {
       assert(regions.size() == physical_instances.size());
       assert(regions.size() == no_access_regions.size());
 #endif 
-      if (is_control_replicated())
+      // If we have a shard manager that means we were replicated so
+      // we just do the launch directly from the shard manager
+      if (shard_manager != NULL)
       {
-        control_replicate_task();
+        shard_manager->launch();
         return;
       }
       // If we haven't computed our virtual mapping information
@@ -6727,15 +6718,22 @@ namespace Legion {
     InnerContext* ShardTask::initialize_inner_execution_context(VariantImpl *v)
     //--------------------------------------------------------------------------
     {
-      ReplicateContext *repl_ctx = new ReplicateContext(runtime, this,
-          v->is_inner(), regions, parent_req_indexes,
-          virtual_mapped, unique_op_id, manager);
-      if (mapper == NULL)
-        mapper->runtime->find_mapper(current_proc, map_id);
-      repl_ctx->configure_context(mapper);
-      // The replicate contexts all need to sync up to exchange resources 
-      repl_ctx->exchange_common_resources();
-      return repl_ctx;
+      // Check to see if we are control replicated or not
+      if (shard_manager->repl_id > 0)
+      {
+        // If we have a control replication context then we do the special path
+        ReplicateContext *repl_ctx = new ReplicateContext(runtime, this,
+            v->is_inner(), regions, parent_req_indexes,
+            virtual_mapped, unique_op_id, manager);
+        if (mapper == NULL)
+          mapper->runtime->find_mapper(current_proc, map_id);
+        repl_ctx->configure_context(mapper);
+        // The replicate contexts all need to sync up to exchange resources 
+        repl_ctx->exchange_common_resources();
+        return repl_ctx;
+      }
+      else // No control replication so do the normal thing
+        return SingleTask::initialize_inner_execution_context(v);
     }
 
     //--------------------------------------------------------------------------

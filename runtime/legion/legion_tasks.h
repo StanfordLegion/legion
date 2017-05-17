@@ -173,9 +173,11 @@ namespace Legion {
       bool is_remote(void) const;
       inline bool is_stolen(void) const { return (steal_count > 0); }
       inline bool is_locally_mapped(void) const { return map_locally; }
+      inline bool is_replicated(void) const { return replicate; }
     public:
       void set_current_proc(Processor current);
       inline void set_locally_mapped(bool local) { map_locally = local; }
+      inline void set_replicated(bool repl) { replicate = repl; }
       inline void set_target_proc(Processor next) { target_proc = next; }
     protected:
       void activate_task(void);
@@ -319,6 +321,7 @@ namespace Legion {
     protected:
       bool options_selected;
       bool map_locally;
+      bool replicate;
     protected:
       // For managing predication
       PredEvent true_guard;
@@ -383,7 +386,6 @@ namespace Legion {
       // the task has had its variant selected
       bool is_leaf(void) const;
       bool is_inner(void) const;
-      bool is_control_replicated(void) const;
       bool has_virtual_instances(void) const;
       bool is_created_region(unsigned index) const;
       void update_no_access_regions(void);
@@ -417,7 +419,7 @@ namespace Legion {
       void map_all_regions(ApEvent user_event,
                            MustEpochOp *must_epoch_owner = NULL); 
       void perform_post_mapping(void);
-      void control_replicate_task(void);
+      void replicate_task(void);
     protected:
       void pack_single_task(Serializer &rez, AddressSpaceID target);
       void unpack_single_task(Deserializer &derez, 
@@ -477,8 +479,6 @@ namespace Legion {
       std::vector<Processor>                target_processors;
       // Hold the result of the mapping 
       std::deque<InstanceSet>               physical_instances;
-      // Mapping of shards to processors for control replication
-      std::map<ShardID,Processor>           control_replication_map;
     protected: // Mapper choices 
       VariantID                             selected_variant;
       TaskPriority                          task_priority;
@@ -488,6 +488,7 @@ namespace Legion {
       std::set<RtEvent>                     map_applied_conditions;
     protected:
       TaskContext*                          execution_context;
+      // For replication of this task
       ShardManager*                         shard_manager;
     protected:
       std::map<AddressSpaceID,RemoteTask*>  remote_instances;

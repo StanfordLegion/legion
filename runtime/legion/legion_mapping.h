@@ -297,12 +297,23 @@ namespace Legion {
        *     deciding to map a task locally disqualifies that task
        *     from being stolen as it will have already been mapped
        *     once it enters the ready queue.
+       *
+       * replicate default:false
+       *     Enable replication of the individual tasks for this
+       *     operation. This is useful for performing redundant
+       *     computation to avoid communication. There are 
+       *     requirements on the properties of replicated tasks
+       *     and how they are mapped. Replicated tasks are not
+       *     allowed to have reduction-only privileges. Furthermore
+       *     the mapper must map any regions with write privileges
+       *     for different copies of the task to different instances.
        */
       struct TaskOptions {
         Processor                              initial_proc; // = current
         bool                                   inline_task;  // = false
         bool                                   stealable;    // = false
         bool                                   map_locally;  // = false
+        bool                                   replicate;    // = false
       };
       //------------------------------------------------------------------------
       virtual void select_task_options(const MapperContext    ctx,
@@ -469,6 +480,38 @@ namespace Legion {
                             const Task&              task,
                             const MapTaskInput&      input,
                                   MapTaskOutput&     output) = 0;
+      //------------------------------------------------------------------------
+
+
+      /**
+       * ----------------------------------------------------------------------
+       *  Map Replicate Task 
+       * ----------------------------------------------------------------------
+       * This mapper call is invoked instead of map_task to map multiple copies
+       * of a single task to run in parallel and generate multiple functionally
+       * equivalent copies of the output data in different locations. It is
+       * the responsibility of the mapper to ensure that each task gets assigned
+       * to exactly one processor and each copy of the task gets assigned to 
+       * a different processor. The mapper must also guarantee that any region
+       * requirements with write privileges be mapped to different physical
+       * instances for each copy of the task. The runtime will check all these
+       * invariants in debug mode or if safe mapping is enabled.
+       *
+       * The mapper can also choose to make this a control replicated version
+       * of this task by setting 'control_replicate' to true. This will make
+       * all the copies of the task work together as though they were one
+       * logical version of the task rather than having them all execute
+       * independently.
+       */
+      struct MapReplicateTaskOutput {
+        std::vector<MapTaskOutput>                      task_mappings;
+        bool                                            control_replicate;
+      };
+      //------------------------------------------------------------------------
+      virtual void map_replicate_task(const MapperContext      ctx,
+                                      const Task&              task,
+                                      const MapTaskInput&      input,
+                                      MapReplicateTaskOutput&  output) = 0;
       //------------------------------------------------------------------------
 
       /**
