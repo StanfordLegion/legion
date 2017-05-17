@@ -1470,7 +1470,9 @@ namespace Legion {
             break;
           case ERROR_BAD_PARENT_INDEX:
             {
-              log_index.error("Parent task %s (ID %lld) of task %s "
+                MessageDescriptor PARENT_TASK_TASK(2500, "undefined");
+              log_index.error(PARENT_TASK_TASK.id(),
+                              "Parent task %s (ID %lld) of task %s "
                               "(ID %lld) "
                               "does not have an index requirement for "
                               "index space %x as a parent of "
@@ -1485,7 +1487,9 @@ namespace Legion {
             }
           case ERROR_BAD_INDEX_PATH:
             {
-              log_index.error("Index space %x is not a sub-space "
+                MessageDescriptor INDEX_SPACE_NOTSUBSPACE(2501, "undefined");
+              log_index.error(INDEX_SPACE_NOTSUBSPACE.id(),
+                              "Index space %x is not a sub-space "
                               "of parent index space %x for index "
                               "requirement %d of task %s (ID %lld)",
                               indexes[idx].handle.id, 
@@ -1498,7 +1502,9 @@ namespace Legion {
             }
           case ERROR_BAD_INDEX_PRIVILEGES:
             {
-              log_index.error("Privileges %x for index space %x "
+                MessageDescriptor PRIVILEGES_INDEX_SPACE(2502, "undefined");
+              log_index.error(PRIVILEGES_INDEX_SPACE.id(),
+                              "Privileges %x for index space %x "
                               " are not a subset of privileges of parent "
                               "task's privileges for index space "
                               "requirement %d of task %s (ID %lld)",

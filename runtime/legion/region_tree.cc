@@ -178,7 +178,9 @@ namespace Legion {
       {
         if (!color_space.contains(it->first))
         {
-          log_index.error("Invalid child color specified "
+            MessageDescriptor INVALID_CHILD_COLOR(2600, "undefined");
+          log_index.error(INVALID_CHILD_COLOR.id(),
+                          "Invalid child color specified "
                                 "for create index partition.  All colors "
                                 "must be contained within the "
                                 "given color space");
@@ -304,7 +306,9 @@ namespace Legion {
       {
         if (!color_space.contains(it->first))
         {
-          log_index.error("Invalid child color specified "
+            MessageDescriptor INVALID_CHILD_COLOR(2601, "undefined");
+          log_index.error(INVALID_CHILD_COLOR.id(),
+                          "Invalid child color specified "
                                 "for create index partition.  All colors "
                                 "must be contained within the given"
                                 "color space");
@@ -499,7 +503,9 @@ namespace Legion {
             // Check that parent is an ancestor of both partitions
             if (!compute_partition_path(parent, handle1, path))
             {
-              log_index.error("Index space %d is not an ancestor of "
+                MessageDescriptor INDEX_SPACE_NOTANCESTOR(2602, "undefined");
+              log_index.error(INDEX_SPACE_NOTANCESTOR.id(),
+                              "Index space %d is not an ancestor of "
                                     "index partition %d in create partition "
                                     "by union call!", parent.id, handle1.id);
               assert(false);
@@ -508,7 +514,9 @@ namespace Legion {
             path.clear();
             if (!compute_partition_path(parent, handle2, path))
             {
-              log_index.error("Index space %d is not an ancestor of "
+                MessageDescriptor INDEX_SPACE_NOTANCESTOR(2603, "undefined");
+              log_index.error(INDEX_SPACE_NOTANCESTOR.id(),
+                              "Index space %d is not an ancestor of "
                                     "index partition %d in create partition "
                                     "by union call!", parent.id, handle1.id);
               assert(false);
@@ -524,7 +532,9 @@ namespace Legion {
               path.clear();
               if (!compute_partition_path(parent, handle2, path))
               {
-                log_index.error("Index space %d is not an ancestor of "
+                  MessageDescriptor INDEX_SPACE_NOTANCESTOR(2604, "undefined");
+                log_index.error(INDEX_SPACE_NOTANCESTOR.id(),
+                                "Index space %d is not an ancestor of "
                                       "either index partition %d or index "
                                       "partition %d in create partition by "
                                       "intersection call!", 
@@ -540,7 +550,9 @@ namespace Legion {
             // Check that the parent is an ancestor of the first index partition
             if (!compute_partition_path(parent, handle1, path))
             {
-              log_index.error("Index space %d is not an ancestor of "
+                MessageDescriptor INDEX_SPACE_NOTANCESTOR(2605, "undefined");
+              log_index.error(INDEX_SPACE_NOTANCESTOR.id(),
+                              "Index space %d is not an ancestor of "
                                     "index partition %d in create partition "
                                     "by difference call!", 
                                     parent.id, handle1.id);
@@ -3722,7 +3734,8 @@ namespace Legion {
       AddressSpace owner = IndexSpaceNode::get_owner_space(space, runtime);
       if (owner == runtime->address_space)
       {
-        log_index.error("Unable to find entry for index space %x.", space.id);
+          MessageDescriptor UNABLE_FIND_ENTRY(2606, "undefined");
+        log_index.error(UNABLE_FIND_ENTRY.id(), "Unable to find entry for index space %x.", space.id);
 #ifdef DEBUG_LEGION
         assert(false);
 #endif
@@ -3760,7 +3773,9 @@ namespace Legion {
           index_nodes.find(space);
       if (finder == index_nodes.end())
       {
-        log_index.error("Unable to find entry for index space %x."
+          MessageDescriptor UNABLE_FIND_ENTRY(2607, "undefined");
+        log_index.error(UNABLE_FIND_ENTRY.id(),
+                        "Unable to find entry for index space %x."
                         "This is definitely a runtime bug.", space.id);
 #ifdef DEBUG_LEGION
         assert(false);
@@ -3785,7 +3800,8 @@ namespace Legion {
       AddressSpace owner = IndexPartNode::get_owner_space(part, runtime);
       if (owner == runtime->address_space)
       {
-        log_index.error("Unable to find entry for index partition %x.",part.id);
+          MessageDescriptor UNABLE_FIND_ENTRY(2608, "undefined");
+        log_index.error(UNABLE_FIND_ENTRY.id(), "Unable to find entry for index partition %x.",part.id);
 #ifdef DEBUG_LEGION
         assert(false);
 #endif
@@ -3823,7 +3839,9 @@ namespace Legion {
         index_parts.find(part);
       if (finder == index_parts.end())
       {
-        log_index.error("Unable to find entry for index partition %x. "
+          MessageDescriptor UNABLE_FIND_ENTRY(2609, "undefined");
+        log_index.error(UNABLE_FIND_ENTRY.id(),
+                        "Unable to find entry for index partition %x. "
                         "This is definitely a runtime bug.", part.id);
 #ifdef DEBUG_LEGION
         assert(false);
@@ -4102,7 +4120,8 @@ namespace Legion {
       AddressSpace owner = IndexSpaceNode::get_owner_space(space, runtime);
       if (owner == runtime->address_space)
       {
-        log_index.error("Unable to find entry for index space %x.", space.id);
+          MessageDescriptor UNABLE_FIND_ENTRY(2610, "undefined");
+        log_index.error(UNABLE_FIND_ENTRY.id(), "Unable to find entry for index space %x.", space.id);
 #ifdef DEBUG_LEGION
         assert(false);
 #endif
@@ -5776,25 +5795,33 @@ namespace Legion {
         {
           case 0:
             {
-              log_index.error("Unable to find entry for color %d in "
+                MessageDescriptor UNABLE_FIND_ENTRY(2611, "undefined");
+              log_index.error(UNABLE_FIND_ENTRY.id(),
+                              "Unable to find entry for color %d in "
                               "index space %x.", c.get_index(), handle.id);
               break;
             }
           case 1:
             {
-              log_index.error("Unable to find entry for color %d in "
+                MessageDescriptor UNABLE_FIND_ENTRY(2612, "undefined");
+              log_index.error(UNABLE_FIND_ENTRY.id(),
+                              "Unable to find entry for color %d in "
                               "index space %x.", c[0], handle.id);
               break;
             }
           case 2:
             {
-              log_index.error("Unable to find entry for color (%d,%d) in "
+                MessageDescriptor UNABLE_FIND_ENTRY(2613, "undefined");
+              log_index.error(UNABLE_FIND_ENTRY.id(),
+                              "Unable to find entry for color (%d,%d) in "
                               "index space %x.", c[0], c[1], handle.id);
               break;
             }
           case 3:
             {
-              log_index.error("Unable to find entry for color (%d,%d,%d) in "
+                MessageDescriptor UNABLE_FIND_ENTRY(2614, "undefined");
+              log_index.error(UNABLE_FIND_ENTRY.id(),
+                              "Unable to find entry for color (%d,%d,%d) in "
                               "index space %x.", c[0], c[1], c[2], handle.id);
               break;
             }
@@ -7303,25 +7330,33 @@ namespace Legion {
         {
           case 0:
             {
-              log_index.error("Invalid request for color %d in "
+                MessageDescriptor INVALID_REQUEST_COLOR(2615, "undefined");
+              log_index.error(INVALID_REQUEST_COLOR.id(),
+                              "Invalid request for color %d in "
                               "index partition %x.", c.get_index(), handle.id);
               break;
             }
           case 1:
             {
-              log_index.error("Invalid request for color %d in "
+                MessageDescriptor INVALID_REQUEST_COLOR(2616, "undefined");
+              log_index.error(INVALID_REQUEST_COLOR.id(),
+                              "Invalid request for color %d in "
                               "index partition %x.", c[0], handle.id);
               break;
             }
           case 2:
             {
-              log_index.error("Invalid request for color (%d,%d) in "
+                MessageDescriptor INVALID_REQUEST_COLOR(2617, "undefined");
+              log_index.error(INVALID_REQUEST_COLOR.id(),
+                              "Invalid request for color (%d,%d) in "
                               "index partition %x.", c[0], c[1], handle.id);
               break;
             }
           case 3:
             {
-              log_index.error("Invalid request for color (%d,%d,%d) in "
+                MessageDescriptor INVALID_REQUEST_COLOR(2618, "undefined");
+              log_index.error(INVALID_REQUEST_COLOR.id(),
+                              "Invalid request for color (%d,%d,%d) in "
                               "index partition %x.", 
                               c[0], c[1], c[2], handle.id);
               break;

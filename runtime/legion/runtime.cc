@@ -10348,7 +10348,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       if (!result.exists())
       {
-        log_index.error("Invalid color %d for get index partitions", 
+          MessageDescriptor INVALID_COLOR_GET(2700, "undefined");
+        log_index.error(INVALID_COLOR_GET.id(), "Invalid color %d for get index partitions",
                                 color);
         assert(false);
         exit(ERROR_INVALID_INDEX_SPACE_COLOR);
@@ -10383,18 +10384,27 @@ namespace Legion {
         switch (color.get_dim())
         {
           case 0:
-          case 1:
-            log_index.error("Invalid color %d for get index partitions", 
+            case 1: {
+                MessageDescriptor INVALID_COLOR_GET(2701, "undefined");
+            log_index.error(INVALID_COLOR_GET.id(),
+                            "Invalid color %d for get index partitions",
                             (int)color.point_data[0]);
+            }
             break;
-          case 2:
-            log_index.error("Invalid color (%d,%d) for get index partitions", 
+            case 2: {
+                MessageDescriptor INVALID_COLOR_GET(2702, "undefined");
+            log_index.error(INVALID_COLOR_GET.id(),
+                            "Invalid color (%d,%d) for get index partitions",
                             (int)color.point_data[0], (int)color.point_data[1]);
+            }
             break;
-          case 3:
-            log_index.error("Invalid color (%d,%d,%d) for get index "
+            case 3: {
+                MessageDescriptor INVALID_COLOR_GET(2703, "undefined");
+            log_index.error(INVALID_COLOR_GET.id(),
+                            "Invalid color (%d,%d,%d) for get index "
                             "partitions", (int)color.point_data[0], 
                             (int)color.point_data[1], (int)color.point_data[2]);
+            }
             break;
         }
         assert(false);
@@ -10448,7 +10458,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       if (!result.exists())
       {
-        log_index.error("Invalid color %d for get index subspace", color);
+          MessageDescriptor INVALID_COLOR_GET(2704, "undefined");
+        log_index.error(INVALID_COLOR_GET.id(),
+                        "Invalid color %d for get index subspace", color);
         assert(false);
         exit(ERROR_INVALID_INDEX_PART_COLOR); 
       }
@@ -10481,19 +10493,28 @@ namespace Legion {
         switch (color.get_dim())
         {
           case 0:
-          case 1:
-            log_index.error("Invalid color %d for get index subspace",
+            case 1: {
+                MessageDescriptor INVALID_COLOR_GET(2705, "undefined");
+            log_index.error(INVALID_COLOR_GET.id(),
+                            "Invalid color %d for get index subspace",
                             (int)color.point_data[0]);
+            }
             break;
-          case 2:
-            log_index.error("Invalid color (%d,%d) for get index subspace",
+            case 2: {
+                MessageDescriptor INVALID_COLOR_GET(2706, "undefined");
+            log_index.error(INVALID_COLOR_GET.id(),
+                            "Invalid color (%d,%d) for get index subspace",
                             (int)color.point_data[0], (int)color.point_data[1]);
+            }
             break;
-          case 3:
-            log_index.error("Invalid color (%d,%d,%d) for get index subspace",
+            case 3: {
+                MessageDescriptor INVALID_COLOR_GET(2707, "undefined");
+            log_index.error(INVALID_COLOR_GET.id(),
+                            "Invalid color (%d,%d,%d) for get index subspace",
                             (int)color.point_data[0],
                             (int)color.point_data[1],
                             (int)color.point_data[2]);
+            }
             break;
         }
         assert(false);
@@ -10563,7 +10584,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       if (!result.exists())
       {
-        log_index.error("Invalid handle %x for get index space "
+          MessageDescriptor INVALID_HANDLE_GET(2708, "undefined");
+        log_index.error(INVALID_HANDLE_GET.id(),
+                        "Invalid handle %x for get index space "
                                "domain", 
                                 handle.id);
         assert(false);
@@ -10614,7 +10637,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       if (!result.exists())
       {
-        log_index.error("Invalid partition handle %d for get index "
+          MessageDescriptor INVALID_PARTITION_HANDLE(2709, "undefined");
+        log_index.error(INVALID_PARTITION_HANDLE.id(),
+                        "Invalid partition handle %d for get index "
                                "partition color space", p.id);
         assert(false);
         exit(ERROR_INVALID_INDEX_PART_DOMAIN);

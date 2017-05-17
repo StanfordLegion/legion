@@ -1715,7 +1715,9 @@ namespace Legion {
         if ((owner_task->indexes[idx].handle == child->indexes[idx].parent))
           return idx;
       }
-      log_index.error("Parent task %s (ID %lld) of inline task %s "
+        MessageDescriptor PARENT_TASK_INLINE(2400, "undefined");
+      log_index.error(PARENT_TASK_INLINE.id(),
+                      "Parent task %s (ID %lld) of inline task %s "
                             "(ID %lld) does not have an index space "
                             "requirement for index space %x "
                             "as a parent of chlid task's index requirement "
@@ -2612,7 +2614,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       if (hull.get_dim() == 0)
       {
-        log_index.error("Create index space with multiple domains "
+          MessageDescriptor CREATE_INDEX_SPACE(2401, "undefined");
+        log_index.error(CREATE_INDEX_SPACE.id(),
+                        "Create index space with multiple domains "
                         "must be created with domains for non-zero "
                         "dimension in task %s (ID %lld)",
                         get_task_name(), get_unique_id());
@@ -2625,7 +2629,9 @@ namespace Legion {
         assert(it->exists());
         if (hull.get_dim() != it->get_dim())
         {
-          log_index.error("A set of domains passed to create_index_space "
+            MessageDescriptor SET_DOMAINS_PASSED(2402, "undefined");
+          log_index.error(SET_DOMAINS_PASSED.id(),
+                          "A set of domains passed to create_index_space "
                           "must all have the same dimensions in task "
                           "%s (ID %lld)", get_task_name(), get_unique_id());
           assert(false);
@@ -3247,7 +3253,9 @@ namespace Legion {
                       get_task_name(), get_unique_id());
       if (parent.get_tree_id() != handle1.get_tree_id())
       {
-        log_index.error("IndexPartition %d is not part of the same "
+          MessageDescriptor INDEX_PARTITION_NOTPART(2403, "undefined");
+        log_index.error(INDEX_PARTITION_NOTPART.id(),
+                        "IndexPartition %d is not part of the same "
                         "index tree as IndexSpace %d in create "
                         "partition by union!", handle1.id, parent.id);
         assert(false);
@@ -3255,7 +3263,9 @@ namespace Legion {
       }
       if (parent.get_tree_id() != handle2.get_tree_id())
       {
-        log_index.error("IndexPartition %d is not part of the same "
+          MessageDescriptor INDEX_PARTITION_NOTPART(2404, "undefined");
+        log_index.error(INDEX_PARTITION_NOTPART.id(),
+                        "IndexPartition %d is not part of the same "
                         "index tree as IndexSpace %d in create "
                         "partition by union!", handle2.id, parent.id);
         assert(false);
@@ -3301,7 +3311,9 @@ namespace Legion {
                       get_task_name(), get_unique_id());
       if (parent.get_tree_id() != handle1.get_tree_id())
       {
-        log_index.error("IndexPartition %d is not part of the same "
+          MessageDescriptor INDEX_PARTITION_NOTPART(2405, "undefined");
+        log_index.error(INDEX_PARTITION_NOTPART.id(),
+                        "IndexPartition %d is not part of the same "
                         "index tree as IndexSpace %d in create partition by "
                         "intersection!", handle1.id, parent.id);
         assert(false);
@@ -3309,7 +3321,9 @@ namespace Legion {
       }
       if (parent.get_tree_id() != handle2.get_tree_id())
       {
-        log_index.error("IndexPartition %d is not part of the same "
+          MessageDescriptor INDEX_PARTITION_NOTPART(2406, "undefined");
+        log_index.error(INDEX_PARTITION_NOTPART.id(),
+                        "IndexPartition %d is not part of the same "
                         "index tree as IndexSpace %d in create partition by "
                         "intersection!", handle2.id, parent.id);
         assert(false);
@@ -3355,7 +3369,9 @@ namespace Legion {
                       get_task_name(), get_unique_id());
       if (parent.get_tree_id() != handle1.get_tree_id())
       {
-        log_index.error("IndexPartition %d is not part of the same "
+          MessageDescriptor INDEX_PARTITION_NOTPART(2407, "undefined");
+        log_index.error(INDEX_PARTITION_NOTPART.id(),
+                        "IndexPartition %d is not part of the same "
                               "index tree as IndexSpace %d in create "
                               "partition by difference!",
                               handle1.id, parent.id);
@@ -3364,7 +3380,9 @@ namespace Legion {
       }
       if (parent.get_tree_id() != handle2.get_tree_id())
       {
-        log_index.error("IndexPartition %d is not part of the same "
+          MessageDescriptor INDEX_PARTITION_NOTPART(2408, "undefined");
+        log_index.error(INDEX_PARTITION_NOTPART.id(),
+                        "IndexPartition %d is not part of the same "
                               "index tree as IndexSpace %d in create "
                               "partition by difference!",
                               handle2.id, parent.id);
@@ -3407,7 +3425,9 @@ namespace Legion {
                       get_task_name(), get_unique_id());
       if (handle1.get_tree_id() != handle2.get_tree_id())
       {
-        log_index.error("IndexPartition %d is not part of the same "
+          MessageDescriptor INDEX_PARTITION_NOTPART(2409, "undefined");
+        log_index.error(INDEX_PARTITION_NOTPART.id(),
+                        "IndexPartition %d is not part of the same "
                               "index tree as IndexPartition %d in create "
                               "cross product partitions!",
                               handle1.id, handle2.id);
