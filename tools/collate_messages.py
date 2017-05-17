@@ -15,6 +15,7 @@
 # limitations under the License.
 #
 
+import argparse
 import sqlite3
 import sys
 
@@ -180,11 +181,12 @@ def parseSourceFile(fileName, connection):
 
 
 def parseSourceFiles(connection):
-    filename = sys.stdin.readline().strip()
-    while(len(filename) > 0):
-        parseSourceFile(filename, connection)
+    fileName = sys.stdin.readline().strip()
+    while(len(fileName) > 0):
+        fileName = fileName.replace("//", "/")
+        parseSourceFile(fileName, connection)
         connection.commit()
-        filename = sys.stdin.readline().strip()
+        fileName = sys.stdin.readline().strip()
 
 def htmlMarker(type, field, code):
     if code == None:
@@ -200,19 +202,23 @@ def fileName_(fileName):
     return fileName
 
 
-def prefixedPath(fileName, prefix):
+def prefixedPath(fileName, prefix, lineNumber, strip):
+    fileName = fileName.replace("//", "/")
+    if strip > 0:
+        splitFileName = fileName.split('/')
+        fileName = "/".join(splitFileName[strip:])
     if prefix == None:
-        return fileName
-    return prefix + '/' + fileName
+        return fileName + '#L' + str(lineNumber)
+    return prefix + '/' + fileName + '#L' + str(lineNumber)
 
 
-def writeHtmlEntry(type, field, outputFile, row, hrefPrefix):
+def writeHtmlEntry(type, field, outputFile, row, hrefPrefix, strip):
     (code, name, message, whatToDo, fileName, lineNumber) = row
     outputFile.write("<p id=\"" + htmlMarker(type, field, code) + "\">")
     outputFile.write("<b>" + type + " " + str(code) + "</b>\n")
     outputFile.write("<br>Message: " + message + "\n");
     outputFile.write("<br>Remedy:" + whatToDo + "\n");
-    outputFile.write("<br>Location: line " + str(lineNumber) + " <a href=\"" + prefixedPath(fileName, hrefPrefix) + "\">" + fileName_(fileName) + "</a>\n")
+    outputFile.write("<br>Location: line " + str(lineNumber) + " <a href=\"" + prefixedPath(fileName, hrefPrefix, lineNumber, strip) + "\">" + fileName_(fileName) + "</a>\n")
     outputFile.write("<p>\n")
 
 
@@ -223,18 +229,18 @@ def tables(connection):
     return tables
 
 
-def writeHtmlSortedByField(field, connection, hrefPrefix):
+def writeHtmlSortedByField(field, connection, hrefPrefix, strip):
     for table in tables(connection):
         tableName = table[0]
         outputFileName = htmlMarker(tableName, field, None) + ".html"
         outputFile = open(outputFileName, "wt")
-        outputFile.write("layout:page\n")
+        outputFile.write("---\nlayout:page\n---\n\n")
         selectCommand = "select * from " + tableName + " order by " + field  + ";"
         cursor = connection.cursor()
         cursor.execute(selectCommand)
         row = cursor.fetchone()
         while row != None:
-              writeHtmlEntry(tableName, field, outputFile, row, hrefPrefix)
+              writeHtmlEntry(tableName, field, outputFile, row, hrefPrefix, strip)
               row = cursor.fetchone()
         outputFile.close()
 
@@ -287,7 +293,7 @@ def writeHtmlLinks(indexFile, connection, field):
 
 def writeHtmlIndexes(connection):
     indexFile = open("index.html", "wt")
-    indexFile.write("layout:page\n")
+    indexFile.write("---\nlayout:page\n---\n\n")
     writeHtmlLinks(indexFile, connection, "code");
     writeHtmlLinks(indexFile, connection, "message")
     for table in tables(connection):
@@ -296,30 +302,25 @@ def writeHtmlIndexes(connection):
     indexFile.close()
 
 
-def writeHtmlOutput(connection, hrefPrefix):
+def writeHtmlOutput(connection, hrefPrefix, strip):
     writeHtmlIndexes(connection);
-    writeHtmlSortedByField("code", connection, hrefPrefix)
-    writeHtmlSortedByField("message", connection, hrefPrefix)
+    writeHtmlSortedByField("code", connection, hrefPrefix, strip)
+    writeHtmlSortedByField("message", connection, hrefPrefix, strip)
 
 
-def parseOptions(argv):
-    hrefPrefix = None
-    result = []
-    for arg in argv:
-        print arg
-        if arg.find("prefix=") == 0:
-            hrefPrefix = arg[7:]
-        else:
-            result.append(arg)
-    return (result, hrefPrefix)
 
+
+class MyParser(argparse.ArgumentParser):
+    def error(self, message):
+        self.print_usage(sys.stderr)
+        print 'error', message
+        sys.exit(2)
+parser = MyParser(description = 'Legion Tools: collate messages')
+parser.add_argument('--prefix', dest='prefix', action='store', help='path prefix to source files')
+parser.add_argument('--strip', dest='strip', action='store', type=int, help='num dirs to strip from sourcfile path', default=0)
+args = parser.parse_args()
 
 connection = sqlite3.connect(":memory:")
-(argv, hrefPrefix) = parseOptions(sys.argv)
-if hrefPrefix == None:
-    print "use prefix=<path> to point to the legion sources"
-if(len(argv) == 2):
-    parseSourceFile(argv[1], connection)
-else:
-    parseSourceFiles(connection)
-writeHtmlOutput(connection, hrefPrefix)
+parseSourceFiles(connection)
+args.prefix = args.prefix.replace("//", "/")
+writeHtmlOutput(connection, args.prefix, args.strip)
