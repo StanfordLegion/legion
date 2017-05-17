@@ -865,8 +865,13 @@ namespace LegionRuntime{
       long submit(Request** requests, long nr);
       void pull();
       long available();
-      void notify_completion() {capacity ++;}
+      void notify_completion() {
+        __sync_fetch_and_add(&capacity, 1);
+      }
     private:
+      // RemoteWriteChannel is maintained by dma threads
+      // and active message threads, so we need atomic ops
+      // for preventing data race
       long capacity;
     };
    

@@ -1186,7 +1186,7 @@ namespace LegionRuntime {
                 req->dst_node, req->dst_base, req->src_base, req->nbytes,
                 req->src_str, req->nlines, req);
           }
-          capacity--;
+          __sync_fetch_and_sub(&capacity, 1);
         /*RemoteWriteRequest* req = (RemoteWriteRequest*) requests[i];
           req->complete_event = GenEventImpl::create_genevent()->current_event();
           Realm::RemoteWriteMessage::RequestArgs args;
