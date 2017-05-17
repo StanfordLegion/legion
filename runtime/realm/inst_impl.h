@@ -20,6 +20,7 @@
 
 #include "instance.h"
 #include "id.h"
+#include "inst_layout.h"
 
 #include "activemsg.h"
 
@@ -79,6 +80,7 @@ namespace Realm {
 
       // TODO: make this part of the metadata so it gets moved around properly
       LinearizedIndexSpaceIntfc *lis;
+      InstanceLayoutGeneric *layout;
 
       class Metadata : public MetadataBase {
       public:

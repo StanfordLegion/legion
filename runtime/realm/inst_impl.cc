@@ -80,6 +80,13 @@ namespace Realm {
       return i_impl->memory;
     }
 
+    /*static*/ RegionInstance RegionInstance::create_instance(Memory memory,
+							      InstanceLayoutGeneric *ilg,
+							      const ProfilingRequestSet& prs)
+    {
+      return RegionInstance::NO_INST;
+    }
+
     void RegionInstance::destroy(Event wait_on /*= Event::NO_EVENT*/) const
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
