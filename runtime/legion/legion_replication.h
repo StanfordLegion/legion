@@ -922,6 +922,7 @@ namespace Legion {
       inline ShardMapping* get_mapping(void) const
         { return address_spaces; }
     public:
+      ShardTask* create_shard(ShardID id, Processor target);
       void launch(void);
 #if 0
       void launch(const std::vector<AddressSpaceID> &spaces,

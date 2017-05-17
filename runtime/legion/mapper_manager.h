@@ -93,6 +93,7 @@ namespace Legion {
                            bool first_invocation = true,
                            MappingCallInfo *info = NULL);
       void invoke_map_replicate_task(TaskOp *task, Mapper::MapTaskInput *input,
+                                     Mapper::MapTaskOutput *default_output,
                                      Mapper::MapReplicateTaskOutput *output,
                                      bool first_invocation = true,
                                      MappingCallInfo *info = NULL);
@@ -768,6 +769,25 @@ namespace Legion {
       T1 *const arg1;
       T2 *const arg2;
       T3 *const arg3;
+    };
+
+    template<typename T1, typename T2, typename T3, typename T4,
+             void (MapperManager::*CALL)(T1*, T2*, T3*, T4*, 
+                                         bool, MappingCallInfo*)>
+    class MapperContinuation4 : public MapperContinuation {
+    public:
+      MapperContinuation4(MapperManager *man, T1 *a1, T2 *a2, T3 *a3, T4 *a4,
+                          MappingCallInfo *info)
+        : MapperContinuation(man, info), 
+          arg1(a1), arg2(a2), arg3(a3), arg4(a4) { }
+    public:
+      virtual void execute(void)
+      { (manager->*CALL)(arg1, arg2, arg3, arg4, false/*first*/, info); }
+    public:
+      T1 *const arg1;
+      T2 *const arg2;
+      T3 *const arg3;
+      T4 *const arg4;
     };
 
   };

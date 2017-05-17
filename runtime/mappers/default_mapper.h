@@ -139,6 +139,7 @@ namespace Legion {
       virtual void map_replicate_task(const MapperContext      ctx,
                                       const Task&              task,
                                       const MapTaskInput&      input,
+                                      const MapTaskOutput&     default_output,
                                       MapReplicateTaskOutput&  output);
       virtual void select_task_variant(const MapperContext          ctx,
                                        const Task&                  task,

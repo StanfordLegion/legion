@@ -498,19 +498,21 @@ namespace Legion {
        * invariants in debug mode or if safe mapping is enabled.
        *
        * The mapper can also choose to make this a control replicated version
-       * of this task by setting 'control_replicate' to true. This will make
+       * of this task by filling in the 'control_replicate' map. This will make
        * all the copies of the task work together as though they were one
        * logical version of the task rather than having them all execute
-       * independently.
+       * independently. The vector should be exactly the same size as the 
+       * vector of task_mappings if it is not empty
        */
       struct MapReplicateTaskOutput {
         std::vector<MapTaskOutput>                      task_mappings;
-        bool                                            control_replicate;
+        std::vector<Processor>                          control_replication_map;
       };
       //------------------------------------------------------------------------
       virtual void map_replicate_task(const MapperContext      ctx,
                                       const Task&              task,
                                       const MapTaskInput&      input,
+                                      const MapTaskOutput&     default_output,
                                       MapReplicateTaskOutput&  output) = 0;
       //------------------------------------------------------------------------
 

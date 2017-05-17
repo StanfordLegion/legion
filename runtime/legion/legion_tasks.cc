@@ -2851,6 +2851,64 @@ namespace Legion {
         // Only one valid choice in this case, ignore everything else
         target_processors.push_back(this->target_proc);
       }
+      // Sort out any profiling requests that we need to perform
+      if (!output.task_prof_requests.empty())
+      {
+        // If we do any legion specific checks, make sure we ask
+        // Realm for the proc profiling info so that we can get
+        // a callback to report our profiling information
+        bool has_proc_request = false;
+        // Filter profiling requests into those for copies and the actual task
+        for (std::set<ProfilingMeasurementID>::const_iterator it = 
+              output.task_prof_requests.requested_measurements.begin(); it !=
+              output.task_prof_requests.requested_measurements.end(); it++)
+        {
+          if ((*it) > Mapping::PMID_LEGION_FIRST)
+          {
+            // If we haven't seen a proc usage yet, then add it
+            // to the realm requests to ensure we get a callback
+            // for this task. We know we'll see it before this
+            // because the measurement IDs are in order
+            if (!has_proc_request)
+              task_profiling_requests.push_back(
+                  (ProfilingMeasurementID)Realm::PMID_OP_PROC_USAGE);
+            // These are legion profiling requests and currently
+            // are only profiling task information
+            task_profiling_requests.push_back(*it);
+            continue;
+          }
+          switch ((Realm::ProfilingMeasurementID)*it)
+          {
+            case Realm::PMID_OP_PROC_USAGE:
+              has_proc_request = true; // Then fall through
+            case Realm::PMID_OP_STATUS:
+            case Realm::PMID_OP_BACKTRACE:
+            case Realm::PMID_OP_TIMELINE:
+            case Realm::PMID_PCTRS_CACHE_L1I:
+            case Realm::PMID_PCTRS_CACHE_L1D:
+            case Realm::PMID_PCTRS_CACHE_L2:
+            case Realm::PMID_PCTRS_CACHE_L3:
+            case Realm::PMID_PCTRS_IPC:
+            case Realm::PMID_PCTRS_TLB:
+            case Realm::PMID_PCTRS_BP:
+              {
+                // Just task
+                task_profiling_requests.push_back(*it);
+                break;
+              }
+            default:
+              log_run.error("WARNING: Mapper %s requested a profiling "
+                  "measurement of type %d which is not applicable to "
+                  "task %s (UID %lld) and will be ignored.",
+                  mapper->get_mapper_name(), *it, get_task_name(),
+                  get_unique_id());
+          }
+        }
+      }
+      if (!output.copy_prof_requests.empty())
+        filter_copy_request_kinds(mapper, 
+            output.copy_prof_requests.requested_measurements,
+            copy_profiling_requests, true/*warn*/);
       // See whether the mapper picked a variant or a generator
       VariantImpl *variant_impl = NULL;
       if (output.chosen_variant > 0)
@@ -3273,23 +3331,6 @@ namespace Legion {
 #endif
         exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
-#if 0
-      // If we're doing control replication then we need a replicated task
-      if (!output.control_replication_map.empty() && 
-          !variant_impl->is_replicable())
-      {
-        log_run.error("Invalid mapper output from invocation of '%s' on "
-                      "mapper %s. Mapper failed to pick a replicable "
-                      "variant for task %s (UID %lld) that was designated "
-                      "to be control replicated.", "map_task",
-                      mapper->get_mapper_name(), get_task_name(),
-                      get_unique_id());
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_MAPPER_OUTPUT);
-      }
-#endif
       // Now that we know which variant to use, we can validate it
       if (!Runtime::unsafe_mapper)
         validate_variant_selection(mapper, variant_impl, "map_task"); 
@@ -3500,67 +3541,143 @@ namespace Legion {
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
       mapper->invoke_map_task(this, &input, &output);
-      // Sort out any profiling requests that we need to perform
-      if (!output.task_prof_requests.empty())
-      {
-        // If we do any legion specific checks, make sure we ask
-        // Realm for the proc profiling info so that we can get
-        // a callback to report our profiling information
-        bool has_proc_request = false;
-        // Filter profiling requests into those for copies and the actual task
-        for (std::set<ProfilingMeasurementID>::const_iterator it = 
-              output.task_prof_requests.requested_measurements.begin(); it !=
-              output.task_prof_requests.requested_measurements.end(); it++)
-        {
-          if ((*it) > Mapping::PMID_LEGION_FIRST)
-          {
-            // If we haven't seen a proc usage yet, then add it
-            // to the realm requests to ensure we get a callback
-            // for this task. We know we'll see it before this
-            // because the measurement IDs are in order
-            if (!has_proc_request)
-              task_profiling_requests.push_back(
-                  (ProfilingMeasurementID)Realm::PMID_OP_PROC_USAGE);
-            // These are legion profiling requests and currently
-            // are only profiling task information
-            task_profiling_requests.push_back(*it);
-            continue;
-          }
-          switch ((Realm::ProfilingMeasurementID)*it)
-          {
-            case Realm::PMID_OP_PROC_USAGE:
-              has_proc_request = true; // Then fall through
-            case Realm::PMID_OP_STATUS:
-            case Realm::PMID_OP_BACKTRACE:
-            case Realm::PMID_OP_TIMELINE:
-            case Realm::PMID_PCTRS_CACHE_L1I:
-            case Realm::PMID_PCTRS_CACHE_L1D:
-            case Realm::PMID_PCTRS_CACHE_L2:
-            case Realm::PMID_PCTRS_CACHE_L3:
-            case Realm::PMID_PCTRS_IPC:
-            case Realm::PMID_PCTRS_TLB:
-            case Realm::PMID_PCTRS_BP:
-              {
-                // Just task
-                task_profiling_requests.push_back(*it);
-                break;
-              }
-            default:
-              log_run.error("WARNING: Mapper %s requested a profiling "
-                  "measurement of type %d which is not applicable to "
-                  "task %s (UID %lld) and will be ignored.",
-                  mapper->get_mapper_name(), *it, get_task_name(),
-                  get_unique_id());
-          }
-        }
-      }
-      if (!output.copy_prof_requests.empty())
-        filter_copy_request_kinds(mapper, 
-            output.copy_prof_requests.requested_measurements,
-            copy_profiling_requests, true/*warn*/);
       // Now we can convert the mapper output into our physical instances
       finalize_map_task_output(input, output, must_epoch_owner, 
                                valid_instances);
+    }
+
+    //--------------------------------------------------------------------------
+    void SingleTask::invoke_mapper_replicated(MustEpochOp *must_epoch_owner)
+    //--------------------------------------------------------------------------
+    {
+      if (mapper == NULL)
+        mapper = runtime->find_mapper(current_proc, map_id);
+      if (must_epoch_owner != NULL)
+      {
+        log_run.error("Mapper %s requested to replicate task %s (UID %lld) "
+                      "which is part of a must epoch launch. Replication of "
+                      "tasks in must epoch launches is not permitted.",
+                      mapper->get_mapper_name(), get_task_name(),
+                      get_unique_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+      Mapper::MapTaskInput input;
+      Mapper::MapTaskOutput default_output;
+      Mapper::MapReplicateTaskOutput output;
+      // Initialize the mapping input which also does all the traversal
+      // down to the target nodes
+      std::vector<InstanceSet> valid_instances(regions.size());
+      initialize_map_task_input(input, default_output, 
+                                must_epoch_owner, valid_instances);
+      // Now we can invoke the mapper to do the mapping
+      mapper->invoke_map_replicate_task(this, &input, &default_output, &output);
+      if (output.task_mappings.empty())
+      {
+        log_run.error("Mapper %s failed to provide any mappings for task %s "
+                      "(UID %lld) in 'map_replicate_task' mapper call.",
+                      mapper->get_mapper_name(), get_task_name(),
+                      get_unique_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+      // Quick test to see if there is only one output requested in which
+      // case then there is no replication
+      else if (output.task_mappings.size() == 1)
+      {
+        finalize_map_task_output(input, output.task_mappings[0], 
+                                 must_epoch_owner, valid_instances);
+        return;
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(shard_manager == NULL);
+#endif
+        // First make a shard manager to handle the all the shard tasks
+        const size_t total_shards = output.task_mappings.size();
+        if (!output.control_replication_map.empty())
+        {
+          const ControlReplicationID repl_context = 
+            runtime->get_unique_control_replication_id(); 
+          shard_manager = new ShardManager(runtime, repl_context, total_shards,
+                                       0/*idx*/, runtime->address_space, this);
+          if (output.control_replication_map.size() != total_shards)
+          {
+            log_run.error("Mapper %s specified a non-empty control replication "
+                          "map of size %ld that does not match the requested "
+                          "number of %ld shards for task %s (UID %lld).",
+                          mapper->get_mapper_name(), 
+                          output.control_replication_map.size(), total_shards,
+                          get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
+          }
+          if (!Runtime::unsafe_mapper)
+          {
+            // Check to make sure that they all picked the same variant
+            // and that it is a replicable variant
+            VariantID chosen_variant = output.task_mappings[0].chosen_variant;
+            for (unsigned idx = 1; idx < total_shards; idx++)
+            {
+              if (output.task_mappings[idx].chosen_variant != chosen_variant)
+              {
+                log_run.error("Invalid mapper output from invocation of '%s' "
+                              "on mapper %s. Mapper picked different variants "
+                              "%ld and %ld for task %s (UID %lld) that was "
+                              "designated to be control replicated.", 
+                              "map_replicate_task", mapper->get_mapper_name(),
+                              chosen_variant, 
+                              output.task_mappings[idx].chosen_variant,
+                              get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+                assert(false);
+#endif
+                exit(ERROR_INVALID_MAPPER_OUTPUT);
+              }
+            }
+            VariantImpl *var_impl = runtime->find_variant_impl(task_id,
+                                      chosen_variant, true/*can_fail*/);
+            // If it's NULL we'll catch it later in the checks
+            if ((var_impl != NULL) && !var_impl->is_replicable())
+            {
+              log_run.error("Invalid mapper output from invocation of '%s' on "
+                            "mapper %s. Mapper failed to pick a replicable "
+                            "variant for task %s (UID %lld) that was designated"
+                            " to be control replicated.", "map_replicate_task",
+                            mapper->get_mapper_name(), get_task_name(),
+                            get_unique_id());
+#ifdef DEBUG_LEGION
+              assert(false);
+#endif
+              exit(ERROR_INVALID_MAPPER_OUTPUT);
+            }
+          }
+        }
+        else
+          shard_manager = new ShardManager(runtime, 0/*no repl ctx*/, 
+                total_shards, 0/*idx*/, runtime->address_space, this);
+        // Create the shard tasks and have them complete their mapping
+        for (unsigned idx = 0; idx < total_shards; idx++)
+        {
+          Processor target = output.control_replication_map.empty() ? 
+            output.task_mappings[idx].target_procs[0] : 
+            output.control_replication_map[idx];
+          ShardTask *shard = shard_manager->create_shard(idx, target);
+          shard->clone_single_from(this);
+          // Finalize the mapping output
+          shard->finalize_map_task_output(input, output.task_mappings[idx],
+                                          must_epoch_owner, valid_instances);
+          // Now record the instances that we need locally
+
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3580,7 +3697,10 @@ namespace Legion {
       }
 #endif
       // Now do the mapping call
-      invoke_mapper(must_epoch_op);
+      if (is_replicated())
+        invoke_mapper_replicated(must_epoch_op);
+      else
+        invoke_mapper(must_epoch_op);
       const bool multiple_requirements = (regions.size() > 1);
       std::set<Reservation> read_only_reservations;
       // This is the price of allowing read-only requirements to

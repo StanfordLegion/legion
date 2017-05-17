@@ -305,6 +305,7 @@ namespace Legion {
     void ReplayMapper::map_replicate_task(const MapperContext      ctx,
                                           const Task&              task,
                                           const MapTaskInput&      input,
+                                          const MapTaskOutput&     def_output,
                                           MapReplicateTaskOutput&  output)
     //--------------------------------------------------------------------------
     {

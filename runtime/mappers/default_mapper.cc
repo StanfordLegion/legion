@@ -1472,6 +1472,7 @@ namespace Legion {
     void DefaultMapper::map_replicate_task(const MapperContext      ctx,
                                            const Task&              task,
                                            const MapTaskInput&      input,
+                                           const MapTaskOutput&     def_output,
                                            MapReplicateTaskOutput&  output)
     //--------------------------------------------------------------------------
     {
@@ -1485,7 +1486,7 @@ namespace Legion {
       {
         // Place on replicate on each node by default
         assert(remote_cpus.size() == total_nodes);
-        output.task_mappings.resize(total_nodes);
+        output.task_mappings.resize(total_nodes, def_output);
         // Check to see if we're interoperating with MPI
         const std::map<AddressSpace,int/*rank*/> &mpi_interop_mapping = 
           runtime->find_reverse_MPI_mapping(ctx);
@@ -1515,10 +1516,16 @@ namespace Legion {
             output.task_mappings[space].target_procs.push_back(*it);
           }
         }
+        // Indicate that we want to do control replication by filling
+        // in the control replication map with our chosen processors
+        // Also set our chosen variant
+        output.control_replication_map.resize(total_nodes);
         for (unsigned idx = 0; idx < total_nodes; idx++)
+        {
           output.task_mappings[idx].chosen_variant = chosen.variant;
-        // Indicate that we are control replicating this task
-        output.control_replicate = true;
+          output.control_replication_map[idx] = 
+            output.task_mappings[idx].target_procs[0];
+        }
       }
       else
       {
@@ -1531,7 +1538,6 @@ namespace Legion {
                            "application!");
         output.task_mappings.resize(1);
         map_task(ctx, task, input, output.task_mappings[0]);
-        output.control_replicate = false;
       }
     }
 

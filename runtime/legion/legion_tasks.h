@@ -416,6 +416,7 @@ namespace Legion {
                     VariantImpl *impl, const char *call_name) const;
     protected:
       void invoke_mapper(MustEpochOp *must_epoch_owner);
+      void invoke_mapper_replicated(MustEpochOp *must_epoch_owner);
       void map_all_regions(ApEvent user_event,
                            MustEpochOp *must_epoch_owner = NULL); 
       void perform_post_mapping(void);

@@ -178,6 +178,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void MapperManager::invoke_map_replicate_task(TaskOp *task,
                                      Mapper::MapTaskInput *input,
+                                     Mapper::MapTaskOutput *default_output,
                                      Mapper::MapReplicateTaskOutput *output,
                                      bool first_invocation,
                                      MappingCallInfo *info)
@@ -190,15 +191,17 @@ namespace Legion {
                              task, first_invocation, continuation_precondition);
         if (continuation_precondition.exists())
         {
-          MapperContinuation3<TaskOp,Mapper::MapTaskInput,
+          MapperContinuation4<TaskOp,Mapper::MapTaskInput,
+                              Mapper::MapTaskOutput,
                               Mapper::MapReplicateTaskOutput,
                               &MapperManager::invoke_map_replicate_task>
-                                continuation(this, task, input, output, info);
+                                continuation(this, task, input, 
+                                    default_output, output, info);
           continuation.defer(runtime, continuation_precondition, task);
           return;
         }
       }
-      mapper->map_replicate_task(info, *task, *input, *output);
+      mapper->map_replicate_task(info, *task, *input, *default_output, *output);
       finish_mapper_call(info);
     }
 
