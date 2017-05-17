@@ -193,7 +193,7 @@ namespace Realm {
     
     va_list args;
     va_start(args, fmt);
-    spew().vprintf(messageID, fmt, args);
+    spew().vprintf("spew", messageID, fmt, args);
     va_end(args);
   }
   
@@ -217,7 +217,7 @@ namespace Realm {
     
     va_list args;
     va_start(args, fmt);
-    debug().vprintf(messageID, fmt, args);
+    debug().vprintf("debug", messageID, fmt, args);
     va_end(args);
   }
   
@@ -241,7 +241,7 @@ namespace Realm {
     
     va_list args;
     va_start(args, fmt);
-    info().vprintf(messageID, fmt, args);
+    info().vprintf("info", messageID, fmt, args);
     va_end(args);
   }
   
@@ -265,7 +265,7 @@ namespace Realm {
     
     va_list args;
     va_start(args, fmt);
-    print().vprintf(messageID, fmt, args);
+    print().vprintf("print", messageID, fmt, args);
     va_end(args);
   }
   
@@ -289,7 +289,7 @@ namespace Realm {
     
     va_list args;
     va_start(args, fmt);
-    warning().vprintf(messageID, fmt, args);
+    warning().vprintf("warning", messageID, fmt, args);
     va_end(args);
   }
   
@@ -313,7 +313,7 @@ namespace Realm {
     
     va_list args;
     va_start(args, fmt);
-    error().vprintf(messageID, fmt, args);
+    error().vprintf("error", messageID, fmt, args);
     va_end(args);
   }
   
@@ -337,7 +337,7 @@ namespace Realm {
     
     va_list args;
     va_start(args, fmt);
-    fatal().vprintf(messageID, fmt, args);
+    fatal().vprintf("fatal", messageID, fmt, args);
     va_end(args);
   }
   

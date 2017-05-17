@@ -143,7 +143,7 @@ namespace Realm {
     
     // vprintf-style
     LoggerMessage& vprintf(const char *fmt, va_list ap);
-    LoggerMessage& vprintf(LoggerMessageID messageID, const char *fmt, va_list ap);
+    LoggerMessage& vprintf(const char *typeName, LoggerMessageID messageID, const char *fmt, va_list ap);
     
     bool is_active(void) const;
     

@@ -535,13 +535,13 @@ namespace Realm {
   // class LoggerMessage
     
 
-  LoggerMessage& LoggerMessage::vprintf(LoggerMessageID messageID, const char *fmt, va_list args)
+  LoggerMessage& LoggerMessage::vprintf(const char *typeName, LoggerMessageID messageID, const char *fmt, va_list args)
   {
     if(active) {
       static const int MAXLEN = 4096;
        char msg[MAXLEN] = {0};
        if(messageID != RESERVED_LOGGER_MESSAGE_ID) {
-          sprintf(msg, "[%d] ", messageID);
+          sprintf(msg, "[%s %d] ", typeName, messageID);
        }
        int prefixLength = strlen(msg);
       int full = prefixLength + vsnprintf(msg + prefixLength, MAXLEN - prefixLength, fmt, args);
@@ -570,7 +570,7 @@ namespace Realm {
     
     LoggerMessage& LoggerMessage::vprintf(const char *fmt, va_list args)
     {
-        return vprintf(RESERVED_LOGGER_MESSAGE_ID, fmt, args);
+        return vprintf(nullptr, RESERVED_LOGGER_MESSAGE_ID, fmt, args);
     }
 
 }; // namespace Realm

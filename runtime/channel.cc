@@ -16,6 +16,7 @@
 
 #include "channel.h"
 #include "channel_disk.h"
+#include "logger_message_descriptor.h"
 
 namespace LegionRuntime {
   namespace LowLevel {
@@ -1786,9 +1787,11 @@ namespace LegionRuntime {
           case XferDes::XFER_HDF_WRITE:
             // for HDF read/write, we don't support unstructured regions
             switch(DIM) {
-            case 0:
-              log_new_dma.fatal() << "HDF copies not supported for unstructured domains!";
+                case 0: {
+                    Legion::Internal::MessageDescriptor HDF_COPY_NOTSUPPORTED(3700, "undfined");
+              log_new_dma.fatal(HDF_COPY_NOTSUPPORTED.id()) << "HDF copies not supported for unstructured domains!";
               assert(false);
+                }
               break;
             case 1:
             case 2:

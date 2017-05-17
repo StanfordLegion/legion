@@ -20,6 +20,7 @@
 #include "logging.h"
 #include "threads.h"
 #include "profiling.h"
+#include "logger_message_descriptor.h"
 
 namespace Realm {
 
