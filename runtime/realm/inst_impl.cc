@@ -19,6 +19,7 @@
 #include "mem_impl.h"
 #include "logging.h"
 #include "runtime_impl.h"
+#include "logger_message_descriptor.h"
 
 namespace Realm {
 
@@ -197,7 +198,8 @@ namespace Realm {
 	assert((*it) > 0);
 	if(byte_offset < (off_t)(*it)) {
 	  if ((off_t)(byte_offset + size) > (off_t)(*it)) {
-            log_inst.error("Requested field does not match the expected field size");
+          Legion::Internal::MessageDescriptor REQUESTED_FIELD_NOTMATCH(3600, "undefined");
+            log_inst.error(REQUESTED_FIELD_NOTMATCH.id(), "Requested field does not match the expected field size");
             assert(false);
           }
 	  field_start = start;

@@ -1471,7 +1471,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       if (req.privilege_fields.find(fid) == req.privilege_fields.end())
       {
-        log_inst.error("Requested field accessor for field %d "
+          MessageDescriptor REQUESTED_FIELD_ACCESSOR(3700, "undefined");
+        log_inst.error(REQUESTED_FIELD_ACCESSOR.id(), "Requested field accessor for field %d "
             "without privileges!", fid);
         assert(false);
         exit(ERROR_INVALID_FIELD_PRIVILEGES);
