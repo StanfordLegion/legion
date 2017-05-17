@@ -2649,7 +2649,9 @@ namespace Legion {
       if ((requirement.handle_type == PART_PROJECTION) || 
           (requirement.handle_type == REG_PROJECTION))
       {
-        log_region.error("Projection region requirements are not "
+          MessageDescriptor PROJECTION_REGION_REQUIREMENTS(3100, "undefined");
+        log_region.error(PROJECTION_REGION_REQUIREMENTS.id(),
+                         "Projection region requirements are not "
                                "permitted for inline mappings (in task %s)",
                                parent_ctx->get_task_name());
 #ifdef DEBUG_LEGION
@@ -2669,7 +2671,9 @@ namespace Legion {
           break;
         case ERROR_INVALID_REGION_HANDLE:
           {
-            log_region.error("Requirest for invalid region handle "
+              MessageDescriptor REQUIREMENTS_INVALID_REGION(3101, "undefined");
+            log_region.error(REQUIREMENTS_INVALID_REGION.id(),
+                             "Requirest for invalid region handle "
                                    "(%x,%d,%d) for inline mapping "
                                    "(ID %lld)",
                                    requirement.region.index_space.id, 
@@ -2697,7 +2701,9 @@ namespace Legion {
           }
         case ERROR_INVALID_INSTANCE_FIELD:
           {
-            log_region.error("Instance field %d is not one of the "
+              MessageDescriptor INSTANCE_FIELD_PRIVILEGE(3102, "undefined");
+            log_region.error(INSTANCE_FIELD_PRIVILEGE.id(),
+                             "Instance field %d is not one of the "
                                    "privilege fields for inline mapping "
                                    "(ID %lld)",
                                     bad_field, unique_op_id);
@@ -2708,7 +2714,9 @@ namespace Legion {
           }
         case ERROR_DUPLICATE_INSTANCE_FIELD:
           {
-            log_region.error("Instance field %d is a duplicate for "
+              MessageDescriptor INSTANCE_FIELD_PRIVILEGE(3103, "undefined");
+            log_region.error(INSTANCE_FIELD_PRIVILEGE.id(),
+                             "Instance field %d is a duplicate for "
                                     "inline mapping (ID %lld)",
                                     bad_field, unique_op_id);
 #ifdef DEBUG_LEGION
@@ -2718,8 +2726,10 @@ namespace Legion {
           }
         case ERROR_BAD_PARENT_REGION:
           {
-            if (bad_index < 0)
-              log_region.error("Parent task %s (ID %lld) of inline mapping "
+              if (bad_index < 0) {
+                  MessageDescriptor PARENT_TASK_INLINE(3104, "undefined");
+              log_region.error(PARENT_TASK_INLINE.id(),
+                               "Parent task %s (ID %lld) of inline mapping "
                                "(ID %lld) does not have a region "
                                "requirement for region (%x,%x,%x) "
                                "as a parent of region requirement because "
@@ -2730,8 +2740,10 @@ namespace Legion {
                                requirement.region.index_space.id,
                                requirement.region.field_space.id, 
                                requirement.region.tree_id);
-            else if (bad_field == AUTO_GENERATE_ID)
-              log_region.error("Parent task %s (ID %lld) of inline mapping "
+              } else if (bad_field == AUTO_GENERATE_ID) {
+                  MessageDescriptor PARENT_TASK_INLINE(3105, "undefined");
+              log_region.error(PARENT_TASK_INLINE.id(),
+                               "Parent task %s (ID %lld) of inline mapping "
                                "(ID %lld) does not have a region "
                                "requirement for region (%x,%x,%x) "
                                "as a parent of region requirement because "
@@ -2743,8 +2755,10 @@ namespace Legion {
                                requirement.region.index_space.id,
                                requirement.region.field_space.id, 
                                requirement.region.tree_id, bad_index);
-            else
-              log_region.error("Parent task %s (ID %lld) of inline mapping "
+              } else {
+                  MessageDescriptor PARENT_TASK_INLINE(3106, "undefined");
+              log_region.error(PARENT_TASK_INLINE.id(),
+                               "Parent task %s (ID %lld) of inline mapping "
                                "(ID %lld) does not have a region "
                                "requirement for region (%x,%x,%x) "
                                "as a parent of region requirement because "
@@ -2756,6 +2770,7 @@ namespace Legion {
                                requirement.region.field_space.id, 
                                requirement.region.tree_id,
                                bad_index, bad_field);
+              }
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
@@ -2763,7 +2778,9 @@ namespace Legion {
           }
         case ERROR_BAD_REGION_PATH:
           {
-            log_region.error("Region (%x,%x,%x) is not a "
+              MessageDescriptor REGION_NOT_SUBREGION(3107, "undefined");
+            log_region.error(REGION_NOT_SUBREGION.id(),
+                             "Region (%x,%x,%x) is not a "
                              "sub-region of parent region "
    		             "(%x,%x,%x) for region requirement of inline "
                              "mapping (ID %lld)",
@@ -2781,7 +2798,9 @@ namespace Legion {
           }
         case ERROR_BAD_REGION_TYPE:
           {
-            log_region.error("Region requirement of inline mapping "
+              MessageDescriptor REGION_REQUIREMENT_INLINE(3108, "undefined");
+            log_region.error(REGION_REQUIREMENT_INLINE.id(),
+                             "Region requirement of inline mapping "
                                    "(ID %lld) cannot find privileges for field "
                                    "%d in parent task",
                                    unique_op_id, bad_field);
@@ -2792,7 +2811,9 @@ namespace Legion {
           }
         case ERROR_BAD_REGION_PRIVILEGES:
           {
-            log_region.error("Privileges %x for region " 
+              MessageDescriptor PRIVILEGES_FOR_REGION(3109, "undefined");
+            log_region.error(PRIVILEGES_FOR_REGION.id(),
+                             "Privileges %x for region "
                                    "(%x,%x,%x) are not a subset of privileges "
                                    "of parent task's privileges for region "
                                    "requirement of inline mapping (ID %lld)",
@@ -2820,7 +2841,9 @@ namespace Legion {
       int parent_index = parent_ctx->find_parent_region_req(requirement);
       if (parent_index < 0)
       {
-        log_region.error("Parent task %s (ID %lld) of inline mapping "
+          MessageDescriptor PARENT_TASK_INLINE(3110, "undefined");
+        log_region.error(PARENT_TASK_INLINE.id(),
+                         "Parent task %s (ID %lld) of inline mapping "
                                    "(ID %lld) does not have a region "
                                    "requirement for region (%x,%x,%x) "
                                    "as a parent of region requirement.",
@@ -4153,7 +4176,9 @@ namespace Legion {
       if (!permit_proj && ((requirement.handle_type == PART_PROJECTION) ||
           (requirement.handle_type == REG_PROJECTION)))
       {
-        log_region.error("Projection region requirements are not "
+          MessageDescriptor PROJECTION_REGION_REQUIREMENTS(3111, "undefined");
+        log_region.error(PROJECTION_REGION_REQUIREMENTS.id(),
+                         "Projection region requirements are not "
                                "permitted for copy operations (in task %s)",
                                parent_ctx->get_task_name());
 #ifdef DEBUG_LEGION
@@ -4173,7 +4198,9 @@ namespace Legion {
           break;
         case ERROR_INVALID_REGION_HANDLE:
           {
-            log_region.error("Requirest for invalid region handle "
+              MessageDescriptor REQUEST_INVALID_REGION(3112, "undefined");
+            log_region.error(REQUEST_INVALID_REGION.id(),
+                             "Requirest for invalid region handle "
                                    "(%x,%d,%d) for index %d of %s "
                                    "requirements of copy operation (ID %lld)",
                                    requirement.region.index_space.id, 
@@ -4192,7 +4219,9 @@ namespace Legion {
                             (requirement.handle_type == REG_PROJECTION)
                              ? requirement.region.field_space : 
                                requirement.partition.field_space;
-            log_region.error("Field %d is not a valid field of field "
+              MessageDescriptor FIELD_NOT_VALID(3113, "undefined");
+            log_region.error(FIELD_NOT_VALID.id(),
+                             "Field %d is not a valid field of field "
                                    "space %d for index %d of %s requirements "
                                    "of copy operation (ID %lld)",
                                    bad_field, sp.id, idx, 
@@ -4205,7 +4234,9 @@ namespace Legion {
           }
         case ERROR_INVALID_INSTANCE_FIELD:
           {
-            log_region.error("Instance field %d is not one of the "
+              MessageDescriptor INSTANCE_FIELD_PRIVILEGE(3114, "undefined");
+            log_region.error(INSTANCE_FIELD_PRIVILEGE.id(),
+                             "Instance field %d is not one of the "
                                    "privilege fields for index %d of %s "
                                    "requirements of copy operation (ID %lld)",
                                     bad_field, idx, 
@@ -4218,7 +4249,9 @@ namespace Legion {
           }
         case ERROR_DUPLICATE_INSTANCE_FIELD:
           {
-            log_region.error("Instance field %d is a duplicate for "
+              MessageDescriptor INSTANCE_FIELD_DUPLICATE(3115, "undefined");
+            log_region.error(INSTANCE_FIELD_DUPLICATE.id(),
+                             "Instance field %d is a duplicate for "
                                     "index %d of %s requirements of copy "
                                     "operation (ID %lld)",
                                     bad_field, idx,
@@ -4231,8 +4264,10 @@ namespace Legion {
           }
         case ERROR_BAD_PARENT_REGION:
           {
-            if (bad_index < 0)
-              log_region.error("Parent task %s (ID %lld) of copy operation "
+              if (bad_index < 0) {
+                  MessageDescriptor PARENT_TASK_COPY(3116, "undefined");
+              log_region.error(PARENT_TASK_COPY.id(),
+                               "Parent task %s (ID %lld) of copy operation "
                                "(ID %lld) does not have a region "
                                "requirement for region (%x,%x,%x) "
                                "as a parent of index %d of %s region "
@@ -4245,8 +4280,10 @@ namespace Legion {
                                requirement.region.field_space.id, 
                                requirement.region.tree_id,
                                idx, (src ? "source" : "destination"));
-            else if (bad_field == AUTO_GENERATE_ID)
-              log_region.error("Parent task %s (ID %lld) of copy operation "
+              } else if (bad_field == AUTO_GENERATE_ID) {
+                  MessageDescriptor PARENT_TASK_COPY(3117, "undefined");
+              log_region.error(PARENT_TASK_COPY.id(),
+                               "Parent task %s (ID %lld) of copy operation "
                                "(ID %lld) does not have a region "
                                "requirement for region (%x,%x,%x) "
                                "as a parent of index %d of %s region "
@@ -4260,8 +4297,10 @@ namespace Legion {
                                requirement.region.tree_id,
                                idx, (src ? "source" : "destination"), 
                                bad_index);
-            else
-              log_region.error("Parent task %s (ID %lld) of copy operation "
+              } else {
+                  MessageDescriptor PARENT_TASK_COPY(3118, "undefined");
+              log_region.error(PARENT_TASK_COPY.id(),
+                               "Parent task %s (ID %lld) of copy operation "
                                "(ID %lld) does not have a region "
                                "requirement for region (%x,%x,%x) "
                                "as a parent of index %d of %s region "
@@ -4275,6 +4314,7 @@ namespace Legion {
                                requirement.region.tree_id,
                                idx, (src ? "source" : "destination"),
                                bad_index, bad_field);
+              }
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
@@ -4282,7 +4322,9 @@ namespace Legion {
           }
         case ERROR_BAD_REGION_PATH:
           {
-            log_region.error("Region (%x,%x,%x) is not a "
+              MessageDescriptor REGION_NOT_SUBREGION(3119, "undefined");
+            log_region.error(REGION_NOT_SUBREGION.id(),
+                             "Region (%x,%x,%x) is not a "
                                    "sub-region of parent region "
                                    "(%x,%x,%x) for index %d of "
                                    "%s region requirements of copy "
@@ -4302,7 +4344,9 @@ namespace Legion {
           }
         case ERROR_BAD_REGION_TYPE:
           {
-            log_region.error("Region requirement of copy operation "
+              MessageDescriptor REGION_REQUIREMENT_COPY(3120, "undefined");
+            log_region.error(REGION_REQUIREMENT_COPY.id(),
+                             "Region requirement of copy operation "
                                    "(ID %lld) cannot find privileges for field "
                                    "%d in parent task from index %d of %s "
                                    "region requirements",
@@ -4315,7 +4359,9 @@ namespace Legion {
           }
         case ERROR_BAD_REGION_PRIVILEGES:
           {
-            log_region.error("Privileges %x for region (%x,%x,%x) are "
+              MessageDescriptor PRIVILEGES_FOR_REGION(3121, "undefined");
+            log_region.error(PRIVILEGES_FOR_REGION.id(),
+                             "Privileges %x for region (%x,%x,%x) are "
                                    "not a subset of privileges of parent "
                                    "task's privileges for index %d of %s "
                                    "region requirements for copy "
@@ -4350,7 +4396,9 @@ namespace Legion {
           parent_ctx->find_parent_region_req(src_requirements[idx]);
         if (parent_index < 0)
         {
-          log_region.error("Parent task %s (ID %lld) of copy operation "
+            MessageDescriptor PARENT_TASK_COPY(3122, "undefined");
+          log_region.error(PARENT_TASK_COPY.id(),
+                           "Parent task %s (ID %lld) of copy operation "
                                    "(ID %lld) does not have a region "
                                    "requirement for region (%x,%x,%x) "
                                    "as a parent of index %d of source region "
@@ -4375,7 +4423,9 @@ namespace Legion {
           parent_ctx->find_parent_region_req(dst_requirements[idx]);
         if (parent_index < 0)
         {
-          log_region.error("Parent task %s (ID %lld) of copy operation "
+            MessageDescriptor PARENT_TASK_COPY(3123, "undefined");
+          log_region.error(PARENT_TASK_COPY.id(),
+                           "Parent task %s (ID %lld) of copy operation "
                                    "(ID %lld) does not have a region "
                                    "requirement for region (%x,%x,%x) "
                                    "as a parent of index %d of destination "
@@ -8405,7 +8455,9 @@ namespace Legion {
           break;
         case ERROR_INVALID_REGION_HANDLE:
           {
-            log_region.error("Requirest for invalid region handle "
+              MessageDescriptor REQUEST_INVALID_REGION(3124, "undefined");
+            log_region.error(REQUEST_INVALID_REGION.id(),
+                             "Requirest for invalid region handle "
                                    "(%x,%d,%d) of requirement for "
                                    "acquire operation (ID %lld)",
                                    requirement.region.index_space.id, 
@@ -8423,7 +8475,9 @@ namespace Legion {
                             (requirement.handle_type == REG_PROJECTION)
                              ? requirement.region.field_space : 
                                requirement.partition.field_space;
-            log_region.error("Field %d is not a valid field of field "
+              MessageDescriptor FIELD_NOT_VALID(3125, "undefined");
+            log_region.error(FIELD_NOT_VALID.id(),
+                             "Field %d is not a valid field of field "
                                    "space %d of requirement for acquire "
                                    "operation (ID %lld)",
                                    bad_field, sp.id, unique_op_id);
@@ -8434,8 +8488,10 @@ namespace Legion {
           }
         case ERROR_BAD_PARENT_REGION:
           {
-            if (bad_index < 0)
-              log_region.error("Parent task %s (ID %lld) of acquire "
+              if (bad_index < 0) {
+                  MessageDescriptor PARENT_TASK_ACQUIRE(3126, "undefined");
+              log_region.error(PARENT_TASK_ACQUIRE.id(),
+                               "Parent task %s (ID %lld) of acquire "
                                "operation (ID %lld) does not have a region "
                                "requirement for region (%x,%x,%x) as a parent "
                                "because no 'parent' region had that name.",
@@ -8445,8 +8501,10 @@ namespace Legion {
                                requirement.region.index_space.id,
                                requirement.region.field_space.id, 
                                requirement.region.tree_id);
-            else if (bad_field == AUTO_GENERATE_ID)
-              log_region.error("Parent task %s (ID %lld) of acquire "
+              } else if (bad_field == AUTO_GENERATE_ID) {
+                  MessageDescriptor PARENT_TASK_ACQUIRE(3127, "undefined");
+              log_region.error(PARENT_TASK_ACQUIRE.id(),
+                               "Parent task %s (ID %lld) of acquire "
                                "operation (ID %lld) does not have a region "
                                "requirement for region (%x,%x,%x) as a parent "
                                "because parent requirement %d did not have "
@@ -8457,8 +8515,10 @@ namespace Legion {
                                requirement.region.index_space.id,
                                requirement.region.field_space.id, 
                                requirement.region.tree_id, bad_index);
-            else
-              log_region.error("Parent task %s (ID %lld) of acquire "
+              } else {
+                  MessageDescriptor PARENT_TASK_ACQUIRE(3128, "undefined");
+              log_region.error(PARENT_TASK_ACQUIRE.id(),
+                               "Parent task %s (ID %lld) of acquire "
                                "operation (ID %lld) does not have a region "
                                "requirement for region (%x,%x,%x) as a parent "
                                "because region requirement %d was missing "
@@ -8470,6 +8530,7 @@ namespace Legion {
                                requirement.region.field_space.id, 
                                requirement.region.tree_id,
                                bad_index, bad_field);
+              }
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
@@ -8477,7 +8538,9 @@ namespace Legion {
           }
         case ERROR_BAD_REGION_PATH:
           {
-            log_region.error("Region (%x,%x,%x) is not a "
+              MessageDescriptor REGION_NOT_SUBREGION(3129, "undefined");
+            log_region.error(REGION_NOT_SUBREGION.id(),
+                             "Region (%x,%x,%x) is not a "
                              "sub-region of parent region (%x,%x,%x) of "
                              "requirement for acquire operation (ID %lld)",
                              requirement.region.index_space.id,
@@ -8493,7 +8556,9 @@ namespace Legion {
           }
         case ERROR_BAD_REGION_TYPE:
           {
-            log_region.error("Region requirement of acquire operation "
+              MessageDescriptor REGION_REQUIREMENT_ACQUIRE(3130, "undefined");
+            log_region.error(REGION_REQUIREMENT_ACQUIRE.id(),
+                             "Region requirement of acquire operation "
                                    "(ID %lld) cannot find privileges for field "
                                    "%d in parent task",
                                    unique_op_id, bad_field);
@@ -8520,7 +8585,9 @@ namespace Legion {
                                                     false/*check privilege*/);
       if (parent_index < 0)
       {
-        log_region.error("Parent task %s (ID %lld) of acquire "
+          MessageDescriptor PARENT_TASK_ACQUIRE(3131, "undefined");
+        log_region.error(PARENT_TASK_ACQUIRE.id(),
+                         "Parent task %s (ID %lld) of acquire "
                                "operation (ID %lld) does not have a region "
                                "requirement for region (%x,%x,%x) as a parent",
                                parent_ctx->get_task_name(), 
@@ -9082,7 +9149,9 @@ namespace Legion {
           break;
         case ERROR_INVALID_REGION_HANDLE:
           {
-            log_region.error("Requirest for invalid region handle "
+              MessageDescriptor REQUEST_INVALID_REGION(3132, "undefined");
+            log_region.error(REQUEST_INVALID_REGION.id(),
+                             "Requirest for invalid region handle "
                                    "(%x,%d,%d) of requirement for "
                                    "release operation (ID %lld)",
                                    requirement.region.index_space.id, 
@@ -9100,7 +9169,9 @@ namespace Legion {
                             (requirement.handle_type == REG_PROJECTION)
                              ? requirement.region.field_space : 
                                requirement.partition.field_space;
-            log_region.error("Field %d is not a valid field of field "
+              MessageDescriptor FIELD_NOT_VALID(3133, "undefined");
+            log_region.error(FIELD_NOT_VALID.id(),
+                             "Field %d is not a valid field of field "
                                    "space %d of requirement for release "
                                    "operation (ID %lld)",
                                    bad_field, sp.id, unique_op_id);
@@ -9111,8 +9182,10 @@ namespace Legion {
           }
         case ERROR_BAD_PARENT_REGION:
           {
-            if (bad_index < 0)
-              log_region.error("Parent task %s (ID %lld) of release "
+              if (bad_index < 0) {
+                  MessageDescriptor PARENT_TASK_RELEASE(3134, "undefined");
+              log_region.error(PARENT_TASK_RELEASE.id(),
+                               "Parent task %s (ID %lld) of release "
                                "operation (ID %lld) does not have a region "
                                "requirement for region (%x,%x,%x) as a parent "
                                "because no 'parent' region had that name.",
@@ -9122,8 +9195,10 @@ namespace Legion {
                                requirement.region.index_space.id,
                                requirement.region.field_space.id, 
                                requirement.region.tree_id);
-            else if (bad_field == AUTO_GENERATE_ID)
-              log_region.error("Parent task %s (ID %lld) of release "
+              } else if (bad_field == AUTO_GENERATE_ID) {
+                  MessageDescriptor PARENT_TASK_RELEASE(3135, "undefined");
+              log_region.error(PARENT_TASK_RELEASE.id(),
+                               "Parent task %s (ID %lld) of release "
                                "operation (ID %lld) does not have a region "
                                "requirement for region (%x,%x,%x) as a parent "
                                "because parent requirement %d did not have "
@@ -9134,8 +9209,10 @@ namespace Legion {
                                requirement.region.index_space.id,
                                requirement.region.field_space.id, 
                                requirement.region.tree_id, bad_index);
-            else
-              log_region.error("Parent task %s (ID %lld) of release "
+              } else {
+                  MessageDescriptor PARENT_TASK_RELEASE(3136, "undefined");
+              log_region.error(PARENT_TASK_RELEASE.id(),
+                               "Parent task %s (ID %lld) of release "
                                "operation (ID %lld) does not have a region "
                                "requirement for region (%x,%x,%x) as a parent "
                                "because region requirement %d was missing " 
@@ -9147,6 +9224,7 @@ namespace Legion {
                                requirement.region.field_space.id, 
                                requirement.region.tree_id, 
                                bad_index, bad_field);
+              }
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
@@ -9154,7 +9232,9 @@ namespace Legion {
           }
         case ERROR_BAD_REGION_PATH:
           {
-            log_region.error("Region (%x,%x,%x) is not a "
+              MessageDescriptor REGION_NOT_SUBREGION(3137, "undefined");
+            log_region.error(REGION_NOT_SUBREGION.id(),
+                             "Region (%x,%x,%x) is not a "
                                    "sub-region of parent region (%x,%x,%x) "
 			           "of requirement for release "
                                    "operation (ID %lld)",
@@ -9171,7 +9251,9 @@ namespace Legion {
           }
         case ERROR_BAD_REGION_TYPE:
           {
-            log_region.error("Region requirement of release operation "
+              MessageDescriptor REGION_REQUIREMENT_RELEASE(3138, "undefined");
+            log_region.error(REGION_REQUIREMENT_RELEASE.id(),
+                             "Region requirement of release operation "
                                    "(ID %lld) cannot find privileges for field "
                                    "%d in parent task",
                                    unique_op_id, bad_field);
@@ -9197,7 +9279,9 @@ namespace Legion {
                                                     false/*check privilege*/);
       if (parent_index < 0)
       {
-        log_region.error("Parent task %s (ID %lld) of release "
+          MessageDescriptor PARENT_TASK_RELEASE(3139, "undefined");
+        log_region.error(PARENT_TASK_RELEASE.id(),
+                         "Parent task %s (ID %lld) of release "
                                "operation (ID %lld) does not have a region "
                                "requirement for region (%x,%x,%x) as a parent",
                                parent_ctx->get_task_name(), 
@@ -11718,7 +11802,9 @@ namespace Legion {
       int parent_index = parent_ctx->find_parent_region_req(requirement);
       if (parent_index < 0)
       {
-        log_region.error("Parent task %s (ID %lld) of partition "
+          MessageDescriptor PARENT_TASK_PARTITION(3140, "undefined");
+        log_region.error(PARENT_TASK_PARTITION.id(),
+                         "Parent task %s (ID %lld) of partition "
                                    "operation (ID %lld) does not have a region "
                                    "requirement for region (%x,%x,%x) "
                                    "as a parent of region requirement.",
@@ -12284,7 +12370,9 @@ namespace Legion {
           break;
         case ERROR_INVALID_REGION_HANDLE:
           {
-            log_region.error("Requirest for invalid region handle "
+              MessageDescriptor REQUEST_INVALID_REGION(3141, "undefined");
+            log_region.error(REQUEST_INVALID_REGION.id(),
+                             "Requirest for invalid region handle "
                                    "(%x,%d,%d) for fill operation"
                                    "(ID %lld)",
                                    requirement.region.index_space.id, 
@@ -12302,7 +12390,9 @@ namespace Legion {
                             (requirement.handle_type == REG_PROJECTION)
                              ? requirement.region.field_space : 
                                requirement.partition.field_space;
-            log_region.error("Field %d is not a valid field of field "
+              MessageDescriptor FIELD_NOT_VALID(3142, "undefined");
+            log_region.error(FIELD_NOT_VALID.id(),
+                             "Field %d is not a valid field of field "
                                    "space %d for fill operation (ID %lld)",
                                    bad_field, sp.id, unique_op_id);
 #ifdef DEBUG_LEGION
@@ -12312,7 +12402,9 @@ namespace Legion {
           }
         case ERROR_INVALID_INSTANCE_FIELD:
           {
-            log_region.error("Instance field %d is not one of the "
+              MessageDescriptor INSTNCE_FIELD_PRIVILEGE(3143, "undefined");
+            log_region.error(INSTNCE_FIELD_PRIVILEGE.id(),
+                             "Instance field %d is not one of the "
                                    "privilege fields for fill operation"
                                    "(ID %lld)",
                                     bad_field, unique_op_id);
@@ -12323,7 +12415,9 @@ namespace Legion {
           }
         case ERROR_DUPLICATE_INSTANCE_FIELD:
           {
-            log_region.error("Instance field %d is a duplicate for "
+              MessageDescriptor INSTANCE_FIELD_DUPLICATE(3144, "undefined");
+            log_region.error(INSTANCE_FIELD_DUPLICATE.id(),
+                             "Instance field %d is a duplicate for "
                                     "fill operation (ID %lld)",
                                     bad_field, unique_op_id);
 #ifdef DEBUG_LEGION
@@ -12333,8 +12427,10 @@ namespace Legion {
           }
         case ERROR_BAD_PARENT_REGION:
           {
-            if (bad_index < 0)
-              log_region.error("Parent task %s (ID %lld) of fill operation "
+              if (bad_index < 0) {
+                  MessageDescriptor PARENT_TASK_FILL(3145, "undefined");
+              log_region.error(PARENT_TASK_FILL.id(),
+                               "Parent task %s (ID %lld) of fill operation "
                                "(ID %lld) does not have a region "
                                "requirement for region (%x,%x,%x) "
                                "as a parent of region requirement because "
@@ -12345,8 +12441,10 @@ namespace Legion {
                                requirement.region.index_space.id,
                                requirement.region.field_space.id, 
                                requirement.region.tree_id);
-            else if (bad_field == AUTO_GENERATE_ID)
-              log_region.error("Parent task %s (ID %lld) of fill operation "
+              } else if (bad_field == AUTO_GENERATE_ID) {
+                  MessageDescriptor PARENT_TASK_FILL(3146, "undefined");
+              log_region.error(PARENT_TASK_FILL.id(),
+                               "Parent task %s (ID %lld) of fill operation "
                                "(ID %lld) does not have a region "
                                "requirement for region (%x,%x,%x) "
                                "as a parent of region requirement because "
@@ -12358,8 +12456,10 @@ namespace Legion {
                                requirement.region.index_space.id,
                                requirement.region.field_space.id, 
                                requirement.region.tree_id, bad_index);
-            else
-              log_region.error("Parent task %s (ID %lld) of fill operation "
+              } else {
+                  MessageDescriptor PARENT_TASK_FILL(3147, "undefined");
+              log_region.error(PARENT_TASK_FILL.id(),
+                               "Parent task %s (ID %lld) of fill operation "
                                "(ID %lld) does not have a region "
                                "requirement for region (%x,%x,%x) "
                                "as a parent of region requirement because "
@@ -12371,6 +12471,7 @@ namespace Legion {
                                requirement.region.field_space.id, 
                                requirement.region.tree_id,
                                bad_index, bad_field);
+              }
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
@@ -12378,7 +12479,9 @@ namespace Legion {
           }
         case ERROR_BAD_REGION_PATH:
           {
-            log_region.error("Region (%x,%x,%x) is not a "
+              MessageDescriptor REGION_NOT_SUBREGION(3148, "undefined");
+            log_region.error(REGION_NOT_SUBREGION.id(),
+                             "Region (%x,%x,%x) is not a "
                                    "sub-region of parent region "
                                    "(%x,%x,%x) for region requirement of fill "
                                    "operation (ID %lld)",
@@ -12396,7 +12499,9 @@ namespace Legion {
           }
         case ERROR_BAD_REGION_TYPE:
           {
-            log_region.error("Region requirement of fill operation "
+              MessageDescriptor REGION_REQUIREMENT_FILL(3149, "undefined");
+            log_region.error(REGION_REQUIREMENT_FILL.id(),
+                             "Region requirement of fill operation "
                                    "(ID %lld) cannot find privileges for field "
                                    "%d in parent task",
                                    unique_op_id, bad_field);
@@ -12407,7 +12512,9 @@ namespace Legion {
           }
         case ERROR_BAD_REGION_PRIVILEGES:
           {
-            log_region.error("Privileges %x for region "
+              MessageDescriptor PRIVILEGES_REGION_SUBSETL(3150, "undefined");
+            log_region.error(PRIVILEGES_REGION_SUBSETL.id(),
+                             "Privileges %x for region "
                                    "(%x,%x,%x) are not a subset of privileges "
                                    "of parent task's privileges for region "
                                    "requirement of fill operation (ID %lld)",
@@ -12435,7 +12542,9 @@ namespace Legion {
       int parent_index = parent_ctx->find_parent_region_req(requirement);
       if (parent_index < 0)
       {
-        log_region.error("Parent task %s (ID %lld) of fill "
+          MessageDescriptor PARENT_TASK_FILL(3151, "undefined");
+        log_region.error(PARENT_TASK_FILL.id(),
+                         "Parent task %s (ID %lld) of fill "
                                "operation (ID %lld) does not have a region "
                                "requirement for region (%x,%x,%x) as a parent",
                                parent_ctx->get_task_name(), 
@@ -13378,7 +13487,9 @@ namespace Legion {
           break;
         case ERROR_INVALID_REGION_HANDLE:
           {
-            log_region.error("Requirest for invalid region handle "
+              MessageDescriptor REQUIREMENTS_INVALID_REGION(3152, "undefined");
+            log_region.error(REQUIREMENTS_INVALID_REGION.id(),
+                             "Requirest for invalid region handle "
                                    "(%x,%d,%d) for attach operation "
                                    "(ID %lld)",
                                    requirement.region.index_space.id, 
@@ -13396,7 +13507,9 @@ namespace Legion {
                             (requirement.handle_type == REG_PROJECTION)
                              ? requirement.region.field_space : 
                                requirement.partition.field_space;
-            log_region.error("Field %d is not a valid field of field "
+              MessageDescriptor FIELD_NOT_VALID(3153, "undefined");
+            log_region.error(FIELD_NOT_VALID.id(),
+                             "Field %d is not a valid field of field "
                                    "space %d for attach operation (ID %lld)",
                                    bad_field, sp.id, unique_op_id);
 #ifdef DEBUG_LEGION
@@ -13406,7 +13519,9 @@ namespace Legion {
           }
         case ERROR_INVALID_INSTANCE_FIELD:
           {
-            log_region.error("Instance field %d is not one of the "
+              MessageDescriptor INSTANCE_FIELD_PRIVILEGE(3154, "undefined");
+            log_region.error(INSTANCE_FIELD_PRIVILEGE.id(),
+                             "Instance field %d is not one of the "
                                    "privilege fields for attach operation "
                                    "(ID %lld)",
                                     bad_field, unique_op_id);
@@ -13417,7 +13532,9 @@ namespace Legion {
           }
         case ERROR_DUPLICATE_INSTANCE_FIELD:
           {
-            log_region.error("Instance field %d is a duplicate for "
+              MessageDescriptor INSTANCE_FIELD_DUPLICATE(3155, "undefined");
+            log_region.error(INSTANCE_FIELD_DUPLICATE.id(),
+                             "Instance field %d is a duplicate for "
                                     "attach operation (ID %lld)",
                                     bad_field, unique_op_id);
 #ifdef DEBUG_LEGION
@@ -13427,8 +13544,10 @@ namespace Legion {
           }
         case ERROR_BAD_PARENT_REGION:
           {
-            if (bad_index > 0)
-              log_region.error("Parent task %s (ID %lld) of attach operation "
+              if (bad_index > 0) {
+                  MessageDescriptor PARENT_TASK_ATTACH(3156, "undefined");
+              log_region.error(PARENT_TASK_ATTACH.id(),
+                               "Parent task %s (ID %lld) of attach operation "
                                "(ID %lld) does not have a region "
                                "requirement for region (%x,%x,%x) "
                                "as a parent of region requirement because "
@@ -13439,8 +13558,10 @@ namespace Legion {
                                requirement.region.index_space.id,
                                requirement.region.field_space.id, 
                                requirement.region.tree_id);
-            else if (bad_field == AUTO_GENERATE_ID)
-              log_region.error("Parent task %s (ID %lld) of attach operation "
+              } else if (bad_field == AUTO_GENERATE_ID) {
+                  MessageDescriptor PARENT_TASK_ATTACH(3157, "undefined");
+              log_region.error(PARENT_TASK_ATTACH.id(),
+                               "Parent task %s (ID %lld) of attach operation "
                                "(ID %lld) does not have a region "
                                "requirement for region (%x,%x,%x) "
                                "as a parent of region requirement because "
@@ -13452,8 +13573,10 @@ namespace Legion {
                                requirement.region.index_space.id,
                                requirement.region.field_space.id, 
                                requirement.region.tree_id, bad_index);
-            else
-              log_region.error("Parent task %s (ID %lld) of attach operation "
+              } else {
+                  MessageDescriptor PARENT_TASK_ATTACH(3158, "undefined");
+              log_region.error(PARENT_TASK_ATTACH.id(),
+                               "Parent task %s (ID %lld) of attach operation "
                                "(ID %lld) does not have a region "
                                "requirement for region (%x,%x,%x) "
                                "as a parent of region requirement because "
@@ -13465,6 +13588,7 @@ namespace Legion {
                                requirement.region.field_space.id, 
                                requirement.region.tree_id,
                                bad_index, bad_field);
+              }
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
@@ -13472,7 +13596,9 @@ namespace Legion {
           }
         case ERROR_BAD_REGION_PATH:
           {
-            log_region.error("Region (%x,%x,%x) is not a "
+              MessageDescriptor REGION_NOT_SUBREGION(3159, "undefined");
+            log_region.error(REGION_NOT_SUBREGION.id(),
+                             "Region (%x,%x,%x) is not a "
                              "sub-region of parent region "
                              "(%x,%x,%x) for region requirement of attach "
                              "operation (ID %lld)",
@@ -13490,7 +13616,9 @@ namespace Legion {
           }
         case ERROR_BAD_REGION_TYPE:
           {
-            log_region.error("Region requirement of attach operation "
+              MessageDescriptor REGION_REQUIREMENT_ATTACH(3160, "undefined");
+            log_region.error(REGION_REQUIREMENT_ATTACH.id(),
+                             "Region requirement of attach operation "
                                    "(ID %lld) cannot find privileges for field "
                                    "%d in parent task",
                                    unique_op_id, bad_field);
@@ -13513,7 +13641,9 @@ namespace Legion {
       int parent_index = parent_ctx->find_parent_region_req(requirement);
       if (parent_index < 0)
       {
-        log_region.error("Parent task %s (ID %lld) of attach "
+          MessageDescriptor PARENT_TASK_ATTACH(3161, "undefined");
+        log_region.error(PARENT_TASK_ATTACH.id(),
+                         "Parent task %s (ID %lld) of attach "
                                "operation (ID %lld) does not have a region "
                                "requirement for region (%x,%x,%x) as a parent",
                                parent_ctx->get_task_name(), 

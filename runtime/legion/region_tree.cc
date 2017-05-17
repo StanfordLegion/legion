@@ -3866,7 +3866,8 @@ namespace Legion {
       AddressSpaceID owner = FieldSpaceNode::get_owner_space(space, runtime); 
       if (owner == runtime->address_space)
       {
-        log_field.error("Unable to find entry for field space %x.", space.id);
+          MessageDescriptor UNABLE_FIND_ENTRY(2800, "undefined");
+        log_field.error(UNABLE_FIND_ENTRY.id(), "Unable to find entry for field space %x.", space.id);
 #ifdef DEBUG_LEGION
         assert(false);
 #endif
@@ -3904,7 +3905,9 @@ namespace Legion {
         field_nodes.find(space);
       if (finder == field_nodes.end())
       {
-        log_field.error("Unable to find entry for field space %x. "
+          MessageDescriptor UNABLE_FIND_ENTRY(2801, "undefined");
+        log_field.error(UNABLE_FIND_ENTRY.id(),
+                        "Unable to find entry for field space %x. "
                         "This is definitely a runtime bug.", space.id);
 #ifdef DEBUG_LEGION
         assert(false);
@@ -3942,7 +3945,9 @@ namespace Legion {
           RegionTreeNode::get_owner_space(handle.get_tree_id(), runtime);
         if (owner == runtime->address_space)
         {
-          log_region.error("Unable to find entry for logical region tree %d.",
+            MessageDescriptor UNABLE_FIND_ENTRY(3300, "undefined");
+          log_region.error(UNABLE_FIND_ENTRY.id(),
+                           "Unable to find entry for logical region tree %d.",
                            handle.get_tree_id());
           assert(false);
         }
@@ -4092,7 +4097,9 @@ namespace Legion {
           tree_nodes.find(tid);
       if (finder == tree_nodes.end())
       {
-        log_region.error("Unable to find top-level tree entry for "
+          MessageDescriptor UNABLE_FIND_ENTRY(3301, "undefined");
+        log_region.error(UNABLE_FIND_ENTRY.id(),
+                         "Unable to find top-level tree entry for "
                          "region tree %d.  This is either a runtime "
                          "bug or requires Legion fences if names are "
                          "being returned out of the context in which"
@@ -9486,7 +9493,9 @@ namespace Legion {
         AutoLock n_lock(node_lock);
         if (fields.find(fid) != fields.end())
         {
-          log_field.error("Illegal duplicate field ID %d used by the "
+            MessageDescriptor ILLEGAL_DUPLICATE_FIELD(2802, "undefined");
+          log_field.error(ILLEGAL_DUPLICATE_FIELD.id(),
+                          "Illegal duplicate field ID %d used by the "
                           "application in field space %d", fid, handle.id);
 #ifdef DEBUG_LEGION
           assert(false);
@@ -9497,7 +9506,9 @@ namespace Legion {
         int result = allocate_index();
         if (result < 0)
         {
-          log_field.error("Exceeded maximum number of allocated fields for "
+            MessageDescriptor EXCEEDED_MAXIMUM_NUMBER(2803, "undefined");
+          log_field.error(EXCEEDED_MAXIMUM_NUMBER.id(),
+                          "Exceeded maximum number of allocated fields for "
                           "field space %x. Change MAX_FIELDS from %d and "
                           "related macros at the top of legion_config.h and "
                           "recompile.", handle.id, MAX_FIELDS);
@@ -9579,7 +9590,9 @@ namespace Legion {
           FieldID fid = fids[idx];
           if (fields.find(fid) != fields.end())
           {
-            log_field.error("Illegal duplicate field ID %d used by the "
+              MessageDescriptor ILLEGAL_DUPLICATE_FIELD(2804, "undefined");
+            log_field.error(ILLEGAL_DUPLICATE_FIELD.id(),
+                            "Illegal duplicate field ID %d used by the "
                             "application in field space %d", fid, handle.id);
 #ifdef DEBUG_LEGION
             assert(false);
@@ -9590,7 +9603,9 @@ namespace Legion {
           int result = allocate_index();
           if (result < 0)
           {
-            log_field.error("Exceeded maximum number of allocated fields for "
+              MessageDescriptor EXCEEDED_MAXIMUM_NUMBER(2805, "undefined");
+            log_field.error(EXCEEDED_MAXIMUM_NUMBER.id(),
+                            "Exceeded maximum number of allocated fields for "
                             "field space %x. Change MAX_FIELDS from %d and "
                             "related macros at the top of legion_config.h and "
                             "recompile.", handle.id, MAX_FIELDS);
@@ -9806,7 +9821,9 @@ namespace Legion {
           FieldID fid = fids[idx];
           if (fields.find(fid) != fields.end())
           {
-            log_field.error("Illegal duplicate field ID %d used by the "
+              MessageDescriptor ILLEGAL_DUPLICATE_FIELD(2806, "undefined");
+            log_field.error(ILLEGAL_DUPLICATE_FIELD.id(),
+                            "Illegal duplicate field ID %d used by the "
                             "application in field space %d", fid, handle.id);
 #ifdef DEBUG_LEGION
             assert(false);

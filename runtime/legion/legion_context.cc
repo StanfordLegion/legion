@@ -1689,7 +1689,9 @@ namespace Legion {
         if (created_requirements[idx].region == child->regions[index].parent)
           return (regions.size() + idx);
       }
-      log_region.error("Parent task %s (ID %lld) of inline task %s "
+        MessageDescriptor PARENT_TASK_INLINE(3000, "undefined");
+      log_region.error(PARENT_TASK_INLINE.id(),
+                       "Parent task %s (ID %lld) of inline task %s "
                         "(ID %lld) does not have a region "
                         "requirement for region (%x,%x,%x) "
                         "as a parent of child task's region "

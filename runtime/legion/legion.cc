@@ -792,7 +792,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         if (IS_REDUCE(*this)) // Shouldn't use this constructor for reductions
         {
-            Internal::log_region.error("Use different RegionRequirement "
+            Internal::MessageDescriptor USE_DIFFERENT_REGIONREQUIREMENT(2900, "undefined");
+            Internal::log_region.error(USE_DIFFERENT_REGIONREQUIREMENT.id(),
+                                       "Use different RegionRequirement "
                                        "constructor for reductions");
             assert(false);
             exit(ERROR_USE_REDUCTION_REGION_REQ);
@@ -817,7 +819,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         if (IS_REDUCE(*this))
         {
-            Internal::log_region.error("Use different RegionRequirement "
+            Internal::MessageDescriptor USE_DIFFERENT_REGIONREQUIREMENT(2901, "undefined");
+            Internal::log_region.error(USE_DIFFERENT_REGIONREQUIREMENT.id(),
+                                       "Use different RegionRequirement "
                                        "constructor for reductions");
             assert(false);
             exit(ERROR_USE_REDUCTION_REGION_REQ);
@@ -842,7 +846,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         if (IS_REDUCE(*this))
         {
-            Internal::log_region.error("Use different RegionRequirement "
+            Internal::MessageDescriptor USE_DIFFERENT_REGIONREQUIREMENT(2902, "undefined");
+            Internal::log_region.error(USE_DIFFERENT_REGIONREQUIREMENT.id(),
+                                       "Use different RegionRequirement "
                                        "constructor for reductions");
             assert(false);
             exit(ERROR_USE_REDUCTION_REGION_REQ);
@@ -867,7 +873,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         if (redop == 0)
         {
-            Internal::log_region.error("Zero is not a valid ReductionOpID");
+            Internal::MessageDescriptor ZERO_NOT_VALID(2903, "undefined");
+            Internal::log_region.error(ZERO_NOT_VALID.id(), "Zero is not a valid ReductionOpID");
             assert(false);
             exit(ERROR_RESERVED_REDOP_ID);
         }
@@ -892,7 +899,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         if (redop == 0)
         {
-            Internal::log_region.error("Zero is not a valid ReductionOpID");
+            Internal::MessageDescriptor ZERO_NOT_VALID(2904, "undefined");
+            Internal::log_region.error(ZERO_NOT_VALID.id(), "Zero is not a valid ReductionOpID");
             assert(false);
             exit(ERROR_RESERVED_REDOP_ID);
         }
@@ -917,7 +925,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         if (redop == 0)
         {
-            Internal::log_region.error("Zero is not a valid ReductionOpID");
+            Internal::MessageDescriptor ZERO_NOT_VALID(2905, "undefined");
+            Internal::log_region.error(ZERO_NOT_VALID.id(), "Zero is not a valid ReductionOpID");
             assert(false);
             exit(ERROR_RESERVED_REDOP_ID);
         }
@@ -939,7 +948,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         if (IS_REDUCE(*this)) // Shouldn't use this constructor for reductions
         {
-            Internal::log_region.error("Use different RegionRequirement "
+            Internal::MessageDescriptor USE_DIFFERENT_REGIONREQUIREMENT(2906, "undefined");
+            Internal::log_region.error(USE_DIFFERENT_REGIONREQUIREMENT.id(),
+                                       "Use different RegionRequirement "
                                        "constructor for reductions");
             assert(false);
             exit(ERROR_USE_REDUCTION_REGION_REQ);
@@ -963,7 +974,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         if (IS_REDUCE(*this))
         {
-            Internal::log_region.error("Use different RegionRequirement "
+            Internal::MessageDescriptor USE_DIFFERENT_REGIONREQUIREMENT(2907, "undefined");
+            Internal::log_region.error(USE_DIFFERENT_REGIONREQUIREMENT.id(),
+                                       "Use different RegionRequirement "
                                        "constructor for reductions");
             assert(false);
             exit(ERROR_USE_REDUCTION_REGION_REQ);
@@ -987,7 +1000,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         if (IS_REDUCE(*this))
         {
-            Internal::log_region.error("Use different RegionRequirement "
+            Internal::MessageDescriptor USE_DIFFERENT_REGIONREQUIREMENT(2908, "undefined");
+            Internal::log_region.error(USE_DIFFERENT_REGIONREQUIREMENT.id(),
+                                       "Use different RegionRequirement "
                                        "constructor for reductions");
             assert(false);
             exit(ERROR_USE_REDUCTION_REGION_REQ);
@@ -1010,7 +1025,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         if (redop == 0)
         {
-            Internal::log_region.error("Zero is not a valid ReductionOpID");
+            Internal::MessageDescriptor ZERO_NOT_VALID(2909, "undefined");
+            Internal::log_region.error(ZERO_NOT_VALID.id(), "Zero is not a valid ReductionOpID");
             assert(false);
             exit(ERROR_RESERVED_REDOP_ID);
         }
@@ -1033,7 +1049,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         if (redop == 0)
         {
-            Internal::log_region.error("Zero is not a valid ReductionOpID");
+            Internal::MessageDescriptor ZERO_NOT_VALID(2910, "undefined");
+            Internal::log_region.error(ZERO_NOT_VALID.id(), "Zero is not a valid ReductionOpID");
             assert(false);
             exit(ERROR_RESERVED_REDOP_ID);
         }
@@ -1056,7 +1073,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         if (redop == 0)
         {
-            Internal::log_region.error("Zero is not a valid ReductionOpID");
+            Internal::MessageDescriptor ZERO_NOT_VALID(2911, "undefined");
+            Internal::log_region.error(ZERO_NOT_VALID.id(), "Zero is not a valid ReductionOpID");
             assert(false);
             exit(ERROR_RESERVED_REDOP_ID);
         }

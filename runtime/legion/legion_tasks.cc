@@ -1541,7 +1541,9 @@ namespace Legion {
             break;
           case ERROR_INVALID_REGION_HANDLE:
             {
-              log_region.error("Invalid region handle (%x,%d,%d)"
+                MessageDescriptor INVALID_REGION_HANDLE(3200, "undefined");
+              log_region.error(INVALID_REGION_HANDLE.id(),
+                               "Invalid region handle (%x,%d,%d)"
                               " for region requirement %d of task %s "
                               "(ID %lld)",
                               regions[idx].region.index_space.id, 
@@ -1555,7 +1557,9 @@ namespace Legion {
             }
           case ERROR_INVALID_PARTITION_HANDLE:
             {
-              log_region.error("Invalid partition handle (%x,%d,%d) "
+                MessageDescriptor INVALID_PARTITION_HANDLE(3201, "undefined");
+              log_region.error(INVALID_PARTITION_HANDLE.id(),
+                               "Invalid partition handle (%x,%d,%d) "
                                "for partition requirement %d of task %s "
                                "(ID %lld)",
                                regions[idx].partition.index_partition.id, 
@@ -1569,7 +1573,9 @@ namespace Legion {
             }
           case ERROR_BAD_PROJECTION_USE:
             {
-              log_region.error("Projection region requirement %d used "
+                MessageDescriptor PROJECTION_REGION_REQUIREMENT(3202, "undefined");
+              log_region.error(PROJECTION_REGION_REQUIREMENT.id(),
+                               "Projection region requirement %d used "
                                 "in non-index space task %s",
                                 idx, get_task_name());
 #ifdef DEBUG_LEGION
@@ -1579,7 +1585,9 @@ namespace Legion {
             }
           case ERROR_NON_DISJOINT_PARTITION:
             {
-              log_region.error("Non disjoint partition selected for "
+                MessageDescriptor NONDISJOINT_PARTITION_SELECTED(3203, "undefined");
+              log_region.error(NONDISJOINT_PARTITION_SELECTED.id(),
+                               "Non disjoint partition selected for "
                                 "writing region requirement %d of task "
                                 "%s.  All projection partitions "
                                 "which are not read-only and not reduce "
@@ -1596,7 +1604,9 @@ namespace Legion {
                 (regions[idx].handle_type == REG_PROJECTION) 
                   ? regions[idx].region.field_space : 
                     regions[idx].partition.field_space;
-              log_region.error("Field %d is not a valid field of field "
+                MessageDescriptor FIELD_NOT_VALID(3204, "undefined");
+              log_region.error(FIELD_NOT_VALID.id(),
+                               "Field %d is not a valid field of field "
                               "space %d for region %d of task %s "
                               "(ID %lld)",
                               bad_field, sp.id, idx, get_task_name(),
@@ -1608,7 +1618,9 @@ namespace Legion {
             }
           case ERROR_INVALID_INSTANCE_FIELD:
             {
-              log_region.error("Instance field %d is not one of the "
+                MessageDescriptor INSTANCE_FIELD_PRIVILEGE(3205, "undefined");
+              log_region.error(INSTANCE_FIELD_PRIVILEGE.id(),
+                               "Instance field %d is not one of the "
                                 "privilege fields for region %d of "
                                 "task %s (ID %lld)",
                                 bad_field, idx, get_task_name(), 
@@ -1620,7 +1632,9 @@ namespace Legion {
             }
           case ERROR_DUPLICATE_INSTANCE_FIELD:
             {
-              log_region.error("Instance field %d is a duplicate for "
+                MessageDescriptor INSTANCE_FIELD_DUPLICATE(3206, "undefined");
+              log_region.error(INSTANCE_FIELD_DUPLICATE.id(),
+                               "Instance field %d is a duplicate for "
                                 "region %d of task %s (ID %lld)",
                                 bad_field, idx, get_task_name(), 
                                 get_unique_id());
@@ -1631,8 +1645,10 @@ namespace Legion {
             }
           case ERROR_BAD_PARENT_REGION:
             {
-              if (bad_index < 0)
-                log_region.error("Parent task %s (ID %lld) of task %s "
+                if (bad_index < 0) {
+                    MessageDescriptor PARENT_TASK_TASK(3207, "undefined");
+                log_region.error(PARENT_TASK_TASK.id(),
+                                 "Parent task %s (ID %lld) of task %s "
                                   "(ID %lld) does not have a region "
                                   "requirement for region " 
                                   "(%x,%x,%x) as a parent of child task's "
@@ -1644,8 +1660,10 @@ namespace Legion {
                                   regions[idx].parent.index_space.id,
                                   regions[idx].parent.field_space.id, 
                                   regions[idx].parent.tree_id, idx);
-              else if (bad_field == AUTO_GENERATE_ID)
-                log_region.error("Parent task %s (ID %lld) of task %s "
+                } else if (bad_field == AUTO_GENERATE_ID) {
+                    MessageDescriptor PARENT_TASK_TASK(3208, "undefined");
+                log_region.error(PARENT_TASK_TASK.id(),
+                                 "Parent task %s (ID %lld) of task %s "
                                   "(ID %lld) does not have a region "
                                   "requirement for region " 
                                   "(%x,%x,%x) as a parent of child task's "
@@ -1658,8 +1676,10 @@ namespace Legion {
                                   regions[idx].parent.index_space.id,
                                   regions[idx].parent.field_space.id, 
                                   regions[idx].parent.tree_id, idx, bad_index);
-              else
-                log_region.error("Parent task %s (ID %lld) of task %s "
+                } else {
+                    MessageDescriptor PARENT_TASK_TASK(3209, "undefined");
+                log_region.error(PARENT_TASK_TASK.id(),
+                                 "Parent task %s (ID %lld) of task %s "
                                   "(ID %lld) does not have a region "
                                   "requirement for region " 
                                   "(%x,%x,%x) as a parent of child task's "
@@ -1672,6 +1692,7 @@ namespace Legion {
                                   regions[idx].parent.field_space.id, 
                                   regions[idx].parent.tree_id, idx,
                                   bad_index, bad_field);
+                }
 #ifdef DEBUG_LEGION
               assert(false);
 #endif
@@ -1679,7 +1700,9 @@ namespace Legion {
             }
           case ERROR_BAD_REGION_PATH:
             {
-              log_region.error("Region (%x,%x,%x) is not a "
+                MessageDescriptor REGION_NOT_SUBREGION(3210, "undefined");
+              log_region.error(REGION_NOT_SUBREGION.id(),
+                               "Region (%x,%x,%x) is not a "
                                 "sub-region of parent region "
                                 "(%x,%x,%x) for region requirement %d of "
                                 "task %s (ID %lld)",
@@ -1695,7 +1718,9 @@ namespace Legion {
             }
           case ERROR_BAD_PARTITION_PATH:
             {
-              log_region.error("Partition (%x,%x,%x) is not a "
+                MessageDescriptor PARTITION_NOT_SUBPARTITION(3211, "undefined");
+              log_region.error(PARTITION_NOT_SUBPARTITION.id(),
+                               "Partition (%x,%x,%x) is not a "
                                "sub-partition of parent region "
                                "(%x,%x,%x) for region "
                                "requirement %d task %s (ID %lld)",
@@ -1711,7 +1736,9 @@ namespace Legion {
             }
           case ERROR_BAD_REGION_TYPE:
             {
-              log_region.error("Region requirement %d of task %s "
+                MessageDescriptor REGION_REQUIREMENT_TASK(3212, "undefined");
+              log_region.error(REGION_REQUIREMENT_TASK.id(),
+                               "Region requirement %d of task %s "
                                      "(ID %lld) "
                                      "cannot find privileges for field %d in "
                                      "parent task",
@@ -1724,7 +1751,9 @@ namespace Legion {
             }
           case ERROR_BAD_REGION_PRIVILEGES:
             {
-              log_region.error("Privileges %x for region " 
+                MessageDescriptor PRIVILEGES_REGION_NOTSUBSET(3213, "undefined");
+              log_region.error(PRIVILEGES_REGION_NOTSUBSET.id(),
+                               "Privileges %x for region "
                                "(%x,%x,%x) are not a subset of privileges " 
                                "of parent task's privileges for "
                                "region requirement %d of task %s "
@@ -1741,7 +1770,9 @@ namespace Legion {
             }
           case ERROR_BAD_PARTITION_PRIVILEGES:
             {
-              log_region.error("Privileges %x for partition (%x,%x,%x) "
+                MessageDescriptor PRIVILEGES_PARTITION_NOTSUBSET(3214, "undefined");
+              log_region.error(PRIVILEGES_PARTITION_NOTSUBSET.id(),
+                               "Privileges %x for partition (%x,%x,%x) "
                                "are not a subset of privileges of parent "
                                "task's privileges for "
                                "region requirement %d of task %s "
@@ -2285,7 +2316,9 @@ namespace Legion {
           parent_ctx->find_parent_region_req(regions[idx]);
         if (parent_index < 0)
         {
-          log_region.error("Parent task %s (ID %lld) of task %s "
+            MessageDescriptor PARENT_TASK_TASK(3215, "undefined");
+          log_region.error(PARENT_TASK_TASK.id(),
+                           "Parent task %s (ID %lld) of task %s "
                            "(ID %lld) does not have a region "
                            "requirement for region "
                            "(%x,%x,%x) as a parent of child task's "
