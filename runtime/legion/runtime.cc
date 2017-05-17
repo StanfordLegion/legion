@@ -7283,7 +7283,7 @@ namespace Legion {
         }
       }
       else
-        send_semantic_info(target, tag, result, size, is_mutable);
+        send_semantic_info(target, tag, result, size, is_mutable, ready);
     }
 
     //--------------------------------------------------------------------------

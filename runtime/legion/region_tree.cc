@@ -5629,7 +5629,7 @@ namespace Legion {
     void IndexSpaceNode::send_semantic_info(AddressSpaceID target,
                                             SemanticTag tag,
                                             const void *buffer, size_t size,
-                                            bool is_mutable)
+                                            bool is_mutable, RtUserEvent ready)
     //--------------------------------------------------------------------------
     {
       // Package up the message first
@@ -5641,6 +5641,7 @@ namespace Legion {
         rez.serialize(size);
         rez.serialize(buffer, size);
         rez.serialize(is_mutable);
+        rez.serialize(ready);
       }
       context->runtime->send_index_space_semantic_info(target, rez);
     }
@@ -5697,7 +5698,7 @@ namespace Legion {
         }
       }
       else
-        send_semantic_info(source, tag, result, size, is_mutable);
+        send_semantic_info(source, tag, result, size, is_mutable, ready);
     }
 
     //--------------------------------------------------------------------------
@@ -5736,8 +5737,12 @@ namespace Legion {
       derez.advance_pointer(size);
       bool is_mutable;
       derez.deserialize(is_mutable);
+      RtUserEvent ready;
+      derez.deserialize(ready);
       forest->attach_semantic_information(handle, tag, source, 
                                           buffer, size, is_mutable);
+      if (ready.exists())
+        Runtime::trigger_event(ready);
     }
 
     //--------------------------------------------------------------------------
@@ -7162,7 +7167,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void IndexPartNode::send_semantic_info(AddressSpaceID target, 
                                            SemanticTag tag, const void *buffer,
-                                           size_t size, bool is_mutable)
+                                           size_t size, bool is_mutable,
+                                           RtUserEvent ready)
     //--------------------------------------------------------------------------
     {
       // Package up the message first
@@ -7174,6 +7180,7 @@ namespace Legion {
         rez.serialize(size);
         rez.serialize(buffer, size);
         rez.serialize(is_mutable);
+        rez.serialize(ready);
       }
       context->runtime->send_index_partition_semantic_info(target, rez);
     }
@@ -7230,7 +7237,7 @@ namespace Legion {
         }
       }
       else
-        send_semantic_info(source, tag, result, size, is_mutable);
+        send_semantic_info(source, tag, result, size, is_mutable, ready);
     }
 
     //--------------------------------------------------------------------------
@@ -7269,8 +7276,12 @@ namespace Legion {
       derez.advance_pointer(size);
       bool is_mutable;
       derez.deserialize(is_mutable);
+      RtUserEvent ready;
+      derez.deserialize(ready);
       forest->attach_semantic_information(handle, tag, source, 
                                           buffer, size, is_mutable);
+      if (ready.exists())
+        Runtime::trigger_event(ready);
     }
 
     //--------------------------------------------------------------------------
@@ -9202,7 +9213,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void FieldSpaceNode::send_semantic_info(AddressSpaceID target, 
-              SemanticTag tag, const void *result, size_t size, bool is_mutable)
+                 SemanticTag tag, const void *result, size_t size, 
+                 bool is_mutable, RtUserEvent ready)
     //--------------------------------------------------------------------------
     {
       Serializer rez;
@@ -9213,6 +9225,7 @@ namespace Legion {
         rez.serialize(size);
         rez.serialize(result, size);
         rez.serialize(is_mutable);
+        rez.serialize(ready);
       }
       context->runtime->send_field_space_semantic_info(target, rez);
     }
@@ -9220,7 +9233,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void FieldSpaceNode::send_semantic_field_info(AddressSpaceID target,
                   FieldID fid, SemanticTag tag, const void *result, 
-                  size_t size, bool is_mutable)
+                  size_t size, bool is_mutable, RtUserEvent ready)
     //--------------------------------------------------------------------------
     {
       Serializer rez;
@@ -9232,6 +9245,7 @@ namespace Legion {
         rez.serialize(size);
         rez.serialize(result, size);
         rez.serialize(is_mutable);
+        rez.serialize(ready);
       }
       context->runtime->send_field_semantic_info(target, rez);
     }
@@ -9288,7 +9302,7 @@ namespace Legion {
         }
       }
       else
-        send_semantic_info(source, tag, result, size, is_mutable);
+        send_semantic_info(source, tag, result, size, is_mutable, ready);
     }
 
     //--------------------------------------------------------------------------
@@ -9346,7 +9360,8 @@ namespace Legion {
         }
       }
       else
-        send_semantic_field_info(source, fid, tag, result, size, is_mutable);
+        send_semantic_field_info(source, fid, tag, result, size, 
+                                 is_mutable, ready);
     }
 
     //--------------------------------------------------------------------------
@@ -9408,8 +9423,12 @@ namespace Legion {
       derez.advance_pointer(size);
       bool is_mutable;
       derez.deserialize(is_mutable);
+      RtUserEvent ready;
+      derez.deserialize(ready);
       forest->attach_semantic_information(handle, tag, source, 
                                           buffer, size, is_mutable);
+      if (ready.exists())
+        Runtime::trigger_event(ready);
     }
 
     //--------------------------------------------------------------------------
@@ -9430,8 +9449,12 @@ namespace Legion {
       derez.advance_pointer(size);
       bool is_mutable;
       derez.deserialize(is_mutable);
+      RtUserEvent ready;
+      derez.deserialize(ready);
       forest->attach_semantic_information(handle, fid, tag, 
                                           source, buffer, size, is_mutable);
+      if (ready.exists())
+        Runtime::trigger_event(ready);
     }
 
     //--------------------------------------------------------------------------
@@ -17035,7 +17058,7 @@ namespace Legion {
     void RegionNode::send_semantic_info(AddressSpaceID target,
                                         SemanticTag tag,
                                         const void *buffer, size_t size, 
-                                        bool is_mutable)
+                                        bool is_mutable, RtUserEvent ready)
     //--------------------------------------------------------------------------
     {
       // Package up the message first
@@ -17047,6 +17070,7 @@ namespace Legion {
         rez.serialize(size);
         rez.serialize(buffer, size);
         rez.serialize(is_mutable);
+        rez.serialize(ready);
       }
       context->runtime->send_logical_region_semantic_info(target, rez);
     }
@@ -17103,7 +17127,7 @@ namespace Legion {
         }
       }
       else
-        send_semantic_info(source, tag, result, size, is_mutable);
+        send_semantic_info(source, tag, result, size, is_mutable, ready);
     }
 
     //--------------------------------------------------------------------------
@@ -17142,8 +17166,12 @@ namespace Legion {
       derez.advance_pointer(size);
       bool is_mutable;
       derez.deserialize(is_mutable);
+      RtUserEvent ready;
+      derez.deserialize(ready);
       forest->attach_semantic_information(handle, tag, source, 
                                           buffer, size, is_mutable);
+      if (ready.exists())
+        Runtime::trigger_event(ready);
     }
 
     //--------------------------------------------------------------------------
@@ -18053,7 +18081,7 @@ namespace Legion {
     void PartitionNode::send_semantic_info(AddressSpaceID target,
                                            SemanticTag tag,
                                            const void *buffer, size_t size,
-                                           bool is_mutable)
+                                           bool is_mutable, RtUserEvent ready)
     //--------------------------------------------------------------------------
     {
       // Package up the message first
@@ -18065,6 +18093,7 @@ namespace Legion {
         rez.serialize(size);
         rez.serialize(buffer, size);
         rez.serialize(is_mutable);
+        rez.serialize(ready);
       }
       context->runtime->send_logical_partition_semantic_info(target, rez);
     }
@@ -18121,7 +18150,7 @@ namespace Legion {
         }
       }
       else
-        send_semantic_info(source, tag, result, size, is_mutable);
+        send_semantic_info(source, tag, result, size, is_mutable, ready);
     }
 
     //--------------------------------------------------------------------------
@@ -18160,8 +18189,12 @@ namespace Legion {
       derez.advance_pointer(size);
       bool is_mutable;
       derez.deserialize(is_mutable);
+      RtUserEvent ready;
+      derez.deserialize(ready);
       forest->attach_semantic_information(handle, tag, source, 
                                           buffer, size, is_mutable);
+      if (ready.exists())
+        Runtime::trigger_event(ready);
     }
 
     //--------------------------------------------------------------------------
