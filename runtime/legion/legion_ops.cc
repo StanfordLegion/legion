@@ -4459,7 +4459,7 @@ namespace Legion {
         {
           if (acquired_instances.find(*it) == acquired_instances.end())
           {
-              MessageDescriptor INVALID_MAPPER_OUTPUT17(1427, "undefined");
+              MessageDescriptor INVALID_MAPPER_OUTPUT17(1462, "undefined");
             log_run.error(INVALID_MAPPER_OUTPUT17.id(),
                           "Invalid mapper output from 'map_copy' invocation "
                           "on mapper %s. Mapper selected physical instance "
@@ -13740,7 +13740,9 @@ namespace Legion {
       int parent_index = parent_ctx->find_parent_region_req(requirement);
       if (parent_index < 0)
       {
-        log_region.error("Parent task %s (ID %lld) of detach "
+          MessageDescriptor PARENT_TASK_DETACH(1461, "undefined");
+        log_region.error(PARENT_TASK_DETACH.id(),
+                         "Parent task %s (ID %lld) of detach "
                                "operation (ID %lld) does not have a region "
                                "requirement for region (%x,%x,%x) as a parent",
                                parent_ctx->get_task_name(), 

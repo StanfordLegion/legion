@@ -100,7 +100,10 @@ def parseInput(sourceFile, tokens, lineNumber):
             type = tokens[i - 2][0]
             assert tokens[i + 1][0] == '.'
             assert tokens[i + 2][0] == 'id'
-            message, index, lineNumber = quotedString(sourceFile, tokens, i + 6, lineNumber);
+            messageTokenIndex = i + 6 # NAME.id(), "format string..."
+            if not tokens[messageTokenIndex][0][0] == '"':
+                messageTokenIndex = i + 7 # NAME.id()) << "format string..."
+            message, index, lineNumber = quotedString(sourceFile, tokens, messageTokenIndex, lineNumber);
             tokens = deleteTokens(tokens, index)
             i = 0
             break
@@ -148,7 +151,7 @@ def sanitizedMessage(message):
 
 
 def addToDatabase(type, name, code, message, whatToDo, connection, sourceFile, lineNumber):
-    createTableCommand = "create table if not exists " + type + "(code int key, name text, message text key, whatToDo text, filename text, lineNumber int);"
+    createTableCommand = "create table if not exists " + type + "(code int key constraint c unique on conflict fail, name text, message text key, whatToDo text, filename text, lineNumber int);"
     connection.execute(createTableCommand)
     filename = sourceFile.name
     insertCommand = "insert into " + type + "(code, name, message, whatToDo, filename, lineNumber) values (" + code + ", \"" + name + "\", \"" + sanitizedMessage(message) + "\", \"" + whatToDo + "\", \"" + filename + "\", " + str(lineNumber) + ");"

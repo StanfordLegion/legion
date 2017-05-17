@@ -27,6 +27,7 @@
 #include "legion_analysis.h"
 #include "interval_tree.h"
 #include "rectangle_set.h"
+#include "logger_message_descriptor.h"
 
 namespace Legion {
   namespace Internal {
@@ -884,7 +885,9 @@ namespace Legion {
       // First get the child node   
       if (!parent_node->has_child(child_color))
       {
-        log_run.error("Invalid color in compute pending space!");
+          MessageDescriptor INVALID_COLOR_COMPUTE(1800, "undefined");
+        log_run.error(INVALID_COLOR_COMPUTE.id(),
+                      "Invalid color in compute pending space!");
 #ifdef DEBUG_LEGION
         assert(false);
 #endif
@@ -894,7 +897,9 @@ namespace Legion {
       if (!parent_node->get_pending_child(child_color, 
                                           handle_ready, domain_ready))
       {
-        log_run.error("Invalid pending child!");
+          MessageDescriptor INVALID_PENDING_CHILD(1801, "undefined");
+        log_run.error(INVALID_PENDING_CHILD.id(),
+                      "Invalid pending child!");
 #ifdef DEBUG_LEGION
         assert(false);
 #endif
@@ -1141,7 +1146,9 @@ namespace Legion {
       IndexSpaceNode *node = get_node(handle);
       if (node->parent == NULL)
       {
-        log_run.error("Parent index partition requested for "
+          MessageDescriptor PARENT_INDEX_PARTITION(1802, "undefined");
+        log_run.error(PARENT_INDEX_PARTITION.id(),
+                      "Parent index partition requested for "
                             "index space %x with no parent. Use "
                             "has_parent_index_partition to check "
                             "before requesting a parent.", handle.id);
@@ -1324,7 +1331,9 @@ namespace Legion {
       FieldSpaceNode *node = get_node(handle);
       if (!node->has_field(fid))
       {
-        log_run.error("FieldSpace %x has no field %d", handle.id, fid);
+          MessageDescriptor FIELDSPACE_NO_FIELD(1803, "undefined");
+        log_run.error(FIELDSPACE_NO_FIELD.id(),
+                      "FieldSpace %x has no field %d", handle.id, fid);
 #ifdef DEBUG_LEGION
         assert(false);
 #endif
@@ -1487,7 +1496,9 @@ namespace Legion {
       RegionNode *node = get_node(handle);
       if (node->parent == NULL)
       {
-        log_run.error("Parent logical partition requested for "
+          MessageDescriptor PARENT_LOGICAL_PARTITION(1804, "undefined");
+        log_run.error(PARENT_LOGICAL_PARTITION.id(),
+                      "Parent logical partition requested for "
                             "logical region (%x,%x,%d) with no parent. "
                             "Use has_parent_logical_partition to check "
                             "before requesting a parent.", 
@@ -4024,7 +4035,9 @@ namespace Legion {
       AddressSpaceID owner = RegionTreeNode::get_owner_space(tid, runtime);
       if (owner == runtime->address_space)
       {
-        log_run.error("Unable to find entry for region tree ID %d", tid);
+          MessageDescriptor UNABLE_FIND_ENTRY(1805, "undefined");
+        log_run.error(UNABLE_FIND_ENTRY.id(),
+                      "Unable to find entry for region tree ID %d", tid);
 #ifdef DEBUG_LEGION
         assert(false);
 #endif
@@ -4957,7 +4970,9 @@ namespace Legion {
               // sure that the bits are the same
               if (size != finder->second.size)
               {
-                log_run.error("Inconsistent Semantic Tag value "
+                  MessageDescriptor INCONSISTENT_SEMANTIC_TAG(1806, "undefined");
+                log_run.error(INCONSISTENT_SEMANTIC_TAG.id(),
+                              "Inconsistent Semantic Tag value "
                               "for tag %ld with different sizes of %zd"
                               " and %zd for index tree node", 
                               tag, size, finder->second.size);
@@ -4975,7 +4990,9 @@ namespace Legion {
                   char diff = orig[idx] ^ next[idx];
                   if (diff)
                   {
-                    log_run.error("Inconsistent Semantic Tag value "
+                      MessageDescriptor INCONSISTENT_SEMANTIC_TAG2(1807, "undefined");
+                    log_run.error(INCONSISTENT_SEMANTIC_TAG2.id(),
+                                  "Inconsistent Semantic Tag value "
                                   "for tag %ld with different values at"
                                   "byte %d for index tree node, %x != %x",
                                   tag, idx, orig[idx], next[idx]);
@@ -5078,7 +5095,9 @@ namespace Legion {
       {
         if (can_fail)
           return false;
-        log_run.error("invalid semantic tag %ld for "
+          MessageDescriptor INVALID_SEMANTIC_TAG(1808, "undefined");
+        log_run.error(INVALID_SEMANTIC_TAG.id(),
+                      "invalid semantic tag %ld for "
                       "index tree node", tag);
 #ifdef DEBUG_LEGION
         assert(false);
@@ -5095,7 +5114,9 @@ namespace Legion {
       {
         if (can_fail)
           return false;
-        log_run.error("invalid semantic tag %ld for "
+          MessageDescriptor INVALID_SEMANTIC_TAG2(1809, "undefined");
+        log_run.error(INVALID_SEMANTIC_TAG2.id(),
+                      "invalid semantic tag %ld for "
                             "index tree node", tag);   
 #ifdef DEBUG_LEGION
         assert(false);
@@ -6864,7 +6885,9 @@ namespace Legion {
     {
       if (kind != UNSTRUCTURED_KIND)
       {
-        log_run.error("Illegal request for an allocator on a structured "
+          MessageDescriptor ILLEGAL_REQUEST_ALLOCATOR(1810, "undefined");
+        log_run.error(ILLEGAL_REQUEST_ALLOCATOR.id(),
+                      "Illegal request for an allocator on a structured "
                       "index space! Only unstructured index spaces are "
                       "permitted to have allocators.");
 #ifdef DEBUG_LEGION
@@ -8793,7 +8816,9 @@ namespace Legion {
               // Check to make sure that the bits are the same
               if (size != finder->second.size)
               {
-                log_run.error("Inconsistent Semantic Tag value "
+                  MessageDescriptor INCONSISTENT_SEMANTIC_TAG(1811, "undefined");
+                log_run.error(INCONSISTENT_SEMANTIC_TAG.id(),
+                              "Inconsistent Semantic Tag value "
                               "for tag %ld with different sizes of %zd"
                               " and %zd for index tree node", 
                               tag, size, finder->second.size);
@@ -8811,7 +8836,9 @@ namespace Legion {
                   char diff = orig[idx] ^ next[idx];
                   if (diff)
                   {
-                    log_run.error("Inconsistent Semantic Tag value "
+                      MessageDescriptor INCONSISTENT_SEMANTIC_TAG2(1812, "undefined");
+                    log_run.error(INCONSISTENT_SEMANTIC_TAG2.id(),
+                                  "Inconsistent Semantic Tag value "
                                   "for tag %ld with different values at"
                                   "byte %d for index tree node, %x != %x", 
                                   tag, idx, orig[idx], next[idx]);
@@ -8893,7 +8920,9 @@ namespace Legion {
               // Check to make sure that the bits are the same
               if (size != finder->second.size)
               {
-                log_run.error("Inconsistent Semantic Tag value "
+                  MessageDescriptor INCONSISTENT_SEMANTIC_TAG3(1813, "undefined");
+                log_run.error(INCONSISTENT_SEMANTIC_TAG3.id(),
+                              "Inconsistent Semantic Tag value "
                               "for tag %ld with different sizes of %zd"
                               " and %zd for index tree node", 
                               tag, size, finder->second.size);
@@ -8911,7 +8940,9 @@ namespace Legion {
                   char diff = orig[idx] ^ next[idx];
                   if (diff)
                   {
-                    log_run.error("Inconsistent Semantic Tag value "
+                      MessageDescriptor INCONSISTENT_SEMANTIC_TAG4(1814, "undefined");
+                    log_run.error(INCONSISTENT_SEMANTIC_TAG4.id(),
+                                  "Inconsistent Semantic Tag value "
                                   "for tag %ld with different values at"
                                   "byte %d for index tree node, %x != %x", 
                                   tag, idx, orig[idx], next[idx]);
@@ -9023,7 +9054,9 @@ namespace Legion {
       {
         if (can_fail)
           return false;
-        log_run.error("invalid semantic tag %ld for "
+          MessageDescriptor INVALID_SEMANTIC_TAG4(1815, "undefined");
+        log_run.error(INVALID_SEMANTIC_TAG4.id(),
+                      "invalid semantic tag %ld for "
                       "field space %d", tag, handle.id);
 #ifdef DEBUG_LEGION
         assert(false);
@@ -9040,7 +9073,9 @@ namespace Legion {
       {
         if (can_fail)
           return false;
-        log_run.error("invalid semantic tag %ld for "
+          MessageDescriptor INVALID_SEMANTIC_TAG5(1816, "undefined");
+        log_run.error(INVALID_SEMANTIC_TAG5.id(),
+                      "invalid semantic tag %ld for "
                             "field space %d", tag, handle.id);
 #ifdef DEBUG_LEGION
         assert(false);
@@ -9112,7 +9147,9 @@ namespace Legion {
       {
         if (can_fail)
           return false;
-        log_run.error("invalid semantic tag %ld for field %d "
+          MessageDescriptor INVALID_SEMANTIC_TAG6(1817, "undefined");
+        log_run.error(INVALID_SEMANTIC_TAG6.id(),
+                      "invalid semantic tag %ld for field %d "
                       "of field space %d", tag, fid, handle.id);
 #ifdef DEBUG_LEGION
         assert(false);
@@ -9130,7 +9167,9 @@ namespace Legion {
       {
         if (can_fail)
           return false;
-        log_run.error("invalid semantic tag %ld for field %d "
+          MessageDescriptor INVALID_SEMANTIC_TAG7(1818, "undefined");
+        log_run.error(INVALID_SEMANTIC_TAG7.id(),
+                      "invalid semantic tag %ld for field %d "
                             "of field space %d", tag, fid, handle.id);
 #ifdef DEBUG_LEGION
         assert(false);
@@ -10138,7 +10177,8 @@ namespace Legion {
 	  // Catch unknown fields here for now
 	  if (finder == fields.end())
 	  {
-	    log_run.fatal() << "ERROR: unknown field ID " << fid 
+          MessageDescriptor UNKNOWN_FIELD_ID(1829, "undefined");
+	    log_run.fatal(UNKNOWN_FIELD_ID.id()) << "unknown field ID " << fid
                             << " requested during instance creation";
 	    assert(false);
 	  }
@@ -10888,7 +10928,9 @@ namespace Legion {
               // Check to make sure that the bits are the same
               if (size != finder->second.size)
               {
-                log_run.error("Inconsistent Semantic Tag value "
+                  MessageDescriptor INCONSISTENT_SEMANTIC_TAG5(1820, "undefined");
+                log_run.error(INCONSISTENT_SEMANTIC_TAG5.id(),
+                              "Inconsistent Semantic Tag value "
                               "for tag %ld with different sizes of %zd"
                               " and %zd for region tree node", 
                               tag, size, finder->second.size);
@@ -10906,7 +10948,9 @@ namespace Legion {
                   char diff = orig[idx] ^ next[idx];
                   if (diff)
                   {
-                    log_run.error("Inconsistent Semantic Tag value "
+                      MessageDescriptor INCONSISTENT_SEMANTIC_TAG6(1828, "undefined");
+                    log_run.error(INCONSISTENT_SEMANTIC_TAG6.id(),
+                                  "Inconsistent Semantic Tag value "
                                   "for tag %ld with different values at"
                                   "byte %d for region tree node, %x != %x", 
                                   tag, idx, orig[idx], next[idx]);
@@ -11007,7 +11051,9 @@ namespace Legion {
       {
         if (can_fail)
           return false;
-        log_run.error("invalid semantic tag %ld for "
+          MessageDescriptor INVALID_SEMANTIC_TAG8(1821, "undefined");
+        log_run.error(INVALID_SEMANTIC_TAG8.id(),
+                      "invalid semantic tag %ld for "
                       "region tree node", tag);
 #ifdef DEBUG_LEGION
         assert(false);
@@ -11024,7 +11070,9 @@ namespace Legion {
       {
         if (can_fail)
           return false;
-        log_run.error("invalid semantic tag %ld for "
+          MessageDescriptor INVALID_SEMANTIC_TAG9(1822, "undefined");
+        log_run.error(INVALID_SEMANTIC_TAG9.id(),
+                      "invalid semantic tag %ld for "
                             "region tree node", tag);   
 #ifdef DEBUG_LEGION
         assert(false);
@@ -12884,7 +12932,9 @@ namespace Legion {
 #endif
       LogicalRegion handle = as_region_node()->handle;
       char *field_string = column_source->to_string(uninit);
-      log_run.warning("Region requirement %d of operation %s "
+        MessageDescriptor REGION_REQUIREMENT_OPERATION(1823, "undefined");
+      log_run.warning(REGION_REQUIREMENT_OPERATION.id(),
+                      "Region requirement %d of operation %s "
                       "(UID %lld) is using uninitialized data for field(s) %s "
                       "of logical region (%d,%d,%d)", idx, 
                       op->get_logging_name(), op->get_unique_op_id(),

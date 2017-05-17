@@ -20,6 +20,7 @@
 #include "legion_trace.h"
 #include "legion_tasks.h"
 #include "legion_context.h"
+#include "logger_message_descriptor.h"
 
 namespace Legion {
   namespace Internal {
@@ -479,7 +480,9 @@ namespace Legion {
           // Check for exceeding the trace size
           if (index >= dependences.size())
           {
-            log_run.error("Trace violation! Recorded %zd operations in trace "
+              MessageDescriptor TRACE_VIOLATION_RECORDED(1600, "undefined");
+            log_run.error(TRACE_VIOLATION_RECORDED.id(),
+                          "Trace violation! Recorded %zd operations in trace "
                           "%d in task %s (UID %lld) but %d operations have "
                           "now been issued!", dependences.size(), tid,
                           ctx->get_task_name(), ctx->get_unique_id(), index+1);
@@ -493,7 +496,9 @@ namespace Legion {
           // Check that they are the same kind of operation
           if (info.kind != op->get_operation_kind())
           {
-            log_run.error("Trace violation! Operation at index %d of trace %d "
+              MessageDescriptor TRACE_VIOLATION_OPERATION(1601, "undefined");
+            log_run.error(TRACE_VIOLATION_OPERATION.id(),
+                          "Trace violation! Operation at index %d of trace %d "
                           "in task %s (UID %lld) was recorded as having type "
                           "%s but instead has type %s in replay.",
                           index, tid, ctx->get_task_name(),ctx->get_unique_id(),
@@ -507,7 +512,9 @@ namespace Legion {
           // Check that they have the same number of region requirements
           if (info.count != op->get_region_count())
           {
-            log_run.error("Trace violation! Operation at index %d of trace %d "
+              MessageDescriptor TRACE_VIOLATION_OPERATION2(1602, "undefined");
+            log_run.error(TRACE_VIOLATION_OPERATION2.id(),
+                          "Trace violation! Operation at index %d of trace %d "
                           "in task %s (UID %lld) was recorded as having %d "
                           "regions, but instead has %zd regions in replay.",
                           index, tid, ctx->get_task_name(),

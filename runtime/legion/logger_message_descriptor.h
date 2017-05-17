@@ -13,7 +13,7 @@
 
 namespace Legion{
     namespace Internal {
-        class MessageDescriptor {
+        const class MessageDescriptor {
         public:
             MessageDescriptor() : mID(0), mDescription(nullptr) {}
             MessageDescriptor(Realm::LoggerMessageID id, std::string htmlDescription){
