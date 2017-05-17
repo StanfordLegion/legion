@@ -297,6 +297,12 @@ namespace Legion {
       output.stealable = stealing_enabled; 
       // Unlike in the past, this is now the best choice
       output.map_locally = false;
+      // Control replicate the top-level task in multi-node settings
+      // otherwise we do no control replication
+      if ((total_nodes > 1) && (task.get_depth() == 0))
+        output.replicate = true;
+      else
+        output.replicate = false;
     }
 
     //--------------------------------------------------------------------------
@@ -1228,54 +1234,6 @@ namespace Legion {
       // TODO: some criticality analysis to assign priorities
       output.task_priority = 0;
       output.postmap_task = false;
-      // A special case for the top-level task
-      // Try to control replicate this task if possible
-      if ((total_nodes > 1) && task.get_depth() == 0)
-      {
-        if (chosen.is_replicable)
-        {
-          // Place on replicate on each node by default
-          assert(remote_cpus.size() == total_nodes);
-          // Check to see if we're interoperating with MPI
-          const std::map<AddressSpace,int/*rank*/> &mpi_interop_mapping = 
-            runtime->find_reverse_MPI_mapping(ctx);
-          if (!mpi_interop_mapping.empty())
-          {
-            // If we're interoperating with MPI make the shards align with ranks
-            assert(mpi_interop_mapping.size() == total_nodes);
-            for (std::vector<Processor>::const_iterator it = 
-                  remote_cpus.begin(); it != remote_cpus.end(); it++)
-            {
-              AddressSpace space = it->address_space();
-              std::map<AddressSpace,int>::const_iterator finder = 
-                mpi_interop_mapping.find(space);
-              assert(finder != mpi_interop_mapping.end());
-              output.control_replication_map[finder->second] = *it;
-            }
-          }
-          else
-          {
-            // Otherwise we can just assign shards based on address space
-            for (std::vector<Processor>::const_iterator it = 
-                  remote_cpus.begin(); it != remote_cpus.end(); it++)
-            {
-              AddressSpace space = it->address_space();
-              output.control_replication_map[space] = *it;
-            }
-          }
-          // We're done since we know that the top-level task has no regions
-          assert(task.regions.empty());
-          return;
-        }
-        else
-          log_mapper.warning("WARNING: Default mapper was unable to locate "
-                             "a replicable task variant for the top-level "
-                             "task during a multi-node execution! We STRONGLY "
-                             "encourage users to make their top-level tasks "
-                             "replicable to avoid sequential bottlenecks on "
-                             "one node during the execution of an "
-                             "application!");
-      }
       // Figure out our target processors
       default_policy_select_target_processors(ctx, task, output.target_procs);
       // See if we have an inner variant, if we do virtually map all the regions
@@ -1507,6 +1465,73 @@ namespace Legion {
             continue;
           cached_result.mapping[idx].clear();
         }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void DefaultMapper::map_replicate_task(const MapperContext      ctx,
+                                           const Task&              task,
+                                           const MapTaskInput&      input,
+                                           MapReplicateTaskOutput&  output)
+    //--------------------------------------------------------------------------
+    {
+      // Should only be replicated for the top-level task
+      assert((task.get_depth() == 0) && (task.regions.size() == 0));
+      Processor::Kind target_kind = task.target_proc.kind();
+      // Get the variant that we are going to use to map this task
+      VariantInfo chosen = default_find_preferred_variant(task, ctx,
+                        true/*needs tight bound*/, true/*cache*/, target_kind);
+      if (chosen.is_replicable)
+      {
+        // Place on replicate on each node by default
+        assert(remote_cpus.size() == total_nodes);
+        output.task_mappings.resize(total_nodes);
+        // Check to see if we're interoperating with MPI
+        const std::map<AddressSpace,int/*rank*/> &mpi_interop_mapping = 
+          runtime->find_reverse_MPI_mapping(ctx);
+        if (!mpi_interop_mapping.empty())
+        {
+          // If we're interoperating with MPI make the shards align with ranks
+          assert(mpi_interop_mapping.size() == total_nodes);
+          for (std::vector<Processor>::const_iterator it = 
+                remote_cpus.begin(); it != remote_cpus.end(); it++)
+          {
+            AddressSpace space = it->address_space();
+            std::map<AddressSpace,int>::const_iterator finder = 
+              mpi_interop_mapping.find(space);
+            assert(finder != mpi_interop_mapping.end());
+            assert(finder->second < output.task_mappings.size());
+            output.task_mappings[finder->second].target_procs.push_back(*it);
+          }
+        }
+        else
+        {
+          // Otherwise we can just assign shards based on address space
+          for (std::vector<Processor>::const_iterator it = 
+                remote_cpus.begin(); it != remote_cpus.end(); it++)
+          {
+            AddressSpace space = it->address_space();
+            assert(space < output.task_mappings.size());
+            output.task_mappings[space].target_procs.push_back(*it);
+          }
+        }
+        for (unsigned idx = 0; idx < total_nodes; idx++)
+          output.task_mappings[idx].chosen_variant = chosen.variant;
+        // Indicate that we are control replicating this task
+        output.control_replicate = true;
+      }
+      else
+      {
+        log_mapper.warning("WARNING: Default mapper was unable to locate "
+                           "a replicable task variant for the top-level "
+                           "task during a multi-node execution! We STRONGLY "
+                           "encourage users to make their top-level tasks "
+                           "replicable to avoid sequential bottlenecks on "
+                           "one node during the execution of an "
+                           "application!");
+        output.task_mappings.resize(1);
+        map_task(ctx, task, input, output.task_mappings[0]);
+        output.control_replicate = false;
       }
     }
 
