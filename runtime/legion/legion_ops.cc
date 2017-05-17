@@ -2198,7 +2198,9 @@ namespace Legion {
                            launcher.static_dependences);
       if (launcher.requirement.privilege_fields.empty())
       {
-        log_task.warning("REGION REQUIREMENT OF INLINE MAPPING "
+          MessageDescriptor REGION_REQUIREMENT_INLINE(2200, "undefined");
+        log_task.warning(REGION_REQUIREMENT_INLINE.id(),
+                         "REGION REQUIREMENT OF INLINE MAPPING "
                                "IN TASK %s (ID %lld) HAS NO PRIVILEGE "
                                "FIELDS! DID YOU FORGET THEM?!?",
                                parent_ctx->get_task_name(), 
@@ -3223,7 +3225,9 @@ namespace Legion {
       {
         if (launcher.src_requirements[idx].privilege_fields.empty())
         {
-          log_task.warning("SOURCE REGION REQUIREMENT %d OF "
+            MessageDescriptor SOURCE_REGION_REQUIREMENT(2201, "undefined");
+          log_task.warning(SOURCE_REGION_REQUIREMENT.id(),
+                           "SOURCE REGION REQUIREMENT %d OF "
                            "COPY (ID %lld) IN TASK %s (ID %lld) HAS NO "
                            "PRIVILEGE FIELDS! DID YOU FORGET THEM?!?",
                            idx, get_unique_op_id(),
@@ -3237,7 +3241,9 @@ namespace Legion {
       {
         if (launcher.src_requirements[idx].privilege_fields.empty())
         {
-          log_task.warning("DESTINATION REGION REQUIREMENT %d OF"
+            MessageDescriptor DESTINATION_REGION_REQUIREMENT(2202, "undefined");
+          log_task.warning(DESTINATION_REGION_REQUIREMENT.id(),
+                           "DESTINATION REGION REQUIREMENT %d OF"
                            " COPY (ID %lld) IN TASK %s (ID %lld) HAS NO "
                            "PRIVILEGE FIELDS! DID YOU FORGET THEM?!?",
                            idx, get_unique_op_id(),
@@ -4684,7 +4690,9 @@ namespace Legion {
       {
         if (launcher.src_requirements[idx].privilege_fields.empty())
         {
-          log_task.warning("SOURCE REGION REQUIREMENT %d OF "
+            MessageDescriptor SOURCE_REGION_REQUIREMENT(2203, "undefined");
+          log_task.warning(SOURCE_REGION_REQUIREMENT.id(),
+                           "SOURCE REGION REQUIREMENT %d OF "
                            "COPY (ID %lld) IN TASK %s (ID %lld) HAS NO "
                            "PRIVILEGE FIELDS! DID YOU FORGET THEM?!?",
                            idx, get_unique_op_id(),
@@ -4698,7 +4706,9 @@ namespace Legion {
       {
         if (launcher.src_requirements[idx].privilege_fields.empty())
         {
-          log_task.warning("DESTINATION REGION REQUIREMENT %d OF"
+            MessageDescriptor DESTINATION_REGION_REQUIREMENT(2204, "undefined");
+          log_task.warning(DESTINATION_REGION_REQUIREMENT.id(),
+                           "DESTINATION REGION REQUIREMENT %d OF"
                            " COPY (ID %lld) IN TASK %s (ID %lld) HAS NO "
                            "PRIVILEGE FIELDS! DID YOU FORGET THEM?!?",
                            idx, get_unique_op_id(),
@@ -8018,7 +8028,9 @@ namespace Legion {
                                       EXCLUSIVE, launcher.parent_region); 
       if (launcher.fields.empty())
       {
-        log_task.warning("PRIVILEGE FIELDS OF ACQUIRE OPERATION"
+          MessageDescriptor PRIVILEGE_FIELDS_ACQUIRE(2205, "undefined");
+        log_task.warning(PRIVILEGE_FIELDS_ACQUIRE.id(),
+                         "PRIVILEGE FIELDS OF ACQUIRE OPERATION"
                          "IN TASK %s (ID %lld) HAS NO PRIVILEGE "
                          "FIELDS! DID YOU FORGET THEM?!?",
                          parent_ctx->get_task_name(), 
@@ -8637,7 +8649,9 @@ namespace Legion {
                                       EXCLUSIVE, launcher.parent_region); 
       if (launcher.fields.empty())
       {
-        log_task.warning("PRIVILEGE FIELDS OF RELEASE OPERATION"
+          MessageDescriptor PRIVILEGE_FIELDS_RELEASE(2206, "undefined");
+        log_task.warning(PRIVILEGE_FIELDS_RELEASE.id(),
+                         "PRIVILEGE FIELDS OF RELEASE OPERATION"
                                "IN TASK %s (ID %lld) HAS NO PRIVILEGE "
                                "FIELDS! DID YOU FORGET THEM?!?",
                                parent_ctx->get_task_name(), 

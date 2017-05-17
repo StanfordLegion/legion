@@ -940,7 +940,9 @@ namespace Legion {
         if (regions[idx].privilege != NO_ACCESS && 
             regions[idx].privilege_fields.empty())
         {
-          log_task.warning("REGION REQUIREMENT %d OF "
+            MessageDescriptor REGION_REQUIREMENT_TASK(2300, "undefined");
+          log_task.warning(REGION_REQUIREMENT_TASK.id(),
+                           "REGION REQUIREMENT %d OF "
                            "TASK %s (ID %lld) HAS NO PRIVILEGE "
                            "FIELDS! DID YOU FORGET THEM?!?",
                            idx, get_task_name(), get_unique_id());
@@ -1084,7 +1086,9 @@ namespace Legion {
         mapping_only = output.speculate_mapping_only;
         if (!mapping_only)
         {
-          log_task.error("Mapper requested execution speculation for task %s "
+            MessageDescriptor MAPPER_REQUESTED_EXECUTION(2301, "undefined");
+          log_task.error(MAPPER_REQUESTED_EXECUTION.id(),
+                         "Mapper requested execution speculation for task %s "
                          "(UID %lld). Full execution speculation is a planned "
                          "feature but is not currently supported.",
                          get_task_name(), get_unique_id());
