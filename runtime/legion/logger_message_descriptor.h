@@ -11,11 +11,13 @@
 
 #include "realm/logging.h"
 
+#include <stdlib.h>
+
 namespace Legion{
     namespace Internal {
-        const class MessageDescriptor {
+        class MessageDescriptor {
         public:
-            MessageDescriptor() : mID(0), mDescription(nullptr) {}
+            MessageDescriptor() : mID(0), mDescription(0) {}
             MessageDescriptor(Realm::LoggerMessageID id, std::string htmlDescription){
                 mID = id;
 #ifdef LOG_MESSAGE_KEEP_DESCRIPTION
@@ -33,10 +35,16 @@ namespace Legion{
             }
             
             std::string formattedOutput() const {
-                return "{ " + std::to_string(mID) + ", \"" + description() + "\" },";
+                char buffer[32];
+                sprintf(buffer, "%d", (int)mID);
+                return "{ " + std::string(buffer) + ", \"" + description() + "\" },";
             }
             
-            std::string operator << (const std::string &t) { return std::to_string(mID) + t; }
+            std::string operator << (const std::string &t) {
+                char buffer[32];
+                sprintf(buffer, "%d", (int)mID);
+                return std::string(buffer) + t;
+            }
                         
         private:
             Realm::LoggerMessageID mID;

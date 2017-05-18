@@ -220,6 +220,7 @@ def writeHtmlEntry(type, field, outputFile, row, hrefPrefix, strip):
     outputFile.write("<br>Remedy:" + whatToDo + "\n");
     outputFile.write("<br>Location: line " + str(lineNumber) + " <a href=\"" + prefixedPath(fileName, hrefPrefix, lineNumber, strip) + "\">" + fileName_(fileName) + "</a>\n")
     outputFile.write("<p>\n")
+    outputFile.write("<a href=\"index.html\">back to message index</a>\n")
 
 
 def tables(connection):
