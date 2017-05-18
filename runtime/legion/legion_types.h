@@ -42,6 +42,12 @@
 #define REALM_USE_LEGION_LAYOUT_CONSTRAINTS
 #include "realm.h"
 
+#if __cplusplus >= 201402L
+#define LEGION_DEPRECATED(x) [[deprecated(x)]]
+#else
+#define LEGION_DEPRECATED(x)
+#endif
+
 namespace BindingLib { class Utility; } // BindingLib namespace
 
 namespace Legion { 

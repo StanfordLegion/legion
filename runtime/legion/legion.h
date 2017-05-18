@@ -897,7 +897,9 @@ namespace Legion {
      * Legion applications written to previous versions of this
      * interface and can safely be ignored for newer programs.
      */
-    struct FieldSpaceRequirement {
+    struct 
+      LEGION_DEPRECATED("FieldSpaceRequirements are deprecated "
+                        "and will be ignored.") FieldSpaceRequirement {
     public:
       FieldSpace   handle;
       AllocateMode privilege;
@@ -1870,6 +1872,8 @@ namespace Legion {
        * method instead. You can silence warnings about this blocking
        * call with the 'silence_warnings' parameter.
        */
+      LEGION_DEPRECATED("Requesting generic accessors are now deprecated. "
+                        "A field accessor should be requested instead.")
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic> 
           get_accessor(bool silience_warnings = false) const;
@@ -2535,6 +2539,8 @@ namespace Legion {
        * @param point the point of the task in the index space
        * @return logical region to be used by the child task
        */
+      LEGION_DEPRECATED("The interface for projection functors has been "
+                        "updated. Please use the new 'project' methods.")
       virtual LogicalRegion project(Context ctx, Task *task,
                                     unsigned index,
                                     LogicalRegion upper_bound,
@@ -2550,6 +2556,8 @@ namespace Legion {
        * @param point the point of the task in the index space
        * @return logical region to be used by the child task
        */
+      LEGION_DEPRECATED("The interface for projection functors has been "
+                        "updated. Please use the new 'project' methods.")
       virtual LogicalRegion project(Context ctx, Task *task, 
                                     unsigned index,
                                     LogicalPartition upper_bound,
@@ -3862,6 +3870,8 @@ namespace Legion {
        * @param tag mapping tag to be passed to any mapping calls
        * @return future representing return value of the task
        */
+      LEGION_DEPRECATED("Launching tasks should be done with the new task "
+                        "launcher interface.")
       Future execute_task(Context ctx, 
                           Processor::TaskFuncID task_id,
                           const std::vector<IndexSpaceRequirement> &indexes,
@@ -3890,6 +3900,8 @@ namespace Legion {
        * @param tag mapping tag to be passed to any mapping calls
        * @return future map containing results for all tasks
        */
+      LEGION_DEPRECATED("Launching tasks should be done with the new task "
+                        "launcher interface.")
       FutureMap execute_index_space(Context ctx, 
                           Processor::TaskFuncID task_id,
                           const Domain domain,
@@ -3924,6 +3936,8 @@ namespace Legion {
        * @param tag mapping tag to be passed to any mapping calls
        * @return future containing reduced return value of all tasks
        */
+      LEGION_DEPRECATED("Launching tasks should be done with the new task "
+                        "launcher interface.")
       Future execute_index_space(Context ctx, 
                           Processor::TaskFuncID task_id,
                           const Domain domain,
@@ -4173,6 +4187,8 @@ namespace Legion {
        * @param mode the access mode for attaching the file
        * @return a new physical instance corresponding to the HDF5 file
        */
+      LEGION_DEPRECATED("Attaching specific HDF5 file type is deprecated "
+                        "in favor of generic attach launcher interface.")
       PhysicalRegion attach_hdf5(Context ctx, const char *file_name,
                                  LogicalRegion handle, LogicalRegion parent, 
                                  const std::map<FieldID,const char*> &field_map,
@@ -4194,6 +4210,8 @@ namespace Legion {
        * @param ctx enclosing task context 
        * @param region the physical region for an HDF5 file to detach
        */
+      LEGION_DEPRECATED("Detaching specific HDF5 file type is deprecated "
+                        "in favor of generic detach interface.")
       void detach_hdf5(Context ctx, PhysicalRegion region);
 
       /**
@@ -4202,6 +4220,8 @@ namespace Legion {
        * attach_hdf5 operation, except that the file has exact same data format
        * as in-memory physical region. Data lays out as SOA in file.
        */
+      LEGION_DEPRECATED("Attaching generic file type is deprecated "
+                        "in favor of generic attach launcher interface.")
       PhysicalRegion attach_file(Context ctx, const char *file_name,
                                  LogicalRegion handle, LogicalRegion parent,
                                  const std::vector<FieldID> &field_vec,
@@ -4212,6 +4232,8 @@ namespace Legion {
        * Detach an normal file. THis detach operation is similar to
        * detach_hdf5
        */
+      LEGION_DEPRECATED("Detaching generic file type is deprecated "
+                        "in favor of generic detach interface.")
       void detach_file(Context ctx, PhysicalRegion region);
     public:
       //------------------------------------------------------------------------
@@ -4601,6 +4623,8 @@ namespace Legion {
        * tunable value. It will assume that the resulting tunable 
        * future can be interpreted as an integer.
        */
+      LEGION_DEPRECATED("Tunable values should now be obtained via the "
+                        "generic interface that returns a future result.")
       int get_tunable_value(Context ctx, TunableID tid, 
                             MapperID mapper = 0, MappingTagID tag = 0);
     public:
@@ -5424,6 +5448,8 @@ namespace Legion {
        * the application.
        * @param callback function pointer to the callback function to be run
        */
+      LEGION_DEPRECATED("Legion now supports multiple registration callbacks "
+                        "added via the add_registration_callback method.") 
       static void set_registration_callback(RegistrationCallbackFnptr callback);
 
       /**

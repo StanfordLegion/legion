@@ -2631,7 +2631,8 @@ namespace Legion {
 
 // This is for backwards compatibility with the old namespace scheme
 namespace LegionRuntime {
-  namespace HighLevel {
+  namespace LEGION_DEPRECATED("Using deprecated namespace "
+                              "LegionRuntime::HighLevel") HighLevel {
     using namespace LegionRuntime::Arrays;
 
     typedef Legion::IndexSpace IndexSpace;

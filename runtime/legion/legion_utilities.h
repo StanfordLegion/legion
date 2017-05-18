@@ -43,8 +43,6 @@
 #endif
 #endif
 
-namespace Legion {
-
 // Useful macros
 #define IS_NO_ACCESS(req) (((req).privilege & READ_WRITE) == NO_ACCESS)
 #define IS_READ_ONLY(req) (((req).privilege & READ_WRITE) <= READ_ONLY)
@@ -57,6 +55,8 @@ namespace Legion {
 #define IS_ATOMIC(req) ((req).prop == ATOMIC)
 #define IS_SIMULT(req) ((req).prop == SIMULTANEOUS)
 #define IS_RELAXED(req) ((req).prop == RELAXED)
+
+namespace Legion {
 
     /**
      * \struct RegionUsage
