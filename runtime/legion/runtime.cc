@@ -6766,15 +6766,16 @@ namespace Legion {
           LegionSpy::log_task_name(task_id, name);
         // Also set the initial name to be safe
         memcpy(initial_name, name, name_size);
+        // Register this task with the profiler if necessary
+        if (runtime->profiler != NULL)
+          runtime->profiler->register_task_kind(task_id, name, false);
       }
       else // Just set the initial name
-        snprintf(initial_name,64,"unnamed_task_%d", task_id);
-      // Register this task with the profiler if necessary
-      if (runtime->profiler != NULL)
       {
-        const SemanticInfo &info = semantic_infos[NAME_SEMANTIC_TAG]; 
-        const char *name = (const char*)info.buffer;
-        runtime->profiler->register_task_kind(task_id, name, false);
+        snprintf(initial_name,64,"unnamed_task_%d", task_id);
+        // Register this task with the profiler if necessary
+        if (runtime->profiler != NULL)
+          runtime->profiler->register_task_kind(task_id, initial_name, false);
       }
     }
 
