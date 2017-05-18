@@ -37,7 +37,7 @@ namespace Legion{
             }
             
             std::string operator << (const std::string &t) { return std::to_string(mID) + t; }
-            
+                        
         private:
             Realm::LoggerMessageID mID;
             std::string mDescription;

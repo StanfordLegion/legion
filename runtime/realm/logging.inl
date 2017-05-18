@@ -172,6 +172,19 @@ namespace Realm {
     return LoggerMessage(this, true, level);
   }
   
+  
+  // append a URL to the format string that links to the online message documentation
+  inline const char *formatLink(const char *format, const char *type, LoggerMessageID messageID)
+  {
+      char buffer[1024 * 4];
+      const char *legionURL = "http://legion.stanford.edu/messages";
+      sprintf(buffer, "%s\nFor more information see:\n%s/%s_code.html#%s_code_%d\n",
+        format, legionURL, type, type, (int)messageID);
+      char *result = (char *)malloc(strlen(buffer) + 1);//ok to leak here, we are about to exit
+      strcpy(result, buffer);
+      return result;
+  }
+  
   // old printf-style interface
   inline void Logger::spew(const char *fmt, ...)
   {
@@ -193,7 +206,7 @@ namespace Realm {
     
     va_list args;
     va_start(args, fmt);
-    spew().vprintf("spew", messageID, fmt, args);
+    spew().vprintf("spew", messageID, formatLink(fmt, "spew", messageID), args);
     va_end(args);
   }
   
@@ -217,7 +230,7 @@ namespace Realm {
     
     va_list args;
     va_start(args, fmt);
-    debug().vprintf("debug", messageID, fmt, args);
+    debug().vprintf("debug", messageID, formatLink(fmt, "debug", messageID), args);
     va_end(args);
   }
   
@@ -241,7 +254,7 @@ namespace Realm {
     
     va_list args;
     va_start(args, fmt);
-    info().vprintf("info", messageID, fmt, args);
+    info().vprintf("info", messageID, formatLink(fmt, "info", messageID), args);
     va_end(args);
   }
   
@@ -265,7 +278,7 @@ namespace Realm {
     
     va_list args;
     va_start(args, fmt);
-    print().vprintf("print", messageID, fmt, args);
+    print().vprintf("print", messageID, formatLink(fmt, "print", messageID), args);
     va_end(args);
   }
   
@@ -289,7 +302,7 @@ namespace Realm {
     
     va_list args;
     va_start(args, fmt);
-    warning().vprintf("warning", messageID, fmt, args);
+    warning().vprintf("warning", messageID, formatLink(fmt, "warning", messageID), args);
     va_end(args);
   }
   
@@ -313,7 +326,7 @@ namespace Realm {
     
     va_list args;
     va_start(args, fmt);
-    error().vprintf("error", messageID, fmt, args);
+    error().vprintf("error", messageID, formatLink(fmt, "error", messageID), args);
     va_end(args);
   }
   
@@ -337,7 +350,7 @@ namespace Realm {
     
     va_list args;
     va_start(args, fmt);
-    fatal().vprintf("fatal", messageID, fmt, args);
+    fatal().vprintf("fatal", messageID, formatLink(fmt, "fatal", messageID), args);
     va_end(args);
   }
   
