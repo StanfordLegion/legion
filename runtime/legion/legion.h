@@ -897,9 +897,7 @@ namespace Legion {
      * Legion applications written to previous versions of this
      * interface and can safely be ignored for newer programs.
      */
-    struct 
-      LEGION_DEPRECATED("FieldSpaceRequirements are deprecated "
-                        "and will be ignored.") FieldSpaceRequirement {
+    struct FieldSpaceRequirement {
     public:
       FieldSpace   handle;
       AllocateMode privilege;
@@ -2772,7 +2770,7 @@ namespace Legion {
 					    int part_color = AUTO_GENERATE_ID);
 
       /**
-       * @deprectated 
+       * @deprecated 
        * @see create_partition_by_field instead
        * Create an index partitioning from an existing field
        * in a physical instance.  This requires that the field
@@ -3805,13 +3803,14 @@ namespace Legion {
       FieldAllocator create_field_allocator(Context ctx, FieldSpace handle);
 
       /**
-       * @deprectated
+       * @deprecated
        * Create an argument map in the given context.  This method
        * is deprecated as argument maps can now be created directly
        * by a simple declaration.
        * @param ctx enclosing task context
        * @return a new argument map
        */
+      LEGION_DEPRECATED("ArgumentMap can be constructed directly.")
       ArgumentMap create_argument_map(Context ctx);
     public:
       //------------------------------------------------------------------------
@@ -5753,6 +5752,8 @@ namespace Legion {
       template<typename T,
         T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                       Context, Runtime*)>
+      LEGION_DEPRECATED("Task registration should be done with "
+                        "a TaskVariantRegistrar") 
       static TaskID register_legion_task(TaskID id, Processor::Kind proc_kind,
                                          bool single, bool index, 
                                          VariantID vid = AUTO_GENERATE_ID,
@@ -5774,6 +5775,8 @@ namespace Legion {
       template<
         void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                          Context, Runtime*)>
+      LEGION_DEPRECATED("Task registration should be done with "
+                        "a TaskVariantRegistrar")
       static TaskID register_legion_task(TaskID id, Processor::Kind proc_kind,
                                          bool single, bool index,
                                          VariantID vid = AUTO_GENERATE_ID,
@@ -5797,6 +5800,8 @@ namespace Legion {
       template<typename T, typename UDT,
         T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                       Context, Runtime*, const UDT&)>
+      LEGION_DEPRECATED("Task registration should be done with "
+                        "a TaskVariantRegistrar")
       static TaskID register_legion_task(TaskID id, Processor::Kind proc_kind,
                                          bool single, bool index,
                                          const UDT &user_data,
@@ -5821,6 +5826,8 @@ namespace Legion {
       template<typename UDT,
         void (*TASK_PTR)(const Task*,const std::vector<PhysicalRegion>&,
                          Context, Runtime*, const UDT&)>
+      LEGION_DEPRECATED("Task registration should be done with "
+                        "a TaskVariantRegistrar")
       static TaskID register_legion_task(TaskID id, Processor::Kind proc_kind,
                                          bool single, bool index,
                                          const UDT &user_data,
