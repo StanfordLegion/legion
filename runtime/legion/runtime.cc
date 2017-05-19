@@ -776,6 +776,8 @@ namespace Legion {
     FutureMapImpl::~FutureMapImpl(void)
     //--------------------------------------------------------------------------
     {
+      if (is_owner() && registered_with_runtime)
+        unregister_with_runtime(DEFAULT_VIRTUAL_CHANNEL);
       futures.clear();
 #ifdef LEGION_GC
       log_garbage.info("GC Deletion %lld %d", 
