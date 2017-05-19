@@ -402,20 +402,30 @@ void check_task(const Task *task,
 int main(int argc, char **argv)
 {
   Runtime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
-  Runtime::register_legion_task<top_level_task>(TOP_LEVEL_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, false/*index*/,
-      AUTO_GENERATE_ID, TaskConfigOptions(), "top_level");
-  // Note we mark that all of these tasks are capable of being
-  // run both as single tasks and as index space tasks
-  Runtime::register_legion_task<init_field_task>(INIT_FIELD_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, true/*index*/,
-      AUTO_GENERATE_ID, TaskConfigOptions(true), "init_field");
-  Runtime::register_legion_task<daxpy_task>(DAXPY_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, true/*index*/,
-      AUTO_GENERATE_ID, TaskConfigOptions(true), "daxpy");
-  Runtime::register_legion_task<check_task>(CHECK_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, true/*index*/,
-      AUTO_GENERATE_ID, TaskConfigOptions(true), "check");
+
+  {
+    TaskVariantRegistrar registrar(TOP_LEVEL_TASK_ID, "top_level");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    Runtime::preregister_task_variant<top_level_task>(registrar, "top_level");
+  }
+
+  {
+    TaskVariantRegistrar registrar(INIT_FIELD_TASK_ID, "init_field");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    Runtime::preregister_task_variant<init_field_task>(registrar, "init_field");
+  }
+
+  {
+    TaskVariantRegistrar registrar(DAXPY_TASK_ID, "daxpy");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    Runtime::preregister_task_variant<daxpy_task>(registrar, "daxpy");
+  }
+
+  {
+    TaskVariantRegistrar registrar(CHECK_TASK_ID, "check");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    Runtime::preregister_task_variant<check_task>(registrar, "check");
+  }
 
   return Runtime::start(argc, argv);
 }

@@ -392,14 +392,30 @@ void check_task(const Task *task,
 int main(int argc, char **argv)
 {
   Runtime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
-  Runtime::register_legion_task<top_level_task>(TOP_LEVEL_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, false/*index*/);
-  Runtime::register_legion_task<init_field_task>(INIT_FIELD_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, true/*index*/);
-  Runtime::register_legion_task<stencil_task>(STENCIL_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, true/*index*/);
-  Runtime::register_legion_task<check_task>(CHECK_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, true/*index*/);
+
+  {
+    TaskVariantRegistrar registrar(TOP_LEVEL_TASK_ID, "top_level");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    Runtime::preregister_task_variant<top_level_task>(registrar, "top_level");
+  }
+
+  {
+    TaskVariantRegistrar registrar(INIT_FIELD_TASK_ID, "init_field");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    Runtime::preregister_task_variant<init_field_task>(registrar, "init_field");
+  }
+
+  {
+    TaskVariantRegistrar registrar(STENCIL_TASK_ID, "stencil");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    Runtime::preregister_task_variant<stencil_task>(registrar, "stencil");
+  }
+
+  {
+    TaskVariantRegistrar registrar(CHECK_TASK_ID, "check");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    Runtime::preregister_task_variant<check_task>(registrar, "check");
+  }
 
   return Runtime::start(argc, argv);
 }
