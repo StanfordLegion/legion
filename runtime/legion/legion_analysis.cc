@@ -8806,7 +8806,7 @@ namespace Legion {
       if (invalidate_all)
         node->invalidate_version_managers();
       else
-        node->invalidate_version_state(ctx);
+        return node->invalidate_version_state(ctx);
       return true;
     }
 
@@ -8817,7 +8817,7 @@ namespace Legion {
       if (invalidate_all)
         node->invalidate_version_managers();
       else
-        node->invalidate_version_state(ctx);
+        return node->invalidate_version_state(ctx);
       return true;
     }
 

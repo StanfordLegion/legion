@@ -15009,11 +15009,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::invalidate_version_state(ContextID ctx)
+    bool RegionTreeNode::invalidate_version_state(ContextID ctx)
     //--------------------------------------------------------------------------
     {
+      if (!current_versions.has_entry(ctx))
+        return false;
       VersionManager &manager = get_current_version_manager(ctx);
       manager.reset();
+      return true;
     }
 
     //--------------------------------------------------------------------------
