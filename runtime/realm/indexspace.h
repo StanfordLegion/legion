@@ -1488,6 +1488,11 @@ namespace Realm {
     Event make_valid(bool precise = true) const;
     bool is_valid(bool precise = true) const;
 
+    // returns the tightest description possible of the index space
+    // if 'wait' is false and the sparsity map data isn't valid, this does
+    //  the best it can without waiting for full data
+    ZIndexSpace<N,T> tighten(bool wait = true) const;
+
     // queries for individual points or rectangles
     bool contains(const ZPoint<N,T>& p) const;
     bool contains_all(const ZRect<N,T>& r) const;

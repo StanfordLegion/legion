@@ -18,8 +18,8 @@
 // nop, but helps IDEs
 #include "indexspace.h"
 
-#include "instance.h"
-#include "inst_layout.h"
+//include "instance.h"
+//include "inst_layout.h"
 
 #include "serialize.h"
 
@@ -599,6 +599,64 @@ namespace Realm {
     else
       return true;
   }
+
+  // returns the tightest description possible of the index space
+  // if 'precise' is false, the sparsity map may be preserved even for dense
+  //  spaces
+  template <int N, typename T>
+  ZIndexSpace<N,T> ZIndexSpace<N,T>::tighten(bool precise /*= true*/) const
+  {
+    if(sparsity.exists()) {
+      SparsityMapPublicImpl<N,T> *impl = sparsity.impl();
+      // always use precise info if it's available
+      if(impl->is_valid(true /*precise*/)) {
+	const std::vector<SparsityMapEntry<N,T> >& entries = impl->get_entries();
+	// three cases:
+	// 1) empty index space
+	if(entries.empty()) {
+	  ZRect<N,T> empty;
+	  empty.lo = bounds.lo;
+	  for(int i = 0; i < N; i++)
+	    empty.hi[i] = empty.lo[i] + 1;
+	  return ZIndexSpace<N,T>(empty);
+	}
+
+	// 2) single dense rectangle
+	if((entries.size() == 1) &&
+	   !entries[0].sparsity.exists() && (entries[0].bitmap == 0))
+	  return ZIndexSpace<N,T>(entries[0].bounds);
+
+	// 3) anything else - keep the sparsity map but tighten the bounds
+	ZRect<N,T> bbox = entries[0].bounds;
+	for(size_t i = 1; i < entries.size(); i++)
+	  bbox = bbox.union_bbox(entries[i].bounds);
+	return ZIndexSpace<N,T>(bbox, sparsity);
+      } else {
+	// make sure we're ok with (and have) approximate data
+	assert(!precise && impl->is_valid(false /*approx*/));
+
+	const std::vector<ZRect<N,T> >& approx_rects = impl->get_approx_rects();
+
+	// two cases:
+	// 1) empty index space
+	if(approx_rects.empty()) {
+	  ZRect<N,T> empty;
+	  empty.lo = bounds.lo;
+	  for(int i = 0; i < N; i++)
+	    empty.hi[i] = empty.lo[i] + 1;
+	  return ZIndexSpace<N,T>(empty);
+	}
+
+	// 2) anything else - keep the sparsity map but tighten the bounds
+	ZRect<N,T> bbox = approx_rects[0];
+	for(size_t i = 1; i < approx_rects.size(); i++)
+	  bbox = bbox.union_bbox(approx_rects[i]);
+	return ZIndexSpace<N,T>(bbox, sparsity);
+      }
+    } else
+      return *this;
+  }
+
 
   // helper function that binary searches a (1-D) sparsity map entry list and returns
   //  the index of the entry that contains the point, or the first one to appear after
