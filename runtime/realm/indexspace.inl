@@ -559,6 +559,54 @@ namespace Realm {
     : bounds(_bounds), sparsity(_sparsity)
   {}
 
+  // construct an index space from a list of points or rects
+  template <int N, typename T>
+  inline ZIndexSpace<N,T>::ZIndexSpace(const std::vector<ZPoint<N,T> >& points)
+  {
+    if(points.empty()) {
+      sparsity.id = 0;
+      for(int i = 0; i < N; i++) {
+	bounds.lo[i] = 1;
+	bounds.hi[i] = 0;
+      }
+    } else {
+      bounds.lo = points[0];
+      bounds.hi = points[0];
+      if(points.size() == 1) {
+	// single point can easily be stored precisely
+	sparsity.id = 0;
+      } else {
+	// more than one point may need a sparsity mask
+	for(size_t i = 1; i < points.size(); i++)
+	  bounds = bounds.union_bbox(ZRect<N,T>(points[i], points[i]));
+	sparsity = SparsityMap<N,T>::construct(points, false /*!always_create*/);
+      }
+    }
+  }
+
+  template <int N, typename T>
+  inline ZIndexSpace<N,T>::ZIndexSpace(const std::vector<ZRect<N,T> >& rects)
+  {
+    if(rects.empty()) {
+      sparsity.id = 0;
+      for(int i = 0; i < N; i++) {
+	bounds.lo[i] = 1;
+	bounds.hi[i] = 0;
+      }
+    } else {
+      bounds = rects[0];
+      if(rects.size() == 1) {
+	// single rect can easily be stored precisely
+	sparsity.id = 0;
+      } else {
+	// more than one rect may need a sparsity mask
+	for(size_t i = 1; i < rects.size(); i++)
+	  bounds = bounds.union_bbox(rects[i]);
+	sparsity = SparsityMap<N,T>::construct(rects, false /*!always_create*/);
+      }
+    }
+  }
+
   // reclaim any physical resources associated with this index space
   //  will clear the sparsity map of this index space if it exists
   template <int N, typename T>

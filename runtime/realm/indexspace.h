@@ -1472,6 +1472,10 @@ namespace Realm {
     ZIndexSpace(const ZRect<N,T>& _bounds);
     ZIndexSpace(const ZRect<N,T>& _bounds, SparsityMap<N,T> _sparsity);
 
+    // construct an index space from a list of points or rects
+    ZIndexSpace(const std::vector<ZPoint<N,T> >& points);
+    ZIndexSpace(const std::vector<ZRect<N,T> >& rects);
+
     // reclaim any physical resources associated with this index space
     //  will clear the sparsity map of this index space if it exists
     void destroy(Event wait_on = Event::NO_EVENT);
@@ -1489,9 +1493,9 @@ namespace Realm {
     bool is_valid(bool precise = true) const;
 
     // returns the tightest description possible of the index space
-    // if 'wait' is false and the sparsity map data isn't valid, this does
-    //  the best it can without waiting for full data
-    ZIndexSpace<N,T> tighten(bool wait = true) const;
+    // if 'precise' is false, the sparsity map may be preserved even for dense
+    //  spaces
+    ZIndexSpace<N,T> tighten(bool precise = true) const;
 
     // queries for individual points or rectangles
     bool contains(const ZPoint<N,T>& p) const;

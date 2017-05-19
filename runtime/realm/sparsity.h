@@ -27,6 +27,7 @@
 
 namespace Realm {
 
+  template <int N, typename T /*= int*/> struct ZPoint;
   template <int N, typename T /*= int*/> struct ZRect;
   template <int N, typename T = int> class HierarchicalBitMap;
 
@@ -66,6 +67,13 @@ namespace Realm {
 
     // looks up the public subset of the implementation object
     SparsityMapPublicImpl<N,T> *impl(void) const;
+
+    // if 'always_create' is false and the points/rects completely fill their
+    //  bounding box, returns NO_SPACE (i.e. id == 0)
+    static SparsityMap<N,T> construct(const std::vector<ZPoint<N,T> >& points,
+				      bool always_create);
+    static SparsityMap<N,T> construct(const std::vector<ZRect<N,T> >& rects,
+				      bool always_create);
   };
 
   template <int N, typename T>

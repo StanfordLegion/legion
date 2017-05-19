@@ -1213,6 +1213,61 @@ namespace Realm {
     return wrapper->get_or_create<N,T>(*this);
   }
 
+  // if 'always_create' is false and the points/rects completely fill their
+  //  bounding box, returns NO_SPACE (i.e. id == 0)
+  
+  template <int N, typename T>
+  /*static*/ SparsityMap<N,T> SparsityMap<N,T>::construct(const std::vector<ZPoint<N,T> >& points,
+							  bool always_create)
+  {
+    HybridRectangleList<N,T> hrl;
+    for(typename std::vector<ZPoint<N,T> >::const_iterator it = points.begin();
+	it != points.end();
+	++it)
+      hrl.add_point(*it);
+    const std::vector<ZRect<N,T> >& dense = hrl.convert_to_vector();
+
+    // are we allow to leave early for dense collections?
+    if(!always_create && (dense.size() <= 1)) {
+      SparsityMap<N,T> sparsity;
+      sparsity.id = 0;
+      return sparsity;
+    }
+
+    // construct and fill in a sparsity map
+    SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
+    SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
+    SparsityMapImpl<N,T> *impl = wrap->get_or_create<N,T>(sparsity);
+    impl->contribute_dense_rect_list(dense);
+    return sparsity;
+  }
+
+  template <int N, typename T>
+  /*static*/ SparsityMap<N,T> SparsityMap<N,T>::construct(const std::vector<ZRect<N,T> >& rects,
+							  bool always_create)
+  {
+    HybridRectangleList<N,T> hrl;
+    for(typename std::vector<ZRect<N,T> >::const_iterator it = rects.begin();
+	it != rects.end();
+	++it)
+      hrl.add_rect(*it);
+    const std::vector<ZRect<N,T> >& dense = hrl.convert_to_vector();
+
+    // are we allow to leave early for dense collections?
+    if(!always_create && (dense.size() <= 1)) {
+      SparsityMap<N,T> sparsity;
+      sparsity.id = 0;
+      return sparsity;
+    }
+
+    // construct and fill in a sparsity map
+    SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
+    SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
+    SparsityMapImpl<N,T> *impl = wrap->get_or_create<N,T>(sparsity);
+    impl->contribute_dense_rect_list(dense);
+    return sparsity;
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -5370,6 +5425,9 @@ namespace Realm {
       template <typename NT, typename T>
       static void demux(int tag, std::vector<void *> *v)
       {
+	v->push_back(UntypedWrapper::wrap((SparsityMap<NT::N,T> (*)(const std::vector<ZPoint<NT::N,T> >&, bool))&SparsityMap<NT::N,T>::construct));
+	v->push_back(UntypedWrapper::wrap((SparsityMap<NT::N,T> (*)(const std::vector<ZRect<NT::N,T> >&, bool))&SparsityMap<NT::N,T>::construct));
+
 	//ZIndexSpace<NT::N,T> i;
 	//std::vector<int> weights;
 	//std::vector<ZIndexSpace<NT::N,T> > list;
