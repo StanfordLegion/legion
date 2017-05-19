@@ -3370,6 +3370,7 @@ namespace Legion {
           }
         }
       }
+      FieldMask not_dominated_by_all;
       for (std::map<RegionTreeNode*,ClosedNode*>::const_iterator it = 
             children.begin(); it != children.end(); it++)
       {
@@ -3387,11 +3388,9 @@ namespace Legion {
         }
         FieldMask child_non_dominated = overlap;
         finder->second->filter_dominated_fields(it->second,child_non_dominated);
-        dominated_fields &= (overlap - child_non_dominated);
-        if (!dominated_fields)
-          return;
+        not_dominated_by_all |= child_non_dominated;
       }
-      non_dominated_mask -= dominated_fields;
+      non_dominated_mask -= dominated_fields - not_dominated_by_all;
     }
 
     //--------------------------------------------------------------------------
