@@ -663,9 +663,9 @@ namespace Realm {
 	// 1) empty index space
 	if(entries.empty()) {
 	  ZRect<N,T> empty;
-	  empty.lo = bounds.lo;
+	  empty.hi = bounds.lo;
 	  for(int i = 0; i < N; i++)
-	    empty.hi[i] = empty.lo[i] + 1;
+	    empty.lo[i] = empty.hi[i] + 1;
 	  return ZIndexSpace<N,T>(empty);
 	}
 
@@ -689,9 +689,9 @@ namespace Realm {
 	// 1) empty index space
 	if(approx_rects.empty()) {
 	  ZRect<N,T> empty;
-	  empty.lo = bounds.lo;
+	  empty.hi = bounds.lo;
 	  for(int i = 0; i < N; i++)
-	    empty.hi[i] = empty.lo[i] + 1;
+	    empty.lo[i] = empty.hi[i] + 1;
 	  return ZIndexSpace<N,T>(empty);
 	}
 
