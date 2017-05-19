@@ -57,7 +57,36 @@ namespace Realm {
     Memory get_location(void) const;
     const LinearizedIndexSpaceIntfc& get_lis(void) const;
     const InstanceLayoutGeneric *get_layout(void) const;
-    void *get_base_address(void) const;
+
+    // these methods may be used to access the contents of an instance, but
+    //  users are encouraged to use various accessors which make repeated
+    //  accesses much more efficient
+
+    void read_untyped(size_t offset, void *data, size_t datalen) const;
+    void write_untyped(size_t offset, const void *data, size_t datalen) const;
+    void reduce_apply_untyped(size_t offset, ReductionOpID redop_id,
+			      const void *data, size_t datalen,
+			      bool exclusive = false) const;
+    void reduce_fold_untyped(size_t offset, ReductionOpID redop_id,
+			     const void *data, size_t datalen,
+			     bool exclusive = false) const;
+    // returns a null pointer if the instance storage cannot be directly
+    //  accessed via load/store instructions
+    void *pointer_untyped(size_t offset, size_t datalen) const;
+
+    // typed template helpers of the above
+    template <typename T>
+    T read(size_t offset) const;
+    template <typename T>
+    void write(size_t offset, T val) const;
+    template <typename T>
+    void reduce_apply(size_t offset, ReductionOpID redop_id, T val,
+		      bool exclusive = false) const;
+    template <typename T>
+    void reduce_fold(size_t offset, ReductionOpID redop_id, T val,
+		     bool exclusive = false) const;
+    template <typename T>
+    T *pointer(size_t offset) const;
 
     Event get_ready_event(void) const;
 

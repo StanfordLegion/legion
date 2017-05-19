@@ -82,6 +82,14 @@ namespace Realm {
 
   std::ostream& operator<<(std::ostream& os, const InstanceLayoutGeneric& ilg);
 
+  // users that wish to handle instances as simple blocks of bits may use
+  //  an InstanceLayoutOpaque to just request a contiguous range of bytes with
+  //  a specified alignment
+  class InstanceLayoutOpaque : public InstanceLayoutGeneric {
+  public:
+    InstanceLayoutOpaque(size_t _bytes_used, size_t _alignment_reqd);
+  };
+
   template <int N, typename T>
   class InstanceLayoutPiece {
   public:
@@ -146,6 +154,10 @@ namespace Realm {
 
     virtual void print(std::ostream& os) const;
 
+    // computes the offset of the specified field for an element - this
+    //  is generally much less efficient than using a layout-specific accessor
+    size_t calculate_offset(ZPoint<N,T> p, FieldID fid) const;
+
     ZIndexSpace<N,T> space;
     std::vector<InstancePieceList<N,T> > piece_lists;
   };
@@ -180,11 +192,18 @@ namespace Realm {
     // - AccessorPrivilege get_accessor_privileges(void) -- for privilege checks
     template <typename INST>
     AffineAccessor(const INST &instance, unsigned field_id);
+    template <typename INST>
+    AffineAccessor(const INST &instance, unsigned field_id, const ZRect<N,T>& subrect);
 
     ~AffineAccessor(void);
 
     static bool is_compatible(RegionInstance inst, ptrdiff_t field_offset);
     static bool is_compatible(RegionInstance inst, ptrdiff_t field_offset, const ZRect<N,T>& subrect);
+
+    template <typename INST>
+    static bool is_compatible(const INST &instance, unsigned field_id);
+    template <typename INST>
+    static bool is_compatible(const INST &instance, unsigned field_id, const ZRect<N,T>& subrect);
 
     FT *ptr(const ZPoint<N,T>& p) const;
     FT read(const ZPoint<N,T>& p) const;

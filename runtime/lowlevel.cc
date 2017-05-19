@@ -1209,9 +1209,18 @@ namespace LegionRuntime {
       // HDF memory doesn't support 
       assert(impl->memory.kind() != Memory::HDF_MEM);
 #endif
+#ifdef OLD_ACCESSORS
       Arrays::Mapping<1, 1> *mapping = impl->metadata.linearization.get_mapping<1>();
       int index = mapping->image(ptr.value);
       impl->get_bytes(index, field_offset + offset, dst, bytes);
+#endif
+      using namespace Realm;
+      InstanceLayout<1,coord_t> *layout = dynamic_cast<InstanceLayout<1,coord_t> *>(impl->metadata.layout);
+      size_t mem_offset = (impl->metadata.inst_offset +
+			   layout->calculate_offset(ZPoint<1, coord_t>(ptr.value),
+						    field_offset + offset));
+      MemoryImpl *mem_impl = get_runtime()->get_memory_impl(impl->memory);
+      mem_impl->get_bytes(mem_offset, dst, bytes);
     }
 
     //bool debug_mappings = false;
@@ -1253,6 +1262,7 @@ namespace LegionRuntime {
         return;
       }
 #endif
+#ifdef OLD_ACCESSORS
       int index = impl->metadata.linearization.get_image(dp);
       impl->get_bytes(index, field_offset + offset, dst, bytes);
       // if (debug_mappings) {
@@ -1261,6 +1271,39 @@ namespace LegionRuntime {
       // 	  printf(" %02x", ((unsigned char *)dst)[i]);
       // 	printf("\n");
       // }
+#endif
+      using namespace Realm;
+      size_t mem_offset = impl->metadata.inst_offset;
+      switch(dp.dim) {
+      case 1:
+	{
+	  InstanceLayout<1,coord_t> *layout = dynamic_cast<InstanceLayout<1,coord_t> *>(impl->metadata.layout);
+	  mem_offset += layout->calculate_offset(ZPoint<1, coord_t>(dp.point_data[0]),
+						 field_offset + offset);
+	  break;
+	}
+      case 2:
+	{
+	  InstanceLayout<2,coord_t> *layout = dynamic_cast<InstanceLayout<2,coord_t> *>(impl->metadata.layout);
+	  mem_offset += layout->calculate_offset(ZPoint<2, coord_t>(dp.point_data[0],
+								    dp.point_data[1]),
+						 field_offset + offset);
+	  break;
+	}
+      case 3:
+	{
+	  InstanceLayout<3,coord_t> *layout = dynamic_cast<InstanceLayout<3,coord_t> *>(impl->metadata.layout);
+	  mem_offset += layout->calculate_offset(ZPoint<3, coord_t>(dp.point_data[0],
+								    dp.point_data[1],
+								    dp.point_data[2]),
+						 field_offset + offset);
+	  break;
+	}
+      default:
+	assert(0);
+      }
+      MemoryImpl *mem_impl = get_runtime()->get_memory_impl(impl->memory);
+      mem_impl->get_bytes(mem_offset, dst, bytes);
     }
 
     void AccessorType::Generic::Untyped::write_untyped(ptr_t ptr, const void *src, size_t bytes, off_t offset) const
@@ -1291,6 +1334,11 @@ namespace LegionRuntime {
       impl->put_bytes(index, field_offset + offset, src, bytes);
 #endif
       using namespace Realm;
+      InstanceLayout<1,coord_t> *layout = dynamic_cast<InstanceLayout<1,coord_t> *>(impl->metadata.layout);
+      size_t mem_offset = (impl->metadata.inst_offset +
+			   layout->calculate_offset(ZPoint<1, coord_t>(ptr.value),
+						    field_offset + offset));
+#if 0
       InstanceLayoutGeneric *ilg = impl->metadata.layout;
       assert(ilg != 0);
       std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = ilg->fields.find(field_offset + offset);
@@ -1311,6 +1359,7 @@ namespace LegionRuntime {
       default:
 	assert(0);
       }
+#endif
       MemoryImpl *mem_impl = get_runtime()->get_memory_impl(impl->memory);
       mem_impl->put_bytes(mem_offset, src, bytes);
     }
@@ -1353,6 +1402,7 @@ namespace LegionRuntime {
       }
 #endif
 
+#ifdef OLD_ACCESSORS
       int index = impl->metadata.linearization.get_image(dp);
       // if (debug_mappings) {
       // 	printf("WRITE: " IDFMT " (%d,%d,%d,%d) -> %d /", impl->me.id, dp.dim, dp.point_data[0], dp.point_data[1], dp.point_data[2], index);
@@ -1361,6 +1411,39 @@ namespace LegionRuntime {
       // 	printf("\n");
       // }
       impl->put_bytes(index, field_offset + offset, src, bytes);
+#endif
+      using namespace Realm;
+      size_t mem_offset = impl->metadata.inst_offset;
+      switch(dp.dim) {
+      case 1:
+	{
+	  InstanceLayout<1,coord_t> *layout = dynamic_cast<InstanceLayout<1,coord_t> *>(impl->metadata.layout);
+	  mem_offset += layout->calculate_offset(ZPoint<1, coord_t>(dp.point_data[0]),
+						 field_offset + offset);
+	  break;
+	}
+      case 2:
+	{
+	  InstanceLayout<2,coord_t> *layout = dynamic_cast<InstanceLayout<2,coord_t> *>(impl->metadata.layout);
+	  mem_offset += layout->calculate_offset(ZPoint<2, coord_t>(dp.point_data[0],
+								    dp.point_data[1]),
+						 field_offset + offset);
+	  break;
+	}
+      case 3:
+	{
+	  InstanceLayout<3,coord_t> *layout = dynamic_cast<InstanceLayout<3,coord_t> *>(impl->metadata.layout);
+	  mem_offset += layout->calculate_offset(ZPoint<3, coord_t>(dp.point_data[0],
+								    dp.point_data[1],
+								    dp.point_data[2]),
+						 field_offset + offset);
+	  break;
+	}
+      default:
+	assert(0);
+      }
+      MemoryImpl *mem_impl = get_runtime()->get_memory_impl(impl->memory);
+      mem_impl->put_bytes(mem_offset, src, bytes);
     }
 
     bool AccessorType::Generic::Untyped::get_aos_parameters(void *&base, size_t &stride) const

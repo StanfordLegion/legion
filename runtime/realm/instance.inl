@@ -71,11 +71,43 @@ namespace Realm {
     return get_lis().as_dim<N,int>().indexspace;
   }
 #endif
-		
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class RegionInstance
 
+  template <typename T>
+  inline T RegionInstance::read(size_t offset) const
+  {
+    T val;
+    read_untyped(offset, &val, sizeof(T));
+    return val;
+  }
+
+  template <typename T>
+  inline void RegionInstance::write(size_t offset, T val) const
+  {
+    write_untyped(offset, &val, sizeof(T));
+  }
+
+  template <typename T>
+  inline void RegionInstance::reduce_apply(size_t offset, ReductionOpID redop_id,
+					   T val,
+					   bool exclusive /*= false*/) const
+  {
+    reduce_apply_untyped(offset, redop_id, &val, sizeof(T), exclusive);
+  }
+
+  template <typename T>
+  inline void RegionInstance::reduce_fold(size_t offset, ReductionOpID redop_id,
+					  T val,
+					  bool exclusive /*= false*/) const
+  {
+    reduce_fold_untyped(offset, redop_id, &val, sizeof(T), exclusive);
+  }
+
+  template <typename T>
+  inline T *RegionInstance::pointer(size_t offset) const
+  {
+    return static_cast<T *>(pointer_untyped(offset, sizeof(T)));
+  }
+		
   template <int N, typename T>
   inline /*static*/ Event RegionInstance::create_instance(RegionInstance& inst,
 							  Memory memory,

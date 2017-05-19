@@ -233,14 +233,95 @@ namespace Realm {
       return r_impl->metadata.layout;
     }
 
-    void *RegionInstance::get_base_address(void) const
+    void RegionInstance::read_untyped(size_t offset, void *data, size_t datalen) const
     {
       RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
       // TODO: wait for metadata to be valid?
       assert(r_impl->metadata.layout);
       MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
-      return mem->get_direct_ptr(r_impl->metadata.inst_offset,
-				 r_impl->metadata.layout->bytes_used);
+      mem->get_bytes(r_impl->metadata.inst_offset + offset, data, datalen);
+    }
+
+    void RegionInstance::write_untyped(size_t offset, const void *data, size_t datalen) const
+    {
+      RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
+      // TODO: wait for metadata to be valid?
+      assert(r_impl->metadata.layout);
+      MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
+      mem->put_bytes(r_impl->metadata.inst_offset + offset, data, datalen);
+    }
+
+    void RegionInstance::reduce_apply_untyped(size_t offset, ReductionOpID redop_id,
+					      const void *data, size_t datalen,
+					      bool exclusive /*= false*/) const
+    {
+      RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
+      // TODO: wait for metadata to be valid?
+      assert(r_impl->metadata.layout);
+      MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
+      const ReductionOpUntyped *redop = get_runtime()->reduce_op_table[redop_id];
+      assert(redop);
+      // data should match RHS size
+      assert(datalen == redop->sizeof_rhs);
+      // can we run the reduction op directly on the memory location?
+      void *ptr = mem->get_direct_ptr(r_impl->metadata.inst_offset + offset,
+				      redop->sizeof_lhs);
+      if(ptr) {
+	redop->apply(ptr, data, 1, exclusive);
+      } else {
+	// we have to do separate get/put, which means we cannot supply
+	//  atomicity in the !exclusive case
+	assert(exclusive);
+	void *lhs_copy = alloca(redop->sizeof_lhs);
+	mem->get_bytes(r_impl->metadata.inst_offset + offset,
+		       lhs_copy, redop->sizeof_lhs);
+	redop->apply(lhs_copy, data, 1, true /*always exclusive*/);
+	mem->put_bytes(r_impl->metadata.inst_offset + offset,
+		       lhs_copy, redop->sizeof_lhs);
+      }
+    }
+
+    void RegionInstance::reduce_fold_untyped(size_t offset, ReductionOpID redop_id,
+					     const void *data, size_t datalen,
+					     bool exclusive /*= false*/) const
+    {
+      RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
+      // TODO: wait for metadata to be valid?
+      assert(r_impl->metadata.layout);
+      MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
+      const ReductionOpUntyped *redop = get_runtime()->reduce_op_table[redop_id];
+      assert(redop);
+      // data should match RHS size
+      assert(datalen == redop->sizeof_rhs);
+      // can we run the reduction op directly on the memory location?
+      void *ptr = mem->get_direct_ptr(r_impl->metadata.inst_offset + offset,
+				      redop->sizeof_rhs);
+      if(ptr) {
+	redop->fold(ptr, data, 1, exclusive);
+      } else {
+	// we have to do separate get/put, which means we cannot supply
+	//  atomicity in the !exclusive case
+	assert(exclusive);
+	void *rhs1_copy = alloca(redop->sizeof_rhs);
+	mem->get_bytes(r_impl->metadata.inst_offset + offset,
+		       rhs1_copy, redop->sizeof_rhs);
+	redop->fold(rhs1_copy, data, 1, true /*always exclusive*/);
+	mem->put_bytes(r_impl->metadata.inst_offset + offset,
+		       rhs1_copy, redop->sizeof_rhs);
+      }
+    }
+
+    // returns a null pointer if the instance storage cannot be directly
+    //  accessed via load/store instructions
+    void *RegionInstance::pointer_untyped(size_t offset, size_t datalen) const
+    {
+      RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
+      // TODO: wait for metadata to be valid?
+      assert(r_impl->metadata.layout);
+      MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
+      void *ptr = mem->get_direct_ptr(r_impl->metadata.inst_offset + offset,
+				      datalen);
+      return ptr;
     }
 
     void RegionInstance::get_strided_access_parameters(size_t start, size_t count,
