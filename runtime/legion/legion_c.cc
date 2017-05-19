@@ -22,12 +22,8 @@
 #endif
 
 #ifndef USE_LEGION_PARTAPI_SHIM
-#ifdef SHARED_LOWLEVEL
-#define USE_LEGION_PARTAPI_SHIM 0
-#else
 // General LLR can't handle new partion API yet. Use a shim instead.
 #define USE_LEGION_PARTAPI_SHIM 1
-#endif
 #endif
 
 using namespace Legion;
@@ -785,13 +781,14 @@ private:
   };
 };
 
-Processor::TaskFuncID
+TaskID
 PartitionEqualShim::register_task()
 {
-  return HighLevelRuntime::register_legion_task<IndexPartition, task>(
-    task_id, Processor::LOC_PROC, true, false,
-    AUTO_GENERATE_ID, TaskConfigOptions(),
-    "PartitionEqualShim::task");
+  static const char * const task_name = "PartitionEqualShim::task";
+  TaskVariantRegistrar registrar(task_id, task_name);
+  registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+  Runtime::preregister_task_variant<IndexPartition, task>(registrar, task_name);
+  return task_id;
 }
 
 IndexPartition
@@ -1052,13 +1049,14 @@ private:
   };
 };
 
-Processor::TaskFuncID
+TaskID
 PartitionByUnionShim::register_task()
 {
-  return HighLevelRuntime::register_legion_task<IndexPartition, task>(
-    task_id, Processor::LOC_PROC, true, false,
-    AUTO_GENERATE_ID, TaskConfigOptions(),
-    "PartitionByUnionShim::task");
+  static const char * const task_name = "PartitionByUnionShim::task";
+  TaskVariantRegistrar registrar(task_id, task_name);
+  registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+  Runtime::preregister_task_variant<IndexPartition, task>(registrar, task_name);
+  return task_id;
 }
 
 IndexPartition
@@ -1178,13 +1176,14 @@ private:
   };
 };
 
-Processor::TaskFuncID
+TaskID
 PartitionByIntersectionShim::register_task()
 {
-  return HighLevelRuntime::register_legion_task<STLVectorSerializer<ptr_t>, task>(
-    task_id, Processor::LOC_PROC, true, false,
-    AUTO_GENERATE_ID, TaskConfigOptions(),
-    "PartitionByIntersectionShim::task");
+  static const char * const task_name = "PartitionByIntersectionShim::task";
+  TaskVariantRegistrar registrar(task_id, task_name);
+  registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+  Runtime::preregister_task_variant<STLVectorSerializer<ptr_t>, task>(registrar, task_name);
+  return task_id;
 }
 
 IndexPartition
@@ -1343,13 +1342,14 @@ private:
   };
 };
 
-Processor::TaskFuncID
+TaskID
 PartitionByDifferenceShim::register_task()
 {
-  return HighLevelRuntime::register_legion_task<STLVectorSerializer<ptr_t>, task>(
-    task_id, Processor::LOC_PROC, true, false,
-    AUTO_GENERATE_ID, TaskConfigOptions(),
-    "PartitionByDifferenceShim::task");
+  static const char * const task_name = "PartitionByDifferenceShim::task";
+  TaskVariantRegistrar registrar(task_id, task_name);
+  registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+  Runtime::preregister_task_variant<STLVectorSerializer<ptr_t>, task>(registrar, task_name);
+  return task_id;
 }
 
 IndexPartition
@@ -1483,13 +1483,14 @@ private:
   };
 };
 
-Processor::TaskFuncID
+TaskID
 PartitionByFieldShim::register_task()
 {
-  return HighLevelRuntime::register_legion_task<IndexPartition, task>(
-    task_id, Processor::LOC_PROC, true, false,
-    AUTO_GENERATE_ID, TaskConfigOptions(),
-    "PartitionByFieldShim::task");
+  static const char * const task_name = "PartitionByFieldShim::task";
+  TaskVariantRegistrar registrar(task_id, task_name);
+  registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+  Runtime::preregister_task_variant<IndexPartition, task>(registrar, task_name);
+  return task_id;
 }
 
 IndexPartition
@@ -1615,24 +1616,26 @@ private:
   };
 };
 
-Processor::TaskFuncID
+TaskID
 PartitionByImageShim::register_task_unstructured()
 {
-  return
-    HighLevelRuntime::register_legion_task<STLSetSerializer<ptr_t>, unstructured>(
-    task_id_unstructured, Processor::LOC_PROC, true, false,
-    AUTO_GENERATE_ID, TaskConfigOptions(),
-    "PartitionByImageShim::unstructured");
+  static const char * const task_name_unstructured = "PartitionByFieldShim::unstructured";
+  TaskVariantRegistrar registrar(task_id_unstructured, task_name_unstructured);
+  registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+  Runtime::preregister_task_variant<STLSetSerializer<ptr_t>, unstructured>(
+    registrar, task_name_unstructured);
+  return task_id_unstructured;
 }
 
-Processor::TaskFuncID
+TaskID
 PartitionByImageShim::register_task_structured()
 {
-  return
-    HighLevelRuntime::register_legion_task<STLVectorSerializer<long long>, structured>(
-    task_id_structured, Processor::LOC_PROC, true, false,
-    AUTO_GENERATE_ID, TaskConfigOptions(),
-    "PartitionByImageShim::structured");
+  static const char * const task_name_structured = "PartitionByFieldShim::structured";
+  TaskVariantRegistrar registrar(task_id_structured, task_name_structured);
+  registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+  Runtime::preregister_task_variant<STLVectorSerializer<long long>, structured>(
+    registrar, task_name_structured);
+  return task_id_structured;
 }
 
 IndexPartition
@@ -1892,13 +1895,14 @@ private:
   };
 };
 
-Processor::TaskFuncID
+TaskID
 PartitionByPreimageShim::register_task()
 {
-  return HighLevelRuntime::register_legion_task<STLVectorSerializer<long long>, task>(
-    task_id, Processor::LOC_PROC, true, false,
-    AUTO_GENERATE_ID, TaskConfigOptions(),
-    "PartitionByPreimageShim::task");
+  static const char * const task_name = "PartitionByPreimageShim::task";
+  TaskVariantRegistrar registrar(task_id, task_name);
+  registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+  Runtime::preregister_task_variant<STLVectorSerializer<long long>, task>(registrar, task_name);
+  return task_id;
 }
 
 IndexPartition
