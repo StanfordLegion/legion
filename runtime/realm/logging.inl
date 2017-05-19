@@ -367,18 +367,18 @@ namespace Realm {
   
   // default constructor makes an inactive message
   inline LoggerMessage::LoggerMessage(void)
-  : logger(0), active(false), level(Logger::LEVEL_NONE), oss(0), messageID(RESERVED_LOGGER_MESSAGE_ID)
+  : messageID(RESERVED_LOGGER_MESSAGE_ID), logger(0), active(false), level(Logger::LEVEL_NONE), oss(0)
   {}
   
   inline LoggerMessage::LoggerMessage(Logger *_logger, bool _active, Logger::LoggingLevel _level)
-  : logger(_logger), active(_active), level(_level), oss(0), messageID(RESERVED_LOGGER_MESSAGE_ID)
+  : messageID(RESERVED_LOGGER_MESSAGE_ID), logger(_logger), active(_active), level(_level), oss(0)
   {
     if(active)
     oss = new std::ostringstream;
   }
   
   inline LoggerMessage::LoggerMessage(LoggerMessageID messageID, Logger *_logger, bool _active, Logger::LoggingLevel _level)
-  : logger(_logger), active(_active), level(_level), oss(0), messageID(RESERVED_LOGGER_MESSAGE_ID)
+  : messageID(RESERVED_LOGGER_MESSAGE_ID), logger(_logger), active(_active), level(_level), oss(0)
   {
     if(active) {
       oss = new std::ostringstream;
