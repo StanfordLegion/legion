@@ -23,11 +23,11 @@
 
 #include "simple_blas.h"
 
-using namespace LegionRuntime::HighLevel;
+using namespace Legion;
 using namespace LegionRuntime::Accessor;
 using namespace LegionRuntime::Arrays;
 
-LegionRuntime::Logger::Category log_app("app");
+Logger log_app("app");
 
 enum {
   TOP_LEVEL_TASK_ID,
@@ -85,9 +85,12 @@ int main(int argc, char **argv)
     blas_do_parallel = false;
 
   Runtime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
-  Runtime::register_legion_task<top_level_task>(TOP_LEVEL_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, false/*index*/,
-      AUTO_GENERATE_ID, TaskConfigOptions(), "top_level");
+
+  {
+    TaskVariantRegistrar registrar(TOP_LEVEL_TASK_ID, "top_level");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    Runtime::preregister_task_variant<top_level_task>(registrar, "top_level");
+  }
 
   blas_impl_s.preregister_tasks();
 

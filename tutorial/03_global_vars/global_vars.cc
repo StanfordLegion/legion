@@ -18,7 +18,7 @@
 
 #include "legion.h"
 
-using namespace LegionRuntime::HighLevel;
+using namespace Legion;
 
 enum TaskIDs {
   TOP_LEVEL_TASK_ID,
@@ -49,7 +49,7 @@ void foo(void)
 
 void top_level_task(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
-                    Context ctx, HighLevelRuntime *runtime)
+                    Context ctx, Runtime *runtime)
 {
   printf("The value of global_var %d is undefined\n", global_var);
 
@@ -75,8 +75,8 @@ void top_level_task(const Task *task,
 
 int main(int argc, char **argv)
 {
-  HighLevelRuntime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
-  HighLevelRuntime::register_legion_task<top_level_task>(TOP_LEVEL_TASK_ID,
+  Runtime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
+  Runtime::register_legion_task<top_level_task>(TOP_LEVEL_TASK_ID,
       Processor::LOC_PROC, true/*single*/, false/*index*/);
-  return HighLevelRuntime::start(argc, argv);
+  return Runtime::start(argc, argv);
 }

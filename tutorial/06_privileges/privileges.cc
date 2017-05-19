@@ -190,7 +190,7 @@ void top_level_task(const Task *task,
 // region but not a physical instance to access.
 void init_field_task(const Task *task,
                      const std::vector<PhysicalRegion> &regions,
-                     Context ctx, HighLevelRuntime *runtime)
+                     Context ctx, Runtime *runtime)
 {
   // Check that the inputs look right since we have no
   // static checking to help us out.
@@ -224,7 +224,7 @@ void init_field_task(const Task *task,
 
 void daxpy_task(const Task *task,
                 const std::vector<PhysicalRegion> &regions,
-                Context ctx, HighLevelRuntime *runtime)
+                Context ctx, Runtime *runtime)
 {
   assert(regions.size() == 2);
   assert(task->regions.size() == 2);
@@ -251,7 +251,7 @@ void daxpy_task(const Task *task,
 
 void check_task(const Task *task,
                 const std::vector<PhysicalRegion> &regions,
-                Context ctx, HighLevelRuntime *runtime)
+                Context ctx, Runtime *runtime)
 {
   assert(regions.size() == 2);
   assert(task->regions.size() == 2);

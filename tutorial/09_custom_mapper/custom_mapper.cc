@@ -475,8 +475,8 @@ void AdversarialMapper::slice_task(const MapperContext      ctx,
   {
     case 1:
       {
-        LegionRuntime::Arrays::Rect<1> rect = input.domain.get_rect<1>();
-        for (LegionRuntime::Arrays::GenericPointInRectIterator<1> pir(rect);
+        Rect<1> rect = input.domain.get_rect<1>();
+        for (GenericPointInRectIterator<1> pir(rect);
               pir; pir++, idx++)
         {
           Rect<1> slice(pir.p, pir.p);
@@ -488,8 +488,8 @@ void AdversarialMapper::slice_task(const MapperContext      ctx,
       }
     case 2:
       {
-        LegionRuntime::Arrays::Rect<2> rect = input.domain.get_rect<2>();
-        for (LegionRuntime::Arrays::GenericPointInRectIterator<2> pir(rect);
+        Rect<2> rect = input.domain.get_rect<2>();
+        for (GenericPointInRectIterator<2> pir(rect);
               pir; pir++, idx++)
         {
           Rect<2> slice(pir.p, pir.p);
@@ -501,8 +501,8 @@ void AdversarialMapper::slice_task(const MapperContext      ctx,
       }
     case 3:
       {
-        LegionRuntime::Arrays::Rect<3> rect = input.domain.get_rect<3>();
-        for (LegionRuntime::Arrays::GenericPointInRectIterator<3> pir(rect);
+        Rect<3> rect = input.domain.get_rect<3>();
+        for (GenericPointInRectIterator<3> pir(rect);
               pir; pir++, idx++)
         {
           Rect<3> slice(pir.p, pir.p);
