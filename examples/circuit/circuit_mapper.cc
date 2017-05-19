@@ -15,7 +15,7 @@
 
 #include "circuit_mapper.h"
 
-LegionRuntime::Logger::Category log_mapper("mapper");
+Logger log_mapper("mapper");
 
 CircuitMapper::CircuitMapper(MapperRuntime *rt, Machine machine, Processor local,
                              const char *mapper_name,

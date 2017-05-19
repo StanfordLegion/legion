@@ -30,7 +30,7 @@
 #define INDEX_TYPE    unsigned
 #define INDEX_DIM     1
 
-using namespace LegionRuntime::HighLevel;
+using namespace Legion;
 using namespace LegionRuntime::Accessor;
 
 // for Point<DIM> and Rect<DIM>
@@ -78,11 +78,6 @@ enum WireFields {
 
 enum LocatorFields {
   FID_LOCATOR,
-};
-
-enum CircuitVariants {
-  CIRCUIT_CPU_LEAF_VARIANT,
-  CIRCUIT_GPU_LEAF_VARIANT,
 };
 
 struct Circuit {
@@ -277,29 +272,22 @@ namespace TaskHelper {
 #endif
 
   template<typename T>
-  void register_cpu_variants(void)
-  {
-    HighLevelRuntime::register_legion_task<base_cpu_wrapper<T> >(T::TASK_ID, Processor::LOC_PROC,
-                                                                 false/*single*/, true/*index*/,
-                                                                 CIRCUIT_CPU_LEAF_VARIANT,
-                                                                 TaskConfigOptions(T::CPU_BASE_LEAF),
-                                                                 T::TASK_NAME);
-  }
-
-  template<typename T>
   void register_hybrid_variants(void)
   {
-    HighLevelRuntime::register_legion_task<base_cpu_wrapper<T> >(T::TASK_ID, Processor::LOC_PROC,
-                                                                 false/*single*/, true/*index*/,
-                                                                 CIRCUIT_CPU_LEAF_VARIANT,
-                                                                 TaskConfigOptions(T::CPU_BASE_LEAF),
-                                                                 T::TASK_NAME);
+    {
+      TaskVariantRegistrar registrar(T::TASK_ID, T::TASK_NAME);
+      registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+      registrar.set_leaf(T::CPU_BASE_LEAF);
+      Runtime::preregister_task_variant<base_cpu_wrapper<T> >(registrar, T::TASK_NAME);
+    }
+
 #ifdef USE_CUDA
-    HighLevelRuntime::register_legion_task<base_gpu_wrapper<T> >(T::TASK_ID, Processor::TOC_PROC,
-                                                                 false/*single*/, true/*index*/,
-                                                                 CIRCUIT_GPU_LEAF_VARIANT,
-                                                                 TaskConfigOptions(T::GPU_BASE_LEAF),
-                                                                 T::TASK_NAME);
+    {
+      TaskVariantRegistrar registrar(T::TASK_ID, T::TASK_NAME);
+      registrar.add_constraint(ProcessorConstraint(Processor::TOC_PROC));
+      registrar.set_leaf(T::GPU_BASE_LEAF);
+      Runtime::preregister_task_variant<base_gpu_wrapper<T> >(registrar, T::TASK_NAME);
+    }
 #endif
   }
 };

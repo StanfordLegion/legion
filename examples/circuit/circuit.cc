@@ -26,10 +26,7 @@
 #include "circuit_mapper.h"
 #include "legion.h"
 
-using namespace LegionRuntime::HighLevel;
-using namespace LegionRuntime::Accessor;
-
-LegionRuntime::Logger::Category log_circuit("circuit");
+Logger log_circuit("circuit");
 
 // Utility functions (forward declarations)
 void parse_input_args(char **argv, int argc, int &num_loops, int &num_pieces,
@@ -217,22 +214,19 @@ void top_level_task(const Task *task,
 int main(int argc, char **argv)
 {
   HighLevelRuntime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
-  HighLevelRuntime::register_legion_task<top_level_task>(TOP_LEVEL_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, false/*index*/,
-      AUTO_GENERATE_ID, TaskConfigOptions(), "top_level");
-  // If we're running on the shared low-level then only register cpu tasks
-#ifdef SHARED_LOWLEVEL
-  TaskHelper::register_cpu_variants<CalcNewCurrentsTask>();
-  TaskHelper::register_cpu_variants<DistributeChargeTask>();
-  TaskHelper::register_cpu_variants<UpdateVoltagesTask>();
-#else
+
+  {
+    TaskVariantRegistrar registrar(TOP_LEVEL_TASK_ID, "top_level");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    Runtime::preregister_task_variant<top_level_task>(registrar, "top_level");
+  }
+
   TaskHelper::register_hybrid_variants<CalcNewCurrentsTask>();
   TaskHelper::register_hybrid_variants<DistributeChargeTask>();
   TaskHelper::register_hybrid_variants<UpdateVoltagesTask>();
-#endif
   CheckTask::register_task();
   HighLevelRuntime::register_reduction_op<AccumulateCharge>(REDUCE_ID);
-  HighLevelRuntime::set_registration_callback(update_mappers);
+  HighLevelRuntime::add_registration_callback(update_mappers);
 
   return HighLevelRuntime::start(argc, argv);
 }

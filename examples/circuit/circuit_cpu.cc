@@ -20,8 +20,6 @@
 #endif
 #include <cmath>
 
-using namespace LegionRuntime::Accessor;
-
 const float AccumulateCharge::identity = 0.0f;
 
 template <>
@@ -594,7 +592,7 @@ void CalcNewCurrentsTask::cpu_base_impl(const CircuitPiece &p,
                               fa_current, fa_voltage))
     return;
 
-  LegionRuntime::HighLevel::IndexIterator itr(rt, ctx, p.pvt_wires);
+  IndexIterator itr(rt, ctx, p.pvt_wires);
   float temp_v[WIRE_SEGMENTS+1];
   float temp_i[WIRE_SEGMENTS];
   float old_i[WIRE_SEGMENTS];
@@ -751,9 +749,9 @@ void DistributeChargeTask::cpu_base_impl(const CircuitPiece &p,
   RegionAccessor<AccessorType::Generic, float> fa_pvt_charge = 
     regions[1].get_field_accessor(FID_CHARGE).typeify<float>();
   RegionAccessor<AccessorType::Generic, float> fa_shr_temp = 
-    regions[2].get_accessor().typeify<float>();
+    regions[2].get_field_accessor(FID_CHARGE).typeify<float>();
   RegionAccessor<AccessorType::Generic, float> fa_ghost_temp =
-    regions[3].get_accessor().typeify<float>();
+    regions[3].get_field_accessor(FID_CHARGE).typeify<float>();
   // Check that we can convert to reduction fold instances
   assert(fa_shr_temp.can_convert<AccessorType::ReductionFold<AccumulateCharge> >());
   assert(fa_ghost_temp.can_convert<AccessorType::ReductionFold<AccumulateCharge> >());
@@ -763,7 +761,7 @@ void DistributeChargeTask::cpu_base_impl(const CircuitPiece &p,
   RegionAccessor<AccessorType::ReductionFold<AccumulateCharge>, float> fa_ghost_charge = 
     fa_ghost_temp.convert<AccessorType::ReductionFold<AccumulateCharge> >();
 
-  LegionRuntime::HighLevel::IndexIterator itr(rt, ctx, p.pvt_wires);
+  IndexIterator itr(rt, ctx, p.pvt_wires);
   while (itr.has_next())
   {
     ptr_t wire_ptr = itr.next();
@@ -956,10 +954,9 @@ bool CheckTask::cpu_impl(const Task *task,
 /*static*/
 void CheckTask::register_task(void)
 {
-  HighLevelRuntime::register_legion_task<bool, cpu_impl>(CheckTask::TASK_ID, Processor::LOC_PROC,
-                                                         false/*single*/, true/*index*/,
-                                                         CIRCUIT_CPU_LEAF_VARIANT,
-                                                         TaskConfigOptions(CheckTask::LEAF),
-                                                         CheckTask::TASK_NAME);
+  TaskVariantRegistrar registrar(CheckTask::TASK_ID, CheckTask::TASK_NAME);
+  registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+  registrar.set_leaf(CheckTask::LEAF);
+  Runtime::preregister_task_variant<bool, cpu_impl>(registrar, CheckTask::TASK_NAME);
 }
 
