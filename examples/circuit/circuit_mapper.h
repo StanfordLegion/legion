@@ -52,6 +52,6 @@ protected:
   std::map<Processor, Memory>& proc_zcmems;
 };
 
-void update_mappers(Machine machine, HighLevelRuntime *rt,
+void update_mappers(Machine machine, Runtime *rt,
                     const std::set<Processor> &local_procs);
 #endif // __CIRCUIT_MAPPER_H__

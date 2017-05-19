@@ -19,7 +19,7 @@
 #include <cstdlib>
 #include <unistd.h>
 #include "legion.h"
-using namespace LegionRuntime::HighLevel;
+using namespace Legion;
 using namespace LegionRuntime::Accessor;
 using namespace LegionRuntime::Arrays;
 
@@ -63,14 +63,14 @@ public:
 
 void top_level_task(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
-                    Context ctx, HighLevelRuntime *runtime)
+                    Context ctx, Runtime *runtime)
 {
     int num_elements = 1024;
     int num_subregions = 4;
     int num_steps = 10;
     // Check for any command line arguments
     {
-        const InputArgs &command_args = HighLevelRuntime::get_input_args();
+        const InputArgs &command_args = Runtime::get_input_args();
         for (int i = 1; i < command_args.argc; i++)
         {
             if (!strcmp(command_args.argv[i],"-n"))
@@ -280,7 +280,7 @@ void top_level_task(const Task *task,
 
 void spmd_task(const Task *task,
                const std::vector<PhysicalRegion> &regions,
-               Context ctx, HighLevelRuntime *runtime)
+               Context ctx, Runtime *runtime)
 {
     // Unmap all the regions we were given since we won't actually use them
     // 
@@ -510,7 +510,7 @@ void spmd_task(const Task *task,
 
 void init_field_task(const Task *task,
                      const std::vector<PhysicalRegion> &regions,
-                     Context ctx, HighLevelRuntime *runtime)
+                     Context ctx, Runtime *runtime)
 {
     assert(regions.size() == 1); 
     assert(task->regions.size() == 1);
@@ -537,7 +537,7 @@ void init_field_task(const Task *task,
 
 void stencil_field_task(const Task *task,
                         const std::vector<PhysicalRegion> &regions,
-                        Context ctx, HighLevelRuntime *runtime)
+                        Context ctx, Runtime *runtime)
 {
     assert(regions.size() == 4);
     assert(task->regions.size() == 4);
@@ -636,7 +636,7 @@ void stencil_field_task(const Task *task,
 
 int check_field_task(const Task *task,
                      const std::vector<PhysicalRegion> &regions,
-                     Context ctx, HighLevelRuntime *runtime)
+                     Context ctx, Runtime *runtime)
 {
     SPMDArgs *args = (SPMDArgs*)task->args; 
 
@@ -698,23 +698,23 @@ int check_field_task(const Task *task,
 
 int main(int argc, char **argv)
 {
-    HighLevelRuntime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
-    HighLevelRuntime::register_legion_task<top_level_task>(TOP_LEVEL_TASK_ID,
+    Runtime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
+    Runtime::register_legion_task<top_level_task>(TOP_LEVEL_TASK_ID,
         Processor::LOC_PROC, true/*single*/, false/*index*/,
         AUTO_GENERATE_ID, TaskConfigOptions(), "top_level");
-    HighLevelRuntime::register_legion_task<spmd_task>(SPMD_TASK_ID,
+    Runtime::register_legion_task<spmd_task>(SPMD_TASK_ID,
         Processor::LOC_PROC, true/*single*/, true/*single*/,
         AUTO_GENERATE_ID, TaskConfigOptions(), "spmd");
-    HighLevelRuntime::register_legion_task<init_field_task>(INIT_FIELD_TASK_ID,
+    Runtime::register_legion_task<init_field_task>(INIT_FIELD_TASK_ID,
         Processor::LOC_PROC, true/*single*/, true/*single*/,
         AUTO_GENERATE_ID, TaskConfigOptions(true), "init");
-    HighLevelRuntime::register_legion_task<stencil_field_task>(STENCIL_TASK_ID,
+    Runtime::register_legion_task<stencil_field_task>(STENCIL_TASK_ID,
         Processor::LOC_PROC, true/*single*/, true/*single*/,
         AUTO_GENERATE_ID, TaskConfigOptions(true), "stencil");
-    HighLevelRuntime::register_legion_task<int, check_field_task>(CHECK_FIELD_TASK_ID,
+    Runtime::register_legion_task<int, check_field_task>(CHECK_FIELD_TASK_ID,
         Processor::LOC_PROC, true/*single*/, true/*single*/,
         AUTO_GENERATE_ID, TaskConfigOptions(true), "check");
 
-  return HighLevelRuntime::start(argc, argv);
+  return Runtime::start(argc, argv);
 }
 

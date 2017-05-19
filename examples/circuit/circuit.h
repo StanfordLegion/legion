@@ -127,7 +127,7 @@ public:
                       const Domain &launch_domain,
                       const ArgumentMap &arg_map);
 public:
-  bool launch_check_fields(Context ctx, HighLevelRuntime *runtime);
+  bool launch_check_fields(Context ctx, Runtime *runtime);
 public:
   static const char * const TASK_NAME;
   static const int TASK_ID = CALC_NEW_CURRENTS_TASK_ID;
@@ -151,7 +151,7 @@ protected:
 public:
   static void cpu_base_impl(const CircuitPiece &piece,
                             const std::vector<PhysicalRegion> &regions,
-                            Context ctx, HighLevelRuntime* rt);
+                            Context ctx, Runtime* rt);
 #ifdef USE_CUDA
   static void gpu_base_impl(const CircuitPiece &piece,
                             const std::vector<PhysicalRegion> &regions);
@@ -169,7 +169,7 @@ public:
                        const Domain &launch_domain,
                        const ArgumentMap &arg_map);
 public:
-  bool launch_check_fields(Context ctx, HighLevelRuntime *runtime);
+  bool launch_check_fields(Context ctx, Runtime *runtime);
 public:
   static const char * const TASK_NAME;
   static const int TASK_ID = DISTRIBUTE_CHARGE_TASK_ID;
@@ -179,7 +179,7 @@ public:
 public:
   static void cpu_base_impl(const CircuitPiece &piece,
                             const std::vector<PhysicalRegion> &regions,
-                            Context ctx, HighLevelRuntime* rt);
+                            Context ctx, Runtime* rt);
 #ifdef USE_CUDA
   static void gpu_base_impl(const CircuitPiece &piece,
                             const std::vector<PhysicalRegion> &regions);
@@ -196,7 +196,7 @@ public:
                      const Domain &launch_domain,
                      const ArgumentMap &arg_map);
 public:
-  bool launch_check_fields(Context ctx, HighLevelRuntime *runtime);
+  bool launch_check_fields(Context ctx, Runtime *runtime);
 public:
   static const char * const TASK_NAME;
   static const int TASK_ID = UPDATE_VOLTAGES_TASK_ID;
@@ -206,7 +206,7 @@ public:
 public:
   static void cpu_base_impl(const CircuitPiece &piece,
                             const std::vector<PhysicalRegion> &regions,
-                            Context ctx, HighLevelRuntime* rt);
+                            Context ctx, Runtime* rt);
 #ifdef USE_CUDA
   static void gpu_base_impl(const CircuitPiece &piece,
                             const std::vector<PhysicalRegion> &regions);
@@ -221,7 +221,7 @@ public:
             const Domain &launch_domain,
             const ArgumentMap &arg_map);
 public:
-  bool dispatch(Context ctx, HighLevelRuntime *runtime, bool success);
+  bool dispatch(Context ctx, Runtime *runtime, bool success);
 public:
   static const char * const TASK_NAME;
   static const int TASK_ID = CHECK_FIELD_TASK_ID;
@@ -230,13 +230,13 @@ public:
 public:
   static bool cpu_impl(const Task *task,
                        const std::vector<PhysicalRegion> &regions,
-                       Context ctx, HighLevelRuntime *runtime);
+                       Context ctx, Runtime *runtime);
   static void register_task(void);
 };
 
 namespace TaskHelper {
   template<typename T>
-  void dispatch_task(T &launcher, Context ctx, HighLevelRuntime *runtime,
+  void dispatch_task(T &launcher, Context ctx, Runtime *runtime,
                      bool perform_checks, bool &simulation_success, bool wait = false)
   {
     FutureMap fm = runtime->execute_index_space(ctx, launcher);
@@ -254,7 +254,7 @@ namespace TaskHelper {
   template<typename T>
   void base_cpu_wrapper(const Task *task,
                         const std::vector<PhysicalRegion> &regions,
-                        Context ctx, HighLevelRuntime *runtime)
+                        Context ctx, Runtime *runtime)
   {
     const CircuitPiece *p = (CircuitPiece*)task->local_args;
     T::cpu_base_impl(*p, regions, ctx, runtime);
@@ -264,7 +264,7 @@ namespace TaskHelper {
   template<typename T>
   void base_gpu_wrapper(const Task *task,
                         const std::vector<PhysicalRegion> &regions,
-                        Context ctx, HighLevelRuntime *runtime)
+                        Context ctx, Runtime *runtime)
   {
     const CircuitPiece *p = (CircuitPiece*)task->local_args;
     T::gpu_base_impl(*p, regions); 

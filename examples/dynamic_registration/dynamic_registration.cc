@@ -21,7 +21,6 @@
 #include "legion_c.h"
 
 using namespace Legion;
-using namespace LegionRuntime::HighLevel;
 using namespace LegionRuntime::Accessor;
 using namespace LegionRuntime::Arrays;
 
@@ -61,15 +60,15 @@ enum FieldIDs {
 
 void init_field_task(const Task *task,
                      const std::vector<PhysicalRegion> &regions,
-                     Context ctx, HighLevelRuntime *runtime);
+                     Context ctx, Runtime *runtime);
 
 void stencil_task(const Task *task,
                   const std::vector<PhysicalRegion> &regions,
-                  Context ctx, HighLevelRuntime *runtime);
+                  Context ctx, Runtime *runtime);
 
 void check_task(const Task *task,
                 const std::vector<PhysicalRegion> &regions,
-                Context ctx, HighLevelRuntime *runtime);
+                Context ctx, Runtime *runtime);
 
 void wrapped_cpp_task(const void *data, size_t datalen,
 		      const void *userdata, size_t userlen, Processor p)
@@ -77,7 +76,7 @@ void wrapped_cpp_task(const void *data, size_t datalen,
   const Task *task;
   const std::vector<PhysicalRegion> *regions;
   Context ctx;
-  HighLevelRuntime *runtime;
+  Runtime *runtime;
   LegionTaskWrapper::legion_task_preamble(data, datalen, p,
 					  task,
 					  regions,
@@ -142,7 +141,7 @@ const char llvm_ir[] =
 
 void top_level_task(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
-                    Context ctx, HighLevelRuntime *runtime)
+                    Context ctx, Runtime *runtime)
 {
   FieldSpace fs = runtime->create_field_space(ctx);
   {
@@ -251,7 +250,7 @@ void top_level_task(const Task *task,
   int num_subregions = 4;
   // Check for any command line arguments
   {
-      const InputArgs &command_args = HighLevelRuntime::get_input_args();
+      const InputArgs &command_args = Runtime::get_input_args();
     for (int i = 1; i < command_args.argc; i++)
     {
       if (!strcmp(command_args.argv[i],"-n"))
@@ -415,7 +414,7 @@ void top_level_task(const Task *task,
 // The standard initialize field task from earlier examples
 void init_field_task(const Task *task,
                      const std::vector<PhysicalRegion> &regions,
-                     Context ctx, HighLevelRuntime *runtime)
+                     Context ctx, Runtime *runtime)
 {
   assert(regions.size() == 1); 
   assert(task->regions.size() == 1);
@@ -442,7 +441,7 @@ void init_field_task(const Task *task,
 // on whether or not its bounds have been clamped.
 void stencil_task(const Task *task,
                   const std::vector<PhysicalRegion> &regions,
-                  Context ctx, HighLevelRuntime *runtime)
+                  Context ctx, Runtime *runtime)
 {
   assert(regions.size() == 2);
   assert(task->regions.size() == 2);
@@ -520,7 +519,7 @@ void stencil_task(const Task *task,
 
 void check_task(const Task *task,
                 const std::vector<PhysicalRegion> &regions,
-                Context ctx, HighLevelRuntime *runtime)
+                Context ctx, Runtime *runtime)
 {
   assert(regions.size() == 2);
   assert(task->regions.size() == 2);
@@ -583,12 +582,12 @@ void check_task(const Task *task,
 
 int main(int argc, char **argv)
 {
-  HighLevelRuntime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
+  Runtime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
   // We'll only register our top-level task here
   TaskVariantRegistrar registrar(TOP_LEVEL_TASK_ID,
                                  "top_level_variant");
   registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
   Runtime::preregister_task_variant<top_level_task>(registrar,"top_level_task");
 
-  return HighLevelRuntime::start(argc, argv);
+  return Runtime::start(argc, argv);
 }

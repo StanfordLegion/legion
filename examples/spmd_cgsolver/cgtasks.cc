@@ -3,7 +3,7 @@
 
 #include <math.h>
 
-extern LegionRuntime::Logger::Category log_app;
+extern Logger log_app;
 
 ////////////////////////////////////////////////////////////////////////
 //
@@ -64,7 +64,7 @@ extern LegionRuntime::Logger::Category log_app;
 
 /*static*/ void PrintField::print_field_task(const Task *task,
 					     const std::vector<PhysicalRegion> &regions,
-					     Context ctx, HighLevelRuntime *runtime)
+					     Context ctx, Runtime *runtime)
 {
   const PrintFieldArgs& args = *(const PrintFieldArgs *)(task->args);
 
@@ -173,7 +173,7 @@ extern LegionRuntime::Logger::Category log_app;
 
 /*static*/ double DotProduct::dotp_field_task(const Task *task,
 					      const std::vector<PhysicalRegion> &regions,
-					      Context ctx, HighLevelRuntime *runtime)
+					      Context ctx, Runtime *runtime)
 {
   const DotpFieldArgs& args = *(const DotpFieldArgs *)(task->args);
 
@@ -255,7 +255,7 @@ extern LegionRuntime::Logger::Category log_app;
 
 /*static*/ void VectorAdd::add_field_task(const Task *task,
 					  const std::vector<PhysicalRegion> &regions,
-					  Context ctx, HighLevelRuntime *runtime)
+					  Context ctx, Runtime *runtime)
 {
   const AddFieldArgs& args = *(const AddFieldArgs *)(task->args);
 
@@ -337,7 +337,7 @@ extern LegionRuntime::Logger::Category log_app;
 
 /*static*/ void VectorAcc::acc_field_task(const Task *task,
 					  const std::vector<PhysicalRegion> &regions,
-					  Context ctx, HighLevelRuntime *runtime)
+					  Context ctx, Runtime *runtime)
 {
   const AccFieldArgs& args = *(const AccFieldArgs *)(task->args);
 

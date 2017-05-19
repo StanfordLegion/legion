@@ -8,7 +8,7 @@ using namespace Legion::Mapping;
 
 class CGMapper : public ShimMapper {
 public:
-  CGMapper(Machine machine, HighLevelRuntime *rt, Processor local);
+  CGMapper(Machine machine, Runtime *rt, Processor local);
   virtual ~CGMapper(void);
 
   // supported tunables
@@ -53,5 +53,5 @@ protected:
   std::vector<Memory> sysmems;
   std::vector<std::vector<Processor> > procs;
   std::map<Processor, int> proc_to_shard;
-  HighLevelRuntime *runtime;
+  Runtime *runtime;
 };

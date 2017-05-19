@@ -159,7 +159,7 @@ void CircuitMapper::map_inline(const MapperContext    ctx,
   }
 }
 
-void update_mappers(Machine machine, HighLevelRuntime *runtime,
+void update_mappers(Machine machine, Runtime *runtime,
                     const std::set<Processor> &local_procs)
 {
   std::vector<Processor>* procs_list = new std::vector<Processor>();
