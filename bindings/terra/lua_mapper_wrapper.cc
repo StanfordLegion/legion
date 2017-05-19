@@ -73,7 +73,7 @@ static inline int lua_push_method(lua_State *L,
 
 LuaMapperWrapper::LuaMapperWrapper(const char* qualified_mapper_name_,
                                    Machine machine,
-                                   HighLevelRuntime *runtime,
+                                   Runtime *runtime,
                                    Processor local_proc)
   : DefaultMapper(machine, runtime, local_proc),
     qualified_mapper_name(qualified_mapper_name_),

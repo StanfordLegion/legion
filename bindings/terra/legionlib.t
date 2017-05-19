@@ -562,7 +562,7 @@ function Blockify:to_cobj()
   return blockify_to_cobj[self.block_size.dim](self.block_size:to_cobj())
 end
 
--- Lua wrapper for LegionRuntime::LowLevel::Domain
+-- Lua wrapper for Legion::Domain
 function Domain:from_cobj(cobj)
   local domain = { cobj = cobj }
   domain.is_domain = true
@@ -592,7 +592,7 @@ function Domain:__tostring()
   return tostring(self:get_rect())
 end
 
--- Lua wrapper for LegionRuntime::HighLevel::DomainColoring
+-- Lua wrapper for Legion::DomainColoring
 function DomainColoring:new()
   local dc = { coloring = {}, is_domain_coloring = true }
   setmetatable(dc, self)
@@ -624,7 +624,7 @@ function DomainColoring:__tostring()
   return str
 end
 
--- Lua wrapper for LegionRuntime::LowLevel::DomainPoint
+-- Lua wrapper for Legion::DomainPoint
 function DomainPoint:from_point(p)
   assert(p.is_point, "Error: DomainPoint:from_point takes only a Point")
   local point_data = {}
@@ -702,7 +702,7 @@ function DomainPoint:__tostring()
   end
 end
 
--- Lua wrapper for LegionRuntime::LowLevel::IndexSpace
+-- Lua wrapper for Legion::IndexSpace
 function IndexSpace:from_cobj(cobj)
   local is = { id = cobj.id, tid = cobj.tid, is_index_space = true }
   setmetatable(is, self)
@@ -715,7 +715,7 @@ function IndexSpace:clone()
   return is
 end
 
--- Lua wrapper for LegionRuntime::HighLevel::IndexPartition
+-- Lua wrapper for Legion::IndexPartition
 function IndexPartition:from_cobj(cobj)
   local ip = { id = cobj.id, tid = cobj.tid, is_index_partition = true }
   setmetatable(ip, self)
@@ -728,7 +728,7 @@ function IndexPartition:clone()
   return ip
 end
 
--- Lua wrapper for LegionRuntime::HighLevel::FieldSpace
+-- Lua wrapper for Legion::FieldSpace
 function FieldSpace:from_cobj(cobj)
   local is = { id = cobj.id, is_field_space = true }
   setmetatable(is, self)
@@ -741,7 +741,7 @@ function FieldSpace:clone()
   return is
 end
 
--- Lua wrapper for LegionRuntime::HighLevel::IndexAllocator
+-- Lua wrapper for Legion::IndexAllocator
 function IndexAllocator:from_cobj(cobj)
   local allocator = { cobj = cobj }
   allocator.is_index_allocator = true
@@ -755,7 +755,7 @@ function IndexAllocator:alloc(num_elements)
       legion_c.legion_index_allocator_alloc(self.cobj, num_elements))
 end
 
--- Lua wrapper for LegionRuntime::HighLevel::FieldAllocator
+-- Lua wrapper for Legion::FieldAllocator
 function FieldAllocator:from_cobj(cobj)
   local allocator = { cobj = cobj }
   allocator.is_field_allocator = true
@@ -768,7 +768,7 @@ function FieldAllocator:allocate_field(size, fid)
   return legion_c.legion_field_allocator_allocate_field(self.cobj, size, fid)
 end
 
--- Lua wrapper for LegionRuntime::HighLevel::LogicalRegion
+-- Lua wrapper for Legion::LogicalRegion
 function LogicalRegion:from_cobj(cobj)
   local lr = { index_space = IndexSpace:from_cobj(cobj.index_space),
                field_space = FieldSpace:from_cobj(cobj.field_space),
@@ -796,7 +796,7 @@ function LogicalRegion:__tostring()
                   self.tree_id .. "}"
 end
 
--- Lua wrapper for LegionRuntime::HighLevel::LogicalPartition
+-- Lua wrapper for Legion::LogicalPartition
 function LogicalPartition:from_cobj(cobj)
   local lp =
     { index_partition = IndexPartition:from_cobj(cobj.index_partition),
@@ -831,7 +831,7 @@ function LogicalPartition:__tostring()
                   self.tree_id .. "}"
 end
 
--- Lua wrapper for LegionRuntime::HighLevel::PhysicalRegion
+-- Lua wrapper for Legion::PhysicalRegion
 function PhysicalRegion:from_cobj(cobj)
   local pr = { impl = cobj.impl }
   pr.is_physical_region = true
@@ -859,7 +859,7 @@ function PhysicalRegion:get_field_accessor(fid)
   return RegionAccessor:new(self, fid)
 end
 
--- Lua wrapper for LegionRuntime::HighLevel::RegionRequirement
+-- Lua wrapper for Legion::RegionRequirement
 function RegionRequirement:new(arg0, arg1, arg2, arg3,
                                arg4, arg5, arg6)
   assert(arg0.is_logical_region or arg0.is_logical_partition)
@@ -964,7 +964,7 @@ function RegionRequirement:from_cobj(req_cobj)
   return req
 end
 
--- Lua wrapper for LegionRuntime::HighLevel::ArgumentMap
+-- Lua wrapper for Legion::ArgumentMap
 function ArgumentMap:new()
   local arg_map = {}
   arg_map.is_argument_map = true
@@ -984,7 +984,7 @@ function ArgumentMap:set_point(dp, arg, replace)
   legion_c.legion_argument_map_set_point(self.cobj, dp, arg, replace)
 end
 
--- Lua wrapper for LegionRuntime::HighLevel::Future
+-- Lua wrapper for Legion::Future
 function Future:from_cobj(cobj)
   local future = { cobj = ffi.gc(cobj, legion_c.legion_future_destroy) }
   future.is_future = true
@@ -1009,7 +1009,7 @@ function Future:get_void_result()
   legion_c.legion_future_get_void_result(self.cobj)
 end
 
--- Lua wrapper for LegionRuntime::HighLevel::FutureMap
+-- Lua wrapper for Legion::FutureMap
 function FutureMap:from_cobj(cobj)
   local fm = { cobj = ffi.gc(cobj, legion_c.legion_future_map_destroy) }
   fm.is_future_map = true
@@ -1034,7 +1034,7 @@ function FutureMap:wait_all_results()
   legion_c.legion_future_map_wait_all_results(self.cobj)
 end
 
--- Lua wrapper for LegionRuntime::HighLevel::Task
+-- Lua wrapper for Legion::Task
 function Task:from_cobj(cobj)
   local task = { impl = cobj.impl }
   task.is_task = true
@@ -1091,7 +1091,7 @@ function Task:get_local_args(arg_type)
   return convert_cdata(call_capi(self))
 end
 
--- Lua wrapper for LegionRuntime::HighLevel::Inline
+-- Lua wrapper for Legion::Inline
 function Inline:from_cobj(cobj)
   local inline = { impl = cobj.impl }
   inline.is_inline = true
@@ -1102,7 +1102,7 @@ function Inline:from_cobj(cobj)
   return inline
 end
 
--- Lua wrapper for LegionRuntime::HighLevel::TaskArgument
+-- Lua wrapper for Legion::TaskArgument
 function TaskArgument:new(arg, arg_type)
   assert(arg and arg_type)
   local terra alloc(arg : arg_type)
@@ -1117,7 +1117,7 @@ function TaskArgument:new(arg, arg_type)
   return tbl
 end
 
--- Lua wrapper for LegionRuntime::HighLevel::TaskLauncher
+-- Lua wrapper for Legion::TaskLauncher
 function TaskLauncher:new(task_id, task_arg, pred, id, tag)
   local launcher = {}
   launcher.task_id = task_id
@@ -1144,7 +1144,7 @@ function TaskLauncher:add_region_requirement(req)
   self.region_requirements:insert(req)
 end
 
--- Lua wrapper for LegionRuntime::HighLevel::IndexLauncher
+-- Lua wrapper for Legion::IndexLauncher
 function IndexLauncher:new(task_id, domain, global_arg, map,
                            pred, must, id, tag)
   local launcher = {}
@@ -1170,7 +1170,7 @@ function IndexLauncher:add_region_requirement(req)
   self.region_requirements:insert(req)
 end
 
--- Lua wrapper for LegionRuntime::HighLevel::InlineLauncher
+-- Lua wrapper for Legion::InlineLauncher
 function InlineLauncher:new(req, id, launcher_tag)
   assert(req.is_region_requirement,
     "Error: InlineLauncher needs a RegionRequirement object to create")
@@ -1187,7 +1187,7 @@ function InlineLauncher:add_field(fid, inst)
   self.requirement:add_field(fid, inst)
 end
 
--- Lua wrapper for LegionRuntime::HighLevel::HighLevelRuntime
+-- Lua wrapper for Legion::Runtime
 
 function legion:create_index_space(ctx, arg)
   assert(ctx.is_context,
@@ -1673,7 +1673,7 @@ function lua_void_task_wrapper_in_lua(script_name, task_name,
   _G[task_name](task, regions_lua, ctx, runtime)
 end
 
--- Lua equivalent of LegionRuntime::Array::GenericPointInRectIterator
+-- Lua equivalent of LegionRuntime::Arrays::GenericPointInRectIterator
 function GenericPointInRectIterator:new(r)
   local pir = { r = r, p = r.lo:clone(),
                 any_left = (r.lo <= r.hi), dim = r.lo.dim }
@@ -1696,7 +1696,7 @@ function GenericPointInRectIterator:next()
   self.any_left = false
 end
 
--- Lua wrapper of LegionRuntime::HighLevel::IndexIterator
+-- Lua wrapper of Legion::IndexIterator
 function IndexIterator:new(arg)
   local is
   if arg.is_logical_region then
@@ -1845,7 +1845,7 @@ function TaskConfigOptions:new(leaf, inner, idempotent)
   return opt
 end
 
--- Lua wrapper of LegionRuntime::LowLevel::Machine
+-- Lua wrapper of Legion::Machine
 function Machine:from_cobj(cobj)
   local machine = { cobj = cobj }
   setmetatable(machine, self)
@@ -1866,7 +1866,7 @@ function Machine:get_all_processors()
   return all_processors
 end
 
--- Lua wrapper of LegionRuntime::LowLevel::Processor
+-- Lua wrapper of Legion::Processor
 function Processor:from_cobj(cobj)
   local proc = { id = cobj.id }
   setmetatable(proc, self)
@@ -1881,8 +1881,7 @@ function Processor:__tostring()
   return "Proc " .. self.id
 end
 
--- Lua wrapper for LegionRuntime::HighLevel::MappingUtilities
---                                         ::MachineQueryInterface
+-- Lua wrapper for Legion::MappingUtilities::MachineQueryInterface
 function MachineQueryInterface:new(machine)
   local cobj =
     ffi.gc(legion_c.legion_machine_query_interface_create(machine.cobj),
@@ -1898,7 +1897,7 @@ function MachineQueryInterface:find_memory_kind(proc, kind)
                                                              proc, kind)
 end
 
--- Lua wrapper for std::vector<LegionRuntime::HighLevel::DomainSplit>
+-- Lua wrapper for std::vector<Legion::DomainSplit>
 function DomainSplitVector:from_cobj(cobj)
   local vec = { cobj = cobj }
   setmetatable(vec, self)
