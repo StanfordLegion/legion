@@ -53,38 +53,38 @@ struct task_args_t{
 
 void copy_values_task(const Task *task,
                        const std::vector<PhysicalRegion> &regions,
-                       Context ctx, HighLevelRuntime *runtime);
+                       Context ctx, Runtime *runtime);
 
 #ifdef TESTERIO_PHASER_TIMERS
 void timer_task(const Task *task,
                 const std::vector<PhysicalRegion> &regions,
-                Context ctx, HighLevelRuntime *runtime);
+                Context ctx, Runtime *runtime);
 #endif
 
 void split_path_file(char** p, char** f, const char *pf);
 
 
 void PersistentRegion_init() {
-  HighLevelRuntime::register_legion_task<copy_values_task>(COPY_VALUES_TASK_ID,
+  Runtime::register_legion_task<copy_values_task>(COPY_VALUES_TASK_ID,
                                                            Processor::LOC_PROC,
                                                            true /*single*/, true /*index*/);
   
 #ifdef TESTERIO_PHASER_TIMERS
-  HighLevelRuntime::register_legion_task<timer_task>(TIMER_TASK_ID,
+  Runtime::register_legion_task<timer_task>(TIMER_TASK_ID,
                                                      Processor::LOC_PROC,
                                                      true /*single*/, false /*index*/);
 #endif
     
 }
         
-PersistentRegion::PersistentRegion(HighLevelRuntime * runtime) {
+PersistentRegion::PersistentRegion(Runtime * runtime) {
     this->runtime = runtime; 
 }
 
 #ifdef TESTERIO_PHASER_TIMERS
 void timer_task(const Task *task,
                 const std::vector<PhysicalRegion> &regions,
-                Context ctx, HighLevelRuntime *runtime)
+                Context ctx, Runtime *runtime)
 {
   struct timespec ts;
   current_utc_time(&ts);   
@@ -95,7 +95,7 @@ void timer_task(const Task *task,
 
 void copy_values_task(const Task *task,
                       const std::vector<PhysicalRegion> &regions,
-                      Context ctx, HighLevelRuntime *runtime)
+                      Context ctx, Runtime *runtime)
 {
   Piece piece = * ((Piece*) task->local_args);
   struct task_args_t task_args = *(struct task_args_t*) task->args;
