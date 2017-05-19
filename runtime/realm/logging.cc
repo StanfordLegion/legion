@@ -570,7 +570,7 @@ namespace Realm {
     
     LoggerMessage& LoggerMessage::vprintf(const char *fmt, va_list args)
     {
-        return vprintf(nullptr, RESERVED_LOGGER_MESSAGE_ID, fmt, args);
+        return vprintf(NULL, RESERVED_LOGGER_MESSAGE_ID, fmt, args);
     }
 
 }; // namespace Realm
