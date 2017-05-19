@@ -1508,7 +1508,7 @@ namespace Legion {
       void invalidate_current_state(ContextID ctx, bool users_only);
       void invalidate_deleted_state(ContextID ctx, 
                                     const FieldMask &deleted_mask);
-      void invalidate_version_state(ContextID ctx);
+      bool invalidate_version_state(ContextID ctx);
       void invalidate_version_managers(void);
     public:
       // Physical traversal operations
