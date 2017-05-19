@@ -2895,7 +2895,7 @@ namespace LegionRuntime {
     typedef std::map<Legion::DomainPoint,
                      std::set<Legion::Domain> > MultiDomainPointColoring;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef void (*RegistrationCallbackFnptr)(Machine machine, 
+    typedef void (*RegistrationCallbackFnptr)(Realm::Machine machine, 
         Legion::Runtime *rt, const std::set<Legion::Processor> &local_procs);
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::LogicalRegion (*RegionProjectionFnptr)(
