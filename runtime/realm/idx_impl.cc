@@ -300,6 +300,7 @@ namespace Realm {
   // class Domain
   //
 
+#ifdef OLD_ALLOCATORS
     RegionInstance Domain::create_instance(Memory memory,
 					   size_t elem_size,
 					   ReductionOpID redop_id) const
@@ -709,6 +710,7 @@ namespace Realm {
 	       this->is_id, memory.id, i.id, inst_bytes);
       return i;
     }
+#endif
 
   ////////////////////////////////////////////////////////////////////////
   //

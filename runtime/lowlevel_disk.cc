@@ -48,6 +48,7 @@ namespace Realm {
       unlink(file.c_str());
     }
 
+#ifdef OLD_ALLOCATORS
     RegionInstance DiskMemory::create_instance(
                      IndexSpace is,
                      const int *linearization_bits,
@@ -70,6 +71,7 @@ namespace Realm {
     {
       destroy_instance_local(i, local_destroy);
     }
+#endif
 
     off_t DiskMemory::alloc_bytes(size_t size)
     {
@@ -130,6 +132,7 @@ namespace Realm {
       pthread_mutex_destroy(&vector_lock);
     }
 
+#ifdef OLD_ALLOCATORS
     RegionInstance FileMemory::create_instance(
                      IndexSpace is,
                      const int *linearization_bits,
@@ -237,6 +240,7 @@ namespace Realm {
       close(fd);
       destroy_instance_local(i, local_destroy);
     }
+#endif
 
     off_t FileMemory::alloc_bytes(size_t size)
     {

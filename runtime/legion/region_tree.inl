@@ -2446,9 +2446,12 @@ namespace Legion {
       if (context->runtime->profiler != NULL)
       {
         context->runtime->profiler->add_inst_request(requests, op_id);
-        PhysicalInstance result = 
-          PhysicalInstance::create_instance(target, realm_index_space,
-                                            field_sizes, requests);
+        PhysicalInstance result;
+	LgEvent ready(PhysicalInstance::create_instance(result, target,
+							realm_index_space,
+							field_sizes, requests));
+	// TODO
+	ready.lg_wait();
         // If the result exists tell the profiler about it in case
         // it never gets deleted and we never see the profiling feedback
         if (result.exists())
@@ -2461,8 +2464,15 @@ namespace Legion {
         return result;
       }
       else
-        return PhysicalInstance::create_instance(target, realm_index_space,
-                                                 field_sizes, requests);
+      {
+        PhysicalInstance result;
+	LgEvent ready(PhysicalInstance::create_instance(result, target,
+							realm_index_space,
+							field_sizes, requests));
+	// TODO
+	ready.lg_wait();
+	return result;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2481,8 +2491,14 @@ namespace Legion {
         index_space_ready.lg_wait();
       // No profiling for these kinds of instances currently
       Realm::ProfilingRequestSet requests;
-      return PhysicalInstance::create_file_instance(file_name, 
-          realm_index_space, field_sizes, file_mode, requests);
+      PhysicalInstance result;
+      LgEvent ready(PhysicalInstance::create_file_instance(result, file_name, 
+							   realm_index_space,
+							   field_sizes,
+							   file_mode, requests));
+      // TODO
+      ready.lg_wait();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -2502,8 +2518,16 @@ namespace Legion {
         index_space_ready.lg_wait();
       // No profiling for these kinds of instances currently
       Realm::ProfilingRequestSet requests;
-      return PhysicalInstance::create_hdf5_instance(file_name, 
-          realm_index_space, field_sizes, field_files, read_only, requests);
+      PhysicalInstance result;
+      LgEvent ready(PhysicalInstance::create_hdf5_instance(result, file_name, 
+							   realm_index_space,
+							   field_sizes,
+							   field_files,
+							   read_only,
+							   requests));
+      // TODO
+      ready.lg_wait();
+      return result;
     }
 
     //--------------------------------------------------------------------------

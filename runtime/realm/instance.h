@@ -56,30 +56,46 @@ namespace Realm {
 
     Memory get_location(void) const;
     const LinearizedIndexSpaceIntfc& get_lis(void) const;
+    const InstanceLayoutGeneric *get_layout(void) const;
+    void *get_base_address(void) const;
 
-    static RegionInstance create_instance(Memory memory,
-					  InstanceLayoutGeneric *ilg,
-					  const ProfilingRequestSet& prs);
+    Event get_ready_event(void) const;
+
+    // calls to create_instance return immediately with a handle, but also
+    //  return an event that must be used as a precondition for any use (or
+    //  destruction) of the instance
+    static Event create_instance(RegionInstance& inst,
+				 Memory memory,
+				 InstanceLayoutGeneric *ilg,
+				 const ProfilingRequestSet& prs,
+				 Event wait_on = Event::NO_EVENT);
 
     template <int N, typename T>
-    static RegionInstance create_instance(Memory memory,
-					  const ZIndexSpace<N,T>& space,
-					  const std::vector<size_t>& field_sizes,
-					  const ProfilingRequestSet& prs);
+    static Event create_instance(RegionInstance& inst,
+				 Memory memory,
+				 const ZIndexSpace<N,T>& space,
+				 const std::vector<size_t>& field_sizes,
+				 const ProfilingRequestSet& prs,
+				 Event wait_on = Event::NO_EVENT);
 
     template <int N, typename T>
-    static RegionInstance create_file_instance(const char *file_name,
-                                          const ZIndexSpace<N,T>& space,
-                                          const std::vector<size_t> &field_sizes,
-                                          legion_lowlevel_file_mode_t file_mode,
-                                          const ProfilingRequestSet& prs);
+    static Event create_file_instance(RegionInstance& inst,
+				      const char *file_name,
+				      const ZIndexSpace<N,T>& space,
+				      const std::vector<size_t> &field_sizes,
+				      legion_lowlevel_file_mode_t file_mode,
+				      const ProfilingRequestSet& prs,
+				      Event wait_on = Event::NO_EVENT);
+
     template <int N, typename T>
-    static RegionInstance create_hdf5_instance(const char *file_name,
-                                          const ZIndexSpace<N,T>& space,
-                                          const std::vector<size_t> &field_sizes,
-                                          const std::vector<const char*> &field_files,
-                                          bool read_only,
-                                          const ProfilingRequestSet& prs);
+    static Event create_hdf5_instance(RegionInstance& inst,
+				      const char *file_name,
+				      const ZIndexSpace<N,T>& space,
+				      const std::vector<size_t> &field_sizes,
+				      const std::vector<const char*> &field_files,
+				      bool read_only,
+				      const ProfilingRequestSet& prs,
+				      Event wait_on = Event::NO_EVENT);
 
     void destroy(Event wait_on = Event::NO_EVENT) const;
 

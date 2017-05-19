@@ -1281,13 +1281,38 @@ namespace LegionRuntime {
 	(DebugHooks::check_bounds_ptr)(region, ptr);
 #endif
 #ifdef USE_HDF
-     // HDF memory doesn't support enumerate type
-     assert(impl->memory.kind() != Memory::HDF_MEM);
+      // HDF memory doesn't support enumerate type
+      assert(impl->memory.kind() != Memory::HDF_MEM);
 #endif
 
+#ifdef OLD_ACCESSORS
       Arrays::Mapping<1, 1> *mapping = impl->metadata.linearization.get_mapping<1>();
       int index = mapping->image(ptr.value);
       impl->put_bytes(index, field_offset + offset, src, bytes);
+#endif
+      using namespace Realm;
+      InstanceLayoutGeneric *ilg = impl->metadata.layout;
+      assert(ilg != 0);
+      std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = ilg->fields.find(field_offset + offset);
+      assert(it != ilg->fields.end());
+      InstanceLayout<1,coord_t> *layout = dynamic_cast<InstanceLayout<1,coord_t> *>(ilg);
+      assert(layout != 0);
+      ZPoint<1,coord_t> p(ptr.value);
+      const InstanceLayoutPiece<1,coord_t> *ilp = layout->piece_lists[it->second.list_idx].find_piece(p);
+      assert(ilp != 0);
+      size_t mem_offset = 0;
+      switch(ilp->layout_type) {
+      case InstanceLayoutPiece<1,coord_t>::AffineLayoutType:
+	{
+	  const AffineLayoutPiece<1,coord_t> *alp = static_cast<const AffineLayoutPiece<1,coord_t> *>(ilp);
+	  mem_offset = alp->offset + alp->strides.dot(p) + it->second.rel_offset;
+	  break;
+	}
+      default:
+	assert(0);
+      }
+      MemoryImpl *mem_impl = get_runtime()->get_memory_impl(impl->memory);
+      mem_impl->put_bytes(mem_offset, src, bytes);
     }
 
     void AccessorType::Generic::Untyped::write_untyped(const DomainPoint& dp, const void *src, size_t bytes, off_t offset) const

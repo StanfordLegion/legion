@@ -36,6 +36,33 @@
 namespace Realm {
 
   class RegionInstanceImpl;
+
+  // manages a basic free list of ranges (using range type RT) and allocated
+  //  ranges, which are tagged (tag type TT)
+  // NOT thread-safe - must be protected from outside
+  template <typename RT, typename TT>
+  class BasicRangeAllocator {
+  public:
+    struct Range {
+      Range(RT _first, RT _last);
+
+      RT first, last;  // half-open range: [first, last)
+      Range *prev, *next;  // double-linked list of all ranges
+      Range *prev_free, *next_free;  // double-linked list of just free ranges
+    };
+
+    std::map<TT, Range *> allocated;  // direct lookup of allocated ranges by tag
+    std::map<RT, Range *> by_first;   // direct lookup of all ranges by first
+    Range sentinel;
+    // TODO: sized-based lookup of free ranges
+
+    BasicRangeAllocator(void);
+    ~BasicRangeAllocator(void);
+
+    void add_range(RT first, RT last);
+    bool allocate(TT tag, RT size, RT alignment, RT& first);
+    void deallocate(TT tag);
+  };
   
     class MemoryImpl {
     public:
@@ -61,10 +88,23 @@ namespace Realm {
 
       virtual ~MemoryImpl(void);
 
-      unsigned add_instance(RegionInstanceImpl *i);
-
+      // looks up an instance based on ID - creates a proxy object for
+      //   unknown IDs (metadata must be requested explicitly)
       RegionInstanceImpl *get_instance(RegionInstance i);
 
+      // adds a new instance to this memory, to be filled in by caller
+      RegionInstanceImpl *new_instance(void);
+
+      // attempt to allocate storage for the specified instance
+      virtual bool allocate_instance_storage(RegionInstance i,
+					     size_t bytes, size_t alignment,
+					     Event precondition);
+
+      // release storage associated with an instance
+      virtual void release_instance_storage(RegionInstance i,
+					    Event precondition);
+
+#ifdef OLD_ALLOCATORS
       RegionInstance create_instance_local(IndexSpace is,
 					   const int *linearization_bits,
 					   size_t bytes_needed,
@@ -103,6 +143,7 @@ namespace Realm {
 
       virtual void destroy_instance(RegionInstance i, 
 				    bool local_destroy) = 0;
+#endif
 
       off_t alloc_bytes_local(size_t size);
       void free_bytes_local(off_t offset, size_t size);
@@ -129,14 +170,27 @@ namespace Realm {
 
       Memory::Kind get_kind(void) const;
 
+      struct InstanceList {
+	std::vector<RegionInstanceImpl *> instances;
+	std::vector<size_t> free_list;
+	GASNetHSL mutex;
+      };
     public:
       Memory me;
       size_t size;
       MemoryKind kind;
       size_t alignment;
       Memory::Kind lowlevel_kind;
+
+      // we keep a dedicated instance list for locally created
+      //  instances, but we use a map indexed by creator node for others,
+      //  and protect lookups in it with its own mutex
+      std::map<gasnet_node_t, InstanceList *> instances_by_creator;
+      GASNetHSL instance_map_mutex;
+      InstanceList local_instances;
+
       GASNetHSL mutex; // protection for resizing vectors
-      std::vector<RegionInstanceImpl *> instances;
+      BasicRangeAllocator<size_t, RegionInstance> allocator;
       std::map<off_t, off_t> free_blocks;
       ProfilingGauges::AbsoluteGauge<size_t> usage, peak_usage, peak_footprint;
     };
@@ -150,6 +204,7 @@ namespace Realm {
 
       virtual ~LocalCPUMemory(void);
 
+#ifdef OLD_ALLOCATORS
       virtual RegionInstance create_instance(IndexSpace r,
 					     const int *linearization_bits,
 					     size_t bytes_needed,
@@ -162,6 +217,7 @@ namespace Realm {
 					     RegionInstance parent_inst);
       virtual void destroy_instance(RegionInstance i, 
 				    bool local_destroy);
+#endif
       virtual off_t alloc_bytes(size_t size);
       virtual void free_bytes(off_t offset, size_t size);
       virtual void get_bytes(off_t offset, void *dst, size_t size);
@@ -183,6 +239,7 @@ namespace Realm {
 
       virtual ~GASNetMemory(void);
 
+#ifdef OLD_ALLOCATORS
       virtual RegionInstance create_instance(IndexSpace is,
 					     const int *linearization_bits,
 					     size_t bytes_needed,
@@ -196,6 +253,7 @@ namespace Realm {
 
       virtual void destroy_instance(RegionInstance i, 
 				    bool local_destroy);
+#endif
 
       virtual off_t alloc_bytes(size_t size);
 
@@ -234,6 +292,7 @@ namespace Realm {
 
       virtual ~DiskMemory(void);
 
+#ifdef OLD_ALLOCATORS
       virtual RegionInstance create_instance(IndexSpace is,
                                             const int *linearization_bits,
                                             size_t bytes_needed,
@@ -247,6 +306,7 @@ namespace Realm {
 
       virtual void destroy_instance(RegionInstance i,
                                     bool local_destroy);
+#endif
 
       virtual off_t alloc_bytes(size_t size);
 
@@ -275,6 +335,7 @@ namespace Realm {
 
       virtual ~FileMemory(void);
 
+#ifdef OLD_ALLOCATORS
       virtual RegionInstance create_instance(IndexSpace is,
                                             const int *linearization_bits,
                                             size_t bytes_needed,
@@ -301,7 +362,7 @@ namespace Realm {
                                      legion_lowlevel_file_mode_t file_mode);
       virtual void destroy_instance(RegionInstance i,
                                     bool local_destroy);
-
+#endif
 
       virtual off_t alloc_bytes(size_t size);
 
@@ -332,6 +393,7 @@ namespace Realm {
       RemoteMemory(Memory _me, size_t _size, Memory::Kind k, void *_regbase);
       virtual ~RemoteMemory(void);
 
+#ifdef OLD_ALLOCATORS
       virtual RegionInstance create_instance(IndexSpace r,
 					     const int *linearization_bits,
 					     size_t bytes_needed,
@@ -344,6 +406,7 @@ namespace Realm {
 					     RegionInstance parent_inst);
       virtual void destroy_instance(RegionInstance i, 
 				    bool local_destroy);
+#endif
       virtual off_t alloc_bytes(size_t size);
       virtual void free_bytes(off_t offset, size_t size);
       virtual void get_bytes(off_t offset, void *dst, size_t size);
@@ -385,6 +448,7 @@ namespace Realm {
       static off_t send_request(gasnet_node_t target, Memory memory, size_t size);
     };
 
+#ifdef OLD_ALLOCATORS
     struct CreateInstanceRequest {
       struct RequestArgs : public BaseMedium {
 	Memory m;
@@ -457,6 +521,7 @@ namespace Realm {
       static void send_request(gasnet_node_t target, Memory memory,
 			       RegionInstance inst);
     };
+#endif
 
     struct RemoteWriteMessage {
       struct RequestArgs : public BaseMedium {
@@ -617,3 +682,4 @@ namespace Realm {
 
 #endif // ifndef REALM_MEM_IMPL_H
 
+#include "mem_impl.inl"

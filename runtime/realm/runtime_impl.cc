@@ -972,8 +972,8 @@ namespace Realm {
       hcount += EventUpdateMessage::Message::add_handler_entries(&handlers[hcount], "Event Update AM");
       hcount += RemoteMemAllocRequest::Request::add_handler_entries(&handlers[hcount], "Remote Memory Allocation Request AM");
       hcount += RemoteMemAllocRequest::Response::add_handler_entries(&handlers[hcount], "Remote Memory Allocation Response AM");
-      hcount += CreateInstanceRequest::Request::add_handler_entries(&handlers[hcount], "Create Instance Request AM");
-      hcount += CreateInstanceRequest::Response::add_handler_entries(&handlers[hcount], "Create Instance Response AM");
+      //hcount += CreateInstanceRequest::Request::add_handler_entries(&handlers[hcount], "Create Instance Request AM");
+      //hcount += CreateInstanceRequest::Response::add_handler_entries(&handlers[hcount], "Create Instance Response AM");
       hcount += RemoteCopyMessage::add_handler_entries(&handlers[hcount], "Remote Copy AM");
       hcount += RemoteFillMessage::add_handler_entries(&handlers[hcount], "Remote Fill AM");
       hcount += ValidMaskRequestMessage::Message::add_handler_entries(&handlers[hcount], "Valid Mask Request AM");
@@ -984,7 +984,7 @@ namespace Realm {
       hcount += TimerDataResponseMessage::Message::add_handler_entries(&handlers[hcount], "Roll-up Data AM");
       hcount += ClearTimersMessage::Message::add_handler_entries(&handlers[hcount], "Clear Timer Request AM");
 #endif
-      hcount += DestroyInstanceMessage::Message::add_handler_entries(&handlers[hcount], "Destroy Instance AM");
+      //hcount += DestroyInstanceMessage::Message::add_handler_entries(&handlers[hcount], "Destroy Instance AM");
       hcount += RemoteWriteMessage::Message::add_handler_entries(&handlers[hcount], "Remote Write AM");
       hcount += RemoteReduceMessage::Message::add_handler_entries(&handlers[hcount], "Remote Reduce AM");
       hcount += RemoteSerdezMessage::Message::add_handler_entries(&handlers[hcount], "Remote Serdez AM");
@@ -2119,7 +2119,9 @@ namespace Realm {
     {
       assert(id.is_instance());
       MemoryImpl *mem = get_memory_impl(id);
-      
+
+      return mem->get_instance(id.convert<RegionInstance>());
+#if 0
       AutoHSLLock al(mem->mutex);
 
       // TODO: factor creator_node into lookup!
@@ -2146,6 +2148,7 @@ namespace Realm {
       }
 	  
       return mem->instances[id.instance.inst_idx];
+#endif
     }
 
     /*static*/

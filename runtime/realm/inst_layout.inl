@@ -431,4 +431,130 @@ namespace Realm {
   }
       
 
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class AffineAccessor<FT,N,T>
+
+  // NOTE: these constructors will die horribly if the conversion is not
+  //  allowed - call is_compatible(...) first if you're not sure
+
+  // implicitly tries to cover the entire instance's domain
+  template <typename FT, int N, typename T>
+  inline AffineAccessor<FT,N,T>::AffineAccessor(RegionInstance inst, ptrdiff_t field_offset)
+  {
+    const InstanceLayout<N,T> *layout = dynamic_cast<const InstanceLayout<N,T> *>(inst.get_layout());
+    std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(field_offset);
+    assert(it != layout->fields.end());
+    const InstancePieceList<N,T>& ipl = layout->piece_lists[it->second.list_idx];
+    
+    // this constructor only works if there's exactly one piece and it's affine
+    assert(ipl.pieces.size() == 1);
+    const InstanceLayoutPiece<N,T> *ilp = ipl.pieces[0];
+    assert((ilp->layout_type == InstanceLayoutPiece<N,T>::AffineLayoutType));
+    const AffineLayoutPiece<N,T> *alp = static_cast<const AffineLayoutPiece<N,T> *>(ilp);
+    base = reinterpret_cast<intptr_t>(inst.get_base_address());
+    assert(base != 0);
+    base += alp->offset + it->second.rel_offset;
+    strides = alp->strides;
+#ifdef REALM_ACCESSOR_DEBUG
+    dbg_inst = inst;
+    dbg_bounds = alp->bounds;
+#endif
+  }
+
+  template <typename FT, int N, typename T> template <typename INST>
+  inline AffineAccessor<FT,N,T>::AffineAccessor(const INST &inst, unsigned fid)
+  {
+    ptrdiff_t field_offset = 0;
+    RegionInstance instance = inst.get_instance(fid, field_offset);
+    const AffineLinearizedIndexSpace<N,T>& alis = 
+      dynamic_cast<const AffineLinearizedIndexSpace<N,T>&>(instance.get_lis());
+    ptrdiff_t element_stride;
+    instance.get_strided_access_parameters(0, alis.volume, field_offset,
+                                           sizeof(FT), base, element_stride);
+    // base offset is currently done in get_strided_access_parameters, 
+    //   since we're piggybacking on the old-style linearizers for now
+    // base -= element_stride * alis.offset;
+    for(int i = 0; i < N; i++)
+      strides[i] = element_stride * alis.strides[i];
+#ifdef REALM_ACCESSOR_DEBUG
+    dbg_inst = instance;
+    dbg_bounds = alis.dbg_bounds;
+#endif
+#ifdef PRIVILEGE_CHECKS
+    privileges = inst.get_accessor_privileges();
+#endif
+#ifdef BOUNDS_CHECKS
+    bounds = inst.template get_bounds<N,T>();
+#endif
+  }
+
+  template <typename FT, int N, typename T>
+  inline AffineAccessor<FT,N,T>::~AffineAccessor(void)
+  {}
+#if 0
+    // limits domain to a subrectangle
+  template <typename FT, int N, typename T>
+    AffineAccessor<FT,N,T>::AffineAccessor(RegionInstance inst, ptrdiff_t field_offset, const ZRect<N,T>& subrect);
+
+  template <typename FT, int N, typename T>
+    AffineAccessor<FT,N,T>::~AffineAccessor(void);
+
+  template <typename FT, int N, typename T>
+    static bool AffineAccessor<FT,N,T>::is_compatible(RegionInstance inst, ptrdiff_t field_offset);
+  template <typename FT, int N, typename T>
+    static bool AffineAccessor<FT,N,T>::is_compatible(RegionInstance inst, ptrdiff_t field_offset, const ZRect<N,T>& subrect);
+#endif
+
+  template <typename FT, int N, typename T>
+  inline FT *AffineAccessor<FT,N,T>::ptr(const ZPoint<N,T>& p) const
+  {
+#ifdef PRIVILEGE_CHECKS
+    assert(privileges & ACCESSOR_PRIV_ALL);
+#endif
+#ifdef BOUNDS_CHECKS
+    assert(bounds.contains(p));
+#endif
+    intptr_t rawptr = base;
+    for(int i = 0; i < N; i++) rawptr += p[i] * strides[i];
+    return reinterpret_cast<FT *>(rawptr);
+  }
+
+  template <typename FT, int N, typename T>
+  inline FT AffineAccessor<FT,N,T>::read(const ZPoint<N,T>& p) const
+  {
+#ifdef PRIVILEGE_CHECKS
+    assert(privileges & ACCESSOR_PRIV_READ);
+#endif
+#ifdef BOUNDS_CHECKS
+    assert(bounds.contains(p));
+#endif
+    return *(this->ptr(p));
+  }
+
+  template <typename FT, int N, typename T>
+  inline void AffineAccessor<FT,N,T>::write(const ZPoint<N,T>& p, FT newval) const
+  {
+#ifdef PRIVILEGE_CHECKS
+    assert(privileges & ACCESSOR_PRIV_WRITE);
+#endif
+#ifdef BOUNDS_CHECKS
+    assert(bounds.contains(p));
+#endif
+    *(ptr(p)) = newval;
+  }
+
+  template <typename FT, int N, typename T>
+  inline std::ostream& operator<<(std::ostream& os, const AffineAccessor<FT,N,T>& a)
+  {
+    os << "AffineAccessor{ base=" << std::hex << a.base << std::dec << " strides=" << a.strides;
+#ifdef REALM_ACCESSOR_DEBUG
+    os << " inst=" << a.dbg_inst;
+    os << " bounds=" << a.dbg_bounds;
+    os << "->[" << std::hex << a.ptr(a.dbg_bounds.lo) << "," << a.ptr(a.dbg_bounds.hi)+1 << std::dec << "]";
+#endif
+    os << " }";
+    return os;
+  }
+
 }; // namespace Realm

@@ -24,6 +24,7 @@ namespace Realm {
 
   Logger log_inst("inst");
 
+#ifdef OLD_ALLOCATORS
   ////////////////////////////////////////////////////////////////////////
   //
   // class DeferredInstDestroy
@@ -62,7 +63,7 @@ namespace Realm {
     protected:
       RegionInstanceImpl *impl;
     };
-
+#endif
   
   ////////////////////////////////////////////////////////////////////////
   //
@@ -80,16 +81,72 @@ namespace Realm {
       return i_impl->memory;
     }
 
-    /*static*/ RegionInstance RegionInstance::create_instance(Memory memory,
-							      InstanceLayoutGeneric *ilg,
-							      const ProfilingRequestSet& prs)
+    /*static*/ Event RegionInstance::create_instance(RegionInstance& inst,
+						     Memory memory,
+						     InstanceLayoutGeneric *ilg,
+						     const ProfilingRequestSet& prs,
+						     Event wait_on)
     {
-      return RegionInstance::NO_INST;
+      MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
+      RegionInstanceImpl *impl = m_impl->new_instance();
+
+      impl->metadata.layout = ilg;
+      
+      if (!prs.empty()) {
+        impl->requests = prs;
+        impl->measurements.import_requests(impl->requests);
+        if(impl->measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>())
+          impl->timeline.record_create_time();
+      }
+
+      // request allocation of storage - a true response means it was serviced right
+      //  away
+      Event ready_event;
+      if(m_impl->allocate_instance_storage(impl->me,
+					   ilg->bytes_used,
+					   ilg->alignment_reqd,
+					   wait_on)) {
+	assert(impl->metadata.inst_offset != (size_t)-1);
+	ready_event = Event::NO_EVENT;
+        if(impl->measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>())
+          impl->timeline.record_ready_time();
+      } else {
+	// we will probably need an event to track when it is ready
+	GenEventImpl *ev = GenEventImpl::create_genevent();
+	ready_event = ev->current_event();
+	bool alloc_done;
+	// use mutex to avoid race on allocation callback
+	{
+	  AutoHSLLock al(impl->mutex);
+	  if(impl->metadata.inst_offset != (size_t)-1) {
+	    alloc_done = true;
+	  } else {
+	    alloc_done = false;
+	    impl->metadata.ready_event = ready_event;
+	  }
+	}
+	if(alloc_done) {
+	  if(impl->measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>())
+	    impl->timeline.record_ready_time();
+	  GenEventImpl::trigger(ready_event, false /*!poisoned*/);
+	  ready_event = Event::NO_EVENT;
+	}
+      }
+
+      inst = impl->me;
+      return ready_event;
     }
 
     void RegionInstance::destroy(Event wait_on /*= Event::NO_EVENT*/) const
     {
+      // we can immediately turn this into a (possibly-preconditioned) request to
+      //  deallocate the instance's storage - the eventual callback from that
+      //  will be what actually destroys the instance
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
+      // this does the right thing even though we're using an instance ID
+      MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
+      mem_impl->release_instance_storage(*this, wait_on);
+#ifdef OLD_ALLOCATORS
       RegionInstanceImpl *i_impl = get_runtime()->get_instance_impl(*this);
       if (!wait_on.has_triggered())
       {
@@ -100,6 +157,7 @@ namespace Realm {
       log_inst.info("instance destroyed: space=" IDFMT " id=" IDFMT "",
 	       i_impl->metadata.is.id, this->id);
       get_runtime()->get_memory_impl(i_impl->memory)->destroy_instance(*this, true);
+#endif
     }
 
     void RegionInstance::destroy(const std::vector<DestroyedField>& destroyed_fields,
@@ -167,6 +225,24 @@ namespace Realm {
       return *(r_impl->lis);
     }
 
+    const InstanceLayoutGeneric *RegionInstance::get_layout(void) const
+    {
+      RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
+      // TODO: wait for metadata to be valid?
+      assert(r_impl->metadata.layout);
+      return r_impl->metadata.layout;
+    }
+
+    void *RegionInstance::get_base_address(void) const
+    {
+      RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
+      // TODO: wait for metadata to be valid?
+      assert(r_impl->metadata.layout);
+      MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
+      return mem->get_direct_ptr(r_impl->metadata.inst_offset,
+				 r_impl->metadata.layout->bytes_used);
+    }
+
     void RegionInstance::get_strided_access_parameters(size_t start, size_t count,
 						       ptrdiff_t field_offset, size_t field_size,
 						       intptr_t& base, ptrdiff_t& stride)
@@ -196,6 +272,7 @@ namespace Realm {
   // class RegionInstanceImpl
   //
 
+#ifdef OLD_ALLOCATORS
     RegionInstanceImpl::RegionInstanceImpl(RegionInstance _me, IndexSpace _is, Memory _memory, 
 					   off_t _offset, size_t _size, ReductionOpID _redopid,
 					   const DomainLinearization& _linear, size_t _block_size,
@@ -240,16 +317,58 @@ namespace Realm {
         }
       }
     }
+#endif
 
-    // when we auto-create a remote instance, we don't know region/offset
     RegionInstanceImpl::RegionInstanceImpl(RegionInstance _me, Memory _memory)
       : me(_me), memory(_memory), lis(0)
     {
-      lock.init(ID(me).convert<Reservation>(), ID(me).instance.owner_node);
+      lock.init(ID(me).convert<Reservation>(), ID(me).instance.creator_node);
       lock.in_use = true;
+
+      metadata.inst_offset = (size_t)-1;
+      metadata.ready_event = Event::NO_EVENT;
+      metadata.layout = 0;
     }
 
     RegionInstanceImpl::~RegionInstanceImpl(void) {}
+
+    void RegionInstanceImpl::notify_allocation(bool success, size_t offset)
+    {
+      log_inst.debug() << "allocation completed: inst=" << me << " offset=" << offset;
+      assert(success);
+
+      // before we publish the offset, we need to update the layout
+      // SJT: or not?  that might be part of RegionInstance::get_base_address?
+      //metadata.layout->relocate(offset);
+
+      // update must be performed with the metadata mutex held to make sure there
+      //  are no races between it and getting the ready event 
+      Event ready_event;
+      {
+	AutoHSLLock al(mutex);
+	ready_event = metadata.ready_event;
+	metadata.ready_event = Event::NO_EVENT;
+	metadata.inst_offset = offset;
+      }
+      if(ready_event.exists())
+	GenEventImpl::trigger(ready_event, !success);
+
+      // metadata is now valid and can be shared
+      NodeSet early_reqs;
+      metadata.mark_valid(early_reqs);
+      if(!early_reqs.empty()) {
+	log_inst.debug() << "sending instance metadata to early requestors: isnt=" << me;
+	size_t datalen = 0;
+	void *data = metadata.serialize(datalen);
+	MetadataResponseMessage::broadcast_request(early_reqs, ID(me).id, data, datalen);
+	free(data);
+      }
+    }
+
+    void RegionInstanceImpl::notify_deallocation(void)
+    {
+      log_inst.debug() << "deallocation completed: inst=" << me;
+    }
 
     // helper function to figure out which field we're in
     void find_field_start(const std::vector<size_t>& field_sizes, off_t byte_offset,
