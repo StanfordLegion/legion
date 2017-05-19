@@ -131,7 +131,7 @@ namespace Legion {
                                    const InstanceSet &physical_instances)
     //--------------------------------------------------------------------------
     {
-      PhysicalRegionImpl *impl = legion_new<PhysicalRegionImpl>(req, 
+      PhysicalRegionImpl *impl = new PhysicalRegionImpl(req, 
           ApEvent::NO_AP_EVENT, mapped, this, mid, tag, 
           is_leaf_context(), virtual_mapped, runtime);
       physical_regions.push_back(PhysicalRegion(impl));
@@ -231,7 +231,7 @@ namespace Legion {
       // Make a new unmapped physical region if we aren't done executing yet
       if (!task_executed)
         physical_regions.push_back(PhysicalRegion(
-              legion_new<PhysicalRegionImpl>(created_requirements.back(), 
+              new PhysicalRegionImpl(created_requirements.back(), 
                 ApEvent::NO_AP_EVENT, false/*mapped*/, this, 
                 owner_task->map_id, owner_task->tag, 
                 is_leaf_context(), false/*virtual mapped*/, runtime)));
@@ -1664,7 +1664,7 @@ namespace Legion {
       // Make a new unmapped physical region if we're not done executing yet
       if (!task_executed)
         physical_regions.push_back(PhysicalRegion(
-              legion_new<PhysicalRegionImpl>(created_requirements.back(),
+              new PhysicalRegionImpl(created_requirements.back(),
                 ApEvent::NO_AP_EVENT, false/*mapped*/, this, 
                 owner_task->map_id, owner_task->tag, 
                 is_leaf_context(), false/*virtual mapped*/, runtime)));
@@ -2237,7 +2237,7 @@ namespace Legion {
             it != traces.end(); it++)
       {
         if (it->second->remove_reference())
-          legion_delete(it->second);
+          delete (it->second);
       }
       traces.clear();
       // Clean up any locks and barriers that the user
@@ -4083,7 +4083,7 @@ namespace Legion {
         if (launcher.predicate_false_future.impl != NULL)
           return launcher.predicate_false_future;
         // Otherwise check to see if we have a value
-        FutureImpl *result = legion_new<FutureImpl>(runtime, true/*register*/,
+        FutureImpl *result = new FutureImpl(runtime, true/*register*/,
           runtime->get_available_distributed_id(true), runtime->address_space);
         if (launcher.predicate_false_result.get_size() > 0)
           result->set_result(launcher.predicate_false_result.get_ptr(),
@@ -4149,7 +4149,7 @@ namespace Legion {
       // Quick out for predicate false
       if (launcher.predicate == Predicate::FALSE_PRED)
       {
-        FutureMapImpl *result = legion_new<FutureMapImpl>(this, runtime,
+        FutureMapImpl *result = new FutureMapImpl(this, runtime,
             runtime->get_available_distributed_id(true/*needs continuation*/),
             runtime->address_space);
         if (launcher.predicate_false_future.impl != NULL)
@@ -4259,7 +4259,7 @@ namespace Legion {
         if (launcher.predicate_false_future.impl != NULL)
           return launcher.predicate_false_future;
         // Otherwise check to see if we have a value
-        FutureImpl *result = legion_new<FutureImpl>(runtime, true/*register*/, 
+        FutureImpl *result = new FutureImpl(runtime, true/*register*/, 
           runtime->get_available_distributed_id(true), runtime->address_space);
         if (launcher.predicate_false_result.get_size() > 0)
           result->set_result(launcher.predicate_false_result.get_ptr(),
@@ -5323,7 +5323,7 @@ namespace Legion {
       if (finder == traces.end())
       {
         // Trace does not exist yet, so make one and record it
-        DynamicTrace *dynamic_trace = legion_new<DynamicTrace>(tid, this);
+        DynamicTrace *dynamic_trace = new DynamicTrace(tid, this);
         dynamic_trace->add_reference();
         traces[tid] = dynamic_trace;
         current_trace = dynamic_trace;
@@ -5404,7 +5404,7 @@ namespace Legion {
       // Issue the mapping fence into the analysis
       runtime->issue_mapping_fence(this);
       // Then we make a static trace
-      current_trace = legion_new<StaticTrace>(this, trees); 
+      current_trace = new StaticTrace(this, trees); 
       current_trace->add_reference();
     }
 
@@ -5987,7 +5987,7 @@ namespace Legion {
         {
           it->first->unregister_active_context(this);
           if (it->second->remove_base_resource_ref(CONTEXT_REF))
-            LogicalView::delete_logical_view(it->second);
+            delete (it->second);
         }
         instance_top_views.clear();
       }
@@ -6117,7 +6117,7 @@ namespace Legion {
         instance_top_views.erase(finder);
       }
       if (removed->remove_base_resource_ref(CONTEXT_REF))
-        LogicalView::delete_logical_view(removed);
+        delete removed;
     }
 
     //--------------------------------------------------------------------------

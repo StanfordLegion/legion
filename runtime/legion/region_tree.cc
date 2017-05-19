@@ -5537,20 +5537,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void* IndexSpaceNode::operator new(size_t count)
-    //--------------------------------------------------------------------------
-    {
-      return legion_alloc_aligned<IndexSpaceNode,true/*bytes*/>(count);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexSpaceNode::operator delete(void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
-    }
-
-    //--------------------------------------------------------------------------
     bool IndexSpaceNode::is_index_space_node(void) const
     //--------------------------------------------------------------------------
     {
@@ -7076,20 +7062,6 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void* IndexPartNode::operator new(size_t count)
-    //--------------------------------------------------------------------------
-    {
-      return legion_alloc_aligned<IndexPartNode,true/*bytes*/>(count);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexPartNode::operator delete(void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
     }
 
     //--------------------------------------------------------------------------
@@ -8769,20 +8741,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void* FieldSpaceNode::operator new(size_t count)
-    //--------------------------------------------------------------------------
-    {
-      return legion_alloc_aligned<FieldSpaceNode,true/*bytes*/>(count);
-    }
-
-    //--------------------------------------------------------------------------
-    void FieldSpaceNode::operator delete(void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
-    }
-
-    //--------------------------------------------------------------------------
     AddressSpaceID FieldSpaceNode::get_owner_space(void) const
     //--------------------------------------------------------------------------
     {
@@ -10447,7 +10405,7 @@ namespace Legion {
       DistributedID did = context->runtime->get_available_distributed_id(false);
       MemoryManager *memory = 
         context->runtime->find_memory_manager(inst.get_location());
-      InstanceManager *result = legion_new<InstanceManager>(context, did, 
+      InstanceManager *result = new InstanceManager(context, did, 
                                          context->runtime->address_space,
                                          memory, inst, dom, false/*own*/,
                                          node, layout, pointer_constraint,
@@ -13814,7 +13772,7 @@ namespace Legion {
       DeferredVersionInfo *view_info = new DeferredVersionInfo();
       version_info.copy_to(*view_info);
       // Make the view
-      CompositeView *result = legion_new<CompositeView>(context, did, 
+      CompositeView *result = new CompositeView(context, did, 
                            local_space, this, view_info, 
                            closed_tree, owner_ctx, true/*register now*/);
       // Capture the state of the top of the composite view
@@ -15518,20 +15476,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void* RegionNode::operator new(size_t count)
-    //--------------------------------------------------------------------------
-    {
-      return legion_alloc_aligned<RegionNode,true/*bytes*/>(count);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionNode::operator delete(void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
-    }
-
-    //--------------------------------------------------------------------------
     bool RegionNode::has_child(const ColorPoint &c)
     //--------------------------------------------------------------------------
     {
@@ -16767,12 +16711,12 @@ namespace Legion {
       FillView::FillViewValue *fill_value = 
         new FillView::FillViewValue(value, value_size);
       FillView *fill_view = 
-        legion_new<FillView>(context, did, local_space,
-                             this, fill_value, true/*register now*/
+        new FillView(context, did, local_space,
+                     this, fill_value, true/*register now*/
 #ifdef LEGION_SPY
-                             , fill_op_uid
+                     , fill_op_uid
 #endif
-                             );
+                     );
       // Now update the physical state
       PhysicalState *state = get_physical_state(version_info);
       if (true_guard.exists())
@@ -16787,10 +16731,10 @@ namespace Legion {
         // Copy the version info that we need
         DeferredVersionInfo *view_info = new DeferredVersionInfo();
         version_info.copy_to(*view_info); 
-        PhiView *phi_view = legion_new<PhiView>(context, did, local_space,
-                                                view_info, this, true_guard, 
-                                                false_guard,
-                                                true/*register now*/);
+        PhiView *phi_view = new PhiView(context, did, local_space,
+                                        view_info, this, true_guard, 
+                                        false_guard,
+                                        true/*register now*/);
         // Record the true and false views
         phi_view->record_true_view(fill_view, fill_mask);
         LegionMap<LogicalView*,FieldMask>::aligned current_views;
@@ -17548,20 +17492,6 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void* PartitionNode::operator new(size_t count)
-    //--------------------------------------------------------------------------
-    {
-      return legion_alloc_aligned<PartitionNode,true/*bytes*/>(count);
-    }
-
-    //--------------------------------------------------------------------------
-    void PartitionNode::operator delete(void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
     }
 
     //--------------------------------------------------------------------------

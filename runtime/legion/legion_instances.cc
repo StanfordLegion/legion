@@ -166,7 +166,7 @@ namespace Legion {
       layout_lock.destroy_reservation();
       layout_lock = Reservation::NO_RESERVATION;
       if (constraints->remove_reference())
-        legion_delete(constraints);
+        delete (constraints);
     }
 
     //--------------------------------------------------------------------------
@@ -177,20 +177,6 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void* LayoutDescription::operator new(size_t count)
-    //--------------------------------------------------------------------------
-    {
-      return legion_alloc_aligned<LayoutDescription,true/*bytes*/>(count);
-    }
-
-    //--------------------------------------------------------------------------
-    void LayoutDescription::operator delete(void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
     }
 
     //--------------------------------------------------------------------------
@@ -992,23 +978,6 @@ namespace Legion {
                                                       proc, priority);
     }
 
-    //--------------------------------------------------------------------------
-    /*static*/ void PhysicalManager::delete_physical_manager(
-                                                       PhysicalManager *manager)
-    //--------------------------------------------------------------------------
-    {
-      if (manager->is_reduction_manager())
-      {
-        ReductionManager *reduc_manager = manager->as_reduction_manager();
-        if (reduc_manager->is_list_manager())
-          legion_delete(reduc_manager->as_list_manager());
-        else
-          legion_delete(reduc_manager->as_fold_manager());
-      }
-      else
-        legion_delete(manager->as_instance_manager());
-    }
-
     /////////////////////////////////////////////////////////////
     // InstanceManager 
     /////////////////////////////////////////////////////////////
@@ -1134,11 +1103,11 @@ namespace Legion {
         context->runtime->get_available_distributed_id(false);
       UniqueID context_uid = own_ctx->get_context_uid();
       InstanceView* result = 
-              legion_new<MaterializedView>(context, view_did, owner_space, 
-                                           logical_owner, region_node,
-                                           const_cast<InstanceManager*>(this),
-                                           (MaterializedView*)NULL/*parent*/, 
-                                           context_uid, true/*register now*/);
+              new MaterializedView(context, view_did, owner_space, 
+                                   logical_owner, region_node,
+                                   const_cast<InstanceManager*>(this),
+                                   (MaterializedView*)NULL/*parent*/, 
+                                   context_uid, true/*register now*/);
       register_active_context(own_ctx);
       return result;
     }
@@ -1290,19 +1259,19 @@ namespace Legion {
       void *location;
       InstanceManager *man = NULL;
       if (runtime->find_pending_collectable_location(did, location))
-        man = legion_new_in_place<InstanceManager>(location,runtime->forest,did,
-                                             owner_space, memory, inst, 
-                                             inst_domain, false/*owns*/, 
-                                             target_node, layout,
-                                             pointer_constraint,
-                                             false/*reg now*/, use_event,
-                                             read_only_reservation);
+        man = new(location) InstanceManager(runtime->forest,did,
+                                            owner_space, memory, inst, 
+                                            inst_domain, false/*owns*/, 
+                                            target_node, layout,
+                                            pointer_constraint,
+                                            false/*reg now*/, use_event,
+                                            read_only_reservation);
       else
-        man = legion_new<InstanceManager>(runtime->forest, did, owner_space,
-                                    memory, inst, inst_domain, false/*owns*/,
-                                    target_node, layout, pointer_constraint, 
-                                    false/*reg now*/, use_event,
-                                    read_only_reservation);
+        man = new InstanceManager(runtime->forest, did, owner_space,
+                                  memory, inst, inst_domain, false/*owns*/,
+                                  target_node, layout, pointer_constraint, 
+                                  false/*reg now*/, use_event,
+                                  read_only_reservation);
       // Hold-off doing the registration until construction is complete
       man->register_with_runtime(NULL/*no remote registration needed*/);
     }
@@ -1424,41 +1393,39 @@ namespace Legion {
       {
         void *location;
         if (runtime->find_pending_collectable_location(did, location))
-          man = legion_new_in_place<FoldReductionManager>(location, 
-                                                    runtime->forest,
-                                                    did, owner_space,
-                                                    memory, inst, layout,
-                                                    pointer_constraint, 
-                                                    inst_dom, false/*owner*/,
-                                                    target_node, redop, op,
-                                                    use_event,
-                                                    false/*reg now*/);
+          man = new(location) FoldReductionManager(runtime->forest,
+                                                   did, owner_space,
+                                                   memory, inst, layout,
+                                                   pointer_constraint, 
+                                                   inst_dom, false/*owner*/,
+                                                   target_node, redop, op,
+                                                   use_event,
+                                                   false/*reg now*/);
         else
-          man = legion_new<FoldReductionManager>(runtime->forest, 
-                                           did, owner_space, memory, inst,
-                                           layout, pointer_constraint, inst_dom,
-                                           false/*own*/, target_node, redop, op,
-                                           use_event, false/*reg now*/);
+          man = new FoldReductionManager(runtime->forest, 
+                                         did, owner_space, memory, inst,
+                                         layout, pointer_constraint, inst_dom,
+                                         false/*own*/, target_node, redop, op,
+                                         use_event, false/*reg now*/);
       }
       else
       {
         void *location;
         if (runtime->find_pending_collectable_location(did, location))
-          man = legion_new_in_place<ListReductionManager>(location, 
-                                                    runtime->forest,
-                                                    did, owner_space, 
-                                                    memory, inst, layout,
-                                                    pointer_constraint, 
-                                                    inst_dom, false/*owner*/,
-                                                    target_node, redop, op,
-                                                    ptr_space,
-                                                    false/*reg now*/);
+          man = new(location) ListReductionManager(runtime->forest,
+                                                   did, owner_space, 
+                                                   memory, inst, layout,
+                                                   pointer_constraint, 
+                                                   inst_dom, false/*owner*/,
+                                                   target_node, redop, op,
+                                                   ptr_space,
+                                                   false/*reg now*/);
         else
-          man = legion_new<ListReductionManager>(runtime->forest, did, 
-                                           owner_space, memory, inst,
-                                           layout, pointer_constraint, inst_dom,
-                                           false/*own*/, target_node, redop,op,
-                                           ptr_space, false/*reg now*/);
+          man = new ListReductionManager(runtime->forest, did, 
+                                         owner_space, memory, inst,
+                                         layout, pointer_constraint, inst_dom,
+                                         false/*own*/, target_node, redop,op,
+                                         ptr_space, false/*reg now*/);
       }
       man->register_with_runtime(NULL/*no remote registration needed*/);
     }
@@ -1475,10 +1442,10 @@ namespace Legion {
         context->runtime->get_available_distributed_id(false);
       UniqueID context_uid = own_ctx->get_context_uid();
       InstanceView *result = 
-             legion_new<ReductionView>(context, view_did, owner_space, 
-                                       logical_owner, region_node, 
-                                       const_cast<ReductionManager*>(this),
-                                       context_uid, true/*register now*/);
+             new ReductionView(context, view_did, owner_space, 
+                               logical_owner, region_node, 
+                               const_cast<ReductionManager*>(this),
+                               context_uid, true/*register now*/);
       register_active_context(own_ctx);
       return result;
     }
@@ -2114,13 +2081,13 @@ namespace Legion {
             // Now we can make the manager
             Reservation read_only_reservation = 
               Reservation::create_reservation();
-            result = legion_new<InstanceManager>(forest, did, local_space,
-                                                 memory_manager,
-                                                 instance, instance_domain, 
-                                                 own_domain, ancestor, layout, 
-                                                 pointer_constraint, 
-                                                 true/*register now*/, ready,
-                                                 read_only_reservation);
+            result = new InstanceManager(forest, did, local_space,
+                                         memory_manager,
+                                         instance, instance_domain, 
+                                         own_domain, ancestor, layout, 
+                                         pointer_constraint, 
+                                         true/*register now*/, ready,
+                                         read_only_reservation);
             break;
           }
         case REDUCTION_FOLD_SPECIALIZE:
@@ -2159,7 +2126,7 @@ namespace Legion {
                                  fill_buffer, reduction_op->sizeof_rhs, ready));
             // We can free the buffer after we've issued the fill
             free(fill_buffer);
-            result = legion_new<FoldReductionManager>(forest, did, local_space,
+            result = new FoldReductionManager(forest, did, local_space,
                                               memory_manager, 
                                               instance, layout, 
                                               pointer_constraint, 

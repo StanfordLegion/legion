@@ -356,7 +356,7 @@ namespace Legion {
     ArgumentMap::ArgumentMap(void)
     //--------------------------------------------------------------------------
     {
-      impl = Internal::legion_new<Internal::ArgumentMapImpl>();
+      impl = new Internal::ArgumentMapImpl();
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
@@ -367,7 +367,7 @@ namespace Legion {
     ArgumentMap::ArgumentMap(const FutureMap &rhs)
     //--------------------------------------------------------------------------
     {
-      impl = Internal::legion_new<Internal::ArgumentMapImpl>(rhs);
+      impl = new Internal::ArgumentMapImpl(rhs);
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
@@ -402,7 +402,7 @@ namespace Legion {
         // last reference holder, then delete it
         if (impl->remove_reference())
         {
-          Internal::legion_delete(impl);
+          delete impl;
         }
         impl = NULL;
       }
@@ -418,10 +418,10 @@ namespace Legion {
       {
         if (impl->remove_reference())
         {
-          Internal::legion_delete(impl);
+          delete impl;
         }
       }
-      impl = Internal::legion_new<Internal::ArgumentMapImpl>(rhs);
+      impl = new Internal::ArgumentMapImpl(rhs);
       impl->add_reference();
       return *this;
     }
@@ -436,7 +436,7 @@ namespace Legion {
       {
         if (impl->remove_reference())
         {
-          Internal::legion_delete(impl);
+          delete impl;
         }
       }
       impl = rhs.impl;
@@ -642,7 +642,7 @@ namespace Legion {
       if (impl != NULL)
       {
         if (impl->remove_reference())
-          Internal::legion_delete(impl);
+          delete impl;
         impl = NULL;
       }
     }
@@ -654,7 +654,7 @@ namespace Legion {
       if (impl != NULL)
       {
         if (impl->remove_reference())
-          Internal::legion_delete(impl);
+          delete impl;
       }
       impl = rhs.impl;
       if (impl != NULL)
@@ -1695,7 +1695,7 @@ namespace Legion {
       if (impl != NULL)
       {
         if (impl->remove_reference())
-          Internal::legion_delete(impl);
+          delete impl;
         impl = NULL;
       }
     }
@@ -1717,7 +1717,7 @@ namespace Legion {
       if (impl != NULL)
       {
         if (impl->remove_reference())
-          Internal::legion_delete(impl);
+          delete impl;
       }
       impl = rhs.impl;
       if (impl != NULL)
@@ -1822,7 +1822,7 @@ namespace Legion {
       if (impl != NULL)
       {
         if (impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
-          Internal::legion_delete(impl);
+          delete impl;
         impl = NULL;
       }
     }
@@ -1843,7 +1843,7 @@ namespace Legion {
       if (impl != NULL)
       {
         if (impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
-          Internal::legion_delete(impl);
+          delete impl;
       }
       impl = rhs.impl;
       if (impl != NULL)
@@ -1937,7 +1937,7 @@ namespace Legion {
       if (impl != NULL)
       {
         if (impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
-          Internal::legion_delete(impl);
+          delete impl;
         impl = NULL;
       }
     }
@@ -1949,7 +1949,7 @@ namespace Legion {
       if (impl != NULL)
       {
         if (impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
-          Internal::legion_delete(impl);
+          delete impl;
       }
       impl = rhs.impl;
       if (impl != NULL)
@@ -2020,7 +2020,7 @@ namespace Legion {
       if (impl != NULL)
       {
         if (impl->remove_reference())
-          Internal::legion_delete(impl);
+          delete impl;
         impl = NULL;
       }
     }
@@ -2032,7 +2032,7 @@ namespace Legion {
       if (impl != NULL)
       {
         if (impl->remove_reference())
-          Internal::legion_delete(impl);
+          delete impl;
       }
       impl = rhs.impl;
       if (impl != NULL)
@@ -4552,7 +4552,7 @@ namespace Legion {
       assert(legion_participants > 0);
 #endif
       MPILegionHandshake result(
-          Internal::legion_new<Internal::MPILegionHandshakeImpl>(init_in_MPI,
+          new Internal::MPILegionHandshakeImpl(init_in_MPI,
                                        mpi_participants, legion_participants));
       Internal::Runtime::register_handshake(result);
       return result;

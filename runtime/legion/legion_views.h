@@ -40,8 +40,6 @@ namespace Legion {
                   RegionTreeNode *node, bool register_now);
       virtual ~LogicalView(void);
     public:
-      static void delete_logical_view(LogicalView *view);
-    public:
       inline bool is_instance_view(void) const;
       inline bool is_deferred_view(void) const;
       inline bool is_materialized_view(void) const;
@@ -231,7 +229,8 @@ namespace Legion {
      * The MaterializedView class is used for representing a given
      * logical view onto a single physical instance.
      */
-    class MaterializedView : public InstanceView {
+    class MaterializedView : public InstanceView, 
+                             public LegionHeapify<MaterializedView> {
     public:
       static const AllocationType alloc_type = MATERIALIZED_VIEW_ALLOC;
     public:
@@ -720,7 +719,8 @@ namespace Legion {
      * The ReductionView class is used for providing a view
      * onto reduction physical instances from any logical perspective.
      */
-    class ReductionView : public InstanceView {
+    class ReductionView : public InstanceView,
+                          public LegionHeapify<ReductionView> {
     public:
       static const AllocationType alloc_type = REDUCTION_VIEW_ALLOC;
     public:
@@ -1145,7 +1145,9 @@ namespace Legion {
      * logical region with a bunch of different instances.
      */
     class CompositeView : public DeferredView, 
-                          public VersionTracker, public CompositeBase {
+                          public VersionTracker, 
+                          public CompositeBase, 
+                          public LegionHeapify<CompositeView> {
     public:
       static const AllocationType alloc_type = COMPOSITE_VIEW_ALLOC; 
     public:
@@ -1181,8 +1183,6 @@ namespace Legion {
       virtual ~CompositeView(void);
     public:
       CompositeView& operator=(const CompositeView &rhs);
-      void* operator new(size_t count);
-      void operator delete(void *ptr);
     public:
       CompositeView* clone(const FieldMask &clone_mask,
         const LegionMap<CompositeView*,FieldMask>::aligned &replacements) const;
@@ -1277,7 +1277,8 @@ namespace Legion {
      * one or more version state objects. It's used for issuing
      * copy operations from closed region tree.
      */
-    class CompositeNode : public CompositeBase {
+    class CompositeNode : public CompositeBase,
+                          public LegionHeapify<CompositeNode> {
     public:
       static const AllocationType alloc_type = COMPOSITE_NODE_ALLOC;
     public:
@@ -1303,8 +1304,6 @@ namespace Legion {
       virtual ~CompositeNode(void);
     public:
       CompositeNode& operator=(const CompositeNode &rhs);
-      void* operator new(size_t count);
-      void operator delete(void *ptr);
     public:
       // From CompositeBase
       virtual InnerContext* get_owner_context(void) const;
@@ -1364,7 +1363,8 @@ namespace Legion {
      * This is a deferred view that is used for filling in 
      * fields with a default value.
      */
-    class FillView : public DeferredView {
+    class FillView : public DeferredView,
+                     public LegionHeapify<FillView> {
     public:
       static const AllocationType alloc_type = FILL_VIEW_ALLOC;
     public:
@@ -1442,7 +1442,10 @@ namespace Legion {
      * but it seems to work.
      * TODO: Prune these and build copy trees correctly
      */
-    class PhiView : public DeferredView, public VersionTracker {
+    class PhiView : public DeferredView, public VersionTracker,
+                    public LegionHeapify<PhiView> {
+    public:
+      static const AllocationType alloc_type = PHI_VIEW_ALLOC;
     public:
       struct DeferPhiViewRefArgs : 
         public LgTaskArgs<DeferPhiViewRefArgs> {
