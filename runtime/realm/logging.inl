@@ -19,6 +19,7 @@
 #include "logging.h"
 
 #include <assert.h>
+#include <stdio.h>
 
 namespace Realm {
   
