@@ -40,7 +40,7 @@ using namespace LegionRuntime::Arrays;
 #if !USE_TLS
 class AutoImmovableLock {
 public:
-  AutoImmovableLock(ImmovableLock& _lock)
+  AutoImmovableLock(LegionRuntime::ImmovableLock& _lock)
     : lock(_lock)
   {
     lock.lock();
@@ -52,7 +52,7 @@ public:
   }
 
 protected:
-  ImmovableLock& lock;
+  LegionRuntime::ImmovableLock& lock;
 };
 #endif
 
@@ -136,7 +136,7 @@ private:
   std::map<IndexSpace, std::vector<std::pair<ptr_t, size_t> > > global_cache;
 #else
   static std::map<IndexSpace, std::vector<std::pair<ptr_t, size_t> > > global_cache;
-  static ImmovableLock global_lock;
+  static LegionRuntime::ImmovableLock global_lock;
 #endif
 };
 
@@ -146,7 +146,7 @@ thread_local std::map<IndexSpace, std::vector<std::pair<ptr_t, size_t> > >
 #else
 std::map<IndexSpace, std::vector<std::pair<ptr_t, size_t> > >
   CachedIndexIterator::global_cache;
-ImmovableLock CachedIndexIterator::global_lock(true);
+LegionRuntime::ImmovableLock CachedIndexIterator::global_lock(true);
 #endif
 
 class TerraCObjectWrapper {
