@@ -50,19 +50,19 @@ namespace Legion {
 
     // If you add a logger, update the LEGION_EXTERN_LOGGER_DECLARATIONS
     // macro in legion_types.h
-    LegionRuntime::Logger::Category log_run("runtime");
-    LegionRuntime::Logger::Category log_task("tasks");
-    LegionRuntime::Logger::Category log_index("index_spaces");
-    LegionRuntime::Logger::Category log_field("field_spaces");
-    LegionRuntime::Logger::Category log_region("regions");
-    LegionRuntime::Logger::Category log_inst("instances");
-    LegionRuntime::Logger::Category log_variant("variants");
-    LegionRuntime::Logger::Category log_allocation("allocation");
-    LegionRuntime::Logger::Category log_prof("legion_prof");
-    LegionRuntime::Logger::Category log_garbage("legion_gc");
-    LegionRuntime::Logger::Category log_shutdown("shutdown");
+    Realm::Logger log_run("runtime");
+    Realm::Logger log_task("tasks");
+    Realm::Logger log_index("index_spaces");
+    Realm::Logger log_field("field_spaces");
+    Realm::Logger log_region("regions");
+    Realm::Logger log_inst("instances");
+    Realm::Logger log_variant("variants");
+    Realm::Logger log_allocation("allocation");
+    Realm::Logger log_prof("legion_prof");
+    Realm::Logger log_garbage("legion_gc");
+    Realm::Logger log_shutdown("shutdown");
     namespace LegionSpy {
-      LegionRuntime::Logger::Category log_spy("legion_spy");
+      Realm::Logger log_spy("legion_spy");
     };
 
 #ifdef ENABLE_LEGION_TLS

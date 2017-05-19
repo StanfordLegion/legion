@@ -23,7 +23,7 @@
 namespace Legion {
   namespace Internal {
 
-    extern LegionRuntime::Logger::Category log_prof;
+    extern Realm::Logger log_prof;
 
     // Keep a thread-local profiler instance so we can always
     // be thread safe no matter what Realm decides to do 
