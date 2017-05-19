@@ -1444,6 +1444,7 @@ namespace Legion {
   typedef Realm::ElementMask::Enumerator Enumerator;
   typedef ::legion_lowlevel_coord_t coord_t;
   typedef Realm::IndexSpace::FieldDataDescriptor FieldDataDescriptor;
+  typedef Realm::Logger Logger;
   typedef std::map<CustomSerdezID, 
                    const Realm::CustomSerdezUntyped *> SerdezOpTable;
   typedef std::map<Realm::ReductionOpID, 
