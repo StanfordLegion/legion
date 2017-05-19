@@ -319,7 +319,7 @@ public:
     std::vector<FieldID> fields;
     pr.get_fields(fields);
     assert((fields.size() == 1) && (fields[0] == fid));
-    return pr.get_accessor().template typeify<T>().template convert<AT>();
+    return pr.get_field_accessor(fid).template typeify<T>().template convert<AT>();
   }
 
 protected:
@@ -474,7 +474,7 @@ void top_level_task(const Task *task,
   // assign blocks to shards
 
   // step 1: ask the mapper how many shards we should even have
-  int num_shards = runtime->get_tunable_value(ctx, CGMapper::TID_NUM_SHARDS);
+  int num_shards = runtime->select_tunable_value(ctx, CGMapper::TID_NUM_SHARDS).get_result<int>();
   // force for now
   log_app.print() << "shards = " << num_shards;
 
@@ -1376,7 +1376,7 @@ int main(int argc, char **argv)
   FLT_double::preregister_task();
   FDV_double::preregister_task();
 
-  Runtime::set_registration_callback(update_mappers);
+  Runtime::add_registration_callback(update_mappers);
 
   Runtime::register_reduction_op<BarrierCombineReductionOp>(BarrierCombineReductionOp::redop_id);
   Runtime::register_reduction_op<DoubleAddReductionOp>(DoubleAddReductionOp::redop_id);
