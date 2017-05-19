@@ -2216,6 +2216,10 @@ namespace Legion {
     {
     }
 
+// FIXME: This exists for backwards compatibility but it is tripping
+// over our own deprecation warnings. Turn those off inside this method.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     //--------------------------------------------------------------------------
     LogicalRegion ProjectionFunctor::project(const Mappable *mappable, 
             unsigned index, LogicalRegion upper_bound, const DomainPoint &point)
@@ -2239,7 +2243,12 @@ namespace Legion {
       }
       return LogicalRegion::NO_REGION;
     }
+#pragma GCC diagnostic pop
 
+// FIXME: This exists for backwards compatibility but it is tripping
+// over our own deprecation warnings. Turn those off inside this method.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     //--------------------------------------------------------------------------
     LogicalRegion ProjectionFunctor::project(const Mappable *mappable,
          unsigned index, LogicalPartition upper_bound, const DomainPoint &point)
@@ -2263,6 +2272,7 @@ namespace Legion {
       }
       return LogicalRegion::NO_REGION;
     }
+#pragma GCC diagnostic pop
 
     //--------------------------------------------------------------------------
     LogicalRegion ProjectionFunctor::project(Context ctx, Task *task,
