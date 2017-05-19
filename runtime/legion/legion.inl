@@ -2813,17 +2813,17 @@ namespace LegionRuntime {
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Realm::IndexSpace::FieldDataDescriptor FieldDataDescriptor;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef std::map<CustomSerdezID, 
+    typedef std::map<Legion::CustomSerdezID, 
                      const Realm::CustomSerdezUntyped *> SerdezOpTable;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef std::map<Realm::ReductionOpID, 
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
             const Realm::ReductionOpUntyped *> ReductionOpTable;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef void (*SerdezInitFnptr)(const ReductionOp*, void *&, size_t&);
+    typedef void (*SerdezInitFnptr)(const Legion::ReductionOp*, 
+                                    void *&, size_t&);
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef void (*SerdezFoldFnptr)(const ReductionOp*, void *&, size_t&,
-                                    const void*, bool);
+    typedef void (*SerdezFoldFnptr)(const Legion::ReductionOp*, void *&, 
+                                    size_t&, const void*, bool);
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef std::map<Realm::ReductionOpID, 
                      Legion::SerdezRedopFns> SerdezRedopTable;
@@ -2880,38 +2880,43 @@ namespace LegionRuntime {
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef ::legion_layout_constraint_id_t LayoutConstraintID;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef std::map<Color,Legion::ColoredPoints<ptr_t> > Coloring;
+    typedef std::map<Legion::Color,Legion::ColoredPoints<ptr_t> > Coloring;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef std::map<Color,Domain> DomainColoring;
+    typedef std::map<Legion::Color,Legion::Domain> DomainColoring;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef std::map<Color,std::set<Domain> > MultiDomainColoring;
+    typedef std::map<Legion::Color,
+                     std::set<Legion::Domain> > MultiDomainColoring;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef std::map<DomainPoint,Legion::ColoredPoints<ptr_t> > PointColoring;
+    typedef std::map<Legion::DomainPoint,
+                     Legion::ColoredPoints<ptr_t> > PointColoring;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef std::map<DomainPoint,Domain> DomainPointColoring;
+    typedef std::map<Legion::DomainPoint,Legion::Domain> DomainPointColoring;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef std::map<DomainPoint,std::set<Domain> > MultiDomainPointColoring;
+    typedef std::map<Legion::DomainPoint,
+                     std::set<Legion::Domain> > MultiDomainPointColoring;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef void (*RegistrationCallbackFnptr)(Machine machine, 
-        Runtime *rt, const std::set<Processor> &local_procs);
+        Legion::Runtime *rt, const std::set<Legion::Processor> &local_procs);
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef LogicalRegion (*RegionProjectionFnptr)(LogicalRegion parent, 
-        const DomainPoint&, Runtime *rt);
+    typedef Legion::LogicalRegion (*RegionProjectionFnptr)(
+        Legion::LogicalRegion parent,
+        const Legion::DomainPoint&, Legion::Runtime *rt);
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef LogicalRegion (*PartitionProjectionFnptr)(LogicalPartition parent, 
-        const DomainPoint&, Runtime *rt);
+    typedef Legion::LogicalRegion (*PartitionProjectionFnptr)(
+        Legion::LogicalPartition parent, 
+        const Legion::DomainPoint&, Legion::Runtime *rt);
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef bool (*PredicateFnptr)(const void*, size_t, 
-        const std::vector<Future> futures);
+        const std::vector<Legion::Future> futures);
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef std::map<ProjectionID,RegionProjectionFnptr> 
+    typedef std::map<Legion::ProjectionID,Legion::RegionProjectionFnptr> 
       RegionProjectionTable;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef std::map<ProjectionID,PartitionProjectionFnptr> 
+    typedef std::map<Legion::ProjectionID,Legion::PartitionProjectionFnptr> 
       PartitionProjectionTable;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef void (*RealmFnptr)(const void*,size_t,
-                               const void*,size_t,Processor);
+                               const void*,size_t,Legion::Processor);
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::Internal::TaskContext* Context; 
   };
