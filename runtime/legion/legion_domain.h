@@ -673,6 +673,7 @@ namespace Legion {
                   rect_itr = NULL;
                   rect_valid = false;
                 }
+                rect_iterator = (void *)rect_itr;
               } else {
                 p = rect_itr->p; 
               }
@@ -702,6 +703,7 @@ namespace Legion {
                   rect_itr = NULL;
                   rect_valid = false;
                 }
+                rect_iterator = (void *)rect_itr;
               } else {
                 p = rect_itr->p; 
               }
@@ -731,6 +733,7 @@ namespace Legion {
                   rect_itr = NULL;
                   rect_valid = false;
                 }
+                rect_iterator = (void *)rect_itr;
               } else {
                 p = rect_itr->p; 
               }
