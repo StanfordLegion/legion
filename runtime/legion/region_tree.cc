@@ -61,6 +61,21 @@ namespace Legion {
     {
       lookup_lock.destroy_reservation();
       lookup_lock = Reservation::NO_RESERVATION;
+      for (std::map<LogicalPartition,PartitionNode*>::const_iterator it = 
+            part_nodes.begin(); it != part_nodes.end(); it++)
+        delete it->second;
+      for (std::map<LogicalRegion,RegionNode*>::const_iterator it = 
+            region_nodes.begin(); it != region_nodes.end(); it++)
+        delete it->second;
+      for (std::map<FieldSpace,FieldSpaceNode*>::const_iterator it = 
+            field_nodes.begin(); it != field_nodes.end(); it++)
+        delete it->second;
+      for (std::map<IndexPartition,IndexPartNode*>::const_iterator it = 
+            index_parts.begin(); it != index_parts.end(); it++)
+        delete it->second;
+      for (std::map<IndexSpace,IndexSpaceNode*>::const_iterator it = 
+            index_nodes.begin(); it != index_nodes.end(); it++)
+        delete it->second;
     }
 
     //--------------------------------------------------------------------------
