@@ -19,7 +19,7 @@
 namespace Legion {
   namespace Mapping {
 
-    LegionRuntime::Logger::Category log_replay("replay_mapper");
+    Logger log_replay("replay_mapper");
 
     //--------------------------------------------------------------------------
     /*static*/ const char* ReplayMapper::create_replay_name(Processor p)

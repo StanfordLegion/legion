@@ -3396,150 +3396,290 @@ namespace LegionRuntime {
   namespace HighLevel {
     using namespace LegionRuntime::Arrays;
 
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::IndexSpace IndexSpace;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::IndexPartition IndexPartition;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::FieldSpace FieldSpace;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::LogicalRegion LogicalRegion;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::LogicalPartition LogicalPartition;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::IndexAllocator IndexAllocator;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::FieldAllocator FieldAllocator;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::TaskArgument TaskArgument;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::ArgumentMap ArgumentMap;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::Predicate Predicate;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::Lock Lock;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::LockRequest LockRequest;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::Grant Grant;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::PhaseBarrier PhaseBarrier;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::DynamicCollective DynamicCollective;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::RegionRequirement RegionRequirement;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::IndexSpaceRequirement IndexSpaceRequirement;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::FieldSpaceRequirement FieldSpaceRequirement;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::Future Future;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::FutureMap FutureMap;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::TaskLauncher TaskLauncher;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::IndexLauncher IndexLauncher;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::InlineLauncher InlineLauncher;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::CopyLauncher CopyLauncher;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::PhysicalRegion PhysicalRegion;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::IndexIterator IndexIterator;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::AcquireLauncher AcquireLauncher;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::ReleaseLauncher ReleaseLauncher;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::TaskVariantRegistrar TaskVariantRegistrar;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::MustEpochLauncher MustEpochLauncher;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::MPILegionHandshake MPILegionHandshake;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::Mappable Mappable;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::Task Task;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::Copy Copy;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::InlineMapping Inline;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::Acquire Acquire;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::Release Release;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::Mapping::Mapper Mapper;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::InputArgs InputArgs;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::TaskConfigOptions TaskConfigOptions;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::ProjectionFunctor ProjectionFunctor;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::Runtime Runtime;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::Runtime HighLevelRuntime; // for backwards compatibility
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::ColoringSerializer ColoringSerializer;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::DomainColoringSerializer DomainColoringSerializer;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::Serializer Serializer;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::Deserializer Deserializer;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::TaskResult TaskResult;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::CObjectWrapper CObjectWrapper;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::ImmovableAutoLock AutoLock;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::ISAConstraint ISAConstraint;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::ProcessorConstraint ProcessorConstraint;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::ResourceConstraint ResourceConstraint;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::LaunchConstraint LaunchConstraint;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::ColocationConstraint ColocationConstraint;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::ExecutionConstraintSet ExecutionConstraintSet;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::SpecializedConstraint SpecializedConstraint;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::MemoryConstraint MemoryConstraint;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::FieldConstraint FieldConstraint;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::OrderingConstraint OrderingConstraint;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::SplittingConstraint SplittingConstraint;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::DimensionConstraint DimensionConstraint;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::AlignmentConstraint AlignmentConstraint;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::OffsetConstraint OffsetConstraint;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::PointerConstraint PointerConstraint;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::LayoutConstraintSet LayoutConstraintSet;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::TaskLayoutConstraintSet TaskLayoutConstraintSet;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Realm::Runtime RealmRuntime;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Realm::Machine Machine;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Realm::Domain Domain;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Realm::DomainPoint DomainPoint;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Realm::IndexSpaceAllocator IndexSpaceAllocator;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Realm::RegionInstance PhysicalInstance;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Realm::Memory Memory;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Realm::Processor Processor;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Realm::CodeDescriptor CodeDescriptor;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Realm::Event Event;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Realm::Event MapperEvent;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Realm::UserEvent UserEvent;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Realm::Reservation Reservation;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Realm::Barrier Barrier;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef ::legion_reduction_op_id_t ReductionOpID;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Realm::ReductionOpUntyped ReductionOp;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef ::legion_custom_serdez_id_t CustomSerdezID;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Realm::CustomSerdezUntyped SerdezOp;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Realm::Machine::ProcessorMemoryAffinity ProcessorMemoryAffinity;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Realm::Machine::MemoryMemoryAffinity MemoryMemoryAffinity;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Realm::ElementMask::Enumerator Enumerator;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Realm::IndexSpace::FieldDataDescriptor FieldDataDescriptor;
-    typedef std::map<CustomSerdezID, 
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
+    typedef std::map<Legion::CustomSerdezID, 
                      const Realm::CustomSerdezUntyped *> SerdezOpTable;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef std::map<Realm::ReductionOpID, 
             const Realm::ReductionOpUntyped *> ReductionOpTable;
-    typedef void (*SerdezInitFnptr)(const ReductionOp*, void *&, size_t&);
-    typedef void (*SerdezFoldFnptr)(const ReductionOp*, void *&, size_t&,
-                                    const void*, bool);
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
+    typedef void (*SerdezInitFnptr)(const Legion::ReductionOp*, 
+                                    void *&, size_t&);
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
+    typedef void (*SerdezFoldFnptr)(const Legion::ReductionOp*, void *&, 
+                                    size_t&, const void*, bool);
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef std::map<Realm::ReductionOpID, 
                      Legion::SerdezRedopFns> SerdezRedopTable;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef ::legion_address_space_t AddressSpace;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef ::legion_task_priority_t TaskPriority;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef ::legion_color_t Color;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef ::legion_field_id_t FieldID;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef ::legion_trace_id_t TraceID;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef ::legion_mapper_id_t MapperID;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef ::legion_context_id_t ContextID;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef ::legion_instance_id_t InstanceID;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef ::legion_index_space_id_t IndexSpaceID;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef ::legion_index_partition_id_t IndexPartitionID;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef ::legion_index_tree_id_t IndexTreeID;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef ::legion_field_space_id_t FieldSpaceID;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef ::legion_generation_id_t GenerationID;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef ::legion_type_handle TypeHandle;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef ::legion_projection_id_t ProjectionID;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef ::legion_region_tree_id_t RegionTreeID;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef ::legion_distributed_id_t DistributedID;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef ::legion_address_space_id_t AddressSpaceID;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef ::legion_tunable_id_t TunableID;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef ::legion_mapping_tag_id_t MappingTagID;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef ::legion_semantic_tag_t SemanticTag;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef ::legion_variant_id_t VariantID;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef ::legion_unique_id_t UniqueID;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef ::legion_version_id_t VersionID;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef ::legion_task_id_t TaskID;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef ::legion_layout_constraint_id_t LayoutConstraintID;
-    typedef std::map<Color,Legion::ColoredPoints<ptr_t> > Coloring;
-    typedef std::map<Color,Domain> DomainColoring;
-    typedef std::map<Color,std::set<Domain> > MultiDomainColoring;
-    typedef std::map<DomainPoint,Legion::ColoredPoints<ptr_t> > PointColoring;
-    typedef std::map<DomainPoint,Domain> DomainPointColoring;
-    typedef std::map<DomainPoint,std::set<Domain> > MultiDomainPointColoring;
-    typedef void (*RegistrationCallbackFnptr)(Machine machine, 
-        Runtime *rt, const std::set<Processor> &local_procs);
-    typedef LogicalRegion (*RegionProjectionFnptr)(LogicalRegion parent, 
-        const DomainPoint&, Runtime *rt);
-    typedef LogicalRegion (*PartitionProjectionFnptr)(LogicalPartition parent, 
-        const DomainPoint&, Runtime *rt);
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
+    typedef std::map<Legion::Color,Legion::ColoredPoints<ptr_t> > Coloring;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
+    typedef std::map<Legion::Color,Legion::Domain> DomainColoring;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
+    typedef std::map<Legion::Color,
+                     std::set<Legion::Domain> > MultiDomainColoring;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
+    typedef std::map<Legion::DomainPoint,
+                     Legion::ColoredPoints<ptr_t> > PointColoring;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
+    typedef std::map<Legion::DomainPoint,Legion::Domain> DomainPointColoring;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
+    typedef std::map<Legion::DomainPoint,
+                     std::set<Legion::Domain> > MultiDomainPointColoring;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
+    typedef void (*RegistrationCallbackFnptr)(Realm::Machine machine, 
+        Legion::Runtime *rt, const std::set<Legion::Processor> &local_procs);
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
+    typedef Legion::LogicalRegion (*RegionProjectionFnptr)(
+        Legion::LogicalRegion parent,
+        const Legion::DomainPoint&, Legion::Runtime *rt);
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
+    typedef Legion::LogicalRegion (*PartitionProjectionFnptr)(
+        Legion::LogicalPartition parent, 
+        const Legion::DomainPoint&, Legion::Runtime *rt);
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef bool (*PredicateFnptr)(const void*, size_t, 
-        const std::vector<Future> futures);
-    typedef std::map<ProjectionID,RegionProjectionFnptr> 
+        const std::vector<Legion::Future> futures);
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
+    typedef std::map<Legion::ProjectionID,Legion::RegionProjectionFnptr> 
       RegionProjectionTable;
-    typedef std::map<ProjectionID,PartitionProjectionFnptr> 
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
+    typedef std::map<Legion::ProjectionID,Legion::PartitionProjectionFnptr> 
       PartitionProjectionTable;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef void (*RealmFnptr)(const void*,size_t,
-                               const void*,size_t,Processor);
+                               const void*,size_t,Legion::Processor);
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::Internal::TaskContext* Context; 
   };
 };

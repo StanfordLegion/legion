@@ -2,7 +2,7 @@
 
 #include "cgmapper.h"
 
-LegionRuntime::Logger::Category log_cgmap("cgmapper");
+Logger log_cgmap("cgmapper");
 
 // thanks to the wonders of ADL, this template has to be in either the Realm or std
 //  namespace to be found...
@@ -33,15 +33,15 @@ namespace std {
   }
 };
 
-CGMapper::CGMapper(Machine machine, HighLevelRuntime *rt, Processor local)
+CGMapper::CGMapper(Machine machine, Runtime *rt, Processor local)
   : ShimMapper(machine, rt, rt->get_mapper_runtime(), local)
   , shard_per_proc(false)
   , runtime(rt)
 {
   // check to see if there any input arguments to parse
   {
-    int argc = HighLevelRuntime::get_input_args().argc;
-    const char **argv = (const char **)HighLevelRuntime::get_input_args().argv;
+    int argc = Runtime::get_input_args().argc;
+    const char **argv = (const char **)Runtime::get_input_args().argv;
 
     for(int i=1; i < argc; i++) {
       if(!strcmp(argv[i], "-perproc")) {

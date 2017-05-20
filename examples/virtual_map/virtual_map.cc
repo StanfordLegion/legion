@@ -43,7 +43,7 @@ enum {
   PFID_USE_DATA_TASK = 77,
 };
 
-LegionRuntime::Logger::Category log_app("app");
+Logger log_app("app");
 
 struct MakeDataTaskArgs {
   int random_seed;
@@ -60,7 +60,7 @@ void top_level_task(const Task *task,
   int random_seed = 12345;
   bool use_projection_functor = false;
 
-  const InputArgs &command_args = HighLevelRuntime::get_input_args();
+  const InputArgs &command_args = Runtime::get_input_args();
 
   bool ok = Realm::CommandLineParser()
     .add_option_int("-n", num_subregions)

@@ -76,22 +76,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    void* IndexSpaceNodeT<DIM,T>::operator new(size_t count)
-    //--------------------------------------------------------------------------
-    {
-      return legion_alloc_aligned<IndexSpaceNodeT<DIM,T>,true/*bytes*/>(count);
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    void IndexSpaceNodeT<DIM,T>::operator delete(void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
     void IndexSpaceNodeT<DIM,T>::get_realm_index_space(
                                         Realm::ZIndexSpace<DIM,T> &result) const
     //--------------------------------------------------------------------------
@@ -2637,22 +2621,6 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    void* IndexPartNodeT<DIM,T>::operator new(size_t count)
-    //--------------------------------------------------------------------------
-    {
-      return legion_alloc_aligned<IndexPartNodeT<DIM,T>,true/*bytes*/>(count);
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    void IndexPartNodeT<DIM,T>::operator delete(void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
     }
 
     //--------------------------------------------------------------------------

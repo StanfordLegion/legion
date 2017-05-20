@@ -20,8 +20,6 @@
 #endif
 #include <cmath>
 
-using namespace LegionRuntime::Accessor;
-
 const float AccumulateCharge::identity = 0.0f;
 
 template <>
@@ -106,7 +104,7 @@ CalcNewCurrentsTask::CalcNewCurrentsTask(LogicalPartition lp_pvt_wires,
 
 /*static*/ const char * const CalcNewCurrentsTask::TASK_NAME = "calc_new_currents";
 
-bool CalcNewCurrentsTask::launch_check_fields(Context ctx, HighLevelRuntime *runtime)
+bool CalcNewCurrentsTask::launch_check_fields(Context ctx, Runtime *runtime)
 {
   const RegionRequirement &req = region_requirements[0];
   bool success = true;
@@ -557,7 +555,7 @@ bool CalcNewCurrentsTask::dense_calc_new_currents(const CircuitPiece &piece,
 /*static*/
 void CalcNewCurrentsTask::cpu_base_impl(const CircuitPiece &p,
                                         const std::vector<PhysicalRegion> &regions,
-                                        Context ctx, HighLevelRuntime* rt)
+                                        Context ctx, Runtime* rt)
 {
 #ifndef DISABLE_MATH
   RegionAccessor<AccessorType::Generic, float> fa_current[WIRE_SEGMENTS];
@@ -594,7 +592,7 @@ void CalcNewCurrentsTask::cpu_base_impl(const CircuitPiece &p,
                               fa_current, fa_voltage))
     return;
 
-  LegionRuntime::HighLevel::IndexIterator itr(rt, ctx, p.pvt_wires);
+  IndexIterator itr(rt, ctx, p.pvt_wires);
   float temp_v[WIRE_SEGMENTS+1];
   float temp_i[WIRE_SEGMENTS];
   float old_i[WIRE_SEGMENTS];
@@ -696,7 +694,7 @@ DistributeChargeTask::DistributeChargeTask(LogicalPartition lp_pvt_wires,
 
 /*static*/ const char * const DistributeChargeTask::TASK_NAME = "distribute_charge";
 
-bool DistributeChargeTask::launch_check_fields(Context ctx, HighLevelRuntime *runtime)
+bool DistributeChargeTask::launch_check_fields(Context ctx, Runtime *runtime)
 {
   bool success = true;
   for (unsigned idx = 1; idx < 4; idx++)
@@ -733,7 +731,7 @@ static inline void reduce_node(const RegionAccessor<AT1,typename REDOP::LHS> &pr
 /*static*/
 void DistributeChargeTask::cpu_base_impl(const CircuitPiece &p,
                                          const std::vector<PhysicalRegion> &regions,
-                                         Context ctx, HighLevelRuntime* rt)
+                                         Context ctx, Runtime* rt)
 {
 #ifndef DISABLE_MATH
   RegionAccessor<AccessorType::Generic, ptr_t> fa_in_ptr = 
@@ -751,9 +749,9 @@ void DistributeChargeTask::cpu_base_impl(const CircuitPiece &p,
   RegionAccessor<AccessorType::Generic, float> fa_pvt_charge = 
     regions[1].get_field_accessor(FID_CHARGE).typeify<float>();
   RegionAccessor<AccessorType::Generic, float> fa_shr_temp = 
-    regions[2].get_accessor().typeify<float>();
+    regions[2].get_field_accessor(FID_CHARGE).typeify<float>();
   RegionAccessor<AccessorType::Generic, float> fa_ghost_temp =
-    regions[3].get_accessor().typeify<float>();
+    regions[3].get_field_accessor(FID_CHARGE).typeify<float>();
   // Check that we can convert to reduction fold instances
   assert(fa_shr_temp.can_convert<AccessorType::ReductionFold<AccumulateCharge> >());
   assert(fa_ghost_temp.can_convert<AccessorType::ReductionFold<AccumulateCharge> >());
@@ -763,7 +761,7 @@ void DistributeChargeTask::cpu_base_impl(const CircuitPiece &p,
   RegionAccessor<AccessorType::ReductionFold<AccumulateCharge>, float> fa_ghost_charge = 
     fa_ghost_temp.convert<AccessorType::ReductionFold<AccumulateCharge> >();
 
-  LegionRuntime::HighLevel::IndexIterator itr(rt, ctx, p.pvt_wires);
+  IndexIterator itr(rt, ctx, p.pvt_wires);
   while (itr.has_next())
   {
     ptr_t wire_ptr = itr.next();
@@ -835,7 +833,7 @@ UpdateVoltagesTask::UpdateVoltagesTask(LogicalPartition lp_pvt_nodes,
 /*static*/
 const char * const UpdateVoltagesTask::TASK_NAME = "update_voltages";
 
-bool UpdateVoltagesTask::launch_check_fields(Context ctx, HighLevelRuntime *runtime)
+bool UpdateVoltagesTask::launch_check_fields(Context ctx, Runtime *runtime)
 {
   bool success = true;
   const RegionRequirement &req = region_requirements[0]; 
@@ -856,7 +854,7 @@ static inline void update_voltages(LogicalRegion lr,
                                    const RegionAccessor<AT,float> &fa_charge,
                                    const RegionAccessor<AT,float> &fa_cap,
                                    const RegionAccessor<AT,float> &fa_leakage,
-                                   Context ctx, HighLevelRuntime* rt)
+                                   Context ctx, Runtime* rt)
 {
   IndexIterator itr(rt, ctx, lr);
   while (itr.has_next())
@@ -877,7 +875,7 @@ static inline void update_voltages(LogicalRegion lr,
 /*static*/
 void UpdateVoltagesTask::cpu_base_impl(const CircuitPiece &p,
                                        const std::vector<PhysicalRegion> &regions,
-                                       Context ctx, HighLevelRuntime* rt)
+                                       Context ctx, Runtime* rt)
 {
 #ifndef DISABLE_MATH
   RegionAccessor<AccessorType::Generic, float> fa_pvt_voltage = 
@@ -923,7 +921,7 @@ CheckTask::CheckTask(LogicalPartition lp,
 /*static*/
 const char * const CheckTask::TASK_NAME = "check_task";
 
-bool CheckTask::dispatch(Context ctx, HighLevelRuntime *runtime, bool success)
+bool CheckTask::dispatch(Context ctx, Runtime *runtime, bool success)
 {
   FutureMap fm = runtime->execute_index_space(ctx, *this);
   fm.wait_all_results();
@@ -936,7 +934,7 @@ bool CheckTask::dispatch(Context ctx, HighLevelRuntime *runtime, bool success)
 /*static*/
 bool CheckTask::cpu_impl(const Task *task,
                          const std::vector<PhysicalRegion> &regions,
-                         Context ctx, HighLevelRuntime *runtime)
+                         Context ctx, Runtime *runtime)
 {
   RegionAccessor<AccessorType::Generic, float> fa_check = 
     regions[0].get_field_accessor(task->regions[0].instance_fields[0]).typeify<float>();
@@ -956,10 +954,9 @@ bool CheckTask::cpu_impl(const Task *task,
 /*static*/
 void CheckTask::register_task(void)
 {
-  HighLevelRuntime::register_legion_task<bool, cpu_impl>(CheckTask::TASK_ID, Processor::LOC_PROC,
-                                                         false/*single*/, true/*index*/,
-                                                         CIRCUIT_CPU_LEAF_VARIANT,
-                                                         TaskConfigOptions(CheckTask::LEAF),
-                                                         CheckTask::TASK_NAME);
+  TaskVariantRegistrar registrar(CheckTask::TASK_ID, CheckTask::TASK_NAME);
+  registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+  registrar.set_leaf(CheckTask::LEAF);
+  Runtime::preregister_task_variant<bool, cpu_impl>(registrar, CheckTask::TASK_NAME);
 }
 

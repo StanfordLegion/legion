@@ -67,7 +67,7 @@ register_bishop_mappers(bishop_mapper_impl_t* _mapper_impls,
     transitions.push_back(_transitions[i]);
   mapper_init = _mapper_init;
 
-  HighLevelRuntime::set_registration_callback(
+  Runtime::add_registration_callback(
       bishop_mapper_registration_callback);
 }
 

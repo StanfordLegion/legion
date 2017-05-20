@@ -29,7 +29,7 @@ bool blas_do_parallel = true;
 template <>
 void BlasTaskImplementations<float>::axpy_task_cpu(const Task *task,
 						   const std::vector<PhysicalRegion> &regions,
-						   Context ctx, HighLevelRuntime *runtime)
+						   Context ctx, Runtime *runtime)
 {
   IndexSpace is = regions[1].get_logical_region().get_index_space();
   Rect<1> bounds = runtime->get_index_space_domain(ctx, is).get_rect<1>();
@@ -48,7 +48,7 @@ void BlasTaskImplementations<float>::axpy_task_cpu(const Task *task,
 template <>
 float BlasTaskImplementations<float>::dot_task_cpu(const Task *task,
 						   const std::vector<PhysicalRegion> &regions,
-						   Context ctx, HighLevelRuntime *runtime)
+						   Context ctx, Runtime *runtime)
 {
   IndexSpace is = regions[1].get_logical_region().get_index_space();
   Rect<1> bounds = runtime->get_index_space_domain(ctx, is).get_rect<1>();

@@ -20,8 +20,7 @@
 
 #include "legion.h"
 
-using namespace LegionRuntime;
-using namespace LegionRuntime::HighLevel;
+using namespace Legion;
 
 /**
  * Creates the cross product between two IndexPartition's.
@@ -42,7 +41,7 @@ using namespace LegionRuntime::HighLevel;
  *         \p rhs_color is -1 or \p consistent_ids is set); -1 otherwise
  */
 Color
-create_cross_product(HighLevelRuntime *runtime,
+create_cross_product(Runtime *runtime,
                      Context ctx,
                      IndexPartition lhs,
                      IndexPartition rhs,

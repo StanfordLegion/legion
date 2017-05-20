@@ -36,7 +36,8 @@ namespace Legion {
      * same layout then they can all share the same
      * description object.
      */
-    class LayoutDescription : public Collectable {
+    class LayoutDescription : public Collectable,
+                              public LegionHeapify<LayoutDescription> {
     public:
       LayoutDescription(FieldSpaceNode *owner,
                         const FieldMask &mask,
@@ -50,8 +51,6 @@ namespace Legion {
       ~LayoutDescription(void);
     public:
       LayoutDescription& operator=(const LayoutDescription &rhs);
-      void* operator new(size_t count);
-      void operator delete(void *ptr);
     public:
       void log_instance_layout(PhysicalInstance inst) const;
     public:
@@ -192,7 +191,6 @@ namespace Legion {
       void perform_deletion(RtEvent deferred_event);
       void set_garbage_collection_priority(MapperID mapper_id, Processor p,
                                            GCPriority priority); 
-      static void delete_physical_manager(PhysicalManager *manager);
     public:
       static inline DistributedID encode_instance_did(DistributedID did);
       static inline DistributedID encode_reduction_fold_did(DistributedID did);
@@ -236,7 +234,8 @@ namespace Legion {
      * \class InstanceManager
      * A class for managing normal physical instances
      */
-    class InstanceManager : public PhysicalManager {
+    class InstanceManager : public PhysicalManager,
+                            public LegionHeapify<InstanceManager> {
     public:
       static const AllocationType alloc_type = INSTANCE_MANAGER_ALLOC;
     public:
@@ -361,7 +360,8 @@ namespace Legion {
      * \class ListReductionManager
      * A class for storing list reduction instances
      */
-    class ListReductionManager : public ReductionManager {
+    class ListReductionManager : public ReductionManager,
+                                 public LegionHeapify<ListReductionManager> {
     public:
       static const AllocationType alloc_type = LIST_MANAGER_ALLOC;
     public:
@@ -406,7 +406,8 @@ namespace Legion {
      * \class FoldReductionManager
      * A class for representing fold reduction instances
      */
-    class FoldReductionManager : public ReductionManager {
+    class FoldReductionManager : public ReductionManager,
+                                 public LegionHeapify<FoldReductionManager> {
     public:
       static const AllocationType alloc_type = FOLD_MANAGER_ALLOC;
     public:

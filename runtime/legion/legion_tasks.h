@@ -585,7 +585,8 @@ namespace Legion {
      * This class serves as the basis for all individual task
      * launch calls performed by the runtime.
      */
-    class IndividualTask : public SingleTask {
+    class IndividualTask : public SingleTask, 
+                           public LegionHeapify<IndividualTask> {
     public:
       static const AllocationType alloc_type = INDIVIDUAL_TASK_ALLOC;
     public:
@@ -703,7 +704,8 @@ namespace Legion {
      * launch.  It will primarily be managed by its enclosing
      * slice task owner.
      */
-    class PointTask : public SingleTask {
+    class PointTask : public SingleTask, 
+                      public LegionHeapify<PointTask> {
     public:
       static const AllocationType alloc_type = POINT_TASK_ALLOC;
     public:
@@ -781,7 +783,8 @@ namespace Legion {
      * slice tasks for the index space will be distributed around
      * the machine and eventually returned to this index space task.
      */
-    class IndexTask : public MultiTask {
+    class IndexTask : public MultiTask,
+                      public LegionHeapify<IndexTask> {
     public:
       static const AllocationType alloc_type = INDEX_TASK_ALLOC;
     public:
@@ -906,7 +909,8 @@ namespace Legion {
      * each slice created by the mapper when (possibly recursively)
      * slicing up the domain of the index space task launch.
      */
-    class SliceTask : public MultiTask, public ResourceTracker {
+    class SliceTask : public MultiTask, public ResourceTracker,
+                      public LegionHeapify<SliceTask> {
     public:
       static const AllocationType alloc_type = SLICE_TASK_ALLOC;
     public:

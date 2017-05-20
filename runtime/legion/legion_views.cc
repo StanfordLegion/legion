@@ -56,36 +56,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void LogicalView::delete_logical_view(LogicalView *view)
-    //--------------------------------------------------------------------------
-    {
-      if (view->is_instance_view())
-      {
-        InstanceView *inst_view = view->as_instance_view();
-        if (inst_view->is_materialized_view())
-          legion_delete(inst_view->as_materialized_view());
-        else if (inst_view->is_reduction_view())
-          legion_delete(inst_view->as_reduction_view());
-        else
-          assert(false);
-      }
-      else if (view->is_deferred_view())
-      {
-        DeferredView *deferred_view = view->as_deferred_view();
-        if (deferred_view->is_composite_view())
-          legion_delete(deferred_view->as_composite_view());
-        else if (deferred_view->is_fill_view())
-          legion_delete(deferred_view->as_fill_view());
-        else if (deferred_view->is_phi_view())
-          legion_delete(deferred_view->as_phi_view());
-        else
-          assert(false);
-      }
-      else
-        assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     /*static*/ void LogicalView::handle_view_request(Deserializer &derez,
                                         Runtime *runtime, AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -120,7 +90,7 @@ namespace Legion {
       view->collect_users(term_events);
       // Then remove the gc reference on the object
       if (view->remove_base_gc_ref(PENDING_GC_REF))
-        delete_logical_view(view);
+        delete view;
     }
 
     /////////////////////////////////////////////////////////////
@@ -283,7 +253,7 @@ namespace Legion {
             children.begin(); it != children.end(); it++)
       {
         if (it->second->remove_nested_resource_ref(did))
-          legion_delete(it->second);
+          delete it->second;
       }
       if ((parent == NULL) && manager->remove_nested_resource_ref(did))
         delete manager;
@@ -405,7 +375,7 @@ namespace Legion {
           else
           {
             // Otherwise we get to make it
-            child_view = legion_new<MaterializedView>(context, child_did, 
+            child_view = new MaterializedView(context, child_did, 
                                               owner_space, logical_owner, 
                                               child_node, manager, this, 
                                               owner_context, true/*reg now*/);
@@ -972,7 +942,7 @@ namespace Legion {
         // to trigger before it can be considered mapped
         applied_events.insert(remote_update_event);
       }
-      PhysicalUser *user = legion_new<PhysicalUser>(usage, child_color, 
+      PhysicalUser *user = new PhysicalUser(usage, child_color, 
                                     creator_op_id, index, origin_node);
       user->add_reference();
       bool issue_collect = false;
@@ -1364,7 +1334,7 @@ namespace Legion {
         applied_events.insert(remote_update_event);
       }
       PhysicalUser *new_user = 
-        legion_new<PhysicalUser>(usage, child_color, op_id, index, origin_node);
+        new PhysicalUser(usage, child_color, op_id, index, origin_node);
       new_user->add_reference();
       // No matter what, we retake the lock in exclusive mode so we
       // can handle any clean-up and add our user
@@ -1502,8 +1472,8 @@ namespace Legion {
       assert(logical_node->is_region());
 #endif
       // No need to take the lock since we are just initializing
-      PhysicalUser *user = legion_new<PhysicalUser>(usage, INVALID_COLOR, 
-                          op_id, index, logical_node->as_region_node());
+      PhysicalUser *user = new PhysicalUser(usage, INVALID_COLOR, op_id, index, 
+                                            logical_node->as_region_node());
       user->add_reference();
       add_current_user(user, term_event, user_mask);
       initial_user_events.insert(term_event);
@@ -1540,7 +1510,7 @@ namespace Legion {
           send_remote_gc_update(owner_space, mutator, 1, false/*add*/);
       }
       else if(parent->remove_nested_gc_ref(did, mutator))
-        legion_delete(parent);
+        delete parent;
     }
 
     //--------------------------------------------------------------------------
@@ -1561,7 +1531,7 @@ namespace Legion {
         // we have a resource reference on the manager so no need to check
         manager->remove_nested_valid_ref(did, mutator);
       else if (parent->remove_nested_valid_ref(did, mutator))
-        legion_delete(parent);
+        delete parent;
     }
 
     //--------------------------------------------------------------------------
@@ -2030,7 +2000,7 @@ namespace Legion {
           if (event_users.single)
           {
             if (event_users.users.single_user->remove_reference())
-              legion_delete(event_users.users.single_user);
+              delete (event_users.users.single_user);
           }
           else
           {
@@ -2039,7 +2009,7 @@ namespace Legion {
                   event_users.users.multi_users->end(); it++)
             {
               if (it->first->remove_reference())
-                legion_delete(it->first);
+                delete (it->first);
             }
             delete event_users.users.multi_users;
           }
@@ -2053,7 +2023,7 @@ namespace Legion {
           if (event_users.single)
           {
             if (event_users.users.single_user->remove_reference())
-              legion_delete(event_users.users.single_user);
+              delete (event_users.users.single_user);
           }
           else
           {
@@ -2062,7 +2032,7 @@ namespace Legion {
                   event_users.users.multi_users->end(); it++)
             {
               if (it->first->remove_reference())
-                legion_delete(it->first);
+                delete (it->first);
             }
             delete event_users.users.multi_users;
           }
@@ -2098,7 +2068,7 @@ namespace Legion {
           {
             PhysicalUser *user = local_users.users.single_user;
             if (user->remove_reference())
-              legion_delete(user);
+              delete (user);
           }
           else
           {
@@ -2107,7 +2077,7 @@ namespace Legion {
                   local_users.users.multi_users->end(); it++)
             {
               if (it->first->remove_reference())
-                legion_delete(it->first);
+                delete (it->first);
             }
             // Delete the map too
             delete local_users.users.multi_users;
@@ -2132,7 +2102,7 @@ namespace Legion {
             {
               local_users.users.multi_users->erase(*it);
               if ((*it)->remove_reference())
-                legion_delete(*it);
+                delete (*it);
             }
             // See if we can shrink this back down
             if (local_users.users.multi_users->size() == 1)
@@ -2181,7 +2151,7 @@ namespace Legion {
         if (current_users.single)
         {
           if (current_users.users.single_user->remove_reference())
-            legion_delete(current_users.users.single_user);
+            delete (current_users.users.single_user);
         }
         else
         {
@@ -2190,7 +2160,7 @@ namespace Legion {
                 current_users.users.multi_users->end(); it++)
           {
             if (it->first->remove_reference())
-              legion_delete(it->first);
+              delete (it->first);
           }
           delete current_users.users.multi_users;
         }
@@ -2463,7 +2433,7 @@ namespace Legion {
         if (previous_users.single)
         {
           if (previous_users.users.single_user->remove_reference())
-            legion_delete(previous_users.users.single_user);
+            delete (previous_users.users.single_user);
         }
         else
         {
@@ -2472,7 +2442,7 @@ namespace Legion {
                 previous_users.users.multi_users->end(); it++)
           {
             if (it->first->remove_reference())
-              legion_delete(it->first);
+              delete (it->first);
           }
           delete previous_users.users.multi_users;
         }
@@ -2492,7 +2462,7 @@ namespace Legion {
         {
           PhysicalUser *user = previous_users.users.single_user;
           if (user->remove_reference())
-            legion_delete(user);
+            delete (user);
         }
         else
         {
@@ -2501,7 +2471,7 @@ namespace Legion {
                 previous_users.users.multi_users->end(); it++)
           {
             if (it->first->remove_reference())
-              legion_delete(it->first);
+              delete (it->first);
           }
           // Delete the map too
           delete previous_users.users.multi_users;
@@ -2527,7 +2497,7 @@ namespace Legion {
           {
             previous_users.users.multi_users->erase(*it);
             if ((*it)->remove_reference())
-              legion_delete(*it);
+              delete (*it);
           }
           // See if we can shrink this back down
           if (previous_users.users.multi_users->size() == 1)
@@ -3137,16 +3107,16 @@ namespace Legion {
       void *location;
       MaterializedView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))
-        view = legion_new_in_place<MaterializedView>(location, runtime->forest,
+        view = new(location) MaterializedView(runtime->forest,
                                               did, owner_space, 
                                               logical_owner, 
                                               target_node, inst_manager,
                                               parent, context_uid,
                                               false/*register now*/);
       else
-        view = legion_new<MaterializedView>(runtime->forest, did, owner_space,
-                                     logical_owner, target_node, inst_manager, 
-                                     parent, context_uid,false/*register now*/);
+        view = new MaterializedView(runtime->forest, did, owner_space,
+                                    logical_owner, target_node, inst_manager, 
+                                    parent, context_uid,false/*register now*/);
       if (parent != NULL)
         parent->add_remote_child(view);
       // Register only after construction
@@ -4996,13 +4966,13 @@ namespace Legion {
       // Delete our children
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
             children.begin(); it != children.end(); it++)
-        legion_delete(it->first);
+        delete (it->first);
       children.clear();
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
             valid_views.begin(); it != valid_views.end(); it++)
       {
         if (it->first->remove_nested_resource_ref(did))
-          LogicalView::delete_logical_view(it->first);
+          delete it->first;
       }
       valid_views.clear();
       for (LegionMap<CompositeView*,FieldMask>::aligned::const_iterator it = 
@@ -5010,14 +4980,14 @@ namespace Legion {
             nested_composite_views.end(); it++)
       {
         if (it->first->remove_nested_resource_ref(did))
-          LogicalView::delete_logical_view(it->first);
+          delete (it->first);
       }
       nested_composite_views.clear();
       for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
             reduction_views.begin(); it != reduction_views.end(); it++)
       {
         if (it->first->remove_nested_resource_ref(did))
-          legion_delete(it->first);
+          delete (it->first);
       }
       reduction_views.clear();
       // Remove our references and delete if necessary
@@ -5045,27 +5015,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void* CompositeView::operator new(size_t count)
-    //--------------------------------------------------------------------------
-    {
-      return legion_alloc_aligned<CompositeView,true/*bytes*/>(count);
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeView::operator delete(void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
-    }
-
-    //--------------------------------------------------------------------------
     CompositeView* CompositeView::clone(const FieldMask &clone_mask,
          const LegionMap<CompositeView*,FieldMask>::aligned &replacements) const
     //--------------------------------------------------------------------------
     {
       Runtime *runtime = context->runtime; 
       DistributedID result_did = runtime->get_available_distributed_id(false);
-      CompositeView *result = legion_new<CompositeView>(context, result_did,
+      CompositeView *result = new CompositeView(context, result_did,
           runtime->address_space, logical_node, version_info, closed_tree, 
           owner_context, true/*register now*/);
       // Clone the children
@@ -5591,13 +5547,13 @@ namespace Legion {
       void *location;
       CompositeView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))
-        view = legion_new_in_place<CompositeView>(location, runtime->forest, 
+        view = new(location) CompositeView(runtime->forest, 
                                            did, owner, target_node, 
                                            version_info, closed_tree,
                                            owner_context,
                                            false/*register now*/);
       else
-        view = legion_new<CompositeView>(runtime->forest, did, owner, 
+        view = new CompositeView(runtime->forest, did, owner, 
                            target_node, version_info, closed_tree, 
                            owner_context, false/*register now*/);
       // Unpack all the internal data structures
@@ -5739,7 +5695,7 @@ namespace Legion {
       }
       // Didn't find it so make it
       CompositeNode *child = 
-        legion_new<CompositeNode>(child_node, this, did); 
+        new CompositeNode(child_node, this, did); 
       child->record_version_state(state, mask, mutator, true/*root*/);
       children[child] = mask;
     }
@@ -5968,28 +5924,28 @@ namespace Legion {
             version_states.begin(); it != version_states.end(); it++)
       {
         if (it->first->remove_nested_resource_ref(owner_did))
-          legion_delete(it->first);
+          delete (it->first);
       }
       version_states.clear();
       // Free up all our children 
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
             children.begin(); it != children.end(); it++)
       {
-        legion_delete(it->first);
+        delete (it->first);
       }
       children.clear();
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
             valid_views.begin(); it != valid_views.end(); it++)
       {
         if (it->first->remove_nested_resource_ref(owner_did))
-          LogicalView::delete_logical_view(it->first);
+          delete it->first;
       }
       valid_views.clear();
       for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
             reduction_views.begin(); it != reduction_views.end(); it++)
       {
         if (it->first->remove_nested_resource_ref(owner_did))
-          legion_delete(it->first);
+          delete (it->first);
       }
       reduction_views.clear();
     }
@@ -6001,20 +5957,6 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void* CompositeNode::operator new(size_t count)
-    //--------------------------------------------------------------------------
-    {
-      return legion_alloc_aligned<CompositeNode,true/*bytes*/>(count);
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeNode::operator delete(void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
     }
 
     //--------------------------------------------------------------------------
@@ -6252,7 +6194,7 @@ namespace Legion {
         node = runtime->forest->get_node(handle);
       }
       CompositeNode *result = 
-        legion_new<CompositeNode>(node, parent, owner_did);
+        new CompositeNode(node, parent, owner_did);
       size_t num_versions;
       derez.deserialize(num_versions);
       for (unsigned idx = 0; idx < num_versions; idx++)
@@ -6425,7 +6367,7 @@ namespace Legion {
       }
       // Didn't find it so make it
       CompositeNode *child = 
-        legion_new<CompositeNode>(child_node, this, owner_did); 
+        new CompositeNode(child_node, this, owner_did); 
       child->record_version_state(state, mask, mutator, false/*root*/);
       children[child] = mask;
       if (currently_valid)
@@ -6721,7 +6663,7 @@ namespace Legion {
       void *location;
       FillView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))
-        view = legion_new_in_place<FillView>(location, runtime->forest, did,
+        view = new(location) FillView(runtime->forest, did,
                                       owner_space, target_node, fill_value,
                                       false/*register now*/
 #ifdef LEGION_SPY
@@ -6729,12 +6671,12 @@ namespace Legion {
 #endif
                                       );
       else
-        view = legion_new<FillView>(runtime->forest, did, owner_space,
-                                    target_node,fill_value,false/*register now*/
+        view = new FillView(runtime->forest, did, owner_space,
+                            target_node,fill_value,false/*register now*/
 #ifdef LEGION_SPY
-                                    , op_uid
+                            , op_uid
 #endif
-                                    );
+                            );
       view->register_with_runtime(NULL/*remote registration not needed*/);
     }
 
@@ -6778,14 +6720,14 @@ namespace Legion {
             true_views.begin(); it != true_views.end(); it++)
       {
         if (it->first->remove_nested_resource_ref(did))
-          LogicalView::delete_logical_view(it->first);
+          delete it->first;
       }
       true_views.clear();
       for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
             false_views.begin(); it != false_views.end(); it++)
       {
         if (it->first->remove_nested_resource_ref(did))
-          LogicalView::delete_logical_view(it->first);
+          delete it->first;
       }
       false_views.clear();
       if (version_info->remove_reference())
@@ -7248,14 +7190,14 @@ namespace Legion {
       void *location;
       PhiView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))
-        view = legion_new_in_place<PhiView>(location, runtime->forest,
-                                        did, owner, version_info, target_node, 
-                                        true_guard, false_guard, 
-                                        false/*register_now*/);
+        view = new(location) PhiView(runtime->forest,
+                                     did, owner, version_info, target_node, 
+                                     true_guard, false_guard, 
+                                     false/*register_now*/);
       else
-        view = legion_new<PhiView>(runtime->forest, did, owner,
-                                   version_info, target_node, true_guard, 
-                                   false_guard, false/*register now*/);
+        view = new PhiView(runtime->forest, did, owner,
+                           version_info, target_node, true_guard, 
+                           false_guard, false/*register now*/);
       // Unpack all the internal data structures
       std::set<RtEvent> ready_events;
       view->unpack_phi_view(derez, ready_events);
@@ -7333,9 +7275,9 @@ namespace Legion {
       if (manager->remove_nested_resource_ref(did))
       {
         if (manager->is_list_manager())
-          legion_delete(manager->as_list_manager());
+          delete (manager->as_list_manager());
         else
-          legion_delete(manager->as_fold_manager());
+          delete (manager->as_fold_manager());
       }
       // Remove any initial users as well
       if (!initial_user_events.empty())
@@ -7688,14 +7630,14 @@ namespace Legion {
         if (reading)
         {
           RegionUsage usage(READ_ONLY, EXCLUSIVE, 0);
-          user = legion_new<PhysicalUser>(usage, INVALID_COLOR, 
-                  creator_op_id, index, logical_node->as_region_node());
+          user = new PhysicalUser(usage, INVALID_COLOR, creator_op_id, index, 
+                                  logical_node->as_region_node());
         }
         else
         {
           RegionUsage usage(REDUCE, EXCLUSIVE, redop);
-          user = legion_new<PhysicalUser>(usage, INVALID_COLOR, 
-                  creator_op_id, index, logical_node->as_region_node());
+          user = new PhysicalUser(usage, INVALID_COLOR, creator_op_id, index, 
+                                  logical_node->as_region_node());
         }
         AutoLock v_lock(view_lock);
         add_physical_user(user, reading, copy_term, mask);
@@ -7790,8 +7732,8 @@ namespace Legion {
       assert(logical_node->is_region());
 #endif
       const bool reading = IS_READ_ONLY(usage);
-      PhysicalUser *new_user = legion_new<PhysicalUser>(usage, INVALID_COLOR,
-                                op_id, index, logical_node->as_region_node());
+      PhysicalUser *new_user = new PhysicalUser(usage, INVALID_COLOR, op_id, 
+                                      index, logical_node->as_region_node());
       bool issue_collect = false;
       {
         AutoLock v_lock(view_lock);
@@ -7862,8 +7804,8 @@ namespace Legion {
       // Who cares just hold the lock in exlcusive mode, this analysis
       // shouldn't be too expensive for reduction views
       bool issue_collect = false;
-      PhysicalUser *new_user = legion_new<PhysicalUser>(usage, INVALID_COLOR, 
-                                op_id, index, logical_node->as_region_node());
+      PhysicalUser *new_user = new PhysicalUser(usage, INVALID_COLOR, op_id, 
+                                      index, logical_node->as_region_node());
       {
         AutoLock v_lock(view_lock);
         if (!reading) // Reducing
@@ -8030,7 +7972,7 @@ namespace Legion {
           EventUsers &event_users = finder->second;
           if (event_users.single)
           {
-            legion_delete(event_users.users.single_user);
+            delete (event_users.users.single_user);
           }
           else
           {
@@ -8038,7 +7980,7 @@ namespace Legion {
                   = event_users.users.multi_users->begin(); it !=
                   event_users.users.multi_users->end(); it++)
             {
-              legion_delete(it->first);
+              delete (it->first);
             }
             delete event_users.users.multi_users;
           }
@@ -8050,7 +7992,7 @@ namespace Legion {
           EventUsers &event_users = finder->second;
           if (event_users.single)
           {
-            legion_delete(event_users.users.single_user);
+            delete (event_users.users.single_user);
           }
           else
           {
@@ -8058,7 +8000,7 @@ namespace Legion {
                   it = event_users.users.multi_users->begin(); it !=
                   event_users.users.multi_users->end(); it++)
             {
-              legion_delete(it->first);
+              delete (it->first);
             }
             delete event_users.users.multi_users;
           }
@@ -8081,8 +8023,8 @@ namespace Legion {
 #endif
       // We don't use field versions for doing interference tests on
       // reductions so there is no need to record it
-      PhysicalUser *user = legion_new<PhysicalUser>(usage, INVALID_COLOR,
-                            op_id, index, logical_node->as_region_node());
+      PhysicalUser *user = new PhysicalUser(usage, INVALID_COLOR, op_id, index,
+                                            logical_node->as_region_node());
       add_physical_user(user, IS_READ_ONLY(usage), term_event, user_mask);
       initial_user_events.insert(term_event);
       // Don't need to actual launch a collection task, destructor
@@ -8261,14 +8203,14 @@ namespace Legion {
       void *location;
       ReductionView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))
-        view = legion_new_in_place<ReductionView>(location, runtime->forest,
+        view = new(location) ReductionView(runtime->forest,
                                            did, owner_space, logical_owner,
                                            target_node, red_manager,
                                            context_uid, false/*register now*/);
       else
-        view = legion_new<ReductionView>(runtime->forest, did, owner_space,
-                                  logical_owner, target_node, red_manager, 
-                                  context_uid, false/*register now*/);
+        view = new ReductionView(runtime->forest, did, owner_space,
+                                 logical_owner, target_node, red_manager, 
+                                 context_uid, false/*register now*/);
       // Only register after construction
       view->register_with_runtime(NULL/*remote registration not needed*/);
     }
@@ -8456,14 +8398,14 @@ namespace Legion {
         if (reading)
         {
           RegionUsage usage(READ_ONLY, EXCLUSIVE, 0);
-          user = legion_new<PhysicalUser>(usage, INVALID_COLOR, op_id, index,
-                                          logical_node->as_region_node());
+          user = new PhysicalUser(usage, INVALID_COLOR, op_id, index,
+                                  logical_node->as_region_node());
         }
         else
         {
           RegionUsage usage(REDUCE, EXCLUSIVE, redop);
-          user = legion_new<PhysicalUser>(usage, INVALID_COLOR, op_id, index,
-                                          logical_node->as_region_node());
+          user = new PhysicalUser(usage, INVALID_COLOR, op_id, index,
+                                  logical_node->as_region_node());
         }
         AutoLock v_lock(view_lock);
         add_physical_user(user, reading, term_event, user_mask);
@@ -8484,8 +8426,8 @@ namespace Legion {
         assert(logical_node->is_region());
 #endif
         PhysicalUser *new_user = 
-          legion_new<PhysicalUser>(usage, INVALID_COLOR, op_id, index,
-                                   logical_node->as_region_node());
+          new PhysicalUser(usage, INVALID_COLOR, op_id, index,
+                           logical_node->as_region_node());
         AutoLock v_lock(view_lock);
         add_physical_user(new_user, reading, term_event, user_mask);
         // Only need to do this if we actually have a term event

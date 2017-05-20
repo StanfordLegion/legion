@@ -45,6 +45,8 @@ reduction_pat = re.compile(prefix + r'GC Reduction View (?P<did>[0-9]+) (?P<node
 version_state_pat = re.compile(prefix + r'GC Version State (?P<did>[0-9]+) (?P<node>[0-9]+)')
 # Future
 future_pat = re.compile(prefix + r'GC Future (?P<did>[0-9]+) (?P<node>[0-9]+)')
+# Future Map
+future_map_pat = re.compile(prefix + r'GC Future Map (?P<did>[0-9]+) (?P<node>[0-9]+)')
 # Constraints
 constraints_pat = re.compile(prefix + r'GC Constraints (?P<did>[0-9]+) (?P<node>[0-9]+)')
 # Source Kinds
@@ -564,6 +566,13 @@ class Future(Base):
     def __repr__(self):
         return 'Future '+str(self.did)+' (Node='+str(self.node)+')'
 
+class FutureMap(Base):
+    def __init__(self, did, node):
+        super(FutureMap,self).__init__(did, node)
+
+    def __repr__(self):
+        return 'Future Map '+str(self.did)+' (Node='+str(self.node)+')'
+
 class VersionState(Base):
     def __init__(self, did, node):
         super(VersionState,self).__init__(did, node)
@@ -592,6 +601,7 @@ class State(object):
         self.managers = {}
         self.views = {}
         self.futures = {}
+        self.future_maps = {}
         self.unknowns = {}
         self.instances = {}
         self.src_names = {}
@@ -692,6 +702,11 @@ class State(object):
                     self.log_future(long(m.group('did')),
                                     long(m.group('node')))
                     continue
+                m = future_map_pat.match(line)
+                if m is not None:
+                    self.log_future_map(long(m.group('did')),
+                                        long(m.group('node')))
+                    continue
                 m = constraints_pat.match(line)
                 if m is not None:
                     self.log_constraints(long(m.group('did')),
@@ -730,6 +745,8 @@ class State(object):
             view.update_nested_references(self)
         for future in self.futures.itervalues():
             future.update_nested_references(self)
+        for future_map in self.future_maps.itervalues():
+            future_map.update_nested_references(self)
         for constraint in self.constraints.itervalues():
             constraint.update_nested_references(self)
         for state in self.version_states.itervalues():
@@ -795,6 +812,9 @@ class State(object):
     def log_future(self, did, node):
         self.get_future(did, node)
 
+    def log_future_map(self, did, node):
+        self.get_future_map(did, node)
+
     def log_constraints(self, did, node):
         self.get_constraints(did, node)
 
@@ -847,6 +867,15 @@ class State(object):
                 del self.unknowns[key]
         return self.futures[key]
 
+    def get_future_map(self, did, node):
+        key = (did,node)
+        if key not in self.future_maps:
+            self.future_maps[key] = FutureMap(did, node)
+            if key in self.unknowns:
+                self.future_maps[key].clone(self.unknowns[key])
+                del self.unknowns[key]
+        return self.future_maps[key]
+
     def get_constraints(self, did, node):
         key = (did,node)
         if key not in self.constraints:
@@ -864,6 +893,8 @@ class State(object):
             return self.managers[key]
         if key in self.futures:
             return self.futures[key]
+        if key in self.future_maps:
+            return self.future_maps[key]
         if key in self.version_states:
             return self.version_states[key]
         if key in self.constraints:
@@ -883,6 +914,9 @@ class State(object):
         for did,future in self.futures.iteritems():
             print "Checking for cycles in "+repr(future)
             future.check_for_cycles()
+        for did,future_map in self.future_maps.iteritems():
+            print "Checking for cycles in "+repr(future_map)
+            future_map.check_for_cycles()
         for did,version in self.version_states.iteritems():
             print "Checking for cycles in "+repr(version)
             version.check_for_cycles()
@@ -893,6 +927,7 @@ class State(object):
 
     def check_for_leaks(self, verbose): 
         leaked_futures = 0
+        leaked_future_maps = 0
         leaked_constraints = 0
         leaked_managers = 0
         pinned_managers = 0
@@ -901,6 +936,9 @@ class State(object):
         for future in self.futures.itervalues():
             if not future.check_for_leaks(verbose):
                 leaked_futures += 1
+        for future_map in self.future_maps.itervalues():
+            if not future_map.check_for_leaks(verbose):
+                leaked_future_maps += 1
         for constraint in self.constraints.itervalues():
             if not constraint.check_for_leaks(verbose): 
                 leaked_constraints += 1
@@ -919,9 +957,13 @@ class State(object):
                 leaked_states += 1
         print "LEAK SUMMARY"
         if leaked_futures > 0:
-            print "  LEAKED_FUTURES: "+str(leaked_futures)
+            print "  LEAKED FUTURES: "+str(leaked_futures)
         else:
             print "  Leaked Futures: "+str(leaked_futures)
+        if leaked_future_maps > 0:
+            print "  LEAKD FUTURE MAPS: "+str(leaked_future_maps)
+        else:
+            print "  Leaked Future Maps: "+str(leaked_future_maps)
         if leaked_constraints > 0:
             print "  LEAKED CONSTRAINTS: "+str(leaked_constraints)
         else:

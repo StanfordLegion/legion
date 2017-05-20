@@ -92,16 +92,6 @@ namespace Legion {
 #endif
     }
 
-    //--------------------------------------------------------------------------
-    /*static*/ void LegionTrace::delete_trace(LegionTrace *trace)
-    //--------------------------------------------------------------------------
-    {
-      if (trace->is_dynamic_trace())
-        legion_delete(trace->as_dynamic_trace());
-      else
-        legion_delete(trace->as_static_trace());
-    }
-
     /////////////////////////////////////////////////////////////
     // StaticTrace
     /////////////////////////////////////////////////////////////
@@ -1008,7 +998,7 @@ namespace Legion {
       {
         StaticTrace *static_trace = static_cast<StaticTrace*>(local_trace);
         if (static_trace->remove_reference())
-          legion_delete(static_trace);
+          delete static_trace;
       }
     }
     

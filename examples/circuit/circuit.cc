@@ -26,10 +26,7 @@
 #include "circuit_mapper.h"
 #include "legion.h"
 
-using namespace LegionRuntime::HighLevel;
-using namespace LegionRuntime::Accessor;
-
-LegionRuntime::Logger::Category log_circuit("circuit");
+Logger log_circuit("circuit");
 
 // Utility functions (forward declarations)
 void parse_input_args(char **argv, int argc, int &num_loops, int &num_pieces,
@@ -38,17 +35,17 @@ void parse_input_args(char **argv, int argc, int &num_loops, int &num_pieces,
                       int &steps, int &sync, bool &perform_checks, bool &dump_values);
 
 Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context ctx,
-                        HighLevelRuntime *runtime, int num_pieces, int nodes_per_piece,
+                        Runtime *runtime, int num_pieces, int nodes_per_piece,
                         int wires_per_piece, int pct_wire_in_piece, int random_seed,
 			int steps);
 
-void allocate_node_fields(Context ctx, HighLevelRuntime *runtime, FieldSpace node_space);
-void allocate_wire_fields(Context ctx, HighLevelRuntime *runtime, FieldSpace wire_space);
-void allocate_locator_fields(Context ctx, HighLevelRuntime *runtime, FieldSpace locator_space);
+void allocate_node_fields(Context ctx, Runtime *runtime, FieldSpace node_space);
+void allocate_wire_fields(Context ctx, Runtime *runtime, FieldSpace wire_space);
+void allocate_locator_fields(Context ctx, Runtime *runtime, FieldSpace locator_space);
 
 void top_level_task(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
-                    Context ctx, HighLevelRuntime *runtime)
+                    Context ctx, Runtime *runtime)
 {
   int num_loops = 2;
   int num_pieces = 4;
@@ -61,7 +58,7 @@ void top_level_task(const Task *task,
   bool perform_checks = false;
   bool dump_values = false;
   {
-    const InputArgs &command_args = HighLevelRuntime::get_input_args();
+    const InputArgs &command_args = Runtime::get_input_args();
     char **argv = command_args.argv;
     int argc = command_args.argc;
 
@@ -216,25 +213,22 @@ void top_level_task(const Task *task,
 
 int main(int argc, char **argv)
 {
-  HighLevelRuntime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
-  HighLevelRuntime::register_legion_task<top_level_task>(TOP_LEVEL_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, false/*index*/,
-      AUTO_GENERATE_ID, TaskConfigOptions(), "top_level");
-  // If we're running on the shared low-level then only register cpu tasks
-#ifdef SHARED_LOWLEVEL
-  TaskHelper::register_cpu_variants<CalcNewCurrentsTask>();
-  TaskHelper::register_cpu_variants<DistributeChargeTask>();
-  TaskHelper::register_cpu_variants<UpdateVoltagesTask>();
-#else
+  Runtime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
+
+  {
+    TaskVariantRegistrar registrar(TOP_LEVEL_TASK_ID, "top_level");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    Runtime::preregister_task_variant<top_level_task>(registrar, "top_level");
+  }
+
   TaskHelper::register_hybrid_variants<CalcNewCurrentsTask>();
   TaskHelper::register_hybrid_variants<DistributeChargeTask>();
   TaskHelper::register_hybrid_variants<UpdateVoltagesTask>();
-#endif
   CheckTask::register_task();
-  HighLevelRuntime::register_reduction_op<AccumulateCharge>(REDUCE_ID);
-  HighLevelRuntime::set_registration_callback(update_mappers);
+  Runtime::register_reduction_op<AccumulateCharge>(REDUCE_ID);
+  Runtime::add_registration_callback(update_mappers);
 
-  return HighLevelRuntime::start(argc, argv);
+  return Runtime::start(argc, argv);
 }
 
 void parse_input_args(char **argv, int argc, int &num_loops, int &num_pieces,
@@ -307,7 +301,7 @@ void parse_input_args(char **argv, int argc, int &num_loops, int &num_pieces,
   }
 }
 
-void allocate_node_fields(Context ctx, HighLevelRuntime *runtime, FieldSpace node_space)
+void allocate_node_fields(Context ctx, Runtime *runtime, FieldSpace node_space)
 {
   FieldAllocator allocator = runtime->create_field_allocator(ctx, node_space);
   allocator.allocate_field(sizeof(float), FID_NODE_CAP);
@@ -320,7 +314,7 @@ void allocate_node_fields(Context ctx, HighLevelRuntime *runtime, FieldSpace nod
   runtime->attach_name(node_space, FID_NODE_VOLTAGE, "node voltage");
 }
 
-void allocate_wire_fields(Context ctx, HighLevelRuntime *runtime, FieldSpace wire_space)
+void allocate_wire_fields(Context ctx, Runtime *runtime, FieldSpace wire_space)
 {
   FieldAllocator allocator = runtime->create_field_allocator(ctx, wire_space);
   allocator.allocate_field(sizeof(ptr_t), FID_IN_PTR);
@@ -353,7 +347,7 @@ void allocate_wire_fields(Context ctx, HighLevelRuntime *runtime, FieldSpace wir
   }
 }
 
-void allocate_locator_fields(Context ctx, HighLevelRuntime *runtime, FieldSpace locator_space)
+void allocate_locator_fields(Context ctx, Runtime *runtime, FieldSpace locator_space)
 {
   FieldAllocator allocator = runtime->create_field_allocator(ctx, locator_space);
   allocator.allocate_field(sizeof(PointerLocation), FID_LOCATOR);
@@ -397,7 +391,7 @@ static T random_element(const std::vector<T> &vec)
 }
 
 Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context ctx,
-                        HighLevelRuntime *runtime, int num_pieces, int nodes_per_piece,
+                        Runtime *runtime, int num_pieces, int nodes_per_piece,
                         int wires_per_piece, int pct_wire_in_piece, int random_seed,
 			int steps)
 {

@@ -71,11 +71,11 @@ protected:
 public: // these must be public as they are used as template arguments
   static void axpy_task_cpu(const Task *task,
 			    const std::vector<PhysicalRegion> &regions,
-			    Context ctx, HighLevelRuntime *runtime);
+			    Context ctx, Runtime *runtime);
 
   static T dot_task_cpu(const Task *task,
 			const std::vector<PhysicalRegion> &regions,
-			Context ctx, HighLevelRuntime *runtime);
+			Context ctx, Runtime *runtime);
 };
 
 // single-precision float

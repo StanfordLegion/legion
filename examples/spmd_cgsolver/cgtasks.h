@@ -26,7 +26,7 @@ public:
 
   static void print_field_task(const Task *task,
 			       const std::vector<PhysicalRegion> &regions,
-			       Context ctx, HighLevelRuntime *runtime);
+			       Context ctx, Runtime *runtime);
 };
 
 class DotProduct {
@@ -49,7 +49,7 @@ public:
 
   static double dotp_field_task(const Task *task,
 				const std::vector<PhysicalRegion> &regions,
-				Context ctx, HighLevelRuntime *runtime);
+				Context ctx, Runtime *runtime);
 };
 
 // computes fid_sum = alpha1 * fid1 + alpha2 * fid2
@@ -74,7 +74,7 @@ public:
 
   static void add_field_task(const Task *task,
 			     const std::vector<PhysicalRegion> &regions,
-			     Context ctx, HighLevelRuntime *runtime);
+			     Context ctx, Runtime *runtime);
 };
 
 // computes fid_acc = alpha1 * fid_acc + alpha2 * fid_in
@@ -98,7 +98,7 @@ public:
 
   static void acc_field_task(const Task *task,
 			     const std::vector<PhysicalRegion> &regions,
-			     Context ctx, HighLevelRuntime *runtime);
+			     Context ctx, Runtime *runtime);
 };
 
 #endif

@@ -44,6 +44,12 @@
 #include "realm.h"
 #include "dynamic_templates.h"
 
+#if __cplusplus >= 201402L
+#define LEGION_DEPRECATED(x) [[deprecated(x)]]
+#else
+#define LEGION_DEPRECATED(x)
+#endif
+
 namespace BindingLib { class Utility; } // BindingLib namespace
 
 namespace Legion { 
@@ -1445,19 +1451,19 @@ namespace Legion {
     friend class BindingLib::Utility;                       \
     friend class CObjectWrapper;                  
 
-#define LEGION_EXTERN_LOGGER_DECLARATIONS                        \
-    extern LegionRuntime::Logger::Category log_run;              \
-    extern LegionRuntime::Logger::Category log_task;             \
-    extern LegionRuntime::Logger::Category log_index;            \
-    extern LegionRuntime::Logger::Category log_field;            \
-    extern LegionRuntime::Logger::Category log_region;           \
-    extern LegionRuntime::Logger::Category log_inst;             \
-    extern LegionRuntime::Logger::Category log_variant;          \
-    extern LegionRuntime::Logger::Category log_allocation;       \
-    extern LegionRuntime::Logger::Category log_prof;             \
-    extern LegionRuntime::Logger::Category log_garbage;          \
-    extern LegionRuntime::Logger::Category log_spy;              \
-    extern LegionRuntime::Logger::Category log_shutdown;
+#define LEGION_EXTERN_LOGGER_DECLARATIONS      \
+    extern Realm::Logger log_run;              \
+    extern Realm::Logger log_task;             \
+    extern Realm::Logger log_index;            \
+    extern Realm::Logger log_field;            \
+    extern Realm::Logger log_region;           \
+    extern Realm::Logger log_inst;             \
+    extern Realm::Logger log_variant;          \
+    extern Realm::Logger log_allocation;       \
+    extern Realm::Logger log_prof;             \
+    extern Realm::Logger log_garbage;          \
+    extern Realm::Logger log_spy;              \
+    extern Realm::Logger log_shutdown;
 
   }; // Internal namespace
 
@@ -1476,6 +1482,7 @@ namespace Legion {
   typedef Realm::Machine::ProcessorMemoryAffinity ProcessorMemoryAffinity;
   typedef Realm::Machine::MemoryMemoryAffinity MemoryMemoryAffinity;
   typedef Realm::DynamicTemplates::TagType TypeTag;
+  typedef Realm::Logger Logger;
   typedef ::legion_lowlevel_coord_t coord_t;
   typedef std::map<CustomSerdezID, 
                    const Realm::CustomSerdezUntyped *> SerdezOpTable;

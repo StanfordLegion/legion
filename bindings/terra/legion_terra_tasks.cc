@@ -81,7 +81,7 @@ legion_mapper_t create_mapper(const char* qualified_mapper_name,
                               legion_processor_t proc_)
 {
   Machine *machine = CObjectWrapper::unwrap(machine_);
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Processor proc = CObjectWrapper::unwrap(proc_);
 
   Mapper *mapper = new LuaMapperWrapper(qualified_mapper_name,
