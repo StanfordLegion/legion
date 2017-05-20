@@ -3836,7 +3836,7 @@ namespace Legion {
             // back the local instance references
           }
           // Make sure you have the metadata for the region with no access priv
-          if (no_access_regions[idx])
+          if (no_access_regions[idx] && regions[idx].region.exists())
             runtime->forest->get_node(clone_requirements[idx].region);
         }
         // Initialize any region tree contexts
@@ -7494,6 +7494,10 @@ namespace Legion {
           {
             // Skip same region requireemnt for same point
             if (same_point && (it->first == it->second))
+              continue;
+            // If either one are the NO_REGION then there is no interference
+            if (!point_reqs[it->first].exists() || 
+                !other_reqs[it->second].exists())
               continue;
             if (!runtime->forest->are_disjoint(
                   point_reqs[it->first].get_index_space(), 
