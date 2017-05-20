@@ -2880,6 +2880,8 @@ namespace Legion {
        * @param max_num_elmts maximum number of elements in the index space
        * @return the handle for the new index space
        */
+      LEGION_DEPRECATED("Use the new index space creation routines with a "
+                        "single domain or rectangle.")
       IndexSpace create_index_space(Context ctx, size_t max_num_elmts);
       /**
        * @deprecated
@@ -2888,6 +2890,8 @@ namespace Legion {
        * @param domains the set of domains
        * @return the handle for the new index space
        */
+      LEGION_DEPRECATED("Use the new index space creation routines with a "
+                        "single domain or rectangle.")
       IndexSpace create_index_space(Context ctx, 
                                     const std::set<Domain> &domains);
       /**
@@ -2913,6 +2917,7 @@ namespace Legion {
        * @param allocable whether the child index spaces are allocable
        * @return handle for the new index partition
        */
+      LEGION_DEPRECATED("Use the new dependent partitioning API calls instead.")
       IndexPartition create_index_partition(Context ctx, IndexSpace parent,
                                         const Domain &color_space,
                                         const PointColoring &coloring,
@@ -2930,6 +2935,7 @@ namespace Legion {
        * @param color optional color name for the partition
        * @return handle for the next index partition
        */
+      LEGION_DEPRECATED("Use the new dependent partitioning API calls instead.")
       IndexPartition create_index_partition(Context ctx, IndexSpace parent, 
                                             const Coloring &coloring, 
                                             bool disjoint, 
@@ -2946,6 +2952,7 @@ namespace Legion {
        * @param color optional color for the new partition
        * @return handle for the new index partition
        */
+      LEGION_DEPRECATED("Use the new dependent partitioning API calls instead.")
       IndexPartition create_index_partition(Context ctx, IndexSpace parent,
                                         const Domain &color_space,
                                         const DomainPointColoring &coloring,
@@ -2963,6 +2970,7 @@ namespace Legion {
        * @param color optional color name for the partition
        * @return handle for the next index partition
        */
+      LEGION_DEPRECATED("Use the new dependent partitioning API calls instead.")
       IndexPartition create_index_partition(Context ctx, IndexSpace parent, 
 					    Domain color_space, 
                                             const DomainColoring &coloring,
@@ -2980,6 +2988,7 @@ namespace Legion {
        * @param color optional color for the new partition
        * @return handle for the new index partition
        */
+      LEGION_DEPRECATED("Use the new dependent partitioning API calls instead.")
       IndexPartition create_index_partition(Context ctx, IndexSpace parent,
                                       const Domain &color_space,
                                       const MultiDomainPointColoring &coloring,
@@ -2999,6 +3008,7 @@ namespace Legion {
        * @param color optional color name for the partition
        * @return handle for the next index partition
        */
+      LEGION_DEPRECATED("Use the new dependent partitioning API calls instead.")
       IndexPartition create_index_partition(Context ctx, IndexSpace parent,
                                             Domain color_space,
                                             const MultiDomainColoring &coloring,
@@ -3014,6 +3024,7 @@ namespace Legion {
        * @return handle for the next index partition
        */
       template <typename T>
+      LEGION_DEPRECATED("Use the new dependent partitioning API calls instead.")
       IndexPartition create_index_partition(Context ctx, IndexSpace parent,
 					    const T& mapping,
 					    Color color = AUTO_GENERATE_ID);
@@ -3036,6 +3047,7 @@ namespace Legion {
        * @param complete whether the partitioning is complete or not
        * @return handle for the next index partition
        */
+      LEGION_DEPRECATED("Use the new dependent partitioning API calls instead.")
       IndexPartition create_index_partition(Context ctx, IndexSpace parent,
        LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic> field_accessor,
@@ -3774,8 +3786,10 @@ namespace Legion {
        * @param handle index space handle
        * @return true if the index space has multiple domains
        */
+      LEGION_DEPRECATED("Multiple domains are no longer supported.")
       bool has_multiple_domains(Context ctx, IndexSpace handle);
       // Context free
+      LEGION_DEPRECATED("Multiple domains are no longer supported.")
       bool has_multiple_domains(IndexSpace handle);
 
       /**
@@ -3802,9 +3816,11 @@ namespace Legion {
        * @param handle index space handle
        * @param vector to populate with domains
        */
+      LEGION_DEPRECATED("Multiple domains are no longer supported.")
       void get_index_space_domains(Context ctx, IndexSpace handle,
                                    std::vector<Domain> &domains);
       // Context free
+      LEGION_DEPRECATED("Multiple domains are no longer supported.")
       void get_index_space_domains(IndexSpace handle,
                                    std::vector<Domain> &domains);
 
@@ -3888,6 +3904,7 @@ namespace Legion {
        * @return the corresponding index space to the specified color point
        */
       template <unsigned DIM>
+      LEGION_DEPRECATED("Use the new templated methods for geting a subspace.")
       IndexSpace get_index_subspace(Context ctx, IndexPartition p, 
                                 LegionRuntime::Arrays::Point<DIM> color_point);
 
@@ -4369,6 +4386,7 @@ namespace Legion {
        * @param handle for the index space to create an allocator
        * @return a new index space allocator for the given index space
        */
+      LEGION_DEPRECATED("Dynamic index allocation is no longer supported.")
       IndexAllocator create_index_allocator(Context ctx, IndexSpace handle);
 
       /**
