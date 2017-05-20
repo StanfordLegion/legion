@@ -12,6 +12,11 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- runs-with:
+-- []
+
+-- FIXME: Uses deprecated APIs
+
 terralib.linklibrary("liblegion_terra.so")
 
 -- Compile and link manual_capi_task_result_reduce.cc
