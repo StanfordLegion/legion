@@ -12,6 +12,11 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- runs-with:
+-- []
+
+-- FIXME: Uses deprecated APIs
+
 -- This is an example of a failure in the runtime when allocating
 -- fields after the region itself has been created.
 local broken = false
