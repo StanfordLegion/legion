@@ -5648,6 +5648,8 @@ namespace Legion {
       // Invalidate all our region contexts
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
+        if (IS_NO_ACCESS(regions[idx]))
+          continue;
         runtime->forest->invalidate_current_context(tree_context,
                                                     false/*users only*/,
                                                     regions[idx].region);
