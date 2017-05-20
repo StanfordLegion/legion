@@ -426,12 +426,7 @@ local function physical_region_get_base_pointer(cx, index_type, field_type, fiel
   assert(index_type and field_type and field_id and privilege and physical_region)
   local get_accessor = c.legion_physical_region_get_field_accessor_generic
   local destroy_accessor = c.legion_accessor_generic_destroy
-  local accessor_args = terralib.newlist({physical_region})
-  if std.is_reduction_op(privilege) then
-    get_accessor = c.legion_physical_region_get_accessor_generic
-  else
-    accessor_args:insert(field_id)
-  end
+  local accessor_args = terralib.newlist({physical_region, field_id})
 
   local base_pointer = terralib.newsymbol(&field_type, "base_pointer")
   if index_type:is_opaque() then
