@@ -90,8 +90,6 @@ namespace Legion {
       void replay_aliased_children(std::vector<RegionTreePath> &paths) const;
       void end_trace_execution(FenceOp *fence_op);
     public:
-      static void delete_trace(LegionTrace *trace);
-    public:
       TaskContext *const ctx;
     protected:
       std::vector<std::pair<Operation*,GenerationID> > operations; 
@@ -112,7 +110,8 @@ namespace Legion {
      * handling cases where the application knows the dependneces
      * for a trace of operations
      */
-    class StaticTrace : public LegionTrace {
+    class StaticTrace : public LegionTrace,
+                        public LegionHeapify<StaticTrace> {
     public:
       static const AllocationType alloc_type = STATIC_TRACE_ALLOC;
     public:
@@ -159,7 +158,8 @@ namespace Legion {
      * dependence analysis for series of operations
      * in a given task's context.
      */
-    class DynamicTrace : public LegionTrace {
+    class DynamicTrace : public LegionTrace,
+                         public LegionHeapify<DynamicTrace> {
     public:
       static const AllocationType alloc_type = DYNAMIC_TRACE_ALLOC;
     public:
@@ -239,7 +239,8 @@ namespace Legion {
      * is finished so the DynamicTrace object can compute the
      * dependences data structure.
      */
-    class TraceCaptureOp : public Operation {
+    class TraceCaptureOp : public Operation,
+                           public LegionHeapify<TraceCaptureOp> {
     public:
       static const AllocationType alloc_type = TRACE_CAPTURE_OP_ALLOC;
     public:

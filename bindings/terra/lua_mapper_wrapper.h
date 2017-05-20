@@ -35,7 +35,7 @@ class LuaMapperWrapper : public DefaultMapper
     LuaMapperWrapper(Machine machine, Processor locak, const char *name);
 #if 0
   public:
-    LuaMapperWrapper(const char*, Machine, HighLevelRuntime*, Processor);
+    LuaMapperWrapper(const char*, Machine, Runtime*, Processor);
     ~LuaMapperWrapper();
 
     virtual void slice_domain(const Task *task, const Domain &domain,

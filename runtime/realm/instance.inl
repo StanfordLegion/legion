@@ -71,16 +71,50 @@ namespace Realm {
     return get_lis().as_dim<N,int>().indexspace;
   }
 #endif
-		
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class RegionInstance
 
+  template <typename T>
+  inline T RegionInstance::read(size_t offset) const
+  {
+    T val;
+    read_untyped(offset, &val, sizeof(T));
+    return val;
+  }
+
+  template <typename T>
+  inline void RegionInstance::write(size_t offset, T val) const
+  {
+    write_untyped(offset, &val, sizeof(T));
+  }
+
+  template <typename T>
+  inline void RegionInstance::reduce_apply(size_t offset, ReductionOpID redop_id,
+					   T val,
+					   bool exclusive /*= false*/) const
+  {
+    reduce_apply_untyped(offset, redop_id, &val, sizeof(T), exclusive);
+  }
+
+  template <typename T>
+  inline void RegionInstance::reduce_fold(size_t offset, ReductionOpID redop_id,
+					  T val,
+					  bool exclusive /*= false*/) const
+  {
+    reduce_fold_untyped(offset, redop_id, &val, sizeof(T), exclusive);
+  }
+
+  template <typename T>
+  inline T *RegionInstance::pointer(size_t offset) const
+  {
+    return static_cast<T *>(pointer_untyped(offset, sizeof(T)));
+  }
+		
   template <int N, typename T>
-  inline /*static*/ RegionInstance RegionInstance::create_instance(Memory memory,
-								   const ZIndexSpace<N,T>& space,
-								   const std::vector<size_t> &field_sizes,
-								   const ProfilingRequestSet& reqs)
+  inline /*static*/ Event RegionInstance::create_instance(RegionInstance& inst,
+							  Memory memory,
+							  const ZIndexSpace<N,T>& space,
+							  const std::vector<size_t> &field_sizes,
+							  const ProfilingRequestSet& reqs,
+							  Event wait_on /*= Event::NO_EVENT*/)
   {
     InstanceLayoutConstraints ilc(field_sizes, 0 /*SOA*/);
     InstanceLayoutGeneric *layout = InstanceLayoutGeneric::choose_instance_layout(space, ilc);
@@ -100,30 +134,36 @@ namespace Realm {
       return RegionInstance::NO_INST;
     }
 #endif
-    return create_instance(memory, layout, reqs);
+    return create_instance(inst, memory, layout, reqs, wait_on);
   }
 
   template <int N, typename T>
-  inline /*static*/ RegionInstance RegionInstance::create_file_instance(const char *file_name,
-									const ZIndexSpace<N,T>& space,
-									const std::vector<size_t> &field_sizes,
-									legion_lowlevel_file_mode_t file_mode,
-									const ProfilingRequestSet& prs)
+  inline /*static*/ Event RegionInstance::create_file_instance(RegionInstance& inst,
+							       const char *file_name,
+							       const ZIndexSpace<N,T>& space,
+							       const std::vector<size_t> &field_sizes,
+							       legion_lowlevel_file_mode_t file_mode,
+							       const ProfilingRequestSet& prs,
+							       Event wait_on /*= Event::NO_EVENT*/)
   {
     assert(0);
-    return RegionInstance::NO_INST;
+    inst = RegionInstance::NO_INST;
+    return Event::NO_EVENT;
   }
 
   template <int N, typename T>
-  inline /*static*/ RegionInstance RegionInstance::create_hdf5_instance(const char *file_name,
-									const ZIndexSpace<N,T>& space,
-									const std::vector<size_t> &field_sizes,
-									const std::vector<const char*> &field_files,
-									bool read_only,
-									const ProfilingRequestSet& prs)
+  inline /*static*/ Event RegionInstance::create_hdf5_instance(RegionInstance& inst,
+							       const char *file_name,
+							       const ZIndexSpace<N,T>& space,
+							       const std::vector<size_t> &field_sizes,
+							       const std::vector<const char*> &field_files,
+							       bool read_only,
+							       const ProfilingRequestSet& prs,
+							       Event wait_on /*= Event::NO_EVENT*/)
   {
     assert(0);
-    return RegionInstance::NO_INST;
+    inst = RegionInstance::NO_INST;
+    return Event::NO_EVENT;
   }
 
   template <int N, typename T>

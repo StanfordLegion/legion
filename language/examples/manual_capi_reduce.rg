@@ -12,6 +12,11 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- runs-with:
+-- []
+
+-- FIXME: Uses deprecated APIs
+
 -- Note: The binding library is only being used to load the dynamic
 -- library for Legion, not for any actual functionality. All Legion
 -- calls happen through the C API.

@@ -18,8 +18,8 @@
 // nop, but helps IDEs
 #include "indexspace.h"
 
-#include "instance.h"
-#include "inst_layout.h"
+//include "instance.h"
+//include "inst_layout.h"
 
 #include "serialize.h"
 
@@ -559,6 +559,54 @@ namespace Realm {
     : bounds(_bounds), sparsity(_sparsity)
   {}
 
+  // construct an index space from a list of points or rects
+  template <int N, typename T>
+  inline ZIndexSpace<N,T>::ZIndexSpace(const std::vector<ZPoint<N,T> >& points)
+  {
+    if(points.empty()) {
+      sparsity.id = 0;
+      for(int i = 0; i < N; i++) {
+	bounds.lo[i] = 1;
+	bounds.hi[i] = 0;
+      }
+    } else {
+      bounds.lo = points[0];
+      bounds.hi = points[0];
+      if(points.size() == 1) {
+	// single point can easily be stored precisely
+	sparsity.id = 0;
+      } else {
+	// more than one point may need a sparsity mask
+	for(size_t i = 1; i < points.size(); i++)
+	  bounds = bounds.union_bbox(ZRect<N,T>(points[i], points[i]));
+	sparsity = SparsityMap<N,T>::construct(points, false /*!always_create*/);
+      }
+    }
+  }
+
+  template <int N, typename T>
+  inline ZIndexSpace<N,T>::ZIndexSpace(const std::vector<ZRect<N,T> >& rects)
+  {
+    if(rects.empty()) {
+      sparsity.id = 0;
+      for(int i = 0; i < N; i++) {
+	bounds.lo[i] = 1;
+	bounds.hi[i] = 0;
+      }
+    } else {
+      bounds = rects[0];
+      if(rects.size() == 1) {
+	// single rect can easily be stored precisely
+	sparsity.id = 0;
+      } else {
+	// more than one rect may need a sparsity mask
+	for(size_t i = 1; i < rects.size(); i++)
+	  bounds = bounds.union_bbox(rects[i]);
+	sparsity = SparsityMap<N,T>::construct(rects, false /*!always_create*/);
+      }
+    }
+  }
+
   // reclaim any physical resources associated with this index space
   //  will clear the sparsity map of this index space if it exists
   template <int N, typename T>
@@ -599,6 +647,64 @@ namespace Realm {
     else
       return true;
   }
+
+  // returns the tightest description possible of the index space
+  // if 'precise' is false, the sparsity map may be preserved even for dense
+  //  spaces
+  template <int N, typename T>
+  ZIndexSpace<N,T> ZIndexSpace<N,T>::tighten(bool precise /*= true*/) const
+  {
+    if(sparsity.exists()) {
+      SparsityMapPublicImpl<N,T> *impl = sparsity.impl();
+      // always use precise info if it's available
+      if(impl->is_valid(true /*precise*/)) {
+	const std::vector<SparsityMapEntry<N,T> >& entries = impl->get_entries();
+	// three cases:
+	// 1) empty index space
+	if(entries.empty()) {
+	  ZRect<N,T> empty;
+	  empty.hi = bounds.lo;
+	  for(int i = 0; i < N; i++)
+	    empty.lo[i] = empty.hi[i] + 1;
+	  return ZIndexSpace<N,T>(empty);
+	}
+
+	// 2) single dense rectangle
+	if((entries.size() == 1) &&
+	   !entries[0].sparsity.exists() && (entries[0].bitmap == 0))
+	  return ZIndexSpace<N,T>(entries[0].bounds);
+
+	// 3) anything else - keep the sparsity map but tighten the bounds
+	ZRect<N,T> bbox = entries[0].bounds;
+	for(size_t i = 1; i < entries.size(); i++)
+	  bbox = bbox.union_bbox(entries[i].bounds);
+	return ZIndexSpace<N,T>(bbox, sparsity);
+      } else {
+	// make sure we're ok with (and have) approximate data
+	assert(!precise && impl->is_valid(false /*approx*/));
+
+	const std::vector<ZRect<N,T> >& approx_rects = impl->get_approx_rects();
+
+	// two cases:
+	// 1) empty index space
+	if(approx_rects.empty()) {
+	  ZRect<N,T> empty;
+	  empty.hi = bounds.lo;
+	  for(int i = 0; i < N; i++)
+	    empty.lo[i] = empty.hi[i] + 1;
+	  return ZIndexSpace<N,T>(empty);
+	}
+
+	// 2) anything else - keep the sparsity map but tighten the bounds
+	ZRect<N,T> bbox = approx_rects[0];
+	for(size_t i = 1; i < approx_rects.size(); i++)
+	  bbox = bbox.union_bbox(approx_rects[i]);
+	return ZIndexSpace<N,T>(bbox, sparsity);
+      }
+    } else
+      return *this;
+  }
+
 
   // helper function that binary searches a (1-D) sparsity map entry list and returns
   //  the index of the entry that contains the point, or the first one to appear after
@@ -1354,130 +1460,6 @@ namespace Realm {
     return x - offset;
   }
 
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class AffineAccessor<FT,N,T>
-
-  // NOTE: these constructors will die horribly if the conversion is not
-  //  allowed - call is_compatible(...) first if you're not sure
-
-  // implicitly tries to cover the entire instance's domain
-  template <typename FT, int N, typename T>
-  inline AffineAccessor<FT,N,T>::AffineAccessor(RegionInstance inst, ptrdiff_t field_offset)
-  {
-    //const LinearizedIndexSpace<N,T>& lis = inst.get_lis().as_dim<N,T>();
-    //const AffineLinearizedIndexSpace<N,T>& alis = dynamic_cast<const AffineLinearizedIndexSpace<N,T>&>(lis);
-    const AffineLinearizedIndexSpace<N,T>& alis = dynamic_cast<const AffineLinearizedIndexSpace<N,T>&>(inst.get_lis());
-
-    ptrdiff_t element_stride;
-    inst.get_strided_access_parameters(0, alis.volume, field_offset, sizeof(FT), base, element_stride);
-
-    // base offset is currently done in get_strided_access_parameters, since we're piggybacking on the
-    //  old-style linearizers for now
-    //base -= element_stride * alis.offset;
-    for(int i = 0; i < N; i++)
-      strides[i] = element_stride * alis.strides[i];
-#ifdef REALM_ACCESSOR_DEBUG
-    dbg_inst = inst;
-    dbg_bounds = alis.dbg_bounds;
-#endif
-  }
-
-  template <typename FT, int N, typename T> template <typename INST>
-  inline AffineAccessor<FT,N,T>::AffineAccessor(const INST &inst, unsigned fid)
-  {
-    ptrdiff_t field_offset = 0;
-    RegionInstance instance = inst.get_instance(fid, field_offset);
-    const AffineLinearizedIndexSpace<N,T>& alis = 
-      dynamic_cast<const AffineLinearizedIndexSpace<N,T>&>(instance.get_lis());
-    ptrdiff_t element_stride;
-    instance.get_strided_access_parameters(0, alis.volume, field_offset,
-                                           sizeof(FT), base, element_stride);
-    // base offset is currently done in get_strided_access_parameters, 
-    //   since we're piggybacking on the old-style linearizers for now
-    // base -= element_stride * alis.offset;
-    for(int i = 0; i < N; i++)
-      strides[i] = element_stride * alis.strides[i];
-#ifdef REALM_ACCESSOR_DEBUG
-    dbg_inst = instance;
-    dbg_bounds = alis.dbg_bounds;
-#endif
-#ifdef PRIVILEGE_CHECKS
-    privileges = inst.get_accessor_privileges();
-#endif
-#ifdef BOUNDS_CHECKS
-    bounds = inst.template get_bounds<N,T>();
-#endif
-  }
-
-  template <typename FT, int N, typename T>
-  inline AffineAccessor<FT,N,T>::~AffineAccessor(void)
-  {}
-#if 0
-    // limits domain to a subrectangle
-  template <typename FT, int N, typename T>
-    AffineAccessor<FT,N,T>::AffineAccessor(RegionInstance inst, ptrdiff_t field_offset, const ZRect<N,T>& subrect);
-
-  template <typename FT, int N, typename T>
-    AffineAccessor<FT,N,T>::~AffineAccessor(void);
-
-  template <typename FT, int N, typename T>
-    static bool AffineAccessor<FT,N,T>::is_compatible(RegionInstance inst, ptrdiff_t field_offset);
-  template <typename FT, int N, typename T>
-    static bool AffineAccessor<FT,N,T>::is_compatible(RegionInstance inst, ptrdiff_t field_offset, const ZRect<N,T>& subrect);
-#endif
-
-  template <typename FT, int N, typename T>
-  inline FT *AffineAccessor<FT,N,T>::ptr(const ZPoint<N,T>& p) const
-  {
-#ifdef PRIVILEGE_CHECKS
-    assert(privileges & ACCESSOR_PRIV_ALL);
-#endif
-#ifdef BOUNDS_CHECKS
-    assert(bounds.contains(p));
-#endif
-    intptr_t rawptr = base;
-    for(int i = 0; i < N; i++) rawptr += p[i] * strides[i];
-    return reinterpret_cast<FT *>(rawptr);
-  }
-
-  template <typename FT, int N, typename T>
-  inline FT AffineAccessor<FT,N,T>::read(const ZPoint<N,T>& p) const
-  {
-#ifdef PRIVILEGE_CHECKS
-    assert(privileges & ACCESSOR_PRIV_READ);
-#endif
-#ifdef BOUNDS_CHECKS
-    assert(bounds.contains(p));
-#endif
-    return *(this->ptr(p));
-  }
-
-  template <typename FT, int N, typename T>
-  inline void AffineAccessor<FT,N,T>::write(const ZPoint<N,T>& p, FT newval) const
-  {
-#ifdef PRIVILEGE_CHECKS
-    assert(privileges & ACCESSOR_PRIV_WRITE);
-#endif
-#ifdef BOUNDS_CHECKS
-    assert(bounds.contains(p));
-#endif
-    *(ptr(p)) = newval;
-  }
-
-  template <typename FT, int N, typename T>
-  inline std::ostream& operator<<(std::ostream& os, const AffineAccessor<FT,N,T>& a)
-  {
-    os << "AffineAccessor{ base=" << std::hex << a.base << std::dec << " strides=" << a.strides;
-#ifdef REALM_ACCESSOR_DEBUG
-    os << " inst=" << a.dbg_inst;
-    os << " bounds=" << a.dbg_bounds;
-    os << "->[" << std::hex << a.ptr(a.dbg_bounds.lo) << "," << a.ptr(a.dbg_bounds.hi)+1 << std::dec << "]";
-#endif
-    os << " }";
-    return os;
-  }
 
 
 }; // namespace Realm

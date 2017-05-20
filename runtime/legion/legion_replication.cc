@@ -514,7 +514,7 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(ctx);
 #endif
       // Make a replicate future map 
-      return legion_new<ReplFutureMapImpl>(repl_ctx, this, index_domain,runtime,
+      return new ReplFutureMapImpl(repl_ctx, this, index_domain,runtime,
           runtime->get_available_distributed_id(true/*need continuation*/),
           runtime->address_space);
     }
@@ -1897,7 +1897,7 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(ctx);
 #endif
       runtime->forest->find_launch_space_domain(launch_space, index_domain);
-      return legion_new<ReplFutureMapImpl>(repl_ctx, this, index_domain,runtime,
+      return new ReplFutureMapImpl(repl_ctx, this, index_domain,runtime,
           runtime->get_available_distributed_id(true/*need continuation*/),
           runtime->address_space);
     }

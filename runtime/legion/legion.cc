@@ -369,7 +369,7 @@ namespace Legion {
     ArgumentMap::ArgumentMap(void)
     //--------------------------------------------------------------------------
     {
-      impl = Internal::legion_new<Internal::ArgumentMapImpl>();
+      impl = new Internal::ArgumentMapImpl();
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
@@ -380,7 +380,7 @@ namespace Legion {
     ArgumentMap::ArgumentMap(const FutureMap &rhs)
     //--------------------------------------------------------------------------
     {
-      impl = Internal::legion_new<Internal::ArgumentMapImpl>(rhs);
+      impl = new Internal::ArgumentMapImpl(rhs);
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
@@ -415,7 +415,7 @@ namespace Legion {
         // last reference holder, then delete it
         if (impl->remove_reference())
         {
-          Internal::legion_delete(impl);
+          delete impl;
         }
         impl = NULL;
       }
@@ -431,10 +431,10 @@ namespace Legion {
       {
         if (impl->remove_reference())
         {
-          Internal::legion_delete(impl);
+          delete impl;
         }
       }
-      impl = Internal::legion_new<Internal::ArgumentMapImpl>(rhs);
+      impl = new Internal::ArgumentMapImpl(rhs);
       impl->add_reference();
       return *this;
     }
@@ -449,7 +449,7 @@ namespace Legion {
       {
         if (impl->remove_reference())
         {
-          Internal::legion_delete(impl);
+          delete impl;
         }
       }
       impl = rhs.impl;
@@ -655,7 +655,7 @@ namespace Legion {
       if (impl != NULL)
       {
         if (impl->remove_reference())
-          Internal::legion_delete(impl);
+          delete impl;
         impl = NULL;
       }
     }
@@ -667,7 +667,7 @@ namespace Legion {
       if (impl != NULL)
       {
         if (impl->remove_reference())
-          Internal::legion_delete(impl);
+          delete impl;
       }
       impl = rhs.impl;
       if (impl != NULL)
@@ -1808,7 +1808,7 @@ namespace Legion {
       if (impl != NULL)
       {
         if (impl->remove_reference())
-          Internal::legion_delete(impl);
+          delete impl;
         impl = NULL;
       }
     }
@@ -1830,7 +1830,7 @@ namespace Legion {
       if (impl != NULL)
       {
         if (impl->remove_reference())
-          Internal::legion_delete(impl);
+          delete impl;
       }
       impl = rhs.impl;
       if (impl != NULL)
@@ -1935,7 +1935,7 @@ namespace Legion {
       if (impl != NULL)
       {
         if (impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
-          Internal::legion_delete(impl);
+          delete impl;
         impl = NULL;
       }
     }
@@ -1956,7 +1956,7 @@ namespace Legion {
       if (impl != NULL)
       {
         if (impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
-          Internal::legion_delete(impl);
+          delete impl;
       }
       impl = rhs.impl;
       if (impl != NULL)
@@ -2050,7 +2050,7 @@ namespace Legion {
       if (impl != NULL)
       {
         if (impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
-          Internal::legion_delete(impl);
+          delete impl;
         impl = NULL;
       }
     }
@@ -2062,7 +2062,7 @@ namespace Legion {
       if (impl != NULL)
       {
         if (impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
-          Internal::legion_delete(impl);
+          delete impl;
       }
       impl = rhs.impl;
       if (impl != NULL)
@@ -2133,7 +2133,7 @@ namespace Legion {
       if (impl != NULL)
       {
         if (impl->remove_reference())
-          Internal::legion_delete(impl);
+          delete impl;
         impl = NULL;
       }
     }
@@ -2145,7 +2145,7 @@ namespace Legion {
       if (impl != NULL)
       {
         if (impl->remove_reference())
-          Internal::legion_delete(impl);
+          delete impl;
       }
       impl = rhs.impl;
       if (impl != NULL)
@@ -2353,6 +2353,10 @@ namespace Legion {
     {
     }
 
+// FIXME: This exists for backwards compatibility but it is tripping
+// over our own deprecation warnings. Turn those off inside this method.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     //--------------------------------------------------------------------------
     LogicalRegion ProjectionFunctor::project(const Mappable *mappable, 
             unsigned index, LogicalRegion upper_bound, const DomainPoint &point)
@@ -2376,7 +2380,12 @@ namespace Legion {
       }
       return LogicalRegion::NO_REGION;
     }
+#pragma GCC diagnostic pop
 
+// FIXME: This exists for backwards compatibility but it is tripping
+// over our own deprecation warnings. Turn those off inside this method.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     //--------------------------------------------------------------------------
     LogicalRegion ProjectionFunctor::project(const Mappable *mappable,
          unsigned index, LogicalPartition upper_bound, const DomainPoint &point)
@@ -2400,6 +2409,7 @@ namespace Legion {
       }
       return LogicalRegion::NO_REGION;
     }
+#pragma GCC diagnostic pop
 
     //--------------------------------------------------------------------------
     LogicalRegion ProjectionFunctor::project(LogicalRegion upper_bound,
@@ -6129,7 +6139,7 @@ namespace Legion {
       assert(legion_participants > 0);
 #endif
       MPILegionHandshake result(
-          Internal::legion_new<Internal::MPILegionHandshakeImpl>(init_in_MPI,
+          new Internal::MPILegionHandshakeImpl(init_in_MPI,
                                        mpi_participants, legion_participants));
       Internal::Runtime::register_handshake(result);
       return result;

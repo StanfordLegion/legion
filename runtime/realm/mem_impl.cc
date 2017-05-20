@@ -73,9 +73,6 @@ namespace Realm {
   // class MemoryImpl
   //
 
-    // make bad offsets really obvious (+1 PB)
-    static const off_t ZERO_SIZE_INSTANCE_OFFSET = 1ULL << ((sizeof(off_t) == 8) ? 50 : 30);
-
     MemoryImpl::MemoryImpl(Memory _me, size_t _size, MemoryKind _kind, size_t _alignment, Memory::Kind _lowlevel_kind)
       : me(_me), size(_size), kind(_kind), alignment(_alignment), lowlevel_kind(_lowlevel_kind)
       , usage(stringbuilder() << "realm/mem " << _me << "/usage")
@@ -86,6 +83,11 @@ namespace Realm {
 
     MemoryImpl::~MemoryImpl(void)
     {
+      for(std::map<gasnet_node_t, InstanceList *>::const_iterator it = instances_by_creator.begin();
+	  it != instances_by_creator.end();
+	  ++it)
+	delete it->second;
+
 #ifdef REALM_PROFILE_MEMORY_USAGE
       printf("Memory " IDFMT " usage: peak=%zd (%.1f MB) footprint=%zd (%.1f MB)\n",
 	     me.id, 
@@ -93,6 +95,9 @@ namespace Realm {
 	     (size_t)peak_footprint, peak_footprint / 1048576.0);
 #endif
     }
+
+    // make bad offsets really obvious (+1 PB)
+    static const off_t ZERO_SIZE_INSTANCE_OFFSET = 1ULL << ((sizeof(off_t) == 8) ? 50 : 30);
 
     off_t MemoryImpl::alloc_bytes_local(size_t size)
     {
@@ -248,6 +253,7 @@ namespace Realm {
       return lowlevel_kind;
     }
 
+#ifdef OLD_ALLOCATORS
     RegionInstance MemoryImpl::create_instance_local(IndexSpace r,
 						       const int *linearization_bits,
 						       size_t bytes_needed,
@@ -389,27 +395,151 @@ namespace Realm {
       }
       return resp.i;
     }
+#endif
 
     RegionInstanceImpl *MemoryImpl::get_instance(RegionInstance i)
     {
       ID id(i);
+      assert(id.is_instance());
 
-      // have we heard of this one before?  if not, add it
-      unsigned index = id.instance.inst_idx;
-      if(index >= instances.size()) { // lock not held - just for early out
-	AutoHSLLock a(mutex);
-	if(index >= instances.size()) // real check
-	  instances.resize(index + 1);
+      gasnet_node_t cnode = id.instance.creator_node;
+      unsigned idx = id.instance.inst_idx;
+      if(cnode == gasnet_mynode()) {
+	// if it was locally created, we can directly access the local_instances list
+	//  and it's a fatal error if it doesn't exist
+	AutoHSLLock al(local_instances.mutex);
+	assert(idx < local_instances.instances.size());
+	assert(local_instances.instances[idx] != 0);
+	return local_instances.instances[idx];
+      } else {
+	// figure out which instance list to look in - non-local creators require a 
+	//  protected lookup
+	InstanceList *ilist;
+	{
+	  AutoHSLLock al(instance_map_mutex);
+	  // this creates a new InstanceList if needed
+	  InstanceList *& iref = instances_by_creator[cnode];
+	  if(!iref)
+	    iref = new InstanceList;
+	  ilist = iref;
+	}
+
+	// now look up (and possibly create) the instance in the right list
+	{
+	  AutoHSLLock al(ilist->mutex);
+
+	  if(idx >= ilist->instances.size())
+	    ilist->instances.resize(idx + 1, 0);
+
+	  if(ilist->instances[idx] == 0) {
+	    log_inst.info() << "creating proxy for remotely-created instance: " << i;
+	    ilist->instances[idx] = new RegionInstanceImpl(i, me);
+	  }
+
+	  return ilist->instances[idx];
+	}
+      }
+    }
+
+    // adds a new instance to this memory, to be filled in by caller
+    RegionInstanceImpl *MemoryImpl::new_instance(void)
+    {
+      // selecting a slot requires holding the mutex
+      unsigned inst_idx;
+      RegionInstanceImpl *inst_impl;
+      {
+	AutoHSLLock al(local_instances.mutex);
+	  
+	if(local_instances.free_list.empty()) {
+	  // need to grow the list - do it in chunks
+	  const size_t chunk_size = 8;
+	  size_t old_size = local_instances.instances.size();
+	  size_t new_size = old_size + chunk_size;
+	  local_instances.instances.resize(chunk_size, 0);
+	  local_instances.free_list.resize(chunk_size - 1);
+	  for(size_t i = 0; i < chunk_size - 1; i++)
+	    local_instances.free_list[i] = new_size - 1 - i;
+	  inst_idx = old_size;
+	  inst_impl = 0;
+	} else {
+	  inst_idx = local_instances.free_list.back();
+	  local_instances.free_list.pop_back();
+	  inst_impl = local_instances.instances[inst_idx];
+	}
       }
 
-      if(!instances[index]) {
-	//instances[index] = new RegionInstanceImpl(id.node());
+      // we've got a slot and possibly an object to reuse - if not, allocate
+      //  it now (only retaking the lock to add it back to the list)
+      if(!inst_impl) {
+	ID mem_id(me);
+	RegionInstance i = ID::make_instance(mem_id.memory.owner_node,
+					     gasnet_mynode() /*creator*/,
+					     mem_id.memory.mem_idx,
+					     inst_idx).convert<RegionInstance>();
+	log_inst.info() << "creating new local instance: " << i;
+	inst_impl = new RegionInstanceImpl(i, me);
+	{
+	  AutoHSLLock al(local_instances.mutex);
+	  local_instances.instances[inst_idx] = inst_impl;
+	}
+      } else
+	log_inst.info() << "reusing local instance: " << inst_impl->me;
+
+      return inst_impl;
+    }
+
+    // attempt to allocate storage for the specified instance
+    bool MemoryImpl::allocate_instance_storage(RegionInstance i,
+					       size_t bytes, size_t alignment,
+					       Event precondition)
+    {
+      // TODO: remote stuff
+      assert(ID(me).memory.owner_node == gasnet_mynode());
+
+      if(!precondition.has_triggered()) {
+	// TODO: queue things up?
+	precondition.wait();
+      }
+
+      size_t offset = (size_t)-1;
+      bool ok = allocator.allocate(i, bytes, alignment, offset);
+
+      if(ID(i).instance.creator_node == gasnet_mynode()) {
+	// local notification of result
+	get_instance(i)->notify_allocation(ok, offset);
+      } else {
+	// TODO: remote notification
 	assert(0);
       }
 
-      return instances[index];
+      return true /*immediate notification*/;
     }
 
+    // release storage associated with an instance
+    void MemoryImpl::release_instance_storage(RegionInstance i,
+					      Event precondition)
+    {
+      // TODO: remote stuff
+      assert(ID(me).memory.owner_node == gasnet_mynode());
+
+      if(!precondition.has_triggered()) {
+	// TODO: queue things up?
+	precondition.wait();
+      }
+
+      allocator.deallocate(i);
+
+      if(ID(i).instance.creator_node == gasnet_mynode()) {
+	// local notification of result
+	get_instance(i)->notify_deallocation();
+      } else {
+	// TODO: remote notification
+	assert(0);
+      }
+    }
+
+
+#ifdef OLD_ALLOCATORS
     void MemoryImpl::destroy_instance_local(RegionInstance i, 
 					      bool local_destroy)
     {
@@ -457,6 +587,7 @@ namespace Realm {
       // and right now, we leave the instance itself untouched
       return;
     }
+#endif
 
   
   ////////////////////////////////////////////////////////////////////////
@@ -490,6 +621,7 @@ namespace Realm {
     log_malloc.debug("CPU memory at %p, size = %zd%s%s", base, _size, 
 		     prealloced ? " (prealloced)" : "", registered ? " (registered)" : "");
     free_blocks[0] = _size;
+    allocator.add_range(0, _size);
   }
 
   LocalCPUMemory::~LocalCPUMemory(void)
@@ -498,6 +630,7 @@ namespace Realm {
       delete[] base_orig;
   }
 
+#ifdef OLD_ALLOCATORS
   RegionInstance LocalCPUMemory::create_instance(IndexSpace r,
 						 const int *linearization_bits,
 						 size_t bytes_needed,
@@ -519,6 +652,7 @@ namespace Realm {
   {
     destroy_instance_local(i, local_destroy);
   }
+#endif
 
   off_t LocalCPUMemory::alloc_bytes(size_t size)
   {
@@ -568,7 +702,8 @@ namespace Realm {
     RemoteMemory::~RemoteMemory(void)
     {
     }
-    
+
+#ifdef OLD_ALLOCATORS    
     RegionInstance RemoteMemory::create_instance(IndexSpace r,
 						 const int *linearization_bits,
 						 size_t bytes_needed,
@@ -590,6 +725,7 @@ namespace Realm {
     {
       destroy_instance_remote(i, local_destroy);
     }
+#endif
 
     off_t RemoteMemory::alloc_bytes(size_t size)
     {
@@ -663,6 +799,7 @@ namespace Realm {
     {
     }
 
+#ifdef OLD_ALLOCATORS
     RegionInstance GASNetMemory::create_instance(IndexSpace r,
 						 const int *linearization_bits,
 						 size_t bytes_needed,
@@ -694,6 +831,7 @@ namespace Realm {
 	destroy_instance_remote(i, local_destroy);
       }
     }
+#endif
 
     off_t GASNetMemory::alloc_bytes(size_t size)
     {
@@ -926,6 +1064,7 @@ namespace Realm {
   }
   
 
+#ifdef OLD_ALLOCATORS
   ////////////////////////////////////////////////////////////////////////
   //
   // class CreateInstanceRequest
@@ -948,6 +1087,7 @@ namespace Realm {
     //requests.deserialize(((const char*)msgdata)+req_offset);
 
     MemoryImpl *m_impl = get_runtime()->get_memory_impl(args.m);
+#ifdef OLD_ALLOCATORS
     RegionInstance inst = m_impl->create_instance(args.r, 
 						  payload->linearization_bits,
 						  payload->bytes_needed,
@@ -958,7 +1098,9 @@ namespace Realm {
 						  payload->list_size,
 						  prs,
 						  args.parent_inst);
-
+#else
+    RegionInstance inst = RegionInstance::NO_INST;
+#endif
 
     // send the response
     ResponseArgs r_args;
@@ -1061,7 +1203,7 @@ namespace Realm {
     args.i = inst;
     Message::request(target, args);
   }
-  
+#endif  
 
   ////////////////////////////////////////////////////////////////////////
   //

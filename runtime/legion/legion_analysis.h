@@ -78,7 +78,8 @@ namespace Legion {
      */
     template<ReferenceSource REF_SRC = LAST_SOURCE_REF, 
              bool LOCAL_ONLY = true>
-    class VersioningSet {
+    class VersioningSet : 
+      public LegionHeapify<VersioningSet<REF_SRC,LOCAL_ONLY> > {
     public:
       class iterator : public std::iterator<std::input_iterator_tag,
                               std::pair<VersionState*,FieldMask> > {
@@ -129,8 +130,6 @@ namespace Legion {
       ~VersioningSet(void);
     public:
       VersioningSet& operator=(const VersioningSet &rhs);
-      void* operator new(size_t count);
-      void operator delete(void *ptr);
     public:
       inline bool empty(void) const 
         { return single && (versions.single_version == NULL); }
@@ -299,15 +298,13 @@ namespace Legion {
      * A class for tracking restrictions that occur as part of
      * relaxed coherence and with tracking external resources
      */
-    class Restriction {
+    class Restriction : public LegionHeapify<Restriction> {
     public:
       Restriction(RegionNode *node);
       Restriction(const Restriction &rhs);
       ~Restriction(void);
     public:
       Restriction& operator=(const Restriction &rhs);
-      void* operator new(size_t count);
-      void operator delete(void *ptr);
     public:
       void add_restricted_instance(PhysicalManager *inst, 
                                    const FieldMask &restricted_fields);
@@ -352,15 +349,13 @@ namespace Legion {
      * A class for tracking when restrictions are relaxed by
      * explicit acquisitions of a region
      */
-    class Acquisition {
+    class Acquisition : public LegionHeapify<Acquisition> {
     public:
       Acquisition(RegionNode *node, const FieldMask &acquired_fields);
       Acquisition(const Acquisition &rhs);
       ~Acquisition(void);
     public:
       Acquisition& operator=(const Acquisition &rhs);
-      void* operator new(size_t count);
-      void operator delete(void *ptr);
     public:
       void find_restrictions(RegionTreeNode *node, 
                              FieldMask &possibly_restricted,
@@ -453,7 +448,8 @@ namespace Legion {
      * region including necessary information to 
      * register execution dependences on the user.
      */
-    struct PhysicalUser : public Collectable {
+    struct PhysicalUser : public Collectable, 
+                          public LegionHeapify<PhysicalUser> {
     public:
       static const AllocationType alloc_type = PHYSICAL_USER_ALLOC;
     public:
@@ -569,7 +565,7 @@ namespace Legion {
      * and domains that have performed in current open
      * projection epoch
      */
-    class ProjectionEpoch {
+    class ProjectionEpoch : public LegionHeapify<ProjectionEpoch> {
     public:
       static const ProjectionEpochID first_epoch = 1;
     public:
@@ -579,8 +575,6 @@ namespace Legion {
       ~ProjectionEpoch(void);
     public:
       ProjectionEpoch& operator=(const ProjectionEpoch &rhs);
-      void* operator new(size_t count);
-      void operator delete(void *ptr);
     public:
       void insert(ProjectionFunction *function, IndexSpaceNode *space,
                   ShardingFunction *sharding_function);
@@ -599,7 +593,7 @@ namespace Legion {
      * is effectively all the information at the analysis
      * wavefront for this particular logical region.
      */
-    class LogicalState {
+    class LogicalState : public LegionHeapify<LogicalState> {
     public:
       static const AllocationType alloc_type = CURRENT_STATE_ALLOC;
     public:
@@ -608,10 +602,6 @@ namespace Legion {
       ~LogicalState(void);
     public:
       LogicalState& operator=(const LogicalState &rhs);
-      void* operator new(size_t count);
-      void* operator new[](size_t count);
-      void operator delete(void *ptr);
-      void operator delete[](void *ptr);
     public:
       void check_init(void);
       void clear_logical_users(void);
@@ -657,15 +647,14 @@ namespace Legion {
      * to the level of projection functions at which point they
      * capture the projection information.
      */
-    class ClosedNode : public Collectable {
+    class ClosedNode : public Collectable,
+                       public LegionHeapify<ClosedNode> {
     public:
       ClosedNode(RegionTreeNode *node);
       ClosedNode(const ClosedNode &rhs);
       ~ClosedNode(void);
     public:
       ClosedNode& operator=(const ClosedNode &rhs);
-      void* operator new(size_t count);
-      void operator delete(void *ptr);
     public:
       inline const FieldMask& get_valid_fields(void) const 
         { return valid_fields; }
@@ -810,7 +799,7 @@ namespace Legion {
      * the version state objects that they use and remove references
      * to them when they are done.
      */
-    class PhysicalState {
+    class PhysicalState : public LegionHeapify<PhysicalState> {
     public:
       static const AllocationType alloc_type = PHYSICAL_STATE_ALLOC;
       typedef VersioningSet<PHYSICAL_STATE_REF> PhysicalVersions;
@@ -820,10 +809,6 @@ namespace Legion {
       ~PhysicalState(void);
     public:
       PhysicalState& operator=(const PhysicalState &rhs);
-      void* operator new(size_t count);
-      void* operator new[](size_t count);
-      void operator delete(void *ptr);
-      void operator delete[](void *ptr);
     public:
       void pack_physical_state(Serializer &rez);
       void unpack_physical_state(Deserializer &derez, Runtime *runtime,
@@ -884,7 +869,7 @@ namespace Legion {
      * for a given logical region or partition will be assigned
      * to be the owner.
      */
-    class VersionManager {
+    class VersionManager : public LegionHeapify<VersionManager> {
     public:
       struct ProjectionEpoch {
       public:
@@ -922,10 +907,6 @@ namespace Legion {
       ~VersionManager(void);
     public:
       VersionManager& operator=(const VersionManager &rhs);
-      void* operator new(size_t count);
-      void* operator new[](size_t count);
-      void operator delete(void *ptr);
-      void operator delete[](void *ptr);
     public:
       void reset(void);
     public:
@@ -1082,7 +1063,8 @@ namespace Legion {
      * for a particular version number from the persepective
      * of a given logical region.
      */
-    class VersionState : public DistributedCollectable {
+    class VersionState : public DistributedCollectable,
+                         public LegionHeapify<VersionState> {
     public:
       static const AllocationType alloc_type = VERSION_STATE_ALLOC;
     public:
@@ -1159,10 +1141,6 @@ namespace Legion {
       virtual ~VersionState(void);
     public:
       VersionState& operator=(const VersionState &rhs);
-      void* operator new(size_t count);
-      void* operator new[](size_t count);
-      void operator delete(void *ptr);
-      void operator delete[](void *ptr);
     public:
       void initialize(ApEvent term_event, const RegionUsage &usage,
                       const FieldMask &user_mask, const InstanceSet &targets,
@@ -1504,7 +1482,7 @@ namespace Legion {
      * \class InstanceRef
      * A class for keeping track of references to physical instances
      */
-    class InstanceRef {
+    class InstanceRef : public LegionHeapify<InstanceRef> {
     public:
       InstanceRef(bool composite = false);
       InstanceRef(const InstanceRef &rhs);

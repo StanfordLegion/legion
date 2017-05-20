@@ -56,30 +56,75 @@ namespace Realm {
 
     Memory get_location(void) const;
     const LinearizedIndexSpaceIntfc& get_lis(void) const;
+    const InstanceLayoutGeneric *get_layout(void) const;
 
-    static RegionInstance create_instance(Memory memory,
-					  InstanceLayoutGeneric *ilg,
-					  const ProfilingRequestSet& prs);
+    // these methods may be used to access the contents of an instance, but
+    //  users are encouraged to use various accessors which make repeated
+    //  accesses much more efficient
+
+    void read_untyped(size_t offset, void *data, size_t datalen) const;
+    void write_untyped(size_t offset, const void *data, size_t datalen) const;
+    void reduce_apply_untyped(size_t offset, ReductionOpID redop_id,
+			      const void *data, size_t datalen,
+			      bool exclusive = false) const;
+    void reduce_fold_untyped(size_t offset, ReductionOpID redop_id,
+			     const void *data, size_t datalen,
+			     bool exclusive = false) const;
+    // returns a null pointer if the instance storage cannot be directly
+    //  accessed via load/store instructions
+    void *pointer_untyped(size_t offset, size_t datalen) const;
+
+    // typed template helpers of the above
+    template <typename T>
+    T read(size_t offset) const;
+    template <typename T>
+    void write(size_t offset, T val) const;
+    template <typename T>
+    void reduce_apply(size_t offset, ReductionOpID redop_id, T val,
+		      bool exclusive = false) const;
+    template <typename T>
+    void reduce_fold(size_t offset, ReductionOpID redop_id, T val,
+		     bool exclusive = false) const;
+    template <typename T>
+    T *pointer(size_t offset) const;
+
+    Event get_ready_event(void) const;
+
+    // calls to create_instance return immediately with a handle, but also
+    //  return an event that must be used as a precondition for any use (or
+    //  destruction) of the instance
+    static Event create_instance(RegionInstance& inst,
+				 Memory memory,
+				 InstanceLayoutGeneric *ilg,
+				 const ProfilingRequestSet& prs,
+				 Event wait_on = Event::NO_EVENT);
 
     template <int N, typename T>
-    static RegionInstance create_instance(Memory memory,
-					  const ZIndexSpace<N,T>& space,
-					  const std::vector<size_t>& field_sizes,
-					  const ProfilingRequestSet& prs);
+    static Event create_instance(RegionInstance& inst,
+				 Memory memory,
+				 const ZIndexSpace<N,T>& space,
+				 const std::vector<size_t>& field_sizes,
+				 const ProfilingRequestSet& prs,
+				 Event wait_on = Event::NO_EVENT);
 
     template <int N, typename T>
-    static RegionInstance create_file_instance(const char *file_name,
-                                          const ZIndexSpace<N,T>& space,
-                                          const std::vector<size_t> &field_sizes,
-                                          legion_lowlevel_file_mode_t file_mode,
-                                          const ProfilingRequestSet& prs);
+    static Event create_file_instance(RegionInstance& inst,
+				      const char *file_name,
+				      const ZIndexSpace<N,T>& space,
+				      const std::vector<size_t> &field_sizes,
+				      legion_lowlevel_file_mode_t file_mode,
+				      const ProfilingRequestSet& prs,
+				      Event wait_on = Event::NO_EVENT);
+
     template <int N, typename T>
-    static RegionInstance create_hdf5_instance(const char *file_name,
-                                          const ZIndexSpace<N,T>& space,
-                                          const std::vector<size_t> &field_sizes,
-                                          const std::vector<const char*> &field_files,
-                                          bool read_only,
-                                          const ProfilingRequestSet& prs);
+    static Event create_hdf5_instance(RegionInstance& inst,
+				      const char *file_name,
+				      const ZIndexSpace<N,T>& space,
+				      const std::vector<size_t> &field_sizes,
+				      const std::vector<const char*> &field_files,
+				      bool read_only,
+				      const ProfilingRequestSet& prs,
+				      Event wait_on = Event::NO_EVENT);
 
     void destroy(Event wait_on = Event::NO_EVENT) const;
 

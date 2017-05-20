@@ -161,9 +161,11 @@ namespace Realm {
 
       RegionInstance instance;      
       timestamp_t create_time; // when was instance created?
+      timestamp_t ready_time;  // when was instance ready for use?
       timestamp_t delete_time; // when was the instance deleted?
 
       inline void record_create_time(void);
+      inline void record_ready_time(void);
       inline void record_delete_time(void);
     };
 

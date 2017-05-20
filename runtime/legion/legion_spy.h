@@ -34,7 +34,7 @@ namespace Legion {
 
       typedef ::legion_lowlevel_id_t IDType;
 
-      extern LegionRuntime::Logger::Category log_spy;
+      extern Realm::Logger log_spy;
 
       // One time logger calls to record what gets logged
       static inline void log_legion_spy_config(void)

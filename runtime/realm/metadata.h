@@ -40,9 +40,12 @@ namespace Realm {
 		   STATE_CLEANUP };
 
       bool is_valid(void) const { return state == STATE_VALID; }
+      
+      // used by owner, may need to send responses to early requests
+      void mark_valid(NodeSet& early_reqs);
 
-      void mark_valid(void); // used by owner
-      void handle_request(int requestor);
+      // returns true if a response should be sent immediately (i.e. data is valid)
+      bool handle_request(int requestor);
 
       // returns an Event for when data will be valid
       Event request_data(int owner, ID::IDType id);
@@ -91,6 +94,8 @@ namespace Realm {
 
       static void send_request(gasnet_node_t target, ID::IDType id, 
 			       const void *data, size_t datalen, int payload_mode);
+      static void broadcast_request(const NodeSet& targets, ID::IDType id,
+				    const void *data, size_t datalen);
     };
 
     struct MetadataInvalidateMessage {

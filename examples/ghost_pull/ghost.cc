@@ -19,7 +19,7 @@
 #include <cstdlib>
 #include <unistd.h>
 #include "legion.h"
-using namespace LegionRuntime::HighLevel;
+using namespace Legion;
 using namespace LegionRuntime::Accessor;
 using namespace LegionRuntime::Arrays;
 
@@ -28,9 +28,9 @@ using namespace LegionRuntime::Arrays;
 enum {
     TOP_LEVEL_TASK_ID = 0,
     SPMD_TASK_ID,
-    INIT_FIELD_TASK_ID,
+    INIT_TASK_ID,
     STENCIL_TASK_ID,
-    CHECK_FIELD_TASK_ID,
+    CHECK_TASK_ID,
 };
 
 enum {
@@ -63,14 +63,14 @@ public:
 
 void top_level_task(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
-                    Context ctx, HighLevelRuntime *runtime)
+                    Context ctx, Runtime *runtime)
 {
     int num_elements = 1024;
     int num_subregions = 4;
     int num_steps = 10;
     // Check for any command line arguments
     {
-        const InputArgs &command_args = HighLevelRuntime::get_input_args();
+        const InputArgs &command_args = Runtime::get_input_args();
         for (int i = 1; i < command_args.argc; i++)
         {
             if (!strcmp(command_args.argv[i],"-n"))
@@ -280,7 +280,7 @@ void top_level_task(const Task *task,
 
 void spmd_task(const Task *task,
                const std::vector<PhysicalRegion> &regions,
-               Context ctx, HighLevelRuntime *runtime)
+               Context ctx, Runtime *runtime)
 {
     // Unmap all the regions we were given since we won't actually use them
     // 
@@ -363,7 +363,7 @@ void spmd_task(const Task *task,
     for (int s = 0; s < args->num_steps; s++)
     {
         // Launch a task to initialize our field with some data
-        TaskLauncher init_launcher(INIT_FIELD_TASK_ID,
+        TaskLauncher init_launcher(INIT_TASK_ID,
                                    TaskArgument(NULL, 0));
         init_launcher.add_region_requirement(
             RegionRequirement(local_lr, WRITE_DISCARD,
@@ -489,7 +489,7 @@ void spmd_task(const Task *task,
 
     // now check our results
     {
-        TaskLauncher check_launcher(CHECK_FIELD_TASK_ID,
+        TaskLauncher check_launcher(CHECK_TASK_ID,
                     TaskArgument(args, sizeof(SPMDArgs)));
         check_launcher.add_region_requirement(
                   RegionRequirement(local_lr, READ_ONLY,
@@ -508,9 +508,9 @@ void spmd_task(const Task *task,
     runtime->destroy_logical_region(ctx, local_lr);
 }
 
-void init_field_task(const Task *task,
-                     const std::vector<PhysicalRegion> &regions,
-                     Context ctx, HighLevelRuntime *runtime)
+void init_task(const Task *task,
+               const std::vector<PhysicalRegion> &regions,
+               Context ctx, Runtime *runtime)
 {
     assert(regions.size() == 1); 
     assert(task->regions.size() == 1);
@@ -535,9 +535,9 @@ void init_field_task(const Task *task,
     }
 }
 
-void stencil_field_task(const Task *task,
-                        const std::vector<PhysicalRegion> &regions,
-                        Context ctx, HighLevelRuntime *runtime)
+void stencil_task(const Task *task,
+                  const std::vector<PhysicalRegion> &regions,
+                  Context ctx, Runtime *runtime)
 {
     assert(regions.size() == 4);
     assert(task->regions.size() == 4);
@@ -634,9 +634,9 @@ void stencil_field_task(const Task *task,
     assert(!pir_right);
 }
 
-int check_field_task(const Task *task,
-                     const std::vector<PhysicalRegion> &regions,
-                     Context ctx, HighLevelRuntime *runtime)
+int check_task(const Task *task,
+               const std::vector<PhysicalRegion> &regions,
+               Context ctx, Runtime *runtime)
 {
     SPMDArgs *args = (SPMDArgs*)task->args; 
 
@@ -698,23 +698,41 @@ int check_field_task(const Task *task,
 
 int main(int argc, char **argv)
 {
-    HighLevelRuntime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
-    HighLevelRuntime::register_legion_task<top_level_task>(TOP_LEVEL_TASK_ID,
-        Processor::LOC_PROC, true/*single*/, false/*index*/,
-        AUTO_GENERATE_ID, TaskConfigOptions(), "top_level");
-    HighLevelRuntime::register_legion_task<spmd_task>(SPMD_TASK_ID,
-        Processor::LOC_PROC, true/*single*/, true/*single*/,
-        AUTO_GENERATE_ID, TaskConfigOptions(), "spmd");
-    HighLevelRuntime::register_legion_task<init_field_task>(INIT_FIELD_TASK_ID,
-        Processor::LOC_PROC, true/*single*/, true/*single*/,
-        AUTO_GENERATE_ID, TaskConfigOptions(true), "init");
-    HighLevelRuntime::register_legion_task<stencil_field_task>(STENCIL_TASK_ID,
-        Processor::LOC_PROC, true/*single*/, true/*single*/,
-        AUTO_GENERATE_ID, TaskConfigOptions(true), "stencil");
-    HighLevelRuntime::register_legion_task<int, check_field_task>(CHECK_FIELD_TASK_ID,
-        Processor::LOC_PROC, true/*single*/, true/*single*/,
-        AUTO_GENERATE_ID, TaskConfigOptions(true), "check");
+    Runtime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
 
-  return HighLevelRuntime::start(argc, argv);
+    {
+        TaskVariantRegistrar registrar(TOP_LEVEL_TASK_ID, "top_level");
+        registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+        Runtime::preregister_task_variant<top_level_task>(registrar, "top_level");
+    }
+
+    {
+        TaskVariantRegistrar registrar(SPMD_TASK_ID, "spmd");
+        registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+        Runtime::preregister_task_variant<spmd_task>(registrar, "spmd");
+    }
+
+    {
+        TaskVariantRegistrar registrar(INIT_TASK_ID, "init");
+        registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+        registrar.set_leaf(true);
+        Runtime::preregister_task_variant<init_task>(registrar, "init");
+    }
+
+    {
+        TaskVariantRegistrar registrar(STENCIL_TASK_ID, "stencil");
+        registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+        registrar.set_leaf(true);
+        Runtime::preregister_task_variant<stencil_task>(registrar, "stencil");
+    }
+
+    {
+        TaskVariantRegistrar registrar(CHECK_TASK_ID, "check");
+        registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+        registrar.set_leaf(true);
+        Runtime::preregister_task_variant<int, check_task>(registrar, "check");
+    }
+
+    return Runtime::start(argc, argv);
 }
 

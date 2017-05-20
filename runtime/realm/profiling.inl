@@ -145,6 +145,11 @@ namespace Realm {
       create_time = Clock::current_time_in_nanoseconds();
     }
 
+    inline void InstanceTimeline::record_ready_time(void)
+    {
+      ready_time = Clock::current_time_in_nanoseconds();
+    }
+
     inline void InstanceTimeline::record_delete_time(void)
     {
       delete_time = Clock::current_time_in_nanoseconds();

@@ -12,6 +12,11 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- runs-with:
+-- []
+
+-- FIXME: Uses deprecated APIs
+
 -- This tests for the ability of a task to take different numbers of
 -- regions. Specifically, the default mapper had at one point made
 -- assumptions (during memoization) about the number of region

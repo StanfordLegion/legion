@@ -25,11 +25,11 @@
 #include "cgtasks.h"
 #include "cgmapper.h"
 
-using namespace LegionRuntime::HighLevel;
+using namespace Legion;
 using namespace LegionRuntime::Accessor;
 using namespace LegionRuntime::Arrays;
 
-LegionRuntime::Logger::Category log_app("app");
+Logger log_app("app");
 
 #define LOG_ASSERT(cond, logger, ...) do {	\
   if(!(cond)) {					\
@@ -174,7 +174,7 @@ struct FutureLessThan {
 
   static bool cpu_task(const Task *task,
 		       const std::vector<PhysicalRegion> &regions,
-		       Context ctx, HighLevelRuntime *runtime);
+		       Context ctx, Runtime *runtime);
 };
 
 template <typename T1, typename T2>
@@ -202,7 +202,7 @@ template <typename T1, typename T2>
 template <typename T1, typename T2>
 /*static*/ bool FutureLessThan<T1,T2>::cpu_task(const Task *task,
 						const std::vector<PhysicalRegion> &regions,
-						Context ctx, HighLevelRuntime *runtime)
+						Context ctx, Runtime *runtime)
 {
   assert(task->futures.size() == 2);
   T1 lhs = Future(task->futures[0]).get_result<T1>();
@@ -226,7 +226,7 @@ struct FutureDivide {
 
   static TR cpu_task(const Task *task,
 		     const std::vector<PhysicalRegion> &regions,
-		     Context ctx, HighLevelRuntime *runtime);
+		     Context ctx, Runtime *runtime);
 };
 
 template <typename TR, typename T1, typename T2>
@@ -254,7 +254,7 @@ template <typename TR, typename T1, typename T2>
 template <typename TR, typename T1, typename T2>
 /*static*/ TR FutureDivide<TR,T1,T2>::cpu_task(const Task *task,
 					       const std::vector<PhysicalRegion> &regions,
-					       Context ctx, HighLevelRuntime *runtime)
+					       Context ctx, Runtime *runtime)
 {
   assert(task->futures.size() == 2);
   T1 lhs = Future(task->futures[0]).get_result<T1>();
@@ -319,7 +319,7 @@ public:
     std::vector<FieldID> fields;
     pr.get_fields(fields);
     assert((fields.size() == 1) && (fields[0] == fid));
-    return pr.get_accessor().template typeify<T>().template convert<AT>();
+    return pr.get_field_accessor(fid).template typeify<T>().template convert<AT>();
   }
 
 protected:
@@ -354,7 +354,7 @@ struct SpmdMainArgs {
 
 void top_level_task(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
-                    Context ctx, HighLevelRuntime *runtime)
+                    Context ctx, Runtime *runtime)
 {
   Point<3> grid_dim, block_dim;
   int max_iters = 0;
@@ -368,7 +368,7 @@ void top_level_task(const Task *task,
   block_dim.x[0] = block_dim.x[1] = block_dim.x[2] = 4;
 
   {
-    const InputArgs &command_args = HighLevelRuntime::get_input_args();
+    const InputArgs &command_args = Runtime::get_input_args();
     for(int i = 1; i < command_args.argc; i++) {
       if(!strcmp(command_args.argv[i], "-g")) {
 	int g = atoi(command_args.argv[++i]);
@@ -474,7 +474,7 @@ void top_level_task(const Task *task,
   // assign blocks to shards
 
   // step 1: ask the mapper how many shards we should even have
-  int num_shards = runtime->get_tunable_value(ctx, CGMapper::TID_NUM_SHARDS);
+  int num_shards = runtime->select_tunable_value(ctx, CGMapper::TID_NUM_SHARDS).get_result<int>();
   // force for now
   log_app.print() << "shards = " << num_shards;
 
@@ -686,7 +686,7 @@ void top_level_task(const Task *task,
 
 void spmd_init_task(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
-                    Context ctx, HighLevelRuntime *runtime)
+                    Context ctx, Runtime *runtime)
 {
   const SpmdInitArgs& args = *(const SpmdInitArgs *)(task->args);
 
@@ -749,7 +749,7 @@ struct AddFieldArgs {
 
 bool spmd_main_task(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
-                    Context ctx, HighLevelRuntime *runtime)
+                    Context ctx, Runtime *runtime)
 {
   const SpmdMainArgs& args = *(const SpmdMainArgs *)(task->args);
 
@@ -1237,7 +1237,7 @@ bool spmd_main_task(const Task *task,
 
 void init_field_task(const Task *task,
 		     const std::vector<PhysicalRegion> &regions,
-		     Context ctx, HighLevelRuntime *runtime)
+		     Context ctx, Runtime *runtime)
 {
   const InitFieldArgs& args = *(const InitFieldArgs *)(task->args);
 
@@ -1264,7 +1264,7 @@ void init_field_task(const Task *task,
 
 void spmv_field_task(const Task *task,
 		     const std::vector<PhysicalRegion> &regions,
-		     Context ctx, HighLevelRuntime *runtime)
+		     Context ctx, Runtime *runtime)
 {
   const SpmvFieldArgs& args = *(const SpmvFieldArgs *)(task->args);
 
@@ -1322,7 +1322,7 @@ void spmv_field_task(const Task *task,
   }
 }
 
-static void update_mappers(Machine machine, HighLevelRuntime *runtime,
+static void update_mappers(Machine machine, Runtime *runtime,
                            const std::set<Processor> &local_procs)
 {
   for(std::set<Processor>::const_iterator it = local_procs.begin();
@@ -1376,7 +1376,7 @@ int main(int argc, char **argv)
   FLT_double::preregister_task();
   FDV_double::preregister_task();
 
-  Runtime::set_registration_callback(update_mappers);
+  Runtime::add_registration_callback(update_mappers);
 
   Runtime::register_reduction_op<BarrierCombineReductionOp>(BarrierCombineReductionOp::redop_id);
   Runtime::register_reduction_op<DoubleAddReductionOp>(DoubleAddReductionOp::redop_id);

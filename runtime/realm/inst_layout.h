@@ -82,6 +82,14 @@ namespace Realm {
 
   std::ostream& operator<<(std::ostream& os, const InstanceLayoutGeneric& ilg);
 
+  // users that wish to handle instances as simple blocks of bits may use
+  //  an InstanceLayoutOpaque to just request a contiguous range of bytes with
+  //  a specified alignment
+  class InstanceLayoutOpaque : public InstanceLayoutGeneric {
+  public:
+    InstanceLayoutOpaque(size_t _bytes_used, size_t _alignment_reqd);
+  };
+
   template <int N, typename T>
   class InstanceLayoutPiece {
   public:
@@ -146,9 +154,81 @@ namespace Realm {
 
     virtual void print(std::ostream& os) const;
 
+    // computes the offset of the specified field for an element - this
+    //  is generally much less efficient than using a layout-specific accessor
+    size_t calculate_offset(ZPoint<N,T> p, FieldID fid) const;
+
     ZIndexSpace<N,T> space;
     std::vector<InstancePieceList<N,T> > piece_lists;
   };
+
+  // accessor stuff should eventually move to a different header file I think
+
+  // Privileges for using an accessor
+  enum AccessorPrivilege {
+    ACCESSOR_PRIV_NONE   = 0x00000000,
+    ACCESSOR_PRIV_READ   = 0x00000001,
+    ACCESSOR_PRIV_WRITE  = 0x00000002,
+    ACCESSOR_PRIV_REDUCE = 0x00000004,
+    ACCESSOR_PRIV_ALL    = 0x00000007,
+  };
+
+  // an instance accessor based on an affine linearization of an index space
+  template <typename FT, int N, typename T = int>
+  class AffineAccessor {
+  public:
+    // NOTE: these constructors will die horribly if the conversion is not
+    //  allowed - call is_compatible(...) first if you're not sure
+
+    // implicitly tries to cover the entire instance's domain
+    AffineAccessor(RegionInstance inst, ptrdiff_t field_offset);
+
+    // limits domain to a subrectangle
+    AffineAccessor(RegionInstance inst, ptrdiff_t field_offset, const ZRect<N,T>& subrect);
+
+    // for higher-level interfaces to use, the INST type must implement the following methods
+    // - RegionInstance get_instance(unsigned field_id, ptrdiff_t &field_offset)
+    // - ZIndexSpace<N,T> get_bounds(void) -- for bounds checks
+    // - AccessorPrivilege get_accessor_privileges(void) -- for privilege checks
+    template <typename INST>
+    AffineAccessor(const INST &instance, unsigned field_id);
+    template <typename INST>
+    AffineAccessor(const INST &instance, unsigned field_id, const ZRect<N,T>& subrect);
+
+    ~AffineAccessor(void);
+
+    static bool is_compatible(RegionInstance inst, ptrdiff_t field_offset);
+    static bool is_compatible(RegionInstance inst, ptrdiff_t field_offset, const ZRect<N,T>& subrect);
+
+    template <typename INST>
+    static bool is_compatible(const INST &instance, unsigned field_id);
+    template <typename INST>
+    static bool is_compatible(const INST &instance, unsigned field_id, const ZRect<N,T>& subrect);
+
+    FT *ptr(const ZPoint<N,T>& p) const;
+    FT read(const ZPoint<N,T>& p) const;
+    void write(const ZPoint<N,T>& p, FT newval) const;
+
+  //protected:
+  //friend
+  // std::ostream& operator<<(std::ostream& os, const AffineAccessor<FT,N,T>& a);
+#define REALM_ACCESSOR_DEBUG
+#ifdef REALM_ACCESSOR_DEBUG
+    RegionInstance dbg_inst;
+    ZRect<N,T> dbg_bounds;
+#endif
+    intptr_t base;
+    ZPoint<N, ptrdiff_t> strides;
+#ifdef PRIVILEGE_CHECKS
+    AccessorPrivilege privileges;
+#endif
+#ifdef BOUNDS_CHECKS
+    ZIndexSpace<N,T> bounds;
+#endif
+  };
+
+  template <typename FT, int N, typename T>
+  std::ostream& operator<<(std::ostream& os, const AffineAccessor<FT,N,T>& a);
 
 }; // namespace Realm
 

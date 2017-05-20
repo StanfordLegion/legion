@@ -28,7 +28,7 @@ namespace Legion {
 
     using namespace LegionRuntime::Arrays;
 
-    LegionRuntime::Logger::Category log_test_mapper("test_mapper");
+    Logger log_test_mapper("test_mapper");
 
     //--------------------------------------------------------------------------
     /*static*/ const char* TestMapper::create_test_name(Processor p)

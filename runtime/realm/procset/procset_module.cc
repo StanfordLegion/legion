@@ -32,8 +32,9 @@ namespace Realm {
    //
    class LocalProcessorSet : public LocalTaskProcessor {
    public:
-     LocalProcessorSet(Processor _me, CoreReservationSet& crs, size_t _stack_size,
-          int _num_cores);
+     LocalProcessorSet(Processor _me, CoreReservationSet& crs,
+		       size_t _stack_size, int _num_cores,
+		       bool _force_kthreads);
      virtual ~LocalProcessorSet(void);
    protected:
      CoreReservation *core_rsrv;
@@ -41,7 +42,8 @@ namespace Realm {
 
 
    LocalProcessorSet::LocalProcessorSet(Processor _me, CoreReservationSet& crs,
-       size_t _stack_size, int _num_cores)
+					size_t _stack_size, int _num_cores,
+					bool _force_kthreads)
      : LocalTaskProcessor(_me, Processor::PROC_SET, _num_cores)
 
    {
@@ -57,13 +59,17 @@ namespace Realm {
      core_rsrv = new CoreReservation(name, crs, params);
 
  #ifdef REALM_USE_USER_THREADS
-     UserThreadTaskScheduler *sched = new UserThreadTaskScheduler(me, *core_rsrv);
-     // no config settings we want to tweak yet
- #else
-    KernelThreadTaskScheduler *sched = new KernelThreadTaskScheduler(me, *core_rsrv);
-     sched->cfg_max_idle_workers = 3; // keep a few idle threads around
+     if(!_force_kthreads) {
+       UserThreadTaskScheduler *sched = new UserThreadTaskScheduler(me, *core_rsrv);
+       // no config settings we want to tweak yet
+       set_scheduler(sched);
+     } else 
  #endif
-     set_scheduler(sched);
+     {
+       KernelThreadTaskScheduler *sched = new KernelThreadTaskScheduler(me, *core_rsrv);
+       sched->cfg_max_idle_workers = 3; // keep a few idle threads around
+       set_scheduler(sched);
+     }
    }
 
    LocalProcessorSet::~LocalProcessorSet(void)
@@ -83,6 +89,7 @@ namespace Realm {
       , cfg_num_mp_threads(0)
       , cfg_num_mp_procs(0)
       , cfg_num_mp_cpus(0)
+      , cfg_force_kernel_threads(false)
       , cfg_stack_size_in_mb(2)
     {
     }
@@ -101,13 +108,14 @@ namespace Realm {
 
       cp.add_option_int("-ll:mp_threads", m->cfg_num_mp_threads)
         .add_option_int("-ll:mp_nodes", m->cfg_num_mp_procs)
-        .add_option_int("-ll:mp_cpu", m->cfg_num_mp_cpus);
+        .add_option_int("-ll:mp_cpu", m->cfg_num_mp_cpus)
+	.add_option_bool("-ll:force_kthreads", m->cfg_force_kernel_threads, true /*keep*/);
 
-	  bool ok = cp.parse_command_line(cmdline);
-	  if(!ok) {
-	    log_procset.fatal() << "error reading ProcSet command line parameters";
-	    assert(false);
-	  }
+      bool ok = cp.parse_command_line(cmdline);
+      if(!ok) {
+	log_procset.fatal() << "error reading ProcSet command line parameters";
+	assert(false);
+      }
       return m;
     }
 
@@ -141,7 +149,8 @@ namespace Realm {
         if (cfg_num_mp_procs == 0 || static_cast<int>(gasnet_mynode()) < cfg_num_mp_procs ) { 
           Processor p = runtime->next_local_processor_id();
           ProcessorImpl *pi = new LocalProcessorSet(p, runtime->core_reservation_set(),
-            cfg_stack_size_in_mb << 20, cfg_num_mp_threads);
+						    cfg_stack_size_in_mb << 20, cfg_num_mp_threads,
+						    cfg_force_kernel_threads);
           runtime->add_processor(pi);
         // if there are not procSets on all nodes and cfg_num_mp_cpus is set
         // then add additional LocalCPUProcessors on these nodes
@@ -149,7 +158,8 @@ namespace Realm {
           for (int i = 0; i < cfg_num_mp_cpus; i++) {
             Processor p = runtime->next_local_processor_id();
             ProcessorImpl *pi = new LocalCPUProcessor(p, runtime->core_reservation_set(),
-              cfg_stack_size_in_mb << 20);
+						      cfg_stack_size_in_mb << 20,
+						      cfg_force_kernel_threads);
             runtime->add_processor(pi);
           }
         }      

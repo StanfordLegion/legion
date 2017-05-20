@@ -943,7 +943,7 @@ namespace Realm {
   //
 
   LocalCPUProcessor::LocalCPUProcessor(Processor _me, CoreReservationSet& crs,
-				       size_t _stack_size)
+				       size_t _stack_size, bool _force_kthreads)
     : LocalTaskProcessor(_me, Processor::LOC_PROC)
   {
     CoreReservationParameters params;
@@ -958,13 +958,17 @@ namespace Realm {
     core_rsrv = new CoreReservation(name, crs, params);
 
 #ifdef REALM_USE_USER_THREADS
-    UserThreadTaskScheduler *sched = new UserThreadTaskScheduler(me, *core_rsrv);
-    // no config settings we want to tweak yet
-#else
-    KernelThreadTaskScheduler *sched = new KernelThreadTaskScheduler(me, *core_rsrv);
-    sched->cfg_max_idle_workers = 3; // keep a few idle threads around
+    if(!_force_kthreads) {
+      UserThreadTaskScheduler *sched = new UserThreadTaskScheduler(me, *core_rsrv);
+      // no config settings we want to tweak yet
+      set_scheduler(sched);
+    } else
 #endif
-    set_scheduler(sched);
+    {
+      KernelThreadTaskScheduler *sched = new KernelThreadTaskScheduler(me, *core_rsrv);
+      sched->cfg_max_idle_workers = 3; // keep a few idle threads around
+      set_scheduler(sched);
+    }
   }
 
   LocalCPUProcessor::~LocalCPUProcessor(void)
@@ -979,7 +983,7 @@ namespace Realm {
   //
 
   LocalUtilityProcessor::LocalUtilityProcessor(Processor _me, CoreReservationSet& crs,
-					       size_t _stack_size)
+					       size_t _stack_size, bool _force_kthreads)
     : LocalTaskProcessor(_me, Processor::UTIL_PROC)
   {
     CoreReservationParameters params;
@@ -994,13 +998,17 @@ namespace Realm {
     core_rsrv = new CoreReservation(name, crs, params);
 
 #ifdef REALM_USE_USER_THREADS
-    UserThreadTaskScheduler *sched = new UserThreadTaskScheduler(me, *core_rsrv);
-    // no config settings we want to tweak yet
-#else
-    KernelThreadTaskScheduler *sched = new KernelThreadTaskScheduler(me, *core_rsrv);
-    // no config settings we want to tweak yet
+    if(!_force_kthreads) {
+      UserThreadTaskScheduler *sched = new UserThreadTaskScheduler(me, *core_rsrv);
+      // no config settings we want to tweak yet
+      set_scheduler(sched);
+    } else
 #endif
-    set_scheduler(sched);
+    {
+      KernelThreadTaskScheduler *sched = new KernelThreadTaskScheduler(me, *core_rsrv);
+      // no config settings we want to tweak yet
+      set_scheduler(sched);
+    }
   }
 
   LocalUtilityProcessor::~LocalUtilityProcessor(void)

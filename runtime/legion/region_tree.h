@@ -998,7 +998,8 @@ namespace Legion {
      * associated with realm index spaces
      */
     template<int DIM, typename T>
-    class IndexSpaceNodeT : public IndexSpaceNode { 
+    class IndexSpaceNodeT : public IndexSpaceNode,
+                            public LegionHeapify<IndexSpaceNodeT<DIM,T> > {
     public:
       struct IntersectInfo {
       public:
@@ -1023,8 +1024,6 @@ namespace Legion {
       virtual ~IndexSpaceNodeT(void);
     public:
       IndexSpaceNodeT& operator=(const IndexSpaceNodeT &rhs);
-      void* operator new(size_t count);
-      void operator delete(void *ptr);
     public:
       void get_realm_index_space(Realm::ZIndexSpace<DIM,T> &result) const;
       void set_realm_index_space(AddressSpaceID source,
@@ -1420,7 +1419,7 @@ namespace Legion {
      * \class IndexPartNode
      * A node for representing a generic index partition.
      */
-    class IndexPartNode : public IndexTreeNode { 
+    class IndexPartNode : public IndexTreeNode {
     public:
       struct DisjointnessArgs : public LgTaskArgs<DisjointnessArgs> {
       public:
@@ -1586,7 +1585,8 @@ namespace Legion {
      * associated with realm index spaces
      */
     template<int DIM, typename T>
-    class IndexPartNodeT : public IndexPartNode {
+    class IndexPartNodeT : public IndexPartNode,
+                           public LegionHeapify<IndexPartNodeT<DIM,T> > {
     public:
       struct IntersectInfo {
       public:
@@ -1617,8 +1617,6 @@ namespace Legion {
       virtual ~IndexPartNodeT(void);
     public:
       IndexPartNodeT& operator=(const IndexPartNodeT &rhs);
-      void* operator new(size_t count);
-      void operator delete(void *ptr);
     public:
       virtual bool compute_complete(void);
       virtual bool intersects_with(IndexSpaceNode *other, bool compute = true);
@@ -1689,7 +1687,7 @@ namespace Legion {
      * Represent a generic field space that can be
      * pointed at by nodes in the region trees.
      */
-    class FieldSpaceNode {
+    class FieldSpaceNode : public LegionHeapify<FieldSpaceNode> {
     public:
       struct FieldInfo {
       public:
@@ -1760,8 +1758,6 @@ namespace Legion {
       ~FieldSpaceNode(void);
     public:
       FieldSpaceNode& operator=(const FieldSpaceNode &rhs);
-      void* operator new(size_t count);
-      void operator delete(void *ptr);
       AddressSpaceID get_owner_space(void) const; 
       static AddressSpaceID get_owner_space(FieldSpace handle, Runtime *rt);
     public:
@@ -2125,7 +2121,7 @@ namespace Legion {
       void invalidate_current_state(ContextID ctx, bool users_only);
       void invalidate_deleted_state(ContextID ctx, 
                                     const FieldMask &deleted_mask);
-      void invalidate_version_state(ContextID ctx);
+      bool invalidate_version_state(ContextID ctx);
       void invalidate_version_managers(void);
     public:
       // Physical traversal operations
@@ -2356,7 +2352,7 @@ namespace Legion {
      * \class RegionNode
      * Represent a region in a region tree
      */
-    class RegionNode : public RegionTreeNode {
+    class RegionNode : public RegionTreeNode, public LegionHeapify<RegionNode> {
     public:
       struct SemanticRequestArgs : public LgTaskArgs<SemanticRequestArgs> {
       public:
@@ -2383,8 +2379,6 @@ namespace Legion {
       virtual ~RegionNode(void);
     public:
       RegionNode& operator=(const RegionNode &rhs);
-      void* operator new(size_t count);
-      void operator delete(void *ptr);
     public:
       bool has_child(const LegionColor p);
       bool has_color(const LegionColor p);
@@ -2550,7 +2544,8 @@ namespace Legion {
      * \class PartitionNode
      * Represent an instance of a partition in a region tree.
      */
-    class PartitionNode : public RegionTreeNode {
+    class PartitionNode : public RegionTreeNode, 
+                          public LegionHeapify<PartitionNode> {
     public:
       struct SemanticRequestArgs : public LgTaskArgs<SemanticRequestArgs> {
       public:
@@ -2578,8 +2573,6 @@ namespace Legion {
       ~PartitionNode(void);
     public:
       PartitionNode& operator=(const PartitionNode &rhs);
-      void* operator new(size_t count);
-      void operator delete(void *ptr);
     public:
       bool has_child(const LegionColor c);
       bool has_color(const LegionColor c);

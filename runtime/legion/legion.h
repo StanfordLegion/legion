@@ -1991,6 +1991,8 @@ namespace Legion {
        * method instead. You can silence warnings about this blocking
        * call with the 'silence_warnings' parameter.
        */
+      LEGION_DEPRECATED("Requesting generic accessors are now deprecated. "
+                        "A field accessor should be requested instead.")
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic> 
           get_accessor(bool silience_warnings = false) const;
@@ -2761,6 +2763,8 @@ namespace Legion {
        * @param point the point of the task in the index space
        * @return logical region to be used by the child task
        */
+      LEGION_DEPRECATED("The interface for projection functors has been "
+                        "updated. Please use the new 'project' methods.")
       virtual LogicalRegion project(Context ctx, Task *task,
                                     unsigned index,
                                     LogicalRegion upper_bound,
@@ -2776,6 +2780,8 @@ namespace Legion {
        * @param point the point of the task in the index space
        * @return logical region to be used by the child task
        */
+      LEGION_DEPRECATED("The interface for projection functors has been "
+                        "updated. Please use the new 'project' methods.")
       virtual LogicalRegion project(Context ctx, Task *task, 
                                     unsigned index,
                                     LogicalPartition upper_bound,
@@ -2938,6 +2944,8 @@ namespace Legion {
        * @param max_num_elmts maximum number of elements in the index space
        * @return the handle for the new index space
        */
+      LEGION_DEPRECATED("Use the new index space creation routines with a "
+                        "single domain or rectangle.")
       IndexSpace create_index_space(Context ctx, size_t max_num_elmts);
       /**
        * @deprecated
@@ -2946,6 +2954,8 @@ namespace Legion {
        * @param domains the set of domains
        * @return the handle for the new index space
        */
+      LEGION_DEPRECATED("Use the new index space creation routines with a "
+                        "single domain or rectangle.")
       IndexSpace create_index_space(Context ctx, 
                                     const std::set<Domain> &domains);
       /**
@@ -2971,6 +2981,7 @@ namespace Legion {
        * @param allocable whether the child index spaces are allocable
        * @return handle for the new index partition
        */
+      LEGION_DEPRECATED("Use the new dependent partitioning API calls instead.")
       IndexPartition create_index_partition(Context ctx, IndexSpace parent,
                                         const Domain &color_space,
                                         const PointColoring &coloring,
@@ -2988,6 +2999,7 @@ namespace Legion {
        * @param color optional color name for the partition
        * @return handle for the next index partition
        */
+      LEGION_DEPRECATED("Use the new dependent partitioning API calls instead.")
       IndexPartition create_index_partition(Context ctx, IndexSpace parent, 
                                             const Coloring &coloring, 
                                             bool disjoint, 
@@ -3004,6 +3016,7 @@ namespace Legion {
        * @param color optional color for the new partition
        * @return handle for the new index partition
        */
+      LEGION_DEPRECATED("Use the new dependent partitioning API calls instead.")
       IndexPartition create_index_partition(Context ctx, IndexSpace parent,
                                         const Domain &color_space,
                                         const DomainPointColoring &coloring,
@@ -3021,6 +3034,7 @@ namespace Legion {
        * @param color optional color name for the partition
        * @return handle for the next index partition
        */
+      LEGION_DEPRECATED("Use the new dependent partitioning API calls instead.")
       IndexPartition create_index_partition(Context ctx, IndexSpace parent, 
 					    Domain color_space, 
                                             const DomainColoring &coloring,
@@ -3038,6 +3052,7 @@ namespace Legion {
        * @param color optional color for the new partition
        * @return handle for the new index partition
        */
+      LEGION_DEPRECATED("Use the new dependent partitioning API calls instead.")
       IndexPartition create_index_partition(Context ctx, IndexSpace parent,
                                       const Domain &color_space,
                                       const MultiDomainPointColoring &coloring,
@@ -3057,6 +3072,7 @@ namespace Legion {
        * @param color optional color name for the partition
        * @return handle for the next index partition
        */
+      LEGION_DEPRECATED("Use the new dependent partitioning API calls instead.")
       IndexPartition create_index_partition(Context ctx, IndexSpace parent,
                                             Domain color_space,
                                             const MultiDomainColoring &coloring,
@@ -3072,6 +3088,7 @@ namespace Legion {
        * @return handle for the next index partition
        */
       template <typename T>
+      LEGION_DEPRECATED("Use the new dependent partitioning API calls instead.")
       IndexPartition create_index_partition(Context ctx, IndexSpace parent,
 					    const T& mapping,
 					    Color color = AUTO_GENERATE_ID);
@@ -3094,6 +3111,7 @@ namespace Legion {
        * @param complete whether the partitioning is complete or not
        * @return handle for the next index partition
        */
+      LEGION_DEPRECATED("Use the new dependent partitioning API calls instead.")
       IndexPartition create_index_partition(Context ctx, IndexSpace parent,
        LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic> field_accessor,
@@ -3832,8 +3850,10 @@ namespace Legion {
        * @param handle index space handle
        * @return true if the index space has multiple domains
        */
+      LEGION_DEPRECATED("Multiple domains are no longer supported.")
       bool has_multiple_domains(Context ctx, IndexSpace handle);
       // Context free
+      LEGION_DEPRECATED("Multiple domains are no longer supported.")
       bool has_multiple_domains(IndexSpace handle);
 
       /**
@@ -3860,9 +3880,11 @@ namespace Legion {
        * @param handle index space handle
        * @param vector to populate with domains
        */
+      LEGION_DEPRECATED("Multiple domains are no longer supported.")
       void get_index_space_domains(Context ctx, IndexSpace handle,
                                    std::vector<Domain> &domains);
       // Context free
+      LEGION_DEPRECATED("Multiple domains are no longer supported.")
       void get_index_space_domains(IndexSpace handle,
                                    std::vector<Domain> &domains);
 
@@ -3946,6 +3968,7 @@ namespace Legion {
        * @return the corresponding index space to the specified color point
        */
       template <unsigned DIM>
+      LEGION_DEPRECATED("Use the new templated methods for geting a subspace.")
       IndexSpace get_index_subspace(Context ctx, IndexPartition p, 
                                 LegionRuntime::Arrays::Point<DIM> color_point);
 
@@ -4427,6 +4450,7 @@ namespace Legion {
        * @param handle for the index space to create an allocator
        * @return a new index space allocator for the given index space
        */
+      LEGION_DEPRECATED("Dynamic index allocation is no longer supported.")
       IndexAllocator create_index_allocator(Context ctx, IndexSpace handle);
 
       /**
@@ -4438,13 +4462,14 @@ namespace Legion {
       FieldAllocator create_field_allocator(Context ctx, FieldSpace handle);
 
       /**
-       * @deprectated
+       * @deprecated
        * Create an argument map in the given context.  This method
        * is deprecated as argument maps can now be created directly
        * by a simple declaration.
        * @param ctx enclosing task context
        * @return a new argument map
        */
+      LEGION_DEPRECATED("ArgumentMap can be constructed directly.")
       ArgumentMap create_argument_map(Context ctx);
     public:
       //------------------------------------------------------------------------
@@ -4503,6 +4528,8 @@ namespace Legion {
        * @param tag mapping tag to be passed to any mapping calls
        * @return future representing return value of the task
        */
+      LEGION_DEPRECATED("Launching tasks should be done with the new task "
+                        "launcher interface.")
       Future execute_task(Context ctx, 
                           Processor::TaskFuncID task_id,
                           const std::vector<IndexSpaceRequirement> &indexes,
@@ -4531,6 +4558,8 @@ namespace Legion {
        * @param tag mapping tag to be passed to any mapping calls
        * @return future map containing results for all tasks
        */
+      LEGION_DEPRECATED("Launching tasks should be done with the new task "
+                        "launcher interface.")
       FutureMap execute_index_space(Context ctx, 
                           Processor::TaskFuncID task_id,
                           const Domain domain,
@@ -4565,6 +4594,8 @@ namespace Legion {
        * @param tag mapping tag to be passed to any mapping calls
        * @return future containing reduced return value of all tasks
        */
+      LEGION_DEPRECATED("Launching tasks should be done with the new task "
+                        "launcher interface.")
       Future execute_index_space(Context ctx, 
                           Processor::TaskFuncID task_id,
                           const Domain domain,
@@ -4814,6 +4845,8 @@ namespace Legion {
        * @param mode the access mode for attaching the file
        * @return a new physical instance corresponding to the HDF5 file
        */
+      LEGION_DEPRECATED("Attaching specific HDF5 file type is deprecated "
+                        "in favor of generic attach launcher interface.")
       PhysicalRegion attach_hdf5(Context ctx, const char *file_name,
                                  LogicalRegion handle, LogicalRegion parent, 
                                  const std::map<FieldID,const char*> &field_map,
@@ -4835,6 +4868,8 @@ namespace Legion {
        * @param ctx enclosing task context 
        * @param region the physical region for an HDF5 file to detach
        */
+      LEGION_DEPRECATED("Detaching specific HDF5 file type is deprecated "
+                        "in favor of generic detach interface.")
       void detach_hdf5(Context ctx, PhysicalRegion region);
 
       /**
@@ -4843,6 +4878,8 @@ namespace Legion {
        * attach_hdf5 operation, except that the file has exact same data format
        * as in-memory physical region. Data lays out as SOA in file.
        */
+      LEGION_DEPRECATED("Attaching generic file type is deprecated "
+                        "in favor of generic attach launcher interface.")
       PhysicalRegion attach_file(Context ctx, const char *file_name,
                                  LogicalRegion handle, LogicalRegion parent,
                                  const std::vector<FieldID> &field_vec,
@@ -4853,6 +4890,8 @@ namespace Legion {
        * Detach an normal file. THis detach operation is similar to
        * detach_hdf5
        */
+      LEGION_DEPRECATED("Detaching generic file type is deprecated "
+                        "in favor of generic detach interface.")
       void detach_file(Context ctx, PhysicalRegion region);
     public:
       //------------------------------------------------------------------------
@@ -5242,6 +5281,8 @@ namespace Legion {
        * tunable value. It will assume that the resulting tunable 
        * future can be interpreted as an integer.
        */
+      LEGION_DEPRECATED("Tunable values should now be obtained via the "
+                        "generic interface that returns a future result.")
       int get_tunable_value(Context ctx, TunableID tid, 
                             MapperID mapper = 0, MappingTagID tag = 0);
     public:
@@ -6082,6 +6123,8 @@ namespace Legion {
        * the application.
        * @param callback function pointer to the callback function to be run
        */
+      LEGION_DEPRECATED("Legion now supports multiple registration callbacks "
+                        "added via the add_registration_callback method.") 
       static void set_registration_callback(RegistrationCallbackFnptr callback);
 
       /**
@@ -6385,6 +6428,8 @@ namespace Legion {
       template<typename T,
         T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                       Context, Runtime*)>
+      LEGION_DEPRECATED("Task registration should be done with "
+                        "a TaskVariantRegistrar") 
       static TaskID register_legion_task(TaskID id, Processor::Kind proc_kind,
                                          bool single, bool index, 
                                          VariantID vid = AUTO_GENERATE_ID,
@@ -6406,6 +6451,8 @@ namespace Legion {
       template<
         void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                          Context, Runtime*)>
+      LEGION_DEPRECATED("Task registration should be done with "
+                        "a TaskVariantRegistrar")
       static TaskID register_legion_task(TaskID id, Processor::Kind proc_kind,
                                          bool single, bool index,
                                          VariantID vid = AUTO_GENERATE_ID,
@@ -6429,6 +6476,8 @@ namespace Legion {
       template<typename T, typename UDT,
         T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                       Context, Runtime*, const UDT&)>
+      LEGION_DEPRECATED("Task registration should be done with "
+                        "a TaskVariantRegistrar")
       static TaskID register_legion_task(TaskID id, Processor::Kind proc_kind,
                                          bool single, bool index,
                                          const UDT &user_data,
@@ -6453,6 +6502,8 @@ namespace Legion {
       template<typename UDT,
         void (*TASK_PTR)(const Task*,const std::vector<PhysicalRegion>&,
                          Context, Runtime*, const UDT&)>
+      LEGION_DEPRECATED("Task registration should be done with "
+                        "a TaskVariantRegistrar")
       static TaskID register_legion_task(TaskID id, Processor::Kind proc_kind,
                                          bool single, bool index,
                                          const UDT &user_data,

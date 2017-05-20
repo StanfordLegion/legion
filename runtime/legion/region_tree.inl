@@ -53,6 +53,14 @@ namespace Legion {
     IndexSpaceNodeT<DIM,T>::~IndexSpaceNodeT(void)
     //--------------------------------------------------------------------------
     { 
+      // Log subspaces when we are cleaning up
+      if (Runtime::legion_spy_enabled && (parent != NULL) &&
+          (get_owner_space() == context->runtime->address_space))
+      {
+        if (!index_space_ready.has_triggered())
+          index_space_ready.lg_wait();
+        log_index_space_points();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -64,22 +72,6 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    void* IndexSpaceNodeT<DIM,T>::operator new(size_t count)
-    //--------------------------------------------------------------------------
-    {
-      return legion_alloc_aligned<IndexSpaceNodeT<DIM,T>,true/*bytes*/>(count);
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    void IndexSpaceNodeT<DIM,T>::operator delete(void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
     }
 
     //--------------------------------------------------------------------------
@@ -264,10 +256,11 @@ namespace Legion {
         realm_index_space_set.lg_wait();
       if (!index_space_ready.has_triggered())
         index_space_ready.lg_wait();
-      if (!realm_index_space.empty())
+      Realm::ZIndexSpace<DIM,T> tight_space = realm_index_space.tighten();
+      if (!tight_space.empty())
       {
         // Iterate over the rectangles and print them out 
-        for (Realm::ZIndexSpaceIterator<DIM,T> itr(realm_index_space); 
+        for (Realm::ZIndexSpaceIterator<DIM,T> itr(tight_space); 
               itr.valid; itr.step())
         {
           if (itr.rect.volume() == 1)
@@ -278,6 +271,7 @@ namespace Legion {
       }
       else
         LegionSpy::log_empty_index_space(handle.get_id());
+      tight_space.destroy();
     }
 
     //--------------------------------------------------------------------------
@@ -821,7 +815,9 @@ namespace Legion {
       // Wait for the result to be ready
       if (!ready.has_triggered())
         ready.lg_wait();
-      bool result = !intersection.empty();
+      // Always tighten these tests so that they are precise
+      Realm::ZIndexSpace<DIM,T> tight_intersection = intersection.tighten();
+      bool result = !tight_intersection.empty();
       AutoLock n_lock(node_lock);
       if (result)
       {
@@ -830,12 +826,13 @@ namespace Legion {
         // Check to make sure we didn't lose the race
         if ((finder == intersections.end()) || 
             (compute && !finder->second.intersection_valid))
-          intersections[rhs] = IntersectInfo(intersection);
+          intersections[rhs] = IntersectInfo(tight_intersection);
         else
-          intersection.destroy(); // clean up resources if we didn't save it
+          tight_intersection.destroy(); // clean up spaces if we didn't save it
       }
       else
         intersections[rhs] = IntersectInfo(false/*result*/);
+      intersection.destroy();
       return result;
     }
 
@@ -890,7 +887,9 @@ namespace Legion {
             Runtime::merge_events(index_space_ready, rhs_precondition)));
       if (!ready.has_triggered())
         ready.lg_wait();
-      bool result = !intersection.empty();
+      // Always tighten these tests so that they are precise
+      Realm::ZIndexSpace<DIM,T> tight_intersection = intersection.tighten();
+      bool result = !tight_intersection.empty();
       AutoLock n_lock(node_lock);
       if (result)
       {
@@ -899,12 +898,13 @@ namespace Legion {
           intersections.find(rhs);
         if ((finder == intersections.end()) ||
             (compute && !finder->second.intersection_valid))
-          intersections[rhs] = IntersectInfo(intersection);
+          intersections[rhs] = IntersectInfo(tight_intersection);
         else
-          intersection.destroy();
+          tight_intersection.destroy();
       }
       else
         intersections[rhs] = IntersectInfo(false/*result*/);
+      intersection.destroy();
       return result;
     }
 
@@ -961,8 +961,11 @@ namespace Legion {
                                 rhs_node->index_space_ready)));
         if (!ready.has_triggered())
           ready.lg_wait();
-        result = difference.empty();
+        // Always tighten these tests so that they are precise
+        Realm::ZIndexSpace<DIM,T> tight_difference = difference.tighten();
+        result = tight_difference.empty();
         difference.destroy();
+        tight_difference.destroy();
       }
       else // Fast path
         result = realm_index_space.bounds.contains(rhs_space);
@@ -1018,8 +1021,11 @@ namespace Legion {
               Runtime::merge_events(index_space_ready, rhs_precondition)));
         if (!ready.has_triggered())
           ready.lg_wait();
-        result = difference.empty();
+        // Always tighten these tests so that they are precise
+        Realm::ZIndexSpace<DIM,T> tight_difference = difference.tighten();
+        result = tight_difference.empty();
         difference.destroy();
+        tight_difference.destroy();
       }
       else // Fast path
         result = realm_index_space.bounds.contains(rhs_space);
@@ -2798,9 +2804,12 @@ namespace Legion {
       if (context->runtime->profiler != NULL)
       {
         context->runtime->profiler->add_inst_request(requests, op_id);
-        PhysicalInstance result = 
-          PhysicalInstance::create_instance(target, realm_index_space,
-                                            field_sizes, requests);
+        PhysicalInstance result;
+	LgEvent ready(PhysicalInstance::create_instance(result, target,
+							realm_index_space,
+							field_sizes, requests));
+	// TODO
+	ready.lg_wait();
         // If the result exists tell the profiler about it in case
         // it never gets deleted and we never see the profiling feedback
         if (result.exists())
@@ -2813,8 +2822,15 @@ namespace Legion {
         return result;
       }
       else
-        return PhysicalInstance::create_instance(target, realm_index_space,
-                                                 field_sizes, requests);
+      {
+        PhysicalInstance result;
+	LgEvent ready(PhysicalInstance::create_instance(result, target,
+							realm_index_space,
+							field_sizes, requests));
+	// TODO
+	ready.lg_wait();
+	return result;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2833,8 +2849,14 @@ namespace Legion {
         index_space_ready.lg_wait();
       // No profiling for these kinds of instances currently
       Realm::ProfilingRequestSet requests;
-      return PhysicalInstance::create_file_instance(file_name, 
-          realm_index_space, field_sizes, file_mode, requests);
+      PhysicalInstance result;
+      LgEvent ready(PhysicalInstance::create_file_instance(result, file_name, 
+							   realm_index_space,
+							   field_sizes,
+							   file_mode, requests));
+      // TODO
+      ready.lg_wait();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -2854,8 +2876,16 @@ namespace Legion {
         index_space_ready.lg_wait();
       // No profiling for these kinds of instances currently
       Realm::ProfilingRequestSet requests;
-      return PhysicalInstance::create_hdf5_instance(file_name, 
-          realm_index_space, field_sizes, field_files, read_only, requests);
+      PhysicalInstance result;
+      LgEvent ready(PhysicalInstance::create_hdf5_instance(result, file_name, 
+							   realm_index_space,
+							   field_sizes,
+							   field_files,
+							   read_only,
+							   requests));
+      // TODO
+      ready.lg_wait();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -2947,22 +2977,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    void* IndexPartNodeT<DIM,T>::operator new(size_t count)
-    //--------------------------------------------------------------------------
-    {
-      return legion_alloc_aligned<IndexPartNodeT<DIM,T>,true/*bytes*/>(count);
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    void IndexPartNodeT<DIM,T>::operator delete(void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
     bool IndexPartNodeT<DIM,T>::compute_complete(void)
     //--------------------------------------------------------------------------
     {
@@ -2982,9 +2996,11 @@ namespace Legion {
             Runtime::merge_events(parent->index_space_ready, union_ready)));
       if (!diff_ready.has_triggered())
         diff_ready.lg_wait();
-      bool complete = difference_space.empty();
-      if (!complete)
-        difference_space.destroy();
+      // Always tighten these tests so that they are precise
+      Realm::ZIndexSpace<DIM,T> tight_space = difference_space.tighten();
+      bool complete = tight_space.empty();
+      difference_space.destroy();
+      tight_space.destroy();
       return complete;
     }
 
@@ -3037,7 +3053,9 @@ namespace Legion {
                                   rhs_node->index_space_ready)));
       if (!ready.has_triggered())
         ready.lg_wait();
-      bool result = !intersection.empty();
+      // Always tighten these tests so that they are precise
+      Realm::ZIndexSpace<DIM,T> tight_intersection = intersection.tighten();
+      bool result = !tight_intersection.empty();
       AutoLock n_lock(node_lock);
       if (result)
       {
@@ -3046,12 +3064,13 @@ namespace Legion {
           intersections.find(rhs);
         if ((finder == intersections.end()) ||
             (compute && !finder->second.intersection_valid))
-          intersections[rhs] = IntersectInfo(intersection);
+          intersections[rhs] = IntersectInfo(tight_intersection);
         else
-          intersection.destroy();
+          tight_intersection.destroy();
       }
       else
         intersections[rhs] = IntersectInfo(false/*result*/);
+      intersection.destroy();
       return result;
     }
 
@@ -3105,7 +3124,9 @@ namespace Legion {
             Runtime::merge_events(union_precondition, rhs_precondition)));
       if (!ready.has_triggered())
         ready.lg_wait();
-      bool result = !intersection.empty();
+      // Always tighten these tests so that they are precise
+      Realm::ZIndexSpace<DIM,T> tight_intersection = intersection.tighten();
+      bool result = !tight_intersection.empty();
       AutoLock n_lock(node_lock);
       if (result)
       {
@@ -3114,12 +3135,13 @@ namespace Legion {
           intersections.find(rhs);
         if ((finder == intersections.end()) ||
             (compute && !finder->second.intersection_valid))
-          intersections[rhs] = IntersectInfo(intersection);
+          intersections[rhs] = IntersectInfo(tight_intersection);
         else
-          intersection.destroy();
+          tight_intersection.destroy();
       }
       else
         intersections[rhs] = IntersectInfo(false/*result*/);
+      intersection.destroy();
       return result;
     }
 
@@ -3171,8 +3193,11 @@ namespace Legion {
                                     rhs_node->index_space_ready)));
         if (!ready.has_triggered())
           ready.lg_wait();
-        result = difference.empty();
+        // Always tighten these tests so that they are precise
+        Realm::ZIndexSpace<DIM,T> tight_difference = difference.tighten();
+        result = tight_difference.empty();
         difference.destroy();
+        tight_difference.destroy();
       }
       else // Fast path
         result = union_space.bounds.contains(rhs_space);
@@ -3230,8 +3255,11 @@ namespace Legion {
               Runtime::merge_events(union_precondition, rhs_precondition))); 
         if (!ready.has_triggered())
           ready.lg_wait();
-        result = difference.empty();
+        // Always tighten these tests so that they are precise
+        Realm::ZIndexSpace<DIM,T> tight_difference = difference.tighten();
+        result = tight_difference.empty();
         difference.destroy();
+        tight_difference.destroy();
       } 
       else // Fast path
         result = union_space.bounds.contains(rhs_space);

@@ -221,24 +221,36 @@ int sum_task(const Task *task,
 int main(int argc, char **argv)
 {
   Runtime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
-  Runtime::register_legion_task<top_level_task>(TOP_LEVEL_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, false/*index*/);
+
+  {
+    TaskVariantRegistrar registrar(TOP_LEVEL_TASK_ID, "top_level");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    Runtime::preregister_task_variant<top_level_task>(registrar, "top_level");
+  }
+
   // Note that tasks which return values must pass the type of
   // the return argument as the first template parameter.
-  Runtime::register_legion_task<int,fibonacci_task>(FIBONACCI_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, false/*index*/);
+
+  {
+    TaskVariantRegistrar registrar(FIBONACCI_TASK_ID, "fibonacci");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    Runtime::preregister_task_variant<int, fibonacci_task>(registrar, "fibonacci");
+  }
+
   // The sum-task has a very special property which is that it is
   // guaranteed never to make any runtime calls.  We call these
   // kinds of tasks "leaf" tasks and tell the runtime system
   // about them using the 'TaskConfigOptions' struct.  Being
   // a leaf task allows the runtime to perform significant
   // optimizations that minimize the overhead of leaf task
-  // execution.  Note that we also tell the runtime to 
-  // automatically generate the variant ID for this task
-  // with the 'AUTO_GENERATE_ID' argument.
-  Runtime::register_legion_task<int,sum_task>(SUM_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, false/*index*/, 
-      AUTO_GENERATE_ID, TaskConfigOptions(true/*leaf*/), "sum_task");
+  // execution.
+
+  {
+    TaskVariantRegistrar registrar(SUM_TASK_ID, "sum");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    registrar.set_leaf(true);
+    Runtime::preregister_task_variant<int, sum_task>(registrar, "sum");
+  }
 
   return Runtime::start(argc, argv);
 }

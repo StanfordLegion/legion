@@ -478,7 +478,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(arg_manager == NULL);
 #endif
-          arg_manager = legion_new<AllocManager>(arglen);
+          arg_manager = new AllocManager(arglen);
           arg_manager->add_reference();
           args = arg_manager->get_allocation();
         }
@@ -607,7 +607,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Create a new grant impl object to perform the unpack
-      grant = Grant(legion_new<GrantImpl>());
+      grant = Grant(new GrantImpl());
       grant.impl->unpack_grant(derez);
     }
 
@@ -755,7 +755,7 @@ namespace Legion {
           // If the arg manager is not NULL then we delete the
           // argument manager and just zero out the arguments
           if (arg_manager->remove_reference())
-            legion_delete(arg_manager);
+            delete (arg_manager);
           arg_manager = NULL;
         }
         else
@@ -1830,7 +1830,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(arg_manager == NULL);
 #endif
-          this->arg_manager = legion_new<AllocManager>(this->arglen); 
+          this->arg_manager = new AllocManager(this->arglen); 
           this->arg_manager->add_reference();
           this->args = this->arg_manager->get_allocation();
           memcpy(this->args, rhs->args, this->arglen);
@@ -5001,7 +5001,7 @@ namespace Legion {
       if (check_privileges)
         perform_privilege_checks();
       // Get a future from the parent context to use as the result
-      result = Future(legion_new<FutureImpl>(runtime, true/*register*/,
+      result = Future(new FutureImpl(runtime, true/*register*/,
             runtime->get_available_distributed_id(!top_level_task), 
             runtime->address_space, this));
       check_empty_field_requirements(); 
@@ -7034,7 +7034,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(arg_manager == NULL);
 #endif
-        arg_manager = legion_new<AllocManager>(arglen);
+        arg_manager = new AllocManager(arglen);
         arg_manager->add_reference();
         args = arg_manager->get_allocation();
         memcpy(args, launcher.global_arg.get_ptr(), arglen);
@@ -7102,7 +7102,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(arg_manager == NULL);
 #endif
-        arg_manager = legion_new<AllocManager>(arglen);
+        arg_manager = new AllocManager(arglen);
         arg_manager->add_reference();
         args = arg_manager->get_allocation();
         memcpy(args, launcher.global_arg.get_ptr(), arglen);
@@ -7139,7 +7139,7 @@ namespace Legion {
       if (launcher.predicate != Predicate::TRUE_PRED)
         initialize_predicate(launcher.predicate_false_future,
                              launcher.predicate_false_result);
-      reduction_future = Future(legion_new<FutureImpl>(runtime,
+      reduction_future = Future(new FutureImpl(runtime,
             true/*register*/, runtime->get_available_distributed_id(true), 
             runtime->address_space, this));
       check_empty_field_requirements();
@@ -7844,7 +7844,7 @@ namespace Legion {
     FutureMapImpl* IndexTask::create_future_map(TaskContext *ctx) 
     //--------------------------------------------------------------------------
     {
-      return legion_new<FutureMapImpl>(ctx, this, runtime,
+      return new FutureMapImpl(ctx, this, runtime,
             runtime->get_available_distributed_id(true/*needs continuation*/),
             runtime->address_space);
     }
