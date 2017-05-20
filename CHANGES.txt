@@ -7,6 +7,18 @@ Version ??.??.? (?? ??, ????)
   * Regent
     - Added support running normal tasks on I/O processors
     - Added support for OpenMP code generation via __demand(__openmp)
+  * C API
+    - Removed the following deprecated APIs:
+          legion_physical_region_get_accessor_generic
+          legion_physical_region_get_accessor_array
+            (use legion_physical_region_get_field_accessor_* instead)
+          legion_runtime_set_registration_callback
+            (use legion_runtime_add_registration_callback instead)
+          legion_runtime_register_task_void
+          legion_runtime_register_task
+          legion_runtime_register_task_uint32
+          legion_runtime_register_task_uint64
+            (use legion_runtime_preregister_task_variant_* instead)
 
 Version 17.02.0 (February 14, 2017)
   * General

@@ -2787,16 +2787,6 @@ extern "C" {
   legion_physical_region_get_field_id(legion_physical_region_t handle, size_t index);
 
   /**
-   * Safe for use only with instances with a single field.
-   *
-   * @return Caller takes ownership of return value.
-   *
-   * @see Legion::PhysicalRegion::get_accessor()
-   */
-  legion_accessor_generic_t
-  legion_physical_region_get_accessor_generic(legion_physical_region_t handle);
-
-  /**
    * @return Caller takes ownership of return value.
    *
    * @see Legion::PhysicalRegion::get_field_accessor()
@@ -2805,17 +2795,6 @@ extern "C" {
   legion_physical_region_get_field_accessor_generic(
     legion_physical_region_t handle,
     legion_field_id_t fid);
-
-  /**
-   * Safe for use only with instances with a single field.
-   *
-   * @return Caller takes ownership of return value.
-   *
-   * @see Legion::PhysicalRegion::get_field_accessor()
-   */
-  legion_accessor_array_t
-  legion_physical_region_get_accessor_array(
-    legion_physical_region_t handle);
 
   /**
    * @return Caller takes ownership of return value.
@@ -3417,10 +3396,10 @@ extern "C" {
   legion_runtime_get_input_args(void);
 
   /**
-   * @see Legion::Runtime::set_registration_callback()
+   * @see Legion::Runtime::add_registration_callback()
    */
   void
-  legion_runtime_set_registration_callback(
+  legion_runtime_add_registration_callback(
     legion_registration_callback_pointer_t callback);
 
   /**
@@ -3431,70 +3410,6 @@ extern "C" {
     legion_runtime_t runtime,
     legion_mapper_t mapper,
     legion_processor_t proc);
-
-  /**
-   * @deprecated
-   *
-   * @see Legion::Runtime::register_legion_task()
-   */
-  legion_task_id_t
-  legion_runtime_register_task_void(
-    legion_task_id_t id,
-    legion_processor_kind_t proc_kind,
-    bool single,
-    bool index,
-    legion_variant_id_t vid /* = AUTO_GENERATE_ID */,
-    legion_task_config_options_t options,
-    const char *task_name /* = NULL*/,
-    legion_task_pointer_void_t task_pointer);
-
-  /**
-   * @deprecated
-   *
-   * @see Legion::Runtime::register_legion_task()
-   */
-  legion_task_id_t
-  legion_runtime_register_task(
-    legion_task_id_t id,
-    legion_processor_kind_t proc_kind,
-    bool single,
-    bool index,
-    legion_variant_id_t vid /* = AUTO_GENERATE_ID */,
-    legion_task_config_options_t options,
-    const char *task_name /* = NULL*/,
-    legion_task_pointer_t task_pointer);
-
-  /**
-   * @deprecated
-   *
-   * @see Legion::Runtime::register_legion_task()
-   */
-  legion_task_id_t
-  legion_runtime_register_task_uint32(
-    legion_task_id_t id,
-    legion_processor_kind_t proc_kind,
-    bool single,
-    bool index,
-    legion_variant_id_t vid /* = AUTO_GENERATE_ID */,
-    legion_task_config_options_t options,
-    const char *task_name /* = NULL*/,
-    legion_task_pointer_uint32_t task_pointer);
-
-  /**
-   * @deprecated
-   *
-   * @see Legion::Runtime::register_legion_task()
-   */
-  legion_task_id_t
-  legion_runtime_register_task_uint64(
-    legion_task_id_t id,
-    legion_processor_kind_t proc_kind,
-    bool single,
-    bool index,
-    legion_variant_id_t vid /* = AUTO_GENERATE_ID */,
-    legion_task_config_options_t options,
-    const char *task_name /* = NULL*/,
-    legion_task_pointer_uint64_t task_pointer);
 
   /**
    * @see Legion::Runtime::register_task_variant()
