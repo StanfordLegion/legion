@@ -1969,7 +1969,7 @@ namespace Legion {
                     IndexPartNode *row_src, FieldSpaceNode *col_src,
                     RegionTreeForest *ctx);
       PartitionNode(const PartitionNode &rhs);
-      ~PartitionNode(void);
+      virtual ~PartitionNode(void);
     public:
       PartitionNode& operator=(const PartitionNode &rhs);
     public:
