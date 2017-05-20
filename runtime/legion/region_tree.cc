@@ -3715,6 +3715,14 @@ namespace Legion {
     IndexSpaceNode* RegionTreeForest::get_node(IndexSpace space)
     //--------------------------------------------------------------------------
     {
+      if (!space.exists())
+      {
+        log_index.error("Invalid request for IndexSpace NO_SPACE.");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_INDEX_SPACE_ENTRY);
+      }
       {
         AutoLock l_lock(lookup_lock,1,false/*exclusive*/); 
         std::map<IndexSpace,IndexSpaceNode*>::const_iterator finder = 
@@ -3778,6 +3786,14 @@ namespace Legion {
     IndexPartNode* RegionTreeForest::get_node(IndexPartition part)
     //--------------------------------------------------------------------------
     {
+      if (!part.exists())
+      {
+        log_index.error("Invalid request for IndexPartition NO_PART.");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_INDEX_SPACE_ENTRY);
+      }
       {
         AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
         std::map<IndexPartition,IndexPartNode*>::const_iterator finder =
@@ -3841,6 +3857,14 @@ namespace Legion {
     FieldSpaceNode* RegionTreeForest::get_node(FieldSpace space) 
     //--------------------------------------------------------------------------
     {
+      if (!space.exists())
+      {
+        log_index.error("Invalid request for FieldSpace NO_SPACE.");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_INDEX_SPACE_ENTRY);
+      }
       {
         AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
         std::map<FieldSpace,FieldSpaceNode*>::const_iterator finder = 
@@ -3905,6 +3929,14 @@ namespace Legion {
                                            bool need_check /* = true*/)
     //--------------------------------------------------------------------------
     {
+      if (!handle.exists())
+      {
+        log_index.error("Invalid request for LogicalRegion NO_REGION.");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_INDEX_SPACE_ENTRY);
+      }
       // Check to see if the node already exists
       bool has_top_level_region;
       {
@@ -3999,6 +4031,14 @@ namespace Legion {
                                               bool need_check /* = true*/)
     //--------------------------------------------------------------------------
     {
+      if (!handle.exists())
+      {
+        log_index.error("Invalid request for LogicalPartition NO_PART.");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_INDEX_SPACE_ENTRY);
+      }
       // Check to see if the node already exists
       {
         AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
@@ -4025,9 +4065,14 @@ namespace Legion {
     RegionNode* RegionTreeForest::get_tree(RegionTreeID tid)
     //--------------------------------------------------------------------------
     {
+      if (tid == 0)
+      {
+        log_run.error("Invalid request for tree ID 0 which is never a tree ID");
 #ifdef DEBUG_LEGION
-      assert(tid != 0);
+        assert(false);
 #endif
+        exit(ERROR_INVALID_TREE_ENTRY);
+      }
       {
         AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
         std::map<RegionTreeID,RegionNode*>::const_iterator finder = 
