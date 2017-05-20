@@ -162,6 +162,8 @@ namespace Legion {
     {
       if ((req.handle_type == SINGULAR) || (req.handle_type == REG_PROJECTION))
       {
+        if (!req.region.exists())
+          return;
         runtime->forest->initialize_path(req.region.get_index_space(),
                                          req.parent.get_index_space(), path);
       }
@@ -170,6 +172,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(req.handle_type == PART_PROJECTION);
 #endif
+        if (!req.partition.exists())
+          return;
         runtime->forest->initialize_path(req.partition.get_index_partition(),
                                          req.parent.get_index_space(), path);
       }
