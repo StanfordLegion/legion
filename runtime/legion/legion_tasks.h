@@ -735,6 +735,7 @@ namespace Legion {
       virtual RtEvent perform_must_epoch_version_analysis(MustEpochOp *own);
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
     public:
       virtual void resolve_false(bool speculated, bool launched);
       virtual void early_map_task(void);

@@ -1941,6 +1941,15 @@ namespace Legion {
         for (unsigned idx = 0; idx < regions.size(); idx++)
           log_requirement(our_uid, idx, regions[idx]);
       }
+#ifdef DEBUG_LEGION
+      {
+        std::vector<RegionTreePath> privilege_paths(regions.size());
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+          initialize_privilege_path(privilege_paths[idx], regions[idx]);
+        perform_intra_task_alias_analysis(false/*tracing*/, NULL/*trace*/,
+                                          privilege_paths);
+      }
+#endif
       // Return true if this point has any valid region requirements
       return (!all_invalid);
     }
@@ -6150,6 +6159,55 @@ namespace Legion {
     {
       // should never be called
       assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointTask::report_interfering_requirements(unsigned idx1,
+                                                    unsigned idx2)
+    //--------------------------------------------------------------------------
+    {
+      switch (index_point.get_dim())
+      {
+        case 1:
+          {
+            log_run.error("Aliased and interfering region requirements for "
+                    "point tasks are not permitted. Region requirements "
+                    "%d and %d of point %lld of index space task %s (UID %lld) "
+                    "in parent task %s (UID %lld) are interfering.", 
+                    idx1, idx2, index_point[0], get_task_name(),
+                    get_unique_id(), parent_ctx->get_task_name(),
+                    parent_ctx->get_unique_id());
+            break;
+          }
+        case 2:
+          {
+            log_run.error("Aliased and interfering region requirements for "
+                    "point tasks are not permitted. Region requirements "
+                    "%d and %d of point (%lld,%lld) of index space task %s "
+                    "(UID %lld) in parent task %s (UID %lld) are interfering.",
+                    idx1, idx2, index_point[0], index_point[1], 
+                    get_task_name(), get_unique_id(), 
+                    parent_ctx->get_task_name(), parent_ctx->get_unique_id());
+            break;
+          }
+        case 3:
+          {
+            log_run.error("Aliased and interfering region requirements for "
+                    "point tasks are not permitted. Region requirements "
+                    "%d and %d of point (%lld,%lld,%lld) of index space task %s"
+                    " (UID %lld) in parent task %s (UID %lld) are interfering.",
+                    idx1, idx2, index_point[0], index_point[1], 
+                    index_point[2], get_task_name(), get_unique_id(), 
+                    parent_ctx->get_task_name(), parent_ctx->get_unique_id());
+            break;
+          }
+        default:
+          assert(false);
+      }
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_ALIASED_REGION_REQUIREMENTS);
     }
 
     //--------------------------------------------------------------------------
