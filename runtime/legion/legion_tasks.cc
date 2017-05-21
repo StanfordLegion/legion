@@ -3672,19 +3672,85 @@ namespace Legion {
         else
           shard_manager = new ShardManager(runtime, 0/*no repl ctx*/, 
                 total_shards, 0/*idx*/, runtime->address_space, this);
+        // We're going to store the needed instances locally so we can
+        // do the mapping when we return on behalf of all the shards
+        physical_instances.resize(regions.size());
         // Create the shard tasks and have them complete their mapping
-        for (unsigned idx = 0; idx < total_shards; idx++)
+        for (unsigned shard_idx = 0; shard_idx < total_shards; shard_idx++)
         {
           Processor target = output.control_replication_map.empty() ? 
-            output.task_mappings[idx].target_procs[0] : 
-            output.control_replication_map[idx];
-          ShardTask *shard = shard_manager->create_shard(idx, target);
+            output.task_mappings[shard_idx].target_procs[0] : 
+            output.control_replication_map[shard_idx];
+          ShardTask *shard = shard_manager->create_shard(shard_idx, target);
           shard->clone_single_from(this);
           // Finalize the mapping output
-          shard->finalize_map_task_output(input, output.task_mappings[idx],
+          shard->finalize_map_task_output(input,output.task_mappings[shard_idx],
                                           must_epoch_owner, valid_instances);
           // Now record the instances that we need locally
-
+          const std::deque<InstanceSet> &shard_instances = 
+            shard->get_physical_instances();
+          for (unsigned region_idx = 0; 
+                region_idx < regions.size(); region_idx++)
+          {
+            if (no_access_regions[region_idx] || 
+                !regions[region_idx].region.exists())
+              continue;
+            const InstanceSet &instances = shard_instances[region_idx];
+            InstanceSet &local_instances = physical_instances[region_idx];
+            const bool is_write = IS_WRITE(regions[region_idx]);
+            // No virtual mappings are permitted
+            if (instances.is_virtual_mapping())
+            {
+              log_run.error("Invalid mapper output from invocation of '%s' on "
+                            "mapper %s. Mapper selected a virtual mapping for "
+                            "region %d of replicated copy %d of task %s "
+                            "(UID %lld). Virtual mappings are not permitted "
+                            "for replicated tasks.", "map_replicate_task",
+                            mapper->get_mapper_name(), region_idx, shard_idx,
+                            get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+              assert(false);
+#endif
+              exit(ERROR_INVALID_MAPPER_OUTPUT);
+            }
+            // For each of the shard instances
+            for (unsigned idx1 = 0; idx1 < instances.size(); idx1++)
+            {
+              const InstanceRef &shard_ref = instances[idx1];
+              bool found = false;
+              for (unsigned idx2 = 0; idx2 < local_instances.size(); idx2++)
+              {
+                InstanceRef &local_ref = local_instances[idx2];
+                if (shard_ref.get_manager() != local_ref.get_manager())
+                  continue;
+                // If this is a write then we need to check for 
+                // overlapping fields to prevent common writes
+                if (is_write && !(local_ref.get_valid_fields() * 
+                                  shard_ref.get_valid_fields()))
+                {
+                  log_run.error("Invalid mapper output from invocation of '%s' "
+                                "on mapper %s. Mapper selected the same "
+                                "physical instance for write privilege region "
+                                "%d of two different replicated copies of task "
+                                "%s (UID %lld). All regions with write "
+                                "privileges must be mapped to different "
+                                "physical instances for replicated tasks.",
+                                "map_replicate_task", mapper->get_mapper_name(),
+                                region_idx, get_task_name(), get_unique_id());
+#ifdef DEBUG_LEGION
+                  assert(false);
+#endif
+                  exit(ERROR_INVALID_MAPPER_OUTPUT);
+                }
+                // Update the set of needed fields
+                local_ref.update_fields(shard_ref.get_valid_fields());
+                found = true;
+                break;
+              }
+              if (!found)
+                local_instances.add_instance(shard_ref);
+            }
+          }
         }
       }
     }

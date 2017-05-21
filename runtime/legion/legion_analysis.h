@@ -1501,6 +1501,8 @@ namespace Legion {
       inline PhysicalManager* get_manager(void) const { return manager; }
       inline const FieldMask& get_valid_fields(void) const 
         { return valid_fields; }
+      inline void update_fields(const FieldMask &update) 
+        { valid_fields |= update; }
     public:
       inline bool is_local(void) const { return local; }
       MappingInstance get_mapping_instance(void) const;
