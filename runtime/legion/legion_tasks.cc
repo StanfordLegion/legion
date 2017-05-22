@@ -6268,12 +6268,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       slice_owner = owner;
-      compute_point_region_requirements(&mp);
-      update_no_access_regions();
       // Get our point
       index_point = mp.get_domain_point();
       // Get our argument
       mp.assign_argument(local_args, local_arglen);
+      // Compute our point region requirements
+      compute_point_region_requirements(&mp);
+      update_no_access_regions();
       // Make a new termination event for this point
       point_termination = Runtime::create_ap_user_event();
     }  
