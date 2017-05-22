@@ -282,7 +282,8 @@ namespace Legion {
                               bool stealable, bool duplicate_args);
       void update_grants(const std::vector<Grant> &grants);
       void update_arrival_barriers(const std::vector<PhaseBarrier> &barriers);
-      bool compute_point_region_requirements(MinimalPoint *mp = NULL);
+      void compute_point_region_requirements(void);
+      void complete_point_projection(void);
       void early_map_regions(std::set<RtEvent> &applied_conditions,
                              const std::vector<unsigned> &must_premap);
       bool prepare_steal(void);
@@ -704,7 +705,7 @@ namespace Legion {
      * launch.  It will primarily be managed by its enclosing
      * slice task owner.
      */
-    class PointTask : public SingleTask, 
+    class PointTask : public SingleTask, public ProjectionPoint,  
                       public LegionHeapify<PointTask> {
     public:
       static const AllocationType alloc_type = POINT_TASK_ALLOC;
@@ -760,7 +761,12 @@ namespace Legion {
       virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual void handle_misspeculation(void);
     public:
-      void initialize_point(SliceTask *owner, MinimalPoint &mp);
+      // ProjectionPoint methods
+      virtual const DomainPoint& get_domain_point(void) const;
+      virtual void set_projection_result(unsigned idx, LogicalRegion result);
+    public:
+      void initialize_point(SliceTask *owner, const DomainPoint &point,
+                            const FutureMap &point_arguments);
       void send_back_created_state(AddressSpaceID target);
     public:
       virtual void record_reference_mutation_effect(RtEvent event);
@@ -957,10 +963,8 @@ namespace Legion {
                                  size_t result_size, bool owner);
     public:
       virtual void register_must_epoch(void);
-      PointTask* clone_as_point_task(MinimalPoint &mp);
+      PointTask* clone_as_point_task(const DomainPoint &point);
       void enumerate_points(void);
-      void project_region_requirements(
-                             std::vector<MinimalPoint> &minimal_points);
       const void* get_predicate_false_result(size_t &result_size);
     public:
       RtEvent perform_versioning_analysis(void);
@@ -1071,32 +1075,6 @@ namespace Legion {
     private:
       Reservation slice_lock;
       MultiTask *const owner;
-    };
-
-    /**
-     * \class MinimalPoint
-     * A helper class for managing point specific data
-     * until we are ready to expand to a full point task
-     */
-    class MinimalPoint {
-    public:
-      MinimalPoint(void);
-      MinimalPoint(const MinimalPoint &rhs);
-      ~MinimalPoint(void);
-    public:
-      MinimalPoint& operator=(const MinimalPoint &rhs);
-    public:
-      inline void add_domain_point(const DomainPoint &p) { dp = p; }
-      void add_projection_region(unsigned index, LogicalRegion handle);
-      void add_argument(const Future &f);
-    public:
-      inline const DomainPoint& get_domain_point(void) const { return dp; }
-      void assign_argument(void *&local_arg, size_t &local_arglen);
-      LogicalRegion find_logical_region(unsigned index) const;
-    protected:
-      DomainPoint dp;
-      std::map<unsigned,LogicalRegion> projections;
-      Future arg;
     };
 
   }; // namespace Internal 

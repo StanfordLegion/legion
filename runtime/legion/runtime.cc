@@ -8344,11 +8344,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ProjectionFunction::project_points(Task *task, unsigned idx, 
-                    Runtime *runtime, std::vector<MinimalPoint> &minimal_points)
+    void ProjectionFunction::project_points(const RegionRequirement &req, 
+     unsigned idx, Runtime *runtime, const std::vector<PointTask*> &point_tasks)
     //--------------------------------------------------------------------------
     {
-      const RegionRequirement &req = task->regions[idx];
 #ifdef DEBUG_LEGION
       assert(req.handle_type != SINGULAR);
 #endif
@@ -8357,24 +8356,26 @@ namespace Legion {
         AutoLock p_lock(projection_reservation);
         if (req.handle_type == PART_PROJECTION)
         {
-          for (std::vector<MinimalPoint>::iterator it = 
-                minimal_points.begin(); it != minimal_points.end(); it++)
+          for (std::vector<PointTask*>::const_iterator it = 
+                point_tasks.begin(); it != point_tasks.end(); it++)
           {
-            LogicalRegion result = functor->project(task, idx, req.partition, 
-                                                    it->get_domain_point());
-            check_projection_partition_result(req, task, idx, result, runtime);
-            it->add_projection_region(idx, result);
+            LogicalRegion result = functor->project(*it, idx, req.partition, 
+                                                    (*it)->get_domain_point());
+            check_projection_partition_result(req, static_cast<Task*>(*it), 
+                                              idx, result, runtime);
+            (*it)->set_projection_result(idx, result);
           }
         }
         else
         {
-          for (std::vector<MinimalPoint>::iterator it = 
-                minimal_points.begin(); it != minimal_points.end(); it++)
+          for (std::vector<PointTask*>::const_iterator it = 
+                point_tasks.begin(); it != point_tasks.end(); it++)
           {
-            LogicalRegion result = functor->project(task, idx, req.region, 
-                                                    it->get_domain_point());
-            check_projection_region_result(req, task, idx, result, runtime);
-            it->add_projection_region(idx, result);
+            LogicalRegion result = functor->project(*it, idx, req.region, 
+                                                    (*it)->get_domain_point());
+            check_projection_region_result(req, static_cast<Task*>(*it), 
+                                           idx, result, runtime);
+            (*it)->set_projection_result(idx, result);
           }
         }
       }
@@ -8382,24 +8383,26 @@ namespace Legion {
       {
         if (req.handle_type == PART_PROJECTION)
         {
-          for (std::vector<MinimalPoint>::iterator it = 
-                minimal_points.begin(); it != minimal_points.end(); it++)
+          for (std::vector<PointTask*>::const_iterator it = 
+                point_tasks.begin(); it != point_tasks.end(); it++)
           {
-            LogicalRegion result = functor->project(task, idx, req.partition, 
-                                                    it->get_domain_point());
-            check_projection_partition_result(req, task, idx, result, runtime);
-            it->add_projection_region(idx, result);
+            LogicalRegion result = functor->project(*it, idx, req.partition, 
+                                                    (*it)->get_domain_point());
+            check_projection_partition_result(req, static_cast<Task*>(*it), 
+                                              idx, result, runtime);
+            (*it)->set_projection_result(idx, result);
           }
         }
         else
         {
-          for (std::vector<MinimalPoint>::iterator it = 
-                minimal_points.begin(); it != minimal_points.end(); it++)
+          for (std::vector<PointTask*>::const_iterator it = 
+                point_tasks.begin(); it != point_tasks.end(); it++)
           {
-            LogicalRegion result = functor->project(task, idx, req.region, 
-                                                    it->get_domain_point());
-            check_projection_region_result(req, task, idx, result, runtime);
-            it->add_projection_region(idx, result);
+            LogicalRegion result = functor->project(*it, idx, req.region, 
+                                                    (*it)->get_domain_point());
+            check_projection_region_result(req, static_cast<Task*>(*it), 
+                                           idx, result, runtime);
+            (*it)->set_projection_result(idx, result);
           }
         }
       }

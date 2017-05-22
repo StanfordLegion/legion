@@ -1234,7 +1234,6 @@ namespace Legion {
     class IndexTask;
     class SliceTask;
     class RemoteTask;
-    class MinimalPoint;
 
     // legion_context.h
     /**
@@ -1413,7 +1412,6 @@ namespace Legion {
     friend class Internal::PointTask;                       \
     friend class Internal::IndexTask;                       \
     friend class Internal::SliceTask;                       \
-    friend class Internal::MinimalPoint;                    \
     friend class Internal::RegionTreeForest;                \
     friend class Internal::IndexSpaceNode;                  \
     friend class Internal::IndexPartNode;                   \
