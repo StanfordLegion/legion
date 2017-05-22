@@ -6257,10 +6257,9 @@ function codegen.expr_future(cx, node)
   local content_type = expr_type.result_type
   local content_value = std.implicit_cast(value_type, content_type, value.value)
 
-  local result_type = std.type_size_bucket_type(content_type)
-  if result_type == terralib.types.unit then
+  if content_type == terralib.types.unit then
     assert(false)
-  elseif result_type == c.legion_task_result_t then
+  else
     local buffer = terralib.newsymbol(&opaque, "buffer")
     local data_ptr = terralib.newsymbol(&uint8, "data_ptr")
     local result = terralib.newsymbol(c.legion_future_t, "result")
@@ -6280,24 +6279,11 @@ function codegen.expr_future(cx, node)
       std.assert(
         [data_ptr] - [&uint8]([buffer]) == buffer_size,
         "mismatch in data serialized in future")
-      var [result] = c.legion_future_from_buffer(
-        [cx.runtime], [&opaque]([buffer]), buffer_size)
+      var [result] = c.legion_future_from_untyped_pointer(
+        [cx.runtime], [buffer], buffer_size)
       c.free([buffer])
     end
 
-    return values.value(
-      node,
-      expr.once_only(actions, `([expr_type]{ __result = [result] }), expr_type),
-      expr_type)
-  else
-    local result_type_name = std.type_size_bucket_name(result_type)
-    local future_from_fn = c["legion_future_from" .. result_type_name]
-    local result = terralib.newsymbol(c.legion_future_t, "result")
-    local actions = quote
-      [actions]
-      var buffer = [content_value]
-      var [result] = [future_from_fn]([cx.runtime], @[&result_type](&buffer))
-    end
     return values.value(
       node,
       expr.once_only(actions, `([expr_type]{ __result = [result] }), expr_type),
@@ -6315,42 +6301,29 @@ function codegen.expr_future_get_result(cx, node)
     [emit_debuginfo(node)]
   end
 
-  local result_type = std.type_size_bucket_type(expr_type)
-  if result_type == terralib.types.unit then
+  if expr_type == terralib.types.unit then
     assert(false)
-  elseif result_type == c.legion_task_result_t then
-    local result = terralib.newsymbol(c.legion_task_result_t, "result")
-    local result_value = terralib.newsymbol(expr_type, "result_value")
+  else
+    local buffer = terralib.newsymbol(&opaque, "buffer")
+    local buffer_size = terralib.newsymbol(c.size_t, "buffer_size")
+    local result = terralib.newsymbol(expr_type, "result")
     local data_ptr = terralib.newsymbol(&uint8, "data_ptr")
 
     local deser_actions, deser_value = std.deserialize(
-      expr_type, `([result].value), `(&[data_ptr]))
+      expr_type, buffer, `(&[data_ptr]))
     local actions = quote
       [actions]
-      var [result] = c.legion_future_get_result([value.value].__result)
-      var [data_ptr] = [&uint8]([result].value) + terralib.sizeof(expr_type)
+      var [buffer] = c.legion_future_get_untyped_pointer([value.value].__result)
+      var [buffer_size] = c.legion_future_get_untyped_size([value.value].__result)
+      var [data_ptr] = [&uint8]([buffer]) + terralib.sizeof(expr_type)
       [deser_actions]
-      var [result_value] = [deser_value]
-      std.assert([result].value_size == [data_ptr] - [&uint8]([result].value),
+      var [result] = [deser_value]
+      std.assert([buffer_size] == [data_ptr] - [&uint8]([buffer]),
         "mismatch in data left over in future")
-      c.legion_task_result_destroy(result)
     end
     return values.value(
       node,
-      expr.just(actions, result_value),
-      expr_type)
-  else
-    local result_type_name = std.type_size_bucket_name(result_type)
-    local get_result_fn = c["legion_future_get_result" .. result_type_name]
-    local result_value = terralib.newsymbol(expr_type, "result_value")
-    local actions = quote
-      [actions]
-      var result = [get_result_fn]([value.value].__result)
-      var [result_value] = @[&expr_type](&result)
-    end
-    return values.value(
-      node,
-      expr.just(actions, result_value),
+      expr.just(actions, result),
       expr_type)
   end
 end
@@ -7939,26 +7912,33 @@ function codegen.stat_return(cx, node)
   end
   local value = codegen.expr(cx, node.value):read(cx)
   local value_type = std.as_read(node.value.expr_type)
-  local return_type = cx.expected_return_type
-  local result_type = std.type_size_bucket_type(return_type)
+  local result_type = cx.expected_return_type
 
-  local result = terralib.newsymbol(return_type, "result")
+  local result = terralib.newsymbol(result_type, "result")
   local actions = quote
     [value.actions]
-    var [result] = [std.implicit_cast(value_type, return_type, value.value)]
+    var [result] = [std.implicit_cast(value_type, result_type, value.value)]
   end
 
-  if result_type == c.legion_task_result_t then
+  if result_type == terralib.types.unit then
     return quote
       [actions]
-      return c.legion_task_result_create(
-        [&opaque](&[result]),
-        terralib.sizeof([return_type]))
+      c.printf("returning void\n")
+      return
     end
   else
     return quote
       [actions]
-      return @[&result_type](&[result])
+      var buffer_size = terralib.sizeof([result_type])
+      var buffer = c.malloc(buffer_size)
+      std.assert(buffer ~= nil, "malloc failed in return")
+      @([&result_type](buffer)) = [result]
+      c.printf("returning: %p %llu\n", buffer, buffer_size)
+      return std.serialized_value {
+        value = buffer,
+        size = buffer_size,
+      }
+      -- Task wrapper is responsible for calling free.
     end
   end
 end
@@ -8749,9 +8729,18 @@ function codegen.top_task(cx, node)
   end
 
   local result_type = std.type_size_bucket_type(return_type)
+  local guard = quote end
+  if result_type ~= terralib.types.unit then
+    guard = quote
+      std.assert_error(false, [get_source_location(node) .. ": missing return statement in task that is expected to return " .. tostring(return_type)])
+    end
+  end
   local terra proto([c_params]): result_type
-    [preamble]; -- Semicolon required. This is not an array access.
-    [body]
+    do
+      [preamble]; -- Semicolon required. This is not an array access.
+      [body]
+    end
+    [guard]
   end
   proto:setname(tostring(task:getname()))
   task:setdefinition(proto)

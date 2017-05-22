@@ -41,7 +41,7 @@ where reads(k.{b, c}), writes(k.{b, c}) do
   end
 end
 
-task main() : int
+task main()
   var m = 5
   var n = region(ispace(ptr, m), a)
   for _ = 0, m do
