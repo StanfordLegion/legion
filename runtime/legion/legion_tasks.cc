@@ -1855,28 +1855,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool TaskOp::compute_point_region_requirements(MinimalPoint *mp/*= NULL*/)
+    void TaskOp::compute_point_region_requirements(void)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, COMPUTE_POINT_REQUIREMENTS_CALL);
-      bool all_invalid = true;
       // Update the region requirements for this point
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         if (regions[idx].handle_type != SINGULAR)
         {
-          if (mp != NULL)
-          {
-            // If we have a minimal point we should be able to find it
-            regions[idx].region = mp->find_logical_region(idx);
-          }
-          else
-          {
-            ProjectionFunction *function = 
-              runtime->find_projection_function(regions[idx].projection);
-            regions[idx].region = 
-              function->project_point(this, idx, runtime, index_point);
-          }
+          ProjectionFunction *function = 
+            runtime->find_projection_function(regions[idx].projection);
+          regions[idx].region = 
+            function->project_point(this, idx, runtime, index_point);
           // Update the region requirement kind 
           regions[idx].handle_type = SINGULAR;
         }
@@ -1887,12 +1878,20 @@ namespace Legion {
           regions[idx].privilege = NO_ACCESS;
           continue;
         }
-        else
-          all_invalid = false;
         // Always check to see if there are any restrictions
         if (has_restrictions(idx, regions[idx].region))
           regions[idx].flags |= RESTRICTED_FLAG;
       }
+      complete_point_projection(); 
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskOp::complete_point_projection(void)
+    //--------------------------------------------------------------------------
+    {
+      SingleTask *single_task = dynamic_cast<SingleTask*>(this);
+      if (single_task != NULL)
+        single_task->update_no_access_regions();
       // Log our requirements that we computed
       if (Runtime::legion_spy_enabled)
       {
@@ -1909,8 +1908,6 @@ namespace Legion {
                                           privilege_paths);
       }
 #endif
-      // Return true if this point has any valid region requirements
-      return (!all_invalid);
     }
 
     //--------------------------------------------------------------------------
@@ -6264,20 +6261,61 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PointTask::initialize_point(SliceTask *owner, MinimalPoint &mp)
+    const DomainPoint& PointTask::get_domain_point(void) const
+    //--------------------------------------------------------------------------
+    {
+      return index_point;
+    }
+
+    //--------------------------------------------------------------------------
+    void PointTask::set_projection_result(unsigned idx, LogicalRegion result)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(idx < regions.size());
+#endif
+      RegionRequirement &req = regions[idx];
+#ifdef DEBUG_LEGION
+      assert(req.handle_type != SINGULAR);
+#endif
+      req.region = result;
+      req.handle_type = SINGULAR;
+      // Check to see if the region is a NO_REGION,
+      // if it is then switch the privilege to NO_ACCESS
+      if (req.region == LogicalRegion::NO_REGION)
+        req.privilege = NO_ACCESS;
+      else if (has_restrictions(idx, req.region))
+        req.flags |= RESTRICTED_FLAG;
+    }
+
+    //--------------------------------------------------------------------------
+    void PointTask::initialize_point(SliceTask *owner, const DomainPoint &point,
+                                     const FutureMap &point_arguments)
     //--------------------------------------------------------------------------
     {
       slice_owner = owner;
       // Get our point
-      index_point = mp.get_domain_point();
+      index_point = point;
       // Get our argument
-      mp.assign_argument(local_args, local_arglen);
-      // Compute our point region requirements
-      compute_point_region_requirements(&mp);
-      update_no_access_regions();
+      if (point_arguments.impl != NULL)
+      {
+        Future f = point_arguments.impl->get_future(point, true/*allow empty*/);
+        if (f.impl != NULL)
+        {
+          ApEvent ready = f.impl->get_ready_event();
+          ready.lg_wait();
+          local_arglen = f.impl->get_untyped_size();
+          // Have to make a local copy since the point takes ownership
+          if (local_arglen > 0)
+          {
+            local_args = malloc(local_arglen);
+            memcpy(local_args, f.impl->get_untyped_result(), local_arglen);
+          }
+        }
+      }
       // Make a new termination event for this point
       point_termination = Runtime::create_ap_user_event();
-    }  
+    }
 
     //--------------------------------------------------------------------------
     void PointTask::send_back_created_state(AddressSpaceID target)
@@ -7103,7 +7141,6 @@ namespace Legion {
         else
           first = false;
         index_point = itr.p; 
-        compute_point_region_requirements();
         // Get our local args
         Future local_arg = point_arguments.impl->get_future(index_point);
         if (local_arg.impl != NULL)
@@ -7116,6 +7153,7 @@ namespace Legion {
           local_args = NULL;
           local_arglen = 0;
         }
+        compute_point_region_requirements();
         InlineContext *inline_ctx = new InlineContext(runtime, enclosing, this);
         // Save the inner context as the parent ctx
         parent_ctx = inline_ctx;
@@ -8165,7 +8203,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PointTask* SliceTask::clone_as_point_task(MinimalPoint &mp)
+    PointTask* SliceTask::clone_as_point_task(const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_CLONE_AS_POINT_CALL);
@@ -8178,7 +8216,7 @@ namespace Legion {
       result->must_epoch_task = this->must_epoch_task;
       result->index_domain = this->index_domain;
       // Now figure out our local point information
-      result->initialize_point(this, mp);
+      result->initialize_point(this, point, point_arguments);
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_slice_point(get_unique_id(), 
                                    result->get_unique_id(),
@@ -8196,36 +8234,12 @@ namespace Legion {
       assert(num_points > 0);
 #endif
       unsigned point_idx = 0;
-      std::vector<MinimalPoint> minimal_points(num_points);
+      points.resize(num_points);
       // Enumerate all the points in our slice and make point tasks
       for (Domain::DomainPointIterator itr(internal_domain); 
             itr; itr++, point_idx++)
-      {
-        MinimalPoint &mp = minimal_points[point_idx];
-        mp.add_domain_point(itr.p);
-        // Find the argument for this point if it exists
-        if (point_arguments.impl != NULL)
-          mp.add_argument(
-              point_arguments.impl->get_future(itr.p, true/*allow empty*/));
-      }
+        points[point_idx] = clone_as_point_task(itr.p);
       // Compute any projection region requirements
-      project_region_requirements(minimal_points);  
-      // Then create all the point tasks
-      points.resize(num_points);
-      for (unsigned idx = 0; idx < num_points; idx++)
-        points[idx] = clone_as_point_task(minimal_points[idx]);
-      // Mark how many points we have
-      num_unmapped_points = points.size();
-      num_uncomplete_points = points.size();
-      num_uncommitted_points = points.size();
-    } 
-
-    //--------------------------------------------------------------------------
-    void SliceTask::project_region_requirements(
-                                      std::vector<MinimalPoint> &minimal_points)
-    //--------------------------------------------------------------------------
-    {
-      // Figure out which requirements are projection and update them
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         if (regions[idx].handle_type == SINGULAR)
@@ -8234,10 +8248,17 @@ namespace Legion {
         {
           ProjectionFunction *function = 
             runtime->find_projection_function(regions[idx].projection);
-          function->project_points(this, idx, runtime, minimal_points);
+          function->project_points(regions[idx], idx, runtime, points);
         }
       }
-    }
+      // Update the no access regions
+      for (unsigned idx = 0; idx < points.size(); idx++)
+        points[idx]->complete_point_projection();
+      // Mark how many points we have
+      num_unmapped_points = points.size();
+      num_uncomplete_points = points.size();
+      num_uncommitted_points = points.size();
+    } 
 
     //--------------------------------------------------------------------------
     const void* SliceTask::get_predicate_false_result(size_t &result_size)
@@ -8812,93 +8833,6 @@ namespace Legion {
     {
       const DeferredSliceArgs *slice_args = (const DeferredSliceArgs*)args;
       slice_args->slicer->perform_slice(slice_args->slice);
-    }
-
-    /////////////////////////////////////////////////////////////
-    // Minimal Point 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    MinimalPoint::MinimalPoint(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    MinimalPoint::MinimalPoint(const MinimalPoint &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should only be called with rhs being empty
-#ifdef DEBUG_LEGION
-      assert(rhs.dp.dim == 0);
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    MinimalPoint::~MinimalPoint(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    MinimalPoint& MinimalPoint::operator=(const MinimalPoint &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void MinimalPoint::add_projection_region(unsigned idx, LogicalRegion handle)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(projections.find(idx) == projections.end());
-#endif
-      projections[idx] = handle;
-    }
-    
-    //--------------------------------------------------------------------------
-    void MinimalPoint::add_argument(const Future &f)
-    //--------------------------------------------------------------------------
-    {
-      arg = f;
-    }
-
-    //--------------------------------------------------------------------------
-    void MinimalPoint::assign_argument(void *&local_arg, size_t &local_arglen)
-    //--------------------------------------------------------------------------
-    {
-      if (arg.impl != NULL)
-      {
-        ApEvent ready = arg.impl->get_ready_event();
-        ready.lg_wait();
-        local_arglen = arg.impl->get_untyped_size();
-        // Have to make a local copy since the point takes ownership
-        if (local_arglen > 0)
-        {
-          local_arg = malloc(local_arglen);
-          memcpy(local_arg, arg.impl->get_untyped_result(), local_arglen);
-        }
-      }
-      else
-      {
-        local_arg = NULL;
-        local_arglen = 0;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalRegion MinimalPoint::find_logical_region(unsigned index) const
-    //--------------------------------------------------------------------------
-    {
-      std::map<unsigned,LogicalRegion>::const_iterator finder = 
-        projections.find(index);
-#ifdef DEBUG_LEGION
-      assert(finder != projections.end());
-#endif
-      return finder->second;
     }
 
   }; // namespace Internal 
