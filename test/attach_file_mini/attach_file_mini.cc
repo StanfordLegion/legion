@@ -66,14 +66,16 @@ void top_level_task(const Task *task,
   std::vector<FieldID> field_vec;
   field_vec.push_back(FID_X);
   for(int reps = 0; reps < 2; reps++) {
-    pr_A = runtime->attach_file(ctx, input_file, lr_A, lr_A, field_vec, LEGION_FILE_CREATE);
+    AttachLauncher alr(EXTERNAL_POSIX_FILE, lr_A, lr_A);
+    alr.attach_file(input_file, field_vec, LEGION_FILE_CREATE);
+    pr_A = runtime->attach_external_resource(ctx, alr);
     
     CopyLauncher clr;
     clr.add_copy_requirements(RegionRequirement(lr_A, READ_ONLY, EXCLUSIVE, lr_A).add_field(FID_Y),
 			      RegionRequirement(lr_A, READ_WRITE, EXCLUSIVE, lr_A).add_field(FID_X));
     runtime->issue_copy_operation(ctx, clr);
 
-    runtime->detach_file(ctx, pr_A);
+    runtime->detach_external_resource(ctx, pr_A);
   }
   runtime->destroy_logical_region(ctx, lr_A);
   runtime->destroy_field_space(ctx, fs_A);
