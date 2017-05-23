@@ -2857,7 +2857,7 @@ namespace Legion {
 	      // if we wrap around, nothing is large enough and we're toast
 	      if(next_as == curr_as) {
 	      }
-            Legion::Internal::MessageDescriptor MUST_EPOCH_NOADDRESS(3800, "undefined");
+        Legion::Internal::MessageDescriptor MUST_EPOCH_NOADDRESS(3800, "undefined");
 	      log_mapper.fatal(MUST_EPOCH_NOADDRESS.id()) << "must_epoch: no address space has enough "
                   << "processors to fit a group of " << group_size << " tasks!";
 	      assert(false);
@@ -2906,8 +2906,8 @@ namespace Legion {
 
       // check for case of no tasks that want access
       if(accessing_task_idxs.empty()) {
-          Legion::Internal::MessageDescriptor MUST_EPOCH_NOTASKS(3801, "undefined");
-	log_mapper.fatal(MUST_EPOCH_NOTASKS.id()) << "Must epoch has no tasks that require direct "
+        Legion::Internal::MessageDescriptor MUST_EPOCH_NOTASKS(3801, "undefined");
+        log_mapper.fatal(MUST_EPOCH_NOTASKS.id()) << "Must epoch has no tasks that require direct "
                            << "access to an instance - DefaultMapper doesn't "
                            << "know how to pick one.";
 	assert(false);
@@ -2925,7 +2925,7 @@ namespace Legion {
 	for(size_t i = 1; i < accessing_task_idxs.size(); i++) {
 	  Processor p2 = target_procs[accessing_task_idxs[i]];
 	  if(!machine.has_affinity(p2, target_memory)) {
-          Legion::Internal::MessageDescriptor DEFAULT_MAPPER_ERROR(3802, "undefined");
+      Legion::Internal::MessageDescriptor DEFAULT_MAPPER_ERROR(3802, "undefined");
 	    log_mapper.fatal(DEFAULT_MAPPER_ERROR.id()) << "Default Mapper Error.  Memory chosen for "
                                << "constrained instance was " << target_memory
 			       << ", but is not visible to task on processor " 
@@ -2950,7 +2950,7 @@ namespace Legion {
 	  const LayoutConstraintSet &req_cons = 
             runtime->find_layout_constraints(ctx, it2->second);
 	  if(constraints.conflicts(req_cons)) {
-          Legion::Internal::MessageDescriptor DEFAULT_MAPPER_ERROR(3803, "undefined");
+      Legion::Internal::MessageDescriptor DEFAULT_MAPPER_ERROR(3803, "undefined");
 	    log_mapper.fatal(DEFAULT_MAPPER_ERROR.id()) << "Default mapper error.  Layout constraint "
                                << "violation in must_epoch instance creation.";
 	    assert(false);
@@ -3125,8 +3125,8 @@ namespace Legion {
 	assert(ok);
 	if(!ok)
         {
-            Legion::Internal::MessageDescriptor DEFAULT_MAPPER_ERROR(3804, "undefined");
-	  log_mapper.fatal(DEFAULT_MAPPER_ERROR.id(),
+          Legion::Internal::MessageDescriptor DEFAULT_MAPPER_ERROR(3804, "undefined");
+          log_mapper.fatal(DEFAULT_MAPPER_ERROR.id(),
                        "Default mapper error. Unable to make instance(s) "
 			   "in memory " IDFMT " for index %d of constrained "
 			   "task %s (ID %lld) in must epoch launch.",

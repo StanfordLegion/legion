@@ -1788,9 +1788,9 @@ namespace LegionRuntime {
             // for HDF read/write, we don't support unstructured regions
             switch(DIM) {
                 case 0: {
-                    Legion::Internal::MessageDescriptor HDF_COPY_NOTSUPPORTED(3700, "undfined");
-              log_new_dma.fatal(HDF_COPY_NOTSUPPORTED.id()) << "HDF copies not supported for unstructured domains!";
-              assert(false);
+                  Legion::Internal::MessageDescriptor HDF_COPY_NOTSUPPORTED(3700, "undfined");
+                  log_new_dma.fatal(HDF_COPY_NOTSUPPORTED.id()) << "HDF copies not supported for unstructured domains!";
+                  assert(false);
                 }
               break;
             case 1:
