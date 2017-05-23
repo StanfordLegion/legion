@@ -378,7 +378,12 @@ LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/runtime_impl.cc \
 		   $(LG_RT_DIR)/realm/operation.cc \
 	           $(LG_RT_DIR)/realm/tasks.cc \
 	           $(LG_RT_DIR)/realm/metadata.cc \
-	           $(LG_RT_DIR)/realm/partitions.cc \
+	           $(LG_RT_DIR)/realm/deppart/partitions.cc \
+	           $(LG_RT_DIR)/realm/deppart/sparsity_impl.cc \
+	           $(LG_RT_DIR)/realm/deppart/image.cc \
+	           $(LG_RT_DIR)/realm/deppart/preimage.cc \
+	           $(LG_RT_DIR)/realm/deppart/byfield.cc \
+	           $(LG_RT_DIR)/realm/deppart/setops.cc \
 		   $(LG_RT_DIR)/realm/event_impl.cc \
 		   $(LG_RT_DIR)/realm/rsrv_impl.cc \
 		   $(LG_RT_DIR)/realm/proc_impl.cc \

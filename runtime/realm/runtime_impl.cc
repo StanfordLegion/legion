@@ -22,9 +22,9 @@
 #include "inst_impl.h"
 
 #include "activemsg.h"
+#include "deppart/preimage.h"
 
 #include "cmdline.h"
-#include "partitions.h"
 
 #include "codedesc.h"
 
