@@ -7923,17 +7923,21 @@ function codegen.stat_return(cx, node)
   if result_type == terralib.types.unit then
     return quote
       [actions]
-      c.printf("returning void\n")
       return
     end
   else
+    -- Force unaligned access because malloc does not provide
+    -- blocks aligned for all purposes (e.g. SSE vectors).
+    local result_type_alignment = 1 -- data.min(terralib.sizeof(result_type), 8)
+
     return quote
       [actions]
       var buffer_size = terralib.sizeof([result_type])
       var buffer = c.malloc(buffer_size)
       std.assert(buffer ~= nil, "malloc failed in return")
-      @([&result_type](buffer)) = [result]
-      c.printf("returning: %p %llu\n", buffer, buffer_size)
+      terralib.attrstore(
+        [&result_type](buffer), result,
+        { align = [result_type_alignment] })
       return std.serialized_value {
         value = buffer,
         size = buffer_size,
