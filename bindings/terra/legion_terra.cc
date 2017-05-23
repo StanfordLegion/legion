@@ -21,10 +21,10 @@
 #include <vector>
 
 #include "legion.h"
-#include "legion_terra.h"
-#include "legion_terra_tasks.h"
 #include "legion_c.h"
 #include "legion_c_util.h"
+
+#include "legion_terra.h"
 
 using namespace Legion;
 using namespace LegionRuntime::Accessor::AccessorType;

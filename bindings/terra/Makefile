@@ -44,10 +44,6 @@ OUTFILE		?= liblegion_terra.so
 GEN_SRC		?= legion_terra.cc legion_terra_partitions.cc bishop_mapper.cc bishop_c.cc # .cc files
 GEN_GPU_SRC	?=		# .cu files
 
-ifeq ($(strip $(BINDINGS_USE_TERRA)),1)
-GEN_SRC += lua_mapper_wrapper.cc legion_terra_tasks.cc
-endif
-
 ifeq ($(strip $(USE_CUDA)),1)
 GEN_SRC += legion_terra_cudart_hijack.cc
 endif
