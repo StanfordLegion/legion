@@ -1372,8 +1372,8 @@ namespace Legion {
       // The old path explicitly for tasks
       LogicalRegion project_point(Task *task, unsigned idx, Runtime *runtime,
                                   const DomainPoint &point);
-      void project_points(Task *task, unsigned idx, Runtime *runtime,
-                          std::vector<MinimalPoint> &minimal_points);
+      void project_points(const RegionRequirement &req, unsigned idx,
+          Runtime *runtime, const std::vector<PointTask*> &point_tasks);
       // Generalized and annonymized
       void project_points(Operation *op, unsigned idx, 
                           const RegionRequirement &req, Runtime *runtime,

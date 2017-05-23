@@ -4,6 +4,9 @@ attempt is made to keep this list accurate for the master branch.
 Version ??.??.? (?? ??, ????)
   * Build system
     - Finally removed long-obsolete SHARED_LOWLEVEL flag
+  * Legion
+    - Added C++14 [[deprecated]] attribute to existing deprecated APIs.
+        All examples should all compile without deprecation warnings
   * Regent
     - Added support running normal tasks on I/O processors
     - Added support for OpenMP code generation via __demand(__openmp)
