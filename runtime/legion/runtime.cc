@@ -1319,7 +1319,7 @@ namespace Legion {
             rez.serialize<DistributedID>(0);
           rez.serialize(done_event);
         }
-        runtime->send_repl_future_map_response(source, rez);
+        runtime->send_control_replicate_future_map_response(source, rez);
       }
       else
       {
@@ -1332,7 +1332,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ReplFutureMapImpl::handle_repl_future_map_response(
+    /*static*/ void ReplFutureMapImpl::handle_future_map_response(
                                           Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
@@ -6263,22 +6263,22 @@ namespace Legion {
             }
           case SEND_REPL_FUTURE_MAP_REQUEST:
             {
-              runtime->handle_repl_future_map_request(derez); 
+              runtime->handle_control_replicate_future_map_request(derez); 
               break;
             }
           case SEND_REPL_FUTURE_MAP_RESPONSE:
             {
-              runtime->handle_repl_future_map_response(derez);
+              runtime->handle_control_replicate_future_map_response(derez);
               break;
             }
           case SEND_REPL_COMPOSITE_VIEW_REQUEST:
             {
-              runtime->handle_repl_composite_view_request(derez);
+              runtime->handle_control_replicate_composite_view_request(derez);
               break;
             }
           case SEND_REPL_COMPOSITE_VIEW_RESPONSE:
             {
-              runtime->handle_repl_composite_view_response(derez);
+              runtime->handle_control_replicate_composite_view_response(derez);
               break;
             }
           case SEND_MAPPER_MESSAGE:
@@ -6529,34 +6529,34 @@ namespace Legion {
               runtime->handle_mpi_rank_exchange(derez);
               break;
             }
-          case SEND_CONTROL_REP_LAUNCH:
+          case SEND_REPLICATE_LAUNCH:
             {
-              runtime->handle_control_rep_launch(derez, remote_address_space);
+              runtime->handle_replicate_launch(derez, remote_address_space);
               break;
             }
-          case SEND_CONTROL_REP_DELETE:
+          case SEND_REPLICATE_DELETE:
             {
-              runtime->handle_control_rep_delete(derez);
+              runtime->handle_replicate_delete(derez);
               break;
             }
-          case SEND_CONTROL_REP_POST_MAPPED:
+          case SEND_REPLICATE_POST_MAPPED:
             {
-              runtime->handle_control_rep_post_mapped(derez);
+              runtime->handle_replicate_post_mapped(derez);
               break;
             }
-          case SEND_CONTROL_REP_TRIGGER_COMPLETE:
+          case SEND_REPLICATE_TRIGGER_COMPLETE:
             {
-              runtime->handle_control_rep_trigger_complete(derez);
+              runtime->handle_replicate_trigger_complete(derez);
               break;
             }
-          case SEND_CONTROL_REP_TRIGGER_COMMIT:
+          case SEND_REPLICATE_TRIGGER_COMMIT:
             {
-              runtime->handle_control_rep_trigger_commit(derez);
+              runtime->handle_replicate_trigger_commit(derez);
               break;
             }
-          case SEND_CONTROL_REP_COLLECTIVE_MESSAGE:
+          case SEND_CONTROL_REPLICATE_COLLECTIVE_MESSAGE:
             {
-              runtime->handle_control_rep_collective_message(derez);
+              runtime->handle_control_replicate_collective_message(derez);
               break;
             }
           case SEND_SHUTDOWN_NOTIFICATION:
@@ -14292,8 +14292,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_repl_future_map_request(AddressSpaceID target, 
-                                               Serializer &rez)
+    void Runtime::send_control_replicate_future_map_request(
+                                         AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_REPL_FUTURE_MAP_REQUEST,
@@ -14301,8 +14301,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_repl_future_map_response(AddressSpaceID target,
-                                                Serializer &rez)
+    void Runtime::send_control_replicate_future_map_response(
+                                         AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_REPL_FUTURE_MAP_RESPONSE,
@@ -14310,8 +14310,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_repl_composite_view_request(AddressSpaceID target,
-                                                   Serializer &rez)
+    void Runtime::send_control_replicate_composite_view_request(
+                                         AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, 
@@ -14320,8 +14320,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_repl_composite_view_response(AddressSpaceID target,
-                                                    Serializer &rez)
+    void Runtime::send_control_replicate_composite_view_response(
+                                         AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez,
@@ -14721,56 +14721,55 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_control_rep_launch(AddressSpaceID target,Serializer &rez)
+    void Runtime::send_replicate_launch(AddressSpaceID target,Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_message(rez, SEND_CONTROL_REP_LAUNCH,
+      find_messenger(target)->send_message(rez, SEND_REPLICATE_LAUNCH,
                                         DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_control_rep_delete(AddressSpaceID target,Serializer &rez)
+    void Runtime::send_replicate_delete(AddressSpaceID target,Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_message(rez, SEND_CONTROL_REP_DELETE,
+      find_messenger(target)->send_message(rez, SEND_REPLICATE_DELETE,
                                         DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_control_rep_post_mapped(AddressSpaceID target, 
-                                               Serializer &rez)
+    void Runtime::send_replicate_post_mapped(AddressSpaceID target, 
+                                             Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_message(rez, SEND_CONTROL_REP_POST_MAPPED,
+      find_messenger(target)->send_message(rez, SEND_REPLICATE_POST_MAPPED,
                                         DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_control_rep_trigger_complete(AddressSpaceID target,
-                                                    Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, 
-          SEND_CONTROL_REP_TRIGGER_COMPLETE, 
-          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_control_rep_trigger_commit(AddressSpaceID target,
+    void Runtime::send_replicate_trigger_complete(AddressSpaceID target,
                                                   Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_message(rez, SEND_CONTROL_REP_TRIGGER_COMMIT,
+      find_messenger(target)->send_message(rez, SEND_REPLICATE_TRIGGER_COMPLETE,
                                         DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_control_rep_collective_message(AddressSpaceID target,
-                                                      Serializer &rez)
+    void Runtime::send_replicate_trigger_commit(AddressSpaceID target,
+                                                Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_REPLICATE_TRIGGER_COMMIT,
+                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_control_replicate_collective_message(
+                                         AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, 
-          SEND_CONTROL_REP_COLLECTIVE_MESSAGE, 
+          SEND_CONTROL_REPLICATE_COLLECTIVE_MESSAGE, 
           COLLECTIVE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
@@ -15456,28 +15455,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_repl_future_map_request(Deserializer &derez)
+    void Runtime::handle_control_replicate_future_map_request(
+                                                            Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       ShardManager::handle_future_map_request(derez, this);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_repl_future_map_response(Deserializer &derez)
+    void Runtime::handle_control_replicate_future_map_response(
+                                                            Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      ReplFutureMapImpl::handle_repl_future_map_response(derez, this);
+      ReplFutureMapImpl::handle_future_map_response(derez, this);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_repl_composite_view_request(Deserializer &derez)
+    void Runtime::handle_control_replicate_composite_view_request(
+                                                            Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       ShardManager::handle_composite_view_request(derez, this);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_repl_composite_view_response(Deserializer &derez)
+    void Runtime::handle_control_replicate_composite_view_response(
+                                                            Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       CompositeBase::handle_composite_view_response(derez, this); 
@@ -15927,7 +15930,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_control_rep_launch(Deserializer &derez, 
+    void Runtime::handle_replicate_launch(Deserializer &derez, 
                                             AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -15935,35 +15938,36 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_control_rep_delete(Deserializer &derez)
+    void Runtime::handle_replicate_delete(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       ShardManager::handle_delete(derez, this);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_control_rep_post_mapped(Deserializer &derez)
+    void Runtime::handle_replicate_post_mapped(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       ShardManager::handle_post_mapped(derez, this);
     }
     
     //--------------------------------------------------------------------------
-    void Runtime::handle_control_rep_trigger_complete(Deserializer &derez)
+    void Runtime::handle_replicate_trigger_complete(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       ShardManager::handle_trigger_complete(derez, this);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_control_rep_trigger_commit(Deserializer &derez)
+    void Runtime::handle_replicate_trigger_commit(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       ShardManager::handle_trigger_commit(derez, this);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_control_rep_collective_message(Deserializer &derez)
+    void Runtime::handle_control_replicate_collective_message(
+                                                            Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       ShardManager::handle_collective_message(derez, this);
@@ -18545,7 +18549,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::register_shard_manager(ControlReplicationID repl_id, 
+    void Runtime::register_shard_manager(ReplicationID repl_id, 
                                          ShardManager *manager)
     //--------------------------------------------------------------------------
     {
@@ -18558,11 +18562,11 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     void Runtime::unregister_shard_manager(
-                                  ControlReplicationID repl_id, bool reclaim_id)
+                                         ReplicationID repl_id, bool reclaim_id)
     //--------------------------------------------------------------------------
     {
       AutoLock s_lock(shard_lock);
-      std::map<ControlReplicationID,ShardManager*>::iterator
+      std::map<ReplicationID,ShardManager*>::iterator
         finder = shard_managers.find(repl_id);
 #ifdef DEBUG_LEGION
       assert(finder != shard_managers.end());
@@ -18571,11 +18575,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardManager* Runtime::find_shard_manager(ControlReplicationID repl_id)
+    ShardManager* Runtime::find_shard_manager(ReplicationID repl_id)
     //--------------------------------------------------------------------------
     {
       AutoLock s_lock(shard_lock,1,false/*exclusive*/);
-      std::map<ControlReplicationID,ShardManager*>::const_iterator
+      std::map<ReplicationID,ShardManager*>::const_iterator
         finder = shard_managers.find(repl_id);
 #ifdef DEBUG_LEGION
       assert(finder != shard_managers.end());
@@ -18740,10 +18744,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ControlReplicationID Runtime::get_unique_control_replication_id(void)
+    ReplicationID Runtime::get_unique_replication_id(void)
     //--------------------------------------------------------------------------
     {
-      ControlReplicationID result = 
+      ReplicationID result = 
         __sync_fetch_and_add(&unique_control_replication_id, runtime_stride);
 #ifdef DEBUG_LEGION
       assert(result <= unique_control_replication_id);
@@ -21403,11 +21407,6 @@ namespace Legion {
         case LG_DEFER_PHI_VIEW_REGISTRATION_TASK_ID:
           {
             PhiView::handle_deferred_view_registration(args);
-            break;
-          }
-        case LG_CONTROL_REP_CLONE_TASK_ID:
-          {
-            ShardManager::handle_clone(args);
             break;
           }
         case LG_CONTROL_REP_LAUNCH_TASK_ID:

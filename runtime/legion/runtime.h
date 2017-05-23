@@ -280,8 +280,8 @@ namespace Legion {
       void set_sharding_function(ShardingFunction *function);
       void handle_future_map_request(Deserializer &derez);
     public:
-      static void handle_repl_future_map_response(Deserializer &derez,
-                                                  Runtime *runtime);
+      static void handle_future_map_response(Deserializer &derez,
+                                             Runtime *runtime);
     public:
       ReplicateContext *const repl_ctx;
       const Domain full_domain;
@@ -2124,12 +2124,14 @@ namespace Legion {
                                           Serializer &rez);
       void send_future_map_response_future(AddressSpaceID target,
                                            Serializer &rez);
-      void send_repl_future_map_request(AddressSpaceID target, Serializer &rez);
-      void send_repl_future_map_response(AddressSpaceID target,Serializer &rez);
-      void send_repl_composite_view_request(AddressSpaceID target, 
-                                            Serializer &rez);
-      void send_repl_composite_view_response(AddressSpaceID target,
-                                             Serializer &rez);
+      void send_control_replicate_future_map_request(AddressSpaceID target, 
+                                                     Serializer &rez);
+      void send_control_replicate_future_map_response(AddressSpaceID target,
+                                                      Serializer &rez);
+      void send_control_replicate_composite_view_request(AddressSpaceID target,
+                                                         Serializer &rez);
+      void send_control_replicate_composite_view_response(AddressSpaceID target,
+                                                          Serializer &rez);
       void send_mapper_message(AddressSpaceID target, Serializer &rez);
       void send_mapper_broadcast(AddressSpaceID target, Serializer &rez);
       void send_task_impl_semantic_request(AddressSpaceID target, 
@@ -2189,15 +2191,15 @@ namespace Legion {
       void send_constraint_release(AddressSpaceID target, Serializer &rez);
       void send_constraint_removal(AddressSpaceID target, Serializer &rez);
       void send_mpi_rank_exchange(AddressSpaceID target, Serializer &rez);
-      void send_control_rep_launch(AddressSpaceID target, Serializer &rez);
-      void send_control_rep_delete(AddressSpaceID target, Serializer &rez);
-      void send_control_rep_post_mapped(AddressSpaceID target, Serializer &rez);
-      void send_control_rep_trigger_complete(AddressSpaceID target,
-                                             Serializer &rez);
-      void send_control_rep_trigger_commit(AddressSpaceID target,
+      void send_replicate_launch(AddressSpaceID target, Serializer &rez);
+      void send_replicate_delete(AddressSpaceID target, Serializer &rez);
+      void send_replicate_post_mapped(AddressSpaceID target, Serializer &rez);
+      void send_replicate_trigger_complete(AddressSpaceID target, 
                                            Serializer &rez);
-      void send_control_rep_collective_message(AddressSpaceID target,
-                                               Serializer &rez);
+      void send_replicate_trigger_commit(AddressSpaceID target,
+                                         Serializer &rez);
+      void send_control_replicate_collective_message(AddressSpaceID target,
+                                                     Serializer &rez);
       void send_shutdown_notification(AddressSpaceID target, Serializer &rez);
       void send_shutdown_response(AddressSpaceID target, Serializer &rez);
     public:
@@ -2314,10 +2316,10 @@ namespace Legion {
       void handle_future_map_future_request(Deserializer &derez,
                                             AddressSpaceID source);
       void handle_future_map_future_response(Deserializer &derez);
-      void handle_repl_future_map_request(Deserializer &derez);
-      void handle_repl_future_map_response(Deserializer &derez);
-      void handle_repl_composite_view_request(Deserializer &derez);
-      void handle_repl_composite_view_response(Deserializer &derez);
+      void handle_control_replicate_future_map_request(Deserializer &derez);
+      void handle_control_replicate_future_map_response(Deserializer &derez);
+      void handle_control_replicate_composite_view_request(Deserializer &derez);
+      void handle_control_replicate_composite_view_response(Deserializer &derez);
       void handle_mapper_message(Deserializer &derez);
       void handle_mapper_broadcast(Deserializer &derez);
       void handle_task_impl_semantic_request(Deserializer &derez,
@@ -2385,12 +2387,12 @@ namespace Legion {
       void handle_top_level_task_request(Deserializer &derez);
       void handle_top_level_task_complete(Deserializer &derez);
       void handle_mpi_rank_exchange(Deserializer &derez);
-      void handle_control_rep_launch(Deserializer &derez,AddressSpaceID source);
-      void handle_control_rep_delete(Deserializer &derez);
-      void handle_control_rep_post_mapped(Deserializer &derez);
-      void handle_control_rep_trigger_complete(Deserializer &derez);
-      void handle_control_rep_trigger_commit(Deserializer &derez);
-      void handle_control_rep_collective_message(Deserializer &derez);
+      void handle_replicate_launch(Deserializer &derez,AddressSpaceID source);
+      void handle_replicate_delete(Deserializer &derez);
+      void handle_replicate_post_mapped(Deserializer &derez);
+      void handle_replicate_trigger_complete(Deserializer &derez);
+      void handle_replicate_trigger_commit(Deserializer &derez);
+      void handle_control_replicate_collective_message(Deserializer &derez);
       void handle_shutdown_notification(Deserializer &derez, 
                                         AddressSpaceID source);
       void handle_shutdown_response(Deserializer &derez);
@@ -2690,11 +2692,11 @@ namespace Legion {
       inline AddressSpaceID get_runtime_owner(UniqueID uid) const
         { return (uid % total_address_spaces); }
     public:
-      void register_shard_manager(ControlReplicationID repl_id, 
+      void register_shard_manager(ReplicationID repl_id, 
                                   ShardManager *manager);
-      void unregister_shard_manager(ControlReplicationID repl_id, 
+      void unregister_shard_manager(ReplicationID repl_id, 
                                     bool reclaim_id);
-      ShardManager* find_shard_manager(ControlReplicationID repl_id);
+      ShardManager* find_shard_manager(ReplicationID repl_id);
     public:
       bool is_local(Processor proc) const;
       void find_visible_memories(Processor proc, std::set<Memory> &visible);
@@ -2708,7 +2710,7 @@ namespace Legion {
       FieldID            get_unique_field_id(void);
       VariantID          get_unique_variant_id(void);
       LayoutConstraintID get_unique_constraint_id(void);
-      ControlReplicationID get_unique_control_replication_id(void);
+      ReplicationID      get_unique_replication_id(void);
     public:
       // Verify that a region requirement is valid
       LegionErrorType verify_requirement(const RegionRequirement &req,
@@ -2903,7 +2905,7 @@ namespace Legion {
     protected:
       // Keep track of managers for control replication execution
       Reservation shard_lock;
-      std::map<ControlReplicationID,ShardManager*> shard_managers;
+      std::map<ReplicationID,ShardManager*> shard_managers;
     protected:
       // For generating random numbers
       Reservation random_lock;

@@ -349,7 +349,6 @@ namespace Legion {
       LG_MISSPECULATE_TASK_ID,
       LG_DEFER_PHI_VIEW_REF_TASK_ID,
       LG_DEFER_PHI_VIEW_REGISTRATION_TASK_ID,
-      LG_CONTROL_REP_CLONE_TASK_ID,
       LG_CONTROL_REP_LAUNCH_TASK_ID,
       LG_CONTROL_REP_DELETE_TASK_ID,
       LG_RECLAIM_FUTURE_MAP_TASK_ID,
@@ -447,7 +446,6 @@ namespace Legion {
         "Handle Mapping Misspeculation",                          \
         "Defer Phi View Reference",                               \
         "Defer Phi View Registration",                            \
-        "Control Replication Clone",                              \
         "Control Replication Launch",                             \
         "Control Replciation Delete",                             \
         "Reclaim Future Map",                                     \
@@ -745,12 +743,12 @@ namespace Legion {
       SEND_TOP_LEVEL_TASK_REQUEST,
       SEND_TOP_LEVEL_TASK_COMPLETE,
       SEND_MPI_RANK_EXCHANGE,
-      SEND_CONTROL_REP_LAUNCH,
-      SEND_CONTROL_REP_DELETE,
-      SEND_CONTROL_REP_POST_MAPPED,
-      SEND_CONTROL_REP_TRIGGER_COMPLETE,
-      SEND_CONTROL_REP_TRIGGER_COMMIT,
-      SEND_CONTROL_REP_COLLECTIVE_MESSAGE,
+      SEND_REPLICATE_LAUNCH,
+      SEND_REPLICATE_DELETE,
+      SEND_REPLICATE_POST_MAPPED,
+      SEND_REPLICATE_TRIGGER_COMPLETE,
+      SEND_REPLICATE_TRIGGER_COMMIT,
+      SEND_CONTROL_REPLICATE_COLLECTIVE_MESSAGE,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
       LAST_SEND_KIND, // This one must be last
@@ -886,11 +884,11 @@ namespace Legion {
         "Top Level Task Request",                                     \
         "Top Level Task Complete",                                    \
         "Send MPI Rank Exchange",                                     \
-        "Send Control Replication Launch",                            \
-        "Send Control Replication Delete",                            \
-        "Send Control Replication Post Mapped",                       \
-        "Send Control Replication Trigger Complete",                  \
-        "Send Control Replication Trigger Commit",                    \
+        "Send Replication Launch",                                    \
+        "Send Replication Delete",                                    \
+        "Send Replication Post Mapped",                               \
+        "Send Replication Trigger Complete",                          \
+        "Send Replication Trigger Commit",                            \
         "Send Control Replication Collective Message",                \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
@@ -1645,7 +1643,7 @@ namespace Legion {
   typedef ::legion_projection_epoch_id_t ProjectionEpochID;
   typedef ::legion_task_id_t TaskID;
   typedef ::legion_layout_constraint_id_t LayoutConstraintID;
-  typedef ::legion_control_replication_id_t ControlReplicationID;
+  typedef ::legion_replication_id_t ReplicationID;
   typedef ::legion_shard_id_t ShardID;
   typedef ::legion_internal_color_t LegionColor;
   typedef std::map<Color,ColoredPoints<ptr_t> > Coloring;

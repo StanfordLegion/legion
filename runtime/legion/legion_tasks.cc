@@ -2439,7 +2439,7 @@ namespace Legion {
       copy_profiling_requests.clear();
       if ((execution_context != NULL) && execution_context->remove_reference())
         delete execution_context;
-      if ((shard_manager != NULL) && shard_manager->broadcast_delete())
+      if (shard_manager != NULL)
         delete shard_manager;
       if (!remote_instances.empty())
       {
@@ -3609,12 +3609,11 @@ namespace Legion {
 #endif
         // First make a shard manager to handle the all the shard tasks
         const size_t total_shards = output.task_mappings.size();
+        const ReplicationID repl_context = runtime->get_unique_replication_id();
         if (!output.control_replication_map.empty())
         {
-          const ControlReplicationID repl_context = 
-            runtime->get_unique_control_replication_id(); 
-          shard_manager = new ShardManager(runtime, repl_context, total_shards,
-                                       0/*idx*/, runtime->address_space, this);
+          shard_manager = new ShardManager(runtime, repl_context, true/*cr*/,
+                                 total_shards, runtime->address_space, this);
           if (output.control_replication_map.size() != total_shards)
           {
             log_run.error("Mapper %s specified a non-empty control replication "
@@ -3670,8 +3669,8 @@ namespace Legion {
           }
         }
         else
-          shard_manager = new ShardManager(runtime, 0/*no repl ctx*/, 
-                total_shards, 0/*idx*/, runtime->address_space, this);
+          shard_manager = new ShardManager(runtime, repl_context, false/*cr*/,
+                                  total_shards, runtime->address_space, this);
         // We're going to store the needed instances locally so we can
         // do the mapping when we return on behalf of all the shards
         physical_instances.resize(regions.size());
@@ -3877,6 +3876,11 @@ namespace Legion {
           }
         }
       }
+      // If we are replicating the task then we have to extract the conditions
+      // under which each of the instances will be ready to be used
+      if (shard_manager != NULL)
+        shard_manager->extract_event_preconditions(physical_instances);
+      // Perform the postmapping for this task if it was requested
       if (perform_postmap)
         perform_post_mapping();
     }  
@@ -4054,47 +4058,6 @@ namespace Legion {
                           );
       }
     } 
-
-#if 0
-    //--------------------------------------------------------------------------
-    void SingleTask::control_replicate_task(void)
-    //--------------------------------------------------------------------------
-    {
-      const ControlReplicationID repl_context = 
-        runtime->get_unique_control_replication_id();
-#ifdef DEBUG_LEGION
-      assert(!control_replication_map.empty());
-#endif
-      // Construct a vector to create an indexable order of the address spaces
-      std::set<AddressSpaceID> spaces_set;
-      for (std::map<ShardID,Processor>::const_iterator it = 
-            control_replication_map.begin(); it != 
-            control_replication_map.end(); it++)
-        spaces_set.insert(it->second.address_space());
-      std::vector<AddressSpaceID> address_spaces(spaces_set.begin(),
-                                                 spaces_set.end());
-      if (spaces_set.find(runtime->address_space) == spaces_set.end())
-      {
-        log_run.error("ERROR: Control replication of task %s (UID %lld) "
-                      "failed because the mapper did not map at least "
-                      "one shard onto the original target processor.",
-                      get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_MAPPER_OUTPUT);
-      }
-#ifdef DEBUG_LEGION
-      assert(shard_manager == NULL);
-#endif
-      // Now make the control replication manager which will use a 
-      // tree broadcast to spread out across the nodes
-      const size_t total_shards = control_replication_map.size();
-      shard_manager = new ShardManager(runtime, repl_context, total_shards, 
-                                       0/*idx*/, runtime->address_space, this);
-      shard_manager->launch(address_spaces, control_replication_map);
-    }
-#endif
 
     //--------------------------------------------------------------------------
     void SingleTask::launch_task(void)
@@ -5416,7 +5379,7 @@ namespace Legion {
       }
       // If we succeeded in mapping and everything was mapped
       // then we get to mark that we are done mapping
-      if (is_leaf() && !has_virtual_instances())
+      if (is_leaf() && !has_virtual_instances() && (shard_manager == NULL))
       {
         RtEvent applied_condition;
         if (!map_applied_conditions.empty())
@@ -6324,7 +6287,7 @@ namespace Legion {
           version_infos[idx].apply_mapping(map_applied_conditions);
       // If we succeeded in mapping and had no virtual mappings
       // then we are done mapping
-      if (is_leaf() && !has_virtual_instances()) 
+      if (is_leaf() && !has_virtual_instances() && (shard_manager == NULL))
       {
         if (!map_applied_conditions.empty())
         {
@@ -6873,7 +6836,14 @@ namespace Legion {
     bool ShardTask::pack_task(Serializer &rez, Processor target)
     //--------------------------------------------------------------------------
     {
-      assert(false);
+      AddressSpaceID addr_target = runtime->find_address_space(target);
+      RezCheck z(rez);
+      pack_single_task(rez, addr_target);
+      rez.serialize(remote_owner_uid);
+      // have to pack all version info (e.g. split masks)
+      std::vector<bool> full_version_infos(regions.size(), true);
+      pack_version_infos(rez, version_infos, full_version_infos);
+      pack_restrict_infos(rez, restrict_infos);
       return false;
     }
 
@@ -6882,7 +6852,11 @@ namespace Legion {
                                 std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
-      assert(false);
+      DerezCheck z(derez);
+      unpack_single_task(derez, ready_events);
+      derez.deserialize(remote_owner_uid);
+      unpack_version_infos(derez, version_infos, ready_events);
+      unpack_restrict_infos(derez, restrict_infos, ready_events);
       return false;
     }
 
@@ -6963,7 +6937,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Check to see if we are control replicated or not
-      if (shard_manager->repl_id > 0)
+      if (shard_manager->control_replicated)
       {
         // If we have a control replication context then we do the special path
         ReplicateContext *repl_ctx = new ReplicateContext(runtime, this,
@@ -6978,6 +6952,43 @@ namespace Legion {
       }
       else // No control replication so do the normal thing
         return SingleTask::initialize_inner_execution_context(v);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardTask::extract_event_preconditions(
+                                   const std::deque<InstanceSet> &all_instances)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(all_instances.size() == physical_instances.size());
+#endif
+      for (unsigned region_idx = 0; 
+            region_idx < physical_instances.size(); region_idx++)
+      {
+        InstanceSet &local_instances = physical_instances[region_idx];
+        const InstanceSet &instances = all_instances[region_idx];
+        for (unsigned idx1 = 0; idx1 < local_instances.size(); idx1++)
+        {
+          InstanceRef &ref = local_instances[idx1];
+#ifdef DEBUG_LEGION
+          bool found = false;
+#endif
+          for (unsigned idx2 = 0; idx2 < instances.size(); idx2++)
+          {
+            const InstanceRef &other_ref = instances[idx2];
+            if (ref.get_manager() != other_ref.get_manager())
+              continue;
+            ref.set_ready_event(other_ref.get_ready_event());
+#ifdef DEBUG_LEGION
+            found = true;
+#endif
+            break;
+          }
+#ifdef DEBUG_LEGION
+          assert(found);
+#endif
+        }
+      }
     }
 
     //--------------------------------------------------------------------------

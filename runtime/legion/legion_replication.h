@@ -881,16 +881,6 @@ namespace Legion {
      */
     class ShardManager : public Mapper::SelectShardingFunctorInput {
     public:
-      struct ShardManagerCloneArgs :
-        public LgTaskArgs<ShardManagerCloneArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_CONTROL_REP_CLONE_TASK_ID;
-      public:
-        ShardManager *manager;
-        RtEvent ready_event;
-        RtUserEvent to_trigger;
-        ShardTask *first_shard;
-      };
       struct ShardManagerLaunchArgs :
         public LgTaskArgs<ShardManagerLaunchArgs> {
       public:
@@ -906,9 +896,9 @@ namespace Legion {
         ShardManager *manager;
       };
     public:
-      ShardManager(Runtime *rt, ControlReplicationID repl_id, size_t total,
-                   unsigned address_space_index, AddressSpaceID owner_space,
-                   SingleTask *original = NULL);
+      ShardManager(Runtime *rt, ReplicationID repl_id, 
+                   bool control, size_t total_shards,
+                   AddressSpaceID owner_space, SingleTask *original = NULL);
       ShardManager(const ShardManager &rhs);
       ~ShardManager(void);
     public:
@@ -923,21 +913,13 @@ namespace Legion {
         { return address_spaces; }
     public:
       ShardTask* create_shard(ShardID id, Processor target);
+      void extract_event_preconditions(const std::deque<InstanceSet> &insts);
       void launch(void);
-#if 0
-      void launch(const std::vector<AddressSpaceID> &spaces,
-                  const std::map<ShardID,Processor> &shard_mapping);
-#endif
-      void unpack_launch(Deserializer &derez);
-      void clone_and_launch(RtEvent ready, RtUserEvent to_trigger, 
-                            ShardTask *first_shard);
-      void create_shards(void);
+      RtEvent distribute_shards(AddressSpaceID target,
+                                const std::vector<ShardTask*> &shards,
+                                RtEvent start_execution);
+      void unpack_shards_and_launch(Deserializer &derez);
       void launch_shards(void) const;
-    public:
-      void broadcast_launch(RtEvent start, RtUserEvent to_trigger,
-                            SingleTask *to_clone);
-      bool broadcast_delete(
-              RtUserEvent to_trigger = RtUserEvent::NO_RT_USER_EVENT);
     public:
       void handle_post_mapped(bool local);
       void handle_future(const void *res, size_t res_size, bool owned);
@@ -953,7 +935,6 @@ namespace Legion {
       void send_composite_view_request(ShardID target, Serializer &rez);
       void handle_composite_view_request(Deserializer &derez);
     public:
-      static void handle_clone(const void *args);
       static void handle_launch(const void *args);
       static void handle_delete(const void *args);
     public:
@@ -971,11 +952,11 @@ namespace Legion {
       ShardingFunction* find_sharding_function(ShardingID sid);
     public:
       Runtime *const runtime;
-      const ControlReplicationID repl_id;
-      const size_t total_shards;
-      const unsigned address_space_index;
+      const ReplicationID repl_id;
       const AddressSpaceID owner_space;
+      const size_t total_shards;
       SingleTask *const original_task;
+      const bool control_replicated;
     protected:
       Reservation                      manager_lock;
       // Inheritted from Mapper::SelectShardingFunctorInput

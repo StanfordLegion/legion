@@ -5590,7 +5590,8 @@ namespace Legion {
           }
           rez.serialize(done_event); 
         }
-        node->context->runtime->send_repl_composite_view_response(source, rez);
+        node->context->runtime->send_control_replicate_composite_view_response(
+                                                                   source, rez);
       }
       else
       {

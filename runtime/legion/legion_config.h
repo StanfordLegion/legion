@@ -605,7 +605,7 @@ typedef unsigned int legion_address_space_id_t;
 typedef unsigned int legion_tunable_id_t;
 typedef unsigned int legion_local_variable_id_t;
 typedef unsigned int legion_generator_id_t;
-typedef unsigned int legion_control_replication_id_t;
+typedef unsigned int legion_replication_id_t;
 typedef unsigned int legion_shard_id_t;
 typedef unsigned long long legion_distributed_id_t;
 typedef unsigned long legion_mapping_tag_id_t;
