@@ -2085,7 +2085,7 @@ namespace Legion {
                 regions[*it].region.get_field_space(), *it,
                 NAME_SEMANTIC_TAG, name, name_size, true, false))
               name = "(no name)";
-              MessageDescriptor MISSING_INSTANCE_FIELD(1504, "undefined");
+            MessageDescriptor MISSING_INSTANCE_FIELD(1504, "undefined");
             log_run.error(MISSING_INSTANCE_FIELD.id(),
                           "Missing instance for field %s (FieldID: %d)",
                           static_cast<const char*>(name), *it);

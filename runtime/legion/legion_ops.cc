@@ -2942,7 +2942,7 @@ namespace Legion {
                requirement.region.get_field_space(), *it, NAME_SEMANTIC_TAG,
                name, name_size, true, false))
             name = "(no name)";
-            MessageDescriptor MISSING_INSTANCE_FIELD(1407, "undefined");
+          MessageDescriptor MISSING_INSTANCE_FIELD(1407, "undefined");
           log_run.error(MISSING_INSTANCE_FIELD.id(),
                         "Missing instance for field %s (FieldID: %d)",
                         static_cast<const char*>(name), *it);
@@ -4498,7 +4498,7 @@ namespace Legion {
                req.region.get_field_space(), *it, NAME_SEMANTIC_TAG,
                name, name_size, true, false))
             name = "(no name)";
-            MessageDescriptor MISSING_INSTANCE_FIELD(1427, "undefined");
+          MessageDescriptor MISSING_INSTANCE_FIELD(1427, "undefined");
           log_run.error(MISSING_INSTANCE_FIELD.id(),
                         "Missing instance for field %s (FieldID: %d)",
                         static_cast<const char*>(name), *it);
@@ -7365,7 +7365,7 @@ namespace Legion {
                requirement.region.get_field_space(), *it, NAME_SEMANTIC_TAG,
                name, name_size, true, false))
             name = "(no name)";
-            MessageDescriptor MISSING_INSTANCE_FIELD(1445, "undefined");
+          MessageDescriptor MISSING_INSTANCE_FIELD(1445, "undefined");
           log_run.error(MISSING_INSTANCE_FIELD.id(),
                         "Missing instance for field %s (FieldID: %d)",
                         static_cast<const char*>(name), *it);
