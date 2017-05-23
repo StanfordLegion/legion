@@ -8801,7 +8801,7 @@ namespace Legion {
       FutureMap result = task->initialize_task(this, launcher, launch_space,
                                                false/*check privileges*/);
 #endif
-      task->initialize_replication(this);
+      task->initialize_replication(this, launch_space);
       execute_task_launch(task, true/*index*/, current_trace, 
                           launcher.silence_warnings, launcher.enable_inlining);
       return result;
@@ -8880,7 +8880,7 @@ namespace Legion {
       Future result = task->initialize_task(this, launcher, launch_space, redop,
                                             false/*check privileges*/);
 #endif
-      task->initialize_replication(this);
+      task->initialize_replication(this, launch_space);
       execute_task_launch(task, true/*index*/, current_trace, 
                           launcher.silence_warnings, launcher.enable_inlining);
       return result;
@@ -8915,7 +8915,7 @@ namespace Legion {
       fill_op->initialize(this, launcher, launch_space,
                           false/*check privileges*/);
 #endif
-      fill_op->initialize_replication(this);
+      fill_op->initialize_replication(this, launch_space);
       // Check to see if we need to do any unmappings and remappings
       // before we can issue this copy operation
       std::vector<PhysicalRegion> unmapped_regions;
@@ -9006,7 +9006,7 @@ namespace Legion {
       copy_op->initialize(this, launcher, launch_space, 
                           false/*check privileges*/);
 #endif
-      copy_op->initialize_replication(this);
+      copy_op->initialize_replication(this, launch_space);
       // Check to see if we need to do any unmappings and remappings
       // before we can issue this copy operation
       std::vector<PhysicalRegion> unmapped_regions;

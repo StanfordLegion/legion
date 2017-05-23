@@ -273,9 +273,6 @@ namespace Legion {
     {
       versioning_collective_id = ctx->get_next_collective_index();
       future_collective_id = ctx->get_next_collective_index();
-      // Also initialize our index domain of a single point
-      index_domain = Domain(index_point, index_point);
-      launch_space = ctx->find_index_launch_space(index_domain);
     }
 
     /////////////////////////////////////////////////////////////
@@ -321,6 +318,7 @@ namespace Legion {
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
       reduction_collective = NULL;
+      launch_space = IndexSpace::NO_SPACE;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
 #endif
@@ -419,7 +417,7 @@ namespace Legion {
       // Compute the local index space of points for this shard
       const Domain &local_domain = 
         sharding_function->find_shard_domain(repl_ctx->owner_shard->shard_id,
-                                             index_domain);
+                                             launch_space);
       index_domain = local_domain;
       // If it's empty we're done, otherwise we go back on the queue
       if (local_domain.get_volume() == 0)
@@ -473,7 +471,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndexTask::initialize_replication(ReplicateContext *ctx)
+    void ReplIndexTask::initialize_replication(ReplicateContext *ctx,
+                                               IndexSpace launch_sp)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -501,6 +500,7 @@ namespace Legion {
       // If we have a reduction op then we need an exchange
       if (redop > 0)
         reduction_collective = new FutureExchange(ctx, reduction_state_size);
+      launch_space = launch_sp;
     }
 
     //--------------------------------------------------------------------------
@@ -629,6 +629,7 @@ namespace Legion {
       activate_index_fill();
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
+      launch_space = IndexSpace::NO_SPACE;
       mapper = NULL;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
@@ -724,7 +725,7 @@ namespace Legion {
       // Compute the local index space of points for this shard
       const Domain &local_domain = 
         sharding_function->find_shard_domain(repl_ctx->owner_shard->shard_id, 
-                                             index_domain);
+                                             launch_space);
       index_domain = local_domain;
       // If it's empty we're done, otherwise we go back on the queue
       if (local_domain.get_volume() == 0)
@@ -738,7 +739,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndexFillOp::initialize_replication(ReplicateContext *ctx)
+    void ReplIndexFillOp::initialize_replication(ReplicateContext *ctx,
+                                                 IndexSpace launch_sp)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -759,6 +761,7 @@ namespace Legion {
         }
       }
 #endif
+      launch_space = launch_sp;
     }
 
     /////////////////////////////////////////////////////////////
@@ -990,6 +993,7 @@ namespace Legion {
       activate_index_copy();
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
+      launch_space = IndexSpace::NO_SPACE;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
 #endif
@@ -1109,7 +1113,7 @@ namespace Legion {
       // Compute the local index space of points for this shard
       const Domain &local_domain = 
         sharding_function->find_shard_domain(repl_ctx->owner_shard->shard_id,
-                                             index_domain);
+                                             launch_space);
       index_domain = local_domain;
       // If it's empty we're done, otherwise we go back on the queue
       if (local_domain.get_volume() == 0)
@@ -1123,7 +1127,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndexCopyOp::initialize_replication(ReplicateContext *ctx)
+    void ReplIndexCopyOp::initialize_replication(ReplicateContext *ctx,
+                                                 IndexSpace launch_sp)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1145,6 +1150,7 @@ namespace Legion {
         }
       }
 #endif
+      launch_space = launch_sp;
     }
 
     /////////////////////////////////////////////////////////////
@@ -1613,8 +1619,8 @@ namespace Legion {
       {
         // Compute the local index space of points for this shard
         const Domain &local_domain = 
-          function->find_shard_domain(repl_ctx->owner_shard->shard_id, 
-                                      index_domain);
+          function->find_shard_domain(repl_ctx->owner_shard->shard_id,
+                                      launch_space);
         index_domain = local_domain;
         // If it's empty we're done, otherwise we go back on the queue
         if (local_domain.get_volume() == 0)
@@ -2883,7 +2889,7 @@ namespace Legion {
 #endif
       // total_shards-1 because we want the upper bound inclusive
       ShardingFunction *result = 
-        new ShardingFunction(functor, sid, total_shards - 1);
+        new ShardingFunction(functor, runtime->forest, sid, total_shards - 1);
       // Save the result for the future
       sharding_functions[sid] = result;
       return result;

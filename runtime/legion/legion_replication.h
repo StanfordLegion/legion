@@ -499,12 +499,13 @@ namespace Legion {
       // Override this so we can exchange reduction results
       virtual void trigger_task_complete(void);
     public:
-      void initialize_replication(ReplicateContext *ctx);
+      void initialize_replication(ReplicateContext *ctx, IndexSpace launch_sp);
       virtual FutureMapImpl* create_future_map(TaskContext *ctx);
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
       FutureExchange *reduction_collective;
+      IndexSpace launch_space;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)
@@ -556,10 +557,11 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
     public:
-      void initialize_replication(ReplicateContext *ctx);
+      void initialize_replication(ReplicateContext *ctx, IndexSpace launch_sp);
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
+      IndexSpace launch_space;
       MapperManager *mapper;
 #ifdef DEBUG_LEGION
     public:
@@ -628,10 +630,11 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
     public:
-      void initialize_replication(ReplicateContext *ctx);
+      void initialize_replication(ReplicateContext *ctx, IndexSpace launch_sp);
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
+      IndexSpace launch_space;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)

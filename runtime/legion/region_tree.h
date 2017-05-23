@@ -974,6 +974,9 @@ namespace Legion {
     public:
       virtual void get_launch_space_domain(Domain &launch_domain) = 0;
       virtual void log_launch_space(UniqueID op_id) = 0;
+      virtual Domain create_shard_domain(ShardingFunction *func, 
+                                         ShardID shard) = 0;
+      virtual void destroy_shard_domain(const Domain &domain) = 0;
     public:
       const IndexSpace handle;
       IndexPartNode *const parent;
@@ -1224,6 +1227,8 @@ namespace Legion {
     public:
       virtual void get_launch_space_domain(Domain &launch_domain);
       virtual void log_launch_space(UniqueID op_id);
+      virtual Domain create_shard_domain(ShardingFunction *func, ShardID shard);
+      virtual void destroy_shard_domain(const Domain &domain);
     protected:
       void compute_linearization_metadata(void);
     protected:

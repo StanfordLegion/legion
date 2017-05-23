@@ -1441,7 +1441,7 @@ namespace Legion {
      */
     class ShardingFunction {
     public:
-      ShardingFunction(ShardingFunctor *functor, 
+      ShardingFunction(ShardingFunctor *functor, RegionTreeForest *forest,
                        ShardingID sharding_id, ShardID max_shard);
       ShardingFunction(const ShardingFunction &rhs);
       virtual ~ShardingFunction(void);
@@ -1449,11 +1449,15 @@ namespace Legion {
       ShardingFunction& operator=(const ShardingFunction &rhs);
     public:
       ShardID find_owner(const DomainPoint &point, const Domain &full_space);
-      const Domain& find_shard_domain(ShardID shard, const Domain &full_space);
+      const Domain& find_shard_domain(ShardID shard, IndexSpace full_space);
     public:
       ShardingFunctor *const functor;
+      RegionTreeForest *const forest;
       const ShardingID sharding_id;
       const ShardID max_shard;
+    protected:
+      Reservation sharding_lock;
+      std::map<std::pair<ShardID,IndexSpace>,Domain> shard_domains; 
     };
 
     /**

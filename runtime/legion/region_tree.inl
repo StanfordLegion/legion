@@ -2914,6 +2914,41 @@ namespace Legion {
         LegionSpy::log_launch_index_space_rect<DIM>(op_id, itr.rect);
     }
 
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    Domain IndexSpaceNodeT<DIM,T>::create_shard_domain(ShardingFunction *func,
+                                                       ShardID shard)
+    //--------------------------------------------------------------------------
+    {
+      if (!realm_index_space_set.has_triggered())
+        realm_index_space_set.lg_wait();
+      if (!index_space_ready.has_triggered())
+        index_space_ready.lg_wait();
+      const Domain full_space(realm_index_space);
+      std::vector<Realm::ZPoint<DIM,T> > shard_points; 
+      for (Realm::ZIndexSpaceIterator<DIM,T> rect_itr(realm_index_space); 
+            rect_itr.valid; rect_itr.step())
+      {
+        for (Realm::ZPointInRectIterator<DIM,T> itr(rect_itr.rect);
+              itr.valid; itr.step())
+        {
+          ShardID point_shard = func->find_owner(DomainPoint(itr.p),full_space);
+          if (point_shard == shard)
+            shard_points.push_back(itr.p);
+        }
+      }
+      return Domain(Realm::ZIndexSpace<DIM,T>(shard_points));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void IndexSpaceNodeT<DIM,T>::destroy_shard_domain(const Domain &domain)
+    //--------------------------------------------------------------------------
+    {
+      Realm::ZIndexSpace<DIM,T> to_destroy = domain;
+      to_destroy.destroy();
+    }
+
     /////////////////////////////////////////////////////////////
     // Templated Index Partition Node 
     /////////////////////////////////////////////////////////////
