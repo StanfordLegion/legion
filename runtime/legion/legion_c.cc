@@ -3107,50 +3107,14 @@ legion_dynamic_collective_advance(legion_runtime_t runtime_,
 //------------------------------------------------------------------------
 
 legion_future_t
-legion_future_from_buffer(legion_runtime_t runtime_,
-                          const void *buffer,
-                          size_t size)
+legion_future_from_untyped_pointer(legion_runtime_t runtime_,
+                                   const void *buffer,
+                                   size_t size)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
 
-  TaskResult task_result(buffer, size);
-  Future *result = new Future(Future::from_value(runtime, task_result));
-  return CObjectWrapper::wrap(result);
-}
-
-legion_future_t
-legion_future_from_uint32(legion_runtime_t runtime_,
-                          uint32_t value)
-{
-  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-
-  Future *result = new Future(Future::from_value(runtime, value));
-  return CObjectWrapper::wrap(result);
-}
-
-legion_future_t
-legion_future_from_uint64(legion_runtime_t runtime_,
-                          uint64_t value)
-{
-  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-
-  Future *result = new Future(Future::from_value(runtime, value));
-  return CObjectWrapper::wrap(result);
-}
-
-/**
- * @return Caller takes ownership of return value.
- *
- * @see LegionRuntime::HighLevel::Future::from_untyped_pointer()
- */
-legion_future_t
-legion_future_from_bytes(legion_runtime_t runtime_,
-			 const void *buffer,
-			 size_t size)
-{
-  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-
-  Future *result = new Future(Future::from_untyped_pointer(runtime, buffer, size));
+  Future *result = new Future(
+    Future::from_untyped_pointer(runtime, buffer, size));
   return CObjectWrapper::wrap(result);
 }
 
@@ -3179,47 +3143,6 @@ legion_future_get_void_result(legion_future_t handle_)
   handle->get_void_result();
 }
 
-legion_task_result_t
-legion_future_get_result(legion_future_t handle_)
-{
-  Future *handle = CObjectWrapper::unwrap(handle_);
-
-  TaskResult result = handle->get_result<TaskResult>();
-  return CObjectWrapper::wrap(result);
-}
-
-uint32_t
-legion_future_get_result_uint32(legion_future_t handle_)
-{
-  Future *handle = CObjectWrapper::unwrap(handle_);
-
-  return handle->get_result<uint32_t>();
-}
-
-uint64_t
-legion_future_get_result_uint64(legion_future_t handle_)
-{
-  Future *handle = CObjectWrapper::unwrap(handle_);
-
-  return handle->get_result<uint64_t>();
-}
-
-void
-legion_future_get_result_bytes(legion_future_t handle_, void *buffer, size_t size)
-{
-  Future *handle = CObjectWrapper::unwrap(handle_);
-
-  // better hope the caller gets the size right - no seat belts on this ride
-  memcpy(buffer, handle->get_untyped_pointer(), size);
-}
-
-size_t
-legion_future_get_result_size(legion_future_t handle_)
-{
-  Future *handle = CObjectWrapper::unwrap(handle_);
-  return handle->get_untyped_size();
-}
-
 bool
 legion_future_is_empty(legion_future_t handle_,
                        bool block /* = false */)
@@ -3242,53 +3165,6 @@ legion_future_get_untyped_size(legion_future_t handle_)
 {
   Future *handle = CObjectWrapper::unwrap(handle_);
   return handle->get_untyped_size();
-}
-
-// -----------------------------------------------------------------------
-// Task Result Operations
-// -----------------------------------------------------------------------
-
-legion_task_result_t
-legion_task_result_create(const void *handle, size_t size)
-{
-  legion_task_result_t result;
-  result.value = malloc(size);
-  assert(result.value);
-  memcpy(result.value, handle, size);
-  result.value_size = size;
-  return result;
-}
-
-void
-legion_task_result_destroy(legion_task_result_t handle)
-{
-  free(handle.value);
-}
-
-size_t
-legion_task_result_serialize(legion_task_result_t handle_,
-                             void *buffer)
-{
-  TaskResult handle = CObjectWrapper::unwrap(handle_);
-
-  return handle.legion_serialize(buffer);
-}
-
-size_t
-legion_task_result_buffer_size(legion_task_result_t handle_)
-{
-  TaskResult handle = CObjectWrapper::unwrap(handle_);
-
-  return handle.legion_buffer_size();
-}
-
-size_t
-legion_task_result_deserialize(legion_task_result_t handle_,
-                               const void *buffer)
-{
-  TaskResult handle = CObjectWrapper::unwrap(handle_);
-
-  return handle.legion_deserialize(buffer);
 }
 
 // -----------------------------------------------------------------------
@@ -3319,17 +3195,6 @@ legion_future_map_get_future(legion_future_map_t fm_,
   DomainPoint dp = CObjectWrapper::unwrap(dp_);
 
   return CObjectWrapper::wrap(new Future(fm->get_future(dp)));
-}
-
-legion_task_result_t
-legion_future_map_get_result(legion_future_map_t fm_,
-                             legion_domain_point_t dp_)
-{
-  FutureMap *fm = CObjectWrapper::unwrap(fm_);
-  DomainPoint dp = CObjectWrapper::unwrap(dp_);
-
-  TaskResult result = fm->get_result<TaskResult>(dp);
-  return CObjectWrapper::wrap(result);
 }
 
 //------------------------------------------------------------------------

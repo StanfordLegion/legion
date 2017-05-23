@@ -204,14 +204,6 @@ extern "C" {
   } legion_task_argument_t;
 
   /**
-   * @see Legion::TaskResult
-   */
-  typedef struct legion_task_result_t {
-    void *value;
-    size_t value_size;
-  } legion_task_result_t;
-
-  /**
    * @see LegionRuntime::Accessor::ByteOffset
    */
   typedef struct legion_byte_offset_t {
@@ -305,51 +297,6 @@ extern "C" {
       legion_runtime_t /* runtime */,
       const legion_processor_t * /* local_procs */,
       unsigned /* num_local_procs */);
-
-  /**
-   * Interface for a Legion C task returning void.
-   */
-  typedef
-    void (*legion_task_pointer_void_t)(
-      const legion_task_t /* task */,
-      const legion_physical_region_t * /* regions */,
-      unsigned /* num_regions */,
-      legion_context_t /* ctx */,
-      legion_runtime_t /* runtime */);
-
-  /**
-   * Interface for a Legion C task returning an opaque, arbitrary size
-   * result.
-   */
-  typedef
-    legion_task_result_t (*legion_task_pointer_t)(
-      const legion_task_t /* task */,
-      const legion_physical_region_t * /* regions */,
-      unsigned /* num_regions */,
-      legion_context_t /* ctx */,
-      legion_runtime_t /* runtime */);
-
-  /**
-   * Interface for a Legion C task returning an opaque 4-byte result.
-   */
-  typedef
-    uint32_t (*legion_task_pointer_uint32_t)(
-      const legion_task_t /* task */,
-      const legion_physical_region_t * /* regions */,
-      unsigned /* num_regions */,
-      legion_context_t /* ctx */,
-      legion_runtime_t /* runtime */);
-
-  /**
-   * Interface for a Legion C task returning an opaque 8-byte result.
-   */
-  typedef
-    uint64_t (*legion_task_pointer_uint64_t)(
-      const legion_task_t /* task */,
-      const legion_physical_region_t * /* regions */,
-      unsigned /* num_regions */,
-      legion_context_t /* ctx */,
-      legion_runtime_t /* runtime */);
 
   /**
    * Interface for a Legion C task that is wrapped (i.e. this is the Realm
@@ -1807,44 +1754,14 @@ extern "C" {
   // -----------------------------------------------------------------------
 
   /**
-   * @param buffer Makes a copy of parameter `buffer`.
-   *
    * @return Caller takes ownership of return value.
    *
-   * @see Legion::Future::from_value()
+   * @see Legion::Future::from_untyped_pointer()
    */
   legion_future_t
-  legion_future_from_buffer(legion_runtime_t runtime,
-                            const void *buffer,
-                            size_t size);
-
-  /**
-   * @return Caller takes ownership of return value.
-   *
-   * @see Legion::Future::from_value()
-   */
-  legion_future_t
-  legion_future_from_uint32(legion_runtime_t runtime,
-                            uint32_t value);
-
-  /**
-   * @return Caller takes ownership of return value.
-   *
-   * @see Legion::Future::from_value()
-   */
-  legion_future_t
-  legion_future_from_uint64(legion_runtime_t runtime,
-                            uint64_t value);
-
-  /**
-   * @return Caller takes ownership of return value.
-   *
-   * @see Legion::Future::from_value()
-   */
-  legion_future_t
-  legion_future_from_bytes(legion_runtime_t runtime,
-			   const void *buffer,
-			   size_t size);
+  legion_future_from_untyped_pointer(legion_runtime_t runtime,
+                                     const void *buffer,
+                                     size_t size);
 
   /**
    * @return Caller takes ownership of return value.
@@ -1869,38 +1786,6 @@ extern "C" {
   legion_future_get_void_result(legion_future_t handle);
 
   /**
-   * @return Caller takes ownership of return value.
-   *
-   * @see Legion::Future::get_result()
-   */
-  legion_task_result_t
-  legion_future_get_result(legion_future_t handle);
-
-  /**
-   * @see Legion::Future::get_result()
-   */
-  uint32_t
-  legion_future_get_result_uint32(legion_future_t handle);
-
-  /**
-   * @see Legion::Future::get_result()
-   */
-  uint64_t
-  legion_future_get_result_uint64(legion_future_t handle);
-
-  /**
-   * @see Legion::Future::get_untyped_pointer()
-   */
-  void
-  legion_future_get_result_bytes(legion_future_t handle_, void *buffer, size_t size);
-
-  /**
-   * @see Legion::Future::get_untyped_size()
-   */
-  size_t
-  legion_future_get_result_size(legion_future_t handle_);
-
-  /**
    * @see Legion::Future::is_empty()
    */
   bool
@@ -1918,46 +1803,6 @@ extern "C" {
    */
   size_t
   legion_future_get_untyped_size(legion_future_t handle);
-
-  // -----------------------------------------------------------------------
-  // Task Result Operations
-  // -----------------------------------------------------------------------
-
-  /**
-   * @return Caller takes ownership of return value.
-   *
-   * @see Legion::Runtime::execute_task()
-   */
-  legion_task_result_t
-  legion_task_result_create(const void *handle, size_t size);
-
-  /**
-   * @param handle Caller must have ownership of parameter `handle`.
-   *
-   * @see Legion::Runtime::execute_task()
-   */
-  void
-  legion_task_result_destroy(legion_task_result_t handle);
-
-  /**
-   * @see Legion::TaskResult::legion_serialize()
-   */
-  size_t
-  legion_task_result_serialize(legion_task_result_t handle,
-                               void *buffer);
-
-  /**
-   * @see Legion::TaskResult::legion_buffer_size()
-   */
-  size_t
-  legion_task_result_buffer_size(legion_task_result_t handle);
-
-  /**
-   * @see Legion::TaskResult::legion_deserialize()
-   */
-  size_t
-  legion_task_result_deserialize(legion_task_result_t handle,
-                                 const void *buffer);
 
   // -----------------------------------------------------------------------
   // Future Map Operations
@@ -1984,15 +1829,6 @@ extern "C" {
    */
   legion_future_t
   legion_future_map_get_future(legion_future_map_t handle,
-                               legion_domain_point_t point);
-
-  /**
-   * @return Caller takes ownership of return value.
-   *
-   * @see Legion::Future::get_result()
-   */
-  legion_task_result_t
-  legion_future_map_get_result(legion_future_map_t handle,
                                legion_domain_point_t point);
 
   // -----------------------------------------------------------------------
