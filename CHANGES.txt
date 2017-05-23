@@ -11,6 +11,9 @@ Version ??.??.? (?? ??, ????)
     - Added support running normal tasks on I/O processors
     - Added support for OpenMP code generation via __demand(__openmp)
   * C API
+    - Removed the following deprecated types:
+          legion_task_result_t
+            (obviated by the new task preamble/postamble)
     - Removed the following deprecated APIs:
           legion_physical_region_get_accessor_generic
           legion_physical_region_get_accessor_array
@@ -22,6 +25,20 @@ Version ??.??.? (?? ??, ????)
           legion_runtime_register_task_uint32
           legion_runtime_register_task_uint64
             (use legion_runtime_preregister_task_variant_* instead)
+          legion_future_from_buffer
+          legion_future_from_uint32
+          legion_future_from_uint64
+          legion_future_from_bytes
+            (use legion_future_from_untyped_pointer instead)
+          legion_future_get_result
+          legion_future_get_result_uint32
+          legion_future_get_result_uint64
+          legion_future_get_result_bytes
+            (use legion_future_get_untyped_pointer instead)
+          legion_future_get_result_size
+            (use legion_future_get_untyped_size instead)
+          legion_future_map_get_result
+            (use legion_future_map_get_future instead)
 
 Version 17.02.0 (February 14, 2017)
   * General
