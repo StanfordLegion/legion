@@ -1707,35 +1707,21 @@ function std.deserialize(value_type, fixed_ptr, data_ptr)
   return actions, result
 end
 
--- Keep in sync with std.type_size_bucket_type
-function std.type_size_bucket_name(value_type)
-  if std.is_list(value_type) then
-    return ""
-  elseif value_type == terralib.types.unit then
-    return "_void"
-  elseif terralib.sizeof(value_type) == 4 then
-    return "_uint32"
-  elseif terralib.sizeof(value_type) == 8 then
-    return "_uint64"
+-- This is a type representing a buffer containing a serialized value.
+-- The value owns the buffer.
+struct std.serialized_value {
+  value: &opaque,
+  size: uint64,
+}
+
+function std.type_size_bucket_type(value_type)
+  if value_type == terralib.types.unit then
+    return terralib.types.unit
   else
-    return ""
+    return std.serialized_value
   end
 end
 
--- Keep in sync with std.type_size_bucket_name
-function std.type_size_bucket_type(value_type)
-  if std.is_list(value_type) then
-    return c.legion_task_result_t
-  elseif value_type == terralib.types.unit then
-    return terralib.types.unit
-  elseif terralib.sizeof(value_type) == 4 then
-    return uint32
-  elseif terralib.sizeof(value_type) == 8 then
-    return uint64
-  else
-    return c.legion_task_result_t
-  end
-end
 
 -- #####################################
 -- ## Symbols
@@ -3549,8 +3535,7 @@ end
 
 local function make_task_wrapper(task_body)
   local return_type = task_body:gettype().returntype
-  local return_type_bucket = std.type_size_bucket_type(return_type)
-  if return_type_bucket == terralib.types.unit then
+  if return_type == terralib.types.unit then
     return terra(data : &opaque, datalen : c.size_t,
                  userdata : &opaque, userlen : c.size_t,
                  proc_id : c.legion_lowlevel_id_t)
@@ -3563,25 +3548,6 @@ local function make_task_wrapper(task_body)
       task_body(task, regions, num_regions, ctx, runtime)
       c.legion_task_postamble(runtime, ctx, nil, 0)
     end
-  elseif return_type_bucket == c.legion_task_result_t then
-    return terra(data : &opaque, datalen : c.size_t,
-                 userdata : &opaque, userlen : c.size_t,
-                 proc_id : c.legion_lowlevel_id_t)
-      var task : c.legion_task_t,
-          regions : &c.legion_physical_region_t,
-          num_regions : uint32,
-          ctx : c.legion_context_t,
-          runtime : c.legion_runtime_t
-      c.legion_task_preamble(data, datalen, proc_id, &task, &regions, &num_regions, &ctx, &runtime)
-      var return_value = task_body(task, regions, num_regions, ctx, runtime)
-      var buffer_size = c.legion_task_result_buffer_size(return_value)
-      var buffer = c.malloc(buffer_size)
-      std.assert(buffer ~= nil, "malloc failed in task wrapper")
-      c.legion_task_result_serialize(return_value, buffer)
-      c.legion_task_postamble(runtime, ctx, buffer, buffer_size)
-      c.free(buffer)
-      c.legion_task_result_destroy(return_value)
-    end
   else
     return terra(data : &opaque, datalen : c.size_t,
                  userdata : &opaque, userlen : c.size_t,
@@ -3592,8 +3558,9 @@ local function make_task_wrapper(task_body)
           ctx : c.legion_context_t,
           runtime : c.legion_runtime_t
       c.legion_task_preamble(data, datalen, proc_id, &task, &regions, &num_regions, &ctx, &runtime)
-      var return_value = task_body(task, regions, num_regions, ctx, runtime)
-      c.legion_task_postamble(runtime, ctx, [&opaque](&return_value), terralib.sizeof(return_type))
+      var result = task_body(task, regions, num_regions, ctx, runtime)
+      c.legion_task_postamble(runtime, ctx, result.value, result.size)
+      c.free(result.value)
     end
   end
 end

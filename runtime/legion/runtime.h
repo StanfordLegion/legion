@@ -2167,6 +2167,10 @@ namespace Legion {
       void send_remote_context_request(AddressSpaceID target, Serializer &rez);
       void send_remote_context_response(AddressSpaceID target, Serializer &rez);
       void send_remote_context_free(AddressSpaceID target, Serializer &rez);
+      void send_remote_context_physical_request(AddressSpaceID target, 
+                                                Serializer &rez);
+      void send_remote_context_physical_response(AddressSpaceID target,
+                                                 Serializer &rez);
       void send_version_owner_request(AddressSpaceID target, Serializer &rez);
       void send_version_owner_response(AddressSpaceID target, Serializer &rez);
       void send_version_state_response(AddressSpaceID target, Serializer &rez);
@@ -2358,6 +2362,9 @@ namespace Legion {
                                          AddressSpaceID source);
       void handle_remote_context_response(Deserializer &derez);
       void handle_remote_context_free(Deserializer &derez);
+      void handle_remote_context_physical_request(Deserializer &derez,
+                                                  AddressSpaceID source);
+      void handle_remote_context_physical_response(Deserializer &derez);
       void handle_version_owner_request(Deserializer &derez, 
                                         AddressSpaceID source);
       void handle_version_owner_response(Deserializer &derez);

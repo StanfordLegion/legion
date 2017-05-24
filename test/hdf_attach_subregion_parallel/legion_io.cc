@@ -65,14 +65,18 @@ void split_path_file(char** p, char** f, const char *pf);
 
 
 void PersistentRegion_init() {
-  Runtime::register_legion_task<copy_values_task>(COPY_VALUES_TASK_ID,
-                                                           Processor::LOC_PROC,
-                                                           true /*single*/, true /*index*/);
+  {
+    TaskVariantRegistrar registrar(COPY_VALUES_TASK_ID, "copy_values");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    Runtime::preregister_task_variant<copy_values_task>(registrar, "copy_values");
+  }
   
 #ifdef TESTERIO_PHASER_TIMERS
-  Runtime::register_legion_task<timer_task>(TIMER_TASK_ID,
-                                                     Processor::LOC_PROC,
-                                                     true /*single*/, false /*index*/);
+  {
+    TaskVariantRegistrar registrar(TIMER_TASK_ID, "timer");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    Runtime::preregister_task_variant<timer_task>(registrar, "timer");
+  }
 #endif
     
 }
