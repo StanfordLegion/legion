@@ -8488,7 +8488,7 @@ index_name_pat           = re.compile(
     prefix+"Index Space Name (?P<uid>[0-9a-f]+) (?P<name>[-$()\w. ]+)")
 index_part_pat           = re.compile(
     prefix+"Index Partition (?P<pid>[0-9a-f]+) (?P<uid>[0-9a-f]+) (?P<disjoint>[0-1]) "+
-           "(?P<dim>[0-9]+) (?P<val1>[0-9]+) (?P<val2>[0-9]+) (?P<val3>[0-9]+)")
+           "(?P<color>[0-9]+)")
 index_part_name_pat      = re.compile(
     prefix+"Index Partition Name (?P<uid>[0-9a-f]+) (?P<name>[-$()\w. ]+)")
 index_subspace_pat       = re.compile(
@@ -9384,13 +9384,8 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         parent = state.get_index_space(int(m.group('pid'),16))
         part = state.get_index_partition(int(m.group('uid'),16))
-        dim = int(m.group('dim'))
-        color= Point(dim)
-        color.vals[0] = int(m.group('val1'))
-        if dim > 1:
-            color.vals[1] = int(m.group('val2'))
-            if dim > 2:
-                color.vals[2] = int(m.group('val3'))
+        color= Point(1)
+        color.vals[0] = int(m.group('color'))
         part.set_parent(parent, color)
         part.set_disjoint(True if int(m.group('disjoint')) == 1 else False)
         return True
