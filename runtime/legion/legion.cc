@@ -5687,6 +5687,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ProjectionID Runtime::generate_dynamic_projection_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_dynamic_projection_id();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ProjectionID Runtime::generate_static_projection_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::Runtime::generate_static_projection_id();
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::register_projection_functor(ProjectionID pid,
                                                        ProjectionFunctor *func)
     //--------------------------------------------------------------------------
