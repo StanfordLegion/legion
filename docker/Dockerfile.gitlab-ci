@@ -9,7 +9,6 @@ ENV DEBIAN_FRONTEND noninteractive
 RUN apt-get update -qq && \
     apt-get install -qq software-properties-common && \
     add-apt-repository ppa:ubuntu-toolchain-r/test -y && \
-    add-apt-repository ppa:graphics-drivers && \
     add-apt-repository ppa:pypy/ppa -y && \
     apt-get update -qq && \
     apt-get install -qq \
@@ -20,7 +19,7 @@ RUN apt-get update -qq && \
       clang-3.8 libclang-3.8-dev llvm-3.8-dev \
       libncurses5-dev zlib1g-dev \
       mpich2 libmpich-dev \
-      nvidia-375 \
+      mesa-common-dev \
       libblas-dev liblapack-dev libhdf5-dev && \
     apt-get clean && \
     pip install github3.py
