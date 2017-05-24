@@ -26,8 +26,6 @@
 namespace Legion {
   namespace Mapping {
 
-    using namespace LegionRuntime::Arrays;
-
     Logger log_test_mapper("test_mapper");
 
     //--------------------------------------------------------------------------
@@ -219,7 +217,7 @@ namespace Legion {
             for (LegionRuntime::Arrays::GenericPointInRectIterator<1> pir(rect);
                   pir; pir++, idx++)
             {
-              Rect<1> slice(pir.p, pir.p);
+              LegionRuntime::Arrays::Rect<1> slice(pir.p, pir.p);
               output.slices[idx] = TaskSlice(Domain::from_rect<1>(slice),
                   select_random_processor(task.target_proc.kind()),
                   false/*recurse*/, true/*stealable*/);
@@ -232,7 +230,7 @@ namespace Legion {
             for (LegionRuntime::Arrays::GenericPointInRectIterator<2> pir(rect);
                   pir; pir++, idx++)
             {
-              Rect<2> slice(pir.p, pir.p);
+              LegionRuntime::Arrays::Rect<2> slice(pir.p, pir.p);
               output.slices[idx] = TaskSlice(Domain::from_rect<2>(slice),
                   select_random_processor(task.target_proc.kind()),
                   false/*recurse*/, true/*stealable*/);
@@ -245,7 +243,7 @@ namespace Legion {
             for (LegionRuntime::Arrays::GenericPointInRectIterator<3> pir(rect);
                   pir; pir++, idx++)
             {
-              Rect<3> slice(pir.p, pir.p);
+              LegionRuntime::Arrays::Rect<3> slice(pir.p, pir.p);
               output.slices[idx] = TaskSlice(Domain::from_rect<3>(slice),
                   select_random_processor(task.target_proc.kind()),
                   false/*recurse*/, true/*stealable*/);

@@ -19,27 +19,31 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM>
     /*static*/ void DefaultMapper::default_decompose_points(
-                                         const Rect<DIM> &point_rect,
-                                         const std::vector<Processor> &targets,
-                                         const Point<DIM> &num_blocks,
-                                         bool recurse, bool stealable,
-                                         std::vector<TaskSlice> &slices)
+                           const LegionRuntime::Arrays::Rect<DIM> &point_rect,
+                           const std::vector<Processor> &targets,
+                           const LegionRuntime::Arrays::Point<DIM> &num_blocks,
+                           bool recurse, bool stealable,
+                           std::vector<TaskSlice> &slices)
     //--------------------------------------------------------------------------
     {
-      Point<DIM> num_points = 
-        point_rect.hi - point_rect.lo + Point<DIM>::ONES();
-      Rect<DIM> blocks(Point<DIM>::ZEROES(), num_blocks - Point<DIM>::ONES());
+      LegionRuntime::Arrays::Point<DIM> num_points = point_rect.hi - 
+        point_rect.lo + LegionRuntime::Arrays::Point<DIM>::ONES();
+      LegionRuntime::Arrays::Rect<DIM> blocks(
+          LegionRuntime::Arrays::Point<DIM>::ZEROES(), 
+          num_blocks - LegionRuntime::Arrays::Point<DIM>::ONES());
       size_t next_index = 0;
       slices.reserve(blocks.volume());
       for (GenericPointInRectIterator<DIM> pir(blocks);
            pir; pir++) {
-        Point<DIM> block_lo = pir.p, block_hi = pir.p + Point<DIM>::ONES();
+        LegionRuntime::Arrays::Point<DIM> block_lo = 
+          pir.p, block_hi = pir.p + LegionRuntime::Arrays::Point<DIM>::ONES();
 
-        Point<DIM> slice_lo =
+        LegionRuntime::Arrays::Point<DIM> slice_lo =
           num_points * block_lo / num_blocks + point_rect.lo;
-        Point<DIM> slice_hi = num_points * block_hi / num_blocks +
-          point_rect.lo - Point<DIM>::ONES();
-        Rect<DIM> slice_rect(slice_lo, slice_hi);
+        LegionRuntime::Arrays::Point<DIM> slice_hi = 
+          num_points * block_hi / num_blocks + point_rect.lo - 
+          LegionRuntime::Arrays::Point<DIM>::ONES();
+        LegionRuntime::Arrays::Rect<DIM> slice_rect(slice_lo, slice_hi);
 
         if (slice_rect.volume() > 0) {
           TaskSlice slice;
@@ -54,12 +58,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM>
-    /*static*/ Point<DIM> DefaultMapper::default_select_num_blocks( 
-                               long long int factor, const Rect<DIM> &to_factor)
+    /*static*/ LegionRuntime::Arrays::Point<DIM> 
+                DefaultMapper::default_select_num_blocks( 
+                             long long int factor, 
+                             const LegionRuntime::Arrays::Rect<DIM> &to_factor)
     //--------------------------------------------------------------------------
     {
       if (factor == 1)
-        return Point<DIM>::ONES();
+        return LegionRuntime::Arrays::Point<DIM>::ONES();
 
       // Fundamental theorem of arithmetic time!
       const unsigned num_primes = 32;
@@ -114,7 +120,7 @@ namespace Legion {
         result[next_dim] *= next_prime;
         dim_chunks[next_dim] /= next_prime;
       }
-      return Point<DIM>(result);
+      return LegionRuntime::Arrays::Point<DIM>(result);
     }
 
     //--------------------------------------------------------------------------

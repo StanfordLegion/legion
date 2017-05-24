@@ -792,18 +792,79 @@ namespace Legion {
       return os;
     }
 
+    template<int DIM, typename COORD_T>
+    class DomainIterator {
+    public:
+#if __cplusplus < 201103L
+      DomainIterator(const Realm::ZIndexSpace<DIM,COORD_T> &d)
+#else
+      DomainIterator(const DomainT<DIM,COORD_T> &d)
+#endif
+        : is_itr(d)
+      {
+        is_valid = is_itr.is_valid;
+        if (is_valid) {
+          rect_itr = Realm::ZPointInRectIterator<DIM,COORD_T>(is_itr.rect);
+          rect_valid = rect_itr.valid;
+          p = rect_itr.p;
+        } else
+          rect_valid = false;
+      }
+    public:
+      inline bool step(void) 
+      {
+        assert(is_valid && rect_valid);
+        // Step the rect iterator first
+        rect_itr.step();
+        rect_valid = rect_itr.valid;
+        if (!rect_valid) {
+          // Rect iterator is no longer valid, start the
+          // next rectangle if there is one
+          is_itr.step();
+          is_valid = is_itr.valid;
+          if (is_valid) {
+            rect_itr = Realm::ZPointInRectIterator<DIM,COORD_T>(is_itr.rect);
+            p = rect_itr.p;
+            rect_valid = rect_itr.valid;
+          } else {
+            rect_valid = false;
+          }
+        } else {
+          p = rect_itr.p;
+        }
+      }
+    public:
+      inline operator bool(void) const { return is_valid && rect_valid; }
+      inline DomainIterator& operator++(int /*i am postfix*/) 
+        { step(); return *this; }
+    public:
+#if __cplusplus < 201103L
+      Realm::ZPoint<DIM,COORD_T> p;
+#else
+      Point<DIM,COORD_T> p;
+#endif
+    protected:
+      Realm::ZIndexSpaceIterator<DIM,COORD_T> is_itr;
+      Realm::ZPointInRectIterator<DIM,COORD_T> rect_itr;
+      bool is_valid, rect_valid;
+    };
+
+    // This class exists for some very minimal backwards compatibility
     class IndexSpaceAllocator {
     public:
       IndexSpaceAllocator(const Domain &d)
         : iterator(Domain::DomainPointIterator(d)) { assert(d.get_dim() == 1); }
     public:
+      LEGION_DEPRECATED("Dynamic allocation is no longer supported.")
       coord_t alloc(size_t count = 1) const 
         { assert(iterator); coord_t result = iterator.p[0]; 
           for (size_t i = 0; i < count; i++) iterator.step();
           return result; }
+      LEGION_DEPRECATED("Dynamic allocation is no longer supported.")
       void reserve(coord_t ptr, size_t count = 1) const
         { printf("No backwards compatibility for 'reserve' "
                  "on index space allocators.\n"); assert(false); }
+      LEGION_DEPRECATED("Dynamic allocation is no longer supported.")
       void free(coord_t ptr, size_t count = 1) const
         { printf("No backwards compatibility for 'free' "
                  "on index space allocators.\n"); assert(false); }
