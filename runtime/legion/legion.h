@@ -3758,6 +3758,7 @@ namespace Legion {
       //------------------------------------------------------------------------
       // Index Tree Traversal Operations
       //------------------------------------------------------------------------
+      ///@{
       /**
        * Return the index partitioning of an index space 
        * with the assigned color.
@@ -3779,6 +3780,9 @@ namespace Legion {
       IndexPartitionT<DIM,COORD_T> get_index_partition(
                                   IndexSpaceT<DIM,COORD_T> parent, Color color);
 
+      ///@}
+      
+      ///@{
       /**
        * Return true if the index space has an index partition
        * with the specified color.
@@ -3797,7 +3801,9 @@ namespace Legion {
       // Template version
       template<int DIM, typename COORD_T>
       bool has_index_partition(IndexSpaceT<DIM,COORD_T> parent, Color color);
+      ///@}
 
+      ///@{
       /**
        * Return the index subspace of an index partitioning
        * with the specified color.
@@ -3820,7 +3826,9 @@ namespace Legion {
       IndexSpaceT<DIM,COORD_T> get_index_subspace(
                                   IndexPartitionT<DIM,COORD_T> p,
                                   Realm::ZPoint<COLOR_DIM,COLOR_COORD_T> color);
+      ///@}
 
+      ///@{
       /**
        * Return true if the index partition has an index subspace
        * with the specified color.
@@ -3839,7 +3847,9 @@ namespace Legion {
                int COLOR_DIM, typename COLOR_COORD_T>
       bool has_index_subspace(IndexPartitionT<DIM,COORD_T> p,
                               Realm::ZPoint<COLOR_DIM,COLOR_COORD_T> color);
+      ///@}
 
+      ///@{
       /**
        * @deprecated
        * Return if the given index space is represented by 
@@ -3855,7 +3865,9 @@ namespace Legion {
       // Context free
       LEGION_DEPRECATED("Multiple domains are no longer supported.")
       bool has_multiple_domains(IndexSpace handle);
+      ///@}
 
+      ///@{
       /**
        * Return the domain corresponding to the
        * specified index space if it exists
@@ -3869,7 +3881,9 @@ namespace Legion {
       // Template version
       template<int DIM, typename COORD_T>
       Realm::ZIndexSpace<DIM,COORD_T> get_index_space_domain(IndexSpace handle);
+      ///@}
 
+      ///@{
       /**
        * @deprecated
        * Return the domains that represent the index space.
@@ -3887,7 +3901,9 @@ namespace Legion {
       LEGION_DEPRECATED("Multiple domains are no longer supported.")
       void get_index_space_domains(IndexSpace handle,
                                    std::vector<Domain> &domains);
+      ///@}
 
+      ///@{
       /**
        * Return a domain that represents the color space
        * for the specified partition.
@@ -3903,7 +3919,9 @@ namespace Legion {
                int COLOR_DIM, typename COLOR_COORD_T>
       Realm::ZIndexSpace<COLOR_DIM,COLOR_COORD_T>
              get_index_partition_color_space(IndexPartitionT<DIM,COORD_T> p);
+      ///@}
 
+      ///@{
       /**
        * Return the name of the color space for a partition
        * @param ctx enclosing task context
@@ -3919,7 +3937,9 @@ namespace Legion {
                int COLOR_DIM, typename COLOR_COORD_T>
       IndexSpaceT<COLOR_DIM,COLOR_COORD_T> 
            get_index_partition_color_space_name(IndexPartitionT<DIM,COORD_T> p);
+      ///@}
 
+      ///@{
       /**
        * Return a set that contains the colors of all
        * the partitions of the index space.  It is unlikely
@@ -3938,7 +3958,9 @@ namespace Legion {
                                             std::set<Color> &colors);
       void get_index_space_partition_colors(IndexSpace sp,
                                             std::set<DomainPoint> &colors);
+      ///@}
 
+      ///@{
       /**
        * Return whether a given index partition is disjoint
        * @param ctx enclosing task context
@@ -3948,7 +3970,9 @@ namespace Legion {
       bool is_index_partition_disjoint(Context ctx, IndexPartition p);
       // Context free
       bool is_index_partition_disjoint(IndexPartition p);
+      ///@}
 
+      ///@{
       /**
        * Return whether a given index partition is complete
        * @param ctx enclosing task context
@@ -3958,6 +3982,7 @@ namespace Legion {
       bool is_index_partition_complete(Context ctx, IndexPartition p);
       // Context free
       bool is_index_partition_complete(IndexPartition p);
+      ///@}
 
       /**
        * @deprecated
@@ -3972,6 +3997,7 @@ namespace Legion {
       IndexSpace get_index_subspace(Context ctx, IndexPartition p, 
                                 LegionRuntime::Arrays::Point<DIM> color_point);
 
+      ///@{
       /**
        * Return the color for the corresponding index space in
        * its member partition.  If it is a top-level index space
@@ -3990,7 +4016,9 @@ namespace Legion {
                int COLOR_DIM, typename COLOR_COORD_T>
       Realm::ZPoint<COLOR_DIM,COLOR_COORD_T>
             get_index_space_color(IndexSpaceT<DIM,COORD_T> handle);
+      ///@}
 
+      ///@{
       /**
        * Return the color for the corresponding index partition in
        * in relation to its parent logical region.
@@ -4004,7 +4032,9 @@ namespace Legion {
       // Context free
       Color get_index_partition_color(IndexPartition handle);
       DomainPoint get_index_partition_color_point(IndexPartition handle);
+      ///@}
 
+      ///@{
       /**
        * Return the index space parent for the given index partition.
        * @param ctx enclosing task context
@@ -4018,7 +4048,9 @@ namespace Legion {
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> get_parent_index_space(
                                       IndexPartitionT<DIM,COORD_T> handle);
+      ///@}
 
+      ///@{
       /**
        * Returns true if the given index space has a parent partition.
        * @param ctx enclosing task context
@@ -4028,7 +4060,9 @@ namespace Legion {
       bool has_parent_index_partition(Context ctx, IndexSpace handle);
       // Context free
       bool has_parent_index_partition(IndexSpace handle);
+      ///@}
 
+      ///@{
       /**
        * Returns the parent partition for the given index space.
        * Use the previous call to check to see if a parent actually exists.
@@ -4043,7 +4077,9 @@ namespace Legion {
       template<int DIM, typename COORD_T>
       IndexPartitionT<DIM,COORD_T> get_parent_index_partition(
                                               IndexSpaceT<DIM,COORD_T> handle);
+      ///@}
 
+      ///@{
       /**
        * Return the depth in the index space tree of the given index space.
        * @param ctx enclosing task context
@@ -4053,7 +4089,9 @@ namespace Legion {
       unsigned get_index_space_depth(Context ctx, IndexSpace handle);
       // Context free
       unsigned get_index_space_depth(IndexSpace handle);
+      ///@}
 
+      ///@{
       /**
        * Return the depth in the index space tree of the given index partition.
        * @param ctx enclosing task context
@@ -4063,6 +4101,7 @@ namespace Legion {
       unsigned get_index_partition_depth(Context ctx, IndexPartition handle);
       // Context free
       unsigned get_index_partition_depth(IndexPartition handle);
+      ///@}
     public:
       //------------------------------------------------------------------------
       // Safe Cast Operations
@@ -4117,6 +4156,7 @@ namespace Legion {
        */
       void destroy_field_space(Context ctx, FieldSpace handle);
 
+      ///@{
       /**
        * Get the size of a specific field within field space.
        * @param ctx enclosing task context
@@ -4127,7 +4167,9 @@ namespace Legion {
       size_t get_field_size(Context ctx, FieldSpace handle, FieldID fid);
       // Context free
       size_t get_field_size(FieldSpace handle, FieldID fid);
+      ///@}
 
+      ///@{
       /**
        * Get the IDs of the fields currently allocated in a field space.
        * @param ctx enclosing task context
@@ -4139,7 +4181,9 @@ namespace Legion {
       // Context free
       void get_field_space_fields(FieldSpace handle,
                                   std::vector<FieldID> &fields);
+      ///@}
 
+      ///@{
       /**
        * Get the IDs of the fields currently allocated in a field space.
        * @param ctx enclosing task context
@@ -4151,6 +4195,7 @@ namespace Legion {
       // Context free
       void get_field_space_fields(FieldSpace handle,
                                   std::set<FieldID> &fields);
+      ///@}
     public:
       //------------------------------------------------------------------------
       // Logical Region Operations
@@ -4190,6 +4235,7 @@ namespace Legion {
       //------------------------------------------------------------------------
       // Logical Region Tree Traversal Operations
       //------------------------------------------------------------------------
+      ///@{
       /**
        * Return the logical partition instance of the given index partition
        * in the region tree for the parent logical region.
@@ -4209,7 +4255,9 @@ namespace Legion {
       LogicalPartitionT<DIM,COORD_T> get_logical_partition(
                                       LogicalRegionT<DIM,COORD_T> parent,
                                       IndexPartitionT<DIM,COORD_T> handle);
+      ///@}
       
+      ///@{
       /**
        * Return the logical partition of the logical region parent with
        * the specified color.
@@ -4234,7 +4282,9 @@ namespace Legion {
       LogicalPartitionT<DIM,COORD_T> get_logical_partition_by_color(
                                         LogicalRegionT<DIM,COORD_T> parent,
                                         Color c);
+      ///@}
 
+      ///@{
       /**
        * Return true if the logical region has a logical partition with
        * the specified color.
@@ -4249,7 +4299,9 @@ namespace Legion {
       // Context free
       bool has_logical_partition_by_color(LogicalRegion parent,
                                           const DomainPoint &c);
+      ///@}
       
+      ///@{
       /**
        * Return the logical partition identified by the triple of index
        * partition, field space, and region tree ID.
@@ -4272,7 +4324,9 @@ namespace Legion {
       LogicalPartitionT<DIM,COORD_T> get_logical_partition_by_tree(
                                       IndexPartitionT<DIM,COORD_T> handle,
                                       FieldSpace fspace, RegionTreeID tid);
+      ///@}
 
+      ///@{
       /**
        * Return the logical region instance of the given index space 
        * in the region tree for the parent logical partition.
@@ -4292,7 +4346,9 @@ namespace Legion {
       LogicalRegionT<DIM,COORD_T> get_logical_subregion(
                                           LogicalPartitionT<DIM,COORD_T> parent,
                                           IndexSpaceT<DIM,COORD_T> handle);
+      ///@}
 
+      ///@{
       /**
        * Return the logical region of the logical partition parent with
        * the specified color.
@@ -4318,7 +4374,9 @@ namespace Legion {
       LogicalRegionT<DIM,COORD_T> get_logical_subregion_by_color(
                                   LogicalPartitionT<DIM,COORD_T> parent,
                                   Realm::ZPoint<COLOR_DIM,COLOR_COORD_T> color);
+      ///@}
 
+      ///@{
       /**
        * Return true if the logical partition has a logical region with
        * the specified color.
@@ -4338,7 +4396,9 @@ namespace Legion {
                int COLOR_DIM, typename COLOR_COORD_T>
       bool has_logical_subregion_by_color(LogicalPartitionT<DIM,COORD_T> parent,
                                   Realm::ZPoint<COLOR_DIM,COLOR_COORD_T> color);
+      ///@}
 
+      ///@{
       /**
        * Return the logical partition identified by the triple of index
        * space, field space, and region tree ID.
@@ -4361,7 +4421,9 @@ namespace Legion {
       LogicalRegionT<DIM,COORD_T> get_logical_subregion_by_tree(
                                     IndexSpaceT<DIM,COORD_T> handle,
                                     FieldSpace space, RegionTreeID tid);
+      ///@}
 
+      ///@{
       /**
        * Return the color for the logical region corresponding to
        * its location in the parent partition.  If the region is a
@@ -4381,7 +4443,9 @@ namespace Legion {
                int COLOR_DIM, typename COLOR_COORD_T>
       Realm::ZPoint<COLOR_DIM,COLOR_COORD_T> get_logical_region_color_point(
                                           LogicalRegionT<DIM,COORD_T> handle);
+      ///@}
 
+      ///@{
       /**
        * Return the color for the logical partition corresponding to
        * its location relative to the parent logical region.
@@ -4395,7 +4459,9 @@ namespace Legion {
       // Context free versions
       Color get_logical_partition_color(LogicalPartition handle);
       DomainPoint get_logical_partition_color_point(LogicalPartition handle);
+      ///@}
 
+      ///@{
       /**
        * Return the parent logical region for a given logical partition.
        * @param ctx enclosing task context
@@ -4410,7 +4476,9 @@ namespace Legion {
       template<int DIM, typename COORD_T>
       LogicalRegionT<DIM,COORD_T> get_parent_logical_region(
                                     LogicalPartitionT<DIM,COORD_T> handle);
+      ///@}
 
+      ///@{
       /**
        * Return true if the logical region has a parent logical partition.
        * @param ctx enclosing task context
@@ -4420,7 +4488,9 @@ namespace Legion {
       bool has_parent_logical_partition(Context ctx, LogicalRegion handle);
       // Context free
       bool has_parent_logical_partition(LogicalRegion handle);
+      ///@}
 
+      ///@{
       /**
        * Return the parent logical partition for a logical region.
        * @param ctx enclosing task context
@@ -4435,6 +4505,7 @@ namespace Legion {
       template<int DIM, typename COORD_T>
       LogicalPartitionT<DIM,COORD_T> get_parent_logical_partition(
                                           LogicalRegionT<DIM,COORD_T> handle);
+      ///@}
     public:
       //------------------------------------------------------------------------
       // Allocator and Argument Map Operations 
@@ -5808,6 +5879,22 @@ namespace Legion {
        */
       void replace_default_mapper(Mapping::Mapper *mapper, 
                                   Processor proc = Processor::NO_PROC);
+
+    public:
+      /**
+       * Dynamically generate a unique projection ID for use across the machine
+       * @reutrn a ProjectionID that is globally unique across the machine
+       */
+      ProjectionID generate_dynamic_projection_id(void);
+
+      /**
+       * Statically generate a unique Projection ID for use across the machine.
+       * This can only be called prior to the runtime starting. It must be
+       * invoked symmetrically across all the nodes in the machine prior
+       * to starting the runtime.
+       * @return a ProjectionID that is globally unique across the machine
+       */
+      static ProjectionID generate_static_projection_id(void);
 
       /**
        * Register a projection functor for handling projection
