@@ -6120,6 +6120,17 @@ namespace Legion {
               runtime->handle_remote_context_free(derez);
               break;
             }
+          case SEND_REMOTE_CONTEXT_PHYSICAL_REQUEST:
+            {
+              runtime->handle_remote_context_physical_request(derez,
+                                              remote_address_space);
+              break;
+            }
+          case SEND_REMOTE_CONTEXT_PHYSICAL_RESPONSE:
+            {
+              runtime->handle_remote_context_physical_response(derez);
+              break;
+            }
           case SEND_VERSION_OWNER_REQUEST: 
             {
               runtime->handle_version_owner_request(derez,remote_address_space);
@@ -13680,6 +13691,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_remote_context_physical_request(AddressSpaceID target,
+                                                       Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_REMOTE_CONTEXT_PHYSICAL_REQUEST, 
+          CONTEXT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_remote_context_physical_response(AddressSpaceID target,
+                                                        Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      // This can't go on the context virtual channel due to the possiblility
+      // of deadlock in the case where we need to page in the result context
+      find_messenger(target)->send_message(rez,
+          SEND_REMOTE_CONTEXT_PHYSICAL_RESPONSE,
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_version_owner_request(AddressSpaceID target,
                                              Serializer &rez)
     //--------------------------------------------------------------------------
@@ -14693,6 +14726,21 @@ namespace Legion {
       UniqueID remote_owner_uid;
       derez.deserialize(remote_owner_uid);
       unregister_remote_context(remote_owner_uid);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_context_physical_request(Deserializer &derez,
+                                                         AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      RemoteContext::handle_physical_request(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_context_physical_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      RemoteContext::handle_physical_response(derez, this);
     }
 
     //--------------------------------------------------------------------------

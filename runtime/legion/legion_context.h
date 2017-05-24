@@ -1117,9 +1117,16 @@ namespace Legion {
                                                AddressSpaceID source);
       virtual void find_parent_version_info(unsigned index, unsigned depth, 
                   const FieldMask &version_mask, VersionInfo &version_info);
+      virtual InnerContext* find_parent_physical_context(unsigned index);
     public:
       void unpack_local_field_update(Deserializer &derez);
       static void handle_local_field_update(Deserializer &derez);
+    public:
+      static void handle_physical_request(Deserializer &derez,
+                      Runtime *runtime, AddressSpaceID source);
+      void set_physical_context_result(unsigned index, InnerContext *result);
+      static void handle_physical_response(Deserializer &derez, 
+                                           Runtime *runtime);
     protected:
       UniqueID parent_context_uid;
       TaskContext *parent_ctx;
@@ -1132,6 +1139,10 @@ namespace Legion {
     protected:
       std::vector<unsigned> local_parent_req_indexes;
       std::vector<bool> local_virtual_mapped;
+    protected:
+      // Cached physical contexts recorded from the owner
+      std::map<unsigned/*index*/,InnerContext*> physical_contexts;
+      std::map<unsigned,RtEvent> pending_physical_contexts;
     };
 
     /**

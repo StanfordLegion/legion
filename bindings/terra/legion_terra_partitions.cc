@@ -1457,11 +1457,24 @@ create_cross_product_complete_structured(
        it != coloring.end(); ++it) {
 
     IndexSpace rh_space = it->first;
-    const DomainPointColoring& coloring = it->second;
+    DomainPointColoring& coloring = it->second;
     assert(color_spaces.count(rh_space) > 0);
+    Domain color_space = color_spaces[rh_space];
+
+    for (Domain::DomainPointIterator dp(color_space); dp; dp++) {
+      if (coloring.find(dp.p) == coloring.end()) {
+        Domain empty_domain = runtime->get_index_space_domain(rh_space);
+        unsigned dim = empty_domain.get_dim();
+        for (unsigned idx = 0; idx < dim; ++idx) {
+          empty_domain.rect_data[idx] = 0;
+          empty_domain.rect_data[idx + dim] = -1;
+        }
+        coloring[dp.p] = empty_domain;
+      }
+    }
 
     IndexPartition ip = runtime->create_index_partition(
-        ctx, /* parent = */ rh_space, /* color_space = */ color_spaces[rh_space],
+        ctx, /* parent = */ rh_space, /* color_space = */ color_space,
         coloring, lhs_part_disjoint ? DISJOINT_KIND : ALIASED_KIND);
     rh_partitions[rh_space] = ip;
   }
@@ -1547,11 +1560,18 @@ create_cross_product_complete_unstructured(
   for (std::map<IndexSpace, PointColoring>::iterator it = coloring.begin();
        it != coloring.end(); ++it) {
     IndexSpace rh_space = it->first;
-    const PointColoring& coloring = it->second;
+    PointColoring& coloring = it->second;
     assert(color_spaces.count(rh_space) > 0);
+    Domain color_space = color_spaces[rh_space];
+
+    for (Domain::DomainPointIterator dp(color_space); dp; dp++) {
+      if (coloring.find(dp.p) == coloring.end()) {
+        coloring[dp.p].ranges.insert(std::pair<ptr_t, ptr_t>(0, -1));
+      }
+    }
 
     IndexPartition ip = runtime->create_index_partition(
-        ctx, /* parent = */ rh_space, /* color_space = */ color_spaces[rh_space],
+        ctx, /* parent = */ rh_space, /* color_space = */ color_space,
         coloring, lhs_part_disjoint ? DISJOINT_KIND : ALIASED_KIND);
     rh_partitions[it->first] = ip;
   }
