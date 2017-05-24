@@ -9289,6 +9289,7 @@ namespace Legion {
         unique_task_id(get_current_static_task_id()+unique),
         unique_mapper_id(get_current_static_mapper_id()+unique),
         unique_projection_id(get_current_static_projection_id()+unique),
+        unique_sharding_id(get_current_static_sharding_id()+unique),
         projection_lock(Reservation::create_reservation()),
         sharding_lock(Reservation::create_reservation()),
         group_lock(Reservation::create_reservation()),
@@ -10014,9 +10015,11 @@ namespace Legion {
       for (std::map<ShardingID,ShardingFunctor*>::const_iterator it = 
             pending_sharding_functors.begin(); it !=
             pending_sharding_functors.end(); it++)
-        register_sharding_functor(it->first, it->second);
+        register_sharding_functor(it->first, it->second, true/*zero check*/,
+                                  true/*was preregistered*/);
       register_sharding_functor(0,
-          new CyclicShardingFunctor(), false/*need check*/);
+          new CyclicShardingFunctor(), false/*need check*/, 
+          true/*was preregistered*/);
     }
 
     //--------------------------------------------------------------------------
@@ -12923,9 +12926,48 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ShardingID Runtime::generate_dynamic_sharding_id(void)
+    //--------------------------------------------------------------------------
+    {
+      ShardingID result = 
+        __sync_fetch_and_add(&unique_sharding_id, runtime_stride);
+#ifdef DEBUG_LEGION
+      // Check for overflow
+      assert(result <= unique_sharding_id);
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ShardingID& Runtime::get_current_static_sharding_id(void)
+    //--------------------------------------------------------------------------
+    {
+      static ShardingID current_sharding_id = MAX_APPLICATION_SHARDING_ID;
+      return current_sharding_id;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ShardingID Runtime::generate_static_sharding_id(void)
+    //--------------------------------------------------------------------------
+    {
+      ShardingID &next_sharding = get_current_static_sharding_id();
+      if (runtime_started)
+      {
+        log_run.error("Illegal call to 'generate_static_sharding_id' after "
+                      "the runtime has been started!");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_STATIC_CALL_POST_RUNTIME_START);
+      }
+      return next_sharding++;
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::register_sharding_functor(ShardingID sid,
                                             ShardingFunctor *functor,
-                                            bool need_zero_check)
+                                            bool need_zero_check,
+                                            bool was_preregistered)
     //--------------------------------------------------------------------------
     {
       if (sid == UINT_MAX)
@@ -12945,6 +12987,13 @@ namespace Legion {
 #endif
         exit(ERROR_RESERVED_SHARDING_ID);
       }
+      if (!was_preregistered && (total_address_spaces > 1))
+        log_run.warning("WARNING: Sharding functor %d is being dynamically "
+                        "registered for a multi-node run with %d nodes. It is "
+                        "currently the responsibility of the application to "
+                        "ensure that this sharding functor is registered on "
+                        "all nodes where it will be required.",
+                        sid, total_address_spaces);
       AutoLock s_lock(sharding_lock);
       std::map<ShardingID,ShardingFunctor*>::const_iterator finder = 
         sharding_functors.find(sid);

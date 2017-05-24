@@ -5758,6 +5758,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ShardingID Runtime::generate_dynamic_sharding_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_dynamic_sharding_id();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ShardingID Runtime::generate_static_sharding_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::Runtime::generate_static_sharding_id();
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::register_sharding_functor(ShardingID sid, 
                                             ShardingFunctor *func)
     //--------------------------------------------------------------------------

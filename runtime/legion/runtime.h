@@ -1941,9 +1941,13 @@ namespace Legion {
                                        ProjectionFunctor *func);
       ProjectionFunction* find_projection_function(ProjectionID pid);
     public:
+      ShardingID generate_dynamic_sharding_id(void);
+      static ShardingID& get_current_static_sharding_id(void);
+      static ShardingID generate_static_sharding_id(void);
       void register_sharding_functor(ShardingID sid,
                                      ShardingFunctor *func,
-                                     bool need_zero_check = true);
+                                     bool need_zero_check = true,
+                                     bool was_preregistered = false);
       static void preregister_sharding_functor(ShardingID sid,
                                      ShardingFunctor *func);
       ShardingFunctor* find_sharding_functor(ShardingID sid);
@@ -2875,6 +2879,7 @@ namespace Legion {
       unsigned unique_task_id;
       unsigned unique_mapper_id;
       unsigned unique_projection_id;
+      unsigned unique_sharding_id;
     protected:
       Reservation projection_lock;
       std::map<ProjectionID,ProjectionFunction*> projection_functions;

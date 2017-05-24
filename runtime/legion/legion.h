@@ -5921,6 +5921,21 @@ namespace Legion {
        */
       static void preregister_projection_functor(ProjectionID pid,
                                                  ProjectionFunctor *functor);
+
+      /**
+       * Dynamically generate a unique sharding ID for use across the machine
+       * @return a ShardingID that is globally unique across the machine
+       */
+      ShardingID generate_dynamic_sharding_id(void);
+
+      /**
+       * Statically generate a unique Sharding ID for use across the machine.
+       * This can only be called prior to the runtime starting. It must be
+       * invoked symmetrically across all the nodes in the machine prior
+       * to starting the runtime.
+       * @return ShardingID that is globally unique across the machine
+       */
+      static ShardingID generate_static_sharding_id(void);
       
       /**
        * Register a sharding functor for handling control replication

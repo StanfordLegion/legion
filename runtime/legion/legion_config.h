@@ -85,6 +85,10 @@
 #ifndef MAX_APPLICATION_PROJECTION_ID
 #define MAX_APPLICATION_PROJECTION_ID   (1<<20)
 #endif
+// Maximum ID for an application sharding ID
+#ifndef MAX_APPLICATION_SHARDING_ID
+#define MAX_APPLICATION_SHARDING_ID     (1<<20)
+#endif
 // Default number of local fields per field space
 #ifndef DEFAULT_LOCAL_FIELDS
 #define DEFAULT_LOCAL_FIELDS            4
