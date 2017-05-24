@@ -5150,6 +5150,22 @@ namespace Legion {
       void replace_default_mapper(Mapping::Mapper *mapper, 
                                   Processor proc = Processor::NO_PROC);
 
+    public:
+      /**
+       * Dynamically generate a unique projection ID for use across the machine
+       * @reutrn a ProjectionID that is globally unique across the machine
+       */
+      ProjectionID generate_dynamic_projection_id(void);
+
+      /**
+       * Statically generate a unique Projection ID for use across the machine.
+       * This can only be called prior to the runtime starting. It must be
+       * invoked symmetrically across all the nodes in the machine prior
+       * to starting the runtime.
+       * @return a ProjectionID that is globally unique across the machine
+       */
+      static ProjectionID generate_static_projection_id(void);
+
       /**
        * Register a projection functor for handling projection
        * queries. The ProjectionID must be non-zero because 

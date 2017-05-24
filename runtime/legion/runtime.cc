@@ -8607,6 +8607,7 @@ namespace Legion {
         unique_constraint_id((unique == 0) ? runtime_stride : unique),
         unique_task_id(get_current_static_task_id()+unique),
         unique_mapper_id(get_current_static_mapper_id()+unique),
+        unique_projection_id(get_current_static_projection_id()+unique),
         projection_lock(Reservation::create_reservation()),
         group_lock(Reservation::create_reservation()),
         processor_mapping_lock(Reservation::create_reservation()),
@@ -9222,10 +9223,12 @@ namespace Legion {
             pending_projection_functors.end(); it++)
       {
         it->second->set_runtime(external);
-        register_projection_functor(it->first, it->second);
+        register_projection_functor(it->first, it->second, true/*need check*/,
+                                    true/*was preregistered*/);
       }
       register_projection_functor(0, 
-          new IdentityProjectionFunctor(this->external), false/*need check*/);
+          new IdentityProjectionFunctor(this->external), false/*need check*/,
+                                        true/*was preregistered*/);
     }
 
     //--------------------------------------------------------------------------
@@ -12523,9 +12526,48 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ProjectionID Runtime::generate_dynamic_projection_id(void)
+    //--------------------------------------------------------------------------
+    {
+      ProjectionID result = 
+        __sync_fetch_and_add(&unique_projection_id, runtime_stride);
+#ifdef DEBUG_LEGION
+      // Check for overflow
+      assert(result <= unique_projection_id);
+#endif
+      return result;
+    }
+    
+    //--------------------------------------------------------------------------
+    /*static*/ ProjectionID& Runtime::get_current_static_projection_id(void)
+    //--------------------------------------------------------------------------
+    {
+      static ProjectionID current_projection_id = MAX_APPLICATION_PROJECTION_ID;
+      return current_projection_id;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ProjectionID Runtime::generate_static_projection_id(void)
+    //--------------------------------------------------------------------------
+    {
+      ProjectionID &next_projection = get_current_static_projection_id();
+      if (runtime_started)
+      {
+        log_run.error("Illegal call to 'generate_static_projection_id' after "
+                      "the runtime has been started!");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_STATIC_CALL_POST_RUNTIME_START);
+      }
+      return next_projection++;
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::register_projection_functor(ProjectionID pid,
                                               ProjectionFunctor *functor,
-                                              bool need_zero_check)
+                                              bool need_zero_check,
+                                              bool was_preregistered)
     //--------------------------------------------------------------------------
     {
       if (need_zero_check && (pid == 0))
@@ -12536,6 +12578,13 @@ namespace Legion {
 #endif
         exit(ERROR_RESERVED_PROJECTION_ID);
       }
+      if (!was_preregistered && (total_address_spaces > 1))
+        log_run.warning("WARNING: Projection functor %d is being dynamically "
+                        "registered for a multi-node run with %d nodes. It is "
+                        "currently the responsibility of the application to "
+                        "ensure that this projection functor is registered on "
+                        "all nodes where it will be required.",
+                        pid, total_address_spaces);
       ProjectionFunction *function = new ProjectionFunction(pid, functor);
       AutoLock p_lock(projection_lock);
       // No need for a lock because these all need to be reserved at
