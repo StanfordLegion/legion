@@ -2832,13 +2832,13 @@ namespace Legion {
        * @return the handle for the new index space
        */
       template<int DIM, typename COORD_T>
-#if __cplusplus < 201103L
       IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx,
-                                              Realm::ZRect<DIM,COORD_T> bounds);
+#if __cplusplus < 201103L
+                                              Realm::ZRect<DIM,COORD_T> bounds
 #else
-      IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx, 
-                                                  Rect<DIM,COORD_T> bounds);
+                                                  Rect<DIM,COORD_T> bounds
 #endif
+                                                  );
 
       /**
        * Create a new top-level index space by unioning together 
