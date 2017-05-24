@@ -3236,6 +3236,7 @@ namespace Legion {
       //------------------------------------------------------------------------
       // Index Tree Traversal Operations
       //------------------------------------------------------------------------
+      ///@{
       /**
        * Return the index partitioning of an index space 
        * with the assigned color.
@@ -3252,6 +3253,9 @@ namespace Legion {
       IndexPartition get_index_partition(IndexSpace parent, Color color);
       IndexPartition get_index_partition(IndexSpace parent, 
                                          const DomainPoint &color);
+      ///@}
+      
+      ///@{
       /**
        * Return true if the index space has an index partition
        * with the specified color.
@@ -3265,7 +3269,9 @@ namespace Legion {
       // Context free
       bool has_index_partition(IndexSpace parent,
                                const DomainPoint &color);
+      ///@}
 
+      ///@{
       /**
        * Return the index subspace of an index partitioning
        * with the specified color.
@@ -3282,7 +3288,9 @@ namespace Legion {
       IndexSpace get_index_subspace(IndexPartition p, Color color);
       IndexSpace get_index_subspace(IndexPartition p,
                                     const DomainPoint &color);
+      ///@}
 
+      ///@{
       /**
        * Return true if the index partition has an index subspace
        * with the specified color.
@@ -3296,7 +3304,9 @@ namespace Legion {
       // Context free
       bool has_index_subspace(IndexPartition p,
                               const DomainPoint &color);
+      ///@}
 
+      ///@{
       /**
        * Return if the given index space is represented by 
        * multiple domains or just a single one. If multiple
@@ -3309,7 +3319,9 @@ namespace Legion {
       bool has_multiple_domains(Context ctx, IndexSpace handle);
       // Context free
       bool has_multiple_domains(IndexSpace handle);
+      ///@}
 
+      ///@{
       /**
        * Return the domain corresponding to the
        * specified index space if it exists
@@ -3320,7 +3332,9 @@ namespace Legion {
       Domain get_index_space_domain(Context ctx, IndexSpace handle);
       // Context free
       Domain get_index_space_domain(IndexSpace handle);
+      ///@}
 
+      ///@{
       /**
        * Return the domains that represent the index space.
        * While the previous call only works when there is a
@@ -3335,7 +3349,9 @@ namespace Legion {
       // Context free
       void get_index_space_domains(IndexSpace handle,
                                    std::vector<Domain> &domains);
+      ///@}
 
+      ///@{
       /**
        * Return a domain that represents the color space
        * for the specified partition.
@@ -3346,7 +3362,9 @@ namespace Legion {
       Domain get_index_partition_color_space(Context ctx, IndexPartition p);
       // Context free
       Domain get_index_partition_color_space(IndexPartition p);
+      ///@}
 
+      ///@{
       /**
        * Return a set that contains the colors of all
        * the partitions of the index space.  It is unlikely
@@ -3365,7 +3383,9 @@ namespace Legion {
                                             std::set<Color> &colors);
       void get_index_space_partition_colors(IndexSpace sp,
                                             std::set<DomainPoint> &colors);
+      ///@}
 
+      ///@{
       /**
        * Return whether a given index partition is disjoint
        * @param ctx enclosing task context
@@ -3375,7 +3395,9 @@ namespace Legion {
       bool is_index_partition_disjoint(Context ctx, IndexPartition p);
       // Context free
       bool is_index_partition_disjoint(IndexPartition p);
+      ///@}
 
+      ///@{
       /**
        * Return whether a given index partition is complete
        * @param ctx enclosing task context
@@ -3385,6 +3407,7 @@ namespace Legion {
       bool is_index_partition_complete(Context ctx, IndexPartition p);
       // Context free
       bool is_index_partition_complete(IndexPartition p);
+      ///@}
 
       /**
        * Get an index subspace from a partition with a given
@@ -3398,6 +3421,7 @@ namespace Legion {
       IndexSpace get_index_subspace(Context ctx, IndexPartition p, 
                                 LegionRuntime::Arrays::Point<DIM> color_point);
 
+      ///@{
       /**
        * Return the color for the corresponding index space in
        * its member partition.  If it is a top-level index space
@@ -3411,7 +3435,9 @@ namespace Legion {
       // Context free
       Color get_index_space_color(IndexSpace handle);
       DomainPoint get_index_space_color_point(IndexSpace handle);
+      ///@}
 
+      ///@{
       /**
        * Return the color for the corresponding index partition in
        * in relation to its parent logical region.
@@ -3425,7 +3451,9 @@ namespace Legion {
       // Context free
       Color get_index_partition_color(IndexPartition handle);
       DomainPoint get_index_partition_color_point(IndexPartition handle);
+      ///@}
 
+      ///@{
       /**
        * Return the index space parent for the given index partition.
        * @param ctx enclosing task context
@@ -3435,7 +3463,9 @@ namespace Legion {
       IndexSpace get_parent_index_space(Context ctx, IndexPartition handle);
       // Context free
       IndexSpace get_parent_index_space(IndexPartition handle);
+      ///@}
 
+      ///@{
       /**
        * Returns true if the given index space has a parent partition.
        * @param ctx enclosing task context
@@ -3445,7 +3475,9 @@ namespace Legion {
       bool has_parent_index_partition(Context ctx, IndexSpace handle);
       // Context free
       bool has_parent_index_partition(IndexSpace handle);
+      ///@}
 
+      ///@{
       /**
        * Returns the parent partition for the given index space.
        * Use the previous call to check to see if a parent actually exists.
@@ -3456,7 +3488,9 @@ namespace Legion {
       IndexPartition get_parent_index_partition(Context ctx, IndexSpace handle);
       // Context free
       IndexPartition get_parent_index_partition(IndexSpace handle);
+      ///@}
 
+      ///@{
       /**
        * Return the depth in the index space tree of the given index space.
        * @param ctx enclosing task context
@@ -3466,7 +3500,9 @@ namespace Legion {
       unsigned get_index_space_depth(Context ctx, IndexSpace handle);
       // Context free
       unsigned get_index_space_depth(IndexSpace handle);
+      ///@}
 
+      ///@{
       /**
        * Return the depth in the index space tree of the given index partition.
        * @param ctx enclosing task context
@@ -3476,6 +3512,7 @@ namespace Legion {
       unsigned get_index_partition_depth(Context ctx, IndexPartition handle);
       // Context free
       unsigned get_index_partition_depth(IndexPartition handle);
+      ///@}
     public:
       //------------------------------------------------------------------------
       // Safe Cast Operations
@@ -3518,6 +3555,7 @@ namespace Legion {
        */
       void destroy_field_space(Context ctx, FieldSpace handle);
 
+      ///@{
       /**
        * Get the size of a specific field within field space.
        * @param ctx enclosing task context
@@ -3528,7 +3566,9 @@ namespace Legion {
       size_t get_field_size(Context ctx, FieldSpace handle, FieldID fid);
       // Context free
       size_t get_field_size(FieldSpace handle, FieldID fid);
+      ///@}
 
+      ///@{
       /**
        * Get the IDs of the fields currently allocated in a field space.
        * @param ctx enclosing task context
@@ -3540,7 +3580,9 @@ namespace Legion {
       // Context free
       void get_field_space_fields(FieldSpace handle,
                                   std::vector<FieldID> &fields);
+      ///@}
 
+      ///@{
       /**
        * Get the IDs of the fields currently allocated in a field space.
        * @param ctx enclosing task context
@@ -3552,6 +3594,7 @@ namespace Legion {
       // Context free
       void get_field_space_fields(FieldSpace handle,
                                   std::set<FieldID> &fields);
+      ///@}
     public:
       //------------------------------------------------------------------------
       // Logical Region Operations
@@ -3586,6 +3629,7 @@ namespace Legion {
       //------------------------------------------------------------------------
       // Logical Region Tree Traversal Operations
       //------------------------------------------------------------------------
+      ///@{
       /**
        * Return the logical partition instance of the given index partition
        * in the region tree for the parent logical region.
@@ -3600,7 +3644,9 @@ namespace Legion {
       // Context free
       LogicalPartition get_logical_partition(LogicalRegion parent,
                                              IndexPartition handle);
+      ///@}
       
+      ///@{
       /**
        * Return the logical partition of the logical region parent with
        * the specified color.
@@ -3620,7 +3666,9 @@ namespace Legion {
                                                       Color c);
       LogicalPartition get_logical_partition_by_color(LogicalRegion parent,
                                                       const DomainPoint &c);
+      ///@}
 
+      ///@{
       /**
        * Return true if the logical region has a logical partition with
        * the specified color.
@@ -3635,7 +3683,9 @@ namespace Legion {
       // Context free
       bool has_logical_partition_by_color(LogicalRegion parent,
                                           const DomainPoint &c);
+      ///@}
       
+      ///@{
       /**
        * Return the logical partition identified by the triple of index
        * partition, field space, and region tree ID.
@@ -3653,7 +3703,9 @@ namespace Legion {
       LogicalPartition get_logical_partition_by_tree(IndexPartition handle, 
                                                      FieldSpace fspace, 
                                                      RegionTreeID tid);
+      ///@}
 
+      ///@{
       /**
        * Return the logical region instance of the given index space 
        * in the region tree for the parent logical partition.
@@ -3668,7 +3720,9 @@ namespace Legion {
       // Context free
       LogicalRegion get_logical_subregion(LogicalPartition parent, 
                                           IndexSpace handle);
+      ///@}
 
+      ///@{
       /**
        * Return the logical region of the logical partition parent with
        * the specified color.
@@ -3688,7 +3742,9 @@ namespace Legion {
                                                    Color c);
       LogicalRegion get_logical_subregion_by_color(LogicalPartition parent,
                                                    const DomainPoint &c);
+      ///@}
 
+      ///@{
       /**
        * Return true if the logical partition has a logical region with
        * the specified color.
@@ -3703,7 +3759,9 @@ namespace Legion {
       // Context free
       bool has_logical_subregion_by_color(LogicalPartition parent,
                                           const DomainPoint &c);
+      ///@}
 
+      ///@{
       /**
        * Return the logical partition identified by the triple of index
        * space, field space, and region tree ID.
@@ -3721,7 +3779,9 @@ namespace Legion {
       LogicalRegion get_logical_subregion_by_tree(IndexSpace handle, 
                                                   FieldSpace fspace, 
                                                   RegionTreeID tid);
+      ///@}
 
+      ///@{
       /**
        * Return the color for the logical region corresponding to
        * its location in the parent partition.  If the region is a
@@ -3736,7 +3796,9 @@ namespace Legion {
       // Context free versions
       Color get_logical_region_color(LogicalRegion handle);
       DomainPoint get_logical_region_color_point(LogicalRegion handle);
+      ///@}
 
+      ///@{
       /**
        * Return the color for the logical partition corresponding to
        * its location relative to the parent logical region.
@@ -3750,7 +3812,9 @@ namespace Legion {
       // Context free versions
       Color get_logical_partition_color(LogicalPartition handle);
       DomainPoint get_logical_partition_color_point(LogicalPartition handle);
+      ///@}
 
+      ///@{
       /**
        * Return the parent logical region for a given logical partition.
        * @param ctx enclosing task context
@@ -3761,7 +3825,9 @@ namespace Legion {
                                               LogicalPartition handle);
       // Context free
       LogicalRegion get_parent_logical_region(LogicalPartition handle);
+      ///@}
 
+      ///@{
       /**
        * Return true if the logical region has a parent logical partition.
        * @param ctx enclosing task context
@@ -3771,7 +3837,9 @@ namespace Legion {
       bool has_parent_logical_partition(Context ctx, LogicalRegion handle);
       // Context free
       bool has_parent_logical_partition(LogicalRegion handle);
+      ///@}
 
+      ///@{
       /**
        * Return the parent logical partition for a logical region.
        * @param ctx enclosing task context
@@ -3782,6 +3850,7 @@ namespace Legion {
                                                     LogicalRegion handle);
       // Context free
       LogicalPartition get_parent_logical_partition(LogicalRegion handle);
+      ///@}
     public:
       //------------------------------------------------------------------------
       // Allocator and Argument Map Operations 
