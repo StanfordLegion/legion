@@ -4927,13 +4927,17 @@ namespace Legion {
         if (!remote_valid.empty() && !(remote_valid_fields * mask))
         {
           std::vector<AddressSpaceID> to_delete;
+          bool skipped_source = false;
           for (LegionMap<AddressSpaceID,FieldMask>::aligned::iterator it = 
                 remote_valid.begin(); it != remote_valid.end(); it++)
           {
             // If this is the source, then we can skip it
             // because it already knows to do its own invalidate
             if (it->first == source_space)
+            {
+              skipped_source = true;
               continue;
+            }
             FieldMask overlap = mask & it->second;
             if (!overlap)
               continue;
@@ -4949,6 +4953,11 @@ namespace Legion {
                   to_delete.begin(); it != to_delete.end(); it++)
               remote_valid.erase(*it);
           }
+          remote_valid_fields -= mask;
+          // If we skipped the source, then make sure to
+          // keep its remote valid fields in the remote valid mask
+          if (skipped_source)
+            remote_valid_fields |= remote_valid[source_space];
         }
         // Otherwise we are the owner node so we can do the update
 #ifdef DEBUG_LEGION
