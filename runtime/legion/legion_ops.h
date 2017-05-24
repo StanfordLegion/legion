@@ -2211,6 +2211,7 @@ namespace Legion {
             RegionTreeForest *forest, ApEvent instances_ready,
             const std::vector<FieldDataDescriptor> &instances) = 0;
         virtual PartitionKind get_kind(void) const = 0;
+        virtual IndexPartition get_partition(void) const = 0;
       };
       class ByFieldThunk : public DepPartThunk {
       public:
@@ -2221,6 +2222,7 @@ namespace Legion {
             RegionTreeForest *forest, ApEvent instances_ready,
             const std::vector<FieldDataDescriptor> &instances);
         virtual PartitionKind get_kind(void) const { return BY_FIELD; }
+        virtual IndexPartition get_partition(void) const { return pid; }
       protected:
         IndexPartition pid;
       };
@@ -2233,6 +2235,7 @@ namespace Legion {
             RegionTreeForest *forest, ApEvent instances_ready,
             const std::vector<FieldDataDescriptor> &instances);
         virtual PartitionKind get_kind(void) const { return BY_IMAGE; }
+        virtual IndexPartition get_partition(void) const { return pid; }
       protected:
         IndexPartition pid;
         IndexPartition projection;
@@ -2246,6 +2249,7 @@ namespace Legion {
             RegionTreeForest *forest, ApEvent instances_ready,
             const std::vector<FieldDataDescriptor> &instances);
         virtual PartitionKind get_kind(void) const { return BY_IMAGE_RANGE; }
+        virtual IndexPartition get_partition(void) const { return pid; }
       protected:
         IndexPartition pid;
         IndexPartition projection;
@@ -2259,6 +2263,7 @@ namespace Legion {
             RegionTreeForest *forest, ApEvent instances_ready,
             const std::vector<FieldDataDescriptor> &instances);
         virtual PartitionKind get_kind(void) const { return BY_PREIMAGE; }
+        virtual IndexPartition get_partition(void) const { return pid; }
       protected:
         IndexPartition pid;
         IndexPartition projection;
@@ -2272,6 +2277,7 @@ namespace Legion {
             RegionTreeForest *forest, ApEvent instances_ready,
             const std::vector<FieldDataDescriptor> &instances);
         virtual PartitionKind get_kind(void) const { return BY_PREIMAGE_RANGE; }
+        virtual IndexPartition get_partition(void) const { return pid; }
       protected:
         IndexPartition pid;
         IndexPartition projection;
@@ -2285,6 +2291,8 @@ namespace Legion {
             RegionTreeForest *forest, ApEvent instances_ready,
             const std::vector<FieldDataDescriptor> &instances);
         virtual PartitionKind get_kind(void) const { return BY_ASSOCIATION; }
+        virtual IndexPartition get_partition(void) const
+          { return IndexPartition::NO_PART; }
       protected:
         IndexSpace domain;
         IndexSpace range;

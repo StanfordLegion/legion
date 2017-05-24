@@ -100,7 +100,7 @@ namespace Legion {
       static inline void log_index_partition(IDType parent_id, 
                 IDType unique_id, bool disjoint, LegionColor point)
       {
-        log_spy.print("Index Partition " IDFMT " " IDFMT " %u 1 %lld",
+        log_spy.print("Index Partition " IDFMT " " IDFMT " %u %lld",
 		      parent_id, unique_id, disjoint, point); 
       }
 
@@ -365,10 +365,11 @@ namespace Legion {
 
       static inline void log_dependent_partition_operation(UniqueID context,
                                                            UniqueID unique_id,
+                                                           IDType pid,
                                                            int kind)
       {
-        log_spy.print("Dependent Partition Operation %llu %llu %d",
-		      context, unique_id, kind);
+        log_spy.print("Dependent Partition Operation %llu %llu " IDFMT " %d",
+		      context, unique_id, pid, kind);
       }
 
       static inline void log_pending_partition_operation(UniqueID context,

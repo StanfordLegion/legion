@@ -11505,7 +11505,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       LegionSpy::log_dependent_partition_operation(
-          parent_ctx->get_unique_id(), unique_op_id, thunk->get_kind());
+          parent_ctx->get_unique_id(), unique_op_id, 
+          thunk->get_partition().get_id(), thunk->get_kind());
     }
 
     //--------------------------------------------------------------------------
