@@ -29,9 +29,6 @@ typedef CObjectWrapper::SOA SOA;
 typedef CObjectWrapper::AccessorGeneric AccessorGeneric;
 typedef CObjectWrapper::AccessorArray AccessorArray;
 
-// for Point<DIM>, Rect<DIM>, Blockify<DIM>
-using namespace LegionRuntime::Arrays;
-
 // -----------------------------------------------------------------------
 // Pointer Operations
 // -----------------------------------------------------------------------
@@ -72,7 +69,7 @@ legion_ptr_safe_cast(legion_runtime_t runtime_,
 legion_domain_t
 legion_domain_from_rect_1d(legion_rect_1d_t r_)
 {
-  Rect<1> r = CObjectWrapper::unwrap(r_);
+  LegionRuntime::Arrays::Rect<1> r = CObjectWrapper::unwrap(r_);
 
   return CObjectWrapper::wrap(Domain::from_rect<1>(r));
 }
@@ -80,7 +77,7 @@ legion_domain_from_rect_1d(legion_rect_1d_t r_)
 legion_domain_t
 legion_domain_from_rect_2d(legion_rect_2d_t r_)
 {
-  Rect<2> r = CObjectWrapper::unwrap(r_);
+  LegionRuntime::Arrays::Rect<2> r = CObjectWrapper::unwrap(r_);
 
   return CObjectWrapper::wrap(Domain::from_rect<2>(r));
 }
@@ -88,7 +85,7 @@ legion_domain_from_rect_2d(legion_rect_2d_t r_)
 legion_domain_t
 legion_domain_from_rect_3d(legion_rect_3d_t r_)
 {
-  Rect<3> r = CObjectWrapper::unwrap(r_);
+  LegionRuntime::Arrays::Rect<3> r = CObjectWrapper::unwrap(r_);
 
   return CObjectWrapper::wrap(Domain::from_rect<3>(r));
 }
@@ -142,7 +139,7 @@ legion_domain_get_volume(legion_domain_t d_)
 legion_domain_point_t
 legion_domain_point_from_point_1d(legion_point_1d_t p_)
 {
-  Point<1> p = CObjectWrapper::unwrap(p_);
+  LegionRuntime::Arrays::Point<1> p = CObjectWrapper::unwrap(p_);
 
   return CObjectWrapper::wrap(DomainPoint::from_point<1>(p));
 }
@@ -150,7 +147,7 @@ legion_domain_point_from_point_1d(legion_point_1d_t p_)
 legion_domain_point_t
 legion_domain_point_from_point_2d(legion_point_2d_t p_)
 {
-  Point<2> p = CObjectWrapper::unwrap(p_);
+  LegionRuntime::Arrays::Point<2> p = CObjectWrapper::unwrap(p_);
 
   return CObjectWrapper::wrap(DomainPoint::from_point<2>(p));
 }
@@ -158,7 +155,7 @@ legion_domain_point_from_point_2d(legion_point_2d_t p_)
 legion_domain_point_t
 legion_domain_point_from_point_3d(legion_point_3d_t p_)
 {
-  Point<3> p = CObjectWrapper::unwrap(p_);
+  LegionRuntime::Arrays::Point<3> p = CObjectWrapper::unwrap(p_);
 
   return CObjectWrapper::wrap(DomainPoint::from_point<3>(p));
 }
@@ -371,7 +368,8 @@ legion_domain_coloring_get_color_space(legion_domain_coloring_t handle_)
     color_max = std::max(color_max, it->first);
   }
   Domain domain = Domain::from_rect<1>(
-    Rect<1>(Point<1>(color_min), Point<1>(color_max)));
+    LegionRuntime::Arrays::Rect<1>(LegionRuntime::Arrays::Point<1>(color_min), 
+                                   LegionRuntime::Arrays::Point<1>(color_max)));
   return CObjectWrapper::wrap(domain);
 }
 
@@ -694,7 +692,7 @@ legion_index_partition_create_blockify_1d(
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexSpace parent = CObjectWrapper::unwrap(parent_);
-  Blockify<1> blockify = CObjectWrapper::unwrap(blockify_);
+  LegionRuntime::Arrays::Blockify<1> blockify = CObjectWrapper::unwrap(blockify_);
 
   IndexPartition ip =
     runtime->create_index_partition(ctx, parent, blockify, part_color);
@@ -712,7 +710,7 @@ legion_index_partition_create_blockify_2d(
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexSpace parent = CObjectWrapper::unwrap(parent_);
-  Blockify<2> blockify = CObjectWrapper::unwrap(blockify_);
+  LegionRuntime::Arrays::Blockify<2> blockify = CObjectWrapper::unwrap(blockify_);
 
   IndexPartition ip =
     runtime->create_index_partition(ctx, parent, blockify, part_color);
@@ -730,7 +728,7 @@ legion_index_partition_create_blockify_3d(
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexSpace parent = CObjectWrapper::unwrap(parent_);
-  Blockify<3> blockify = CObjectWrapper::unwrap(blockify_);
+  LegionRuntime::Arrays::Blockify<3> blockify = CObjectWrapper::unwrap(blockify_);
 
   IndexPartition ip =
     runtime->create_index_partition(ctx, parent, blockify, part_color);
@@ -743,7 +741,7 @@ legion_index_partition_create_blockify_3d(
 static DomainPoint upgrade_point(DomainPoint p)
 {
   if (p.get_dim() == 0) {
-    return DomainPoint::from_point<1>(Point<1>(p[0]));
+    return DomainPoint::from_point<1>(LegionRuntime::Arrays::Point<1>(p[0]));
   }
   return p;
 }
@@ -1530,7 +1528,8 @@ PartitionByFieldShim::task(const Task *task,
     ptr_t start = it.next_span(count);
     for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
       Color c = accessor.read(p);
-      coloring[DomainPoint::from_point<1>(Point<1>(c))].points.insert(p);
+      coloring[DomainPoint::from_point<1>(
+          LegionRuntime::Arrays::Point<1>(c))].points.insert(p);
     }
   }
 
@@ -4353,9 +4352,9 @@ legion_accessor_generic_raw_rect_ptr_1d(legion_accessor_generic_t handle_,
                                         legion_byte_offset_t *offsets_)
 {
   AccessorGeneric *handle = CObjectWrapper::unwrap(handle_);
-  Rect<1> rect = CObjectWrapper::unwrap(rect_);
+  LegionRuntime::Arrays::Rect<1> rect = CObjectWrapper::unwrap(rect_);
 
-  Rect<1> subrect;
+  LegionRuntime::Arrays::Rect<1> subrect;
   LegionRuntime::Accessor::ByteOffset offsets[1];
   void *data = handle->raw_rect_ptr<1>(rect, subrect, &offsets[0]);
   *subrect_ = CObjectWrapper::wrap(subrect);
@@ -4370,9 +4369,9 @@ legion_accessor_generic_raw_rect_ptr_2d(legion_accessor_generic_t handle_,
                                         legion_byte_offset_t *offsets_)
 {
   AccessorGeneric *handle = CObjectWrapper::unwrap(handle_);
-  Rect<2> rect = CObjectWrapper::unwrap(rect_);
+  LegionRuntime::Arrays::Rect<2> rect = CObjectWrapper::unwrap(rect_);
 
-  Rect<2> subrect;
+  LegionRuntime::Arrays::Rect<2> subrect;
   LegionRuntime::Accessor::ByteOffset offsets[2];
   void *data = handle->raw_rect_ptr<2>(rect, subrect, &offsets[0]);
   *subrect_ = CObjectWrapper::wrap(subrect);
@@ -4388,9 +4387,9 @@ legion_accessor_generic_raw_rect_ptr_3d(legion_accessor_generic_t handle_,
                                         legion_byte_offset_t *offsets_)
 {
   AccessorGeneric *handle = CObjectWrapper::unwrap(handle_);
-  Rect<3> rect = CObjectWrapper::unwrap(rect_);
+  LegionRuntime::Arrays::Rect<3> rect = CObjectWrapper::unwrap(rect_);
 
-  Rect<3> subrect;
+  LegionRuntime::Arrays::Rect<3> subrect;
   LegionRuntime::Accessor::ByteOffset offsets[3];
   void *data = handle->raw_rect_ptr<3>(rect, subrect, &offsets[0]);
   *subrect_ = CObjectWrapper::wrap(subrect);

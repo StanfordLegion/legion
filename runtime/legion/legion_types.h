@@ -129,6 +129,17 @@ namespace Legion {
   typedef Runtime HighLevelRuntime;
   // Helper for saving instantiated template functions
   struct SerdezRedopFns;
+  // Some typedefs for making things nicer for users with C++11 support
+#if __cplusplus >= 201103L
+  template<int DIM, typename COORD_T>
+  using Point = Realm::ZPoint<DIM,COORD_T>;
+  template<int DIM, typename COORD_T>
+  using Rect = Realm::ZRect<DIM,COORD_T>;
+  template<int DIM1, int DIM2, typename COORD_T>
+  using Matrix = Realm::ZMatrix<DIM1,DIM2,COORD_T>;
+  template<int DIM, typename COORD_T>
+  using DomainT = Realm::ZIndexSpace<DIM,COORD_T>;
+#endif
 
   // Forward declarations for compiler level objects
   // legion.h
