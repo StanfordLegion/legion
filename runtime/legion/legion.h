@@ -3348,6 +3348,28 @@ namespace Legion {
                                 Color color = AUTO_GENERATE_ID);
 
       /**
+       * Create partition by blockify is a special (but common) case of 
+       * create partition by restriction, that is guaranteed to create a 
+       * disjoint partition given the blocking factor specified for each 
+       * dimension. This call will also create an implicit color space
+       * for the partition that is the caller's responsibility to reclaim.
+       * @param ctx the enclosing task context
+       * @param parent the parent index space to be partitioned
+       * @param blocking factor the blocking factors for each dimension
+       * @param color optional new color for the index partition
+       * @return a new index partition of the parent index space
+       */
+      template<int DIM, typename COORD_T>
+      IndexPartitionT<DIM,COORD_T> create_partition_by_blockify(Context ctx,
+                                    IndexSpaceT<DIM,COORD_T> parent,
+#if __cplusplus < 201103L
+                                    Realm::ZPoint<DIM,COORD_T> blocking_factor,
+#else
+                                    Point<DIM,COORD_T> blocking_factor,
+#endif
+                                    Color color = AUTO_GENERATE_ID);
+
+      /**
        * Create partition by field uses an existing field in a logical
        * region to perform a partitioning operation. The field type
        * must be of 'Color' type (or int type) so that the runtime can 

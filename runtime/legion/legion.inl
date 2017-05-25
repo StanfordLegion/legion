@@ -2171,6 +2171,50 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexPartitionT<DIM,T> Runtime::create_partition_by_blockify(Context ctx,
+                                      IndexSpaceT<DIM,T> parent,
+                                      Realm::ZPoint<DIM,T> blocking_factor,
+                                      Color color)
+    //--------------------------------------------------------------------------
+    {
+      // Get the domain of the color space to partition
+      const Realm::ZIndexSpace<DIM,T> parent_is = 
+        get_index_space_domain(parent);
+      const Realm::ZRect<DIM,T> &bounds = parent_is.bounds;
+      if (bounds.empty())
+        return IndexPartitionT<DIM,T>();
+      // Compute the intended color space bounds
+      Realm::ZPoint<DIM,T> colors;
+      for (int i = 0; i < DIM; i++)
+        colors[i] = (((bounds.hi[i] - bounds.lo[i]) + // -1 and +1 cancel out
+            blocking_factor[i]) / blocking_factor[i]) - 1; 
+      Realm::ZPoint<DIM,T> zeroes; 
+      for (int i = 0; i < DIM; i++)
+        zeroes[i] = 0;
+      // Make the color space
+      IndexSpaceT<DIM,T> color_space = create_index_space(ctx, 
+                                    Realm::ZRect<DIM,T>(zeroes, colors));
+      // Now make the transform matrix
+      Realm::ZMatrix<DIM,DIM,T> transform;
+      for (int i = 0; i < DIM; i++)
+        for (int j = 0; j < DIM; j++)
+          if (i == j)
+            transform[i][j] = blocking_factor[i];
+          else
+            transform[i][j] = 0;
+      // And the extent
+      Realm::ZPoint<DIM,T> ones;
+      for (int i = 0; i < DIM; i++)
+        ones[i] = 1;
+      const Realm::ZRect<DIM,T> extent(zeroes, blocking_factor - ones);
+      // Then do the create partition by restriction call
+      return create_partition_by_restriction(ctx, parent, color_space,
+                                             transform, extent,
+                                             DISJOINT_KIND, color);
+    }
+
+    //--------------------------------------------------------------------------
     template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
     IndexPartitionT<DIM,T> Runtime::create_partition_by_field(Context ctx,
                                     LogicalRegionT<DIM,T> handle,
