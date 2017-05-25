@@ -3069,6 +3069,7 @@ namespace Legion {
       //------------------------------------------------------------------------
       // Dependent Partitioning Operations
       //------------------------------------------------------------------------
+      ///@{
       /**
        * Create 'color_space' index subspaces (one for each point) in a 
        * common partition of the 'parent' index space. By definition the 
@@ -3092,7 +3093,8 @@ namespace Legion {
                         IndexSpaceT<DIM,COORD_T> parent,
                         IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                         size_t granularity = 1, Color color = AUTO_GENERATE_ID);
-
+      ///@}
+      ///@{
       /**
        * This function zips a union operation over all the index subspaces
        * in two different partitions. The zip operation is only applied 
@@ -3131,7 +3133,8 @@ namespace Legion {
                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                               PartitionKind part_kind = COMPUTE_KIND,
                               Color color = AUTO_GENERATE_ID);
-
+      ///@}
+      ///@{
       /**
        * This function zips an intersection operation over all the index 
        * subspaces in two different partitions. The zip operation is only
@@ -3172,7 +3175,8 @@ namespace Legion {
                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                               PartitionKind part_kind = COMPUTE_KIND,
                               Color color = AUTO_GENERATE_ID);
-
+      ///@}
+      ///@{
       /**
        * This function zips a set difference operation over all the index 
        * subspaces in two different partitions. The zip operation is only
@@ -3212,7 +3216,8 @@ namespace Legion {
                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                               PartitionKind part_kind = COMPUTE_KIND,
                               Color color = AUTO_GENERATE_ID);
-
+      ///@}
+      ///@{
       /**
        * This performs a cross product between two different index
        * partitions. For every index subspace in the first index 
@@ -3252,7 +3257,8 @@ namespace Legion {
                                     IndexPartitionT<DIM,COORD_T> > &handles,
                                   PartitionKind part_kind = COMPUTE_KIND,
                                   Color color = AUTO_GENERATE_ID);
-
+      ///@}
+      ///@{
       /**
        * Create association will construct an injective mapping between
        * the points of two different index spaces. The mapping will 
@@ -3309,7 +3315,7 @@ namespace Legion {
                               FieldID range_fid, // type: ZPoint<DIM1,COORD_T1>
                               MapperID id = 0,
                               MappingTagID tag = 0);
-
+      ///@}
       /**
        * Create partition by restriction will make a new partition of a
        * logical region by computing new restriction bounds for each 
@@ -3353,6 +3359,7 @@ namespace Legion {
        * disjoint partition given the blocking factor specified for each 
        * dimension. This call will also create an implicit color space
        * for the partition that is the caller's responsibility to reclaim.
+       * This assumes an origin of (0)* for all dimensions of the extent.
        * @param ctx the enclosing task context
        * @param parent the parent index space to be partitioned
        * @param blocking factor the blocking factors for each dimension
@@ -3368,7 +3375,28 @@ namespace Legion {
                                     Point<DIM,COORD_T> blocking_factor,
 #endif
                                     Color color = AUTO_GENERATE_ID);
-
+      /**
+       * An alternate version of create partition by blockify that also
+       * takes an origin to use for the computation of the extent.
+       * @param ctx the enclosing task context
+       * @param parent the parent index space to be partitioned
+       * @param blocking factor the blocking factors for each dimension
+       * @param origin the origin to use for computing the extent
+       * @param color optional new color for the index partition
+       * @return a new index partition of the parent index space
+       */
+      template<int DIM, typename COORD_T>
+      IndexPartitionT<DIM,COORD_T> create_partition_by_blockify(Context ctx,
+                                    IndexSpaceT<DIM,COORD_T> parent,
+#if __cplusplus < 201103L
+                                    Realm::ZPoint<DIM,COORD_T> blocking_factor,
+                                    Realm::ZPoint<DIM,COORD_T> origin,
+#else
+                                    Point<DIM,COORD_T> blocking_factor,
+                                    Point<DIM,COORD_T> origin,
+#endif
+                                    Color color = AUTO_GENERATE_ID);
+      ///@{
       /**
        * Create partition by field uses an existing field in a logical
        * region to perform a partitioning operation. The field type
@@ -3409,7 +3437,8 @@ namespace Legion {
                           IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                           Color color = AUTO_GENERATE_ID,
                           MapperID id = 0, MappingTagID tag = 0);
-
+      ///@}
+      ///@{
       /**
        * Create partition by image creates a new index partition from an
        * existing field that represents an enumerated function from 
@@ -3484,7 +3513,8 @@ namespace Legion {
                               PartitionKind part_kind = COMPUTE_KIND,
                               Color color = AUTO_GENERATE_ID,
                               MapperID id = 0, MappingTagID tag = 0);
-                                               
+      ///@}                                    
+      ///@{
       /**
        * Create partition by premimage performs the opposite operation
        * of create partition by image. The function will create a new
@@ -3556,10 +3586,12 @@ namespace Legion {
                               PartitionKind part_kind = COMPUTE_KIND,
                               Color color = AUTO_GENERATE_ID,
                               MapperID id = 0, MappingTagID tag = 0);
+      ///@}
     public:
       //------------------------------------------------------------------------
       // Computed Index Spaces and Partitions 
       //------------------------------------------------------------------------
+      ///@{
       /**
        * Create a new index partition in which the individual sub-regions
        * will computed by one of the following calls:
@@ -3596,7 +3628,8 @@ namespace Legion {
                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                               PartitionKind part_kind = COMPUTE_KIND,
                               Color color = AUTO_GENERATE_ID);
-
+      ///@}
+      ///@{
       /**
        * Create a new index space by unioning together a bunch of index spaces 
        * from a common index space tree. The resulting index space is assigned
@@ -3625,7 +3658,8 @@ namespace Legion {
 #endif
                                 const typename std::vector<
                                   IndexSpaceT<DIM,COORD_T> > &handles);
-
+      ///@}
+      ///@{
       /**
        * This method is the same as the one above, except the index
        * spaces all come from a common partition specified by 'handle'.
@@ -3650,7 +3684,8 @@ namespace Legion {
                                 Point<COLOR_DIM,COLOR_COORD_T> color,
 #endif
                                 IndexPartitionT<DIM,COORD_T> handle);
-
+      ///@}
+      ///@{
       /**
        * Create a new index space by intersecting together a bunch of index
        * spaces from a common index space tree. The resulting index space is
@@ -3680,7 +3715,8 @@ namespace Legion {
 #endif
                                 const typename std::vector<
                                   IndexSpaceT<DIM,COORD_T> > &handles);
-
+      ///@}
+      ///@{
       /**
        * This method is the same as the one above, except the index
        * spaces all come from a common partition specified by 'handle'.
@@ -3706,7 +3742,8 @@ namespace Legion {
                                 Point<COLOR_DIM,COLOR_COORD_T> color,
 #endif
                                 IndexPartitionT<DIM,COORD_T> handle);
-
+      ///@}
+      ///@{
       /**
        * Create a new index space by taking the set difference of
        * an existing index space with a set of other index spaces.
@@ -3743,6 +3780,7 @@ namespace Legion {
                                 IndexSpaceT<DIM,COORD_T> initial,
                                 const typename std::vector<
                                   IndexSpaceT<DIM,COORD_T> > &handles);
+      ///@}
     public:
       //------------------------------------------------------------------------
       // Index Tree Traversal Operations

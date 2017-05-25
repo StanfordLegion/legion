@@ -139,6 +139,8 @@ namespace Legion {
   using Matrix = Realm::ZMatrix<DIM1,DIM2,COORD_T>;
   template<int DIM, typename COORD_T>
   using DomainT = Realm::ZIndexSpace<DIM,COORD_T>;
+  template<typename FT, int N, typename T = ::legion_lowlevel_coord_t>
+  using AffineAccessor = Realm::AffineAccessor<FT,N,T>;
 #endif
 
   // Forward declarations for compiler level objects

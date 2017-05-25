@@ -2178,6 +2178,22 @@ namespace Legion {
                                       Color color)
     //--------------------------------------------------------------------------
     {
+      Realm::ZPoint<DIM,T> origin; 
+      for (int i = 0; i < DIM; i++)
+        origin[i] = 0;
+      return create_partition_by_blockify<DIM,T>(ctx, parent, blocking_factor,
+                                                 origin, color);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexPartitionT<DIM,T> Runtime::create_partition_by_blockify(Context ctx,
+                                      IndexSpaceT<DIM,T> parent,
+                                      Realm::ZPoint<DIM,T> blocking_factor,
+                                      Realm::ZPoint<DIM,T> origin,
+                                      Color color)
+    //--------------------------------------------------------------------------
+    {
       // Get the domain of the color space to partition
       const Realm::ZIndexSpace<DIM,T> parent_is = 
         get_index_space_domain(parent);
@@ -2207,7 +2223,7 @@ namespace Legion {
       Realm::ZPoint<DIM,T> ones;
       for (int i = 0; i < DIM; i++)
         ones[i] = 1;
-      const Realm::ZRect<DIM,T> extent(zeroes, blocking_factor - ones);
+      const Realm::ZRect<DIM,T> extent(origin, origin + blocking_factor - ones);
       // Then do the create partition by restriction call
       return create_partition_by_restriction(ctx, parent, color_space,
                                              transform, extent,
