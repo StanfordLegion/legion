@@ -2470,7 +2470,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return IndexSpaceT<COLOR_DIM,COLOR_T>(
-                              get_index_space_partition_color_space_name(p));
+                              get_index_partition_color_space_name(p));
     }
 
     //--------------------------------------------------------------------------
