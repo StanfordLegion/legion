@@ -786,15 +786,18 @@ namespace Legion {
     class DomainIterator {
     public:
 #if __cplusplus < 201103L
-      DomainIterator(const Realm::ZIndexSpace<DIM,COORD_T> &d)
+      DomainIterator(const Realm::ZIndexSpace<DIM,COORD_T> &d,
+                     bool column_major_order = true)
 #else
-      DomainIterator(const DomainT<DIM,COORD_T> &d)
+      DomainIterator(const DomainT<DIM,COORD_T> &d,
+                     bool column_major_order = true)
 #endif
-        : is_itr(d)
+        : is_itr(d), column_major(column_major_order)
       {
         is_valid = is_itr.is_valid;
         if (is_valid) {
-          rect_itr = Realm::ZPointInRectIterator<DIM,COORD_T>(is_itr.rect);
+          rect_itr = 
+            Realm::ZPointInRectIterator<DIM,COORD_T>(is_itr.rect, column_major);
           rect_valid = rect_itr.valid;
           p = rect_itr.p;
         } else
@@ -813,7 +816,8 @@ namespace Legion {
           is_itr.step();
           is_valid = is_itr.valid;
           if (is_valid) {
-            rect_itr = Realm::ZPointInRectIterator<DIM,COORD_T>(is_itr.rect);
+            rect_itr = Realm::ZPointInRectIterator<DIM,COORD_T>(is_itr.rect,
+                                                                column_major);
             p = rect_itr.p;
             rect_valid = rect_itr.valid;
           } else {
@@ -837,6 +841,7 @@ namespace Legion {
       Realm::ZIndexSpaceIterator<DIM,COORD_T> is_itr;
       Realm::ZPointInRectIterator<DIM,COORD_T> rect_itr;
       bool is_valid, rect_valid;
+      bool column_major;
     };
 
     // This class exists for some very minimal backwards compatibility
