@@ -1324,6 +1324,7 @@ namespace Realm {
     T x, y, z, w;  T rest[N - 4];
 
     ZPoint(void);
+    ZPoint(const T vals[N]);
     // copies allow type coercion (assuming the underlying type does)
     template <typename T2>
     ZPoint(const ZPoint<N, T2>& copy_from);
@@ -1429,6 +1430,9 @@ namespace Realm {
     ZMatrix(const ZMatrix<M, N, T2>& copy_from);
     template <typename T2>
     ZMatrix<M, N, T>& operator=(const ZMatrix<M, N, T2>& copy_from);
+
+    ZPoint<N,T>& operator[](int index);
+    const ZPoint<N,T>& operator[](int index) const;
   };
 
   template <int M, int N, typename T, typename T2>

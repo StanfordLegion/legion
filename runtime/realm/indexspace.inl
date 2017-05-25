@@ -38,6 +38,13 @@ namespace Realm {
   {}
 
   template <int N, typename T>
+  inline ZPoint<N,T>::ZPoint(const T vals[N])
+  {
+    for(int i = 0; i < N; i++)
+      (&x)[i] = vals[i];
+  }
+
+  template <int N, typename T>
   template <typename T2>
   inline ZPoint<N,T>::ZPoint(const ZPoint<N,T2>& copy_from)
   {
@@ -81,6 +88,7 @@ namespace Realm {
   struct ZPoint<1,T> {
     T x;
     ZPoint(void) {}
+    // No need for a static array constructor here
     ZPoint(T _x) : x(_x) {}
     // copies allow type coercion (assuming the underlying type does)
     template <typename T2>
@@ -109,6 +117,7 @@ namespace Realm {
   struct ZPoint<2,T> {
     T x, y;
     ZPoint(void) {}
+    ZPoint(const T vals[2]) : x(vals[0]), y(vals[1]) {}
     ZPoint(T _x, T _y) : x(_x), y(_y) {}
     // copies allow type coercion (assuming the underlying type does)
     template <typename T2>
@@ -136,6 +145,7 @@ namespace Realm {
   struct ZPoint<3,T> {
     T x, y, z;
     ZPoint(void) {}
+    ZPoint(const T vals[3]) : x(vals[0]), y(vals[1]), z(vals[2]) {}
     ZPoint(T _x, T _y, T _z) : x(_x), y(_y), z(_z) {}
     // copies allow type coercion (assuming the underlying type does)
     template <typename T2>
@@ -164,6 +174,7 @@ namespace Realm {
   struct ZPoint<4,T> {
     T x, y, z, w;
     ZPoint(void) {}
+    ZPoint(const T vals[4]) : x(vals[0]), y(vals[1]), z(vals[2]), w(vals[3]) {}
     ZPoint(T _x, T _y, T _z, T _w) : x(_x), y(_y), z(_z), w(_w) {}
     // copies allow type coercion (assuming the underlying type does)
     template <typename T2>
@@ -490,6 +501,18 @@ namespace Realm {
     for(int j = 0; j < M; j++)
       out[j] = m.rows[j].dot(p);
     return out;
+  }
+
+  template <int M, int N, typename T>
+  inline ZPoint<N, T>& ZMatrix<M,N,T>::operator[](int index)
+  {
+    return rows[index];
+  }
+
+  template <int M, int N, typename T>
+  inline const ZPoint<N, T>& ZMatrix<M,N,T>::operator[](int index) const
+  {
+    return rows[index];
   }
 
   ////////////////////////////////////////////////////////////////////////
