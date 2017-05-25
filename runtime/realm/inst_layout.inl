@@ -660,9 +660,7 @@ namespace Realm {
 #ifdef BOUNDS_CHECKS
     assert(bounds.contains(p));
 #endif
-    intptr_t rawptr = base;
-    for(int i = 0; i < N; i++) rawptr += p[i] * strides[i];
-    return reinterpret_cast<FT *>(rawptr);
+    return this->get_ptr(p);
   }
 
   template <typename FT, int N, typename T>
@@ -674,7 +672,7 @@ namespace Realm {
 #ifdef BOUNDS_CHECKS
     assert(bounds.contains(p));
 #endif
-    return *(this->ptr(p));
+    return *(this->get_ptr(p));
   }
 
   template <typename FT, int N, typename T>
@@ -686,7 +684,39 @@ namespace Realm {
 #ifdef BOUNDS_CHECKS
     assert(bounds.contains(p));
 #endif
-    *(ptr(p)) = newval;
+    *(this->get_ptr(p)) = newval;
+  }
+
+  template <typename FT, int N, typename T>
+  inline FT& AffineAccessor<FT,N,T>::operator[](const ZPoint<N,T>& p)
+  {
+#ifdef PRIVILEGE_CHECKS
+    assert(privileges & ACCESSOR_PRIV_ALL);
+#endif
+#ifdef BOUNDS_CHECKS
+    assert(bounds.contains(p));
+#endif
+    return *(this->get_ptr(p));
+  }
+
+  template <typename FT, int N, typename T>
+  inline const FT& AffineAccessor<FT,N,T>::operator[](const ZPoint<N,T>& p) const
+  {
+#ifdef PRIVILEGE_CHECKS
+    assert(privileges & ACCESSOR_PRIV_READ);
+#endif
+#ifdef BOUNDS_CHECKS
+    assert(bounds.contains(p));
+#endif
+    return *(this->get_ptr(p));
+  }
+
+  template <typename FT, int N, typename T>
+  inline FT *AffineAccessor<FT,N,T>::get_ptr(const ZPoint<N,T>& p) const
+  {
+    intptr_t rawptr = base;
+    for(int i = 0; i < N; i++) rawptr += p[i] * strides[i];
+    return reinterpret_cast<FT *>(rawptr);
   }
 
   template <typename FT, int N, typename T>

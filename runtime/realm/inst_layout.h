@@ -209,6 +209,9 @@ namespace Realm {
     FT read(const ZPoint<N,T>& p) const;
     void write(const ZPoint<N,T>& p, FT newval) const;
 
+    FT& operator[](const ZPoint<N,T>& p);
+    const FT& operator[](const ZPoint<N,T>& p) const;
+
   //protected:
   //friend
   // std::ostream& operator<<(std::ostream& os, const AffineAccessor<FT,N,T>& a);
@@ -225,6 +228,8 @@ namespace Realm {
 #ifdef BOUNDS_CHECKS
     ZIndexSpace<N,T> bounds;
 #endif
+  protected:
+    FT* get_ptr(const ZPoint<N,T>& p) const;
   };
 
   template <typename FT, int N, typename T>
