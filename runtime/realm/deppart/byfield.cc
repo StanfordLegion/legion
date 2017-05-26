@@ -329,7 +329,7 @@ namespace Realm {
 #define DOIT(N,T,F) \
   template class ByFieldMicroOp<N,T,F>; \
   template class ByFieldOperation<N,T,F>; \
-  template ByFieldMicroOp<N,T,F>::ByFieldMicroOp<Serialization::FixedBufferDeserializer>(gasnet_node_t, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \
+  template ByFieldMicroOp<N,T,F>::ByFieldMicroOp(gasnet_node_t, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \
   template Event ZIndexSpace<N,T>::create_subspaces_by_field(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,F> >&, \
 							     const std::vector<F>&, \
 							     std::vector<ZIndexSpace<N,T> >&, \
