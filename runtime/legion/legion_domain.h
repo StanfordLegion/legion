@@ -793,64 +793,104 @@ namespace Legion {
     }
 
     template<int DIM, typename COORD_T>
-    class DomainIterator {
+    class PointInRectIterator {
     public:
+      PointInRectIterator(void) { }
 #if __cplusplus < 201103L
-      DomainIterator(const Realm::ZIndexSpace<DIM,COORD_T> &d,
-                     bool column_major_order = true)
+      PointInRectIterator(const Realm::ZRect<DIM,COORD_T> &r,
+                          bool column_major_order = true)
 #else
-      DomainIterator(const DomainT<DIM,COORD_T> &d,
-                     bool column_major_order = true)
+      PointInRectIterator(const Rect<DIM,COORD_T> &r,
+                          bool column_major_order = true)
 #endif
-        : is_itr(d), column_major(column_major_order)
+        : itr(Realm::ZPointInRectIterator<DIM,COORD_T>(r, column_major_order))
       {
-        is_valid = is_itr.is_valid;
-        if (is_valid) {
-          rect_itr = 
-            Realm::ZPointInRectIterator<DIM,COORD_T>(is_itr.rect, column_major);
-          rect_valid = rect_itr.valid;
-          p = rect_itr.p;
-        } else
-          rect_valid = false;
       }
     public:
-      inline bool step(void) 
-      {
-        assert(is_valid && rect_valid);
-        // Step the rect iterator first
-        rect_itr.step();
-        rect_valid = rect_itr.valid;
-        if (!rect_valid) {
-          // Rect iterator is no longer valid, start the
-          // next rectangle if there is one
-          is_itr.step();
-          is_valid = is_itr.valid;
-          if (is_valid) {
-            rect_itr = Realm::ZPointInRectIterator<DIM,COORD_T>(is_itr.rect,
-                                                                column_major);
-            p = rect_itr.p;
-            rect_valid = rect_itr.valid;
-          } else {
-            rect_valid = false;
-          }
-        } else {
-          p = rect_itr.p;
-        }
-      }
+      inline bool valid(void) const { return itr.valid; }
+      inline bool step(void)
+        { assert(valid()); itr.step(); return valid(); }
     public:
-      inline operator bool(void) const { return is_valid && rect_valid; }
-      inline DomainIterator& operator++(int /*i am postfix*/) 
+      inline bool operator()(void) const { return valid(); }
+      inline operator Realm::ZPoint<DIM,COORD_T>(void) const 
+        { assert(valid()); return itr.p; }
+      inline PointInRectIterator<DIM,COORD_T>& operator++(void)
         { step(); return *this; }
+      inline PointInRectIterator<DIM,COORD_T>& operator++(int/*postfix*/)
+        { step(); return *this; }
+    protected:
+      Realm::ZPointInRectIterator<DIM,COORD_T> itr;
+    };
+
+    template<int DIM, typename COORD_T>
+    class RectInDomainIterator {
+    public:
+      RectInDomainIterator(void) { }
+#if __cplusplus < 201103L
+      RectInDomainIterator(const Realm::ZIndexSpace<DIM,COORD_T> &d)
+#else
+      RectInDomainIterator(const DomainT<DIM,COORD_T> &d)
+#endif
+        : itr(Realm::ZIndexSpaceIterator<DIM,COORD_T>(d))
+      {
+      }
+    public:
+      inline bool valid(void) const { return itr.valid; }
+      inline bool step(void)
+        { assert(valid()); itr.step(); return valid(); }
+    public:
+      inline bool operator()(void) const { return valid(); }
+      inline operator Realm::ZRect<DIM,COORD_T>(void) const
+        { assert(valid()); return itr.rect; }
+      inline RectInDomainIterator<DIM,COORD_T>& operator++(void)
+        { step(); return *this; }
+      inline RectInDomainIterator<DIM,COORD_T>& operator++(int/*postfix*/)
+        { step(); return *this; }
+    protected:
+      Realm::ZIndexSpaceIterator<DIM,COORD_T> itr;
+    };
+
+    template<int DIM, typename COORD_T>
+    class PointInDomainIterator {
     public:
 #if __cplusplus < 201103L
-      Realm::ZPoint<DIM,COORD_T> p;
+      PointInDomainIterator(const Realm::ZIndexSpace<DIM,COORD_T> &d,
+                            bool column_major_order = true)
 #else
-      Point<DIM,COORD_T> p;
+      PointInDomainIterator(const DomainT<DIM,COORD_T> &d,
+                            bool column_major_order = true)
 #endif
+        : rect_itr(RectInDomainIterator<DIM,COORD_T>(d)), 
+          column_major(column_major_order)
+      {
+        if (rect_itr())
+          point_itr = PointInRectIterator<DIM,COORD_T>(rect_itr, column_major);
+      }
+    public:
+      inline bool valid(void) const { return point_itr(); }
+      inline bool step(void) 
+      { 
+        assert(valid()); 
+        point_itr++;
+        if (!point_itr())
+        {
+          rect_itr++;
+          if (rect_itr())
+            point_itr = PointInRectIterator<DIM,COORD_T>(rect_itr,column_major);
+        }
+        return valid();
+      }
+    public:
+      inline bool operator()(void) const { return valid(); }
+      inline operator Realm::ZPoint<DIM,COORD_T>(void) const
+        { assert(valid()); return point_itr; }
+      inline PointInDomainIterator& operator++(void)
+        { step(); return *this; }
+      inline PointInDomainIterator& operator++(int /*postfix*/) 
+        { step(); return *this; }
     protected:
-      Realm::ZIndexSpaceIterator<DIM,COORD_T> is_itr;
-      Realm::ZPointInRectIterator<DIM,COORD_T> rect_itr;
-      bool is_valid, rect_valid;
+      RectInDomainIterator<DIM,COORD_T> rect_itr;
+      PointInRectIterator<DIM,COORD_T> point_itr;
       bool column_major;
     };
 

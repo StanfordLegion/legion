@@ -518,6 +518,11 @@ namespace Realm {
   ////////////////////////////////////////////////////////////////////////
   //
   // class ZPointInRectIterator<N,T>
+  
+  template <int N, typename T>
+  inline ZPointInRectIterator<N,T>::ZPointInRectIterator(void)
+    : valid(false)
+  {}
 
   template <int N, typename T>
   inline ZPointInRectIterator<N,T>::ZPointInRectIterator(const ZRect<N,T>& _r,

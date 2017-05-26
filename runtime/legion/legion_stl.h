@@ -52,6 +52,42 @@ namespace Legion {
       inline void legion_deserialize(const void *buffer);
     };
 
+    // C++ is dumb about member template specialization so put 
+    // this in a separate namespace instead of inside ArrayAccessor
+    namespace Detail {
+      // A small helper class that helps provide some syntactic sugar for
+      // indexing accessors like a multi-dimensional array, this should be
+      // able to work with all Accessor classes and not just AffineAccessor
+      template<typename A, typename FT, int N, typename T, int M>
+      class ArraySyntaxHelper {
+      public:
+        ArraySyntaxHelper(const ArraySyntaxHelper<A,FT,N,T,M-1> &rhs);
+      public:
+        ArraySyntaxHelper<A,FT,N,T,M+1> operator[](T val);
+        const ArraySyntaxHelper<A,FT,N,T,M+1> operator[](T val) const;
+      public:
+        A &accessor;
+        mutable Point<M,T> point;
+      };
+    }
+
+    /**
+     * A wrapper accessor that provides multi-dimensional array like syntax
+     * for arbitrary kinds of Realm accessors
+     */
+    template<typename A/*base accessor*/, typename FT, int N, typename T>
+    class ArrayAccessor : public A {
+    public:
+      using A::A; // inherit base constructors
+    public:
+      // Keep the old overloads for points
+      FT& operator[](const Point<N,T> &p);
+      const FT& operator[](const Point<N,T> &p) const;
+      // The accessor methods for arrays
+      Detail::ArraySyntaxHelper<A,FT,N,T,2> operator[](T val);
+      const Detail::ArraySyntaxHelper<A,FT,N,T,2> operator[](T val) const;
+    };
+
     /*
      * These methods can be used to create a Legion task from a function
      * that simply wants vectors of pointers for each field and the associated
