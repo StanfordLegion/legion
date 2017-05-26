@@ -812,8 +812,10 @@ namespace Legion {
         { assert(valid()); itr.step(); return valid(); }
     public:
       inline bool operator()(void) const { return valid(); }
-      inline operator Realm::ZPoint<DIM,COORD_T>(void) const 
-        { assert(valid()); return itr.p; }
+      inline const Realm::ZPoint<DIM,COORD_T>& operator*(void) const
+        { return itr.p; }
+      inline const Realm::ZPoint<DIM,COORD_T>* operator->(void) const
+        { return &itr.p; }
       inline PointInRectIterator<DIM,COORD_T>& operator++(void)
         { step(); return *this; }
       inline PointInRectIterator<DIM,COORD_T>& operator++(int/*postfix*/)
@@ -840,8 +842,10 @@ namespace Legion {
         { assert(valid()); itr.step(); return valid(); }
     public:
       inline bool operator()(void) const { return valid(); }
-      inline operator Realm::ZRect<DIM,COORD_T>(void) const
-        { assert(valid()); return itr.rect; }
+      inline const Realm::ZRect<DIM,COORD_T>& operator*(void) const
+        { return itr.rect; }
+      inline const Realm::ZRect<DIM,COORD_T>* operator->(void) const
+        { return &(itr.rect); }
       inline RectInDomainIterator<DIM,COORD_T>& operator++(void)
         { step(); return *this; }
       inline RectInDomainIterator<DIM,COORD_T>& operator++(int/*postfix*/)
@@ -864,7 +868,7 @@ namespace Legion {
           column_major(column_major_order)
       {
         if (rect_itr())
-          point_itr = PointInRectIterator<DIM,COORD_T>(rect_itr, column_major);
+          point_itr = PointInRectIterator<DIM,COORD_T>(*rect_itr, column_major);
       }
     public:
       inline bool valid(void) const { return point_itr(); }
@@ -876,14 +880,17 @@ namespace Legion {
         {
           rect_itr++;
           if (rect_itr())
-            point_itr = PointInRectIterator<DIM,COORD_T>(rect_itr,column_major);
+            point_itr = PointInRectIterator<DIM,COORD_T>(*rect_itr,
+                                                         column_major);
         }
         return valid();
       }
     public:
       inline bool operator()(void) const { return valid(); }
-      inline operator Realm::ZPoint<DIM,COORD_T>(void) const
-        { assert(valid()); return point_itr; }
+      inline const Realm::ZPoint<DIM,COORD_T>& operator*(void) const
+        { return *point_itr; }
+      inline const Realm::ZPoint<DIM,COORD_T>* operator->(void) const
+        { return &(*point_itr); }
       inline PointInDomainIterator& operator++(void)
         { step(); return *this; }
       inline PointInDomainIterator& operator++(int /*postfix*/) 

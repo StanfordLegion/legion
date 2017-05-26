@@ -2602,7 +2602,7 @@ namespace Legion {
         LogicalPartitionT<DIM,T> parent, Realm::ZPoint<COLOR_DIM,COLOR_T> color)
     //--------------------------------------------------------------------------
     {
-      return LogicalRegionT<DIM,T>(get_logical_subregion_by_color_interal(
+      return LogicalRegionT<DIM,T>(get_logical_subregion_by_color_internal(
             LogicalPartition(parent), &color,
             Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>()));
     }
