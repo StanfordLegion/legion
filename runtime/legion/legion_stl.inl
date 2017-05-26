@@ -128,6 +128,19 @@ namespace Legion {
     }
 
     template<typename A, typename FT, int N, typename T>
+    inline FT& ArrayAccessor<A,FT,N,T>::operator[](const Point<N,T> &p)
+    {
+      return A::operator[](p);
+    }
+
+    template<typename A, typename FT, int N, typename T>
+    inline const FT& ArrayAccessor<A,FT,N,T>::operator[](
+                                            const Point<N,T> &p) const
+    {
+      return A::operator[](p);
+    }
+
+    template<typename A, typename FT, int N, typename T>
     inline Detail::ArraySyntaxHelper<A,FT,N,T,2> 
                           ArrayAccessor<A,FT,N,T>::operator[](T val)
     {
