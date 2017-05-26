@@ -27,7 +27,7 @@
 
 #include "dynamic_table.h"
 #include "proc_impl.h"
-#include "partitions.h"
+#include "deppart/partitions.h"
 
 // event and reservation impls are included directly in the node's dynamic tables,
 //  so we need their definitions here (not just declarations)

@@ -1,0 +1,1454 @@
+/* Copyright 2015 Stanford University, NVIDIA Corporation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+// set operations for Realm dependent partitioning
+
+#include "setops.h"
+
+#include "deppart_config.h"
+#include "rectlist.h"
+#include "inst_helper.h"
+#include "image.h"
+#include "../logging.h"
+
+namespace Realm {
+
+  extern Logger log_part;
+  extern Logger log_uop_timing;
+
+
+  template <int N, typename T>
+  __attribute__ ((noinline))
+  /*static*/ Event ZIndexSpace<N,T>::compute_unions(const std::vector<ZIndexSpace<N,T> >& lhss,
+						    const std::vector<ZIndexSpace<N,T> >& rhss,
+						    std::vector<ZIndexSpace<N,T> >& results,
+						    const ProfilingRequestSet &reqs,
+						    Event wait_on /*= Event::NO_EVENT*/)
+  {
+    Event e = GenEventImpl::create_genevent()->current_event();
+    UnionOperation<N,T> *op = new UnionOperation<N,T>(reqs, e);
+
+    size_t n = std::max(lhss.size(), rhss.size());
+    assert((lhss.size() == rhss.size()) || (lhss.size() == 1) || (rhss.size() == 1));
+    results.resize(n);
+    for(size_t i = 0; i < n; i++) {
+      size_t li = (lhss.size() == 1) ? 0 : i;
+      size_t ri = (rhss.size() == 1) ? 0 : i;
+      results[i] = op->add_union(lhss[li], rhss[ri]);
+    }
+
+    op->deferred_launch(wait_on);
+    return e;
+  }
+
+  template <int N, typename T>
+  __attribute__ ((noinline))
+  /*static*/ Event ZIndexSpace<N,T>::compute_intersections(const std::vector<ZIndexSpace<N,T> >& lhss,
+							   const std::vector<ZIndexSpace<N,T> >& rhss,
+							   std::vector<ZIndexSpace<N,T> >& results,
+							   const ProfilingRequestSet &reqs,
+							   Event wait_on /*= Event::NO_EVENT*/)
+  {
+    Event e = GenEventImpl::create_genevent()->current_event();
+    IntersectionOperation<N,T> *op = new IntersectionOperation<N,T>(reqs, e);
+
+    size_t n = std::max(lhss.size(), rhss.size());
+    assert((lhss.size() == rhss.size()) || (lhss.size() == 1) || (rhss.size() == 1));
+    results.resize(n);
+    for(size_t i = 0; i < n; i++) {
+      size_t li = (lhss.size() == 1) ? 0 : i;
+      size_t ri = (rhss.size() == 1) ? 0 : i;
+      results[i] = op->add_intersection(lhss[li], rhss[ri]);
+    }
+
+    op->deferred_launch(wait_on);
+    return e;
+  }
+
+  template <int N, typename T>
+  __attribute__ ((noinline))
+  /*static*/ Event ZIndexSpace<N,T>::compute_differences(const std::vector<ZIndexSpace<N,T> >& lhss,
+							 const std::vector<ZIndexSpace<N,T> >& rhss,
+							 std::vector<ZIndexSpace<N,T> >& results,
+							 const ProfilingRequestSet &reqs,
+							 Event wait_on /*= Event::NO_EVENT*/)
+  {
+    Event e = GenEventImpl::create_genevent()->current_event();
+    DifferenceOperation<N,T> *op = new DifferenceOperation<N,T>(reqs, e);
+
+    size_t n = std::max(lhss.size(), rhss.size());
+    assert((lhss.size() == rhss.size()) || (lhss.size() == 1) || (rhss.size() == 1));
+    results.resize(n);
+    for(size_t i = 0; i < n; i++) {
+      size_t li = (lhss.size() == 1) ? 0 : i;
+      size_t ri = (rhss.size() == 1) ? 0 : i;
+      results[i] = op->add_difference(lhss[li], rhss[ri]);
+    }
+
+    op->deferred_launch(wait_on);
+    return e;
+  }
+
+  template <int N, typename T>
+  /*static*/ Event ZIndexSpace<N,T>::compute_union(const std::vector<ZIndexSpace<N,T> >& subspaces,
+						   ZIndexSpace<N,T>& result,
+						   const ProfilingRequestSet &reqs,
+						   Event wait_on /*= Event::NO_EVENT*/)
+  {
+    Event e = GenEventImpl::create_genevent()->current_event();
+    UnionOperation<N,T> *op = new UnionOperation<N,T>(reqs, e);
+
+    result = op->add_union(subspaces);
+
+    op->deferred_launch(wait_on);
+    return e;
+  }
+
+  template <int N, typename T>
+  /*static*/ Event ZIndexSpace<N,T>::compute_intersection(const std::vector<ZIndexSpace<N,T> >& subspaces,
+							  ZIndexSpace<N,T>& result,
+							  const ProfilingRequestSet &reqs,
+							  Event wait_on /*= Event::NO_EVENT*/)
+  {
+    Event e = GenEventImpl::create_genevent()->current_event();
+    IntersectionOperation<N,T> *op = new IntersectionOperation<N,T>(reqs, e);
+
+    result = op->add_intersection(subspaces);
+
+    op->deferred_launch(wait_on);
+    return e;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class UnionMicroOp<N,T>
+
+  template <int N, typename T>
+  inline /*static*/ DynamicTemplates::TagType UnionMicroOp<N,T>::type_tag(void)
+  {
+    return NT_TemplateHelper::encode_tag<N,T>();
+  }
+
+  template <int N, typename T>
+  UnionMicroOp<N,T>::UnionMicroOp(const std::vector<ZIndexSpace<N,T> >& _inputs)
+    : inputs(_inputs)
+  {
+    sparsity_output.id = 0;
+  }
+
+  template <int N, typename T>
+  UnionMicroOp<N,T>::UnionMicroOp(ZIndexSpace<N,T> _lhs,
+				  ZIndexSpace<N,T> _rhs)
+    : inputs(2)
+  {
+    inputs[0] = _lhs;
+    inputs[1] = _rhs;
+    sparsity_output.id = 0;
+  }
+
+  template <int N, typename T>
+  UnionMicroOp<N,T>::~UnionMicroOp(void)
+  {}
+
+  template <int N, typename T>
+  void UnionMicroOp<N,T>::add_sparsity_output(SparsityMap<N,T> _sparsity)
+  {
+    sparsity_output = _sparsity;
+  }
+
+  template <int N, typename T>
+  class NWayMerge {
+  public:
+    NWayMerge(const std::vector<ZIndexSpace<N,T> >& spaces);
+    ~NWayMerge(void);
+
+    const ZRect<N,T>& operator[](int idx) const;
+    size_t size(void) const;
+
+    // steps an iterator - does not immediately update its position
+    bool step(int idx);
+
+    // called after you call step at least once on a given iterator
+    void update(int idx);
+
+    void print(void) const;
+
+  protected:
+    int n;
+    std::vector<ZIndexSpaceIterator<N,T> > its;
+    std::vector<int> order;
+  };
+
+  template <int N, typename T>
+  NWayMerge<N,T>::NWayMerge(const std::vector<ZIndexSpace<N,T> >& spaces)
+    : n(0)
+  {
+    its.resize(spaces.size());
+    order.resize(spaces.size());
+    for(size_t i = 0; i < spaces.size(); i++) {
+      its[i].reset(spaces[i]);
+      if(its[i].valid) {
+	order[n] = i;
+	T lo = its[i].rect.lo.x;
+	for(int j = n; j > 0; j--)
+	  if(its[order[j-1]].rect.lo.x > lo)
+	    std::swap(order[j-1], order[j]);
+	  else
+	    break;
+	n++;
+      }
+    }
+  }
+
+  template <int N, typename T>
+  NWayMerge<N,T>::~NWayMerge(void)
+  {}
+
+  template <int N, typename T>
+  const ZRect<N,T>& NWayMerge<N,T>::operator[](int idx) const
+  {
+    assert(idx < n);
+    return its[order[idx]].rect;
+  }
+
+  template <int N, typename T>
+  size_t NWayMerge<N,T>::size(void) const
+  {
+    return n;
+  }
+
+  // steps an iterator - does not immediately update its position
+  template <int N, typename T>
+  bool NWayMerge<N,T>::step(int idx)
+  {
+    assert(idx < n);
+    return its[order[idx]].step();
+  }
+
+  // called after you call step at least once on a given iterator
+  template <int N, typename T>
+  void NWayMerge<N,T>::update(int idx)
+  {
+    if(its[order[idx]].valid) {
+      // can only move upwards
+      T lo = its[order[idx]].rect.lo;
+      for(int j = idx + 1; j < n; j++)
+	if(its[order[j]].rect.lo < lo)
+	  std::swap(order[j], order[j-1]);
+	else
+	  break;
+    } else {
+      // just delete it
+      order.erase(order.begin() + idx);
+      n--;
+    }
+  }
+
+  template <int N, typename T>
+  void NWayMerge<N,T>::print(void) const
+  {
+    std::cout << "[[";
+    for(size_t i = 0; i < n; i++) std::cout << " " << i << "=" << order[i] << "=" << its[order[i]].rect;
+    std::cout << "]]\n";
+  }
+
+  template <int N, typename T, typename BM>
+  bool try_fast_1d_union(BM& bitmask, const std::vector<ZIndexSpace<N,T> >& spaces)
+  {
+    return false;  // general case doesn't work
+  }
+
+  template <typename T, typename BM>
+  bool try_fast_1d_union(BM& bitmask, const std::vector<ZIndexSpace<1,T> >& inputs)
+  {
+    static const int N = 1;
+    // stuff
+      // even more special case where inputs.size() == 2
+      if(inputs.size() == 2) {
+	ZIndexSpaceIterator<N,T> it_lhs(inputs[0]);
+	ZIndexSpaceIterator<N,T> it_rhs(inputs[1]);
+       
+	while(it_lhs.valid && it_rhs.valid) {
+	  // if either side comes completely before the other, emit it and continue
+	  if(it_lhs.rect.hi.x < (it_rhs.rect.lo.x - 1)) {
+	    bitmask.add_rect(it_lhs.rect);
+	    it_lhs.step();
+	    continue;
+	  }
+
+	  if(it_rhs.rect.hi.x < (it_lhs.rect.lo.x - 1)) {
+	    bitmask.add_rect(it_rhs.rect);
+	    it_rhs.step();
+	    continue;
+	  }
+
+	  // new rectangle will be at least the union of these two
+	  ZRect<N,T> u = it_lhs.rect.union_bbox(it_rhs.rect);
+	  it_lhs.step();
+	  it_rhs.step();
+	  // try to consume even more
+	  while(true) {
+	    if(it_lhs.valid && (it_lhs.rect.lo.x <= (u.hi.x + 1))) {
+	      u.hi.x = std::max(u.hi.x, it_lhs.rect.hi.x);
+	      it_lhs.step();
+	      continue;
+	    }
+	    if(it_rhs.valid && (it_rhs.rect.lo.x <= (u.hi.x + 1))) {
+	      u.hi.x = std::max(u.hi.x, it_rhs.rect.hi.x);
+	      it_rhs.step();
+	      continue;
+	    }
+	    // if both fail, we're done
+	    break;
+	  }
+	  bitmask.add_rect(u);
+	}
+
+	// leftover rects from one side or the other just get added
+	while(it_lhs.valid) {
+	  bitmask.add_rect(it_lhs.rect);
+	  it_lhs.step();
+	}
+	while(it_rhs.valid) {
+	  bitmask.add_rect(it_rhs.rect);
+	  it_rhs.step();
+	}
+      } else {
+	// N-way merge
+	NWayMerge<N,T> nwm(inputs);
+	//nwm.print();
+	while(nwm.size() > 1) {
+	  //nwm.print();
+
+	  // consume rectangles off the first one until there's overlap with the next guy
+	  T lo1 = nwm[1].lo.x;
+	  if(nwm[0].hi.x < (lo1 - 1)) {
+	    while(nwm[0].hi.x < (lo1 - 1)) {
+	      bitmask.add_rect(nwm[0]);
+	      if(!nwm.step(0)) break;
+	    }
+	    nwm.update(0);
+	    continue;
+	  }
+
+	  // at least a little overlap, so start accumulating a value
+	  ZRect<N,T> u = nwm[0];
+	  nwm.step(0); nwm.update(0);
+	  while((nwm.size() > 0) && (nwm[0].lo.x <= (u.hi.x + 1))) {
+	    u.hi.x = std::max(u.hi.x, nwm[0].hi.x);
+	    nwm.step(0);
+	    nwm.update(0);
+	  }
+	  bitmask.add_rect(u);
+	}
+
+	// any stragglers?
+	if(nwm.size() > 0)
+	  do {
+	    bitmask.add_rect(nwm[0]);
+	  } while(nwm.step(0));
+#if 0
+	std::vector<ZIndexSpaceIterator<N,T> > its(inputs.size());
+	std::vector<int> order(inputs.size());
+	size_t n = 0;
+	for(size_t i = 0; i < inputs.size(); i++) {
+	  its[i].reset(inputs[i]);
+	  if(its[i].valid) {
+	    order[n] = i;
+	    T lo = its[i].rect.lo.x;
+	    for(size_t j = n; j > 0; j--)
+	      if(its[order[j-1]].rect.lo.x > lo)
+		std::swap(order[j-1], order[j]);
+	      else
+		break;
+	    n++;
+	  }
+	}
+	std::cout << "[[";
+	for(size_t i = 0; i < n; i++) std::cout << " " << i << "=" << order[i] << "=" << its[order[i]].rect;
+	std::cout << "]]\n";
+	while(n > 1) {
+	  std::cout << "[[";
+	  for(size_t i = 0; i < n; i++) std::cout << " " << i << "=" << order[i] << "=" << its[order[i]].rect;
+	  std::cout << "]]\n";
+	  // consume rectangles off the first one until there's overlap with the next guy
+	  if(its[order[0]].rect.hi.x < (its[order[1]].rect.lo.x - 1)) {
+	    while(its[order[0]].rect.hi.x < (its[order[1]].rect.lo.x - 1)) {
+	      bitmask.add_rect(its[order[0]].rect);
+	      if(!its[order[0]].step()) break;
+	    }
+	    if(its[order[0]].valid) {
+	      for(size_t j = 0; j < n - 1; j++)
+		if(its[order[j]].rect.lo.x > its[order[j+1]].rect.lo.x)
+		  std::swap(order[j], order[j+1]);
+		else
+		  break;
+	    } else {
+	      order.erase(order.begin());
+	      n--;
+	    }
+	    continue;
+	  }
+
+	  // at least some overlap, switch to consuming and appending to next guy
+	  ZRect<N,T> 
+	  break;
+	}
+
+	// whichever one is left can just emit all its remaining rectangles
+	while(its[order[0]].valid) {
+	  bitmask.add_rect(its[order[0]].rect);
+	  its[order[0]].step();
+	}
+#endif
+      }
+    return true;
+  }
+
+  template <int N, typename T>
+  template <typename BM>
+  void UnionMicroOp<N,T>::populate_bitmask(BM& bitmask)
+  {
+    // special case: in 1-D, we can count on the iterators being ordered and just do an O(N)
+    //  merge-union of the two streams
+    if(try_fast_1d_union<N,T>(bitmask, inputs))
+      return;
+#if 0
+    if(N == 1) {
+      // even more special case where inputs.size() == 2
+      if(inputs.size() == 2) {
+	ZIndexSpaceIterator<N,T> it_lhs(inputs[0]);
+	ZIndexSpaceIterator<N,T> it_rhs(inputs[1]);
+       
+	while(it_lhs.valid && it_rhs.valid) {
+	  // if either side comes completely before the other, emit it and continue
+	  if(it_lhs.rect.hi.x < (it_rhs.rect.lo.x - 1)) {
+	    bitmask.add_rect(it_lhs.rect);
+	    it_lhs.step();
+	    continue;
+	  }
+
+	  if(it_rhs.rect.hi.x < (it_lhs.rect.lo.x - 1)) {
+	    bitmask.add_rect(it_rhs.rect);
+	    it_rhs.step();
+	    continue;
+	  }
+
+	  // new rectangle will be at least the union of these two
+	  ZRect<N,T> u = it_lhs.rect.union_bbox(it_rhs.rect);
+	  it_lhs.step();
+	  it_rhs.step();
+	  // try to consume even more
+	  while(true) {
+	    if(it_lhs.valid && (it_lhs.rect.lo.x <= (u.hi.x + 1))) {
+	      u.hi.x = std::max(u.hi.x, it_lhs.rect.hi.x);
+	      it_lhs.step();
+	      continue;
+	    }
+	    if(it_rhs.valid && (it_rhs.rect.lo.x <= (u.hi.x + 1))) {
+	      u.hi.x = std::max(u.hi.x, it_rhs.rect.hi.x);
+	      it_rhs.step();
+	      continue;
+	    }
+	    // if both fail, we're done
+	    break;
+	  }
+	  bitmask.add_rect(u);
+	}
+
+	// leftover rects from one side or the other just get added
+	while(it_lhs.valid) {
+	  bitmask.add_rect(it_lhs.rect);
+	  it_lhs.step();
+	}
+	while(it_rhs.valid) {
+	  bitmask.add_rect(it_rhs.rect);
+	  it_rhs.step();
+	}
+      } else {
+	// N-way merge
+	NWayMerge<N,T> nwm(inputs);
+	//nwm.print();
+	while(nwm.size() > 1) {
+	  //nwm.print();
+
+	  // consume rectangles off the first one until there's overlap with the next guy
+	  T lo1 = nwm[1].lo.x;
+	  if(nwm[0].hi.x < (lo1 - 1)) {
+	    while(nwm[0].hi.x < (lo1 - 1)) {
+	      bitmask.add_rect(nwm[0]);
+	      if(!nwm.step(0)) break;
+	    }
+	    nwm.update(0);
+	    continue;
+	  }
+
+	  // at least a little overlap, so start accumulating a value
+	  ZRect<N,T> u = nwm[0];
+	  nwm.step(0); nwm.update(0);
+	  while((nwm.size() > 0) && (nwm[0].lo.x <= (u.hi.x + 1))) {
+	    u.hi.x = std::max(u.hi.x, nwm[0].hi.x);
+	    nwm.step(0);
+	    nwm.update(0);
+	  }
+	  bitmask.add_rect(u);
+	}
+
+	// any stragglers?
+	if(nwm.size() > 0)
+	  do {
+	    bitmask.add_rect(nwm[0]);
+	  } while(nwm.step(0));
+#if 0
+	std::vector<ZIndexSpaceIterator<N,T> > its(inputs.size());
+	std::vector<int> order(inputs.size());
+	size_t n = 0;
+	for(size_t i = 0; i < inputs.size(); i++) {
+	  its[i].reset(inputs[i]);
+	  if(its[i].valid) {
+	    order[n] = i;
+	    T lo = its[i].rect.lo.x;
+	    for(size_t j = n; j > 0; j--)
+	      if(its[order[j-1]].rect.lo.x > lo)
+		std::swap(order[j-1], order[j]);
+	      else
+		break;
+	    n++;
+	  }
+	}
+	std::cout << "[[";
+	for(size_t i = 0; i < n; i++) std::cout << " " << i << "=" << order[i] << "=" << its[order[i]].rect;
+	std::cout << "]]\n";
+	while(n > 1) {
+	  std::cout << "[[";
+	  for(size_t i = 0; i < n; i++) std::cout << " " << i << "=" << order[i] << "=" << its[order[i]].rect;
+	  std::cout << "]]\n";
+	  // consume rectangles off the first one until there's overlap with the next guy
+	  if(its[order[0]].rect.hi.x < (its[order[1]].rect.lo.x - 1)) {
+	    while(its[order[0]].rect.hi.x < (its[order[1]].rect.lo.x - 1)) {
+	      bitmask.add_rect(its[order[0]].rect);
+	      if(!its[order[0]].step()) break;
+	    }
+	    if(its[order[0]].valid) {
+	      for(size_t j = 0; j < n - 1; j++)
+		if(its[order[j]].rect.lo.x > its[order[j+1]].rect.lo.x)
+		  std::swap(order[j], order[j+1]);
+		else
+		  break;
+	    } else {
+	      order.erase(order.begin());
+	      n--;
+	    }
+	    continue;
+	  }
+
+	  // at least some overlap, switch to consuming and appending to next guy
+	  ZRect<N,T> 
+	  break;
+	}
+
+	// whichever one is left can just emit all its remaining rectangles
+	while(its[order[0]].valid) {
+	  bitmask.add_rect(its[order[0]].rect);
+	  its[order[0]].step();
+	}
+#endif
+      }
+      return;
+    }
+#endif
+
+    // iterate over all the inputs, adding dense (sub)rectangles first
+    for(typename std::vector<ZIndexSpace<N,T> >::const_iterator it = inputs.begin();
+	it != inputs.end();
+	it++) {
+      if(it->dense()) {
+	bitmask.add_rect(it->bounds);
+      } else {
+	SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(it->sparsity);
+	const std::vector<SparsityMapEntry<N,T> >& entries = impl->get_entries();
+	for(typename std::vector<SparsityMapEntry<N,T> >::const_iterator it2 = entries.begin();
+	    it2 != entries.end();
+	    it2++) {
+	  ZRect<N,T> isect = it->bounds.intersection(it2->bounds);
+	  if(isect.empty())
+	    continue;
+	  assert(!it2->sparsity.exists());
+	  assert(it2->bitmap == 0);
+	  bitmask.add_rect(isect);
+	}
+      }
+    }
+  }
+
+  template <int N, typename T>
+  void UnionMicroOp<N,T>::execute(void)
+  {
+    TimeStamp ts("UnionMicroOp::execute", true, &log_uop_timing);
+#ifdef DEBUG_PARTITIONING
+    std::cout << "calc union: " << inputs[0];
+    for(size_t i = 1; i < inputs.size(); i++)
+      std::cout << " + " << inputs[i];
+    std::cout << std::endl;
+#endif
+    DenseRectangleList<N,T> drl;
+    populate_bitmask(drl);
+    if(sparsity_output.exists()) {
+      SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity_output);
+      impl->contribute_dense_rect_list(drl.rects);
+    }
+  }
+
+  template <int N, typename T>
+  void UnionMicroOp<N,T>::dispatch(PartitioningOperation *op, bool inline_ok)
+  {
+    // execute wherever our sparsity output is
+    gasnet_node_t exec_node = ID(sparsity_output).sparsity.creator_node;
+
+    if(exec_node != gasnet_mynode()) {
+      // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
+      //  track it
+      async_microop = new AsyncMicroOp(op, this);
+      op->add_async_work_item(async_microop);
+
+      RemoteMicroOpMessage::send_request(exec_node, op, *this);
+      delete this;
+      return;
+    }
+
+    // need valid data for each input
+    for(typename std::vector<ZIndexSpace<N,T> >::const_iterator it = inputs.begin();
+	it != inputs.end();
+	it++) {
+      if(!it->dense()) {
+	// it's safe to add the count after the registration only because we initialized
+	//  the count to 2 instead of 1
+	bool registered = SparsityMapImpl<N,T>::lookup(it->sparsity)->add_waiter(this, true /*precise*/);
+	if(registered)
+	  __sync_fetch_and_add(&wait_count, 1);
+      }
+    }
+
+    finish_dispatch(op, inline_ok);
+  }
+
+  template <int N, typename T>
+  template <typename S>
+  bool UnionMicroOp<N,T>::serialize_params(S& s) const
+  {
+    return((s << inputs) &&
+	   (s << sparsity_output));
+  }
+
+  template <int N, typename T>
+  template <typename S>
+  UnionMicroOp<N,T>::UnionMicroOp(gasnet_node_t _requestor,
+				  AsyncMicroOp *_async_microop, S& s)
+    : PartitioningMicroOp(_requestor, _async_microop)
+  {
+    bool ok = ((s >> inputs) &&
+	       (s >> sparsity_output));
+    assert(ok);
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class IntersectionMicroOp<N,T>
+
+  template <int N, typename T>
+  inline /*static*/ DynamicTemplates::TagType IntersectionMicroOp<N,T>::type_tag(void)
+  {
+    return NT_TemplateHelper::encode_tag<N,T>();
+  }
+
+  template <int N, typename T>
+  IntersectionMicroOp<N,T>::IntersectionMicroOp(const std::vector<ZIndexSpace<N,T> >& _inputs)
+    : inputs(_inputs)
+  {
+    sparsity_output.id = 0;
+  }
+
+  template <int N, typename T>
+  IntersectionMicroOp<N,T>::IntersectionMicroOp(ZIndexSpace<N,T> _lhs,
+				  ZIndexSpace<N,T> _rhs)
+    : inputs(2)
+  {
+    inputs[0] = _lhs;
+    inputs[1] = _rhs;
+    sparsity_output.id = 0;
+  }
+
+  template <int N, typename T>
+  IntersectionMicroOp<N,T>::~IntersectionMicroOp(void)
+  {}
+
+  template <int N, typename T>
+  void IntersectionMicroOp<N,T>::add_sparsity_output(SparsityMap<N,T> _sparsity)
+  {
+    sparsity_output = _sparsity;
+  }
+
+  template <int N, typename T>
+  template <typename BM>
+  void IntersectionMicroOp<N,T>::populate_bitmask(BM& bitmask)
+  {
+    // special case: in 1-D, we can count on the iterators being ordered and just do an O(N)
+    //  merge-intersection of the two streams
+    if(N == 1) {
+      // even more special case where inputs.size() == 2
+      if(inputs.size() == 2) {
+	ZIndexSpaceIterator<N,T> it_lhs(inputs[0]);
+	ZIndexSpaceIterator<N,T> it_rhs(inputs[1]);
+       
+	// can only generate data while both sides have rectangles left
+	while(it_lhs.valid && it_rhs.valid) {
+	  // skip rectangles if they completely preceed the one on the other side
+	  if(it_lhs.rect.hi.x < it_rhs.rect.lo.x) {
+	    it_lhs.step();
+	    continue;
+	  }
+
+	  if(it_rhs.rect.hi.x < it_lhs.rect.lo.x) {
+	    it_rhs.step();
+	    continue;
+	  }
+
+	  // we have at least partial overlap - add the intersection and then consume whichever
+	  //  rectangle ended first (or both if equal)
+	  bitmask.add_rect(it_lhs.rect.intersection(it_rhs.rect));
+	  T diff = it_lhs.rect.hi.x - it_rhs.rect.hi.x;
+	  if(diff <= 0)
+	    it_lhs.step();
+	  if(diff >= 0)
+	    it_rhs.step();
+	}
+      } else {
+	assert(0);
+      }
+      return;
+    }
+
+    // general version
+    // first build the intersection of all the bounding boxes
+    ZRect<N,T> bounds = inputs[0].bounds;
+    for(size_t i = 1; i < inputs.size(); i++)
+      bounds = bounds.intersection(inputs[i].bounds);
+    if(bounds.empty()) {
+      // early out
+      std::cout << "empty intersection bounds!" << std::endl;
+      return;
+    }
+
+    // handle 2 input case with simple double-iteration
+    if(inputs.size() == 2) {
+      // double iteration - use the instance's space first, since it's probably smaller
+      for(ZIndexSpaceIterator<N,T> it(inputs[0], bounds); it.valid; it.step())
+	for(ZIndexSpaceIterator<N,T> it2(inputs[1], it.rect); it2.valid; it2.step())
+	  bitmask.add_rect(it2.rect);
+    } else {
+      assert(0);
+    }
+  }
+
+  template <int N, typename T>
+  void IntersectionMicroOp<N,T>::execute(void)
+  {
+    TimeStamp ts("IntersectionMicroOp::execute", true, &log_uop_timing);
+#ifdef DEBUG_PARTITIONING
+    std::cout << "calc intersection: " << inputs[0];
+    for(size_t i = 1; i < inputs.size(); i++)
+      std::cout << " & " << inputs[i];
+    std::cout << std::endl;
+#endif
+    DenseRectangleList<N,T> drl;
+    populate_bitmask(drl);
+    if(sparsity_output.exists()) {
+      SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity_output);
+      impl->contribute_dense_rect_list(drl.rects);
+    }
+  }
+
+  template <int N, typename T>
+  void IntersectionMicroOp<N,T>::dispatch(PartitioningOperation *op, bool inline_ok)
+  {
+    // execute wherever our sparsity output is
+    gasnet_node_t exec_node = ID(sparsity_output).sparsity.creator_node;
+
+    if(exec_node != gasnet_mynode()) {
+      // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
+      //  track it
+      async_microop = new AsyncMicroOp(op, this);
+      op->add_async_work_item(async_microop);
+
+      RemoteMicroOpMessage::send_request(exec_node, op, *this);
+      delete this;
+      return;
+    }
+
+    // need valid data for each input
+    for(typename std::vector<ZIndexSpace<N,T> >::const_iterator it = inputs.begin();
+	it != inputs.end();
+	it++) {
+      if(!it->dense()) {
+	// it's safe to add the count after the registration only because we initialized
+	//  the count to 2 instead of 1
+	bool registered = SparsityMapImpl<N,T>::lookup(it->sparsity)->add_waiter(this, true /*precise*/);
+	if(registered)
+	  __sync_fetch_and_add(&wait_count, 1);
+      }
+    }
+
+    finish_dispatch(op, inline_ok);
+  }
+
+  template <int N, typename T>
+  template <typename S>
+  bool IntersectionMicroOp<N,T>::serialize_params(S& s) const
+  {
+    return((s << inputs) &&
+	   (s << sparsity_output));
+  }
+
+  template <int N, typename T>
+  template <typename S>
+  IntersectionMicroOp<N,T>::IntersectionMicroOp(gasnet_node_t _requestor,
+						AsyncMicroOp *_async_microop, S& s)
+    : PartitioningMicroOp(_requestor, _async_microop)
+  {
+    bool ok = ((s >> inputs) &&
+	       (s >> sparsity_output));
+    assert(ok);
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class DifferenceMicroOp<N,T>
+
+  template <int N, typename T>
+  inline /*static*/ DynamicTemplates::TagType DifferenceMicroOp<N,T>::type_tag(void)
+  {
+    return NT_TemplateHelper::encode_tag<N,T>();
+  }
+
+  template <int N, typename T>
+  DifferenceMicroOp<N,T>::DifferenceMicroOp(ZIndexSpace<N,T> _lhs,
+					    ZIndexSpace<N,T> _rhs)
+    : lhs(_lhs), rhs(_rhs)
+  {
+    sparsity_output.id = 0;
+  }
+
+  template <int N, typename T>
+  DifferenceMicroOp<N,T>::~DifferenceMicroOp(void)
+  {}
+
+  template <int N, typename T>
+  void DifferenceMicroOp<N,T>::add_sparsity_output(SparsityMap<N,T> _sparsity)
+  {
+    sparsity_output = _sparsity;
+  }
+
+  template <int N, typename T>
+  void subtract_rects(const ZRect<N,T>& lhs, const ZRect<N,T>& rhs,
+		      std::vector<ZRect<N,T> >& pieces)
+  {
+    // should only be called if we have overlapping rectangles
+    assert(!lhs.empty() && !rhs.empty() && lhs.overlaps(rhs));
+    ZRect<N,T> r = lhs;
+    for(int i = 0; i < N; i++) {
+      if(lhs.lo[i] < rhs.lo[i]) {
+	// some coverage "below"
+	r.lo[i] = lhs.lo[i];
+	r.hi[i] = rhs.lo[i] - 1;
+	pieces.push_back(r);
+      }
+      if(lhs.hi[i] > rhs.hi[i]) {
+	// some coverage "below"
+	r.lo[i] = rhs.hi[i] + 1;
+	r.hi[i] = lhs.hi[i];
+	pieces.push_back(r);
+      }
+      // clamp to the rhs range for the next dimension
+      r.lo[i] = std::max(lhs.lo[i], rhs.lo[i]);
+      r.hi[i] = std::min(lhs.hi[i], rhs.hi[i]);
+    }
+  }
+
+  template <int N, typename T>
+  template <typename BM>
+  void DifferenceMicroOp<N,T>::populate_bitmask(BM& bitmask)
+  {
+    // special case: in 1-D, we can count on the iterators being ordered and just do an O(N)
+    //  merge-subtract of the two streams
+    if(N == 1) {
+      ZIndexSpaceIterator<N,T> it_lhs(lhs);
+      ZIndexSpaceIterator<N,T> it_rhs(rhs);
+
+      while(it_lhs.valid) {
+	// throw away any rhs rectangles that come before this one
+	while(it_rhs.valid && (it_rhs.rect.hi.x < it_lhs.rect.lo.x))
+	  it_rhs.step();
+
+	// out of rhs rectangles? just copy over all the rest on the lhs and we're done
+	if(!it_rhs.valid) {
+	  while(it_lhs.valid) {
+	    bitmask.add_rect(it_lhs.rect);
+	    it_lhs.step();
+	  }
+	  break;
+	}
+
+	// consume lhs rectangles until we get one that overlaps
+	while(it_lhs.rect.hi.x < it_rhs.rect.lo.x) {
+	  bitmask.add_rect(it_lhs.rect);
+	  if(!it_lhs.step()) break;
+	}
+
+	// last case - partial overlap - subtract out rhs rect(s)
+	if(it_lhs.valid) {
+	  ZPoint<N,T> p = it_lhs.rect.lo;
+	  while(it_rhs.valid) {
+	    if(p.x < it_rhs.rect.lo.x) {
+	      // add a partial rect below the rhs
+	      ZPoint<N,T> p2 = it_rhs.rect.lo;
+	      p2.x -= 1;
+	      bitmask.add_rect(ZRect<N,T>(p, p2));
+	    }
+
+	    // if the rhs ends after the lhs, we're done
+	    if(it_rhs.rect.hi.x >= it_lhs.rect.hi.x)
+	      break;
+
+	    // otherwise consume the rhs and update p
+	    p = it_rhs.rect.hi;
+	    p.x += 1;
+	    if(!it_rhs.step()) {
+	      // no rhs left - emit the rest and break out
+	      bitmask.add_rect(ZRect<N,T>(p, it_lhs.rect.hi));
+	      break;
+	    }
+	  }
+	  it_lhs.step();
+	}
+      }
+      return;
+    }
+
+    // the basic idea here is to build a list of rectangles from the lhs and clip them
+    //  based on the rhs until we're done
+    std::deque<ZRect<N,T> > todo;
+
+    if(lhs.dense()) {
+      todo.push_back(lhs.bounds);
+    } else {
+      SparsityMapImpl<N,T> *l_impl = SparsityMapImpl<N,T>::lookup(lhs.sparsity);
+      const std::vector<SparsityMapEntry<N,T> >& entries = l_impl->get_entries();
+      for(typename std::vector<SparsityMapEntry<N,T> >::const_iterator it = entries.begin();
+	  it != entries.end();
+	  it++) {
+	ZRect<N,T> isect = lhs.bounds.intersection(it->bounds);
+	if(isect.empty())
+	  continue;
+	assert(!it->sparsity.exists());
+	assert(it->bitmap == 0);
+	todo.push_back(isect);
+      }
+    }
+
+    while(!todo.empty()) {
+      ZRect<N,T> r = todo.front();
+      todo.pop_front();
+
+      // iterate over all subrects in the rhs - any that contain it eliminate this rect,
+      //  overlap chops it into pieces
+      bool fully_covered = false;
+      for(ZIndexSpaceIterator<N,T> it(rhs); it.valid; it.step()) {
+#ifdef DEBUG_PARTITIONING
+	std::cout << "check " << r << " -= " << it.rect << std::endl;
+#endif
+	if(it.rect.contains(r)) {
+	  fully_covered = true;
+	  break;
+	}
+
+	if(it.rect.overlaps(r)) {
+	  // subtraction is nasty - can result in 2N subrectangles
+	  std::vector<ZRect<N,T> > pieces;
+	  subtract_rects(r, it.rect, pieces);
+	  assert(!pieces.empty());
+
+	  // continue on with the first piece, and stick the rest on the todo list
+	  typename std::vector<ZRect<N,T> >::iterator it2 = pieces.begin();
+	  r = *(it2++);
+	  todo.insert(todo.end(), it2, pieces.end());
+	}
+      }
+      if(!fully_covered) {
+#ifdef DEBUG_PARTITIONING
+	std::cout << "difference += " << r << std::endl;
+#endif
+	bitmask.add_rect(r);
+      }
+    }
+  }
+
+  template <int N, typename T>
+  void DifferenceMicroOp<N,T>::execute(void)
+  {
+    TimeStamp ts("DifferenceMicroOp::execute", true, &log_uop_timing);
+#ifdef DEBUG_PARTITIONING
+    std::cout << "calc difference: " << lhs << " - " << rhs << std::endl;
+#endif
+    DenseRectangleList<N,T> drl;
+    populate_bitmask(drl);
+    if(sparsity_output.exists()) {
+      SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(sparsity_output);
+      impl->contribute_dense_rect_list(drl.rects);
+    }
+  }
+
+  template <int N, typename T>
+  void DifferenceMicroOp<N,T>::dispatch(PartitioningOperation *op, bool inline_ok)
+  {
+    // execute wherever our sparsity output is
+    gasnet_node_t exec_node = ID(sparsity_output).sparsity.creator_node;
+
+    if(exec_node != gasnet_mynode()) {
+      // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
+      //  track it
+      async_microop = new AsyncMicroOp(op, this);
+      op->add_async_work_item(async_microop);
+
+      RemoteMicroOpMessage::send_request(exec_node, op, *this);
+      delete this;
+      return;
+    }
+
+    // need valid data for each source
+    if(!lhs.dense()) {
+      // it's safe to add the count after the registration only because we initialized
+      //  the count to 2 instead of 1
+      bool registered = SparsityMapImpl<N,T>::lookup(lhs.sparsity)->add_waiter(this, true /*precise*/);
+      if(registered)
+	__sync_fetch_and_add(&wait_count, 1);
+    }
+
+    if(!rhs.dense()) {
+      // it's safe to add the count after the registration only because we initialized
+      //  the count to 2 instead of 1
+      bool registered = SparsityMapImpl<N,T>::lookup(rhs.sparsity)->add_waiter(this, true /*precise*/);
+      if(registered)
+	__sync_fetch_and_add(&wait_count, 1);
+    }
+
+    finish_dispatch(op, inline_ok);
+  }
+
+  template <int N, typename T>
+  template <typename S>
+  bool DifferenceMicroOp<N,T>::serialize_params(S& s) const
+  {
+    return((s << lhs) &&
+	   (s << rhs) &&
+	   (s << sparsity_output));
+  }
+
+  template <int N, typename T>
+  template <typename S>
+  DifferenceMicroOp<N,T>::DifferenceMicroOp(gasnet_node_t _requestor,
+					    AsyncMicroOp *_async_microop, S& s)
+    : PartitioningMicroOp(_requestor, _async_microop)
+  {
+    bool ok = ((s >> lhs) &&
+	       (s >> rhs) &&
+	       (s >> sparsity_output));
+    assert(ok);
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class UnionOperation<N,T>
+
+  template <int N, typename T>
+  UnionOperation<N,T>::UnionOperation(const ProfilingRequestSet& reqs,
+				      Event _finish_event)
+    : PartitioningOperation(reqs, _finish_event)
+  {}
+
+  template <int N, typename T>
+  UnionOperation<N,T>::~UnionOperation(void)
+  {}
+
+  template <int N, typename T>
+  ZIndexSpace<N,T> UnionOperation<N,T>::add_union(const ZIndexSpace<N,T>& lhs,
+						  const ZIndexSpace<N,T>& rhs)
+  {
+    // simple case - if both lhs and rhs are empty, the union must be empty too
+    if(lhs.empty() && rhs.empty())
+      return ZIndexSpace<N,T>(/*empty*/);
+
+    // otherwise create a new index space whose bounds can fit both lhs and rhs
+    ZIndexSpace<N,T> output;
+    output.bounds = lhs.bounds.union_bbox(rhs.bounds);
+
+    // try to assign sparsity ID near one or both of the input sparsity maps (if present)
+    // if the target has a sparsity map, use the same node - otherwise
+    // get a sparsity ID by round-robin'ing across the nodes that have field data
+    int target_node;
+    if(lhs.dense()) {
+      if(rhs.dense()) {
+	target_node = gasnet_mynode();  // operation will be cheap anyway
+      } else {
+	target_node = ID(rhs.sparsity).sparsity.creator_node;
+      }
+    } else {
+      if(rhs.dense()) {
+	target_node = ID(lhs.sparsity).sparsity.creator_node;
+      } else {
+	int lhs_node = ID(lhs.sparsity).sparsity.creator_node;
+	int rhs_node = ID(rhs.sparsity).sparsity.creator_node;
+	//if(lhs_node != rhs_node)
+	//  std::cout << "UNION PICK " << lhs_node << " or " << rhs_node << "\n";
+	// if they're different, and lhs is us, choose rhs to load-balance maybe
+	target_node = (lhs_node == gasnet_mynode()) ? rhs_node : lhs_node;
+      }
+    }
+    SparsityMap<N,T> sparsity;
+    if(target_node == gasnet_mynode()) {
+      SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
+      sparsity = wrap->me.convert<SparsityMap<N,T> >();
+    } else
+      sparsity = ID(get_runtime()->remote_id_allocator.get_remote_id(target_node, ID::ID_SPARSITY)).convert<SparsityMap<N,T> >();
+    output.sparsity = sparsity;
+
+    std::vector<ZIndexSpace<N,T> > ops(2);
+    ops[0] = lhs;
+    ops[1] = rhs;
+    inputs.push_back(ops);
+    outputs.push_back(sparsity);
+
+    return output;
+  }
+
+  template <int N, typename T>
+  ZIndexSpace<N,T> UnionOperation<N,T>::add_union(const std::vector<ZIndexSpace<N,T> >& ops)
+  {
+    // build a bounding box that can hold all the operands, and pay attention to the
+    //  case where they're all empty
+    ZIndexSpace<N,T> output;
+    bool all_empty = true;
+    for(size_t i = 0; i < ops.size(); i++)
+      if(!ops[i].empty()) {
+	all_empty = false;
+	output.bounds = output.bounds.union_bbox(ops[i].bounds);
+      }
+
+    if(!all_empty) {
+      // try to assign sparsity ID near the input sparsity maps (if present)
+      int target_node = gasnet_mynode();
+      int node_count = 0;
+      for(size_t i = 0; i < ops.size(); i++)
+	if(!ops[i].dense()) {
+	  int node = ID(ops[i].sparsity).sparsity.creator_node;
+	  if(node_count == 0) {
+	    node_count = 1;
+	    target_node = node;
+	  } else if((node_count == 1) && (node != target_node)) {
+	    //std::cout << "UNION DIFF " << target_node << " or " << node << "\n";
+	    target_node = gasnet_mynode();
+	    break;
+	  }
+	}
+      SparsityMap<N,T> sparsity;
+      if(target_node == gasnet_mynode()) {
+	SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
+	sparsity = wrap->me.convert<SparsityMap<N,T> >();
+      } else
+	sparsity = ID(get_runtime()->remote_id_allocator.get_remote_id(target_node, ID::ID_SPARSITY)).convert<SparsityMap<N,T> >();
+      output.sparsity = sparsity;
+
+      inputs.push_back(ops);
+      outputs.push_back(sparsity);
+    }
+
+    return output;
+  }
+
+  template <int N, typename T>
+  void UnionOperation<N,T>::execute(void)
+  {
+    for(size_t i = 0; i < outputs.size(); i++) {
+      SparsityMapImpl<N,T>::lookup(outputs[i])->set_contributor_count(1);
+
+      UnionMicroOp<N,T> *uop = new UnionMicroOp<N,T>(inputs[i]);
+      uop->add_sparsity_output(outputs[i]);
+      uop->dispatch(this, true /* ok to run in this thread */);
+    }
+  }
+
+  template <int N, typename T>
+  void UnionOperation<N,T>::print(std::ostream& os) const
+  {
+    os << "UnionOperation";
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class IntersectionOperation<N,T>
+
+  template <int N, typename T>
+  IntersectionOperation<N,T>::IntersectionOperation(const ProfilingRequestSet& reqs,
+						    Event _finish_event)
+    : PartitioningOperation(reqs, _finish_event)
+  {}
+
+  template <int N, typename T>
+  IntersectionOperation<N,T>::~IntersectionOperation(void)
+  {}
+
+  template <int N, typename T>
+  ZIndexSpace<N,T> IntersectionOperation<N,T>::add_intersection(const ZIndexSpace<N,T>& lhs,
+								const ZIndexSpace<N,T>& rhs)
+  {
+    ZIndexSpace<N,T> output;
+    output.bounds = lhs.bounds.intersection(rhs.bounds);
+    
+    if(!output.bounds.empty()) {
+      // try to assign sparsity ID near one or both of the input sparsity maps (if present)
+      // if the target has a sparsity map, use the same node - otherwise
+      // get a sparsity ID by round-robin'ing across the nodes that have field data
+      int target_node;
+      if(lhs.dense()) {
+	if(rhs.dense()) {
+	  target_node = gasnet_mynode();  // operation will be cheap anyway
+	} else {
+	  target_node = ID(rhs.sparsity).sparsity.creator_node;
+	}
+      } else {
+	if(rhs.dense()) {
+	  target_node = ID(lhs.sparsity).sparsity.creator_node;
+	} else {
+	  int lhs_node = ID(lhs.sparsity).sparsity.creator_node;
+	  int rhs_node = ID(rhs.sparsity).sparsity.creator_node;
+	  //if(lhs_node != rhs_node)
+	  //  std::cout << "ISECT PICK " << lhs_node << " or " << rhs_node << "\n";
+	  // if they're different, and lhs is us, choose rhs to load-balance maybe
+	  target_node = (lhs_node == gasnet_mynode()) ? rhs_node : lhs_node;
+	}
+      }
+      SparsityMap<N,T> sparsity;
+      if(target_node == gasnet_mynode()) {
+	SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
+	sparsity = wrap->me.convert<SparsityMap<N,T> >();
+      } else
+	sparsity = ID(get_runtime()->remote_id_allocator.get_remote_id(target_node, ID::ID_SPARSITY)).convert<SparsityMap<N,T> >();
+      output.sparsity = sparsity;
+
+      std::vector<ZIndexSpace<N,T> > ops(2);
+      ops[0] = lhs;
+      ops[1] = rhs;
+      inputs.push_back(ops);
+      outputs.push_back(sparsity);
+    }
+
+    return output;
+  }
+
+  template <int N, typename T>
+  ZIndexSpace<N,T> IntersectionOperation<N,T>::add_intersection(const std::vector<ZIndexSpace<N,T> >& ops)
+  {
+    // special case for empty operand list
+    if(ops.empty())
+      return ZIndexSpace<N,T>(/*empty*/);
+
+    // build the intersection of all bounding boxes
+    ZIndexSpace<N,T> output;
+    output.bounds = ops[0].bounds;
+    for(size_t i = 1; i < ops.size(); i++)
+      output.bounds = output.bounds.intersection(ops[i].bounds);
+
+    if(!output.bounds.empty()) {
+      // try to assign sparsity ID near the input sparsity maps (if present)
+      int target_node = gasnet_mynode();
+      int node_count = 0;
+      for(size_t i = 0; i < ops.size(); i++)
+	if(!ops[i].dense()) {
+	  int node = ID(ops[i].sparsity).sparsity.creator_node;
+	  if(node_count == 0) {
+	    node_count = 1;
+	    target_node = node;
+	  } else if((node_count == 1) && (node != target_node)) {
+	    //std::cout << "ISECT DIFF " << target_node << " or " << node << "\n";
+	    target_node = gasnet_mynode();
+	    break;
+	  }
+	}
+      SparsityMap<N,T> sparsity;
+      if(target_node == gasnet_mynode()) {
+	SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
+	sparsity = wrap->me.convert<SparsityMap<N,T> >();
+      } else
+	sparsity = ID(get_runtime()->remote_id_allocator.get_remote_id(target_node, ID::ID_SPARSITY)).convert<SparsityMap<N,T> >();
+      output.sparsity = sparsity;
+
+      inputs.push_back(ops);
+      outputs.push_back(sparsity);
+    }
+
+    return output;
+  }
+
+  template <int N, typename T>
+  void IntersectionOperation<N,T>::execute(void)
+  {
+    for(size_t i = 0; i < outputs.size(); i++) {
+      SparsityMapImpl<N,T>::lookup(outputs[i])->set_contributor_count(1);
+
+      IntersectionMicroOp<N,T> *uop = new IntersectionMicroOp<N,T>(inputs[i]);
+      uop->add_sparsity_output(outputs[i]);
+      uop->dispatch(this, true /* ok to run in this thread */);
+    }
+  }
+
+  template <int N, typename T>
+  void IntersectionOperation<N,T>::print(std::ostream& os) const
+  {
+    os << "IntersectionOperation";
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class DifferenceOperation<N,T>
+
+  template <int N, typename T>
+  DifferenceOperation<N,T>::DifferenceOperation(const ProfilingRequestSet& reqs,
+				      Event _finish_event)
+    : PartitioningOperation(reqs, _finish_event)
+  {}
+
+  template <int N, typename T>
+  DifferenceOperation<N,T>::~DifferenceOperation(void)
+  {}
+
+  template <int N, typename T>
+  ZIndexSpace<N,T> DifferenceOperation<N,T>::add_difference(const ZIndexSpace<N,T>& lhs,
+							    const ZIndexSpace<N,T>& rhs)
+  {
+    // simple cases - an empty lhs or a dense rhs that covers lhs both yield an empty
+    //  difference
+    if(lhs.empty() || (rhs.dense() && rhs.bounds.contains(lhs.bounds)))
+      return ZIndexSpace<N,T>(/*empty*/);
+
+    // otherwise the difference is no larger than the lhs
+    ZIndexSpace<N,T> output;
+    output.bounds = lhs.bounds;
+
+    // try to assign sparsity ID near one or both of the input sparsity maps (if present)
+    // if the target has a sparsity map, use the same node - otherwise
+    // get a sparsity ID by round-robin'ing across the nodes that have field data
+    int target_node;
+    if(lhs.dense()) {
+      if(rhs.dense()) {
+	target_node = gasnet_mynode();  // operation will be cheap anyway
+      } else {
+	target_node = ID(rhs.sparsity).sparsity.creator_node;
+      }
+    } else {
+      if(rhs.dense()) {
+	target_node = ID(lhs.sparsity).sparsity.creator_node;
+      } else {
+	int lhs_node = ID(lhs.sparsity).sparsity.creator_node;
+	int rhs_node = ID(rhs.sparsity).sparsity.creator_node;
+	//if(lhs_node != rhs_node)
+	//  std::cout << "DIFF PICK " << lhs_node << " or " << rhs_node << "\n";
+	// if they're different, and lhs is us, choose rhs to load-balance maybe
+	target_node = (lhs_node == gasnet_mynode()) ? rhs_node : lhs_node;
+      }
+    }
+    SparsityMap<N,T> sparsity;
+    if(target_node == gasnet_mynode()) {
+      SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
+      sparsity = wrap->me.convert<SparsityMap<N,T> >();
+    } else
+      sparsity = ID(get_runtime()->remote_id_allocator.get_remote_id(target_node, ID::ID_SPARSITY)).convert<SparsityMap<N,T> >();
+    output.sparsity = sparsity;
+
+    lhss.push_back(lhs);
+    rhss.push_back(rhs);
+    outputs.push_back(sparsity);
+
+    return output;
+  }
+
+  template <int N, typename T>
+  void DifferenceOperation<N,T>::execute(void)
+  {
+    for(size_t i = 0; i < outputs.size(); i++) {
+      SparsityMapImpl<N,T>::lookup(outputs[i])->set_contributor_count(1);
+
+      DifferenceMicroOp<N,T> *uop = new DifferenceMicroOp<N,T>(lhss[i], rhss[i]);
+      uop->add_sparsity_output(outputs[i]);
+      uop->dispatch(this, true /* ok to run in this thread */);
+    }
+  }
+
+  template <int N, typename T>
+  void DifferenceOperation<N,T>::print(std::ostream& os) const
+  {
+    os << "DifferenceOperation";
+  }
+
+
+#define DOIT(N,T) \
+  template class UnionMicroOp<N,T>; \
+  template class IntersectionMicroOp<N,T>; \
+  template class DifferenceMicroOp<N,T>; \
+  template class UnionOperation<N,T>; \
+  template class IntersectionOperation<N,T>; \
+  template class DifferenceOperation<N,T>; \
+  template UnionMicroOp<N,T>::UnionMicroOp<Serialization::FixedBufferDeserializer>(gasnet_node_t, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \
+  template IntersectionMicroOp<N,T>::IntersectionMicroOp<Serialization::FixedBufferDeserializer>(gasnet_node_t, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \
+  template DifferenceMicroOp<N,T>::DifferenceMicroOp<Serialization::FixedBufferDeserializer>(gasnet_node_t, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \
+  template Event ZIndexSpace<N,T>::compute_unions(const std::vector<ZIndexSpace<N,T> >&, \
+						  const std::vector<ZIndexSpace<N,T> >&, \
+						  std::vector<ZIndexSpace<N,T> >&, \
+						  const ProfilingRequestSet &, \
+						  Event); \
+  template Event ZIndexSpace<N,T>::compute_intersections(const std::vector<ZIndexSpace<N,T> >&, \
+							 const std::vector<ZIndexSpace<N,T> >&, \
+							 std::vector<ZIndexSpace<N,T> >&, \
+							 const ProfilingRequestSet &, \
+							 Event); \
+  template Event ZIndexSpace<N,T>::compute_differences(const std::vector<ZIndexSpace<N,T> >&, \
+						       const std::vector<ZIndexSpace<N,T> >&, \
+						       std::vector<ZIndexSpace<N,T> >&, \
+						       const ProfilingRequestSet &, \
+						       Event); \
+  template Event ZIndexSpace<N,T>::compute_union(const std::vector<ZIndexSpace<N,T> >&, \
+						 ZIndexSpace<N,T>&, \
+						 const ProfilingRequestSet &, \
+						 Event); \
+  template Event ZIndexSpace<N,T>::compute_intersection(const std::vector<ZIndexSpace<N,T> >&, \
+							ZIndexSpace<N,T>&, \
+							const ProfilingRequestSet &, \
+							Event);
+  FOREACH_NT(DOIT)
+};
