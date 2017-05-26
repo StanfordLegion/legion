@@ -634,7 +634,7 @@ namespace Realm {
 #define DOIT(N1,T1,N2,T2) \
   template class ImageMicroOp<N1,T1,N2,T2>; \
   template class ImageOperation<N1,T1,N2,T2>; \
-  template ImageMicroOp<N1,T1,N2,T2>::ImageMicroOp<Serialization::FixedBufferDeserializer>(gasnet_node_t, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \
+  template ImageMicroOp<N1,T1,N2,T2>::ImageMicroOp(gasnet_node_t, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \
   template Event ZIndexSpace<N1,T1>::create_subspaces_by_image(const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZPoint<N1,T1> > >&, \
 							       const std::vector<ZIndexSpace<N2,T2> >&,	\
 							       std::vector<ZIndexSpace<N1,T1> >&, \

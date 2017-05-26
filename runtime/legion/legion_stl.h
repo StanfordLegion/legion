@@ -61,9 +61,12 @@ namespace Legion {
       template<typename A, typename FT, int N, typename T, int M>
       class ArraySyntaxHelper {
       public:
+        __CUDA_HD__
         ArraySyntaxHelper(const ArraySyntaxHelper<A,FT,N,T,M-1> &rhs);
       public:
+        __CUDA_HD__
         ArraySyntaxHelper<A,FT,N,T,M+1> operator[](T val);
+        __CUDA_HD__
         const ArraySyntaxHelper<A,FT,N,T,M+1> operator[](T val) const;
       public:
         A &accessor;
@@ -81,10 +84,14 @@ namespace Legion {
       using A::A; // inherit base constructors
     public:
       // Keep the old overloads for points
+      __CUDA_HD__
       FT& operator[](const Point<N,T> &p);
+      __CUDA_HD__
       const FT& operator[](const Point<N,T> &p) const;
       // The accessor methods for arrays
+      __CUDA_HD__
       Detail::ArraySyntaxHelper<A,FT,N,T,2> operator[](T val);
+      __CUDA_HD__
       const Detail::ArraySyntaxHelper<A,FT,N,T,2> operator[](T val) const;
     };
 

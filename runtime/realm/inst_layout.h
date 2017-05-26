@@ -177,7 +177,11 @@ namespace Realm {
   template <typename FT, int N, typename T = int>
   class AffineAccessor {
   public:
+    // Note: All constructors except the default one must currently be called 
+    // on the host so there are no __CUDA_HD__ qualifiers
+
     // TODO: Sean check if this is safe for a default constructor
+    __CUDA_HD__
     AffineAccessor(void) : base(0) { }
     // NOTE: these constructors will die horribly if the conversion is not
     //  allowed - call is_compatible(...) first if you're not sure
@@ -197,6 +201,7 @@ namespace Realm {
     template <typename INST>
     AffineAccessor(const INST &instance, unsigned field_id, const ZRect<N,T>& subrect);
 
+    __CUDA_HD__
     ~AffineAccessor(void);
 
     static bool is_compatible(RegionInstance inst, ptrdiff_t field_offset);
@@ -207,11 +212,16 @@ namespace Realm {
     template <typename INST>
     static bool is_compatible(const INST &instance, unsigned field_id, const ZRect<N,T>& subrect);
 
+    __CUDA_HD__
     FT *ptr(const ZPoint<N,T>& p) const;
+    __CUDA_HD__
     FT read(const ZPoint<N,T>& p) const;
+    __CUDA_HD__
     void write(const ZPoint<N,T>& p, FT newval) const;
 
+    __CUDA_HD__
     FT& operator[](const ZPoint<N,T>& p);
+    __CUDA_HD__
     const FT& operator[](const ZPoint<N,T>& p) const;
 
   //protected:
@@ -221,6 +231,9 @@ namespace Realm {
 #ifdef REALM_ACCESSOR_DEBUG
     RegionInstance dbg_inst;
     ZRect<N,T> dbg_bounds;
+#ifdef __CUDACC__
+#error "REALM_ACCESSOR_DEBUG macro for AffineAccessor not supported for GPU code"
+#endif
 #endif
     intptr_t base;
     ZPoint<N, ptrdiff_t> strides;
@@ -229,8 +242,12 @@ namespace Realm {
 #endif
 #ifdef BOUNDS_CHECKS
     ZIndexSpace<N,T> bounds;
+#ifdef __CUDACC__
+#error "BOUNDS_CHECKS macro for AffineAccessor not supported for GPU code"
+#endif
 #endif
   protected:
+    __CUDA_HD__
     FT* get_ptr(const ZPoint<N,T>& p) const;
   };
 
