@@ -5350,17 +5350,6 @@ namespace Realm {
       return GenEventImpl::merge_events(finish_events, false /*!ignore faults*/);
     }
     
-    Event Domain::copy(RegionInstance src_inst, RegionInstance dst_inst,
-		       size_t elem_size, Event wait_on,
-		       ReductionOpID redop_id, bool red_fold) const
-    {
-      assert(0);
-      std::vector<CopySrcDstField> srcs, dsts;
-      srcs.push_back(CopySrcDstField(src_inst, 0, elem_size));
-      dsts.push_back(CopySrcDstField(dst_inst, 0, elem_size));
-      return copy(srcs, dsts, wait_on, redop_id, red_fold);
-    }
-
 };
 
 namespace LegionRuntime {
@@ -5694,45 +5683,5 @@ namespace Realm {
 	return ev;
       }
     } 
-
-    Event Domain::copy(const std::vector<CopySrcDstField>& srcs,
-		       const std::vector<CopySrcDstField>& dsts,
-		       const ElementMask& mask,
-		       Event wait_on,
-		       ReductionOpID redop_id, bool red_fold) const
-    {
-      assert(redop_id == 0);
-
-      assert(0);
-      log_dma.warning("ignoring copy\n");
-      return Event::NO_EVENT;
-    }
-
-    Event Domain::copy_indirect(const CopySrcDstField& idx,
-				const std::vector<CopySrcDstField>& srcs,
-				const std::vector<CopySrcDstField>& dsts,
-				Event wait_on,
-				ReductionOpID redop_id, bool red_fold) const
-    {
-      assert(redop_id == 0);
-
-      assert(0);
-      log_dma.warning("ignoring copy\n");
-      return Event::NO_EVENT;
-    }
-
-    Event Domain::copy_indirect(const CopySrcDstField& idx,
-				const std::vector<CopySrcDstField>& srcs,
-				const std::vector<CopySrcDstField>& dsts,
-				const ElementMask& mask,
-				Event wait_on,
-				ReductionOpID redop_id, bool red_fold) const
-    {
-      assert(redop_id == 0);
-
-      assert(0);
-      log_dma.warning("ignoring copy\n");
-      return Event::NO_EVENT;
-    }
 
 };

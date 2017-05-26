@@ -1106,39 +1106,18 @@ namespace Realm {
                                           bool read_only) const;
       RegionInstance create_file_instance(const char *file_name,
                                           const std::vector<size_t> &field_sizes,
-                                          legion_lowlevel_file_mode_t file_mode) const; 
+                                          legion_lowlevel_file_mode_t file_mode) const;
+
+      typedef Realm::CopySrcDstField CopySrcDstField;
 
       Event fill(const std::vector<CopySrcDstField> &dsts,
                  const void *fill_value, size_t fill_value_size,
                  Event wait_on = Event::NO_EVENT) const;
 
-      Event copy(RegionInstance src_inst, RegionInstance dst_inst,
-		 size_t elem_size, Event wait_on = Event::NO_EVENT,
-		 ReductionOpID redop_id = 0, bool red_fold = false) const;
-
       Event copy(const std::vector<CopySrcDstField>& srcs,
 		 const std::vector<CopySrcDstField>& dsts,
 		 Event wait_on = Event::NO_EVENT,
 		 ReductionOpID redop_id = 0, bool red_fold = false) const;
-
-      Event copy(const std::vector<CopySrcDstField>& srcs,
-		 const std::vector<CopySrcDstField>& dsts,
-		 const ElementMask& mask,
-		 Event wait_on = Event::NO_EVENT,
-		 ReductionOpID redop_id = 0, bool red_fold = false) const;
-
-      Event copy_indirect(const CopySrcDstField& idx,
-			  const std::vector<CopySrcDstField>& srcs,
-			  const std::vector<CopySrcDstField>& dsts,
-			  Event wait_on = Event::NO_EVENT,
-			  ReductionOpID redop_id = 0, bool red_fold = false) const;
-
-      Event copy_indirect(const CopySrcDstField& idx,
-			  const std::vector<CopySrcDstField>& srcs,
-			  const std::vector<CopySrcDstField>& dsts,
-			  const ElementMask& mask,
-			  Event wait_on = Event::NO_EVENT,
-			  ReductionOpID redop_id = 0, bool red_fold = false) const;
 
       // Variants of the above for profiling
       Event fill(const std::vector<CopySrcDstField> &dsts,

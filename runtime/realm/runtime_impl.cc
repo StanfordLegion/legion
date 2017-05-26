@@ -40,14 +40,14 @@
 #endif
 
 // remote copy active messages from from lowlevel_dma.h for now
-#include "lowlevel_dma.h"
+#include <realm/transfer/lowlevel_dma.h>
 namespace Realm {
   typedef LegionRuntime::LowLevel::RemoteCopyMessage RemoteCopyMessage;
   typedef LegionRuntime::LowLevel::RemoteFillMessage RemoteFillMessage;
 };
 
 // create xd message and update bytes read/write messages
-#include "channel.h"
+#include <realm/transfer/channel.h>
 namespace Realm {
   typedef LegionRuntime::LowLevel::XferDesRemoteWriteMessage XferDesRemoteWriteMessage;
   typedef LegionRuntime::LowLevel::XferDesRemoteWriteAckMessage XferDesRemoteWriteAckMessage;
