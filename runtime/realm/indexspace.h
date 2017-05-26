@@ -1866,6 +1866,9 @@ namespace Realm {
     ZRect<N,T> dbg_bounds;
   };
 
+  template <int N, typename T>
+  class SparsityMapPublicImpl;
+
   // an IndexSpaceIterator iterates over the valid points in an IndexSpace, rectangles at a time
   template <int N, typename T>
   struct ZIndexSpaceIterator {
