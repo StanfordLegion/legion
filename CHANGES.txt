@@ -1,7 +1,7 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version ??.??.? (?? ??, ????)
+Version 17.05.0 (May 26, 2017
   * Build system
     - Finally removed long-obsolete SHARED_LOWLEVEL flag
   * Legion
@@ -9,6 +9,8 @@ Version ??.??.? (?? ??, ????)
         All examples should all compile without deprecation warnings
     - Added Legion executor that enables support for interoperating
         with Agency inside of Legion tasks
+  * Realm
+    - Switched to new DMA engine
   * Regent
     - Added support running normal tasks on I/O processors
     - Added support for OpenMP code generation via __demand(__openmp)
