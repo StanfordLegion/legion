@@ -127,6 +127,127 @@ namespace Legion {
         derez.deserialize((*this)[idx]);
     }
 
+    template<typename A, typename FT, int N, typename T>
+    inline Detail::ArraySyntaxHelper<A,FT,N,T,2> 
+                          ArrayAccessor<A,FT,N,T>::operator[](T val)
+    {
+      return Detail::ArraySyntaxHelper<A,FT,N,T,1>(*this)[val];
+    }
+
+    template<typename A, typename FT, int N, typename T>
+    inline const Detail::ArraySyntaxHelper<A,FT,N,T,2> 
+                    ArrayAccessor<A,FT,N,T>::operator[](T val) const
+    {
+      return Detail::ArraySyntaxHelper<A,FT,N,T,1>(*this)[val];
+    }
+
+    // Provide a specialization of the ArrayAccessor 
+    // class for 1-D with no helpers to avoid ambiguity
+    template<typename A, typename FT, typename T>
+    class ArrayAccessor<A,FT,1,T> : public A {
+    public:
+      using A::A; // inherit base constructor and nothing else
+    // No operator[] here to avoid ambiguity
+    };
+
+    namespace Detail {
+      template<typename A, typename FT, int N, typename T, int M>
+      inline ArraySyntaxHelper<A,FT,N,T,M>::ArraySyntaxHelper(
+                            const ArraySyntaxHelper<A,FT,N,T,M-1> &rhs)
+        : accessor(rhs.accessor)
+      {
+        for (int i = 0; i < (M-2); i++)
+          point[i] = rhs.point[i];
+      }
+
+      template<typename A, typename FT, int N, typename T, int M>
+      inline ArraySyntaxHelper<A,FT,N,T,M+1>
+              ArraySyntaxHelper<A,FT,N,T,M>::operator[](T val)
+      {
+        point[M-1] = val;
+        return ArraySyntaxHelper<A,FT,N,T,M+1>(*this);
+      }
+
+      template<typename A, typename FT, int N, typename T, int M>
+      inline const ArraySyntaxHelper<A,FT,N,T,M+1>
+                    ArraySyntaxHelper<A,FT,N,T,M>::operator[](T val) const
+      {
+        point[M-1] = val;
+        return ArraySyntaxHelper<A,FT,N,T,M+1>(*this);
+      }
+
+      // Specialization of ArraySyntaxHelper for M = N
+      template<typename A, typename FT, int N, typename T> 
+      class ArraySyntaxHelper<A,FT,N,T,N> {
+      public:
+        ArraySyntaxHelper(const ArraySyntaxHelper<A,FT,N,T,N-1> &rhs);
+      public:
+        FT& operator[](T val);
+        const FT& operator[](T val) const;
+      public:
+        A &accessor;
+        mutable Point<N,T> point;
+      };
+
+      template<typename A, typename FT, int N, typename T>
+      inline ArraySyntaxHelper<A,FT,N,T,N>::ArraySyntaxHelper(
+                      const ArraySyntaxHelper<A,FT,N,T,N-1> &rhs)
+        : accessor(rhs.accessor)
+      {
+        for (int i = 0; i < (N-2); i++)
+          point[i] = rhs.point[i];
+      }
+
+      template<typename A, typename FT, int N, typename T>
+      inline FT& ArraySyntaxHelper<A,FT,N,T,N>::operator[](T val)
+      {
+        point[N-1] = val;
+        return accessor[point];
+      }
+
+      template<typename A, typename FT, int N, typename T>
+      inline const FT& ArraySyntaxHelper<A,FT,N,T,N>::operator[](T val) const
+      {
+        point[N-1] = val;
+        return accessor[point];
+      }
+
+      // Specialization of ArraySyntaxHelper for M = 1
+      template<typename A, typename FT, int N, typename T>
+      class ArraySyntaxHelper<A,FT,N,T,1> {
+      public:
+        ArraySyntaxHelper(A &a);
+      public:
+        ArraySyntaxHelper<A,FT,N,T,2> operator[](T val);
+        const ArraySyntaxHelper<A,FT,N,T,2> operator[](T val) const;
+      public:
+        A &accessor;
+        mutable Point<1,T> point;
+      };
+
+      template<typename A, typename FT, int N, typename T>
+      inline ArraySyntaxHelper<A,FT,N,T,1>::ArraySyntaxHelper(A &a) 
+        : accessor(a)
+      {
+      }
+
+      template<typename A, typename FT, int N, typename T>
+      inline ArraySyntaxHelper<A,FT,N,T,2> 
+        ArraySyntaxHelper<A,FT,N,T,1>::operator[](T val)
+      {
+        point[0] = val;
+        return ArraySyntaxHelper<A,FT,N,T,2>(*this);
+      }
+
+      template<typename A, typename FT, int N, typename T>
+      inline const ArraySyntaxHelper<A,FT,N,T,2>
+        ArraySyntaxHelper<A,FT,N,T,1>::operator[](T val) const
+      {
+        point[0] = val;
+        return ArraySyntaxHelper<A,FT,N,T,2>(*this);
+      } 
+    } // namespace Detail 
+
 #define GET_RAW_POINTERS(x)                                                   \
   std::vector<T##x *> ptrs_##x(task->regions[x].privilege_fields.size(),NULL);\
   ByteOffset offsets_##x[DIM##x];                                             \
