@@ -801,7 +801,7 @@ namespace Legion {
       inline bool step(void)
         { assert(valid()); itr.step(); return valid(); }
     public:
-      inline operator bool(void) const { return valid(); }
+      inline bool operator()(void) const { return valid(); }
       inline operator Realm::ZPoint<DIM,COORD_T>(void) const 
         { assert(valid()); return itr.p; }
       inline PointInRectIterator<DIM,COORD_T>& operator++(void)
@@ -829,7 +829,7 @@ namespace Legion {
       inline bool step(void)
         { assert(valid()); itr.step(); return valid(); }
     public:
-      inline operator bool(void) const { return valid(); }
+      inline bool operator()(void) const { return valid(); }
       inline operator Realm::ZRect<DIM,COORD_T>(void) const
         { assert(valid()); return itr.rect; }
       inline RectInDomainIterator<DIM,COORD_T>& operator++(void)
@@ -853,25 +853,25 @@ namespace Legion {
         : rect_itr(RectInDomainIterator<DIM,COORD_T>(d)), 
           column_major(column_major_order)
       {
-        if (rect_itr)
+        if (rect_itr())
           point_itr = PointInRectIterator<DIM,COORD_T>(rect_itr, column_major);
       }
     public:
-      inline bool valid(void) const { return point_itr; }
+      inline bool valid(void) const { return point_itr(); }
       inline bool step(void) 
       { 
         assert(valid()); 
         point_itr++;
-        if (!point_itr)
+        if (!point_itr())
         {
           rect_itr++;
-          if (rect_itr)
+          if (rect_itr())
             point_itr = PointInRectIterator<DIM,COORD_T>(rect_itr,column_major);
         }
         return valid();
       }
     public:
-      inline operator bool(void) const { return valid(); }
+      inline bool operator()(void) const { return valid(); }
       inline operator Realm::ZPoint<DIM,COORD_T>(void) const
         { assert(valid()); return point_itr; }
       inline PointInDomainIterator& operator++(void)
