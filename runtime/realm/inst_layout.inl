@@ -582,7 +582,7 @@ namespace Realm {
 #endif
   }
 
-  template <typename FT, int N, typename T>
+  template <typename FT, int N, typename T> __CUDA_HD__
   inline AffineAccessor<FT,N,T>::~AffineAccessor(void)
   {}
 
@@ -663,7 +663,7 @@ namespace Realm {
     return this->get_ptr(p);
   }
 
-  template <typename FT, int N, typename T>
+  template <typename FT, int N, typename T> __CUDA_HD__
   inline FT AffineAccessor<FT,N,T>::read(const ZPoint<N,T>& p) const
   {
 #ifdef PRIVILEGE_CHECKS
@@ -675,7 +675,7 @@ namespace Realm {
     return *(this->get_ptr(p));
   }
 
-  template <typename FT, int N, typename T>
+  template <typename FT, int N, typename T> __CUDA_HD__
   inline void AffineAccessor<FT,N,T>::write(const ZPoint<N,T>& p, FT newval) const
   {
 #ifdef PRIVILEGE_CHECKS
@@ -687,7 +687,7 @@ namespace Realm {
     *(this->get_ptr(p)) = newval;
   }
 
-  template <typename FT, int N, typename T>
+  template <typename FT, int N, typename T> __CUDA_HD__
   inline FT& AffineAccessor<FT,N,T>::operator[](const ZPoint<N,T>& p)
   {
 #ifdef PRIVILEGE_CHECKS
@@ -699,7 +699,7 @@ namespace Realm {
     return *(this->get_ptr(p));
   }
 
-  template <typename FT, int N, typename T>
+  template <typename FT, int N, typename T> __CUDA_HD__
   inline const FT& AffineAccessor<FT,N,T>::operator[](const ZPoint<N,T>& p) const
   {
 #ifdef PRIVILEGE_CHECKS
@@ -711,7 +711,7 @@ namespace Realm {
     return *(this->get_ptr(p));
   }
 
-  template <typename FT, int N, typename T>
+  template <typename FT, int N, typename T> __CUDA_HD__
   inline FT *AffineAccessor<FT,N,T>::get_ptr(const ZPoint<N,T>& p) const
   {
     intptr_t rawptr = base;

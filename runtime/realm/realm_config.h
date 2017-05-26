@@ -40,6 +40,13 @@
 // can Realm use exceptions to propagate errors back to the profiling interace?
 #define REALM_USE_EXCEPTIONS
 
+// Define a prefix for annotating functions for CUDA compilation
+#ifdef __CUDACC__
+#define __CUDA_HD__ __host__ __device__
+#else
+#define __CUDA_HD__
+#endif
+
 // runtime configuration settings
 namespace Realm {
   namespace Config {

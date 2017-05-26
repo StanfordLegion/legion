@@ -33,11 +33,11 @@ namespace Realm {
   //
   // class ZPoint<N,T>
 
-  template <int N, typename T>
+  template <int N, typename T> __CUDA_HD__
   inline ZPoint<N,T>::ZPoint(void)
   {}
 
-  template <int N, typename T>
+  template <int N, typename T> __CUDA_HD__
   inline ZPoint<N,T>::ZPoint(const T vals[N])
   {
     for(int i = 0; i < N; i++)
@@ -45,7 +45,7 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  template <typename T2>
+  template <typename T2> __CUDA_HD__
   inline ZPoint<N,T>::ZPoint(const ZPoint<N,T2>& copy_from)
   {
     for(int i = 0; i < N; i++)
@@ -53,7 +53,7 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  template <typename T2>
+  template <typename T2> __CUDA_HD__
   inline ZPoint<N,T>& ZPoint<N,T>::operator=(const ZPoint<N,T2>& copy_from)
   {
     for(int i = 0; i < N; i++)
@@ -61,20 +61,20 @@ namespace Realm {
     return *this;
   }
 
-  template <int N, typename T>
+  template <int N, typename T> __CUDA_HD__
   inline T& ZPoint<N,T>::operator[](int index)
   {
     return (&x)[index];
   }
 
-  template <int N, typename T>
+  template <int N, typename T> __CUDA_HD__
   inline const T& ZPoint<N,T>::operator[](int index) const
   {
     return (&x)[index];
   }
 
   template <int N, typename T>
-  template <typename T2>
+  template <typename T2> __CUDA_HD__
   inline T ZPoint<N,T>::dot(const ZPoint<N,T2>& rhs) const
   {
     T acc = x * rhs.x;
@@ -87,43 +87,51 @@ namespace Realm {
   template <typename T>
   struct ZPoint<1,T> {
     T x;
+    __CUDA_HD__
     ZPoint(void) {}
     // No need for a static array constructor here
+    __CUDA_HD__
     ZPoint(T _x) : x(_x) {}
     // copies allow type coercion (assuming the underlying type does)
-    template <typename T2>
+    template <typename T2> __CUDA_HD__
     ZPoint(const ZPoint<1, T2>& copy_from) : x(copy_from.x) {}
-    template <typename T2>
+    template <typename T2> __CUDA_HD__
     ZPoint<1,T>& operator=(const ZPoint<1, T2>& copy_from)
     {
       x = copy_from.x;
       return *this;
     }
 
+    __CUDA_HD__
     T& operator[](int index) { return (&x)[index]; }
+    __CUDA_HD__
     const T& operator[](int index) const { return (&x)[index]; }
 
-    template <typename T2>
+    template <typename T2> __CUDA_HD__
     T dot(const ZPoint<1, T2>& rhs) const
     {
       return (x * rhs.x);
     }
 
     // special case: for N == 1, we're willing to coerce to T
+    __CUDA_HD__
     operator T(void) const { return x; }
   };
 
   template <typename T>
   struct ZPoint<2,T> {
     T x, y;
+    __CUDA_HD__
     ZPoint(void) {}
+    __CUDA_HD__
     explicit ZPoint(const T vals[2]) : x(vals[0]), y(vals[1]) {}
+    __CUDA_HD__
     ZPoint(T _x, T _y) : x(_x), y(_y) {}
     // copies allow type coercion (assuming the underlying type does)
-    template <typename T2>
+    template <typename T2> __CUDA_HD__
     ZPoint(const ZPoint<2, T2>& copy_from)
       : x(copy_from.x), y(copy_from.y) {}
-    template <typename T2>
+    template <typename T2> __CUDA_HD__
     ZPoint<2,T>& operator=(const ZPoint<2,T2>& copy_from)
     {
       x = copy_from.x;
@@ -131,10 +139,12 @@ namespace Realm {
       return *this;
     }
 
+    __CUDA_HD__
     T& operator[](int index) { return (&x)[index]; }
+    __CUDA_HD__
     const T& operator[](int index) const { return (&x)[index]; }
 
-    template <typename T2>
+    template <typename T2> __CUDA_HD__
     T dot(const ZPoint<2, T2>& rhs) const
     {
       return (x * rhs.x) + (y * rhs.y);
@@ -144,14 +154,17 @@ namespace Realm {
   template <typename T>
   struct ZPoint<3,T> {
     T x, y, z;
+    __CUDA_HD__
     ZPoint(void) {}
+    __CUDA_HD__
     explicit ZPoint(const T vals[3]) : x(vals[0]), y(vals[1]), z(vals[2]) {}
+    __CUDA_HD__
     ZPoint(T _x, T _y, T _z) : x(_x), y(_y), z(_z) {}
     // copies allow type coercion (assuming the underlying type does)
-    template <typename T2>
+    template <typename T2> __CUDA_HD__
     ZPoint(const ZPoint<3, T2>& copy_from)
       : x(copy_from.x), y(copy_from.y), z(copy_from.z) {}
-    template <typename T2>
+    template <typename T2> __CUDA_HD__
     ZPoint<3,T>& operator=(const ZPoint<3,T2>& copy_from)
     {
       x = copy_from.x;
@@ -160,10 +173,12 @@ namespace Realm {
       return *this;
     }
 
+    __CUDA_HD__
     T& operator[](int index) { return (&x)[index]; }
+    __CUDA_HD__
     const T& operator[](int index) const { return (&x)[index]; }
 
-    template <typename T2>
+    template <typename T2> __CUDA_HD__
     T dot(const ZPoint<3, T2>& rhs) const
     {
       return (x * rhs.x) + (y * rhs.y) + (z * rhs.z);
@@ -173,14 +188,17 @@ namespace Realm {
   template <typename T>
   struct ZPoint<4,T> {
     T x, y, z, w;
+    __CUDA_HD__
     ZPoint(void) {}
+    __CUDA_HD__
     explicit ZPoint(const T vals[4]) : x(vals[0]), y(vals[1]), z(vals[2]), w(vals[3]) {}
+    __CUDA_HD__
     ZPoint(T _x, T _y, T _z, T _w) : x(_x), y(_y), z(_z), w(_w) {}
     // copies allow type coercion (assuming the underlying type does)
-    template <typename T2>
+    template <typename T2> __CUDA_HD__
     ZPoint(const ZPoint<4, T2>& copy_from)
       : x(copy_from.x), y(copy_from.y), z(copy_from.z), w(copy_from.w) {}
-    template <typename T2>
+    template <typename T2> __CUDA_HD__
     ZPoint<4,T>& operator=(const ZPoint<4,T2>& copy_from)
     {
       x = copy_from.x;
@@ -190,10 +208,12 @@ namespace Realm {
       return *this;
     }
 
+    __CUDA_HD__
     T& operator[](int index) { return (&x)[index]; }
+    __CUDA_HD__
     const T& operator[](int index) const { return (&x)[index]; }
 
-    template <typename T2>
+    template <typename T2> __CUDA_HD__
     T dot(const ZPoint<4, T2>& rhs) const
     {
       return (x * rhs.x) + (y * rhs.y) + (z * rhs.z) + (w * rhs.w);
@@ -211,21 +231,21 @@ namespace Realm {
   }
 
   // component-wise operators defined on Point<N,T> (with optional coercion)
-  template <int N, typename T, typename T2> 
+  template <int N, typename T, typename T2> __CUDA_HD__
   inline bool operator==(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs)
   {
     for(int i = 0; i < N; i++) if(lhs[i] != rhs[i]) return false;
     return true;
   }
     
-  template <int N, typename T, typename T2>
+  template <int N, typename T, typename T2> __CUDA_HD__
   inline bool operator!=(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs)
   {
     for(int i = 0; i < N; i++) if(lhs[i] != rhs[i]) return true;
     return false;
   }
 
-  template <int N, typename T, typename T2>
+  template <int N, typename T, typename T2> __CUDA_HD__
   inline ZPoint<N,T> operator+(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs)
   {
     ZPoint<N,T> out;
@@ -233,14 +253,14 @@ namespace Realm {
     return out;
   }
 
-  template <int N, typename T, typename T2>
+  template <int N, typename T, typename T2> __CUDA_HD__
   inline ZPoint<N,T>& operator+=(ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs)
   {
     for(int i = 0; i < N; i++) lhs[i] += rhs[i];
     return lhs;
   }
 
-  template <int N, typename T, typename T2>
+  template <int N, typename T, typename T2> __CUDA_HD__
   inline ZPoint<N,T> operator-(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs)
   {
     ZPoint<N,T> out;
@@ -248,14 +268,14 @@ namespace Realm {
     return out;
   }
 
-  template <int N, typename T, typename T2>
+  template <int N, typename T, typename T2> __CUDA_HD__
   inline ZPoint<N,T>& operator-=(ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs)
   {
     for(int i = 0; i < N; i++) lhs[i] -= rhs[i];
     return lhs;
   }
 
-  template <int N, typename T, typename T2>
+  template <int N, typename T, typename T2> __CUDA_HD__
   inline ZPoint<N,T> operator*(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs)
   {
     ZPoint<N,T> out;
@@ -263,14 +283,14 @@ namespace Realm {
     return out;
   }
 
-  template <int N, typename T, typename T2>
+  template <int N, typename T, typename T2> __CUDA_HD__
   inline ZPoint<N,T>& operator*=(ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs)
   {
     for(int i = 0; i < N; i++) lhs[i] *= rhs[i];
     return lhs;
   }
 
-  template <int N, typename T, typename T2>
+  template <int N, typename T, typename T2> __CUDA_HD__
   inline ZPoint<N,T> operator/(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs)
   {
     ZPoint<N,T> out;
@@ -278,14 +298,14 @@ namespace Realm {
     return out;
   }
 
-  template <int N, typename T, typename T2>
+  template <int N, typename T, typename T2> __CUDA_HD__
   inline ZPoint<N,T>& operator/=(ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs)
   {
     for(int i = 0; i < N; i++) lhs[i] /= rhs[i];
     return lhs;
   }
 
-  template <int N, typename T, typename T2>
+  template <int N, typename T, typename T2> __CUDA_HD__
   inline ZPoint<N,T> operator%(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs)
   {
     ZPoint<N,T> out;
@@ -293,7 +313,7 @@ namespace Realm {
     return out;
   }
 
-  template <int N, typename T, typename T2>
+  template <int N, typename T, typename T2> __CUDA_HD__
   inline ZPoint<N,T>& operator%=(ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs)
   {
     for(int i = 0; i < N; i++) lhs[i] %= rhs[i];
@@ -305,23 +325,23 @@ namespace Realm {
   //
   // class ZRect<N,T>
 
-  template <int N, typename T>
+  template <int N, typename T> __CUDA_HD__
   inline ZRect<N,T>::ZRect(void)
   {}
 
-  template <int N, typename T>
+  template <int N, typename T> __CUDA_HD__
   inline ZRect<N,T>::ZRect(const ZPoint<N,T>& _lo, const ZPoint<N,T>& _hi)
     : lo(_lo), hi(_hi)
   {}
 
   template <int N, typename T>
-  template <typename T2>
+  template <typename T2> __CUDA_HD__
   inline ZRect<N,T>::ZRect(const ZRect<N, T2>& copy_from)
     : lo(copy_from.lo), hi(copy_from.hi)
   {}
 
   template <int N, typename T>
-  template <typename T2>
+  template <typename T2> __CUDA_HD__
   inline ZRect<N,T>& ZRect<N,T>::operator=(const ZRect<N, T2>& copy_from)
   {
     lo = copy_from.lo;
@@ -329,14 +349,14 @@ namespace Realm {
     return *this;
   }
 
-  template <int N, typename T>
+  template <int N, typename T> __CUDA_HD__
   inline bool ZRect<N,T>::empty(void) const
   {
     for(int i = 0; i < N; i++) if(lo[i] > hi[i]) return true;
     return false;
   }
 
-  template <int N, typename T>
+  template <int N, typename T> __CUDA_HD__
   inline size_t ZRect<N,T>::volume(void) const
   {
     size_t v = 1;
@@ -348,7 +368,7 @@ namespace Realm {
     return v;
   }
 
-  template <int N, typename T>
+  template <int N, typename T> __CUDA_HD__
   inline bool ZRect<N,T>::contains(const ZPoint<N,T>& p) const
   {
     for(int i = 0; i < N; i++)
@@ -357,7 +377,7 @@ namespace Realm {
   }
 
   // true if all points in other are in this rectangle
-  template <int N, typename T>
+  template <int N, typename T> __CUDA_HD__
   inline bool ZRect<N,T>::contains(const ZRect<N,T>& other) const
   {
     // containment is weird w.r.t. emptiness: if other is empty, the answer is
@@ -378,14 +398,14 @@ namespace Realm {
 
   // true if all points in other are in this rectangle
   // FIXME: the bounds of an index space aren't necessarily tight - is that ok?
-  template <int N, typename T>
+  template <int N, typename T> __CUDA_HD__
   inline bool ZRect<N,T>::contains(const ZIndexSpace<N,T>& other) const
   {
     return contains(other.bounds);
   }
 
   // true if there are any points in the intersection of the two rectangles
-  template <int N, typename T>
+  template <int N, typename T> __CUDA_HD__
   inline bool ZRect<N,T>::overlaps(const ZRect<N,T>& other) const
   {
     // overlapping requires there be an element that lies in both ranges, which
@@ -397,24 +417,24 @@ namespace Realm {
     return true;
   }
 
-  template <int N, typename T>
+  template <int N, typename T> __CUDA_HD__
   inline ZRect<N,T> ZRect<N,T>::intersection(const ZRect<N,T>& other) const
   {
     ZRect<N,T> out;
     for(int i = 0; i < N; i++) {
-      out.lo[i] = std::max(lo[i], other.lo[i]);
-      out.hi[i] = std::min(hi[i], other.hi[i]);
+      out.lo[i] = (lo[i] < other.lo[i]) ? other.lo[i] : lo[i]; // max
+      out.hi[i] = (hi[i] < other.hi[i]) ? hi[i] : other.hi[i]; // min
     }
     return out;
   };
 
-  template <int N, typename T>
+  template <int N, typename T> __CUDA_HD__
   inline ZRect<N,T> ZRect<N,T>::union_bbox(const ZRect<N,T>& other) const
   {
     ZRect<N,T> out;
     for(int i = 0; i < N; i++) {
-      out.lo[i] = std::min(lo[i], other.lo[i]);
-      out.hi[i] = std::max(hi[i], other.hi[i]);
+      out.lo[i] = (lo[i] < other.lo[i]) ? lo[i] : other.lo[i]; // min
+      out.hi[i] = (hi[i] < other.hi[i]) ? other.hi[i] : hi[i]; // max
     }
     return out;
   };
@@ -426,26 +446,26 @@ namespace Realm {
     return os;
   }
 
-  template <int N, typename T, typename T2> 
+  template <int N, typename T, typename T2> __CUDA_HD__
   inline bool operator==(const ZRect<N,T>& lhs, const ZRect<N,T2>& rhs)
   {
     return (lhs.lo == rhs.lo) && (lhs.hi == rhs.hi);
   }
     
-  template <int N, typename T, typename T2>
+  template <int N, typename T, typename T2> __CUDA_HD__
   inline bool operator!=(const ZRect<N,T>& lhs, const ZRect<N,T2>& rhs)
   {
     return (lhs.lo != rhs.lo) || (lhs.hi != rhs.hi);
   }
 
   // rectangles may be displaced by a vector (i.e. point)
-  template <int N, typename T, typename T2>
+  template <int N, typename T, typename T2> __CUDA_HD__
   inline ZRect<N,T> operator+(const ZRect<N,T>& lhs, const ZPoint<N,T2>& rhs)
   {
     return ZRect<N,T>(lhs.lo + rhs, lhs.hi + rhs);
   }
 
-  template <int N, typename T, typename T2>
+  template <int N, typename T, typename T2> __CUDA_HD__
   inline ZRect<N,T>& operator+=(ZRect<N,T>& lhs, const ZPoint<N,T2>& rhs)
   {
     lhs.lo += rhs;
@@ -453,13 +473,13 @@ namespace Realm {
     return lhs;
   }
 
-  template <int N, typename T, typename T2>
+  template <int N, typename T, typename T2> __CUDA_HD__
   inline ZRect<N,T> operator-(const ZRect<N,T>& lhs, const ZPoint<N,T2>& rhs)
   {
     return ZRect<N,T>(lhs.lo - rhs, lhs.hi - rhs);
   }
 
-  template <int N, typename T, typename T2>
+  template <int N, typename T, typename T2> __CUDA_HD__
   inline ZRect<N,T>& operator-=(ZRect<N,T>& lhs, const ZRect<N,T2>& rhs)
   {
     lhs.lo -= rhs;
@@ -472,13 +492,13 @@ namespace Realm {
   //
   // class ZMatrix<M,N,T>
 
-  template <int M, int N, typename T>
+  template <int M, int N, typename T> __CUDA_HD__
   inline ZMatrix<M,N,T>::ZMatrix(void)
   {}
 
   // copies allow type coercion (assuming the underlying type does)
   template <int M, int N, typename T>
-  template <typename T2>
+  template <typename T2> __CUDA_HD__
   inline ZMatrix<M,N,T>::ZMatrix(const ZMatrix<M, N, T2>& copy_from)
   {
     for(int i = 0; i < M; i++)
@@ -486,7 +506,7 @@ namespace Realm {
   }
   
   template <int M, int N, typename T>
-  template <typename T2>
+  template <typename T2> __CUDA_HD__
   inline ZMatrix<M, N, T>& ZMatrix<M,N,T>::operator=(const ZMatrix<M, N, T2>& copy_from)
   {
     for(int i = 0; i < M; i++)
@@ -494,7 +514,7 @@ namespace Realm {
     return *this;
   }
 
-  template <int M, int N, typename T, typename T2>
+  template <int M, int N, typename T, typename T2> __CUDA_HD__
   inline ZPoint<M, T> operator*(const ZMatrix<M, N, T>& m, const ZPoint<N, T2>& p)
   {
     ZPoint<M,T> out;
@@ -503,13 +523,13 @@ namespace Realm {
     return out;
   }
 
-  template <int M, int N, typename T>
+  template <int M, int N, typename T> __CUDA_HD__
   inline ZPoint<N, T>& ZMatrix<M,N,T>::operator[](int index)
   {
     return rows[index];
   }
 
-  template <int M, int N, typename T>
+  template <int M, int N, typename T> __CUDA_HD__
   inline const ZPoint<N, T>& ZMatrix<M,N,T>::operator[](int index) const
   {
     return rows[index];
@@ -519,18 +539,18 @@ namespace Realm {
   //
   // class ZPointInRectIterator<N,T>
   
-  template <int N, typename T>
+  template <int N, typename T> __CUDA_HD__
   inline ZPointInRectIterator<N,T>::ZPointInRectIterator(void)
     : valid(false)
   {}
 
-  template <int N, typename T>
+  template <int N, typename T> __CUDA_HD__
   inline ZPointInRectIterator<N,T>::ZPointInRectIterator(const ZRect<N,T>& _r,
 							 bool _fortran_order /*= true*/)
     : p(_r.lo), valid(!_r.empty()), rect(_r), fortran_order(_fortran_order)
   {}
 
-  template <int N, typename T>
+  template <int N, typename T> __CUDA_HD__
   inline bool ZPointInRectIterator<N,T>::step(void)
   {
     assert(valid);  // can't step an iterator that's already done

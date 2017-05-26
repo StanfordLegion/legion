@@ -25,6 +25,7 @@
 #undef REALM_SKIP_INLINES
 
 #include "lowlevel_config.h"
+#include "realm_config.h"
 #include "arrays.h"
 #include "sparsity.h"
 #include "dynamic_templates.h"
@@ -1302,18 +1303,22 @@ namespace Realm {
   struct ZPoint {
     T x, y, z, w;  T rest[N - 4];
 
+    __CUDA_HD__
     ZPoint(void);
+    __CUDA_HD__
     explicit ZPoint(const T vals[N]);
     // copies allow type coercion (assuming the underlying type does)
-    template <typename T2>
+    template <typename T2> __CUDA_HD__
     ZPoint(const ZPoint<N, T2>& copy_from);
-    template <typename T2>
+    template <typename T2> __CUDA_HD__
     ZPoint<N,T>& operator=(const ZPoint<N, T2>& copy_from);
 
+    __CUDA_HD__
     T& operator[](int index);
+    __CUDA_HD__
     const T& operator[](int index) const;
 
-    template <typename T2>
+    template <typename T2> __CUDA_HD__
     T dot(const ZPoint<N, T2>& rhs) const;
   };
 
@@ -1321,30 +1326,30 @@ namespace Realm {
   std::ostream& operator<<(std::ostream& os, const ZPoint<N,T>& p);
 
   // component-wise operators defined on Point<N,T> (with optional coercion)
-  template <int N, typename T, typename T2>
+  template <int N, typename T, typename T2> __CUDA_HD__
   bool operator==(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
-  template <int N, typename T, typename T2>
+  template <int N, typename T, typename T2> __CUDA_HD__
   bool operator!=(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
 
-  template <int N, typename T, typename T2>
+  template <int N, typename T, typename T2> __CUDA_HD__
   ZPoint<N,T> operator+(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
-  template <int N, typename T, typename T2>
+  template <int N, typename T, typename T2> __CUDA_HD__
   ZPoint<N,T>& operator+=(ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
-  template <int N, typename T, typename T2>
+  template <int N, typename T, typename T2> __CUDA_HD__
   ZPoint<N,T> operator-(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
-  template <int N, typename T, typename T2>
+  template <int N, typename T, typename T2> __CUDA_HD__
   ZPoint<N,T>& operator-=(ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
-  template <int N, typename T, typename T2>
+  template <int N, typename T, typename T2> __CUDA_HD__
   ZPoint<N,T> operator*(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
-  template <int N, typename T, typename T2>
+  template <int N, typename T, typename T2> __CUDA_HD__
   ZPoint<N,T>& operator*=(ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
-  template <int N, typename T, typename T2>
+  template <int N, typename T, typename T2> __CUDA_HD__
   ZPoint<N,T> operator/(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
-  template <int N, typename T, typename T2>
+  template <int N, typename T, typename T2> __CUDA_HD__
   ZPoint<N,T>& operator/=(ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
-  template <int N, typename T, typename T2>
+  template <int N, typename T, typename T2> __CUDA_HD__
   ZPoint<N,T> operator%(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
-  template <int N, typename T, typename T2>
+  template <int N, typename T, typename T2> __CUDA_HD__
   ZPoint<N,T>& operator%=(ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
 
   // a Rect is a pair of points defining the lower and upper bounds of an N-D rectangle
@@ -1354,67 +1359,80 @@ namespace Realm {
   struct ZRect {
     ZPoint<N,T> lo, hi;
 
+    __CUDA_HD__
     ZRect(void);
+    __CUDA_HD__
     ZRect(const ZPoint<N,T>& _lo, const ZPoint<N,T>& _hi);
     // copies allow type coercion (assuming the underlying type does)
-    template <typename T2>
+    template <typename T2> __CUDA_HD__
     ZRect(const ZRect<N, T2>& copy_from);
-    template <typename T2>
+    template <typename T2> __CUDA_HD__
     ZRect<N,T>& operator=(const ZRect<N, T2>& copy_from);
 
+    __CUDA_HD__
     bool empty(void) const;
+    __CUDA_HD__
     size_t volume(void) const;
 
+    __CUDA_HD__
     bool contains(const ZPoint<N,T>& p) const;
 
     // true if all points in other are in this rectangle
+    __CUDA_HD__
     bool contains(const ZRect<N,T>& other) const;
+    __CUDA_HD__
     bool contains(const ZIndexSpace<N,T>& is) const;
 
     // true if there are any points in the intersection of the two rectangles
+    __CUDA_HD__
     bool overlaps(const ZRect<N,T>& other) const;
 
+    __CUDA_HD__
     ZRect<N,T> intersection(const ZRect<N,T>& other) const;
 
     // returns the _bounding box_ of the union of two rectangles (the actual union
     //  might not be a rectangle)
+    __CUDA_HD__
     ZRect<N,T> union_bbox(const ZRect<N,T>& other) const;
   };
 
   template <int N, typename T>
   std::ostream& operator<<(std::ostream& os, const ZRect<N,T>& p);
 
-  template <int N, typename T, typename T2>
+  template <int N, typename T, typename T2> __CUDA_HD__
   bool operator==(const ZRect<N,T>& lhs, const ZRect<N,T2>& rhs);
-  template <int N, typename T, typename T2>
+  template <int N, typename T, typename T2> __CUDA_HD__
   bool operator!=(const ZRect<N,T>& lhs, const ZRect<N,T2>& rhs);
 
   // rectangles may be displaced by a vector (i.e. point)
-  template <int N, typename T, typename T2>
+  template <int N, typename T, typename T2> __CUDA_HD__
   ZRect<N,T> operator+(const ZRect<N,T>& lhs, const ZPoint<N,T2>& rhs);
-  template <int N, typename T, typename T2>
+  template <int N, typename T, typename T2> __CUDA_HD__
   ZRect<N,T>& operator+=(ZRect<N,T>& lhs, const ZPoint<N,T2>& rhs);
-  template <int N, typename T, typename T2>
+  template <int N, typename T, typename T2> __CUDA_HD__
   ZRect<N,T> operator-(const ZRect<N,T>& lhs, const ZPoint<N,T2>& rhs);
-  template <int N, typename T, typename T2>
+  template <int N, typename T, typename T2> __CUDA_HD__
   ZRect<N,T>& operator-=(ZRect<N,T>& lhs, const ZRect<N,T2>& rhs);
 
   template <int M, int N, typename T>
   struct ZMatrix {
     ZPoint<N,T> rows[M];
 
+    __CUDA_HD__
     ZMatrix(void);
     // copies allow type coercion (assuming the underlying type does)
-    template <typename T2>
+    template <typename T2> __CUDA_HD__
     ZMatrix(const ZMatrix<M, N, T2>& copy_from);
-    template <typename T2>
+    template <typename T2> __CUDA_HD__
     ZMatrix<M, N, T>& operator=(const ZMatrix<M, N, T2>& copy_from);
 
+    __CUDA_HD__
     ZPoint<N,T>& operator[](int index);
+    __CUDA_HD__
     const ZPoint<N,T>& operator[](int index) const;
   };
 
-  template <int M, int N, typename T, typename T2>
+  template <int M, int N, typename T, typename T2> __CUDA_HD__
   ZPoint<M, T> operator*(const ZMatrix<M, N, T>& m, const ZPoint<N, T2>& p);
 
   template <int N, typename T>
@@ -1425,9 +1443,11 @@ namespace Realm {
     ZRect<N,T> rect;
     bool fortran_order;
 
+    __CUDA_HD__
     ZPointInRectIterator(void);
+    __CUDA_HD__
     ZPointInRectIterator(const ZRect<N,T>& _r, bool _fortran_order = true);
-
+    __CUDA_HD__
     bool step(void);
   };
 
