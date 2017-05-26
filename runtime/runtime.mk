@@ -369,9 +369,9 @@ ASM_SRC		?=
 
 # Set the source files
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/runtime_impl.cc \
-	           $(LG_RT_DIR)/channel.cc \
-	           $(LG_RT_DIR)/channel_disk.cc \
-	           $(LG_RT_DIR)/lowlevel_dma.cc \
+	           $(LG_RT_DIR)/realm/transfer/channel.cc \
+	           $(LG_RT_DIR)/realm/transfer/channel_disk.cc \
+	           $(LG_RT_DIR)/realm/transfer/lowlevel_dma.cc \
 	           $(LG_RT_DIR)/realm/module.cc \
 	           $(LG_RT_DIR)/realm/threads.cc \
 	           $(LG_RT_DIR)/realm/faults.cc \
@@ -387,7 +387,7 @@ LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/runtime_impl.cc \
 		   $(LG_RT_DIR)/realm/machine_impl.cc \
 		   $(LG_RT_DIR)/realm/sampling_impl.cc \
                    $(LG_RT_DIR)/lowlevel.cc \
-                   $(LG_RT_DIR)/lowlevel_disk.cc
+                   $(LG_RT_DIR)/realm/transfer/lowlevel_disk.cc
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/numa/numa_module.cc \
 		   $(LG_RT_DIR)/realm/numa/numasysif.cc
 ifeq ($(strip $(USE_OPENMP)),1)
