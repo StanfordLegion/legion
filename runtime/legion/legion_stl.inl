@@ -127,27 +127,27 @@ namespace Legion {
         derez.deserialize((*this)[idx]);
     }
 
-    template<typename A, typename FT, int N, typename T>
+    template<typename A, typename FT, int N, typename T> __CUDA_HD__
     inline FT& ArrayAccessor<A,FT,N,T>::operator[](const Point<N,T> &p)
     {
       return A::operator[](p);
     }
 
-    template<typename A, typename FT, int N, typename T>
+    template<typename A, typename FT, int N, typename T> __CUDA_HD__
     inline const FT& ArrayAccessor<A,FT,N,T>::operator[](
                                             const Point<N,T> &p) const
     {
       return A::operator[](p);
     }
 
-    template<typename A, typename FT, int N, typename T>
+    template<typename A, typename FT, int N, typename T> __CUDA_HD__
     inline Detail::ArraySyntaxHelper<A,FT,N,T,2> 
                           ArrayAccessor<A,FT,N,T>::operator[](T val)
     {
       return Detail::ArraySyntaxHelper<A,FT,N,T,1>(*this)[val];
     }
 
-    template<typename A, typename FT, int N, typename T>
+    template<typename A, typename FT, int N, typename T> __CUDA_HD__
     inline const Detail::ArraySyntaxHelper<A,FT,N,T,2> 
                     ArrayAccessor<A,FT,N,T>::operator[](T val) const
     {
@@ -164,7 +164,7 @@ namespace Legion {
     };
 
     namespace Detail {
-      template<typename A, typename FT, int N, typename T, int M>
+      template<typename A, typename FT, int N, typename T, int M> __CUDA_HD__
       inline ArraySyntaxHelper<A,FT,N,T,M>::ArraySyntaxHelper(
                             const ArraySyntaxHelper<A,FT,N,T,M-1> &rhs)
         : accessor(rhs.accessor)
@@ -173,7 +173,7 @@ namespace Legion {
           point[i] = rhs.point[i];
       }
 
-      template<typename A, typename FT, int N, typename T, int M>
+      template<typename A, typename FT, int N, typename T, int M> __CUDA_HD__
       inline ArraySyntaxHelper<A,FT,N,T,M+1>
               ArraySyntaxHelper<A,FT,N,T,M>::operator[](T val)
       {
@@ -181,7 +181,7 @@ namespace Legion {
         return ArraySyntaxHelper<A,FT,N,T,M+1>(*this);
       }
 
-      template<typename A, typename FT, int N, typename T, int M>
+      template<typename A, typename FT, int N, typename T, int M> __CUDA_HD__
       inline const ArraySyntaxHelper<A,FT,N,T,M+1>
                     ArraySyntaxHelper<A,FT,N,T,M>::operator[](T val) const
       {
@@ -193,16 +193,19 @@ namespace Legion {
       template<typename A, typename FT, int N, typename T> 
       class ArraySyntaxHelper<A,FT,N,T,N> {
       public:
+        __CUDA_HD__
         ArraySyntaxHelper(const ArraySyntaxHelper<A,FT,N,T,N-1> &rhs);
       public:
+        __CUDA_HD__
         FT& operator[](T val);
+        __CUDA_HD__
         const FT& operator[](T val) const;
       public:
         A &accessor;
         mutable Point<N,T> point;
       };
 
-      template<typename A, typename FT, int N, typename T>
+      template<typename A, typename FT, int N, typename T> __CUDA_HD__
       inline ArraySyntaxHelper<A,FT,N,T,N>::ArraySyntaxHelper(
                       const ArraySyntaxHelper<A,FT,N,T,N-1> &rhs)
         : accessor(rhs.accessor)
@@ -211,14 +214,14 @@ namespace Legion {
           point[i] = rhs.point[i];
       }
 
-      template<typename A, typename FT, int N, typename T>
+      template<typename A, typename FT, int N, typename T> __CUDA_HD__
       inline FT& ArraySyntaxHelper<A,FT,N,T,N>::operator[](T val)
       {
         point[N-1] = val;
         return accessor[point];
       }
 
-      template<typename A, typename FT, int N, typename T>
+      template<typename A, typename FT, int N, typename T> __CUDA_HD__
       inline const FT& ArraySyntaxHelper<A,FT,N,T,N>::operator[](T val) const
       {
         point[N-1] = val;
@@ -229,22 +232,25 @@ namespace Legion {
       template<typename A, typename FT, int N, typename T>
       class ArraySyntaxHelper<A,FT,N,T,1> {
       public:
+        __CUDA_HD__
         ArraySyntaxHelper(A &a);
       public:
+        __CUDA_HD__
         ArraySyntaxHelper<A,FT,N,T,2> operator[](T val);
+        __CUDA_HD__
         const ArraySyntaxHelper<A,FT,N,T,2> operator[](T val) const;
       public:
         A &accessor;
         mutable Point<1,T> point;
       };
 
-      template<typename A, typename FT, int N, typename T>
+      template<typename A, typename FT, int N, typename T> __CUDA_HD__
       inline ArraySyntaxHelper<A,FT,N,T,1>::ArraySyntaxHelper(A &a) 
         : accessor(a)
       {
       }
 
-      template<typename A, typename FT, int N, typename T>
+      template<typename A, typename FT, int N, typename T> __CUDA_HD__
       inline ArraySyntaxHelper<A,FT,N,T,2> 
         ArraySyntaxHelper<A,FT,N,T,1>::operator[](T val)
       {
@@ -252,7 +258,7 @@ namespace Legion {
         return ArraySyntaxHelper<A,FT,N,T,2>(*this);
       }
 
-      template<typename A, typename FT, int N, typename T>
+      template<typename A, typename FT, int N, typename T> __CUDA_HD__
       inline const ArraySyntaxHelper<A,FT,N,T,2>
         ArraySyntaxHelper<A,FT,N,T,1>::operator[](T val) const
       {
