@@ -177,6 +177,8 @@ namespace Realm {
   template <typename FT, int N, typename T = int>
   class AffineAccessor {
   public:
+    // TODO: Sean check if this is safe for a default constructor
+    AffineAccessor(void) : base(0) { }
     // NOTE: these constructors will die horribly if the conversion is not
     //  allowed - call is_compatible(...) first if you're not sure
 

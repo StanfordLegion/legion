@@ -1446,6 +1446,7 @@ namespace Realm {
     ZRect<N,T> rect;
     bool fortran_order;
 
+    ZPointInRectIterator(void);
     ZPointInRectIterator(const ZRect<N,T>& _r, bool _fortran_order = true);
 
     bool step(void);
