@@ -1424,9 +1424,9 @@ namespace Realm {
   template class UnionOperation<N,T>; \
   template class IntersectionOperation<N,T>; \
   template class DifferenceOperation<N,T>; \
-  template UnionMicroOp<N,T>::UnionMicroOp<Serialization::FixedBufferDeserializer>(gasnet_node_t, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \
-  template IntersectionMicroOp<N,T>::IntersectionMicroOp<Serialization::FixedBufferDeserializer>(gasnet_node_t, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \
-  template DifferenceMicroOp<N,T>::DifferenceMicroOp<Serialization::FixedBufferDeserializer>(gasnet_node_t, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \
+  template UnionMicroOp<N,T>::UnionMicroOp(gasnet_node_t, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \
+  template IntersectionMicroOp<N,T>::IntersectionMicroOp(gasnet_node_t, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \
+  template DifferenceMicroOp<N,T>::DifferenceMicroOp(gasnet_node_t, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \
   template Event ZIndexSpace<N,T>::compute_unions(const std::vector<ZIndexSpace<N,T> >&, \
 						  const std::vector<ZIndexSpace<N,T> >&, \
 						  std::vector<ZIndexSpace<N,T> >&, \
