@@ -1707,7 +1707,7 @@ namespace Legion {
       template<int N, typename T>
       static inline TypeTag encode_tag(void) {
         return SUPER::template encode_tag<Realm::DynamicTemplates::Int<N>, T>();
-      };
+      }
       template<int N, typename T>
       static inline void check_type(const TypeTag t) {
 #ifdef DEBUG_LEGION

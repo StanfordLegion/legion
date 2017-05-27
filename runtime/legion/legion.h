@@ -2551,7 +2551,7 @@ namespace Legion {
      */
     class Fill : public Mappable {
     protected:
-      FRIEND_ALL_RUNTIME_CLASSES;
+      FRIEND_ALL_RUNTIME_CLASSES
       Fill(void);
     public:
       virtual MappableType get_mappable_type(void) const 
@@ -2589,7 +2589,7 @@ namespace Legion {
      */
     class Partition : public Mappable {
     protected:
-      FRIEND_ALL_RUNTIME_CLASSES;
+      FRIEND_ALL_RUNTIME_CLASSES
       Partition(void);
     public:
       virtual MappableType get_mappable_type(void) const 

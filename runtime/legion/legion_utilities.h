@@ -1118,7 +1118,7 @@ namespace Legion {
     protected:
       inline void set_edge(unsigned src, unsigned dst);
       inline unsigned get_src(unsigned dst);
-      inline unsigned get_dst(unsigned src);;
+      inline unsigned get_dst(unsigned src);
     protected:
       void compress_representation(void);
       void test_identity(void);
