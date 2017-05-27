@@ -251,7 +251,8 @@ namespace Realm {
     class MachineQueryIterator : public std::iterator<std::input_iterator_tag, RT> {
       // would like this constructor to be protected and have QT be a friend, but that requires
       //  C++11 (or a compiler like g++ that supports it even without -std=c++11)
-#if __cplusplus >= 201103L
+      //  The CUDA compiler also seems to be a little dense here as well
+#if __cplusplus >= 201103L && !defined(__CUDACC__)
     protected:
       friend QT;
 #else

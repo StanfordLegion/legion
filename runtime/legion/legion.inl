@@ -2513,7 +2513,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Realm::ZPoint<COLOR_DIM,COLOR_T> point;
-      get_index_space_color_internal(IndexSpace(handle), &point,
+      return get_index_space_color_internal(IndexSpace(handle), &point,
           Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>());
     }
 
