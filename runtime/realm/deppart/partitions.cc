@@ -809,7 +809,7 @@ namespace Realm {
   }
 
 #define DOIT(N,T) \
-  template class ZIndexSpace<N,T>; \
+  template struct ZIndexSpace<N,T>; \
   template void PartitioningMicroOp::sparsity_map_ready(SparsityMapImpl<N,T>*, bool); \
   template class OverlapTester<N,T>; \
   template class ComputeOverlapMicroOp<N,T>;
