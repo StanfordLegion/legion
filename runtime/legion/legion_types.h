@@ -1677,7 +1677,7 @@ namespace Legion {
       {
 #ifdef ENABLE_LEGION_TLS
         // Save the context locally
-        TaskContext *local_ctx = Internal::implicit_context; 
+        Internal::TaskContext *local_ctx = Internal::implicit_context; 
         // Do the wait
         wait();
         // Write the context back
