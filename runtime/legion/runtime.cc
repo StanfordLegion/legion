@@ -16891,12 +16891,14 @@ namespace Legion {
             Realm::ZIndexSpace<2,coord_t> is = dom;
             result = ctx->create_index_space(forest, &is, 
                 NT_TemplateHelper::encode_tag<2,coord_t>());
+            break;
           }
         case 3:
           {
             Realm::ZIndexSpace<3,coord_t> is = dom;
             result = ctx->create_index_space(forest, &is, 
                 NT_TemplateHelper::encode_tag<3,coord_t>());
+            break;
           }
         default:
           assert(false);
