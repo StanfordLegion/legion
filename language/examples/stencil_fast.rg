@@ -511,9 +511,8 @@ task main()
   fill(ym.{input, output}, init)
   fill(yp.{input, output}, init)
 
-  var tsteps : int64 = conf.tsteps
   var tprune : int64 = conf.tprune
-  regentlib.assert(tsteps > 2*tprune, "too few time steps")
+  var tsteps : int64 = conf.tsteps + 2 * tprune
 
   -- __demand(__spmd)
   -- do

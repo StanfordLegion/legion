@@ -27,11 +27,11 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/
 # Realm runtime
 list(APPEND LOW_RUNTIME_SRC
   lowlevel_config.h
-  lowlevel_disk.cc
-  channel.h                 channel.cc
-  channel_disk.h            channel_disk.cc
-  lowlevel_dma.h            lowlevel_dma.cc
-  lowlevel_dma.inl
+  realm/transfer/lowlevel_disk.cc
+  realm/transfer/channel.h                 realm/transfer/channel.cc
+  realm/transfer/channel_disk.h            realm/transfer/channel_disk.cc
+  realm/transfer/lowlevel_dma.h            realm/transfer/lowlevel_dma.cc
+  realm/transfer/lowlevel_dma.inl
   lowlevel.h                lowlevel.cc
   lowlevel_impl.h
   realm/event_impl.h        realm/event_impl.cc
