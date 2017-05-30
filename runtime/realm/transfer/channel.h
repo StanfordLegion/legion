@@ -31,6 +31,12 @@
 #include "lowlevel.h"
 #include "lowlevel_dma.h"
 
+#include <realm/id.h>
+#include <realm/runtime_impl.h>
+#include <realm/idx_impl.h>
+#include <realm/mem_impl.h>
+#include <realm/inst_impl.h>
+
 #ifdef USE_CUDA
 #include "realm/cuda/cuda_module.h"
 #endif
@@ -45,6 +51,14 @@ namespace LegionRuntime{
   namespace LowLevel{
     class XferDes;
     class Channel;
+
+    typedef Realm::ID ID;
+    typedef Realm::DmaRequest DmaRequest;
+    typedef Realm::OffsetsAndSize OffsetsAndSize;
+    typedef Realm::XferDesID XferDesID;
+
+    typedef Realm::MemoryImpl MemoryImpl;
+    typedef Realm::RegionInstanceImpl RegionInstanceImpl;
     
 #ifdef USE_CUDA
     typedef Realm::Cuda::GPU GPU;
@@ -56,6 +70,13 @@ namespace LegionRuntime{
     typedef Realm::HDF5::HDF5Memory::HDFMetadata HDFMetadata;
 #endif
     typedef Realm::FileMemory FileMemory;
+
+    inline Realm::RuntimeImpl *get_runtime(void)
+    {
+      return Realm::get_runtime();
+    }
+
+    extern Logger::Category log_new_dma;
 
     class Buffer {
     public:

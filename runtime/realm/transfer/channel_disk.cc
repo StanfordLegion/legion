@@ -18,6 +18,8 @@
 
 namespace LegionRuntime {
   namespace LowLevel {
+    typedef Realm::AsyncFileIOContext AsyncFileIOContext;
+
     template<unsigned DIM>
     FileXferDes<DIM>::FileXferDes(DmaRequest* _dma_request,
                                   gasnet_node_t _launch_node,

@@ -17,6 +17,7 @@
 #include "realm/realm_config.h"
 #include "lowlevel_dma.h"
 #include "channel.h"
+#include "arrays.h"
 #include "accessor.h"
 #include "realm/threads.h"
 #include <errno.h>
@@ -42,6 +43,7 @@
 } while(0)
 
 using namespace LegionRuntime::Accessor;
+using namespace LegionRuntime;
 
 #ifndef __GNUC__
 #include "atomics.h"
@@ -52,29 +54,23 @@ using namespace LegionRuntime::Accessor;
 
 using namespace Realm::Serialization;
 
-namespace LegionRuntime {
-  namespace LowLevel {
+namespace Realm {
 
-    typedef Realm::GASNetMemory GASNetMemory;
-    typedef Realm::DiskMemory DiskMemory;
-    typedef Realm::FileMemory FileMemory;
-    typedef Realm::Thread Thread;
-    typedef Realm::ThreadLaunchParameters ThreadLaunchParameters;
-    typedef Realm::CoreReservation CoreReservation;
-    typedef Realm::CoreReservationParameters CoreReservationParameters;
-
-    Logger::Category log_dma("dma");
-    Logger::Category log_ib_alloc("ib_alloc");
-    extern Logger::Category log_new_dma;
-    Logger::Category log_aio("aio");
+    Logger log_dma("dma");
+    Logger log_ib_alloc("ib_alloc");
+    Logger& log_new_dma = LegionRuntime::LowLevel::log_new_dma;
+    //extern Logger log_new_dma;
+    Logger log_aio("aio");
 #ifdef EVENT_GRAPH_TRACE
-    extern Logger::Category log_event_graph;
+    extern Logger log_event_graph;
     extern Event find_enclosing_termination_event(void);
 #endif
 
-    typedef std::pair<Memory, Memory> MemPair;
-    typedef std::pair<RegionInstance, RegionInstance> InstPair;
-    typedef std::map<InstPair, OASVec> OASByInst;
+  typedef LegionRuntime::LowLevel::XferDes XferDes;
+  typedef LegionRuntime::LowLevel::XferDesFence XferDesFence;
+  typedef LegionRuntime::LowLevel::XferOrder XferOrder;
+  typedef LegionRuntime::LowLevel::Buffer Buffer;
+
     class IBFence : public Realm::Operation::AsyncWorkItem {
     public:
       IBFence(Realm::Operation *op) : Realm::Operation::AsyncWorkItem(op) {}
@@ -83,43 +79,6 @@ namespace LegionRuntime {
       }
       virtual void print(std::ostream& os) const { os << "IBFence"; }
     };
-
-    struct IBInfo {
-      enum Status {
-        INIT,
-        SENT,
-        COMPLETED
-      };
-      Memory memory;
-      off_t offset;
-      size_t size;
-      Status status;
-      //IBFence* fence;
-      Event event;
-    };
-
-    struct PendingIBInfo {
-      Memory memory;
-      int idx;
-      InstPair ip;
-    };
-
-    class ComparePendingIBInfo {
-    public:
-      bool operator() (const PendingIBInfo& a, const PendingIBInfo& b) {
-        if (a.memory.id == b.memory.id) {
-          assert(a.idx != b.idx);
-          return a.idx < b.idx;
-        }
-        else
-          return a.memory.id < b.memory.id;
-      }
-    };
-
-    typedef std::set<PendingIBInfo, ComparePendingIBInfo> PriorityIBQueue;
-    typedef std::vector<IBInfo> IBVec;
-    typedef std::map<InstPair, IBVec> IBByInst;
-    typedef std::map<MemPair, OASByInst *> OASByMem;
 
     class IBAllocRequest {
     public:
@@ -221,167 +180,6 @@ namespace LegionRuntime {
     DmaRequest::Waiter::~Waiter(void)
     {
     }
-
-    // dma requests come in two flavors:
-    // 1) CopyRequests, which are per memory pair, and
-    // 2) ReduceRequests, which have to be handled monolithically
-
-    class CopyRequest : public DmaRequest {
-    public:
-      CopyRequest(const void *data, size_t datalen,
-		  Event _before_copy,
-		  Event _after_copy,
-		  int _priority);
-
-      CopyRequest(const Domain& _domain,
-		  OASByInst *_oas_by_inst,
-		  Event _before_copy,
-		  Event _after_copy,
-		  int _priority,
-                  const Realm::ProfilingRequestSet &reqs);
-
-    protected:
-      // deletion performed when reference count goes to zero
-      virtual ~CopyRequest(void);
-
-    public:
-      size_t compute_size(void) const;
-      void serialize(void *buffer);
-
-      virtual bool check_readiness(bool just_check, DmaRequestQueue *rq);
-
-      void perform_dma_mask(MemPairCopier *mpc);
-
-      template <unsigned DIM>
-      void perform_dma_rect(MemPairCopier *mpc);
-
-      template <unsigned DIM>
-      void perform_new_dma(Memory src_mem, Memory dst_mem);
-
-      virtual void perform_dma(void);
-
-      virtual bool handler_safe(void) { return(false); }
-
-      Domain domain;
-      OASByInst *oas_by_inst;
-
-      // <NEW_DMA>
-      void alloc_intermediate_buffer(InstPair inst_pair, Memory tgt_mem, int idx);
-
-      void handle_ib_response(int idx, InstPair inst_pair, size_t ib_size, off_t ib_offset);
-
-      PriorityIBQueue priority_ib_queue;
-      // operations on ib_by_inst are protected by ib_mutex
-      IBByInst ib_by_inst;
-      GASNetHSL ib_mutex;
-      class IBAllocOp : public Realm::Operation {
-      public:
-        IBAllocOp(Event _completion) : Operation(_completion, Realm::ProfilingRequestSet()) {};
-        ~IBAllocOp() {};
-        void print(std::ostream& os) const {os << "IBAllocOp"; };
-      };
-
-      IBAllocOp* ib_req;
-      Event ib_completion;
-      std::vector<Memory> mem_path;
-      // </NEW_DMA>
-
-      Event before_copy;
-      Waiter waiter; // if we need to wait on events
-    };
-
-    class ReduceRequest : public DmaRequest {
-    public:
-      ReduceRequest(const void *data, size_t datalen,
-		    ReductionOpID _redop_id,
-		    bool _red_fold,
-		    Event _before_copy,
-		    Event _after_copy,
-		    int _priority);
-
-      ReduceRequest(const Domain& _domain,
-		    const std::vector<Domain::CopySrcDstField>& _srcs,
-		    const Domain::CopySrcDstField& _dst,
-		    bool _inst_lock_needed,
-		    ReductionOpID _redop_id,
-		    bool _red_fold,
-		    Event _before_copy,
-		    Event _after_copy,
-		    int _priority,
-                    const Realm::ProfilingRequestSet &reqs);
-
-    protected:
-      // deletion performed when reference count goes to zero
-      virtual ~ReduceRequest(void);
-
-    public:
-      size_t compute_size(void);
-      void serialize(void *buffer);
-
-      virtual bool check_readiness(bool just_check, DmaRequestQueue *rq);
-
-      void perform_dma_mask(MemPairCopier *mpc);
-
-      template <unsigned DIM>
-      void perform_dma_rect(MemPairCopier *mpc);
-
-      virtual void perform_dma(void);
-
-      virtual bool handler_safe(void) { return(false); }
-
-      Domain domain;
-      std::vector<Domain::CopySrcDstField> srcs;
-      Domain::CopySrcDstField dst;
-      bool inst_lock_needed;
-      Event inst_lock_event;
-      ReductionOpID redop_id;
-      bool red_fold;
-      Event before_copy;
-      Waiter waiter; // if we need to wait on events
-    };
-
-    class FillRequest : public DmaRequest {
-    public:
-      FillRequest(const void *data, size_t msglen,
-                  RegionInstance inst,
-                  unsigned offset, unsigned size,
-                  Event _before_fill, 
-                  Event _after_fill,
-                  int priority);
-      FillRequest(const Domain &_domain,
-                  const Domain::CopySrcDstField &_dst,
-                  const void *fill_value, size_t fill_size,
-                  Event _before_fill,
-                  Event _after_fill,
-                  int priority,
-                  const Realm::ProfilingRequestSet &reqs);
-
-    protected:
-      // deletion performed when reference count goes to zero
-      virtual ~FillRequest(void);
-
-    public:
-      size_t compute_size(void);
-      void serialize(void *buffer);
-
-      virtual bool check_readiness(bool just_check, DmaRequestQueue *rq);
-
-      virtual void perform_dma(void);
-
-      virtual bool handler_safe(void) { return(false); }
-
-      template<int DIM>
-      void perform_dma_rect(MemoryImpl *mem_impl);
-
-      size_t optimize_fill_buffer(RegionInstanceImpl *impl, int &fill_elmts);
-
-      Domain domain;
-      Domain::CopySrcDstField dst;
-      void *fill_buffer;
-      size_t fill_size;
-      Event before_fill;
-      Waiter waiter;
-    };
 
     static PendingIBQueue *ib_req_queue = 0;
 
@@ -570,7 +368,7 @@ namespace LegionRuntime {
 	oas_by_inst(0),
 	before_copy(_before_copy)
     {
-      const IDType *idata = (const IDType *)data;
+      const ID::IDType *idata = (const ID::IDType *)data;
 
       idata = domain.deserialize(idata);
 
@@ -586,8 +384,8 @@ namespace LegionRuntime {
       size_t num_pairs = *idata++;
 
       for (unsigned idx = 0; idx < num_pairs; idx++) {
-	RegionInstance src_inst = ID((IDType)*idata++).convert<RegionInstance>();
-	RegionInstance dst_inst = ID((IDType)*idata++).convert<RegionInstance>();
+	RegionInstance src_inst = ID((ID::IDType)*idata++).convert<RegionInstance>();
+	RegionInstance dst_inst = ID((ID::IDType)*idata++).convert<RegionInstance>();
 	InstPair ip(src_inst, dst_inst);
 
         // If either one of the instances is in GPU memory increase priority
@@ -623,7 +421,7 @@ namespace LegionRuntime {
       // better have consumed exactly the right amount of data
       //assert((((unsigned long)result) - ((unsigned long)data)) == datalen);
       size_t request_size = *reinterpret_cast<const size_t*>(idata);
-      idata += sizeof(size_t) / sizeof(IDType);
+      idata += sizeof(size_t) / sizeof(ID::IDType);
       FixedBufferDeserializer deserializer(idata, request_size);
       deserializer >> requests;
       Realm::Operation::reconstruct_measurements();
@@ -678,7 +476,7 @@ namespace LegionRuntime {
       // destroy all xfer des
       std::vector<XferDesID>::iterator it;
       for (it = path.begin(); it != path.end(); it++) {
-        destroy_xfer_des(*it);
+        LegionRuntime::LowLevel::destroy_xfer_des(*it);
       }
       // free intermediate buffers
       {
@@ -704,10 +502,10 @@ namespace LegionRuntime {
     size_t CopyRequest::compute_size(void) const
     {
       size_t result = domain.compute_size();
-      result += sizeof(IDType); // number of requests;
+      result += sizeof(ID::IDType); // number of requests;
       for(OASByInst::iterator it2 = oas_by_inst->begin(); it2 != oas_by_inst->end(); it2++) {
         OASVec& oasvec = it2->second;
-        result += (3 + oasvec.size() * 4) * sizeof(IDType);
+        result += (3 + oasvec.size() * 4) * sizeof(ID::IDType);
       }
       // TODO: unbreak once the serialization stuff is repaired
       //result += requests.compute_size();
@@ -720,7 +518,7 @@ namespace LegionRuntime {
     void CopyRequest::serialize(void *buffer)
     {
       // domain info goes first
-      IDType *msgptr = domain.serialize((IDType *)buffer);
+      ID::IDType *msgptr = domain.serialize((ID::IDType *)buffer);
 
       *msgptr++ = oas_by_inst->size();
 
@@ -747,7 +545,7 @@ namespace LegionRuntime {
       ByteCountSerializer counter;
       counter << requests;
       *reinterpret_cast<size_t*>(msgptr) = counter.bytes_used();
-      msgptr += sizeof(size_t) / sizeof(IDType);
+      msgptr += sizeof(size_t) / sizeof(ID::IDType);
       FixedBufferSerializer serializer(msgptr, counter.bytes_used());
       serializer << requests;
       clear_profiling();
@@ -1535,6 +1333,7 @@ namespace LegionRuntime {
 
     }; // namespace RangeExecutors
 
+#if 0
     // helper function to figure out which field we're in
     void find_field_start(const std::vector<size_t>& field_sizes, off_t byte_offset,
 				 size_t size, off_t& field_start, int& field_size)
@@ -1555,6 +1354,7 @@ namespace LegionRuntime {
       }
       assert(0);
     }
+#endif
 
     class RemoteWriteInstPairCopier : public InstPairCopier {
     public:
@@ -3532,7 +3332,7 @@ namespace LegionRuntime {
       for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
         std::vector<XferDesID> sub_path;
         for (unsigned idx = 0; idx < mem_path.size() - 1; idx ++) {
-          XferDesID new_xdid = get_xdq_singleton()->get_guid(ID(mem_path[idx]).memory.owner_node);
+          XferDesID new_xdid = LegionRuntime::LowLevel::get_xdq_singleton()->get_guid(ID(mem_path[idx]).memory.owner_node);
           sub_path.push_back(new_xdid);
           path.push_back(new_xdid);
         }
@@ -3604,6 +3404,7 @@ namespace LegionRuntime {
                   oasvec_src = oasvec;
                   oasvec.clear();
                 }
+		LegionRuntime::LowLevel::
                 create_xfer_des<1>(this, gasnet_mynode(), xd_guid, pre_xd_guid,
                                    next_xd_guid, mark_started, pre_buf, cur_buf,
                                    new_domain, oasvec_src,
@@ -3618,6 +3419,7 @@ namespace LegionRuntime {
                   oasvec_src = oasvec;
                   oasvec.clear();
                 }
+		LegionRuntime::LowLevel::
                 create_xfer_des<0>(this, gasnet_mynode(), xd_guid, pre_xd_guid,
                                    next_xd_guid, mark_started, pre_buf, cur_buf,
                                    domain, oasvec_src,
@@ -3634,6 +3436,7 @@ namespace LegionRuntime {
                 oasvec_src = oasvec;
                 oasvec.clear();
               }
+	      LegionRuntime::LowLevel::
               create_xfer_des<DIM>(this, gasnet_mynode(), xd_guid, pre_xd_guid,
                                    next_xd_guid, mark_started, pre_buf, cur_buf,
                                    domain, oasvec_src,
@@ -4132,7 +3935,7 @@ namespace LegionRuntime {
 	redop_id(_redop_id), red_fold(_red_fold),
 	before_copy(_before_copy)
     {
-      const IDType *idata = (const IDType *)data;
+      const ID::IDType *idata = (const ID::IDType *)data;
 
       idata = domain.deserialize(idata);
 
@@ -4162,7 +3965,7 @@ namespace LegionRuntime {
       // better have consumed exactly the right amount of data
       //assert((((unsigned long long)result) - ((unsigned long long)data)) == datalen);
       size_t request_size = *reinterpret_cast<const size_t*>(idata);
-      idata += sizeof(size_t) / sizeof(IDType);
+      idata += sizeof(size_t) / sizeof(ID::IDType);
       FixedBufferDeserializer deserializer(idata, request_size);
       deserializer >> requests;
       Realm::Operation::reconstruct_measurements();
@@ -4217,8 +4020,8 @@ namespace LegionRuntime {
     size_t ReduceRequest::compute_size(void)
     {
       size_t result = domain.compute_size();
-      result += (4 + 3 * srcs.size()) * sizeof(IDType);
-      result += sizeof(IDType); // for inst_lock_needed
+      result += (4 + 3 * srcs.size()) * sizeof(ID::IDType);
+      result += sizeof(ID::IDType); // for inst_lock_needed
       // TODO: unbreak once the serialization stuff is repaired
       //result += requests.compute_size();
       ByteCountSerializer counter;
@@ -4230,7 +4033,7 @@ namespace LegionRuntime {
     void ReduceRequest::serialize(void *buffer)
     {
       // domain info goes first
-      IDType *msgptr = domain.serialize((IDType *)buffer);
+      ID::IDType *msgptr = domain.serialize((ID::IDType *)buffer);
 
       // now source fields
       *msgptr++ = srcs.size();
@@ -4255,7 +4058,7 @@ namespace LegionRuntime {
       ByteCountSerializer counter;
       counter << requests;
       *reinterpret_cast<size_t*>(msgptr) = counter.bytes_used();
-      msgptr += sizeof(size_t) / sizeof(IDType);
+      msgptr += sizeof(size_t) / sizeof(ID::IDType);
       FixedBufferSerializer serializer(msgptr, counter.bytes_used());
       serializer << requests;
       clear_profiling();
@@ -4800,7 +4603,7 @@ namespace LegionRuntime {
       dst.offset = offset;
       dst.size = size;
 
-      const IDType *idata = (const IDType *)data;
+      const ID::IDType *idata = (const ID::IDType *)data;
 
       idata = domain.deserialize(idata);
 
@@ -4819,7 +4622,7 @@ namespace LegionRuntime {
       // better have consumed exactly the right amount of data
       //assert((((unsigned long)result) - ((unsigned long)data)) == datalen);
       size_t request_size = *reinterpret_cast<const size_t*>(idata);
-      idata += sizeof(size_t) / sizeof(IDType);
+      idata += sizeof(size_t) / sizeof(ID::IDType);
       FixedBufferDeserializer deserializer(idata, request_size);
       deserializer >> requests;
       Realm::Operation::reconstruct_measurements();
@@ -4865,8 +4668,8 @@ namespace LegionRuntime {
     size_t FillRequest::compute_size(void)
     {
       size_t result = domain.compute_size();
-      size_t elmts = (fill_size + sizeof(IDType) - 1)/sizeof(IDType);
-      result += ((elmts+1) * sizeof(IDType)); // +1 for fill size in bytes
+      size_t elmts = (fill_size + sizeof(ID::IDType) - 1)/sizeof(ID::IDType);
+      result += ((elmts+1) * sizeof(ID::IDType)); // +1 for fill size in bytes
       // TODO: unbreak once the serialization stuff is repaired
       //result += requests.compute_size();
       ByteCountSerializer counter;
@@ -4877,10 +4680,10 @@ namespace LegionRuntime {
 
     void FillRequest::serialize(void *buffer)
     {
-      IDType *msgptr = domain.serialize((IDType *)buffer);
+      ID::IDType *msgptr = domain.serialize((ID::IDType *)buffer);
       
       assert(dst.size == fill_size);
-      size_t elmts = (fill_size + sizeof(IDType) - 1)/sizeof(IDType);
+      size_t elmts = (fill_size + sizeof(ID::IDType) - 1)/sizeof(ID::IDType);
       *msgptr++ = elmts;
       memcpy(msgptr, fill_buffer, fill_size);
       msgptr += elmts;
@@ -4892,7 +4695,7 @@ namespace LegionRuntime {
       ByteCountSerializer counter;
       counter << requests;
       *reinterpret_cast<size_t*>(msgptr) = counter.bytes_used();
-      msgptr += sizeof(size_t) / sizeof(IDType);
+      msgptr += sizeof(size_t) / sizeof(ID::IDType);
       FixedBufferSerializer serializer(msgptr, counter.bytes_used());
       serializer << requests;
       clear_profiling();
@@ -5200,7 +5003,7 @@ namespace LegionRuntime {
 #endif
 
     // for now we use a single queue for all (local) dmas
-    static DmaRequestQueue *dma_queue = 0;
+    DmaRequestQueue *dma_queue = 0;
     
     void DmaRequestQueue::worker_thread_loop(void)
     {
@@ -5258,27 +5061,22 @@ namespace LegionRuntime {
     void start_dma_system(int count, bool pinned, int max_nr,
                           Realm::CoreReservationSet& crs)
     {
-      //log_dma.add_stream(&std::cerr, Logger::Category::LEVEL_DEBUG, false, false);
+      //log_dma.add_stream(&std::cerr, Logger::LEVEL_DEBUG, false, false);
       aio_context = new AsyncFileIOContext(256);
-      start_channel_manager(count, pinned, max_nr, crs);
+      LegionRuntime::LowLevel::start_channel_manager(count, pinned, max_nr, crs);
       ib_req_queue = new PendingIBQueue();
     }
 
     void stop_dma_system(void)
     {
-      stop_channel_manager();
+      LegionRuntime::LowLevel::stop_channel_manager();
       delete ib_req_queue;
       ib_req_queue = 0;
       delete aio_context;
       aio_context = 0;
     }
-  };
-};
 
-namespace Realm {
-
-  using namespace LegionRuntime::LowLevel;
-
+#if 0
     Event Domain::fill(const std::vector<CopySrcDstField> &dsts,
                        const void *fill_value, size_t fill_value_size,
                        Event wait_on /*= Event::NO_EVENT*/) const
@@ -5349,12 +5147,9 @@ namespace Realm {
       }
       return GenEventImpl::merge_events(finish_events, false /*!ignore faults*/);
     }
-    
-};
+#endif
 
-namespace LegionRuntime {
-  namespace LowLevel {
-
+#if 0
     static int select_dma_node(Memory src_mem, Memory dst_mem,
 			       ReductionOpID redop_id, bool red_fold)
     {
@@ -5383,6 +5178,7 @@ namespace LegionRuntime {
 	}
       }
     }
+#endif
 
     void handle_remote_copy(RemoteCopyArgs args, const void *data, size_t msglen)
     {
@@ -5428,11 +5224,7 @@ namespace LegionRuntime {
 
     template <typename T> T min(T a, T b) { return (a < b) ? a : b; }
 
-  };
-};
-
-namespace Realm {
-
+#if 0
     Event Domain::copy(const std::vector<CopySrcDstField>& srcs,
 		       const std::vector<CopySrcDstField>& dsts,
 		       Event wait_on,
@@ -5683,5 +5475,5 @@ namespace Realm {
 	return ev;
       }
     } 
-
+#endif
 };

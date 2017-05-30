@@ -41,8 +41,8 @@
 // remote copy active messages from from lowlevel_dma.h for now
 #include <realm/transfer/lowlevel_dma.h>
 namespace Realm {
-  typedef LegionRuntime::LowLevel::RemoteCopyMessage RemoteCopyMessage;
-  typedef LegionRuntime::LowLevel::RemoteFillMessage RemoteFillMessage;
+  //typedef LegionRuntime::LowLevel::RemoteCopyMessage RemoteCopyMessage;
+  //typedef LegionRuntime::LowLevel::RemoteFillMessage RemoteFillMessage;
 };
 
 // create xd message and update bytes read/write messages
@@ -55,9 +55,9 @@ namespace Realm {
   typedef LegionRuntime::LowLevel::NotifyXferDesCompleteMessage NotifyXferDesCompleteMessage;
   typedef LegionRuntime::LowLevel::UpdateBytesWriteMessage UpdateBytesWriteMessage;
   typedef LegionRuntime::LowLevel::UpdateBytesReadMessage UpdateBytesReadMessage;
-  typedef LegionRuntime::LowLevel::RemoteIBAllocRequestAsync RemoteIBAllocRequestAsync;
-  typedef LegionRuntime::LowLevel::RemoteIBAllocResponseAsync RemoteIBAllocResponseAsync;
-  typedef LegionRuntime::LowLevel::RemoteIBFreeRequestAsync RemoteIBFreeRequestAsync;
+  //typedef LegionRuntime::LowLevel::RemoteIBAllocRequestAsync RemoteIBAllocRequestAsync;
+  //typedef LegionRuntime::LowLevel::RemoteIBAllocResponseAsync RemoteIBAllocResponseAsync;
+  //typedef LegionRuntime::LowLevel::RemoteIBFreeRequestAsync RemoteIBFreeRequestAsync;
 }
 
 #include <unistd.h>
@@ -986,10 +986,10 @@ namespace Realm {
       gasnet_coll_init(0, 0, 0, 0, 0);
 #endif
 
-      LegionRuntime::LowLevel::create_builtin_dma_channels(this);
+      create_builtin_dma_channels(this);
 
-      LegionRuntime::LowLevel::start_dma_worker_threads(dma_worker_threads,
-                                                        *core_reservations);
+      start_dma_worker_threads(dma_worker_threads,
+			       *core_reservations);
 
 #ifdef EVENT_TRACING
       // Always initialize even if we won't dump to file, otherwise segfaults happen
@@ -1092,9 +1092,9 @@ namespace Realm {
       
       // start dma system at the very ending of initialization
       // since we need list of local gpus to create channels
-      LegionRuntime::LowLevel::start_dma_system(dma_worker_threads,
-                                                pin_dma_threads, 100
-                                                ,*core_reservations);
+      start_dma_system(dma_worker_threads,
+		       pin_dma_threads, 100
+		       ,*core_reservations);
 
       // now that we've created all the processors/etc., we can try to come up with core
       //  allocations that satisfy everybody's requirements - this will also start up any
@@ -1759,8 +1759,8 @@ namespace Realm {
       // Shutdown all the threads
 
       // threads that cause inter-node communication have to stop first
-      LegionRuntime::LowLevel::stop_dma_worker_threads();
-      LegionRuntime::LowLevel::stop_dma_system();
+      stop_dma_worker_threads();
+      stop_dma_system();
       stop_activemsg_threads();
 
       sampling_profiler.shutdown();

@@ -32,9 +32,6 @@ namespace LegionRuntime {
       // we use a single manager to organize all channels
       static ChannelManager *channel_manager = 0;
 
-      static inline off_t max(off_t a, off_t b) { return (a < b) ? b : a; }
-      static inline size_t umin(size_t a, size_t b) { return (a < b) ? a : b; }
-
       static inline bool cross_ib(off_t start, size_t nbytes, size_t buf_size)
       {
         return (nbytes > 0) && (start / buf_size < (start + nbytes - 1) / buf_size);
@@ -62,7 +59,7 @@ namespace LegionRuntime {
         off_t idx2 = domain_size / block_size * block_size;
         off_t offset;
         if (index < idx2) {
-          offset = calc_mem_loc(alloc_offset, field_start, field_size, elmt_size, block_size, index);
+          offset = Realm::calc_mem_loc(alloc_offset, field_start, field_size, elmt_size, block_size, index);
         } else {
           offset = (alloc_offset + field_start * domain_size + (elmt_size - field_start) * idx2 + (index - idx2) * field_size);
         }
@@ -98,13 +95,13 @@ namespace LegionRuntime {
         while (idx + MAX_GEN_REQS <= nr && offset_idx < oas_vec.size()
         && MAX_GEN_REQS <= available_reqs.size()) {
           if (DIM == 0) {
-            todo = min(max_req_size / oas_vec[offset_idx].size,
+            todo = std::min((coord_t)(max_req_size / oas_vec[offset_idx].size),
                        me->continuous_steps(src_idx, dst_idx));
             nitems = src_str = dst_str = todo;
             nlines = 1;
           }
           else
-            todo = min(max_req_size / oas_vec[offset_idx].size,
+            todo = std::min((coord_t)(max_req_size / oas_vec[offset_idx].size),
                        li->continuous_steps(src_idx, dst_idx,
                                             src_str, dst_str,
                                             nitems, nlines));
@@ -112,7 +109,7 @@ namespace LegionRuntime {
                                - src_idx % src_buf.block_size;
           coord_t dst_in_block = dst_buf.block_size
                                - dst_idx % dst_buf.block_size;
-          todo = min(todo, min(src_in_block, dst_in_block));
+          todo = std::min(todo, std::min(src_in_block, dst_in_block));
           if (todo == 0)
             break;
           coord_t src_start, dst_start;
@@ -124,10 +121,11 @@ namespace LegionRuntime {
                                         src_buf.block_size,
                                         src_buf.buf_size,
                                         domain.get_volume(), src_idx);
-            todo = min(todo, max(0, pre_bytes_write - src_start)
+            todo = std::min(todo, std::max((coord_t)0,
+					   (coord_t)(pre_bytes_write - src_start))
                                     / oas_vec[offset_idx].size);
           } else {
-            src_start = calc_mem_loc(0,
+            src_start = Realm::calc_mem_loc(0,
                                      oas_vec[offset_idx].src_offset,
                                      oas_vec[offset_idx].size,
                                      src_buf.elmt_size,
@@ -141,10 +139,11 @@ namespace LegionRuntime {
                                         dst_buf.block_size,
                                         dst_buf.buf_size,
                                         domain.get_volume(), dst_idx);
-            todo = min(todo, max(0, next_bytes_read + dst_buf.buf_size - dst_start)
+            todo = std::min(todo, std::max((coord_t)0,
+					   (coord_t)(next_bytes_read + dst_buf.buf_size - dst_start))
                                     / oas_vec[offset_idx].size);
           } else {
-            dst_start = calc_mem_loc(0,
+            dst_start = Realm::calc_mem_loc(0,
                                      oas_vec[offset_idx].dst_offset,
                                      oas_vec[offset_idx].size,
                                      dst_buf.elmt_size,
@@ -164,7 +163,7 @@ namespace LegionRuntime {
           // We are crossing ib, fallback to 1d case
           // We don't support 2D, fallback to 1d case
           if (cross_src_ib || cross_dst_ib || !support_2d_xfers(kind))
-            todo = min(todo, nitems);
+            todo = std::min(todo, (coord_t)nitems);
           if ((size_t)todo <= nitems) {
             // fallback to 1d case
             nitems = (size_t)todo;
@@ -182,11 +181,11 @@ namespace LegionRuntime {
               new_req->dim = Request::DIM_1D;
               if (src_buf.is_ib) {
                 src_start = src_start % src_buf.buf_size;
-                req_size = umin(req_size, src_buf.buf_size - src_start);
+                req_size = std::min(req_size, (size_t)(src_buf.buf_size - src_start));
               }
               if (dst_buf.is_ib) {
                 dst_start = dst_start % dst_buf.buf_size;
-                req_size = umin(req_size, dst_buf.buf_size - dst_start);
+                req_size = std::min(req_size, (size_t)(dst_buf.buf_size - dst_start));
               }
               new_req->src_off = src_start;
               new_req->dst_off = dst_start;
@@ -374,11 +373,11 @@ namespace LegionRuntime {
             size_t req_size = nbytes;
             if (src_buf.is_ib) {
               src_start = src_start % src_buf.buf_size;
-              req_size = umin(req_size, src_buf.buf_size - src_start);
+              req_size = std::min(req_size, (size_t)(src_buf.buf_size - src_start));
             }
             if (dst_buf.is_ib) {
               dst_start = dst_start % dst_buf.buf_size;
-              req_size = umin(req_size, dst_buf.buf_size - dst_start);
+              req_size = std::min(req_size, (size_t)(dst_buf.buf_size - dst_start));
             }
             mem_cpy_reqs[idx] = (MemcpyRequest*) available_reqs.front();
             available_reqs.pop();
@@ -840,7 +839,7 @@ namespace LegionRuntime {
               ret = H5Sselect_hyperslab(hdf_req->mem_space_id, H5S_SELECT_SET, ms_start, NULL, count, NULL);
               assert(ret >= 0);
               //pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
-              off_t dst_offset = calc_mem_loc(0, fit->dst_offset, fit->size,
+              off_t dst_offset = Realm::calc_mem_loc(0, fit->dst_offset, fit->size,
                                               dst_buf.elmt_size, dst_buf.block_size, lsi->image_lo[0]);
               hdf_req->mem_base = buf_base + dst_offset;
               hdf_req->nbytes = todo * elemnt_size;
@@ -882,7 +881,7 @@ namespace LegionRuntime {
               ret = H5Sselect_hyperslab(hdf_req->mem_space_id, H5S_SELECT_SET, ms_start, NULL, count, NULL);
               assert(ret >= 0);
               //pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
-              off_t src_offset = calc_mem_loc(0, fit->src_offset, fit->size,
+              off_t src_offset = Realm::calc_mem_loc(0, fit->src_offset, fit->size,
                                               src_buf.elmt_size, src_buf.block_size, lsi->image_lo[0]);
               hdf_req->mem_base = buf_base + src_offset;
               hdf_req->nbytes = todo * elemnt_size;
@@ -1467,7 +1466,7 @@ namespace LegionRuntime {
                 finish_xferdes.push_back(*it2);
                 continue;
               }
-              long nr_got = (*it2)->get_requests(requests, min(nr, max_nr));
+              long nr_got = (*it2)->get_requests(requests, std::min(nr, max_nr));
               long nr_submitted = it->first->submit(requests, nr_got);
               nr -= nr_submitted;
               assert(nr_got == nr_submitted);
