@@ -808,159 +808,16 @@ namespace Realm {
     log_part.info() << "worker " << Thread::self() << " finishing for op queue " << this;
   }
 
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // template instantiation goo
-
-  namespace {
-    struct UntypedWrapper {
-      template <typename T>
-      static UntypedWrapper *wrap(T val);
-    };
-
-    template <typename T>
-    struct TypedWrapper : public UntypedWrapper {
-    public:
-      TypedWrapper(T _val) : val(_val) {}
-      T val;
-    };
-
-    template <typename T>
-    UntypedWrapper *UntypedWrapper::wrap(T val)
-    {
-      return new TypedWrapper<T>(val);
-    }
-
-
-    class NT_Instantiator {
-    public:
-      template <typename NT, typename T>
-      static void demux(int tag, std::vector<void *> *v)
-      {
-	v->push_back(UntypedWrapper::wrap((void (PartitioningMicroOp::*)(SparsityMapImpl<NT::N,T> *,bool))&PartitioningMicroOp::sparsity_map_ready));
-
-	//v->push_back(UntypedWrapper::wrap((SparsityMap<NT::N,T> (*)(const std::vector<ZPoint<NT::N,T> >&, bool))&SparsityMap<NT::N,T>::construct));
-	//v->push_back(UntypedWrapper::wrap((SparsityMap<NT::N,T> (*)(const std::vector<ZRect<NT::N,T> >&, bool))&SparsityMap<NT::N,T>::construct));
-
-	//ZIndexSpace<NT::N,T> i;
-	//std::vector<int> weights;
-	//std::vector<ZIndexSpace<NT::N,T> > list;
-	//i.create_equal_subspaces(0, 0, list, Realm::ProfilingRequestSet());
-	v->push_back(UntypedWrapper::wrap(&ZIndexSpace<NT::N,T>::create_equal_subspaces));
-	//i.create_weighted_subspaces(0, 0, weights, list, Realm::ProfilingRequestSet());
-	v->push_back(UntypedWrapper::wrap(&ZIndexSpace<NT::N,T>::create_weighted_subspaces));
-	//ZIndexSpace<NT::N,T>::compute_unions(list, list, list, Realm::ProfilingRequestSet());
-	v->push_back(UntypedWrapper::wrap((Event (*)(const std::vector<ZIndexSpace<NT::N, T> >&, const std::vector<ZIndexSpace<NT::N, T> >&, std::vector<ZIndexSpace<NT::N, T> >&, const ProfilingRequestSet&, Event))&ZIndexSpace<NT::N,T>::compute_unions));
-	//ZIndexSpace<NT::N,T>::compute_intersections(list, list, list, Realm::ProfilingRequestSet());
-	v->push_back(UntypedWrapper::wrap((Event (*)(const std::vector<ZIndexSpace<NT::N, T> >&, const std::vector<ZIndexSpace<NT::N, T> >&, std::vector<ZIndexSpace<NT::N, T> >&, const ProfilingRequestSet&, Event))&ZIndexSpace<NT::N,T>::compute_intersections));
-	//ZIndexSpace<NT::N,T>::compute_differences(list, list, list, Realm::ProfilingRequestSet());
-	v->push_back(UntypedWrapper::wrap((Event (*)(const std::vector<ZIndexSpace<NT::N, T> >&, const std::vector<ZIndexSpace<NT::N, T> >&, std::vector<ZIndexSpace<NT::N, T> >&, const ProfilingRequestSet&, Event))&ZIndexSpace<NT::N,T>::compute_differences));
-	//ZIndexSpace<NT::N,T>::compute_union(list, i, Realm::ProfilingRequestSet());
-	v->push_back(UntypedWrapper::wrap((Event (*)(const std::vector<ZIndexSpace<NT::N,T> >&, ZIndexSpace<NT::N,T>&, const ProfilingRequestSet&, Event))&ZIndexSpace<NT::N,T>::compute_union));
-	//ZIndexSpace<NT::N,T>::compute_intersection(list, i, Realm::ProfilingRequestSet());
-	v->push_back(UntypedWrapper::wrap((Event (*)(const std::vector<ZIndexSpace<NT::N,T> >&, ZIndexSpace<NT::N,T>&, const ProfilingRequestSet&, Event))&ZIndexSpace<NT::N,T>::compute_intersection));
-      }
-    };
-
-    class NTF_Instantiator {
-    public:
-      template <typename NT, typename T, typename FT>
-      static void demux(int tag, std::vector<void *> *v)
-      {
-	//ZIndexSpace<NT::N,T> i;
-	//std::vector<FieldDataDescriptor<ZIndexSpace<NT::N,T>,FT> > field_data;
-	//std::vector<FT> colors;
-	//std::vector<ZIndexSpace<NT::N,T> > subspaces;
-	//i.create_subspaces_by_field(field_data, colors, subspaces,
-	//			    Realm::ProfilingRequestSet());
-	// v->push_back(UntypedWrapper::wrap((Event (ZIndexSpace<NT::N,T>::*)(const std::vector<FieldDataDescriptor<ZIndexSpace<NT::N,T>,FT> >&, const std::vector<FT>&, std::vector<ZIndexSpace<NT::N,T> >&, const ProfilingRequestSet&, Event) const)&ZIndexSpace<NT::N,T>::template create_subspaces_by_field<FT>));
-      }
-    };
-
-    class NTNT_Instantiator {
-    public:
-      template <typename NT, typename T, typename N2T, typename T2>
-      static void demux(int tag, std::vector<void *> *v)
-      {
-	//std::vector<ZIndexSpace<NT::N, T> > list1;
-	//std::vector<ZIndexSpace<N2T::N, T2> > list2;
-
-	//std::vector<FieldDataDescriptor<ZIndexSpace<NT::N,T>,ZPoint<N2T::N,T2> > > field_ptrs;
-	//list2[0].create_subspaces_by_image(field_ptrs, list1, list2,
-	//				   Realm::ProfilingRequestSet());
-	// v->push_back(UntypedWrapper::wrap((Event (ZIndexSpace<NT::N,T>::*)(const std::vector<FieldDataDescriptor<ZIndexSpace<N2T::N,T2>,
-	// 								   ZPoint<NT::N,T> > >&,
-	// 								   const std::vector<ZIndexSpace<N2T::N,T2> >&,
-	// 								   std::vector<ZIndexSpace<NT::N,T> >&,
-	// 								   const ProfilingRequestSet &,
-	// 								   Event) const)&ZIndexSpace<NT::N,T>::template create_subspaces_by_image<N2T::N,T2>));
-	// v->push_back(UntypedWrapper::wrap((Event (ZIndexSpace<NT::N,T>::*)(const std::vector<FieldDataDescriptor<ZIndexSpace<N2T::N,T2>,
-	// 								   ZRect<NT::N,T> > >&,
-	// 								   const std::vector<ZIndexSpace<N2T::N,T2> >&,
-	// 								   std::vector<ZIndexSpace<NT::N,T> >&,
-	// 								   const ProfilingRequestSet &,
-	// 								   Event) const)&ZIndexSpace<NT::N,T>::template create_subspaces_by_image<N2T::N,T2>));
-	//list2[0].create_subspaces_by_image_with_difference(field_ptrs, list1, list2, list2,
-	//				   Realm::ProfilingRequestSet());
-	// v->push_back(UntypedWrapper::wrap((Event (ZIndexSpace<NT::N,T>::*)(const std::vector<FieldDataDescriptor<ZIndexSpace<N2T::N,T2>,
-	// 								   ZPoint<NT::N,T> > >&,
-	// 								   const std::vector<ZIndexSpace<N2T::N,T2> >&,
-	// 								   const std::vector<ZIndexSpace<NT::N,T> >&,
-	// 								   std::vector<ZIndexSpace<NT::N,T> >&,
-	// 								   const ProfilingRequestSet &,
-	// 								   Event) const)&ZIndexSpace<NT::N,T>::template create_subspaces_by_image_with_difference<N2T::N,T2>));
-
-	//list1[0].create_subspaces_by_preimage(field_ptrs, list2, list1,
-	//				      Realm::ProfilingRequestSet());
-	// v->push_back(UntypedWrapper::wrap((Event (ZIndexSpace<NT::N,T>::*)(const std::vector<FieldDataDescriptor<ZIndexSpace<NT::N,T>,
-	// 								   ZPoint<N2T::N,T2> > >&,
-	// 								   const std::vector<ZIndexSpace<N2T::N,T2> >&,
-	// 								   std::vector<ZIndexSpace<NT::N,T> >&,
-	// 								   const ProfilingRequestSet &,
-	// 								   Event) const)&ZIndexSpace<NT::N,T>::template create_subspaces_by_preimage<N2T::N,T2>));
-					  
-
-	// v->push_back(UntypedWrapper::wrap((Event (ZIndexSpace<NT::N,T>::*)(const std::vector<FieldDataDescriptor<ZIndexSpace<NT::N,T>,
-	// 								   ZRect<N2T::N,T2> > >&,
-	// 								   const std::vector<ZIndexSpace<N2T::N,T2> >&,
-	// 								   std::vector<ZIndexSpace<NT::N,T> >&,
-	// 								   const ProfilingRequestSet &,
-	// 								   Event) const)&ZIndexSpace<NT::N,T>::template create_subspaces_by_preimage<N2T::N,T2>));
-					  
-
-	//list1[0].create_association(field_ptrs, list2[0],
-	//			    Realm::ProfilingRequestSet());
-	v->push_back(UntypedWrapper::wrap((Event (ZIndexSpace<NT::N,T>::*)(const std::vector<FieldDataDescriptor<ZIndexSpace<NT::N,T>,ZPoint<N2T::N,T2> > >&, const ZIndexSpace<N2T::N, T2>&, const ProfilingRequestSet&, Event) const)&ZIndexSpace<NT::N, T>::template create_association<N2T::N, T2>));
-
-	//std::vector<FieldDataDescriptor<ZIndexSpace<NT::N,T>,ZRect<N2T::N,T2> > > field_ranges;
-	//list2[0].create_subspaces_by_image(field_ranges, list1, list2,
-	//				   Realm::ProfilingRequestSet());
-	//list1[0].create_subspaces_by_preimage(field_ranges, list2, list1,
-	//				      Realm::ProfilingRequestSet());
-
-	// also do the field based stuff with point/rect types
-	//NTF_Instantiator::demux<NT, T, ZPoint<N2T::N, T2> >(tag);
-      }
-    };
-
-    // use our dynamic template demux stuff to enumerate all possible
-    //  combinations of template paramters
-    void instantiate_stuff(int tag, std::vector<void *> *v)
-    {
-      NT_TemplateHelper::demux<NT_Instantiator>(tag, tag, v);
-      NTF_TemplateHelper::demux<NTF_Instantiator>(tag, tag, v);
-      NTNT_TemplateHelper::demux<NTNT_Instantiator>(tag, tag, v);
-    }
-  };
-
-  //void (*dummy)(void) __attribute__((unused)) = &InstantiatePartitioningStuff<1,int>::inst_stuff;
-  void (*dummy)(int, std::vector<void *> *) __attribute__((unused)) = &instantiate_stuff;
-  //InstantiatePartitioningStuff<1,int> foo __attribute__((unused));
-
 #define DOIT(N,T) \
+  template class ZIndexSpace<N,T>; \
+  template void PartitioningMicroOp::sparsity_map_ready(SparsityMapImpl<N,T>*, bool); \
   template class OverlapTester<N,T>; \
   template class ComputeOverlapMicroOp<N,T>;
   FOREACH_NT(DOIT)
+
+#define DOIT2(N1,T1,N2,T2) \
+  template Event ZIndexSpace<N1,T1>::create_association(std::vector<FieldDataDescriptor<ZIndexSpace<N1,T1>, ZPoint<N2,T2> > > const&, ZIndexSpace<N2,T2> const&, ProfilingRequestSet const&, Event) const;
+  FOREACH_NTNT(DOIT2)
+
 };
 
