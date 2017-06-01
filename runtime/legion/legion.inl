@@ -2449,8 +2449,8 @@ namespace Legion {
                                          Realm::ZPoint<COLOR_DIM,COLOR_T> color)
     //--------------------------------------------------------------------------
     {
-      return get_index_subspace_internal(IndexPartition(p), &color,
-          Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>());
+      return IndexSpaceT<DIM,T>(get_index_subspace_internal(IndexPartition(p), 
+        &color, Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>()));
     }
 
     //--------------------------------------------------------------------------
