@@ -15,7 +15,7 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.1)
-project(Legion)
+project(Legion VERSION 16.08.0)
 
 #------------------------------------------------------------------------------#
 # Some boilerplate to setup nice output directories
@@ -34,9 +34,6 @@ endif()
 if(NOT CMAKE_RUNTIME_OUTPUT_DIRECTORY)
   set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${Legion_BINARY_DIR}/bin)
 endif()
-
-#library api version, bump from time to time
-set(SOVERSION 1)
 
 #------------------------------------------------------------------------------#
 # More boilerplate to deal with build type and lib type

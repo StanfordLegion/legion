@@ -138,7 +138,7 @@ if(UNIX AND NOT APPLE)
   target_link_libraries(LowLevelRuntime PRIVATE rt)
 endif()
 set_target_properties(LowLevelRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
-set_target_properties(LowLevelRuntime PROPERTIES SOVERSION ${SOVERSION})
+set_target_properties(LowLevelRuntime PROPERTIES VERSION ${Legion_VERSION})
 target_compile_definitions(LowLevelRuntime
   PRIVATE
     $<$<CONFIG:Debug>:DEBUG_REALM>
@@ -238,7 +238,7 @@ add_library(HighLevelRuntime ${MAPPER_SRC} ${HIGH_RUNTIME_SRC})
 target_link_libraries(HighLevelRuntime LowLevelRuntime)
 set_target_properties(HighLevelRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(HighLevelRuntime PROPERTIES OUTPUT_NAME legion)
-set_target_properties(HighLevelRuntime PROPERTIES SOVERSION ${SOVERSION})
+set_target_properties(HighLevelRuntime PROPERTIES VERSION ${Legion_VERSION})
 target_compile_definitions(HighLevelRuntime
   PRIVATE
     ASSUME_UNALLOCABLE
