@@ -17,83 +17,20 @@
 from __future__ import print_function
 import inspect
 import re
+import struct
 import legion_spy
+import gzip
+import io
 
+binary_filetype_pat = re.compile(r"FileType: BinaryLegionProf v: (?P<version>\d+(\.\d+)?)")
 
-
-TASK_INFO_ENC         = 0
-META_INFO_ENC         = 1
-COPY_INFO_ENC         = 2
-FILL_INFO_ENC         = 3
-INST_CREATE_ENC       = 4
-INST_USAGE_ENC        = 5
-INST_TIMELINE_ENC     = 6
-USER_INFO_ENC         = 7
-TASK_WAIT_INFO_ENC    = 8
-META_WAIT_INFO_ENC    = 9
-TASK_KIND_ENC         = 10
-TASK_KIND_OVER_ENC    = 11
-TASK_VARIANT_ENC      = 12
-OPERATION_ENC         = 13
-MULTI_ENC             = 14
-SLICE_OWNER_ENC       = 15
-META_DESC_ENC         = 16
-OP_DESC_ENC           = 17
-PROC_DESC_ENC         = 18
-MEM_DESC_ENC          = 19
-MESSAGE_DESC_ENC      = 20
-MESSAGE_INFO_ENC      = 21
-MAPPER_CALL_DESC_ENC  = 22
-MAPPER_CALL_INFO_ENC  = 23
-RUNTIME_CALL_DESC_ENC = 24
-RUNTIME_CALL_INFO_ENC = 25
-PROFTASK_INFO_ENC     = 26
-
-ENCODINGS = {
-    "Task Info":          {"ENC": TASK_INFO_ENC,         "NUM_ARGS": 7},
-    "Meta Info":          {"ENC": META_INFO_ENC,         "NUM_ARGS": 7},
-    "Copy Info":          {"ENC": COPY_INFO_ENC,         "NUM_ARGS": 8},
-    "Fill Info":          {"ENC": FILL_INFO_ENC,         "NUM_ARGS": 6},
-    "Inst Create":        {"ENC": INST_CREATE_ENC,       "NUM_ARGS": 3},
-    "Inst Usage" :        {"ENC": INST_USAGE_ENC,        "NUM_ARGS": 4},
-    "Inst Timeline":      {"ENC": INST_TIMELINE_ENC,     "NUM_ARGS": 4},
-    "User Info" :         {"ENC": USER_INFO_ENC,         "NUM_ARGS": 4},
-    "Task Wait Info" :    {"ENC": TASK_WAIT_INFO_ENC,    "NUM_ARGS": 5},
-    "Meta Wait Info" :    {"ENC": META_WAIT_INFO_ENC,    "NUM_ARGS": 5},
-    "Task Kind" :         {"ENC": TASK_KIND_ENC,         "NUM_ARGS": 3},
-    "Task Kind Over" :    {"ENC": TASK_KIND_OVER_ENC,    "NUM_ARGS": 3},
-    "Task Variant" :      {"ENC": TASK_VARIANT_ENC,      "NUM_ARGS": 3},
-    "Operation" :         {"ENC": OPERATION_ENC,         "NUM_ARGS": 2},
-    "Multi" :             {"ENC": MULTI_ENC,             "NUM_ARGS": 2},
-    "Slice Owner" :       {"ENC": SLICE_OWNER_ENC,       "NUM_ARGS": 2},
-    "Meta Desc" :         {"ENC": META_DESC_ENC,         "NUM_ARGS": 2},
-    "Op Desc" :           {"ENC": OP_DESC_ENC,           "NUM_ARGS": 2},
-    "Proc Desc" :         {"ENC": PROC_DESC_ENC,         "NUM_ARGS": 2},
-    "Mem Desc" :          {"ENC": MEM_DESC_ENC,          "NUM_ARGS": 3},
-    "Message Desc" :      {"ENC": MESSAGE_DESC_ENC,      "NUM_ARGS": 2},
-    "Message Info" :      {"ENC": MESSAGE_INFO_ENC,      "NUM_ARGS": 4},
-    "Mapper Call Desc" :  {"ENC": MAPPER_CALL_DESC_ENC,  "NUM_ARGS": 2},
-    "Mapper Call Info" :  {"ENC": MAPPER_CALL_INFO_ENC,  "NUM_ARGS": 5},
-    "Runtime Call Desc" : {"ENC": RUNTIME_CALL_DESC_ENC, "NUM_ARGS": 2},
-    "Runtime Call Info" : {"ENC": RUNTIME_CALL_INFO_ENC, "NUM_ARGS": 4},
-    "ProfTask Info" :     {"ENC": PROFTASK_INFO_ENC,     "NUM_ARGS": 4}
-}
-REQUIRED_CALLBACKS = ENCODINGS.keys()
-REQUIRED_CALLBACKS_SET = set(REQUIRED_CALLBACKS)
-
-# Encodings for the different types of profiling. MAKE SURE THIS IS UP TO DATE WITH XXX
-
-
-#         assert(len(callbacks) == len(REQUIRED_CALLBACKS))
-# 
-#         callbacks_valid = True
-#         for callback_name, callback in callbacks.iteritems():
-#             cur_valid = callback_name in REQUIRED_CALLBACKS_SET and \
-#                         callable(callback) and \
-#                         len(inspect.getargspec(callback).args) == ENCODINGS[callback_name]["NUM_ARGS"]
-#             callbacks_valid = callbacks_valid and cur_valid
-#         assert callbacks_valid
-
+def getFileObj(filename):
+    buffer_size = 32768
+    if filename.endswith(".gz"):
+        return io.BufferedReader(gzip.open(filename, mode='rb'), \
+                    buffer_size=buffer_size)
+    else:
+        return open(filename, mode='rb', buffering=buffer_size)
 
 class LegionDeserializer(object):
     """This is a generic class for our deserializer"""
@@ -108,7 +45,7 @@ class LegionDeserializer(object):
         self.state = state
         self.callbacks = callbacks
 
-    def deserialize(self, filepath):
+    def deserialize(self, filename):
         """ The generic deserialize method
 
         @param[filename]: The path to the binary file we want to deserialize
@@ -118,7 +55,7 @@ class LegionDeserializer(object):
 def read_time(string):
     return long(string)/1000
 
-class LegionProfRegexDeserializer(LegionDeserializer):
+class LegionProfASCIIDeserializer(LegionDeserializer):
     """
     This is the serializer for the regex log files
     """
@@ -127,57 +64,59 @@ class LegionProfRegexDeserializer(LegionDeserializer):
     prefix = r'\[(?:[0-9]+) - (?:[0-9a-f]+)\] \{\w+\}\{legion_prof\}: '
 
     patterns = {
-        "Task Info": re.compile(prefix + r'Prof Task Info (?P<op_id>[0-9]+) (?P<vid>[0-9]+) (?P<pid>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)'),
-        "Meta Info": re.compile(prefix + r'Prof Meta Info (?P<op_id>[0-9]+) (?P<hlr>[0-9]+) (?P<pid>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)'),
-        "Copy Info": re.compile(prefix + r'Prof Copy Info (?P<op_id>[0-9]+) (?P<src>[a-f0-9]+) (?P<dst>[a-f0-9]+) (?P<size>[0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)'),
-        "Fill Info": re.compile(prefix + r'Prof Fill Info (?P<op_id>[0-9]+) (?P<dst>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)'),
-        "Inst Create": re.compile(prefix + r'Prof Inst Create (?P<op_id>[0-9]+) (?P<inst>[a-f0-9]+) (?P<create>[0-9]+)'),
-        "Inst Usage": re.compile(prefix + r'Prof Inst Usage (?P<op_id>[0-9]+) (?P<inst>[a-f0-9]+) (?P<mem>[a-f0-9]+) (?P<size>[0-9]+)'),
-        "Inst Timeline": re.compile(prefix + r'Prof Inst Timeline (?P<op_id>[0-9]+) (?P<inst>[a-f0-9]+) (?P<create>[0-9]+) (?P<destroy>[0-9]+)'),
-        "User Info": re.compile(prefix + r'Prof User Info (?P<pid>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<name>[$()a-zA-Z0-9_]+)'),
-        "Task Wait Info": re.compile(prefix + r'Prof Task Wait Info (?P<op_id>[0-9]+) (?P<vid>[0-9]+) (?P<start>[0-9]+) (?P<ready>[0-9]+) (?P<end>[0-9]+)'),
-        "Meta Wait Info": re.compile(prefix + r'Prof Meta Wait Info (?P<op_id>[0-9]+) (?P<hlr>[0-9]+) (?P<start>[0-9]+) (?P<ready>[0-9]+) (?P<end>[0-9]+)'),
-        "Task Kind": re.compile(prefix + r'Prof Task Kind (?P<tid>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+)'),
-        "Task Kind Over": re.compile(prefix + r'Prof Task Kind (?P<tid>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+) (?P<overwrite>[0-1])'),
-        "Task Variant": re.compile(prefix + r'Prof Task Variant (?P<tid>[0-9]+) (?P<vid>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+)'),
-        "Operation": re.compile(prefix + r'Prof Operation (?P<op_id>[0-9]+) (?P<kind>[0-9]+)'),
-        "Multi": re.compile(prefix + r'Prof Multi (?P<op_id>[0-9]+) (?P<tid>[0-9]+)'),
-        "Slice Owner": re.compile(prefix + r'Prof Slice Owner (?P<parent_id>[0-9]+) (?P<op_id>[0-9]+)'),
-        "Meta Desc": re.compile(prefix + r'Prof Meta Desc (?P<hlr>[0-9]+) (?P<name>[a-zA-Z0-9_ ]+)'),
-        "Op Desc": re.compile(prefix + r'Prof Op Desc (?P<kind>[0-9]+) (?P<name>[a-zA-Z0-9_ ]+)'),
-        "Prof Desc": re.compile(prefix + r'Prof Proc Desc (?P<pid>[a-f0-9]+) (?P<kind>[0-9]+)'),
-        "Mem Desc": re.compile(prefix + r'Prof Mem Desc (?P<mem_id>[a-f0-9]+) (?P<kind>[0-9]+) (?P<size>[0-9]+)'),
-        "Message Desc": re.compile(prefix + r'Prof Message Desc (?P<kind>[0-9]+) (?P<desc>[a-zA-Z0-9_ ]+)'),
-        "Message Info": re.compile(prefix + r'Prof Message Info (?P<kind>[0-9]+) (?P<pid>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)'),
-        "Mapper Call Desc": re.compile(prefix + r'Prof Mapper Call Desc (?P<kind>[0-9]+) (?P<desc>[a-zA-Z0-9_ ]+)'),
-        "Mapper Call Info": re.compile(prefix + r'Prof Mapper Call Info (?P<kind>[0-9]+) (?P<pid>[a-f0-9]+) (?P<op_id>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)'),
-        "Runtime Call Desc": re.compile(prefix + r'Prof Runtime Call Desc (?P<kind>[0-9]+) (?P<desc>[a-zA-Z0-9_ ]+)'),
-        "Runtime Call Info": re.compile(prefix + r'Prof Runtime Call Info (?P<kind>[0-9]+) (?P<pid>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)'),
-        "Proftask Info": re.compile(prefix + r'Prof ProfTask Info (?P<pid>[a-f0-9]+) (?P<op_id>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
+        "MessageDesc": re.compile(prefix + r'Prof Message Desc (?P<kind>[0-9]+) (?P<name>[a-zA-Z0-9_ ]+)'),
+        "MapperCallDesc": re.compile(prefix + r'Prof Mapper Call Desc (?P<kind>[0-9]+) (?P<name>[a-zA-Z0-9_ ]+)'),
+        "RuntimeCallDesc": re.compile(prefix + r'Prof Runtime Call Desc (?P<kind>[0-9]+) (?P<name>[a-zA-Z0-9_ ]+)'),
+        "MetaDesc": re.compile(prefix + r'Prof Meta Desc (?P<kind>[0-9]+) (?P<name>[a-zA-Z0-9_ ]+)'),
+        "OpDesc": re.compile(prefix + r'Prof Op Desc (?P<kind>[0-9]+) (?P<name>[a-zA-Z0-9_ ]+)'),
+        "ProcDesc": re.compile(prefix + r'Prof Proc Desc (?P<proc_id>[a-f0-9]+) (?P<kind>[0-9]+)'),
+        "MemDesc": re.compile(prefix + r'Prof Mem Desc (?P<mem_id>[a-f0-9]+) (?P<kind>[0-9]+) (?P<capacity>[0-9]+)'),
+        "TaskKind": re.compile(prefix + r'Prof Task Kind (?P<task_id>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+) (?P<overwrite>[0-1])'),
+        "TaskVariant": re.compile(prefix + r'Prof Task Variant (?P<task_id>[0-9]+) (?P<variant_id>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+)'),
+        "OperationInstance": re.compile(prefix + r'Prof Operation (?P<op_id>[0-9]+) (?P<kind>[0-9]+)'),
+        "MultiTask": re.compile(prefix + r'Prof Multi (?P<op_id>[0-9]+) (?P<task_id>[0-9]+)'),
+        "SliceOwner": re.compile(prefix + r'Prof Slice Owner (?P<parent_id>[0-9]+) (?P<op_id>[0-9]+)'),
+        "TaskWaitInfo": re.compile(prefix + r'Prof Task Wait Info (?P<op_id>[0-9]+) (?P<variant_id>[0-9]+) (?P<wait_start>[0-9]+) (?P<wait_ready>[0-9]+) (?P<wait_end>[0-9]+)'),
+        "MetaWaitInfo": re.compile(prefix + r'Prof Meta Wait Info (?P<op_id>[0-9]+) (?P<lg_id>[0-9]+) (?P<wait_start>[0-9]+) (?P<wait_ready>[0-9]+) (?P<wait_end>[0-9]+)'),
+        "TaskInfo": re.compile(prefix + r'Prof Task Info (?P<op_id>[0-9]+) (?P<variant_id>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)'),
+        "MetaInfo": re.compile(prefix + r'Prof Meta Info (?P<op_id>[0-9]+) (?P<lg_id>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)'),
+        "CopyInfo": re.compile(prefix + r'Prof Copy Info (?P<op_id>[0-9]+) (?P<src>[a-f0-9]+) (?P<dst>[a-f0-9]+) (?P<size>[0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)'),
+        "FillInfo": re.compile(prefix + r'Prof Fill Info (?P<op_id>[0-9]+) (?P<dst>[a-f0-9]+) (?P<create>[0-9]+) (?P<ready>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)'),
+        "InstCreateInfo": re.compile(prefix + r'Prof Inst Create (?P<op_id>[0-9]+) (?P<inst_id>[a-f0-9]+) (?P<create>[0-9]+)'),
+        "InstUsageInfo": re.compile(prefix + r'Prof Inst Usage (?P<op_id>[0-9]+) (?P<inst_id>[a-f0-9]+) (?P<mem_id>[a-f0-9]+) (?P<size>[0-9]+)'),
+        "InstTimelineInfo": re.compile(prefix + r'Prof Inst Timeline (?P<op_id>[0-9]+) (?P<inst_id>[a-f0-9]+) (?P<create>[0-9]+) (?P<destroy>[0-9]+)'),
+        "MessageInfo": re.compile(prefix + r'Prof Message Info (?P<kind>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)'),
+        "MapperCallInfo": re.compile(prefix + r'Prof Mapper Call Info (?P<kind>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<op_id>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)'),
+        "RuntimeCallInfo": re.compile(prefix + r'Prof Runtime Call Info (?P<kind>[0-9]+) (?P<proc_id>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)'),
+        "ProfTaskInfo": re.compile(prefix + r'Prof ProfTask Info (?P<proc_id>[a-f0-9]+) (?P<op_id>[0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+)')
+        # "UserInfo": re.compile(prefix + r'Prof User Info (?P<proc_id>[a-f0-9]+) (?P<start>[0-9]+) (?P<stop>[0-9]+) (?P<name>[$()a-zA-Z0-9_]+)')
     }
     parse_callbacks = {
         "op_id": long,
         "parent_id": long,
         "size": long,
-        "vid": int,
-        "hlr": int,
+        "capacity": long,
+        "variant_id": int,
+        "lg_id": int,
         "uid": int,
         "overwrite": int,
-        "tid": int,
+        "task_id": int,
         "kind": int,
         "opkind": int,
-        "pid": lambda x: int(x, 16),
+        "proc_id": lambda x: int(x, 16),
         "mem_id": lambda x: int(x, 16),
         "src": lambda x: int(x, 16),
         "dst": lambda x: int(x, 16),
-        "inst": lambda x: int(x, 16),
-        "mem": lambda x: int(x, 16),
+        "inst_id": lambda x: int(x, 16),
         "create": read_time,
         "destroy": read_time,
-        "ready": read_time,
         "start": read_time,
+        "ready": read_time,
         "stop": read_time,
         "end": read_time,
+        "wait_start": read_time,
+        "wait_ready": read_time,
+        "wait_end": read_time,
         "name": lambda x: x,
         "desc": lambda x: x
     }
@@ -185,11 +124,11 @@ class LegionProfRegexDeserializer(LegionDeserializer):
     def __init__(self, state, callbacks):
         LegionDeserializer.__init__(self, state, callbacks)
 
-        assert len(callbacks) == len(LegionProfRegexDeserializer.patterns)
+        assert len(callbacks) == len(LegionProfASCIIDeserializer.patterns)
 
         callbacks_valid = True
         for callback_name, callback in callbacks.iteritems():
-            cur_valid = callback_name in LegionProfRegexDeserializer.patterns and \
+            cur_valid = callback_name in LegionProfASCIIDeserializer.patterns and \
                         callable(callback)
             callbacks_valid = callbacks_valid and cur_valid
         assert callbacks_valid
@@ -198,12 +137,20 @@ class LegionProfRegexDeserializer(LegionDeserializer):
         kwargs = m.groupdict()
 
         for key, arg in kwargs.iteritems():
-            kwargs[key] = LegionProfRegexDeserializer.parse_callbacks[key](arg)
+            kwargs[key] = LegionProfASCIIDeserializer.parse_callbacks[key](arg)
         return kwargs
 
-    def parse(self, filepath, verbose):
+    def search_for_spy_data(self, filename):
+        with open(filename, 'rb') as log:
+            for line in log:
+                if legion_spy.config_pat.match(line) or \
+                   legion_spy.detailed_config_pat.match(line):
+                   self.state.has_spy_data = True
+                   break
+
+    def parse(self, filename, verbose):
         skipped = 0
-        with open(filepath, 'rb') as log:
+        with open(filename, 'rb') as log:
             matches = 0
             # Keep track of the first and last times
             first_time = 0L
@@ -215,7 +162,7 @@ class LegionProfRegexDeserializer(LegionDeserializer):
                     self.state.has_spy_data = True
                 matched = False
 
-                for prof_event, pattern in LegionProfRegexDeserializer.patterns.iteritems():
+                for prof_event, pattern in LegionProfASCIIDeserializer.patterns.iteritems():
                     m = pattern.match(line)
                     if m is not None:
                         callback = self.callbacks[prof_event]
@@ -230,6 +177,130 @@ class LegionProfRegexDeserializer(LegionDeserializer):
                     if verbose:
                         print('Skipping line: %s' % line.strip())
         if skipped > 0:
-            print('WARNING: Skipped %d lines in %s' % (skipped, filepath))
+            print('WARNING: Skipped %d lines in %s' % (skipped, filename))
         return matches
 
+class LegionProfBinaryDeserializer(LegionDeserializer):
+
+    preamble_regex = re.compile(r'(?P<name>\w+) {id:(?P<id>\d+)(?P<params>.*)}')
+    params_regex = re.compile(r', (?P<param_name>[^:]+):(?P<param_type>[^:]+):(?P<param_bytes>-?\d+)')
+
+    preamble_data = {}
+    name_to_id = {}
+
+    # XXX: Make sure these are consistent with legion_profiling.h and legion_types.h!
+    fmt_dict = {
+        "ProcID":             "Q", # unsigned long long
+        "MemID":              "Q", # unsigned long long
+        "InstID":             "Q", # unsigned long long
+        "UniqueID":           "Q", # unsigned long long
+        "TaskID":             "I", # unsigned int
+        "bool":               "?", # bool
+        "VariantID":          "L", # unsigned long
+        "unsigned":           "I", # unsigned int
+        "timestamp_t":        "Q", # unsigned long long
+        "unsigned long long": "Q", # unsigned long long
+        "ProcKind":           "i", # int (really an enum so this depends)
+        "MemKind":            "i", # int (really an enum so this depends)
+        "MessageKind":        "i", # int (really an enum so this depends)
+        "MappingCallKind":    "i", # int (really an enum so this depends)
+        "RuntimeCallKind":    "i", # int (really an enum so this depends)
+    }
+
+    def __init__(self, state, callbacks):
+        LegionDeserializer.__init__(self, state, callbacks)
+
+    @staticmethod
+    def create_type_reader(num_bytes, param_type):
+        if param_type == "string":
+            def string_reader(log):
+                string = ""
+                char = log.read(1)
+                while ord(char) != 0:
+                    string += char
+                    char = log.read(1)
+                return string
+            return string_reader
+        else:
+            fmt = LegionProfBinaryDeserializer.fmt_dict[param_type]
+            def reader(log):
+                raw_val = log.read(num_bytes)
+                val = struct.unpack(fmt, raw_val)[0]
+                return val
+            return reader
+
+    def parse_preamble(self, log):
+        log.readline() # filetype
+        while(True):
+            line = log.readline()
+            if line == "\n":
+                break
+
+            m = LegionProfBinaryDeserializer.preamble_regex.match(line)
+            if not m:
+                print("Malformed binary log file. Must contain a valid preamble!")
+                print("Malformed line: '" + line + "'")
+                exit(-1)
+
+            name = m.group('name')
+            _id = int(m.group('id'))
+            params = m.group('params')
+            param_data = []
+            
+            for param_m in LegionProfBinaryDeserializer.params_regex.finditer(params):
+                param_name = param_m.group('param_name')
+                param_type = param_m.group('param_type')
+                param_bytes = int(param_m.group('param_bytes'))
+
+                reader = LegionProfBinaryDeserializer.create_type_reader(param_bytes, param_type)
+
+                param_data.append((param_name, reader))
+
+            LegionProfBinaryDeserializer.preamble_data[_id] = param_data
+            LegionProfBinaryDeserializer.name_to_id[name] = _id
+
+
+        # change the callbacks to be by id
+        new_callbacks = {LegionProfBinaryDeserializer.name_to_id[name]: callback 
+                            for name, callback in self.callbacks.iteritems()}
+        
+        self.callbacks = new_callbacks
+
+
+        # callbacks_valid = True
+        # for callback_name, callback in callbacks.iteritems():
+        #     cur_valid = callback_name in LegionProfASCIIDeserializer.patterns and \
+        #                 callable(callback)
+        #     callbacks_valid = callbacks_valid and cur_valid
+        # assert callbacks_valid
+
+    def parse(self, filename, verbose):
+        print("parsing " + str(filename))
+        matches = 0
+        with getFileObj(filename) as log:
+            self.parse_preamble(log)
+            _id_raw = log.read(4)
+            while _id_raw:
+                matches += 1
+                _id = int(struct.unpack('i', _id_raw)[0])
+                param_data = LegionProfBinaryDeserializer.preamble_data[_id]
+                kwargs = {}
+                for (param_name, reader) in param_data:
+                    val = reader(log)
+                    kwargs[param_name] = val
+                self.callbacks[_id](**kwargs)
+                _id_raw = log.read(4)
+        return matches
+
+def GetFileTypeInfo(filename):
+    filetype = None
+    version = None
+    with getFileObj(filename) as log:
+        line = log.readline().rstrip()
+        m = binary_filetype_pat.match(line)
+        if m is not None:
+            filetype = "binary"
+            version = m.group("version")
+        else:
+            filetype = "ascii" # assume if not binary, it's ascii
+    return filetype, version

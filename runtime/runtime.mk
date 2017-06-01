@@ -342,6 +342,14 @@ ifeq ($(strip $(USE_MPI)),1)
 endif
 
 
+# libz
+USE_ZLIB ?= 1
+ZLIB_LIBNAME ?= z
+ifeq ($(strip $(USE_ZLIB)),1)
+  CC_FLAGS      += -DUSE_ZLIB
+  LEGION_LD_FLAGS += -l$(ZLIB_LIBNAME)
+endif
+
 
 ifeq ($(strip $(DEBUG)),1)
 CC_FLAGS	+= -DDEBUG_REALM -DDEBUG_LEGION -ggdb #-ggdb -Wall
@@ -439,6 +447,7 @@ HIGH_RUNTIME_SRC += $(LG_RT_DIR)/legion/legion.cc \
 		    $(LG_RT_DIR)/legion/legion_trace.cc \
 		    $(LG_RT_DIR)/legion/legion_spy.cc \
 		    $(LG_RT_DIR)/legion/legion_profiling.cc \
+		    $(LG_RT_DIR)/legion/legion_profiling_serializer.cc \
 		    $(LG_RT_DIR)/legion/legion_instances.cc \
 		    $(LG_RT_DIR)/legion/legion_views.cc \
 		    $(LG_RT_DIR)/legion/legion_analysis.cc \

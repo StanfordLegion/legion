@@ -374,10 +374,10 @@ function getMouseOver() {
                        .attr("x", x)
                        .attr("y", y)
                        .attr("class", "desc");
-
-    if ((d.in.length != 0) || (d.out.length != 0) || 
-        (d.children.length !== 0) || (d.parents.length !==0 )) {
-      d3.select(this).style("cursor", "pointer")
+    var depElem = prof_uid_map[d.prof_uid][0];
+    if ((depElem.in.length != 0) || (depElem.out.length != 0) || 
+        (depElem.children.length !== 0) || (depElem.parents.length !==0 )) {
+      d3.select(this).style("cursor", "pointer");
     }
     // descTexts is an array of Texts we will store in the desc view
     var descTexts = [];
@@ -576,16 +576,96 @@ function calculateLayout() {
   });
 }
 
-function getElemXY(elem) {
-  var proc = elem.proc;
-  var level = elem.level;
-  var time = (elem.end - elem.start) / 2 + elem.start;
-  var x = convertToPos(state, time);
+function getElemCoords(elems) {
+  var proc = elems[0].proc;
+  var level = elems[0].level;
+  var startX = convertToPos(state, elems[0].start);
+  var endX = convertToPos(state, elems[elems.length-1].end);
   var endBase = +proc.base;
   var endLevel = endBase + level;
   var y = dependencyLineLevelCalculator(endLevel);
-  return [x, y];
+  return {startX: startX, endX: endX, y: y};
 }
+
+
+function addLine(group, x1, x2, y1, y2, color, dashed) {
+  var line;
+  if (dashed) {
+    line = group.append("line")
+      .attr("x1", x1)
+      .attr("y1", y1)
+      .attr("x2", x2)
+      .attr("y2", y2)
+      .style("stroke", color)
+      .style("stroke-dasharray", "3,3")
+      .style("stroke-width", "1px");
+  } else {
+    line = group.append("line")
+      .attr("x1", x1)
+      .attr("y1", y1)
+      .attr("x2", x2)
+      .attr("y2", y2)
+      .style("stroke", color)
+      .style("stroke-width", "1px");
+  }
+
+  var slope = (y2 - y1) / (x2 - x1);
+  var intercept = y1 - (slope * x1);
+  var triangleRotation =  Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI - 90;
+
+  group.append("line")
+    .attr("x1", x1)
+    .attr("y1", y1)
+    .attr("x2", x2)
+    .attr("y2", y2)
+    .style("stroke", "transparent")
+    .style("stroke-width", "20px")
+    .on("mouseover", function() { 
+      group.append("g")
+      .attr("class", "marker")
+      .append("path")
+        .attr("d", d3.svg.symbol().type("triangle-down").size(20))
+        .style("stroke", color)
+        .style("fill", color);
+    })
+    .on("mousemove", function() {
+      var marker = group.select("g.marker");
+      var px = d3.mouse(this)[0] - 10;
+      var py = d3.mouse(this)[1] - ((slope > 0 ? 1 : -1) * 20);
+      if (px < Math.min(x1, x2)) {
+        px += 20;
+      }
+      if (py < Math.min(y1, y2)) {
+        py += 40;
+      }
+
+      // some linear algebra here
+      var cx = (slope * py + px - slope * intercept) / (slope * slope + 1);
+      var cy = (slope * slope * py + slope * px + intercept) / (slope * slope + 1);
+
+      marker.attr("transform", "translate(" + cx + "," + cy + ") rotate(" + triangleRotation + ")");
+    })
+    .on("mouseout", function() {
+      group.select("g.marker").remove();
+    });
+
+  group.append("circle")
+    .attr("cx", x1)
+    .attr("cy", y1)
+    .attr("fill", "white")
+    .attr("stroke", "black")
+    .attr("r", 2.5)
+    .style("stroke-width", "1px");
+
+  group.append("circle")
+    .attr("cx", x2)
+    .attr("cy", y2)
+    .attr("fill", "white")
+    .attr("stroke", "black")
+    .attr("r", 2.5)
+    .style("stroke-width", "1px");
+}
+
 
 function drawCriticalPath() {
   state.timelineSvg.selectAll("g.critical_path_lines").remove();
@@ -594,82 +674,58 @@ function drawCriticalPath() {
   }
   var depGroup = state.timelineSvg.append("g")
       .attr("class", "critical_path_lines");
-  var prevElem = undefined;
-
   state.critical_path.forEach(function(op) {
     var proc = base_map[op[0] + "," + op[1]]; // set in calculateBases
     if (proc != undefined && proc.visible && proc.enabled && proc.loaded) {
-        var elem = prof_uid_map[op[2]];
-        if (elem != undefined) {
-          var coords = getElemXY(elem)
-          var x = coords[0];
-          var y = coords[1];
-          depGroup.append("circle")
-            .attr("cx", x)
-            .attr("cy", y)
-            .attr("fill", "white")
-            .attr("stroke", "grey")
-            .attr("r", 2.5)
-            .style("stroke-width", "1px");
-          elem.out.forEach(function(dep) {
-            if (dep[2] in state.critical_path_prof_uids) {
-              var depElem = prof_uid_map[dep[2]];
-              var depProc = depElem.proc;
-              if (depElem != undefined && depProc.visible && depProc.enabled && depProc.loaded) { // is the op visible?
-                var depCoords = getElemXY(depElem);
-                var depX = depCoords[0];
-                var depY = depCoords[1];
-                depGroup.append("line")
-                  .style("stroke", "grey")
-                  .attr("x1", depX)
-                  .attr("y1", depY)
-                  .attr("x2", x)
-                  .attr("y2", y)
-                  .style("stroke-width", "1px");
-
-                depGroup.append("circle")
-                  .attr("cx", depX)
-                  .attr("cy", depY)
-                  .attr("fill", "white")
-                  .attr("stroke", "grey")
-                  .attr("r", 2.5)
-                  .style("stroke-width", "1px");
+      var elems = prof_uid_map[op[2]];
+      if (elems != undefined) {
+        var coords = getElemCoords(elems)
+        var startX = coords.startX;
+        var endX = coords.endX;
+        var y = coords.y;
+        elems[0].out.forEach(function(dep) {
+          if (dep[2] in state.critical_path_prof_uids) {
+            var depElems = prof_uid_map[dep[2]];
+            if (depElems != undefined) {
+              var depProc = depElems[0].proc;
+              // is the proc visible?
+              if (depProc.visible && depProc.enabled && depProc.loaded) { 
+                var depCoords = getElemCoords(depElems);
+                var depX = depCoords.endX;
+                var depY = depCoords.y;
+                addLine(depGroup, depX, startX, depY, y, "grey", false);
               }
             }
-          });
-          // Draw parent-child lines
-          var lastChild = undefined;
-          var firstChild = undefined;
-          elem.children.forEach(function(child) {
-            if (child[2] in state.critical_path_prof_uids) {
-              var childElem = prof_uid_map[child[2]];
-              if (childElem !== undefined) {
-                if (lastChild === undefined || childElem.start > lastChild.start) {
-                  lastChild = childElem;
-                }
-                if (firstChild === undefined || childElem.start < firstChild.start) {
-                  firstChild = childElem;
-                }
+          }
+        });
+        // Draw parent-child lines
+        var lastChildCoords = undefined;
+        var firstChildCoords = undefined;
+        elems[0].children.forEach(function(child) {
+          if (child[2] in state.critical_path_prof_uids) {
+            var childElems = prof_uid_map[child[2]];
+            var childCoords = getElemCoords(childElems);
+            if (childElems !== undefined) {
+              if (lastChildCoords === undefined || 
+                  childCoords.startX > lastChildCoords.startX) {
+                lastChildCoords = childCoords;
+              }
+              if (firstChildCoords === undefined || 
+                  childCoords.endX < firstChildCoords.endX) {
+                firstChildCoords = childCoords;
               }
             }
-          });
-          [lastChild, firstChild].forEach(function(child) {
-            if (child !== undefined) {
-              var childCoords = getElemXY(child);
-              depGroup.append("line")
-                .style("stroke", "grey")
-                .style("stroke-dasharray", "3,3")
-                .attr("x1", childCoords[0])
-                .attr("y1", childCoords[1])
-                .attr("x2", x)
-                .attr("y2", y)
-                .style("stroke-width", "1px");
-            }
-          });
-          prevElem = elem;
+          }
+        });
+        if (firstChildCoords !== undefined) {
+          addLine(depGroup, startX, firstChildCoords.startX, 
+                  y, firstChildCoords.y, "grey", true);
         }
-    } else {
-      prevElem = undefined;
+        if (lastChildCoords !== undefined) {
+          addLine(depGroup, lastChildCoords.endX, endX,
+                   lastChildCoords.y, y, "grey", true);
+        }
+      }
     }
   });
 }
@@ -681,75 +737,46 @@ function drawDependencies() {
       !timelineEvent.proc.visible || !timelineEvent.proc.enabled) {
     return; // don't draw in this case, the src isn't present
   }
-  var startTime = (timelineEvent.end - timelineEvent.start) / 2 
-                  + timelineEvent.start;
-  var startX = convertToPos(state, startTime);
-  var startLevel = timelineEvent.proc.base + timelineEvent.level;
-  var startY = dependencyLineLevelCalculator(startLevel);
+  var srcElems = prof_uid_map[timelineEvent.prof_uid];
+  timelineEvent = srcElems[0]; // only the first elem will have deps and children
+  var srcCoords = getElemCoords(srcElems);
+  var srcStartX = srcCoords.startX;
+  var srcEndX = srcCoords.endX;
+  var srcY = srcCoords.y;
   var depGroup = state.timelineSvg.append("g")
       .attr("class", "dependencies");
 
-  var drewOne = false;
-
-  var addDependency = function(dep, dashed) {
+  var addDependency = function(dep, dir, dashed) {
     var depProc = base_map[dep[0] + "," + dep[1]]; // set in calculateBases
     if (depProc.visible && depProc.enabled) {
-      var depElement = prof_uid_map[dep[2]];
-      if (depElement != undefined) {
-        drewOne = true;
-        var level = depElement.level;
-        var time = (depElement.end - depElement.start) / 2 + depElement.start;
-        var endX = convertToPos(state, time);
-        var endBase = +depProc.base;
-        var endLevel = endBase + level;
-        var endY = dependencyLineLevelCalculator(endLevel);
-        if (dashed) {
-          depGroup.append("line")
-            .style("stroke", "black")
-            .style("stroke-dasharray", "3,3")
-            .attr("x1", startX)
-            .attr("y1", startY)
-            .attr("x2", endX)
-            .attr("y2", endY)
-            .style("stroke-width", "1px");
-        } else {
-          depGroup.append("line")
-            .style("stroke", "black")
-            .attr("x1", startX)
-            .attr("y1", startY)
-            .attr("x2", endX)
-            .attr("y2", endY)
-            .style("stroke-width", "1px");
+      var depElems = prof_uid_map[dep[2]];
+      if (depElems != undefined) {
+        console.log(dir);
+        var depCoords = getElemCoords(depElems);
+        var dstY = depCoords.y;
+        if (dir === "in") {
+          addLine(depGroup, srcEndX, depCoords.startX, srcY, dstY, "black", dashed);
+        } else if (dir === "out") {
+          addLine(depGroup, depCoords.endX, srcStartX, dstY, srcY, "black", dashed);
+        } else if (dir === "parent") {
+          addLine(depGroup, depCoords.startX, srcStartX, dstY, srcY, "black", dashed);
+          addLine(depGroup, srcEndX, depCoords.endX, srcY, dstY, "black", dashed);
+        } else if (dir === "child") {
+          addLine(depGroup, srcStartX, depCoords.startX, srcY, dstY, "black", dashed);
+          addLine(depGroup, depCoords.endX, srcEndX, dstY, srcY, "black", dashed);
         }
 
-        depGroup.append("circle")
-          .attr("cx", endX)
-          .attr("cy", endY)
-          .attr("fill", "white")
-          .attr("stroke", "black")
-          .attr("r", 2.5)
-          .style("stroke-width", "1px");
       }
     }
   }
 
   if (state.drawDeps) {
-    timelineEvent.in.forEach(function(dep) {addDependency(dep, false)});
-    timelineEvent.out.forEach(function(dep) {addDependency(dep, false)});
+    timelineEvent.in.forEach(function(dep) {addDependency(dep, "in", false)});
+    timelineEvent.out.forEach(function(dep) {addDependency(dep, "out", false)});
   }
   if (state.drawChildren) {
-    timelineEvent.children.forEach(function(dep) {addDependency(dep, true)});
-    timelineEvent.parents.forEach(function(dep) {addDependency(dep, true)});
-  }
-
-  if (drewOne) {
-    depGroup.append("circle")
-      .attr("cx", startX)
-      .attr("cy", startY)
-      .attr("fill", "white")
-      .attr("stroke", "black")
-      .attr("r", 2.5)
-      .style("stroke-width", "1px");
+    timelineEvent.parents.forEach(function(dep) {addDependency(dep, "parent", true)});
+    timelineEvent.children.forEach(function(dep) {addDependency(dep, "child", true)});
   }
 }
 
@@ -770,7 +797,9 @@ function timelineElementStrokeCalculator(elem) {
   return false;
 }
 
-function timelineEventMouseDown(timelineEvent) {
+function timelineEventMouseDown(_timelineEvent) {
+  // only the first event of this uid will have information
+  var timelineEvent = prof_uid_map[_timelineEvent.prof_uid][0];
   var hasDependencies = ((timelineEvent.in.length != 0) || 
                          (timelineEvent.out.length != 0));
 
@@ -912,6 +941,11 @@ function calculateVisibileLevels() {
     }
   });
   return levels;
+}
+
+function is_proc(proc) {
+  // the full text of this proc should start with 0x1d to be a processor
+  return /0x1d/.exec(proc.full_text) !== undefined;
 }
 
 function get_node_id(text) {
@@ -1780,7 +1814,11 @@ function load_proc_timeline(proc) {
           state.processorData[proc_name][d.level] = [d];
         }
         if (d.prof_uid != undefined && d.prof_uid !== "") {
-          prof_uid_map[d.prof_uid] = d;
+          if (d.prof_uid in prof_uid_map) {
+            prof_uid_map[d.prof_uid].push(d);
+          } else {
+            prof_uid_map[d.prof_uid] = [d];
+          }
         }
       }
       proc.loaded = true;
