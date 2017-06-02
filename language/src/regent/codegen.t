@@ -68,14 +68,25 @@ local codegen = {}
 local c = std.c
 
 local context = {}
-context.__index = context
+
+function context:__index(field)
+  local value = context[field]
+  if value ~= nil then
+    return value
+  end
+  error("context has no field '" .. field .. "' (in lookup)", 2)
+end
+
+function context:__newindex(field, value)
+  error("context has no field '" .. field .. "' (in assignment)", 2)
+end
 
 function context:new_local_scope(divergence, must_epoch, must_epoch_point)
   assert(not (self.must_epoch and must_epoch))
-  divergence = self.divergence or divergence
-  must_epoch = self.must_epoch or must_epoch
-  must_epoch_point = self.must_epoch_point or must_epoch_point
-  assert((must_epoch == nil) == (must_epoch_point == nil))
+  divergence = self.divergence or divergence or false
+  must_epoch = self.must_epoch or must_epoch or false
+  must_epoch_point = self.must_epoch_point or must_epoch_point or false
+  assert((must_epoch == false) == (must_epoch_point == false))
   return setmetatable({
     expected_return_type = self.expected_return_type,
     constraints = self.constraints,
@@ -102,9 +113,9 @@ function context:new_task_scope(expected_return_type, constraints, leaf, task_me
     task = task,
     task_meta = task_meta,
     leaf = leaf,
-    divergence = nil,
-    must_epoch = nil,
-    must_epoch_point = nil,
+    divergence = false,
+    must_epoch = false,
+    must_epoch_point = false,
     context = ctx,
     runtime = runtime,
     ispaces = symbol_table.new_global_scope({}),
