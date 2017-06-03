@@ -90,6 +90,7 @@ void top_level_task(const Task *task,
     int input = i + 10;
     arg_map.set_point(DomainPoint::from_point<1>(Point<1>(i)),
         TaskArgument(&input,sizeof(input)));
+      printf("point %d input %d sizeof(input) %lu\n", i, input, sizeof(input));
   }
   // Legion supports launching an array of tasks with a 
   // single call.  We call these index tasks as we are launching
@@ -141,6 +142,7 @@ int index_space_task(const Task *task,
   printf("Hello world from task %lld!\n", task->index_point.point_data[0]);
   // Values passed through an argument map are available 
   // through the local_args and local_arglen fields.
+    printf("task->local_arglen = %lu\n", task->local_arglen);
   assert(task->local_arglen == sizeof(int));
   int input = *((const int*)task->local_args);
   return (2*input);
