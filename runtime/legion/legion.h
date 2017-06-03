@@ -1870,6 +1870,8 @@ namespace Legion {
        * method instead. You can silence warnings about this blocking
        * call with the 'silence_warnings' parameter.
        */
+      LEGION_DEPRECATED("Requesting generic accessors are now deprecated. "
+                        "A field accessor should be requested instead.")
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic> 
           get_accessor(bool silience_warnings = false) const;
@@ -2535,6 +2537,8 @@ namespace Legion {
        * @param point the point of the task in the index space
        * @return logical region to be used by the child task
        */
+      LEGION_DEPRECATED("The interface for projection functors has been "
+                        "updated. Please use the new 'project' methods.")
       virtual LogicalRegion project(Context ctx, Task *task,
                                     unsigned index,
                                     LogicalRegion upper_bound,
@@ -2550,6 +2554,8 @@ namespace Legion {
        * @param point the point of the task in the index space
        * @return logical region to be used by the child task
        */
+      LEGION_DEPRECATED("The interface for projection functors has been "
+                        "updated. Please use the new 'project' methods.")
       virtual LogicalRegion project(Context ctx, Task *task, 
                                     unsigned index,
                                     LogicalPartition upper_bound,
@@ -2764,7 +2770,7 @@ namespace Legion {
 					    int part_color = AUTO_GENERATE_ID);
 
       /**
-       * @deprectated 
+       * @deprecated 
        * @see create_partition_by_field instead
        * Create an index partitioning from an existing field
        * in a physical instance.  This requires that the field
@@ -3230,6 +3236,7 @@ namespace Legion {
       //------------------------------------------------------------------------
       // Index Tree Traversal Operations
       //------------------------------------------------------------------------
+      ///@{
       /**
        * Return the index partitioning of an index space 
        * with the assigned color.
@@ -3246,6 +3253,9 @@ namespace Legion {
       IndexPartition get_index_partition(IndexSpace parent, Color color);
       IndexPartition get_index_partition(IndexSpace parent, 
                                          const DomainPoint &color);
+      ///@}
+      
+      ///@{
       /**
        * Return true if the index space has an index partition
        * with the specified color.
@@ -3259,7 +3269,9 @@ namespace Legion {
       // Context free
       bool has_index_partition(IndexSpace parent,
                                const DomainPoint &color);
+      ///@}
 
+      ///@{
       /**
        * Return the index subspace of an index partitioning
        * with the specified color.
@@ -3276,7 +3288,9 @@ namespace Legion {
       IndexSpace get_index_subspace(IndexPartition p, Color color);
       IndexSpace get_index_subspace(IndexPartition p,
                                     const DomainPoint &color);
+      ///@}
 
+      ///@{
       /**
        * Return true if the index partition has an index subspace
        * with the specified color.
@@ -3290,7 +3304,9 @@ namespace Legion {
       // Context free
       bool has_index_subspace(IndexPartition p,
                               const DomainPoint &color);
+      ///@}
 
+      ///@{
       /**
        * Return if the given index space is represented by 
        * multiple domains or just a single one. If multiple
@@ -3303,7 +3319,9 @@ namespace Legion {
       bool has_multiple_domains(Context ctx, IndexSpace handle);
       // Context free
       bool has_multiple_domains(IndexSpace handle);
+      ///@}
 
+      ///@{
       /**
        * Return the domain corresponding to the
        * specified index space if it exists
@@ -3314,7 +3332,9 @@ namespace Legion {
       Domain get_index_space_domain(Context ctx, IndexSpace handle);
       // Context free
       Domain get_index_space_domain(IndexSpace handle);
+      ///@}
 
+      ///@{
       /**
        * Return the domains that represent the index space.
        * While the previous call only works when there is a
@@ -3329,7 +3349,9 @@ namespace Legion {
       // Context free
       void get_index_space_domains(IndexSpace handle,
                                    std::vector<Domain> &domains);
+      ///@}
 
+      ///@{
       /**
        * Return a domain that represents the color space
        * for the specified partition.
@@ -3340,7 +3362,9 @@ namespace Legion {
       Domain get_index_partition_color_space(Context ctx, IndexPartition p);
       // Context free
       Domain get_index_partition_color_space(IndexPartition p);
+      ///@}
 
+      ///@{
       /**
        * Return a set that contains the colors of all
        * the partitions of the index space.  It is unlikely
@@ -3359,7 +3383,9 @@ namespace Legion {
                                             std::set<Color> &colors);
       void get_index_space_partition_colors(IndexSpace sp,
                                             std::set<DomainPoint> &colors);
+      ///@}
 
+      ///@{
       /**
        * Return whether a given index partition is disjoint
        * @param ctx enclosing task context
@@ -3369,7 +3395,9 @@ namespace Legion {
       bool is_index_partition_disjoint(Context ctx, IndexPartition p);
       // Context free
       bool is_index_partition_disjoint(IndexPartition p);
+      ///@}
 
+      ///@{
       /**
        * Return whether a given index partition is complete
        * @param ctx enclosing task context
@@ -3379,6 +3407,7 @@ namespace Legion {
       bool is_index_partition_complete(Context ctx, IndexPartition p);
       // Context free
       bool is_index_partition_complete(IndexPartition p);
+      ///@}
 
       /**
        * Get an index subspace from a partition with a given
@@ -3392,6 +3421,7 @@ namespace Legion {
       IndexSpace get_index_subspace(Context ctx, IndexPartition p, 
                                 LegionRuntime::Arrays::Point<DIM> color_point);
 
+      ///@{
       /**
        * Return the color for the corresponding index space in
        * its member partition.  If it is a top-level index space
@@ -3405,7 +3435,9 @@ namespace Legion {
       // Context free
       Color get_index_space_color(IndexSpace handle);
       DomainPoint get_index_space_color_point(IndexSpace handle);
+      ///@}
 
+      ///@{
       /**
        * Return the color for the corresponding index partition in
        * in relation to its parent logical region.
@@ -3419,7 +3451,9 @@ namespace Legion {
       // Context free
       Color get_index_partition_color(IndexPartition handle);
       DomainPoint get_index_partition_color_point(IndexPartition handle);
+      ///@}
 
+      ///@{
       /**
        * Return the index space parent for the given index partition.
        * @param ctx enclosing task context
@@ -3429,7 +3463,9 @@ namespace Legion {
       IndexSpace get_parent_index_space(Context ctx, IndexPartition handle);
       // Context free
       IndexSpace get_parent_index_space(IndexPartition handle);
+      ///@}
 
+      ///@{
       /**
        * Returns true if the given index space has a parent partition.
        * @param ctx enclosing task context
@@ -3439,7 +3475,9 @@ namespace Legion {
       bool has_parent_index_partition(Context ctx, IndexSpace handle);
       // Context free
       bool has_parent_index_partition(IndexSpace handle);
+      ///@}
 
+      ///@{
       /**
        * Returns the parent partition for the given index space.
        * Use the previous call to check to see if a parent actually exists.
@@ -3450,7 +3488,9 @@ namespace Legion {
       IndexPartition get_parent_index_partition(Context ctx, IndexSpace handle);
       // Context free
       IndexPartition get_parent_index_partition(IndexSpace handle);
+      ///@}
 
+      ///@{
       /**
        * Return the depth in the index space tree of the given index space.
        * @param ctx enclosing task context
@@ -3460,7 +3500,9 @@ namespace Legion {
       unsigned get_index_space_depth(Context ctx, IndexSpace handle);
       // Context free
       unsigned get_index_space_depth(IndexSpace handle);
+      ///@}
 
+      ///@{
       /**
        * Return the depth in the index space tree of the given index partition.
        * @param ctx enclosing task context
@@ -3470,6 +3512,7 @@ namespace Legion {
       unsigned get_index_partition_depth(Context ctx, IndexPartition handle);
       // Context free
       unsigned get_index_partition_depth(IndexPartition handle);
+      ///@}
     public:
       //------------------------------------------------------------------------
       // Safe Cast Operations
@@ -3512,6 +3555,7 @@ namespace Legion {
        */
       void destroy_field_space(Context ctx, FieldSpace handle);
 
+      ///@{
       /**
        * Get the size of a specific field within field space.
        * @param ctx enclosing task context
@@ -3522,7 +3566,9 @@ namespace Legion {
       size_t get_field_size(Context ctx, FieldSpace handle, FieldID fid);
       // Context free
       size_t get_field_size(FieldSpace handle, FieldID fid);
+      ///@}
 
+      ///@{
       /**
        * Get the IDs of the fields currently allocated in a field space.
        * @param ctx enclosing task context
@@ -3534,7 +3580,9 @@ namespace Legion {
       // Context free
       void get_field_space_fields(FieldSpace handle,
                                   std::vector<FieldID> &fields);
+      ///@}
 
+      ///@{
       /**
        * Get the IDs of the fields currently allocated in a field space.
        * @param ctx enclosing task context
@@ -3546,6 +3594,7 @@ namespace Legion {
       // Context free
       void get_field_space_fields(FieldSpace handle,
                                   std::set<FieldID> &fields);
+      ///@}
     public:
       //------------------------------------------------------------------------
       // Logical Region Operations
@@ -3580,6 +3629,7 @@ namespace Legion {
       //------------------------------------------------------------------------
       // Logical Region Tree Traversal Operations
       //------------------------------------------------------------------------
+      ///@{
       /**
        * Return the logical partition instance of the given index partition
        * in the region tree for the parent logical region.
@@ -3594,7 +3644,9 @@ namespace Legion {
       // Context free
       LogicalPartition get_logical_partition(LogicalRegion parent,
                                              IndexPartition handle);
+      ///@}
       
+      ///@{
       /**
        * Return the logical partition of the logical region parent with
        * the specified color.
@@ -3614,7 +3666,9 @@ namespace Legion {
                                                       Color c);
       LogicalPartition get_logical_partition_by_color(LogicalRegion parent,
                                                       const DomainPoint &c);
+      ///@}
 
+      ///@{
       /**
        * Return true if the logical region has a logical partition with
        * the specified color.
@@ -3629,7 +3683,9 @@ namespace Legion {
       // Context free
       bool has_logical_partition_by_color(LogicalRegion parent,
                                           const DomainPoint &c);
+      ///@}
       
+      ///@{
       /**
        * Return the logical partition identified by the triple of index
        * partition, field space, and region tree ID.
@@ -3647,7 +3703,9 @@ namespace Legion {
       LogicalPartition get_logical_partition_by_tree(IndexPartition handle, 
                                                      FieldSpace fspace, 
                                                      RegionTreeID tid);
+      ///@}
 
+      ///@{
       /**
        * Return the logical region instance of the given index space 
        * in the region tree for the parent logical partition.
@@ -3662,7 +3720,9 @@ namespace Legion {
       // Context free
       LogicalRegion get_logical_subregion(LogicalPartition parent, 
                                           IndexSpace handle);
+      ///@}
 
+      ///@{
       /**
        * Return the logical region of the logical partition parent with
        * the specified color.
@@ -3682,7 +3742,9 @@ namespace Legion {
                                                    Color c);
       LogicalRegion get_logical_subregion_by_color(LogicalPartition parent,
                                                    const DomainPoint &c);
+      ///@}
 
+      ///@{
       /**
        * Return true if the logical partition has a logical region with
        * the specified color.
@@ -3697,7 +3759,9 @@ namespace Legion {
       // Context free
       bool has_logical_subregion_by_color(LogicalPartition parent,
                                           const DomainPoint &c);
+      ///@}
 
+      ///@{
       /**
        * Return the logical partition identified by the triple of index
        * space, field space, and region tree ID.
@@ -3715,7 +3779,9 @@ namespace Legion {
       LogicalRegion get_logical_subregion_by_tree(IndexSpace handle, 
                                                   FieldSpace fspace, 
                                                   RegionTreeID tid);
+      ///@}
 
+      ///@{
       /**
        * Return the color for the logical region corresponding to
        * its location in the parent partition.  If the region is a
@@ -3730,7 +3796,9 @@ namespace Legion {
       // Context free versions
       Color get_logical_region_color(LogicalRegion handle);
       DomainPoint get_logical_region_color_point(LogicalRegion handle);
+      ///@}
 
+      ///@{
       /**
        * Return the color for the logical partition corresponding to
        * its location relative to the parent logical region.
@@ -3744,7 +3812,9 @@ namespace Legion {
       // Context free versions
       Color get_logical_partition_color(LogicalPartition handle);
       DomainPoint get_logical_partition_color_point(LogicalPartition handle);
+      ///@}
 
+      ///@{
       /**
        * Return the parent logical region for a given logical partition.
        * @param ctx enclosing task context
@@ -3755,7 +3825,9 @@ namespace Legion {
                                               LogicalPartition handle);
       // Context free
       LogicalRegion get_parent_logical_region(LogicalPartition handle);
+      ///@}
 
+      ///@{
       /**
        * Return true if the logical region has a parent logical partition.
        * @param ctx enclosing task context
@@ -3765,7 +3837,9 @@ namespace Legion {
       bool has_parent_logical_partition(Context ctx, LogicalRegion handle);
       // Context free
       bool has_parent_logical_partition(LogicalRegion handle);
+      ///@}
 
+      ///@{
       /**
        * Return the parent logical partition for a logical region.
        * @param ctx enclosing task context
@@ -3776,6 +3850,7 @@ namespace Legion {
                                                     LogicalRegion handle);
       // Context free
       LogicalPartition get_parent_logical_partition(LogicalRegion handle);
+      ///@}
     public:
       //------------------------------------------------------------------------
       // Allocator and Argument Map Operations 
@@ -3797,13 +3872,14 @@ namespace Legion {
       FieldAllocator create_field_allocator(Context ctx, FieldSpace handle);
 
       /**
-       * @deprectated
+       * @deprecated
        * Create an argument map in the given context.  This method
        * is deprecated as argument maps can now be created directly
        * by a simple declaration.
        * @param ctx enclosing task context
        * @return a new argument map
        */
+      LEGION_DEPRECATED("ArgumentMap can be constructed directly.")
       ArgumentMap create_argument_map(Context ctx);
     public:
       //------------------------------------------------------------------------
@@ -3862,6 +3938,8 @@ namespace Legion {
        * @param tag mapping tag to be passed to any mapping calls
        * @return future representing return value of the task
        */
+      LEGION_DEPRECATED("Launching tasks should be done with the new task "
+                        "launcher interface.")
       Future execute_task(Context ctx, 
                           Processor::TaskFuncID task_id,
                           const std::vector<IndexSpaceRequirement> &indexes,
@@ -3890,6 +3968,8 @@ namespace Legion {
        * @param tag mapping tag to be passed to any mapping calls
        * @return future map containing results for all tasks
        */
+      LEGION_DEPRECATED("Launching tasks should be done with the new task "
+                        "launcher interface.")
       FutureMap execute_index_space(Context ctx, 
                           Processor::TaskFuncID task_id,
                           const Domain domain,
@@ -3924,6 +4004,8 @@ namespace Legion {
        * @param tag mapping tag to be passed to any mapping calls
        * @return future containing reduced return value of all tasks
        */
+      LEGION_DEPRECATED("Launching tasks should be done with the new task "
+                        "launcher interface.")
       Future execute_index_space(Context ctx, 
                           Processor::TaskFuncID task_id,
                           const Domain domain,
@@ -4173,6 +4255,8 @@ namespace Legion {
        * @param mode the access mode for attaching the file
        * @return a new physical instance corresponding to the HDF5 file
        */
+      LEGION_DEPRECATED("Attaching specific HDF5 file type is deprecated "
+                        "in favor of generic attach launcher interface.")
       PhysicalRegion attach_hdf5(Context ctx, const char *file_name,
                                  LogicalRegion handle, LogicalRegion parent, 
                                  const std::map<FieldID,const char*> &field_map,
@@ -4194,6 +4278,8 @@ namespace Legion {
        * @param ctx enclosing task context 
        * @param region the physical region for an HDF5 file to detach
        */
+      LEGION_DEPRECATED("Detaching specific HDF5 file type is deprecated "
+                        "in favor of generic detach interface.")
       void detach_hdf5(Context ctx, PhysicalRegion region);
 
       /**
@@ -4202,6 +4288,8 @@ namespace Legion {
        * attach_hdf5 operation, except that the file has exact same data format
        * as in-memory physical region. Data lays out as SOA in file.
        */
+      LEGION_DEPRECATED("Attaching generic file type is deprecated "
+                        "in favor of generic attach launcher interface.")
       PhysicalRegion attach_file(Context ctx, const char *file_name,
                                  LogicalRegion handle, LogicalRegion parent,
                                  const std::vector<FieldID> &field_vec,
@@ -4212,6 +4300,8 @@ namespace Legion {
        * Detach an normal file. THis detach operation is similar to
        * detach_hdf5
        */
+      LEGION_DEPRECATED("Detaching generic file type is deprecated "
+                        "in favor of generic detach interface.")
       void detach_file(Context ctx, PhysicalRegion region);
     public:
       //------------------------------------------------------------------------
@@ -4601,6 +4691,8 @@ namespace Legion {
        * tunable value. It will assume that the resulting tunable 
        * future can be interpreted as an integer.
        */
+      LEGION_DEPRECATED("Tunable values should now be obtained via the "
+                        "generic interface that returns a future result.")
       int get_tunable_value(Context ctx, TunableID tid, 
                             MapperID mapper = 0, MappingTagID tag = 0);
     public:
@@ -5127,6 +5219,22 @@ namespace Legion {
       void replace_default_mapper(Mapping::Mapper *mapper, 
                                   Processor proc = Processor::NO_PROC);
 
+    public:
+      /**
+       * Dynamically generate a unique projection ID for use across the machine
+       * @reutrn a ProjectionID that is globally unique across the machine
+       */
+      ProjectionID generate_dynamic_projection_id(void);
+
+      /**
+       * Statically generate a unique Projection ID for use across the machine.
+       * This can only be called prior to the runtime starting. It must be
+       * invoked symmetrically across all the nodes in the machine prior
+       * to starting the runtime.
+       * @return a ProjectionID that is globally unique across the machine
+       */
+      static ProjectionID generate_static_projection_id(void);
+
       /**
        * Register a projection functor for handling projection
        * queries. The ProjectionID must be non-zero because 
@@ -5424,6 +5532,8 @@ namespace Legion {
        * the application.
        * @param callback function pointer to the callback function to be run
        */
+      LEGION_DEPRECATED("Legion now supports multiple registration callbacks "
+                        "added via the add_registration_callback method.") 
       static void set_registration_callback(RegistrationCallbackFnptr callback);
 
       /**
@@ -5727,6 +5837,8 @@ namespace Legion {
       template<typename T,
         T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                       Context, Runtime*)>
+      LEGION_DEPRECATED("Task registration should be done with "
+                        "a TaskVariantRegistrar") 
       static TaskID register_legion_task(TaskID id, Processor::Kind proc_kind,
                                          bool single, bool index, 
                                          VariantID vid = AUTO_GENERATE_ID,
@@ -5748,6 +5860,8 @@ namespace Legion {
       template<
         void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                          Context, Runtime*)>
+      LEGION_DEPRECATED("Task registration should be done with "
+                        "a TaskVariantRegistrar")
       static TaskID register_legion_task(TaskID id, Processor::Kind proc_kind,
                                          bool single, bool index,
                                          VariantID vid = AUTO_GENERATE_ID,
@@ -5771,6 +5885,8 @@ namespace Legion {
       template<typename T, typename UDT,
         T (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                       Context, Runtime*, const UDT&)>
+      LEGION_DEPRECATED("Task registration should be done with "
+                        "a TaskVariantRegistrar")
       static TaskID register_legion_task(TaskID id, Processor::Kind proc_kind,
                                          bool single, bool index,
                                          const UDT &user_data,
@@ -5795,6 +5911,8 @@ namespace Legion {
       template<typename UDT,
         void (*TASK_PTR)(const Task*,const std::vector<PhysicalRegion>&,
                          Context, Runtime*, const UDT&)>
+      LEGION_DEPRECATED("Task registration should be done with "
+                        "a TaskVariantRegistrar")
       static TaskID register_legion_task(TaskID id, Processor::Kind proc_kind,
                                          bool single, bool index,
                                          const UDT &user_data,

@@ -52,19 +52,19 @@ namespace Legion {
 
     // If you add a logger, update the LEGION_EXTERN_LOGGER_DECLARATIONS
     // macro in legion_types.h
-    LegionRuntime::Logger::Category log_run("runtime");
-    LegionRuntime::Logger::Category log_task("tasks");
-    LegionRuntime::Logger::Category log_index("index_spaces");
-    LegionRuntime::Logger::Category log_field("field_spaces");
-    LegionRuntime::Logger::Category log_region("regions");
-    LegionRuntime::Logger::Category log_inst("instances");
-    LegionRuntime::Logger::Category log_variant("variants");
-    LegionRuntime::Logger::Category log_allocation("allocation");
-    LegionRuntime::Logger::Category log_prof("legion_prof");
-    LegionRuntime::Logger::Category log_garbage("legion_gc");
-    LegionRuntime::Logger::Category log_shutdown("shutdown");
+    Realm::Logger log_run("runtime");
+    Realm::Logger log_task("tasks");
+    Realm::Logger log_index("index_spaces");
+    Realm::Logger log_field("field_spaces");
+    Realm::Logger log_region("regions");
+    Realm::Logger log_inst("instances");
+    Realm::Logger log_variant("variants");
+    Realm::Logger log_allocation("allocation");
+    Realm::Logger log_prof("legion_prof");
+    Realm::Logger log_garbage("legion_gc");
+    Realm::Logger log_shutdown("shutdown");
     namespace LegionSpy {
-      LegionRuntime::Logger::Category log_spy("legion_spy");
+      Realm::Logger log_spy("legion_spy");
     };
 
 #ifdef ENABLE_LEGION_TLS
@@ -110,7 +110,7 @@ namespace Legion {
     {
       if ((future_map != NULL) && 
             future_map->remove_base_gc_ref(FUTURE_HANDLE_REF))
-        legion_delete(future_map);
+        delete (future_map);
     }
 
     //--------------------------------------------------------------------------
@@ -166,7 +166,7 @@ namespace Legion {
       {
         equivalent = false;
         if (future_map->remove_base_gc_ref(FUTURE_HANDLE_REF))
-          legion_delete(future_map);
+          delete (future_map);
         future_map = NULL;
       }
     }
@@ -186,7 +186,7 @@ namespace Legion {
         {
           equivalent = false;
           if (future_map->remove_base_gc_ref(FUTURE_HANDLE_REF))
-            legion_delete(future_map);
+            delete (future_map);
           future_map = NULL;
         }
         return true;
@@ -220,8 +220,8 @@ namespace Legion {
       // Otherwise we have to make a future map and set all the futures
       // We know that they are already completed 
       DistributedID did = runtime->get_available_distributed_id(true/*cont*/);
-      future_map = legion_new<FutureMapImpl>(ctx, runtime, did, 
-                                             runtime->address_space);
+      future_map = new FutureMapImpl(ctx, runtime, did, 
+                                     runtime->address_space);
       future_map->add_base_gc_ref(FUTURE_HANDLE_REF);
       future_map->set_all_futures(arguments);
       equivalent = true; // mark that these are equivalent
@@ -757,6 +757,10 @@ namespace Legion {
         ready_event(o->get_completion_event()), valid(true)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_GC
+      log_garbage.info("GC Future Map %lld %d", 
+          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -768,6 +772,10 @@ namespace Legion {
         ready_event(ApEvent::NO_AP_EVENT), valid(!is_owner())
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_GC
+      log_garbage.info("GC Future Map %lld %d", 
+          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -784,7 +792,13 @@ namespace Legion {
     FutureMapImpl::~FutureMapImpl(void)
     //--------------------------------------------------------------------------
     {
+      if (is_owner() && registered_with_runtime)
+        unregister_with_runtime(DEFAULT_VIRTUAL_CHANNEL);
       futures.clear();
+#ifdef LEGION_GC
+      log_garbage.info("GC Deletion %lld %d", 
+          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3029,7 +3043,7 @@ namespace Legion {
                   (*it)->unregister_with_runtime(DEFAULT_VIRTUAL_CHANNEL));
             // Remove our base resource reference
             if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
-              PhysicalManager::delete_physical_manager(*it);
+              delete (*it);
           }
         }
         if (!wait_for.empty())
@@ -3120,7 +3134,7 @@ namespace Legion {
       if (remove_reference)
       {
         if (manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
-          PhysicalManager::delete_physical_manager(manager);
+          delete manager;
       }
       else if (is_owner && manager->is_reduction_manager())
       { 
@@ -3567,7 +3581,7 @@ namespace Legion {
           record_deleted_instance(it->first);
         // Now we can release our resource reference
         if (it->first->remove_base_resource_ref(MEMORY_MANAGER_REF))
-          PhysicalManager::delete_physical_manager(it->first);
+          delete (it->first);
       }
     }
 
@@ -3664,7 +3678,7 @@ namespace Legion {
           }
           if (remove_duplicate && 
               manager->remove_base_valid_ref(NEVER_GC_REF, &mutator))
-            PhysicalManager::delete_physical_manager(manager);
+            delete manager; 
         }
       }
       else
@@ -3745,7 +3759,7 @@ namespace Legion {
       }
       if (remove_min_reference && 
           manager->remove_base_valid_ref(NEVER_GC_REF, &mutator))
-        PhysicalManager::delete_physical_manager(manager);
+        delete manager;
     }
 
     //--------------------------------------------------------------------------
@@ -4164,7 +4178,7 @@ namespace Legion {
         }
         if (remove_duplicate_valid && 
             manager->remove_base_valid_ref(NEVER_GC_REF, &mutator))
-          PhysicalManager::delete_physical_manager(manager);
+          delete manager;
       }
       else if ((kind == CREATE_INSTANCE_CONSTRAINTS) ||
                (kind == CREATE_INSTANCE_LAYOUT))
@@ -4200,7 +4214,7 @@ namespace Legion {
         }
         if (remove_duplicate_valid && 
             manager->remove_base_valid_ref(NEVER_GC_REF, &mutator))
-          PhysicalManager::delete_physical_manager(manager);
+          delete manager;
       }
       // Trigger that we are done
       if (!preconditions.empty())
@@ -4284,7 +4298,7 @@ namespace Legion {
       }
       // Remote our reference
       if (manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
-        PhysicalManager::delete_physical_manager(manager);
+        delete manager;
     }
 
     //--------------------------------------------------------------------------
@@ -4338,7 +4352,7 @@ namespace Legion {
         {
           failures.push_back(idx);
           if (manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
-            PhysicalManager::delete_physical_manager(manager);
+            delete manager;
         }
         else // just remove our reference since we succeeded
           manager->remove_base_resource_ref(MEMORY_MANAGER_REF);
@@ -4713,7 +4727,7 @@ namespace Legion {
             candidates.begin(); it != candidates.end(); it++)
       {
         if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
-          PhysicalManager::delete_physical_manager(*it);
+          delete (*it);
       } 
     }
 
@@ -4726,7 +4740,7 @@ namespace Legion {
             candidates.begin(); it != candidates.end(); it++)
       {
         if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
-          PhysicalManager::delete_physical_manager(*it);
+          delete (*it);
       }
     }
 
@@ -4760,7 +4774,7 @@ namespace Legion {
     {
       if ((manager != NULL) && 
           manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
-        PhysicalManager::delete_physical_manager(manager);
+        delete manager;
     }
 
     //--------------------------------------------------------------------------
@@ -4772,7 +4786,7 @@ namespace Legion {
     {
       if ((manager != NULL) && 
           manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
-        PhysicalManager::delete_physical_manager(manager);
+        delete manager;
       manager = rhs.manager;
       instance_size = rhs.instance_size;
       priority = rhs.priority;
@@ -5219,7 +5233,7 @@ namespace Legion {
       manager->perform_deletion(deletion_precondition);
       if (remove_reference && 
           manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
-        PhysicalManager::delete_physical_manager(manager);
+        delete manager;
     }
 
     //--------------------------------------------------------------------------
@@ -6053,6 +6067,17 @@ namespace Legion {
               runtime->handle_remote_context_free(derez);
               break;
             }
+          case SEND_REMOTE_CONTEXT_PHYSICAL_REQUEST:
+            {
+              runtime->handle_remote_context_physical_request(derez,
+                                              remote_address_space);
+              break;
+            }
+          case SEND_REMOTE_CONTEXT_PHYSICAL_RESPONSE:
+            {
+              runtime->handle_remote_context_physical_response(derez);
+              break;
+            }
           case SEND_VERSION_OWNER_REQUEST: 
             {
               runtime->handle_version_owner_request(derez,remote_address_space);
@@ -6817,15 +6842,16 @@ namespace Legion {
           LegionSpy::log_task_name(task_id, name);
         // Also set the initial name to be safe
         memcpy(initial_name, name, name_size);
+        // Register this task with the profiler if necessary
+        if (runtime->profiler != NULL)
+          runtime->profiler->register_task_kind(task_id, name, false);
       }
       else // Just set the initial name
-        snprintf(initial_name,64,"unnamed_task_%d", task_id);
-      // Register this task with the profiler if necessary
-      if (runtime->profiler != NULL)
       {
-        const SemanticInfo &info = semantic_infos[NAME_SEMANTIC_TAG]; 
-        const char *name = (const char*)info.buffer;
-        runtime->profiler->register_task_kind(task_id, name, false);
+        snprintf(initial_name,64,"unnamed_task_%d", task_id);
+        // Register this task with the profiler if necessary
+        if (runtime->profiler != NULL)
+          runtime->profiler->register_task_kind(task_id, initial_name, false);
       }
     }
 
@@ -8163,11 +8189,11 @@ namespace Legion {
       derez.deserialize(handle);
       // Make it an unpack it, then try to register it 
       LayoutConstraints *new_constraints = 
-        legion_new<LayoutConstraints>(lay_id, handle, runtime,
-                                      source, runtime->address_space);
+        new LayoutConstraints(lay_id, handle, runtime,
+                              source, runtime->address_space);
       new_constraints->update_constraints(derez);
       if (!runtime->register_layout(new_constraints, true/*need lock*/))
-        legion_delete(new_constraints);
+        delete (new_constraints);
       // Now try to register this with the runtime
       // Trigger our done event and then return it
       RtUserEvent done_event;
@@ -8297,11 +8323,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ProjectionFunction::project_points(Task *task, unsigned idx, 
-                    Runtime *runtime, std::vector<MinimalPoint> &minimal_points)
+    void ProjectionFunction::project_points(const RegionRequirement &req, 
+     unsigned idx, Runtime *runtime, const std::vector<PointTask*> &point_tasks)
     //--------------------------------------------------------------------------
     {
-      const RegionRequirement &req = task->regions[idx];
 #ifdef DEBUG_LEGION
       assert(req.handle_type != SINGULAR);
 #endif
@@ -8310,24 +8335,26 @@ namespace Legion {
         AutoLock p_lock(projection_reservation);
         if (req.handle_type == PART_PROJECTION)
         {
-          for (std::vector<MinimalPoint>::iterator it = 
-                minimal_points.begin(); it != minimal_points.end(); it++)
+          for (std::vector<PointTask*>::const_iterator it = 
+                point_tasks.begin(); it != point_tasks.end(); it++)
           {
-            LogicalRegion result = functor->project(task, idx, req.partition, 
-                                                    it->get_domain_point());
-            check_projection_partition_result(req, task, idx, result, runtime);
-            it->add_projection_region(idx, result);
+            LogicalRegion result = functor->project(*it, idx, req.partition, 
+                                                    (*it)->get_domain_point());
+            check_projection_partition_result(req, static_cast<Task*>(*it), 
+                                              idx, result, runtime);
+            (*it)->set_projection_result(idx, result);
           }
         }
         else
         {
-          for (std::vector<MinimalPoint>::iterator it = 
-                minimal_points.begin(); it != minimal_points.end(); it++)
+          for (std::vector<PointTask*>::const_iterator it = 
+                point_tasks.begin(); it != point_tasks.end(); it++)
           {
-            LogicalRegion result = functor->project(task, idx, req.region, 
-                                                    it->get_domain_point());
-            check_projection_region_result(req, task, idx, result, runtime);
-            it->add_projection_region(idx, result);
+            LogicalRegion result = functor->project(*it, idx, req.region, 
+                                                    (*it)->get_domain_point());
+            check_projection_region_result(req, static_cast<Task*>(*it), 
+                                           idx, result, runtime);
+            (*it)->set_projection_result(idx, result);
           }
         }
       }
@@ -8335,24 +8362,26 @@ namespace Legion {
       {
         if (req.handle_type == PART_PROJECTION)
         {
-          for (std::vector<MinimalPoint>::iterator it = 
-                minimal_points.begin(); it != minimal_points.end(); it++)
+          for (std::vector<PointTask*>::const_iterator it = 
+                point_tasks.begin(); it != point_tasks.end(); it++)
           {
-            LogicalRegion result = functor->project(task, idx, req.partition, 
-                                                    it->get_domain_point());
-            check_projection_partition_result(req, task, idx, result, runtime);
-            it->add_projection_region(idx, result);
+            LogicalRegion result = functor->project(*it, idx, req.partition, 
+                                                    (*it)->get_domain_point());
+            check_projection_partition_result(req, static_cast<Task*>(*it), 
+                                              idx, result, runtime);
+            (*it)->set_projection_result(idx, result);
           }
         }
         else
         {
-          for (std::vector<MinimalPoint>::iterator it = 
-                minimal_points.begin(); it != minimal_points.end(); it++)
+          for (std::vector<PointTask*>::const_iterator it = 
+                point_tasks.begin(); it != point_tasks.end(); it++)
           {
-            LogicalRegion result = functor->project(task, idx, req.region, 
-                                                    it->get_domain_point());
-            check_projection_region_result(req, task, idx, result, runtime);
-            it->add_projection_region(idx, result);
+            LogicalRegion result = functor->project(*it, idx, req.region, 
+                                                    (*it)->get_domain_point());
+            check_projection_region_result(req, static_cast<Task*>(*it), 
+                                           idx, result, runtime);
+            (*it)->set_projection_result(idx, result);
           }
         }
       }
@@ -8674,6 +8703,7 @@ namespace Legion {
         unique_constraint_id((unique == 0) ? runtime_stride : unique),
         unique_task_id(get_current_static_task_id()+unique),
         unique_mapper_id(get_current_static_mapper_id()+unique),
+        unique_projection_id(get_current_static_projection_id()+unique),
         projection_lock(Reservation::create_reservation()),
         group_lock(Reservation::create_reservation()),
         processor_mapping_lock(Reservation::create_reservation()),
@@ -8880,7 +8910,7 @@ namespace Legion {
             available_individual_tasks.begin(); 
             it != available_individual_tasks.end(); it++)
       {
-        legion_delete(*it);
+        delete (*it);
       }
       available_individual_tasks.clear();
       individual_task_lock.destroy_reservation();
@@ -8889,7 +8919,7 @@ namespace Legion {
             available_point_tasks.begin(); it != 
             available_point_tasks.end(); it++)
       {
-        legion_delete(*it);
+        delete (*it);
       }
       available_point_tasks.clear();
       point_task_lock.destroy_reservation();
@@ -8898,7 +8928,7 @@ namespace Legion {
             available_index_tasks.begin(); it != 
             available_index_tasks.end(); it++)
       {
-        legion_delete(*it);
+        delete (*it);
       }
       available_index_tasks.clear();
       index_task_lock.destroy_reservation();
@@ -8907,7 +8937,7 @@ namespace Legion {
             available_slice_tasks.begin(); it != 
             available_slice_tasks.end(); it++)
       {
-        legion_delete(*it);
+        delete (*it);
       }
       available_slice_tasks.clear();
       slice_task_lock.destroy_reservation();
@@ -8916,7 +8946,7 @@ namespace Legion {
             available_map_ops.begin(); it != 
             available_map_ops.end(); it++)
       {
-        legion_delete(*it);
+        delete (*it);
       }
       available_map_ops.clear();
       map_op_lock.destroy_reservation();
@@ -8925,7 +8955,7 @@ namespace Legion {
             available_copy_ops.begin(); it != 
             available_copy_ops.end(); it++)
       {
-        legion_delete(*it);
+        delete (*it);
       }
       available_copy_ops.clear();
       copy_op_lock.destroy_reservation();
@@ -8934,7 +8964,7 @@ namespace Legion {
             available_fence_ops.begin(); it != 
             available_fence_ops.end(); it++)
       {
-        legion_delete(*it);
+        delete (*it);
       }
       available_fence_ops.clear();
       fence_op_lock.destroy_reservation();
@@ -8943,7 +8973,7 @@ namespace Legion {
             available_frame_ops.begin(); it !=
             available_frame_ops.end(); it++)
       {
-        legion_delete(*it);
+        delete (*it);
       }
       available_frame_ops.clear();
       frame_op_lock.destroy_reservation();
@@ -8952,7 +8982,7 @@ namespace Legion {
             available_deletion_ops.begin(); it != 
             available_deletion_ops.end(); it++)
       {
-        legion_delete(*it);
+        delete (*it);
       }
       available_deletion_ops.clear();
       deletion_op_lock.destroy_reservation();
@@ -8961,7 +8991,7 @@ namespace Legion {
             available_open_ops.begin(); it !=
             available_open_ops.end(); it++)
       {
-        legion_delete(*it);
+        delete (*it);
       }
       available_open_ops.clear();
       open_op_lock.destroy_reservation();
@@ -8970,7 +9000,7 @@ namespace Legion {
             available_advance_ops.begin(); it !=
             available_advance_ops.end(); it++)
       {
-        legion_delete(*it);
+        delete (*it);
       }
       available_advance_ops.clear();
       advance_op_lock.destroy_reservation();
@@ -8979,7 +9009,7 @@ namespace Legion {
             available_inter_close_ops.begin(); it !=
             available_inter_close_ops.end(); it++)
       {
-        legion_delete(*it);
+        delete (*it);
       }
       available_inter_close_ops.clear();
       inter_close_op_lock.destroy_reservation();
@@ -8988,7 +9018,7 @@ namespace Legion {
             available_read_close_ops.begin(); it != 
             available_read_close_ops.end(); it++)
       {
-        legion_delete(*it);
+        delete (*it);
       }
       read_close_op_lock.destroy_reservation();
       read_close_op_lock = Reservation::NO_RESERVATION;
@@ -8996,7 +9026,7 @@ namespace Legion {
             available_post_close_ops.begin(); it !=
             available_post_close_ops.end(); it++)
       {
-        legion_delete(*it);
+        delete (*it);
       }
       available_post_close_ops.clear();
       post_close_op_lock.destroy_reservation();
@@ -9005,7 +9035,7 @@ namespace Legion {
             available_virtual_close_ops.begin(); it !=
             available_virtual_close_ops.end(); it++)
       {
-        legion_delete(*it);
+        delete (*it);
       }
       available_virtual_close_ops.clear();
       virtual_close_op_lock.destroy_reservation();
@@ -9014,7 +9044,7 @@ namespace Legion {
             available_dynamic_collective_ops.begin(); it !=
             available_dynamic_collective_ops.end(); it++)
       {
-        legion_delete(*it);
+        delete (*it);
       }
       available_dynamic_collective_ops.end();
       dynamic_collective_op_lock.destroy_reservation();
@@ -9023,7 +9053,7 @@ namespace Legion {
             available_future_pred_ops.begin(); it !=
             available_future_pred_ops.end(); it++)
       {
-        legion_delete(*it);
+        delete (*it);
       }
       available_future_pred_ops.clear();
       future_pred_op_lock.destroy_reservation();
@@ -9032,7 +9062,7 @@ namespace Legion {
             available_not_pred_ops.begin(); it !=
             available_not_pred_ops.end(); it++)
       {
-        legion_delete(*it);
+        delete (*it);
       }
       available_not_pred_ops.clear();
       not_pred_op_lock.destroy_reservation();
@@ -9041,7 +9071,7 @@ namespace Legion {
             available_and_pred_ops.begin(); it !=
             available_and_pred_ops.end(); it++)
       {
-        legion_delete(*it);
+        delete (*it);
       }
       available_and_pred_ops.clear();
       and_pred_op_lock.destroy_reservation();
@@ -9050,7 +9080,7 @@ namespace Legion {
             available_or_pred_ops.begin(); it !=
             available_or_pred_ops.end(); it++)
       {
-        legion_delete(*it);
+        delete (*it);
       }
       available_or_pred_ops.clear();
       or_pred_op_lock.destroy_reservation();
@@ -9059,7 +9089,7 @@ namespace Legion {
             available_acquire_ops.begin(); it !=
             available_acquire_ops.end(); it++)
       {
-        legion_delete(*it);
+        delete (*it);
       }
       available_acquire_ops.clear();
       acquire_op_lock.destroy_reservation();
@@ -9068,7 +9098,7 @@ namespace Legion {
             available_release_ops.begin(); it !=
             available_release_ops.end(); it++)
       {
-        legion_delete(*it);
+        delete (*it);
       }
       available_release_ops.clear();
       release_op_lock.destroy_reservation();
@@ -9077,7 +9107,7 @@ namespace Legion {
             available_capture_ops.begin(); it !=
             available_capture_ops.end(); it++)
       {
-        legion_delete(*it);
+        delete (*it);
       }
       available_capture_ops.clear();
       capture_op_lock.destroy_reservation();
@@ -9086,7 +9116,7 @@ namespace Legion {
             available_trace_ops.begin(); it !=
             available_trace_ops.end(); it++)
       {
-        legion_delete(*it);
+        delete (*it);
       }
       available_trace_ops.clear();
       trace_op_lock.destroy_reservation();
@@ -9095,7 +9125,7 @@ namespace Legion {
             available_epoch_ops.begin(); it !=
             available_epoch_ops.end(); it++)
       {
-        legion_delete(*it);
+        delete (*it);
       }
       available_epoch_ops.clear();
       epoch_op_lock.destroy_reservation();
@@ -9104,7 +9134,7 @@ namespace Legion {
             available_pending_partition_ops.begin(); it !=
             available_pending_partition_ops.end(); it++)
       {
-        legion_delete(*it);
+        delete (*it);
       }
       available_pending_partition_ops.clear();
       pending_partition_op_lock.destroy_reservation();
@@ -9113,7 +9143,7 @@ namespace Legion {
             available_dependent_partition_ops.begin(); it !=
             available_dependent_partition_ops.end(); it++)
       {
-        legion_delete(*it);
+        delete (*it);
       }
       available_dependent_partition_ops.clear();
       dependent_partition_op_lock.destroy_reservation();
@@ -9122,7 +9152,7 @@ namespace Legion {
             available_fill_ops.begin(); it !=
             available_fill_ops.end(); it++)
       {
-        legion_delete(*it);
+        delete (*it);
       }
       available_fill_ops.clear();
       fill_op_lock.destroy_reservation();
@@ -9131,7 +9161,7 @@ namespace Legion {
             available_attach_ops.begin(); it !=
             available_attach_ops.end(); it++)
       {
-        legion_delete(*it);
+        delete (*it);
       }
       available_attach_ops.clear();
       attach_op_lock.destroy_reservation();
@@ -9140,7 +9170,7 @@ namespace Legion {
             available_detach_ops.begin(); it !=
             available_detach_ops.end(); it++)
       {
-        legion_delete(*it);
+        delete (*it);
       }
       available_detach_ops.clear();
       detach_op_lock.destroy_reservation();
@@ -9149,7 +9179,7 @@ namespace Legion {
             available_timing_ops.begin(); it != 
             available_timing_ops.end(); it++)
       {
-        legion_delete(*it);
+        delete (*it);
       }
       available_timing_ops.clear();
       timing_op_lock.destroy_reservation();
@@ -9157,7 +9187,7 @@ namespace Legion {
       for (std::map<TaskID,TaskImpl*>::const_iterator it = 
             task_table.begin(); it != task_table.end(); it++)
       {
-        legion_delete(it->second);
+        delete (it->second);
       }
       task_table.clear();
       // Skip this if we are in separate runtime mode
@@ -9166,7 +9196,7 @@ namespace Legion {
         for (std::deque<VariantImpl*>::const_iterator it = 
               variant_table.begin(); it != variant_table.end(); it++)
         {
-          legion_delete(*it);
+          delete (*it);
         }
       }
       variant_table.clear();
@@ -9182,7 +9212,7 @@ namespace Legion {
           LayoutConstraints *next = next_it->second;
           layout_constraints_table.erase(next_it);
           if (next->remove_reference())
-            legion_delete(next);
+            delete (next);
         }
       }
       layout_constraints_lock.destroy_reservation();
@@ -9289,10 +9319,12 @@ namespace Legion {
             pending_projection_functors.end(); it++)
       {
         it->second->set_runtime(external);
-        register_projection_functor(it->first, it->second);
+        register_projection_functor(it->first, it->second, true/*need check*/,
+                                    true/*was preregistered*/);
       }
       register_projection_functor(0, 
-          new IdentityProjectionFunctor(this->external), false/*need check*/);
+          new IdentityProjectionFunctor(this->external), false/*need check*/,
+                                        true/*was preregistered*/);
     }
 
     //--------------------------------------------------------------------------
@@ -9305,7 +9337,9 @@ namespace Legion {
                                     machine, LG_LAST_TASK_ID,
                                     lg_task_descriptions, 
                                     Operation::LAST_OP_KIND, 
-                                    Operation::op_names); 
+                                    Operation::op_names,
+                                    Runtime::serializer_type,
+                                    Runtime::prof_logfile); 
       LG_MESSAGE_DESCRIPTIONS(lg_message_descriptions);
       profiler->record_message_kinds(lg_message_descriptions, LAST_SEND_KIND);
       MAPPER_CALL_NAMES(lg_mapper_calls);
@@ -11555,7 +11589,7 @@ namespace Legion {
     ArgumentMap Runtime::create_argument_map(void)
     //--------------------------------------------------------------------------
     {
-      ArgumentMapImpl *impl = legion_new<ArgumentMapImpl>();
+      ArgumentMapImpl *impl = new ArgumentMapImpl();
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
@@ -11898,7 +11932,7 @@ namespace Legion {
                                         requests[idx].mode,
                                         requests[idx].exclusive);
       }
-      Grant result(legion_new<GrantImpl>(unpack_requests));
+      Grant result(new GrantImpl(unpack_requests));
       if (ctx != DUMMY_CONTEXT)
         ctx->end_runtime_call();
       return result;
@@ -12350,7 +12384,7 @@ namespace Legion {
                     "task %s (ID %lld)", tid, ctx->get_task_name(),
                     ctx->get_unique_id());
 #endif
-      FutureImpl *result = legion_new<FutureImpl>(this, true/*register*/,
+      FutureImpl *result = new FutureImpl(this, true/*register*/,
                               get_available_distributed_id(true),
                               address_space, ctx->get_owner_task());
       // Make this here to get a local reference on it now
@@ -12722,9 +12756,48 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ProjectionID Runtime::generate_dynamic_projection_id(void)
+    //--------------------------------------------------------------------------
+    {
+      ProjectionID result = 
+        __sync_fetch_and_add(&unique_projection_id, runtime_stride);
+#ifdef DEBUG_LEGION
+      // Check for overflow
+      assert(result <= unique_projection_id);
+#endif
+      return result;
+    }
+    
+    //--------------------------------------------------------------------------
+    /*static*/ ProjectionID& Runtime::get_current_static_projection_id(void)
+    //--------------------------------------------------------------------------
+    {
+      static ProjectionID current_projection_id = MAX_APPLICATION_PROJECTION_ID;
+      return current_projection_id;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ProjectionID Runtime::generate_static_projection_id(void)
+    //--------------------------------------------------------------------------
+    {
+      ProjectionID &next_projection = get_current_static_projection_id();
+      if (runtime_started)
+      {
+        log_run.error("Illegal call to 'generate_static_projection_id' after "
+                      "the runtime has been started!");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_STATIC_CALL_POST_RUNTIME_START);
+      }
+      return next_projection++;
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::register_projection_functor(ProjectionID pid,
                                               ProjectionFunctor *functor,
-                                              bool need_zero_check)
+                                              bool need_zero_check,
+                                              bool was_preregistered)
     //--------------------------------------------------------------------------
     {
       if (need_zero_check && (pid == 0))
@@ -12736,6 +12809,13 @@ namespace Legion {
 #endif
         exit(ERROR_RESERVED_PROJECTION_ID);
       }
+      if (!was_preregistered && (total_address_spaces > 1))
+        log_run.warning("WARNING: Projection functor %d is being dynamically "
+                        "registered for a multi-node run with %d nodes. It is "
+                        "currently the responsibility of the application to "
+                        "ensure that this projection functor is registered on "
+                        "all nodes where it will be required.",
+                        pid, total_address_spaces);
       ProjectionFunction *function = new ProjectionFunction(pid, functor);
       AutoLock p_lock(projection_lock);
       // No need for a lock because these all need to be reserved at
@@ -13097,9 +13177,9 @@ namespace Legion {
       // First find the task implementation
       TaskImpl *task_impl = find_or_create_task_impl(registrar.task_id);
       // Make our variant and add it to the set of variants
-      VariantImpl *impl = legion_new<VariantImpl>(this, vid, task_impl, 
-                                                  registrar, ret, realm,
-                                                  user_data, user_data_size);
+      VariantImpl *impl = new VariantImpl(this, vid, task_impl, 
+                                          registrar, ret, realm,
+                                          user_data, user_data_size);
       // Add this variant to the owner
       task_impl->add_variant(impl);
       {
@@ -13131,7 +13211,7 @@ namespace Legion {
         if (finder != task_table.end())
           return finder->second;
       }
-      TaskImpl *result = legion_new<TaskImpl>(task_id, this);
+      TaskImpl *result = new TaskImpl(task_id, this);
       AutoLock tv_lock(task_variant_lock);
       task_table[task_id] = result;
       return result;
@@ -14340,6 +14420,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_remote_context_physical_request(AddressSpaceID target,
+                                                       Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_REMOTE_CONTEXT_PHYSICAL_REQUEST, 
+          CONTEXT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_remote_context_physical_response(AddressSpaceID target,
+                                                        Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      // This can't go on the context virtual channel due to the possiblility
+      // of deadlock in the case where we need to page in the result context
+      find_messenger(target)->send_message(rez,
+          SEND_REMOTE_CONTEXT_PHYSICAL_RESPONSE,
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_version_owner_request(AddressSpaceID target,
                                              Serializer &rez)
     //--------------------------------------------------------------------------
@@ -15363,6 +15465,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_remote_context_physical_request(Deserializer &derez,
+                                                         AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      RemoteContext::handle_physical_request(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_context_physical_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      RemoteContext::handle_physical_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_version_owner_request(Deserializer &derez,
                                                AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -16244,8 +16361,8 @@ namespace Legion {
         }
       }
       AddressSpaceID owner_space = determine_owner(did);
-      FutureImpl *result = legion_new<FutureImpl>(this, false/*register*/, 
-                                                  did, owner_space);
+      FutureImpl *result = new FutureImpl(this, false/*register*/, 
+                                          did, owner_space);
       // Retake the lock and see if we lost the race
       {
         AutoLock d_lock(distributed_collectable_lock);
@@ -16254,7 +16371,7 @@ namespace Legion {
         if (finder != dist_collectables.end())
         {
           // We lost the race
-          legion_delete(result);
+          delete (result);
 #ifdef DEBUG_LEGION
           result = dynamic_cast<FutureImpl*>(finder->second);
           assert(result != NULL);
@@ -16291,7 +16408,7 @@ namespace Legion {
         }
       }
       AddressSpaceID owner_space = determine_owner(did);
-      FutureMapImpl *result = legion_new<FutureMapImpl>(ctx, this, did,
+      FutureMapImpl *result = new FutureMapImpl(ctx, this, did,
                                     owner_space, false/*register now */);
       // Retake the lock and see if we lost the race
       {
@@ -16301,7 +16418,7 @@ namespace Legion {
         if (finder != dist_collectables.end())
         {
           // We lost the race
-          legion_delete(result);
+          delete (result);
 #ifdef DEBUG_LEGION
           result = dynamic_cast<FutureMapImpl*>(finder->second);
           assert(result != NULL);
@@ -17993,9 +18110,9 @@ namespace Legion {
     Future Runtime::help_create_future(Operation *op /*= NULL*/)
     //--------------------------------------------------------------------------
     {
-      return Future(legion_new<FutureImpl>(this, true/*register*/,
-                                     get_available_distributed_id(true),
-                                     address_space, op));
+      return Future(new FutureImpl(this, true/*register*/,
+                                   get_available_distributed_id(true),
+                                   address_space, op));
     }
 
     //--------------------------------------------------------------------------
@@ -18133,6 +18250,8 @@ namespace Legion {
           return "Composite View";
         case FILL_VIEW_ALLOC:
           return "Fill View";
+        case PHI_VIEW_ALLOC:
+          return "Phi View";
         case INDIVIDUAL_TASK_ALLOC:
           return "Individual Task";
         case POINT_TASK_ALLOC:
@@ -18496,7 +18615,7 @@ namespace Legion {
         layout_id = get_unique_constraint_id();
       // Now make our entry and then return the result
       LayoutConstraints *constraints = 
-        legion_new<LayoutConstraints>(layout_id, this, registrar);
+        new LayoutConstraints(layout_id, this, registrar);
       RtEvent precondition = Runtime::acquire_rt_reservation(
           layout_constraints_lock, true/*exclusive*/);
       if (precondition.has_triggered())
@@ -18518,7 +18637,7 @@ namespace Legion {
                                                 const LayoutConstraintSet &cons)
     //--------------------------------------------------------------------------
     {
-      LayoutConstraints *constraints = legion_new<LayoutConstraints>(
+      LayoutConstraints *constraints = new LayoutConstraints(
           get_unique_constraint_id(), this, cons, handle);
       register_layout(constraints, true/*needs lock*/);
       return constraints;
@@ -18591,7 +18710,7 @@ namespace Legion {
         }
       }
       if ((constraints != NULL) && constraints->remove_reference())
-        legion_delete(constraints);
+        delete (constraints);
     }
 
     //--------------------------------------------------------------------------
@@ -18808,6 +18927,13 @@ namespace Legion {
     /*static*/ bool Runtime::bit_mask_logging = false;
 #endif
     /*static*/ unsigned Runtime::num_profiling_nodes = 0;
+    /*static*/ const char* Runtime::serializer_type = "binary";
+    /*static*/ const char* Runtime::prof_logfile = NULL;
+#ifdef TRACE_ALLOCATION
+    /*static*/ std::map<AllocationType,Runtime::AllocationTracker>
+                                        Runtime::allocation_manager;
+    /*static*/ unsigned long long Runtime::allocation_tracing_count = 0;
+#endif
 
     //--------------------------------------------------------------------------
     /*static*/ int Runtime::start(int argc, char **argv, bool background)
@@ -18898,6 +19024,8 @@ namespace Legion {
         max_local_fields = DEFAULT_LOCAL_FIELDS;
         program_order_execution = false;
         num_profiling_nodes = 0;
+        serializer_type = "binary";
+        prof_logfile = NULL;
         legion_collective_radix = LEGION_COLLECTIVE_RADIX;
         legion_collective_log_radix = 0;
         legion_collective_stages = 0;
@@ -18971,6 +19099,17 @@ namespace Legion {
           }
 #endif
           INT_ARG("-lg:prof", num_profiling_nodes);
+          if (!strcmp(argv[i],"-lg:serializer"))
+          {
+            serializer_type = argv[++i];
+            continue;
+          }
+          if (!strcmp(argv[i],"-lg:prof_logfile"))
+          {
+            prof_logfile = argv[++i];
+            continue;
+          }
+
           // These are all the deprecated versions of these flag
           BOOL_ARG("-hl:separate",separate_runtime_instances);
           BOOL_ARG("-hl:registration",record_registration);
@@ -19025,6 +19164,16 @@ namespace Legion {
           }
 #endif
           INT_ARG("-hl:prof", num_profiling_nodes);
+          if (!strcmp(argv[i],"-hl:serializer"))
+          {
+            serializer_type = argv[++i];
+            continue;
+          }
+          if (!strcmp(argv[i],"-hl:prof_logfile"))
+          {
+            prof_logfile = argv[++i];
+            continue;
+          }
         }
         if (delay_start > 0)
           sleep(delay_start);
@@ -20219,9 +20368,9 @@ namespace Legion {
                   future_args->result->get_untyped_result(),
                   result_size, false/*own*/);
             if (future_args->target->remove_base_gc_ref(DEFERRED_TASK_REF))
-              legion_delete(future_args->target);
+              delete (future_args->target);
             if (future_args->result->remove_base_gc_ref(DEFERRED_TASK_REF)) 
-              legion_delete(future_args->result);
+              delete (future_args->result);
             break;
           }
         case LG_DEFERRED_FUTURE_MAP_SET_ID:
@@ -20241,9 +20390,9 @@ namespace Legion {
             future_args->future_map->complete_all_futures();
             if (future_args->future_map->remove_base_gc_ref(
                                                         DEFERRED_TASK_REF))
-              legion_delete(future_args->future_map);
+              delete (future_args->future_map);
             if (future_args->result->remove_base_gc_ref(FUTURE_HANDLE_REF))
-              legion_delete(future_args->result);
+              delete (future_args->result);
             future_args->task_op->complete_execution();
             break;
           }
@@ -20331,7 +20480,7 @@ namespace Legion {
                                                   *(vargs->request_mask),
                                                   vargs->request_kind,
                                                   vargs->to_trigger);
-            legion_delete(vargs->request_mask);
+            delete (vargs->request_mask);
             break;
           }
         case LG_ADD_TO_DEP_QUEUE_TASK_ID:
@@ -20444,7 +20593,7 @@ namespace Legion {
             Runtime::get_runtime(p)->perform_tunable_selection(tunable_args);
             // Remove the reference that we added
             if (tunable_args->result->remove_base_gc_ref(FUTURE_HANDLE_REF)) 
-              legion_delete(tunable_args->result);
+              delete (tunable_args->result);
             break;
           }
         case LG_DEFERRED_ENQUEUE_OP_ID:

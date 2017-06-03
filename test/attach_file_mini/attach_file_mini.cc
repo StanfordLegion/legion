@@ -20,7 +20,7 @@
 #include <math.h>
 #include "legion.h"
 
-using namespace LegionRuntime::HighLevel;
+using namespace Legion;
 using namespace LegionRuntime::Accessor;
 using namespace LegionRuntime::Arrays;
 
@@ -37,7 +37,7 @@ enum FieldIDs {
 
 void top_level_task(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
-                    Context ctx, HighLevelRuntime *runtime)
+                    Context ctx, Runtime *runtime)
 {
    char input_file[64];
   //sprintf(input_file, "/scratch/sdb1_ext4/input.dat");
@@ -66,14 +66,16 @@ void top_level_task(const Task *task,
   std::vector<FieldID> field_vec;
   field_vec.push_back(FID_X);
   for(int reps = 0; reps < 2; reps++) {
-    pr_A = runtime->attach_file(ctx, input_file, lr_A, lr_A, field_vec, LEGION_FILE_CREATE);
+    AttachLauncher alr(EXTERNAL_POSIX_FILE, lr_A, lr_A);
+    alr.attach_file(input_file, field_vec, LEGION_FILE_CREATE);
+    pr_A = runtime->attach_external_resource(ctx, alr);
     
     CopyLauncher clr;
     clr.add_copy_requirements(RegionRequirement(lr_A, READ_ONLY, EXCLUSIVE, lr_A).add_field(FID_Y),
 			      RegionRequirement(lr_A, READ_WRITE, EXCLUSIVE, lr_A).add_field(FID_X));
     runtime->issue_copy_operation(ctx, clr);
 
-    runtime->detach_file(ctx, pr_A);
+    runtime->detach_external_resource(ctx, pr_A);
   }
   runtime->destroy_logical_region(ctx, lr_A);
   runtime->destroy_field_space(ctx, fs_A);
@@ -82,8 +84,13 @@ void top_level_task(const Task *task,
 
 int main(int argc, char **argv)
 {
-  HighLevelRuntime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
-  HighLevelRuntime::register_legion_task<top_level_task>(TOP_LEVEL_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, false/*index*/);
-  return HighLevelRuntime::start(argc, argv);
+  Runtime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
+
+  {
+    TaskVariantRegistrar registrar(TOP_LEVEL_TASK_ID, "top_level");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    Runtime::preregister_task_variant<top_level_task>(registrar, "top_level");
+  }
+
+  return Runtime::start(argc, argv);
 }

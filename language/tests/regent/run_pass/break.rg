@@ -14,52 +14,20 @@
 
 import "regent"
 
-fspace a {
-  b : int,
-  c : int,
-}
-
-task d(e : region(a))
-where reads(e.b), writes(e.b) do
-  for f in e do
-    f.b += 10
-  end
-end
-
-task g(h : region(a))
-where reads(h.c), writes(h.c) do
-  for i in h do
-    i.c += 100
-  end
-end
-
-task j(k : region(a))
-where reads(k.{b, c}), writes(k.{b, c}) do
-  for l in k do
-    l.b *= 2
-    l.c *= 2
-  end
-end
-
 task main()
-  var m = 5
-  var n = region(ispace(ptr, m), a)
-  for _ = 0, m do
-    var o = new(ptr(a, n))
-    o.b = 1
-    o.c = 2
+  var count = 0
+  for i = 0, 10 do
+    count += 1
+    break
   end
 
-  d(n)
-  g(n)
-  j(n)
-  d(n)
-  j(n)
-  g(n)
-
-  for p in n do
-    regentlib.assert(p.b == ((1+10)*2 + 10)*2, "test failed")
-    regentlib.assert(p.c == (2+100)*2*2 + 100, "test failed")
+  var r = region(ispace(ptr, 5), int)
+  new(ptr(int, r), 5)
+  for x in r do
+    count += 10
+    break
   end
+
+  regentlib.assert(count == 11, "test failed")
 end
 regentlib.start(main)

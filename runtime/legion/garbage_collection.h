@@ -89,7 +89,7 @@ namespace Legion {
       "Version State Tree Reference",               \
     }
 
-    extern LegionRuntime::Logger::Category log_garbage;
+    extern Realm::Logger log_garbage;
 
     /**
      * \class Collectable

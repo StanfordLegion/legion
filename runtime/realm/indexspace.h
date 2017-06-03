@@ -589,6 +589,26 @@ namespace Realm {
 	void *lptr;
     };
 
+    struct CopySrcDstField {
+    public:
+      CopySrcDstField(void) 
+	: inst(RegionInstance::NO_INST), offset(0), size(0), 
+	  field_id(0), serdez_id(0) { }
+      CopySrcDstField(RegionInstance i, coord_t o, size_t s)
+	: inst(i), offset(o), size(s), field_id(0), serdez_id(0) { }
+      CopySrcDstField(RegionInstance i, coord_t o, size_t s, unsigned f)
+	: inst(i), offset(o), size(s), field_id(f), serdez_id(0) { }
+      CopySrcDstField(RegionInstance i, coord_t o, size_t s, 
+		      unsigned f, CustomSerdezID sid)
+	: inst(i), offset(o), size(s), field_id(f), serdez_id(sid) { }
+    public:
+      RegionInstance inst;
+      coord_t offset;
+      size_t size;
+      unsigned field_id;
+      CustomSerdezID serdez_id;
+    };
+
     class Domain {
     public:
       typedef ::legion_lowlevel_id_t IDType;
@@ -1067,57 +1087,17 @@ namespace Realm {
       RegionInstance create_file_instance(const char *file_name,
                                           const std::vector<size_t> &field_sizes,
                                           legion_lowlevel_file_mode_t file_mode) const;
-      struct CopySrcDstField {
-      public:
-        CopySrcDstField(void) 
-          : inst(RegionInstance::NO_INST), offset(0), size(0), 
-            field_id(0), serdez_id(0) { }
-        CopySrcDstField(RegionInstance i, coord_t o, size_t s)
-          : inst(i), offset(o), size(s), field_id(0), serdez_id(0) { }
-        CopySrcDstField(RegionInstance i, coord_t o, size_t s, unsigned f)
-          : inst(i), offset(o), size(s), field_id(f), serdez_id(0) { }
-        CopySrcDstField(RegionInstance i, coord_t o, size_t s, 
-                        unsigned f, CustomSerdezID sid)
-          : inst(i), offset(o), size(s), field_id(f), serdez_id(sid) { }
-      public:
-	RegionInstance inst;
-	coord_t offset;
-        size_t size;
-        unsigned field_id;
-	CustomSerdezID serdez_id;
-      };
+
+      typedef Realm::CopySrcDstField CopySrcDstField;
 
       Event fill(const std::vector<CopySrcDstField> &dsts,
                  const void *fill_value, size_t fill_value_size,
                  Event wait_on = Event::NO_EVENT) const;
 
-      Event copy(RegionInstance src_inst, RegionInstance dst_inst,
-		 size_t elem_size, Event wait_on = Event::NO_EVENT,
-		 ReductionOpID redop_id = 0, bool red_fold = false) const;
-
       Event copy(const std::vector<CopySrcDstField>& srcs,
 		 const std::vector<CopySrcDstField>& dsts,
 		 Event wait_on = Event::NO_EVENT,
 		 ReductionOpID redop_id = 0, bool red_fold = false) const;
-
-      Event copy(const std::vector<CopySrcDstField>& srcs,
-		 const std::vector<CopySrcDstField>& dsts,
-		 const ElementMask& mask,
-		 Event wait_on = Event::NO_EVENT,
-		 ReductionOpID redop_id = 0, bool red_fold = false) const;
-
-      Event copy_indirect(const CopySrcDstField& idx,
-			  const std::vector<CopySrcDstField>& srcs,
-			  const std::vector<CopySrcDstField>& dsts,
-			  Event wait_on = Event::NO_EVENT,
-			  ReductionOpID redop_id = 0, bool red_fold = false) const;
-
-      Event copy_indirect(const CopySrcDstField& idx,
-			  const std::vector<CopySrcDstField>& srcs,
-			  const std::vector<CopySrcDstField>& dsts,
-			  const ElementMask& mask,
-			  Event wait_on = Event::NO_EVENT,
-			  ReductionOpID redop_id = 0, bool red_fold = false) const;
 
       // Variants of the above for profiling
       Event fill(const std::vector<CopySrcDstField> &dsts,

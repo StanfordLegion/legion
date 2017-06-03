@@ -46,15 +46,21 @@ int main(int argc, char **argv)
   Runtime::set_top_level_task_id(HELLO_WORLD_ID);
   // Before starting the Legion runtime, all possible tasks that the
   // runtime can potentially run must be registered with the runtime.
-  // The function pointer is passed as a template argument.  The second
-  // argument specifies the kind of processor on which the task can be
-  // run: latency optimized cores (LOC) aka CPUs or throughput optimized
-  // cores (TOC) aka GPUs.  The last two arguments specify whether the
-  // task can be run as a single task or an index space task (covered
-  // in more detail in later examples).  The top-level task must always
-  // be able to be run as a single task.
-  Runtime::register_legion_task<hello_world_task>(HELLO_WORLD_ID,
-      Processor::LOC_PROC, true/*single*/, false/*index*/);
+  // A task may have multiple variants (versions of the same code for
+  // different processors, data layouts, etc.) Each variant is
+  // registered described by a TaskVariantRegistrar object.  The
+  // registrar takes a number of constraints which determine where it
+  // is valid to run the task variant.  The ProcessorConstraint
+  // specifies the kind of processor on which the task can be run:
+  // latency optimized cores (LOC) aka CPUs or throughput optimized
+  // cores (TOC) aka GPUs.  The function pointer is passed as a
+  // template argument to the preregister_task_variant call.
+
+  {
+    TaskVariantRegistrar registrar(HELLO_WORLD_ID, "hello_world");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    Runtime::preregister_task_variant<hello_world_task>(registrar, "hello_world");
+  }
 
   // Now we're ready to start the runtime, so tell it to begin the
   // execution.  We'll never return from this call, but its return 

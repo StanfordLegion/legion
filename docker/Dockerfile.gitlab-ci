@@ -6,7 +6,8 @@ MAINTAINER Elliott Slaughter <slaughter@cs.stanford.edu>
 
 ENV DEBIAN_FRONTEND noninteractive
 
-RUN apt-get update -qq && \
+RUN dpkg --add-architecture i386 && \
+    apt-get update -qq && \
     apt-get install -qq software-properties-common && \
     add-apt-repository ppa:ubuntu-toolchain-r/test -y && \
     add-apt-repository ppa:pypy/ppa -y && \
@@ -17,8 +18,10 @@ RUN apt-get update -qq && \
       gcc-4.9-multilib g++-4.9-multilib \
       clang-3.5 libclang-3.5-dev llvm-3.5-dev \
       clang-3.8 libclang-3.8-dev llvm-3.8-dev \
-      libncurses5-dev zlib1g-dev \
+      libncurses5-dev \
+      zlib1g-dev zlib1g-dev:i386 \
       mpich2 libmpich-dev \
+      mesa-common-dev \
       libblas-dev liblapack-dev libhdf5-dev && \
     apt-get clean && \
     pip install github3.py

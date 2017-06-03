@@ -45,6 +45,10 @@ variables:
   USE_SPY: "1"
 .cxx11_normal: &cxx11_normal
   CC_FLAGS: "-std=c++11"
+.cxx14_normal: &cxx14_normal
+  CC_FLAGS: "-std=c++14"
+.cxx14_checks: &cxx14_checks
+  CC_FLAGS: "-std=c++14 -DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
 .cxx98_32bit_normal: &cxx98_32bit_normal
   CC_FLAGS: "-std=c++98 -m32"
   LD_FLAGS: "-m32"
@@ -310,26 +314,34 @@ gcc48_cxx98_debug_checks_legion:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc48, *terra38, *debug, *cxx98_checks, *legion]
-gcc48_cxx98_debug_checks_regent:
+gcc48_cxx98_debug_regent:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc48, *terra38, *debug, *cxx98_checks, *regent]
+    <<: [*gcc48, *terra38, *debug, *cxx98_normal, *regent]
 gcc5_cxx98_debug_checks_legion:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc5, *terra38, *debug, *cxx98_checks, *legion]
-gcc5_cxx98_debug_checks:
+gcc5_cxx98_debug_normal_regent:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc5, *terra38, *debug, *cxx98_checks, *regent]
+    <<: [*gcc5, *terra38, *debug, *cxx98_normal, *regent]
 gcc6_cxx98_debug_checks_legion:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc6, *terra38, *debug, *cxx98_checks, *legion]
-gcc6_cxx98_debug_checks_regent:
+gcc6_cxx98_debug_regent:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*gcc6, *terra38, *debug, *cxx98_checks, *regent]
+    <<: [*gcc6, *terra38, *debug, *cxx98_normal, *regent]
+gcc6_cxx14_debug_checks_legion:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*gcc6, *terra38, *debug, *cxx14_checks, *legion]
+gcc6_cxx14_debug_regent:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*gcc6, *terra38, *debug, *cxx14_normal, *regent]
 
 # Linux with Clang 3.5
 clang35_cxx98_debug_checks_legion:

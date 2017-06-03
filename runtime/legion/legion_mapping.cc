@@ -60,7 +60,7 @@ namespace Legion {
     {
       if ((impl != NULL) && 
           impl->remove_base_resource_ref(Internal::INSTANCE_MAPPER_REF))
-        legion_delete(impl);
+        delete (impl);
     }
 
     //--------------------------------------------------------------------------
@@ -69,7 +69,7 @@ namespace Legion {
     {
       if ((impl != NULL) && 
           impl->remove_base_resource_ref(Internal::INSTANCE_MAPPER_REF))
-        legion_delete(impl);
+        delete (impl);
       impl = rhs.impl;
       if (impl != NULL)
         impl->add_base_resource_ref(Internal::INSTANCE_MAPPER_REF);

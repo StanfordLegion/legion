@@ -132,7 +132,7 @@ namespace Legion {
                                    const InstanceSet &physical_instances)
     //--------------------------------------------------------------------------
     {
-      PhysicalRegionImpl *impl = legion_new<PhysicalRegionImpl>(req, 
+      PhysicalRegionImpl *impl = new PhysicalRegionImpl(req, 
           ApEvent::NO_AP_EVENT, mapped, this, mid, tag, 
           is_leaf_context(), virtual_mapped, runtime);
       physical_regions.push_back(PhysicalRegion(impl));
@@ -232,7 +232,7 @@ namespace Legion {
       // Make a new unmapped physical region if we aren't done executing yet
       if (!task_executed)
         physical_regions.push_back(PhysicalRegion(
-              legion_new<PhysicalRegionImpl>(created_requirements.back(), 
+              new PhysicalRegionImpl(created_requirements.back(), 
                 ApEvent::NO_AP_EVENT, false/*mapped*/, this, 
                 owner_task->map_id, owner_task->tag, 
                 is_leaf_context(), false/*virtual mapped*/, runtime)));
@@ -1665,7 +1665,7 @@ namespace Legion {
       // Make a new unmapped physical region if we're not done executing yet
       if (!task_executed)
         physical_regions.push_back(PhysicalRegion(
-              legion_new<PhysicalRegionImpl>(created_requirements.back(),
+              new PhysicalRegionImpl(created_requirements.back(),
                 ApEvent::NO_AP_EVENT, false/*mapped*/, this, 
                 owner_task->map_id, owner_task->tag, 
                 is_leaf_context(), false/*virtual mapped*/, runtime)));
@@ -2249,7 +2249,7 @@ namespace Legion {
             it != traces.end(); it++)
       {
         if (it->second->remove_reference())
-          legion_delete(it->second);
+          delete (it->second);
       }
       traces.clear();
       // Clean up any locks and barriers that the user
@@ -4140,7 +4140,7 @@ namespace Legion {
         if (launcher.predicate_false_future.impl != NULL)
           return launcher.predicate_false_future;
         // Otherwise check to see if we have a value
-        FutureImpl *result = legion_new<FutureImpl>(runtime, true/*register*/,
+        FutureImpl *result = new FutureImpl(runtime, true/*register*/,
           runtime->get_available_distributed_id(true), runtime->address_space);
         if (launcher.predicate_false_result.get_size() > 0)
           result->set_result(launcher.predicate_false_result.get_ptr(),
@@ -4208,7 +4208,7 @@ namespace Legion {
       // Quick out for predicate false
       if (launcher.predicate == Predicate::FALSE_PRED)
       {
-        FutureMapImpl *result = legion_new<FutureMapImpl>(this, runtime,
+        FutureMapImpl *result = new FutureMapImpl(this, runtime,
             runtime->get_available_distributed_id(true/*needs continuation*/),
             runtime->address_space);
         if (launcher.predicate_false_future.impl != NULL)
@@ -4320,7 +4320,7 @@ namespace Legion {
         if (launcher.predicate_false_future.impl != NULL)
           return launcher.predicate_false_future;
         // Otherwise check to see if we have a value
-        FutureImpl *result = legion_new<FutureImpl>(runtime, true/*register*/, 
+        FutureImpl *result = new FutureImpl(runtime, true/*register*/, 
           runtime->get_available_distributed_id(true), runtime->address_space);
         if (launcher.predicate_false_result.get_size() > 0)
           result->set_result(launcher.predicate_false_result.get_ptr(),
@@ -5425,7 +5425,7 @@ namespace Legion {
       if (finder == traces.end())
       {
         // Trace does not exist yet, so make one and record it
-        DynamicTrace *dynamic_trace = legion_new<DynamicTrace>(tid, this);
+        DynamicTrace *dynamic_trace = new DynamicTrace(tid, this);
         dynamic_trace->add_reference();
         traces[tid] = dynamic_trace;
         current_trace = dynamic_trace;
@@ -5512,7 +5512,7 @@ namespace Legion {
       // Issue the mapping fence into the analysis
       runtime->issue_mapping_fence(this);
       // Then we make a static trace
-      current_trace = legion_new<StaticTrace>(this, trees); 
+      current_trace = new StaticTrace(this, trees); 
       current_trace->add_reference();
     }
 
@@ -6069,6 +6069,8 @@ namespace Legion {
       // Invalidate all our region contexts
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
+        if (IS_NO_ACCESS(regions[idx]))
+          continue;
         runtime->forest->invalidate_current_context(tree_context,
                                                     false/*users only*/,
                                                     regions[idx].region);
@@ -6107,7 +6109,7 @@ namespace Legion {
         {
           it->first->unregister_active_context(this);
           if (it->second->remove_base_resource_ref(CONTEXT_REF))
-            LogicalView::delete_logical_view(it->second);
+            delete (it->second);
         }
         instance_top_views.clear();
       }
@@ -6237,7 +6239,7 @@ namespace Legion {
         instance_top_views.erase(finder);
       }
       if (removed->remove_base_resource_ref(CONTEXT_REF))
-        LogicalView::delete_logical_view(removed);
+        delete removed;
     }
 
     //--------------------------------------------------------------------------
@@ -7324,6 +7326,74 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    InnerContext* RemoteContext::find_parent_physical_context(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(regions.size() == virtual_mapped.size());
+      assert(regions.size() == parent_req_indexes.size());
+#endif     
+      const unsigned owner_size = virtual_mapped.size();
+      if (index < owner_size)
+      {
+        // See if it is virtual mapped
+        if (virtual_mapped[index])
+          return find_parent_context()->find_parent_physical_context(
+                                            parent_req_indexes[index]);
+        else // We mapped a physical instance so we're it
+          return this;
+      }
+      else // We created it
+      {
+        // But we're the remote note, so we don't have updated created
+        // requirements or returnable privileges so we need to see if
+        // we already know the answer and if not, ask the owner context
+        RtEvent wait_on;
+        RtUserEvent request;
+        {
+          AutoLock ctx_lock(context_lock);
+          std::map<unsigned,InnerContext*>::const_iterator finder = 
+            physical_contexts.find(index);
+          if (finder != physical_contexts.end())
+            return finder->second;
+          std::map<unsigned,RtEvent>::const_iterator pending_finder = 
+            pending_physical_contexts.find(index);
+          if (pending_finder == pending_physical_contexts.end())
+          {
+            // Make a new request
+            request = Runtime::create_rt_user_event();
+            pending_physical_contexts[index] = request;
+            wait_on = request;
+          }
+          else // Already sent it so just get the wait event
+            wait_on = pending_finder->second;
+        }
+        if (request.exists())
+        {
+          // Send the request
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(context_uid);
+            rez.serialize(index);
+            rez.serialize(this);
+            rez.serialize(request);
+          }
+          const AddressSpaceID target = runtime->get_runtime_owner(context_uid);
+          runtime->send_remote_context_physical_request(target, rez);
+        }
+        // Wait for the result to come back to us
+        wait_on.lg_wait();
+        // When we wake up it should be there
+        AutoLock ctx_lock(context_lock, 1, false/*exclusive*/);
+#ifdef DEBUG_LEGION
+        assert(physical_contexts.find(index) != physical_contexts.end());
+#endif
+        return physical_contexts[index]; 
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void RemoteContext::unpack_remote_context(Deserializer &derez,
                                               std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
@@ -7420,6 +7490,72 @@ namespace Legion {
       RtUserEvent done_event;
       derez.deserialize(done_event);
       Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteContext::handle_physical_request(Deserializer &derez,
+                                        Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      UniqueID context_uid;
+      derez.deserialize(context_uid);
+      unsigned index;
+      derez.deserialize(index);
+      RemoteContext *target;
+      derez.deserialize(target);
+      RtUserEvent to_trigger;
+      derez.deserialize(to_trigger);
+
+      InnerContext *local = runtime->find_context(context_uid);
+      InnerContext *result = local->find_parent_physical_context(index);
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(target);
+        rez.serialize(index);
+        rez.serialize(result->context_uid);
+        rez.serialize(to_trigger);
+      }
+      runtime->send_remote_context_physical_response(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteContext::set_physical_context_result(unsigned index,
+                                                    InnerContext *result)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock ctx_lock(context_lock);
+#ifdef DEBUG_LEGION
+      assert(physical_contexts.find(index) == physical_contexts.end());
+#endif
+      physical_contexts[index] = result;
+      std::map<unsigned,RtEvent>::iterator finder = 
+        pending_physical_contexts.find(index);
+#ifdef DEBUG_LEGION
+      assert(finder != pending_physical_contexts.end());
+#endif
+      pending_physical_contexts.erase(finder);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteContext::handle_physical_response(Deserializer &derez,
+                                                            Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      RemoteContext *target;
+      derez.deserialize(target);
+      unsigned index;
+      derez.deserialize(index);
+      UniqueID result_uid;
+      derez.deserialize(result_uid);
+      RtUserEvent to_trigger;
+      derez.deserialize(to_trigger);
+
+      InnerContext *result = runtime->find_context(result_uid);
+      target->set_physical_context_result(index, result);
+      Runtime::trigger_event(to_trigger);
     }
 
     /////////////////////////////////////////////////////////////

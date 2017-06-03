@@ -23,12 +23,10 @@
 #include "lowlevel.h"
 #include "utilities.h"
 
-#ifdef SHARED_LOWLEVEL
-#define USE_LEGION_CROSS_PRODUCT 1
-#else
-// General LLR can't handle new partion API yet.
+using namespace LegionRuntime::Arrays;
+
+// Legion can't handle new partion API yet.
 #define USE_LEGION_CROSS_PRODUCT 0
-#endif
 
 #ifndef USE_TLS
 // Mac OS X and GCC <= 4.7 do not support C++11 thread_local.
@@ -42,7 +40,7 @@
 #if !USE_TLS
 class AutoImmovableLock {
 public:
-  AutoImmovableLock(ImmovableLock& _lock)
+  AutoImmovableLock(LegionRuntime::ImmovableLock& _lock)
     : lock(_lock)
   {
     lock.lock();
@@ -54,13 +52,13 @@ public:
   }
 
 protected:
-  ImmovableLock& lock;
+  LegionRuntime::ImmovableLock& lock;
 };
 #endif
 
 struct CachedIndexIterator {
 public:
-  CachedIndexIterator(HighLevelRuntime *rt, Context ctx, IndexSpace is, bool gl)
+  CachedIndexIterator(Runtime *rt, Context ctx, IndexSpace is, bool gl)
     : runtime(rt), context(ctx), space(is), index(0), cached(false), global(gl)
   {
   }
@@ -125,7 +123,7 @@ private:
   }
 
 private:
-  HighLevelRuntime *runtime;
+  Runtime *runtime;
   Context context;
   IndexSpace space;
   std::vector<std::pair<ptr_t, size_t> > spans;
@@ -138,7 +136,7 @@ private:
   std::map<IndexSpace, std::vector<std::pair<ptr_t, size_t> > > global_cache;
 #else
   static std::map<IndexSpace, std::vector<std::pair<ptr_t, size_t> > > global_cache;
-  static ImmovableLock global_lock;
+  static LegionRuntime::ImmovableLock global_lock;
 #endif
 };
 
@@ -148,7 +146,7 @@ thread_local std::map<IndexSpace, std::vector<std::pair<ptr_t, size_t> > >
 #else
 std::map<IndexSpace, std::vector<std::pair<ptr_t, size_t> > >
   CachedIndexIterator::global_cache;
-ImmovableLock CachedIndexIterator::global_lock(true);
+LegionRuntime::ImmovableLock CachedIndexIterator::global_lock(true);
 #endif
 
 class TerraCObjectWrapper {
@@ -232,14 +230,14 @@ assign_list_list(legion_terra_index_space_list_list_t& ls,
 
 // Returns true if the index space `is` is structured.
 static bool
-is_structured(HighLevelRuntime *runtime, Context ctx, IndexSpace is) {
+is_structured(Runtime *runtime, Context ctx, IndexSpace is) {
   Domain is_domain = runtime->get_index_space_domain(ctx, is);
   return is_domain.get_dim() > 0;
 }
 
 // Returns true if the index space `ip` belongs to is structured.
 static bool
-is_structured(HighLevelRuntime *runtime, Context ctx, IndexPartition ip) {
+is_structured(Runtime *runtime, Context ctx, IndexPartition ip) {
   IndexSpace is = runtime->get_parent_index_space(ctx, ip);
   return is_structured(runtime, ctx, is);
 }
@@ -248,7 +246,7 @@ is_structured(HighLevelRuntime *runtime, Context ctx, IndexPartition ip) {
 // intersection to achieve better performance.  This is the case when the index
 // space is unstructured and `rhs` is "smaller" than `lhs`.
 static bool
-should_flip_cross_product(HighLevelRuntime *runtime,
+should_flip_cross_product(Runtime *runtime,
                           Context ctx,
                           IndexPartition lhs,
                           IndexPartition rhs,
@@ -297,7 +295,7 @@ should_flip_cross_product(HighLevelRuntime *runtime,
 // Creates cross product between structured IndexPartition's.
 // See documentation of `create_cross_product()` for details.
 static Color
-create_cross_product_structured(HighLevelRuntime *runtime,
+create_cross_product_structured(Runtime *runtime,
                                 Context ctx,
                                 IndexPartition lhs,
                                 IndexPartition rhs,
@@ -366,7 +364,7 @@ create_cross_product_structured(HighLevelRuntime *runtime,
 // lh_color => intersection); otherwise, it will be a Map (lh_color => rh_color
 // => intersection).
 static void
-create_cross_product_coloring_unstructured(HighLevelRuntime *runtime,
+create_cross_product_coloring_unstructured(Runtime *runtime,
                                            Context ctx,
                                            IndexPartition lhs,
                                            IndexPartition rhs,
@@ -441,7 +439,7 @@ create_cross_product_coloring_unstructured(HighLevelRuntime *runtime,
 // Creates cross product between unstructured IndexPartition's.
 // See documentation of `create_cross_product()` for details.
 static Color
-create_cross_product_unstructured(HighLevelRuntime *runtime,
+create_cross_product_unstructured(Runtime *runtime,
                                   Context ctx,
                                   IndexPartition lhs,
                                   IndexPartition rhs,
@@ -501,7 +499,7 @@ create_cross_product_unstructured(HighLevelRuntime *runtime,
 #endif
 
 Color
-create_cross_product(HighLevelRuntime *runtime,
+create_cross_product(Runtime *runtime,
                      Context ctx,
                      IndexPartition lhs,
                      IndexPartition rhs,
@@ -535,7 +533,7 @@ create_cross_product(HighLevelRuntime *runtime,
 // For each unstructured IndexSpace in `index_spaces`, stores its bounds (first & last
 // element) as pairs in `bounds`.
 static inline void
-get_bounding_boxes(HighLevelRuntime *runtime,
+get_bounding_boxes(Runtime *runtime,
                    Context ctx,
                    const std::vector<IndexSpace> &index_spaces,
                    std::vector<std::pair<ptr_t, ptr_t> >& bounds)
@@ -726,7 +724,7 @@ find_first_bounding_box(Node* root, unsigned key, Leaf*& leaf, int& idx)
 }
 
 static void
-create_cross_product_tree(HighLevelRuntime *runtime,
+create_cross_product_tree(Runtime *runtime,
                           Context ctx,
                           bool flip,
                           const std::vector<IndexSpace> &lhs,
@@ -829,7 +827,7 @@ create_cross_product_tree(HighLevelRuntime *runtime,
 // `DIM` should match the dimensionality of the index spaces.
 template <unsigned DIM>
 static void
-extract_ispace_domain_rects(HighLevelRuntime *runtime,
+extract_ispace_domain_rects(Runtime *runtime,
                             Context ctx,
                             const std::vector<IndexSpace> &ispaces,
                             std::vector<Rect<DIM> >& rects)
@@ -851,7 +849,7 @@ extract_ispace_domain_rects(HighLevelRuntime *runtime,
 template <unsigned DIM>
 static void
 create_cross_product_shallow_structured_spec(
-    HighLevelRuntime *runtime,
+    Runtime *runtime,
     Context ctx,
     const std::vector<IndexSpace> &lhs,
     const std::vector<IndexSpace> &rhs,
@@ -978,12 +976,12 @@ QuadNode* create_quad_tree(const Rect<2>& bounds,
     coord_t center_x = (bounds.lo[0] + bounds.hi[0]) / 2;
     coord_t center_y = (bounds.lo[1] + bounds.hi[1]) / 2;
 
-    Rect<2> lower_left(bounds.lo, Arrays::make_point(center_x, center_y));
-    Rect<2> lower_right(Arrays::make_point(center_x + 1, bounds.lo[1]),
-                        Arrays::make_point(bounds.hi[0], center_y));
-    Rect<2> upper_left(Arrays::make_point(bounds.lo[0], center_y + 1),
-                       Arrays::make_point(center_x, bounds.hi[1]));
-    Rect<2> upper_right(Arrays::make_point(center_x + 1, center_y + 1),
+    Rect<2> lower_left(bounds.lo, make_point(center_x, center_y));
+    Rect<2> lower_right(make_point(center_x + 1, bounds.lo[1]),
+                        make_point(bounds.hi[0], center_y));
+    Rect<2> upper_left(make_point(bounds.lo[0], center_y + 1),
+                       make_point(center_x, bounds.hi[1]));
+    Rect<2> upper_right(make_point(center_x + 1, center_y + 1),
                         bounds.hi);
     num_nodes *= 4;
     num_elements /= 4;
@@ -997,7 +995,7 @@ QuadNode* create_quad_tree(const Rect<2>& bounds,
 
 static void
 create_cross_product_shallow_structured_tree(
-    HighLevelRuntime *runtime,
+    Runtime *runtime,
     Context ctx,
     IndexPartition lhs_part,
     const std::vector<IndexSpace> &lhs,
@@ -1037,7 +1035,7 @@ create_cross_product_shallow_structured_tree(
 // `lhs` and `rhs`.  Specifically, if `lhs[i]` and `rhs[j]` intersect,
 // `result[i][j]` is populated with `rhs[j]`.
 static void
-create_cross_product_shallow_structured(HighLevelRuntime *runtime,
+create_cross_product_shallow_structured(Runtime *runtime,
                                         Context ctx,
                                         IndexPartition lhs_part,
                                         IndexPartition rhs_part,
@@ -1083,7 +1081,7 @@ create_cross_product_shallow_structured(HighLevelRuntime *runtime,
 
 // Takes the shallow cross product between lists of unstructured index spaces.
 static void
-create_cross_product_shallow_unstructured(HighLevelRuntime *runtime,
+create_cross_product_shallow_unstructured(Runtime *runtime,
                                           Context ctx,
                                           bool flip,
                                           const std::vector<IndexSpace> &lhs,
@@ -1160,7 +1158,7 @@ create_cross_product_shallow_unstructured(HighLevelRuntime *runtime,
 }
 
 static void
-create_cross_product_multi(HighLevelRuntime *runtime,
+create_cross_product_multi(Runtime *runtime,
                            Context ctx,
                            size_t npartitions,
                            IndexPartition next,
@@ -1197,7 +1195,7 @@ legion_terra_index_cross_product_create(legion_runtime_t runtime_,
                                         legion_index_partition_t lhs_,
                                         legion_index_partition_t rhs_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexPartition lhs = CObjectWrapper::unwrap(lhs_);
   IndexPartition rhs = CObjectWrapper::unwrap(rhs_);
@@ -1218,7 +1216,7 @@ legion_terra_index_cross_product_create_multi(
   legion_color_t *colors_, // output
   size_t npartitions)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
 
   std::vector<IndexPartition> partitions;
@@ -1302,7 +1300,7 @@ wrap_list_list(std::vector<IndexSpace> &lhs,
 }
 
 static IndexPartition
-partition_from_list(HighLevelRuntime *runtime, Context ctx,
+partition_from_list(Runtime *runtime, Context ctx,
                     const std::vector<IndexSpace> &subspaces)
 {
   if (subspaces.empty()) return IndexPartition::NO_PART;
@@ -1318,7 +1316,7 @@ legion_terra_index_cross_product_create_list(
   legion_terra_logical_region_list_t *rhs_,
   legion_terra_logical_region_list_list_t *result_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   std::vector<IndexSpace> lhs;
   unwrap_list(lhs_, lhs);
@@ -1363,7 +1361,7 @@ legion_terra_index_cross_product_create_list_shallow(
   legion_terra_logical_region_list_t *rhs_,
   legion_terra_logical_region_list_list_t *result_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   std::vector<IndexSpace> lhs;
   unwrap_list(lhs_, lhs);
@@ -1412,7 +1410,7 @@ legion_terra_index_cross_product_create_list_shallow(
 //            IndexSpace belongs to a Partition of the RHS IndexSpace.
 static inline void
 create_cross_product_complete_structured(
-    HighLevelRuntime *runtime,
+    Runtime *runtime,
     Context ctx,
     std::vector<IndexSpace>& lhs,
     bool lhs_part_disjoint,
@@ -1462,11 +1460,24 @@ create_cross_product_complete_structured(
        it != coloring.end(); ++it) {
 
     IndexSpace rh_space = it->first;
-    const DomainPointColoring& coloring = it->second;
+    DomainPointColoring& coloring = it->second;
     assert(color_spaces.count(rh_space) > 0);
+    Domain color_space = color_spaces[rh_space];
+
+    for (Domain::DomainPointIterator dp(color_space); dp; dp++) {
+      if (coloring.find(dp.p) == coloring.end()) {
+        Domain empty_domain = runtime->get_index_space_domain(rh_space);
+        unsigned dim = empty_domain.get_dim();
+        for (unsigned idx = 0; idx < dim; ++idx) {
+          empty_domain.rect_data[idx] = 0;
+          empty_domain.rect_data[idx + dim] = -1;
+        }
+        coloring[dp.p] = empty_domain;
+      }
+    }
 
     IndexPartition ip = runtime->create_index_partition(
-        ctx, /* parent = */ rh_space, /* color_space = */ color_spaces[rh_space],
+        ctx, /* parent = */ rh_space, /* color_space = */ color_space,
         coloring, lhs_part_disjoint ? DISJOINT_KIND : ALIASED_KIND);
     rh_partitions[rh_space] = ip;
   }
@@ -1490,7 +1501,7 @@ create_cross_product_complete_structured(
 // Completes the shallow cross product between two lists of unstructured index spaces.
 static inline void
 create_cross_product_complete_unstructured(
-    HighLevelRuntime *runtime,
+    Runtime *runtime,
     Context ctx,
     std::vector<IndexSpace>& lhs,
     bool lhs_part_disjoint,
@@ -1552,11 +1563,18 @@ create_cross_product_complete_unstructured(
   for (std::map<IndexSpace, PointColoring>::iterator it = coloring.begin();
        it != coloring.end(); ++it) {
     IndexSpace rh_space = it->first;
-    const PointColoring& coloring = it->second;
+    PointColoring& coloring = it->second;
     assert(color_spaces.count(rh_space) > 0);
+    Domain color_space = color_spaces[rh_space];
+
+    for (Domain::DomainPointIterator dp(color_space); dp; dp++) {
+      if (coloring.find(dp.p) == coloring.end()) {
+        coloring[dp.p].ranges.insert(std::pair<ptr_t, ptr_t>(0, -1));
+      }
+    }
 
     IndexPartition ip = runtime->create_index_partition(
-        ctx, /* parent = */ rh_space, /* color_space = */ color_spaces[rh_space],
+        ctx, /* parent = */ rh_space, /* color_space = */ color_space,
         coloring, lhs_part_disjoint ? DISJOINT_KIND : ALIASED_KIND);
     rh_partitions[it->first] = ip;
   }
@@ -1585,7 +1603,7 @@ legion_terra_index_cross_product_create_list_complete(
   legion_terra_index_space_list_list_t product_,
   bool consistent_ids)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   std::vector<IndexSpace> lhs;
   unwrap_list(lhs_, lhs);
@@ -1630,7 +1648,7 @@ legion_terra_index_cross_product_get_subpartition_by_color_domain_point(
   legion_terra_index_cross_product_t prod,
   legion_domain_point_t color_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexPartition partition = CObjectWrapper::unwrap(prod.partition);
   DomainPoint color = CObjectWrapper::unwrap(color_);
@@ -1646,7 +1664,7 @@ legion_terra_cached_index_iterator_create(
   legion_context_t ctx_,
   legion_index_space_t handle_)
 {
-  HighLevelRuntime *runtime = CObjectWrapper::unwrap(runtime_);
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexSpace handle = CObjectWrapper::unwrap(handle_);
 

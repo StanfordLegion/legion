@@ -676,7 +676,8 @@ namespace Legion {
      * will result in the entire enclosing task context
      * being restarted.
      */
-    class MapOp : public InlineMapping, public Operation {
+    class MapOp : public InlineMapping, public Operation,
+                  public LegionHeapify<MapOp> {
     public:
       static const AllocationType alloc_type = MAP_OP_ALLOC;
     public:
@@ -758,7 +759,8 @@ namespace Legion {
      * from different region trees in an efficient way by
      * using the low-level runtime copy facilities. 
      */
-    class CopyOp : public Copy, public SpeculativeOp {
+    class CopyOp : public Copy, public SpeculativeOp,
+                   public LegionHeapify<CopyOp> {
     public:
       static const AllocationType alloc_type = COPY_OP_ALLOC;
     public:
@@ -943,7 +945,7 @@ namespace Legion {
      * runs.  To support these two kinds of guarantees, we
      * provide both mapping and executing fences.
      */
-    class FenceOp : public Operation {
+    class FenceOp : public Operation, public LegionHeapify<FenceOp> {
     public:
       enum FenceKind {
         MAPPING_FENCE,
@@ -1013,7 +1015,7 @@ namespace Legion {
      * going to be deleted.  Deletion operations defer deletions
      * until they are safe to be committed.
      */
-    class DeletionOp : public Operation {
+    class DeletionOp : public Operation, public LegionHeapify<DeletionOp> {
     public:
       static const AllocationType alloc_type = DELETION_OP_ALLOC;
     public:
@@ -1114,7 +1116,7 @@ namespace Legion {
      * record whether they are advancing the version
      * number information at a given level or not.
      */
-    class OpenOp : public InternalOp {
+    class OpenOp : public InternalOp, public LegionHeapify<OpenOp> {
     public:
       static const AllocationType alloc_type = OPEN_OP_ALLOC;
     public:
@@ -1148,7 +1150,7 @@ namespace Legion {
      * on intermediate nodes in the region tree when data
      * is being written to a subregion.
      */
-    class AdvanceOp : public InternalOp {
+    class AdvanceOp : public InternalOp, public LegionHeapify<AdvanceOp> {
     public:
       static const AllocationType alloc_type = ADVANCE_OP_ALLOC;
     public:
@@ -1236,7 +1238,7 @@ namespace Legion {
      * for closing up region trees as part of the normal execution
      * of an application.
      */
-    class InterCloseOp : public CloseOp {
+    class InterCloseOp : public CloseOp, public LegionHeapify<InterCloseOp> {
     public:
       struct DisjointCloseInfo {
       public:
@@ -1258,8 +1260,6 @@ namespace Legion {
       virtual ~InterCloseOp(void);
     public:
       InterCloseOp& operator=(const InterCloseOp &rhs);
-      void* operator new(size_t count);
-      void operator delete(void *ptr);
     public:
       void initialize(TaskContext *ctx, const RegionRequirement &req,
                       ClosedNode *closed_tree, const TraceInfo &trace_info,
@@ -1331,15 +1331,13 @@ namespace Legion {
      * are summaries for all those dependences to reduce the
      * overhead of testing against everything in a subtree.
      */
-    class ReadCloseOp : public CloseOp {
+    class ReadCloseOp : public CloseOp, public LegionHeapify<ReadCloseOp> {
     public:
       ReadCloseOp(Runtime *runtime);
       ReadCloseOp(const ReadCloseOp &rhs);
       virtual ~ReadCloseOp(void);
     public:
       ReadCloseOp& operator=(const ReadCloseOp &rhs);
-      void* operator new(size_t count);
-      void operator delete(void *ptr);
     public:
       void initialize(TaskContext *ctx, const RegionRequirement &req,
                       const TraceInfo &trace_info, int close_idx,
@@ -1447,7 +1445,8 @@ namespace Legion {
      * user-level software coherence when tasks own
      * regions with simultaneous coherence.
      */
-    class AcquireOp : public Acquire, public SpeculativeOp {
+    class AcquireOp : public Acquire, public SpeculativeOp,
+                      public LegionHeapify<AcquireOp> {
     public:
       static const AllocationType alloc_type = ACQUIRE_OP_ALLOC;
     public:
@@ -1519,7 +1518,8 @@ namespace Legion {
      * user-level software coherence when tasks own
      * regions with simultaneous coherence.
      */
-    class ReleaseOp : public Release, public SpeculativeOp {
+    class ReleaseOp : public Release, public SpeculativeOp,
+                      public LegionHeapify<ReleaseOp> {
     public:
       static const AllocationType alloc_type = RELEASE_OP_ALLOC;
     public:
@@ -1597,7 +1597,8 @@ namespace Legion {
      * us the framework necessary to handle roll backs on 
      * collectives so we can memoize their results.
      */
-    class DynamicCollectiveOp : public Operation {
+    class DynamicCollectiveOp : public Operation,
+                                public LegionHeapify<DynamicCollectiveOp> {
     public:
       static const AllocationType alloc_type = DYNAMIC_COLLECTIVE_OP_ALLOC;
     public:
@@ -1627,7 +1628,8 @@ namespace Legion {
      * \class FuturePredOp
      * A class for making predicates out of futures.
      */
-    class FuturePredOp : public PredicateOp {
+    class FuturePredOp : public PredicateOp, 
+                         public LegionHeapify<FuturePredOp> {
     public:
       static const AllocationType alloc_type = FUTURE_PRED_OP_ALLOC;
     public:
@@ -1662,7 +1664,8 @@ namespace Legion {
      * \class NotPredOp
      * A class for negating other predicates
      */
-    class NotPredOp : public PredicateOp, PredicateWaiter {
+    class NotPredOp : public PredicateOp, PredicateWaiter,
+                      public LegionHeapify<NotPredOp> {
     public:
       static const AllocationType alloc_type = NOT_PRED_OP_ALLOC;
     public:
@@ -1690,7 +1693,8 @@ namespace Legion {
      * \class AndPredOp
      * A class for and-ing other predicates
      */
-    class AndPredOp : public PredicateOp, PredicateWaiter {
+    class AndPredOp : public PredicateOp, PredicateWaiter,
+                      public LegionHeapify<AndPredOp> {
     public:
       static const AllocationType alloc_type = AND_PRED_OP_ALLOC;
     public:
@@ -1721,7 +1725,8 @@ namespace Legion {
      * \class OrPredOp
      * A class for or-ing other predicates
      */
-    class OrPredOp : public PredicateOp, PredicateWaiter {
+    class OrPredOp : public PredicateOp, PredicateWaiter,
+                     public LegionHeapify<OrPredOp> {
     public:
       static const AllocationType alloc_type = OR_PRED_OP_ALLOC;
     public:
@@ -1757,7 +1762,7 @@ namespace Legion {
      * these operations and ensures that they can all
      * be run in parallel or it reports an error.
      */
-    class MustEpochOp : public Operation {
+    class MustEpochOp : public Operation, public LegionHeapify<MustEpochOp> {
     public:
       static const AllocationType alloc_type = MUST_EPOCH_OP_ALLOC;
     public:
@@ -1976,7 +1981,8 @@ namespace Legion {
      * necessary to avoid possible application deadlock with
      * other pending partitions.
      */
-    class PendingPartitionOp : public Operation {
+    class PendingPartitionOp : public Operation,
+                               public LegionHeapify<PendingPartitionOp> {
     public:
       static const AllocationType alloc_type = PENDING_PARTITION_OP_ALLOC;
     protected:
@@ -2176,7 +2182,8 @@ namespace Legion {
      * which are dependent on mapping a region in order to compute
      * the resulting partition.
      */
-    class DependentPartitionOp : public Operation {
+    class DependentPartitionOp : public Operation,
+                                 public LegionHeapify<DependentPartitionOp> {
     public:
       static const AllocationType alloc_type = DEPENDENT_PARTITION_OP_ALLOC;
     public:
@@ -2242,7 +2249,8 @@ namespace Legion {
      * Fill operations are used to initialize a field to a
      * specific value for a particular logical region.
      */
-    class FillOp : public SpeculativeOp, public Fill {
+    class FillOp : public SpeculativeOp, public Fill,
+                   public LegionHeapify<FillOp> {
     public:
       static const AllocationType alloc_type = FILL_OP_ALLOC;
     public:
@@ -2375,7 +2383,7 @@ namespace Legion {
      * \class AttachOp
      * Operation for attaching a file to a physical instance
      */
-    class AttachOp : public Operation {
+    class AttachOp : public Operation, public LegionHeapify<AttachOp> {
     public:
       static const AllocationType alloc_type = ATTACH_OP_ALLOC;
     public:
@@ -2430,7 +2438,7 @@ namespace Legion {
      * \class Detach Op
      * Operation for detaching a file from a physical instance
      */
-    class DetachOp : public Operation {
+    class DetachOp : public Operation, public LegionHeapify<DetachOp> {
     public:
       static const AllocationType alloc_type = DETACH_OP_ALLOC;
     public:

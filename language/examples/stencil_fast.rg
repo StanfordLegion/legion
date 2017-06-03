@@ -39,7 +39,8 @@ if USE_FOREIGN then
   end
   local cxx = os.getenv('CXX') or 'c++'
 
-  local cxx_flags = "-O3 -Wall -Werror -DDTYPE=" .. tostring(DTYPE) .. " -DRESTRICT=__restrict__ -DRADIUS=" .. tostring(RADIUS)
+  local cxx_flags = os.getenv('CC_FLAGS') or ''
+  cxx_flags = cxx_flags .. " -O3 -Wall -Werror -DDTYPE=" .. tostring(DTYPE) .. " -DRESTRICT=__restrict__ -DRADIUS=" .. tostring(RADIUS)
   if os.execute('test "$(uname)" = Darwin') == 0 then
     cxx_flags =
       (cxx_flags ..
@@ -85,7 +86,8 @@ do
   end
   local cxx = os.getenv('CXX') or 'c++'
 
-  local cxx_flags = "-O2 -Wall -Werror"
+  local cxx_flags = os.getenv('CC_FLAGS') or ''
+  cxx_flags = cxx_flags .. " -O2 -Wall -Werror"
   if map_locally then cxx_flags = cxx_flags .. " -DMAP_LOCALLY " end
   if os.execute('test "$(uname)" = Darwin') == 0 then
     cxx_flags =
@@ -509,9 +511,8 @@ task main()
   fill(ym.{input, output}, init)
   fill(yp.{input, output}, init)
 
-  var tsteps : int64 = conf.tsteps
   var tprune : int64 = conf.tprune
-  regentlib.assert(tsteps > 2*tprune, "too few time steps")
+  var tsteps : int64 = conf.tsteps + 2 * tprune
 
   -- __demand(__spmd)
   -- do

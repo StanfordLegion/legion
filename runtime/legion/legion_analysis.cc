@@ -114,7 +114,7 @@ namespace Legion {
                                                        RegionTreeForest *forest)
     //--------------------------------------------------------------------------
     {
-      PhysicalUser *result = legion_new<PhysicalUser>();
+      PhysicalUser *result = new PhysicalUser();
       derez.deserialize(result->child);
       derez.deserialize(result->usage.privilege);
       derez.deserialize(result->usage.prop);
@@ -186,23 +186,6 @@ namespace Legion {
     {
       // should never be called
       assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    template<ReferenceSource REF_KIND, bool LOCAL>
-    void* VersioningSet<REF_KIND,LOCAL>::operator new(size_t count)
-    //--------------------------------------------------------------------------
-    {
-      return legion_alloc_aligned<VersioningSet<REF_KIND,LOCAL>,
-                                  true/*bytes*/>(count);
-    }
-
-    //--------------------------------------------------------------------------
-    template<ReferenceSource REF_KIND, bool LOCAL>
-    void VersioningSet<REF_KIND,LOCAL>::operator delete(void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
     }
 
     //--------------------------------------------------------------------------
@@ -424,7 +407,7 @@ namespace Legion {
           to_erase->send_remote_valid_update(to_erase->owner_space, 
               NULL/*mutator*/, 1/*count*/, false/*add*/);
         if (to_erase->remove_base_valid_ref(REF_KIND))
-          legion_delete(to_erase);
+          delete to_erase; 
       }
     }
 
@@ -442,7 +425,7 @@ namespace Legion {
                 versions.single_version->owner_space, 
                 NULL/*mutator*/, 1/*count*/, false/*add*/);
           if (versions.single_version->remove_base_valid_ref(REF_KIND))
-            legion_delete(versions.single_version);
+            delete versions.single_version;
         }
         versions.single_version = NULL;
       }
@@ -461,7 +444,7 @@ namespace Legion {
               it->first->send_remote_valid_update(it->first->owner_space,
                   NULL/*mutator*/, 1/*count*/, false/*add*/);
             if (it->first->remove_base_valid_ref(REF_KIND))
-              legion_delete(it->first);
+              delete it->first;
           }
         }
         delete versions.multi_versions;
@@ -750,7 +733,7 @@ namespace Legion {
       assert(depth < physical_states.size());
 #endif
       if (physical_states[depth] == NULL)
-        physical_states[depth] = legion_new<PhysicalState>(node, path_only);
+        physical_states[depth] = new PhysicalState(node, path_only);
       physical_states[depth]->add_version_state(state, state_mask);
       // Now record the version information
 #ifdef DEBUG_LEGION
@@ -776,7 +759,7 @@ namespace Legion {
       assert(depth < physical_states.size());
 #endif
       if (physical_states[depth] == NULL)
-        physical_states[depth] = legion_new<PhysicalState>(node, path_only);
+        physical_states[depth] = new PhysicalState(node, path_only);
       physical_states[depth]->add_advance_state(state, state_mask);
     }
 
@@ -856,7 +839,7 @@ namespace Legion {
             physical_states.begin(); it != physical_states.end(); it++)
       {
         if ((*it) != NULL)
-          legion_delete(*it);
+          delete *it;
       }
       physical_states.clear();
       split_masks.clear();
@@ -957,7 +940,7 @@ namespace Legion {
           (upper_bound_node->get_depth() <= node->get_depth()))
       {
         result = 
-          legion_new<PhysicalState>(node, (depth < (physical_states.size()-1)));
+          new PhysicalState(node, (depth < (physical_states.size()-1)));
         result->capture_state();
         physical_states[depth] = result;
         return result;
@@ -1154,7 +1137,7 @@ namespace Legion {
             derez.deserialize(handle);
             node = runtime->forest->get_node(handle);
           }
-          PhysicalState *next = legion_new<PhysicalState>(node, is_path_only);
+          PhysicalState *next = new PhysicalState(node, is_path_only);
           next->unpack_physical_state(derez, runtime, ready_events);
           physical_states[idx] = next;
           // Reverse the polarity
@@ -1301,7 +1284,7 @@ namespace Legion {
             restrictions.begin(); it != restrictions.end(); it++)
       {
         if (it->first->remove_base_gc_ref(RESTRICTED_REF))
-          legion_delete(it->first);
+          delete it->first;
       }
       restrictions.clear();
     }
@@ -1355,7 +1338,7 @@ namespace Legion {
             restrictions.begin(); it != restrictions.end(); it++)
       {
         if (it->first->remove_base_gc_ref(RESTRICTED_REF))
-          legion_delete(it->first);
+          delete it->first;
       }
       restrictions.clear();
       restricted_instances.clear();
@@ -1463,7 +1446,7 @@ namespace Legion {
             instances.begin(); it != instances.end(); it++)
       {
         if (it->first->remove_base_gc_ref(RESTRICTED_REF))
-          legion_delete(it->first);
+          delete it->first;
       }
       instances.clear();
     }
@@ -1475,20 +1458,6 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void* Restriction::operator new(size_t count)
-    //--------------------------------------------------------------------------
-    {
-      return legion_alloc_aligned<Restriction,true/*bytes*/>(count);
-    }
-
-    //--------------------------------------------------------------------------
-    void Restriction::operator delete(void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
     }
 
     //--------------------------------------------------------------------------
@@ -1583,7 +1552,7 @@ namespace Legion {
         {
           instances.erase(*it);
           if ((*it)->remove_base_gc_ref(RESTRICTED_REF))
-            legion_delete(*it);
+            delete *it;
         }
       }
       return false;
@@ -1753,20 +1722,6 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void* Acquisition::operator new(size_t count)
-    //--------------------------------------------------------------------------
-    {
-      return legion_alloc_aligned<Acquisition,true/*bytes*/>(count);
-    }
-
-    //--------------------------------------------------------------------------
-    void Acquisition::operator delete(void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
     }
 
     //--------------------------------------------------------------------------
@@ -2443,20 +2398,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void* ProjectionEpoch::operator new(size_t count)
-    //--------------------------------------------------------------------------
-    {
-      return legion_alloc_aligned<ProjectionEpoch,true/*bytes*/>(count);
-    }
-
-    //--------------------------------------------------------------------------
-    void ProjectionEpoch::operator delete(void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
-    }
-
-    //--------------------------------------------------------------------------
     void ProjectionEpoch::insert(ProjectionFunction *function, const Domain &d)
     //--------------------------------------------------------------------------
     {
@@ -2499,34 +2440,6 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void* LogicalState::operator new(size_t count)
-    //--------------------------------------------------------------------------
-    {
-      return legion_alloc_aligned<LogicalState,true/*bytes*/>(count);
-    }
-
-    //--------------------------------------------------------------------------
-    void* LogicalState::operator new[](size_t count)
-    //--------------------------------------------------------------------------
-    {
-      return legion_alloc_aligned<LogicalState,true/*bytes*/>(count);
-    }
-
-    //--------------------------------------------------------------------------
-    void LogicalState::operator delete(void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
-    }
-
-    //--------------------------------------------------------------------------
-    void LogicalState::operator delete[](void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
     }
 
     //--------------------------------------------------------------------------
@@ -3076,20 +2989,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void* ClosedNode::operator new(size_t count)
-    //--------------------------------------------------------------------------
-    {
-      return legion_alloc_aligned<ClosedNode,true/*bytes*/>(count); 
-    }
-
-    //--------------------------------------------------------------------------
-    void ClosedNode::operator delete(void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
-    }
-
-    //--------------------------------------------------------------------------
     ClosedNode* ClosedNode::clone_disjoint_projection(
                   RegionTreeNode *child_node, const FieldMask &close_mask) const
     //--------------------------------------------------------------------------
@@ -3379,6 +3278,7 @@ namespace Legion {
           }
         }
       }
+      FieldMask not_dominated_by_all;
       for (std::map<RegionTreeNode*,ClosedNode*>::const_iterator it = 
             children.begin(); it != children.end(); it++)
       {
@@ -3396,11 +3296,9 @@ namespace Legion {
         }
         FieldMask child_non_dominated = overlap;
         finder->second->filter_dominated_fields(it->second,child_non_dominated);
-        dominated_fields &= (overlap - child_non_dominated);
-        if (!dominated_fields)
-          return;
+        not_dominated_by_all |= child_non_dominated;
       }
-      non_dominated_mask -= dominated_fields;
+      non_dominated_mask -= dominated_fields - not_dominated_by_all;
     }
 
     //--------------------------------------------------------------------------
@@ -3484,7 +3382,7 @@ namespace Legion {
         derez.deserialize(handle);
         node = runtime->forest->get_node(handle);
       }
-      ClosedNode *result = legion_new<ClosedNode>(node);
+      ClosedNode *result = new ClosedNode(node);
       result->perform_unpack(derez, runtime, is_region);
       return result;
     }
@@ -3862,34 +3760,6 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    void* PhysicalState::operator new(size_t count)
-    //--------------------------------------------------------------------------
-    {
-      return legion_alloc_aligned<PhysicalState,true/*bytes*/>(count);
-    }
-
-    //--------------------------------------------------------------------------
-    void* PhysicalState::operator new[](size_t count)
-    //--------------------------------------------------------------------------
-    {
-      return legion_alloc_aligned<PhysicalState,true/*bytes*/>(count);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalState::operator delete(void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalState::operator delete[](void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
-    }
-
-    //--------------------------------------------------------------------------
     void PhysicalState::pack_physical_state(Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -4057,7 +3927,7 @@ namespace Legion {
     PhysicalState* PhysicalState::clone(void) const
     //--------------------------------------------------------------------------
     {
-      PhysicalState *result = legion_new<PhysicalState>(node, path_only);
+      PhysicalState *result = new PhysicalState(node, path_only);
       if (!version_states.empty())
       {
         for (PhysicalVersions::iterator it = version_states.begin();
@@ -4230,34 +4100,6 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void* VersionManager::operator new(size_t count)
-    //--------------------------------------------------------------------------
-    {
-      return legion_alloc_aligned<VersionManager,true/*bytes*/>(count);
-    }
-
-    //--------------------------------------------------------------------------
-    void* VersionManager::operator new[](size_t count)
-    //--------------------------------------------------------------------------
-    {
-      return legion_alloc_aligned<VersionManager,true/*bytes*/>(count);
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionManager::operator delete(void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionManager::operator delete[](void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
     }
 
     //--------------------------------------------------------------------------
@@ -5094,13 +4936,17 @@ namespace Legion {
         if (!remote_valid.empty() && !(remote_valid_fields * mask))
         {
           std::vector<AddressSpaceID> to_delete;
+          bool skipped_source = false;
           for (LegionMap<AddressSpaceID,FieldMask>::aligned::iterator it = 
                 remote_valid.begin(); it != remote_valid.end(); it++)
           {
             // If this is the source, then we can skip it
             // because it already knows to do its own invalidate
             if (it->first == source_space)
+            {
+              skipped_source = true;
               continue;
+            }
             FieldMask overlap = mask & it->second;
             if (!overlap)
               continue;
@@ -5116,6 +4962,11 @@ namespace Legion {
                   to_delete.begin(); it != to_delete.end(); it++)
               remote_valid.erase(*it);
           }
+          remote_valid_fields -= mask;
+          // If we skipped the source, then make sure to
+          // keep its remote valid fields in the remote valid mask
+          if (skipped_source)
+            remote_valid_fields |= remote_valid[source_space];
         }
         // Otherwise we are the owner node so we can do the update
 #ifdef DEBUG_LEGION
@@ -5371,7 +5222,7 @@ namespace Legion {
                 DirtyUpdateArgs args;
                 args.previous = mit->first;
                 args.target = it->first;
-                args.capture_mask = legion_new<FieldMask>(overlap);
+                args.capture_mask = new FieldMask(overlap);
                 RtEvent done = 
                   runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
                                                    NULL, precondition);
@@ -5422,7 +5273,7 @@ namespace Legion {
       const DirtyUpdateArgs *dargs = (const DirtyUpdateArgs*)args;
       dargs->previous->capture_dirty_instances(*(dargs->capture_mask),
                                                dargs->target);
-      legion_delete(dargs->capture_mask);
+      delete dargs->capture_mask;
     }
 
     //--------------------------------------------------------------------------
@@ -5598,7 +5449,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DistributedID did = runtime->get_available_distributed_id(false);
-      return legion_new<VersionState>(vid, runtime, did, 
+      return new VersionState(vid, runtime, did, 
           runtime->address_space, node, true/*register now*/);
     }
 
@@ -6175,34 +6026,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void* VersionState::operator new(size_t count)
-    //--------------------------------------------------------------------------
-    {
-      return legion_alloc_aligned<VersionState,true/*bytes*/>(count);
-    }
-
-    //--------------------------------------------------------------------------
-    void* VersionState::operator new[](size_t count)
-    //--------------------------------------------------------------------------
-    {
-      return legion_alloc_aligned<VersionState,true/*bytes*/>(count);
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionState::operator delete(void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionState::operator delete[](void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
-    }
-
-    //--------------------------------------------------------------------------
     void VersionState::initialize(ApEvent term_event, const RegionUsage &usage,
                                   const FieldMask &user_mask,
                                   const InstanceSet &targets,
@@ -6620,13 +6443,13 @@ namespace Legion {
             valid_views.begin(); it != valid_views.end(); it++)
       {
         if (it->first->remove_nested_valid_ref(did, mutator))
-          LogicalView::delete_logical_view(it->first);
+          delete it->first;
       }
       for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
             reduction_views.begin(); it != reduction_views.end(); it++)
       {
         if (it->first->remove_nested_valid_ref(did, mutator))
-          legion_delete(it->first);
+          delete it->first;
       }
     }
 
@@ -7081,7 +6904,7 @@ namespace Legion {
       args.proxy_this = this;
       args.target = target;
       args.context = context;
-      args.request_mask = legion_new<FieldMask>(request_mask);
+      args.request_mask = new FieldMask(request_mask);
       args.request_kind = request_kind;
       args.to_trigger = to_trigger;
       // There is imprecision in our tracking of which nodes have valid
@@ -7164,12 +6987,12 @@ namespace Legion {
       void *location;
       VersionState *state = NULL;
       if (runtime->find_pending_collectable_location(did, location))
-        state = legion_new_in_place<VersionState>(location, version_number,
-                                                  runtime, did, source, 
-                                                  node, false/*register now*/);
+        state = new(location) VersionState(version_number,
+                                           runtime, did, source, 
+                                           node, false/*register now*/);
       else
-        state = legion_new<VersionState>(version_number, runtime, did,
-                                         source, node, false/*register now*/);
+        state = new VersionState(version_number, runtime, did,
+                                 source, node, false/*register now*/);
       // Once construction is complete then we do the registration
       state->register_with_runtime(NULL/*no remote registration needed*/);
     }
@@ -7777,7 +7600,7 @@ namespace Legion {
       const RemoveVersionStateRefArgs *ref_args = 
         (const RemoveVersionStateRefArgs*)args;
       if (ref_args->proxy_this->remove_base_valid_ref(ref_args->ref_kind))
-        legion_delete(ref_args->proxy_this);     
+        delete ref_args->proxy_this;     
     }
 
     //--------------------------------------------------------------------------
@@ -8278,19 +8101,7 @@ namespace Legion {
       assert(manager != NULL);
 #endif
       if (manager->remove_base_valid_ref(source))
-      {
-        if (manager->is_reduction_manager())
-        {
-          ReductionManager *reduc_manager = 
-            manager->as_reduction_manager();
-          if (reduc_manager->is_list_manager())
-            legion_delete(reduc_manager->as_list_manager());
-          else
-            legion_delete(reduc_manager->as_fold_manager());
-        }
-        else
-          legion_delete(manager->as_instance_manager());
-      }
+        delete manager;
     }
 
     //--------------------------------------------------------------------------
@@ -8403,7 +8214,7 @@ namespace Legion {
         refs.single = NULL;
       else if (init_size == 1)
       {
-        refs.single = legion_new<CollectableRef>();
+        refs.single = new CollectableRef();
         refs.single->add_reference();
       }
       else
@@ -8447,7 +8258,7 @@ namespace Legion {
       if (single)
       {
         if ((refs.single != NULL) && refs.single->remove_reference())
-          legion_delete(refs.single);
+          delete (refs.single);
       }
       else
       {
@@ -8464,7 +8275,7 @@ namespace Legion {
       if (single)
       {
         if ((refs.single != NULL) && refs.single->remove_reference())
-          legion_delete(refs.single);
+          delete (refs.single);
       }
       else
       {
@@ -8507,10 +8318,10 @@ namespace Legion {
         if (refs.single != NULL)
         {
           CollectableRef *next = 
-            legion_new<CollectableRef,InstanceRef>(*refs.single);
+            new CollectableRef(*refs.single);
           next->add_reference();
           if (refs.single->remove_reference())
-            legion_delete(refs.single);
+            delete (refs.single);
           refs.single = next;
         }
       }
@@ -8634,7 +8445,7 @@ namespace Legion {
         if (new_size == 0)
         {
           if ((refs.single != NULL) && refs.single->remove_reference())
-            legion_delete(refs.single);
+            delete (refs.single);
           refs.single = NULL;
           shared = false;
         }
@@ -8646,7 +8457,7 @@ namespace Legion {
           {
             next->vector[0] = *(refs.single);
             if (refs.single->remove_reference())
-              legion_delete(refs.single);
+              delete (refs.single);
           }
           next->add_reference();
           refs.multi = next;
@@ -8656,7 +8467,7 @@ namespace Legion {
         else if (refs.single == NULL)
         {
           // New size is 1 but we were empty before
-          CollectableRef *next = legion_new<CollectableRef>();
+          CollectableRef *next = new CollectableRef();
           next->add_reference();
           refs.single = next;
           single = true;
@@ -8676,9 +8487,9 @@ namespace Legion {
         else if (new_size == 1)
         {
           CollectableRef *next = 
-            legion_new<CollectableRef,InstanceRef>(refs.multi->vector[0]);
+            new CollectableRef(refs.multi->vector[0]);
           if (refs.multi->remove_reference())
-            legion_delete(refs.multi);
+            delete (refs.multi);
           next->add_reference();
           refs.single = next;
           single = true;
@@ -8722,7 +8533,7 @@ namespace Legion {
       if (single)
       {
         if ((refs.single != NULL) && refs.single->remove_reference())
-          legion_delete(refs.single);
+          delete (refs.single);
         refs.single = NULL;
       }
       else
@@ -8764,7 +8575,7 @@ namespace Legion {
           next->vector[0] = *(refs.single);
           next->vector[1] = ref;
           if (refs.single->remove_reference())
-            legion_delete(refs.single);
+            delete (refs.single);
           next->add_reference();
           refs.multi = next;
           single = false;
@@ -8772,7 +8583,7 @@ namespace Legion {
         }
         else
         {
-          refs.single = legion_new<CollectableRef,InstanceRef>(ref);
+          refs.single = new CollectableRef(ref);
           refs.single->add_reference();
         }
       }
@@ -8831,7 +8642,7 @@ namespace Legion {
         if (single)
         {
           if ((refs.single != NULL) && refs.single->remove_reference())
-            legion_delete(refs.single);
+            delete (refs.single);
           refs.single = NULL;
         }
         else
@@ -8854,7 +8665,7 @@ namespace Legion {
         // Now we can unpack our reference, see if we need to make one
         if (refs.single == NULL)
         {
-          refs.single = legion_new<CollectableRef>();
+          refs.single = new CollectableRef();
           refs.single->add_reference();
         }
         RtEvent ready;
@@ -8869,7 +8680,7 @@ namespace Legion {
         if (single)
         {
           if ((refs.single != NULL) && refs.single->remove_reference())
-            legion_delete(refs.single);
+            delete (refs.single);
           refs.multi = new InternalSet(num_refs);
           refs.multi->add_reference();
           single = false;
@@ -9013,7 +8824,7 @@ namespace Legion {
       if (invalidate_all)
         node->invalidate_version_managers();
       else
-        node->invalidate_version_state(ctx);
+        return node->invalidate_version_state(ctx);
       return true;
     }
 
@@ -9024,7 +8835,7 @@ namespace Legion {
       if (invalidate_all)
         node->invalidate_version_managers();
       else
-        node->invalidate_version_state(ctx);
+        return node->invalidate_version_state(ctx);
       return true;
     }
 

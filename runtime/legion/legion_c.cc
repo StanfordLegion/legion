@@ -22,12 +22,8 @@
 #endif
 
 #ifndef USE_LEGION_PARTAPI_SHIM
-#ifdef SHARED_LOWLEVEL
-#define USE_LEGION_PARTAPI_SHIM 0
-#else
 // General LLR can't handle new partion API yet. Use a shim instead.
 #define USE_LEGION_PARTAPI_SHIM 1
-#endif
 #endif
 
 using namespace Legion;
@@ -785,13 +781,14 @@ private:
   };
 };
 
-Processor::TaskFuncID
+TaskID
 PartitionEqualShim::register_task()
 {
-  return HighLevelRuntime::register_legion_task<IndexPartition, task>(
-    task_id, Processor::LOC_PROC, true, false,
-    AUTO_GENERATE_ID, TaskConfigOptions(),
-    "PartitionEqualShim::task");
+  static const char * const task_name = "PartitionEqualShim::task";
+  TaskVariantRegistrar registrar(task_id, task_name);
+  registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+  Runtime::preregister_task_variant<IndexPartition, task>(registrar, task_name);
+  return task_id;
 }
 
 IndexPartition
@@ -1052,13 +1049,14 @@ private:
   };
 };
 
-Processor::TaskFuncID
+TaskID
 PartitionByUnionShim::register_task()
 {
-  return HighLevelRuntime::register_legion_task<IndexPartition, task>(
-    task_id, Processor::LOC_PROC, true, false,
-    AUTO_GENERATE_ID, TaskConfigOptions(),
-    "PartitionByUnionShim::task");
+  static const char * const task_name = "PartitionByUnionShim::task";
+  TaskVariantRegistrar registrar(task_id, task_name);
+  registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+  Runtime::preregister_task_variant<IndexPartition, task>(registrar, task_name);
+  return task_id;
 }
 
 IndexPartition
@@ -1178,13 +1176,14 @@ private:
   };
 };
 
-Processor::TaskFuncID
+TaskID
 PartitionByIntersectionShim::register_task()
 {
-  return HighLevelRuntime::register_legion_task<STLVectorSerializer<ptr_t>, task>(
-    task_id, Processor::LOC_PROC, true, false,
-    AUTO_GENERATE_ID, TaskConfigOptions(),
-    "PartitionByIntersectionShim::task");
+  static const char * const task_name = "PartitionByIntersectionShim::task";
+  TaskVariantRegistrar registrar(task_id, task_name);
+  registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+  Runtime::preregister_task_variant<STLVectorSerializer<ptr_t>, task>(registrar, task_name);
+  return task_id;
 }
 
 IndexPartition
@@ -1343,13 +1342,14 @@ private:
   };
 };
 
-Processor::TaskFuncID
+TaskID
 PartitionByDifferenceShim::register_task()
 {
-  return HighLevelRuntime::register_legion_task<STLVectorSerializer<ptr_t>, task>(
-    task_id, Processor::LOC_PROC, true, false,
-    AUTO_GENERATE_ID, TaskConfigOptions(),
-    "PartitionByDifferenceShim::task");
+  static const char * const task_name = "PartitionByDifferenceShim::task";
+  TaskVariantRegistrar registrar(task_id, task_name);
+  registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+  Runtime::preregister_task_variant<STLVectorSerializer<ptr_t>, task>(registrar, task_name);
+  return task_id;
 }
 
 IndexPartition
@@ -1483,13 +1483,14 @@ private:
   };
 };
 
-Processor::TaskFuncID
+TaskID
 PartitionByFieldShim::register_task()
 {
-  return HighLevelRuntime::register_legion_task<IndexPartition, task>(
-    task_id, Processor::LOC_PROC, true, false,
-    AUTO_GENERATE_ID, TaskConfigOptions(),
-    "PartitionByFieldShim::task");
+  static const char * const task_name = "PartitionByFieldShim::task";
+  TaskVariantRegistrar registrar(task_id, task_name);
+  registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+  Runtime::preregister_task_variant<IndexPartition, task>(registrar, task_name);
+  return task_id;
 }
 
 IndexPartition
@@ -1615,24 +1616,26 @@ private:
   };
 };
 
-Processor::TaskFuncID
+TaskID
 PartitionByImageShim::register_task_unstructured()
 {
-  return
-    HighLevelRuntime::register_legion_task<STLSetSerializer<ptr_t>, unstructured>(
-    task_id_unstructured, Processor::LOC_PROC, true, false,
-    AUTO_GENERATE_ID, TaskConfigOptions(),
-    "PartitionByImageShim::unstructured");
+  static const char * const task_name_unstructured = "PartitionByFieldShim::unstructured";
+  TaskVariantRegistrar registrar(task_id_unstructured, task_name_unstructured);
+  registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+  Runtime::preregister_task_variant<STLSetSerializer<ptr_t>, unstructured>(
+    registrar, task_name_unstructured);
+  return task_id_unstructured;
 }
 
-Processor::TaskFuncID
+TaskID
 PartitionByImageShim::register_task_structured()
 {
-  return
-    HighLevelRuntime::register_legion_task<STLVectorSerializer<long long>, structured>(
-    task_id_structured, Processor::LOC_PROC, true, false,
-    AUTO_GENERATE_ID, TaskConfigOptions(),
-    "PartitionByImageShim::structured");
+  static const char * const task_name_structured = "PartitionByFieldShim::structured";
+  TaskVariantRegistrar registrar(task_id_structured, task_name_structured);
+  registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+  Runtime::preregister_task_variant<STLVectorSerializer<long long>, structured>(
+    registrar, task_name_structured);
+  return task_id_structured;
 }
 
 IndexPartition
@@ -1892,13 +1895,14 @@ private:
   };
 };
 
-Processor::TaskFuncID
+TaskID
 PartitionByPreimageShim::register_task()
 {
-  return HighLevelRuntime::register_legion_task<STLVectorSerializer<long long>, task>(
-    task_id, Processor::LOC_PROC, true, false,
-    AUTO_GENERATE_ID, TaskConfigOptions(),
-    "PartitionByPreimageShim::task");
+  static const char * const task_name = "PartitionByPreimageShim::task";
+  TaskVariantRegistrar registrar(task_id, task_name);
+  registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+  Runtime::preregister_task_variant<STLVectorSerializer<long long>, task>(registrar, task_name);
+  return task_id;
 }
 
 IndexPartition
@@ -3103,50 +3107,14 @@ legion_dynamic_collective_advance(legion_runtime_t runtime_,
 //------------------------------------------------------------------------
 
 legion_future_t
-legion_future_from_buffer(legion_runtime_t runtime_,
-                          const void *buffer,
-                          size_t size)
+legion_future_from_untyped_pointer(legion_runtime_t runtime_,
+                                   const void *buffer,
+                                   size_t size)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
 
-  TaskResult task_result(buffer, size);
-  Future *result = new Future(Future::from_value(runtime, task_result));
-  return CObjectWrapper::wrap(result);
-}
-
-legion_future_t
-legion_future_from_uint32(legion_runtime_t runtime_,
-                          uint32_t value)
-{
-  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-
-  Future *result = new Future(Future::from_value(runtime, value));
-  return CObjectWrapper::wrap(result);
-}
-
-legion_future_t
-legion_future_from_uint64(legion_runtime_t runtime_,
-                          uint64_t value)
-{
-  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-
-  Future *result = new Future(Future::from_value(runtime, value));
-  return CObjectWrapper::wrap(result);
-}
-
-/**
- * @return Caller takes ownership of return value.
- *
- * @see LegionRuntime::HighLevel::Future::from_untyped_pointer()
- */
-legion_future_t
-legion_future_from_bytes(legion_runtime_t runtime_,
-			 const void *buffer,
-			 size_t size)
-{
-  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-
-  Future *result = new Future(Future::from_untyped_pointer(runtime, buffer, size));
+  Future *result = new Future(
+    Future::from_untyped_pointer(runtime, buffer, size));
   return CObjectWrapper::wrap(result);
 }
 
@@ -3175,47 +3143,6 @@ legion_future_get_void_result(legion_future_t handle_)
   handle->get_void_result();
 }
 
-legion_task_result_t
-legion_future_get_result(legion_future_t handle_)
-{
-  Future *handle = CObjectWrapper::unwrap(handle_);
-
-  TaskResult result = handle->get_result<TaskResult>();
-  return CObjectWrapper::wrap(result);
-}
-
-uint32_t
-legion_future_get_result_uint32(legion_future_t handle_)
-{
-  Future *handle = CObjectWrapper::unwrap(handle_);
-
-  return handle->get_result<uint32_t>();
-}
-
-uint64_t
-legion_future_get_result_uint64(legion_future_t handle_)
-{
-  Future *handle = CObjectWrapper::unwrap(handle_);
-
-  return handle->get_result<uint64_t>();
-}
-
-void
-legion_future_get_result_bytes(legion_future_t handle_, void *buffer, size_t size)
-{
-  Future *handle = CObjectWrapper::unwrap(handle_);
-
-  // better hope the caller gets the size right - no seat belts on this ride
-  memcpy(buffer, handle->get_untyped_pointer(), size);
-}
-
-size_t
-legion_future_get_result_size(legion_future_t handle_)
-{
-  Future *handle = CObjectWrapper::unwrap(handle_);
-  return handle->get_untyped_size();
-}
-
 bool
 legion_future_is_empty(legion_future_t handle_,
                        bool block /* = false */)
@@ -3238,53 +3165,6 @@ legion_future_get_untyped_size(legion_future_t handle_)
 {
   Future *handle = CObjectWrapper::unwrap(handle_);
   return handle->get_untyped_size();
-}
-
-// -----------------------------------------------------------------------
-// Task Result Operations
-// -----------------------------------------------------------------------
-
-legion_task_result_t
-legion_task_result_create(const void *handle, size_t size)
-{
-  legion_task_result_t result;
-  result.value = malloc(size);
-  assert(result.value);
-  memcpy(result.value, handle, size);
-  result.value_size = size;
-  return result;
-}
-
-void
-legion_task_result_destroy(legion_task_result_t handle)
-{
-  free(handle.value);
-}
-
-size_t
-legion_task_result_serialize(legion_task_result_t handle_,
-                             void *buffer)
-{
-  TaskResult handle = CObjectWrapper::unwrap(handle_);
-
-  return handle.legion_serialize(buffer);
-}
-
-size_t
-legion_task_result_buffer_size(legion_task_result_t handle_)
-{
-  TaskResult handle = CObjectWrapper::unwrap(handle_);
-
-  return handle.legion_buffer_size();
-}
-
-size_t
-legion_task_result_deserialize(legion_task_result_t handle_,
-                               const void *buffer)
-{
-  TaskResult handle = CObjectWrapper::unwrap(handle_);
-
-  return handle.legion_deserialize(buffer);
 }
 
 // -----------------------------------------------------------------------
@@ -3315,17 +3195,6 @@ legion_future_map_get_future(legion_future_map_t fm_,
   DomainPoint dp = CObjectWrapper::unwrap(dp_);
 
   return CObjectWrapper::wrap(new Future(fm->get_future(dp)));
-}
-
-legion_task_result_t
-legion_future_map_get_result(legion_future_map_t fm_,
-                             legion_domain_point_t dp_)
-{
-  FutureMap *fm = CObjectWrapper::unwrap(fm_);
-  DomainPoint dp = CObjectWrapper::unwrap(dp_);
-
-  TaskResult result = fm->get_result<TaskResult>(dp);
-  return CObjectWrapper::wrap(result);
 }
 
 //------------------------------------------------------------------------
@@ -3888,8 +3757,10 @@ legion_runtime_attach_hdf5(
   std::map<FieldID, const char *> *field_map =
     CObjectWrapper::unwrap(field_map_);
 
-  PhysicalRegion result =
-    runtime->attach_hdf5(ctx, filename, handle, parent, *field_map, mode);
+  AttachLauncher launcher(EXTERNAL_HDF5_FILE, handle, parent);
+  launcher.attach_hdf5(filename, *field_map, mode);
+
+  PhysicalRegion result = runtime->attach_external_resource(ctx, launcher);
 
   return CObjectWrapper::wrap(new PhysicalRegion(result));
 }
@@ -3904,7 +3775,7 @@ legion_runtime_detach_hdf5(
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   PhysicalRegion *region = CObjectWrapper::unwrap(region_);
 
-  runtime->detach_hdf5(ctx, *region);
+  runtime->detach_external_resource(ctx, *region);
 }
 
 // -----------------------------------------------------------------------
@@ -4392,16 +4263,6 @@ legion_physical_region_get_field_id(legion_physical_region_t handle_, size_t ind
 }
 
 legion_accessor_generic_t
-legion_physical_region_get_accessor_generic(legion_physical_region_t handle_)
-{
-  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
-
-  AccessorGeneric *accessor =
-    new AccessorGeneric(handle->get_accessor());
-  return CObjectWrapper::wrap(accessor);
-}
-
-legion_accessor_generic_t
 legion_physical_region_get_field_accessor_generic(
   legion_physical_region_t handle_,
   legion_field_id_t fid)
@@ -4410,18 +4271,6 @@ legion_physical_region_get_field_accessor_generic(
 
   AccessorGeneric *accessor =
     new AccessorGeneric(handle->get_field_accessor(fid));
-  return CObjectWrapper::wrap(accessor);
-}
-
-legion_accessor_array_t
-legion_physical_region_get_accessor_array(
-  legion_physical_region_t handle_)
-{
-  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
-
-  AccessorArray *accessor =
-    new AccessorArray(
-      handle->get_accessor().typeify<char>().convert<SOA>());
   return CObjectWrapper::wrap(accessor);
 }
 
@@ -5176,8 +5025,8 @@ legion_runtime_get_input_args(void)
   return CObjectWrapper::wrap_const(Runtime::get_input_args());
 }
 
-// a pointer to the callback function that is last registered
-static legion_registration_callback_pointer_t callback;
+// List of callbacks registered.
+static std::vector<legion_registration_callback_pointer_t> callbacks;
 
 void
 registration_callback_wrapper(Machine machine,
@@ -5196,15 +5045,23 @@ registration_callback_wrapper(Machine machine,
     local_procs_[idx++] = CObjectWrapper::wrap(proc);
   }
 
-  callback(machine_, rt_, local_procs_, idx);
+  for (std::vector<legion_registration_callback_pointer_t>::iterator itr = callbacks.begin();
+      itr != callbacks.end(); ++itr)
+  {
+    (*itr)(machine_, rt_, local_procs_, idx);
+  }
 }
 
 void
-legion_runtime_set_registration_callback(
+legion_runtime_add_registration_callback(
   legion_registration_callback_pointer_t callback_)
 {
-  callback = callback_;
-  Runtime::set_registration_callback(registration_callback_wrapper);
+  static bool registered = false;
+  if (!registered) {
+    Runtime::add_registration_callback(registration_callback_wrapper);
+    registered = true;
+  }
+  callbacks.push_back(callback_);
 }
 
 void
@@ -5218,147 +5075,6 @@ legion_runtime_replace_default_mapper(
   Processor proc = CObjectWrapper::unwrap(proc_);
 
   runtime->replace_default_mapper(mapper, proc);
-}
-
-void
-task_wrapper_void(const Task *task,
-                  const std::vector<PhysicalRegion> &regions,
-                  Context ctx,
-                  Runtime *runtime,
-                  const legion_task_pointer_void_t &task_pointer)
-{
-  CContext cctx(ctx, regions);
-  const legion_task_t task_ = CObjectWrapper::wrap_const(task);
-  legion_context_t ctx_ = CObjectWrapper::wrap(&cctx);
-  legion_runtime_t runtime_ = CObjectWrapper::wrap(runtime);
-
-  task_pointer(task_, cctx.regions(), cctx.num_regions(), ctx_, runtime_);
-}
-
-legion_task_id_t
-legion_runtime_register_task_void(
-  legion_task_id_t id,
-  legion_processor_kind_t proc_kind_,
-  bool single,
-  bool index,
-  legion_variant_id_t vid /* = AUTO_GENERATE_ID */,
-  legion_task_config_options_t options_,
-  const char *task_name /* = NULL*/,
-  legion_task_pointer_void_t task_pointer)
-{
-  Processor::Kind proc_kind = CObjectWrapper::unwrap(proc_kind_);
-  TaskConfigOptions options = CObjectWrapper::unwrap(options_);
-
-  return Runtime::register_legion_task<
-    legion_task_pointer_void_t, task_wrapper_void>(
-    id, proc_kind, single, index, task_pointer, vid, options, task_name);
-}
-
-TaskResult
-task_wrapper(const Task *task,
-             const std::vector<PhysicalRegion> &regions,
-             Context ctx,
-             Runtime *runtime,
-             const legion_task_pointer_t &task_pointer)
-{
-  CContext cctx(ctx, regions);
-  const legion_task_t task_ = CObjectWrapper::wrap_const(task);
-  legion_context_t ctx_ = CObjectWrapper::wrap(&cctx);
-  legion_runtime_t runtime_ = CObjectWrapper::wrap(runtime);
-
-  legion_task_result_t result_ =
-    task_pointer(task_, cctx.regions(), cctx.num_regions(), ctx_, runtime_);
-
-  TaskResult result = CObjectWrapper::unwrap(result_);
-  legion_task_result_destroy(result_);
-  return result;
-}
-
-legion_task_id_t
-legion_runtime_register_task(
-  legion_task_id_t id,
-  legion_processor_kind_t proc_kind_,
-  bool single,
-  bool index,
-  legion_variant_id_t vid /* = AUTO_GENERATE_ID */,
-  legion_task_config_options_t options_,
-  const char *task_name /* = NULL*/,
-  legion_task_pointer_t task_pointer)
-{
-  Processor::Kind proc_kind = CObjectWrapper::unwrap(proc_kind_);
-  TaskConfigOptions options = CObjectWrapper::unwrap(options_);
-
-  return Runtime::register_legion_task<
-    TaskResult, legion_task_pointer_t, task_wrapper>(
-    id, proc_kind, single, index, task_pointer, vid, options, task_name);
-}
-
-uint32_t
-task_wrapper_uint32(const Task *task,
-                    const std::vector<PhysicalRegion> &regions,
-                    Context ctx,
-                    Runtime *runtime,
-                    const legion_task_pointer_uint32_t &task_pointer)
-{
-  CContext cctx(ctx, regions);
-  const legion_task_t task_ = CObjectWrapper::wrap_const(task);
-  legion_context_t ctx_ = CObjectWrapper::wrap(&cctx);
-  legion_runtime_t runtime_ = CObjectWrapper::wrap(runtime);
-
-  return task_pointer(task_, cctx.regions(), cctx.num_regions(), ctx_, runtime_);
-}
-
-legion_task_id_t
-legion_runtime_register_task_uint32(
-  legion_task_id_t id,
-  legion_processor_kind_t proc_kind_,
-  bool single,
-  bool index,
-  legion_variant_id_t vid /* = AUTO_GENERATE_ID */,
-  legion_task_config_options_t options_,
-  const char *task_name /* = NULL*/,
-  legion_task_pointer_uint32_t task_pointer)
-{
-  Processor::Kind proc_kind = CObjectWrapper::unwrap(proc_kind_);
-  TaskConfigOptions options = CObjectWrapper::unwrap(options_);
-
-  return Runtime::register_legion_task<
-    uint32_t, legion_task_pointer_uint32_t, task_wrapper_uint32>(
-    id, proc_kind, single, index, task_pointer, vid, options, task_name);
-}
-
-uint64_t
-task_wrapper_uint64(const Task *task,
-                    const std::vector<PhysicalRegion> &regions,
-                    Context ctx,
-                    Runtime *runtime,
-                    const legion_task_pointer_uint64_t &task_pointer)
-{
-  CContext cctx(ctx, regions);
-  const legion_task_t task_ = CObjectWrapper::wrap_const(task);
-  legion_context_t ctx_ = CObjectWrapper::wrap(&cctx);
-  legion_runtime_t runtime_ = CObjectWrapper::wrap(runtime);
-
-  return task_pointer(task_, cctx.regions(), cctx.num_regions(), ctx_, runtime_);
-}
-
-legion_task_id_t
-legion_runtime_register_task_uint64(
-  legion_task_id_t id,
-  legion_processor_kind_t proc_kind_,
-  bool single,
-  bool index,
-  legion_variant_id_t vid /* = AUTO_GENERATE_ID */,
-  legion_task_config_options_t options_,
-  const char *task_name /* = NULL*/,
-  legion_task_pointer_uint64_t task_pointer)
-{
-  Processor::Kind proc_kind = CObjectWrapper::unwrap(proc_kind_);
-  TaskConfigOptions options = CObjectWrapper::unwrap(options_);
-
-  return Runtime::register_legion_task<
-    uint64_t, legion_task_pointer_uint64_t, task_wrapper_uint64>(
-    id, proc_kind, single, index, task_pointer, vid, options, task_name);
 }
 
 legion_task_id_t

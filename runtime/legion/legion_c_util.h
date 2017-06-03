@@ -35,66 +35,6 @@ namespace Legion {
 
     class CContext;
 
-    class TaskResult {
-    public:
-      TaskResult(void) : value(NULL), value_size(0) {}
-
-      TaskResult(const void *v, size_t v_size)
-        : value(NULL), value_size(v_size) {
-        if (!v) return;
-        value = malloc(value_size);
-        assert(value);
-        memcpy(value, v, value_size);
-      }
-
-      TaskResult(const TaskResult &r) : value(NULL), value_size(r.value_size) {
-        if (!r.value) return;
-        value = malloc(value_size);
-        assert(value);
-        memcpy(value, r.value, value_size);
-      }
-
-      const TaskResult &operator=(const TaskResult &r) {
-        if (value) free(value);
-
-        value_size = r.value_size;
-        if (!r.value) {
-          value = NULL;
-          return r;
-        }
-        value = malloc(value_size);
-        assert(value);
-        memcpy(value, r.value, value_size);
-        return r;
-      }
-
-      ~TaskResult(void) {
-        if (value) free(value);
-      }
-
-      size_t legion_buffer_size(void) const {
-        return sizeof(size_t) + value_size;
-      }
-      size_t legion_serialize(void *buffer) const {
-        *(size_t *)buffer = value_size;
-        if (value) {
-          memcpy((void *)(((size_t *)buffer)+1), value, value_size);
-        }
-        return sizeof(size_t) + value_size;
-      }
-      size_t legion_deserialize(const void *buffer) {
-        value_size = *(const size_t *)buffer;
-        value = malloc(value_size);
-        assert(value);
-        memcpy(value, (void *)(((const size_t *)buffer)+1), value_size);
-        return sizeof(size_t) + value_size;
-      }
-
-   public:
-      void *value;
-      size_t value_size;
-    };
-
     class CObjectWrapper {
     public:
 
@@ -382,23 +322,6 @@ namespace Legion {
       unwrap(legion_task_argument_t arg_)
       {
         return TaskArgument(arg_.args, arg_.arglen);
-      }
-
-      static legion_task_result_t
-      wrap(TaskResult result)
-      {
-        legion_task_result_t result_;
-        result_.value = malloc(result.value_size);
-        assert(result_.value);
-        memcpy(result_.value, result.value, result.value_size);
-        result_.value_size = result.value_size;
-        return result_;
-      }
-
-      static TaskResult
-      unwrap(legion_task_result_t result_)
-      {
-        return TaskResult(result_.value, result_.value_size);
       }
 
       static const legion_byte_offset_t

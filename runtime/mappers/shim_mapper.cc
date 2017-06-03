@@ -39,7 +39,7 @@ namespace Legion {
 
     using namespace Utilities;
 
-    LegionRuntime::Logger::Category log_shim("shim_mapper");
+    Logger log_shim("shim_mapper");
 
     //--------------------------------------------------------------------------
     ShimMapper::RegionRequirement::RegionRequirement(void)

@@ -121,7 +121,7 @@ namespace Legion {
         dependence_tracker.commit = NULL;
       }
       if ((trace != NULL) && (trace->remove_reference()))
-        LegionTrace::delete_trace(trace);
+        delete trace;
       if (!mapped_event.has_triggered())
         Runtime::trigger_event(mapped_event);
       if (!resolved_event.has_triggered())
@@ -163,6 +163,8 @@ namespace Legion {
     {
       if ((req.handle_type == SINGULAR) || (req.handle_type == REG_PROJECTION))
       {
+        if (!req.region.exists())
+          return;
         runtime->forest->initialize_path(req.region.get_index_space(),
                                          req.parent.get_index_space(), path);
       }
@@ -171,6 +173,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(req.handle_type == PART_PROJECTION);
 #endif
+        if (!req.partition.exists())
+          return;
         runtime->forest->initialize_path(req.partition.get_index_partition(),
                                          req.parent.get_index_space(), path);
       }
@@ -254,7 +258,7 @@ namespace Legion {
       {
         if (it->first->remove_base_valid_ref(MAPPING_ACQUIRE_REF, this, 
                                              it->second.first))
-          PhysicalManager::delete_physical_manager(it->first);
+          delete it->first;
       }
       acquired_instances.clear();
     }
@@ -1729,7 +1733,7 @@ namespace Legion {
       if (result_future.impl == NULL)
       {
         Future temp = Future(
-              legion_new<FutureImpl>(runtime, true/*register*/,
+              new FutureImpl(runtime, true/*register*/,
                 runtime->get_available_distributed_id(true),
                 runtime->address_space, this));
         AutoLock o_lock(op_lock);
@@ -2211,7 +2215,7 @@ namespace Legion {
       tag = launcher.tag;
       layout_constraint_id = launcher.layout_constraint_id;
       termination_event = Runtime::create_ap_user_event();
-      region = PhysicalRegion(legion_new<PhysicalRegionImpl>(requirement,
+      region = PhysicalRegion(new PhysicalRegionImpl(requirement,
                               completion_event, true/*mapped*/, ctx, 
                               map_id, tag, false/*leaf*/, 
                               false/*virtual mapped*/, runtime));
@@ -6867,20 +6871,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void* InterCloseOp::operator new(size_t count)
-    //--------------------------------------------------------------------------
-    {
-      return legion_alloc_aligned<InterCloseOp,true/*bytes*/>(count);
-    }
-
-    //--------------------------------------------------------------------------
-    void InterCloseOp::operator delete(void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
-    }
-
-    //--------------------------------------------------------------------------
     void InterCloseOp::initialize(TaskContext *ctx,const RegionRequirement &req,
                               ClosedNode *closed_t, const TraceInfo &trace_info,
                               int close_idx, const VersionInfo &clone_info,
@@ -7528,20 +7518,6 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void* ReadCloseOp::operator new(size_t count)
-    //--------------------------------------------------------------------------
-    {
-      return legion_alloc_aligned<ReadCloseOp,true/*bytes*/>(count);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReadCloseOp::operator delete(void *ptr)
-    //--------------------------------------------------------------------------
-    {
-      free(ptr);
     }
 
     //--------------------------------------------------------------------------
@@ -9399,7 +9375,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
-      future = Future(legion_new<FutureImpl>(runtime, true/*register*/,
+      future = Future(new FutureImpl(runtime, true/*register*/,
             runtime->get_available_distributed_id(true), 
             runtime->address_space, this));
       collective = dc;
@@ -10214,7 +10190,7 @@ namespace Legion {
       mapper_tag = launcher.mapping_tag;
       // Make a new future map for storing our results
       // We'll fill it in later
-      result_map = FutureMap(legion_new<FutureMapImpl>(ctx, this, runtime,
+      result_map = FutureMap(new FutureMapImpl(ctx, this, runtime,
             runtime->get_available_distributed_id(true/*need continuation*/),
             runtime->address_space));
 #ifdef DEBUG_LEGION
@@ -13208,7 +13184,7 @@ namespace Legion {
         default:
           assert(false); // should never get here
       }
-      region = PhysicalRegion(legion_new<PhysicalRegionImpl>(requirement,
+      region = PhysicalRegion(new PhysicalRegionImpl(requirement,
                               completion_event, true/*mapped*/, ctx,
                               0/*map id*/, 0/*tag*/, false/*leaf*/, 
                               false/*virtual mapped*/, runtime));
@@ -13946,7 +13922,7 @@ namespace Legion {
       initialize_operation(ctx, true/*track*/);
       measurement = launcher.measurement;
       preconditions = launcher.preconditions;
-      result = Future(legion_new<FutureImpl>(runtime, true/*register*/,
+      result = Future(new FutureImpl(runtime, true/*register*/,
                   runtime->get_available_distributed_id(true),
                   runtime->address_space, this));
       if (Runtime::legion_spy_enabled)

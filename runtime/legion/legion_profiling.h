@@ -21,10 +21,12 @@
 #include "legion_types.h"
 #include "legion_utilities.h"
 #include "realm/profiling.h"
+#include "lowlevel_config.h"
 
 #include <cassert>
 #include <deque>
 #include <algorithm>
+#include <sstream>
 
 #define LEGION_PROF_SELF_PROFILE
 
@@ -34,8 +36,23 @@
 #define DETAILED_PROFILER(runtime, call) // Nothing
 #endif
 
+#ifdef SHARED_LOWLEVEL
+#define gasnet_mynode() 0
+#endif
+
+
 namespace Legion {
   namespace Internal { 
+
+    // XXX: Make sure these typedefs are consistent with Realm
+    typedef ::legion_lowlevel_barrier_timestamp_t timestamp_t;
+    typedef Realm::Processor::Kind ProcKind;
+    typedef Realm::Memory::Kind MemKind;
+    typedef ::legion_lowlevel_id_t ProcID;
+    typedef ::legion_lowlevel_id_t MemID;
+    typedef ::legion_lowlevel_id_t InstID;
+
+    class LegionProfSerializer; // forward declaration
 
     class LegionProfMarker {
     public:
@@ -46,7 +63,47 @@ namespace Legion {
       const char* name;
       bool stopped;
       Processor proc;
-      unsigned long long start, stop;
+      timestamp_t start, stop;
+    };
+
+    class LegionProfDesc {
+    public:
+      struct MessageDesc {
+      public:
+        unsigned kind;
+        const char *name;
+      };
+      struct MapperCallDesc {
+      public:
+        unsigned kind;
+        const char *name;
+      };
+      struct RuntimeCallDesc {
+      public:
+        unsigned kind;
+        const char *name;
+      };
+      struct MetaDesc {
+      public:
+        unsigned kind;
+        const char *name;
+      };
+      struct OpDesc {
+      public:
+        unsigned kind;
+        const char *name;
+      };
+      struct ProcDesc {
+      public:
+        ProcID proc_id;
+        ProcKind kind;
+      };
+      struct MemDesc {
+      public:
+        MemID mem_id;
+        MemKind kind;
+        unsigned long long capacity;
+      };
     };
 
     class LegionProfInstance {
@@ -54,19 +111,19 @@ namespace Legion {
       struct TaskKind {
       public:
         TaskID task_id;
-        const char *task_name;
+        const char *name;
         bool overwrite;
       };
       struct TaskVariant {
       public:
         TaskID task_id;
         VariantID variant_id;
-        const char *variant_name;
+        const char *name;
       };
       struct OperationInstance {
       public:
         UniqueID op_id;
-        unsigned op_kind;
+        unsigned kind;
       };
       struct MultiTask {
       public:
@@ -80,81 +137,81 @@ namespace Legion {
       };
       struct WaitInfo {
       public:
-        unsigned long long wait_start, wait_ready, wait_end;
+        timestamp_t wait_start, wait_ready, wait_end;
       };
       struct TaskInfo {
       public:
         UniqueID op_id;
         VariantID variant_id;
-        Processor proc;
-        unsigned long long create, ready, start, stop;
+        ProcID proc_id;
+        timestamp_t create, ready, start, stop;
         std::deque<WaitInfo> wait_intervals;
       };
       struct MetaInfo {
       public:
         UniqueID op_id;
         unsigned lg_id;
-        Processor proc;
-        unsigned long long create, ready, start, stop;
+        ProcID proc_id;
+        timestamp_t create, ready, start, stop;
         std::deque<WaitInfo> wait_intervals;
       };
       struct CopyInfo {
       public:
         UniqueID op_id;
-        Memory source, target;
+        MemID src, dst;
         unsigned long long size;
-        unsigned long long create, ready, start, stop;
+        timestamp_t create, ready, start, stop;
       };
       struct FillInfo {
       public:
         UniqueID op_id;
-        Memory target;
-        unsigned long long create, ready, start, stop;
+        MemID dst;
+        timestamp_t create, ready, start, stop;
       };
       struct InstCreateInfo {
       public:
-	UniqueID op_id;
-        PhysicalInstance inst;
-	unsigned long long create; // time of HLR creation request
+        UniqueID op_id;
+        InstID inst_id;
+        timestamp_t create; // time of HLR creation request
       };
       struct InstUsageInfo {
       public:
-	UniqueID op_id;
-        PhysicalInstance inst;
-        Memory mem;
-        size_t total_bytes;
+        UniqueID op_id;
+        InstID inst_id;
+        MemID mem_id;
+        unsigned long long size;
       };
       struct InstTimelineInfo {
       public:
-	UniqueID op_id;
-        PhysicalInstance inst;
-        unsigned long long create, destroy;
+        UniqueID op_id;
+        InstID inst_id;
+        timestamp_t create, destroy;
       };
       struct MessageInfo {
       public:
         MessageKind kind;
-        unsigned long long start, stop;
-        Processor proc;
+        timestamp_t start, stop;
+        ProcID proc_id;
       };
       struct MapperCallInfo {
       public:
         MappingCallKind kind;
         UniqueID op_id;
-        unsigned long long start, stop;
-        Processor proc;
+        timestamp_t start, stop;
+        ProcID proc_id;
       };
       struct RuntimeCallInfo {
       public:
         RuntimeCallKind kind;
-        unsigned long long start, stop;
-        Processor proc;
+        timestamp_t start, stop;
+        ProcID proc_id;
       };
 #ifdef LEGION_PROF_SELF_PROFILE
       struct ProfTaskInfo {
       public:
-	Processor proc;
-	UniqueID op_id;
-	unsigned long long start, stop;
+        ProcID proc_id;
+        UniqueID op_id;
+        timestamp_t start, stop;
       };
 #endif
     public:
@@ -191,28 +248,26 @@ namespace Legion {
                   Realm::ProfilingMeasurements::OperationTimeline *timeline,
                   Realm::ProfilingMeasurements::OperationMemoryUsage *usage);
       void process_inst_create(UniqueID op_id, PhysicalInstance inst,
-		  unsigned long long create);
+                               timestamp_t create);
       void process_inst_usage(UniqueID op_id,
                   Realm::ProfilingMeasurements::InstanceMemoryUsage *usage);
       void process_inst_timeline(UniqueID op_id,
                   Realm::ProfilingMeasurements::InstanceTimeline *timeline);
     public:
-      void record_message(Processor proc, MessageKind kind, 
-                          unsigned long long start,
-                          unsigned long long stop);
+      void record_message(Processor proc, MessageKind kind, timestamp_t start,
+                          timestamp_t stop);
       void record_mapper_call(Processor proc, MappingCallKind kind, 
-                          UniqueID uid, unsigned long long start,
-                          unsigned long long stop);
+                              UniqueID uid, timestamp_t start,
+                              timestamp_t stop);
       void record_runtime_call(Processor proc, RuntimeCallKind kind,
-                          unsigned long long start, unsigned long long stop);
+                               timestamp_t start, timestamp_t stop);
 #ifdef LEGION_PROF_SELF_PROFILE
     public:
-      void record_proftask(Processor p, UniqueID op_id,
-			   unsigned long long start,
-			   unsigned long long stop);
+      void record_proftask(Processor p, UniqueID op_id, timestamp_t start,
+                           timestamp_t stop);
 #endif
     public:
-      void dump_state(void);
+      void dump_state(LegionProfSerializer *serializer);
     private:
       LegionProfiler *const owner;
       std::deque<TaskKind>          task_kinds;
@@ -264,7 +319,9 @@ namespace Legion {
                      unsigned num_meta_tasks,
                      const char *const *const meta_task_descriptions,
                      unsigned num_operation_kinds,
-                     const char *const *const operation_kind_descriptions);
+                     const char *const *const operation_kind_descriptions,
+                     const char *serializer_type,
+                     const char *prof_logname);
       LegionProfiler(const LegionProfiler &rhs);
       ~LegionProfiler(void);
     public:
@@ -295,7 +352,7 @@ namespace Legion {
       // Adding a message profiling request is a static method
       // because we might not have a profiler on the local node
       static void add_message_request(Realm::ProfilingRequestSet &requests,
-                            Processor remote_target);
+                                      Processor remote_target);
     public:
       // Alternate versions of the one above with op ids
       void add_task_request(Realm::ProfilingRequestSet &requests, 
@@ -316,22 +373,22 @@ namespace Legion {
       void finalize(void);
     public:
       void record_instance_creation(PhysicalInstance inst, Memory memory,
-                                    UniqueID op_id, unsigned long long create);
+                                    UniqueID op_id, timestamp_t create);
     public:
       void record_message_kinds(const char *const *const message_names,
                                 unsigned int num_message_kinds);
-      void record_message(MessageKind kind, unsigned long long start,
-                          unsigned long long stop);
+      void record_message(MessageKind kind, timestamp_t start,
+                          timestamp_t stop);
     public:
       void record_mapper_call_kinds(const char *const *const mapper_call_names,
                                     unsigned int num_mapper_call_kinds);
       void record_mapper_call(MappingCallKind kind, UniqueID uid,
-                            unsigned long long start, unsigned long long stop);
+                              timestamp_t start, timestamp_t stop);
     public:
       void record_runtime_call_kinds(const char *const *const runtime_calls,
                                      unsigned int num_runtime_call_kinds);
-      void record_runtime_call(RuntimeCallKind kind,
-                           unsigned long long start, unsigned long long stop);
+      void record_runtime_call(RuntimeCallKind kind, timestamp_t start,
+                               timestamp_t stop);
     public:
       const Processor target_proc;
       inline bool has_outstanding_requests(void)
@@ -344,6 +401,7 @@ namespace Legion {
     private:
       void create_thread_local_profiling_instance(void);
     private:
+      LegionProfSerializer* serializer;
       Reservation profiler_lock;
       std::vector<LegionProfInstance*> instances;
       unsigned total_outstanding_requests;
@@ -359,7 +417,7 @@ namespace Legion {
     private:
       LegionProfiler *const profiler;
       const RuntimeCallKind call_kind;
-      unsigned long long start_time;
+      timestamp_t start_time;
     };
 
   }; // namespace Internal

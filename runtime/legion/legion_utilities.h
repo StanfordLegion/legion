@@ -43,8 +43,6 @@
 #endif
 #endif
 
-namespace Legion {
-
 // Useful macros
 #define IS_NO_ACCESS(req) (((req).privilege & READ_WRITE) == NO_ACCESS)
 #define IS_READ_ONLY(req) (((req).privilege & READ_WRITE) <= READ_ONLY)
@@ -57,6 +55,8 @@ namespace Legion {
 #define IS_ATOMIC(req) ((req).prop == ATOMIC)
 #define IS_SIMULT(req) ((req).prop == SIMULTANEOUS)
 #define IS_RELAXED(req) ((req).prop == RELAXED)
+
+namespace Legion {
 
     /**
      * \struct RegionUsage
@@ -564,7 +564,7 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
     template<typename T, unsigned int MAX,
              unsigned int SHIFT, unsigned int MASK>
-    class BitMask {
+    class BitMask : public Internal::LegionHeapify<BitMask<T,MAX,SHIFT,MASK> > {
     public:
       explicit BitMask(T init = 0);
       BitMask(const BitMask &rhs);
@@ -643,7 +643,8 @@ namespace Legion {
      * summary is a single instance of the summary type ST.
      */
     template<typename T, unsigned int MAX, unsigned SHIFT, unsigned MASK>
-    class TLBitMask {
+    class TLBitMask : 
+      public Internal::LegionHeapify<TLBitMask<T,MAX,SHIFT,MASK> > {
     public:
       explicit TLBitMask(T init = 0);
       TLBitMask(const TLBitMask &rhs);
@@ -715,7 +716,7 @@ namespace Legion {
     // SSE Bit Mask  
     /////////////////////////////////////////////////////////////
     template<unsigned int MAX>
-    class SSEBitMask {
+    class SSEBitMask : public Internal::LegionHeapify<SSEBitMask<MAX> > {
     public:
       explicit SSEBitMask(uint64_t init = 0);
       SSEBitMask(const SSEBitMask &rhs);
@@ -786,7 +787,7 @@ namespace Legion {
     // SSE Two-Level Bit Mask  
     /////////////////////////////////////////////////////////////
     template<unsigned int MAX>
-    class SSETLBitMask {
+    class SSETLBitMask : public Internal::LegionHeapify<SSETLBitMask<MAX> > {
     public:
       explicit SSETLBitMask(uint64_t init = 0);
       SSETLBitMask(const SSETLBitMask &rhs);
@@ -861,7 +862,7 @@ namespace Legion {
     // AVX Bit Mask  
     /////////////////////////////////////////////////////////////
     template<unsigned int MAX>
-    class AVXBitMask {
+    class AVXBitMask : public Internal::LegionHeapify<AVXBitMask<MAX> > {
     public:
       explicit AVXBitMask(uint64_t init = 0);
       AVXBitMask(const AVXBitMask &rhs);
@@ -935,7 +936,7 @@ namespace Legion {
     // AVX Two-Level Bit Mask  
     /////////////////////////////////////////////////////////////
     template<unsigned int MAX>
-    class AVXTLBitMask {
+    class AVXTLBitMask : public Internal::LegionHeapify<AVXTLBitMask<MAX> > {
     public:
       explicit AVXTLBitMask(uint64_t init = 0);
       AVXTLBitMask(const AVXTLBitMask &rhs);
@@ -1125,7 +1126,8 @@ namespace Legion {
      *
      */
     template<typename BITMASK, unsigned LOG2MAX>
-    class BitPermutation {
+    class BitPermutation : 
+      public Internal::LegionHeapify<BitPermutation<BITMASK,LOG2MAX> > {
     public:
       BitPermutation(void);
       BitPermutation(const BitPermutation &rhs);
@@ -6255,7 +6257,7 @@ namespace Legion {
       else
       {
         set_count(DENSE_CNT);
-        set_dense(Internal::legion_new<BITMASK>(init));
+        set_dense(new BITMASK(init));
       }
     }
 
@@ -6274,7 +6276,7 @@ namespace Legion {
       else if (rhs_count == DENSE_CNT)
       {
         set_count(DENSE_CNT); 
-        set_dense(Internal::legion_new<BITMASK>(*rhs.get_dense()));
+        set_dense(new BITMASK(*rhs.get_dense()));
       }
       else
       {
@@ -6292,7 +6294,7 @@ namespace Legion {
       if (count == SPARSE_CNT)
         delete get_sparse();
       else if (count == DENSE_CNT)
-        Internal::legion_delete(get_dense());
+        delete get_dense();
     }
 
     //-------------------------------------------------------------------------
@@ -6488,7 +6490,7 @@ namespace Legion {
         }
         else
         {
-          BITMASK *next = Internal::legion_new<BITMASK>();
+          BITMASK *next = new BITMASK();
           next->set_bit(bit);
           for (int idx = 0; idx < MAX_CNT; idx++)
             next->set_bit(get_value<OVERLAP>(idx));
@@ -6503,7 +6505,7 @@ namespace Legion {
         if (sparse->size() == SPARSE_MAX)
         {
           // upgrade to dense 
-          BITMASK *next = Internal::legion_new<BITMASK>();
+          BITMASK *next = new BITMASK();
           for (SparseSet::const_iterator it = sparse->begin();
                 it != sparse->end(); it++)
             next->set_bit(*it);
@@ -6550,7 +6552,7 @@ namespace Legion {
         // If dense is empty come back to zero
         if (!(*dense))
         {
-          Internal::legion_delete(dense);
+          delete dense;
           set_count(0);
         }
       }
@@ -6669,7 +6671,7 @@ namespace Legion {
       if (count == SPARSE_CNT)
         delete get_sparse();
       if (count == DENSE_CNT)
-        Internal::legion_delete(get_dense());
+        delete get_dense();
       set_count(0);
     }
 
@@ -6744,7 +6746,7 @@ namespace Legion {
         if (count == DENSE_CNT)
         {
           // Free our dense count and copy over bits
-          Internal::legion_delete(get_dense());
+          delete get_dense();
           if (rhs_count == SPARSE_CNT)
           {
             set_count(SPARSE_CNT);
@@ -6764,7 +6766,7 @@ namespace Legion {
           {
             // If the rhs is dense copy it over
             set_count(DENSE_CNT);
-            set_dense(Internal::legion_new<BITMASK>(*rhs.get_dense()));
+            set_dense(new BITMASK(*rhs.get_dense()));
           }
           else
           {
@@ -6784,7 +6786,7 @@ namespace Legion {
           else if (rhs_count == DENSE_CNT)
           {
             set_count(DENSE_CNT);
-            set_dense(Internal::legion_new<BITMASK>(*rhs.get_dense()));
+            set_dense(new BITMASK(*rhs.get_dense()));
           }
           else
           {
@@ -6828,12 +6830,12 @@ namespace Legion {
         if (!!next)
         {
           result.set_count(DENSE_CNT);
-          result.set_dense(Internal::legion_new<BITMASK>(next));
+          result.set_dense(new BITMASK(next));
         }
       }
       else if (count == SPARSE_CNT)
       {
-        BITMASK *dense = Internal::legion_new<BITMASK>(0xFFFFFFFFFFFFFFFF);
+        BITMASK *dense = new BITMASK(0xFFFFFFFFFFFFFFFF);
         SparseSet *sparse = get_sparse();
         for (SparseSet::const_iterator it = sparse->begin();
               it != sparse->end(); it++)
@@ -6843,7 +6845,7 @@ namespace Legion {
       }
       else
       {
-        BITMASK *dense = Internal::legion_new<BITMASK>(0xFFFFFFFFFFFFFFFF); 
+        BITMASK *dense = new BITMASK(0xFFFFFFFFFFFFFFFF); 
         for (int idx = 0; idx < count; idx++)
           dense->unset_bit(get_value<OVERLAP>(idx));
         result.set_count(DENSE_CNT);
@@ -6866,14 +6868,13 @@ namespace Legion {
       {
         if (rhs_count == DENSE_CNT)
         {
-          BITMASK *next = 
-            Internal::legion_new<BITMASK>((*get_dense()) | (*rhs.get_dense()));
+          BITMASK *next = new BITMASK((*get_dense()) | (*rhs.get_dense()));
           result.set_count(DENSE_CNT);
           result.set_dense(next);
         }
         else if (rhs_count == SPARSE_CNT)
         {
-          BITMASK *next = Internal::legion_new<BITMASK>(*get_dense());
+          BITMASK *next = new BITMASK(*get_dense());
           SparseSet *other = rhs.get_sparse();
           for (SparseSet::const_iterator it = other->begin();
                 it != other->end(); it++)
@@ -6883,7 +6884,7 @@ namespace Legion {
         }
         else
         {
-          BITMASK *next = Internal::legion_new<BITMASK>(*get_dense());
+          BITMASK *next = new BITMASK(*get_dense());
           for (int idx = 0; idx < rhs_count; idx++)
             next->set_bit(rhs.get_value<OVERLAP>(idx));
           result.set_count(DENSE_CNT);
@@ -6892,7 +6893,7 @@ namespace Legion {
       }
       else if (rhs_count == DENSE_CNT)
       {
-        BITMASK *next = Internal::legion_new<BITMASK>(*rhs.get_dense());
+        BITMASK *next = new BITMASK(*rhs.get_dense());
         if (count == SPARSE_CNT)
         {
           SparseSet *other = get_sparse();
@@ -6999,7 +7000,7 @@ namespace Legion {
         if (!!next)
         {
           result.set_count(DENSE_CNT);
-          result.set_dense(Internal::legion_new<BITMASK>(next));
+          result.set_dense(new BITMASK(next));
         }
       }
       return result;
@@ -7024,7 +7025,7 @@ namespace Legion {
           if (!!next)
           {
             result.set_count(DENSE_CNT);
-            result.set_dense(Internal::legion_new<BITMASK>(next));
+            result.set_dense(new BITMASK(next));
           }
         }
         else if (rhs_count == SPARSE_CNT)
@@ -7042,7 +7043,7 @@ namespace Legion {
           if (!!next)
           {
             result.set_count(DENSE_CNT);
-            result.set_dense(Internal::legion_new<BITMASK>(next));
+            result.set_dense(new BITMASK(next));
           }
         }
         else
@@ -7059,7 +7060,7 @@ namespace Legion {
           if (!!next)
           {
             result.set_count(DENSE_CNT);
-            result.set_dense(Internal::legion_new<BITMASK>(next));
+            result.set_dense(new BITMASK(next));
           }
         }
       }
@@ -7092,7 +7093,7 @@ namespace Legion {
         if (!!next)
         {
           result.set_count(DENSE_CNT);
-          result.set_dense(Internal::legion_new<BITMASK>(next));
+          result.set_dense(new BITMASK(next));
         }
       }
       else if (count == SPARSE_CNT)
@@ -7220,7 +7221,7 @@ namespace Legion {
         }
         else
         {
-          BITMASK *mask = Internal::legion_new<BITMASK>(*rhs.get_dense());
+          BITMASK *mask = new BITMASK(*rhs.get_dense());
           if (count == SPARSE_CNT)
           {
             SparseSet *sparse = get_sparse();
@@ -7269,7 +7270,7 @@ namespace Legion {
           (*dense) &= (*rhs.get_dense());  
           if (!(*dense))
           {
-            Internal::legion_delete(dense);
+            delete dense;
             set_count(0);
           }
         }
@@ -7283,7 +7284,7 @@ namespace Legion {
             if (dense->is_set(*it))
               set_bit(*it);
           }
-          Internal::legion_delete(dense);
+          delete dense;
         }
         else
         {
@@ -7294,7 +7295,7 @@ namespace Legion {
             if (dense->is_set(bit))
               set_bit(bit);
           }
-          Internal::legion_delete(dense);
+          delete dense;
         }
       }
       else if (count == SPARSE_CNT)
@@ -7372,7 +7373,7 @@ namespace Legion {
         }
         if (!(*dense))
         {
-          Internal::legion_delete(dense);
+          delete dense;
           set_count(0);
         }
       }
@@ -7406,7 +7407,7 @@ namespace Legion {
         if (!!next)
         {
           set_count(DENSE_CNT);
-          set_dense(Internal::legion_new<BITMASK>(next));
+          set_dense(new BITMASK(next));
         }
         else
           set_count(0);
@@ -7523,7 +7524,7 @@ namespace Legion {
         if (!!next)
         {
           result.set_count(DENSE_CNT);
-          result.set_dense(Internal::legion_new<BITMASK>(next));
+          result.set_dense(new BITMASK(next));
         }
       }
       else if (count == SPARSE_CNT)
@@ -7577,7 +7578,7 @@ namespace Legion {
         }
         if (!(*dense))
         {
-          Internal::legion_delete<BITMASK>(dense);
+          delete dense;
           set_count(0);
         }
       }
@@ -7632,7 +7633,7 @@ namespace Legion {
         if (!!dense)
         {
           result.set_count(DENSE_CNT);
-          result.set_dense(Internal::legion_new<BITMASK>(dense));
+          result.set_dense(new BITMASK(dense));
         }
       }
       else if (count == SPARSE_CNT)
@@ -7675,7 +7676,7 @@ namespace Legion {
         if (!!dense)
         {
           result.set_count(DENSE_CNT);
-          result.set_dense(Internal::legion_new<BITMASK>(dense));
+          result.set_dense(new BITMASK(dense));
         }
       }
       else if (count == SPARSE_CNT)
@@ -7717,7 +7718,7 @@ namespace Legion {
         (*dense) <<= shift;
         if (!(*dense))
         {
-          Internal::legion_delete<BITMASK>(dense);
+          delete dense;
           set_count(0);
         }
       }
@@ -7763,7 +7764,7 @@ namespace Legion {
         (*dense) >>= shift;
         if (!(*dense))
         {
-          Internal::legion_delete<BITMASK>(dense);
+          delete dense;
           set_count(0);
         }
       }
@@ -7863,7 +7864,7 @@ namespace Legion {
           if (current_count == SPARSE_CNT)
             delete get_sparse();
           set_count(DENSE_CNT);
-          dense = Internal::legion_new<BITMASK>();
+          dense = new BITMASK();
           set_dense(dense);
         }
         else
@@ -7874,7 +7875,7 @@ namespace Legion {
       {
         SparseSet *sparse = new SparseSet();
         if (current_count == DENSE_CNT)
-          Internal::legion_delete(get_dense());
+          delete get_dense();
         size_t num_elements;
         derez.deserialize(num_elements);
         for (unsigned idx = 0; idx < num_elements; idx++)
@@ -7889,7 +7890,7 @@ namespace Legion {
       else
       {
         if (current_count == DENSE_CNT)
-          Internal::legion_delete<BITMASK>(get_dense());
+          delete get_dense();
         else if (current_count == SPARSE_CNT)
           delete get_sparse();
         for (unsigned idx = 0; idx < WORDS; idx++)
@@ -8217,7 +8218,7 @@ namespace Legion {
       }
       else
       {
-        set_ptr.dense = Internal::legion_new<DenseSet>();
+        set_ptr.dense = new DenseSet();
         set_ptr.dense->set = rhs.set_ptr.dense->set;
       }
     }
@@ -8233,7 +8234,7 @@ namespace Legion {
       if (sparse)
         delete set_ptr.sparse;
       else
-        Internal::legion_delete(set_ptr.dense);
+        delete set_ptr.dense;
     }
     
     //-------------------------------------------------------------------------
@@ -8246,7 +8247,7 @@ namespace Legion {
       {
         if (!sparse)
         {
-          Internal::legion_delete(set_ptr.dense);
+          delete set_ptr.dense;
           set_ptr.sparse = new typename std::set<IT>();
         }
         else
@@ -8258,7 +8259,7 @@ namespace Legion {
         if (sparse)
         {
           delete set_ptr.sparse;
-          set_ptr.dense = Internal::legion_new<DenseSet>();
+          set_ptr.dense = new DenseSet();
         }
         else
           set_ptr.dense->set.clear();
@@ -8291,7 +8292,7 @@ namespace Legion {
         if (sizeof(DT) < (set_ptr.sparse->size() * 
                           (sizeof(IT) + STL_SET_NODE_SIZE)))
         {
-          DenseSet *dense_set = Internal::legion_new<DenseSet>();
+          DenseSet *dense_set = new DenseSet();
           for (typename std::set<IT>::const_iterator it = 
                 set_ptr.sparse->begin(); it != set_ptr.sparse->end(); it++)
           {
@@ -8335,7 +8336,7 @@ namespace Legion {
               }
             }
             // Delete the dense set
-            Internal::legion_delete(set_ptr.dense);
+            delete set_ptr.dense;
             set_ptr.sparse = sparse_set;
             sparse = true;
           }
@@ -8452,7 +8453,7 @@ namespace Legion {
         // If it doesn't match then replace the old one
         if (!sparse)
         {
-          Internal::legion_delete(set_ptr.dense);
+          delete set_ptr.dense;
           set_ptr.sparse = new typename std::set<IT>();
         }
         else
@@ -8472,7 +8473,7 @@ namespace Legion {
         if (sparse)
         {
           delete set_ptr.sparse;
-          set_ptr.dense = Internal::legion_new<DenseSet>();
+          set_ptr.dense = new DenseSet();
         }
         else
           set_ptr.dense->set.clear();

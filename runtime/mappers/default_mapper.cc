@@ -37,7 +37,7 @@ namespace Legion {
     using namespace Utilities;
     using namespace LegionRuntime::Arrays;
 
-    LegionRuntime::Logger::Category log_mapper("default_mapper");
+    Logger log_mapper("default_mapper");
 
     //--------------------------------------------------------------------------
     /*static*/ const char* DefaultMapper::create_default_name(Processor p)

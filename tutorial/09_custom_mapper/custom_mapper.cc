@@ -475,8 +475,8 @@ void AdversarialMapper::slice_task(const MapperContext      ctx,
   {
     case 1:
       {
-        LegionRuntime::Arrays::Rect<1> rect = input.domain.get_rect<1>();
-        for (LegionRuntime::Arrays::GenericPointInRectIterator<1> pir(rect);
+        Rect<1> rect = input.domain.get_rect<1>();
+        for (GenericPointInRectIterator<1> pir(rect);
               pir; pir++, idx++)
         {
           Rect<1> slice(pir.p, pir.p);
@@ -488,8 +488,8 @@ void AdversarialMapper::slice_task(const MapperContext      ctx,
       }
     case 2:
       {
-        LegionRuntime::Arrays::Rect<2> rect = input.domain.get_rect<2>();
-        for (LegionRuntime::Arrays::GenericPointInRectIterator<2> pir(rect);
+        Rect<2> rect = input.domain.get_rect<2>();
+        for (GenericPointInRectIterator<2> pir(rect);
               pir; pir++, idx++)
         {
           Rect<2> slice(pir.p, pir.p);
@@ -501,8 +501,8 @@ void AdversarialMapper::slice_task(const MapperContext      ctx,
       }
     case 3:
       {
-        LegionRuntime::Arrays::Rect<3> rect = input.domain.get_rect<3>();
-        for (LegionRuntime::Arrays::GenericPointInRectIterator<3> pir(rect);
+        Rect<3> rect = input.domain.get_rect<3>();
+        for (GenericPointInRectIterator<3> pir(rect);
               pir; pir++, idx++)
         {
           Rect<3> slice(pir.p, pir.p);
@@ -691,7 +691,7 @@ void PartitioningMapper::select_tunable_value(const MapperContext ctx,
  * Everything below here is the standard daxpy example
  * except for the registration of the callback function
  * for creating custom mappers which is explicitly commented
- * and the call to get_tunable_value to determine the number
+ * and the call to select_tunable_value to determine the number
  * of sub-regions.
  */
 void top_level_task(const Task *task,
@@ -707,8 +707,9 @@ void top_level_task(const Task *task,
         num_elements = atoi(command_args.argv[++i]);
     }
   }
-  int num_subregions = runtime->get_tunable_value(ctx, SUBREGION_TUNABLE, 
-                                                  PARTITIONING_MAPPER_ID);
+  int num_subregions =
+    runtime->select_tunable_value(ctx, SUBREGION_TUNABLE,
+                                  PARTITIONING_MAPPER_ID).get_result<int>();
 
   printf("Running daxpy for %d elements...\n", num_elements);
   printf("Partitioning data into %d sub-regions...\n", num_subregions);
@@ -903,18 +904,34 @@ void check_task(const Task *task,
 int main(int argc, char **argv)
 {
   Runtime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
-  Runtime::register_legion_task<top_level_task>(TOP_LEVEL_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, false/*index*/);
-  Runtime::register_legion_task<init_field_task>(INIT_FIELD_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, true/*index*/);
-  Runtime::register_legion_task<daxpy_task>(DAXPY_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, true/*index*/);
-  Runtime::register_legion_task<check_task>(CHECK_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, true/*index*/);
+
+  {
+    TaskVariantRegistrar registrar(TOP_LEVEL_TASK_ID, "top_level");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    Runtime::preregister_task_variant<top_level_task>(registrar, "top_level");
+  }
+
+  {
+    TaskVariantRegistrar registrar(INIT_FIELD_TASK_ID, "init_field");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    Runtime::preregister_task_variant<init_field_task>(registrar, "init_field");
+  }
+
+  {
+    TaskVariantRegistrar registrar(DAXPY_TASK_ID, "daxpy");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    Runtime::preregister_task_variant<daxpy_task>(registrar, "daxpy");
+  }
+
+  {
+    TaskVariantRegistrar registrar(CHECK_TASK_ID, "check");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    Runtime::preregister_task_variant<check_task>(registrar, "check");
+  }
 
   // Here is where we register the callback function for 
   // creating custom mappers.
-  Runtime::set_registration_callback(mapper_registration);
+  Runtime::add_registration_callback(mapper_registration);
 
   return Runtime::start(argc, argv);
 }

@@ -53,38 +53,42 @@ struct task_args_t{
 
 void copy_values_task(const Task *task,
                        const std::vector<PhysicalRegion> &regions,
-                       Context ctx, HighLevelRuntime *runtime);
+                       Context ctx, Runtime *runtime);
 
 #ifdef TESTERIO_PHASER_TIMERS
 void timer_task(const Task *task,
                 const std::vector<PhysicalRegion> &regions,
-                Context ctx, HighLevelRuntime *runtime);
+                Context ctx, Runtime *runtime);
 #endif
 
 void split_path_file(char** p, char** f, const char *pf);
 
 
 void PersistentRegion_init() {
-  HighLevelRuntime::register_legion_task<copy_values_task>(COPY_VALUES_TASK_ID,
-                                                           Processor::LOC_PROC,
-                                                           true /*single*/, true /*index*/);
+  {
+    TaskVariantRegistrar registrar(COPY_VALUES_TASK_ID, "copy_values");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    Runtime::preregister_task_variant<copy_values_task>(registrar, "copy_values");
+  }
   
 #ifdef TESTERIO_PHASER_TIMERS
-  HighLevelRuntime::register_legion_task<timer_task>(TIMER_TASK_ID,
-                                                     Processor::LOC_PROC,
-                                                     true /*single*/, false /*index*/);
+  {
+    TaskVariantRegistrar registrar(TIMER_TASK_ID, "timer");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    Runtime::preregister_task_variant<timer_task>(registrar, "timer");
+  }
 #endif
     
 }
         
-PersistentRegion::PersistentRegion(HighLevelRuntime * runtime) {
+PersistentRegion::PersistentRegion(Runtime * runtime) {
     this->runtime = runtime; 
 }
 
 #ifdef TESTERIO_PHASER_TIMERS
 void timer_task(const Task *task,
                 const std::vector<PhysicalRegion> &regions,
-                Context ctx, HighLevelRuntime *runtime)
+                Context ctx, Runtime *runtime)
 {
   struct timespec ts;
   current_utc_time(&ts);   
@@ -95,7 +99,7 @@ void timer_task(const Task *task,
 
 void copy_values_task(const Task *task,
                       const std::vector<PhysicalRegion> &regions,
-                      Context ctx, HighLevelRuntime *runtime)
+                      Context ctx, Runtime *runtime)
 {
   Piece piece = * ((Piece*) task->local_args);
   struct task_args_t task_args = *(struct task_args_t*) task->args;

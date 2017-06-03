@@ -18,8 +18,6 @@
 
 #include "cuda_runtime.h"
 
-using namespace LegionRuntime::Accessor;
-
 class GPUAccumulateCharge {
 public:
   typedef float LHS;

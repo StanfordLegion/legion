@@ -15,7 +15,7 @@
 
 #include "circuit_mapper.h"
 
-LegionRuntime::Logger::Category log_mapper("mapper");
+Logger log_mapper("mapper");
 
 CircuitMapper::CircuitMapper(MapperRuntime *rt, Machine machine, Processor local,
                              const char *mapper_name,
@@ -159,7 +159,7 @@ void CircuitMapper::map_inline(const MapperContext    ctx,
   }
 }
 
-void update_mappers(Machine machine, HighLevelRuntime *runtime,
+void update_mappers(Machine machine, Runtime *runtime,
                     const std::set<Processor> &local_procs)
 {
   std::vector<Processor>* procs_list = new std::vector<Processor>();

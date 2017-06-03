@@ -13,9 +13,12 @@
  * limitations under the License.
  */
 
+#include "legion.h"
+#include "cmdline.h"
 #include "legion_ops.h"
 #include "legion_tasks.h"
 #include "legion_profiling.h"
+#include "legion_profiling_serializer.h"
 
 #include <cstring>
 #include <cstdlib>
@@ -23,7 +26,7 @@
 namespace Legion {
   namespace Internal {
 
-    extern LegionRuntime::Logger::Category log_prof;
+    extern Realm::Logger log_prof;
 
     // Keep a thread-local profiler instance so we can always
     // be thread safe no matter what Realm decides to do 
@@ -95,7 +98,7 @@ namespace Legion {
       task_kinds.push_back(TaskKind());
       TaskKind &kind = task_kinds.back();
       kind.task_id = task_id;
-      kind.task_name = strdup(name);
+      kind.name = strdup(name);
       kind.overwrite = overwrite;
     }
 
@@ -109,7 +112,7 @@ namespace Legion {
       TaskVariant &var = task_variants.back();
       var.task_id = task_id;
       var.variant_id = variant_id;
-      var.variant_name = strdup(variant_name);
+      var.name = strdup(variant_name);
     }
 
     //--------------------------------------------------------------------------
@@ -119,7 +122,7 @@ namespace Legion {
       operation_instances.push_back(OperationInstance());
       OperationInstance &inst = operation_instances.back();
       inst.op_id = op->get_unique_op_id();
-      inst.op_kind = op->get_operation_kind();
+      inst.kind = op->get_operation_kind();
     }
 
     //--------------------------------------------------------------------------
@@ -156,7 +159,7 @@ namespace Legion {
       TaskInfo &info = task_infos.back();
       info.op_id = op_id;
       info.variant_id = variant_id;
-      info.proc = usage->proc;
+      info.proc_id = usage->proc.id;
       info.create = timeline->create_time;
       info.ready = timeline->ready_time;
       info.start = timeline->start_time;
@@ -190,7 +193,7 @@ namespace Legion {
       MetaInfo &info = meta_infos.back();
       info.op_id = op_id;
       info.lg_id = id;
-      info.proc = usage->proc;
+      info.proc_id = usage->proc.id;
       info.create = timeline->create_time;
       info.ready = timeline->ready_time;
       info.start = timeline->start_time;
@@ -224,7 +227,7 @@ namespace Legion {
       MetaInfo &info = meta_infos.back();
       info.op_id = 0;
       info.lg_id = LG_MESSAGE_ID;
-      info.proc = usage->proc;
+      info.proc_id = usage->proc.id;
       info.create = timeline->create_time;
       info.ready = timeline->ready_time;
       info.start = timeline->start_time;
@@ -256,8 +259,8 @@ namespace Legion {
       copy_infos.push_back(CopyInfo());
       CopyInfo &info = copy_infos.back();
       info.op_id = op_id;
-      info.source = usage->source;
-      info.target = usage->target;
+      info.src = usage->source.id;
+      info.dst = usage->target.id;
       info.size = usage->size;
       info.create = timeline->create_time;
       info.ready = timeline->ready_time;
@@ -278,7 +281,7 @@ namespace Legion {
       fill_infos.push_back(FillInfo());
       FillInfo &info = fill_infos.back();
       info.op_id = op_id;
-      info.target = usage->target;
+      info.dst = usage->target.id;
       info.create = timeline->create_time;
       info.ready = timeline->ready_time;
       info.start = timeline->start_time;
@@ -294,7 +297,7 @@ namespace Legion {
       inst_create_infos.push_back(InstCreateInfo());
       InstCreateInfo &info = inst_create_infos.back();
       info.op_id = op_id;
-      info.inst = inst;
+      info.inst_id = inst.id;
       info.create = create;
     }
 
@@ -306,9 +309,9 @@ namespace Legion {
       inst_usage_infos.push_back(InstUsageInfo());
       InstUsageInfo &info = inst_usage_infos.back();
       info.op_id = op_id;
-      info.inst = usage->instance;
-      info.mem = usage->memory;
-      info.total_bytes = usage->bytes;
+      info.inst_id = usage->instance.id;
+      info.mem_id = usage->memory.id;
+      info.size = usage->bytes;
     }
 
     //--------------------------------------------------------------------------
@@ -319,7 +322,7 @@ namespace Legion {
       inst_timeline_infos.push_back(InstTimelineInfo());
       InstTimelineInfo &info = inst_timeline_infos.back();
       info.op_id = op_id;
-      info.inst = timeline->instance;
+      info.inst_id = timeline->instance.id;
       info.create = timeline->create_time;
       info.destroy = timeline->delete_time;
     }
@@ -335,7 +338,7 @@ namespace Legion {
       info.kind = kind;
       info.start = start;
       info.stop = stop;
-      info.proc = proc;
+      info.proc_id = proc.id;
     }
 
     //--------------------------------------------------------------------------
@@ -350,7 +353,7 @@ namespace Legion {
       info.op_id = uid;
       info.start = start;
       info.stop = stop;
-      info.proc = proc;
+      info.proc_id = proc.id;
     }
 
     //--------------------------------------------------------------------------
@@ -363,7 +366,7 @@ namespace Legion {
       info.kind = kind;
       info.start = start;
       info.stop = stop;
-      info.proc = proc;
+      info.proc_id = proc.id;
     }
 
 #ifdef LEGION_PROF_SELF_PROFILE
@@ -375,7 +378,7 @@ namespace Legion {
     {
       prof_task_infos.push_back(ProfTaskInfo());
       ProfTaskInfo &info = prof_task_infos.back();
-      info.proc = proc;
+      info.proc_id = proc.id;
       info.op_id = op_id;
       info.start = start;
       info.stop = stop;
@@ -383,123 +386,101 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
-    void LegionProfInstance::dump_state(void)
+    void LegionProfInstance::dump_state(LegionProfSerializer *serializer)
     //--------------------------------------------------------------------------
     {
       for (std::deque<TaskKind>::const_iterator it = task_kinds.begin();
             it != task_kinds.end(); it++)
       {
-        log_prof.print("Prof Task Kind %u %s %d", it->task_id, it->task_name, 
-                        (it->overwrite ? 1 : 0));
-        free(const_cast<char*>(it->task_name));
+        serializer->serialize(*it);
+        free(const_cast<char*>(it->name));
       }
       for (std::deque<TaskVariant>::const_iterator it = task_variants.begin();
             it != task_variants.end(); it++)
       {
-        log_prof.print("Prof Task Variant %u %lu %s", it->task_id,
-		       it->variant_id, it->variant_name);
-        free(const_cast<char*>(it->variant_name));
+        serializer->serialize(*it);
+        free(const_cast<char*>(it->name));
       }
       for (std::deque<OperationInstance>::const_iterator it = 
             operation_instances.begin(); it != operation_instances.end(); it++)
       {
-        log_prof.print("Prof Operation %llu %u", it->op_id, it->op_kind);
+        serializer->serialize(*it);
       }
       for (std::deque<MultiTask>::const_iterator it = 
             multi_tasks.begin(); it != multi_tasks.end(); it++)
       {
-        log_prof.print("Prof Multi %llu %u", it->op_id, it->task_id);
+        serializer->serialize(*it);
       }
       for (std::deque<SliceOwner>::const_iterator it = 
             slice_owners.begin(); it != slice_owners.end(); it++)
       {
-        log_prof.print("Prof Slice Owner %llu %llu", it->parent_id, it->op_id);
+        serializer->serialize(*it);
       }
       for (std::deque<TaskInfo>::const_iterator it = task_infos.begin();
             it != task_infos.end(); it++)
       {
-        log_prof.print("Prof Task Info %llu %lu " IDFMT " %llu %llu %llu %llu",
-		       it->op_id, it->variant_id, it->proc.id, 
-		       it->create, it->ready, it->start, it->stop);
+        serializer->serialize(*it);
         for (std::deque<WaitInfo>::const_iterator wit =
              it->wait_intervals.begin(); wit != it->wait_intervals.end(); wit++)
         {
-          log_prof.print("Prof Task Wait Info %llu %lu %llu %llu %llu",
-			 it->op_id, it->variant_id, wit->wait_start, 
-                         wit->wait_ready, wit->wait_end);
+          serializer->serialize(*wit, *it);
         }
       }
       for (std::deque<MetaInfo>::const_iterator it = meta_infos.begin();
             it != meta_infos.end(); it++)
       {
-        log_prof.print("Prof Meta Info %llu %u " IDFMT " %llu %llu %llu %llu",
-		       it->op_id, it->lg_id, it->proc.id,
-		       it->create, it->ready, it->start, it->stop);
+        serializer->serialize(*it);
         for (std::deque<WaitInfo>::const_iterator wit =
              it->wait_intervals.begin(); wit != it->wait_intervals.end(); wit++)
         {
-          log_prof.print("Prof Meta Wait Info %llu %u %llu %llu %llu",
-                       it->op_id, it->lg_id, wit->wait_start, wit->wait_ready,
-                       wit->wait_end);
+          serializer->serialize(*wit, *it);
         }
       }
       for (std::deque<CopyInfo>::const_iterator it = copy_infos.begin();
             it != copy_infos.end(); it++)
       {
-        log_prof.print("Prof Copy Info %llu " IDFMT " " IDFMT " %llu"
-		       " %llu %llu %llu %llu", it->op_id, it->source.id,
-                     it->target.id, it->size, it->create, it->ready, it->start,
-                     it->stop);
+        serializer->serialize(*it);
       }
       for (std::deque<FillInfo>::const_iterator it = fill_infos.begin();
             it != fill_infos.end(); it++)
       {
-        log_prof.print("Prof Fill Info %llu " IDFMT 
-		       " %llu %llu %llu %llu", it->op_id, it->target.id, 
-		       it->create, it->ready, it->start, it->stop);
+        serializer->serialize(*it);
       }
       for (std::deque<InstCreateInfo>::const_iterator it = 
             inst_create_infos.begin(); it != inst_create_infos.end(); it++)
       {
-        log_prof.print("Prof Inst Create %llu " IDFMT " %llu",
-		       it->op_id, it->inst.id, it->create);
+        serializer->serialize(*it);
       }
       for (std::deque<InstUsageInfo>::const_iterator it = 
             inst_usage_infos.begin(); it != inst_usage_infos.end(); it++)
       {
-        log_prof.print("Prof Inst Usage %llu " IDFMT " " IDFMT " %zu",
-		       it->op_id, it->inst.id, it->mem.id, it->total_bytes);
+        serializer->serialize(*it);
       }
       for (std::deque<InstTimelineInfo>::const_iterator it = 
             inst_timeline_infos.begin(); it != inst_timeline_infos.end(); it++)
       {
-        log_prof.print("Prof Inst Timeline %llu " IDFMT " %llu %llu",
-		       it->op_id, it->inst.id, it->create, it->destroy);
+        serializer->serialize(*it);
       }
       for (std::deque<MessageInfo>::const_iterator it = message_infos.begin();
             it != message_infos.end(); it++)
       {
-        log_prof.print("Prof Message Info %u " IDFMT " %llu %llu",
-		       it->kind, it->proc.id, it->start, it->stop);
+        serializer->serialize(*it);
       }
       for (std::deque<MapperCallInfo>::const_iterator it = 
             mapper_call_infos.begin(); it != mapper_call_infos.end(); it++)
       {
-        log_prof.print("Prof Mapper Call Info %u " IDFMT " %llu %llu %llu",
-		       it->kind, it->proc.id, it->op_id, it->start, it->stop);
+        serializer->serialize(*it);
       }
       for (std::deque<RuntimeCallInfo>::const_iterator it = 
             runtime_call_infos.begin(); it != runtime_call_infos.end(); it++)
       {
-        log_prof.print("Prof Runtime Call Info %u " IDFMT " %llu %llu",
-		       it->kind, it->proc.id, it->start, it->stop);
+        serializer->serialize(*it);
       }
 #ifdef LEGION_PROF_SELF_PROFILE
       for (std::deque<ProfTaskInfo>::const_iterator it = 
             prof_task_infos.begin(); it != prof_task_infos.end(); it++)
       {
-        log_prof.print("Prof ProfTask Info " IDFMT " %llu %llu %llu",
-		       it->proc.id, it->op_id, it->start, it->stop);
+        serializer->serialize(*it);
       }
 #endif
       task_kinds.clear();
@@ -522,33 +503,72 @@ namespace Legion {
                                    const char *const *const task_descriptions,
                                    unsigned num_operation_kinds,
                                    const char *const *const 
-                                                  operation_kind_descriptions)
+                                                  operation_kind_descriptions,
+                                   const char *serializer_type,
+                                   const char *prof_logfile)
       : target_proc(target), total_outstanding_requests(0)
     //--------------------------------------------------------------------------
     {
       profiler_lock = Reservation::create_reservation();
+
+      if (!strcmp(serializer_type, "binary")) {
+        if (prof_logfile == NULL) {
+          fprintf(stderr, "ERROR: Please specify -lg:prof_logfile <logfile_name> "
+                          "when running with -lg:serializer binary");
+          exit(-1);
+        }
+        Processor current = Processor::get_executing_processor();
+        std::stringstream ss;
+        ss << prof_logfile << current.address_space();
+        serializer = new LegionProfBinarySerializer(ss.str());
+      } else if (!strcmp(serializer_type, "ascii")) {
+        if (prof_logfile != NULL) {
+          fprintf(stderr, "ERROR: You should not specify -lg:prof_logfile "
+                          "<logfile_name> when running with -lg:serializer ascii\n"
+                          "       legion_prof output will be written to -logfile "
+                                  "<logfile_name> instead");
+          exit(-1);
+        }
+        serializer = new LegionProfASCIISerializer();
+      } else {
+        fprintf(stderr, "Invalid serializer (%s), must be 'binary' or 'ascii'\n", 
+                        serializer_type);
+        exit(-1);
+      }
+
       for (unsigned idx = 0; idx < num_meta_tasks; idx++)
       {
-        log_prof.print("Prof Meta Desc %u %s", idx, task_descriptions[idx]);
+        LegionProfDesc::MetaDesc meta_desc;
+        meta_desc.kind = idx;
+        meta_desc.name = task_descriptions[idx];
+        serializer->serialize(meta_desc);
       }
       for (unsigned idx = 0; idx < num_operation_kinds; idx++)
       {
-        log_prof.print("Prof Op Desc %u %s", 
-		       idx, operation_kind_descriptions[idx]);
+        LegionProfDesc::OpDesc op_desc;
+        op_desc.kind = idx;
+        op_desc.name = operation_kind_descriptions[idx];
+        serializer->serialize(op_desc);
       }
       // Log all the processors and memories
       Machine::ProcessorQuery all_procs(machine);
       for (Machine::ProcessorQuery::iterator it = all_procs.begin();
             it != all_procs.end(); it++)
       {
-        log_prof.print("Prof Proc Desc " IDFMT " %d", it->id, it->kind());
+        LegionProfDesc::ProcDesc proc_desc;
+        proc_desc.proc_id = it->id;
+        proc_desc.kind = it->kind();
+        serializer->serialize(proc_desc);
       }
       Machine::MemoryQuery all_mems(machine);
       for (Machine::MemoryQuery::iterator it = all_mems.begin();
             it != all_mems.end(); it++)
       {
-        log_prof.print("Prof Mem Desc " IDFMT " %d %zd", 
-		       it->id, it->kind(), it->capacity());
+        LegionProfDesc::MemDesc mem_desc;
+        mem_desc.mem_id = it->id;
+        mem_desc.kind = it->kind();
+        mem_desc.capacity = it->capacity();
+        serializer->serialize(mem_desc);
       }
     }
 
@@ -571,6 +591,9 @@ namespace Legion {
       for (std::vector<LegionProfInstance*>::const_iterator it = 
             instances.begin(); it != instances.end(); it++)
         delete (*it);
+
+      // remove our serializer
+      delete serializer;
     }
 
     //--------------------------------------------------------------------------
@@ -1035,8 +1058,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       for (std::vector<LegionProfInstance*>::const_iterator it = 
-            instances.begin(); it != instances.end(); it++)
-        (*it)->dump_state();
+            instances.begin(); it != instances.end(); it++) {
+        (*it)->dump_state(serializer);
+      }  
     }
 
     //--------------------------------------------------------------------------
@@ -1056,7 +1080,10 @@ namespace Legion {
     {
       for (unsigned idx = 0; idx < num_message_kinds; idx++)
       {
-        log_prof.print("Prof Message Desc %u %s", idx, message_names[idx]);
+        LegionProfDesc::MessageDesc message_desc;
+        message_desc.kind = idx;
+        message_desc.name = message_names[idx];
+        serializer->serialize(message_desc);
       }
     }
 
@@ -1080,7 +1107,10 @@ namespace Legion {
     {
       for (unsigned idx = 0; idx < num_mapper_calls; idx++)
       {
-        log_prof.print("Prof Mapper Call Desc %u %s",idx,mapper_call_names[idx]);
+        LegionProfDesc::MapperCallDesc mapper_call_desc;
+        mapper_call_desc.kind = idx;
+        mapper_call_desc.name = mapper_call_names[idx];
+        serializer->serialize(mapper_call_desc);
       }
     }
 
@@ -1103,8 +1133,10 @@ namespace Legion {
     {
       for (unsigned idx = 0; idx < num_runtime_calls; idx++)
       {
-        log_prof.print("Prof Runtime Call Desc %u %s", 
-		       idx, runtime_call_names[idx]);
+        LegionProfDesc::RuntimeCallDesc runtime_call_desc;
+        runtime_call_desc.kind = idx;
+        runtime_call_desc.name = runtime_call_names[idx];
+        serializer->serialize(runtime_call_desc);
       }
     }
 

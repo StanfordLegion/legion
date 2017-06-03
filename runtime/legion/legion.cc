@@ -357,7 +357,7 @@ namespace Legion {
     ArgumentMap::ArgumentMap(void)
     //--------------------------------------------------------------------------
     {
-        impl = Internal::legion_new<Internal::ArgumentMapImpl>();
+      impl = new Internal::ArgumentMapImpl();
 #ifdef DEBUG_LEGION
         assert(impl != NULL);
 #endif
@@ -368,7 +368,7 @@ namespace Legion {
     ArgumentMap::ArgumentMap(const FutureMap &rhs)
     //--------------------------------------------------------------------------
     {
-        impl = Internal::legion_new<Internal::ArgumentMapImpl>(rhs);
+      impl = new Internal::ArgumentMapImpl(rhs);
 #ifdef DEBUG_LEGION
         assert(impl != NULL);
 #endif
@@ -399,13 +399,7 @@ namespace Legion {
     {
         if (impl != NULL)
         {
-            // Remove our reference and if we were the
-            // last reference holder, then delete it
-            if (impl->remove_reference())
-            {
-                Internal::legion_delete(impl);
-            }
-            impl = NULL;
+          delete impl;
         }
     }
     
@@ -417,14 +411,11 @@ namespace Legion {
         // if so remove our reference
         if (impl != NULL)
         {
-            if (impl->remove_reference())
-            {
-                Internal::legion_delete(impl);
-            }
+          delete impl;
         }
-        impl = Internal::legion_new<Internal::ArgumentMapImpl>(rhs);
-        impl->add_reference();
-        return *this;
+      impl = new Internal::ArgumentMapImpl(rhs);
+      impl->add_reference();
+      return *this;
     }
     
     //--------------------------------------------------------------------------
@@ -435,10 +426,7 @@ namespace Legion {
         // if so remove our reference
         if (impl != NULL)
         {
-            if (impl->remove_reference())
-            {
-                Internal::legion_delete(impl);
-            }
+          delete impl;
         }
         impl = rhs.impl;
         // Add our reference to the new impl
@@ -640,27 +628,27 @@ namespace Legion {
     Grant::~Grant(void)
     //--------------------------------------------------------------------------
     {
-        if (impl != NULL)
-        {
-            if (impl->remove_reference())
-                Internal::legion_delete(impl);
-            impl = NULL;
-        }
+      if (impl != NULL)
+      {
+        if (impl->remove_reference())
+          delete impl;
+        impl = NULL;
+      }
     }
     
     //--------------------------------------------------------------------------
     Grant& Grant::operator=(const Grant &rhs)
     //--------------------------------------------------------------------------
     {
-        if (impl != NULL)
-        {
-            if (impl->remove_reference())
-                Internal::legion_delete(impl);
-        }
-        impl = rhs.impl;
-        if (impl != NULL)
-            impl->add_reference();
-        return *this;
+      if (impl != NULL)
+      {
+        if (impl->remove_reference())
+          delete impl;
+      }
+      impl = rhs.impl;
+      if (impl != NULL)
+        impl->add_reference();
+      return *this;
     }
     
     /////////////////////////////////////////////////////////////
@@ -1711,12 +1699,12 @@ namespace Legion {
     MPILegionHandshake::~MPILegionHandshake(void)
     //--------------------------------------------------------------------------
     {
-        if (impl != NULL)
-        {
-            if (impl->remove_reference())
-                Internal::legion_delete(impl);
-            impl = NULL;
-        }
+      if (impl != NULL)
+      {
+        if (impl->remove_reference())
+          delete impl;
+        impl = NULL;
+      }
     }
     
     //--------------------------------------------------------------------------
@@ -1733,15 +1721,15 @@ namespace Legion {
                                                       const MPILegionHandshake &rhs)
     //--------------------------------------------------------------------------
     {
-        if (impl != NULL)
-        {
-            if (impl->remove_reference())
-                Internal::legion_delete(impl);
-        }
-        impl = rhs.impl;
-        if (impl != NULL)
-            impl->add_reference();
-        return *this;
+      if (impl != NULL)
+      {
+        if (impl->remove_reference())
+          delete impl;
+      }
+      impl = rhs.impl;
+      if (impl != NULL)
+        impl->add_reference();
+      return *this;
     }
     
     //--------------------------------------------------------------------------
@@ -1838,12 +1826,12 @@ namespace Legion {
     Future::~Future(void)
     //--------------------------------------------------------------------------
     {
-        if (impl != NULL)
-        {
-            if (impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
-                Internal::legion_delete(impl);
-            impl = NULL;
-        }
+      if (impl != NULL)
+      {
+        if (impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
+          delete impl;
+        impl = NULL;
+      }
     }
     
     //--------------------------------------------------------------------------
@@ -1859,15 +1847,15 @@ namespace Legion {
     Future& Future::operator=(const Future &rhs)
     //--------------------------------------------------------------------------
     {
-        if (impl != NULL)
-        {
-            if (impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
-                Internal::legion_delete(impl);
-        }
-        impl = rhs.impl;
-        if (impl != NULL)
-            impl->add_base_gc_ref(Internal::FUTURE_HANDLE_REF);
-        return *this;
+      if (impl != NULL)
+      {
+        if (impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
+          delete impl;
+      }
+      impl = rhs.impl;
+      if (impl != NULL)
+        impl->add_base_gc_ref(Internal::FUTURE_HANDLE_REF);
+      return *this;
     }
     
     //--------------------------------------------------------------------------
@@ -1956,27 +1944,27 @@ namespace Legion {
     FutureMap::~FutureMap(void)
     //--------------------------------------------------------------------------
     {
-        if (impl != NULL)
-        {
-            if (impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
-                Internal::legion_delete(impl);
-            impl = NULL;
-        }
+      if (impl != NULL)
+      {
+        if (impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
+          delete impl;
+        impl = NULL;
+      }
     }
     
     //--------------------------------------------------------------------------
     FutureMap& FutureMap::operator=(const FutureMap &rhs)
     //--------------------------------------------------------------------------
     {
-        if (impl != NULL)
-        {
-            if (impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
-                Internal::legion_delete(impl);
-        }
-        impl = rhs.impl;
-        if (impl != NULL)
-            impl->add_base_gc_ref(Internal::FUTURE_HANDLE_REF);
-        return *this;
+      if (impl != NULL)
+      {
+        if (impl->remove_base_gc_ref(Internal::FUTURE_HANDLE_REF))
+          delete impl;
+      }
+      impl = rhs.impl;
+      if (impl != NULL)
+        impl->add_base_gc_ref(Internal::FUTURE_HANDLE_REF);
+      return *this;
     }
     
     //--------------------------------------------------------------------------
@@ -2039,27 +2027,27 @@ namespace Legion {
     PhysicalRegion::~PhysicalRegion(void)
     //--------------------------------------------------------------------------
     {
-        if (impl != NULL)
-        {
-            if (impl->remove_reference())
-                Internal::legion_delete(impl);
-            impl = NULL;
-        }
+      if (impl != NULL)
+      {
+        if (impl->remove_reference())
+          delete impl;
+        impl = NULL;
+      }
     }
     
     //--------------------------------------------------------------------------
     PhysicalRegion& PhysicalRegion::operator=(const PhysicalRegion &rhs)
     //--------------------------------------------------------------------------
     {
-        if (impl != NULL)
-        {
-            if (impl->remove_reference())
-                Internal::legion_delete(impl);
-        }
-        impl = rhs.impl;
-        if (impl != NULL)
-            impl->add_reference();
-        return *this;
+      if (impl != NULL)
+      {
+        if (impl->remove_reference())
+          delete impl;
+      }
+      impl = rhs.impl;
+      if (impl != NULL)
+        impl->add_reference();
+      return *this;
     }
     
     //--------------------------------------------------------------------------
@@ -2237,7 +2225,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
     }
-    
+
+// FIXME: This exists for backwards compatibility but it is tripping
+// over our own deprecation warnings. Turn those off inside this method.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     //--------------------------------------------------------------------------
     LogicalRegion ProjectionFunctor::project(const Mappable *mappable,
                                              unsigned index, LogicalRegion upper_bound, const DomainPoint &point)
@@ -2264,7 +2256,12 @@ namespace Legion {
         }
         return LogicalRegion::NO_REGION;
     }
-    
+#pragma GCC diagnostic pop
+
+// FIXME: This exists for backwards compatibility but it is tripping
+// over our own deprecation warnings. Turn those off inside this method.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     //--------------------------------------------------------------------------
     LogicalRegion ProjectionFunctor::project(const Mappable *mappable,
                                              unsigned index, LogicalPartition upper_bound, const DomainPoint &point)
@@ -2292,7 +2289,8 @@ namespace Legion {
         }
         return LogicalRegion::NO_REGION;
     }
-    
+#pragma GCC diagnostic pop
+
     //--------------------------------------------------------------------------
     LogicalRegion ProjectionFunctor::project(Context ctx, Task *task,
                                              unsigned index, LogicalRegion upper_bound, const DomainPoint &point)
@@ -4190,6 +4188,20 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
+    ProjectionID Runtime::generate_dynamic_projection_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return runtime->generate_dynamic_projection_id();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ProjectionID Runtime::generate_static_projection_id(void)
+    //--------------------------------------------------------------------------
+    {
+      return Internal::Runtime::generate_static_projection_id();
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::register_projection_functor(ProjectionID pid,
                                               ProjectionFunctor *func)
     //--------------------------------------------------------------------------
@@ -4584,11 +4596,11 @@ namespace Legion {
         assert(mpi_participants > 0);
         assert(legion_participants > 0);
 #endif
-        MPILegionHandshake result(
-                                  Internal::legion_new<Internal::MPILegionHandshakeImpl>(init_in_MPI,
-                                                                                         mpi_participants, legion_participants));
-        Internal::Runtime::register_handshake(result);
-        return result;
+      MPILegionHandshake result(
+          new Internal::MPILegionHandshakeImpl(init_in_MPI,
+                                       mpi_participants, legion_participants));
+      Internal::Runtime::register_handshake(result);
+      return result;
     }
     
     //--------------------------------------------------------------------------

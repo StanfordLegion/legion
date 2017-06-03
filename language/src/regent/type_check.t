@@ -23,11 +23,23 @@ local symbol_table = require("regent/symbol_table")
 local type_check = {}
 
 local context = {}
-context.__index = context
 
-function context:new_local_scope(must_epoch)
+function context:__index(field)
+  local value = context[field]
+  if value ~= nil then
+    return value
+  end
+  error("context has no field '" .. field .. "' (in lookup)", 2)
+end
+
+function context:__newindex(field, value)
+  error("context has no field '" .. field .. "' (in assignment)", 2)
+end
+
+function context:new_local_scope(must_epoch, breakable_loop)
   assert(not (self.must_epoch and must_epoch))
   must_epoch = self.must_epoch or must_epoch or false
+  breakable_loop = self.breakable_loop or breakable_loop or false
   local cx = {
     type_env = self.type_env:new_local_scope(),
     privileges = self.privileges,
@@ -36,6 +48,7 @@ function context:new_local_scope(must_epoch)
     expected_return_type = self.expected_return_type,
     fixup_nodes = self.fixup_nodes,
     must_epoch = must_epoch,
+    breakable_loop = breakable_loop,
     external = self.external,
   }
   setmetatable(cx, context)
@@ -51,6 +64,7 @@ function context:new_task_scope(expected_return_type)
     expected_return_type = {expected_return_type},
     fixup_nodes = terralib.newlist(),
     must_epoch = false,
+    breakable_loop = false,
     external = false,
   }
   setmetatable(cx, context)
@@ -3140,7 +3154,7 @@ function type_check.stat_while(cx, node)
   end
   cond = insert_implicit_cast(cond, cond_type, bool)
 
-  local body_cx = cx:new_local_scope()
+  local body_cx = cx:new_local_scope(nil, true)
   return ast.typed.stat.While {
     cond = cond,
     block = type_check.block(body_cx, node.block),
@@ -3177,7 +3191,7 @@ function type_check.stat_for_num(cx, node)
   cx.type_env:insert(node, node.symbol, var_type)
 
   -- Enter scope for body.
-  local cx = cx:new_local_scope()
+  local cx = cx:new_local_scope(nil, true)
   return ast.typed.stat.ForNum {
     symbol = node.symbol,
     values = values,
@@ -3241,7 +3255,7 @@ function type_check.stat_for_list(cx, node)
   cx.type_env:insert(node, node.symbol, var_type)
 
   -- Enter scope for body.
-  local cx = cx:new_local_scope()
+  local cx = cx:new_local_scope(nil, true)
   return ast.typed.stat.ForList {
     symbol = node.symbol,
     value = value,
@@ -3252,7 +3266,7 @@ function type_check.stat_for_list(cx, node)
 end
 
 function type_check.stat_repeat(cx, node)
-  local block_cx = cx:new_local_scope()
+  local block_cx = cx:new_local_scope(nil, true)
   local block = type_check.block(cx, node.block)
 
   local until_cond = type_check.expr(block_cx, node.until_cond)
@@ -3427,6 +3441,9 @@ function type_check.stat_return(cx, node)
 end
 
 function type_check.stat_break(cx, node)
+  if not cx.breakable_loop then
+    report.error(node, "break must be inside a loop")
+  end
   return ast.typed.stat.Break {
     annotations = node.annotations,
     span = node.span,

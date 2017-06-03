@@ -21,13 +21,12 @@
 #include <vector>
 
 #include "legion.h"
-#include "legion_terra.h"
-#include "legion_terra_tasks.h"
 #include "legion_c.h"
 #include "legion_c_util.h"
 
-using namespace std;
-using namespace LegionRuntime::HighLevel;
+#include "legion_terra.h"
+
+using namespace Legion;
 using namespace LegionRuntime::Accessor::AccessorType;
 
 typedef CObjectWrapper::AccessorGeneric AccessorGeneric;
@@ -87,7 +86,7 @@ typedef CObjectWrapper::AccessorGeneric AccessorGeneric;
   {                                                                     \
   void REG(legion_reduction_op_id_t redop)                              \
   {                                                                     \
-    HighLevelRuntime::register_reduction_op<CLASS>(redop);              \
+    Runtime::register_reduction_op<CLASS>(redop);              \
   }                                                                     \
   void SRED(legion_accessor_generic_t accessor_,                        \
            legion_ptr_t ptr_, T value)                                  \
@@ -190,34 +189,34 @@ DECLARE_REDUCTION(register_reduction_divide_int64,
 DECLARE_REDUCTION(register_reduction_max_float,
                   safe_reduce_max_float, safe_reduce_max_float_domain_point,
                   reduce_max_float, reduce_max_float_domain_point,
-                  MaxOPFloat, float, int, max, max, -std::numeric_limits<float>::infinity())
+                  MaxOPFloat, float, int, std::max, std::max, -std::numeric_limits<float>::infinity())
 DECLARE_REDUCTION(register_reduction_max_double,
                   safe_reduce_max_double, safe_reduce_max_double_domain_point,
                   reduce_max_double, reduce_max_double_domain_point,
-                  MaxOpDouble, double, size_t, max, max, -std::numeric_limits<double>::infinity())
+                  MaxOpDouble, double, size_t, std::max, std::max, -std::numeric_limits<double>::infinity())
 DECLARE_REDUCTION(register_reduction_max_int32,
                   safe_reduce_max_int32, safe_reduce_max_int32_domain_point,
                   reduce_max_int32, reduce_max_int32_domain_point,
-                  MaxOpInt, int, int, max, max, INT_MIN)
+                  MaxOpInt, int, int, std::max, std::max, INT_MIN)
 DECLARE_REDUCTION(register_reduction_max_int64,
                   safe_reduce_max_int64, safe_reduce_max_int64_domain_point,
                   reduce_max_int64, reduce_max_int64_domain_point,
-                  MaxOpLongLong, long long int, long long int, max, max, LLONG_MIN)
+                  MaxOpLongLong, long long int, long long int, std::max, std::max, LLONG_MIN)
 
 DECLARE_REDUCTION(register_reduction_min_float,
                   safe_reduce_min_float, safe_reduce_min_float_domain_point,
                   reduce_min_float, reduce_min_float_domain_point,
-                  MinOPFloat, float, int, min, min, std::numeric_limits<float>::infinity())
+                  MinOPFloat, float, int, std::min, std::min, std::numeric_limits<float>::infinity())
 DECLARE_REDUCTION(register_reduction_min_double,
                   safe_reduce_min_double, safe_reduce_min_double_domain_point,
                   reduce_min_double, reduce_min_double_domain_point,
-                  MinOpDouble, double, size_t, min, min, std::numeric_limits<double>::infinity())
+                  MinOpDouble, double, size_t, std::min, std::min, std::numeric_limits<double>::infinity())
 DECLARE_REDUCTION(register_reduction_min_int32,
                   safe_reduce_min_int32, safe_reduce_min_int32_domain_point,
                   reduce_min_int32, reduce_min_int32_domain_point,
-                  MinOpInt, int, int, min, min, INT_MAX)
+                  MinOpInt, int, int, std::min, std::min, INT_MAX)
 DECLARE_REDUCTION(register_reduction_min_int64,
                   safe_reduce_min_int64, safe_reduce_min_int64_domain_point,
                   reduce_min_int64, reduce_min_int64_domain_point,
-                  MinOpLongLong, long long int, long long int, min, min, LLONG_MAX)
+                  MinOpLongLong, long long int, long long int, std::min, std::min, LLONG_MAX)
 

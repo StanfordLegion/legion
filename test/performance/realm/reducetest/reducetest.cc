@@ -25,7 +25,7 @@
 #include "accessor.h"
 #include "indexspace.h"
 
-using namespace LegionRuntime::LowLevel;
+using namespace Realm;
 using namespace LegionRuntime::Accessor;
 
 // TASK IDs
@@ -43,7 +43,7 @@ enum {
   REDOP_BUCKET_ADD = 1,
 };
 
-LegionRuntime::Logger::Category log_app("appl");
+Logger log_app("appl");
 
 template <bool EXCL, class LHS, class RHS>
 struct DoAdd {

@@ -42,6 +42,12 @@
 #define REALM_USE_LEGION_LAYOUT_CONSTRAINTS
 #include "realm.h"
 
+#if __cplusplus >= 201402L
+#define LEGION_DEPRECATED(x) [[deprecated(x)]]
+#else
+#define LEGION_DEPRECATED(x)
+#endif
+
 namespace BindingLib { class Utility; } // BindingLib namespace
 
 namespace Legion { 
@@ -640,6 +646,8 @@ namespace Legion {
       SEND_REMOTE_CONTEXT_REQUEST,
       SEND_REMOTE_CONTEXT_RESPONSE,
       SEND_REMOTE_CONTEXT_FREE,
+      SEND_REMOTE_CONTEXT_PHYSICAL_REQUEST,
+      SEND_REMOTE_CONTEXT_PHYSICAL_RESPONSE,
       SEND_VERSION_OWNER_REQUEST,
       SEND_VERSION_OWNER_RESPONSE,
       SEND_VERSION_STATE_REQUEST,
@@ -767,6 +775,8 @@ namespace Legion {
         "Send Remote Context Request",                                \
         "Send Remote Context Response",                               \
         "Send Remote Context Free",                                   \
+        "Send Remote Context Physical Request",                       \
+        "Send Remote Context Physical Response",                      \
         "Send Version Owner Request",                                 \
         "Send Version Owner Response",                                \
         "Send Version State Request",                                 \
@@ -1190,7 +1200,6 @@ namespace Legion {
     class IndexTask;
     class SliceTask;
     class RemoteTask;
-    class MinimalPoint;
 
     // legion_context.h
     /**
@@ -1365,7 +1374,6 @@ namespace Legion {
     friend class Internal::PointTask;                       \
     friend class Internal::IndexTask;                       \
     friend class Internal::SliceTask;                       \
-    friend class Internal::MinimalPoint;                    \
     friend class Internal::RegionTreeForest;                \
     friend class Internal::IndexSpaceNode;                  \
     friend class Internal::IndexPartNode;                   \
@@ -1402,19 +1410,19 @@ namespace Legion {
     friend class BindingLib::Utility;                       \
     friend class CObjectWrapper;                  
 
-#define LEGION_EXTERN_LOGGER_DECLARATIONS                        \
-    extern LegionRuntime::Logger::Category log_run;              \
-    extern LegionRuntime::Logger::Category log_task;             \
-    extern LegionRuntime::Logger::Category log_index;            \
-    extern LegionRuntime::Logger::Category log_field;            \
-    extern LegionRuntime::Logger::Category log_region;           \
-    extern LegionRuntime::Logger::Category log_inst;             \
-    extern LegionRuntime::Logger::Category log_variant;          \
-    extern LegionRuntime::Logger::Category log_allocation;       \
-    extern LegionRuntime::Logger::Category log_prof;             \
-    extern LegionRuntime::Logger::Category log_garbage;          \
-    extern LegionRuntime::Logger::Category log_spy;              \
-    extern LegionRuntime::Logger::Category log_shutdown;
+#define LEGION_EXTERN_LOGGER_DECLARATIONS      \
+    extern Realm::Logger log_run;              \
+    extern Realm::Logger log_task;             \
+    extern Realm::Logger log_index;            \
+    extern Realm::Logger log_field;            \
+    extern Realm::Logger log_region;           \
+    extern Realm::Logger log_inst;             \
+    extern Realm::Logger log_variant;          \
+    extern Realm::Logger log_allocation;       \
+    extern Realm::Logger log_prof;             \
+    extern Realm::Logger log_garbage;          \
+    extern Realm::Logger log_spy;              \
+    extern Realm::Logger log_shutdown;
 
   }; // Internal namespace
 
@@ -1438,6 +1446,7 @@ namespace Legion {
   typedef Realm::ElementMask::Enumerator Enumerator;
   typedef ::legion_lowlevel_coord_t coord_t;
   typedef Realm::IndexSpace::FieldDataDescriptor FieldDataDescriptor;
+  typedef Realm::Logger Logger;
   typedef std::map<CustomSerdezID, 
                    const Realm::CustomSerdezUntyped *> SerdezOpTable;
   typedef std::map<Realm::ReductionOpID, 
@@ -1668,7 +1677,7 @@ namespace Legion {
       {
 #ifdef ENABLE_LEGION_TLS
         // Save the context locally
-        TaskContext *local_ctx = Internal::implicit_context; 
+        Internal::TaskContext *local_ctx = Internal::implicit_context; 
         // Do the wait
         wait();
         // Write the context back

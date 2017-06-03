@@ -33,7 +33,7 @@ using namespace LegionRuntime::Arrays;
 
 enum TaskIDs {
   TOP_LEVEL_TASK_ID,
-  HELLO_WORLD_INDEX_ID,
+  INDEX_SPACE_TASK_ID,
 };
 
 void top_level_task(const Task *task,
@@ -100,7 +100,7 @@ void top_level_task(const Task *task,
   // a TaskArgument which is a global argument that will
   // be passed to all tasks launched, and a domain describing
   // the points to be launched.
-  IndexLauncher index_launcher(HELLO_WORLD_INDEX_ID,
+  IndexLauncher index_launcher(INDEX_SPACE_TASK_ID,
                                launch_domain,
                                TaskArgument(NULL, 0),
                                arg_map);
@@ -149,10 +149,18 @@ int index_space_task(const Task *task,
 int main(int argc, char **argv)
 {
   Runtime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
-  Runtime::register_legion_task<top_level_task>(TOP_LEVEL_TASK_ID,
-      Processor::LOC_PROC, true/*single*/, false/*index*/);
-  Runtime::register_legion_task<int, index_space_task>(HELLO_WORLD_INDEX_ID,
-      Processor::LOC_PROC, false/*single*/, true/*index*/);
+
+  {
+    TaskVariantRegistrar registrar(TOP_LEVEL_TASK_ID, "top_level");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    Runtime::preregister_task_variant<top_level_task>(registrar, "top_level");
+  }
+
+  {
+    TaskVariantRegistrar registrar(INDEX_SPACE_TASK_ID, "index_space_task");
+    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    Runtime::preregister_task_variant<int, index_space_task>(registrar, "index_space_task");
+  }
 
   return Runtime::start(argc, argv);
 }
