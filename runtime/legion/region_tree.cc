@@ -4426,7 +4426,6 @@ namespace Legion {
       void *local = legion_malloc(SEMANTIC_INFO_ALLOC, size);
       memcpy(local, buffer, size);
       bool added = true;
-      RtUserEvent to_trigger;
       {
         AutoLock n_lock(node_lock); 
         // See if it already exists
@@ -4489,8 +4488,7 @@ namespace Legion {
           {
             finder->second.buffer = local;
             finder->second.size = size;
-            // See if we have an event to trigger
-            to_trigger = finder->second.ready_event;
+            // Trigger will happen by the caller
             finder->second.ready_event = RtUserEvent::NO_RT_USER_EVENT;
             finder->second.is_mutable = is_mutable;
           }
@@ -4498,9 +4496,6 @@ namespace Legion {
         else
           semantic_info[tag] = SemanticInfo(local, size, is_mutable);
       }
-      // Trigger the ready event if there is one
-      if (to_trigger.exists())
-        Runtime::trigger_event(to_trigger);
       if (added)
       {
         AddressSpaceID owner_space = get_owner_space();
@@ -6489,7 +6484,6 @@ namespace Legion {
       void *local = legion_malloc(SEMANTIC_INFO_ALLOC, size);
       memcpy(local, buffer, size);
       bool added = true;
-      RtUserEvent to_trigger;
       {
         AutoLock n_lock(node_lock); 
         // See if it already exists
@@ -6551,8 +6545,7 @@ namespace Legion {
           {
             finder->second.buffer = local;
             finder->second.size = size;
-            // See if we have an event to trigger
-            to_trigger = finder->second.ready_event;
+            // Trigger will happen by caller
             finder->second.ready_event = RtUserEvent::NO_RT_USER_EVENT;
             finder->second.is_mutable = is_mutable;
           }
@@ -6560,9 +6553,6 @@ namespace Legion {
         else
           semantic_info[tag] = SemanticInfo(local, size, is_mutable);
       }
-      // Trigger the ready event if there is one
-      if (to_trigger.exists())
-        Runtime::trigger_event(to_trigger);
       if (added)
       {
         AddressSpaceID owner_space = get_owner_space();
@@ -6588,7 +6578,6 @@ namespace Legion {
       void *local = legion_malloc(SEMANTIC_INFO_ALLOC, size);
       memcpy(local, buffer, size);
       bool added = true;
-      RtUserEvent to_trigger;
       {
         AutoLock n_lock(node_lock); 
         // See if it already exists
@@ -6651,8 +6640,7 @@ namespace Legion {
           {
             finder->second.buffer = local;
             finder->second.size = size;
-            // See if we have an event to trigger
-            to_trigger = finder->second.ready_event;
+            // Trigger will happen by caller
             finder->second.ready_event = RtUserEvent::NO_RT_USER_EVENT;
             finder->second.is_mutable = is_mutable;
           }
@@ -6663,9 +6651,6 @@ namespace Legion {
             SemanticInfo(local, size, is_mutable);
         }
       }
-      // Trigger the ready event if there is one
-      if (to_trigger.exists())
-        Runtime::trigger_event(to_trigger);
       if (added)
       {
         AddressSpaceID owner_space = get_owner_space();
@@ -8635,7 +8620,6 @@ namespace Legion {
       void *local = legion_malloc(SEMANTIC_INFO_ALLOC, size);
       memcpy(local, buffer, size);
       bool added = true;
-      RtUserEvent to_trigger;
       {
         AutoLock n_lock(node_lock); 
         // See if it already exists
@@ -8696,7 +8680,7 @@ namespace Legion {
           {
             finder->second.buffer = local;
             finder->second.size = size;
-            to_trigger = finder->second.ready_event;
+            // Trigger will happen by caller
             finder->second.ready_event = RtUserEvent::NO_RT_USER_EVENT;
             finder->second.is_mutable = is_mutable;
           }
@@ -8704,8 +8688,6 @@ namespace Legion {
         else
           semantic_info[tag] = SemanticInfo(local, size, is_mutable);
       }
-      if (to_trigger.exists())
-        Runtime::trigger_event(to_trigger);
       if (added)
       {
         AddressSpaceID owner_space = get_owner_space();
