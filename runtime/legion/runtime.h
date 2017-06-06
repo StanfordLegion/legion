@@ -3167,6 +3167,8 @@ namespace Legion {
       static bool program_order_execution;
     public:
       static unsigned num_profiling_nodes;
+      static const char* serializer_type;
+      static const char* prof_logfile;
     public:
       static inline ApEvent merge_events(ApEvent e1, ApEvent e2);
       static inline ApEvent merge_events(ApEvent e1, ApEvent e2, ApEvent e3);

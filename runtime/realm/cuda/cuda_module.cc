@@ -20,8 +20,8 @@
 #include "realm/cmdline.h"
 #include "realm/event_impl.h"
 
-#include "lowlevel_dma.h"
-#include "channel.h"
+#include <realm/transfer/lowlevel_dma.h>
+#include <realm/transfer/channel.h>
 
 #include "realm/cuda/cudart_hijack.h"
 

@@ -68,14 +68,28 @@ local codegen = {}
 local c = std.c
 
 local context = {}
-context.__index = context
 
-function context:new_local_scope(divergence, must_epoch, must_epoch_point)
+function context:__index(field)
+  local value = context[field]
+  if value ~= nil then
+    return value
+  end
+  error("context has no field '" .. field .. "' (in lookup)", 2)
+end
+
+function context:__newindex(field, value)
+  error("context has no field '" .. field .. "' (in assignment)", 2)
+end
+
+function context:new_local_scope(divergence, must_epoch, must_epoch_point, break_label)
   assert(not (self.must_epoch and must_epoch))
-  divergence = self.divergence or divergence
-  must_epoch = self.must_epoch or must_epoch
-  must_epoch_point = self.must_epoch_point or must_epoch_point
-  assert((must_epoch == nil) == (must_epoch_point == nil))
+  divergence = self.divergence or divergence or false
+  must_epoch = self.must_epoch or must_epoch or false
+  must_epoch_point = self.must_epoch_point or must_epoch_point or false
+  if not break_label then
+    break_label = self.break_label or false
+  end
+  assert((must_epoch == false) == (must_epoch_point == false))
   return setmetatable({
     expected_return_type = self.expected_return_type,
     constraints = self.constraints,
@@ -85,6 +99,7 @@ function context:new_local_scope(divergence, must_epoch, must_epoch_point)
     divergence = divergence,
     must_epoch = must_epoch,
     must_epoch_point = must_epoch_point,
+    break_label = break_label,
     context = self.context,
     runtime = self.runtime,
     ispaces = self.ispaces:new_local_scope(),
@@ -102,9 +117,10 @@ function context:new_task_scope(expected_return_type, constraints, leaf, task_me
     task = task,
     task_meta = task_meta,
     leaf = leaf,
-    divergence = nil,
-    must_epoch = nil,
-    must_epoch_point = nil,
+    divergence = false,
+    must_epoch = false,
+    must_epoch_point = false,
+    break_label = false,
     context = ctx,
     runtime = runtime,
     ispaces = symbol_table.new_global_scope({}),
@@ -6570,12 +6586,14 @@ end
 
 function codegen.stat_while(cx, node)
   local cond = codegen.expr(cx, node.cond):read(cx)
-  local body_cx = cx:new_local_scope()
+  local break_label = terralib.newlabel()
+  local body_cx = cx:new_local_scope(nil, nil, nil, break_label)
   local block = cleanup_after(body_cx, codegen.block(body_cx, node.block))
   return quote
     while [quote [cond.actions] in [cond.value] end] do
       [block]
     end
+    ::[break_label]::
   end
 end
 
@@ -6583,7 +6601,8 @@ function codegen.stat_for_num(cx, node)
   local symbol = node.symbol:getsymbol()
   local cx = cx:new_local_scope()
   local bounds = codegen.expr_list(cx, node.values):map(function(value) return value:read(cx) end)
-  local cx = cx:new_local_scope()
+  local break_label = terralib.newlabel()
+  local cx = cx:new_local_scope(nil, nil, nil, break_label)
   local block = cleanup_after(cx, codegen.block(cx, node.block))
 
   local v1, v2, v3 = unpack(bounds)
@@ -6593,6 +6612,7 @@ function codegen.stat_for_num(cx, node)
       for [symbol] = [v1.value], [v2.value] do
         [block]
       end
+      ::[break_label]::
     end
   else
     return quote
@@ -6600,6 +6620,7 @@ function codegen.stat_for_num(cx, node)
       for [symbol] = [v1.value], [v2.value], [v3.value] do
         [block]
       end
+      ::[break_label]::
     end
   end
 end
@@ -6729,7 +6750,8 @@ function codegen.stat_for_list(cx, node)
   local cx = cx:new_local_scope()
   local value = codegen.expr(cx, node.value):read(cx)
   local value_type = std.as_read(node.value.expr_type)
-  local cx = cx:new_local_scope()
+  local break_label = terralib.newlabel()
+  local cx = cx:new_local_scope(nil, nil, nil, break_label)
   local block = cleanup_after(cx, codegen.block(cx, node.block))
 
   local ispace_type, is, it
@@ -6749,6 +6771,7 @@ function codegen.stat_for_list(cx, node)
           [block]
         end
       end
+      ::[break_label]::
     end
   else
     assert(false)
@@ -6819,6 +6842,7 @@ function codegen.stat_for_list(cx, node)
               end
             end
           end
+          ::[break_label]::
           [cleanup_actions]
         end
       else
@@ -6866,6 +6890,7 @@ function codegen.stat_for_list(cx, node)
             [openmphelper.launch]([omp_worker], [arg], [openmphelper.get_max_threads](), 0)
             [launcher_cleanup]
           end
+          ::[break_label]::
           [cleanup_actions]
         end
       end
@@ -6895,6 +6920,7 @@ function codegen.stat_for_list(cx, node)
             [actions]
             var [rect] = [domain_get_rect]([domain])
             [body]
+            ::[break_label]::
             [cleanup_actions]
           end
         else
@@ -6944,6 +6970,7 @@ function codegen.stat_for_list(cx, node)
             [launch_init]
             [openmphelper.launch]([omp_worker], [arg], [openmphelper.get_max_threads](), 0)
             [launcher_cleanup]
+            ::[break_label]::
             [cleanup_actions]
           end
         end
@@ -6958,6 +6985,7 @@ function codegen.stat_for_list(cx, node)
                 [block]
               end
             end
+            ::[break_label]::
             [cleanup_actions]
           end
         else
@@ -6996,6 +7024,7 @@ function codegen.stat_for_list(cx, node)
             [launch_init]
             [openmphelper.launch]([omp_worker], [arg], [openmphelper.get_max_threads](), 0)
             [launcher_cleanup]
+            ::[break_label]::
             [cleanup_actions]
           end
         end
@@ -7167,7 +7196,8 @@ function codegen.stat_for_list_vectorized(cx, node)
   local value_type = std.as_read(node.value.expr_type)
   local cx = cx:new_local_scope()
   local block = cleanup_after(cx, codegen.block(cx, node.block))
-  local orig_block = cleanup_after(cx, codegen.block(cx, node.orig_block))
+  local orig_block_1 = cleanup_after(cx, codegen.block(cx, node.orig_block))
+  local orig_block_2 = cleanup_after(cx, codegen.block(cx, node.orig_block))
   local vector_width = node.vector_width
 
   local ispace_type, is, it
@@ -7231,7 +7261,7 @@ function codegen.stat_for_list_vectorized(cx, node)
           while i < start do
             var [symbol] = [symbol.type]{ __ptr = c.legion_ptr_t { value = i }}
             do
-              [orig_block]
+              [orig_block_1]
             end
             i = i + 1
           end
@@ -7246,7 +7276,7 @@ function codegen.stat_for_list_vectorized(cx, node)
         while i < final do
           var [symbol] = [symbol.type]{ __ptr = c.legion_ptr_t { value = i }}
           do
-            [orig_block]
+            [orig_block_2]
           end
           i = i + 1
         end
@@ -7267,18 +7297,12 @@ function codegen.stat_for_list_vectorized(cx, node)
       local final = terralib.newsymbol(c.coord_t, "base")
 
       local body = quote
-        var [symbol] = [symbol.type] { __ptr = [symbol.type.index_type.impl_type]{ index } }
-        do
-          [orig_block]
-        end
-      end
-      body = quote
         var [ index[1] ] = base
         if count >= [vector_width] then
           while [ index[1] ] < [start] do
             var [symbol] = [symbol.type] { __ptr = [symbol.type.index_type.impl_type]{ index } }
             do
-              [orig_block]
+              [orig_block_1]
             end
             [ index[1] ] = [ index[1] ] + 1
           end
@@ -7293,7 +7317,7 @@ function codegen.stat_for_list_vectorized(cx, node)
         while [ index[1] ] < [final] do
           var [symbol] = [symbol.type] { __ptr = [symbol.type.index_type.impl_type]{ index } }
           do
-            [orig_block]
+            [orig_block_2]
           end
           [ index[1] ] = [ index[1] ] + 1
         end
@@ -7334,7 +7358,7 @@ function codegen.stat_for_list_vectorized(cx, node)
           while i < start do
             var [symbol] = [symbol.type]{ __ptr = i }
             do
-              [orig_block]
+              [orig_block_1]
             end
             i = i + 1
           end
@@ -7349,7 +7373,7 @@ function codegen.stat_for_list_vectorized(cx, node)
         while i < final do
           var [symbol] = [symbol.type]{ __ptr = i }
           do
-            [orig_block]
+            [orig_block_2]
           end
           i = i + 1
         end
@@ -7948,7 +7972,8 @@ function codegen.stat_return(cx, node)
 end
 
 function codegen.stat_break(cx, node)
-  return quote break end
+  assert(cx.break_label)
+  return quote goto [cx.break_label] end
 end
 
 function codegen.stat_assignment(cx, node)

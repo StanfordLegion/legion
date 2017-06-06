@@ -17,7 +17,6 @@
 
 #include "arrays.h"
 #include "logging.h"
-#include "lowlevel_dma.h"
 
 namespace Realm {
 

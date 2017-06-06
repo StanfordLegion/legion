@@ -1559,6 +1559,98 @@ namespace Legion {
     };
 
     /**
+     * \struct GatherLauncher
+     * A gather launcher is used to perform a gather from an explicit 
+     * gather copy from a number of source logical regions into a 
+     * single destination logical region by indirecting through a
+     * mapping stored in a field.
+     */
+    struct GatherLauncher {
+    public:
+      GatherLauncher(LogicalRegion indirect_region, 
+                     FieldID indirect_fid,
+                     LogicalRegion indirect_parent,
+                     Predicate pred = Predicate::TRUE_PRED,
+                     MapperID id = 0, MappingTagID tag = 0);
+    public:
+      inline GatherLauncher& add_src_requirement(const RegionRequirement &req);
+      inline void set_destination_requirement(const RegionRequirement &req);
+    public:
+      inline void add_src_field(unsigned idx, FieldID fid, bool inst = true);
+      inline void add_dst_field(FieldID fid, bool inst = true);
+    public:
+      inline void add_grant(Grant g);
+      inline void add_wait_barrier(PhaseBarrier bar);
+      inline void add_arrival_barrier(PhaseBarrier bar);
+      inline void add_wait_handshake(MPILegionHandshake handshake);
+      inline void add_arrival_handshake(MPILegionHandshake handshake);
+    public:
+      LogicalRegion                   indirect_region;
+      FieldID                         indirect_field;
+      LogicalRegion                   indirect_parent;
+      std::vector<RegionRequirement>  src_requirements;
+      RegionRequirement               dst_requirement;
+      std::vector<Grant>              grants;
+      std::vector<PhaseBarrier>       wait_barriers;
+      std::vector<PhaseBarrier>       arrive_barriers;
+      Predicate                       predicate;
+      MapperID                        map_id;
+      MappingTagID                    tag;
+      DomainPoint                     point;
+    public:
+      // Inform the runtime about any static dependences
+      // These will be ignored outside of static traces
+      const std::vector<StaticDependence> *static_dependences;
+    public:
+      bool                            silence_warnings;
+    };
+
+    /**
+     * A scatter launcher is used to perform an explicit scatter 
+     * copy from a single logical region out to many other logical
+     * regions using a mapping stored in a field.
+     */
+    struct ScatterLauncher {
+    public:
+      ScatterLauncher(LogicalRegion indirect_region, 
+                      FieldID indirect_fid,
+                      LogicalRegion indirect_parent,
+                      Predicate pred = Predicate::TRUE_PRED,
+                      MapperID id = 0, MappingTagID tag = 0);
+    public:
+      inline void set_src_requirement(const RegionRequirement &req);
+      inline ScatterLauncher& add_dst_requirement(const RegionRequirement &req);
+    public:
+      inline void add_src_field(FieldID fid, bool inst = true);
+      inline void add_dst_field(unsigned idx, FieldID fid, bool inst = true);
+    public:
+      inline void add_grant(Grant g);
+      inline void add_wait_barrier(PhaseBarrier bar);
+      inline void add_arrival_barrier(PhaseBarrier bar);
+      inline void add_wait_handshake(MPILegionHandshake handshake);
+      inline void add_arrival_handshake(MPILegionHandshake handshake);
+    public:
+      LogicalRegion                   indirect_region;
+      FieldID                         indirect_field;
+      LogicalRegion                   indirect_parent;
+      RegionRequirement               src_requirement;
+      std::vector<RegionRequirement>  dst_requirements;
+      std::vector<Grant>              grants;
+      std::vector<PhaseBarrier>       wait_barriers;
+      std::vector<PhaseBarrier>       arrive_barriers;
+      Predicate                       predicate;
+      MapperID                        map_id;
+      MappingTagID                    tag;
+      DomainPoint                     point;
+    public:
+      // Inform the runtime about any static dependences
+      // These will be ignored outside of static traces
+      const std::vector<StaticDependence> *static_dependences;
+    public:
+      bool                            silence_warnings;
+    };
+
+    /**
      * \struct FillLauncher
      * Fill launchers are objects that describe the parameters
      * for issuing a fill operation.

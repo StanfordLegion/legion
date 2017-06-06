@@ -69,7 +69,7 @@ namespace Legion {
         __CUDA_HD__
         const ArraySyntaxHelper<A,FT,N,T,M+1> operator[](T val) const;
       public:
-        A &accessor;
+        A accessor;
         mutable Point<M,T> point;
       };
     }
