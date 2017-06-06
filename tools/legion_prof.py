@@ -26,7 +26,7 @@ from math import sqrt, log
 from cgi import escape
 from operator import itemgetter
 from os.path import dirname, exists, basename
-from legion_serializer import LegionProfRegexDeserializer
+from legion_serializer import LegionProfASCIIDeserializer, LegionProfBinaryDeserializer, GetFileTypeInfo
 
 # Make sure this is up to date with lowlevel.h
 processor_kinds = {
@@ -182,6 +182,9 @@ class HasInitiationDependencies(HasDependencies):
         self.initiation = initiation_op.op_id
 
     def add_initiation_dependencies(self, state, op_dependencies, transitive_map):
+        """
+        Add the dependencies from the initiation to us
+        """
         unique_tuple = self.get_unique_tuple()
         if self.initiation in state.operations:
             op = state.find_op(self.initiation)
@@ -194,22 +197,24 @@ class HasInitiationDependencies(HasDependencies):
                         "parents" : set(),
                         "children" : set()
                     }
-                if op.start < self.start:
+                if op.stop < self.stop:
                     op_dependencies[self.initiation]["in"].add(unique_tuple)
                 else:
                     op_dependencies[self.initiation]["out"].add(unique_tuple)
 
     def attach_dependencies(self, state, op_dependencies, transitive_map):
+        """
+        Add the dependencies from the us to the initiation
+        """
         # add the out direction
         if self.initiation in state.operations:
             op = state.find_op(self.initiation)
             if op.proc is not None: # this op exists
                 op_tuple = op.get_unique_tuple()
-                if op.start < self.start:
+                if op.stop < self.stop:
                     self.deps["out"].add(op_tuple)
                 else:
                     self.deps["in"].add(op_tuple)
-
 
     def get_color(self):
         return self.initiation_op.get_color()
@@ -433,14 +438,14 @@ class TimePoint(object):
         return cmp(a.time_key, b.time_key)
 
 class Memory(object):
-    def __init__(self, mem_id, kind, size):
+    def __init__(self, mem_id, kind, capacity):
         self.mem_id = mem_id
         # MEMORY:      tag:8 = 0x1e, owner_node:16,   (unused):28, mem_idx: 12
         # owner_node = mem_id[55:40]
         self.node_id = (mem_id >> 40) & ((1 << 16) - 1)
         self.mem_in_node = (mem_id) & ((1 << 12) - 1)
         self.kind = kind
-        self.total_size = size
+        self.capacity = capacity
         self.instances = set()
         self.time_points = list()
         self.max_live_instances = None
@@ -515,7 +520,7 @@ class Memory(object):
         previous_time = 0
         for point in sorted(self.time_points,key=lambda p: p.time_key):
             # First do the math for the previous interval
-            usage = float(current_size)/float(self.total_size) if self.total_size <> 0 else 0
+            usage = float(current_size)/float(self.capacity) if self.capacity <> 0 else 0
             if usage > max_usage:
                 max_usage = usage
             duration = point.time - previous_time
@@ -887,6 +892,11 @@ class HasWaiters(object):
                                     children = children,
                                     parents = parents,
                                     prof_uid = self.prof_uid)
+                # only write once
+                _in = ""
+                out = ""
+                children = ""
+                parents = ""
                 wait = data_tsv_str(level = cur_level,
                                     start = wait_interval.start,
                                     end = wait_interval.ready,
@@ -894,10 +904,10 @@ class HasWaiters(object):
                                     opacity = "0.15",
                                     title = title + " (waiting)",
                                     initiation = initiation,
-                                    _in = _in,
-                                    out = out,
-                                    children = children,
-                                    parents = parents,
+                                    _in = "",
+                                    out = "",
+                                    children = "",
+                                    parents = "",
                                     prof_uid = self.prof_uid)
                 ready = data_tsv_str(level = cur_level,
                                      start = wait_interval.ready,
@@ -906,11 +916,11 @@ class HasWaiters(object):
                                      opacity = "0.45",
                                      title = title + " (ready)",
                                      initiation = initiation,
-                                     _in = _in,
-                                     out = out,
-                                     children = children,
-                                     parents = parents,
-                                     prof_uid = None)
+                                     _in = "",
+                                     out = "",
+                                     children = "",
+                                     parents = "",
+                                    prof_uid = self.prof_uid)
 
                 tsv_file.write(init)
                 tsv_file.write(wait)
@@ -924,11 +934,11 @@ class HasWaiters(object):
                                    opacity = "1.0",
                                    title = title,
                                    initiation = initiation,
-                                   _in = _in,
-                                   out = out,
-                                   children = children,
-                                   parents = parents,
-                                   prof_uid = None)
+                                   _in = "",
+                                   out = "",
+                                   children = "",
+                                   parents = "",
+                                    prof_uid = self.prof_uid)
 
                 tsv_file.write(end)
         else:
@@ -1281,10 +1291,10 @@ class Instance(Base, TimeRange, HasInitiationDependencies):
                         size_pretty))
 
 class MessageKind(StatObject):
-    def __init__(self, message_id, desc):
+    def __init__(self, message_id, name):
         StatObject.__init__(self)
         self.message_id = message_id
-        self.desc = desc
+        self.name = name
         self.color = None
 
     def __eq__(self, other):
@@ -1295,7 +1305,7 @@ class MessageKind(StatObject):
         self.color = color
 
     def __repr__(self):
-        return self.desc
+        return self.name
 
 class Message(Base, TimeRange, HasNoDependencies):
     def __init__(self, kind, start, stop):
@@ -1338,17 +1348,17 @@ class Message(Base, TimeRange, HasNoDependencies):
         return 'Message '+str(self.kind)
 
 class MapperCallKind(StatObject):
-    def __init__(self, mapper_call_kind, desc):
+    def __init__(self, mapper_call_kind, name):
         StatObject.__init__(self)
         self.mapper_call_kind = mapper_call_kind
-        self.desc = desc
+        self.name = name
         self.color = None
 
     def __eq__(self, other):
         return self.mapper_call_kind == other.mapper_call_kind
 
     def __repr__(self):
-        return self.desc
+        return self.name
 
     def assign_color(self, color):
         assert self.color is None
@@ -1406,10 +1416,10 @@ class MapperCall(Base, TimeRange, HasInitiationDependencies):
             return 'Mapper Call '+str(self.kind)+' for '+str(self.initiation)
 
 class RuntimeCallKind(StatObject):
-    def __init__(self, runtime_call_kind, desc):
+    def __init__(self, runtime_call_kind, name):
         StatObject.__init__(self)
         self.runtime_call_kind = runtime_call_kind
-        self.desc = desc
+        self.name = name
         self.color = None
 
     def __eq__(self, other):
@@ -1420,7 +1430,7 @@ class RuntimeCallKind(StatObject):
         self.color = color
 
     def __repr__(self):
-        return self.desc
+        return self.name
 
 class RuntimeCall(Base, TimeRange, HasNoDependencies):
     def __init__(self, kind, start, stop):
@@ -1602,52 +1612,51 @@ class State(object):
         self.has_spy_data = False
         self.spy_state = None
         self.callbacks = {
-            "Task Info": self.log_task_info,
-            "Meta Info": self.log_meta_info,
-            "Copy Info": self.log_copy_info,
-            "Fill Info": self.log_fill_info,
-            "Inst Create": self.log_inst_create,
-            "Inst Usage": self.log_inst_usage,
-            "Inst Timeline": self.log_inst_timeline,
-            "User Info": self.log_user_info,
-            "Task Wait Info": self.log_task_wait_info,
-            "Meta Wait Info": self.log_meta_wait_info,
-            "Task Kind": self.log_kind,
-            "Task Kind Over": self.log_kind_over,
-            "Task Variant": self.log_variant,
-            "Operation": self.log_operation,
-            "Multi": self.log_multi,
-            "Slice Owner": self.log_slice_owner,
-            "Meta Desc": self.log_meta_desc,
-            "Op Desc": self.log_op_desc,
-            "Prof Desc": self.log_proc_desc,
-            "Mem Desc": self.log_mem_desc,
-            "Message Desc": self.log_message_desc,
-            "Message Info": self.log_message_info,
-            "Mapper Call Desc": self.log_mapper_call_desc,
-            "Mapper Call Info": self.log_mapper_call_info,
-            "Runtime Call Desc": self.log_runtime_call_desc,
-            "Runtime Call Info": self.log_runtime_call_info,
-            "Proftask Info": self.log_proftask_info
+            "MessageDesc": self.log_message_desc,
+            "MapperCallDesc": self.log_mapper_call_desc,
+            "RuntimeCallDesc": self.log_runtime_call_desc,
+            "MetaDesc": self.log_meta_desc,
+            "OpDesc": self.log_op_desc,
+            "ProcDesc": self.log_proc_desc,
+            "MemDesc": self.log_mem_desc,
+            "TaskKind": self.log_kind,
+            "TaskVariant": self.log_variant,
+            "OperationInstance": self.log_operation,
+            "MultiTask": self.log_multi,
+            "SliceOwner": self.log_slice_owner,
+            "TaskWaitInfo": self.log_task_wait_info,
+            "MetaWaitInfo": self.log_meta_wait_info,
+            "TaskInfo": self.log_task_info,
+            "MetaInfo": self.log_meta_info,
+            "CopyInfo": self.log_copy_info,
+            "FillInfo": self.log_fill_info,
+            "InstCreateInfo": self.log_inst_create,
+            "InstUsageInfo": self.log_inst_usage,
+            "InstTimelineInfo": self.log_inst_timeline,
+            "MessageInfo": self.log_message_info,
+            "MapperCallInfo": self.log_mapper_call_info,
+            "RuntimeCallInfo": self.log_runtime_call_info,
+            "ProfTaskInfo": self.log_proftask_info
+            #"UserInfo": self.log_user_info
         }
 
-    def log_task_info(self, op_id, vid, pid,
+    def log_task_info(self, op_id, variant_id, proc_id,
                       create, ready, start, stop):
-        variant = self.find_variant(vid)
+        variant = self.find_variant(variant_id)
         task = self.find_task(op_id, variant, create, ready, start, stop)
         if stop > self.last_time:
             self.last_time = stop
-        proc = self.find_processor(pid)
+        proc = self.find_processor(proc_id)
         proc.add_task(task)
 
-    def log_meta_info(self, op_id, hlr, pid, 
+    def log_meta_info(self, op_id, lg_id, proc_id, 
                       create, ready, start, stop):
         op = self.find_op(op_id)
-        variant = self.find_meta_variant(hlr)
+        variant = self.find_meta_variant(lg_id)
         meta = self.create_meta(variant, op, create, ready, start, stop)
         if stop > self.last_time:
             self.last_time = stop
-        proc = self.find_processor(pid)
+        proc = self.find_processor(proc_id)
         proc.add_task(meta)
 
     def log_copy_info(self, op_id, src, dst, size,
@@ -1670,32 +1679,32 @@ class State(object):
         channel = self.find_channel(None, dst)
         channel.add_copy(fill)
 
-    def log_inst_create(self, op_id, inst, create):
+    def log_inst_create(self, op_id, inst_id, create):
         op = self.find_op(op_id)
-        inst = self.create_instance(inst, op)
+        inst = self.create_instance(inst_id, op)
         # don't overwrite if we have already captured the (more precise)
         #  timeline info
         if inst.stop is None:
             inst.start = create
 
-    def log_inst_usage(self, op_id, inst, mem, size):
+    def log_inst_usage(self, op_id, inst_id, mem_id, size):
         op = self.find_op(op_id)
-        mem = self.find_memory(mem)
-        inst = self.create_instance(inst, op)
+        mem = self.find_memory(mem_id)
+        inst = self.create_instance(inst_id, op)
         inst.mem = mem
         inst.size = size
         mem.add_instance(inst)
 
-    def log_inst_timeline(self, op_id, inst, create, destroy):
+    def log_inst_timeline(self, op_id, inst_id, create, destroy):
         op = self.find_op(op_id)
-        inst = self.create_instance(inst, op)
+        inst = self.create_instance(inst_id, op)
         inst.start = create
         inst.stop = destroy
         if destroy > self.last_time:
             self.last_time = destroy 
 
-    def log_user_info(self, pid, start, stop, name):
-        proc = self.find_processor(pid)
+    def log_user_info(self, proc_id, start, stop, name):
+        proc = self.find_processor(proc_id)
         user = self.create_user_marker(name)
         user.start = start
         user.stop = stop
@@ -1703,38 +1712,35 @@ class State(object):
             self.last_time = stop 
         proc.add_task(user)
 
-    def log_task_wait_info(self, op_id, vid, start, ready, end):
-        variant = self.find_variant(vid)
+    def log_task_wait_info(self, op_id, variant_id, wait_start, wait_ready, wait_end):
+        variant = self.find_variant(variant_id)
         task = self.find_task(op_id, variant)
-        assert ready >= start
-        assert end >= ready
-        task.add_wait_interval(start, ready, end)
+        assert wait_ready >= wait_start
+        assert wait_end >= wait_ready
+        task.add_wait_interval(wait_start, wait_ready, wait_end)
 
-    def log_meta_wait_info(self, op_id, hlr, start, ready, end):
+    def log_meta_wait_info(self, op_id, lg_id, wait_start, wait_ready, wait_end):
         op = self.find_op(op_id)
-        variant = self.find_meta_variant(hlr)
-        assert ready >= start
-        assert end >= ready
+        variant = self.find_meta_variant(lg_id)
+        assert wait_ready >= wait_start
+        assert wait_end >= wait_ready
         assert op_id in variant.op
-        variant.op[op_id].add_wait_interval(start, ready, end)
+        variant.op[op_id].add_wait_interval(wait_start, wait_ready, wait_end)
 
-    def log_kind_over(self, tid, name, overwrite):
-        if tid not in self.task_kinds:
-            self.task_kinds[tid] = TaskKind(tid, name)
+    def log_kind(self, task_id, name, overwrite):
+        if task_id not in self.task_kinds:
+            self.task_kinds[task_id] = TaskKind(task_id, name)
         elif overwrite == 1:
-            self.task_kinds[tid].name = name
+            self.task_kinds[task_id].name = name
 
-    def log_kind(self, tid, name):
-        self.log_kind_over(tid, name, 1)
-
-    def log_variant(self, tid, vid, name):
-        assert tid in self.task_kinds
-        task_kind = self.task_kinds[tid]
-        if vid not in self.variants:
-            self.variants[vid] = Variant(vid, name)
+    def log_variant(self, task_id, variant_id, name):
+        assert task_id in self.task_kinds
+        task_kind = self.task_kinds[task_id]
+        if variant_id not in self.variants:
+            self.variants[variant_id] = Variant(variant_id, name)
         else:
-            self.variants[vid].name = name
-        self.variants[vid].set_task_kind(task_kind)
+            self.variants[variant_id].name = name
+        self.variants[variant_id].set_task_kind(task_kind)
 
     def log_operation(self, op_id, kind):
         op = self.find_op(op_id)
@@ -1742,40 +1748,40 @@ class State(object):
         op.kind_num = kind
         op.kind = self.op_kinds[kind]
 
-    def log_multi(self, op_id, tid):
+    def log_multi(self, op_id, task_id):
         op = self.find_op(op_id)
-        task_kind = TaskKind(tid, None)
-        if tid in self.task_kinds:
-            task_kind = self.task_kinds[tid]
+        task_kind = TaskKind(task_id, None)
+        if task_id in self.task_kinds:
+            task_kind = self.task_kinds[task_id]
         else:
-            self.task_kinds[tid] = task_kind
+            self.task_kinds[task_id] = task_kind
         op.is_multi = True
-        op.task_kind = self.task_kinds[tid]
+        op.task_kind = self.task_kinds[task_id]
 
     def log_slice_owner(self, parent_id, op_id):
         parent = self.find_op(parent_id)
         op = self.find_op(op_id)
         op.owner = parent
 
-    def log_meta_desc(self, hlr, name):
-        if hlr not in self.meta_variants:
-            self.meta_variants[hlr] = Variant(hlr, name)
+    def log_meta_desc(self, kind, name):
+        if kind not in self.meta_variants:
+            self.meta_variants[kind] = Variant(kind, name)
         else:
-            self.meta_variants[hlr].name = name
+            self.meta_variants[kind].name = name
 
-    def log_proc_desc(self, pid, kind):
+    def log_proc_desc(self, proc_id, kind):
         assert kind in processor_kinds
         kind = processor_kinds[kind]
-        if pid not in self.processors:
-            self.processors[pid] = Processor(pid, kind)
+        if proc_id not in self.processors:
+            self.processors[proc_id] = Processor(proc_id, kind)
         else:
-            self.processors[pid].kind = kind
+            self.processors[proc_id].kind = kind
 
-    def log_mem_desc(self, mem_id, kind, size):
+    def log_mem_desc(self, mem_id, kind, capacity):
         assert kind in memory_kinds
         kind = memory_kinds[kind]
         if mem_id not in self.memories:
-            self.memories[mem_id] = Memory(mem_id, kind, size)
+            self.memories[mem_id] = Memory(mem_id, kind, capacity)
         else:
             self.memories[mem_id].kind = kind
 
@@ -1783,24 +1789,24 @@ class State(object):
         if kind not in self.op_kinds:
             self.op_kinds[kind] = name
 
-    def log_message_desc(self, kind, desc):
+    def log_message_desc(self, kind, name):
         if kind not in self.message_kinds:
-            self.message_kinds[kind] = MessageKind(kind, desc) 
+            self.message_kinds[kind] = MessageKind(kind, name) 
 
-    def log_message_info(self, kind, pid, start, stop):
+    def log_message_info(self, kind, proc_id, start, stop):
         assert start <= stop
         assert kind in self.message_kinds
         if stop > self.last_time:
             self.last_time = stop
         message = Message(self.message_kinds[kind], start, stop)
-        proc = self.find_processor(pid)
+        proc = self.find_processor(proc_id)
         proc.add_message(message)
 
-    def log_mapper_call_desc(self, kind, desc):
+    def log_mapper_call_desc(self, kind, name):
         if kind not in self.mapper_call_kinds:
-            self.mapper_call_kinds[kind] = MapperCallKind(kind, desc)
+            self.mapper_call_kinds[kind] = MapperCallKind(kind, name)
 
-    def log_mapper_call_info(self, kind, pid, op_id, start, stop):
+    def log_mapper_call_info(self, kind, proc_id, op_id, start, stop):
         assert start <= stop
         assert kind in self.mapper_call_kinds
         # For now we'll only add very expensive mapper calls (more than 100 us)
@@ -1812,27 +1818,27 @@ class State(object):
                           self.find_op(op_id), start, stop)
         # update prof_uid map
         self.prof_uid_map[call.prof_uid] = call
-        proc = self.find_processor(pid)
+        proc = self.find_processor(proc_id)
         proc.add_mapper_call(call)
 
-    def log_runtime_call_desc(self, kind, desc):
+    def log_runtime_call_desc(self, kind, name):
         if kind not in self.runtime_call_kinds:
-            self.runtime_call_kinds[kind] = RuntimeCallKind(kind, desc)
+            self.runtime_call_kinds[kind] = RuntimeCallKind(kind, name)
 
-    def log_runtime_call_info(self, kind, pid, start, stop):
+    def log_runtime_call_info(self, kind, proc_id, start, stop):
         assert start <= stop 
         assert kind in self.runtime_call_kinds
         if stop > self.last_time:
             self.last_time = stop
         call = RuntimeCall(self.runtime_call_kinds[kind], start, stop)
-        proc = self.find_processor(pid)
+        proc = self.find_processor(proc_id)
         proc.add_runtime_call(call)
 
-    def log_proftask_info(self, pid, op_id, start, stop):
+    def log_proftask_info(self, proc_id, op_id, start, stop):
         # we don't have a unique op_id for the profiling task itself, so we don't 
         # add to self.operations
         proftask = ProfTask(Operation(op_id), start, start, start, stop) 
-        proc = self.find_processor(pid)
+        proc = self.find_processor(proc_id)
         proc.add_task(proftask)
 
     def find_processor(self, proc_id):
@@ -1863,10 +1869,10 @@ class State(object):
             self.variants[variant_id] = Variant(variant_id, None)
         return self.variants[variant_id]
 
-    def find_meta_variant(self, hlr_id):
-        if hlr_id not in self.meta_variants:
-            self.meta_variants[hlr_id] = Variant(hlr_id, None)
-        return self.meta_variants[hlr_id]
+    def find_meta_variant(self, lg_id):
+        if lg_id not in self.meta_variants:
+            self.meta_variants[lg_id] = Variant(lg_id, None)
+        return self.meta_variants[lg_id]
 
     def find_op(self, op_id):
         if op_id not in self.operations:
@@ -2088,7 +2094,7 @@ class State(object):
         if isinstance(owners[0], Memory):
             isMemory = True
             for mem in owners:
-                max_count += mem.total_size
+                max_count += mem.capacity
         else:
             max_count = len(owners)
 
@@ -2303,7 +2309,9 @@ class State(object):
         total_matches = 0
 
         for file_name in file_names:
-            total_matches += self.spy_state.parse_log_file(file_name)
+            file_type, version = GetFileTypeInfo(file_name)
+            if file_type == "ascii":
+                total_matches += self.spy_state.parse_log_file(file_name)
         print('Matched %d lines across all files.' % total_matches)
         op_dependencies = {}
 
@@ -2472,6 +2480,7 @@ class State(object):
             if op.visited:
                 cur_path = op.path
             else:
+                op.visited = True
                 paths = list()
                 for op_tuple in op.deps["out"]:
                     out_op = self.prof_uid_map[op_tuple[2]]
@@ -2489,7 +2498,6 @@ class State(object):
                     op.path = PathRange(op.start, op.stop, [op])
 
                 cur_path = op.path
-            op.visited = True
         return cur_path
 
     def get_longest_child(self, op):
@@ -2507,16 +2515,21 @@ class State(object):
 
     def compute_critical_path(self):
         paths = []
+        # compute the critical path for each task
         for proc in self.processors.itervalues():
             for task in proc.tasks:
                 if (len(task.deps["parents"]) > 0) or (len(task.deps["out"]) > 0):
                     path = self.traverse_op_for_critical_path(task)
                     paths.append(path)
+        # pick the longest critical path
         critical_path = max(paths).clone()
 
+        # add the chilren to the critical path
         all_children = []
         for op in critical_path.path:
-            all_children = all_children + self.get_longest_child(op)
+            # remove initiation depedencies from the inner critical paths
+            longest_child_path = filter(lambda p: not isinstance(p, HasInitiationDependencies), self.get_longest_child(op))
+            all_children = all_children + longest_child_path
         critical_path.path = critical_path.path + all_children
 
         if len(critical_path.path) > 0:
@@ -2764,13 +2777,38 @@ def main():
 
     state = State()
     has_matches = False
-    deserializer = LegionProfRegexDeserializer(state, state.callbacks)
+    has_binary_files = False # true if any of the files are a binary file
+
+    asciiDeserializer = LegionProfASCIIDeserializer(state, state.callbacks)
+    binaryDeserializer = LegionProfBinaryDeserializer(state, state.callbacks)
+
     for file_name in file_names:
-        print('Reading log file %s...' % file_name)
-        total_matches = deserializer.parse(file_name, verbose)
-        print('Matched %s lines' % total_matches)
-        if total_matches > 0:
-            has_matches = True
+        file_type, version = GetFileTypeInfo(file_name)
+        if file_type == "binary":
+            has_binary_files = True
+            break
+
+    for file_name in file_names:
+        deserializer = None
+        file_type, version = GetFileTypeInfo(file_name)
+        if file_type == "binary":
+            deserializer = binaryDeserializer
+        else:
+            deserializer = asciiDeserializer
+        if has_binary_files == False or file_type == "binary":
+            # only parse the log if it's a binary file, or if all the files
+            # are ascii files
+            print('Reading log file %s...' % file_name)
+            total_matches = deserializer.parse(file_name, verbose)
+            print('Matched %s objects' % total_matches)
+            if total_matches > 0:
+                has_matches = True
+        else:
+            # In this case, we have an ascii file passed in but we also have
+            # binary files. All we need to do is check if it has legion spy
+            # data
+            deserializer.search_for_spy_data(file_name)
+
     if not has_matches:
         print('No matches found! Exiting...')
         return
