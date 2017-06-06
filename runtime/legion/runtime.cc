@@ -9348,7 +9348,9 @@ namespace Legion {
                                     machine, LG_LAST_TASK_ID,
                                     lg_task_descriptions, 
                                     Operation::LAST_OP_KIND, 
-                                    Operation::op_names); 
+                                    Operation::op_names,
+                                    Runtime::serializer_type,
+                                    Runtime::prof_logfile); 
       LG_MESSAGE_DESCRIPTIONS(lg_message_descriptions);
       profiler->record_message_kinds(lg_message_descriptions, LAST_SEND_KIND);
       MAPPER_CALL_NAMES(lg_mapper_calls);
@@ -18303,6 +18305,8 @@ namespace Legion {
     /*static*/ bool Runtime::bit_mask_logging = false;
 #endif
     /*static*/ unsigned Runtime::num_profiling_nodes = 0;
+    /*static*/ const char* Runtime::serializer_type = "binary";
+    /*static*/ const char* Runtime::prof_logfile = NULL;
 #ifdef TRACE_ALLOCATION
     /*static*/ std::map<AllocationType,Runtime::AllocationTracker>
                                         Runtime::allocation_manager;
@@ -18398,6 +18402,8 @@ namespace Legion {
         max_local_fields = DEFAULT_LOCAL_FIELDS;
         program_order_execution = false;
         num_profiling_nodes = 0;
+        serializer_type = "binary";
+        prof_logfile = NULL;
         legion_collective_radix = LEGION_COLLECTIVE_RADIX;
         legion_collective_log_radix = 0;
         legion_collective_stages = 0;
@@ -18471,6 +18477,17 @@ namespace Legion {
           }
 #endif
           INT_ARG("-lg:prof", num_profiling_nodes);
+          if (!strcmp(argv[i],"-lg:serializer"))
+          {
+            serializer_type = argv[++i];
+            continue;
+          }
+          if (!strcmp(argv[i],"-lg:prof_logfile"))
+          {
+            prof_logfile = argv[++i];
+            continue;
+          }
+
           // These are all the deprecated versions of these flag
           BOOL_ARG("-hl:separate",separate_runtime_instances);
           BOOL_ARG("-hl:registration",record_registration);
@@ -18525,6 +18542,16 @@ namespace Legion {
           }
 #endif
           INT_ARG("-hl:prof", num_profiling_nodes);
+          if (!strcmp(argv[i],"-hl:serializer"))
+          {
+            serializer_type = argv[++i];
+            continue;
+          }
+          if (!strcmp(argv[i],"-hl:prof_logfile"))
+          {
+            prof_logfile = argv[++i];
+            continue;
+          }
         }
         if (delay_start > 0)
           sleep(delay_start);

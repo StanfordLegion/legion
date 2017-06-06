@@ -11,6 +11,7 @@ Version 17.05.0 (May 26, 2017
         with Agency inside of Legion tasks
   * Realm
     - Switched to new DMA engine
+    - Initial support for OpenMP "processors". Compile with USE_OPENMP
   * Regent
     - Added support running normal tasks on I/O processors
     - Added support for OpenMP code generation via __demand(__openmp)
