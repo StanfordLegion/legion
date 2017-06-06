@@ -201,7 +201,7 @@ namespace Legion {
         __CUDA_HD__
         const FT& operator[](T val) const;
       public:
-        A &accessor;
+        A accessor;
         mutable Point<N,T> point;
       };
 
@@ -233,19 +233,19 @@ namespace Legion {
       class ArraySyntaxHelper<A,FT,N,T,1> {
       public:
         __CUDA_HD__
-        ArraySyntaxHelper(A &a);
+        ArraySyntaxHelper(const A &a);
       public:
         __CUDA_HD__
         ArraySyntaxHelper<A,FT,N,T,2> operator[](T val);
         __CUDA_HD__
         const ArraySyntaxHelper<A,FT,N,T,2> operator[](T val) const;
       public:
-        A &accessor;
+        A accessor;
         mutable Point<1,T> point;
       };
 
       template<typename A, typename FT, int N, typename T> __CUDA_HD__
-      inline ArraySyntaxHelper<A,FT,N,T,1>::ArraySyntaxHelper(A &a) 
+      inline ArraySyntaxHelper<A,FT,N,T,1>::ArraySyntaxHelper(const A &a)
         : accessor(a)
       {
       }
