@@ -19,8 +19,654 @@
 
 #include <realm/transfer/lowlevel_dma.h>
 #include <realm/mem_impl.h>
+#include <realm/idx_impl.h>
 
 namespace Realm {
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class TransferIterator
+  //
+
+  TransferIterator::~TransferIterator(void)
+  {}
+
+#ifdef USE_HDF
+  size_t TransferIterator::step(size_t max_bytes, AddressInfoHDF5& info,
+				bool tentative /*= false*/)
+  {
+    // should never be called
+    return 0;
+  }
+#endif
+
+
+  using namespace LegionRuntime::Arrays;
+
+  class TransferIteratorIndexSpace : public TransferIterator {
+  public:
+    TransferIteratorIndexSpace(const IndexSpace is,
+			       RegionInstance inst,
+			       const std::vector<unsigned>& _fields,
+			       size_t _extra_elems);
+
+    virtual ~TransferIteratorIndexSpace(void);
+
+    virtual void reset(void);
+    virtual bool done(void) const;
+    virtual size_t step(size_t max_bytes, AddressInfo& info,
+			bool tentative = false);
+    virtual void confirm_step(void);
+    virtual void cancel_step(void);
+
+  protected:
+    const ElementMask *valid_mask;
+    coord_t first_enabled;
+    ElementMask::Enumerator *enumerator;
+    coord_t rewind_pos;
+    RegionInstanceImpl *inst_impl;
+    const Mapping<1, 1> *mapping;
+    std::vector<unsigned> field_offsets;
+    std::vector<size_t> field_sizes;
+    size_t field_idx, next_idx;
+    size_t extra_elems;
+    bool tentative_valid;
+  };
+
+  TransferIteratorIndexSpace::TransferIteratorIndexSpace(const IndexSpace is,
+							 RegionInstance inst,
+							 const std::vector<unsigned>& _fields,
+							 size_t _extra_elems)
+    : enumerator(0), field_idx(0), extra_elems(_extra_elems)
+    , tentative_valid(false)
+  {
+    valid_mask = &(is.get_valid_mask());
+    assert(valid_mask != 0);
+    first_enabled = valid_mask->find_enabled();
+    // special case - an empty index space skips the rest of the init
+    if((first_enabled == -1) || _fields.empty()) {
+      // leave fields empty so that done() is always true
+    } else {
+      inst_impl = get_runtime()->get_instance_impl(inst);
+      mapping = inst_impl->metadata.linearization.get_mapping<1>();
+      for(std::vector<unsigned>::const_iterator it = _fields.begin();
+	  it != _fields.end();
+	  ++it) {
+	// iterate over the fields in the instance to find the one we want
+	size_t s = 0;
+	assert(!inst_impl->metadata.field_sizes.empty());
+	std::vector<size_t>::const_iterator it2 = inst_impl->metadata.field_sizes.begin();
+	while(*it != s) {
+	  s += *it2;
+	  ++it2;
+	  assert(it2 != inst_impl->metadata.field_sizes.end());
+	}
+	field_offsets.push_back(*it);
+	field_sizes.push_back(*it2);
+      }
+    }
+  }
+
+  TransferIteratorIndexSpace::~TransferIteratorIndexSpace(void)
+  {
+    delete enumerator;
+  }
+
+  void TransferIteratorIndexSpace::reset(void)
+  {
+    field_idx = 0;
+    delete enumerator;
+    enumerator = 0;
+  }
+
+  bool TransferIteratorIndexSpace::done(void) const
+  {
+    return(field_idx == field_offsets.size());
+  }
+
+  size_t TransferIteratorIndexSpace::step(size_t max_bytes, AddressInfo& info,
+					  bool tentative /*= false*/)
+  {
+    assert(!done());
+    assert(!tentative_valid);
+
+    size_t max_elems = max_bytes / field_sizes[field_idx];
+    // less than one element?  give up immediately
+    if(max_elems == 0)
+      return 0;
+
+    // build an enumerator if we don't have one
+    if(!enumerator)
+      enumerator = valid_mask->enumerate_enabled(first_enabled);
+
+    coord_t span_start;
+    size_t span_len;
+    bool ok = enumerator->get_next(span_start, span_len);
+    assert(ok);
+
+    // if this step is cancelled, we'll back up to span_start (no
+    //  need to re-scan the 0's before span_start)
+    rewind_pos = span_start;
+
+    bool last_span;
+    if(span_len > max_elems) {
+      // we're only going to take part of this span this time,
+      //   but that means we know we're not the last span
+      span_len = max_elems;
+      enumerator->set_pos(span_start + span_len);
+      last_span = false;
+    } else {
+      // peek ahead to see if we're done, and maybe merge spans if
+      //  extra_elems > 0
+      while(1) {
+	coord_t peek_start;
+	size_t peek_len;
+	bool peek_ok = enumerator->peek_next(peek_start, peek_len);
+	if(peek_ok) {
+	  // to merge, the gap needs to be <= extra_elems and the total size
+	  //  needs to be <= max_elems
+	  if(((peek_start - (span_start + span_len)) <= extra_elems) &&
+	     ((peek_start + peek_len - span_start)) <= max_elems) {
+	    // merge and keep going
+	    span_len = (peek_start - span_start) + peek_len;
+	  } else {
+	    // no merge, but this isn't the last span
+	    last_span = false;
+	    break;
+	  }
+	} else {
+	  // all done
+	  last_span = true;
+	  break;
+	}
+      }
+    }
+
+    // map the target rectangle, and (for now) assume it works
+    Rect<1> target_subrect(span_start,
+			   (coord_t)(span_start + span_len - 1));
+    Rect<1> act_subrect;
+    Rect<1> image = mapping->image_dense_subrect(target_subrect, act_subrect);
+    assert(act_subrect == target_subrect);
+
+    coord_t first_block;
+    coord_t block_ofs;
+    if(inst_impl->metadata.block_size > (size_t)image.hi[0]) {
+      // SOA is always a single block
+      first_block = 0;
+      block_ofs = image.lo[0];
+    } else {
+      // handle AOS/hybrid cases
+      // see which block the start and end are in
+      first_block = image.lo[0] / inst_impl->metadata.block_size;
+      block_ofs = image.lo[0] - (first_block *
+				 inst_impl->metadata.block_size);
+      coord_t last_block = image.hi[0] / inst_impl->metadata.block_size;
+      if(first_block != last_block) {
+	// shorten span to remain contiguous
+	span_len = (inst_impl->metadata.block_size -
+		    (image.lo[0] % inst_impl->metadata.block_size));
+	enumerator->set_pos(image.lo[0] + span_len);
+	last_span = false;
+      }
+    }
+
+    // fill in address info
+    info.base_offset = (inst_impl->metadata.alloc_offset +
+			(first_block * inst_impl->metadata.block_size * inst_impl->metadata.elmt_size) +
+			(field_offsets[field_idx] * inst_impl->metadata.block_size) +
+			(block_ofs * field_sizes[field_idx]));
+    info.bytes_per_chunk = span_len * field_sizes[field_idx];
+    info.num_lines = 1;
+    info.line_stride = 0;
+    info.num_planes = 1;
+    info.plane_stride = 0;
+
+    if(tentative) {
+      tentative_valid = true;
+      next_idx = field_idx + (last_span ? 1 : 0);
+    } else {
+      if(last_span) {
+	delete enumerator;
+	enumerator = 0;
+	field_idx++;
+      }
+    }
+
+    return info.bytes_per_chunk;
+  }
+
+  void TransferIteratorIndexSpace::confirm_step(void)
+  {
+    assert(tentative_valid);
+    if(next_idx != field_idx) {
+      delete enumerator;
+      enumerator = 0;
+      field_idx = next_idx;
+    }
+    tentative_valid = false;
+  }
+
+  void TransferIteratorIndexSpace::cancel_step(void)
+  {
+    assert(tentative_valid);
+    assert(enumerator != 0);
+    enumerator->set_pos(rewind_pos);
+    tentative_valid = false;
+  }
+
+
+  template <unsigned DIM>
+  class TransferIteratorRect : public TransferIterator {
+  public:
+    TransferIteratorRect(const Rect<DIM>& _r,
+			 RegionInstance inst,
+			 const std::vector<unsigned>& _fields);
+
+    virtual void reset(void);
+    virtual bool done(void) const;
+    virtual size_t step(size_t max_bytes, AddressInfo& info,
+			bool tentative = false);
+    virtual void confirm_step(void);
+    virtual void cancel_step(void);
+
+  protected:
+    Rect<DIM> r;
+    Point<DIM> p, next_p;
+    RegionInstanceImpl *inst_impl;
+    const Mapping<DIM, 1> *mapping;
+    std::vector<unsigned> field_offsets;
+    std::vector<size_t> field_sizes;
+    size_t field_idx, next_idx;
+    bool tentative_valid;
+  };
+
+  template <unsigned DIM>
+  TransferIteratorRect<DIM>::TransferIteratorRect(const Rect<DIM>& _r,
+						  RegionInstance _inst,
+						  const std::vector<unsigned>& _fields)
+    : r(_r), p(_r.lo), field_idx(0), tentative_valid(false)
+  {
+    // special case - an empty rectangle (or field list) skips most initialization
+    if((r.volume() == 0) || _fields.empty()) {
+      mapping = 0;
+      // leave fields empty so that done() is always true
+    } else {
+      inst_impl = get_runtime()->get_instance_impl(_inst);
+      mapping = inst_impl->metadata.linearization.get_mapping<DIM>();
+      for(std::vector<unsigned>::const_iterator it = _fields.begin();
+	  it != _fields.end();
+	  ++it) {
+	// iterate over the fields in the instance to find the one we want
+	size_t s = 0;
+	assert(!inst_impl->metadata.field_sizes.empty());
+	std::vector<size_t>::const_iterator it2 = inst_impl->metadata.field_sizes.begin();
+	while(*it != s) {
+	  s += *it2;
+	  ++it2;
+	  assert(it2 != inst_impl->metadata.field_sizes.end());
+	}
+	field_offsets.push_back(*it);
+	field_sizes.push_back(*it2);
+      }
+    }
+  }
+
+  template <unsigned DIM>
+  void TransferIteratorRect<DIM>::reset(void)
+  {
+    field_idx = 0;
+    p = r.lo;
+    tentative_valid = false;
+  }
+
+  template <unsigned DIM>
+  bool TransferIteratorRect<DIM>::done(void) const
+  {
+    return(field_idx == field_offsets.size());
+  }
+
+  template <unsigned DIM>
+  size_t TransferIteratorRect<DIM>::step(size_t max_bytes, AddressInfo& info,
+					 bool tentative /*= false*/)
+  {
+    assert(!done());
+    assert(!tentative_valid);
+
+    size_t max_elems = max_bytes / field_sizes[field_idx];
+    // less than one element?  give up immediately
+    if(max_elems == 0)
+      return 0;
+
+    // std::cout << "step " << this << " " << r << " " << p << " " << field_idx
+    // 	      << " " << max_bytes << ":";
+
+    // using the current point, find the biggest subrectangle we want to try
+    //  giving out
+    Rect<DIM> target_subrect;
+    target_subrect.lo = p;
+    bool grow = true;
+    size_t count = 1;
+    for(unsigned d = 0; d < DIM; d++) {
+      if(grow) {
+	size_t len = r.hi[d] - p[d] + 1;
+	if((count * len) <= max_elems) {
+	  // full growth in that direction
+	  target_subrect.hi.x[d] = r.hi[d];
+	  count *= len;
+	  // once we get to a dimension we've only partially handled, we can't
+	  //  grow in any subsequent ones
+	  if(p[d] != r.lo[d])
+	    grow = false;
+	} else {
+	  size_t actlen = max_elems / count;
+	  assert(actlen >= 1);
+	  // take what we can, and don't try to grow other dimensions
+	  target_subrect.hi.x[d] = p[d] + actlen - 1;
+	  count *= actlen;
+	  grow = false;
+	}
+      } else
+	target_subrect.hi.x[d] = p[d];
+    }
+
+    // map the target rectangle, and if we get a subrectangle, assume it's
+    //  compatible with the ordering rules above (e.g. Fortran layout)
+    Rect<DIM> act_subrect;
+    Rect<1> image = mapping->image_dense_subrect(target_subrect, act_subrect);
+    //assert(act_subrect == target_subrect);
+    size_t act_count = act_subrect.volume();
+    
+    coord_t first_block;
+    coord_t block_ofs;
+    if(inst_impl->metadata.block_size > (size_t)image.hi[0]) {
+      // SOA is always a single block
+      first_block = 0;
+      block_ofs = image.lo[0];
+    } else {
+      // handle AOS/hybrid cases
+      // see which block the start and end are in
+      first_block = image.lo[0] / inst_impl->metadata.block_size;
+      block_ofs = image.lo[0] - (first_block *
+				 inst_impl->metadata.block_size);
+      coord_t last_block = image.hi[0] / inst_impl->metadata.block_size;
+      if(first_block != last_block) {
+	// shrink rectangle to remain contiguous
+	coord_t max_len = (inst_impl->metadata.block_size -
+			   (image.lo[0] % inst_impl->metadata.block_size));
+	if(max_len < (act_subrect.hi[0] - act_subrect.lo[0] + 1)) {
+	  // can't even get the first dimension done - collapse everything else
+	  act_subrect.hi = act_subrect.lo;
+	  act_subrect.hi.x[0] = act_subrect.lo[0] + max_len - 1;
+	  act_count = max_len;
+	} else {
+	  coord_t new_count = act_subrect.hi[0] - act_subrect.lo[0] + 1;
+	  for(unsigned d = 1; d < DIM; d++) {
+	    // don't spend time on degenerate domains
+	    if(act_subrect.lo[d] == act_subrect.hi[d]) continue;
+
+	    // does this whole dimension fit?
+	    coord_t dim_len = act_subrect.hi[d] - act_subrect.lo[d] + 1;
+	    if((new_count * dim_len) <= max_len) {
+	      new_count *= dim_len;
+	      continue;
+	    }
+
+	    // nope, have to shorten it and then collapse higher dimensions
+	    coord_t new_len = max_len / new_count;
+	    assert((new_len > 0) && (new_len < dim_len));
+	    act_subrect.hi.x[d] = act_subrect.lo[d] + new_len - 1;
+	    new_count *= new_len;
+	    while(++d < DIM)
+	      act_subrect.hi.x[d] = act_subrect.lo[d];
+	    break;
+	  }
+	  act_count = new_count;
+	}
+      }
+    }
+
+    // fill in address info
+    info.base_offset = (inst_impl->metadata.alloc_offset +
+			(first_block * inst_impl->metadata.block_size * inst_impl->metadata.elmt_size) +
+			(field_offsets[field_idx] * inst_impl->metadata.block_size) +
+			(block_ofs * field_sizes[field_idx]));
+    info.bytes_per_chunk = act_count * field_sizes[field_idx];
+    info.num_lines = 1;
+    info.line_stride = 0;
+    info.num_planes = 1;
+    info.plane_stride = 0;
+
+    // now set 'next_p' to the next point we want
+    bool carry = true;
+    for(unsigned d = 0; d < DIM; d++) {
+      if(carry) {
+	if(act_subrect.hi[d] == r.hi[d]) {
+	  next_p.x[d] = r.lo[d];
+	} else {
+	  next_p.x[d] = act_subrect.hi[d] + 1;
+	  carry = false;
+	}
+      } else
+	next_p.x[d] = act_subrect.lo[d];
+    }
+    // if the "carry" propagated all the way through, go on to the next field
+    next_idx = field_idx + (carry ? 1 : 0);
+
+    //std::cout << " " << act_subrect << " " << next_p << " " << next_idx << " " << info.bytes_per_chunk << "\n";
+
+    if(tentative) {
+      tentative_valid = true;
+    } else {
+      p = next_p;
+      field_idx = next_idx;
+    }
+
+    return info.bytes_per_chunk;
+  }
+
+  template <unsigned DIM>
+  void TransferIteratorRect<DIM>::confirm_step(void)
+  {
+    assert(tentative_valid);
+    p = next_p;
+    field_idx = next_idx;
+    tentative_valid = false;
+  }
+
+  template <unsigned DIM>
+  void TransferIteratorRect<DIM>::cancel_step(void)
+  {
+    assert(tentative_valid);
+    tentative_valid = false;
+  }
+
+
+#ifdef USE_HDF
+  template <unsigned DIM>
+  class TransferIteratorHDF5 : public TransferIterator {
+  public:
+    TransferIteratorHDF5(const Rect<DIM>& _r,
+			 RegionInstance inst,
+			 const std::vector<unsigned>& _fields);
+
+    virtual void reset(void);
+    virtual bool done(void) const;
+    virtual size_t step(size_t max_bytes, AddressInfo& info,
+			bool tentative = false);
+    virtual size_t step(size_t max_bytes, AddressInfoHDF5& info,
+			bool tentative = false);
+    virtual void confirm_step(void);
+    virtual void cancel_step(void);
+
+  protected:
+    Rect<DIM> r;
+    Point<DIM> p, next_p;
+    std::vector<hid_t> dset_ids, dtype_ids;
+    const HDF5::HDF5Memory::HDFMetadata *hdf_metadata;
+    size_t field_idx, next_idx;
+    bool tentative_valid;
+  };
+
+  template <unsigned DIM>
+  TransferIteratorHDF5<DIM>::TransferIteratorHDF5(const Rect<DIM>& _r,
+						  RegionInstance inst,
+						  const std::vector<unsigned>& _fields)
+    : r(_r), p(_r.lo), field_idx(0), tentative_valid(false)
+  {
+    MemoryImpl *mem_impl = get_runtime()->get_memory_impl(inst);
+    assert(mem_impl->kind == MemoryImpl::MKIND_HDF);
+    HDF5::HDF5Memory *hdf5mem = (HDF5::HDF5Memory *)mem_impl;
+    std::map<RegionInstance, HDF5::HDF5Memory::HDFMetadata *>::const_iterator it = hdf5mem->hdf_metadata.find(inst);
+    assert(it != hdf5mem->hdf_metadata.end());
+    hdf_metadata = it->second;
+    assert(hdf_metadata->ndims == DIM);
+
+    // look up dataset and datatype ids for all fields
+    for(std::vector<unsigned>::const_iterator it = _fields.begin();
+	it != _fields.end();
+	++it) {
+      std::map<size_t, hid_t>::const_iterator it2;
+
+      it2 = hdf_metadata->dataset_ids.find(*it);
+      assert(it2 != hdf_metadata->dataset_ids.end());
+      dset_ids.push_back(it2->second);
+
+      it2 = hdf_metadata->datatype_ids.find(*it);
+      assert(it2 != hdf_metadata->datatype_ids.end());
+      dtype_ids.push_back(it2->second);
+    }
+  }
+
+  template <unsigned DIM>
+  void TransferIteratorHDF5<DIM>::reset(void)
+  {
+    p = r.lo;
+    field_idx = 0;
+  }
+
+  template <unsigned DIM>
+  bool TransferIteratorHDF5<DIM>::done(void) const
+  {
+    return (field_idx == dset_ids.size());
+  }
+  
+  template <unsigned DIM>
+  size_t TransferIteratorHDF5<DIM>::step(size_t max_bytes, AddressInfo& info,
+					 bool tentative /*= false*/)
+  {
+    // normal address infos not allowed
+    return 0;
+  }
+
+  template <unsigned DIM>
+  size_t TransferIteratorHDF5<DIM>::step(size_t max_bytes, AddressInfoHDF5& info,
+					 bool tentative /*= false*/)
+  {
+    assert(!done());
+    assert(!tentative_valid);
+
+    info.dset_id = dset_ids[field_idx];
+    info.dtype_id = dtype_ids[field_idx];
+
+    // convert max_bytes into desired number of elements
+    size_t elmt_size = H5Tget_size(info.dtype_id);
+    size_t max_elems = max_bytes / elmt_size;
+    if(max_elems == 0)
+      return 0;
+
+    // std::cout << "step " << this << " " << r << " " << p << " " << field_idx
+    // 	      << " " << max_bytes << ":";
+
+    // HDF5 requires we handle dimensions in order - no permutation allowed
+    // using the current point, find the biggest subrectangle we want to try
+    //  giving out
+    Rect<DIM> target_subrect;
+    target_subrect.lo = p;
+    bool grow = true;
+    size_t count = 1;
+    for(unsigned d = 0; d < DIM; d++) {
+      if(grow) {
+	size_t len = r.hi[d] - p[d] + 1;
+	if((count * len) <= max_elems) {
+	  // full growth in that direction
+	  target_subrect.hi.x[d] = r.hi[d];
+	  count *= len;
+	  // once we get to a dimension we've only partially handled, we can't
+	  //  grow in any subsequent ones
+	  if(p[d] != r.lo[d])
+	    grow = false;
+	} else {
+	  size_t actlen = max_elems / count;
+	  assert(actlen >= 1);
+	  // take what we can, and don't try to grow other dimensions
+	  target_subrect.hi.x[d] = p[d] + actlen - 1;
+	  count *= actlen;
+	  grow = false;
+	}
+      } else
+	target_subrect.hi.x[d] = p[d];
+    }
+
+    // translate the target_subrect into the dataset's coordinates
+    // HDF5 uses C-style (row-major) ordering, so invert array indices
+    info.dset_bounds.resize(DIM);
+    info.offset.resize(DIM);
+    info.extent.resize(DIM);
+    for(unsigned d = 0; d < DIM; d++) {
+      assert(target_subrect.lo[d] >= hdf_metadata->lo[d]);
+      info.offset[DIM - 1 - d] = (target_subrect.lo[d] - hdf_metadata->lo[d]);
+      info.extent[DIM - 1 - d] = (target_subrect.hi[d] - target_subrect.lo[d] + 1);
+      assert(info.extent[DIM - 1 - d] <= hdf_metadata->dims[d]);
+      info.dset_bounds[DIM - 1 - d] = hdf_metadata->dims[d];
+    }
+
+    // now set 'next_p' to the next point we want
+    bool carry = true;
+    for(unsigned d = 0; d < DIM; d++) {
+      if(carry) {
+	if(target_subrect.hi[d] == r.hi[d]) {
+	  next_p.x[d] = r.lo[d];
+	} else {
+	  next_p.x[d] = target_subrect.hi[d] + 1;
+	  carry = false;
+	}
+      } else
+	next_p.x[d] = target_subrect.lo[d];
+    }
+    // if the "carry" propagated all the way through, go on to the next field
+    next_idx = field_idx + (carry ? 1 : 0);
+
+    size_t act_bytes = count * elmt_size;
+
+    //std::cout << " " << target_subrect << " " << next_p << " " << next_idx << " " << act_bytes << "\n";
+
+    if(tentative) {
+      tentative_valid = true;
+    } else {
+      p = next_p;
+      field_idx = next_idx;
+    }
+
+    return act_bytes;
+  }
+
+  template <unsigned DIM>
+  void TransferIteratorHDF5<DIM>::confirm_step(void)
+  {
+    assert(tentative_valid);
+    p = next_p;
+    field_idx = next_idx;
+    tentative_valid = false;
+  }
+
+  template <unsigned DIM>
+  void TransferIteratorHDF5<DIM>::cancel_step(void)
+  {
+    assert(tentative_valid);
+    tentative_valid = false;
+  }
+#endif // USE_HDF
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -37,6 +683,19 @@ namespace Realm {
   public:
     TransferDomainIndexSpace(IndexSpace _is);
 
+    virtual TransferDomain *clone(void) const;
+
+    virtual Event request_metadata(void);
+
+    virtual size_t volume(void) const;
+
+    virtual TransferIterator *create_iterator(RegionInstance inst,
+					      RegionInstance peer,
+					      const std::vector<unsigned/*FieldID*/>& fields,
+					      unsigned option_flags) const;
+
+    virtual void print(std::ostream& os) const;
+
     //protected:
     IndexSpace is;
   };
@@ -45,10 +704,79 @@ namespace Realm {
     : is(_is)
   {}
 
+  TransferDomain *TransferDomainIndexSpace::clone(void) const
+  {
+    return new TransferDomainIndexSpace(is);
+  }
+
+  Event TransferDomainIndexSpace::request_metadata(void)
+  {
+    IndexSpaceImpl *is_impl = get_runtime()->get_index_space_impl(is);
+    if(!is_impl->locked_data.valid) {
+      log_dma.debug("dma request %p - no index space metadata yet", this);
+
+      Event e = is_impl->lock.acquire(1, false, ReservationImpl::ACQUIRE_BLOCKING);
+      if(e.has_triggered()) {
+	log_dma.debug("request %p - index space metadata invalid - instant trigger", this);
+	is_impl->lock.release();
+      } else {
+	log_dma.debug("request %p - index space metadata invalid - sleeping on lock " IDFMT "", this, is_impl->lock.me.id);
+	is_impl->lock.me.release(e);
+	return e;
+      }
+    }
+
+    // we will need more than just the metadata - we also need the valid mask
+    {
+      Event e = is_impl->request_valid_mask();
+      if(!e.has_triggered()) {
+	log_dma.debug() << "request " << (void *)this << " - valid mask needed for index space "
+			<< is << " - sleeping on event " << e;
+	return e;
+      }
+    }
+
+    return Event::NO_EVENT;
+  }
+
+  size_t TransferDomainIndexSpace::volume(void) const
+  {
+    //return is.get_volume();
+    return is.get_valid_mask().pop_count();
+  }
+
+  TransferIterator *TransferDomainIndexSpace::create_iterator(RegionInstance inst,
+							      RegionInstance peer,
+							      const std::vector<unsigned/*FieldID*/>& fields,
+							      unsigned option_flags) const
+  {
+    size_t extra_elems = 0;
+    return new TransferIteratorIndexSpace(is, inst, fields, extra_elems);
+  }
+  
+  void TransferDomainIndexSpace::print(std::ostream& os) const
+  {
+    os << is;
+  }
+
+
   template <unsigned DIM>
   class TransferDomainRect : public TransferDomain {
   public:
     TransferDomainRect(LegionRuntime::Arrays::Rect<DIM> _r);
+
+    virtual TransferDomain *clone(void) const;
+
+    virtual Event request_metadata(void);
+
+    virtual size_t volume(void) const;
+
+    virtual TransferIterator *create_iterator(RegionInstance inst,
+					      RegionInstance peer,
+					      const std::vector<unsigned/*FieldID*/>& fields,
+					      unsigned option_flags) const;
+
+    virtual void print(std::ostream& os) const;
 
     //protected:
     LegionRuntime::Arrays::Rect<DIM> r;
@@ -58,6 +786,47 @@ namespace Realm {
   TransferDomainRect<DIM>::TransferDomainRect(LegionRuntime::Arrays::Rect<DIM> _r)
     : r(_r)
   {}
+
+  template <unsigned DIM>
+  TransferDomain *TransferDomainRect<DIM>::clone(void) const
+  {
+    return new TransferDomainRect<DIM>(r);
+  }
+
+  template <unsigned DIM>
+  Event TransferDomainRect<DIM>::request_metadata(void)
+  {
+    // nothing to request
+    return Event::NO_EVENT;
+  }
+
+  template <unsigned DIM>
+  size_t TransferDomainRect<DIM>::volume(void) const
+  {
+    return r.volume();
+  }
+
+  template <unsigned DIM>
+  TransferIterator *TransferDomainRect<DIM>::create_iterator(RegionInstance inst,
+							      RegionInstance peer,
+							      const std::vector<unsigned/*FieldID*/>& fields,
+							      unsigned option_flags) const
+  {
+#ifdef USE_HDF
+    // HDF5 memories need special iterators
+    if(inst.get_location().kind() == Memory::HDF_MEM)
+      return new TransferIteratorHDF5<DIM>(r, inst, fields);
+#endif
+
+    return new TransferIteratorRect<DIM>(r, inst, fields);
+  }
+  
+  template <unsigned DIM>
+  void TransferDomainRect<DIM>::print(std::ostream& os) const
+  {
+    os << r;
+  }
+
 
   /*static*/ TransferDomain *TransferDomain::construct(Domain d)
   {
@@ -71,28 +840,6 @@ namespace Realm {
     return 0;
   }
 
-  // HACK!
-  Domain cvt(const TransferDomain *td)
-  {
-    const TransferDomainIndexSpace *tdis = dynamic_cast<const TransferDomainIndexSpace *>(td);
-    if(tdis)
-      return Domain(tdis->is);
-
-    const TransferDomainRect<1> *tdr1 = dynamic_cast<const TransferDomainRect<1> *>(td);
-    if(tdr1)
-      return Domain::from_rect<1>(tdr1->r);
-
-    const TransferDomainRect<2> *tdr2 = dynamic_cast<const TransferDomainRect<2> *>(td);
-    if(tdr2)
-      return Domain::from_rect<2>(tdr2->r);
-
-    const TransferDomainRect<3> *tdr3 = dynamic_cast<const TransferDomainRect<3> *>(td);
-    if(tdr3)
-      return Domain::from_rect<3>(tdr3->r);
-
-    assert(0);
-    return Domain(IndexSpace::NO_SPACE);
-  }
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -182,7 +929,7 @@ namespace Realm {
     log_dma.debug() << "copy: srcmem=" << src_mem << " dstmem=" << dst_mem
 		    << " node=" << dma_node;
 
-    CopyRequest *r = new CopyRequest(cvt(td), oas_by_inst, 
+    CopyRequest *r = new CopyRequest(td, oas_by_inst, 
 				     wait_on, ev, priority, requests);
     // we've given oas_by_inst to the copyrequest, so forget it
     assert(oas_by_inst != 0);
@@ -252,7 +999,7 @@ namespace Realm {
     // TODO
     bool inst_lock_needed = false;
 
-    ReduceRequest *r = new ReduceRequest(cvt(td),
+    ReduceRequest *r = new ReduceRequest(td,
 					 srcs, dst,
 					 inst_lock_needed,
 					 redop_id, red_fold,
@@ -319,7 +1066,7 @@ namespace Realm {
     f.size = data.size();
 
     Event ev = GenEventImpl::create_genevent()->current_event();
-    FillRequest *r = new FillRequest(cvt(td), f, data.base(), data.size(),
+    FillRequest *r = new FillRequest(td, f, data.base(), data.size(),
 				     wait_on, ev, priority, requests);
 
     gasnet_node_t tgt_node = ID(inst).instance.owner_node;
@@ -520,6 +1267,7 @@ namespace Realm {
       finish_events.insert(e);
       delete *it;
     }
+    delete td;
     return Event::merge_events(finish_events);
   }
 
@@ -548,6 +1296,7 @@ namespace Realm {
       finish_events.insert(e);
       delete *it;
     }
+    delete td;
     return Event::merge_events(finish_events);
   }
 

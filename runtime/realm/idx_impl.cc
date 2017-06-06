@@ -1657,6 +1657,11 @@ namespace Realm {
       return ret;
     }
 
+    void ElementMask::Enumerator::set_pos(coord_t new_pos)
+    {
+      pos = new_pos;
+    }
+
 
   ////////////////////////////////////////////////////////////////////////
   //

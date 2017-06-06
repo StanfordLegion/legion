@@ -283,6 +283,9 @@ namespace Realm {
     typedef std::vector<IBInfo> IBVec;
     typedef std::map<InstPair, IBVec> IBByInst;
 
+    class TransferDomain;
+    class TransferIterator;
+
     // dma requests come in two flavors:
     // 1) CopyRequests, which are per memory pair, and
     // 2) ReduceRequests, which have to be handled monolithically
@@ -294,7 +297,7 @@ namespace Realm {
 		  Event _after_copy,
 		  int _priority);
 
-      CopyRequest(const Domain& _domain,
+      CopyRequest(const TransferDomain *_domain, //const Domain& _domain,
 		  OASByInst *_oas_by_inst,
 		  Event _before_copy,
 		  Event _after_copy,
@@ -311,19 +314,21 @@ namespace Realm {
 
       virtual bool check_readiness(bool just_check, DmaRequestQueue *rq);
 
+#if 0
       void perform_dma_mask(MemPairCopier *mpc);
 
       template <unsigned DIM>
       void perform_dma_rect(MemPairCopier *mpc);
+#endif
 
-      template <unsigned DIM>
       void perform_new_dma(Memory src_mem, Memory dst_mem);
 
       virtual void perform_dma(void);
 
       virtual bool handler_safe(void) { return(false); }
 
-      Domain domain;
+      TransferDomain *domain;
+      //Domain domain;
       OASByInst *oas_by_inst;
 
       // <NEW_DMA>
@@ -360,7 +365,7 @@ namespace Realm {
 		    Event _after_copy,
 		    int _priority);
 
-      ReduceRequest(const Domain& _domain,
+      ReduceRequest(const TransferDomain *_domain, //const Domain& _domain,
 		    const std::vector<Domain::CopySrcDstField>& _srcs,
 		    const Domain::CopySrcDstField& _dst,
 		    bool _inst_lock_needed,
@@ -390,7 +395,8 @@ namespace Realm {
 
       virtual bool handler_safe(void) { return(false); }
 
-      Domain domain;
+      TransferDomain *domain;
+      //Domain domain;
       std::vector<Domain::CopySrcDstField> srcs;
       Domain::CopySrcDstField dst;
       bool inst_lock_needed;
@@ -409,7 +415,7 @@ namespace Realm {
                   Event _before_fill, 
                   Event _after_fill,
                   int priority);
-      FillRequest(const Domain &_domain,
+      FillRequest(const TransferDomain *_domain, //const Domain &_domain,
                   const Domain::CopySrcDstField &_dst,
                   const void *fill_value, size_t fill_size,
                   Event _before_fill,
@@ -436,7 +442,8 @@ namespace Realm {
 
       size_t optimize_fill_buffer(RegionInstanceImpl *impl, int &fill_elmts);
 
-      Domain domain;
+      TransferDomain *domain;
+      //Domain domain;
       Domain::CopySrcDstField dst;
       void *fill_buffer;
       size_t fill_size;

@@ -22,6 +22,16 @@
 
 #include <hdf5.h>
 
+#define CHECK_HDF5(cmd) \
+  do { \
+    herr_t res = (cmd); \
+    if(res < 0) { \
+      fprintf(stderr, "HDF5 error on %s:\n", #cmd); \
+      H5Eprint2(H5E_DEFAULT, stderr); \
+      assert(0); \
+    } \
+  } while(0)
+
 namespace Realm {
 
   namespace HDF5 {

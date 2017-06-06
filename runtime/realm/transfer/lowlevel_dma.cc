@@ -20,6 +20,7 @@
 #include "arrays.h"
 #include "accessor.h"
 #include "realm/threads.h"
+#include <realm/transfer/transfer.h>
 #include <errno.h>
 // included for file memory data transfer
 #include <unistd.h>
@@ -370,7 +371,9 @@ namespace Realm {
     {
       const ID::IDType *idata = (const ID::IDType *)data;
 
-      idata = domain.deserialize(idata);
+      // TODO:
+      domain = 0;
+      //idata = domain.deserialize(idata);
 
       oas_by_inst = new OASByInst;
 
@@ -440,15 +443,16 @@ namespace Realm {
 	    " serdez=" << it2->serdez_id;
     }
 
-    CopyRequest::CopyRequest(const Domain& _domain,
+    CopyRequest::CopyRequest(const TransferDomain *_domain, //const Domain& _domain,
 			     OASByInst *_oas_by_inst,
 			     Event _before_copy,
 			     Event _after_copy,
 			     int _priority,
                              const Realm::ProfilingRequestSet &reqs)
-      : DmaRequest(_priority, _after_copy, reqs),
-	domain(_domain), oas_by_inst(_oas_by_inst),
-	before_copy(_before_copy)
+      : DmaRequest(_priority, _after_copy, reqs)
+      , domain(_domain->clone())
+      , oas_by_inst(_oas_by_inst)
+      , before_copy(_before_copy)
     {
       // <NEW_DMA>
       ib_completion = GenEventImpl::create_genevent()->current_event();
@@ -457,7 +461,7 @@ namespace Realm {
       priority_ib_queue.clear();
       // </NEW_DMA>
       log_dma.info() << "dma request " << (void *)this << " created - is="
-		     << domain << " before=" << before_copy << " after=" << get_finish_event();
+		     << *domain << " before=" << before_copy << " after=" << get_finish_event();
       for(OASByInst::const_iterator it = oas_by_inst->begin();
 	  it != oas_by_inst->end();
 	  it++)
@@ -497,11 +501,14 @@ namespace Realm {
       delete ib_req;
       //</NEWDMA>
       delete oas_by_inst;
+      delete domain;
     }
 
     size_t CopyRequest::compute_size(void) const
     {
-      size_t result = domain.compute_size();
+      size_t result = 0;
+      // TODO
+      //size_t result += domain.compute_size();
       result += sizeof(ID::IDType); // number of requests;
       for(OASByInst::iterator it2 = oas_by_inst->begin(); it2 != oas_by_inst->end(); it2++) {
         OASVec& oasvec = it2->second;
@@ -517,8 +524,10 @@ namespace Realm {
 
     void CopyRequest::serialize(void *buffer)
     {
+      ID::IDType *msgptr = (ID::IDType *)buffer;
       // domain info goes first
-      ID::IDType *msgptr = domain.serialize((ID::IDType *)buffer);
+      // TODO
+      //msgptr = domain.serialize(msgptr);
 
       *msgptr++ = oas_by_inst->size();
 
@@ -691,6 +700,8 @@ namespace Realm {
       for(OASVec::const_iterator it = oasvec.begin(); it != oasvec.end(); it++) {
         ib_elmnt_size += it->size;
       }
+      domain_size = domain->volume();
+#if 0
       if (domain.get_dim() == 0) {
         IndexSpaceImpl *ispace = get_runtime()->get_index_space_impl(domain.get_index_space());
         assert(get_runtime()->get_instance_impl(inst_pair.second)->metadata.is_valid());
@@ -707,6 +718,7 @@ namespace Realm {
       } else {
         domain_size = domain.get_volume();
       }
+#endif
       size_t ib_size;
       if (domain_size * ib_elmnt_size < IB_MAX_SIZE)
         ib_size = domain_size * ib_elmnt_size;
@@ -754,6 +766,14 @@ namespace Realm {
       // make sure our node has all the meta data it needs, but don't take more than one lock
       //  at a time
       if(state == STATE_METADATA_FETCH) {
+	Event e = domain->request_metadata();
+	if(!e.has_triggered()) {
+	  log_dma.debug() << "transfer domain metadata - req=" << (void *)this
+			  << " ready=" << e;
+	  waiter.sleep_on_event(e);
+	  return false;
+	}
+#if 0
 	// index space first
 	if(domain.get_dim() == 0) {
 	  IndexSpaceImpl *is_impl = get_runtime()->get_index_space_impl(domain.get_index_space());
@@ -783,6 +803,7 @@ namespace Realm {
             }
           }
 	}
+#endif
 
 	// now go through all instance pairs
 	for(OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
@@ -824,6 +845,9 @@ namespace Realm {
       if(state == STATE_DST_FETCH) {
         Memory tgt_mem = get_runtime()->get_instance_impl(oas_by_inst->begin()->first.second)->memory;
         gasnet_node_t tgt_node = ID(tgt_mem).memory.owner_node;
+	// TODO
+	assert(tgt_node == gasnet_mynode());
+#if 0
         if ((domain.get_dim() == 0) && (tgt_node != gasnet_mynode())) {
           if (tgt_fetch_completion == Event::NO_EVENT) {
             tgt_fetch_completion = GenEventImpl::create_genevent()->current_event();
@@ -838,6 +862,7 @@ namespace Realm {
             return false;
           }
         }
+#endif
         state = STATE_GEN_PATH;
       }
 
@@ -961,6 +986,7 @@ namespace Realm {
       return false;
     }
 
+#ifdef DO_WE_NEED_THIS
     namespace RangeExecutors {
       class Memcpy {
       public:
@@ -1332,6 +1358,7 @@ namespace Realm {
 #endif
 
     }; // namespace RangeExecutors
+#endif
 
 #if 0
     // helper function to figure out which field we're in
@@ -3026,8 +3053,11 @@ namespace Realm {
       return curdim+1;
     }
 
+#if 0
     void CopyRequest::perform_dma_mask(MemPairCopier *mpc)
     {
+      // TODO
+      assert(0);
       IndexSpaceImpl *ispace = get_runtime()->get_index_space_impl(domain.get_index_space());
       assert(ispace->valid_mask_complete);
 
@@ -3091,6 +3121,7 @@ namespace Realm {
 	delete ipc;
       }
     }
+#endif
 
     bool oas_sort_by_dst(OffsetsAndSize a, OffsetsAndSize b) {return a.dst_offset < b.dst_offset; }
 
@@ -3154,7 +3185,8 @@ namespace Realm {
       return DomainLinearization();
     }
 
-    Buffer simple_create_intermediate_buffer(const IBInfo& ib_info, const Domain& domain,
+    Buffer simple_create_intermediate_buffer(const IBInfo& ib_info,
+					     //const Domain& domain,
                                              OASVec oasvec, OASVec& oasvec_src, OASVec& oasvec_dst,
                                              DomainLinearization linearization)
     {
@@ -3175,21 +3207,23 @@ namespace Realm {
         oasvec_dst.push_back(oas_dst);
       }
       size_t ib_size; /*size of ib (bytes)*/
-      if (domain.get_volume() * ib_elmnt_size < IB_MAX_SIZE)
-        ib_size = domain.get_volume() * ib_elmnt_size;
-      else
+      // TODO
+      // if (domain.get_volume() * ib_elmnt_size < IB_MAX_SIZE)
+      //   ib_size = domain.get_volume() * ib_elmnt_size;
+      // else
         ib_size = IB_MAX_SIZE;
       // Make sure the size we want here matches our previous allocation
       assert(ib_size == ib_info.size);
       //off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes(ib_size);
       //assert(ib_offset >= 0);
       // Create a new linearization order x->y in Domain
-      DomainLinearization dl;
-      if (domain.get_dim() == 0)
-        dl = linearization;
-      else
-        dl = create_ib_linearization(domain);
-      Buffer ib_buf(ib_info.offset, true, domain.get_volume(), ib_elmnt_size, ib_info.size, dl, ib_info.memory);
+      // DomainLinearization dl;
+      // if (domain.get_dim() == 0)
+      //   dl = linearization;
+      // else
+      //   dl = create_ib_linearization(domain);
+      Buffer ib_buf(ib_info.offset, true, 
+		    0/*domain.get_volume()*/, ib_elmnt_size, ib_info.size, ib_info.memory);
       return ib_buf;
     }
 
@@ -3323,12 +3357,89 @@ namespace Realm {
       path = dist[dst_mem];
     }
 
-    template<unsigned DIM>
+
+  class WrappingFIFOIterator : public TransferIterator {
+  public:
+    WrappingFIFOIterator(size_t _base, size_t _size);
+      
+    virtual void reset(void);
+    virtual bool done(void) const;
+
+    virtual size_t step(size_t max_bytes, AddressInfo& info,
+			bool tentative = false);
+    virtual void confirm_step(void);
+    virtual void cancel_step(void);
+
+  protected:
+    size_t base, size, offset, prev_offset;
+    bool tentative_valid;
+  };
+
+  WrappingFIFOIterator::WrappingFIFOIterator(size_t _base, size_t _size)
+    : base(_base)
+    , size(_size)
+    , offset(0)
+    , tentative_valid(false)
+  {}
+
+  void WrappingFIFOIterator::reset(void)
+  {
+    offset = 0;
+  }
+
+  bool WrappingFIFOIterator::done(void) const
+  {
+    // we never know when we're done
+    return false;
+  }
+
+  size_t WrappingFIFOIterator::step(size_t max_bytes, AddressInfo &info,
+				    bool tentative /*= false*/)
+  {
+    assert(!tentative_valid);
+
+    if(tentative) {
+      prev_offset = offset;
+      tentative_valid = true;
+    }
+
+    info.base_offset = base + offset;
+    info.num_lines = 1;
+    info.line_stride = 0;
+    info.num_planes = 1;
+    info.plane_stride = 0;
+    size_t bytes;
+    size_t bytes_left = size - offset;
+    if(bytes_left <= max_bytes) {
+      offset = 0;
+      bytes = bytes_left;
+    } else {
+      offset += max_bytes;
+      bytes = max_bytes;
+    }
+    info.bytes_per_chunk = bytes;
+    return bytes;
+  }
+
+  void WrappingFIFOIterator::confirm_step(void)
+  {
+    assert(tentative_valid);
+    tentative_valid = false;
+  }
+
+  void WrappingFIFOIterator::cancel_step(void)
+  {
+    assert(tentative_valid);
+    offset = prev_offset;
+    tentative_valid = false;
+  }
+
     void CopyRequest::perform_new_dma(Memory src_mem, Memory dst_mem)
     {
       //mark_started();
       //std::vector<Memory> mem_path;
       //find_shortest_path(src_mem, dst_mem, mem_path);
+      // TODO
       for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
         std::vector<XferDesID> sub_path;
         for (unsigned idx = 0; idx < mem_path.size() - 1; idx ++) {
@@ -3338,12 +3449,12 @@ namespace Realm {
         }
         RegionInstance src_inst = it->first.first;
         RegionInstance dst_inst = it->first.second;
-        OASVec oasvec = it->second, oasvec_src, oasvec_dst;
+        //OASVec oasvec = it->second, oasvec_src, oasvec_dst;
         IBByInst::iterator ib_it = ib_by_inst.find(it->first);
         assert(ib_it != ib_by_inst.end());
-        IBVec& ibvec = ib_it->second;
-        RegionInstanceImpl *src_impl = get_runtime()->get_instance_impl(src_inst);
-        RegionInstanceImpl *dst_impl = get_runtime()->get_instance_impl(dst_inst);
+        const IBVec& ibvec = ib_it->second;
+        //RegionInstanceImpl *src_impl = get_runtime()->get_instance_impl(src_inst);
+        //RegionInstanceImpl *dst_impl = get_runtime()->get_instance_impl(dst_inst);
 
         //MemoryImpl::MemoryKind src_kind = get_runtime()->get_memory_impl(src_mem)->kind;
         //MemoryImpl::MemoryKind dst_kind = get_runtime()->get_memory_impl(dst_mem)->kind;
@@ -3352,20 +3463,78 @@ namespace Realm {
 
         // We don't need to care about deallocation of Buffer class
         // This will be handled by XferDes destruction
-        Buffer src_buf(&src_impl->metadata, src_mem);
-        Buffer dst_buf(&dst_impl->metadata, dst_mem);
-        Buffer pre_buf;
+        // Buffer src_buf(&src_impl->metadata, src_mem);
+        // Buffer dst_buf(&dst_impl->metadata, dst_mem);
+        // Buffer pre_buf;
+
+	// construct the iterators for the source and dest instances - these
+	//  know about each other so they can potentially conspire about
+	//  iteration order
+	unsigned iter_flags = 0;  // most conservative for now
+	std::vector<unsigned/*FieldID*/> src_fields, dst_fields;
+	for(OASVec::const_iterator it2 = it->second.begin();
+	    it2 != it->second.end();
+	    ++it2) {
+	  src_fields.push_back(it2->src_offset);
+	  dst_fields.push_back(it2->dst_offset);
+	}
+	TransferIterator *src_iter = domain->create_iterator(src_inst,
+							     dst_inst,
+							     src_fields,
+							     iter_flags);
+	TransferIterator *dst_iter = domain->create_iterator(dst_inst,
+							     src_inst,
+							     dst_fields,
+							     iter_flags);
+
         assert(mem_path.size() - 1 == sub_path.size());
         for (unsigned idx = 0; idx < mem_path.size(); idx ++) {
           log_new_dma.info("mem_path[%d]: node(%llu), memory(%d)", idx, ID(mem_path[idx]).memory.owner_node, mem_path[idx].kind());
           if (idx == 0) {
-            pre_buf = src_buf;
+            //pre_buf = src_buf;
           } else {
             XferDesID xd_guid = sub_path[idx - 1];
-            XferDesID pre_xd_guid = idx == 1 ? XferDes::XFERDES_NO_GUID : sub_path[idx - 2];
-            XferDesID next_xd_guid = idx == sub_path.size() ? XferDes::XFERDES_NO_GUID : sub_path[idx];
-            bool mark_started = ((idx == 1) && (it == oas_by_inst->begin())) ? true : false;
-            Buffer cur_buf;
+
+	    // xferdes inputs
+	    XferDesID pre_xd_guid;
+	    Memory xd_src_mem;
+	    TransferIterator *xd_src_iter;
+	    bool mark_started;
+	    gasnet_node_t xd_target_node;
+	    if(idx == 1) {
+	      // first step reads from source
+	      pre_xd_guid = XferDes::XFERDES_NO_GUID;
+	      xd_src_mem = src_inst.get_location();
+	      xd_src_iter = src_iter;
+	      mark_started = (it == oas_by_inst->begin());
+	      xd_target_node = gasnet_mynode();
+	    } else {
+	      // reads from intermediate buffer
+	      pre_xd_guid = sub_path[idx - 2];
+	      xd_src_mem = ibvec[idx - 2].memory;
+	      xd_src_iter = new WrappingFIFOIterator(ibvec[idx - 2].offset,
+						     ibvec[idx - 2].size);
+	      mark_started = false;
+	      xd_target_node = ID(ibvec[idx - 2].memory).memory.owner_node;
+	    }
+
+	    // xferdes output
+	    XferDesID next_xd_guid;
+	    Memory xd_dst_mem;
+	    TransferIterator *xd_dst_iter;
+	    if(idx == sub_path.size()) {
+	      // last step writes to target
+	      next_xd_guid = XferDes::XFERDES_NO_GUID;
+	      xd_dst_mem = dst_inst.get_location();
+	      xd_dst_iter = dst_iter;
+	    } else {
+	      // writes to intermediate buffer
+	      next_xd_guid = sub_path[idx];
+	      xd_dst_mem = ibvec[idx - 1].memory;
+	      xd_dst_iter = new WrappingFIFOIterator(ibvec[idx - 1].offset,
+						     ibvec[idx - 1].size);
+	    }
+
             XferDes::XferKind kind = get_xfer_des(mem_path[idx - 1], mem_path[idx]);
             XferOrder::Type order;
             if (mem_path.size() == 2)
@@ -3381,10 +3550,29 @@ namespace Realm {
               attach_inst = dst_inst;
             else
               attach_inst = RegionInstance::NO_INST;
-
             
             XferDesFence* complete_fence = new XferDesFence(this);
             add_async_work_item(complete_fence);
+
+#if 0
+	    if (idx != mem_path.size() - 1) {
+	      cur_buf = simple_create_intermediate_buffer(ibvec[idx-1],
+							  oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
+	    } else {
+	      cur_buf = dst_buf;
+	      oasvec_src = oasvec;
+	      oasvec.clear();
+	    }
+#endif
+	    LegionRuntime::LowLevel::
+	      create_xfer_des(this, gasnet_mynode(), xd_target_node,
+			      xd_guid, pre_xd_guid,
+			    next_xd_guid, mark_started,
+			    //pre_buf, cur_buf, domain, oasvec_src,
+			    xd_src_mem, xd_dst_mem, xd_src_iter, xd_dst_iter,
+			    16 * 1024 * 1024/*max_req_size*/, 100/*max_nr*/,
+			    priority, order, kind, complete_fence, attach_inst);
+#if 0
             if (DIM == 0) {
               // Need to do something special for unstructured data: we perform a 1D copy from first_elemnt to last_elemnt
               // First we should make sure destination instance space's index space match what we're copying
@@ -3443,14 +3631,17 @@ namespace Realm {
                                    16 * 1024 * 1024/*max_req_size*/, 100/*max_nr*/,
                                    priority, order, kind, complete_fence, attach_inst);
             }
-            pre_buf = cur_buf;
-            oasvec = oasvec_dst;
+#endif
+            //pre_buf = cur_buf;
+            //oasvec = oasvec_dst;
           }
         }
       }
+
       mark_finished(true/*successful*/);
     }
 
+#if 0
     template <unsigned DIM>
     void CopyRequest::perform_dma_rect(MemPairCopier *mpc)
     {
@@ -3549,16 +3740,13 @@ namespace Realm {
         delete ipc;
       }
     }
+#endif
 
     void CopyRequest::perform_dma(void)
     {
       log_dma.debug("request %p executing", this);
 
       DetailedTimer::ScopedPush sp(TIME_COPY);
-
-      // create a copier for the memory used by all of these instance pairs
-      Memory src_mem = get_runtime()->get_instance_impl(oas_by_inst->begin()->first.first)->memory;
-      Memory dst_mem = get_runtime()->get_instance_impl(oas_by_inst->begin()->first.second)->memory;
 
       // <NEWDMA>
       if(measurements.wants_measurement<Realm::ProfilingMeasurements::OperationMemoryUsage>()) {
@@ -3573,9 +3761,17 @@ namespace Realm {
         Realm::ProfilingMeasurements::OperationMemoryUsage usage;
         usage.source = pair.first.get_location();
         usage.target = pair.second.get_location();
-        usage.size = total_field_size * domain.get_volume();
+        usage.size = total_field_size * domain->volume();
         measurements.add_measurement(usage);
       }
+
+      Memory src_mem = oas_by_inst->begin()->first.first.get_location();
+      Memory dst_mem = oas_by_inst->begin()->first.second.get_location();
+      perform_new_dma(src_mem, dst_mem);
+#if 0
+      // create a copier for the memory used by all of these instance pairs
+      Memory src_mem = get_runtime()->get_instance_impl(oas_by_inst->begin()->first.first)->memory;
+      Memory dst_mem = get_runtime()->get_instance_impl(oas_by_inst->begin()->first.second)->memory;
 
       switch (domain.get_dim()) {
       case 0:
@@ -3593,12 +3789,13 @@ namespace Realm {
       default:
         assert(0);
       }
+#endif
 
       log_dma.info() << "dma request " << (void *)this << " finished - is="
                      << domain << " before=" << before_copy << " after=" << get_finish_event();
       return;
       // </NEWDMA>
-
+#ifdef OLD_DMA_CODE
       // MemPairCopier *mpc = MemPairCopier::create_copier(src_mem, dst_mem);
 
       CustomSerdezID serdez_id = oas_by_inst->begin()->second.begin()->serdez_id;
@@ -3640,6 +3837,7 @@ namespace Realm {
       // 	after_copy.impl()->trigger(after_copy.gen, gasnet_mynode());
 
       delete mpc;
+#endif
 
 #ifdef EVEN_MORE_DEAD_DMA_CODE
       RegionInstanceImpl *src_impl = src.impl();
@@ -3937,7 +4135,8 @@ namespace Realm {
     {
       const ID::IDType *idata = (const ID::IDType *)data;
 
-      idata = domain.deserialize(idata);
+      // TODO
+      //idata = domain.deserialize(idata);
 
       priority = 0;
 
@@ -3970,19 +4169,17 @@ namespace Realm {
       deserializer >> requests;
       Realm::Operation::reconstruct_measurements();
 
-      log_dma.info("dma request %p deserialized - " IDFMT "[%lld]->" IDFMT "[%lld]:%zu (+%zu) %s %d (" IDFMT ") " IDFMT " " IDFMT,
-		   this,
-		   srcs[0].inst.id, srcs[0].offset,
-		   dst.inst.id, dst.offset, dst.size,
-		   srcs.size() - 1,
-		   (red_fold ? "fold" : "apply"),
-		   redop_id,
-		   domain.is_id,
-		   before_copy.id,
-		   get_finish_event().id);
+      log_dma.info() << "dma request " << (void *)this << " deserialized - is="
+		     << *domain
+		     << " " << (red_fold ? "fold" : "apply") << " " << redop_id
+		     << " before=" << before_copy << " after=" << get_finish_event();
+      log_dma.info() << "dma request " << (void *)this << " field: "
+		     << srcs[0].inst << "[" << srcs[0].offset << "]"
+		     << "+" << (srcs.size()-1) << "->"
+		     << dst.inst << "[" << dst.offset << "] size=" << dst.size;
     }
 
-    ReduceRequest::ReduceRequest(const Domain& _domain,
+    ReduceRequest::ReduceRequest(const TransferDomain *_domain, //const Domain& _domain,
 				 const std::vector<Domain::CopySrcDstField>& _srcs,
 				 const Domain::CopySrcDstField& _dst,
 				 bool _inst_lock_needed,
@@ -3993,7 +4190,7 @@ namespace Realm {
 				 int _priority, 
                                  const Realm::ProfilingRequestSet &reqs)
       : DmaRequest(_priority, _after_copy, reqs),
-	domain(_domain),
+	domain(_domain->clone()),
 	dst(_dst), 
 	inst_lock_needed(_inst_lock_needed), inst_lock_event(Event::NO_EVENT),
 	redop_id(_redop_id), red_fold(_red_fold),
@@ -4001,25 +4198,26 @@ namespace Realm {
     {
       srcs.insert(srcs.end(), _srcs.begin(), _srcs.end());
 
-      log_dma.info("dma request %p created - " IDFMT "[%lld]->" IDFMT "[%lld]:%zu (+%zu) %s %d (" IDFMT ") " IDFMT " " IDFMT,
-		   this,
-		   srcs[0].inst.id, srcs[0].offset,
-		   dst.inst.id, dst.offset, dst.size,
-		   srcs.size() - 1,
-		   (red_fold ? "fold" : "apply"),
-		   redop_id,
-		   domain.is_id,
-		   before_copy.id,
-		   get_finish_event().id);
+      log_dma.info() << "dma request " << (void *)this << " created - is="
+		     << *domain
+		     << " " << (red_fold ? "fold" : "apply") << " " << redop_id
+		     << " before=" << before_copy << " after=" << get_finish_event();
+      log_dma.info() << "dma request " << (void *)this << " field: "
+		     << srcs[0].inst << "[" << srcs[0].offset << "]"
+		     << "+" << (srcs.size()-1) << "->"
+		     << dst.inst << "[" << dst.offset << "] size=" << dst.size;
     }
 
     ReduceRequest::~ReduceRequest(void)
     {
+      delete domain;
     }
 
     size_t ReduceRequest::compute_size(void)
     {
-      size_t result = domain.compute_size();
+      size_t result = 0;
+      // TODO
+      //result += domain.compute_size();
       result += (4 + 3 * srcs.size()) * sizeof(ID::IDType);
       result += sizeof(ID::IDType); // for inst_lock_needed
       // TODO: unbreak once the serialization stuff is repaired
@@ -4032,8 +4230,9 @@ namespace Realm {
 
     void ReduceRequest::serialize(void *buffer)
     {
+      ID::IDType *msgptr = (ID::IDType *)buffer;
       // domain info goes first
-      ID::IDType *msgptr = domain.serialize((ID::IDType *)buffer);
+      //msgptr = domain.serialize(msgptr);
 
       // now source fields
       *msgptr++ = srcs.size();
@@ -4076,6 +4275,14 @@ namespace Realm {
       // make sure our node has all the meta data it needs, but don't take more than one lock
       //  at a time
       if(state == STATE_METADATA_FETCH) {
+	Event e = domain->request_metadata();
+	if(!e.has_triggered()) {
+	  log_dma.debug() << "transfer domain metadata - req=" << (void *)this
+			  << " ready=" << e;
+	  waiter.sleep_on_event(e);
+	  return false;
+	}
+#if 0
 	// index space first
 	if(domain.get_dim() == 0) {
 	  IndexSpaceImpl *is_impl = get_runtime()->get_index_space_impl(domain.get_index_space());
@@ -4104,6 +4311,7 @@ namespace Realm {
             }
           }
 	}
+#endif
 
 	// now go through all source instance pairs
 	for(std::vector<Domain::CopySrcDstField>::iterator it = srcs.begin();
@@ -4223,6 +4431,7 @@ namespace Realm {
       return false;
     }
 
+#if 0
     template <unsigned DIM>
     void ReduceRequest::perform_dma_rect(MemPairCopier *mpc)
     {
@@ -4323,6 +4532,7 @@ namespace Realm {
       
       delete ipc;
     }
+#endif
 
     void ReduceRequest::perform_dma(void)
     {
@@ -4333,6 +4543,148 @@ namespace Realm {
       // code assumes a single source field for now
       assert(srcs.size() == 1);
 
+      MemoryImpl *src_mem = get_runtime()->get_memory_impl(srcs[0].inst);
+      MemoryImpl *dst_mem = get_runtime()->get_memory_impl(dst.inst);
+
+      bool dst_is_remote = ((dst_mem->kind == MemoryImpl::MKIND_REMOTE) ||
+			    (dst_mem->kind == MemoryImpl::MKIND_RDMA));
+      unsigned rdma_sequence_id = (dst_is_remote ?
+				     __sync_fetch_and_add(&rdma_sequence_no, 1) :
+				     0);
+      unsigned rdma_count = 0;
+
+      std::vector<unsigned/*FieldID*/> src_field(1, srcs[0].offset);
+      std::vector<unsigned/*FieldID*/> dst_field(1, dst.offset);
+      unsigned iter_flags = 0;
+      TransferIterator *src_iter = domain->create_iterator(srcs[0].inst,
+							   dst.inst,
+							   src_field,
+							   iter_flags);
+      TransferIterator *dst_iter = domain->create_iterator(dst.inst,
+							   srcs[0].inst,
+							   dst_field,
+							   iter_flags);
+
+      const ReductionOpUntyped *redop = get_runtime()->reduce_op_table[redop_id];
+      size_t src_elem_size = red_fold ? redop->sizeof_rhs : redop->sizeof_lhs;
+
+      size_t total_bytes = 0;
+
+      void *src_scratch_buffer = 0;
+      void *dst_scratch_buffer = 0;
+      size_t src_scratch_size = 0;
+      size_t dst_scratch_size = 0;
+
+      while(!src_iter->done()) {
+	TransferIterator::AddressInfo src_info, dst_info;
+
+	size_t max_bytes = (size_t)-1;
+	size_t src_bytes = src_iter->step(max_bytes, src_info,
+					  true /*tentative*/);
+	assert(src_bytes >= 0);
+	size_t num_elems = src_bytes / src_elem_size;
+	size_t exp_dst_bytes = num_elems * redop->sizeof_rhs;
+	size_t dst_bytes = dst_iter->step(exp_dst_bytes, dst_info);
+	if(dst_bytes == exp_dst_bytes) {
+	  // good, confirm the source step
+	  src_iter->confirm_step();
+	} else {
+	  // bad, cancel the source step and try a smaller one
+	  src_iter->cancel_step();
+	  num_elems = dst_bytes / redop->sizeof_rhs;
+	  size_t exp_src_bytes = num_elems * src_elem_size;
+	  src_bytes = src_iter->step(exp_src_bytes, src_info);
+	  assert(src_bytes == exp_src_bytes);
+	}
+
+	total_bytes += dst_bytes;
+
+	// can we directly access the source data?
+	const void *src_ptr = src_mem->get_direct_ptr(src_info.base_offset,
+						      src_info.bytes_per_chunk);
+	if(src_ptr == 0) {
+	  // nope, make a local copy via get_bytes
+	  if(src_info.bytes_per_chunk > src_scratch_size) {
+	    if(src_scratch_size > 0)
+	      free(src_scratch_buffer);
+	    // allocate 2x in case the next block is a little bigger
+	    src_scratch_size = src_info.bytes_per_chunk * 2;
+	    src_scratch_buffer = malloc(src_scratch_size);
+	  }
+	  src_mem->get_bytes(src_info.base_offset,
+			     src_scratch_buffer,
+			     src_info.bytes_per_chunk);
+	  src_ptr = src_scratch_buffer;
+	}
+
+	// now look at destination and deal with two fast cases
+	  
+	// case 1: destination is remote (quickest to check)
+	if(dst_is_remote) {
+	  // have to tell rdma to make a copy if we're using the temp buffer
+	  bool make_copy = (src_ptr == src_scratch_buffer);
+	  do_remote_reduce(dst_mem->me,
+			   dst_info.base_offset,
+			   redop_id, red_fold,
+			   src_ptr, num_elems,
+			   src_elem_size, redop->sizeof_rhs,
+			   rdma_sequence_no,
+			   make_copy);
+	} else {
+	  // case 2: destination is directly accessible
+	  void *dst_ptr = dst_mem->get_direct_ptr(dst_info.base_offset,
+						  dst_info.bytes_per_chunk);
+	  if(dst_ptr) {
+	    if(red_fold)
+	      redop->fold(dst_ptr, src_ptr, num_elems, false /*!excl*/);
+	    else
+	      redop->apply(dst_ptr, src_ptr, num_elems, false /*!excl*/);
+	  } else {
+	    // case 3: fallback - use get_bytes/put_bytes combo
+
+	    // need a buffer for destination data
+	    if(dst_info.bytes_per_chunk > dst_scratch_size) {
+	      if(dst_scratch_size > 0)
+		free(dst_scratch_buffer);
+	      // allocate 2x in case the next block is a little bigger
+	      dst_scratch_size = dst_info.bytes_per_chunk * 2;
+	      dst_scratch_buffer = malloc(dst_scratch_size);
+	    }
+	    dst_mem->get_bytes(dst_info.base_offset,
+			       dst_scratch_buffer,
+			       dst_info.bytes_per_chunk);
+	    if(red_fold)
+	      redop->fold(dst_scratch_buffer, src_ptr, num_elems, true/*excl*/);
+	    else
+	      redop->apply(dst_scratch_buffer, src_ptr, num_elems, true/*excl*/);
+	    dst_mem->put_bytes(dst_info.base_offset,
+			       dst_scratch_buffer,
+			       dst_info.bytes_per_chunk);
+	  }
+	}
+      }
+      assert(dst_iter->done());
+
+      delete src_iter;
+      delete dst_iter;
+
+      if(src_scratch_size > 0)
+	free(src_scratch_buffer);
+      if(dst_scratch_size > 0)
+	free(dst_scratch_buffer);
+
+      // if we did any actual reductions, send a fence, otherwise trigger here
+      if(rdma_count > 0) {
+	Realm::RemoteWriteFence *fence = new Realm::RemoteWriteFence(this);
+	this->add_async_work_item(fence);
+	do_remote_fence(dst_mem->me, rdma_sequence_id, rdma_count, fence);
+      }
+
+      //printf("kinds: " IDFMT "=%d " IDFMT "=%d\n", src_mem.id, src_mem.impl()->kind, dst_mem.id, dst_mem.impl()->kind);
+
+#if 0
+      // we have the same jumble of memory type and layout permutations here - again we'll
+      //  solve a few of them point-wise and then try to unify later
       Memory src_mem = get_runtime()->get_instance_impl(srcs[0].inst)->memory;
       Memory dst_mem = get_runtime()->get_instance_impl(dst.inst)->memory;
       MemoryImpl::MemoryKind src_kind = get_runtime()->get_memory_impl(src_mem)->kind;
@@ -4340,11 +4692,6 @@ namespace Realm {
 
       const ReductionOpUntyped *redop = get_runtime()->reduce_op_table[redop_id];
 
-      //printf("kinds: " IDFMT "=%d " IDFMT "=%d\n", src_mem.id, src_mem.impl()->kind, dst_mem.id, dst_mem.impl()->kind);
-
-      // we have the same jumble of memory type and layout permutations here - again we'll
-      //  solve a few of them point-wise and then try to unify later
-      size_t total_bytes = 0;
       if(domain.get_dim() == 0) {
 	// index space
 	IndexSpaceImpl *ispace = get_runtime()->get_index_space_impl(domain.get_index_space());
@@ -4570,17 +4917,12 @@ namespace Realm {
 
 	delete mpc;
       }
+#endif
 
-      log_dma.info("dma request %p finished - " IDFMT "[%lld]->" IDFMT "[%lld]:%zu (+%zu) %s %d (" IDFMT ") " IDFMT " " IDFMT,
-		   this,
-		   srcs[0].inst.id, srcs[0].offset,
-		   dst.inst.id, dst.offset, dst.size,
-		   srcs.size() - 1,
-		   (red_fold ? "fold" : "apply"),
-		   redop_id,
-		   domain.is_id,
-		   before_copy.id,
-		   get_finish_event().id);
+      log_dma.info() << "dma request " << (void *)this << " finished - is="
+		     << *domain
+		     << " " << (red_fold ? "fold" : "apply") << " " << redop_id
+		     << " before=" << before_copy << " after=" << get_finish_event();
 
       if(measurements.wants_measurement<Realm::ProfilingMeasurements::OperationMemoryUsage>()) {
         Realm::ProfilingMeasurements::OperationMemoryUsage usage;  
@@ -4605,7 +4947,8 @@ namespace Realm {
 
       const ID::IDType *idata = (const ID::IDType *)data;
 
-      idata = domain.deserialize(idata);
+      // TODO
+      //idata = domain.deserialize(idata);
 
       size_t elmts = *idata++;
 
@@ -4628,24 +4971,26 @@ namespace Realm {
       Realm::Operation::reconstruct_measurements();
 
       log_dma.info() << "dma request " << (void *)this << " deserialized - is="
-		     << domain << " fill dst=" << dst.inst << "[" << dst.offset << "+" << dst.size << "] size="
+		     << *domain << " fill dst=" << dst.inst << "[" << dst.offset << "+" << dst.size << "] size="
 		     << fill_size << " before=" << _before_fill << " after=" << _after_fill;
     }
 
-    FillRequest::FillRequest(const Domain &d, 
+    FillRequest::FillRequest(const TransferDomain *_domain, //const Domain &d, 
                              const Domain::CopySrcDstField &_dst,
                              const void *_fill_value, size_t _fill_size,
                              Event _before_fill, Event _after_fill, int _priority,
                              const Realm::ProfilingRequestSet &reqs)
-      : DmaRequest(_priority, _after_fill, reqs), domain(d), dst(_dst),
-        before_fill(_before_fill)
+      : DmaRequest(_priority, _after_fill, reqs)
+      , domain(_domain->clone())
+      , dst(_dst)
+      , before_fill(_before_fill)
     {
       fill_size = _fill_size;
       fill_buffer = malloc(fill_size);
       memcpy(fill_buffer, _fill_value, fill_size);
 
       log_dma.info() << "dma request " << (void *)this << " created - is="
-		     << d << " fill dst=" << dst.inst << "[" << dst.offset << "+" << dst.size << "] size="
+		     << *domain << " fill dst=" << dst.inst << "[" << dst.offset << "+" << dst.size << "] size="
 		     << fill_size << " before=" << _before_fill << " after=" << _after_fill;
       {
 	Realm::LoggerMessage msg(log_dma.debug());
@@ -4663,11 +5008,14 @@ namespace Realm {
     {
       // clean up our mess
       free(fill_buffer);
+      delete domain;
     }
 
     size_t FillRequest::compute_size(void)
     {
-      size_t result = domain.compute_size();
+      size_t result = 0;
+      // TODO
+      //result += domain.compute_size();
       size_t elmts = (fill_size + sizeof(ID::IDType) - 1)/sizeof(ID::IDType);
       result += ((elmts+1) * sizeof(ID::IDType)); // +1 for fill size in bytes
       // TODO: unbreak once the serialization stuff is repaired
@@ -4680,8 +5028,9 @@ namespace Realm {
 
     void FillRequest::serialize(void *buffer)
     {
-      ID::IDType *msgptr = domain.serialize((ID::IDType *)buffer);
-      
+      ID::IDType *msgptr = (ID::IDType *)buffer;
+      // TODO
+      //msgptr = domain.serialize(msgptr);
       assert(dst.size == fill_size);
       size_t elmts = (fill_size + sizeof(ID::IDType) - 1)/sizeof(ID::IDType);
       *msgptr++ = elmts;
@@ -4713,6 +5062,14 @@ namespace Realm {
       // make sure our node has all the meta data it needs, but don't take more than one lock
       //  at a time
       if(state == STATE_METADATA_FETCH) {
+	Event e = domain->request_metadata();
+	if(!e.has_triggered()) {
+	  log_dma.debug() << "transfer domain metadata - req=" << (void *)this
+			  << " ready=" << e;
+	  waiter.sleep_on_event(e);
+	  return false;
+	}
+#if 0
         // index space first
 	if(domain.get_dim() == 0) {
 	  IndexSpaceImpl *is_impl = get_runtime()->get_index_space_impl(domain.get_index_space());
@@ -4741,6 +5098,7 @@ namespace Realm {
             }
           }
 	}
+#endif
         // No need to check the instance, we are on its local node 
         state = STATE_BEFORE_EVENT;
       }
@@ -4804,6 +5162,69 @@ namespace Realm {
 
     void FillRequest::perform_dma(void)
     {
+      // if we are doing large chunks of data, we will build a buffer with
+      //  multiple copies of the same data to make fewer calls to put_bytes
+      void *rep_buffer = 0;
+      size_t rep_size = 0;
+
+      MemoryImpl *mem_impl = get_runtime()->get_memory_impl(dst.inst.get_location());
+
+      std::vector<unsigned/*FieldID*/> dst_field(1, dst.offset);
+      unsigned iter_flags = 0;
+      TransferIterator *iter = domain->create_iterator(dst.inst,
+						       RegionInstance::NO_INST,
+						       dst_field,
+						       iter_flags);
+
+      while(!iter->done()) {
+	TransferIterator::AddressInfo info;
+
+	size_t max_bytes = (size_t)-1;
+	size_t act_bytes = iter->step(max_bytes, info);
+	assert(act_bytes >= 0);
+
+	// decide whether to use the original fill buffer or one that
+	//  repeats the data several times
+	const void *use_buffer = fill_buffer;
+	size_t use_size = fill_size;
+	const size_t MAX_REP_SIZE = 32768;
+	if((info.bytes_per_chunk > fill_size) &&
+	   ((fill_size * 2) <= MAX_REP_SIZE)) {
+	  if(!rep_buffer) {
+	    size_t rep_elems = MAX_REP_SIZE / fill_size;
+	    rep_size = rep_elems * fill_size;
+	    rep_buffer = malloc(rep_size);
+	    assert(rep_buffer != 0);
+	    for(size_t ofs = 0; ofs < rep_size; ofs += fill_size)
+	      memcpy(((char *)rep_buffer)+ofs, fill_buffer, fill_size);
+	  }
+	  use_buffer = rep_buffer;
+	  use_size = rep_size;
+	}
+
+	for(size_t p = 0; p < info.num_planes; p++)
+	  for(size_t l = 0; l < info.num_lines; l++) {
+	    size_t ofs = 0;
+	    while((ofs + use_size) < info.bytes_per_chunk) {
+	      mem_impl->put_bytes(info.base_offset + 
+				  (p * info.plane_stride) +
+				  (l * info.line_stride) +
+				  ofs, use_buffer, use_size);
+	      ofs += use_size;
+	    }
+	    size_t bytes_left = info.bytes_per_chunk - ofs;
+	    assert((bytes_left > 0) && (bytes_left <= use_size));
+	    mem_impl->put_bytes(info.base_offset + 
+				(p * info.plane_stride) +
+				(l * info.line_stride) +
+				ofs, use_buffer, bytes_left);
+	  }
+      }
+
+      if(rep_buffer)
+	free(rep_buffer);
+      delete iter;
+#if 0
       // First switch on the memory type
       MemoryImpl *mem_impl = get_runtime()->get_memory_impl(dst.inst.get_location());
 
@@ -4884,6 +5305,7 @@ namespace Realm {
         // TODO: Implement GASNet and Disk
         assert(false);
       }
+#endif
 
       if(measurements.wants_measurement<Realm::ProfilingMeasurements::OperationMemoryUsage>()) {
         Realm::ProfilingMeasurements::OperationMemoryUsage usage;
@@ -4893,6 +5315,7 @@ namespace Realm {
       }
     }
 
+#if 0
     template<int DIM>
     void FillRequest::perform_dma_rect(MemoryImpl *mem_impl)
     {
@@ -4941,6 +5364,7 @@ namespace Realm {
         }
       }
     }
+#endif
 
     size_t FillRequest::optimize_fill_buffer(RegionInstanceImpl *inst_impl, int &fill_elmts)
     {
