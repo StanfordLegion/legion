@@ -6288,7 +6288,8 @@ namespace Legion {
       bool has_return = false;
       CodeDescriptor *realm_desc = new CodeDescriptor(codedesc);
       return preregister_variant(registrar, user_data, user_len,
-				 realm_desc, has_return, task_name);
+				 realm_desc, has_return, task_name,
+                                 AUTO_GENERATE_ID);
     }
 
     //--------------------------------------------------------------------------
@@ -6307,11 +6308,11 @@ namespace Legion {
                                   const void *user_data, size_t user_data_size,
                                   CodeDescriptor *realm,
                                   bool has_return, const char *task_name, 
-                                  bool check_task_id)
+                                  VariantID vid, bool check_task_id)
     //--------------------------------------------------------------------------
     {
       return Internal::Runtime::preregister_variant(registrar, user_data, 
-                  user_data_size, realm, has_return, task_name, check_task_id);
+          user_data_size, realm, has_return, task_name, vid, check_task_id);
     } 
 
     //--------------------------------------------------------------------------

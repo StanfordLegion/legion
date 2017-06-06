@@ -3100,8 +3100,8 @@ namespace Legion {
       static VariantID preregister_variant(
                       const TaskVariantRegistrar &registrar,
                       const void *user_data, size_t user_data_size,
-                      CodeDescriptor *realm_desc,
-                      bool has_ret, const char *task_name,bool check_id = true);
+                      CodeDescriptor *realm_desc, bool has_ret, 
+                      const char *task_name,VariantID vid,bool check_id = true);
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
     public:
       static const char* find_privilege_task_name(void *impl);
