@@ -5705,6 +5705,7 @@ namespace Legion {
        * Runtime::start method has been invoked.
        * @param registrar the task variant registrar for describing the task
        * @param task_name an optional name to assign to the logical task
+       * @param vid optional static variant ID
        * @return variant ID for the task
        */
       template<typename T,
@@ -5712,7 +5713,8 @@ namespace Legion {
                       Context, Runtime*)>
       static VariantID preregister_task_variant(
                                     const TaskVariantRegistrar &registrar,
-                                    const char *task_name = NULL);
+                                    const char *task_name = NULL,
+                                    VariantID vid = AUTO_GENERATE_ID);
 
       /**
        * Statically register a new task variant with the runtime with
@@ -5722,6 +5724,7 @@ namespace Legion {
        * @param registrar the task variant registrar for describing the task
        * @param user_data the user data to associate with the task variant
        * @param task_name an optional name to assign to the logical task
+       * @param vid optional static variant ID
        * @return variant ID for the task
        */
       template<typename T, typename UDT,
@@ -5729,7 +5732,9 @@ namespace Legion {
                       Context, Runtime*, const UDT&)>
       static VariantID preregister_task_variant(
                       const TaskVariantRegistrar &registrar, 
-                      const UDT &user_data, const char *task_name = NULL);
+                      const UDT &user_data,
+                      const char *task_name = NULL,
+                      VariantID vid = AUTO_GENERATE_ID);
        
       /**
        * Statically register a new task variant with the runtime with
@@ -5738,6 +5743,7 @@ namespace Legion {
        * Runtime::start method has been invoked.
        * @param registrar the task variant registrar for describing the task
        * @param an optional name to assign to the logical task
+       * @param vid optional static variant ID
        * @return variant ID for the task
        */
       template<
@@ -5745,7 +5751,8 @@ namespace Legion {
                          Context, Runtime*)>
       static VariantID preregister_task_variant(
                                     const TaskVariantRegistrar &registrar,
-                                    const char *task_name = NULL);
+                                    const char *task_name = NULL,
+                                    VariantID vid = AUTO_GENERATE_ID);
 
       /**
        * Statically register a new task variant with the runtime with
@@ -5755,14 +5762,15 @@ namespace Legion {
        * @param registrar the task variant registrar for describing the task
        * @param user_data the user data to associate with the task variant
        * @param an optional name to assign to the logical task
+       * @param vid optional static variant ID
        * @return variant ID for the task
        */
       template<typename UDT,
         void (*TASK_PTR)(const Task*, const std::vector<PhysicalRegion>&,
                          Context, Runtime*, const UDT&)>
       static VariantID preregister_task_variant(
-              const TaskVariantRegistrar &registrar, 
-              const UDT &user_data, const char *task_name = NULL);
+              const TaskVariantRegistrar &registrar, const UDT &user_data, 
+              const char *task_name = NULL, VariantID vid = AUTO_GENERATE_ID);
     public:
       //------------------------------------------------------------------------
       // Task Generator Registration Operations
@@ -5964,7 +5972,7 @@ namespace Legion {
                                  const void *user_data, size_t user_data_size,
                                  CodeDescriptor *realm,
                                  bool has_return, const char *task_name,
-                                 bool check_task_id = true);
+                                 VariantID vid, bool check_task_id = true);
     private:
       static ReductionOpTable& get_reduction_table(void);
       static SerdezOpTable& get_serdez_table(void);

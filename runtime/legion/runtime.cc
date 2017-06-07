@@ -19725,10 +19725,10 @@ continue;					\
     
     //--------------------------------------------------------------------------
     /*static*/ VariantID Runtime::preregister_variant(
-                                                      const TaskVariantRegistrar &registrar,
-                                                      const void *user_data, size_t user_data_size,
-                                                      CodeDescriptor *realm,
-                                                      bool has_ret, const char *task_name, bool check_id)
+                          const TaskVariantRegistrar &registrar,
+                          const void *user_data, size_t user_data_size,
+                          CodeDescriptor *realm, bool has_ret, 
+                          const char *task_name, VariantID vid, bool check_id)
     //--------------------------------------------------------------------------
     {
       // Report an error if the runtime has already started
@@ -19756,10 +19756,12 @@ continue;					\
 #endif
         exit(ERROR_MAX_APPLICATION_TASK_ID_EXCEEDED);
       }
-      std::deque<PendingVariantRegistration*> &pending_table =
-      get_pending_variant_table();
-      // Offset by the runtime tasks
-      VariantID vid = TASK_ID_AVAILABLE + pending_table.size();
+      std::deque<PendingVariantRegistration*> &pending_table = 
+        get_pending_variant_table();
+      // See if we need to pick a variant
+      if (vid == AUTO_GENERATE_ID)
+        // Offset by the runtime tasks
+        vid = TASK_ID_AVAILABLE + pending_table.size();
       pending_table.push_back(new PendingVariantRegistration(vid, has_ret,
                                                              registrar, user_data, user_data_size,
                                                              realm, task_name));
