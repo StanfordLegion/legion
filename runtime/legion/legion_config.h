@@ -394,6 +394,8 @@ typedef enum legion_error_t {
   ERROR_DUPLICATE_SHARDING_ID = 167,
   ERROR_INVALID_SHARDING_ID = 168,
   ERROR_MISSING_LOCAL_VARIABLE = 169,
+  ERROR_ACCESSOR_PRIVILEGE_CHECK = 170,
+  ERROR_ACCESSOR_BOUNDS_CHECK = 171,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well

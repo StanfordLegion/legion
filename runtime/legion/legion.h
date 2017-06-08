@@ -2083,8 +2083,9 @@ namespace Legion {
        * method instead. You can silence warnings about this blocking
        * call with the 'silence_warnings' parameter.
        */
-      LEGION_DEPRECATED("Requesting generic accessors are now deprecated. "
-                        "A field accessor should be requested instead.")
+      LEGION_DEPRECATED("All accessors in the LegionRuntime::Accessor "
+                        "namespace are now deprecated. FieldAccessor "
+                        "from the Legion namespace should be used now.")
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic> 
           get_accessor(bool silience_warnings = false) const;
@@ -2096,6 +2097,9 @@ namespace Legion {
        * You can silence warnings regarding this blocking call with
        * the 'silence_warnings' parameter.
        */
+      LEGION_DEPRECATED("All accessors in the LegionRuntime::Accessor "
+                        "namespace are now deprecated. FieldAccessor "
+                        "from the Legion namespace should be used now.")
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic> 
           get_field_accessor(FieldID field, 
@@ -2109,19 +2113,9 @@ namespace Legion {
        */
       void get_fields(std::vector<FieldID>& fields) const;
     public:
-      // These methods implement the interface needed by 
-      // templated type constructors for Realm accessors.
-      // This allows the user to pass a PhysicalRegion directly
-      // to a Realm accessor constructor. Users should never neeed
-      // to call these methods directly.
-      // Get the physical instance and offset for a particular field
-      Realm::RegionInstance get_instance(unsigned field_id, 
-          ptrdiff_t &field_offset, bool silence_warnings = false) const;
-      // Get the bounding index space for the instance
+#if __cplusplus < 201103L
       template<int DIM, typename COORD_T>
       Realm::ZIndexSpace<DIM,COORD_T> get_bounds(void) const;
-      // Get the privileges with which the accessor can be used 
-      Realm::AccessorPrivilege get_accessor_privileges(void) const;
       // We'll also allow this to implicitly cast to a realm index space
       // so that users can easily iterate over the points
       template<int DIM, typename COORD_T>
@@ -2130,8 +2124,68 @@ namespace Legion {
       // sparsity map, runtime will check for this
       template<int DIM, typename COORD_T>
       operator Realm::ZRect<DIM,COORD_T>(void) const;
+#else
+      template<int DIM, typename COORD_T>
+      DomainT<DIM,COORD_T> get_bounds(void) const;
+      // We'll also allow this to implicitly cast to a realm index space
+      // so that users can easily iterate over the points
+      template<int DIM, typename COORD_T>
+      operator DomainT<DIM,COORD_T>(void) const;
+      // They can implicitly cast to a rectangle if there is no
+      // sparsity map, runtime will check for this
+      template<int DIM, typename COORD_T>
+      operator Rect<DIM,COORD_T>(void) const;
+#endif
+    protected:
+      // These methods can only be accessed by the FieldAccessor class
+      template<PrivilegeMode, typename, int, typename, typename>
+      friend class FieldAccessor;
+      Realm::RegionInstance get_instance(PrivilegeMode mode, FieldID fid,
+                          ptrdiff_t &field_offset, bool silence_warnings, 
+                          ReductionOpID redop = 0) const;
+#ifdef BOUNDS_CHECKS
+      void fail_bounds_check(DomainPoint p, FieldID fid,
+                             PrivilegeMode mode) const;
+#endif
     protected:
       void get_bounds(void *realm_is, TypeTag type_tag) const;
+    };
+
+    /**
+     * \class FieldAccessor
+     * A field accessor is a class used to get access to the data 
+     * inside of a PhysicalRegion object for a specific field. The
+     * default version of this class is empty, but the following
+     * specializations of this class with different privilege modes
+     * will provide different methods specific to that privilege type
+     *
+     * READ_ONLY
+     *  - FT read(const Point<N,T>&) const
+     *  - const FT* ptr(const Point<N,T>&) const
+     *  - const FT& operator[](const Point<N,T>&) const
+     *
+     * READ_WRITE
+     *  - FT read(const Point<N,T>&) const
+     *  - void write(const Point<N,T>&, FT val) const
+     *  - FT* ptr(const Point<N,T>&) const
+     *  - FT& operator[](const Point<N,T>&) const
+     *  - template<typename REDOP> void reduce(const Point<N,T>&, REDOP::RHS);
+     *
+     *  WRITE_DISCARD
+     *  - void write(const Point<N,T>&, FT val) const
+     *  - FT* ptr(const Point<N,T>&) const
+     *  - FT& operator[](const Point<N,T>&) const
+     *
+     * REDUCE
+     *  - template<typename REDOP> void reduce(const Point<N,T>&, REDOP::RHS)
+     */
+    template<PrivilegeMode M, typename FT, int N, typename COORD_T = int,
+             typename A = Realm::AffineAccessor<FT,N,COORD_T> >
+    class FieldAccessor {
+    public:
+      FieldAccessor(void);
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    bool silence_warnings = false);
     };
 
     /**

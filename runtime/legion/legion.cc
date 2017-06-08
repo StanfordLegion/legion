@@ -2232,14 +2232,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Realm::RegionInstance PhysicalRegion::get_instance(unsigned field_id,
-                                 ptrdiff_t &offset, bool silence_warnings) const
-    //--------------------------------------------------------------------------
-    {
-      return impl->get_instance(field_id, offset, silence_warnings);
-    }
-
-    //--------------------------------------------------------------------------
     void PhysicalRegion::get_bounds(void *realm_is, TypeTag type_tag) const 
     //--------------------------------------------------------------------------
     {
@@ -2247,11 +2239,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Realm::AccessorPrivilege PhysicalRegion::get_accessor_privileges(void) const
+    Realm::RegionInstance PhysicalRegion::get_instance(PrivilegeMode mode,
+                               FieldID fid, ptrdiff_t &field_offset, 
+                               bool silence_warnings, ReductionOpID redop) const
     //--------------------------------------------------------------------------
     {
-      return impl->get_accessor_privileges();
+      return impl->get_instance(mode, fid, field_offset,silence_warnings,redop);
     }
+
+#ifdef BOUNDS_CHECKS
+    //--------------------------------------------------------------------------
+    void PhysicalRegion::fail_bounds_check(DomainPoint p, FieldID fid,
+                                           PrivilegeMode mode) const
+    //--------------------------------------------------------------------------
+    {
+      impl->fail_bounds_check(p, fid, mode);
+    }
+#endif
 
     /////////////////////////////////////////////////////////////
     // Index Iterator  

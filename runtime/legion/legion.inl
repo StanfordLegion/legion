@@ -289,6 +289,540 @@ namespace Legion {
 
     };
 
+    // Special namespace for providing multi-dimensional 
+    // array syntax on accessors 
+    namespace AccessorHelp {
+      // A small helper class that helps provide some syntactic sugar for
+      // indexing accessors like a multi-dimensional array 
+      template<typename A, typename FT, int N, typename T, 
+                int M, bool READ_ONLY>
+      class ArraySyntaxHelper {
+      public:
+        __CUDA_HD__
+        ArraySyntaxHelper(const A &acc, const Realm::ZPoint<M-1,T> &p)
+          : accessor(acc)
+        {
+          for (int i = 0; i < (M-1); i++)
+            point[i] = p[i];
+        }
+      public:
+        __CUDA_HD__
+        inline ArraySyntaxHelper<A,FT,N,T,M+1,READ_ONLY> operator[](T val)
+        {
+          point[M-1] = val;
+          return ArraySyntaxHelper<A,FT,N,T,M+1,READ_ONLY>(accessor, point);
+        }
+      public:
+        const A &accessor;
+        Realm::ZPoint<M,T> point;
+      };
+      // Specialization for M = N
+      template<typename A, typename FT, int N, typename T, bool RO>
+      class ArraySyntaxHelper<A,FT,N,T,N,RO> {
+      public:
+        __CUDA_HD__
+        ArraySyntaxHelper(const A &acc, const Realm::ZPoint<N-1,T> &p)
+          : accessor(acc)
+        {
+          for (int i = 0; i < (N-1); i++)
+            point[i] = p[i];
+        }
+      public:
+        __CUDA_HD__
+        inline FT& operator[](T val)
+        {
+          point[N-1] = val;
+          return accessor[point];
+        }
+      public:
+        const A &accessor;
+        Realm::ZPoint<N,T> point;
+      };
+      // Further specialization for M = N and read-only
+      template<typename A, typename FT, int N, typename T>
+      class ArraySyntaxHelper<A,FT,N,T,N,true> {
+      public:
+        __CUDA_HD__
+        ArraySyntaxHelper(const A &acc, const Realm::ZPoint<N-1,T> &p)
+          : accessor(acc)
+        {
+          for (int i = 0; i < (N-1); i++)
+            point[i] = p[i];
+        }
+      public:
+        __CUDA_HD__
+        inline const FT& operator[](T val)
+        {
+          point[N-1] = val;
+          return accessor[point];
+        }
+      public:
+        const A &accessor;
+        Realm::ZPoint<N,T> point;
+      };
+    };
+
+    // Read-only FieldAccessor specialization
+    template<typename FT, int N, typename T, typename A>
+    class FieldAccessor<READ_ONLY,FT,N,T,A> {
+    public:
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    bool silence_warnings = false)
+#ifdef BOUNDS_CHECKS
+        : field(fid), field_region(region), bounds(region)
+#endif
+      {
+        ptrdiff_t field_offset = 0;
+        accessor = A(region.get_instance(READ_ONLY, fid, field_offset,
+                                         silence_warnings), field_offset);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Realm::ZPoint<N,T>& p) const 
+        { 
+#ifdef BOUNDS_CHECKS
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+#endif
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline const FT* ptr(const Realm::ZPoint<N,T>& p) const
+        { 
+#ifdef BOUNDS_CHECKS
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+#endif
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline const FT& operator[](const Realm::ZPoint<N,T>& p) const
+        { 
+#ifdef BOUNDS_CHECKS
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+#endif
+          return accessor[p]; 
+        }
+      __CUDA_HD__
+      inline AccessorHelp::ArraySyntaxHelper<
+        FieldAccessor<READ_ONLY,FT,N,T,A>,FT,N,T,2,true/*read only*/>
+          operator[](T index) const
+      {
+        return AccessorHelp::ArraySyntaxHelper<
+          FieldAccessor<READ_ONLY,FT,N,T,A>,FT,N,T,2,true/*read only*/>(
+              *this, Realm::ZPoint<1,T>(index));
+      }
+    private:
+      A accessor;
+#ifdef BOUNDS_CHECKS
+#ifdef __CUDACC__
+#error "BOUNDS_CHECKS macro for FieldAccessor not supported for GPU code"
+#else
+      FieldID field;
+      PhysicalRegion field_region;
+      Realm::ZIndexSpace<N,T> bounds;
+#endif
+#endif
+    };
+
+    // Read-only FieldAccessor specialization 
+    // with N==1 to avoid array ambiguity
+    template<typename FT, typename T, typename A>
+    class FieldAccessor<READ_ONLY,FT,1,T,A> {
+    public:
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    bool silence_warnings = false)
+#ifdef BOUNDS_CHECKS
+        : field(fid), field_region(region), bounds(region)
+#endif
+      {
+        ptrdiff_t field_offset = 0;
+        accessor = A(region.get_instance(READ_ONLY, fid, field_offset,
+                                         silence_warnings), field_offset);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Realm::ZPoint<1,T>& p) const 
+        { 
+#ifdef BOUNDS_CHECKS
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+#endif
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline const FT* ptr(const Realm::ZPoint<1,T>& p) const
+        { 
+#ifdef BOUNDS_CHECKS
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+#endif
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline const FT& operator[](const Realm::ZPoint<1,T>& p) const
+        { 
+#ifdef BOUNDS_CHECKS
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+#endif
+          return accessor[p]; 
+        }
+    private:
+      A accessor;
+#ifdef BOUNDS_CHECKS
+#ifdef __CUDACC__
+#error "BOUNDS_CHECKS macro for FieldAccessor not supported for GPU code"
+#else
+      FieldID field;
+      PhysicalRegion field_region;
+      Realm::ZIndexSpace<1,T> bounds;
+#endif
+#endif
+    };
+
+    // Read-write FieldAccessor specialization
+    template<typename FT, int N, typename T, typename A>
+    class FieldAccessor<READ_WRITE,FT,N,T,A> {
+    public:
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    bool silence_warnings = false)
+#ifdef BOUNDS_CHECKS
+        : field(fid), field_region(region), bounds(region)
+#endif
+      {
+        ptrdiff_t field_offset = 0;
+        accessor = A(region.get_instance(READ_WRITE, fid, field_offset,
+                                         silence_warnings), field_offset);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Realm::ZPoint<N,T>& p) const
+        { 
+#ifdef BOUNDS_CHECKS
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+#endif
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline void write(const Realm::ZPoint<N,T>& p, FT val) const
+        { 
+#ifdef BOUNDS_CHECKS
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field,WRITE_DISCARD);
+#endif
+          accessor.write(p, val); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Realm::ZPoint<N,T>& p) const
+        { 
+#ifdef BOUNDS_CHECKS
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+#endif
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Realm::ZPoint<N,T>& p) const
+        { 
+#ifdef BOUNDS_CHECKS
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+#endif
+          return accessor[p]; 
+        }
+      __CUDA_HD__
+      inline AccessorHelp::ArraySyntaxHelper<
+        FieldAccessor<READ_WRITE,FT,N,T,A>,FT,N,T,2,false/*read only*/>
+          operator[](T index) const
+      {
+        return AccessorHelp::ArraySyntaxHelper<
+          FieldAccessor<READ_WRITE,FT,N,T,A>,FT,N,T,2,false/*read only*/>(
+              *this, Realm::ZPoint<1,T>(index));
+      }
+      template<typename REDOP> __CUDA_HD__
+      inline void reduce(const Realm::ZPoint<N,T>& p, 
+                         typename REDOP::RHS val) const
+        { 
+#ifdef BOUNDS_CHECKS
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, REDUCE);
+#endif
+          REDOP::apply(accessor[p], val);
+        }
+    private:
+      A accessor;
+#ifdef BOUNDS_CHECKS
+#ifdef __CUDACC__
+#error "BOUNDS_CHECKS macro for FieldAccessor not supported for GPU code"
+#else
+      FieldID field;
+      PhysicalRegion field_region;
+      Realm::ZIndexSpace<N,T> bounds;
+#endif
+#endif
+    };
+
+    // Read-write FieldAccessor specialization 
+    // with N==1 to avoid array ambiguity
+    template<typename FT, typename T, typename A>
+    class FieldAccessor<READ_WRITE,FT,1,T,A> {
+    public:
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    bool silence_warnings = false)
+#ifdef BOUNDS_CHECKS
+        : field(fid), field_region(region), bounds(region)
+#endif
+      {
+        ptrdiff_t field_offset = 0;
+        accessor = A(region.get_instance(READ_WRITE, fid, field_offset,
+                                         silence_warnings), field_offset);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Realm::ZPoint<1,T>& p) const
+        { 
+#ifdef BOUNDS_CHECKS
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+#endif
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline void write(const Realm::ZPoint<1,T>& p, FT val) const
+        { 
+#ifdef BOUNDS_CHECKS
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field,WRITE_DISCARD);
+#endif
+          accessor.write(p, val); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Realm::ZPoint<1,T>& p) const
+        { 
+#ifdef BOUNDS_CHECKS
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+#endif
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Realm::ZPoint<1,T>& p) const
+        { 
+#ifdef BOUNDS_CHECKS
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+#endif
+          return accessor[p]; 
+        }
+      template<typename REDOP> __CUDA_HD__
+      inline void reduce(const Realm::ZPoint<1,T>& p, 
+                         typename REDOP::RHS val) const
+        { 
+#ifdef BOUNDS_CHECKS
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, REDUCE);
+#endif
+          REDOP::apply(accessor[p], val);
+        }
+    private:
+      A accessor;
+#ifdef BOUNDS_CHECKS
+#ifdef __CUDACC__
+#error "BOUNDS_CHECKS macro for FieldAccessor not supported for GPU code"
+#else
+      FieldID field;
+      PhysicalRegion field_region;
+      Realm::ZIndexSpace<1,T> bounds;
+#endif
+#endif
+    };
+
+    // Write-discard FieldAccessor specialization
+    template<typename FT, int N, typename T, typename A>
+    class FieldAccessor<WRITE_DISCARD,FT,N,T,A> {
+    public:
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    bool silence_warnings = false)
+#ifdef BOUNDS_CHECKS
+        : field(fid), field_region(region), bounds(region)
+#endif
+      {
+        ptrdiff_t field_offset = 0;
+        accessor = A(region.get_instance(WRITE_DISCARD, fid, field_offset,
+                                         silence_warnings), field_offset);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Realm::ZPoint<N,T>& p) const
+        { 
+#ifdef BOUNDS_CHECKS
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+#endif
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline void write(const Realm::ZPoint<N,T>& p, FT val) const
+        { 
+#ifdef BOUNDS_CHECKS
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field,WRITE_DISCARD);
+#endif
+          accessor.write(p, val); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Realm::ZPoint<N,T>& p) const
+        { 
+#ifdef BOUNDS_CHECKS
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+#endif
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Realm::ZPoint<N,T>& p) const
+        { 
+#ifdef BOUNDS_CHECKS
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+#endif
+          return accessor[p]; 
+        }
+      __CUDA_HD__
+      inline AccessorHelp::ArraySyntaxHelper<
+        FieldAccessor<WRITE_DISCARD,FT,N,T,A>,FT,N,T,2,false/*read only*/>
+          operator[](T index) const
+      {
+        return AccessorHelp::ArraySyntaxHelper<
+          FieldAccessor<WRITE_DISCARD,FT,N,T,A>,FT,N,T,2,false/*read only*/>(
+              *this, Realm::ZPoint<1,T>(index));
+      }
+    private:
+      A accessor;
+#ifdef BOUNDS_CHECKS
+#ifdef __CUDACC__
+#error "BOUNDS_CHECKS macro for FieldAccessor not supported for GPU code"
+#else
+      FieldID field;
+      PhysicalRegion field_region;
+      Realm::ZIndexSpace<N,T> bounds;
+#endif
+#endif
+    };
+
+    // Write-discard FieldAccessor specialization with
+    // N == 1 to avoid array ambiguity
+    template<typename FT, typename T, typename A>
+    class FieldAccessor<WRITE_DISCARD,FT,1,T,A> {
+    public:
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    bool silence_warnings = false)
+#ifdef BOUNDS_CHECKS
+        : field(fid), field_region(region), bounds(region)
+#endif
+      {
+        ptrdiff_t field_offset = 0;
+        accessor = A(region.get_instance(WRITE_DISCARD, fid, field_offset,
+                                         silence_warnings), field_offset);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Realm::ZPoint<1,T>& p) const
+        { 
+#ifdef BOUNDS_CHECKS
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+#endif
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline void write(const Realm::ZPoint<1,T>& p, FT val) const
+        { 
+#ifdef BOUNDS_CHECKS
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field,WRITE_DISCARD);
+#endif
+          accessor.write(p, val); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Realm::ZPoint<1,T>& p) const
+        { 
+#ifdef BOUNDS_CHECKS
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+#endif
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Realm::ZPoint<1,T>& p) const
+        { 
+#ifdef BOUNDS_CHECKS
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+#endif
+          return accessor[p]; 
+        }
+    private:
+      A accessor;
+#ifdef BOUNDS_CHECKS
+#ifdef __CUDACC__
+#error "BOUNDS_CHECKS macro for FieldAccessor not supported for GPU code"
+#else
+      FieldID field;
+      PhysicalRegion field_region;
+      Realm::ZIndexSpace<1,T> bounds;
+#endif
+#endif
+    };
+
+    // Reduce FieldAccessor specialization
+    template<typename FT, int N, typename T, typename A>
+    class FieldAccessor<REDUCE,FT,N,T,A> {
+    public:
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    bool silence_warnings = false)
+#ifdef BOUNDS_CHECKS
+        : field(fid), field_region(region), bounds(region)
+#endif
+      {
+        ptrdiff_t field_offset = 0;
+        accessor = A(region.get_instance(REDUCE, fid, field_offset,
+                                         silence_warnings), field_offset);
+      }
+    public:
+      template<typename REDOP> __CUDA_HD__
+      inline void reduce(const Realm::ZPoint<N,T>& p, 
+                         typename REDOP::RHS val) const
+        { 
+#ifdef BOUNDS_CHECKS
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, REDUCE);
+#endif
+          REDOP::fold(accessor[p], val);
+        }
+    private:
+      A accessor;
+#ifdef BOUNDS_CHECKS
+#ifdef __CUDACC__
+#error "BOUNDS_CHECKS macro for FieldAccessor not supported for GPU code"
+#else
+      FieldID field;
+      PhysicalRegion field_region;
+      Realm::ZIndexSpace<N,T> bounds;
+#endif
+#endif
+    };
+
     //--------------------------------------------------------------------------
     inline IndexSpace& IndexSpace::operator=(const IndexSpace &rhs)
     //--------------------------------------------------------------------------

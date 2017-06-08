@@ -1379,7 +1379,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef BOUNDS_CHECKS
-      bounds = runtime->get_index_space_domain(req.region.get_index_space());
+      // A total hack just to keep old bounds checks working for now
+      bounds = runtime->forest->get_node(req.region.get_index_space())->
+        get_color_space_domain();
 #endif
     }
 
@@ -1827,12 +1829,104 @@ namespace Legion {
       return bounds.contains(dp);
     }
 #endif
-    
+
     //--------------------------------------------------------------------------
-    PhysicalInstance PhysicalRegionImpl::get_instance(unsigned fid,
-                                 ptrdiff_t &field_offset, bool silence_warnings)
+    void PhysicalRegionImpl::get_bounds(void *realm_is, TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
+      runtime->get_index_space_domain(req.region.get_index_space(),
+                                      realm_is, type_tag);
+    }
+    
+    //--------------------------------------------------------------------------
+    PhysicalInstance PhysicalRegionImpl::get_instance(PrivilegeMode mode,
+                                     FieldID fid, ptrdiff_t &field_offset, 
+                                     bool silence_warnings, ReductionOpID redop)
+    //--------------------------------------------------------------------------
+    {
+      // Check the privilege mode first
+      switch (mode)
+      {
+        case READ_ONLY:
+          {
+            if (!(READ_ONLY & req.privilege))
+            {
+              log_run.error("Error creating read-only field accessor without "
+                            "read-only privileges on field %d in task %s",
+                            fid, context->get_task_name());
+#ifdef DEBUG_LEGION
+              assert(false);
+#endif
+              exit(ERROR_ACCESSOR_PRIVILEGE_CHECK);
+            }
+            break;
+          }
+        case READ_WRITE:
+          {
+            if (req.privilege == WRITE_DISCARD)
+            {
+              if (!silence_warnings)
+                log_run.warning("WARNING: creating read-write accessor for "
+                                "field %d in task %s which only has "
+                                "WRITE_DISCARD privileges. You may be "
+                                "accessing uninitialized data.",
+                                fid, context->get_task_name());
+            }
+            else if (req.privilege != READ_WRITE)
+            {
+              log_run.error("Error creating read-write field accessor without "
+                            "read-write privileges on field %d in task %s",
+                            fid, context->get_task_name());
+#ifdef DEBUG_LEGION
+              assert(false);
+#endif
+              exit(ERROR_ACCESSOR_PRIVILEGE_CHECK);
+            }
+            break;
+          }
+        case WRITE_DISCARD:
+          {
+            if (!(WRITE_DISCARD & req.privilege))
+            {
+              log_run.error("Error creating write-discard field accessor "
+                            "without write privileges on field %d in task %s",
+                            fid, context->get_task_name());
+#ifdef DEBUG_LEGION
+              assert(false);
+#endif
+              exit(ERROR_ACCESSOR_PRIVILEGE_CHECK);
+            }
+            break;
+          }
+        case REDUCE:
+          {
+            if ((REDUCE != req.privilege) || (redop != req.redop))
+            {
+              if (!(REDUCE & req.privilege))
+                log_run.error("Error creating reduction field accessor "
+                              "without reduction privileges on field %d in "
+                              "task %s", fid, context->get_task_name());
+              else if (redop != req.redop)
+                log_run.error("Error creating reduction field accessor "
+                              "with mismatched reduction operators %d and %d "
+                              "on field %d in task %s", redop, req.redop,
+                              fid, context->get_task_name());
+              else
+                log_run.error("Error creating reduction-only field accessor "
+                              "for a region requirement with more than "
+                              "reduction-only privileges for field %d in task "
+                              "%s. Please use a read-write accessor instead.",
+                              fid, context->get_task_name());
+#ifdef DEBUG_LEGION
+              assert(false);
+#endif
+              exit(ERROR_ACCESSOR_PRIVILEGE_CHECK);
+            }
+            break;
+          }
+        default: // rest of the privileges don't matter
+          break;
+      }
       if (context != NULL)
       {
         if (context->is_inner_context())
@@ -1883,15 +1977,15 @@ namespace Legion {
       // Wait until we are valid before returning the accessor
       wait_until_valid(silence_warnings, 
                        Runtime::runtime_warnings, "Accessor Construction");
-#ifdef DEBUG_LEGION
       if (req.privilege_fields.find(fid) == req.privilege_fields.end())
       {
-        log_inst.error("Accessor construction for field %d "
-                       "without privileges!", fid);
+        log_inst.error("Accessor construction for field %d in task %s "
+                       "without privileges!", fid, context->get_task_name());
+#ifdef DEBUG_LEGION
         assert(false);
+#endif
         exit(ERROR_INVALID_FIELD_PRIVILEGES);
       }
-#endif
       made_accessor = true;
       for (unsigned idx = 0; idx < references.size(); idx++)
       {
@@ -1907,36 +2001,65 @@ namespace Legion {
       // error raised earlier in this function
       assert(false);
       return PhysicalInstance::NO_INST;
-    }
+    } 
 
+#ifdef BOUNDS_CHECKS
     //--------------------------------------------------------------------------
-    void PhysicalRegionImpl::get_bounds(void *realm_is, TypeTag type_tag)
+    void PhysicalRegionImpl::fail_bounds_check(DomainPoint p, FieldID fid,
+                                               PrivilegeMode mode)
     //--------------------------------------------------------------------------
     {
-      runtime->get_index_space_domain(req.region.get_index_space(),
-                                      realm_is, type_tag);
-    }
-
-    //--------------------------------------------------------------------------
-    Realm::AccessorPrivilege PhysicalRegionImpl::get_accessor_privileges(void)
-    //--------------------------------------------------------------------------
-    {
-      switch (req.privilege)
+      char point_string[128];
+      sprintf(point_string," (");
+      for (int d = 0; d < p.get_dim(); d++)
       {
-        case NO_ACCESS:
-          return Realm::ACCESSOR_PRIV_NONE;
-        case READ_ONLY:
-          return Realm::ACCESSOR_PRIV_READ;
-        case READ_WRITE:
-        case WRITE_DISCARD:
-          return Realm::ACCESSOR_PRIV_ALL;
-        case REDUCE:
-          return Realm::ACCESSOR_PRIV_REDUCE;
-        default:
-          assert(false); // should never get here
+        char buffer[32];
+        if (d == 0)
+          sprintf(buffer,"%lld", p[0]);
+        else
+          sprintf(buffer,",%lld", p[d]);
+        strcat(point_string, buffer);
       }
-      return Realm::ACCESSOR_PRIV_NONE;
+      strcat(point_string,")");
+      switch (mode)
+      {
+        case READ_ONLY:
+          {
+            log_run.error("Bounds check failure reading point %s from "
+                          "field %d in task %s\n", point_string, fid,
+                          context->get_task_name());
+            break;
+          }
+        case READ_WRITE:
+          {
+            log_run.error("Bounds check failure geting a reference to point %s "
+                          "from field %d in task %s\n", point_string, fid,
+                          context->get_task_name());
+            break;
+          }
+        case WRITE_DISCARD:
+          {
+            log_run.error("Bounds check failure writing to point %s in "
+                          "field %d in task %s\n", point_string, fid,
+                          context->get_task_name());
+            break;
+          }
+        case REDUCE:
+          {
+            log_run.error("Bounds check failure reducing to point %s in "
+                          "field %d in task %s\n", point_string, fid,
+                          context->get_task_name());
+            break;
+          }
+        default:
+          assert(false);
+      }
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_ACCESSOR_BOUNDS_CHECK);
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // Grant Impl 
@@ -20683,7 +20806,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::check_bounds(void *impl, const DomainPoint &dp)
+    /*static*/ void Runtime::check_bounds(void *impl, 
+                                          const Realm::DomainPoint &dp)
     //--------------------------------------------------------------------------
     {
       PhysicalRegionImpl *region = static_cast<PhysicalRegionImpl*>(impl);
