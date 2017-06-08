@@ -67,12 +67,10 @@ fspace fs
 task init(r : region(ispace(int2d), fs))
 where reads writes(r)
 do
-  var cnt = 0
   for e in r do
-    e._0 = 3 * cnt
-    e._1 = 3 * cnt + 1
-    e._2 = 3 * cnt + 2
-    cnt += 1
+    e._0 = (e.x + 1) * 100 + (e.y + 1) * 10 + 1
+    e._1 = (e.x + 1) * 100 + (e.y + 1) * 10 + 2
+    e._2 = (e.x + 1) * 100 + (e.y + 1) * 10 + 3
   end
 end
 
@@ -98,10 +96,24 @@ do
   var p2 = get_raw_ptr(__physical(r._1), __fields(r._1))
   var p3 = get_raw_ptr(__physical(r._2), __fields(r._2))
   c.printf("%p %p %p\n", p1, p2, p3)
+  var errors = 0
   for i = 0, 27 do
-    c.printf("%.0f ", p1[i])
+    -- layout not forced by ExternalMapper, defaults to SOA in DefaultMapper
+    -- SOA order: fastest..slowest = x, y, field
+    var exp_x = i % 3
+    var exp_y = (i / 3) % 3
+    var exp_f = i / 9
+    var exp_val = (exp_x + 1) * 100 + (exp_y + 1) * 10 + (exp_f + 1)
+    var act_val = p1[i]
+    if(exp_val == act_val) then
+      c.printf("%.0f ", act_val)
+    else
+      c.printf("%.0f(!=%d) ", act_val, exp_val)
+      errors += 1
+    end
   end
   c.printf("\n")
+  regentlib.assert(errors == 0, "mismatches in data")
 end
 
 __demand(__external)
@@ -113,10 +125,23 @@ do
   var p3 = get_raw_ptr(__physical(r._2), __fields(r._2))
   c.printf("=== aos_test ===\n")
   c.printf("%p %p %p\n", p1, p2, p3)
+  var errors = 0
   for i = 0, 27 do
-    c.printf("%.0f ", p1[i])
+    -- AOS order: fastest..slowest = field, x, y
+    var exp_f = i % 3
+    var exp_x = (i / 3) % 3
+    var exp_y = i / 9
+    var exp_val = (exp_x + 1) * 100 + (exp_y + 1) * 10 + (exp_f + 1)
+    var act_val = p1[i]
+    if(exp_val == act_val) then
+      c.printf("%.0f ", act_val)
+    else
+      c.printf("%.0f(!=%d) ", act_val, exp_val)
+      errors += 1
+    end
   end
   c.printf("\n")
+  regentlib.assert(errors == 0, "mismatches in data")
   aos_test_child(r)
 end
 
@@ -128,10 +153,23 @@ do
   var p3 = get_raw_ptr(__physical(r._2), __fields(r._2))
   c.printf("=== soa_test ===\n")
   c.printf("%p %p %p\n", p1, p2, p3)
+  var errors = 0
   for i = 0, 27 do
-    c.printf("%.0f ", p1[i])
+    -- SOA order: fastest..slowest = x, y, field
+    var exp_x = i % 3
+    var exp_y = (i / 3) % 3
+    var exp_f = i / 9
+    var exp_val = (exp_x + 1) * 100 + (exp_y + 1) * 10 + (exp_f + 1)
+    var act_val = p1[i]
+    if(exp_val == act_val) then
+      c.printf("%.0f ", act_val)
+    else
+      c.printf("%.0f(!=%d) ", act_val, exp_val)
+      errors += 1
+    end
   end
   c.printf("\n")
+  regentlib.assert(errors == 0, "mismatches in data")
 end
 
 task toplevel()
