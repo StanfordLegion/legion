@@ -84,8 +84,8 @@ terra get_raw_ptr(pr : c.legion_physical_region_t[1],
   var offsets : c.legion_byte_offset_t[2]
   rect.lo.x[0] = 0
   rect.lo.x[1] = 0
-  rect.hi.x[0] = 3
-  rect.hi.x[1] = 3
+  rect.hi.x[0] = 2
+  rect.hi.x[1] = 2
   var p = c.legion_accessor_generic_raw_rect_ptr_2d(fa, rect, &subrect, offsets)
   return [&float](p)
 end
