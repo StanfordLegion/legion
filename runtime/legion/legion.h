@@ -2134,9 +2134,10 @@ namespace Legion {
       // These methods can only be accessed by the FieldAccessor class
       template<PrivilegeMode, typename, int, typename, typename>
       friend class FieldAccessor;
-      Realm::RegionInstance get_instance(PrivilegeMode mode, FieldID fid,
-                          ptrdiff_t &field_offset, bool silence_warnings, 
-                          ReductionOpID redop = 0) const;
+      Realm::RegionInstance get_instance_info(PrivilegeMode mode, FieldID fid,
+                                      ptrdiff_t &field_offset, void *realm_is,
+                                      TypeTag type_tag, bool silence_warnings,
+                                      ReductionOpID redop = 0) const;
 #ifdef BOUNDS_CHECKS
       void fail_bounds_check(DomainPoint p, FieldID fid,
                              PrivilegeMode mode) const;
