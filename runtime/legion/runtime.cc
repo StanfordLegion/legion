@@ -1839,9 +1839,9 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    PhysicalInstance PhysicalRegionImpl::get_instance(PrivilegeMode mode,
-                                     FieldID fid, ptrdiff_t &field_offset, 
-                                     bool silence_warnings, ReductionOpID redop)
+    PhysicalInstance PhysicalRegionImpl::get_instance_info(PrivilegeMode mode,
+        FieldID fid, ptrdiff_t &field_offset, void *realm_is, TypeTag type_tag, 
+                                    bool silence_warnings, ReductionOpID redop)
     //--------------------------------------------------------------------------
     {
       // Check the privilege mode first
@@ -1974,9 +1974,6 @@ namespace Legion {
         assert(mapped);
 #endif 
       }
-      // Wait until we are valid before returning the accessor
-      wait_until_valid(silence_warnings, 
-                       Runtime::runtime_warnings, "Accessor Construction");
       if (req.privilege_fields.find(fid) == req.privilege_fields.end())
       {
         log_inst.error("Accessor construction for field %d in task %s "
@@ -1986,6 +1983,12 @@ namespace Legion {
 #endif
         exit(ERROR_INVALID_FIELD_PRIVILEGES);
       }
+      // Get the index space to use for the accessor
+      runtime->get_index_space_domain(req.region.get_index_space(),
+                                      realm_is, type_tag);
+      // Wait until we are valid before returning the accessor
+      wait_until_valid(silence_warnings, 
+                       Runtime::runtime_warnings, "Accessor Construction");
       made_accessor = true;
       for (unsigned idx = 0; idx < references.size(); idx++)
       {

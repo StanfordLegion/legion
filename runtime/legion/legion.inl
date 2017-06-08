@@ -373,9 +373,11 @@ namespace Legion {
         : field(fid), field_region(region), bounds(region)
 #endif
       {
-        ptrdiff_t field_offset = 0;
-        accessor = A(region.get_instance(READ_ONLY, fid, field_offset,
-                                         silence_warnings), field_offset);
+        ptrdiff_t field_offset; Realm::ZIndexSpace<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_ONLY, fid, field_offset, &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
+        accessor = A(instance, field_offset, is.bounds);
       }
     public:
       __CUDA_HD__
@@ -439,9 +441,11 @@ namespace Legion {
         : field(fid), field_region(region), bounds(region)
 #endif
       {
-        ptrdiff_t field_offset = 0;
-        accessor = A(region.get_instance(READ_ONLY, fid, field_offset,
-                                         silence_warnings), field_offset);
+        ptrdiff_t field_offset; Realm::ZIndexSpace<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_ONLY, fid, field_offset, &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
+        accessor = A(instance, field_offset, is.bounds);
       }
     public:
       __CUDA_HD__
@@ -495,9 +499,11 @@ namespace Legion {
         : field(fid), field_region(region), bounds(region)
 #endif
       {
-        ptrdiff_t field_offset = 0;
-        accessor = A(region.get_instance(READ_WRITE, fid, field_offset,
-                                         silence_warnings), field_offset);
+        ptrdiff_t field_offset; Realm::ZIndexSpace<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_WRITE, fid, field_offset, &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
+        accessor = A(instance, field_offset, is.bounds);
       }
     public:
       __CUDA_HD__
@@ -545,7 +551,7 @@ namespace Legion {
           FieldAccessor<READ_WRITE,FT,N,T,A>,FT,N,T,2,false/*read only*/>(
               *this, Realm::ZPoint<1,T>(index));
       }
-      template<typename REDOP> __CUDA_HD__
+      template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
       inline void reduce(const Realm::ZPoint<N,T>& p, 
                          typename REDOP::RHS val) const
         { 
@@ -553,7 +559,7 @@ namespace Legion {
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field, REDUCE);
 #endif
-          REDOP::apply(accessor[p], val);
+          REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     private:
       A accessor;
@@ -580,9 +586,11 @@ namespace Legion {
         : field(fid), field_region(region), bounds(region)
 #endif
       {
-        ptrdiff_t field_offset = 0;
-        accessor = A(region.get_instance(READ_WRITE, fid, field_offset,
-                                         silence_warnings), field_offset);
+        ptrdiff_t field_offset; Realm::ZIndexSpace<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_WRITE, fid, field_offset, &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
+        accessor = A(instance, field_offset, is.bounds);
       }
     public:
       __CUDA_HD__
@@ -621,7 +629,7 @@ namespace Legion {
 #endif
           return accessor[p]; 
         }
-      template<typename REDOP> __CUDA_HD__
+      template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
       inline void reduce(const Realm::ZPoint<1,T>& p, 
                          typename REDOP::RHS val) const
         { 
@@ -629,7 +637,7 @@ namespace Legion {
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field, REDUCE);
 #endif
-          REDOP::apply(accessor[p], val);
+          REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     private:
       A accessor;
@@ -655,9 +663,11 @@ namespace Legion {
         : field(fid), field_region(region), bounds(region)
 #endif
       {
-        ptrdiff_t field_offset = 0;
-        accessor = A(region.get_instance(WRITE_DISCARD, fid, field_offset,
-                                         silence_warnings), field_offset);
+        ptrdiff_t field_offset; Realm::ZIndexSpace<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(WRITE_DISCARD, fid, field_offset, &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
+        accessor = A(instance, field_offset, is.bounds);
       }
     public:
       __CUDA_HD__
@@ -730,9 +740,11 @@ namespace Legion {
         : field(fid), field_region(region), bounds(region)
 #endif
       {
-        ptrdiff_t field_offset = 0;
-        accessor = A(region.get_instance(WRITE_DISCARD, fid, field_offset,
-                                         silence_warnings), field_offset);
+        ptrdiff_t field_offset; Realm::ZIndexSpace<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(WRITE_DISCARD, fid, field_offset, &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
+        accessor = A(instance, field_offset, is.bounds);
       }
     public:
       __CUDA_HD__
@@ -790,17 +802,20 @@ namespace Legion {
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    bool silence_warnings = false)
+                    ReductionOpID redop, bool silence_warnings = false)
 #ifdef BOUNDS_CHECKS
         : field(fid), field_region(region), bounds(region)
 #endif
       {
-        ptrdiff_t field_offset = 0;
-        accessor = A(region.get_instance(REDUCE, fid, field_offset,
-                                         silence_warnings), field_offset);
+        ptrdiff_t field_offset; Realm::ZIndexSpace<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(REDUCE, fid, field_offset, &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              silence_warnings, redop);
+        accessor = A(instance, field_offset, is.bounds);
       }
     public:
-      template<typename REDOP> __CUDA_HD__
+      template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
       inline void reduce(const Realm::ZPoint<N,T>& p, 
                          typename REDOP::RHS val) const
         { 
@@ -808,7 +823,7 @@ namespace Legion {
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field, REDUCE);
 #endif
-          REDOP::fold(accessor[p], val);
+          REDOP::template fold<EXCLUSIVE>(accessor[p], val);
         }
     private:
       A accessor;

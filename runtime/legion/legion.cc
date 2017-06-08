@@ -2239,12 +2239,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Realm::RegionInstance PhysicalRegion::get_instance(PrivilegeMode mode,
-                               FieldID fid, ptrdiff_t &field_offset, 
-                               bool silence_warnings, ReductionOpID redop) const
+    Realm::RegionInstance PhysicalRegion::get_instance_info(PrivilegeMode mode,
+        FieldID fid, ptrdiff_t &field_offset, void *realm_is, TypeTag type_tag, 
+        bool silence_warnings, ReductionOpID redop) const
     //--------------------------------------------------------------------------
     {
-      return impl->get_instance(mode, fid, field_offset,silence_warnings,redop);
+      return impl->get_instance_info(mode, fid, field_offset, realm_is, 
+                                     type_tag, silence_warnings,redop);
     }
 
 #ifdef BOUNDS_CHECKS
