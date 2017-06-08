@@ -220,14 +220,12 @@ namespace Realm {
     void write(const ZPoint<N,T>& p, FT newval) const;
 
     __CUDA_HD__
-    FT& operator[](const ZPoint<N,T>& p);
-    __CUDA_HD__
-    const FT& operator[](const ZPoint<N,T>& p) const;
+    FT& operator[](const ZPoint<N,T>& p) const;
 
   //protected:
   //friend
   // std::ostream& operator<<(std::ostream& os, const AffineAccessor<FT,N,T>& a);
-#define REALM_ACCESSOR_DEBUG
+//#define REALM_ACCESSOR_DEBUG
 #ifdef REALM_ACCESSOR_DEBUG
     RegionInstance dbg_inst;
     ZRect<N,T> dbg_bounds;

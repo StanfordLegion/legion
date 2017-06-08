@@ -688,22 +688,12 @@ namespace Realm {
   }
 
   template <typename FT, int N, typename T> __CUDA_HD__
-  inline FT& AffineAccessor<FT,N,T>::operator[](const ZPoint<N,T>& p)
+  inline FT& AffineAccessor<FT,N,T>::operator[](const ZPoint<N,T>& p) const
   {
 #ifdef PRIVILEGE_CHECKS
-    assert(privileges & ACCESSOR_PRIV_ALL);
-#endif
-#ifdef BOUNDS_CHECKS
-    assert(bounds.contains(p));
-#endif
-    return *(this->get_ptr(p));
-  }
-
-  template <typename FT, int N, typename T> __CUDA_HD__
-  inline const FT& AffineAccessor<FT,N,T>::operator[](const ZPoint<N,T>& p) const
-  {
-#ifdef PRIVILEGE_CHECKS
-    assert(privileges & ACCESSOR_PRIV_READ);
+    // unsound for now until privilege checks are 
+    // done in the constructor using template specialization
+    assert(privileges & ACCESSOR_PRIV_READ); 
 #endif
 #ifdef BOUNDS_CHECKS
     assert(bounds.contains(p));
