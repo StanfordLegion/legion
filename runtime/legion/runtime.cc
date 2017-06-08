@@ -6846,9 +6846,9 @@ namespace Legion {
       // current runtime name and stride by the number of nodes
       VariantID result = runtime->address_space;
       if (result == 0) // Never use VariantID 0
-        result = runtime->total_address_spaces;
-      for ( ; result <= (UINT_MAX - runtime->total_address_spaces); 
-            result += runtime->total_address_spaces)
+        result = runtime->runtime_stride;
+      for ( ; result <= (UINT_MAX - runtime->runtime_stride); 
+            result += runtime->runtime_stride)
       {
         if (variants.find(result) != variants.end())
           continue;
@@ -8630,7 +8630,8 @@ namespace Legion {
         unique_operation_id((unique == 0) ? runtime_stride : unique),
         unique_field_id(MAX_APPLICATION_FIELD_ID + 
                         ((unique == 0) ? runtime_stride : unique)),
-        unique_code_descriptor_id(TASK_ID_AVAILABLE), // local to node
+        unique_code_descriptor_id(TASK_ID_AVAILABLE +
+                        ((unique == 0) ? runtime_stride : unique)),
         unique_constraint_id((unique == 0) ? runtime_stride : unique),
         unique_task_id(get_current_static_task_id()+unique),
         unique_mapper_id(get_current_static_mapper_id()+unique),
@@ -17793,9 +17794,8 @@ namespace Legion {
     CodeDescriptorID Runtime::get_unique_code_descriptor_id(void)
     //--------------------------------------------------------------------------
     {
-      // Code descriptors are a local thing so we only need to increment by 1
-      CodeDescriptorID result = 
-        __sync_fetch_and_add(&unique_code_descriptor_id, 1);
+      CodeDescriptorID result = __sync_fetch_and_add(&unique_code_descriptor_id,
+                                                     runtime_stride);
 #ifdef DEBUG_LEGION
       // check for overflow
       assert(result <= unique_code_descriptor_id);
