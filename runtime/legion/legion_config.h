@@ -596,6 +596,7 @@ typedef unsigned int legion_generator_id_t;
 typedef unsigned long long legion_distributed_id_t;
 typedef unsigned long legion_mapping_tag_id_t;
 typedef unsigned long legion_variant_id_t;
+typedef unsigned long legion_code_descriptor_id_t;
 typedef unsigned long legion_semantic_tag_t;
 typedef unsigned long long legion_unique_id_t;
 typedef unsigned long long legion_version_id_t;
