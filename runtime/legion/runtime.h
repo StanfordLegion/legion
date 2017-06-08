@@ -315,10 +315,13 @@ namespace Legion {
       bool contains_point(const DomainPoint &dp) const;
 #endif
     public:
-      PhysicalInstance get_instance(unsigned field_id,
-          ptrdiff_t &field_offset, bool silence_warnings);
       void get_bounds(void *realm_is, TypeTag type_tag);
-      Realm::AccessorPrivilege get_accessor_privileges(void);
+      PhysicalInstance get_instance(PrivilegeMode mode, FieldID fid, 
+          ptrdiff_t &offset, bool silence_warnings, ReductionOpID redop);
+#ifdef BOUNDS_CHECKS
+      void fail_bounds_check(DomainPoint p, FieldID fid,
+                             PrivilegeMode mode);
+#endif
     public:
       Runtime *const runtime;
       TaskContext *const context;
@@ -2869,7 +2872,7 @@ namespace Legion {
 #ifdef BOUNDS_CHECKS
     public:
       static void check_bounds(void *impl, ptr_t ptr);
-      static void check_bounds(void *impl, const DomainPoint &dp);
+      static void check_bounds(void *impl, const Realm::DomainPoint &dp);
 #endif
     private:
       static RtEvent register_runtime_tasks(RealmRuntime &realm);

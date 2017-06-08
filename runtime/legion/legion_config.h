@@ -373,6 +373,8 @@ typedef enum legion_error_t {
   ERROR_ILLEGAL_REMAP_IN_STATIC_TRACE = 163,
   ERROR_DYNAMIC_TYPE_MISMATCH = 164,
   ERROR_MISSING_LOCAL_VARIABLE = 165,
+  ERROR_ACCESSOR_PRIVILEGE_CHECK = 166,
+  ERROR_ACCESSOR_BOUNDS_CHECK = 167,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well
