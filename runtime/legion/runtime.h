@@ -1088,6 +1088,7 @@ namespace Legion {
     public:
       inline bool returns_value(void) const { return has_return_type; }
     public:
+      VariantID get_unique_variant_id(void);
       void add_variant(VariantImpl *impl);
       VariantImpl* find_variant_impl(VariantID variant_id, bool can_fail);
       void find_valid_variants(std::vector<VariantID> &valid_variants, 
@@ -1125,6 +1126,8 @@ namespace Legion {
       Reservation task_lock;
       std::map<VariantID,VariantImpl*> variants;
       std::map<VariantID,RtEvent> outstanding_requests;
+      // VariantIDs that we've handed out but haven't registered yet
+      std::set<VariantID> pending_variants;
       std::map<SemanticTag,SemanticInfo> semantic_infos;
       // Track whether all these variants have a return type or not
       bool has_return_type;
@@ -1185,6 +1188,7 @@ namespace Legion {
       const bool global; // globally valid variant
       const bool has_return_value; // has a return value
     public:
+      const CodeDescriptorID descriptor_id;
       CodeDescriptor *const realm_descriptor;
     private:
       ExecutionConstraintSet execution_constraints;
@@ -2532,7 +2536,7 @@ namespace Legion {
       RegionTreeID       get_unique_region_tree_id(void);
       UniqueID           get_unique_operation_id(void);
       FieldID            get_unique_field_id(void);
-      VariantID          get_unique_variant_id(void);
+      CodeDescriptorID   get_unique_code_descriptor_id(void);
       LayoutConstraintID get_unique_constraint_id(void);
     public:
       // Verify that a region requirement is valid
@@ -2677,7 +2681,7 @@ namespace Legion {
       unsigned unique_region_tree_id;
       unsigned unique_operation_id;
       unsigned unique_field_id; 
-      unsigned unique_variant_id;
+      unsigned unique_code_descriptor_id;
       unsigned unique_constraint_id;
       unsigned unique_task_id;
       unsigned unique_mapper_id;
