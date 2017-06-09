@@ -2006,7 +2006,6 @@ namespace Legion {
       return PhysicalInstance::NO_INST;
     } 
 
-#ifdef BOUNDS_CHECKS
     //--------------------------------------------------------------------------
     void PhysicalRegionImpl::fail_bounds_check(DomainPoint p, FieldID fid,
                                                PrivilegeMode mode)
@@ -2062,7 +2061,6 @@ namespace Legion {
 #endif
       exit(ERROR_ACCESSOR_BOUNDS_CHECK);
     }
-#endif
 
     /////////////////////////////////////////////////////////////
     // Grant Impl 
@@ -7224,8 +7222,7 @@ namespace Legion {
     PendingVariantRegistration::PendingVariantRegistration(VariantID v,
                                   bool has_ret, const TaskVariantRegistrar &reg,
                                   const void *udata, size_t udata_size,
-                                  CodeDescriptor *realm,
-                                  const char *task_name)
+                                  CodeDescriptor *realm, const char *task_name)
       : vid(v), has_return(has_ret), registrar(reg), 
         realm_desc(realm), logical_task_name(NULL)
     //--------------------------------------------------------------------------
@@ -7288,7 +7285,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       runtime->register_variant(registrar, user_data, user_data_size,
-                      realm_desc, has_return, vid, false/*check task*/);
+                    realm_desc, has_return, vid, false/*check task*/);
       // If we have a logical task name, attach the name info
       if (logical_task_name != NULL)
         runtime->attach_semantic_information(registrar.task_id, 
@@ -7369,6 +7366,30 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    VariantID TaskImpl::get_unique_variant_id(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(task_lock);
+      // VariantIDs have to uniquely identify our node so start at our
+      // current runtime name and stride by the number of nodes
+      VariantID result = runtime->address_space;
+      if (result == 0) // Never use VariantID 0
+        result = runtime->runtime_stride;
+      for ( ; result <= (UINT_MAX - runtime->runtime_stride); 
+            result += runtime->runtime_stride)
+      {
+        if (variants.find(result) != variants.end())
+          continue;
+        if (pending_variants.find(result) != pending_variants.end())
+          continue;
+        pending_variants.insert(result);
+        return result;
+      }
+      assert(false);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     void TaskImpl::add_variant(VariantImpl *impl)
     //--------------------------------------------------------------------------
     {
@@ -7412,6 +7433,8 @@ namespace Legion {
       variants[impl->vid] = impl;
       // Erase the outstanding request if there is one
       outstanding_requests.erase(impl->vid);
+      // Erase the pending VariantID if there is one
+      pending_variants.erase(impl->vid);
     }
 
     //--------------------------------------------------------------------------
@@ -7928,7 +7951,9 @@ namespace Legion {
                            CodeDescriptor *realm,
                            const void *udata /*=NULL*/, size_t udata_size/*=0*/)
       : vid(v), owner(own), runtime(rt), global(registrar.global_registration),
-        has_return_value(ret), realm_descriptor(realm),
+        has_return_value(ret), 
+        descriptor_id(runtime->get_unique_code_descriptor_id()),
+        realm_descriptor(realm),
         execution_constraints(registrar.execution_constraints),
         layout_constraints(registrar.layout_constraints),
         user_data_size(udata_size), leaf_variant(registrar.leaf_variant), 
@@ -7957,8 +7982,8 @@ namespace Legion {
       {
         Realm::ProfilingRequestSet profiling_requests;
         ready_event = ApEvent(Processor::register_task_by_kind(
-            get_processor_kind(true), false/*global*/, vid, *realm_descriptor,
-            profiling_requests, user_data, user_data_size));
+            get_processor_kind(true), false/*global*/, descriptor_id, 
+            *realm_descriptor, profiling_requests, user_data, user_data_size));
       }
       else
       {
@@ -7966,8 +7991,8 @@ namespace Legion {
         // for each processor
         Processor proc = Processor::get_executing_processor();
         Realm::ProfilingRequestSet profiling_requests;
-        ready_event = ApEvent(proc.register_task(vid, *realm_descriptor,
-            profiling_requests, user_data, user_data_size));
+        ready_event = ApEvent(proc.register_task(descriptor_id,
+            *realm_descriptor, profiling_requests, user_data, user_data_size));
       }
       // If we have a variant name, then record it
       if (registrar.task_variant_name == NULL)
@@ -8015,14 +8040,14 @@ namespace Legion {
       }
       if (Runtime::record_registration)
         log_run.print("Task variant %s of task %s (ID %d) has Realm ID %ld",
-                      variant_name, owner->get_name(), owner->task_id, vid);
+              variant_name, owner->get_name(), owner->task_id, descriptor_id);
     }
 
     //--------------------------------------------------------------------------
     VariantImpl::VariantImpl(const VariantImpl &rhs) 
       : vid(rhs.vid), owner(rhs.owner), runtime(rhs.runtime), 
         global(rhs.global), has_return_value(rhs.has_return_value),
-        realm_descriptor(rhs.realm_descriptor) 
+        descriptor_id(rhs.descriptor_id), realm_descriptor(rhs.realm_descriptor) 
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -8099,16 +8124,16 @@ namespace Legion {
         ApEvent pre = Runtime::merge_events(precondition, ready_event, 
                                             ApEvent(predicate_guard));
         // Have to protect the result in case it misspeculates
-        return Runtime::ignorefaults(
-              target.spawn(vid, &ctx, sizeof(ctx), requests, pre, priority));
+        return Runtime::ignorefaults(target.spawn(descriptor_id, 
+                    &ctx, sizeof(ctx), requests, pre, priority));
       }
       else
       {
         // No predicate guard
         if (!ready_event.has_triggered())
-          return ApEvent(target.spawn(vid, &ctx, sizeof(ctx), requests,
+          return ApEvent(target.spawn(descriptor_id, &ctx, sizeof(ctx),requests,
                    Runtime::merge_events(precondition, ready_event), priority));
-        return ApEvent(target.spawn(vid, &ctx, sizeof(ctx), requests, 
+        return ApEvent(target.spawn(descriptor_id, &ctx, sizeof(ctx), requests, 
                                     precondition, priority));
       }
     }
@@ -8321,7 +8346,7 @@ namespace Legion {
       registrar.layout_constraints.deserialize(derez);
       // Ask the runtime to perform the registration 
       runtime->register_variant(registrar, user_data, user_data_size,
-                    realm_desc, has_return, variant_id, false/*check task*/);
+              realm_desc, has_return, variant_id, false/*check task*/);
       Runtime::trigger_event(done);
     }
 
@@ -9386,8 +9411,7 @@ namespace Legion {
         mapper_runtime(new Legion::Mapping::MapperRuntime()),
         machine(m), address_space(unique), 
         total_address_spaces(address_spaces.size()),
-        runtime_stride((1/*normal set of nodes*/ + 
-              max_control_replication_contexts) * address_spaces.size()), 
+        runtime_stride(address_spaces.size()), 
         profiler(NULL), forest(new RegionTreeForest(this)), 
         has_explicit_utility_procs(!local_utilities.empty()), 
         prepared_for_shutdown(false),
@@ -9409,7 +9433,8 @@ namespace Legion {
         unique_operation_id((unique == 0) ? runtime_stride : unique),
         unique_field_id(MAX_APPLICATION_FIELD_ID + 
                         ((unique == 0) ? runtime_stride : unique)),
-        unique_variant_id((unique == 0) ? runtime_stride : unique),
+        unique_code_descriptor_id(TASK_ID_AVAILABLE +
+                        ((unique == 0) ? runtime_stride : unique)),
         unique_constraint_id((unique == 0) ? runtime_stride : unique),
         unique_control_replication_id((unique == 0) ? runtime_stride : unique),
         unique_task_id(get_current_static_task_id()+unique),
@@ -10062,8 +10087,6 @@ namespace Legion {
     {
       std::deque<PendingVariantRegistration*> &pending_variants = 
         get_pending_variant_table();
-      const size_t num_static_variants = 
-        TASK_ID_AVAILABLE + pending_variants.size();
       if (!pending_variants.empty())
       {
         for (std::deque<PendingVariantRegistration*>::const_iterator it =
@@ -10078,13 +10101,6 @@ namespace Legion {
         if (!Runtime::separate_runtime_instances)
           pending_variants.clear();
       }
-      // All the runtime instances registered the static variants
-      // starting at 1 and counting by 1, so just increment our
-      // unique_variant_id until it is greater than the
-      // number of static variants, no need to use atomics
-      // here since we are still initializing the runtime
-      while (unique_variant_id <= num_static_variants)
-        unique_variant_id += runtime_stride;
     }
 
     //--------------------------------------------------------------------------
@@ -13465,11 +13481,11 @@ namespace Legion {
         exit(ERROR_MAX_APPLICATION_TASK_ID_EXCEEDED);
       }
 #endif
-      // See if we need to make a new variant ID
-      if (vid == AUTO_GENERATE_ID) // Make a variant ID to use
-        vid = get_unique_variant_id();
       // First find the task implementation
       TaskImpl *task_impl = find_or_create_task_impl(registrar.task_id);
+      // See if we need to make a new variant ID
+      if (vid == AUTO_GENERATE_ID) // Make a variant ID to use
+        vid = task_impl->get_unique_variant_id();
       // Make our variant and add it to the set of variants
       VariantImpl *impl = new VariantImpl(this, vid, task_impl, 
                                           registrar, ret, realm,
@@ -19036,14 +19052,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    VariantID Runtime::get_unique_variant_id(void)
+    CodeDescriptorID Runtime::get_unique_code_descriptor_id(void)
     //--------------------------------------------------------------------------
     {
-      VariantID result = __sync_fetch_and_add(&unique_variant_id,
-                                              runtime_stride);
+      CodeDescriptorID result = __sync_fetch_and_add(&unique_code_descriptor_id,
+                                                     runtime_stride);
 #ifdef DEBUG_LEGION
       // check for overflow
-      assert(result <= unique_variant_id);
+      assert(result <= unique_code_descriptor_id);
 #endif
       return result;
     }
@@ -20746,7 +20762,7 @@ namespace Legion {
     /*static*/ VariantID Runtime::preregister_variant(
                           const TaskVariantRegistrar &registrar,
                           const void *user_data, size_t user_data_size,
-                          CodeDescriptor *realm, bool has_ret, 
+                          CodeDescriptor *code_desc, bool has_ret, 
                           const char *task_name, VariantID vid, bool check_id)
     //--------------------------------------------------------------------------
     {
@@ -20776,11 +20792,11 @@ namespace Legion {
         get_pending_variant_table();
       // See if we need to pick a variant
       if (vid == AUTO_GENERATE_ID)
-        // Offset by the runtime tasks
-        vid = TASK_ID_AVAILABLE + pending_table.size();
+        vid = pending_table.size() + 1;
+      // Offset by the runtime tasks
       pending_table.push_back(new PendingVariantRegistration(vid, has_ret,
                               registrar, user_data, user_data_size, 
-                              realm, task_name));
+                              code_desc, task_name));
       return vid;
     }
 

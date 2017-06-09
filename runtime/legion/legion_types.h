@@ -111,7 +111,8 @@ namespace Legion {
   class FutureMap;
   class Predicate;
   class PhysicalRegion;
-  template<PrivilegeMode,typename,int,typename,typename> class FieldAccessor;
+  template<PrivilegeMode,typename,int,typename,typename,bool> 
+    class FieldAccessor;
   class IndexIterator;
   template<typename T> struct ColoredPoints; 
   struct InputArgs;
@@ -1654,6 +1655,7 @@ namespace Legion {
   typedef ::legion_mapping_tag_id_t MappingTagID;
   typedef ::legion_semantic_tag_t SemanticTag;
   typedef ::legion_variant_id_t VariantID;
+  typedef ::legion_code_descriptor_id_t CodeDescriptorID;
   typedef ::legion_unique_id_t UniqueID;
   typedef ::legion_version_id_t VersionID;
   typedef ::legion_projection_epoch_id_t ProjectionEpochID;

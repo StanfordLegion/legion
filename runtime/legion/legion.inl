@@ -363,15 +363,12 @@ namespace Legion {
     };
 
     // Read-only FieldAccessor specialization
-    template<typename FT, int N, typename T, typename A>
-    class FieldAccessor<READ_ONLY,FT,N,T,A> {
+    template<typename FT, int N, typename T, typename A, bool CB>
+    class FieldAccessor<READ_ONLY,FT,N,T,A,CB> {
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
-#ifdef BOUNDS_CHECKS
-        : field(fid), field_region(region), bounds(region)
-#endif
       {
         ptrdiff_t field_offset; Realm::ZIndexSpace<N,T> is;
         const Realm::RegionInstance instance = 
@@ -383,7 +380,62 @@ namespace Legion {
       __CUDA_HD__
       inline FT read(const Realm::ZPoint<N,T>& p) const 
         { 
-#ifdef BOUNDS_CHECKS
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline const FT* ptr(const Realm::ZPoint<N,T>& p) const
+        { 
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline const FT& operator[](const Realm::ZPoint<N,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+      __CUDA_HD__
+      inline AccessorHelp::ArraySyntaxHelper<
+        FieldAccessor<READ_ONLY,FT,N,T,A>,FT,N,T,2,true/*read only*/>
+          operator[](T index) const
+      {
+        return AccessorHelp::ArraySyntaxHelper<
+          FieldAccessor<READ_ONLY,FT,N,T,A>,FT,N,T,2,true/*read only*/>(
+              *this, Realm::ZPoint<1,T>(index));
+      }
+    private:
+      A accessor;
+    };
+
+    // Read-only FieldAccessor specialization
+    // with bounds checks
+    template<typename FT, int N, typename T, typename A>
+    class FieldAccessor<READ_ONLY,FT,N,T,A,true> {
+    public:
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    bool silence_warnings = false)
+        : field(fid), field_region(region), 
+          bounds(region.template get_bounds<N,T>()),
+          gpu_warning(!silence_warnings)
+      {
+        ptrdiff_t field_offset; Realm::ZIndexSpace<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_ONLY, fid, field_offset, &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
+        accessor = A(instance, field_offset, is.bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Realm::ZPoint<N,T>& p) const 
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
 #endif
@@ -392,7 +444,15 @@ namespace Legion {
       __CUDA_HD__
       inline const FT* ptr(const Realm::ZPoint<N,T>& p) const
         { 
-#ifdef BOUNDS_CHECKS
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
 #endif
@@ -401,7 +461,15 @@ namespace Legion {
       __CUDA_HD__
       inline const FT& operator[](const Realm::ZPoint<N,T>& p) const
         { 
-#ifdef BOUNDS_CHECKS
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
 #endif
@@ -418,28 +486,20 @@ namespace Legion {
       }
     private:
       A accessor;
-#ifdef BOUNDS_CHECKS
-#ifdef __CUDACC__
-#error "BOUNDS_CHECKS macro for FieldAccessor not supported for GPU code"
-#else
       FieldID field;
       PhysicalRegion field_region;
       Realm::ZIndexSpace<N,T> bounds;
-#endif
-#endif
+      mutable bool gpu_warning;
     };
 
     // Read-only FieldAccessor specialization 
     // with N==1 to avoid array ambiguity
-    template<typename FT, typename T, typename A>
-    class FieldAccessor<READ_ONLY,FT,1,T,A> {
+    template<typename FT, typename T, typename A, bool CB>
+    class FieldAccessor<READ_ONLY,FT,1,T,A,CB> {
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
-#ifdef BOUNDS_CHECKS
-        : field(fid), field_region(region), bounds(region)
-#endif
       {
         ptrdiff_t field_offset; Realm::ZIndexSpace<1,T> is;
         const Realm::RegionInstance instance = 
@@ -451,7 +511,53 @@ namespace Legion {
       __CUDA_HD__
       inline FT read(const Realm::ZPoint<1,T>& p) const 
         { 
-#ifdef BOUNDS_CHECKS
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline const FT* ptr(const Realm::ZPoint<1,T>& p) const
+        { 
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline const FT& operator[](const Realm::ZPoint<1,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+    private:
+      A accessor;
+    };
+
+    // Read-only FieldAccessor specialization 
+    // with N==1 to avoid array ambiguity and bounds checks
+    template<typename FT, typename T, typename A>
+    class FieldAccessor<READ_ONLY,FT,1,T,A,true> {
+    public:
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    bool silence_warnings = false)
+        : field(fid), field_region(region), 
+          bounds(region.template get_bounds<1,T>()), 
+          gpu_warning(!silence_warnings)
+      {
+        ptrdiff_t field_offset; Realm::ZIndexSpace<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_ONLY, fid, field_offset, &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
+        accessor = A(instance, field_offset, is.bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Realm::ZPoint<1,T>& p) const 
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
 #endif
@@ -460,7 +566,15 @@ namespace Legion {
       __CUDA_HD__
       inline const FT* ptr(const Realm::ZPoint<1,T>& p) const
         { 
-#ifdef BOUNDS_CHECKS
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
 #endif
@@ -469,7 +583,15 @@ namespace Legion {
       __CUDA_HD__
       inline const FT& operator[](const Realm::ZPoint<1,T>& p) const
         { 
-#ifdef BOUNDS_CHECKS
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
 #endif
@@ -477,27 +599,19 @@ namespace Legion {
         }
     private:
       A accessor;
-#ifdef BOUNDS_CHECKS
-#ifdef __CUDACC__
-#error "BOUNDS_CHECKS macro for FieldAccessor not supported for GPU code"
-#else
       FieldID field;
       PhysicalRegion field_region;
       Realm::ZIndexSpace<1,T> bounds;
-#endif
-#endif
+      mutable bool gpu_warning;
     };
 
     // Read-write FieldAccessor specialization
-    template<typename FT, int N, typename T, typename A>
-    class FieldAccessor<READ_WRITE,FT,N,T,A> {
+    template<typename FT, int N, typename T, typename A, bool CB>
+    class FieldAccessor<READ_WRITE,FT,N,T,A,CB> {
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
-#ifdef BOUNDS_CHECKS
-        : field(fid), field_region(region), bounds(region)
-#endif
       {
         ptrdiff_t field_offset; Realm::ZIndexSpace<N,T> is;
         const Realm::RegionInstance instance = 
@@ -509,37 +623,21 @@ namespace Legion {
       __CUDA_HD__
       inline FT read(const Realm::ZPoint<N,T>& p) const
         { 
-#ifdef BOUNDS_CHECKS
-          if (!bounds.contains(p)) 
-            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
-#endif
           return accessor.read(p); 
         }
       __CUDA_HD__
       inline void write(const Realm::ZPoint<N,T>& p, FT val) const
         { 
-#ifdef BOUNDS_CHECKS
-          if (!bounds.contains(p)) 
-            field_region.fail_bounds_check(DomainPoint(p), field,WRITE_DISCARD);
-#endif
           accessor.write(p, val); 
         }
       __CUDA_HD__
       inline FT* ptr(const Realm::ZPoint<N,T>& p) const
         { 
-#ifdef BOUNDS_CHECKS
-          if (!bounds.contains(p)) 
-            field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
-#endif
           return accessor.ptr(p); 
         }
       __CUDA_HD__
       inline FT& operator[](const Realm::ZPoint<N,T>& p) const
         { 
-#ifdef BOUNDS_CHECKS
-          if (!bounds.contains(p)) 
-            field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
-#endif
           return accessor[p]; 
         }
       __CUDA_HD__
@@ -555,7 +653,121 @@ namespace Legion {
       inline void reduce(const Realm::ZPoint<N,T>& p, 
                          typename REDOP::RHS val) const
         { 
-#ifdef BOUNDS_CHECKS
+          REDOP::template apply<EXCLUSIVE>(accessor[p], val);
+        }
+    private:
+      A accessor;
+    };
+
+    // Read-write FieldAccessor specialization
+    // with bounds checks
+    template<typename FT, int N, typename T, typename A>
+    class FieldAccessor<READ_WRITE,FT,N,T,A,true> {
+    public:
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    bool silence_warnings = false)
+        : field(fid), field_region(region), 
+          bounds(region.template get_bounds<N,T>()),
+          gpu_warning(!silence_warnings)
+      {
+        ptrdiff_t field_offset; Realm::ZIndexSpace<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_WRITE, fid, field_offset, &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
+        accessor = A(instance, field_offset, is.bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Realm::ZPoint<N,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+#endif
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline void write(const Realm::ZPoint<N,T>& p, FT val) const
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field,WRITE_DISCARD);
+#endif
+          accessor.write(p, val); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Realm::ZPoint<N,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+#endif
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Realm::ZPoint<N,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+#endif
+          return accessor[p]; 
+        }
+      __CUDA_HD__
+      inline AccessorHelp::ArraySyntaxHelper<
+        FieldAccessor<READ_WRITE,FT,N,T,A>,FT,N,T,2,false/*read only*/>
+          operator[](T index) const
+      {
+        return AccessorHelp::ArraySyntaxHelper<
+          FieldAccessor<READ_WRITE,FT,N,T,A>,FT,N,T,2,false/*read only*/>(
+              *this, Realm::ZPoint<1,T>(index));
+      }
+      template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__ 
+      inline void reduce(const Realm::ZPoint<N,T>& p, 
+                         typename REDOP::RHS val) const
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field, REDUCE);
 #endif
@@ -563,28 +775,20 @@ namespace Legion {
         }
     private:
       A accessor;
-#ifdef BOUNDS_CHECKS
-#ifdef __CUDACC__
-#error "BOUNDS_CHECKS macro for FieldAccessor not supported for GPU code"
-#else
       FieldID field;
       PhysicalRegion field_region;
       Realm::ZIndexSpace<N,T> bounds;
-#endif
-#endif
+      mutable bool gpu_warning;
     };
 
     // Read-write FieldAccessor specialization 
     // with N==1 to avoid array ambiguity
-    template<typename FT, typename T, typename A>
-    class FieldAccessor<READ_WRITE,FT,1,T,A> {
+    template<typename FT, typename T, typename A, bool CB>
+    class FieldAccessor<READ_WRITE,FT,1,T,A,CB> {
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
-#ifdef BOUNDS_CHECKS
-        : field(fid), field_region(region), bounds(region)
-#endif
       {
         ptrdiff_t field_offset; Realm::ZIndexSpace<1,T> is;
         const Realm::RegionInstance instance = 
@@ -596,7 +800,64 @@ namespace Legion {
       __CUDA_HD__
       inline FT read(const Realm::ZPoint<1,T>& p) const
         { 
-#ifdef BOUNDS_CHECKS
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline void write(const Realm::ZPoint<1,T>& p, FT val) const
+        { 
+          accessor.write(p, val); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Realm::ZPoint<1,T>& p) const
+        { 
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Realm::ZPoint<1,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+      template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
+      inline void reduce(const Realm::ZPoint<1,T>& p, 
+                         typename REDOP::RHS val) const
+        { 
+          REDOP::template apply<EXCLUSIVE>(accessor[p], val);
+        }
+    private:
+      A accessor;
+    };
+
+    // Read-write FieldAccessor specialization 
+    // with N==1 to avoid array ambiguity and bounds checks
+    template<typename FT, typename T, typename A>
+    class FieldAccessor<READ_WRITE,FT,1,T,A,true> {
+    public:
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    bool silence_warnings = false)
+        : field(fid), field_region(region), 
+          bounds(region.template get_bounds<1,T>()),
+          gpu_warning(!silence_warnings)
+      {
+        ptrdiff_t field_offset; Realm::ZIndexSpace<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_WRITE, fid, field_offset, &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
+        accessor = A(instance, field_offset, is.bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Realm::ZPoint<1,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
 #endif
@@ -605,7 +866,15 @@ namespace Legion {
       __CUDA_HD__
       inline void write(const Realm::ZPoint<1,T>& p, FT val) const
         { 
-#ifdef BOUNDS_CHECKS
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field,WRITE_DISCARD);
 #endif
@@ -614,7 +883,15 @@ namespace Legion {
       __CUDA_HD__
       inline FT* ptr(const Realm::ZPoint<1,T>& p) const
         { 
-#ifdef BOUNDS_CHECKS
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
 #endif
@@ -623,7 +900,15 @@ namespace Legion {
       __CUDA_HD__
       inline FT& operator[](const Realm::ZPoint<1,T>& p) const
         { 
-#ifdef BOUNDS_CHECKS
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
 #endif
@@ -633,7 +918,15 @@ namespace Legion {
       inline void reduce(const Realm::ZPoint<1,T>& p, 
                          typename REDOP::RHS val) const
         { 
-#ifdef BOUNDS_CHECKS
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field, REDUCE);
 #endif
@@ -641,27 +934,19 @@ namespace Legion {
         }
     private:
       A accessor;
-#ifdef BOUNDS_CHECKS
-#ifdef __CUDACC__
-#error "BOUNDS_CHECKS macro for FieldAccessor not supported for GPU code"
-#else
       FieldID field;
       PhysicalRegion field_region;
       Realm::ZIndexSpace<1,T> bounds;
-#endif
-#endif
+      mutable bool gpu_warning;
     };
 
     // Write-discard FieldAccessor specialization
-    template<typename FT, int N, typename T, typename A>
-    class FieldAccessor<WRITE_DISCARD,FT,N,T,A> {
+    template<typename FT, int N, typename T, typename A, bool CB>
+    class FieldAccessor<WRITE_DISCARD,FT,N,T,A,CB> {
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
-#ifdef BOUNDS_CHECKS
-        : field(fid), field_region(region), bounds(region)
-#endif
       {
         ptrdiff_t field_offset; Realm::ZIndexSpace<N,T> is;
         const Realm::RegionInstance instance = 
@@ -673,7 +958,67 @@ namespace Legion {
       __CUDA_HD__
       inline FT read(const Realm::ZPoint<N,T>& p) const
         { 
-#ifdef BOUNDS_CHECKS
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline void write(const Realm::ZPoint<N,T>& p, FT val) const
+        { 
+          accessor.write(p, val); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Realm::ZPoint<N,T>& p) const
+        { 
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Realm::ZPoint<N,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+      __CUDA_HD__
+      inline AccessorHelp::ArraySyntaxHelper<
+        FieldAccessor<WRITE_DISCARD,FT,N,T,A>,FT,N,T,2,false/*read only*/>
+          operator[](T index) const
+      {
+        return AccessorHelp::ArraySyntaxHelper<
+          FieldAccessor<WRITE_DISCARD,FT,N,T,A>,FT,N,T,2,false/*read only*/>(
+              *this, Realm::ZPoint<1,T>(index));
+      }
+    private:
+      A accessor;
+    };
+
+    // Write-discard FieldAccessor specialization
+    // with bounds checks
+    template<typename FT, int N, typename T, typename A>
+    class FieldAccessor<WRITE_DISCARD,FT,N,T,A,true> {
+    public:
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    bool silence_warnings = false)
+        : field(fid), field_region(region), 
+          bounds(region.template get_bounds<N,T>()),
+          gpu_warning(!silence_warnings)
+      {
+        ptrdiff_t field_offset; Realm::ZIndexSpace<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(WRITE_DISCARD, fid, field_offset, &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
+        accessor = A(instance, field_offset, is.bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Realm::ZPoint<N,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
 #endif
@@ -682,7 +1027,15 @@ namespace Legion {
       __CUDA_HD__
       inline void write(const Realm::ZPoint<N,T>& p, FT val) const
         { 
-#ifdef BOUNDS_CHECKS
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field,WRITE_DISCARD);
 #endif
@@ -691,7 +1044,15 @@ namespace Legion {
       __CUDA_HD__
       inline FT* ptr(const Realm::ZPoint<N,T>& p) const
         { 
-#ifdef BOUNDS_CHECKS
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
 #endif
@@ -700,7 +1061,15 @@ namespace Legion {
       __CUDA_HD__
       inline FT& operator[](const Realm::ZPoint<N,T>& p) const
         { 
-#ifdef BOUNDS_CHECKS
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
 #endif
@@ -717,28 +1086,20 @@ namespace Legion {
       }
     private:
       A accessor;
-#ifdef BOUNDS_CHECKS
-#ifdef __CUDACC__
-#error "BOUNDS_CHECKS macro for FieldAccessor not supported for GPU code"
-#else
       FieldID field;
       PhysicalRegion field_region;
       Realm::ZIndexSpace<N,T> bounds;
-#endif
-#endif
+      mutable bool gpu_warning;
     };
 
     // Write-discard FieldAccessor specialization with
     // N == 1 to avoid array ambiguity
-    template<typename FT, typename T, typename A>
-    class FieldAccessor<WRITE_DISCARD,FT,1,T,A> {
+    template<typename FT, typename T, typename A, bool CB>
+    class FieldAccessor<WRITE_DISCARD,FT,1,T,A,CB> {
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
-#ifdef BOUNDS_CHECKS
-        : field(fid), field_region(region), bounds(region)
-#endif
       {
         ptrdiff_t field_offset; Realm::ZIndexSpace<1,T> is;
         const Realm::RegionInstance instance = 
@@ -750,7 +1111,58 @@ namespace Legion {
       __CUDA_HD__
       inline FT read(const Realm::ZPoint<1,T>& p) const
         { 
-#ifdef BOUNDS_CHECKS
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline void write(const Realm::ZPoint<1,T>& p, FT val) const
+        { 
+          accessor.write(p, val); 
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Realm::ZPoint<1,T>& p) const
+        { 
+          return accessor.ptr(p); 
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Realm::ZPoint<1,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+    private:
+      A accessor;
+    };
+
+    // Write-discard FieldAccessor specialization with
+    // N == 1 to avoid array ambiguity and bounds checks
+    template<typename FT, typename T, typename A>
+    class FieldAccessor<WRITE_DISCARD,FT,1,T,A,true> {
+    public:
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    bool silence_warnings = false)
+        : field(fid), field_region(region), 
+          bounds(region.template get_bounds<1,T>()),
+          gpu_warning(!silence_warnings)
+      {
+        ptrdiff_t field_offset; Realm::ZIndexSpace<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(WRITE_DISCARD, fid, field_offset, &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
+        accessor = A(instance, field_offset, is.bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Realm::ZPoint<1,T>& p) const
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
 #endif
@@ -759,7 +1171,15 @@ namespace Legion {
       __CUDA_HD__
       inline void write(const Realm::ZPoint<1,T>& p, FT val) const
         { 
-#ifdef BOUNDS_CHECKS
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field,WRITE_DISCARD);
 #endif
@@ -768,7 +1188,15 @@ namespace Legion {
       __CUDA_HD__
       inline FT* ptr(const Realm::ZPoint<1,T>& p) const
         { 
-#ifdef BOUNDS_CHECKS
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
 #endif
@@ -777,7 +1205,15 @@ namespace Legion {
       __CUDA_HD__
       inline FT& operator[](const Realm::ZPoint<1,T>& p) const
         { 
-#ifdef BOUNDS_CHECKS
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
 #endif
@@ -785,27 +1221,19 @@ namespace Legion {
         }
     private:
       A accessor;
-#ifdef BOUNDS_CHECKS
-#ifdef __CUDACC__
-#error "BOUNDS_CHECKS macro for FieldAccessor not supported for GPU code"
-#else
       FieldID field;
       PhysicalRegion field_region;
       Realm::ZIndexSpace<1,T> bounds;
-#endif
-#endif
+      mutable bool gpu_warning;
     };
 
     // Reduce FieldAccessor specialization
-    template<typename FT, int N, typename T, typename A>
-    class FieldAccessor<REDUCE,FT,N,T,A> {
+    template<typename FT, int N, typename T, typename A, bool CB>
+    class FieldAccessor<REDUCE,FT,N,T,A,CB> {
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     ReductionOpID redop, bool silence_warnings = false)
-#ifdef BOUNDS_CHECKS
-        : field(fid), field_region(region), bounds(region)
-#endif
       {
         ptrdiff_t field_offset; Realm::ZIndexSpace<N,T> is;
         const Realm::RegionInstance instance = 
@@ -819,7 +1247,44 @@ namespace Legion {
       inline void reduce(const Realm::ZPoint<N,T>& p, 
                          typename REDOP::RHS val) const
         { 
-#ifdef BOUNDS_CHECKS
+          REDOP::template fold<EXCLUSIVE>(accessor[p], val);
+        }
+    private:
+      A accessor;
+    };
+
+    // Reduce FieldAccessor specialization with bounds checks
+    template<typename FT, int N, typename T, typename A>
+    class FieldAccessor<REDUCE,FT,N,T,A,true> {
+    public:
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    ReductionOpID redop, bool silence_warnings = false)
+        : field(fid), field_region(region), 
+          bounds(region.template get_bounds<N,T>()),
+          gpu_warning(!silence_warnings)
+      {
+        ptrdiff_t field_offset; Realm::ZIndexSpace<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(REDUCE, fid, field_offset, &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              silence_warnings, redop);
+        accessor = A(instance, field_offset, is.bounds);
+      }
+    public:
+      template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__ 
+      inline void reduce(const Realm::ZPoint<N,T>& p, 
+                         typename REDOP::RHS val) const
+        { 
+#ifdef __CUDA_ARCH__
+          if (gpu_warning)
+          {
+            if (!bounds.dense())
+              printf("WARNING: GPU bounds check is imprecise\n");
+            gpu_warning = false;
+          }
+          assert(bounds.bounds.contains(p));
+#else
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field, REDUCE);
 #endif
@@ -827,15 +1292,10 @@ namespace Legion {
         }
     private:
       A accessor;
-#ifdef BOUNDS_CHECKS
-#ifdef __CUDACC__
-#error "BOUNDS_CHECKS macro for FieldAccessor not supported for GPU code"
-#else
       FieldID field;
       PhysicalRegion field_region;
       Realm::ZIndexSpace<N,T> bounds;
-#endif
-#endif
+      mutable bool gpu_warning;
     };
 
     //--------------------------------------------------------------------------

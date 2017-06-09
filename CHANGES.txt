@@ -12,6 +12,7 @@ Version 17.05.0 (May 26, 2017
   * Realm
     - Switched to new DMA engine
     - Initial support for OpenMP "processors". Compile with USE_OPENMP
+        and run with flags -ll:ocpu and -ll:othr.
   * Regent
     - Added support running normal tasks on I/O processors
     - Added support for OpenMP code generation via __demand(__openmp)
