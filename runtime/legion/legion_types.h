@@ -111,7 +111,8 @@ namespace Legion {
   class FutureMap;
   class Predicate;
   class PhysicalRegion;
-  template<PrivilegeMode,typename,int,typename,typename> class FieldAccessor;
+  template<PrivilegeMode,typename,int,typename,typename,bool> 
+    class FieldAccessor;
   class IndexIterator;
   template<typename T> struct ColoredPoints; 
   struct InputArgs;

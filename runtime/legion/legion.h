@@ -2132,16 +2132,14 @@ namespace Legion {
 #endif
     protected:
       // These methods can only be accessed by the FieldAccessor class
-      template<PrivilegeMode, typename, int, typename, typename>
+      template<PrivilegeMode, typename, int, typename, typename, bool>
       friend class FieldAccessor;
       Realm::RegionInstance get_instance_info(PrivilegeMode mode, FieldID fid,
                                       ptrdiff_t &field_offset, void *realm_is,
                                       TypeTag type_tag, bool silence_warnings,
                                       ReductionOpID redop = 0) const;
-#ifdef BOUNDS_CHECKS
       void fail_bounds_check(DomainPoint p, FieldID fid,
                              PrivilegeMode mode) const;
-#endif
     protected:
       void get_bounds(void *realm_is, TypeTag type_tag) const;
     };
@@ -2175,7 +2173,12 @@ namespace Legion {
      *  - template<typename REDOP> void reduce(const Point<N,T>&, REDOP::RHS)
      */
     template<PrivilegeMode M, typename FT, int N, typename COORD_T = int,
-             typename A = Realm::AffineAccessor<FT,N,COORD_T> >
+             typename A = Realm::AffineAccessor<FT,N,COORD_T>,
+#ifdef BOUNDS_CHECKS
+             bool CHECK_BOUNDS = true>
+#else
+             bool CHECK_BOUNDS = false>
+#endif
     class FieldAccessor {
     public:
       FieldAccessor(void);

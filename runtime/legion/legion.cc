@@ -2245,7 +2245,6 @@ namespace Legion {
                                      type_tag, silence_warnings,redop);
     }
 
-#ifdef BOUNDS_CHECKS
     //--------------------------------------------------------------------------
     void PhysicalRegion::fail_bounds_check(DomainPoint p, FieldID fid,
                                            PrivilegeMode mode) const
@@ -2253,7 +2252,6 @@ namespace Legion {
     {
       impl->fail_bounds_check(p, fid, mode);
     }
-#endif
 
     /////////////////////////////////////////////////////////////
     // Index Iterator  

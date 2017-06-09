@@ -1786,7 +1786,6 @@ namespace Legion {
       return PhysicalInstance::NO_INST;
     } 
 
-#ifdef BOUNDS_CHECKS
     //--------------------------------------------------------------------------
     void PhysicalRegionImpl::fail_bounds_check(DomainPoint p, FieldID fid,
                                                PrivilegeMode mode)
@@ -1842,7 +1841,6 @@ namespace Legion {
 #endif
       exit(ERROR_ACCESSOR_BOUNDS_CHECK);
     }
-#endif
 
     /////////////////////////////////////////////////////////////
     // Grant Impl 

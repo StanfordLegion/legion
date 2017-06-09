@@ -319,10 +319,8 @@ namespace Legion {
       PhysicalInstance get_instance_info(PrivilegeMode mode, FieldID fid, 
                      ptrdiff_t &offset, void *realm_is, TypeTag type_tag,
                      bool silence_warnings, ReductionOpID redop);
-#ifdef BOUNDS_CHECKS
       void fail_bounds_check(DomainPoint p, FieldID fid,
                              PrivilegeMode mode);
-#endif
     public:
       Runtime *const runtime;
       TaskContext *const context;
