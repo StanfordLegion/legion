@@ -1497,7 +1497,7 @@ function type_check.expr_partition(cx, node)
   if region:is(ast.typed.expr.ID) then
     region_symbol = region.value
   else
-    region_symbol = terralib.newsymbol()
+    region_symbol = std.newsymbol()
   end
   local colors_symbol
   if colors and colors:is(ast.typed.expr.ID) then
@@ -1608,7 +1608,7 @@ function type_check.expr_partition_by_field(cx, node)
   if region.region:is(ast.typed.expr.ID) then
     region_symbol = region.region.value
   else
-    region_symbol = terralib.newsymbol()
+    region_symbol = std.newsymbol()
   end
   local colors_symbol
   if colors:is(ast.typed.expr.ID) then
@@ -1673,7 +1673,7 @@ function type_check.expr_image(cx, node)
   if region.region:is(ast.typed.expr.ID) then
     region_symbol = region.region.value
   else
-    region_symbol = terralib.newsymbol(region_type)
+    region_symbol = std.newsymbol(region_type)
   end
 
   if not std.check_privilege(cx, std.reads, region_type, region.fields[1]) then
@@ -1687,7 +1687,7 @@ function type_check.expr_image(cx, node)
   if parent:is(ast.typed.expr.ID) then
     parent_symbol = parent.value
   else
-    parent_symbol = terralib.newsymbol()
+    parent_symbol = std.newsymbol()
   end
   local expr_type = std.partition(std.aliased, parent_symbol, partition_type.colors_symbol)
 
@@ -1781,7 +1781,7 @@ function type_check.expr_image_by_task(cx, node)
   if parent:is(ast.typed.expr.ID) then
     parent_symbol = parent.value
   else
-    parent_symbol = terralib.newsymbol()
+    parent_symbol = std.newsymbol()
   end
   local expr_type = std.partition(std.aliased, parent_symbol, partition_type.colors_symbol)
 
@@ -1827,7 +1827,7 @@ function type_check.expr_preimage(cx, node)
   if region.region:is(ast.typed.expr.ID) then
     region_symbol = region.region.value
   else
-    region_symbol = terralib.newsymbol(region_type)
+    region_symbol = std.newsymbol(region_type)
   end
 
   if not std.check_privilege(cx, std.reads, region_type, region.fields[1]) then
@@ -1841,7 +1841,7 @@ function type_check.expr_preimage(cx, node)
   if parent:is(ast.typed.expr.ID) then
     parent_symbol = parent.value
   else
-    parent_symbol = terralib.newsymbol()
+    parent_symbol = std.newsymbol()
   end
   local expr_type = std.partition(partition_type.disjointness, parent_symbol, partition_type.colors_symbol)
 
@@ -1911,7 +1911,7 @@ function type_check.expr_cross_product(cx, node)
       if arg:is(ast.typed.expr.ID) then
         return arg.value
       else
-        return terralib.newsymbol(std.as_read(arg.expr_type))
+        return std.newsymbol(std.as_read(arg.expr_type))
       end
   end)
   local expr_type = std.cross_product(unpack(arg_symbols))
@@ -2706,7 +2706,7 @@ function type_check.expr_with_scratch_fields(cx, node)
   local field_ids_type = std.check_read(cx, field_ids)
 
   local expr_type = std.region(
-    terralib.newsymbol(region_type:ispace()),
+    std.newsymbol(region_type:ispace()),
     region_type:fspace())
   if std.is_list_of_regions(region_type) then
     for i = 1, region_type:list_depth() do
