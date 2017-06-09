@@ -46,7 +46,7 @@ namespace Realm {
     return id != rhs.id;
   }
 
-  template <int N, typename T>
+  template <int N, typename T> __CUDA_HD__
   inline bool SparsityMap<N,T>::exists(void) const
   {
     return id != 0;

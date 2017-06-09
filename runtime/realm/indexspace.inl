@@ -670,7 +670,7 @@ namespace Realm {
   }
     
   // true if there is no sparsity map (i.e. the bounds fully define the domain)
-  template <int N, typename T>
+  template <int N, typename T>  __CUDA_HD__
   inline bool ZIndexSpace<N,T>::dense(void) const
   {
     return !sparsity.exists();

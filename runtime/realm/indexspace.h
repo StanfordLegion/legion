@@ -1489,6 +1489,7 @@ namespace Realm {
     bool empty(void) const;
     
     // true if there is no sparsity map (i.e. the bounds fully define the domain)
+    __CUDA_HD__
     bool dense(void) const;
 
     // kicks off any operation needed to get detailed sparsity information - asking for
