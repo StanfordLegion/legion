@@ -7486,26 +7486,14 @@ namespace Legion {
                              CodeDescriptor *realm,
                              const void *udata /*=NULL*/, size_t udata_size/*=0*/)
     : vid(v), owner(own), runtime(rt), global(registrar.global_registration),
-    has_return_value(ret), realm_descriptor(realm),
+    has_return_value(ret),
+    descriptor_id(runtime->get_unique_code_descriptor_id()),
+    realm_descriptor(realm),
     execution_constraints(registrar.execution_constraints),
     layout_constraints(registrar.layout_constraints),
     user_data_size(udata_size), leaf_variant(registrar.leaf_variant),
     inner_variant(registrar.inner_variant),
     idempotent_variant(registrar.idempotent_variant)
-    //--------------------------------------------------------------------------
-    VariantImpl::VariantImpl(Runtime *rt, VariantID v, TaskImpl *own, 
-                           const TaskVariantRegistrar &registrar, bool ret,
-                           CodeDescriptor *realm,
-                           const void *udata /*=NULL*/, size_t udata_size/*=0*/)
-      : vid(v), owner(own), runtime(rt), global(registrar.global_registration),
-        has_return_value(ret), 
-        descriptor_id(runtime->get_unique_code_descriptor_id()),
-        realm_descriptor(realm),
-        execution_constraints(registrar.execution_constraints),
-        layout_constraints(registrar.layout_constraints),
-        user_data_size(udata_size), leaf_variant(registrar.leaf_variant), 
-        inner_variant(registrar.inner_variant),
-        idempotent_variant(registrar.idempotent_variant)
     //--------------------------------------------------------------------------
     { 
 #ifdef LEGION_SPY
