@@ -366,6 +366,7 @@ namespace Legion {
     template<typename FT, int N, typename T, typename A, bool CB>
     class FieldAccessor<READ_ONLY,FT,N,T,A,CB> {
     public:
+      __CUDA_HD__
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
@@ -401,7 +402,7 @@ namespace Legion {
           FieldAccessor<READ_ONLY,FT,N,T,A>,FT,N,T,2,true/*read only*/>(
               *this, Realm::ZPoint<1,T>(index));
       }
-    private:
+    public:
       A accessor;
     };
 
@@ -410,6 +411,7 @@ namespace Legion {
     template<typename FT, int N, typename T, typename A>
     class FieldAccessor<READ_ONLY,FT,N,T,A,true> {
     public:
+      // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
@@ -484,7 +486,7 @@ namespace Legion {
           FieldAccessor<READ_ONLY,FT,N,T,A>,FT,N,T,2,true/*read only*/>(
               *this, Realm::ZPoint<1,T>(index));
       }
-    private:
+    public:
       A accessor;
       FieldID field;
       PhysicalRegion field_region;
@@ -497,6 +499,7 @@ namespace Legion {
     template<typename FT, typename T, typename A, bool CB>
     class FieldAccessor<READ_ONLY,FT,1,T,A,CB> {
     public:
+      __CUDA_HD__
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
@@ -523,7 +526,7 @@ namespace Legion {
         { 
           return accessor[p]; 
         }
-    private:
+    public:
       A accessor;
     };
 
@@ -532,6 +535,7 @@ namespace Legion {
     template<typename FT, typename T, typename A>
     class FieldAccessor<READ_ONLY,FT,1,T,A,true> {
     public:
+      // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
@@ -597,7 +601,7 @@ namespace Legion {
 #endif
           return accessor[p]; 
         }
-    private:
+    public:
       A accessor;
       FieldID field;
       PhysicalRegion field_region;
@@ -609,6 +613,7 @@ namespace Legion {
     template<typename FT, int N, typename T, typename A, bool CB>
     class FieldAccessor<READ_WRITE,FT,N,T,A,CB> {
     public:
+      __CUDA_HD__
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
@@ -655,7 +660,7 @@ namespace Legion {
         { 
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
-    private:
+    public:
       A accessor;
     };
 
@@ -664,6 +669,7 @@ namespace Legion {
     template<typename FT, int N, typename T, typename A>
     class FieldAccessor<READ_WRITE,FT,N,T,A,true> {
     public:
+      // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
@@ -773,7 +779,7 @@ namespace Legion {
 #endif
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
-    private:
+    public:
       A accessor;
       FieldID field;
       PhysicalRegion field_region;
@@ -786,6 +792,7 @@ namespace Legion {
     template<typename FT, typename T, typename A, bool CB>
     class FieldAccessor<READ_WRITE,FT,1,T,A,CB> {
     public:
+      __CUDA_HD__
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
@@ -823,7 +830,7 @@ namespace Legion {
         { 
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
-    private:
+    public:
       A accessor;
     };
 
@@ -832,6 +839,7 @@ namespace Legion {
     template<typename FT, typename T, typename A>
     class FieldAccessor<READ_WRITE,FT,1,T,A,true> {
     public:
+      // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
@@ -932,7 +940,7 @@ namespace Legion {
 #endif
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
-    private:
+    public:
       A accessor;
       FieldID field;
       PhysicalRegion field_region;
@@ -944,6 +952,7 @@ namespace Legion {
     template<typename FT, int N, typename T, typename A, bool CB>
     class FieldAccessor<WRITE_DISCARD,FT,N,T,A,CB> {
     public:
+      __CUDA_HD__
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
@@ -984,7 +993,7 @@ namespace Legion {
           FieldAccessor<WRITE_DISCARD,FT,N,T,A>,FT,N,T,2,false/*read only*/>(
               *this, Realm::ZPoint<1,T>(index));
       }
-    private:
+    public:
       A accessor;
     };
 
@@ -993,6 +1002,7 @@ namespace Legion {
     template<typename FT, int N, typename T, typename A>
     class FieldAccessor<WRITE_DISCARD,FT,N,T,A,true> {
     public:
+      // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
@@ -1084,7 +1094,7 @@ namespace Legion {
           FieldAccessor<WRITE_DISCARD,FT,N,T,A>,FT,N,T,2,false/*read only*/>(
               *this, Realm::ZPoint<1,T>(index));
       }
-    private:
+    public:
       A accessor;
       FieldID field;
       PhysicalRegion field_region;
@@ -1097,6 +1107,7 @@ namespace Legion {
     template<typename FT, typename T, typename A, bool CB>
     class FieldAccessor<WRITE_DISCARD,FT,1,T,A,CB> {
     public:
+      __CUDA_HD__
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
@@ -1128,7 +1139,7 @@ namespace Legion {
         { 
           return accessor[p]; 
         }
-    private:
+    public:
       A accessor;
     };
 
@@ -1137,6 +1148,7 @@ namespace Legion {
     template<typename FT, typename T, typename A>
     class FieldAccessor<WRITE_DISCARD,FT,1,T,A,true> {
     public:
+      // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
@@ -1219,7 +1231,7 @@ namespace Legion {
 #endif
           return accessor[p]; 
         }
-    private:
+    public:
       A accessor;
       FieldID field;
       PhysicalRegion field_region;
@@ -1231,6 +1243,7 @@ namespace Legion {
     template<typename FT, int N, typename T, typename A, bool CB>
     class FieldAccessor<REDUCE,FT,N,T,A,CB> {
     public:
+      __CUDA_HD__
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     ReductionOpID redop, bool silence_warnings = false)
@@ -1249,7 +1262,7 @@ namespace Legion {
         { 
           REDOP::template fold<EXCLUSIVE>(accessor[p], val);
         }
-    private:
+    public:
       A accessor;
     };
 
@@ -1257,6 +1270,7 @@ namespace Legion {
     template<typename FT, int N, typename T, typename A>
     class FieldAccessor<REDUCE,FT,N,T,A,true> {
     public:
+      // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     ReductionOpID redop, bool silence_warnings = false)
@@ -1290,7 +1304,7 @@ namespace Legion {
 #endif
           REDOP::template fold<EXCLUSIVE>(accessor[p], val);
         }
-    private:
+    public:
       A accessor;
       FieldID field;
       PhysicalRegion field_region;
