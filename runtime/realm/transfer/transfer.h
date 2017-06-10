@@ -82,6 +82,9 @@ namespace Realm {
     TransferDomain(void);
 
   public:
+    template <typename S>
+    static TransferDomain *deserialize_new(S& deserializer);
+
     static TransferDomain *construct(Domain d);
 
     virtual TransferDomain *clone(void) const = 0;
@@ -103,6 +106,18 @@ namespace Realm {
   inline std::ostream& operator<<(std::ostream& os, const TransferDomain& td)
   {
     td.print(os); return os;
+  }
+
+  template <typename S>
+  inline bool serialize(S& serializer, const TransferDomain& ci)
+  {
+    return Serialization::PolymorphicSerdezHelper<TransferDomain>::serialize(serializer, ci);
+  }
+
+  template <typename S>
+  /*static*/ inline TransferDomain *TransferDomain::deserialize_new(S& deserializer)
+  {
+    return Serialization::PolymorphicSerdezHelper<TransferDomain>::deserialize_new(deserializer);
   }
 
   class TransferPlan {

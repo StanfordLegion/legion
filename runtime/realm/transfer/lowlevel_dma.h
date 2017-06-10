@@ -309,8 +309,7 @@ namespace Realm {
       virtual ~CopyRequest(void);
 
     public:
-      size_t compute_size(void) const;
-      void serialize(void *buffer);
+      void forward_request(gasnet_node_t target_node);
 
       virtual bool check_readiness(bool just_check, DmaRequestQueue *rq);
 
@@ -381,8 +380,7 @@ namespace Realm {
       virtual ~ReduceRequest(void);
 
     public:
-      size_t compute_size(void);
-      void serialize(void *buffer);
+      void forward_request(gasnet_node_t target_node);
 
       virtual bool check_readiness(bool just_check, DmaRequestQueue *rq);
 
@@ -428,8 +426,7 @@ namespace Realm {
       virtual ~FillRequest(void);
 
     public:
-      size_t compute_size(void);
-      void serialize(void *buffer);
+      void forward_request(gasnet_node_t target_node);
 
       virtual bool check_readiness(bool just_check, DmaRequestQueue *rq);
 

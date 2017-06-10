@@ -21,6 +21,11 @@
 #include <realm/mem_impl.h>
 #include <realm/idx_impl.h>
 
+TYPE_IS_SERIALIZABLE(Realm::IndexSpace);
+TYPE_IS_SERIALIZABLE(LegionRuntime::Arrays::Rect<1>);
+TYPE_IS_SERIALIZABLE(LegionRuntime::Arrays::Rect<2>);
+TYPE_IS_SERIALIZABLE(LegionRuntime::Arrays::Rect<3>);
+
 namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
@@ -683,6 +688,9 @@ namespace Realm {
   public:
     TransferDomainIndexSpace(IndexSpace _is);
 
+    template <typename S>
+    static TransferDomain *deserialize_new(S& deserializer);
+
     virtual TransferDomain *clone(void) const;
 
     virtual Event request_metadata(void);
@@ -696,6 +704,11 @@ namespace Realm {
 
     virtual void print(std::ostream& os) const;
 
+    static Serialization::PolymorphicSerdezSubclass<TransferDomain, TransferDomainIndexSpace> serdez_subclass;
+
+    template <typename S>
+    bool serialize(S& serializer) const;
+
     //protected:
     IndexSpace is;
   };
@@ -703,6 +716,16 @@ namespace Realm {
   TransferDomainIndexSpace::TransferDomainIndexSpace(IndexSpace _is)
     : is(_is)
   {}
+
+  template <typename S>
+  /*static*/ TransferDomain *TransferDomainIndexSpace::deserialize_new(S& deserializer)
+  {
+    IndexSpace is;
+    if(deserializer >> is)
+      return new TransferDomainIndexSpace(is);
+    else
+      return 0;
+  }
 
   TransferDomain *TransferDomainIndexSpace::clone(void) const
   {
@@ -759,11 +782,22 @@ namespace Realm {
     os << is;
   }
 
+  /*static*/ Serialization::PolymorphicSerdezSubclass<TransferDomain, TransferDomainIndexSpace> TransferDomainIndexSpace::serdez_subclass;
+
+  template <typename S>
+  inline bool TransferDomainIndexSpace::serialize(S& serializer) const
+  {
+    return (serializer << is);
+  }
+
 
   template <unsigned DIM>
   class TransferDomainRect : public TransferDomain {
   public:
     TransferDomainRect(LegionRuntime::Arrays::Rect<DIM> _r);
+
+    template <typename S>
+    static TransferDomain *deserialize_new(S& deserializer);
 
     virtual TransferDomain *clone(void) const;
 
@@ -778,6 +812,11 @@ namespace Realm {
 
     virtual void print(std::ostream& os) const;
 
+    static Serialization::PolymorphicSerdezSubclass<TransferDomain, TransferDomainRect<DIM> > serdez_subclass;
+
+    template <typename S>
+    bool serialize(S& serializer) const;
+
     //protected:
     LegionRuntime::Arrays::Rect<DIM> r;
   };
@@ -786,6 +825,17 @@ namespace Realm {
   TransferDomainRect<DIM>::TransferDomainRect(LegionRuntime::Arrays::Rect<DIM> _r)
     : r(_r)
   {}
+
+  template <unsigned DIM>
+  template <typename S>
+  /*static*/ TransferDomain *TransferDomainRect<DIM>::deserialize_new(S& deserializer)
+  {
+    Rect<DIM> r;
+    if(deserializer >> r)
+      return new TransferDomainRect<DIM>(r);
+    else
+      return 0;
+  }
 
   template <unsigned DIM>
   TransferDomain *TransferDomainRect<DIM>::clone(void) const
@@ -827,6 +877,19 @@ namespace Realm {
     os << r;
   }
 
+  template <unsigned DIM>
+  /*static*/ Serialization::PolymorphicSerdezSubclass<TransferDomain, TransferDomainRect<DIM> > TransferDomainRect<DIM>::serdez_subclass;
+
+  template <unsigned DIM>
+  template <typename S>
+  inline bool TransferDomainRect<DIM>::serialize(S& serializer) const
+  {
+    return (serializer << r);
+  }
+
+  template class TransferDomainRect<1>;
+  template class TransferDomainRect<2>;
+  template class TransferDomainRect<3>;
 
   /*static*/ TransferDomain *TransferDomain::construct(Domain d)
   {
@@ -941,6 +1004,9 @@ namespace Realm {
       get_runtime()->optable.add_local_operation(ev, r);
       r->check_readiness(false, dma_queue);
     } else {
+      r->forward_request(dma_node);
+      get_runtime()->optable.add_remote_operation(ev, dma_node);
+#if 0
       RemoteCopyArgs args;
       args.redop_id = 0;
       args.red_fold = false;
@@ -956,7 +1022,7 @@ namespace Realm {
       log_dma.debug("performing copy on remote node (%d), event=" IDFMT, dma_node, args.after_copy.id);
       get_runtime()->optable.add_remote_operation(ev, dma_node);
       RemoteCopyMessage::request(dma_node, args, msgdata, msglen, PAYLOAD_FREE);
-
+#endif
       // done with the local copy of the request
       r->remove_reference();
     }
@@ -1013,6 +1079,9 @@ namespace Realm {
       get_runtime()->optable.add_local_operation(ev, r);	  
       r->check_readiness(false, dma_queue);
     } else {
+      r->forward_request(src_node);
+      get_runtime()->optable.add_remote_operation(ev, src_node);
+#if 0
       RemoteCopyArgs args;
       args.redop_id = redop_id;
       args.red_fold = red_fold;
@@ -1028,6 +1097,7 @@ namespace Realm {
 		    src_node, args.after_copy.id);
       get_runtime()->optable.add_remote_operation(ev, src_node);
       RemoteCopyMessage::request(src_node, args, msgdata, msglen, PAYLOAD_FREE);
+#endif
       // done with the local copy of the request
       r->remove_reference();
     }
@@ -1074,6 +1144,9 @@ namespace Realm {
       get_runtime()->optable.add_local_operation(ev, r);
       r->check_readiness(false, dma_queue);
     } else {
+      r->forward_request(tgt_node);
+      get_runtime()->optable.add_remote_operation(ev, tgt_node);
+#if 0
       RemoteFillArgs args;
       args.inst = inst;
       args.offset = offset;
@@ -1090,7 +1163,7 @@ namespace Realm {
       get_runtime()->optable.add_remote_operation(ev, tgt_node);
 
       RemoteFillMessage::request(tgt_node, args, msgdata, msglen, PAYLOAD_FREE);
-
+#endif
       // release local copy of operation
       r->remove_reference();
     }

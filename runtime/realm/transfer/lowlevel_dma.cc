@@ -55,6 +55,9 @@ using namespace LegionRuntime;
 
 using namespace Realm::Serialization;
 
+TYPE_IS_SERIALIZABLE(Realm::OffsetsAndSize);
+TYPE_IS_SERIALIZABLE(Realm::CopySrcDstField);
+
 namespace Realm {
 
     Logger log_dma("dma");
@@ -369,13 +372,31 @@ namespace Realm {
 	oas_by_inst(0),
 	before_copy(_before_copy)
     {
-      const ID::IDType *idata = (const ID::IDType *)data;
+      FixedBufferDeserializer deserializer(data, datalen);
 
-      // TODO:
-      domain = 0;
-      //idata = domain.deserialize(idata);
-
+      domain = TransferDomain::deserialize_new(deserializer);
       oas_by_inst = new OASByInst;
+      bool ok = ((deserializer >> *oas_by_inst) &&
+		 (deserializer >> requests));
+      assert((domain != 0) && ok && (deserializer.bytes_left() == 0));
+
+      // If either one of the instances is in GPU memory increase priority
+      if(priority == 0) {
+	for(OASByInst::const_iterator it = oas_by_inst->begin();
+	    it != oas_by_inst->end();
+	    ++it) {
+          Memory::Kind src_kind = it->first.first.get_location().kind();
+          if (src_kind == Memory::GPU_FB_MEM) {
+            priority = 1;
+	    break;
+	  }
+          Memory::Kind dst_kind = it->first.second.get_location().kind();
+          if (dst_kind == Memory::GPU_FB_MEM) {
+            priority = 1;
+	    break;
+	  }
+	}
+      }
 
       // <NEW_DMA>
       ib_completion = GenEventImpl::create_genevent()->current_event();
@@ -384,6 +405,7 @@ namespace Realm {
       priority_ib_queue.clear();
       // </NEW_DMA>
 
+#if 0
       size_t num_pairs = *idata++;
 
       for (unsigned idx = 0; idx < num_pairs; idx++) {
@@ -427,10 +449,11 @@ namespace Realm {
       idata += sizeof(size_t) / sizeof(ID::IDType);
       FixedBufferDeserializer deserializer(idata, request_size);
       deserializer >> requests;
+#endif
       Realm::Operation::reconstruct_measurements();
 
       log_dma.info() << "dma request " << (void *)this << " deserialized - is="
-		     << domain << " before=" << before_copy << " after=" << get_finish_event();
+		     << *domain << " before=" << before_copy << " after=" << get_finish_event();
       for(OASByInst::const_iterator it = oas_by_inst->begin();
 	  it != oas_by_inst->end();
 	  it++)
@@ -504,6 +527,7 @@ namespace Realm {
       delete domain;
     }
 
+#if 0
     size_t CopyRequest::compute_size(void) const
     {
       size_t result = 0;
@@ -557,6 +581,31 @@ namespace Realm {
       msgptr += sizeof(size_t) / sizeof(ID::IDType);
       FixedBufferSerializer serializer(msgptr, counter.bytes_used());
       serializer << requests;
+      clear_profiling();
+    }
+#endif
+
+    void CopyRequest::forward_request(gasnet_node_t target_node)
+    {
+      RemoteCopyArgs args;
+      args.redop_id = 0;
+      args.red_fold = false;
+      args.before_copy = before_copy;
+      args.after_copy = finish_event;
+      args.priority = priority;
+
+      DynamicBufferSerializer dbs(128);
+      bool ok = ((dbs << *domain) &&
+		 (dbs << *oas_by_inst) &&
+		 (dbs << requests));
+      assert(ok);
+
+      size_t msglen = dbs.bytes_used();
+      void *msgdata = dbs.detach_buffer(-1 /*no trim*/);
+
+      log_dma.debug() << "forwarding copy: target=" << target_node << " finish=" << finish_event;
+      RemoteCopyMessage::request(target_node, args, msgdata, msglen, PAYLOAD_FREE);
+
       clear_profiling();
     }
 
@@ -843,10 +892,11 @@ namespace Realm {
 
       // make sure the destination has fetched metadata
       if(state == STATE_DST_FETCH) {
-        Memory tgt_mem = get_runtime()->get_instance_impl(oas_by_inst->begin()->first.second)->memory;
-        gasnet_node_t tgt_node = ID(tgt_mem).memory.owner_node;
 	// TODO
-	assert(tgt_node == gasnet_mynode());
+	// SJT: actually, is this needed any more?
+        //Memory tgt_mem = get_runtime()->get_instance_impl(oas_by_inst->begin()->first.second)->memory;
+        //gasnet_node_t tgt_node = ID(tgt_mem).memory.owner_node;
+	//assert(tgt_node == gasnet_mynode());
 #if 0
         if ((domain.get_dim() == 0) && (tgt_node != gasnet_mynode())) {
           if (tgt_fetch_completion == Event::NO_EVENT) {
@@ -3792,7 +3842,7 @@ namespace Realm {
 #endif
 
       log_dma.info() << "dma request " << (void *)this << " finished - is="
-                     << domain << " before=" << before_copy << " after=" << get_finish_event();
+                     << *domain << " before=" << before_copy << " after=" << get_finish_event();
       return;
       // </NEWDMA>
 #ifdef OLD_DMA_CODE
@@ -3819,7 +3869,7 @@ namespace Realm {
       };
 
       log_dma.info() << "dma request " << (void *)this << " finished - is="
-		     << domain << " before=" << before_copy << " after=" << get_finish_event();
+		     << *domain << " before=" << before_copy << " after=" << get_finish_event();
 
       mpc->flush(this);
 
@@ -4133,12 +4183,20 @@ namespace Realm {
 	redop_id(_redop_id), red_fold(_red_fold),
 	before_copy(_before_copy)
     {
+      FixedBufferDeserializer deserializer(data, datalen);
+
+      domain = TransferDomain::deserialize_new(deserializer);
+      bool ok = ((deserializer >> srcs) &&
+		 (deserializer >> dst) &&
+		 (deserializer >> inst_lock_needed) &&
+		 (deserializer >> requests));
+      assert((domain != 0) && ok && (deserializer.bytes_left() == 0));
+
+#if 0
       const ID::IDType *idata = (const ID::IDType *)data;
 
       // TODO
       //idata = domain.deserialize(idata);
-
-      priority = 0;
 
       // get sources
       int n_srcs = *idata++;
@@ -4167,6 +4225,7 @@ namespace Realm {
       idata += sizeof(size_t) / sizeof(ID::IDType);
       FixedBufferDeserializer deserializer(idata, request_size);
       deserializer >> requests;
+#endif
       Realm::Operation::reconstruct_measurements();
 
       log_dma.info() << "dma request " << (void *)this << " deserialized - is="
@@ -4213,6 +4272,7 @@ namespace Realm {
       delete domain;
     }
 
+#if 0
     size_t ReduceRequest::compute_size(void)
     {
       size_t result = 0;
@@ -4260,6 +4320,33 @@ namespace Realm {
       msgptr += sizeof(size_t) / sizeof(ID::IDType);
       FixedBufferSerializer serializer(msgptr, counter.bytes_used());
       serializer << requests;
+      clear_profiling();
+    }
+#endif
+
+    void ReduceRequest::forward_request(gasnet_node_t target_node)
+    {
+      RemoteCopyArgs args;
+      args.redop_id = redop_id;
+      args.red_fold = red_fold;
+      args.before_copy = before_copy;
+      args.after_copy = finish_event;
+      args.priority = priority;
+
+      DynamicBufferSerializer dbs(128);
+      bool ok = ((dbs << *domain) &&
+		 (dbs << srcs) &&
+		 (dbs << dst) &&
+		 (dbs << inst_lock_needed) &&
+		 (dbs << requests));
+      assert(ok);
+
+      size_t msglen = dbs.bytes_used();
+      void *msgdata = dbs.detach_buffer(-1 /*no trim*/);
+
+      log_dma.debug() << "forwarding copy: target=" << target_node << " finish=" << finish_event;
+      RemoteCopyMessage::request(target_node, args, msgdata, msglen, PAYLOAD_FREE);
+
       clear_profiling();
     }
 
@@ -4945,6 +5032,17 @@ namespace Realm {
       dst.offset = offset;
       dst.size = size;
 
+      FixedBufferDeserializer deserializer(data, datalen);
+
+      domain = TransferDomain::deserialize_new(deserializer);
+      ByteArray ba; // TODO
+      bool ok = ((deserializer >> ba) &&
+		 (deserializer >> requests));
+      assert((domain != 0) && ok && (deserializer.bytes_left() == 0));
+
+      fill_size = ba.size();
+      fill_buffer = ba.detach();
+#if 0
       const ID::IDType *idata = (const ID::IDType *)data;
 
       // TODO
@@ -4968,6 +5066,7 @@ namespace Realm {
       idata += sizeof(size_t) / sizeof(ID::IDType);
       FixedBufferDeserializer deserializer(idata, request_size);
       deserializer >> requests;
+#endif
       Realm::Operation::reconstruct_measurements();
 
       log_dma.info() << "dma request " << (void *)this << " deserialized - is="
@@ -5011,6 +5110,7 @@ namespace Realm {
       delete domain;
     }
 
+#if 0
     size_t FillRequest::compute_size(void)
     {
       size_t result = 0;
@@ -5047,6 +5147,33 @@ namespace Realm {
       msgptr += sizeof(size_t) / sizeof(ID::IDType);
       FixedBufferSerializer serializer(msgptr, counter.bytes_used());
       serializer << requests;
+      clear_profiling();
+    }
+#endif
+
+    void FillRequest::forward_request(gasnet_node_t target_node)
+    {
+      RemoteFillArgs args;
+      args.inst = dst.inst;
+      args.offset = dst.offset;
+      args.size = fill_size; // redundant!
+      args.before_fill = before_fill;
+      args.after_fill = finish_event;
+      //args.priority = 0;
+
+      DynamicBufferSerializer dbs(128);
+      ByteArray ba(fill_buffer, fill_size); // TODO
+      bool ok = ((dbs << *domain) &&
+		 (dbs << ba) &&
+		 (dbs << requests));
+      assert(ok);
+
+      size_t msglen = dbs.bytes_used();
+      void *msgdata = dbs.detach_buffer(-1 /*no trim*/);
+
+      log_dma.debug() << "forwarding fill: target=" << target_node << " finish=" << finish_event;
+      RemoteFillMessage::request(target_node, args, msgdata, msglen, PAYLOAD_FREE);
+
       clear_profiling();
     }
 
@@ -5719,10 +5846,19 @@ namespace Realm {
               args.after_copy = ev;
               args.priority = priority;
 
+#if 0
               size_t msglen = r->compute_size();
               void *msgdata = malloc(msglen);
 
               r->serialize(msgdata);
+#endif
+	      DynamicBufferSerializer dbs(128);
+	      dbs << *(r->oas_by_inst);
+	      dbs << r->requests;
+
+	      size_t msglen = dbs.bytes_used();
+	      void *msgdata = dbs.detach_buffer(-1 /*no trim*/);
+	      assert(0);
 
               log_dma.debug("performing serdez on remote node (%d), event=" IDFMT, dma_node, args.after_copy.id);
 	      get_runtime()->optable.add_remote_operation(ev, dma_node);
@@ -5730,6 +5866,7 @@ namespace Realm {
 
               finish_events.insert(ev);
               // done with the local copy of the request
+	      r->clear_profiling();
 	      r->remove_reference();
             }
 	  }
@@ -5814,10 +5951,19 @@ namespace Realm {
 	      args.after_copy = ev;
 	      args.priority = priority;
 
+#if 0
               size_t msglen = r->compute_size();
               void *msgdata = malloc(msglen);
 
               r->serialize(msgdata);
+#endif
+	      DynamicBufferSerializer dbs(128);
+	      dbs << *(r->oas_by_inst);
+	      dbs << r->requests;
+
+	      size_t msglen = dbs.bytes_used();
+	      void *msgdata = dbs.detach_buffer(-1 /*no trim*/);
+	      assert(0);
 
 	      log_dma.debug("performing copy on remote node (%d), event=" IDFMT, dma_node, args.after_copy.id);
 	      get_runtime()->optable.add_remote_operation(ev, dma_node);
@@ -5826,6 +5972,7 @@ namespace Realm {
 	      finish_events.insert(ev);
 
 	      // done with the local copy of the request
+	      r->clear_profiling();
 	      r->remove_reference();
 	    }
 	  } // for OASByInst::iterator
@@ -5884,15 +6031,25 @@ namespace Realm {
 	  args.after_copy = ev;
 	  args.priority = 0 /*priority*/;
 
+#if 0
           size_t msglen = r->compute_size();
           void *msgdata = malloc(msglen);
           r->serialize(msgdata);
+#endif
+	  DynamicBufferSerializer dbs(128);
+	  dbs << *(r->oas_by_inst);
+	  dbs << r->requests;
+
+	  size_t msglen = dbs.bytes_used();
+	  void *msgdata = dbs.detach_buffer(-1 /*no trim*/);
+	  assert(0);
 
 	  log_dma.debug("performing reduction on remote node (%d), event=" IDFMT,
 		       src_node, args.after_copy.id);
 	  get_runtime()->optable.add_remote_operation(ev, src_node);
 	  RemoteCopyMessage::request(src_node, args, msgdata, msglen, PAYLOAD_FREE);
 	  // done with the local copy of the request
+	  r->clear_profiling();
 	  r->remove_reference();
 	}
 
