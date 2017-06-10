@@ -293,7 +293,7 @@ namespace Realm {
     , num_cpu_procs(1), num_util_procs(1), num_io_procs(0)
     , concurrent_io_threads(1)  // Legion does not support values > 1 right now
     , force_kernel_threads(false)
-    , sysmem_size_in_mb(512), stack_size_in_mb(2)
+    , sysmem_size_in_mb(0 /*SJT DMA HACK - 512*/), stack_size_in_mb(2)
   {}
 
   CoreModule::~CoreModule(void)
@@ -730,7 +730,7 @@ namespace Realm {
       size_t gasnet_mem_size_in_mb = 0;
       size_t reg_ib_mem_size_in_mb = 0;
 #endif
-      size_t reg_mem_size_in_mb = 0;
+      size_t reg_mem_size_in_mb = 512 /*SJT DMA HACK - 0*/;
       size_t disk_mem_size_in_mb = 0;
       // Static variable for stack size since we need to 
       // remember it when we launch threads in run 
