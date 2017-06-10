@@ -204,6 +204,13 @@ namespace Realm {
     __CUDA_HD__
     FT& operator[](const ZPoint<N,T>& p) const;
 
+    __CUDA_HD__
+    bool is_dense_arbitrary(const ZRect<N,T> &bounds) const; // any dimension ordering
+    __CUDA_HD__
+    bool is_dense_col_major(const ZRect<N,T> &bounds) const; // Fortran dimension ordering
+    __CUDA_HD__
+    bool is_dense_row_major(const ZRect<N,T> &bounds) const; // C dimension ordering
+
   //protected:
   //friend
   // std::ostream& operator<<(std::ostream& os, const AffineAccessor<FT,N,T>& a);
