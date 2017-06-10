@@ -608,6 +608,49 @@ namespace Realm {
   }
 
   template <typename FT, int N, typename T> __CUDA_HD__
+  inline bool AffineAccessor<FT,N,T>::is_dense_arbitrary(const ZRect<N,T> &bounds) const
+  {
+    ptrdiff_t exp_offset = sizeof(FT);
+    int used_mask = 0; // keep track of which dimensions we've already matched
+    for (int i = 0; i < N; i++) {
+      bool found = false;
+      for (int j = 0; j < N; j++) {
+        if ((used_mask >> j) & 1) continue;
+        if (strides[j] != exp_offset) continue;
+        found = true;
+        used_mask |= (1 << j);
+        exp_offset *= (bounds.hi[j] - bounds.lo[j] + 1);
+        break;
+      }
+      if (!found)
+        return false;
+    }
+    return true;
+  }
+
+  template <typename FT, int N, typename T> __CUDA_HD__
+  inline bool AffineAccessor<FT,N,T>::is_dense_col_major(const ZRect<N,T> &bounds) const
+  {
+    ptrdiff_t exp_offset = sizeof(FT);
+    for (int i = 0; i < N; i++) {
+      if (strides[i] != exp_offset) return false;
+      exp_offset *= (bounds.hi[i] - bounds.lo[i] + 1);
+    }
+    return true;
+  }
+
+  template <typename FT, int N, typename T> __CUDA_HD__
+  inline bool AffineAccessor<FT,N,T>::is_dense_row_major(const ZRect<N,T> &bounds) const
+  {
+    ptrdiff_t exp_offset = sizeof(FT);
+    for (int i = N-1; i >= 0; i--) {
+      if (strides[i] != exp_offset) return false;
+      exp_offset *= (bounds.hi[i] - bounds.lo[i] + 1);
+    }
+    return true;
+  }
+
+  template <typename FT, int N, typename T> __CUDA_HD__
   inline FT *AffineAccessor<FT,N,T>::get_ptr(const ZPoint<N,T>& p) const
   {
     intptr_t rawptr = base;
