@@ -212,6 +212,12 @@ namespace Realm {
     };
 
     // support for some STL containers
+    template <typename S, typename T1, typename T2>
+      bool serialize(S& s, const std::pair<T1, T2>& p);
+
+    template <typename S, typename T1, typename T2>
+      bool deserialize(S& s, std::pair<T1, T2>& p);
+
     template <typename S, typename T>
       bool serialize(S& s, const std::vector<T>& v);
 
