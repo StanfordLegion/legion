@@ -95,7 +95,7 @@ public:
   ~UsecTimer(){}
   void start(){
     if(clock_gettime(CLOCK, &mStart)) {
-      std::cerr << "error from clock_gettime" << endl;
+      std::cerr << "error from clock_gettime" << std::endl;
       return;
     }
     mStarted = true;
@@ -104,7 +104,7 @@ public:
     if(mStarted) {
       Time end;
       if(clock_gettime(CLOCK, &end)) {
-        std::cerr << "error from clock_gettime" << endl;
+        std::cerr << "error from clock_gettime" << std::endl;
         return;
       }
       double elapsedSeconds = timespecToSeconds(&end) - timespecToSeconds(&mStart);
