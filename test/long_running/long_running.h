@@ -86,7 +86,7 @@ public:
   typedef struct timespec Time;
   static const clockid_t CLOCK = CLOCK_MONOTONIC;
   
-  UsecTimer(string description){
+  UsecTimer(std::string description){
     mDescription = description;
     mCumulativeElapsedSeconds = 0.0;
     mNumSamples = 0;
@@ -113,7 +113,7 @@ public:
       mStarted = false;
     }
   }
-  string to_string(){
+  std::string to_string(){
     double meanSampleElapsedSeconds = 0;
     if(mNumSamples > 0) {
       meanSampleElapsedSeconds = mCumulativeElapsedSeconds / mNumSamples;
@@ -137,7 +137,7 @@ private:
   
   bool mStarted;
   Time mStart;
-  string mDescription;
+  std::string mDescription;
   double mCumulativeElapsedSeconds;
   int mNumSamples;
 };
