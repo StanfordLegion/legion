@@ -14,7 +14,7 @@
  */
 
 
-#undef SMALL_INDEX_LAUNCH//toggle this to demonstrate two different problems abh 6/10/17
+#define SMALL_INDEX_LAUNCH//toggle this to demonstrate two different problems abh 6/10/17
 
 
 #include "long_running.h"
@@ -22,6 +22,7 @@
 enum {
   TOP_LEVEL_TASK_ID,
   GENERATE_IMAGE_DATA_TASK_ID,
+  INTERIOR_TASK_ID,
   VERIFY_COMPOSITED_IMAGE_DATA_TASK_ID
 };
 
@@ -153,6 +154,7 @@ namespace Legion {
     Domain fragmentDomain;
   };
   
+  
   void generate_image_data_task(const Task *task,
                                 const std::vector<PhysicalRegion> &regions,
                                 Context ctx, HighLevelRuntime *runtime) {
@@ -163,13 +165,21 @@ namespace Legion {
     }
   }
   
+  void interior_task(const Task *task,
+                     const std::vector<PhysicalRegion> &regions,
+                     Context ctx, HighLevelRuntime *runtime) {
+    ImageReduction(runtime, ctx);
+  }
+  
   
   void top_level_task(const Task *task,
                       const std::vector<PhysicalRegion> &regions,
                       Context ctx, HighLevelRuntime *runtime) {
     
     for(int i = 0; i < 100000; ++i) {
-      ImageReduction image_reduction(runtime, ctx);
+      TaskLauncher launcher(INTERIOR_TASK_ID, TaskArgument(NULL, 0));
+      Future future = runtime->execute_task(ctx, launcher);
+      future.wait();
     }
     
   }
@@ -188,6 +198,10 @@ int main(int argc, char *argv[]) {
   Legion::HighLevelRuntime::register_legion_task<Legion::generate_image_data_task>(GENERATE_IMAGE_DATA_TASK_ID,
                                                                                    Legion::Processor::LOC_PROC, false/*single*/, true/*index*/,
                                                                                    AUTO_GENERATE_ID, Legion::TaskConfigOptions(true/*leaf*/), "generate_image_data_task");
+  
+  Legion::HighLevelRuntime::register_legion_task<Legion::interior_task>(INTERIOR_TASK_ID,
+                                                                        Legion::Processor::LOC_PROC, true/*single*/, false/*index*/,
+                                                                        AUTO_GENERATE_ID, Legion::TaskConfigOptions(false/*leaf*/), "interior_task");
   
   return Legion::HighLevelRuntime::start(argc, argv);
 }
