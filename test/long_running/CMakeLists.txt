@@ -15,14 +15,15 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.1)
+project(LegionTest_long_running)
 
+# Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_subdirectory(attach_file_mini)
-add_subdirectory(long_running)
-
-if(Legion_USE_HDF5)
-  add_subdirectory(hdf_attach_subregion_parallel)
+add_executable(long_running long_running.cc long_running.h)
+target_link_libraries(long_running Legion::Legion)
+if(Legion_ENABLE_TESTING)
+  add_test(NAME long_running COMMAND $<TARGET_FILE:long_running>) 
 endif()
