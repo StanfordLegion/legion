@@ -3538,6 +3538,7 @@ namespace Realm {
 							     iter_flags);
 
         assert(mem_path.size() - 1 == sub_path.size());
+	assert(ibvec.empty() || (0 && "SJT: intermediate buffer functionality temporarily disabled"));
         for (unsigned idx = 0; idx < mem_path.size(); idx ++) {
           log_new_dma.info("mem_path[%d]: node(%llu), memory(%d)", idx, ID(mem_path[idx]).memory.owner_node, mem_path[idx].kind());
           if (idx == 0) {
