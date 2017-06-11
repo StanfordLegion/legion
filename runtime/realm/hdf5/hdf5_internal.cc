@@ -418,7 +418,7 @@ namespace Realm {
 	LegionRuntime::Arrays::Mapping<DIM, 1> *linearization = local_impl->metadata.linearization.get_mapping<DIM>();
 	for(typename LegionRuntime::Arrays::Mapping<DIM, 1>::LinearSubrectIterator lsi(r, *linearization); lsi; lsi++) {
 	  log_hdf5.debug() << " sr: " << lsi.subrect << " " << lsi.strides[0];
-	  off_t l_offset = LegionRuntime::LowLevel::calc_mem_loc(local_impl->metadata.alloc_offset + (local_ofs - local_start),
+	  off_t l_offset = calc_mem_loc(local_impl->metadata.alloc_offset + (local_ofs - local_start),
 					local_start, local_size,
 					local_impl->metadata.elmt_size,
 					local_impl->metadata.block_size,

@@ -20,8 +20,7 @@
 
 #include "realm/logging.h"
 
-namespace LegionRuntime {
-  namespace LowLevel {
+namespace Realm {
 
     extern Realm::Logger log_dma;
 
@@ -416,6 +415,5 @@ namespace LegionRuntime {
     }
 
 
-  };
 };
 

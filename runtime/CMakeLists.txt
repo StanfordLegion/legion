@@ -30,6 +30,7 @@ list(APPEND LOW_RUNTIME_SRC
   realm/transfer/lowlevel_disk.cc
   realm/transfer/channel.h                 realm/transfer/channel.cc
   realm/transfer/channel_disk.h            realm/transfer/channel_disk.cc
+  realm/transfer/transfer.h                realm/transfer/transfer.cc
   realm/transfer/lowlevel_dma.h            realm/transfer/lowlevel_dma.cc
   realm/transfer/lowlevel_dma.inl
   lowlevel.h                lowlevel.cc

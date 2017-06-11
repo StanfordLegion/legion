@@ -22,16 +22,19 @@
 
 #include <hdf5.h>
 
+#define CHECK_HDF5(cmd) \
+  do { \
+    herr_t res = (cmd); \
+    if(res < 0) { \
+      fprintf(stderr, "HDF5 error on %s:\n", #cmd); \
+      H5Eprint2(H5E_DEFAULT, stderr); \
+      assert(0); \
+    } \
+  } while(0)
+
 namespace Realm {
 
   namespace HDF5 {
-
-    // dma code is still in old namespace
-    typedef LegionRuntime::LowLevel::DmaRequest DmaRequest;
-    typedef LegionRuntime::LowLevel::OASVec OASVec;
-    typedef LegionRuntime::LowLevel::InstPairCopier InstPairCopier;
-    typedef LegionRuntime::LowLevel::MemPairCopier MemPairCopier;
-    typedef LegionRuntime::LowLevel::MemPairCopierFactory MemPairCopierFactory;
 
     class HDF5Memory : public MemoryImpl {
     public:
