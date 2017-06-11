@@ -184,7 +184,7 @@ namespace Legion {
 
 int main(int argc, char *argv[]) {
   
-  std::cout << " this program demonstrates memory leaks and an index launch that never completes" << std::endl;
+  std::cout << " this program demonstrates memory usage that never recovers and an index launch that never completes (when run locally, let's see what happens on travis)" << std::endl;
   
   Legion::HighLevelRuntime::set_top_level_task_id(TOP_LEVEL_TASK_ID);
   

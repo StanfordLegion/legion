@@ -64,6 +64,10 @@ if platform.system() != 'Darwin':
         ['test/attach_file_mini/attach_file_mini', []],
     ]
 
+legion_cxx_tests = legion_cxx_tests + [
+        ['test/long_running/long_running', []],
+]
+
 legion_gasnet_cxx_tests = [
     # Examples
     ['examples/mpi_interop/mpi_interop', []],
