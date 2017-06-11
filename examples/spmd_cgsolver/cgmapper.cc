@@ -56,6 +56,18 @@ CGMapper::CGMapper(Machine machine, Runtime *rt, Processor local)
   // eventually)
   Machine::MemoryQuery mq(machine);
   mq.only_kind(Memory::SYSTEM_MEM);
+  if(mq.count() == 0) {
+    log_cgmap.info() << "no sysmems found - trying socket memories";
+    mq = Machine::MemoryQuery(machine).only_kind(Memory::SOCKET_MEM);
+    if(mq.count() == 0) {
+      log_cgmap.info() << "no socket memories found either - trying regdma";
+      mq = Machine::MemoryQuery(machine).only_kind(Memory::REGDMA_MEM);
+      if(mq.count() == 0) {
+	log_cgmap.fatal() << "HELP!  No system memories (or socket or regdma) found!?";
+	assert(false);
+      }
+    }
+  }
   for(Machine::MemoryQuery::iterator it = mq.begin();
       it != mq.end();
       it++) {
@@ -120,10 +132,7 @@ CGMapper::CGMapper(Machine machine, Runtime *rt, Processor local)
     }
 #endif
 
-  if(sysmems.empty()) {
-    log_cgmap.fatal() << "HELP!  No system memories found!?";
-    assert(false);
-  }
+  assert(!sysmems.empty());
 }
 
 CGMapper::~CGMapper(void)

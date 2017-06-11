@@ -90,6 +90,8 @@ void find_memories(Processor cpu, Processor gpu,
     switch (kind)
     {
       case Memory::SYSTEM_MEM:
+      case Memory::SOCKET_MEM:
+      case Memory::REGDMA_MEM:
         {
           system = *it;
           printf("System Memory " IDFMT " for CPU Processor " IDFMT 

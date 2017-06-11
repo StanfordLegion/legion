@@ -815,6 +815,58 @@ namespace Realm {
       }
 #endif
 
+      // if the REALM_DEFAULT_ARGS environment variable is set, these arguments
+      //  are inserted at the FRONT of the command line (so they may still be
+      //  overridden by actual command line args)
+      {
+	const char *e = getenv("REALM_DEFAULT_ARGS");
+	if(e) {
+	  // find arguments first, then construct new argv of right size
+	  std::vector<const char *> starts, ends;
+	  while(*e) {
+	    if(isspace(*e)) { e++; continue; }
+	    if(*e == '\'') {
+	      // single quoted string
+	      e++; assert(*e);
+	      starts.push_back(e);
+	      // read until next single quote
+	      while(*e && (*e != '\'')) e++;
+	      ends.push_back(e++);
+	      assert(!*e || isspace(*e));
+	      continue;
+	    }
+	    if(*e == '\"') {
+	      // double quoted string
+	      e++; assert(*e);
+	      starts.push_back(e);
+	      // read until next double quote
+	      while(*e && (*e != '\"')) e++;
+	      ends.push_back(e++);
+	      assert(!*e || isspace(*e));
+	      continue;
+	    }
+	    // no quotes - just take until next whitespace
+	    starts.push_back(e);
+	    while(*e && !isspace(*e)) e++;
+	    ends.push_back(e);
+	  }
+	  if(!starts.empty()) {
+	    int new_argc = *argc + starts.size();
+	    char **new_argv = (char **)(malloc((new_argc + 1) * sizeof(char *)));
+	    // new args go after argv[0[]
+	    new_argv[0] = (*argv)[0];
+	    for(size_t i = 0; i < starts.size(); i++)
+	      new_argv[i + 1] = strndup(starts[i], ends[i] - starts[i]);
+	    for(int i = 1; i < *argc; i++)
+	      new_argv[i + starts.size()] = (*argv)[i];
+	    new_argv[new_argc] = 0;
+
+	    *argc = new_argc;
+	    *argv = new_argv;
+	  }
+	}
+      }
+
       // new command-line parsers will work from a vector<string> representation of the
       //  command line
       std::vector<std::string> cmdline;
