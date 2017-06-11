@@ -14,6 +14,9 @@
  */
 
 
+#undef SMALL_INDEX_LAUNCH//toggle this to demonstrate two different problems abh 6/10/17
+
+
 #include "long_running.h"
 
 enum {
@@ -51,8 +54,13 @@ namespace Legion {
       
       Point<3> origin = Point<3>::ZEROES();
       Point<3> regionSize;
+#ifdef SMALL_INDEX_LAUNCH
+      regionSize.x[0] = 32;//320;
+      regionSize.x[1] = 24;//240;
+#else
       regionSize.x[0] = 320;
       regionSize.x[1] = 240;
+#endif
       regionSize.x[2] = 4;
       Rect<image_region_dimensions> imageBounds(origin, regionSize - Point<image_region_dimensions>::ONES());
       mDomain = Domain::from_rect<image_region_dimensions>(imageBounds);
@@ -161,7 +169,7 @@ namespace Legion {
                       Context ctx, HighLevelRuntime *runtime) {
     
     for(int i = 0; i < 100000; ++i) {
-      ImageReduction image_reduction = ImageReduction(runtime, ctx);
+      ImageReduction image_reduction(runtime, ctx);
     }
     
   }
