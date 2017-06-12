@@ -779,6 +779,7 @@ namespace Realm {
       assert(layout_piece != 0);
       field_rel_offset = it->second.rel_offset;
       field_size = it->second.size_in_bytes;
+      //log_dma.print() << "F " << field_idx << " " << fields[field_idx] << " : " << it->second.list_idx << " " << field_rel_offset << " " << field_size;
     }
 
     size_t max_elems = max_bytes / field_size;
@@ -824,10 +825,11 @@ namespace Realm {
 	  target_subrect.hi[d] = cur_point[d];
       }
 
-      info.base_offset = (inst_impl->metadata.alloc_offset +
+      info.base_offset = (inst_impl->metadata.inst_offset +
 			  affine->offset +
 			  affine->strides.dot(cur_point) +
 			  field_rel_offset);
+      //log_dma.print() << "A " << inst_impl->metadata.inst_offset << " + " << affine->offset << " + (" << affine->strides << " . " << cur_point << ") + " << field_rel_offset << " = " << info.base_offset;
       info.bytes_per_chunk = cur_bytes;
       info.num_lines = 1;
       info.line_stride = 0;
