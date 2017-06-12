@@ -12,21 +12,8 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- runs-with:
--- []
-
--- FIXME: Uses deprecated APIs
-
--- Note: The binding library is only being used to load the dynamic
--- library for Legion, not for any actual functionality. All Legion
--- calls happen through the C API.
-require('legionlib')
-c = terralib.includecstring([[
-#include "legion_c.h"
-#include "legion_terra.h"
-#include <stdio.h>
-#include <stdlib.h>
-]])
+local tasklib = require("manual_capi_tasklib")
+local c = tasklib.c
 
 RED_PLUS_INT = 1
 
@@ -53,8 +40,8 @@ terra sub_task(task : c.legion_task_t,
   var p1 = @[&c.legion_ptr_t](c.legion_task_get_args(task))
   c.printf("got arg %d\n", p1)
 
-  var a1 = c.legion_physical_region_get_accessor_generic(
-    regions[0])
+  var a1 = c.legion_physical_region_get_field_accessor_generic(
+    regions[0], FID_1)
 
   -- FIMXE: This has privilege problems.
   -- c.reduce_plus_int32(a1, p1, 123)
@@ -139,26 +126,24 @@ local args = require("manual_capi_args")
 terra main()
   c.printf("in main...\n")
   c.register_reduction_plus_int32(RED_PLUS_INT)
-  c.legion_runtime_register_task_void(
+
+  var execution_constraints = c.legion_execution_constraint_set_create()
+  c.legion_execution_constraint_set_add_processor_constraint(execution_constraints, c.LOC_PROC)
+  var layout_constraints = c.legion_task_layout_constraint_set_create()
+  [ tasklib.preregister_task(top_level_task) ](
     TID_TOP_LEVEL_TASK,
-    c.LOC_PROC,
-    true,
-    false,
-    1, -- c.AUTO_GENERATE_ID,
-    c.legion_task_config_options_t {
-      leaf = false, inner = false, idempotent = false},
     "top_level_task",
-    top_level_task)
-  c.legion_runtime_register_task_void(
-    TID_SUB_TASK,
-    c.LOC_PROC,
-    true,
-    false,
-    1, -- c.AUTO_GENERATE_ID,
+    execution_constraints, layout_constraints,
     c.legion_task_config_options_t {
       leaf = false, inner = false, idempotent = false},
+    nil, 0)
+  [ tasklib.preregister_task(sub_task) ](
+    TID_SUB_TASK,
     "sub_task",
-    sub_task)
+    execution_constraints, layout_constraints,
+    c.legion_task_config_options_t {
+      leaf = false, inner = false, idempotent = false},
+    nil, 0)
   c.legion_runtime_set_top_level_task_id(TID_TOP_LEVEL_TASK)
   [args.argv_setup]
   c.legion_runtime_start(args.argc, args.argv, false)
