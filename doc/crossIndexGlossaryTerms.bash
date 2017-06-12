@@ -14,77 +14,140 @@
 #  
 #!/bin/bash
 
+
+# prestage for development, remove when it works:
+
+
+
+
+ROOT=.
+
 TARGET_DIR=$1 # these files will be scanned and modified
-SOURCE_DIR=$2 # design patterns dir
-GLOSSARY_DIR=$3 # filenames are glossary terms
-IS_DESIGN_PATTERN=$4 # false for glossary, true for design patterns
-LEGEND=$5 # "See also:" 
-
-echo === Indexes will be appended to files in ${TARGET_DIR}
-echo === Indexes will point to files in ${SOURCE_DIR}
-echo === Indexed terms are filenames in ${GLOSSARY_DIR}
-echo === Design patterns? ${IS_DESIGN_PATTERN}
-echo === Legend ${LEGEND}
+GLOSSARY_DIR=$2 # filenames are glossary terms
+REFERENCE_DIR=$3 # references will point to here
+LEGEND=$4 # "<p>See also:"
+TARGET_IS_GLOSSARY=$5 # "true" or "false"
+REFERENCE_IS_GLOSSARY=$6 # "true" or "false"
 
 
-rm -f .tmp_targets .tmp_glossary .tmp_legends
-if [[ "${IS_DESIGN_PATTERN}" == "true" ]]
+# Generate all references
+#
+
+TMP=${ROOT}/.tmp
+REFERENCES=${TMP}/references
+TARGETS=${TMP}/targets
+GLOSSARY_TERMS=${TMP}/glossary_terms
+
+rm -rf ${TMP}
+mkdir -p ${TMP}
+
+# find all references in files in target dir
+
+ls -1 "${GLOSSARY_DIR}" > "${GLOSSARY_TERMS}"
+if [[ "${REFERENCE_IS_GLOSSARY}" == "true" ]]
 then
-  ls -1 ${SOURCE_DIR}/* > .tmp_targets
-  EFFECTIVE_SOURCE_DIR="${SOURCE_DIR}"
+  ls -1 "${TARGET_DIR}"/* | sed -e "s://:/:g" > "${TARGETS}"
+  echo === Files will be indexed from ${TARGET_DIR}
 else
-  ls -1 ${TARGET_DIR}/* > .tmp_targets
-  EFFECTIVE_SOURCE_DIR="../glossary"
+  ls -1 "${REFERENCE_DIR}"/* | sed -e "s://:/:g" > "${TARGETS}"
+  echo === Files will be indexed from ${REFERENCE_DIR}
 fi
-ls -1 ${GLOSSARY_DIR} > .tmp_glossary
 
-echo "" > .tmp_legends
+echo === Indexed terms are filenames in ${GLOSSARY_DIR}
+echo === References will point to filenames in ${REFERENCE_DIR}
+echo === Legend ${LEGEND}
+echo === TARGET_IS_GLOSSARY ${TARGET_IS_GLOSSARY}
+echo === REFERENCE_IS_GLOSSARY ${REFERENCE_IS_GLOSSARY}
 
-while read SOURCE_FILE
+
+wc -l ${TMP}/*
+mkdir -p ${REFERENCES}
+
+
+while read TARGET
+do
+  echo Indexing glossary terms used in "${TARGET}"
+  TARGET_NAME=$(basename "${TARGET}")
+  while read GLOSSARY_TERM
   do
-    SOURCE_FILE=`echo "${SOURCE_FILE}" | sed -e "s://:/:g"`
-    echo "Process ${SOURCE_FILE}" 
-    THIS_LEGEND=${LEGEND}
-    while read GLOSSARY_TERM
-      do
-        FOUND_IN_SOURCE=`grep "${GLOSSARY_TERM}" "${SOURCE_FILE}"`
-        if [[ "${FOUND_IN_SOURCE}" != "" ]]
-        then
-          IS_SELF=`echo "${SOURCE_FILE}" | grep "${GLOSSARY_TERM}"`
-          if [[ ${IS_SELF} && "${IS_DESIGN_PATTERN}" == "false" ]]
-          then
-            echo > /dev/null
-          else
-            FILENAME=$(basename "${SOURCE_FILE}")
-            if [[ "${IS_DESIGN_PATTERN}" == "true" ]]
-            then
-              TARGET_FILE="${TARGET_DIR}/${GLOSSARY_TERM}.html"
-              TEXT="<a href=\"../design_patterns/${FILENAME}\">${FILENAME}</a>" 
-              if [[ `grep "${GLOSSARY_TERM}" .tmp_legends` ]]
-              then
-                echo > /dev/null
-              else
-                echo "${THIS_LEGEND}" >> "${TARGET_FILE}"
-                echo "${GLOSSARY_TERM}" >> .tmp_legends
-              fi
-            else
-              TARGET_FILE="${TARGET_DIR}/${FILENAME}"
-              TEXT="<a href=\"${EFFECTIVE_SOURCE_DIR}/${GLOSSARY_TERM}.html\">${GLOSSARY_TERM}</a>" 
+    FOUND_REFERENCE=`grep "${GLOSSARY_TERM}" "${TARGET}"`
+    if [[ "${FOUND_REFERENCE}" != "" ]]
+    then
+      if [[ `echo "${TARGET}" | grep "${GLOSSARY_TERM}"` && "${TARGET_IS_GLOSSARY}" == "true" ]]
+      then
+        echo > /dev/null
+      else
+        STRIPPED_TARGET_NAME="`echo ${TARGET_NAME} | sed -e 's/.html//' `"
 
-              if [[ "${THIS_LEGEND}" != "" ]]
-              then
-                echo "${THIS_LEGEND}" >> "${TARGET_FILE}"
-                THIS_LEGEND=
-              fi
-            fi
-            echo "${TEXT}" | sed -e "s://:/:g" >> "${TARGET_FILE}"
-          fi
-        else
-          echo FOUND_IN_SOURCE ${FOUND_IN_SOURCE}
-          echo GLOSSARY_TERM ${GLOSSARY_TERM}
-          echo SOURCE_FILE ${SOURCE_FILE}
+        if [[ "${TARGET_IS_GLOSSARY}" == "true" && "${REFERENCE_IS_GLOSSARY}" == "true" ]]
+        then
+# modifying glossary with self references
+          TARGET_REFERENCES="${REFERENCES}/${TARGET_NAME}"
+          HREF="\"<a href=\\\"${GLOSSARY_TERM}.html\\\">${GLOSSARY_TERM}</a>\""
+          MODIFIED_FILE=`echo "${TARGET}" | sed -e "s://:/:g"`
+          OUT_LINE="echo ${HREF} >> \"${MODIFIED_FILE}\""
+          echo "${OUT_LINE}" >> "${TARGET_REFERENCES}"
+
+          TARGET_REFERENCES2="${REFERENCES}/${GLOSSARY_TERM}.html"
+          MODIFIED_FILE2=`echo "${REFERENCE_DIR}/${GLOSSARY_TERM}.html" | sed -e "s://:/:g"`
+          HREF2="\"<a href=\\\"${TARGET_NAME}\\\">${STRIPPED_TARGET_NAME}</a>\""
+          OUT_LINE2="echo ${HREF2} >> \"${MODIFIED_FILE2}\""
+          echo "${OUT_LINE2}" >> "${TARGET_REFERENCES2}"
+
+        elif [[ "${TARGET_IS_GLOSSARY}" == "false" && "${REFERENCE_IS_GLOSSARY}" == "true" ]]
+         then
+# modifying design patterns with references to glossary
+          TARGET_REFERENCES="${REFERENCES}/${TARGET_NAME}"
+          MODIFIED_FILE=`echo "${TARGET_DIR}/${TARGET_NAME}" | sed -e "s://:/:g"`
+          HREF_NAME=`echo "../${REFERENCE_DIR}/${GLOSSARY_TERM}.html" | sed -e "s://:/:g"`
+          HREF="\"<a href=\\\"${HREF_NAME}\\\">${GLOSSARY_TERM}</a>\""
+          echo "echo ${HREF} >> \"${MODIFIED_FILE}\"" >> "${TARGET_REFERENCES}"
+
+        elif [[ "${TARGET_IS_GLOSSARY}" == "true" && "${REFERENCE_IS_GLOSSARY}" == "false" ]]
+        then
+# modifying glossary with references to design patterns
+          TARGET_REFERENCES="${REFERENCES}/${GLOSSARY_TERM}.html"
+          MODIFIED_FILE=`echo "${TARGET_DIR}/${GLOSSARY_TERM}.html" | sed -e "s://:/:g"`
+          HREF_NAME=`echo "../${REFERENCE_DIR}/${STRIPPED_TARGET_NAME}.html" | sed -e "s://:/:g"`
+          HREF="\"<a href=\\\"${HREF_NAME}\\\">${STRIPPED_TARGET_NAME}</a>\""
+          echo "echo ${HREF} >> \"${MODIFIED_FILE}\"" >> "${TARGET_REFERENCES}"
+
+        elif [[ "${TARGET_IS_GLOSSARY}" == "false" && "${REFERENCE_IS_GLOSSARY}" == "false" ]]
+        then
+          echo ERROR THIS CONFIGURATION IS NOT SUPPORTED
+          exit
         fi
-      done < .tmp_glossary
-  done < .tmp_targets
-rm -f .tmp_targets .tmp_glossary .tmp_legends
+
+      fi
+    fi
+  done < "${GLOSSARY_TERMS}"
+done < "${TARGETS}"
+
+
+
+
+# Sort and eliminate duplicates, append to target files
+#
+
+for TARGET_REFERENCES in "${REFERENCES}"/*
+do
+  TARGET_NAME=$(basename "${TARGET_REFERENCES}")
+  if [[ "${TARGET_IS_GLOSSARY}" == "true" ]]
+  then
+    TARGET=`echo "${REFERENCE_DIR}/${TARGET_NAME}" | sed -e "s://:/:g"`
+  else
+    TARGET=`echo "${TARGET_DIR}/${TARGET_NAME}" | sed -e "s://:/:g"`
+  fi
+  FILTERED_TARGET_REFERENCES="${TARGET_REFERENCES}.filtered"
+  cat "${TARGET_REFERENCES}" | sort | uniq >> .tmp_filtered
+  if [[ `wc -l .tmp_filtered | sed -e "s:.tmp_filtered::"` -gt 0 ]]
+  then
+    LEGEND_TARGET=`echo "${TARGET_DIR}/${TARGET_NAME}" | sed -e "s://:/:g"`
+    OUT_LINE="echo \"${LEGEND}\" >> \"${LEGEND_TARGET}\""
+    echo "${OUT_LINE}" > "${FILTERED_TARGET_REFERENCES}"
+    cat .tmp_filtered >> "${FILTERED_TARGET_REFERENCES}"
+    rm .tmp_filtered
+    /bin/bash "${FILTERED_TARGET_REFERENCES}"
+  fi
+done
 

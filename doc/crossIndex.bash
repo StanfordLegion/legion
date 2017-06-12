@@ -50,19 +50,28 @@ echo
 echo ADD GLOSSARY TERMS TO GLOSSARY
 echo 
 
-./crossIndexGlossaryTerms.bash ./publish/glossary/ ./publish/glossary/ glossary/html/ false "<p>See also:"
+(
+cd publish 
+../crossIndexGlossaryTerms.bash glossary/ ../glossary/html/ glossary/ "<p> See also:" true true
+)
 
 echo 
 echo ADD GLOSSARY TERMS TO DESIGN PATTERNS
 echo 
 
-./crossIndexGlossaryTerms.bash ./publish/design_patterns/ ./publish/glossary/ glossary/html/ false "<p>See also:"
+(
+cd publish
+../crossIndexGlossaryTerms.bash design_patterns/ ../glossary/html/ glossary/ "<p> See also:" false true
+)
 
 echo 
 echo ADD DESIGN PATTERNS TO GLOSSARY
 echo 
 
-./crossIndexGlossaryTerms.bash ./publish/glossary ./publish/design_patterns/ glossary/html/ true "<p>Related design patterns:"
+(
+cd publish
+../crossIndexGlossaryTerms.bash glossary/ ../glossary/html/ design_patterns/ "<p> Relevant design patterns:" true false
+)
 
 echo 
 echo CREATE THE INDEX PAGE
@@ -73,3 +82,4 @@ echo
 echo 
 echo DONE
 echo 
+
