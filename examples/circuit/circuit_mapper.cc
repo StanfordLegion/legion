@@ -193,6 +193,18 @@ void update_mappers(Machine machine, Runtime *runtime,
     }
   }
 
+  // do a second pass in which a regdma/socket memory is used as a sysmem if
+  //   a processor doesn't have sysmem for some reason
+  for (unsigned idx = 0; idx < proc_mem_affinities.size(); ++idx) {
+    Machine::ProcessorMemoryAffinity& affinity = proc_mem_affinities[idx];
+    if ((affinity.p.kind() == Processor::LOC_PROC) &&
+	((affinity.m.kind() == Memory::SOCKET_MEM) ||
+	 (affinity.m.kind() == Memory::REGDMA_MEM)) &&
+	(proc_sysmems->count(affinity.p) == 0)) {
+      (*proc_sysmems)[affinity.p] = affinity.m;
+    }
+  }
+
   for (std::map<Processor, Memory>::iterator it = proc_sysmems->begin();
        it != proc_sysmems->end(); ++it) {
     procs_list->push_back(it->first);

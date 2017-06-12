@@ -42,8 +42,8 @@
 // remote copy active messages from from lowlevel_dma.h for now
 #include <realm/transfer/lowlevel_dma.h>
 namespace Realm {
-  typedef LegionRuntime::LowLevel::RemoteCopyMessage RemoteCopyMessage;
-  typedef LegionRuntime::LowLevel::RemoteFillMessage RemoteFillMessage;
+  //typedef LegionRuntime::LowLevel::RemoteCopyMessage RemoteCopyMessage;
+  //typedef LegionRuntime::LowLevel::RemoteFillMessage RemoteFillMessage;
 };
 
 // create xd message and update bytes read/write messages
@@ -56,9 +56,9 @@ namespace Realm {
   typedef LegionRuntime::LowLevel::NotifyXferDesCompleteMessage NotifyXferDesCompleteMessage;
   typedef LegionRuntime::LowLevel::UpdateBytesWriteMessage UpdateBytesWriteMessage;
   typedef LegionRuntime::LowLevel::UpdateBytesReadMessage UpdateBytesReadMessage;
-  typedef LegionRuntime::LowLevel::RemoteIBAllocRequestAsync RemoteIBAllocRequestAsync;
-  typedef LegionRuntime::LowLevel::RemoteIBAllocResponseAsync RemoteIBAllocResponseAsync;
-  typedef LegionRuntime::LowLevel::RemoteIBFreeRequestAsync RemoteIBFreeRequestAsync;
+  //typedef LegionRuntime::LowLevel::RemoteIBAllocRequestAsync RemoteIBAllocRequestAsync;
+  //typedef LegionRuntime::LowLevel::RemoteIBAllocResponseAsync RemoteIBAllocResponseAsync;
+  //typedef LegionRuntime::LowLevel::RemoteIBFreeRequestAsync RemoteIBFreeRequestAsync;
 }
 
 #include <unistd.h>
@@ -455,7 +455,7 @@ namespace Realm {
     , num_cpu_procs(1), num_util_procs(1), num_io_procs(0)
     , concurrent_io_threads(1)  // Legion does not support values > 1 right now
     , force_kernel_threads(false)
-    , sysmem_size_in_mb(512), stack_size_in_mb(2)
+    , sysmem_size_in_mb(0 /*SJT DMA HACK - 512*/), stack_size_in_mb(2)
   {}
 
   CoreModule::~CoreModule(void)
@@ -815,6 +815,58 @@ namespace Realm {
       }
 #endif
 
+      // if the REALM_DEFAULT_ARGS environment variable is set, these arguments
+      //  are inserted at the FRONT of the command line (so they may still be
+      //  overridden by actual command line args)
+      {
+	const char *e = getenv("REALM_DEFAULT_ARGS");
+	if(e) {
+	  // find arguments first, then construct new argv of right size
+	  std::vector<const char *> starts, ends;
+	  while(*e) {
+	    if(isspace(*e)) { e++; continue; }
+	    if(*e == '\'') {
+	      // single quoted string
+	      e++; assert(*e);
+	      starts.push_back(e);
+	      // read until next single quote
+	      while(*e && (*e != '\'')) e++;
+	      ends.push_back(e++);
+	      assert(!*e || isspace(*e));
+	      continue;
+	    }
+	    if(*e == '\"') {
+	      // double quoted string
+	      e++; assert(*e);
+	      starts.push_back(e);
+	      // read until next double quote
+	      while(*e && (*e != '\"')) e++;
+	      ends.push_back(e++);
+	      assert(!*e || isspace(*e));
+	      continue;
+	    }
+	    // no quotes - just take until next whitespace
+	    starts.push_back(e);
+	    while(*e && !isspace(*e)) e++;
+	    ends.push_back(e);
+	  }
+	  if(!starts.empty()) {
+	    int new_argc = *argc + starts.size();
+	    char **new_argv = (char **)(malloc((new_argc + 1) * sizeof(char *)));
+	    // new args go after argv[0[]
+	    new_argv[0] = (*argv)[0];
+	    for(size_t i = 0; i < starts.size(); i++)
+	      new_argv[i + 1] = strndup(starts[i], ends[i] - starts[i]);
+	    for(int i = 1; i < *argc; i++)
+	      new_argv[i + starts.size()] = (*argv)[i];
+	    new_argv[new_argc] = 0;
+
+	    *argc = new_argc;
+	    *argv = new_argv;
+	  }
+	}
+      }
+
       // new command-line parsers will work from a vector<string> representation of the
       //  command line
       std::vector<std::string> cmdline;
@@ -844,7 +896,7 @@ namespace Realm {
       size_t gasnet_mem_size_in_mb = 0;
       size_t reg_ib_mem_size_in_mb = 0;
 #endif
-      size_t reg_mem_size_in_mb = 0;
+      size_t reg_mem_size_in_mb = 512 /*SJT DMA HACK - 0*/;
       size_t disk_mem_size_in_mb = 0;
       // Static variable for stack size since we need to 
       // remember it when we launch threads in run 
@@ -1113,10 +1165,10 @@ namespace Realm {
       gasnet_coll_init(0, 0, 0, 0, 0);
 #endif
 
-      LegionRuntime::LowLevel::create_builtin_dma_channels(this);
+      create_builtin_dma_channels(this);
 
-      LegionRuntime::LowLevel::start_dma_worker_threads(dma_worker_threads,
-                                                        *core_reservations);
+      start_dma_worker_threads(dma_worker_threads,
+			       *core_reservations);
 
       PartitioningOpQueue::start_worker_threads(*core_reservations);
 
@@ -1221,9 +1273,9 @@ namespace Realm {
       
       // start dma system at the very ending of initialization
       // since we need list of local gpus to create channels
-      LegionRuntime::LowLevel::start_dma_system(dma_worker_threads,
-                                                pin_dma_threads, 100
-                                                ,*core_reservations);
+      start_dma_system(dma_worker_threads,
+		       pin_dma_threads, 100
+		       ,*core_reservations);
 
       // now that we've created all the processors/etc., we can try to come up with core
       //  allocations that satisfy everybody's requirements - this will also start up any
@@ -1889,8 +1941,8 @@ namespace Realm {
 
       // threads that cause inter-node communication have to stop first
       PartitioningOpQueue::stop_worker_threads();
-      LegionRuntime::LowLevel::stop_dma_worker_threads();
-      LegionRuntime::LowLevel::stop_dma_system();
+      stop_dma_worker_threads();
+      stop_dma_system();
       stop_activemsg_threads();
 
       sampling_profiler.shutdown();

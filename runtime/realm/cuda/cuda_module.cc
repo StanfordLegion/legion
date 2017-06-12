@@ -33,13 +33,6 @@
 namespace Realm {
   namespace Cuda {
 
-    // dma code is still in old namespace
-    typedef LegionRuntime::LowLevel::DmaRequest DmaRequest;
-    typedef LegionRuntime::LowLevel::OASVec OASVec;
-    typedef LegionRuntime::LowLevel::InstPairCopier InstPairCopier;
-    typedef LegionRuntime::LowLevel::MemPairCopier MemPairCopier;
-    typedef LegionRuntime::LowLevel::MemPairCopierFactory MemPairCopierFactory;
-
     Logger log_gpu("gpu");
     Logger log_gpudma("gpudma");
     Logger log_cudart("cudart");
@@ -354,7 +347,7 @@ namespace Realm {
     {
       log_gpudma.info("gpu memcpy 2d: dst=%p src=%p "
                    "dst_off=%ld src_off=%ld bytes=%ld lines=%ld kind=%d",
-                   dst, src, (long)dst_stride, (long)src_stride, bytes, lines, kind); 
+		      dst, src, (long)dst_stride, (long)src_stride, (long)bytes, (long)lines, kind); 
       CUDA_MEMCPY2D copy_info;
       if (kind == GPU_MEMCPY_PEER_TO_PEER) {
         // If we're doing peer to peer, just let unified memory it deal with it
@@ -386,7 +379,7 @@ namespace Realm {
 
       log_gpudma.info("gpu memcpy 2d complete: dst=%p src=%p "
                    "dst_off=%ld src_off=%ld bytes=%ld lines=%ld kind=%d",
-                   dst, src, (long)dst_stride, (long)src_stride, bytes, lines, kind);
+		      dst, src, (long)dst_stride, (long)src_stride, (long)bytes, (long)lines, kind);
     }
 
   ////////////////////////////////////////////////////////////////////////
@@ -417,8 +410,8 @@ namespace Realm {
                       "dst_off=%ld src_off=%ld dst_hei = %ld src_hei = %ld"
                       "bytes=%ld height=%ld depth=%ld kind=%d",
                       dst, src, (long)dst_stride, (long)src_stride,
-                      (long)dst_height, (long)src_height, bytes, height,
-                      depth, kind);
+                      (long)dst_height, (long)src_height, (long)bytes, (long)height,
+                      (long)depth, kind);
       CUDA_MEMCPY3D copy_info;
       if (kind == GPU_MEMCPY_PEER_TO_PEER) {
         // If we're doing peer to peer, just let unified memory it deal with it
@@ -456,11 +449,11 @@ namespace Realm {
         stream->add_notification(notification);
 
        log_gpudma.info("gpu memcpy 3d complete: dst=%p src=%p"
-                      "dst_off=%ld src_off=%ld dst_hei = %ld src_hei = %ld"
-                      "bytes=%ld height=%ld depth=%ld kind=%d",
-                      dst, src, (long)dst_stride, (long)src_stride,
-                      (long)dst_height, (long)src_height, bytes, height,
-                      depth, kind);
+		       "dst_off=%ld src_off=%ld dst_hei = %ld src_hei = %ld"
+		       "bytes=%ld height=%ld depth=%ld kind=%d",
+		       dst, src, (long)dst_stride, (long)src_stride,
+		       (long)dst_height, (long)src_height, (long)bytes, (long)height,
+		       (long)depth, kind);
     }
 
     ////////////////////////////////////////////////////////////////////////
@@ -482,7 +475,7 @@ namespace Realm {
       virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
 					OASVec &oas_vec)
       {
-	return new LegionRuntime::LowLevel::SpanBasedInstPairCopier<GPUtoFBMemPairCopier>(this, src_inst, 
+	return new SpanBasedInstPairCopier<GPUtoFBMemPairCopier>(this, src_inst, 
 											  dst_inst, oas_vec);
       }
 
@@ -528,7 +521,7 @@ namespace Realm {
       virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
 					OASVec &oas_vec)
       {
-	return new LegionRuntime::LowLevel::SpanBasedInstPairCopier<GPUfromFBMemPairCopier>(this, src_inst, 
+	return new SpanBasedInstPairCopier<GPUfromFBMemPairCopier>(this, src_inst, 
 											    dst_inst, oas_vec);
       }
 
@@ -571,7 +564,7 @@ namespace Realm {
       virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
 					OASVec &oas_vec)
       {
-	return new LegionRuntime::LowLevel::SpanBasedInstPairCopier<GPUinFBMemPairCopier>(this, src_inst, 
+	return new SpanBasedInstPairCopier<GPUinFBMemPairCopier>(this, src_inst, 
 											  dst_inst, oas_vec);
       }
 
@@ -613,7 +606,7 @@ namespace Realm {
       virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
 					OASVec &oas_vec)
       {
-        return new LegionRuntime::LowLevel::SpanBasedInstPairCopier<GPUPeerMemPairCopier>(this, src_inst,
+        return new SpanBasedInstPairCopier<GPUPeerMemPairCopier>(this, src_inst,
 											  dst_inst, oas_vec);
       }
 
@@ -758,8 +751,8 @@ namespace Realm {
       return true;
     }
 
-    LegionRuntime::LowLevel::MemPairCopier *GPUDMAChannel_D2H::create_copier(Memory src_mem, Memory dst_mem,
-									     ReductionOpID redop_id, bool fold)
+    MemPairCopier *GPUDMAChannel_D2H::create_copier(Memory src_mem, Memory dst_mem,
+						    ReductionOpID redop_id, bool fold)
     {
       return new GPUfromFBMemPairCopier(gpu, dst_mem);
     }
