@@ -79,6 +79,10 @@ while read SOURCE_FILE
             fi
             echo "${TEXT}" | sed -e "s://:/:g" >> "${TARGET_FILE}"
           fi
+        else
+          echo FOUND_IN_SOURCE ${FOUND_IN_SOURCE}
+          echo GLOSSARY_TERM ${GLOSSARY_TERM}
+          echo SOURCE_FILE ${SOURCE_FILE}
         fi
       done < .tmp_glossary
   done < .tmp_targets
