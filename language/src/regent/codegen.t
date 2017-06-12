@@ -6191,11 +6191,26 @@ function codegen.expr_binary(cx, node)
       [actions]
       var is = c.legion_index_partition_get_parent_index_space(
         [cx.runtime], [lhs.value].impl.index_partition)
+      var lhs_colors = c.legion_index_partition_get_color_space(
+        [cx.runtime], [lhs.value].impl.index_partition)
+      var rhs_colors = c.legion_index_partition_get_color_space(
+        [cx.runtime], [rhs.value].impl.index_partition)
+      var colors : c.legion_index_space_t
+      if lhs_colors.tid ~= rhs_colors.tid or lhs_colors.id ~= rhs_colors.id then
+        var color_spaces : c.legion_index_space_t[2]
+        color_spaces[0] = lhs_colors
+        color_spaces[1] = rhs_colors
+        colors = c.legion_index_space_union(
+          [cx.runtime], [cx.context], &(color_spaces[0]), 2) -- FIXME: Leaks
+      else
+        colors = lhs_colors
+      end
       var [ip] = [create_partition](
         [cx.runtime], [cx.context],
         is, [lhs.value].impl.index_partition, [rhs.value].impl.index_partition,
+        colors,
         [(partition_type:is_disjoint() and c.DISJOINT_KIND) or c.COMPUTE_KIND],
-        -1, false)
+        -1)
       var [lp] = c.legion_logical_partition_create_by_tree(
         [cx.runtime], [cx.context],
         [ip], [lhs.value].impl.field_space, [lhs.value].impl.tree_id)
