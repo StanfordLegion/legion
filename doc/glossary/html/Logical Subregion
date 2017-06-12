@@ -1,0 +1,8 @@
+<em>Logical Subregion</em>
+
+<p>
+
+A Logical Subregion is a LogicalRegion that is a subregion of another LogicalRegion.
+It corresponds to an element of a LogicalPartition.
+
+<p>
