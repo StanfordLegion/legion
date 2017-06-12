@@ -118,6 +118,7 @@ namespace Realm {
 	    // case 3 - leftover at end
 	    Range *r_after = new Range(alloc_last, r->last);
 	    by_first[alloc_last] = r_after;
+	    r->last = alloc_last;
 
 	    // r_after goes after r in all block list
 	    r_after->prev = r; r_after->next = r->next;
@@ -179,15 +180,67 @@ namespace Realm {
 	prev_free->next_free = next_free->prev_free = r;
       } else {
 	// case 2 - merge before
-	assert(0);
+	Range *old_prev = r->prev;
+	assert(r->first == old_prev->last);
+	by_first.erase(r->first);
+	r->first = old_prev->first;
+	by_first[r->first] = r;
+
+	// our prev is the old prev's prev - next doesn't change
+	r->prev = old_prev->prev;
+	r->prev->next = r;
+
+	// take over the free list pointers
+	r->prev_free = old_prev->prev_free;
+	r->prev_free->next_free = r;
+	r->next_free = old_prev->next_free;
+	r->next_free->prev_free = r;
+
+
+	delete old_prev;
       }
     } else {
       if(!merge_prev) {
 	// case 3 - merge after
-	assert(0);
+	Range *old_next = r->next;
+	assert(r->last == old_next->first);
+	r->last = old_next->last;
+	by_first.erase(old_next->first);
+
+	// our next is the old next's next - prev doesn't change
+	r->next = old_next->next;
+	r->next->prev = r;
+
+	// take over the free list pointers
+	r->prev_free = old_next->prev_free;
+	r->prev_free->next_free = r;
+	r->next_free = old_next->next_free;
+	r->next_free->prev_free = r;
+
+	delete old_next;
       } else {
 	// case 4 - merge both
-	assert(0);
+	
+	Range *old_prev = r->prev;
+	assert(r->first == old_prev->last);
+	by_first.erase(r->first);
+	r->first = old_prev->first;
+	by_first[r->first] = r;
+
+	Range *old_next = r->next;
+	assert(r->last == old_next->first);
+	r->last = old_next->last;
+	by_first.erase(old_next->first);
+
+	// take prev pointers from old_prev and next from old_next
+	r->prev = old_prev->prev;  r->prev->next = r;
+	r->next = old_next->next;  r->next->prev = r;
+
+	r->prev_free = old_prev->prev_free; r->prev_free->next_free = r;
+	r->next_free = old_next->next_free; r->next_free->prev_free = r;
+
+	delete old_prev;
+	delete old_next;
       }
     }
   };
