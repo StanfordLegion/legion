@@ -2224,16 +2224,16 @@ legion_index_partition_has_index_subspace_domain_point(
   return runtime->has_index_subspace(handle, color);
 }
 
-legion_domain_t
+legion_index_space_t
 legion_index_partition_get_color_space(legion_runtime_t runtime_,
                                        legion_index_partition_t handle_)
 {
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   IndexPartition handle = CObjectWrapper::unwrap(handle_);
 
-  Domain d = runtime->get_index_partition_color_space(handle);
+  IndexSpace is = runtime->get_index_partition_color_space_name(handle);
 
-  return CObjectWrapper::wrap(d);
+  return CObjectWrapper::wrap(is);
 }
 
 legion_color_t

@@ -1052,9 +1052,9 @@ extern "C" {
     legion_domain_point_t color);
 
   /**
-   * @see Legion::Runtime::get_index_partition_color_space()
+   * @see Legion::Runtime::get_index_partition_color_space_name()
    */
-  legion_domain_t
+  legion_index_space_t
   legion_index_partition_get_color_space(legion_runtime_t runtime,
                                          legion_index_partition_t handle);
 
