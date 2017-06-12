@@ -3637,8 +3637,8 @@ function codegen.expr_partition_equal(cx, node)
       var domain = c.legion_index_space_get_domain(
         [cx.runtime], [colors.value].impl)
       var [ip] = c.legion_index_partition_create_equal(
-      [cx.runtime], [cx.context], [region.value].impl.index_space,
-      domain, 1 --[[ granularity ]], -1 --[[ AUTO_GENERATE_ID ]], false)
+        [cx.runtime], [cx.context], [region.value].impl.index_space,
+        [colors.value].impl, 1 --[[ granularity ]], -1 --[[ AUTO_GENERATE_ID ]])
       var [lp] = c.legion_logical_partition_create(
         [cx.runtime], [cx.context], [region.value].impl, [ip])
     end
@@ -3671,8 +3671,8 @@ function codegen.expr_partition_equal(cx, node)
            end
          end)]
       var [ip] = [create_index_partition](
-      [cx.runtime], [cx.context], [region.value].impl.index_space,
-      [blockify], -1 --[[ AUTO_GENERATE_ID ]])
+        [cx.runtime], [cx.context], [region.value].impl.index_space,
+        [blockify], -1 --[[ AUTO_GENERATE_ID ]])
       var [lp] = c.legion_logical_partition_create(
         [cx.runtime], [cx.context], [region.value].impl, [ip])
     end
@@ -3712,11 +3712,9 @@ function codegen.expr_partition_by_field(cx, node)
   local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
   actions = quote
     [actions]
-    var domain = c.legion_index_space_get_domain(
-      [cx.runtime], [colors.value].impl)
     var [ip] = c.legion_index_partition_create_by_field(
-    [cx.runtime], [cx.context], [region.value].impl, [parent_region].impl,
-    field_id, domain, -1, false)
+      [cx.runtime], [cx.context], [region.value].impl, [parent_region].impl,
+      field_id, [colors.value].impl, -1)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region.value].impl, [ip])
   end
@@ -3767,13 +3765,13 @@ function codegen.expr_image(cx, node)
   local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
   actions = quote
     [actions]
-    var domain = c.legion_index_partition_get_color_space(
+    var colors = c.legion_index_partition_get_color_space(
       [cx.runtime], [partition.value].impl.index_partition)
     var [ip] = c.legion_index_partition_create_by_image(
       [cx.runtime], [cx.context],
       [parent.value].impl.index_space,
       [partition.value].impl, [region_parent].impl, field_id,
-      domain, c.COMPUTE_KIND, -1, false)
+      colors, c.COMPUTE_KIND, -1)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [parent.value].impl, [ip])
   end
@@ -3824,16 +3822,16 @@ function codegen.expr_preimage(cx, node)
   local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
   actions = quote
     [actions]
-    var domain = c.legion_index_partition_get_color_space(
+    var colors = c.legion_index_partition_get_color_space(
       [cx.runtime], [partition.value].impl.index_partition)
     var [ip] = c.legion_index_partition_create_by_preimage(
       [cx.runtime], [cx.context], [partition.value].impl.index_partition,
-      [parent.value].impl, [region_parent].impl, field_id, domain,
+      [parent.value].impl, [region_parent].impl, field_id, colors,
       [(result_type:is_disjoint() and
         result_type:parent_region():is_opaque() and
         c.DISJOINT_KIND) or
        c.COMPUTE_KIND],
-      -1, false)
+      -1)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region.value].impl, [ip])
   end
