@@ -5052,7 +5052,7 @@ namespace Legion {
       else
         result = context->runtime->get_start_color();
 #ifdef DEBUG_LEGION
-      assert(color_map.find(color) == color_map.end());
+      assert(color_map.find(result) == color_map.end());
 #endif
       // We have to put ourselves in the map to be sound for other parallel
       // allocations of colors which may come later

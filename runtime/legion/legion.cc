@@ -2898,7 +2898,7 @@ namespace Legion {
       FieldSpace temp_fs = create_field_space(ctx);
       const FieldID color_fid = 1;
       const FieldID pointer_fid = 2;
-      const size_t color_point_size = sizeof(Color);
+      const size_t color_point_size = sizeof(coord_t);
       {
         FieldAllocator allocator = create_field_allocator(ctx,temp_fs);
         allocator.allocate_field(color_point_size, color_fid);
@@ -3112,7 +3112,7 @@ namespace Legion {
       FieldSpace temp_fs = create_field_space(ctx);
       const FieldID color_fid = 1;
       const FieldID range_fid = 2;
-      const size_t color_point_size = sizeof(Color);
+      const size_t color_point_size = sizeof(coord_t);
       size_t range_size = 0;
       switch (coloring.begin()->second.get_dim())
       {
@@ -3366,7 +3366,7 @@ namespace Legion {
       FieldSpace temp_fs = create_field_space(ctx);
       const FieldID color_fid = 1;
       const FieldID range_fid = 2;
-      const size_t color_point_size = sizeof(Color);
+      const size_t color_point_size = sizeof(coord_t);
       size_t range_size = 0;
       switch (coloring.begin()->second.begin()->get_dim())
       {
