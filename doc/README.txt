@@ -1,5 +1,7 @@
 README.txt
 
+You probably just want to do "./crossIndex.bash"
+
 glossary/html
 contains a set of files, each file defines a glossary term, file names are exact (no extensions, no spaces in class names)
 
