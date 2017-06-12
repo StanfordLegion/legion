@@ -461,13 +461,17 @@ class Stage(object):
         print()
         sys.stdout.flush()
 
-def report_mode(test_regent, test_legion_cxx, test_fuzzer, test_realm,
+def report_mode(debug, launcher,
+                test_regent, test_legion_cxx, test_fuzzer, test_realm,
                 test_external, test_private, test_perf, use_gasnet,
                 use_cuda, use_openmp, use_llvm, use_hdf, use_spy, use_gcov,
                 use_cmake, use_rdir):
     print()
     print('#'*60)
     print('### Test Suite Configuration')
+    print('###')
+    print('### Debug:          %s' % debug)
+    print('### Launcher:       %s' % launcher)
     print('###')
     print('### Running Tests:')
     print('###   * Regent:     %s' % test_regent)
@@ -570,7 +574,8 @@ def run_tests(test_modules=None,
         check_test_legion_cxx(root_dir)
         return
 
-    report_mode(test_regent, test_legion_cxx, test_fuzzer, test_realm,
+    report_mode(debug, launcher,
+                test_regent, test_legion_cxx, test_fuzzer, test_realm,
                 test_external, test_private, test_perf, use_gasnet,
                 use_cuda, use_openmp, use_llvm, use_hdf, use_spy, use_gcov,
                 use_cmake, use_rdir)
