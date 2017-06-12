@@ -12,11 +12,11 @@ crossIndex.bash
 script to automatically cross idnex the glossary and design patterns, results go into
 publish/glossary
 publish/design_patterns
-public/index.html
+publish/index.html
 
 corssIndexGlossaryTerms.bash
 this script is called by crossIndex.bash
 
 createIndex.bash
-this creates the published/index.html after the other scripts have run
+this creates publish/index.html after the other scripts have run
 
