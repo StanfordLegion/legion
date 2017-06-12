@@ -504,6 +504,40 @@ legion_index_space_create_domain(legion_runtime_t runtime_,
   return CObjectWrapper::wrap(is);
 }
 
+legion_index_space_t
+legion_index_space_union(legion_runtime_t runtime_,
+                         legion_context_t ctx_,
+                         const legion_index_space_t *spaces_,
+                         size_t num_spaces)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  std::vector<IndexSpace> spaces;
+  for (size_t i = 0; i < num_spaces; i++) {
+    spaces.push_back(CObjectWrapper::unwrap(spaces_[i]));
+  }
+
+  IndexSpace is = runtime->union_index_spaces(ctx, spaces);
+  return CObjectWrapper::wrap(is);
+}
+
+legion_index_space_t
+legion_index_space_intersection(legion_runtime_t runtime_,
+                                legion_context_t ctx_,
+                                const legion_index_space_t *spaces_,
+                                size_t num_spaces)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  std::vector<IndexSpace> spaces;
+  for (size_t i = 0; i < num_spaces; i++) {
+    spaces.push_back(CObjectWrapper::unwrap(spaces_[i]));
+  }
+
+  IndexSpace is = runtime->intersect_index_spaces(ctx, spaces);
+  return CObjectWrapper::wrap(is);
+}
+
 void
 legion_index_space_destroy(legion_runtime_t runtime_,
                            legion_context_t ctx_,
