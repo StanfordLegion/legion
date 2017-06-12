@@ -23,6 +23,7 @@
 #include "legion_profiling.h"
 #include "legion_instances.h"
 #include "legion_views.h"
+#include "logger_message_descriptor.h"
 
 namespace Legion {
   namespace Internal {
@@ -2021,8 +2022,10 @@ namespace Legion {
         initialize(forest);
       if (field_sizes.empty())
       {
-        log_run.warning("WARNING: Ignoring request to create instance in "
-                        "memory " IDFMT " with no fields.", 
+        MessageDescriptor IGNORE_MEMORY_REQUEST(1300, "undefined");
+        log_run.warning(IGNORE_MEMORY_REQUEST.id(),
+                        "Ignoring request to create instance in "
+                        "memory " IDFMT " with no fields.",
                         memory_manager->memory.id);
         return NULL;
       }
@@ -2097,7 +2100,9 @@ namespace Legion {
             // though so all you should have to do is delete this check
             if (field_sizes.size() > 1)
             {
-              log_run.error("ERROR: Illegal request for a reduction instance "
+              MessageDescriptor ILLEGAL_REDUCTION_REQUEST(1301, "undefined");
+              log_run.error(ILLEGAL_REDUCTION_REQUEST.id(),
+                            "Illegal request for a reduction instance "
                             "containing multiple fields. Only a single field "
                             "is currently permitted for reduction instances.");
 #ifdef DEBUG_LEGION
@@ -2421,15 +2426,17 @@ namespace Legion {
             break;
           }
         case VIRTUAL_SPECIALIZE:
-          {
-            log_run.error("Illegal request to create a virtual instance");
-            assert(false);
-          }
+        {
+          MessageDescriptor ILLEGAL_REQUEST_VIRTUAL_INSTANCE(1302, "undefined");
+          log_run.error(ILLEGAL_REQUEST_VIRTUAL_INSTANCE.id(),
+                        "Illegal request to create a virtual instance");
+          assert(false);
+        }
         default:
           assert(false); // unknown kind
       }
     }
-
-  }; // namespace Internal 
+    
+  }; // namespace Internal
 }; // namespace Legion
 
