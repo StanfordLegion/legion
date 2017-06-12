@@ -648,6 +648,9 @@ def driver():
         default=os.environ['DEBUG'] == '1' if 'DEBUG' in os.environ else True,
         help='Build Legion in debug mode (also via DEBUG).')
     parser.add_argument(
+        '--no-debug', dest='debug', action='store_false',
+        help='Disable debug mode (equivalent to DEBUG=0).')
+    parser.add_argument(
         '--use', dest='use_features', action='append',
         choices=['gasnet', 'cuda', 'openmp', 'llvm', 'hdf', 'spy', 'gcov',
                  'cmake', 'rdir'],
