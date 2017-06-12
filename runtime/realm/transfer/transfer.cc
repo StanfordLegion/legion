@@ -20,6 +20,7 @@
 #include <realm/transfer/lowlevel_dma.h>
 #include <realm/mem_impl.h>
 #include <realm/idx_impl.h>
+#include <realm/inst_layout.h>
 
 TYPE_IS_SERIALIZABLE(Realm::IndexSpace);
 TYPE_IS_SERIALIZABLE(LegionRuntime::Arrays::Rect<1>);
@@ -45,6 +46,11 @@ namespace Realm {
   }
 #endif
 
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class TransferIteratorIndexSpace
+  //
 
   using namespace LegionRuntime::Arrays;
 
@@ -260,6 +266,11 @@ namespace Realm {
     tentative_valid = false;
   }
 
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class TransferIteratorRect<DIM>
+  //
 
   template <unsigned DIM>
   class TransferIteratorRect : public TransferIterator {
@@ -673,6 +684,220 @@ namespace Realm {
   }
 #endif // USE_HDF
 
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class TransferIteratorZIndexSpace<N,T>
+  //
+
+  template <int N, typename T>
+  class TransferIteratorZIndexSpace : public TransferIterator {
+  public:
+    TransferIteratorZIndexSpace(const ZIndexSpace<N,T> &_is,
+				RegionInstance inst,
+				const std::vector<unsigned>& _fields,
+				size_t _extra_elems);
+
+    virtual ~TransferIteratorZIndexSpace(void);
+
+    virtual void reset(void);
+    virtual bool done(void) const;
+    virtual size_t step(size_t max_bytes, AddressInfo& info,
+			bool tentative = false);
+    virtual void confirm_step(void);
+    virtual void cancel_step(void);
+
+  protected:
+    ZIndexSpaceIterator<N,T> iter;
+    ZPoint<N,T> cur_point, next_point;
+    bool carry;
+    RegionInstanceImpl *inst_impl;
+    const InstanceLayout<N,T> *inst_layout;
+    std::vector<unsigned> fields;
+    size_t field_idx;
+    size_t extra_elems;
+    bool tentative_valid;
+  };
+
+  template <int N, typename T>
+  TransferIteratorZIndexSpace<N,T>::TransferIteratorZIndexSpace(const ZIndexSpace<N,T>& _is,
+								RegionInstance inst,
+								const std::vector<unsigned>& _fields,
+								size_t _extra_elems)
+    : iter(_is), field_idx(0), extra_elems(_extra_elems), tentative_valid(false)
+  {
+    // special case - skip a lot of the init if the space is empty
+    if(!iter.valid) {
+      inst_impl = 0;
+      inst_layout = 0;
+    } else {
+      cur_point = iter.rect.lo;
+
+      inst_impl = get_runtime()->get_instance_impl(inst);
+      inst_layout = dynamic_cast<const InstanceLayout<N,T> *>(inst.get_layout());
+      fields = _fields;
+    }
+  }
+
+  template <int N, typename T>
+  TransferIteratorZIndexSpace<N,T>::~TransferIteratorZIndexSpace(void)
+  {}
+
+  template <int N, typename T>
+  void TransferIteratorZIndexSpace<N,T>::reset(void)
+  {
+    field_idx = 0;
+    iter.reset(iter.space);
+    cur_point = iter.rect.lo;
+  }
+
+  template <int N, typename T>
+  bool TransferIteratorZIndexSpace<N,T>::done(void) const
+  {
+    return(field_idx == fields.size());
+  }
+
+  template <int N, typename T>
+  size_t TransferIteratorZIndexSpace<N,T>::step(size_t max_bytes, AddressInfo& info,
+					   bool tentative /*= false*/)
+  {
+    assert(!done());
+    assert(!tentative_valid);
+
+    // shouldn't be here if the iterator isn't valid
+    assert(iter.valid);
+
+    // find the layout piece the current point is in
+    const InstanceLayoutPiece<N,T> *layout_piece;
+    int field_rel_offset;
+    size_t field_size;
+    {
+      std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = inst_layout->fields.find(fields[field_idx]);
+      assert(it != inst_layout->fields.end());
+      const InstancePieceList<N,T>& piece_list = inst_layout->piece_lists[it->second.list_idx];
+      layout_piece = piece_list.find_piece(cur_point);
+      assert(layout_piece != 0);
+      field_rel_offset = it->second.rel_offset;
+      field_size = it->second.size_in_bytes;
+    }
+
+    size_t max_elems = max_bytes / field_size;
+    // less than one element?  give up immediately
+    if(max_elems == 0)
+      return 0;
+
+    // the subrectangle we give always starts with the current point
+    ZRect<N,T> target_subrect;
+    target_subrect.lo = cur_point;
+    if(layout_piece->layout_type == InstanceLayoutPiece<N,T>::AffineLayoutType) {
+      const AffineLayoutPiece<N,T> *affine = static_cast<const AffineLayoutPiece<N,T> *>(layout_piece);
+
+      // using the current point, find the biggest subrectangle we want to try
+      //  giving out, paying attention to the piece's bounds, where we've stopped,
+      //  and piece strides
+      bool grow = true;
+      size_t exp_stride = field_size;
+      size_t cur_bytes = field_size;
+      for(int d = 0; d < N; d++) {
+	if(grow) {
+	  size_t len;
+	  if(affine->strides[d] == exp_stride) {
+	    len = iter.rect.hi[d] - cur_point[d] + 1;
+	    exp_stride *= len;  // only matters if we keep growing anyway
+	    size_t piece_limit = affine->bounds.hi[d] - cur_point[d] + 1;
+	    if(piece_limit < len) {
+	      len = piece_limit;
+	      grow = false;
+	    }
+	    size_t byte_limit = max_bytes / cur_bytes;
+	    if(byte_limit < len) {
+	      len = byte_limit;
+	      grow = false;
+	    }
+	  } else {
+	    len = 1;
+	    grow = false;
+	  }
+	  target_subrect.hi[d] = cur_point[d] + len - 1;
+	  cur_bytes *= len;
+	} else
+	  target_subrect.hi[d] = cur_point[d];
+      }
+
+      info.base_offset = (inst_impl->metadata.alloc_offset +
+			  affine->offset +
+			  affine->strides.dot(cur_point) +
+			  field_rel_offset);
+      info.bytes_per_chunk = cur_bytes;
+      info.num_lines = 1;
+      info.line_stride = 0;
+      info.num_planes = 1;
+      info.plane_stride = 0;
+    } else {
+      assert(0 && "no support for non-affine pieces yet");
+    }
+
+    // now set 'next_point' to the next point we want - this is just based on
+    //  the iterator rectangle so that iterators using different layouts still
+    //  agree
+    carry = true;
+    for(int d = 0; d < N; d++) {
+      if(carry) {
+	if(target_subrect.hi[d] == iter.rect.hi[d]) {
+	  next_point[d] = iter.rect.lo[d];
+	} else {
+	  next_point[d] = target_subrect.hi[d] + 1;
+	  carry = false;
+	}
+      } else
+	next_point[d] = target_subrect.lo[d];
+    }
+
+    //log_dma.print() << "iter " << ((void *)this) << " " << field_idx << " " << iter.rect << " " << cur_point << " " << max_bytes << " : " << target_subrect << " " << next_point << " " << carry;
+
+    if(tentative) {
+      tentative_valid = true;
+    } else {
+      // if the "carry" propagated all the way through, go on to the next field
+      //  (defer if tentative)
+      if(carry) {
+	if(iter.step()) {
+	  cur_point = iter.rect.lo;
+	} else {
+	  field_idx++;
+	  iter.reset(iter.space);
+	}
+      } else
+	cur_point = next_point;
+    }
+
+    return info.bytes_per_chunk;
+  }
+
+  template <int N, typename T>
+  void TransferIteratorZIndexSpace<N,T>::confirm_step(void)
+  {
+    assert(tentative_valid);
+    if(carry) {
+      if(iter.step()) {
+	cur_point = iter.rect.lo;
+      } else {
+	field_idx++;
+	iter.reset(iter.space);
+      }
+    } else
+      cur_point = next_point;
+    tentative_valid = false;
+  }
+
+  template <int N, typename T>
+  void TransferIteratorZIndexSpace<N,T>::cancel_step(void)
+  {
+    assert(tentative_valid);
+    tentative_valid = false;
+  }
+
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class TransferDomain
@@ -901,6 +1126,119 @@ namespace Realm {
     }
     assert(0);
     return 0;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class TransferDomainZIndexSpace<N,T>
+  //
+
+  template <int N, typename T>
+  class TransferDomainZIndexSpace : public TransferDomain {
+  public:
+    TransferDomainZIndexSpace(ZIndexSpace<N,T> _is);
+
+    template <typename S>
+    static TransferDomain *deserialize_new(S& deserializer);
+
+    virtual TransferDomain *clone(void) const;
+
+    virtual Event request_metadata(void);
+
+    virtual size_t volume(void) const;
+
+    virtual TransferIterator *create_iterator(RegionInstance inst,
+					      RegionInstance peer,
+					      const std::vector<unsigned/*FieldID*/>& fields,
+					      unsigned option_flags) const;
+
+    virtual void print(std::ostream& os) const;
+
+    static Serialization::PolymorphicSerdezSubclass<TransferDomain, TransferDomainZIndexSpace<N,T> > serdez_subclass;
+
+    template <typename S>
+    bool serialize(S& serializer) const;
+
+    //protected:
+    ZIndexSpace<N,T> is;
+  };
+
+  template <int N, typename T>
+  TransferDomainZIndexSpace<N,T>::TransferDomainZIndexSpace(ZIndexSpace<N,T> _is)
+    : is(_is)
+  {}
+
+  template <int N, typename T>
+  template <typename S>
+  /*static*/ TransferDomain *TransferDomainZIndexSpace<N,T>::deserialize_new(S& deserializer)
+  {
+    ZIndexSpace<N,T> is;
+    if(deserializer >> is)
+      return new TransferDomainZIndexSpace<N,T>(is);
+    else
+      return 0;
+  }
+
+  template <int N, typename T>
+  TransferDomain *TransferDomainZIndexSpace<N,T>::clone(void) const
+  {
+    return new TransferDomainZIndexSpace<N,T>(is);
+  }
+
+  template <int N, typename T>
+  Event TransferDomainZIndexSpace<N,T>::request_metadata(void)
+  {
+    if(!is.is_valid())
+      return is.make_valid();
+
+    return Event::NO_EVENT;
+  }
+
+  template <int N, typename T>
+  size_t TransferDomainZIndexSpace<N,T>::volume(void) const
+  {
+    return is.volume();
+  }
+
+  template <int N, typename T>
+  TransferIterator *TransferDomainZIndexSpace<N,T>::create_iterator(RegionInstance inst,
+								    RegionInstance peer,
+								    const std::vector<unsigned/*FieldID*/>& fields,
+								    unsigned option_flags) const
+  {
+#ifdef USE_HDF
+    // HDF5 memories need special iterators
+    if(inst.get_location().kind() == Memory::HDF_MEM) {
+      assert(0);
+      return 0;
+    }
+#endif
+
+    size_t extra_elems = 0;
+    return new TransferIteratorZIndexSpace<N,T>(is, inst, fields, extra_elems);
+  }
+  
+  template <int N, typename T>
+  void TransferDomainZIndexSpace<N,T>::print(std::ostream& os) const
+  {
+    os << is;
+  }
+
+  template <int N, typename T>
+  /*static*/ Serialization::PolymorphicSerdezSubclass<TransferDomain, TransferDomainZIndexSpace<N,T> > TransferDomainZIndexSpace<N,T>::serdez_subclass;
+
+  template <int N, typename T>
+  template <typename S>
+  inline bool TransferDomainZIndexSpace<N,T>::serialize(S& serializer) const
+  {
+    return (serializer << is);
+  }
+
+  template <int N, typename T>
+  inline /*static*/ TransferDomain *TransferDomain::construct(const ZIndexSpace<N,T>& is)
+  {
+    return new TransferDomainZIndexSpace<N,T>(is);
   }
 
 
@@ -1372,5 +1710,62 @@ namespace Realm {
     delete td;
     return Event::merge_events(finish_events);
   }
+
+  template <int N, typename T>
+  Event ZIndexSpace<N,T>::copy(const std::vector<CopySrcDstField>& srcs,
+			       const std::vector<CopySrcDstField>& dsts,
+			       const Realm::ProfilingRequestSet &requests,
+			       Event wait_on,
+			       ReductionOpID redop_id, bool red_fold) const
+  {
+    TransferDomain *td = TransferDomain::construct(*this);
+    std::vector<TransferPlan *> plans;
+    bool ok = TransferPlan::plan_copy(plans, srcs, dsts, redop_id, red_fold);
+    assert(ok);
+    std::set<Event> finish_events;
+    for(std::vector<TransferPlan *>::iterator it = plans.begin();
+	it != plans.end();
+	++it) {
+      Event e = (*it)->execute_plan(td, requests, wait_on, 0 /*priority*/);
+      finish_events.insert(e);
+      delete *it;
+    }
+    delete td;
+    return Event::merge_events(finish_events);
+  }
+
+  template <int N, typename T>
+  Event ZIndexSpace<N,T>::fill(const std::vector<CopySrcDstField> &dsts,
+			       const Realm::ProfilingRequestSet &requests,
+			       const void *fill_value, size_t fill_value_size,
+			       Event wait_on /*= Event::NO_EVENT*/) const
+  {
+    TransferDomain *td = TransferDomain::construct(*this);
+    std::vector<TransferPlan *> plans;
+    bool ok = TransferPlan::plan_fill(plans, dsts, fill_value, fill_value_size);
+    assert(ok);
+    std::set<Event> finish_events;
+    for(std::vector<TransferPlan *>::iterator it = plans.begin();
+	it != plans.end();
+	++it) {
+      Event e = (*it)->execute_plan(td, requests, wait_on, 0 /*priority*/);
+      finish_events.insert(e);
+      delete *it;
+    }
+    delete td;
+    return Event::merge_events(finish_events);
+  }
+
+#define DOIT(N,T) \
+  template Event ZIndexSpace<N,T>::copy(const std::vector<CopySrcDstField>&, \
+					const std::vector<CopySrcDstField>&, \
+					const ProfilingRequestSet&, \
+					Event, \
+					ReductionOpID, bool) const; \
+  template Event ZIndexSpace<N,T>::fill(const std::vector<CopySrcDstField>&, \
+					const ProfilingRequestSet&, \
+					const void *, size_t, \
+					Event wait_on) const;
+  FOREACH_NT(DOIT)
 
 }; // namespace Realm

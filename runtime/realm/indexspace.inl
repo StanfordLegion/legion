@@ -1028,28 +1028,6 @@ namespace Realm {
   // copy and fill operations
 
   template <int N, typename T>
-  inline Event ZIndexSpace<N,T>::fill(const std::vector<CopySrcDstField> &dsts,
-				      const ProfilingRequestSet &requests,
-				      const void *fill_value, size_t fill_value_size,
-				      Event wait_on /*= Event::NO_EVENT*/) const
-  {
-    assert(0);
-    return wait_on;
-  }
-
-  template <int N, typename T>
-  inline Event ZIndexSpace<N,T>::copy(const std::vector<CopySrcDstField> &srcs,
-				      const std::vector<CopySrcDstField> &dsts,
-				      const ProfilingRequestSet &requests,
-				      Event wait_on /*= Event::NO_EVENT*/,
-				      ReductionOpID redop_id /*= 0*/,
-				      bool red_fold /*= false*/) const
-  {
-    assert(0);
-    return wait_on;
-  }
-
-  template <int N, typename T>
   inline Event ZIndexSpace<N,T>::copy(const std::vector<CopySrcDstField> &srcs,
 				      const std::vector<CopySrcDstField> &dsts,
 				      const ZIndexSpace<N,T> &mask,

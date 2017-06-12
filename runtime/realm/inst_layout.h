@@ -75,6 +75,7 @@ namespace Realm {
     struct FieldLayout {
       int list_idx;
       int rel_offset;
+      int size_in_bytes;
     };
 
     std::map<FieldID, FieldLayout> fields;

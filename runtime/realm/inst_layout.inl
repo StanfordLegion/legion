@@ -199,6 +199,7 @@ namespace Realm {
       // we can't set field offsets in a single pass because we don't know
       //  the whole group's alignment until we look at every field
       std::map<FieldID, int> field_offsets;
+      std::map<FieldID, int> field_sizes;
       for(std::vector<InstanceLayoutConstraints::FieldInfo>::const_iterator it2 = fg.begin();
 	  it2 != fg.end();
 	  ++it2) {
@@ -218,6 +219,7 @@ namespace Realm {
 	  galign = lcm(galign, (size_t)(it2->alignment));
 	
 	field_offsets[it2->field_id] = offset;
+	field_sizes[it2->field_id] = it2->size;
       }
       if(galign > 1) {
 	// group size needs to be rounded up to match group alignment
@@ -236,6 +238,7 @@ namespace Realm {
 	InstanceLayoutGeneric::FieldLayout& fl = layout->fields[it2->first];
 	fl.list_idx = li;
 	fl.rel_offset = /*group_offset +*/ it2->second;
+	fl.size_in_bytes = field_sizes[it2->first];
       }
 
       for(typename std::vector<ZRect<N,T> >::const_iterator it = piece_bounds.begin();

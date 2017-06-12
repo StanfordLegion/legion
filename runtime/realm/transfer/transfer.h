@@ -86,6 +86,9 @@ namespace Realm {
     static TransferDomain *deserialize_new(S& deserializer);
 
     static TransferDomain *construct(Domain d);
+    
+    template <int N, typename T>
+    static TransferDomain *construct(const ZIndexSpace<N,T>& is);
 
     virtual TransferDomain *clone(void) const = 0;
 
