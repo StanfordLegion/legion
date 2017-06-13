@@ -34,7 +34,7 @@ while read GLOSSARY
     echo "---" >> "${GLOSSARY}.html"
     echo "<a href=\"../index.html\">index</a><p>" >> "${GLOSSARY}.html"
     echo Convert "${GLOSSARY}" from markdown to html
-    pandoc "${GLOSSARY}" >> "${GLOSSARY}.html"
+    pandoc "${GLOSSARY}" >> "${GLOSSARY}.html" || echo Please install pandoc
     rm "${GLOSSARY}"
   done < .tmp_glossary
 wc -l .tmp_glossary
@@ -51,7 +51,7 @@ while read DESIGN_PATTERN
     echo "---" >> "${DESIGN_PATTERN}.html"
     echo "<a href=\"../index.html\">index</a><p>" >> "${DESIGN_PATTERN}.html"
     echo Convert "${DESIGN_PATTERN}" from markdown to html
-    pandoc "${DESIGN_PATTERN}" >> "${DESIGN_PATTERN}.html"
+    pandoc "${DESIGN_PATTERN}" >> "${DESIGN_PATTERN}.html" || echo Please install pandoc
     rm "${DESIGN_PATTERN}"
   done < .tmp_design_patterns
 wc -l .tmp_design_patterns
