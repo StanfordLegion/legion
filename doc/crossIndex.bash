@@ -17,7 +17,8 @@
 
 echo 
 echo INITIALIZE
-echo 
+echo
+
 
 rm -rf ./publish
 mkdir -p ./publish/glossary ./publish/design_patterns
@@ -26,7 +27,11 @@ rm -f .tmp_glossary
 ls -1 ./publish/glossary/* | sed -e "s://:/:g" > .tmp_glossary
 while read GLOSSARY
   do
-    echo "<a href=\"../index.html\">index</a><p>" > "${GLOSSARY}.html"
+    rm -f "${GLOSSARY}.html"
+    echo "---" >> "${GLOSSARY}.html"
+    echo "layout: page" >> "${GLOSSARY}.html"
+    echo "---" >> "${GLOSSARY}.html"
+    echo "<a href=\"../index.html\">index</a><p>" >> "${GLOSSARY}.html"
     cat "${GLOSSARY}" >> "${GLOSSARY}.html"
     rm "${GLOSSARY}"
   done < .tmp_glossary
@@ -39,7 +44,11 @@ rm -f .tmp_design_patterns
 ls -1 ./publish/design_patterns/* | sed -e "s://:/:g" > .tmp_design_patterns
 while read DESIGN_PATTERN
   do
-    echo "<a href=\"../index.html\">index</a><p>" > "${DESIGN_PATTERN}.html"
+    rm -f "${DESIGN_PATTERN}.html"
+    echo "---" >> "${DESIGN_PATTERN}.html"
+    echo "layout: page" >> "${DESIGN_PATTERN}.html"
+    echo "---" >> "${DESIGN_PATTERN}.html"
+    echo "<a href=\"../index.html\">index</a><p>" >> "${DESIGN_PATTERN}.html"
     cat "${DESIGN_PATTERN}" >> "${DESIGN_PATTERN}.html"
     rm "${DESIGN_PATTERN}"
   done < .tmp_design_patterns

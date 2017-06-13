@@ -24,6 +24,10 @@ rm -f "${OUTPUT_FILE}"
 rm -f .tmp_pages
 ls -1 "${PUBLISHED_DIR}" > .tmp_pages
 
+echo "---" >> "${OUTPUT_FILE}"
+echo "layout: page" >> "${OUTPUT_FILE}"
+echo "---" >> "${OUTPUT_FILE}"
+
 while read PAGE
   do
     echo "<table style=\"width:100%\" border=1>" >> "${OUTPUT_FILE}"
