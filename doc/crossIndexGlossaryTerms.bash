@@ -70,10 +70,10 @@ do
   TARGET_NAME=$(basename "${TARGET}")
   while read GLOSSARY_TERM
   do
-    FOUND_REFERENCE=`grep "${GLOSSARY_TERM}" "${TARGET}"`
+    FOUND_REFERENCE=`grep -i "${GLOSSARY_TERM}" "${TARGET}"`
     if [[ "${FOUND_REFERENCE}" != "" ]]
     then
-      if [[ `echo "${TARGET}" | grep "${GLOSSARY_TERM}"` && "${TARGET_IS_GLOSSARY}" == "true" ]]
+      if [[ `echo "${TARGET}" | grep -i "${GLOSSARY_TERM}"` && "${TARGET_IS_GLOSSARY}" == "true" ]]
       then
         echo > /dev/null
       else
