@@ -14,12 +14,6 @@
 #  
 #!/bin/bash
 
-
-# prestage for development, remove when it works:
-
-
-
-
 ROOT=.
 
 TARGET_DIR=$1 # these files will be scanned and modified

@@ -1,5 +1,0 @@
-Get program invocation arguments
-
-<pre>
-  const InputArgs &command_args = HighLevelRuntime::get_input_args();
-</pre>

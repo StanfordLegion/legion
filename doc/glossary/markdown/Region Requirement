@@ -1,0 +1,4 @@
+# Region Requirement
+
+A Region Requirement is defined prior to a task launch to indicate the task requires access to a region.
+It is declared in a RegionRequirement object.

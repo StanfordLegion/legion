@@ -1,8 +1,0 @@
-<em>LogicalPartition</em>
-
-<p>
-
-A LogicalPartition divides a LogicalRegion into a number of Logical Subregions.
-There is one subregion for each point in an IndexSpacePartition.
-
-<p>
