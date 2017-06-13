@@ -524,14 +524,15 @@ namespace Legion {
             }
           default:
             {
-              if (warn_if_not_copy) {
+              if (warn_if_not_copy) 
+              {
                 MessageDescriptor WARN_NOT_COPY(1400, "undefined");
                 log_run.error(WARN_NOT_COPY.id(),
-                              "Mapper %s requested a profiling "
-                              "measurement of type %d which is not applicable to "
-                              "operation %s (UID %lld) and will be ignored.",
-                              mapper->get_mapper_name(), *it, get_logging_name(),
-                              get_unique_op_id());
+                            "Mapper %s requested a profiling "
+                            "measurement of type %d which is not applicable to "
+                            "operation %s (UID %lld) and will be ignored.",
+                            mapper->get_mapper_name(), *it, get_logging_name(),
+                            get_unique_op_id());
               }
             }
         }
@@ -644,7 +645,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Operation::log_temporary_instance(PhysicalManager *result, 
-                           unsigned index, const FieldMask &needed_fields) const 
+                           unsigned index, const FieldMask &needed_fields) const
     //--------------------------------------------------------------------------
     {
       std::vector<FieldID> fields;
@@ -2730,7 +2731,8 @@ namespace Legion {
           }
         case ERROR_BAD_PARENT_REGION:
           {
-            if (bad_index < 0) {
+            if (bad_index < 0) 
+            {
               MessageDescriptor PARENT_TASK_INLINE(3104, "undefined");
               log_region.error(PARENT_TASK_INLINE.id(),
                                "Parent task %s (ID %lld) of inline mapping "
@@ -2744,7 +2746,9 @@ namespace Legion {
                                requirement.region.index_space.id,
                                requirement.region.field_space.id,
                                requirement.region.tree_id);
-            } else if (bad_field == AUTO_GENERATE_ID) {
+            } 
+            else if (bad_field == AUTO_GENERATE_ID) 
+            {
               MessageDescriptor PARENT_TASK_INLINE(3105, "undefined");
               log_region.error(PARENT_TASK_INLINE.id(),
                                "Parent task %s (ID %lld) of inline mapping "
@@ -2759,7 +2763,9 @@ namespace Legion {
                                requirement.region.index_space.id,
                                requirement.region.field_space.id,
                                requirement.region.tree_id, bad_index);
-            } else {
+            } 
+            else 
+            {
               MessageDescriptor PARENT_TASK_INLINE(3106, "undefined");
               log_region.error(PARENT_TASK_INLINE.id(),
                                "Parent task %s (ID %lld) of inline mapping "
@@ -2831,226 +2837,203 @@ namespace Legion {
 #endif
             exit(ERROR_BAD_REGION_PRIVILEGES);
           }
-            // this should never happen with an inline mapping
-          case ERROR_NON_DISJOINT_PARTITION:
-          default:
-            assert(false); // Should never happen
-        }
+          // this should never happen with an inline mapping
+        case ERROR_NON_DISJOINT_PARTITION:
+        default:
+          assert(false); // Should never happen
       }
+    }
 
-      //--------------------------------------------------------------------------
-      void MapOp::compute_parent_index(void)
-      //--------------------------------------------------------------------------
+    //--------------------------------------------------------------------------
+    void MapOp::compute_parent_index(void)
+    //--------------------------------------------------------------------------
+    {
+      int parent_index = parent_ctx->find_parent_region_req(requirement);
+      if (parent_index < 0)
       {
-        int parent_index = parent_ctx->find_parent_region_req(requirement);
-        if (parent_index < 0)
-        {
-          MessageDescriptor PARENT_TASK_INLINE(3110, "undefined");
-          log_region.error(PARENT_TASK_INLINE.id(),
-                           "Parent task %s (ID %lld) of inline mapping "
-                           "(ID %lld) does not have a region "
-                           "requirement for region (%x,%x,%x) "
-                           "as a parent of region requirement.",
-                           parent_ctx->get_task_name(),
-                           parent_ctx->get_unique_id(),
-                           unique_op_id,
-                           requirement.region.index_space.id,
-                           requirement.region.field_space.id,
-                           requirement.region.tree_id);
+        MessageDescriptor PARENT_TASK_INLINE(3110, "undefined");
+        log_region.error(PARENT_TASK_INLINE.id(),
+                         "Parent task %s (ID %lld) of inline mapping "
+                         "(ID %lld) does not have a region "
+                         "requirement for region (%x,%x,%x) "
+                         "as a parent of region requirement.",
+                         parent_ctx->get_task_name(),
+                         parent_ctx->get_unique_id(),
+                         unique_op_id,
+                         requirement.region.index_space.id,
+                         requirement.region.field_space.id,
+                         requirement.region.tree_id);
 #ifdef DEBUG_LEGION
-          assert(false);
+        assert(false);
 #endif
-          exit(ERROR_BAD_PARENT_REGION);
-        }
-        else
-          parent_req_index = unsigned(parent_index);
+        exit(ERROR_BAD_PARENT_REGION);
       }
+      else
+        parent_req_index = unsigned(parent_index);
+    }
 
-      //--------------------------------------------------------------------------
-      void MapOp::invoke_mapper(const InstanceSet &valid_instances,
-                                      InstanceSet &chosen_instances)
-      //--------------------------------------------------------------------------
+    //--------------------------------------------------------------------------
+    void MapOp::invoke_mapper(const InstanceSet &valid_instances,
+                                    InstanceSet &chosen_instances)
+    //--------------------------------------------------------------------------
+    {
+      Mapper::MapInlineInput input;
+      Mapper::MapInlineOutput output;
+      if (restrict_info.has_restrictions())
       {
-        Mapper::MapInlineInput input;
-        Mapper::MapInlineOutput output;
-        if (restrict_info.has_restrictions())
-        {
-          prepare_for_mapping(restrict_info.get_instances(), 
-                              input.valid_instances);
-        }
-        else if (!requirement.is_no_access())
-        {
-          std::set<Memory> visible_memories;
-          runtime->find_visible_memories(parent_ctx->get_executing_processor(),
-                                         visible_memories);
-          prepare_for_mapping(valid_instances, visible_memories, 
-                              input.valid_instances);
-        }
-        else
-          prepare_for_mapping(valid_instances, input.valid_instances);
-        // Invoke the mapper
-        if (mapper == NULL)
-        {
-          Processor exec_proc = parent_ctx->get_executing_processor();
-          mapper = runtime->find_mapper(exec_proc, map_id);
-        }
-        mapper->invoke_map_inline(this, &input, &output);
-        if (!output.profiling_requests.empty())
-          filter_copy_request_kinds(mapper,
-              output.profiling_requests.requested_measurements,
-              profiling_requests, true/*warn*/);
-        // Now we have to validate the output
-        // Go through the instances and make sure we got one for every field
-        // Also check to make sure that none of them are composite instances
-        RegionTreeID bad_tree = 0;
-        std::vector<FieldID> missing_fields;
-        std::vector<PhysicalManager*> unacquired;
-        int composite_index = runtime->forest->physical_convert_mapping(this,
-                                  requirement, output.chosen_instances, 
-                                  chosen_instances, bad_tree, missing_fields,
-                                  &acquired_instances, unacquired, 
-                                  !Runtime::unsafe_mapper);
-        if (bad_tree > 0)
-        {
-          MessageDescriptor INVALID_MAPPER_OUTPUT5(1405, "undefined");
-          log_run.error(INVALID_MAPPER_OUTPUT5.id(),
-                        "Invalid mapper output from invocation of 'map_inline' "
-                        "on mapper %s. Mapper selected instance from region "
-                        "tree %d to satisfy a region requirement for an inline "
-                        "mapping in task %s (ID %lld) whose logical region is "
-                        "from region tree %d.", mapper->get_mapper_name(),
-                        bad_tree, parent_ctx->get_task_name(),
-                        parent_ctx->get_unique_id(),
-                        requirement.region.get_tree_id());
+        prepare_for_mapping(restrict_info.get_instances(), 
+                            input.valid_instances);
+      }
+      else if (!requirement.is_no_access())
+      {
+        std::set<Memory> visible_memories;
+        runtime->find_visible_memories(parent_ctx->get_executing_processor(),
+                                       visible_memories);
+        prepare_for_mapping(valid_instances, visible_memories, 
+                            input.valid_instances);
+      }
+      else
+        prepare_for_mapping(valid_instances, input.valid_instances);
+      // Invoke the mapper
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      mapper->invoke_map_inline(this, &input, &output);
+      if (!output.profiling_requests.empty())
+        filter_copy_request_kinds(mapper,
+            output.profiling_requests.requested_measurements,
+            profiling_requests, true/*warn*/);
+      // Now we have to validate the output
+      // Go through the instances and make sure we got one for every field
+      // Also check to make sure that none of them are composite instances
+      RegionTreeID bad_tree = 0;
+      std::vector<FieldID> missing_fields;
+      std::vector<PhysicalManager*> unacquired;
+      int composite_index = runtime->forest->physical_convert_mapping(this,
+                                requirement, output.chosen_instances, 
+                                chosen_instances, bad_tree, missing_fields,
+                                &acquired_instances, unacquired, 
+                                !Runtime::unsafe_mapper);
+      if (bad_tree > 0)
+      {
+        MessageDescriptor INVALID_MAPPER_OUTPUT5(1405, "undefined");
+        log_run.error(INVALID_MAPPER_OUTPUT5.id(),
+                      "Invalid mapper output from invocation of 'map_inline' "
+                      "on mapper %s. Mapper selected instance from region "
+                      "tree %d to satisfy a region requirement for an inline "
+                      "mapping in task %s (ID %lld) whose logical region is "
+                      "from region tree %d.", mapper->get_mapper_name(),
+                      bad_tree, parent_ctx->get_task_name(),
+                      parent_ctx->get_unique_id(),
+                      requirement.region.get_tree_id());
 #ifdef DEBUG_LEGION
-          assert(false);
+        assert(false);
 #endif
-          exit(ERROR_INVALID_MAPPER_OUTPUT);
-        }
-        if (!missing_fields.empty())
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+      if (!missing_fields.empty())
+      {
+        MessageDescriptor INVALID_MAPPER_OUTPUT6(1406, "undefined");
+        log_run.error(INVALID_MAPPER_OUTPUT6.id(),
+                      "Invalid mapper output from invocation of 'map_inline' "
+                      "on mapper %s. Mapper failed to specify a physical "
+                      "instance for %zd fields of the region requirement to "
+                      "an inline mapping in task %s (ID %lld). The missing "
+                      "fields are listed below.", mapper->get_mapper_name(),
+                      missing_fields.size(), parent_ctx->get_task_name(),
+                      parent_ctx->get_unique_id());
+        for (std::vector<FieldID>::const_iterator it = missing_fields.begin();
+              it != missing_fields.end(); it++)
         {
-          MessageDescriptor INVALID_MAPPER_OUTPUT6(1406, "undefined");
-          log_run.error(INVALID_MAPPER_OUTPUT6.id(),
-                        "Invalid mapper output from invocation of 'map_inline' "
-                        "on mapper %s. Mapper failed to specify a physical "
-                        "instance for %zd fields of the region requirement to "
-                        "an inline mapping in task %s (ID %lld). The missing "
-                        "fields are listed below.", mapper->get_mapper_name(),
-                        missing_fields.size(), parent_ctx->get_task_name(),
-                        parent_ctx->get_unique_id());
-          for (std::vector<FieldID>::const_iterator it = missing_fields.begin();
-                it != missing_fields.end(); it++)
+          const void *name; size_t name_size;
+          if (!runtime->retrieve_semantic_information(
+               requirement.region.get_field_space(), *it, NAME_SEMANTIC_TAG,
+               name, name_size, true, false))
+            name = "(no name)";
+          MessageDescriptor MISSING_INSTANCE_FIELD(1407, "undefined");
+          log_run.error(MISSING_INSTANCE_FIELD.id(),
+                        "Missing instance for field %s (FieldID: %d)",
+                        static_cast<const char*>(name), *it);
+        }
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+      if (!unacquired.empty())
+      {
+        for (std::vector<PhysicalManager*>::const_iterator it = 
+              unacquired.begin(); it != unacquired.end(); it++)
+        {
+          if (acquired_instances.find(*it) == acquired_instances.end())
           {
-            const void *name; size_t name_size;
-            if (!runtime->retrieve_semantic_information(
-                 requirement.region.get_field_space(), *it, NAME_SEMANTIC_TAG,
-                 name, name_size, true, false))
-              name = "(no name)";
-            MessageDescriptor MISSING_INSTANCE_FIELD(1407, "undefined");
-            log_run.error(MISSING_INSTANCE_FIELD.id(),
-                          "Missing instance for field %s (FieldID: %d)",
-                          static_cast<const char*>(name), *it);
-          }
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_INVALID_MAPPER_OUTPUT);
-        }
-        if (!unacquired.empty())
-        {
-          for (std::vector<PhysicalManager*>::const_iterator it = 
-                unacquired.begin(); it != unacquired.end(); it++)
-          {
-            if (acquired_instances.find(*it) == acquired_instances.end())
-            {
-              MessageDescriptor INVALID_MAPPER_OUTPUT7(1408, "undefined");
-              log_run.error(INVALID_MAPPER_OUTPUT7.id(),
-                            "Invalid mapper output from 'map_inline' invocation "
-                          "on mapper %s. Mapper selected physical instance for "
-                          "inline mapping in task %s (ID %lld) which has already "
-                          "been collected. If the mapper had properly acquired "
-                          "this instance as part of the mapper call it would "
-                          "have detected this. Please update the mapper to abide "
-                          "by proper mapping conventions.", 
-                          mapper->get_mapper_name(), parent_ctx->get_task_name(),
-                          parent_ctx->get_unique_id());
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_INVALID_MAPPER_OUTPUT);
-            }
-          }
-          // If we did successfully acquire them, still issue the warning
-          MessageDescriptor MAPPER_FAILED_ACQUIRE(1409, "undefined");
-          log_run.warning(MAPPER_FAILED_ACQUIRE.id(),
-                          "mapper %s faield to acquire instance "
-                          "for inline mapping operation in task %s (ID %lld) "
-                          "in 'map_inline' call. You may experience undefined "
-                          "behavior as a consequence.", mapper->get_mapper_name(),
-                          parent_ctx->get_task_name(), 
-                          parent_ctx->get_unique_id());
-        }
-        if (composite_index >= 0)
-        {
-          MessageDescriptor INVALID_MAPPER_OUTPUT8(1410, "undefined");
-          log_run.error(INVALID_MAPPER_OUTPUT8.id(),
-                        "Invalid mapper output from invocation of 'map_inline' "
-                        "on mapper %s. Mapper requested creation of a composite "
-                        "instance for inline mapping in task %s (ID %lld).",
+            MessageDescriptor INVALID_MAPPER_OUTPUT7(1408, "undefined");
+            log_run.error(INVALID_MAPPER_OUTPUT7.id(),
+                          "Invalid mapper output from 'map_inline' invocation "
+                        "on mapper %s. Mapper selected physical instance for "
+                        "inline mapping in task %s (ID %lld) which has already "
+                        "been collected. If the mapper had properly acquired "
+                        "this instance as part of the mapper call it would "
+                        "have detected this. Please update the mapper to abide "
+                        "by proper mapping conventions.", 
                         mapper->get_mapper_name(), parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id());
 #ifdef DEBUG_LEGION
-          assert(false);
+            assert(false);
 #endif
-          exit(ERROR_INVALID_MAPPER_OUTPUT);
-        } 
-        // If we are doing unsafe mapping, then we can return
-        if (Runtime::unsafe_mapper)
-          return;
-        // If this requirement doesn't have a no access flag then we
-        // need to check to make sure that the instances are visible
-        if (!requirement.is_no_access())
-        {
-          Processor exec_proc = parent_ctx->get_executing_processor();
-          std::set<Memory> visible_memories;
-          runtime->find_visible_memories(exec_proc, visible_memories);
-          for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
-          {
-            Memory mem = chosen_instances[idx].get_memory();   
-            if (visible_memories.find(mem) == visible_memories.end())
-            {
-              MessageDescriptor INVALID_MAPPER_OUTPUT9(1411, "undefined");
-              log_run.error(INVALID_MAPPER_OUTPUT9.id(),
-                            "Invalid mapper output from invocation of "
-                            "'map_inline' on mapper %s. Mapper selected a "
-                            "physical instance in memory " IDFMT " which is "
-                            "not visible from processor " IDFMT ". The inline "
-                            "mapping operation was issued in task %s (ID %lld).",
-                            mapper->get_mapper_name(), mem.id, exec_proc.id,
-                            parent_ctx->get_task_name(), 
-                            parent_ctx->get_unique_id());
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_INVALID_MAPPER_OUTPUT);
-            }
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
           }
         }
-        // Iterate over the instances and make sure they are all valid
-        // for the given logical region which we are mapping
-        std::vector<LogicalRegion> regions_to_check(1, requirement.region);
+        // If we did successfully acquire them, still issue the warning
+        MessageDescriptor MAPPER_FAILED_ACQUIRE(1409, "undefined");
+        log_run.warning(MAPPER_FAILED_ACQUIRE.id(),
+                        "mapper %s faield to acquire instance "
+                        "for inline mapping operation in task %s (ID %lld) "
+                        "in 'map_inline' call. You may experience undefined "
+                        "behavior as a consequence.", mapper->get_mapper_name(),
+                        parent_ctx->get_task_name(), 
+                        parent_ctx->get_unique_id());
+      }
+      if (composite_index >= 0)
+      {
+        MessageDescriptor INVALID_MAPPER_OUTPUT8(1410, "undefined");
+        log_run.error(INVALID_MAPPER_OUTPUT8.id(),
+                      "Invalid mapper output from invocation of 'map_inline' "
+                      "on mapper %s. Mapper requested creation of a composite "
+                      "instance for inline mapping in task %s (ID %lld).",
+                      mapper->get_mapper_name(), parent_ctx->get_task_name(),
+                      parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      } 
+      // If we are doing unsafe mapping, then we can return
+      if (Runtime::unsafe_mapper)
+        return;
+      // If this requirement doesn't have a no access flag then we
+      // need to check to make sure that the instances are visible
+      if (!requirement.is_no_access())
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        std::set<Memory> visible_memories;
+        runtime->find_visible_memories(exec_proc, visible_memories);
         for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
         {
-          if (!chosen_instances[idx].get_manager()->meets_regions(
-                                                          regions_to_check))
+          Memory mem = chosen_instances[idx].get_memory();   
+          if (visible_memories.find(mem) == visible_memories.end())
           {
-            MessageDescriptor INVALID_MAPPER_OUTPUT10(1412, "undefined");
-            log_run.error(INVALID_MAPPER_OUTPUT10.id(),
-                          "Invalid mapper output from invocation of 'map_inline' "
-                          "on mapper %s. Mapper specified an instance that does "
-                          "not meet the logical region requirement. The inline "
+            MessageDescriptor INVALID_MAPPER_OUTPUT9(1411, "undefined");
+            log_run.error(INVALID_MAPPER_OUTPUT9.id(),
+                          "Invalid mapper output from invocation of "
+                          "'map_inline' on mapper %s. Mapper selected a "
+                          "physical instance in memory " IDFMT " which is "
+                          "not visible from processor " IDFMT ". The inline "
                           "mapping operation was issued in task %s (ID %lld).",
-                          mapper->get_mapper_name(), parent_ctx->get_task_name(),
+                          mapper->get_mapper_name(), mem.id, exec_proc.id,
+                          parent_ctx->get_task_name(), 
                           parent_ctx->get_unique_id());
 #ifdef DEBUG_LEGION
             assert(false);
@@ -3058,1144 +3041,1167 @@ namespace Legion {
             exit(ERROR_INVALID_MAPPER_OUTPUT);
           }
         }
-        // If this is a reduction region requirement, make sure all the
-        // chosen instances are specialized reduction instances
-        if (IS_REDUCE(requirement))
+      }
+      // Iterate over the instances and make sure they are all valid
+      // for the given logical region which we are mapping
+      std::vector<LogicalRegion> regions_to_check(1, requirement.region);
+      for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
+      {
+        if (!chosen_instances[idx].get_manager()->meets_regions(
+                                                        regions_to_check))
         {
-          for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
-          {
-            if (!chosen_instances[idx].get_manager()->is_reduction_manager())
-            {
-              MessageDescriptor INVALID_MAPPER_OUTPUT11(1413, "undefined");
-              log_run.error(INVALID_MAPPER_OUTPUT11.id(),
-                            "Invalid mapper output from invocation of "
-                            "'map_inline' on mapper %s. Mapper failed to select "
-                            "specialized reduction instances for region "
-                            "requirement with reduction-only privileges for "
-                            "inline mapping operation in task %s (ID %lld).",
-                            mapper->get_mapper_name(),parent_ctx->get_task_name(),
-                            parent_ctx->get_unique_id());
+          MessageDescriptor INVALID_MAPPER_OUTPUT10(1412, "undefined");
+          log_run.error(INVALID_MAPPER_OUTPUT10.id(),
+                        "Invalid mapper output from invocation of 'map_inline' "
+                        "on mapper %s. Mapper specified an instance that does "
+                        "not meet the logical region requirement. The inline "
+                        "mapping operation was issued in task %s (ID %lld).",
+                        mapper->get_mapper_name(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id());
 #ifdef DEBUG_LEGION
-              assert(false);
+          assert(false);
 #endif
-              exit(ERROR_INVALID_MAPPER_OUTPUT);
-            }
-            std::map<PhysicalManager*,std::pair<unsigned,bool> >::const_iterator 
-              finder = acquired_instances.find(
-                  chosen_instances[idx].get_manager());
-#ifdef DEBUG_LEGION
-            assert(finder != acquired_instances.end());
-#endif
-            if (!finder->second.second)
-            {
-              MessageDescriptor INVALID_MAPPER_OUTPUT12(1414, "undefined");
-              log_run.error(INVALID_MAPPER_OUTPUT12.id(),
-                            "Invalid mapper output from invocatino of "
-                            "'map_inline' on mapper %s. Mapper made an illegal "
-                            "decision to re-use a reduction instance for an "
-                            "inline mapping in task %s (ID %lld). Reduction "
-                            "instances are not currently permitted to be "
-                            "recycled.", mapper->get_mapper_name(),
-                            parent_ctx->get_task_name(), 
-                            parent_ctx->get_unique_id());
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_INVALID_MAPPER_OUTPUT);
-            }
-          }
-        }
-        else
-        {
-          for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
-          {
-            if (!chosen_instances[idx].get_manager()->is_instance_manager())
-            {
-              MessageDescriptor INVALID_MAPPER_OUTPUT13(1415, "undefined");
-              log_run.error(INVALID_MAPPER_OUTPUT13.id(),
-                            "Invalid mapper output from invocation of "
-                            "'map_inline' on mapper %s. Mapper selected an "
-                            "illegal specialized reduction instance for region "
-                            "requirement without reduction privileges for "
-                            "inline mapping operation in task %s (ID %lld).",
-                            mapper->get_mapper_name(),parent_ctx->get_task_name(),
-                            parent_ctx->get_unique_id());
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_INVALID_MAPPER_OUTPUT);
-            }
-          }
-        }
-        if (layout_constraint_id > 0)
-        {
-          // Check the layout constraints are valid
-          LayoutConstraints *constraints = 
-            runtime->find_layout_constraints(layout_constraint_id);
-          for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
-          {
-            PhysicalManager *manager = chosen_instances[idx].get_manager();
-            if (manager->conflicts(constraints))
-            {
-              MessageDescriptor INVALID_MAPPER_OUTPUT14(1416, "undefined");
-              log_run.error(INVALID_MAPPER_OUTPUT14.id(),
-                            "Invalid mapper output. Mapper %s selected "
-                            "instance for inline mapping (ID %lld) in task %s "
-                            "(ID %lld) which failed to satisfy the corresponding "
-                            "layout constraints.", 
-                            mapper->get_mapper_name(), get_unique_op_id(),
-                            parent_ctx->get_task_name(), 
-                            parent_ctx->get_unique_id());
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_INVALID_MAPPER_OUTPUT);
-            }
-          }
+          exit(ERROR_INVALID_MAPPER_OUTPUT);
         }
       }
-
-      //--------------------------------------------------------------------------
-      void MapOp::add_copy_profiling_request(Realm::ProfilingRequestSet &requests)
-      //--------------------------------------------------------------------------
+      // If this is a reduction region requirement, make sure all the
+      // chosen instances are specialized reduction instances
+      if (IS_REDUCE(requirement))
       {
-        // Nothing to do if we don't have any profiling requests
-        if (profiling_requests.empty())
-          return;
-        Operation *proxy_this = this;
-        Realm::ProfilingRequest &request = requests.add_request( 
-            runtime->find_utility_group(), LG_MAPPER_PROFILING_ID, 
-            &proxy_this, sizeof(proxy_this));
-        for (std::vector<ProfilingMeasurementID>::const_iterator it = 
-              profiling_requests.begin(); it != profiling_requests.end(); it++)
-          request.add_measurement((Realm::ProfilingMeasurementID)(*it));
-        int previous = __sync_fetch_and_add(&outstanding_profiling_requests, 1);
-        if ((previous == 1) && !profiling_reported.exists())
-          profiling_reported = Runtime::create_rt_user_event();
-      }
-
-      //--------------------------------------------------------------------------
-      void MapOp::report_profiling_response(
-                                         const Realm::ProfilingResponse &response)
-      //--------------------------------------------------------------------------
-      {
-#ifdef DEBUG_LEGION
-        assert(mapper != NULL);
-#endif
-        Mapping::Mapper::InlineProfilingInfo info;
-        info.profiling_responses.attach_realm_profiling_response(response);
-        mapper->invoke_inline_report_profiling(this, &info);
-#ifdef DEBUG_LEGION
-        assert(outstanding_profiling_requests > 0);
-        assert(profiling_reported.exists());
-#endif
-        int remaining = __sync_add_and_fetch(&outstanding_profiling_requests, -1);
-        // If this was the last one, we can trigger our events
-        if (remaining == 0)
-          Runtime::trigger_event(profiling_reported);
-      }
-
-      /////////////////////////////////////////////////////////////
-      // Copy Operation 
-      /////////////////////////////////////////////////////////////
-
-      //--------------------------------------------------------------------------
-      CopyOp::CopyOp(Runtime *rt)
-        : Copy(), SpeculativeOp(rt)
-      //--------------------------------------------------------------------------
-      {
-        this->is_index_space = false;
-      }
-
-      //--------------------------------------------------------------------------
-      CopyOp::CopyOp(const CopyOp &rhs)
-        : Copy(), SpeculativeOp(NULL)
-      //--------------------------------------------------------------------------
-      {
-        // should never be called
-        assert(false);
-      }
-
-      //--------------------------------------------------------------------------
-      CopyOp::~CopyOp(void)
-      //--------------------------------------------------------------------------
-      {
-      }
-
-      //--------------------------------------------------------------------------
-      CopyOp& CopyOp::operator=(const CopyOp &rhs)
-      //--------------------------------------------------------------------------
-      {
-        // should never be called
-        assert(false);
-        return *this;
-      }
-
-      //--------------------------------------------------------------------------
-      void CopyOp::initialize(TaskContext *ctx,
-                              const CopyLauncher &launcher, bool check_privileges)
-      //--------------------------------------------------------------------------
-      {
-        parent_task = ctx->get_task();
-        initialize_speculation(ctx, true/*track*/, 
-                               launcher.src_requirements.size() + 
-                                 launcher.dst_requirements.size(), 
-                               launcher.static_dependences,
-                               launcher.predicate);
-        src_requirements.resize(launcher.src_requirements.size());
-        dst_requirements.resize(launcher.dst_requirements.size());
-        src_versions.resize(launcher.src_requirements.size());
-        dst_versions.resize(launcher.dst_requirements.size());
-        src_restrict_infos.resize(launcher.src_requirements.size());
-        dst_restrict_infos.resize(launcher.dst_requirements.size());
-        for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+        for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
         {
-          if (launcher.src_requirements[idx].privilege_fields.empty())
+          if (!chosen_instances[idx].get_manager()->is_reduction_manager())
           {
-            MessageDescriptor SOURCE_REGION_REQUIREMENT(2201, "undefined");
-            log_task.warning(SOURCE_REGION_REQUIREMENT.id(),
-                             "SOURCE REGION REQUIREMENT %d OF "
-                             "COPY (ID %lld) IN TASK %s (ID %lld) HAS NO "
-                             "PRIVILEGE FIELDS! DID YOU FORGET THEM?!?",
-                             idx, get_unique_op_id(),
-                             parent_ctx->get_task_name(), 
-                             parent_ctx->get_unique_id());
-          }
-          src_requirements[idx] = launcher.src_requirements[idx];
-          src_requirements[idx].flags |= NO_ACCESS_FLAG;
-        }
-        for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-        {
-          if (launcher.src_requirements[idx].privilege_fields.empty())
-          {
-            MessageDescriptor DESTINATION_REGION_REQUIREMENT(2202, "undefined");
-            log_task.warning(DESTINATION_REGION_REQUIREMENT.id(),
-                             "DESTINATION REGION REQUIREMENT %d OF"
-                             " COPY (ID %lld) IN TASK %s (ID %lld) HAS NO "
-                             "PRIVILEGE FIELDS! DID YOU FORGET THEM?!?",
-                             idx, get_unique_op_id(),
-                             parent_ctx->get_task_name(), 
-                             parent_ctx->get_unique_id());
-          }
-          dst_requirements[idx] = launcher.dst_requirements[idx];
-          dst_requirements[idx].flags |= NO_ACCESS_FLAG;
-          // If our privilege is not reduce, then shift it to write discard
-          // since we are going to write all over the region
-          if (dst_requirements[idx].privilege != REDUCE)
-            dst_requirements[idx].privilege = WRITE_DISCARD;
-        }
-        grants = launcher.grants;
-        // Register ourselves with all the grants
-        for (unsigned idx = 0; idx < grants.size(); idx++)
-          grants[idx].impl->register_operation(completion_event);
-        wait_barriers = launcher.wait_barriers;
-#ifdef LEGION_SPY
-        for (std::vector<PhaseBarrier>::const_iterator it = 
-              launcher.arrive_barriers.begin(); it != 
-              launcher.arrive_barriers.end(); it++)
-        {
-          arrive_barriers.push_back(*it);
-          LegionSpy::log_event_dependence(it->phase_barrier,
-              arrive_barriers.back().phase_barrier);
-        }
-#else
-        arrive_barriers = launcher.arrive_barriers;
-#endif
-        map_id = launcher.map_id;
-        tag = launcher.tag;
-        index_point = launcher.point;
-        if (check_privileges)
-        {
-          if (src_requirements.size() != dst_requirements.size())
-          {
-            MessageDescriptor NUMBER_SOURCE_REQUIREMENTS(1417, "undefined");
-            log_run.error(NUMBER_SOURCE_REQUIREMENTS.id(),
-                          "Number of source requirements (%zd) does not "
-                          "match number of destination requirements (%zd) "
-                          "for copy operation (ID %lld) with parent "
-                          "task %s (ID %lld)",
-                          src_requirements.size(), dst_requirements.size(),
-                          get_unique_id(), parent_ctx->get_task_name(),
+            MessageDescriptor INVALID_MAPPER_OUTPUT11(1413, "undefined");
+            log_run.error(INVALID_MAPPER_OUTPUT11.id(),
+                          "Invalid mapper output from invocation of "
+                          "'map_inline' on mapper %s. Mapper failed to select "
+                          "specialized reduction instances for region "
+                          "requirement with reduction-only privileges for "
+                          "inline mapping operation in task %s (ID %lld).",
+                          mapper->get_mapper_name(),parent_ctx->get_task_name(),
                           parent_ctx->get_unique_id());
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
-            exit(ERROR_COPY_REQUIREMENTS_MISMATCH);
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
           }
-          for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+          std::map<PhysicalManager*,std::pair<unsigned,bool> >::const_iterator 
+            finder = acquired_instances.find(
+                chosen_instances[idx].get_manager());
+#ifdef DEBUG_LEGION
+          assert(finder != acquired_instances.end());
+#endif
+          if (!finder->second.second)
           {
-            if (src_requirements[idx].privilege_fields.size() != 
-                src_requirements[idx].instance_fields.size())
-            {
-              MessageDescriptor COPY_SOURCE_REQUIREMENTS(1418, "undefined");
-              log_run.error(COPY_SOURCE_REQUIREMENTS.id(),
-                            "Copy source requirement %d for copy operation "
-                            "(ID %lld) in parent task %s (ID %lld) has %zd "
-                            "privilege fields and %zd instance fields.  "
-                            "Copy requirements must have exactly the same "
-                            "number of privilege and instance fields.",
-                            idx, get_unique_id(), 
-                            parent_ctx->get_task_name(),
-                            parent_ctx->get_unique_id(),
-                            src_requirements[idx].privilege_fields.size(),
-                            src_requirements[idx].instance_fields.size());
+            MessageDescriptor INVALID_MAPPER_OUTPUT12(1414, "undefined");
+            log_run.error(INVALID_MAPPER_OUTPUT12.id(),
+                          "Invalid mapper output from invocatino of "
+                          "'map_inline' on mapper %s. Mapper made an illegal "
+                          "decision to re-use a reduction instance for an "
+                          "inline mapping in task %s (ID %lld). Reduction "
+                          "instances are not currently permitted to be "
+                          "recycled.", mapper->get_mapper_name(),
+                          parent_ctx->get_task_name(), 
+                          parent_ctx->get_unique_id());
 #ifdef DEBUG_LEGION
-              assert(false);
+            assert(false);
 #endif
-              exit(ERROR_INVALID_COPY_FIELDS_SIZE);
-            }
-            if (!IS_READ_ONLY(src_requirements[idx]))
-            {
-              MessageDescriptor COPY_SOURCE_REQUIREMENTS2(1419, "undefined");
-              log_run.error(COPY_SOURCE_REQUIREMENTS2.id(),
-                            "Copy source requirement %d for copy operation "
-                            "(ID %lld) in parent task %s (ID %lld) must "
-                            "be requested with a read-only privilege.",
-                            idx, get_unique_id(),
-                            parent_ctx->get_task_name(),
-                            parent_ctx->get_unique_id());
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_INVALID_COPY_PRIVILEGE);
-            }
-            check_copy_privilege(src_requirements[idx], idx, true/*src*/);
-          }
-          for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-          {
-            if (dst_requirements[idx].privilege_fields.size() != 
-                dst_requirements[idx].instance_fields.size())
-            {
-              MessageDescriptor COPY_DESTINATION_REQUIREMENT(1420, "undefined");
-              log_run.error(COPY_DESTINATION_REQUIREMENT.id(),
-                            "Copy destination requirement %d for copy "
-                            "operation (ID %lld) in parent task %s "
-                            "(ID %lld) has %zd privilege fields and %zd "
-                            "instance fields.  Copy requirements must "
-                            "have exactly the same number of privilege "
-                            "and instance fields.", idx, 
-                            get_unique_id(), 
-                            parent_ctx->get_task_name(),
-                            parent_ctx->get_unique_id(),
-                            dst_requirements[idx].privilege_fields.size(),
-                            dst_requirements[idx].instance_fields.size());
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_INVALID_COPY_FIELDS_SIZE);
-            }
-            if (!HAS_WRITE(dst_requirements[idx]))
-            {
-              MessageDescriptor COPY_DESTINATION_REQUIREMENT2(1421, "undefined");
-              log_run.error(COPY_DESTINATION_REQUIREMENT2.id(),
-                            "Copy destination requirement %d for copy "
-                            "operation (ID %lld) in parent task %s "
-                            "(ID %lld) must be requested with a "
-                            "read-write or write-discard privilege.",
-                            idx, get_unique_id(),
-                            parent_ctx->get_task_name(),
-                            parent_ctx->get_unique_id());
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_INVALID_COPY_PRIVILEGE);
-            }
-            check_copy_privilege(dst_requirements[idx], idx, false/*src*/);
-          }
-          for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-          {
-            IndexSpace src_space = src_requirements[idx].region.get_index_space();
-            IndexSpace dst_space = dst_requirements[idx].region.get_index_space();
-            if (!runtime->forest->are_compatible(src_space, dst_space))
-            {
-              MessageDescriptor COPY_LAUNCHER_INDEX(1422, "undefined");
-              log_run.error(COPY_LAUNCHER_INDEX.id(),
-                            "Copy launcher index space mismatch at index "
-                            "%d of cross-region copy (ID %lld) in task %s "
-                            "(ID %lld). Source requirement with index "
-                            "space %x and destination requirement "
-                            "with index space %x do not have the "
-                            "same number of dimensions or the same number "
-                            "of elements in their element masks.",
-                            idx, get_unique_id(),
-                            parent_ctx->get_task_name(), 
-                            parent_ctx->get_unique_id(),
-                            src_space.id, dst_space.id);
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_COPY_SPACE_MISMATCH);
-            }
-            else if (!runtime->forest->is_dominated(src_space, dst_space))
-            {
-              MessageDescriptor DESTINATION_INDEX_SPACE(1423, "undefined");
-              log_run.error(DESTINATION_INDEX_SPACE.id(),
-                            "Destination index space %x for "
-                            "requirement %d of cross-region copy "
-                            "(ID %lld) in task %s (ID %lld) is not "
-                            "a sub-region of the source index space %x.", 
-                            dst_space.id, idx, get_unique_id(),
-                            parent_ctx->get_task_name(),
-                            parent_ctx->get_unique_id(),
-                            src_space.id);
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_COPY_SPACE_MISMATCH);
-            }
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
           }
         }
-        if (Runtime::legion_spy_enabled)
-          LegionSpy::log_copy_operation(parent_ctx->get_unique_id(),
-                                        unique_op_id);
       }
-
-      //--------------------------------------------------------------------------
-      void CopyOp::activate_copy(void)
-      //--------------------------------------------------------------------------
+      else
       {
-        activate_speculative();
-        mapper = NULL;
-        outstanding_profiling_requests = 1; // start at 1 to guard
-        profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
-        predication_guard = PredEvent::NO_PRED_EVENT;
-      }
-
-      //--------------------------------------------------------------------------
-      void CopyOp::deactivate_copy(void)
-      //--------------------------------------------------------------------------
-      {
-        deactivate_speculative();
-        // Clear out our region tree state
-        src_requirements.clear();
-        dst_requirements.clear();
-        grants.clear();
-        wait_barriers.clear();
-        arrive_barriers.clear();
-        src_privilege_paths.clear();
-        dst_privilege_paths.clear();
-        src_parent_indexes.clear();
-        dst_parent_indexes.clear();
-        src_versions.clear();
-        dst_versions.clear();
-        src_restrict_infos.clear();
-        dst_restrict_infos.clear();
+        for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
+        {
+          if (!chosen_instances[idx].get_manager()->is_instance_manager())
+          {
+            MessageDescriptor INVALID_MAPPER_OUTPUT13(1415, "undefined");
+            log_run.error(INVALID_MAPPER_OUTPUT13.id(),
+                          "Invalid mapper output from invocation of "
+                          "'map_inline' on mapper %s. Mapper selected an "
+                          "illegal specialized reduction instance for region "
+                          "requirement without reduction privileges for "
+                          "inline mapping operation in task %s (ID %lld).",
+                          mapper->get_mapper_name(),parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id());
 #ifdef DEBUG_LEGION
-        assert(acquired_instances.empty());
+            assert(false);
 #endif
-        acquired_instances.clear();
-        atomic_locks.clear();
-        map_applied_conditions.clear();
-        restrict_postconditions.clear();
-        profiling_requests.clear();
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
+          }
+        }
       }
-
-      //--------------------------------------------------------------------------
-      void CopyOp::activate(void)
-      //--------------------------------------------------------------------------
+      if (layout_constraint_id > 0)
       {
-        activate_copy(); 
+        // Check the layout constraints are valid
+        LayoutConstraints *constraints = 
+          runtime->find_layout_constraints(layout_constraint_id);
+        for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
+        {
+          PhysicalManager *manager = chosen_instances[idx].get_manager();
+          if (manager->conflicts(constraints))
+          {
+            MessageDescriptor INVALID_MAPPER_OUTPUT14(1416, "undefined");
+            log_run.error(INVALID_MAPPER_OUTPUT14.id(),
+                          "Invalid mapper output. Mapper %s selected "
+                          "instance for inline mapping (ID %lld) in task %s "
+                          "(ID %lld) which failed to satisfy the corresponding "
+                          "layout constraints.", 
+                          mapper->get_mapper_name(), get_unique_op_id(),
+                          parent_ctx->get_task_name(), 
+                          parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_INVALID_MAPPER_OUTPUT);
+          }
+        }
       }
+    }
 
-      //--------------------------------------------------------------------------
-      void CopyOp::deactivate(void)
-      //--------------------------------------------------------------------------
+    //--------------------------------------------------------------------------
+    void MapOp::add_copy_profiling_request(Realm::ProfilingRequestSet &requests)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing to do if we don't have any profiling requests
+      if (profiling_requests.empty())
+        return;
+      Operation *proxy_this = this;
+      Realm::ProfilingRequest &request = requests.add_request( 
+          runtime->find_utility_group(), LG_MAPPER_PROFILING_ID, 
+          &proxy_this, sizeof(proxy_this));
+      for (std::vector<ProfilingMeasurementID>::const_iterator it = 
+            profiling_requests.begin(); it != profiling_requests.end(); it++)
+        request.add_measurement((Realm::ProfilingMeasurementID)(*it));
+      int previous = __sync_fetch_and_add(&outstanding_profiling_requests, 1);
+      if ((previous == 1) && !profiling_reported.exists())
+        profiling_reported = Runtime::create_rt_user_event();
+    }
+
+    //--------------------------------------------------------------------------
+    void MapOp::report_profiling_response(
+                                       const Realm::ProfilingResponse &response)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(mapper != NULL);
+#endif
+      Mapping::Mapper::InlineProfilingInfo info;
+      info.profiling_responses.attach_realm_profiling_response(response);
+      mapper->invoke_inline_report_profiling(this, &info);
+#ifdef DEBUG_LEGION
+      assert(outstanding_profiling_requests > 0);
+      assert(profiling_reported.exists());
+#endif
+      int remaining = __sync_add_and_fetch(&outstanding_profiling_requests, -1);
+      // If this was the last one, we can trigger our events
+      if (remaining == 0)
+        Runtime::trigger_event(profiling_reported);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Copy Operation 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    CopyOp::CopyOp(Runtime *rt)
+      : Copy(), SpeculativeOp(rt)
+    //--------------------------------------------------------------------------
+    {
+      this->is_index_space = false;
+    }
+
+    //--------------------------------------------------------------------------
+    CopyOp::CopyOp(const CopyOp &rhs)
+      : Copy(), SpeculativeOp(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    CopyOp::~CopyOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CopyOp& CopyOp::operator=(const CopyOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::initialize(TaskContext *ctx,
+                            const CopyLauncher &launcher, bool check_privileges)
+    //--------------------------------------------------------------------------
+    {
+      parent_task = ctx->get_task();
+      initialize_speculation(ctx, true/*track*/, 
+                             launcher.src_requirements.size() + 
+                               launcher.dst_requirements.size(), 
+                             launcher.static_dependences,
+                             launcher.predicate);
+      src_requirements.resize(launcher.src_requirements.size());
+      dst_requirements.resize(launcher.dst_requirements.size());
+      src_versions.resize(launcher.src_requirements.size());
+      dst_versions.resize(launcher.dst_requirements.size());
+      src_restrict_infos.resize(launcher.src_requirements.size());
+      dst_restrict_infos.resize(launcher.dst_requirements.size());
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
-        deactivate_copy(); 
-        // Return this operation to the runtime
-        runtime->free_copy_op(this);
+        if (launcher.src_requirements[idx].privilege_fields.empty())
+        {
+          MessageDescriptor SOURCE_REGION_REQUIREMENT(2201, "undefined");
+          log_task.warning(SOURCE_REGION_REQUIREMENT.id(),
+                           "SOURCE REGION REQUIREMENT %d OF "
+                           "COPY (ID %lld) IN TASK %s (ID %lld) HAS NO "
+                           "PRIVILEGE FIELDS! DID YOU FORGET THEM?!?",
+                           idx, get_unique_op_id(),
+                           parent_ctx->get_task_name(), 
+                           parent_ctx->get_unique_id());
+        }
+        src_requirements[idx] = launcher.src_requirements[idx];
+        src_requirements[idx].flags |= NO_ACCESS_FLAG;
       }
-
-      //--------------------------------------------------------------------------
-      const char* CopyOp::get_logging_name(void) const
-      //--------------------------------------------------------------------------
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
-        return op_names[COPY_OP_KIND];
+        if (launcher.src_requirements[idx].privilege_fields.empty())
+        {
+          MessageDescriptor DESTINATION_REGION_REQUIREMENT(2202, "undefined");
+          log_task.warning(DESTINATION_REGION_REQUIREMENT.id(),
+                           "DESTINATION REGION REQUIREMENT %d OF"
+                           " COPY (ID %lld) IN TASK %s (ID %lld) HAS NO "
+                           "PRIVILEGE FIELDS! DID YOU FORGET THEM?!?",
+                           idx, get_unique_op_id(),
+                           parent_ctx->get_task_name(), 
+                           parent_ctx->get_unique_id());
+        }
+        dst_requirements[idx] = launcher.dst_requirements[idx];
+        dst_requirements[idx].flags |= NO_ACCESS_FLAG;
+        // If our privilege is not reduce, then shift it to write discard
+        // since we are going to write all over the region
+        if (dst_requirements[idx].privilege != REDUCE)
+          dst_requirements[idx].privilege = WRITE_DISCARD;
       }
-
-      //--------------------------------------------------------------------------
-      Operation::OpKind CopyOp::get_operation_kind(void) const
-      //--------------------------------------------------------------------------
+      grants = launcher.grants;
+      // Register ourselves with all the grants
+      for (unsigned idx = 0; idx < grants.size(); idx++)
+        grants[idx].impl->register_operation(completion_event);
+      wait_barriers = launcher.wait_barriers;
+#ifdef LEGION_SPY
+      for (std::vector<PhaseBarrier>::const_iterator it = 
+            launcher.arrive_barriers.begin(); it != 
+            launcher.arrive_barriers.end(); it++)
       {
-        return COPY_OP_KIND;
+        arrive_barriers.push_back(*it);
+        LegionSpy::log_event_dependence(it->phase_barrier,
+            arrive_barriers.back().phase_barrier);
       }
-
-      //--------------------------------------------------------------------------
-      size_t CopyOp::get_region_count(void) const
-      //--------------------------------------------------------------------------
+#else
+      arrive_barriers = launcher.arrive_barriers;
+#endif
+      map_id = launcher.map_id;
+      tag = launcher.tag;
+      index_point = launcher.point;
+      if (check_privileges)
       {
-        return src_requirements.size() + dst_requirements.size();
-      }
-
-      //--------------------------------------------------------------------------
-      Mappable* CopyOp::get_mappable(void)
-      //--------------------------------------------------------------------------
-      {
-        return this;
-      }
-
-      //--------------------------------------------------------------------------
-      void CopyOp::log_copy_requirements(void) const
-      //--------------------------------------------------------------------------
-      {
+        if (src_requirements.size() != dst_requirements.size())
+        {
+          MessageDescriptor NUMBER_SOURCE_REQUIREMENTS(1417, "undefined");
+          log_run.error(NUMBER_SOURCE_REQUIREMENTS.id(),
+                        "Number of source requirements (%zd) does not "
+                        "match number of destination requirements (%zd) "
+                        "for copy operation (ID %lld) with parent "
+                        "task %s (ID %lld)",
+                        src_requirements.size(), dst_requirements.size(),
+                        get_unique_id(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_COPY_REQUIREMENTS_MISMATCH);
+        }
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         {
-          const RegionRequirement &req = src_requirements[idx];
-          LegionSpy::log_logical_requirement(unique_op_id, idx, true/*region*/,
-                                             req.region.index_space.id,
-                                             req.region.field_space.id,
-                                             req.region.tree_id,
-                                             req.privilege,
-                                             req.prop, req.redop,
-                                             req.parent.index_space.id);
-          LegionSpy::log_requirement_fields(unique_op_id, idx, 
-                                            req.instance_fields);
-        }
-        for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-        {
-          const RegionRequirement &req = dst_requirements[idx];
-          LegionSpy::log_logical_requirement(unique_op_id, 
-                                             src_requirements.size()+idx, 
-                                             true/*region*/,
-                                             req.region.index_space.id,
-                                             req.region.field_space.id,
-                                             req.region.tree_id,
-                                             req.privilege,
-                                             req.prop, req.redop,
-                                             req.parent.index_space.id);
-          LegionSpy::log_requirement_fields(unique_op_id, 
-                                            src_requirements.size()+idx, 
-                                            req.instance_fields);
-        }
-      }
-
-      //--------------------------------------------------------------------------
-      void CopyOp::trigger_prepipeline_stage(void)
-      //--------------------------------------------------------------------------
-      {
-        // First compute the parent indexes
-        compute_parent_indexes();
-        // Initialize the privilege and mapping paths for all of the
-        // region requirements that we have
-        src_privilege_paths.resize(src_requirements.size());
-        for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-        {
-          initialize_privilege_path(src_privilege_paths[idx],
-                                    src_requirements[idx]);
-        }
-        dst_privilege_paths.resize(dst_requirements.size());
-        for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-        {
-          initialize_privilege_path(dst_privilege_paths[idx],
-                                    dst_requirements[idx]);
-        }
-        if (Runtime::legion_spy_enabled)
-          log_copy_requirements();
-      }
-
-      //--------------------------------------------------------------------------
-      void CopyOp::trigger_dependence_analysis(void)
-      //--------------------------------------------------------------------------
-      {
-        // Register a dependence on our predicate
-        register_predicate_dependence();
-        ProjectionInfo projection_info;
-        src_versions.resize(src_requirements.size());
-        for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-          runtime->forest->perform_dependence_analysis(this, idx, 
-                                                       src_requirements[idx],
-                                                       src_restrict_infos[idx],
-                                                       src_versions[idx],
-                                                       projection_info,
-                                                       src_privilege_paths[idx]);
-        dst_versions.resize(dst_requirements.size());
-        for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-        {
-          unsigned index = src_requirements.size()+idx;
-          // Perform this dependence analysis as if it was READ_WRITE
-          // so that we can get the version numbers correct
-          const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
-          if (is_reduce_req)
-            dst_requirements[idx].privilege = READ_WRITE;
-          runtime->forest->perform_dependence_analysis(this, index, 
-                                                       dst_requirements[idx],
-                                                       dst_restrict_infos[idx],
-                                                       dst_versions[idx],
-                                                       projection_info,
-                                                       dst_privilege_paths[idx]);
-          // Switch the privileges back when we are done
-          if (is_reduce_req)
-            dst_requirements[idx].privilege = REDUCE;
-        }
-      }
-
-      //--------------------------------------------------------------------------
-      bool CopyOp::query_speculate(bool &value, bool &mapping_only)
-      //--------------------------------------------------------------------------
-      {
-        if (mapper == NULL)
-        {
-          Processor exec_proc = parent_ctx->get_executing_processor();
-          mapper = runtime->find_mapper(exec_proc, map_id);
-        }
-        Mapper::SpeculativeOutput output;
-        output.speculate = false;
-        output.speculate_mapping_only = true;
-        mapper->invoke_copy_speculate(this, &output);
-        if (!output.speculate)
-          return false;
-        value = output.speculative_value;
-        mapping_only = output.speculate_mapping_only;
-        // Make our predicate guard
+          if (src_requirements[idx].privilege_fields.size() != 
+              src_requirements[idx].instance_fields.size())
+          {
+            MessageDescriptor COPY_SOURCE_REQUIREMENTS(1418, "undefined");
+            log_run.error(COPY_SOURCE_REQUIREMENTS.id(),
+                          "Copy source requirement %d for copy operation "
+                          "(ID %lld) in parent task %s (ID %lld) has %zd "
+                          "privilege fields and %zd instance fields.  "
+                          "Copy requirements must have exactly the same "
+                          "number of privilege and instance fields.",
+                          idx, get_unique_id(), 
+                          parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id(),
+                          src_requirements[idx].privilege_fields.size(),
+                          src_requirements[idx].instance_fields.size());
 #ifdef DEBUG_LEGION
-        assert(!predication_guard.exists());
+            assert(false);
 #endif
-        // Make the copy across precondition guard 
-        predication_guard = predicate->get_true_guard();
-        // If we're speculating then we make all the destination
-        // privileges that are write-discard read-write instead so
-        // that we get the earlier version of the data in case we
-        // actually are predicated false
+            exit(ERROR_INVALID_COPY_FIELDS_SIZE);
+          }
+          if (!IS_READ_ONLY(src_requirements[idx]))
+          {
+            MessageDescriptor COPY_SOURCE_REQUIREMENTS2(1419, "undefined");
+            log_run.error(COPY_SOURCE_REQUIREMENTS2.id(),
+                          "Copy source requirement %d for copy operation "
+                          "(ID %lld) in parent task %s (ID %lld) must "
+                          "be requested with a read-only privilege.",
+                          idx, get_unique_id(),
+                          parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_INVALID_COPY_PRIVILEGE);
+          }
+          check_copy_privilege(src_requirements[idx], idx, true/*src*/);
+        }
         for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
         {
-          RegionRequirement &req = dst_requirements[idx];
-          if (IS_WRITE_ONLY(req))
-            req.privilege = READ_WRITE;
+          if (dst_requirements[idx].privilege_fields.size() != 
+              dst_requirements[idx].instance_fields.size())
+          {
+            MessageDescriptor COPY_DESTINATION_REQUIREMENT(1420, "undefined");
+            log_run.error(COPY_DESTINATION_REQUIREMENT.id(),
+                          "Copy destination requirement %d for copy "
+                          "operation (ID %lld) in parent task %s "
+                          "(ID %lld) has %zd privilege fields and %zd "
+                          "instance fields.  Copy requirements must "
+                          "have exactly the same number of privilege "
+                          "and instance fields.", idx, 
+                          get_unique_id(), 
+                          parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id(),
+                          dst_requirements[idx].privilege_fields.size(),
+                          dst_requirements[idx].instance_fields.size());
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_INVALID_COPY_FIELDS_SIZE);
+          }
+          if (!HAS_WRITE(dst_requirements[idx]))
+          {
+            MessageDescriptor COPY_DESTINATION_REQUIREMENT2(1421, "undefined");
+            log_run.error(COPY_DESTINATION_REQUIREMENT2.id(),
+                          "Copy destination requirement %d for copy "
+                          "operation (ID %lld) in parent task %s "
+                          "(ID %lld) must be requested with a "
+                          "read-write or write-discard privilege.",
+                          idx, get_unique_id(),
+                          parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_INVALID_COPY_PRIVILEGE);
+          }
+          check_copy_privilege(dst_requirements[idx], idx, false/*src*/);
         }
-        return true;
+        for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+        {
+          IndexSpace src_space = src_requirements[idx].region.get_index_space();
+          IndexSpace dst_space = dst_requirements[idx].region.get_index_space();
+          if (!runtime->forest->are_compatible(src_space, dst_space))
+          {
+            MessageDescriptor COPY_LAUNCHER_INDEX(1422, "undefined");
+            log_run.error(COPY_LAUNCHER_INDEX.id(),
+                          "Copy launcher index space mismatch at index "
+                          "%d of cross-region copy (ID %lld) in task %s "
+                          "(ID %lld). Source requirement with index "
+                          "space %x and destination requirement "
+                          "with index space %x do not have the "
+                          "same number of dimensions or the same number "
+                          "of elements in their element masks.",
+                          idx, get_unique_id(),
+                          parent_ctx->get_task_name(), 
+                          parent_ctx->get_unique_id(),
+                          src_space.id, dst_space.id);
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_COPY_SPACE_MISMATCH);
+          }
+          else if (!runtime->forest->is_dominated(src_space, dst_space))
+          {
+            MessageDescriptor DESTINATION_INDEX_SPACE(1423, "undefined");
+            log_run.error(DESTINATION_INDEX_SPACE.id(),
+                          "Destination index space %x for "
+                          "requirement %d of cross-region copy "
+                          "(ID %lld) in task %s (ID %lld) is not "
+                          "a sub-region of the source index space %x.", 
+                          dst_space.id, idx, get_unique_id(),
+                          parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id(),
+                          src_space.id);
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_COPY_SPACE_MISMATCH);
+          }
+        }
       }
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_copy_operation(parent_ctx->get_unique_id(),
+                                      unique_op_id);
+    }
 
-      //--------------------------------------------------------------------------
-      void CopyOp::resolve_true(bool speculated, bool launched)
-      //--------------------------------------------------------------------------
+    //--------------------------------------------------------------------------
+    void CopyOp::activate_copy(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_speculative();
+      mapper = NULL;
+      outstanding_profiling_requests = 1; // start at 1 to guard
+      profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
+      predication_guard = PredEvent::NO_PRED_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::deactivate_copy(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_speculative();
+      // Clear out our region tree state
+      src_requirements.clear();
+      dst_requirements.clear();
+      grants.clear();
+      wait_barriers.clear();
+      arrive_barriers.clear();
+      src_privilege_paths.clear();
+      dst_privilege_paths.clear();
+      src_parent_indexes.clear();
+      dst_parent_indexes.clear();
+      src_versions.clear();
+      dst_versions.clear();
+      src_restrict_infos.clear();
+      dst_restrict_infos.clear();
+#ifdef DEBUG_LEGION
+      assert(acquired_instances.empty());
+#endif
+      acquired_instances.clear();
+      atomic_locks.clear();
+      map_applied_conditions.clear();
+      restrict_postconditions.clear();
+      profiling_requests.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_copy(); 
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_copy(); 
+      // Return this operation to the runtime
+      runtime->free_copy_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* CopyOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[COPY_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind CopyOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return COPY_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    size_t CopyOp::get_region_count(void) const
+    //--------------------------------------------------------------------------
+    {
+      return src_requirements.size() + dst_requirements.size();
+    }
+
+    //--------------------------------------------------------------------------
+    Mappable* CopyOp::get_mappable(void)
+    //--------------------------------------------------------------------------
+    {
+      return this;
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::log_copy_requirements(void) const
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
-        // Nothing to do
+        const RegionRequirement &req = src_requirements[idx];
+        LegionSpy::log_logical_requirement(unique_op_id, idx, true/*region*/,
+                                           req.region.index_space.id,
+                                           req.region.field_space.id,
+                                           req.region.tree_id,
+                                           req.privilege,
+                                           req.prop, req.redop,
+                                           req.parent.index_space.id);
+        LegionSpy::log_requirement_fields(unique_op_id, idx, 
+                                          req.instance_fields);
       }
-
-      //--------------------------------------------------------------------------
-      void CopyOp::resolve_false(bool speculated, bool launched)
-      //--------------------------------------------------------------------------
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
-        // If we already launched then we are done
-        if (launched)
-          return;
-        // Otherwise we need to do the things to clean up this operation
-        // Mark that this operation has completed both
-        // execution and mapping indicating that we are done
-        // Do it in this order to avoid calling 'execute_trigger'
-        complete_execution();
-        if (!map_applied_conditions.empty())
-          complete_mapping(Runtime::merge_events(map_applied_conditions));
+        const RegionRequirement &req = dst_requirements[idx];
+        LegionSpy::log_logical_requirement(unique_op_id, 
+                                           src_requirements.size()+idx, 
+                                           true/*region*/,
+                                           req.region.index_space.id,
+                                           req.region.field_space.id,
+                                           req.region.tree_id,
+                                           req.privilege,
+                                           req.prop, req.redop,
+                                           req.parent.index_space.id);
+        LegionSpy::log_requirement_fields(unique_op_id, 
+                                          src_requirements.size()+idx, 
+                                          req.instance_fields);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::trigger_prepipeline_stage(void)
+    //--------------------------------------------------------------------------
+    {
+      // First compute the parent indexes
+      compute_parent_indexes();
+      // Initialize the privilege and mapping paths for all of the
+      // region requirements that we have
+      src_privilege_paths.resize(src_requirements.size());
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+      {
+        initialize_privilege_path(src_privilege_paths[idx],
+                                  src_requirements[idx]);
+      }
+      dst_privilege_paths.resize(dst_requirements.size());
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+      {
+        initialize_privilege_path(dst_privilege_paths[idx],
+                                  dst_requirements[idx]);
+      }
+      if (Runtime::legion_spy_enabled)
+        log_copy_requirements();
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      // Register a dependence on our predicate
+      register_predicate_dependence();
+      ProjectionInfo projection_info;
+      src_versions.resize(src_requirements.size());
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+        runtime->forest->perform_dependence_analysis(this, idx, 
+                                                     src_requirements[idx],
+                                                     src_restrict_infos[idx],
+                                                     src_versions[idx],
+                                                     projection_info,
+                                                     src_privilege_paths[idx]);
+      dst_versions.resize(dst_requirements.size());
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+      {
+        unsigned index = src_requirements.size()+idx;
+        // Perform this dependence analysis as if it was READ_WRITE
+        // so that we can get the version numbers correct
+        const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = READ_WRITE;
+        runtime->forest->perform_dependence_analysis(this, index, 
+                                                     dst_requirements[idx],
+                                                     dst_restrict_infos[idx],
+                                                     dst_versions[idx],
+                                                     projection_info,
+                                                     dst_privilege_paths[idx]);
+        // Switch the privileges back when we are done
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = REDUCE;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool CopyOp::query_speculate(bool &value, bool &mapping_only)
+    //--------------------------------------------------------------------------
+    {
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      Mapper::SpeculativeOutput output;
+      output.speculate = false;
+      output.speculate_mapping_only = true;
+      mapper->invoke_copy_speculate(this, &output);
+      if (!output.speculate)
+        return false;
+      value = output.speculative_value;
+      mapping_only = output.speculate_mapping_only;
+      // Make our predicate guard
+#ifdef DEBUG_LEGION
+      assert(!predication_guard.exists());
+#endif
+      // Make the copy across precondition guard 
+      predication_guard = predicate->get_true_guard();
+      // If we're speculating then we make all the destination
+      // privileges that are write-discard read-write instead so
+      // that we get the earlier version of the data in case we
+      // actually are predicated false
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+      {
+        RegionRequirement &req = dst_requirements[idx];
+        if (IS_WRITE_ONLY(req))
+          req.privilege = READ_WRITE;
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::resolve_true(bool speculated, bool launched)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing to do
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::resolve_false(bool speculated, bool launched)
+    //--------------------------------------------------------------------------
+    {
+      // If we already launched then we are done
+      if (launched)
+        return;
+      // Otherwise we need to do the things to clean up this operation
+      // Mark that this operation has completed both
+      // execution and mapping indicating that we are done
+      // Do it in this order to avoid calling 'execute_trigger'
+      complete_execution();
+      if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events(map_applied_conditions));
+      else
+        complete_mapping();
+      resolve_speculation();
+    } 
+
+    //--------------------------------------------------------------------------
+    void CopyOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      // Do our versioning analysis and then add it to the ready queue
+      std::set<RtEvent> preconditions;
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+        runtime->forest->perform_versioning_analysis(this, idx,
+                                                     src_requirements[idx],
+                                                     src_privilege_paths[idx],
+                                                     src_versions[idx],
+                                                     preconditions);
+      const unsigned offset = src_requirements.size();
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+      {
+        const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
+        // Perform this dependence analysis as if it was READ_WRITE
+        // so that we can get the version numbers correct
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = READ_WRITE;
+        runtime->forest->perform_versioning_analysis(this, offset + idx,
+                                                     dst_requirements[idx],
+                                                     dst_privilege_paths[idx],
+                                                     dst_versions[idx],
+                                                     preconditions);
+        // Switch the privileges back when we are done
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = REDUCE;
+      }
+      if (!preconditions.empty())
+        enqueue_ready_operation(Runtime::merge_events(preconditions));
+      else
+        enqueue_ready_operation();
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<InstanceSet> valid_src_instances(src_requirements.size());
+      std::vector<InstanceSet> valid_dst_instances(dst_requirements.size());
+      Mapper::MapCopyInput input;
+      Mapper::MapCopyOutput output;
+      input.src_instances.resize(src_requirements.size());
+      input.dst_instances.resize(dst_requirements.size());
+      output.src_instances.resize(src_requirements.size());
+      output.dst_instances.resize(dst_requirements.size());
+      // First go through and do the traversals to find the valid instances
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+      {
+        InstanceSet &valid_instances = valid_src_instances[idx];
+        runtime->forest->physical_premap_only(this, idx, 
+                                              src_requirements[idx],
+                                              src_versions[idx],
+                                              valid_instances);
+        // Convert these to the valid set of mapping instances
+        // No need to filter for copies
+        if (src_restrict_infos[idx].has_restrictions())
+          prepare_for_mapping(src_restrict_infos[idx].get_instances(), 
+                              input.src_instances[idx]);
         else
-          complete_mapping();
-        resolve_speculation();
-      } 
-
-      //--------------------------------------------------------------------------
-      void CopyOp::trigger_ready(void)
-      //--------------------------------------------------------------------------
-      {
-        // Do our versioning analysis and then add it to the ready queue
-        std::set<RtEvent> preconditions;
-        for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-          runtime->forest->perform_versioning_analysis(this, idx,
-                                                       src_requirements[idx],
-                                                       src_privilege_paths[idx],
-                                                       src_versions[idx],
-                                                       preconditions);
-        const unsigned offset = src_requirements.size();
-        for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-        {
-          const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
-          // Perform this dependence analysis as if it was READ_WRITE
-          // so that we can get the version numbers correct
-          if (is_reduce_req)
-            dst_requirements[idx].privilege = READ_WRITE;
-          runtime->forest->perform_versioning_analysis(this, offset + idx,
-                                                       dst_requirements[idx],
-                                                       dst_privilege_paths[idx],
-                                                       dst_versions[idx],
-                                                       preconditions);
-          // Switch the privileges back when we are done
-          if (is_reduce_req)
-            dst_requirements[idx].privilege = REDUCE;
-        }
-        if (!preconditions.empty())
-          enqueue_ready_operation(Runtime::merge_events(preconditions));
-        else
-          enqueue_ready_operation();
+          prepare_for_mapping(valid_instances, input.src_instances[idx]);
       }
-
-      //--------------------------------------------------------------------------
-      void CopyOp::trigger_mapping(void)
-      //--------------------------------------------------------------------------
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
-        std::vector<InstanceSet> valid_src_instances(src_requirements.size());
-        std::vector<InstanceSet> valid_dst_instances(dst_requirements.size());
-        Mapper::MapCopyInput input;
-        Mapper::MapCopyOutput output;
-        input.src_instances.resize(src_requirements.size());
-        input.dst_instances.resize(dst_requirements.size());
-        output.src_instances.resize(src_requirements.size());
-        output.dst_instances.resize(dst_requirements.size());
-        // First go through and do the traversals to find the valid instances
-        for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+        InstanceSet &valid_instances = valid_dst_instances[idx];
+        runtime->forest->physical_premap_only(this, idx+src_requirements.size(),
+                                              dst_requirements[idx],
+                                              dst_versions[idx],
+                                              valid_instances);
+        // No need to filter for copies
+        if (dst_restrict_infos[idx].has_restrictions())
         {
-          InstanceSet &valid_instances = valid_src_instances[idx];
-          runtime->forest->physical_premap_only(this, idx, 
-                                                src_requirements[idx],
-                                                src_versions[idx],
-                                                valid_instances);
-          // Convert these to the valid set of mapping instances
-          // No need to filter for copies
-          if (src_restrict_infos[idx].has_restrictions())
-            prepare_for_mapping(src_restrict_infos[idx].get_instances(), 
-                                input.src_instances[idx]);
-          else
-            prepare_for_mapping(valid_instances, input.src_instances[idx]);
+          prepare_for_mapping(dst_restrict_infos[idx].get_instances(), 
+                              input.dst_instances[idx]);
+          assert(!input.dst_instances[idx].empty());
         }
-        for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+        else
+          prepare_for_mapping(valid_instances, input.dst_instances[idx]);
+      }
+      // Now we can ask the mapper what to do
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      mapper->invoke_map_copy(this, &input, &output);
+      if (!output.profiling_requests.empty())
+        filter_copy_request_kinds(mapper,
+            output.profiling_requests.requested_measurements,
+            profiling_requests, true/*warn*/);
+      // Now we can carry out the mapping requested by the mapper
+      // and issue the across copies, first set up the sync precondition
+      ApEvent sync_precondition;
+      if (!wait_barriers.empty() || !grants.empty())
+      {
+        std::set<ApEvent> preconditions;
+        for (std::vector<PhaseBarrier>::const_iterator it = 
+              wait_barriers.begin(); it != wait_barriers.end(); it++)
         {
-          InstanceSet &valid_instances = valid_dst_instances[idx];
-          runtime->forest->physical_premap_only(this, idx+src_requirements.size(),
-                                                dst_requirements[idx],
-                                                dst_versions[idx],
-                                                valid_instances);
-          // No need to filter for copies
-          if (dst_restrict_infos[idx].has_restrictions())
-          {
-            prepare_for_mapping(dst_restrict_infos[idx].get_instances(), 
-                                input.dst_instances[idx]);
-            assert(!input.dst_instances[idx].empty());
-          }
-          else
-            prepare_for_mapping(valid_instances, input.dst_instances[idx]);
-        }
-        // Now we can ask the mapper what to do
-        if (mapper == NULL)
-        {
-          Processor exec_proc = parent_ctx->get_executing_processor();
-          mapper = runtime->find_mapper(exec_proc, map_id);
-        }
-        mapper->invoke_map_copy(this, &input, &output);
-        if (!output.profiling_requests.empty())
-          filter_copy_request_kinds(mapper,
-              output.profiling_requests.requested_measurements,
-              profiling_requests, true/*warn*/);
-        // Now we can carry out the mapping requested by the mapper
-        // and issue the across copies, first set up the sync precondition
-        ApEvent sync_precondition;
-        if (!wait_barriers.empty() || !grants.empty())
-        {
-          std::set<ApEvent> preconditions;
-          for (std::vector<PhaseBarrier>::const_iterator it = 
-                wait_barriers.begin(); it != wait_barriers.end(); it++)
-          {
-            ApEvent e = Runtime::get_previous_phase(*it); 
-            preconditions.insert(e);
-            if (Runtime::legion_spy_enabled)
-              LegionSpy::log_phase_barrier_wait(unique_op_id, e);
-          }
-          for (std::vector<Grant>::const_iterator it = grants.begin();
-                it != grants.end(); it++)
-          {
-            ApEvent e = it->impl->acquire_grant();
-            preconditions.insert(e);
-          }
-          if (sync_precondition.exists())
-            preconditions.insert(sync_precondition);
-          sync_precondition = Runtime::merge_events(preconditions);
-        }
-        // Register the source and destination regions
-        std::set<ApEvent> copy_complete_events;
-        for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-        {
-          InstanceSet src_targets, dst_targets;
-          // The common case 
-          int src_composite = -1;
-          // Make a user event for when this copy across is done
-          // and add it to the set of copy complete events
-          ApUserEvent local_completion = Runtime::create_ap_user_event();
-          copy_complete_events.insert(local_completion);
-          // Do the conversion and check for errors
-          src_composite = 
-            perform_conversion<true/*src*/>(idx, src_requirements[idx],
-                                            output.src_instances[idx],
-                                            src_targets,
-                                            IS_REDUCE(dst_requirements[idx]));
+          ApEvent e = Runtime::get_previous_phase(*it); 
+          preconditions.insert(e);
           if (Runtime::legion_spy_enabled)
-            runtime->forest->log_mapping_decision(unique_op_id, idx, 
-                                                  src_requirements[idx],
-                                                  src_targets);
-          // If we have a compsite reference, we need to map it
-          // as a virtual region
-          if (src_composite >= 0)
-          {
-            // Clear out the target views, the copy_across call will
-            // find the proper valid views
-            src_targets.clear();
-          }
-          else
-          {
-            // Now do the registration
-            set_mapping_state(idx, true/*src*/);
-            runtime->forest->physical_register_only(src_requirements[idx],
-                                                    src_versions[idx],
-                                                    src_restrict_infos[idx],
-                                                    this, idx, local_completion,
-                                                    false/*defer add users*/,
-                                                    true/*read only locks*/,
-                                                    map_applied_conditions,
-                                                    src_targets
-#ifdef DEBUG_LEGION
-                                                    , get_logging_name()
-                                                    , unique_op_id
-#endif
-                                                    );
-          }
-          // Little bit of a hack here, if we are going to do a reduction
-          // explicit copy, switch the privileges to read-write when doing
-          // the registration since we know we are using normal instances
-          const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
-          if (is_reduce_req)
-            dst_requirements[idx].privilege = READ_WRITE;
-          perform_conversion<false/*src*/>(idx, dst_requirements[idx],
-                                           output.dst_instances[idx],
-                                           dst_targets);
+            LegionSpy::log_phase_barrier_wait(unique_op_id, e);
+        }
+        for (std::vector<Grant>::const_iterator it = grants.begin();
+              it != grants.end(); it++)
+        {
+          ApEvent e = it->impl->acquire_grant();
+          preconditions.insert(e);
+        }
+        if (sync_precondition.exists())
+          preconditions.insert(sync_precondition);
+        sync_precondition = Runtime::merge_events(preconditions);
+      }
+      // Register the source and destination regions
+      std::set<ApEvent> copy_complete_events;
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+      {
+        InstanceSet src_targets, dst_targets;
+        // The common case 
+        int src_composite = -1;
+        // Make a user event for when this copy across is done
+        // and add it to the set of copy complete events
+        ApUserEvent local_completion = Runtime::create_ap_user_event();
+        copy_complete_events.insert(local_completion);
+        // Do the conversion and check for errors
+        src_composite = 
+          perform_conversion<true/*src*/>(idx, src_requirements[idx],
+                                          output.src_instances[idx],
+                                          src_targets,
+                                          IS_REDUCE(dst_requirements[idx]));
+        if (Runtime::legion_spy_enabled)
+          runtime->forest->log_mapping_decision(unique_op_id, idx, 
+                                                src_requirements[idx],
+                                                src_targets);
+        // If we have a compsite reference, we need to map it
+        // as a virtual region
+        if (src_composite >= 0)
+        {
+          // Clear out the target views, the copy_across call will
+          // find the proper valid views
+          src_targets.clear();
+        }
+        else
+        {
           // Now do the registration
-          set_mapping_state(idx, false/*src*/);
-          runtime->forest->physical_register_only(dst_requirements[idx],
-                                                  dst_versions[idx],
-                                                  dst_restrict_infos[idx],
-                                                  this, 
-                                                  idx + src_requirements.size(),
-                                                  local_completion,
+          set_mapping_state(idx, true/*src*/);
+          runtime->forest->physical_register_only(src_requirements[idx],
+                                                  src_versions[idx],
+                                                  src_restrict_infos[idx],
+                                                  this, idx, local_completion,
                                                   false/*defer add users*/,
-                                                  false/*not read only*/,
+                                                  true/*read only locks*/,
                                                   map_applied_conditions,
-                                                  dst_targets
+                                                  src_targets
 #ifdef DEBUG_LEGION
                                                   , get_logging_name()
                                                   , unique_op_id
 #endif
                                                   );
-          if (Runtime::legion_spy_enabled)
-            runtime->forest->log_mapping_decision(unique_op_id, 
-               idx + src_requirements.size(), dst_requirements[idx], dst_targets);
-          // Switch the privileges back when we are done
-          if (is_reduce_req)
-            dst_requirements[idx].privilege = REDUCE;
-          ApEvent local_sync_precondition = sync_precondition;
-          // See if we have any atomic locks we have to acquire
-          if ((idx < atomic_locks.size()) && !atomic_locks[idx].empty())
-          {
-            // Issue the acquires and releases for the reservations
-            // necessary for performing this across operation
-            const std::map<Reservation,bool> &local_locks = atomic_locks[idx];
-            for (std::map<Reservation,bool>::const_iterator it = 
-                  local_locks.begin(); it != local_locks.end(); it++)
-            {
-              local_sync_precondition = 
-                Runtime::acquire_ap_reservation(it->first, it->second,
-                                                local_sync_precondition);
-              // We can also issue the release here too
-              Runtime::release_reservation(it->first, local_completion);
-            }
-          }
-          // If we made it here, we passed all our error-checking so
-          // now we can issue the copy/reduce across operation
-          // Trigger our local completion event contingent upon 
-          // the copy/reduce across being done
-          if (!IS_REDUCE(dst_requirements[idx]))
-          {
-            ApEvent across_done = 
-              runtime->forest->copy_across( 
-                                    src_requirements[idx], dst_requirements[idx],
-                                    src_targets, dst_targets, 
-                                    src_versions[idx], dst_versions[idx], 
-                                    local_completion, this, idx,
-                                    idx + src_requirements.size(),
-                                    local_sync_precondition, predication_guard, 
-                                    map_applied_conditions);
-            Runtime::trigger_event(local_completion, across_done);
-          }
-          else
-          {
-            // Composite instances are not valid sources for reductions across
+        }
+        // Little bit of a hack here, if we are going to do a reduction
+        // explicit copy, switch the privileges to read-write when doing
+        // the registration since we know we are using normal instances
+        const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = READ_WRITE;
+        perform_conversion<false/*src*/>(idx, dst_requirements[idx],
+                                         output.dst_instances[idx],
+                                         dst_targets);
+        // Now do the registration
+        set_mapping_state(idx, false/*src*/);
+        runtime->forest->physical_register_only(dst_requirements[idx],
+                                                dst_versions[idx],
+                                                dst_restrict_infos[idx],
+                                                this, 
+                                                idx + src_requirements.size(),
+                                                local_completion,
+                                                false/*defer add users*/,
+                                                false/*not read only*/,
+                                                map_applied_conditions,
+                                                dst_targets
 #ifdef DEBUG_LEGION
-            assert(src_composite == -1);
+                                                , get_logging_name()
+                                                , unique_op_id
 #endif
-            ApEvent across_done = 
-              runtime->forest->reduce_across(
-                                    src_requirements[idx], dst_requirements[idx],
-                                    src_targets, dst_targets, this, 
-                                    local_sync_precondition, predication_guard);
-            Runtime::trigger_event(local_completion, across_done);
-          }
-          // Apply our changes to the version states
-          // Don't apply changes to the source if we have a composite instance
-          // because it is unsound to mutate the region tree that way
-          if (src_composite == -1)
-            src_versions[idx].apply_mapping(map_applied_conditions);
-          dst_versions[idx].apply_mapping(map_applied_conditions); 
-        }
-        ApEvent copy_complete_event = Runtime::merge_events(copy_complete_events);
-        if (!restrict_postconditions.empty())
-        {
-          restrict_postconditions.insert(copy_complete_event);
-          copy_complete_event = Runtime::merge_events(restrict_postconditions);
-        }
-#ifdef LEGION_SPY
+                                                );
         if (Runtime::legion_spy_enabled)
-          LegionSpy::log_operation_events(unique_op_id, copy_complete_event,
-                                          completion_event);
-#endif
-        // Chain all the unlock and barrier arrivals off of the
-        // copy complete event
-        if (!arrive_barriers.empty())
+          runtime->forest->log_mapping_decision(unique_op_id, 
+             idx + src_requirements.size(), dst_requirements[idx], dst_targets);
+        // Switch the privileges back when we are done
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = REDUCE;
+        ApEvent local_sync_precondition = sync_precondition;
+        // See if we have any atomic locks we have to acquire
+        if ((idx < atomic_locks.size()) && !atomic_locks[idx].empty())
         {
-          for (std::vector<PhaseBarrier>::iterator it = 
-                arrive_barriers.begin(); it != arrive_barriers.end(); it++)
+          // Issue the acquires and releases for the reservations
+          // necessary for performing this across operation
+          const std::map<Reservation,bool> &local_locks = atomic_locks[idx];
+          for (std::map<Reservation,bool>::const_iterator it = 
+                local_locks.begin(); it != local_locks.end(); it++)
           {
-            if (Runtime::legion_spy_enabled)
-              LegionSpy::log_phase_barrier_arrival(unique_op_id, 
-                                                   it->phase_barrier);
-            Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
-                                          completion_event);    
+            local_sync_precondition = 
+              Runtime::acquire_ap_reservation(it->first, it->second,
+                                              local_sync_precondition);
+            // We can also issue the release here too
+            Runtime::release_reservation(it->first, local_completion);
           }
         }
-        // Remove our profiling guard and trigger the profiling event if necessary
-        if ((__sync_add_and_fetch(&outstanding_profiling_requests, -1) == 0) &&
-            profiling_reported.exists())
-          Runtime::trigger_event(profiling_reported);
-        // Mark that we completed mapping
-        if (!map_applied_conditions.empty())
-          complete_mapping(Runtime::merge_events(map_applied_conditions));
+        // If we made it here, we passed all our error-checking so
+        // now we can issue the copy/reduce across operation
+        // Trigger our local completion event contingent upon 
+        // the copy/reduce across being done
+        if (!IS_REDUCE(dst_requirements[idx]))
+        {
+          ApEvent across_done = 
+            runtime->forest->copy_across( 
+                                  src_requirements[idx], dst_requirements[idx],
+                                  src_targets, dst_targets, 
+                                  src_versions[idx], dst_versions[idx], 
+                                  local_completion, this, idx,
+                                  idx + src_requirements.size(),
+                                  local_sync_precondition, predication_guard, 
+                                  map_applied_conditions);
+          Runtime::trigger_event(local_completion, across_done);
+        }
         else
-          complete_mapping();
-        if (!acquired_instances.empty())
-          release_acquired_instances(acquired_instances);
-        // Handle the case for marking when the copy completes
-        Runtime::trigger_event(completion_event, copy_complete_event);
-        need_completion_trigger = false;
-        complete_execution(Runtime::protect_event(copy_complete_event));
-      }
-
-      //--------------------------------------------------------------------------
-      void CopyOp::trigger_commit(void)
-      //--------------------------------------------------------------------------
-      {
-        for (std::vector<VersionInfo>::iterator it = src_versions.begin();
-              it != src_versions.end(); it++)
         {
-          it->clear();
+          // Composite instances are not valid sources for reductions across
+#ifdef DEBUG_LEGION
+          assert(src_composite == -1);
+#endif
+          ApEvent across_done = 
+            runtime->forest->reduce_across(
+                                  src_requirements[idx], dst_requirements[idx],
+                                  src_targets, dst_targets, this, 
+                                  local_sync_precondition, predication_guard);
+          Runtime::trigger_event(local_completion, across_done);
         }
-        for (std::vector<VersionInfo>::iterator it = dst_versions.begin();
-              it != dst_versions.end(); it++)
-        {
-          it->clear();
-        }
-        // Don't commit this operation until we've reported our profiling
-        commit_operation(true/*deactivate*/, profiling_reported);
+        // Apply our changes to the version states
+        // Don't apply changes to the source if we have a composite instance
+        // because it is unsound to mutate the region tree that way
+        if (src_composite == -1)
+          src_versions[idx].apply_mapping(map_applied_conditions);
+        dst_versions[idx].apply_mapping(map_applied_conditions); 
       }
-
-      //--------------------------------------------------------------------------
-      void CopyOp::report_interfering_requirements(unsigned idx1, unsigned idx2)
-      //--------------------------------------------------------------------------
+      ApEvent copy_complete_event = Runtime::merge_events(copy_complete_events);
+      if (!restrict_postconditions.empty())
       {
-        bool is_src1 = idx1 < src_requirements.size();
-        bool is_src2 = idx2 < src_requirements.size();
-        unsigned actual_idx1 = is_src1 ? idx1 : (idx1 - src_requirements.size());
-        unsigned actual_idx2 = is_src2 ? idx2 : (idx2 - src_requirements.size());
-        MessageDescriptor ALIASED_REQION_REQUIREMENTS(1424, "undefined");
-        log_run.error(ALIASED_REQION_REQUIREMENTS.id(),
-                      "Aliased region requirements for copy operations "
-                      "are not permitted. Region requirement %d of %s "
-                      "requirements and %d of %s requirements interfering for "
-                      "copy operation (UID %lld) in task %s (UID %lld).",
-                      actual_idx1, is_src1 ? "source" : "destination",
-                      actual_idx2, is_src2 ? "source" : "destination",
-                      unique_op_id, parent_ctx->get_task_name(),
-                      parent_ctx->get_unique_id());
+        restrict_postconditions.insert(copy_complete_event);
+        copy_complete_event = Runtime::merge_events(restrict_postconditions);
+      }
+#ifdef LEGION_SPY
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_operation_events(unique_op_id, copy_complete_event,
+                                        completion_event);
+#endif
+      // Chain all the unlock and barrier arrivals off of the
+      // copy complete event
+      if (!arrive_barriers.empty())
+      {
+        for (std::vector<PhaseBarrier>::iterator it = 
+              arrive_barriers.begin(); it != arrive_barriers.end(); it++)
+        {
+          if (Runtime::legion_spy_enabled)
+            LegionSpy::log_phase_barrier_arrival(unique_op_id, 
+                                                 it->phase_barrier);
+          Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
+                                        completion_event);    
+        }
+      }
+      // Remove our profiling guard and trigger the profiling event if necessary
+      if ((__sync_add_and_fetch(&outstanding_profiling_requests, -1) == 0) &&
+          profiling_reported.exists())
+        Runtime::trigger_event(profiling_reported);
+      // Mark that we completed mapping
+      if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events(map_applied_conditions));
+      else
+        complete_mapping();
+      if (!acquired_instances.empty())
+        release_acquired_instances(acquired_instances);
+      // Handle the case for marking when the copy completes
+      Runtime::trigger_event(completion_event, copy_complete_event);
+      need_completion_trigger = false;
+      complete_execution(Runtime::protect_event(copy_complete_event));
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::trigger_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::vector<VersionInfo>::iterator it = src_versions.begin();
+            it != src_versions.end(); it++)
+      {
+        it->clear();
+      }
+      for (std::vector<VersionInfo>::iterator it = dst_versions.begin();
+            it != dst_versions.end(); it++)
+      {
+        it->clear();
+      }
+      // Don't commit this operation until we've reported our profiling
+      commit_operation(true/*deactivate*/, profiling_reported);
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::report_interfering_requirements(unsigned idx1, unsigned idx2)
+    //--------------------------------------------------------------------------
+    {
+      bool is_src1 = idx1 < src_requirements.size();
+      bool is_src2 = idx2 < src_requirements.size();
+      unsigned actual_idx1 = is_src1 ? idx1 : (idx1 - src_requirements.size());
+      unsigned actual_idx2 = is_src2 ? idx2 : (idx2 - src_requirements.size());
+      MessageDescriptor ALIASED_REQION_REQUIREMENTS(1424, "undefined");
+      log_run.error(ALIASED_REQION_REQUIREMENTS.id(),
+                    "Aliased region requirements for copy operations "
+                    "are not permitted. Region requirement %d of %s "
+                    "requirements and %d of %s requirements interfering for "
+                    "copy operation (UID %lld) in task %s (UID %lld).",
+                    actual_idx1, is_src1 ? "source" : "destination",
+                    actual_idx2, is_src2 ? "source" : "destination",
+                    unique_op_id, parent_ctx->get_task_name(),
+                    parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(ERROR_ALIASED_REGION_REQUIREMENTS);
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned CopyOp::find_parent_index(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+      if (idx >= src_parent_indexes.size())
+      {
+        idx -= src_parent_indexes.size();
+#ifdef DEBUG_LEGION
+        assert(idx < dst_parent_indexes.size());
+#endif
+        return dst_parent_indexes[idx];
+      }
+      else
+        return src_parent_indexes[idx];
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::select_sources(const InstanceRef &target,
+                                const InstanceSet &sources,
+                                std::vector<unsigned> &ranking)
+    //--------------------------------------------------------------------------
+    {
+      Mapper::SelectCopySrcInput input;
+      Mapper::SelectCopySrcOutput output;
+      prepare_for_mapping(sources, input.source_instances);
+      prepare_for_mapping(target, input.target);
+      input.is_src = current_src;
+      input.region_req_index = current_index;
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      mapper->invoke_select_copy_sources(this, &input, &output);
+      // Fill in the ranking based on the output
+      compute_ranking(output.chosen_ranking, sources, ranking);
+    }
+
+    //--------------------------------------------------------------------------
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
+                                        CopyOp::get_acquired_instances_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      return &acquired_instances;
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::update_atomic_locks(Reservation lock, bool exclusive)
+    //--------------------------------------------------------------------------
+    {
+      // We should only be doing analysis on one region requirement
+      // at a time so we don't need to hold the operation lock when 
+      // updating this data structure
+      if (current_index >= atomic_locks.size())
+        atomic_locks.resize(current_index+1);
+      std::map<Reservation,bool> &local_locks = atomic_locks[current_index];
+      std::map<Reservation,bool>::iterator finder = local_locks.find(lock);
+      if (finder != local_locks.end())
+      {
+        if (!finder->second && exclusive)
+          finder->second = true;
+      }
+      else
+        local_locks[lock] = exclusive;
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::record_reference_mutation_effect(RtEvent event)
+    //--------------------------------------------------------------------------
+    {
+      map_applied_conditions.insert(event);
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalManager* CopyOp::select_temporary_instance(PhysicalManager *dst,
+                                 unsigned index, const FieldMask &needed_fields)
+    //--------------------------------------------------------------------------
+    {
+      if (mapper == NULL)
+      {
+        Processor exec_proc = parent_ctx->get_executing_processor();
+        mapper = runtime->find_mapper(exec_proc, map_id);
+      }
+      Mapper::CreateCopyTemporaryInput input;
+      Mapper::CreateCopyTemporaryOutput output;
+      input.region_requirement_index = index;
+      input.src_requirement = current_src;
+      input.destination_instance = MappingInstance(dst);
+      if (!Runtime::unsafe_mapper)
+      {
+        // Fields and regions must both be met
+        // The instance must be freshly created
+        // Instance must be acquired
+        std::set<PhysicalManager*> previous_managers;
+        // Get the set of previous managers we've made
+        for (std::map<PhysicalManager*,std::pair<unsigned,bool> >::
+              const_iterator it = acquired_instances.begin(); it !=
+              acquired_instances.end(); it++)
+          previous_managers.insert(it->first);
+        mapper->invoke_copy_create_temporary(this, &input, &output);
+        validate_temporary_instance(output.temporary_instance.impl,
+            previous_managers, acquired_instances, needed_fields,
+            current_src ? src_requirements[index].region :
+                          dst_requirements[index].region, mapper,
+            "create_copy_temporary_instance");
+      }
+      else
+        mapper->invoke_copy_create_temporary(this, &input, &output);
+      if (Runtime::legion_spy_enabled)
+        log_temporary_instance(output.temporary_instance.impl, 
+                               index, needed_fields);
+      return output.temporary_instance.impl;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent CopyOp::get_restrict_precondition(void) const
+    //--------------------------------------------------------------------------
+    {
+      return merge_restrict_preconditions(grants, wait_barriers);
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::record_restrict_postcondition(ApEvent postcondition)
+    //--------------------------------------------------------------------------
+    {
+      restrict_postconditions.insert(postcondition);
+    }
+
+    //--------------------------------------------------------------------------
+    UniqueID CopyOp::get_unique_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return unique_op_id; 
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned CopyOp::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_index;
+    }
+
+    //--------------------------------------------------------------------------
+    int CopyOp::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_ctx->get_depth() + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::check_copy_privilege(const RegionRequirement &requirement, 
+                                      unsigned idx, bool src, bool permit_proj)
+    //--------------------------------------------------------------------------
+    {
+      if (!permit_proj && ((requirement.handle_type == PART_PROJECTION) ||
+          (requirement.handle_type == REG_PROJECTION)))
+      {
+        MessageDescriptor PROJECTION_REGION_REQUIREMENTS(3111, "undefined");
+        log_region.error(PROJECTION_REGION_REQUIREMENTS.id(),
+                         "Projection region requirements are not "
+                               "permitted for copy operations (in task %s)",
+                               parent_ctx->get_task_name());
 #ifdef DEBUG_LEGION
         assert(false);
 #endif
-        exit(ERROR_ALIASED_REGION_REQUIREMENTS);
+        exit(ERROR_BAD_PROJECTION_USE);
       }
-
-      //--------------------------------------------------------------------------
-      unsigned CopyOp::find_parent_index(unsigned idx)
-      //--------------------------------------------------------------------------
-      {
-        if (idx >= src_parent_indexes.size())
-        {
-          idx -= src_parent_indexes.size();
-#ifdef DEBUG_LEGION
-          assert(idx < dst_parent_indexes.size());
-#endif
-          return dst_parent_indexes[idx];
-        }
-        else
-          return src_parent_indexes[idx];
-      }
-
-      //--------------------------------------------------------------------------
-      void CopyOp::select_sources(const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking)
-      //--------------------------------------------------------------------------
-      {
-        Mapper::SelectCopySrcInput input;
-        Mapper::SelectCopySrcOutput output;
-        prepare_for_mapping(sources, input.source_instances);
-        prepare_for_mapping(target, input.target);
-        input.is_src = current_src;
-        input.region_req_index = current_index;
-        if (mapper == NULL)
-        {
-          Processor exec_proc = parent_ctx->get_executing_processor();
-          mapper = runtime->find_mapper(exec_proc, map_id);
-        }
-        mapper->invoke_select_copy_sources(this, &input, &output);
-        // Fill in the ranking based on the output
-        compute_ranking(output.chosen_ranking, sources, ranking);
-      }
-
-      //--------------------------------------------------------------------------
-      std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
-                                          CopyOp::get_acquired_instances_ref(void)
-      //--------------------------------------------------------------------------
-      {
-        return &acquired_instances;
-      }
-
-      //--------------------------------------------------------------------------
-      void CopyOp::update_atomic_locks(Reservation lock, bool exclusive)
-      //--------------------------------------------------------------------------
-      {
-        // We should only be doing analysis on one region requirement
-        // at a time so we don't need to hold the operation lock when 
-        // updating this data structure
-        if (current_index >= atomic_locks.size())
-          atomic_locks.resize(current_index+1);
-        std::map<Reservation,bool> &local_locks = atomic_locks[current_index];
-        std::map<Reservation,bool>::iterator finder = local_locks.find(lock);
-        if (finder != local_locks.end())
-        {
-          if (!finder->second && exclusive)
-            finder->second = true;
-        }
-        else
-          local_locks[lock] = exclusive;
-      }
-
-      //--------------------------------------------------------------------------
-      void CopyOp::record_reference_mutation_effect(RtEvent event)
-      //--------------------------------------------------------------------------
-      {
-        map_applied_conditions.insert(event);
-      }
-
-      //--------------------------------------------------------------------------
-      PhysicalManager* CopyOp::select_temporary_instance(PhysicalManager *dst,
-                                   unsigned index, const FieldMask &needed_fields)
-      //--------------------------------------------------------------------------
-      {
-        if (mapper == NULL)
-        {
-          Processor exec_proc = parent_ctx->get_executing_processor();
-          mapper = runtime->find_mapper(exec_proc, map_id);
-        }
-        Mapper::CreateCopyTemporaryInput input;
-        Mapper::CreateCopyTemporaryOutput output;
-        input.region_requirement_index = index;
-        input.src_requirement = current_src;
-        input.destination_instance = MappingInstance(dst);
-        if (!Runtime::unsafe_mapper)
-        {
-          // Fields and regions must both be met
-          // The instance must be freshly created
-          // Instance must be acquired
-          std::set<PhysicalManager*> previous_managers;
-          // Get the set of previous managers we've made
-          for (std::map<PhysicalManager*,std::pair<unsigned,bool> >::
-                const_iterator it = acquired_instances.begin(); it !=
-                acquired_instances.end(); it++)
-            previous_managers.insert(it->first);
-          mapper->invoke_copy_create_temporary(this, &input, &output);
-          validate_temporary_instance(output.temporary_instance.impl,
-              previous_managers, acquired_instances, needed_fields,
-              current_src ? src_requirements[index].region :
-                            dst_requirements[index].region, mapper,
-              "create_copy_temporary_instance");
-        }
-        else
-          mapper->invoke_copy_create_temporary(this, &input, &output);
-        if (Runtime::legion_spy_enabled)
-          log_temporary_instance(output.temporary_instance.impl, 
-                                 index, needed_fields);
-        return output.temporary_instance.impl;
-      }
-
-      //--------------------------------------------------------------------------
-      ApEvent CopyOp::get_restrict_precondition(void) const
-      //--------------------------------------------------------------------------
-      {
-        return merge_restrict_preconditions(grants, wait_barriers);
-      }
-
-      //--------------------------------------------------------------------------
-      void CopyOp::record_restrict_postcondition(ApEvent postcondition)
-      //--------------------------------------------------------------------------
-      {
-        restrict_postconditions.insert(postcondition);
-      }
-
-      //--------------------------------------------------------------------------
-      UniqueID CopyOp::get_unique_id(void) const
-      //--------------------------------------------------------------------------
-      {
-        return unique_op_id; 
-      }
-
-      //--------------------------------------------------------------------------
-      unsigned CopyOp::get_context_index(void) const
-      //--------------------------------------------------------------------------
-      {
-        return context_index;
-      }
-
-      //--------------------------------------------------------------------------
-      int CopyOp::get_depth(void) const
-      //--------------------------------------------------------------------------
-      {
-        return (parent_ctx->get_depth() + 1);
-      }
-
-      //--------------------------------------------------------------------------
-      void CopyOp::check_copy_privilege(const RegionRequirement &requirement, 
-                                        unsigned idx, bool src, bool permit_proj)
-      //--------------------------------------------------------------------------
-      {
-        if (!permit_proj && ((requirement.handle_type == PART_PROJECTION) ||
-            (requirement.handle_type == REG_PROJECTION)))
-        {
-          MessageDescriptor PROJECTION_REGION_REQUIREMENTS(3111, "undefined");
-          log_region.error(PROJECTION_REGION_REQUIREMENTS.id(),
-                           "Projection region requirements are not "
-                                 "permitted for copy operations (in task %s)",
-                                 parent_ctx->get_task_name());
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_BAD_PROJECTION_USE);
-        }
-        FieldID bad_field = AUTO_GENERATE_ID;
-        int bad_index = -1;
-        LegionErrorType et = runtime->verify_requirement(requirement, bad_field);
-        // If that worked, then check the privileges with the parent context
-        if (et == NO_ERROR)
-          et = parent_ctx->check_privilege(requirement, bad_field, bad_index);
+      FieldID bad_field = AUTO_GENERATE_ID;
+      int bad_index = -1;
+      LegionErrorType et = runtime->verify_requirement(requirement, bad_field);
+      // If that worked, then check the privileges with the parent context
+      if (et == NO_ERROR)
+        et = parent_ctx->check_privilege(requirement, bad_field, bad_index);
       switch (et)
       {
         case NO_ERROR:
@@ -4268,7 +4274,8 @@ namespace Legion {
           }
           case ERROR_BAD_PARENT_REGION:
           {
-            if (bad_index < 0) {
+            if (bad_index < 0) 
+            {
               MessageDescriptor PARENT_TASK_COPY(3116, "undefined");
               log_region.error(PARENT_TASK_COPY.id(),
                                "Parent task %s (ID %lld) of copy operation "
@@ -4284,7 +4291,9 @@ namespace Legion {
                                requirement.region.field_space.id,
                                requirement.region.tree_id,
                                idx, (src ? "source" : "destination"));
-            } else if (bad_field == AUTO_GENERATE_ID) {
+            } 
+            else if (bad_field == AUTO_GENERATE_ID) 
+            {
               MessageDescriptor PARENT_TASK_COPY(3117, "undefined");
               log_region.error(PARENT_TASK_COPY.id(),
                                "Parent task %s (ID %lld) of copy operation "
@@ -4301,7 +4310,9 @@ namespace Legion {
                                requirement.region.tree_id,
                                idx, (src ? "source" : "destination"),
                                bad_index);
-            } else {
+            } 
+            else 
+            {
               MessageDescriptor PARENT_TASK_COPY(3118, "undefined");
               log_region.error(PARENT_TASK_COPY.id(),
                                "Parent task %s (ID %lld) of copy operation "
@@ -4381,1336 +4392,1336 @@ namespace Legion {
 #endif
               exit(ERROR_BAD_REGION_PRIVILEGES);
             }
-              // this should never happen with an inline mapping
-          case ERROR_NON_DISJOINT_PARTITION:
-            default:
-              assert(false); // Should never happen
-          }
-        }
+        // this should never happen with an inline mapping
+        case ERROR_NON_DISJOINT_PARTITION:
+        default:
+          assert(false); // Should never happen
+      }
+    }
 
-        //--------------------------------------------------------------------------
-        void CopyOp::compute_parent_indexes(void)
-        //--------------------------------------------------------------------------
+    //--------------------------------------------------------------------------
+    void CopyOp::compute_parent_indexes(void)
+    //--------------------------------------------------------------------------
+    {
+      src_parent_indexes.resize(src_requirements.size());
+      dst_parent_indexes.resize(dst_requirements.size());
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+      {
+        int parent_index =
+          parent_ctx->find_parent_region_req(src_requirements[idx]);
+        if (parent_index < 0)
         {
-          src_parent_indexes.resize(src_requirements.size());
-          dst_parent_indexes.resize(dst_requirements.size());
-          for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-          {
-            int parent_index =
-              parent_ctx->find_parent_region_req(src_requirements[idx]);
-            if (parent_index < 0)
-            {
-              MessageDescriptor PARENT_TASK_COPY(3122, "undefined");
-              log_region.error(PARENT_TASK_COPY.id(),
-                               "Parent task %s (ID %lld) of copy operation "
-                                       "(ID %lld) does not have a region "
-                                       "requirement for region (%x,%x,%x) "
-                                       "as a parent of index %d of source region "
-                                       "requirements",
-                                       parent_ctx->get_task_name(), 
-                                       parent_ctx->get_unique_id(),
-                                       unique_op_id, 
-                                       src_requirements[idx].region.index_space.id,
-                                       src_requirements[idx].region.field_space.id, 
-                                       src_requirements[idx].region.tree_id, idx);
+          MessageDescriptor PARENT_TASK_COPY(3122, "undefined");
+          log_region.error(PARENT_TASK_COPY.id(),
+                           "Parent task %s (ID %lld) of copy operation "
+                                   "(ID %lld) does not have a region "
+                                   "requirement for region (%x,%x,%x) "
+                                   "as a parent of index %d of source region "
+                                   "requirements",
+                                   parent_ctx->get_task_name(), 
+                                   parent_ctx->get_unique_id(),
+                                   unique_op_id, 
+                                   src_requirements[idx].region.index_space.id,
+                                   src_requirements[idx].region.field_space.id, 
+                                   src_requirements[idx].region.tree_id, idx);
 #ifdef DEBUG_LEGION
-              assert(false);
+          assert(false);
 #endif
-              exit(ERROR_BAD_PARENT_REGION);
-            }
-            else
-              src_parent_indexes[idx] = unsigned(parent_index);
-          }
-          for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-          {
-            int parent_index = 
-              parent_ctx->find_parent_region_req(dst_requirements[idx]);
-            if (parent_index < 0)
-            {
-              MessageDescriptor PARENT_TASK_COPY(3123, "undefined");
-              log_region.error(PARENT_TASK_COPY.id(),
-                               "Parent task %s (ID %lld) of copy operation "
-                                       "(ID %lld) does not have a region "
-                                       "requirement for region (%x,%x,%x) "
-                                       "as a parent of index %d of destination "
-                                       "region requirements",
-                                       parent_ctx->get_task_name(), 
-                                       parent_ctx->get_unique_id(),
-                                       unique_op_id, 
-                                       dst_requirements[idx].region.index_space.id,
-                                       dst_requirements[idx].region.field_space.id, 
-                                       dst_requirements[idx].region.tree_id, idx);
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_BAD_PARENT_REGION);
-            }
-            else
-              dst_parent_indexes[idx] = unsigned(parent_index);
-          }
+          exit(ERROR_BAD_PARENT_REGION);
         }
-
-        //--------------------------------------------------------------------------
-        template<bool IS_SRC>
-        int CopyOp::perform_conversion(unsigned idx, const RegionRequirement &req,
-                                       std::vector<MappingInstance> &output,
-                                       InstanceSet &targets, bool is_reduce)
-        //--------------------------------------------------------------------------
+        else
+          src_parent_indexes[idx] = unsigned(parent_index);
+      }
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+      {
+        int parent_index = 
+          parent_ctx->find_parent_region_req(dst_requirements[idx]);
+        if (parent_index < 0)
         {
-          RegionTreeID bad_tree = 0;
-          std::vector<FieldID> missing_fields;
-          std::vector<PhysicalManager*> unacquired;
-          int composite_idx = runtime->forest->physical_convert_mapping(this,
-                                  req, output, targets, bad_tree, missing_fields,
-                                  &acquired_instances, unacquired, 
-                                  !Runtime::unsafe_mapper);
-          if (bad_tree > 0)
-          {
-            MessageDescriptor INVALID_MAPPER_OUTPUT15(1425, "undefined");
-            log_run.error(INVALID_MAPPER_OUTPUT15.id(),
-                          "Invalid mapper output from invocation of 'map_copy' "
-                          "on mapper %s. Mapper selected an instance from "
-                          "region tree %d to satisfy %s region requirement %d "
-                          "for explicit region-to_region copy in task %s (ID %lld) "
-                          "but the logical region for this requirement is from "
-                          "region tree %d.", mapper->get_mapper_name(), bad_tree,
-                          IS_SRC ? "source" : "destination", idx, 
-                          parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
-                          req.region.get_tree_id());
+          MessageDescriptor PARENT_TASK_COPY(3123, "undefined");
+          log_region.error(PARENT_TASK_COPY.id(),
+                           "Parent task %s (ID %lld) of copy operation "
+                                   "(ID %lld) does not have a region "
+                                   "requirement for region (%x,%x,%x) "
+                                   "as a parent of index %d of destination "
+                                   "region requirements",
+                                   parent_ctx->get_task_name(), 
+                                   parent_ctx->get_unique_id(),
+                                   unique_op_id, 
+                                   dst_requirements[idx].region.index_space.id,
+                                   dst_requirements[idx].region.field_space.id, 
+                                   dst_requirements[idx].region.tree_id, idx);
 #ifdef DEBUG_LEGION
-            assert(false);
+          assert(false);
 #endif
-            exit(ERROR_INVALID_MAPPER_OUTPUT);
-          }
-          if (!missing_fields.empty())
-          {
-            MessageDescriptor INVALID_MAPPER_OUTPUT16(1426, "undefined");
-            log_run.error(INVALID_MAPPER_OUTPUT16.id(),
-                          "Invalid mapper output from invocation of 'map_copy' "
-                          "on mapper %s. Mapper failed to specify a physical "
-                          "instance for %zd fields of the region requirement %d "
-                          "of explicit region-to-region copy in task %s (ID %lld). "
-                          "Ths missing fields are listed below.",
-                          mapper->get_mapper_name(), missing_fields.size(), idx,
-                          parent_ctx->get_task_name(), parent_ctx->get_unique_id());
+          exit(ERROR_BAD_PARENT_REGION);
+        }
+        else
+          dst_parent_indexes[idx] = unsigned(parent_index);
+      }
+    }
 
-            for (std::vector<FieldID>::const_iterator it = missing_fields.begin();
-                  it != missing_fields.end(); it++)
-            {
-              const void *name; size_t name_size;
-              if (!runtime->retrieve_semantic_information(
-                   req.region.get_field_space(), *it, NAME_SEMANTIC_TAG,
-                   name, name_size, true, false))
-                name = "(no name)";
-              MessageDescriptor MISSING_INSTANCE_FIELD(1427, "undefined");
-              log_run.error(MISSING_INSTANCE_FIELD.id(),
-                            "Missing instance for field %s (FieldID: %d)",
-                            static_cast<const char*>(name), *it);
-            }
+    //--------------------------------------------------------------------------
+    template<bool IS_SRC>
+    int CopyOp::perform_conversion(unsigned idx, const RegionRequirement &req,
+                                   std::vector<MappingInstance> &output,
+                                   InstanceSet &targets, bool is_reduce)
+    //--------------------------------------------------------------------------
+    {
+      RegionTreeID bad_tree = 0;
+      std::vector<FieldID> missing_fields;
+      std::vector<PhysicalManager*> unacquired;
+      int composite_idx = runtime->forest->physical_convert_mapping(this,
+                              req, output, targets, bad_tree, missing_fields,
+                              &acquired_instances, unacquired, 
+                              !Runtime::unsafe_mapper);
+      if (bad_tree > 0)
+      {
+        MessageDescriptor INVALID_MAPPER_OUTPUT15(1425, "undefined");
+        log_run.error(INVALID_MAPPER_OUTPUT15.id(),
+                      "Invalid mapper output from invocation of 'map_copy' "
+                      "on mapper %s. Mapper selected an instance from "
+                      "region tree %d to satisfy %s region requirement %d "
+                      "for explicit region-to_region copy in task %s (ID %lld) "
+                      "but the logical region for this requirement is from "
+                      "region tree %d.", mapper->get_mapper_name(), bad_tree,
+                      IS_SRC ? "source" : "destination", idx, 
+                      parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
+                      req.region.get_tree_id());
 #ifdef DEBUG_LEGION
-            assert(false);
+        assert(false);
 #endif
-            exit(ERROR_INVALID_MAPPER_OUTPUT);
-          }
-          if (!unacquired.empty())
-          {
-            for (std::vector<PhysicalManager*>::const_iterator it = 
-                  unacquired.begin(); it != unacquired.end(); it++)
-            {
-              if (acquired_instances.find(*it) == acquired_instances.end())
-              {
-                MessageDescriptor INVALID_MAPPER_OUTPUT17(1462, "undefined");
-                log_run.error(INVALID_MAPPER_OUTPUT17.id(),
-                              "Invalid mapper output from 'map_copy' invocation "
-                              "on mapper %s. Mapper selected physical instance "
-                              "for %s region requirement %d of explicit region-to-"
-                              "region copy in task %s (ID %lld) which has already "
-                              "been collected. If the mapper had properly acquired "
-                              "this instance as part of the mapper call it would "
-                              "have detected this. Please update the mapper to "
-                              "abide by proper mapping conventions.",
-                              mapper->get_mapper_name(), 
-                              IS_SRC ? "source" : "destination", idx,
-                              parent_ctx->get_task_name(),
-                              parent_ctx->get_unique_id());
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+      if (!missing_fields.empty())
+      {
+        MessageDescriptor INVALID_MAPPER_OUTPUT16(1426, "undefined");
+        log_run.error(INVALID_MAPPER_OUTPUT16.id(),
+                      "Invalid mapper output from invocation of 'map_copy' "
+                      "on mapper %s. Mapper failed to specify a physical "
+                      "instance for %zd fields of the region requirement %d "
+                      "of explicit region-to-region copy in task %s (ID %lld). "
+                      "Ths missing fields are listed below.",
+                      mapper->get_mapper_name(), missing_fields.size(), idx,
+                      parent_ctx->get_task_name(), parent_ctx->get_unique_id());
+
+        for (std::vector<FieldID>::const_iterator it = missing_fields.begin();
+              it != missing_fields.end(); it++)
+        {
+          const void *name; size_t name_size;
+          if (!runtime->retrieve_semantic_information(
+               req.region.get_field_space(), *it, NAME_SEMANTIC_TAG,
+               name, name_size, true, false))
+            name = "(no name)";
+          MessageDescriptor MISSING_INSTANCE_FIELD(1427, "undefined");
+          log_run.error(MISSING_INSTANCE_FIELD.id(),
+                        "Missing instance for field %s (FieldID: %d)",
+                        static_cast<const char*>(name), *it);
+        }
 #ifdef DEBUG_LEGION
-                assert(false);
+        assert(false);
 #endif
-                exit(ERROR_INVALID_MAPPER_OUTPUT);
-              }
-            }
-            // If we did successfully acquire them, still issue the warning
-            MessageDescriptor MAPPER_FAILED_ACQUIRE(1428, "undefined");
-            log_run.warning(MAPPER_FAILED_ACQUIRE.id(),
-                            "mapper %s failed to acquire instances "
-                            "for %s region requirement %d of explicit region-to-"
-                            "region copy in task %s (ID %lld) in 'map_copy' call. "
-                            "You may experience undefined behavior as a "
-                            "consequence.", mapper->get_mapper_name(),
-                            IS_SRC ? "source" : "destination", idx,
-                            parent_ctx->get_task_name(),
-                            parent_ctx->get_unique_id());
-          }
-          // Destination is not allowed to have composite instances
-          if (!IS_SRC && (composite_idx >= 0))
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+      if (!unacquired.empty())
+      {
+        for (std::vector<PhysicalManager*>::const_iterator it = 
+              unacquired.begin(); it != unacquired.end(); it++)
+        {
+          if (acquired_instances.find(*it) == acquired_instances.end())
           {
-            MessageDescriptor INVALID_MAPPER_OUTPUT18(1428, "undefined");
-            log_run.error(INVALID_MAPPER_OUTPUT18.id(),
-                          "Invalid mapper output from invocation of 'map_copy' "
-                          "on mapper %s. Mapper requested the creation of a "
-                          "composite instance for destination region requiremnt "
-                          "%d. Only source region requirements are permitted to "
-                          "be composite instances for explicit region-to-region "
-                          "copy operations. Operation was issued in task %s "
-                          "(ID %lld).", mapper->get_mapper_name(), idx,
-                          parent_ctx->get_task_name(), parent_ctx->get_unique_id());
-#ifdef DEBUG_LEGION
-            assert(false);
-#endif
-            exit(ERROR_INVALID_MAPPER_OUTPUT); 
-          } 
-          if (IS_SRC && (composite_idx >= 0) && is_reduce)
-          {
-            MessageDescriptor INVALID_MAPPER_OUTPUT19(1429, "undefined");
-            log_run.error(INVALID_MAPPER_OUTPUT19.id(),
-                          "Invalid mapper output from invocation of 'map_copy' "
-                          "on mapper %s. Mapper requested the creation of a "
-                          "composite instance for the source requirement %d of "
-                          "an explicit region-to-region reduction. Only real "
-                          "physical instances are permitted to be sources of "
-                          "explicit region-to-region reductions. Operation was "
-                          "issued in task %s (ID %lld).", mapper->get_mapper_name(),
-                          idx, parent_ctx->get_task_name(), 
+            MessageDescriptor INVALID_MAPPER_OUTPUT17(1462, "undefined");
+            log_run.error(INVALID_MAPPER_OUTPUT17.id(),
+                          "Invalid mapper output from 'map_copy' invocation "
+                          "on mapper %s. Mapper selected physical instance "
+                          "for %s region requirement %d of explicit region-to-"
+                          "region copy in task %s (ID %lld) which has already "
+                          "been collected. If the mapper had properly acquired "
+                          "this instance as part of the mapper call it would "
+                          "have detected this. Please update the mapper to "
+                          "abide by proper mapping conventions.",
+                          mapper->get_mapper_name(), 
+                          IS_SRC ? "source" : "destination", idx,
+                          parent_ctx->get_task_name(),
                           parent_ctx->get_unique_id());
 #ifdef DEBUG_LEGION
             assert(false);
 #endif
             exit(ERROR_INVALID_MAPPER_OUTPUT);
           }
-          if (Runtime::unsafe_mapper)
-            return composite_idx;
-          std::vector<LogicalRegion> regions_to_check(1, req.region);
-          for (unsigned idx = 0; idx < targets.size(); idx++)
-          {
-            const InstanceRef &ref = targets[idx];
-            PhysicalManager *manager = ref.get_manager();
-            if (manager->is_virtual_instance())
-              continue;
-            if (!manager->meets_regions(regions_to_check))
-            {
-              MessageDescriptor INVALID_MAPPER_OUTPUT20(1430, "undefined");
-              log_run.error(INVALID_MAPPER_OUTPUT20.id(),
-                            "Invalid mapper output from invocation of 'map_copy' "
-                            "on mapper %s. Mapper specified an instance for %s "
-                            "region requirement at index %d that does not meet "
-                            "the logical region requirement. The copy operation "
-                            "was issued in task %s (ID %lld).",
-                            mapper->get_mapper_name(), 
-                            IS_SRC ? "source" : "destination", idx,
-                            parent_ctx->get_task_name(),
-                            parent_ctx->get_unique_id());
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_INVALID_MAPPER_OUTPUT);
-            }
-          }
-          // Make sure all the destinations are real instances, this has
-          // to be true for all kinds of explicit copies including reductions
-          for (unsigned idx = 0; idx < targets.size(); idx++)
-          {
-            if (IS_SRC && (int(idx) == composite_idx))
-              continue;
-            if (!targets[idx].get_manager()->is_instance_manager())
-            {
-              MessageDescriptor INVALID_MAPPER_OUTPUT21(1431, "undefined");
-              log_run.error(INVALID_MAPPER_OUTPUT21.id(),
-                            "Invalid mapper output from invocation of 'map_copy' "
-                            "on mapper %s. Mapper specified an illegal "
-                            "specialized instance as the target for %s "
-                            "region requirement %d of an explicit copy operation "
-                            "in task %s (ID %lld).", mapper->get_mapper_name(),
-                            IS_SRC ? "source" : "destination", idx, 
-                            parent_ctx->get_task_name(), 
-                            parent_ctx->get_unique_id());
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_INVALID_MAPPER_OUTPUT);
-            }
-          }
-          return composite_idx;
         }
-
-        //--------------------------------------------------------------------------
-        void CopyOp::add_copy_profiling_request(
-                                               Realm::ProfilingRequestSet &requests)
-        //--------------------------------------------------------------------------
-        {
-          // Nothing to do if we don't have any profiling requests
-          if (profiling_requests.empty())
-            return;
-          Operation *proxy_this = this;
-          Realm::ProfilingRequest &request = requests.add_request( 
-              runtime->find_utility_group(), LG_MAPPER_PROFILING_ID, 
-              &proxy_this, sizeof(proxy_this));
-          for (std::vector<ProfilingMeasurementID>::const_iterator it = 
-                profiling_requests.begin(); it != profiling_requests.end(); it++)
-            request.add_measurement((Realm::ProfilingMeasurementID)(*it));
-          int previous = __sync_fetch_and_add(&outstanding_profiling_requests, 1);
-          if ((previous == 1) && !profiling_reported.exists())
-            profiling_reported = Runtime::create_rt_user_event();
-        }
-
-        //--------------------------------------------------------------------------
-        void CopyOp::report_profiling_response(
-                                           const Realm::ProfilingResponse &response)
-        //--------------------------------------------------------------------------
-        {
+        // If we did successfully acquire them, still issue the warning
+        MessageDescriptor MAPPER_FAILED_ACQUIRE(1428, "undefined");
+        log_run.warning(MAPPER_FAILED_ACQUIRE.id(),
+                        "mapper %s failed to acquire instances "
+                        "for %s region requirement %d of explicit region-to-"
+                        "region copy in task %s (ID %lld) in 'map_copy' call. "
+                        "You may experience undefined behavior as a "
+                        "consequence.", mapper->get_mapper_name(),
+                        IS_SRC ? "source" : "destination", idx,
+                        parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id());
+      }
+      // Destination is not allowed to have composite instances
+      if (!IS_SRC && (composite_idx >= 0))
+      {
+        MessageDescriptor INVALID_MAPPER_OUTPUT18(1428, "undefined");
+        log_run.error(INVALID_MAPPER_OUTPUT18.id(),
+                      "Invalid mapper output from invocation of 'map_copy' "
+                      "on mapper %s. Mapper requested the creation of a "
+                      "composite instance for destination region requiremnt "
+                      "%d. Only source region requirements are permitted to "
+                      "be composite instances for explicit region-to-region "
+                      "copy operations. Operation was issued in task %s "
+                      "(ID %lld).", mapper->get_mapper_name(), idx,
+                      parent_ctx->get_task_name(), parent_ctx->get_unique_id());
 #ifdef DEBUG_LEGION
-          assert(mapper != NULL);
+        assert(false);
 #endif
-          Mapping::Mapper::CopyProfilingInfo info;
-          info.profiling_responses.attach_realm_profiling_response(response);
-          mapper->invoke_copy_report_profiling(this, &info);
+        exit(ERROR_INVALID_MAPPER_OUTPUT); 
+      } 
+      if (IS_SRC && (composite_idx >= 0) && is_reduce)
+      {
+        MessageDescriptor INVALID_MAPPER_OUTPUT19(1429, "undefined");
+        log_run.error(INVALID_MAPPER_OUTPUT19.id(),
+                      "Invalid mapper output from invocation of 'map_copy' "
+                      "on mapper %s. Mapper requested the creation of a "
+                      "composite instance for the source requirement %d of "
+                      "an explicit region-to-region reduction. Only real "
+                      "physical instances are permitted to be sources of "
+                      "explicit region-to-region reductions. Operation was "
+                      "issued in task %s (ID %lld).", mapper->get_mapper_name(),
+                      idx, parent_ctx->get_task_name(), 
+                      parent_ctx->get_unique_id());
 #ifdef DEBUG_LEGION
-          assert(outstanding_profiling_requests > 0);
-          assert(profiling_reported.exists());
+        assert(false);
 #endif
-          int remaining = __sync_add_and_fetch(&outstanding_profiling_requests, -1);
-          // If we're the last one then we trigger the result
-          if (remaining == 0)
-            Runtime::trigger_event(profiling_reported);
-        }
-
-        /////////////////////////////////////////////////////////////
-        // Index Copy Operation 
-        /////////////////////////////////////////////////////////////
-
-        //--------------------------------------------------------------------------
-        IndexCopyOp::IndexCopyOp(Runtime *rt)
-          : CopyOp(rt)
-        //--------------------------------------------------------------------------
+        exit(ERROR_INVALID_MAPPER_OUTPUT);
+      }
+      if (Runtime::unsafe_mapper)
+        return composite_idx;
+      std::vector<LogicalRegion> regions_to_check(1, req.region);
+      for (unsigned idx = 0; idx < targets.size(); idx++)
+      {
+        const InstanceRef &ref = targets[idx];
+        PhysicalManager *manager = ref.get_manager();
+        if (manager->is_virtual_instance())
+          continue;
+        if (!manager->meets_regions(regions_to_check))
         {
-          this->is_index_space = true;
-        }
-
-        //--------------------------------------------------------------------------
-        IndexCopyOp::IndexCopyOp(const IndexCopyOp &rhs)
-          : CopyOp(rhs)
-        //--------------------------------------------------------------------------
-        {
-          // should never be called
+          MessageDescriptor INVALID_MAPPER_OUTPUT20(1430, "undefined");
+          log_run.error(INVALID_MAPPER_OUTPUT20.id(),
+                        "Invalid mapper output from invocation of 'map_copy' "
+                        "on mapper %s. Mapper specified an instance for %s "
+                        "region requirement at index %d that does not meet "
+                        "the logical region requirement. The copy operation "
+                        "was issued in task %s (ID %lld).",
+                        mapper->get_mapper_name(), 
+                        IS_SRC ? "source" : "destination", idx,
+                        parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
           assert(false);
-        }
-
-        //--------------------------------------------------------------------------
-        IndexCopyOp::~IndexCopyOp(void)
-        //--------------------------------------------------------------------------
-        {
-        }
-
-        //--------------------------------------------------------------------------
-        IndexCopyOp& IndexCopyOp::operator=(const IndexCopyOp &rhs)
-        //--------------------------------------------------------------------------
-        {
-          // should never be called
-          assert(false);
-          return *this;
-        }
-
-        //--------------------------------------------------------------------------
-        void IndexCopyOp::initialize(TaskContext *ctx, 
-                                     const IndexCopyLauncher &launcher,
-                                     IndexSpace launch_sp, bool check_privileges)
-        //--------------------------------------------------------------------------
-        {
-          parent_task = ctx->get_task();
-          initialize_speculation(ctx, true/*track*/, 
-                                 launcher.src_requirements.size() + 
-                                   launcher.dst_requirements.size(), 
-                                 launcher.static_dependences,
-                                 launcher.predicate);
-#ifdef DEBUG_LEGION
-          assert(launch_sp.exists());
 #endif
-          launch_space = launch_sp;
-          if (!launcher.launch_domain.exists())
-            runtime->forest->find_launch_space_domain(launch_space, index_domain);
-          else
-            index_domain = launcher.launch_domain;
-          src_requirements.resize(launcher.src_requirements.size());
-          dst_requirements.resize(launcher.dst_requirements.size());
-          src_versions.resize(launcher.src_requirements.size());
-          dst_versions.resize(launcher.dst_requirements.size());
-          src_restrict_infos.resize(launcher.src_requirements.size());
-          dst_restrict_infos.resize(launcher.dst_requirements.size());
-          src_projection_infos.resize(launcher.src_requirements.size());
-          dst_projection_infos.resize(launcher.dst_requirements.size());
-          for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-          {
-            if (launcher.src_requirements[idx].privilege_fields.empty())
-            {
-              MessageDescriptor SOURCE_REGION_REQUIREMENT(2203, "undefined");
-              log_task.warning(SOURCE_REGION_REQUIREMENT.id(),
-                               "SOURCE REGION REQUIREMENT %d OF "
-                               "COPY (ID %lld) IN TASK %s (ID %lld) HAS NO "
-                               "PRIVILEGE FIELDS! DID YOU FORGET THEM?!?",
-                               idx, get_unique_op_id(),
-                               parent_ctx->get_task_name(), 
-                               parent_ctx->get_unique_id());
-            }
-            src_requirements[idx] = launcher.src_requirements[idx];
-            src_requirements[idx].flags |= NO_ACCESS_FLAG;
-          }
-          for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-          {
-            if (launcher.src_requirements[idx].privilege_fields.empty())
-            {
-              MessageDescriptor DESTINATION_REGION_REQUIREMENT(2204, "undefined");
-              log_task.warning(DESTINATION_REGION_REQUIREMENT.id(),
-                               "DESTINATION REGION REQUIREMENT %d OF"
-                               " COPY (ID %lld) IN TASK %s (ID %lld) HAS NO "
-                               "PRIVILEGE FIELDS! DID YOU FORGET THEM?!?",
-                               idx, get_unique_op_id(),
-                               parent_ctx->get_task_name(), 
-                               parent_ctx->get_unique_id());
-            }
-            dst_requirements[idx] = launcher.dst_requirements[idx];
-            dst_requirements[idx].flags |= NO_ACCESS_FLAG;
-            // If our privilege is not reduce, then shift it to write discard
-            // since we are going to write all over the region
-            if (dst_requirements[idx].privilege != REDUCE)
-              dst_requirements[idx].privilege = WRITE_DISCARD;
-          }
-          grants = launcher.grants;
-          // Register ourselves with all the grants
-          for (unsigned idx = 0; idx < grants.size(); idx++)
-            grants[idx].impl->register_operation(completion_event);
-          wait_barriers = launcher.wait_barriers;
+          exit(ERROR_INVALID_MAPPER_OUTPUT);
+        }
+      }
+      // Make sure all the destinations are real instances, this has
+      // to be true for all kinds of explicit copies including reductions
+      for (unsigned idx = 0; idx < targets.size(); idx++)
+      {
+        if (IS_SRC && (int(idx) == composite_idx))
+          continue;
+        if (!targets[idx].get_manager()->is_instance_manager())
+        {
+          MessageDescriptor INVALID_MAPPER_OUTPUT21(1431, "undefined");
+          log_run.error(INVALID_MAPPER_OUTPUT21.id(),
+                        "Invalid mapper output from invocation of 'map_copy' "
+                        "on mapper %s. Mapper specified an illegal "
+                        "specialized instance as the target for %s "
+                        "region requirement %d of an explicit copy operation "
+                        "in task %s (ID %lld).", mapper->get_mapper_name(),
+                        IS_SRC ? "source" : "destination", idx, 
+                        parent_ctx->get_task_name(), 
+                        parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_INVALID_MAPPER_OUTPUT);
+        }
+      }
+      return composite_idx;
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::add_copy_profiling_request(
+                                           Realm::ProfilingRequestSet &requests)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing to do if we don't have any profiling requests
+      if (profiling_requests.empty())
+        return;
+      Operation *proxy_this = this;
+      Realm::ProfilingRequest &request = requests.add_request( 
+          runtime->find_utility_group(), LG_MAPPER_PROFILING_ID, 
+          &proxy_this, sizeof(proxy_this));
+      for (std::vector<ProfilingMeasurementID>::const_iterator it = 
+            profiling_requests.begin(); it != profiling_requests.end(); it++)
+        request.add_measurement((Realm::ProfilingMeasurementID)(*it));
+      int previous = __sync_fetch_and_add(&outstanding_profiling_requests, 1);
+      if ((previous == 1) && !profiling_reported.exists())
+        profiling_reported = Runtime::create_rt_user_event();
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::report_profiling_response(
+                                       const Realm::ProfilingResponse &response)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(mapper != NULL);
+#endif
+      Mapping::Mapper::CopyProfilingInfo info;
+      info.profiling_responses.attach_realm_profiling_response(response);
+      mapper->invoke_copy_report_profiling(this, &info);
+#ifdef DEBUG_LEGION
+      assert(outstanding_profiling_requests > 0);
+      assert(profiling_reported.exists());
+#endif
+      int remaining = __sync_add_and_fetch(&outstanding_profiling_requests, -1);
+      // If we're the last one then we trigger the result
+      if (remaining == 0)
+        Runtime::trigger_event(profiling_reported);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Index Copy Operation 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    IndexCopyOp::IndexCopyOp(Runtime *rt)
+      : CopyOp(rt)
+    //--------------------------------------------------------------------------
+    {
+      this->is_index_space = true;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexCopyOp::IndexCopyOp(const IndexCopyOp &rhs)
+      : CopyOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexCopyOp::~IndexCopyOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexCopyOp& IndexCopyOp::operator=(const IndexCopyOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCopyOp::initialize(TaskContext *ctx, 
+                                 const IndexCopyLauncher &launcher,
+                                 IndexSpace launch_sp, bool check_privileges)
+    //--------------------------------------------------------------------------
+    {
+      parent_task = ctx->get_task();
+      initialize_speculation(ctx, true/*track*/, 
+                             launcher.src_requirements.size() + 
+                               launcher.dst_requirements.size(), 
+                             launcher.static_dependences,
+                             launcher.predicate);
+#ifdef DEBUG_LEGION
+      assert(launch_sp.exists());
+#endif
+      launch_space = launch_sp;
+      if (!launcher.launch_domain.exists())
+        runtime->forest->find_launch_space_domain(launch_space, index_domain);
+      else
+        index_domain = launcher.launch_domain;
+      src_requirements.resize(launcher.src_requirements.size());
+      dst_requirements.resize(launcher.dst_requirements.size());
+      src_versions.resize(launcher.src_requirements.size());
+      dst_versions.resize(launcher.dst_requirements.size());
+      src_restrict_infos.resize(launcher.src_requirements.size());
+      dst_restrict_infos.resize(launcher.dst_requirements.size());
+      src_projection_infos.resize(launcher.src_requirements.size());
+      dst_projection_infos.resize(launcher.dst_requirements.size());
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+      {
+        if (launcher.src_requirements[idx].privilege_fields.empty())
+        {
+          MessageDescriptor SOURCE_REGION_REQUIREMENT(2203, "undefined");
+          log_task.warning(SOURCE_REGION_REQUIREMENT.id(),
+                           "SOURCE REGION REQUIREMENT %d OF "
+                           "COPY (ID %lld) IN TASK %s (ID %lld) HAS NO "
+                           "PRIVILEGE FIELDS! DID YOU FORGET THEM?!?",
+                           idx, get_unique_op_id(),
+                           parent_ctx->get_task_name(), 
+                           parent_ctx->get_unique_id());
+        }
+        src_requirements[idx] = launcher.src_requirements[idx];
+        src_requirements[idx].flags |= NO_ACCESS_FLAG;
+      }
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+      {
+        if (launcher.src_requirements[idx].privilege_fields.empty())
+        {
+          MessageDescriptor DESTINATION_REGION_REQUIREMENT(2204, "undefined");
+          log_task.warning(DESTINATION_REGION_REQUIREMENT.id(),
+                           "DESTINATION REGION REQUIREMENT %d OF"
+                           " COPY (ID %lld) IN TASK %s (ID %lld) HAS NO "
+                           "PRIVILEGE FIELDS! DID YOU FORGET THEM?!?",
+                           idx, get_unique_op_id(),
+                           parent_ctx->get_task_name(), 
+                           parent_ctx->get_unique_id());
+        }
+        dst_requirements[idx] = launcher.dst_requirements[idx];
+        dst_requirements[idx].flags |= NO_ACCESS_FLAG;
+        // If our privilege is not reduce, then shift it to write discard
+        // since we are going to write all over the region
+        if (dst_requirements[idx].privilege != REDUCE)
+          dst_requirements[idx].privilege = WRITE_DISCARD;
+      }
+      grants = launcher.grants;
+      // Register ourselves with all the grants
+      for (unsigned idx = 0; idx < grants.size(); idx++)
+        grants[idx].impl->register_operation(completion_event);
+      wait_barriers = launcher.wait_barriers;
 #ifdef LEGION_SPY
-          for (std::vector<PhaseBarrier>::const_iterator it = 
-                launcher.arrive_barriers.begin(); it != 
-                launcher.arrive_barriers.end(); it++)
-          {
-            arrive_barriers.push_back(*it);
-            LegionSpy::log_event_dependence(it->phase_barrier,
-                arrive_barriers.back().phase_barrier);
-          }
+      for (std::vector<PhaseBarrier>::const_iterator it = 
+            launcher.arrive_barriers.begin(); it != 
+            launcher.arrive_barriers.end(); it++)
+      {
+        arrive_barriers.push_back(*it);
+        LegionSpy::log_event_dependence(it->phase_barrier,
+            arrive_barriers.back().phase_barrier);
+      }
 #else
-          arrive_barriers = launcher.arrive_barriers;
+      arrive_barriers = launcher.arrive_barriers;
 #endif
-          map_id = launcher.map_id;
-          tag = launcher.tag;
-          if (check_privileges)
+      map_id = launcher.map_id;
+      tag = launcher.tag;
+      if (check_privileges)
+      {
+        if (src_requirements.size() != dst_requirements.size())
+        {
+          MessageDescriptor NUMBER_SOURCE_REQUIREMENTS(1432, "undefined");
+          log_run.error(NUMBER_SOURCE_REQUIREMENTS.id(),
+                        "Number of source requirements (%zd) does not "
+                        "match number of destination requirements (%zd) "
+                        "for copy operation (ID %lld) with parent "
+                        "task %s (ID %lld)",
+                        src_requirements.size(), dst_requirements.size(),
+                        get_unique_id(), parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+          assert(false);
+#endif
+          exit(ERROR_COPY_REQUIREMENTS_MISMATCH);
+        }
+        for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+        {
+          if (src_requirements[idx].privilege_fields.size() != 
+              src_requirements[idx].instance_fields.size())
           {
-            if (src_requirements.size() != dst_requirements.size())
-            {
-              MessageDescriptor NUMBER_SOURCE_REQUIREMENTS(1432, "undefined");
-              log_run.error(NUMBER_SOURCE_REQUIREMENTS.id(),
-                            "Number of source requirements (%zd) does not "
-                            "match number of destination requirements (%zd) "
-                            "for copy operation (ID %lld) with parent "
-                            "task %s (ID %lld)",
-                            src_requirements.size(), dst_requirements.size(),
-                            get_unique_id(), parent_ctx->get_task_name(),
-                            parent_ctx->get_unique_id());
+            MessageDescriptor COPY_SOURCE_REQUIREMENT(1433, "undefined");
+            log_run.error(COPY_SOURCE_REQUIREMENT.id(),
+                          "Copy source requirement %d for copy operation "
+                          "(ID %lld) in parent task %s (ID %lld) has %zd "
+                          "privilege fields and %zd instance fields.  "
+                          "Copy requirements must have exactly the same "
+                          "number of privilege and instance fields.",
+                          idx, get_unique_id(), 
+                          parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id(),
+                          src_requirements[idx].privilege_fields.size(),
+                          src_requirements[idx].instance_fields.size());
 #ifdef DEBUG_LEGION
-              assert(false);
+            assert(false);
 #endif
-              exit(ERROR_COPY_REQUIREMENTS_MISMATCH);
-            }
-            for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-            {
-              if (src_requirements[idx].privilege_fields.size() != 
-                  src_requirements[idx].instance_fields.size())
-              {
-                MessageDescriptor COPY_SOURCE_REQUIREMENT(1433, "undefined");
-                log_run.error(COPY_SOURCE_REQUIREMENT.id(),
-                              "Copy source requirement %d for copy operation "
-                              "(ID %lld) in parent task %s (ID %lld) has %zd "
-                              "privilege fields and %zd instance fields.  "
-                              "Copy requirements must have exactly the same "
-                              "number of privilege and instance fields.",
-                              idx, get_unique_id(), 
-                              parent_ctx->get_task_name(),
-                              parent_ctx->get_unique_id(),
-                              src_requirements[idx].privilege_fields.size(),
-                              src_requirements[idx].instance_fields.size());
+            exit(ERROR_INVALID_COPY_FIELDS_SIZE);
+          }
+          if (!IS_READ_ONLY(src_requirements[idx]))
+          {
+            MessageDescriptor COPY_SOURCE_REQUIREMENT2(1434, "undefined");
+            log_run.error(COPY_SOURCE_REQUIREMENT2.id(),
+                          "Copy source requirement %d for copy operation "
+                          "(ID %lld) in parent task %s (ID %lld) must "
+                          "be requested with a read-only privilege.",
+                          idx, get_unique_id(),
+                          parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id());
 #ifdef DEBUG_LEGION
-                assert(false);
+            assert(false);
 #endif
-                exit(ERROR_INVALID_COPY_FIELDS_SIZE);
-              }
-              if (!IS_READ_ONLY(src_requirements[idx]))
-              {
-                MessageDescriptor COPY_SOURCE_REQUIREMENT2(1434, "undefined");
-                log_run.error(COPY_SOURCE_REQUIREMENT2.id(),
-                              "Copy source requirement %d for copy operation "
-                              "(ID %lld) in parent task %s (ID %lld) must "
-                              "be requested with a read-only privilege.",
-                              idx, get_unique_id(),
-                              parent_ctx->get_task_name(),
+            exit(ERROR_INVALID_COPY_PRIVILEGE);
+          }
+          check_copy_privilege(src_requirements[idx], idx, 
+                               true/*src*/, true/*permit projection*/);
+        }
+        for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+        {
+          if (dst_requirements[idx].privilege_fields.size() != 
+              dst_requirements[idx].instance_fields.size())
+          {
+            MessageDescriptor COPY_DESTINATION_REQUIREMENT(1435, "undefined");
+            log_run.error(COPY_DESTINATION_REQUIREMENT.id(),
+                          "Copy destination requirement %d for copy "
+                          "operation (ID %lld) in parent task %s "
+                          "(ID %lld) has %zd privilege fields and %zd "
+                          "instance fields.  Copy requirements must "
+                          "have exactly the same number of privilege "
+                          "and instance fields.", idx, 
+                          get_unique_id(), 
+                          parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id(),
+                          dst_requirements[idx].privilege_fields.size(),
+                          dst_requirements[idx].instance_fields.size());
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_INVALID_COPY_FIELDS_SIZE);
+          }
+          if (!HAS_WRITE(dst_requirements[idx]))
+          {
+            MessageDescriptor COPY_DESTINATION_REQUIREMENT2(1436, "undefined");
+            log_run.error(COPY_DESTINATION_REQUIREMENT2.id(),
+                          "Copy destination requirement %d for copy "
+                          "operation (ID %lld) in parent task %s "
+                          "(ID %lld) must be requested with a "
+                          "read-write or write-discard privilege.",
+                          idx, get_unique_id(),
+                          parent_ctx->get_task_name(),
+                          parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_INVALID_COPY_PRIVILEGE);
+          }
+          check_copy_privilege(dst_requirements[idx], idx, 
+                               false/*src*/, true/*permit projection*/);
+        }
+      }
+      if (Runtime::legion_spy_enabled)
+      {
+        LegionSpy::log_copy_operation(parent_ctx->get_unique_id(),
+                                      unique_op_id);
+        runtime->forest->log_launch_space(launch_space, unique_op_id);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCopyOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_copy();
+      index_domain = Domain::NO_DOMAIN;
+      launch_space = IndexSpace::NO_SPACE;
+      points_committed = 0;
+      commit_request = false;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCopyOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_copy();
+      src_projection_infos.clear();
+      dst_projection_infos.clear();
+      // We can deactivate all of our point operations
+      for (std::vector<PointCopyOp*>::const_iterator it = points.begin();
+            it != points.end(); it++)
+        (*it)->deactivate();
+      points.clear();
+      commit_preconditions.clear();
+      // Return this operation to the runtime
+      runtime->free_index_copy_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCopyOp::trigger_prepipeline_stage(void)
+    //--------------------------------------------------------------------------
+    {
+      // First compute the parent indexes
+      compute_parent_indexes();
+      // Initialize the privilege and mapping paths for all of the
+      // region requirements that we have
+      src_privilege_paths.resize(src_requirements.size());
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+      {
+        initialize_privilege_path(src_privilege_paths[idx],
+                                  src_requirements[idx]);
+      }
+      dst_privilege_paths.resize(dst_requirements.size());
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+      {
+        initialize_privilege_path(dst_privilege_paths[idx],
+                                  dst_requirements[idx]);
+      }
+      if (Runtime::legion_spy_enabled)
+      { 
+        for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+        {
+          const RegionRequirement &req = src_requirements[idx];
+          const bool reg = (req.handle_type == SINGULAR) ||
+                           (req.handle_type == REG_PROJECTION);
+          const bool proj = (req.handle_type == REG_PROJECTION) ||
+                            (req.handle_type == PART_PROJECTION); 
+
+          LegionSpy::log_logical_requirement(unique_op_id, idx, reg,
+              reg ? req.region.index_space.id :
+                    req.partition.index_partition.id,
+              reg ? req.region.field_space.id :
+                    req.partition.field_space.id,
+              reg ? req.region.tree_id : 
+                    req.partition.tree_id,
+              req.privilege, req.prop, req.redop, req.parent.index_space.id);
+          LegionSpy::log_requirement_fields(unique_op_id, idx, 
+                                            req.instance_fields);
+          if (proj)
+            LegionSpy::log_requirement_projection(unique_op_id, idx, 
+                                                  req.projection);
+        }
+        for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+        {
+          const RegionRequirement &req = dst_requirements[idx];
+          const bool reg = (req.handle_type == SINGULAR) ||
+                           (req.handle_type == REG_PROJECTION);
+          const bool proj = (req.handle_type == REG_PROJECTION) ||
+                            (req.handle_type == PART_PROJECTION); 
+
+          LegionSpy::log_logical_requirement(unique_op_id, 
+              src_requirements.size() + idx, reg,
+              reg ? req.region.index_space.id :
+                    req.partition.index_partition.id,
+              reg ? req.region.field_space.id :
+                    req.partition.field_space.id,
+              reg ? req.region.tree_id : 
+                    req.partition.tree_id,
+              req.privilege, req.prop, req.redop, req.parent.index_space.id);
+          LegionSpy::log_requirement_fields(unique_op_id, 
+                                            src_requirements.size()+idx, 
+                                            req.instance_fields);
+          if (proj)
+            LegionSpy::log_requirement_projection(unique_op_id,
+                src_requirements.size() + idx, req.projection);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCopyOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      // Register a dependence on our predicate
+      register_predicate_dependence();
+      src_versions.resize(src_requirements.size());
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+      {
+        src_projection_infos[idx] = 
+          ProjectionInfo(runtime, src_requirements[idx], launch_space);
+        runtime->forest->perform_dependence_analysis(this, idx, 
+                                                     src_requirements[idx],
+                                                     src_restrict_infos[idx],
+                                                     src_versions[idx],
+                                                     src_projection_infos[idx],
+                                                     src_privilege_paths[idx]);
+      }
+      dst_versions.resize(dst_requirements.size());
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+      {
+        dst_projection_infos[idx] = 
+          ProjectionInfo(runtime, dst_requirements[idx], launch_space);
+        unsigned index = src_requirements.size()+idx;
+        // Perform this dependence analysis as if it was READ_WRITE
+        // so that we can get the version numbers correct
+        const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = READ_WRITE;
+        runtime->forest->perform_dependence_analysis(this, index, 
+                                                     dst_requirements[idx],
+                                                     dst_restrict_infos[idx],
+                                                     dst_versions[idx],
+                                                     dst_projection_infos[idx],
+                                                     dst_privilege_paths[idx]);
+        // Switch the privileges back when we are done
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = REDUCE;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCopyOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      // Do the upper bound version analysis first
+      std::set<RtEvent> preconditions;
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+      {
+        VersionInfo &version_info = src_versions[idx];
+        // If we already have physical state for it then we've 
+        // done this before so there is no need to do it again
+        if (version_info.has_physical_states())
+          continue;
+        ProjectionInfo &proj_info = src_projection_infos[idx];
+        const bool partial_traversal = 
+          (proj_info.projection_type == PART_PROJECTION) ||
+          ((proj_info.projection_type != SINGULAR) && 
+           (proj_info.projection->depth > 0));
+        runtime->forest->perform_versioning_analysis(this, idx, 
+                                                     src_requirements[idx],
+                                                     src_privilege_paths[idx],
+                                                     version_info,
+                                                     preconditions,
+                                                     partial_traversal);
+      }
+      const unsigned offset = src_requirements.size();
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+      {
+        VersionInfo &version_info = dst_versions[idx];
+        // If we already have physical state for it then we've 
+        // done this before so there is no need to do it again
+        if (version_info.has_physical_states())
+          continue;
+        ProjectionInfo &proj_info = dst_projection_infos[idx];
+        const bool partial_traversal = 
+          (proj_info.projection_type == PART_PROJECTION) ||
+          ((proj_info.projection_type != SINGULAR) && 
+           (proj_info.projection->depth > 0));
+        const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
+        // Perform this dependence analysis as if it was READ_WRITE
+        // so that we can get the version numbers correct
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = READ_WRITE;
+        runtime->forest->perform_versioning_analysis(this, offset + idx,
+                                                     dst_requirements[idx],
+                                                     dst_privilege_paths[idx],
+                                                     version_info,
+                                                     preconditions,
+                                                     partial_traversal);
+        // Switch the privileges back when we are done
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = REDUCE;
+      }
+      // Now enumerate the points
+      size_t num_points = index_domain.get_volume();
+#ifdef DEBUG_LEGION
+      assert(num_points > 0);
+#endif
+      unsigned point_idx = 0;
+      points.resize(num_points);
+      for (Domain::DomainPointIterator itr(index_domain); 
+            itr; itr++, point_idx++)
+      {
+        PointCopyOp *point = runtime->get_available_point_copy_op(false);
+        point->initialize(this, itr.p);
+        points[point_idx] = point;
+      }
+      // Perform the projections
+      std::vector<ProjectionPoint*> projection_points(points.begin(),
+                                                      points.end());
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+      {
+        if (src_requirements[idx].handle_type == SINGULAR)
+          continue;
+        ProjectionFunction *function = 
+          runtime->find_projection_function(src_requirements[idx].projection);
+        function->project_points(this, idx, src_requirements[idx],
+                                 runtime, projection_points);
+      }
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+      {
+        if (dst_requirements[idx].handle_type == SINGULAR)
+          continue;
+        ProjectionFunction *function = 
+          runtime->find_projection_function(dst_requirements[idx].projection);
+        function->project_points(this, src_requirements.size() + idx, 
+                                 dst_requirements[idx], runtime, 
+                                 projection_points);
+      }
+#ifdef DEBUG_LEGION
+      // Check for interfering point requirements in debug mode
+      check_point_requirements();
+      // Also check to make sure source requirements dominate
+      // the destination requirements for each point
+      for (std::vector<PointCopyOp*>::const_iterator it = points.begin();
+            it != points.end(); it++)
+        (*it)->check_domination();
+#endif
+      if (Runtime::legion_spy_enabled)
+      {
+        for (std::vector<PointCopyOp*>::const_iterator it = points.begin();
+              it != points.end(); it++) 
+          (*it)->log_copy_requirements();
+      }
+      // Launch the points
+      std::set<RtEvent> mapped_preconditions;
+      std::set<ApEvent> executed_preconditions;
+      for (std::vector<PointCopyOp*>::const_iterator it = points.begin();
+            it != points.end(); it++)
+      {
+        mapped_preconditions.insert((*it)->get_mapped_event());
+        executed_preconditions.insert((*it)->get_completion_event());
+        (*it)->launch(preconditions);
+      }
+      // Record that we are mapped when all our points are mapped
+      // and we are executed when all our points are executed
+      complete_mapping(Runtime::merge_events(mapped_preconditions));
+      complete_execution(Runtime::protect_event(
+                          Runtime::merge_events(executed_preconditions)));
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCopyOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      // This should never be called as this operation doesn't
+      // go through the rest of the queue normally
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCopyOp::trigger_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      bool commit_now = false;
+      {
+        AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+        assert(!commit_request);
+#endif
+        commit_request = true;
+        commit_now = (points.size() == points_committed);
+      }
+      if (commit_now)
+        commit_operation(true/*deactivate*/, 
+                          Runtime::merge_events(commit_preconditions));
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCopyOp::handle_point_commit(RtEvent point_committed)
+    //--------------------------------------------------------------------------
+    {
+      bool commit_now = false;
+      RtEvent commit_pre;
+      {
+        AutoLock o_lock(op_lock);
+        points_committed++;
+        if (point_committed.exists())
+          commit_preconditions.insert(point_committed);
+        commit_now = commit_request && (points.size() == points_committed);
+      }
+      if (commit_now)
+        commit_operation(true/*deactivate*/,
+                          Runtime::merge_events(commit_preconditions));
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexCopyOp::report_interfering_requirements(unsigned idx1,
+                                                      unsigned idx2)
+    //--------------------------------------------------------------------------
+    {
+      bool is_src1 = idx1 < src_requirements.size();
+      bool is_src2 = idx2 < src_requirements.size();
+      unsigned actual_idx1 = is_src1 ? idx1 : (idx1 - src_requirements.size());
+      unsigned actual_idx2 = is_src2 ? idx2 : (idx2 - src_requirements.size());
+      MessageDescriptor REGION_REQUIREMENTS_INDEX(1437, "undefined");
+      log_run.warning(REGION_REQUIREMENTS_INDEX.id(),
+                      "Region requirements %d and %d of index copy %lld in "
+                      "parent task %s (UID %lld) are potentially interfering. "
+                      "It's possible that this is a false positive if there "
+                      "are projection region requirements and each of the "
+                      "point copies are non-interfering. If the runtime is "
+                      "built in debug mode then it will check that the region "
+                      "requirements of all points are actually "
+                      "non-interfering. If you see no further error messages "
+                      "for this index task launch then everything is good.",
+                      actual_idx1, actual_idx2, unique_op_id, 
+                      parent_ctx->get_task_name(), parent_ctx->get_unique_id());
+#ifdef DEBUG_LEGION
+      interfering_requirements.insert(std::pair<unsigned,unsigned>(idx1,idx2));
+#endif
+    }
+
+#ifdef DEBUG_LEGION
+    //--------------------------------------------------------------------------
+    void IndexCopyOp::check_point_requirements(void)
+    //--------------------------------------------------------------------------
+    {
+      // Handle any region requirements which can interfere with itself
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+      {
+        if (!IS_WRITE(dst_requirements[idx]))
+          continue;
+        const unsigned index = src_requirements.size() + idx;
+        interfering_requirements.insert(
+            std::pair<unsigned,unsigned>(index,index));
+      }
+      // Nothing to do if there are no interfering requirements
+      if (interfering_requirements.empty())
+        return;
+      std::map<DomainPoint,std::vector<LogicalRegion> > point_requirements;
+      for (std::vector<PointCopyOp*>::const_iterator pit = points.begin();
+            pit != points.end(); pit++)
+      {
+        const DomainPoint &current_point = (*pit)->get_domain_point();
+        std::vector<LogicalRegion> &point_reqs = 
+          point_requirements[current_point];
+        point_reqs.resize(src_requirements.size() + dst_requirements.size());
+        for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+          point_reqs[idx] = (*pit)->src_requirements[idx].region;
+        for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+          point_reqs[src_requirements.size() + idx] = 
+            (*pit)->dst_requirements[idx].region;
+        // Check against all the prior points
+        for (std::map<DomainPoint,std::vector<LogicalRegion> >::const_iterator
+              oit = point_requirements.begin(); 
+              oit != point_requirements.end(); oit++)
+        {
+          const bool same_point = (current_point == oit->first);
+          const std::vector<LogicalRegion> &other_reqs = oit->second;
+          // Now check for interference with any other points
+          for (std::set<std::pair<unsigned,unsigned> >::const_iterator it =
+                interfering_requirements.begin(); it !=
+                interfering_requirements.end(); it++)
+          {
+            // Can skip comparing against ourself
+            if (same_point && (it->first == it->second))
+              continue;
+            if (!runtime->forest->are_disjoint(
+                  point_reqs[it->first].get_index_space(), 
+                  other_reqs[it->second].get_index_space()))
+            {
+              if (current_point.get_dim() <= 1) {
+                MessageDescriptor INDEX_SPACE_COPY(1438, "undefined");
+                log_run.error(INDEX_SPACE_COPY.id(),
+                              "Index space copy launch has intefering "
+                              "region requirements %d of point %lld and region "
+                              "requirement %d of point %lld of %s (UID %lld) "
+                              "in parent task %s (UID %lld) are interfering.",
+                              it->first, current_point[0], it->second,
+                              oit->first[0], get_logging_name(),
+                              get_unique_id(), parent_ctx->get_task_name(),
                               parent_ctx->get_unique_id());
-#ifdef DEBUG_LEGION
-                assert(false);
-#endif
-                exit(ERROR_INVALID_COPY_PRIVILEGE);
-              }
-              check_copy_privilege(src_requirements[idx], idx, 
-                                   true/*src*/, true/*permit projection*/);
-            }
-            for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-            {
-              if (dst_requirements[idx].privilege_fields.size() != 
-                  dst_requirements[idx].instance_fields.size())
-              {
-                MessageDescriptor COPY_DESTINATION_REQUIREMENT(1435, "undefined");
-                log_run.error(COPY_DESTINATION_REQUIREMENT.id(),
-                              "Copy destination requirement %d for copy "
-                              "operation (ID %lld) in parent task %s "
-                              "(ID %lld) has %zd privilege fields and %zd "
-                              "instance fields.  Copy requirements must "
-                              "have exactly the same number of privilege "
-                              "and instance fields.", idx, 
-                              get_unique_id(), 
-                              parent_ctx->get_task_name(),
-                              parent_ctx->get_unique_id(),
-                              dst_requirements[idx].privilege_fields.size(),
-                              dst_requirements[idx].instance_fields.size());
-#ifdef DEBUG_LEGION
-                assert(false);
-#endif
-                exit(ERROR_INVALID_COPY_FIELDS_SIZE);
-              }
-              if (!HAS_WRITE(dst_requirements[idx]))
-              {
-                MessageDescriptor COPY_DESTINATION_REQUIREMENT2(1436, "undefined");
-                log_run.error(COPY_DESTINATION_REQUIREMENT2.id(),
-                              "Copy destination requirement %d for copy "
-                              "operation (ID %lld) in parent task %s "
-                              "(ID %lld) must be requested with a "
-                              "read-write or write-discard privilege.",
-                              idx, get_unique_id(),
-                              parent_ctx->get_task_name(),
+              } else if (current_point.get_dim() == 2) {
+                MessageDescriptor INDEX_SPACE_COPY2(1439, "undefined");
+                log_run.error(INDEX_SPACE_COPY2.id(),
+                              "Index space copy launch has intefering "
+                              "region requirements %d of point (%lld,%lld) and "
+                              "region requirement %d of point (%lld,%lld) of "
+                              "%s (UID %lld) in parent task %s (UID %lld) are "
+                              "interfering.", it->first, current_point[0],
+                              current_point[1], it->second, oit->first[0],
+                              oit->first[1], get_logging_name(),
+                              get_unique_id(), parent_ctx->get_task_name(),
                               parent_ctx->get_unique_id());
-#ifdef DEBUG_LEGION
-                assert(false);
-#endif
-                exit(ERROR_INVALID_COPY_PRIVILEGE);
+              } else if (current_point.get_dim() == 3) {
+                MessageDescriptor INDEX_SPACE_COPY3(1440, "undefined");
+                log_run.error(INDEX_SPACE_COPY3.id(),
+                              "Index space copy launch has intefering "
+                              "region requirements %d of point (%lld,%lld,%lld)"
+                              " and region requirement %d of point "
+                              "(%lld,%lld,%lld) of %s (UID %lld) in parent "
+                              "task %s (UID %lld) are interfering.", it->first,
+                              current_point[0], current_point[1],
+                              current_point[2], it->second, oit->first[0],
+                              oit->first[1], oit->first[2], get_logging_name(),
+                              get_unique_id(), parent_ctx->get_task_name(),
+                              parent_ctx->get_unique_id());
               }
-              check_copy_privilege(dst_requirements[idx], idx, 
-                                   false/*src*/, true/*permit projection*/);
-            }
-          }
-          if (Runtime::legion_spy_enabled)
-          {
-            LegionSpy::log_copy_operation(parent_ctx->get_unique_id(),
-                                          unique_op_id);
-            runtime->forest->log_launch_space(launch_space, unique_op_id);
-          }
-        }
-
-        //--------------------------------------------------------------------------
-        void IndexCopyOp::activate(void)
-        //--------------------------------------------------------------------------
-        {
-          activate_copy();
-          index_domain = Domain::NO_DOMAIN;
-          launch_space = IndexSpace::NO_SPACE;
-          points_committed = 0;
-          commit_request = false;
-        }
-
-        //--------------------------------------------------------------------------
-        void IndexCopyOp::deactivate(void)
-        //--------------------------------------------------------------------------
-        {
-          deactivate_copy();
-          src_projection_infos.clear();
-          dst_projection_infos.clear();
-          // We can deactivate all of our point operations
-          for (std::vector<PointCopyOp*>::const_iterator it = points.begin();
-                it != points.end(); it++)
-            (*it)->deactivate();
-          points.clear();
-          commit_preconditions.clear();
-          // Return this operation to the runtime
-          runtime->free_index_copy_op(this);
-        }
-
-        //--------------------------------------------------------------------------
-        void IndexCopyOp::trigger_prepipeline_stage(void)
-        //--------------------------------------------------------------------------
-        {
-          // First compute the parent indexes
-          compute_parent_indexes();
-          // Initialize the privilege and mapping paths for all of the
-          // region requirements that we have
-          src_privilege_paths.resize(src_requirements.size());
-          for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-          {
-            initialize_privilege_path(src_privilege_paths[idx],
-                                      src_requirements[idx]);
-          }
-          dst_privilege_paths.resize(dst_requirements.size());
-          for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-          {
-            initialize_privilege_path(dst_privilege_paths[idx],
-                                      dst_requirements[idx]);
-          }
-          if (Runtime::legion_spy_enabled)
-          { 
-            for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-            {
-              const RegionRequirement &req = src_requirements[idx];
-              const bool reg = (req.handle_type == SINGULAR) ||
-                               (req.handle_type == REG_PROJECTION);
-              const bool proj = (req.handle_type == REG_PROJECTION) ||
-                                (req.handle_type == PART_PROJECTION); 
-
-              LegionSpy::log_logical_requirement(unique_op_id, idx, reg,
-                  reg ? req.region.index_space.id :
-                        req.partition.index_partition.id,
-                  reg ? req.region.field_space.id :
-                        req.partition.field_space.id,
-                  reg ? req.region.tree_id : 
-                        req.partition.tree_id,
-                  req.privilege, req.prop, req.redop, req.parent.index_space.id);
-              LegionSpy::log_requirement_fields(unique_op_id, idx, 
-                                                req.instance_fields);
-              if (proj)
-                LegionSpy::log_requirement_projection(unique_op_id, idx, 
-                                                      req.projection);
-            }
-            for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-            {
-              const RegionRequirement &req = dst_requirements[idx];
-              const bool reg = (req.handle_type == SINGULAR) ||
-                               (req.handle_type == REG_PROJECTION);
-              const bool proj = (req.handle_type == REG_PROJECTION) ||
-                                (req.handle_type == PART_PROJECTION); 
-
-              LegionSpy::log_logical_requirement(unique_op_id, 
-                  src_requirements.size() + idx, reg,
-                  reg ? req.region.index_space.id :
-                        req.partition.index_partition.id,
-                  reg ? req.region.field_space.id :
-                        req.partition.field_space.id,
-                  reg ? req.region.tree_id : 
-                        req.partition.tree_id,
-                  req.privilege, req.prop, req.redop, req.parent.index_space.id);
-              LegionSpy::log_requirement_fields(unique_op_id, 
-                                                src_requirements.size()+idx, 
-                                                req.instance_fields);
-              if (proj)
-                LegionSpy::log_requirement_projection(unique_op_id,
-                    src_requirements.size() + idx, req.projection);
-            }
-          }
-        }
-
-        //--------------------------------------------------------------------------
-        void IndexCopyOp::trigger_dependence_analysis(void)
-        //--------------------------------------------------------------------------
-        {
-          // Register a dependence on our predicate
-          register_predicate_dependence();
-          src_versions.resize(src_requirements.size());
-          for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-          {
-            src_projection_infos[idx] = 
-              ProjectionInfo(runtime, src_requirements[idx], launch_space);
-            runtime->forest->perform_dependence_analysis(this, idx, 
-                                                         src_requirements[idx],
-                                                         src_restrict_infos[idx],
-                                                         src_versions[idx],
-                                                         src_projection_infos[idx],
-                                                         src_privilege_paths[idx]);
-          }
-          dst_versions.resize(dst_requirements.size());
-          for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-          {
-            dst_projection_infos[idx] = 
-              ProjectionInfo(runtime, dst_requirements[idx], launch_space);
-            unsigned index = src_requirements.size()+idx;
-            // Perform this dependence analysis as if it was READ_WRITE
-            // so that we can get the version numbers correct
-            const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
-            if (is_reduce_req)
-              dst_requirements[idx].privilege = READ_WRITE;
-            runtime->forest->perform_dependence_analysis(this, index, 
-                                                         dst_requirements[idx],
-                                                         dst_restrict_infos[idx],
-                                                         dst_versions[idx],
-                                                         dst_projection_infos[idx],
-                                                         dst_privilege_paths[idx]);
-            // Switch the privileges back when we are done
-            if (is_reduce_req)
-              dst_requirements[idx].privilege = REDUCE;
-          }
-        }
-
-        //--------------------------------------------------------------------------
-        void IndexCopyOp::trigger_ready(void)
-        //--------------------------------------------------------------------------
-        {
-          // Do the upper bound version analysis first
-          std::set<RtEvent> preconditions;
-          for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-          {
-            VersionInfo &version_info = src_versions[idx];
-            // If we already have physical state for it then we've 
-            // done this before so there is no need to do it again
-            if (version_info.has_physical_states())
-              continue;
-            ProjectionInfo &proj_info = src_projection_infos[idx];
-            const bool partial_traversal = 
-              (proj_info.projection_type == PART_PROJECTION) ||
-              ((proj_info.projection_type != SINGULAR) && 
-               (proj_info.projection->depth > 0));
-            runtime->forest->perform_versioning_analysis(this, idx, 
-                                                         src_requirements[idx],
-                                                         src_privilege_paths[idx],
-                                                         version_info,
-                                                         preconditions,
-                                                         partial_traversal);
-          }
-          const unsigned offset = src_requirements.size();
-          for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-          {
-            VersionInfo &version_info = dst_versions[idx];
-            // If we already have physical state for it then we've 
-            // done this before so there is no need to do it again
-            if (version_info.has_physical_states())
-              continue;
-            ProjectionInfo &proj_info = dst_projection_infos[idx];
-            const bool partial_traversal = 
-              (proj_info.projection_type == PART_PROJECTION) ||
-              ((proj_info.projection_type != SINGULAR) && 
-               (proj_info.projection->depth > 0));
-            const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
-            // Perform this dependence analysis as if it was READ_WRITE
-            // so that we can get the version numbers correct
-            if (is_reduce_req)
-              dst_requirements[idx].privilege = READ_WRITE;
-            runtime->forest->perform_versioning_analysis(this, offset + idx,
-                                                         dst_requirements[idx],
-                                                         dst_privilege_paths[idx],
-                                                         version_info,
-                                                         preconditions,
-                                                         partial_traversal);
-            // Switch the privileges back when we are done
-            if (is_reduce_req)
-              dst_requirements[idx].privilege = REDUCE;
-          }
-          // Now enumerate the points
-          size_t num_points = index_domain.get_volume();
-#ifdef DEBUG_LEGION
-          assert(num_points > 0);
-#endif
-          unsigned point_idx = 0;
-          points.resize(num_points);
-          for (Domain::DomainPointIterator itr(index_domain); 
-                itr; itr++, point_idx++)
-          {
-            PointCopyOp *point = runtime->get_available_point_copy_op(false);
-            point->initialize(this, itr.p);
-            points[point_idx] = point;
-          }
-          // Perform the projections
-          std::vector<ProjectionPoint*> projection_points(points.begin(),
-                                                          points.end());
-          for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-          {
-            if (src_requirements[idx].handle_type == SINGULAR)
-              continue;
-            ProjectionFunction *function = 
-              runtime->find_projection_function(src_requirements[idx].projection);
-            function->project_points(this, idx, src_requirements[idx],
-                                     runtime, projection_points);
-          }
-          for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-          {
-            if (dst_requirements[idx].handle_type == SINGULAR)
-              continue;
-            ProjectionFunction *function = 
-              runtime->find_projection_function(dst_requirements[idx].projection);
-            function->project_points(this, src_requirements.size() + idx, 
-                                     dst_requirements[idx], runtime, 
-                                     projection_points);
-          }
-#ifdef DEBUG_LEGION
-          // Check for interfering point requirements in debug mode
-          check_point_requirements();
-          // Also check to make sure source requirements dominate
-          // the destination requirements for each point
-          for (std::vector<PointCopyOp*>::const_iterator it = points.begin();
-                it != points.end(); it++)
-            (*it)->check_domination();
-#endif
-          if (Runtime::legion_spy_enabled)
-          {
-            for (std::vector<PointCopyOp*>::const_iterator it = points.begin();
-                  it != points.end(); it++) 
-              (*it)->log_copy_requirements();
-          }
-          // Launch the points
-          std::set<RtEvent> mapped_preconditions;
-          std::set<ApEvent> executed_preconditions;
-          for (std::vector<PointCopyOp*>::const_iterator it = points.begin();
-                it != points.end(); it++)
-          {
-            mapped_preconditions.insert((*it)->get_mapped_event());
-            executed_preconditions.insert((*it)->get_completion_event());
-            (*it)->launch(preconditions);
-          }
-          // Record that we are mapped when all our points are mapped
-          // and we are executed when all our points are executed
-          complete_mapping(Runtime::merge_events(mapped_preconditions));
-          complete_execution(Runtime::protect_event(
-                              Runtime::merge_events(executed_preconditions)));
-        }
-
-        //--------------------------------------------------------------------------
-        void IndexCopyOp::trigger_mapping(void)
-        //--------------------------------------------------------------------------
-        {
-          // This should never be called as this operation doesn't
-          // go through the rest of the queue normally
-          assert(false);
-        }
-
-        //--------------------------------------------------------------------------
-        void IndexCopyOp::trigger_commit(void)
-        //--------------------------------------------------------------------------
-        {
-          bool commit_now = false;
-          {
-            AutoLock o_lock(op_lock);
-#ifdef DEBUG_LEGION
-            assert(!commit_request);
-#endif
-            commit_request = true;
-            commit_now = (points.size() == points_committed);
-          }
-          if (commit_now)
-            commit_operation(true/*deactivate*/, 
-                              Runtime::merge_events(commit_preconditions));
-        }
-
-        //--------------------------------------------------------------------------
-        void IndexCopyOp::handle_point_commit(RtEvent point_committed)
-        //--------------------------------------------------------------------------
-        {
-          bool commit_now = false;
-          RtEvent commit_pre;
-          {
-            AutoLock o_lock(op_lock);
-            points_committed++;
-            if (point_committed.exists())
-              commit_preconditions.insert(point_committed);
-            commit_now = commit_request && (points.size() == points_committed);
-          }
-          if (commit_now)
-            commit_operation(true/*deactivate*/,
-                              Runtime::merge_events(commit_preconditions));
-        }
-
-        //--------------------------------------------------------------------------
-        void IndexCopyOp::report_interfering_requirements(unsigned idx1,
-                                                          unsigned idx2)
-        //--------------------------------------------------------------------------
-        {
-          bool is_src1 = idx1 < src_requirements.size();
-          bool is_src2 = idx2 < src_requirements.size();
-          unsigned actual_idx1 = is_src1 ? idx1 : (idx1 - src_requirements.size());
-          unsigned actual_idx2 = is_src2 ? idx2 : (idx2 - src_requirements.size());
-          MessageDescriptor REGION_REQUIREMENTS_INDEX(1437, "undefined");
-          log_run.warning(REGION_REQUIREMENTS_INDEX.id(),
-                          "Region requirements %d and %d of index copy %lld in "
-                          "parent task %s (UID %lld) are potentially interfering. "
-                          "It's possible that this is a false positive if there "
-                          "are projection region requirements and each of the "
-                          "point copies are non-interfering. If the runtime is "
-                          "built in debug mode then it will check that the region "
-                          "requirements of all points are actually "
-                          "non-interfering. If you see no further error messages "
-                          "for this index task launch then everything is good.",
-                          actual_idx1, actual_idx2, unique_op_id, 
-                          parent_ctx->get_task_name(), parent_ctx->get_unique_id());
-#ifdef DEBUG_LEGION
-          interfering_requirements.insert(std::pair<unsigned,unsigned>(idx1,idx2));
-#endif
-        }
-
-#ifdef DEBUG_LEGION
-        //--------------------------------------------------------------------------
-        void IndexCopyOp::check_point_requirements(void)
-        //--------------------------------------------------------------------------
-        {
-          // Handle any region requirements which can interfere with itself
-          for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-          {
-            if (!IS_WRITE(dst_requirements[idx]))
-              continue;
-            const unsigned index = src_requirements.size() + idx;
-            interfering_requirements.insert(
-                std::pair<unsigned,unsigned>(index,index));
-          }
-          // Nothing to do if there are no interfering requirements
-          if (interfering_requirements.empty())
-            return;
-          std::map<DomainPoint,std::vector<LogicalRegion> > point_requirements;
-          for (std::vector<PointCopyOp*>::const_iterator pit = points.begin();
-                pit != points.end(); pit++)
-          {
-            const DomainPoint &current_point = (*pit)->get_domain_point();
-            std::vector<LogicalRegion> &point_reqs = 
-              point_requirements[current_point];
-            point_reqs.resize(src_requirements.size() + dst_requirements.size());
-            for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-              point_reqs[idx] = (*pit)->src_requirements[idx].region;
-            for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-              point_reqs[src_requirements.size() + idx] = 
-                (*pit)->dst_requirements[idx].region;
-            // Check against all the prior points
-            for (std::map<DomainPoint,std::vector<LogicalRegion> >::const_iterator
-                  oit = point_requirements.begin(); 
-                  oit != point_requirements.end(); oit++)
-            {
-              const bool same_point = (current_point == oit->first);
-              const std::vector<LogicalRegion> &other_reqs = oit->second;
-              // Now check for interference with any other points
-              for (std::set<std::pair<unsigned,unsigned> >::const_iterator it =
-                    interfering_requirements.begin(); it !=
-                    interfering_requirements.end(); it++)
-              {
-                // Can skip comparing against ourself
-                if (same_point && (it->first == it->second))
-                  continue;
-                if (!runtime->forest->are_disjoint(
-                      point_reqs[it->first].get_index_space(), 
-                      other_reqs[it->second].get_index_space()))
-                {
-                  if (current_point.get_dim() <= 1) {
-                    MessageDescriptor INDEX_SPACE_COPY(1438, "undefined");
-                    log_run.error(INDEX_SPACE_COPY.id(),
-                                  "Index space copy launch has intefering "
-                                  "region requirements %d of point %lld and region "
-                                  "requirement %d of point %lld of %s (UID %lld) "
-                                  "in parent task %s (UID %lld) are interfering.",
-                                  it->first, current_point[0], it->second,
-                                  oit->first[0], get_logging_name(),
-                                  get_unique_id(), parent_ctx->get_task_name(),
-                                  parent_ctx->get_unique_id());
-                  } else if (current_point.get_dim() == 2) {
-                    MessageDescriptor INDEX_SPACE_COPY2(1439, "undefined");
-                    log_run.error(INDEX_SPACE_COPY2.id(),
-                                  "Index space copy launch has intefering "
-                                  "region requirements %d of point (%lld,%lld) and "
-                                  "region requirement %d of point (%lld,%lld) of "
-                                  "%s (UID %lld) in parent task %s (UID %lld) are "
-                                  "interfering.", it->first, current_point[0],
-                                  current_point[1], it->second, oit->first[0],
-                                  oit->first[1], get_logging_name(),
-                                  get_unique_id(), parent_ctx->get_task_name(),
-                                  parent_ctx->get_unique_id());
-                  } else if (current_point.get_dim() == 3) {
-                    MessageDescriptor INDEX_SPACE_COPY3(1440, "undefined");
-                    log_run.error(INDEX_SPACE_COPY3.id(),
-                                  "Index space copy launch has intefering "
-                                  "region requirements %d of point (%lld,%lld,%lld)"
-                                  " and region requirement %d of point "
-                                  "(%lld,%lld,%lld) of %s (UID %lld) in parent "
-                                  "task %s (UID %lld) are interfering.", it->first,
-                                  current_point[0], current_point[1],
-                                  current_point[2], it->second, oit->first[0],
-                                  oit->first[1], oit->first[2], get_logging_name(),
-                                  get_unique_id(), parent_ctx->get_task_name(),
-                                  parent_ctx->get_unique_id());
-                  }
-                  assert(false);
-                }
-              }
-            }
-          }
-        }
-#endif
-
-        /////////////////////////////////////////////////////////////
-        // Point Copy Operation 
-        /////////////////////////////////////////////////////////////
-
-        //--------------------------------------------------------------------------
-        PointCopyOp::PointCopyOp(Runtime *rt)
-          : CopyOp(rt)
-        //--------------------------------------------------------------------------
-        {
-        }
-
-        //--------------------------------------------------------------------------
-        PointCopyOp::PointCopyOp(const PointCopyOp &rhs)
-          : CopyOp(rhs)
-        //--------------------------------------------------------------------------
-        {
-          // should never be called
-          assert(false);
-        }
-
-        //--------------------------------------------------------------------------
-        PointCopyOp::~PointCopyOp(void)
-        //--------------------------------------------------------------------------
-        {
-        }
-
-        //--------------------------------------------------------------------------
-        PointCopyOp& PointCopyOp::operator=(const PointCopyOp &rhs)
-        //--------------------------------------------------------------------------
-        {
-          // should never be called
-          assert(false);
-          return *this;
-        }
-
-        //--------------------------------------------------------------------------
-        void PointCopyOp::initialize(IndexCopyOp *own, const DomainPoint &p)
-        //--------------------------------------------------------------------------
-        {
-          // Initialize the operation
-          initialize_operation(own->get_context(), false/*track*/, 
-              own->src_requirements.size() + own->dst_requirements.size());
-          index_point = p;
-          owner = own;
-          // From Copy
-          src_requirements   = owner->src_requirements;
-          dst_requirements   = owner->dst_requirements;
-          grants             = owner->grants;
-          wait_barriers      = owner->wait_barriers;
-          arrive_barriers    = owner->arrive_barriers;
-          parent_task        = owner->parent_task;
-          map_id             = owner->map_id;
-          tag                = owner->tag;
-          // From CopyOp
-          src_parent_indexes = owner->src_parent_indexes;
-          dst_parent_indexes = owner->dst_parent_indexes;
-          src_restrict_infos = owner->src_restrict_infos;
-          dst_restrict_infos = owner->dst_restrict_infos;
-          predication_guard  = owner->predication_guard;
-          if (Runtime::legion_spy_enabled)
-            LegionSpy::log_index_point(owner->get_unique_op_id(), unique_op_id, p);
-        }
-
-#ifdef DEBUG_LEGION
-        //--------------------------------------------------------------------------
-        void PointCopyOp::check_domination(void) const
-        //--------------------------------------------------------------------------
-        {
-          for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-          {
-            IndexSpace src_space = src_requirements[idx].region.get_index_space();
-            IndexSpace dst_space = dst_requirements[idx].region.get_index_space();
-            if (!runtime->forest->are_compatible(src_space, dst_space))
-            {
-              MessageDescriptor COPY_LAUNCHER_INDEX(1441, "undefined");
-              log_run.error(COPY_LAUNCHER_INDEX.id(),
-                            "Copy launcher index space mismatch at index "
-                            "%d of cross-region copy (ID %lld) in task %s "
-                            "(ID %lld). Source requirement with index "
-                            "space %x and destination requirement "
-                            "with index space %x do not have the "
-                            "same number of dimensions or the same number "
-                            "of elements in their element masks.",
-                            idx, get_unique_id(),
-                            parent_ctx->get_task_name(), 
-                            parent_ctx->get_unique_id(),
-                            src_space.id, dst_space.id);
-#ifdef DEBUG_LEGION
               assert(false);
-#endif
-              exit(ERROR_COPY_SPACE_MISMATCH);
             }
-            else if (!runtime->forest->is_dominated(src_space, dst_space))
-            {
-              MessageDescriptor DESTINATION_INDEX_SPACE(1442, "undefined");
-              log_run.error(DESTINATION_INDEX_SPACE.id(),
-                            "Destination index space %x for "
-                            "requirement %d of cross-region copy "
-                            "(ID %lld) in task %s (ID %lld) is not "
-                            "a sub-region of the source index space %x.", 
-                            dst_space.id, idx, get_unique_id(),
-                            parent_ctx->get_task_name(),
-                            parent_ctx->get_unique_id(),
-                            src_space.id);
+          }
+        }
+      }
+    }
+#endif
+
+    /////////////////////////////////////////////////////////////
+    // Point Copy Operation 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PointCopyOp::PointCopyOp(Runtime *rt)
+      : CopyOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PointCopyOp::PointCopyOp(const PointCopyOp &rhs)
+      : CopyOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    PointCopyOp::~PointCopyOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PointCopyOp& PointCopyOp::operator=(const PointCopyOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void PointCopyOp::initialize(IndexCopyOp *own, const DomainPoint &p)
+    //--------------------------------------------------------------------------
+    {
+      // Initialize the operation
+      initialize_operation(own->get_context(), false/*track*/, 
+          own->src_requirements.size() + own->dst_requirements.size());
+      index_point = p;
+      owner = own;
+      // From Copy
+      src_requirements   = owner->src_requirements;
+      dst_requirements   = owner->dst_requirements;
+      grants             = owner->grants;
+      wait_barriers      = owner->wait_barriers;
+      arrive_barriers    = owner->arrive_barriers;
+      parent_task        = owner->parent_task;
+      map_id             = owner->map_id;
+      tag                = owner->tag;
+      // From CopyOp
+      src_parent_indexes = owner->src_parent_indexes;
+      dst_parent_indexes = owner->dst_parent_indexes;
+      src_restrict_infos = owner->src_restrict_infos;
+      dst_restrict_infos = owner->dst_restrict_infos;
+      predication_guard  = owner->predication_guard;
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_index_point(owner->get_unique_op_id(), unique_op_id, p);
+    }
+
 #ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_COPY_SPACE_MISMATCH);
-            }
-          }
-        }
-#endif
-
-        //--------------------------------------------------------------------------
-        void PointCopyOp::activate(void)
-        //--------------------------------------------------------------------------
+    //--------------------------------------------------------------------------
+    void PointCopyOp::check_domination(void) const
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+      {
+        IndexSpace src_space = src_requirements[idx].region.get_index_space();
+        IndexSpace dst_space = dst_requirements[idx].region.get_index_space();
+        if (!runtime->forest->are_compatible(src_space, dst_space))
         {
-          activate_copy();
-          owner = NULL;
-        }
-
-        //--------------------------------------------------------------------------
-        void PointCopyOp::deactivate(void)
-        //--------------------------------------------------------------------------
-        {
-          deactivate_copy();
-          runtime->free_point_copy_op(this);
-        }
-
-        //--------------------------------------------------------------------------
-        void PointCopyOp::trigger_prepipeline_stage(void)
-        //--------------------------------------------------------------------------
-        {
-          // should never be called
-          assert(false);
-        }
-
-        //--------------------------------------------------------------------------
-        void PointCopyOp::trigger_dependence_analysis(void)
-        //--------------------------------------------------------------------------
-        {
-          // should never be called
-          assert(false);
-        }
-
-        //--------------------------------------------------------------------------
-        void PointCopyOp::trigger_ready(void)
-        //--------------------------------------------------------------------------
-        {
-          // should never be called
-          assert(false);
-        }
-
-        //--------------------------------------------------------------------------
-        void PointCopyOp::launch(const std::set<RtEvent> &index_preconditions)
-        //--------------------------------------------------------------------------
-        {
-          // Copy over the version infos from our owner
-          src_versions = owner->src_versions;
-          dst_versions = owner->dst_versions;
-          // Perform the version analysis
-          std::set<RtEvent> preconditions(index_preconditions);
-          const UniqueID logical_context_uid = parent_ctx->get_context_uid();
-          for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-            perform_projection_version_analysis(owner->src_projection_infos[idx],
-                      owner->src_requirements[idx], src_requirements[idx],
-                      idx, logical_context_uid, src_versions[idx], preconditions); 
-          for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-          {
-            const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
-            // Perform this dependence analysis as if it was READ_WRITE
-            // so that we can get the version numbers correct
-            if (is_reduce_req)
-              dst_requirements[idx].privilege = READ_WRITE;
-            perform_projection_version_analysis(owner->dst_projection_infos[idx],
-                      owner->dst_requirements[idx], dst_requirements[idx],
-                      src_requirements.size() + idx, logical_context_uid,
-                      dst_versions[idx], preconditions);
-            // Switch the privileges back when we are done
-            if (is_reduce_req)
-              dst_requirements[idx].privilege = REDUCE;
-          }
-          // Then put ourselves in the queue of operations ready to map
-          if (!preconditions.empty())
-            enqueue_ready_operation(Runtime::merge_events(preconditions));
-          else
-            enqueue_ready_operation();
-          // We can also mark this as having our resolved any predication
-          resolve_speculation();
-        }
-
-        //--------------------------------------------------------------------------
-        void PointCopyOp::trigger_commit(void)
-        //--------------------------------------------------------------------------
-        {
-          for (std::vector<VersionInfo>::iterator it = src_versions.begin();
-                it != src_versions.end(); it++)
-            it->clear();
-          for (std::vector<VersionInfo>::iterator it = dst_versions.begin();
-                it != dst_versions.end(); it++)
-            it->clear();
-          // Tell our owner that we are done
-          owner->handle_point_commit(profiling_reported);
-          // Don't commit this operation until we've reported our profiling
-          // Out index owner will deactivate the operation
-          commit_operation(false/*deactivate*/, profiling_reported);
-        }
-
-        //--------------------------------------------------------------------------
-        const DomainPoint& PointCopyOp::get_domain_point(void) const
-        //--------------------------------------------------------------------------
-        {
-          return index_point;
-        }
-
-        //--------------------------------------------------------------------------
-        void PointCopyOp::set_projection_result(unsigned idx, LogicalRegion result)
-        //--------------------------------------------------------------------------
-        {
-          if (idx < src_requirements.size())
-          {
+          MessageDescriptor COPY_LAUNCHER_INDEX(1441, "undefined");
+          log_run.error(COPY_LAUNCHER_INDEX.id(),
+                        "Copy launcher index space mismatch at index "
+                        "%d of cross-region copy (ID %lld) in task %s "
+                        "(ID %lld). Source requirement with index "
+                        "space %x and destination requirement "
+                        "with index space %x do not have the "
+                        "same number of dimensions or the same number "
+                        "of elements in their element masks.",
+                        idx, get_unique_id(),
+                        parent_ctx->get_task_name(), 
+                        parent_ctx->get_unique_id(),
+                        src_space.id, dst_space.id);
 #ifdef DEBUG_LEGION
-            assert(src_requirements[idx].handle_type != SINGULAR);
+          assert(false);
 #endif
-            src_requirements[idx].region = result;
-            src_requirements[idx].handle_type = SINGULAR;
-          }
-          else
-          {
-            idx -= src_requirements.size();
+          exit(ERROR_COPY_SPACE_MISMATCH);
+        }
+        else if (!runtime->forest->is_dominated(src_space, dst_space))
+        {
+          MessageDescriptor DESTINATION_INDEX_SPACE(1442, "undefined");
+          log_run.error(DESTINATION_INDEX_SPACE.id(),
+                        "Destination index space %x for "
+                        "requirement %d of cross-region copy "
+                        "(ID %lld) in task %s (ID %lld) is not "
+                        "a sub-region of the source index space %x.", 
+                        dst_space.id, idx, get_unique_id(),
+                        parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id(),
+                        src_space.id);
 #ifdef DEBUG_LEGION
-            assert(idx < dst_requirements.size());
-            assert(dst_requirements[idx].handle_type != SINGULAR);
+          assert(false);
 #endif
-            dst_requirements[idx].region = result;
-            dst_requirements[idx].handle_type = SINGULAR;
+          exit(ERROR_COPY_SPACE_MISMATCH);
+        }
+      }
+    }
+#endif
+
+    //--------------------------------------------------------------------------
+    void PointCopyOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_copy();
+      owner = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void PointCopyOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_copy();
+      runtime->free_point_copy_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointCopyOp::trigger_prepipeline_stage(void)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointCopyOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointCopyOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointCopyOp::launch(const std::set<RtEvent> &index_preconditions)
+    //--------------------------------------------------------------------------
+    {
+      // Copy over the version infos from our owner
+      src_versions = owner->src_versions;
+      dst_versions = owner->dst_versions;
+      // Perform the version analysis
+      std::set<RtEvent> preconditions(index_preconditions);
+      const UniqueID logical_context_uid = parent_ctx->get_context_uid();
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+        perform_projection_version_analysis(owner->src_projection_infos[idx],
+                  owner->src_requirements[idx], src_requirements[idx],
+                  idx, logical_context_uid, src_versions[idx], preconditions); 
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+      {
+        const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
+        // Perform this dependence analysis as if it was READ_WRITE
+        // so that we can get the version numbers correct
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = READ_WRITE;
+        perform_projection_version_analysis(owner->dst_projection_infos[idx],
+                  owner->dst_requirements[idx], dst_requirements[idx],
+                  src_requirements.size() + idx, logical_context_uid,
+                  dst_versions[idx], preconditions);
+        // Switch the privileges back when we are done
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = REDUCE;
+      }
+      // Then put ourselves in the queue of operations ready to map
+      if (!preconditions.empty())
+        enqueue_ready_operation(Runtime::merge_events(preconditions));
+      else
+        enqueue_ready_operation();
+      // We can also mark this as having our resolved any predication
+      resolve_speculation();
+    }
+
+    //--------------------------------------------------------------------------
+    void PointCopyOp::trigger_commit(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::vector<VersionInfo>::iterator it = src_versions.begin();
+            it != src_versions.end(); it++)
+        it->clear();
+      for (std::vector<VersionInfo>::iterator it = dst_versions.begin();
+            it != dst_versions.end(); it++)
+        it->clear();
+      // Tell our owner that we are done
+      owner->handle_point_commit(profiling_reported);
+      // Don't commit this operation until we've reported our profiling
+      // Out index owner will deactivate the operation
+      commit_operation(false/*deactivate*/, profiling_reported);
+    }
+
+    //--------------------------------------------------------------------------
+    const DomainPoint& PointCopyOp::get_domain_point(void) const
+    //--------------------------------------------------------------------------
+    {
+      return index_point;
+    }
+
+    //--------------------------------------------------------------------------
+    void PointCopyOp::set_projection_result(unsigned idx, LogicalRegion result)
+    //--------------------------------------------------------------------------
+    {
+      if (idx < src_requirements.size())
+      {
+#ifdef DEBUG_LEGION
+        assert(src_requirements[idx].handle_type != SINGULAR);
+#endif
+        src_requirements[idx].region = result;
+        src_requirements[idx].handle_type = SINGULAR;
+      }
+      else
+      {
+        idx -= src_requirements.size();
+#ifdef DEBUG_LEGION
+        assert(idx < dst_requirements.size());
+        assert(dst_requirements[idx].handle_type != SINGULAR);
+#endif
+        dst_requirements[idx].region = result;
+        dst_requirements[idx].handle_type = SINGULAR;
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Fence Operation 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    FenceOp::FenceOp(Runtime *rt)
+      : Operation(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    FenceOp::FenceOp(const FenceOp &rhs)
+      : Operation(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    FenceOp::~FenceOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    FenceOp& FenceOp::operator=(const FenceOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void FenceOp::initialize(TaskContext *ctx, FenceKind kind)
+    //--------------------------------------------------------------------------
+    {
+      initialize_operation(ctx, true/*track*/);
+      fence_kind = kind;
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
+                                       unique_op_id);
+    }
+
+    //--------------------------------------------------------------------------
+    void FenceOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_operation();
+    }
+
+    //--------------------------------------------------------------------------
+    void FenceOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_operation();
+      runtime->free_fence_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* FenceOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[FENCE_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind FenceOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return FENCE_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void FenceOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      // Register this fence with all previous users in the parent's context
+      parent_ctx->perform_fence_analysis(this);
+      // Now update the parent context with this fence
+      // before we can complete the dependence analysis
+      // and possibly be deactivated
+      parent_ctx->update_current_fence(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void FenceOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      switch (fence_kind)
+      {
+        case MAPPING_FENCE:
+          {
+            complete_mapping();
+            complete_execution();
+            break;
           }
-        }
-
-        /////////////////////////////////////////////////////////////
-        // Fence Operation 
-        /////////////////////////////////////////////////////////////
-
-        //--------------------------------------------------------------------------
-        FenceOp::FenceOp(Runtime *rt)
-          : Operation(rt)
-        //--------------------------------------------------------------------------
-        {
-        }
-
-        //--------------------------------------------------------------------------
-        FenceOp::FenceOp(const FenceOp &rhs)
-          : Operation(NULL)
-        //--------------------------------------------------------------------------
-        {
-          // should never be called
-          assert(false);
-        }
-
-        //--------------------------------------------------------------------------
-        FenceOp::~FenceOp(void)
-        //--------------------------------------------------------------------------
-        {
-        }
-
-        //--------------------------------------------------------------------------
-        FenceOp& FenceOp::operator=(const FenceOp &rhs)
-        //--------------------------------------------------------------------------
-        {
-          // should never be called
-          assert(false);
-          return *this;
-        }
-
-        //--------------------------------------------------------------------------
-        void FenceOp::initialize(TaskContext *ctx, FenceKind kind)
-        //--------------------------------------------------------------------------
-        {
-          initialize_operation(ctx, true/*track*/);
-          fence_kind = kind;
-          if (Runtime::legion_spy_enabled)
-            LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
-                                           unique_op_id);
-        }
-
-        //--------------------------------------------------------------------------
-        void FenceOp::activate(void)
-        //--------------------------------------------------------------------------
-        {
-          activate_operation();
-        }
-
-        //--------------------------------------------------------------------------
-        void FenceOp::deactivate(void)
-        //--------------------------------------------------------------------------
-        {
-          deactivate_operation();
-          runtime->free_fence_op(this);
-        }
-
-        //--------------------------------------------------------------------------
-        const char* FenceOp::get_logging_name(void) const
-        //--------------------------------------------------------------------------
-        {
-          return op_names[FENCE_OP_KIND];
-        }
-
-        //--------------------------------------------------------------------------
-        Operation::OpKind FenceOp::get_operation_kind(void) const
-        //--------------------------------------------------------------------------
-        {
-          return FENCE_OP_KIND;
-        }
-
-        //--------------------------------------------------------------------------
-        void FenceOp::trigger_dependence_analysis(void)
-        //--------------------------------------------------------------------------
-        {
-          // Register this fence with all previous users in the parent's context
-          parent_ctx->perform_fence_analysis(this);
-          // Now update the parent context with this fence
-          // before we can complete the dependence analysis
-          // and possibly be deactivated
-          parent_ctx->update_current_fence(this);
-        }
-
-        //--------------------------------------------------------------------------
-        void FenceOp::trigger_mapping(void)
-        //--------------------------------------------------------------------------
-        {
-        switch (fence_kind)
-        {
-          case MAPPING_FENCE:
+        case MIXED_FENCE:
+          {
+            // Mark that we finished our mapping now
+            complete_mapping();
+            // Intentionally fall through
+          }
+        case EXECUTION_FENCE:
+          {
+            // Go through and launch a completion task dependent upon
+            // all the completion events of our incoming dependences.
+            // Make sure that the events that we pulled out our still valid.
+            // Note since we are performing this operation, then we know
+            // that we are mapped and therefore our set of input dependences
+            // have been fixed so we can read them without holding the lock.
+            std::set<ApEvent> trigger_events;
+            for (std::map<Operation*,GenerationID>::const_iterator it = 
+                  incoming.begin(); it != incoming.end(); it++)
             {
-              complete_mapping();
-              complete_execution();
-              break;
+              ApEvent complete = it->first->get_completion_event();
+              if (it->second == it->first->get_generation())
+                trigger_events.insert(complete);
             }
-          case MIXED_FENCE:
+            RtEvent wait_on = Runtime::protect_merge_events(trigger_events);
+            if (!wait_on.has_triggered())
             {
-              // Mark that we finished our mapping now
-              complete_mapping();
-              // Intentionally fall through
+              DeferredExecuteArgs deferred_execute_args;
+              deferred_execute_args.proxy_this = this;
+              runtime->issue_runtime_meta_task(deferred_execute_args,
+                                               LG_LATENCY_PRIORITY,
+                                               this, wait_on);
             }
-          case EXECUTION_FENCE:
-            {
-              // Go through and launch a completion task dependent upon
-              // all the completion events of our incoming dependences.
-              // Make sure that the events that we pulled out our still valid.
-              // Note since we are performing this operation, then we know
-              // that we are mapped and therefore our set of input dependences
-              // have been fixed so we can read them without holding the lock.
-              std::set<ApEvent> trigger_events;
-              for (std::map<Operation*,GenerationID>::const_iterator it = 
-                    incoming.begin(); it != incoming.end(); it++)
-              {
-                ApEvent complete = it->first->get_completion_event();
-                if (it->second == it->first->get_generation())
-                  trigger_events.insert(complete);
-              }
-              RtEvent wait_on = Runtime::protect_merge_events(trigger_events);
-              if (!wait_on.has_triggered())
-              {
-                DeferredExecuteArgs deferred_execute_args;
-                deferred_execute_args.proxy_this = this;
-                runtime->issue_runtime_meta_task(deferred_execute_args,
-                                                 LG_LATENCY_PRIORITY,
-                                                 this, wait_on);
-              }
-              else
-                deferred_execute();
-              break;
-            }
+            else
+              deferred_execute();
+            break;
+          }
         default:
           assert(false); // should never get here
       }
@@ -8447,7 +8458,8 @@ namespace Legion {
           }
         case ERROR_BAD_PARENT_REGION:
           {
-            if (bad_index < 0) {
+            if (bad_index < 0) 
+            {
               MessageDescriptor PARENT_TASK_ACQUIRE(3126, "undefined");
               log_region.error(PARENT_TASK_ACQUIRE.id(),
                                "Parent task %s (ID %lld) of acquire "
@@ -8460,7 +8472,9 @@ namespace Legion {
                                requirement.region.index_space.id,
                                requirement.region.field_space.id,
                                requirement.region.tree_id);
-            } else if (bad_field == AUTO_GENERATE_ID) {
+            } 
+            else if (bad_field == AUTO_GENERATE_ID) 
+            {
               MessageDescriptor PARENT_TASK_ACQUIRE(3127, "undefined");
               log_region.error(PARENT_TASK_ACQUIRE.id(),
                                "Parent task %s (ID %lld) of acquire "
@@ -8474,7 +8488,9 @@ namespace Legion {
                                requirement.region.index_space.id,
                                requirement.region.field_space.id,
                                requirement.region.tree_id, bad_index);
-            } else {
+            } 
+            else 
+            {
               MessageDescriptor PARENT_TASK_ACQUIRE(3128, "undefined");
               log_region.error(PARENT_TASK_ACQUIRE.id(),
                                "Parent task %s (ID %lld) of acquire "
@@ -9141,7 +9157,8 @@ namespace Legion {
           }
         case ERROR_BAD_PARENT_REGION:
           {
-            if (bad_index < 0) {
+            if (bad_index < 0) 
+            {
               MessageDescriptor PARENT_TASK_RELEASE(3134, "undefined");
               log_region.error(PARENT_TASK_RELEASE.id(),
                                "Parent task %s (ID %lld) of release "
@@ -9154,7 +9171,9 @@ namespace Legion {
                                requirement.region.index_space.id,
                                requirement.region.field_space.id,
                                requirement.region.tree_id);
-            } else if (bad_field == AUTO_GENERATE_ID) {
+            } 
+            else if (bad_field == AUTO_GENERATE_ID) 
+            {
               MessageDescriptor PARENT_TASK_RELEASE(3135, "undefined");
               log_region.error(PARENT_TASK_RELEASE.id(),
                                "Parent task %s (ID %lld) of release "
@@ -9168,7 +9187,9 @@ namespace Legion {
                                requirement.region.index_space.id,
                                requirement.region.field_space.id,
                                requirement.region.tree_id, bad_index);
-            } else {
+            } 
+            else 
+            {
               MessageDescriptor PARENT_TASK_RELEASE(3136, "undefined");
               log_region.error(PARENT_TASK_RELEASE.id(),
                                "Parent task %s (ID %lld) of release "
@@ -9221,7 +9242,7 @@ namespace Legion {
 #endif
             exit(ERROR_BAD_REGION_TYPE);
           }
-            // these should never happen with an release operation
+        // these should never happen with a release operation
         case ERROR_INVALID_INSTANCE_FIELD:
         case ERROR_DUPLICATE_INSTANCE_FIELD:
         case ERROR_NON_DISJOINT_PARTITION:
@@ -11382,7 +11403,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PendingPartitionOp::initialize_index_space_intersection(
-                      TaskContext *ctx, IndexSpace target, IndexPartition handle)
+                     TaskContext *ctx, IndexSpace target, IndexPartition handle)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
@@ -13295,7 +13316,8 @@ namespace Legion {
           }
         case ERROR_BAD_PARENT_REGION:
           {
-            if (bad_index < 0) {
+            if (bad_index < 0) 
+            {
               MessageDescriptor PARENT_TASK_FILL(3145, "undefined");
               log_region.error(PARENT_TASK_FILL.id(),
                                "Parent task %s (ID %lld) of fill operation "
@@ -13309,7 +13331,9 @@ namespace Legion {
                                requirement.region.index_space.id,
                                requirement.region.field_space.id,
                                requirement.region.tree_id);
-            } else if (bad_field == AUTO_GENERATE_ID) {
+            } 
+            else if (bad_field == AUTO_GENERATE_ID) 
+            {
               MessageDescriptor PARENT_TASK_FILL(3146, "undefined");
               log_region.error(PARENT_TASK_FILL.id(),
                                "Parent task %s (ID %lld) of fill operation "
@@ -13324,7 +13348,9 @@ namespace Legion {
                                requirement.region.index_space.id,
                                requirement.region.field_space.id,
                                requirement.region.tree_id, bad_index);
-            } else {
+            } 
+            else 
+            {
               MessageDescriptor PARENT_TASK_FILL(3147, "undefined");
               log_region.error(PARENT_TASK_FILL.id(),
                                "Parent task %s (ID %lld) of fill operation "
@@ -13758,7 +13784,8 @@ namespace Legion {
           {
             const DomainPoint &p1 = points[idx1]->get_domain_point();
             const DomainPoint &p2 = points[idx2]->get_domain_point();
-            if (p1.get_dim() <= 1) {
+            if (p1.get_dim() <= 1) 
+            {
               MessageDescriptor INDEX_SPACE_FILL(1454, "undefined");
               log_run.error("Index space fill launch has intefering "
                             "region requirements 0 of point %lld and region "
@@ -13767,7 +13794,9 @@ namespace Legion {
                             p1[0], p2[0], get_logging_name(),
                             get_unique_op_id(), parent_ctx->get_task_name(),
                             parent_ctx->get_unique_id());
-            } else if (p1.get_dim() == 2) {
+            } 
+            else if (p1.get_dim() == 2) 
+            {
               MessageDescriptor INDEX_SPACE_FILL2(1455, "undefined");
               log_run.error(INDEX_SPACE_FILL2.id(),
                             "Index space fill launch has intefering "
@@ -13778,7 +13807,9 @@ namespace Legion {
                             get_logging_name(), get_unique_op_id(),
                             parent_ctx->get_task_name(),
                             parent_ctx->get_unique_id());
-            } else if (p1.get_dim() == 3) {
+            } 
+            else if (p1.get_dim() == 3) 
+            {
               MessageDescriptor INDEX_SPACE_FILL3(1456, "undefined");
               log_run.error(INDEX_SPACE_FILL3.id(),
                             "Index space fill launch has intefering "
@@ -14001,15 +14032,15 @@ namespace Legion {
       {
         case EXTERNAL_POSIX_FILE:
           {
-              if (launcher.file_fields.empty()) {
-                MessageDescriptor FILE_ATTACH_OPERATION(1457, "undefined");
+            if (launcher.file_fields.empty()) 
+            {
+              MessageDescriptor FILE_ATTACH_OPERATION(1457, "undefined");
               log_run.warning(FILE_ATTACH_OPERATION.id(),
                               "FILE ATTACH OPERATION ISSUED WITH NO "
                               "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "
                               "FORGET THEM?!?", parent_ctx->get_task_name(),
                               parent_ctx->get_unique_id());
-              }
-
+            }
             file_name = strdup(launcher.file_name);
             // Construct the region requirement for this task
             requirement = RegionRequirement(launcher.handle, WRITE_DISCARD, 
@@ -14023,14 +14054,15 @@ namespace Legion {
           }
         case EXTERNAL_HDF5_FILE:
           {
-              if (launcher.field_files.empty()) {
-                MessageDescriptor HDF5_ATTACH_OPERATION(1458, "undefined");
+            if (launcher.field_files.empty()) 
+            {
+              MessageDescriptor HDF5_ATTACH_OPERATION(1458, "undefined");
               log_run.warning(HDF5_ATTACH_OPERATION.id(),
-                              "HDF5 ATTACH OPERATION ISSUED WITH NO "
-                              "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "
-                              "FORGET THEM?!?", parent_ctx->get_task_name(),
-                              parent_ctx->get_unique_id());
-              }
+                            "HDF5 ATTACH OPERATION ISSUED WITH NO "
+                            "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "
+                            "FORGET THEM?!?", parent_ctx->get_task_name(),
+                            parent_ctx->get_unique_id());
+            }
             file_name = strdup(launcher.file_name);
             // Construct the region requirement for this task
             requirement = RegionRequirement(launcher.handle, WRITE_DISCARD, 
@@ -14336,147 +14368,152 @@ namespace Legion {
         case ERROR_BAD_REGION_PRIVILEGES:
           break;
         case ERROR_INVALID_REGION_HANDLE:
-        {
-          MessageDescriptor REQUIREMENTS_INVALID_REGION(3152, "undefined");
-          log_region.error(REQUIREMENTS_INVALID_REGION.id(),
-                           "Requirest for invalid region handle "
-                           "(%x,%d,%d) for attach operation "
-                           "(ID %lld)",
-                           requirement.region.index_space.id,
-                           requirement.region.field_space.id,
-                           requirement.region.tree_id,
-                           unique_op_id);
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_INVALID_REGION_HANDLE);
-        }
-        case ERROR_FIELD_SPACE_FIELD_MISMATCH:
-        {
-          FieldSpace sp = (requirement.handle_type == SINGULAR) ||
-          (requirement.handle_type == REG_PROJECTION)
-          ? requirement.region.field_space :
-          requirement.partition.field_space;
-          MessageDescriptor FIELD_NOT_VALID(3153, "undefined");
-          log_region.error(FIELD_NOT_VALID.id(),
-                           "Field %d is not a valid field of field "
-                           "space %d for attach operation (ID %lld)",
-                           bad_field, sp.id, unique_op_id);
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_FIELD_SPACE_FIELD_MISMATCH);
-        }
-        case ERROR_INVALID_INSTANCE_FIELD:
-        {
-          MessageDescriptor INSTANCE_FIELD_PRIVILEGE(3154, "undefined");
-          log_region.error(INSTANCE_FIELD_PRIVILEGE.id(),
-                           "Instance field %d is not one of the "
-                           "privilege fields for attach operation "
-                           "(ID %lld)",
-                           bad_field, unique_op_id);
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_INVALID_INSTANCE_FIELD);
-        }
-        case ERROR_DUPLICATE_INSTANCE_FIELD:
-        {
-          MessageDescriptor INSTANCE_FIELD_DUPLICATE(3155, "undefined");
-          log_region.error(INSTANCE_FIELD_DUPLICATE.id(),
-                           "Instance field %d is a duplicate for "
-                           "attach operation (ID %lld)",
-                           bad_field, unique_op_id);
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_DUPLICATE_INSTANCE_FIELD);
-        }
-        case ERROR_BAD_PARENT_REGION:
-        {
-          if (bad_index > 0) {
-            MessageDescriptor PARENT_TASK_ATTACH(3156, "undefined");
-            log_region.error(PARENT_TASK_ATTACH.id(),
-                             "Parent task %s (ID %lld) of attach operation "
-                             "(ID %lld) does not have a region "
-                             "requirement for region (%x,%x,%x) "
-                             "as a parent of region requirement because "
-                             "no 'parent' region had that name.",
-                             parent_ctx->get_task_name(),
-                             parent_ctx->get_unique_id(),
-                             unique_op_id,
-                             requirement.region.index_space.id,
-                             requirement.region.field_space.id,
-                             requirement.region.tree_id);
-          } else if (bad_field == AUTO_GENERATE_ID) {
-            MessageDescriptor PARENT_TASK_ATTACH(3157, "undefined");
-            log_region.error(PARENT_TASK_ATTACH.id(),
-                             "Parent task %s (ID %lld) of attach operation "
-                             "(ID %lld) does not have a region "
-                             "requirement for region (%x,%x,%x) "
-                             "as a parent of region requirement because "
-                             "parent requirement %d did not have "
-                             "sufficient privileges.",
-                             parent_ctx->get_task_name(),
-                             parent_ctx->get_unique_id(),
-                             unique_op_id,
-                             requirement.region.index_space.id,
-                             requirement.region.field_space.id,
-                             requirement.region.tree_id, bad_index);
-          } else {
-            MessageDescriptor PARENT_TASK_ATTACH(3158, "undefined");
-            log_region.error(PARENT_TASK_ATTACH.id(),
-                             "Parent task %s (ID %lld) of attach operation "
-                             "(ID %lld) does not have a region "
-                             "requirement for region (%x,%x,%x) "
-                             "as a parent of region requirement because "
-                             "region requirement %d was missing field %d.",
-                             parent_ctx->get_task_name(),
-                             parent_ctx->get_unique_id(),
-                             unique_op_id,
+          {
+            MessageDescriptor REQUIREMENTS_INVALID_REGION(3152, "undefined");
+            log_region.error(REQUIREMENTS_INVALID_REGION.id(),
+                             "Requirest for invalid region handle "
+                             "(%x,%d,%d) for attach operation "
+                             "(ID %lld)",
                              requirement.region.index_space.id,
                              requirement.region.field_space.id,
                              requirement.region.tree_id,
-                             bad_index, bad_field);
+                             unique_op_id);
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_INVALID_REGION_HANDLE);
           }
+        case ERROR_FIELD_SPACE_FIELD_MISMATCH:
+          {
+            FieldSpace sp = (requirement.handle_type == SINGULAR) ||
+              (requirement.handle_type == REG_PROJECTION) ? 
+                requirement.region.field_space :
+                requirement.partition.field_space;
+            MessageDescriptor FIELD_NOT_VALID(3153, "undefined");
+            log_region.error(FIELD_NOT_VALID.id(),
+                             "Field %d is not a valid field of field "
+                             "space %d for attach operation (ID %lld)",
+                             bad_field, sp.id, unique_op_id);
 #ifdef DEBUG_LEGION
-          assert(false);
+            assert(false);
 #endif
-          exit(ERROR_BAD_PARENT_REGION);
-        }
+            exit(ERROR_FIELD_SPACE_FIELD_MISMATCH);
+          }
+        case ERROR_INVALID_INSTANCE_FIELD:
+          {
+            MessageDescriptor INSTANCE_FIELD_PRIVILEGE(3154, "undefined");
+            log_region.error(INSTANCE_FIELD_PRIVILEGE.id(),
+                             "Instance field %d is not one of the "
+                             "privilege fields for attach operation "
+                             "(ID %lld)",
+                             bad_field, unique_op_id);
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_INVALID_INSTANCE_FIELD);
+          }
+        case ERROR_DUPLICATE_INSTANCE_FIELD:
+          {
+            MessageDescriptor INSTANCE_FIELD_DUPLICATE(3155, "undefined");
+            log_region.error(INSTANCE_FIELD_DUPLICATE.id(),
+                             "Instance field %d is a duplicate for "
+                             "attach operation (ID %lld)",
+                             bad_field, unique_op_id);
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_DUPLICATE_INSTANCE_FIELD);
+          }
+        case ERROR_BAD_PARENT_REGION:
+          {
+            if (bad_index > 0) 
+            {
+              MessageDescriptor PARENT_TASK_ATTACH(3156, "undefined");
+              log_region.error(PARENT_TASK_ATTACH.id(),
+                               "Parent task %s (ID %lld) of attach operation "
+                               "(ID %lld) does not have a region "
+                               "requirement for region (%x,%x,%x) "
+                               "as a parent of region requirement because "
+                               "no 'parent' region had that name.",
+                               parent_ctx->get_task_name(),
+                               parent_ctx->get_unique_id(),
+                               unique_op_id,
+                               requirement.region.index_space.id,
+                               requirement.region.field_space.id,
+                               requirement.region.tree_id);
+            } 
+            else if (bad_field == AUTO_GENERATE_ID) 
+            {
+              MessageDescriptor PARENT_TASK_ATTACH(3157, "undefined");
+              log_region.error(PARENT_TASK_ATTACH.id(),
+                               "Parent task %s (ID %lld) of attach operation "
+                               "(ID %lld) does not have a region "
+                               "requirement for region (%x,%x,%x) "
+                               "as a parent of region requirement because "
+                               "parent requirement %d did not have "
+                               "sufficient privileges.",
+                               parent_ctx->get_task_name(),
+                               parent_ctx->get_unique_id(),
+                               unique_op_id,
+                               requirement.region.index_space.id,
+                               requirement.region.field_space.id,
+                               requirement.region.tree_id, bad_index);
+            } 
+            else 
+            {
+              MessageDescriptor PARENT_TASK_ATTACH(3158, "undefined");
+              log_region.error(PARENT_TASK_ATTACH.id(),
+                               "Parent task %s (ID %lld) of attach operation "
+                               "(ID %lld) does not have a region "
+                               "requirement for region (%x,%x,%x) "
+                               "as a parent of region requirement because "
+                               "region requirement %d was missing field %d.",
+                               parent_ctx->get_task_name(),
+                               parent_ctx->get_unique_id(),
+                               unique_op_id,
+                               requirement.region.index_space.id,
+                               requirement.region.field_space.id,
+                               requirement.region.tree_id,
+                               bad_index, bad_field);
+            }
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_BAD_PARENT_REGION);
+          }
         case ERROR_BAD_REGION_PATH:
-        {
-          MessageDescriptor REGION_NOT_SUBREGION(3159, "undefined");
-          log_region.error(REGION_NOT_SUBREGION.id(),
-                           "Region (%x,%x,%x) is not a "
-                           "sub-region of parent region "
-                           "(%x,%x,%x) for region requirement of attach "
-                           "operation (ID %lld)",
-                           requirement.region.index_space.id,
-                           requirement.region.field_space.id,
-                           requirement.region.tree_id,
-                           requirement.parent.index_space.id,
-                           requirement.parent.field_space.id,
-                           requirement.parent.tree_id,
-                           unique_op_id);
+          {
+            MessageDescriptor REGION_NOT_SUBREGION(3159, "undefined");
+            log_region.error(REGION_NOT_SUBREGION.id(),
+                             "Region (%x,%x,%x) is not a "
+                             "sub-region of parent region "
+                             "(%x,%x,%x) for region requirement of attach "
+                             "operation (ID %lld)",
+                             requirement.region.index_space.id,
+                             requirement.region.field_space.id,
+                             requirement.region.tree_id,
+                             requirement.parent.index_space.id,
+                             requirement.parent.field_space.id,
+                             requirement.parent.tree_id,
+                             unique_op_id);
 #ifdef DEBUG_LEGION
-          assert(false);
+            assert(false);
 #endif
-          exit(ERROR_BAD_REGION_PATH);
-        }
+            exit(ERROR_BAD_REGION_PATH);
+          }
         case ERROR_BAD_REGION_TYPE:
-        {
-          MessageDescriptor REGION_REQUIREMENT_ATTACH(3160, "undefined");
-          log_region.error(REGION_REQUIREMENT_ATTACH.id(),
-                           "Region requirement of attach operation "
-                           "(ID %lld) cannot find privileges for field "
-                           "%d in parent task",
-                           unique_op_id, bad_field);
+          {
+            MessageDescriptor REGION_REQUIREMENT_ATTACH(3160, "undefined");
+            log_region.error(REGION_REQUIREMENT_ATTACH.id(),
+                             "Region requirement of attach operation "
+                             "(ID %lld) cannot find privileges for field "
+                             "%d in parent task",
+                             unique_op_id, bad_field);
 #ifdef DEBUG_LEGION
-          assert(false);
+            assert(false);
 #endif
-          exit(ERROR_BAD_REGION_TYPE);
-        }
+            exit(ERROR_BAD_REGION_TYPE);
+          }
           // this should never happen with an inline mapping
         case ERROR_NON_DISJOINT_PARTITION:
         default:

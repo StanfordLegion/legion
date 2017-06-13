@@ -1604,9 +1604,9 @@ namespace Legion {
           case ERROR_FIELD_SPACE_FIELD_MISMATCH:
             {
               FieldSpace sp = (regions[idx].handle_type == SINGULAR) ||
-              (regions[idx].handle_type == REG_PROJECTION)
-              ? regions[idx].region.field_space :
-              regions[idx].partition.field_space;
+                (regions[idx].handle_type == REG_PROJECTION) ? 
+                  regions[idx].region.field_space :
+                  regions[idx].partition.field_space;
               MessageDescriptor FIELD_NOT_VALID(3204, "undefined");
               log_region.error(FIELD_NOT_VALID.id(),
                                "Field %d is not a valid field of field "
@@ -1648,7 +1648,8 @@ namespace Legion {
             }
           case ERROR_BAD_PARENT_REGION:
             {
-              if (bad_index < 0) {
+              if (bad_index < 0) 
+              {
                 MessageDescriptor PARENT_TASK_TASK(3207, "undefined");
                 log_region.error(PARENT_TASK_TASK.id(),
                                  "Parent task %s (ID %lld) of task %s "
@@ -1663,7 +1664,9 @@ namespace Legion {
                                  regions[idx].parent.index_space.id,
                                  regions[idx].parent.field_space.id,
                                  regions[idx].parent.tree_id, idx);
-              } else if (bad_field == AUTO_GENERATE_ID) {
+              } 
+              else if (bad_field == AUTO_GENERATE_ID) 
+              {
                 MessageDescriptor PARENT_TASK_TASK(3208, "undefined");
                 log_region.error(PARENT_TASK_TASK.id(),
                                  "Parent task %s (ID %lld) of task %s "
@@ -1679,7 +1682,9 @@ namespace Legion {
                                  regions[idx].parent.index_space.id,
                                  regions[idx].parent.field_space.id,
                                  regions[idx].parent.tree_id, idx, bad_index);
-              } else {
+              } 
+              else 
+              {
                 MessageDescriptor PARENT_TASK_TASK(3209, "undefined");
                 log_region.error(PARENT_TASK_TASK.id(),
                                  "Parent task %s (ID %lld) of task %s "
@@ -2903,7 +2908,8 @@ namespace Legion {
               {
                 // Not visible from all target processors
                 // Different error messages depending on the cause
-                if (regions[idx].is_restricted()) {
+                if (regions[idx].is_restricted()) 
+                {
                   MessageDescriptor INVALID_MAPPER_OUTPUT9(1514, "undefined");
                   log_run.error(INVALID_MAPPER_OUTPUT9.id(),
                                 "Invalid mapper output from invocation of '%s' "
@@ -2913,7 +2919,9 @@ namespace Legion {
                                 "visible for task %s (ID %lld).",
                                 "map_task", mapper->get_mapper_name(), idx,
                                 mem.id, get_task_name(), get_unique_id());
-                } else {
+                } 
+                else 
+                {
                   MessageDescriptor INVALID_MAPPER_OUTPUT10(1515, "undefined");
                   log_run.error(INVALID_MAPPER_OUTPUT10.id(),
                                 "Invalid mapper output from invocation of '%s' "
@@ -4862,7 +4870,8 @@ namespace Legion {
       if (!options_selected)
       {
         const bool inline_task = select_task_options();
-        if (inline_task) {
+        if (inline_task) 
+        {
           MessageDescriptor MAPPER_REQUESTED_INLINE(1550, "undefined");
           log_run.warning(MAPPER_REQUESTED_INLINE.id(),
                           "Mapper %s requested to inline task %s "
@@ -6828,7 +6837,8 @@ namespace Legion {
       if (!options_selected)
       {
         const bool inline_task = select_task_options();
-        if (inline_task) {
+        if (inline_task) 
+        {
           MessageDescriptor MAPPER_REQUESTED_INLINE(1555, "undefined");
           log_run.warning(MAPPER_REQUESTED_INLINE.id(),
                           "Mapper %s requested to inline task %s "
@@ -7704,7 +7714,8 @@ namespace Legion {
                   point_reqs[it->first].get_index_space(), 
                   other_reqs[it->second].get_index_space()))
             {
-              if (pit->first.get_dim() <= 1) {
+              if (pit->first.get_dim() <= 1) 
+              {
                 MessageDescriptor INDEX_SPACE_TASK(1557, "undefined");
                 log_run.error(INDEX_SPACE_TASK.id(),
                               "Index space task launch has intefering "
@@ -7715,7 +7726,9 @@ namespace Legion {
                               oit->first[0], get_task_name(), get_unique_id(),
                               parent_ctx->get_task_name(),
                               parent_ctx->get_unique_id());
-              } else if (pit->first.get_dim() == 2) {
+              } 
+              else if (pit->first.get_dim() == 2) 
+              {
                 MessageDescriptor INDEX_SPACE_TASK2(1558, "undefined");
                 log_run.error(INDEX_SPACE_TASK2.id(),
                               "Index space task launch has intefering "
@@ -7727,7 +7740,9 @@ namespace Legion {
                               oit->first[1], get_task_name(), get_unique_id(),
                               parent_ctx->get_task_name(),
                               parent_ctx->get_unique_id());
-              } else if (pit->first.get_dim() == 3) {
+              } 
+              else if (pit->first.get_dim() == 3) 
+              {
                 MessageDescriptor INDEX_SPACE_TASK3(1559, "undefined");
                 log_run.error(INDEX_SPACE_TASK3.id(),
                               "Index space task launch has intefering "
