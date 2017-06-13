@@ -198,6 +198,7 @@ end
 
 function base.task:set_param_symbols(symbols, force)
   assert(force or not self.param_symbols)
+  assert(terralib.islist(symbols))
   self.param_symbols = symbols
 end
 
@@ -208,6 +209,7 @@ end
 
 function base.task:set_params_struct(t)
   assert(not self.params_struct)
+  assert(terralib.types.istype(t))
   self.params_struct = t
 end
 
@@ -218,7 +220,7 @@ end
 
 function base.task:set_params_map_type(t)
   assert(not self.params_map_type)
-  assert(t)
+  assert(terralib.types.istype(t))
   self.params_map_type = t
 end
 
@@ -263,6 +265,7 @@ end
 
 function base.task:set_field_id_param_labels(t)
   assert(not self.field_id_param_labels)
+  assert(t)
   self.field_id_param_labels = t
 end
 
@@ -273,6 +276,7 @@ end
 
 function base.task:set_field_id_param_symbols(t)
   assert(not self.field_id_param_symbols)
+  assert(t)
   self.field_id_param_symbols = t
 end
 
@@ -281,9 +285,10 @@ function base.task:get_field_id_param_symbols()
   return self.field_id_param_symbols
 end
 
-function base.task:set_type(type, force)
+function base.task:set_type(t, force)
   assert(force or not self.type)
-  self.type = type
+  assert(terralib.types.istype(t))
+  self.type = t
 end
 
 function base.task:get_type()
@@ -293,6 +298,7 @@ end
 
 function base.task:set_privileges(t)
   assert(not self.privileges)
+  assert(terralib.islist(t))
   self.privileges = t
 end
 
@@ -303,6 +309,7 @@ end
 
 function base.task:set_coherence_modes(t)
   assert(not self.coherence_modes)
+  assert(t)
   self.coherence_modes = t
 end
 
@@ -313,6 +320,7 @@ end
 
 function base.task:set_flags(t)
   assert(not self.flags)
+  assert(t)
   self.flags = t
 end
 
@@ -344,6 +352,7 @@ end
 
 function base.task:set_constraints(t)
   assert(not self.constraints)
+  assert(t)
   self.constraints = t
 end
 
@@ -354,6 +363,7 @@ end
 
 function base.task:set_region_universe(t)
   assert(not self.region_universe)
+  assert(t)
   self.region_universe = t
 end
 
@@ -383,6 +393,7 @@ function base.task:get_name()
 end
 
 function base.task:set_primary_variant(task)
+  assert(not self.primary_variant)
   self.primary_variant = task
 end
 
@@ -391,6 +402,7 @@ function base.task:get_primary_variant()
 end
 
 function base.task:set_cuda_variant(task)
+  assert(not self.cuda_variant)
   self.cuda_variant = task
 end
 
@@ -399,6 +411,7 @@ function base.task:get_cuda_variant()
 end
 
 function base.task:set_parallel_task(task)
+  assert(not self.parallel_task)
   self.parallel_task = task
 end
 
