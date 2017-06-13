@@ -15,7 +15,6 @@
 #  
 #!/bin/bash
 
-set -e
 
 echo 
 echo INITIALIZE
