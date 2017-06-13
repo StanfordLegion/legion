@@ -24,7 +24,6 @@ namespace Realm {
 
   Logger log_inst("inst");
 
-#ifdef OLD_ALLOCATORS
   ////////////////////////////////////////////////////////////////////////
   //
   // class DeferredInstDestroy
@@ -32,7 +31,7 @@ namespace Realm {
 
     class DeferredInstDestroy : public EventWaiter {
     public:
-      DeferredInstDestroy(RegionInstanceImpl *i) : impl(i) { }
+      DeferredInstDestroy(RegionInstance _inst) : inst(_inst) { }
       virtual ~DeferredInstDestroy(void) { }
     public:
       virtual bool event_triggered(Event e, bool poisoned)
@@ -41,11 +40,11 @@ namespace Realm {
 	// we don't have an output event here, so this may result in a leak if nobody is
 	//  paying attention
 	if(poisoned) {
-	  log_poison.info() << "poisoned deferred instance destruction skipped - POSSIBLE LEAK - inst=" << impl->me;
+	  log_poison.info() << "poisoned deferred instance destruction skipped - POSSIBLE LEAK - inst=" << inst;
 	} else {
-	  log_inst.info("instance destroyed: space=" IDFMT " id=" IDFMT "",
-			impl->metadata.is.id, impl->me.id);
-	  get_runtime()->get_memory_impl(impl->memory)->destroy_instance(impl->me, true); 
+	  log_inst.info() << "instance destroyed: inst=" << inst;
+	  inst.destroy();
+	  //get_runtime()->get_memory_impl(impl->memory)->destroy_instance(impl->me, true); 
 	}
         return true;
       }
@@ -61,9 +60,9 @@ namespace Realm {
       }
 
     protected:
-      RegionInstanceImpl *impl;
+      RegionInstance inst;
     };
-#endif
+
   
   ////////////////////////////////////////////////////////////////////////
   //
@@ -143,6 +142,12 @@ namespace Realm {
       //  deallocate the instance's storage - the eventual callback from that
       //  will be what actually destroys the instance
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
+      // TODO: send destruction request through so memory can see it, even
+      //  if it's not ready
+      if(!wait_on.has_triggered()) {
+	EventImpl::add_waiter(wait_on, new DeferredInstDestroy(*this));
+        return;
+      }
       // this does the right thing even though we're using an instance ID
       MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
       mem_impl->release_instance_storage(*this, wait_on);
@@ -462,9 +467,9 @@ namespace Realm {
 	assert((*it) > 0);
 	if(byte_offset < (off_t)(*it)) {
 	  if ((off_t)(byte_offset + size) > (off_t)(*it)) {
-            log_inst.error("Requested field does not match the expected field size");
-            assert(false);
-          }
+      log_inst.error("Requested field does not match the expected field size");
+      assert(false);
+    }
 	  field_start = start;
 	  field_size = (*it);
 	  return;

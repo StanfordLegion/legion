@@ -722,6 +722,28 @@ extern "C" {
                                    legion_domain_t domain);
 
   /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::Runtime::union_index_spaces
+   */
+  legion_index_space_t
+  legion_index_space_union(legion_runtime_t runtime,
+                           legion_context_t ctx,
+                           const legion_index_space_t *spaces,
+                           size_t num_spaces);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::Runtime::intersect_index_spaces
+   */
+  legion_index_space_t
+  legion_index_space_intersection(legion_runtime_t runtime,
+                                  legion_context_t ctx,
+                                  const legion_index_space_t *spaces,
+                                  size_t num_spaces);
+
+  /**
    * @see Legion::Runtime::has_multiple_domains().
    */
   bool
@@ -1052,9 +1074,9 @@ extern "C" {
     legion_domain_point_t color);
 
   /**
-   * @see Legion::Runtime::get_index_partition_color_space()
+   * @see Legion::Runtime::get_index_partition_color_space_name()
    */
-  legion_domain_t
+  legion_index_space_t
   legion_index_partition_get_color_space(legion_runtime_t runtime,
                                          legion_index_partition_t handle);
 

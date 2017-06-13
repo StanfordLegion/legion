@@ -538,8 +538,8 @@ namespace Legion {
 
       if (!strcmp(serializer_type, "binary")) {
         if (prof_logfile == NULL) {
-          fprintf(stderr, "ERROR: Please specify -lg:prof_logfile <logfile_name> "
-                          "when running with -lg:serializer binary");
+          fprintf(stderr, "ERROR: Please specify -lg:prof_logfile "
+              "<logfile_name> when running with -lg:serializer binary");
           exit(-1);
         }
         Processor current = Processor::get_executing_processor();
@@ -549,15 +549,16 @@ namespace Legion {
       } else if (!strcmp(serializer_type, "ascii")) {
         if (prof_logfile != NULL) {
           fprintf(stderr, "ERROR: You should not specify -lg:prof_logfile "
-                          "<logfile_name> when running with -lg:serializer ascii\n"
-                          "       legion_prof output will be written to -logfile "
-                                  "<logfile_name> instead");
+                          "<logfile_name> when running with -lg:serializer "
+                          "ascii\n"
+                          "       legion_prof output will be written to "
+                          "-logfile <logfile_name> instead");
           exit(-1);
         }
         serializer = new LegionProfASCIISerializer();
       } else {
-        fprintf(stderr, "Invalid serializer (%s), must be 'binary' or 'ascii'\n", 
-                        serializer_type);
+        fprintf(stderr, "Invalid serializer (%s), must be 'binary' "
+                "or 'ascii'\n", serializer_type);
         exit(-1);
       }
 
@@ -794,7 +795,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfiler::add_partition_request(
-                                           Realm::ProfilingRequestSet &requests, 
+                                           Realm::ProfilingRequestSet &requests,
                                            Operation *op, DepPartOpKind part_op)
     //--------------------------------------------------------------------------
     {

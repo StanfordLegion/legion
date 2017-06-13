@@ -522,10 +522,8 @@ namespace Realm {
       // TODO: remote stuff
       assert(ID(me).memory.owner_node == gasnet_mynode());
 
-      if(!precondition.has_triggered()) {
-	// TODO: queue things up?
-	precondition.wait();
-      }
+      // TODO: memory needs to handle non-ready releases
+      assert(precondition.has_triggered());
 
       allocator.deallocate(i);
 

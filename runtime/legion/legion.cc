@@ -21,6 +21,7 @@
 #include "legion_context.h"
 #include "legion_profiling.h"
 #include "legion_allocation.h"
+#include "logger_message_descriptor.h"
 
 namespace Legion {
 
@@ -804,7 +805,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       if (IS_REDUCE(*this)) // Shouldn't use this constructor for reductions
       {
-        Internal::log_region.error("ERROR: Use different RegionRequirement "
+        Internal::MessageDescriptor USE_DIFFERENT_REGIONREQUIREMENT(2900, 
+                                                            "undefined");
+        Internal::log_region.error(USE_DIFFERENT_REGIONREQUIREMENT.id(),
+                                   "Use different RegionRequirement "
                                    "constructor for reductions");
         assert(false);
         exit(ERROR_USE_REDUCTION_REGION_REQ);
@@ -829,7 +833,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       if (IS_REDUCE(*this))
       {
-        Internal::log_region.error("ERROR: Use different RegionRequirement "
+        Internal::MessageDescriptor USE_DIFFERENT_REGIONREQUIREMENT(2901, 
+                                                            "undefined");
+        Internal::log_region.error(USE_DIFFERENT_REGIONREQUIREMENT.id(),
+                                   "Use different RegionRequirement "
                                    "constructor for reductions");
         assert(false);
         exit(ERROR_USE_REDUCTION_REGION_REQ);
@@ -854,7 +861,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       if (IS_REDUCE(*this))
       {
-        Internal::log_region.error("ERROR: Use different RegionRequirement "
+        Internal::MessageDescriptor USE_DIFFERENT_REGIONREQUIREMENT(2902, 
+                                                            "undefined");
+        Internal::log_region.error(USE_DIFFERENT_REGIONREQUIREMENT.id(),
+                                   "Use different RegionRequirement "
                                    "constructor for reductions");
         assert(false);
         exit(ERROR_USE_REDUCTION_REGION_REQ);
@@ -879,7 +889,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       if (redop == 0)
       {
-        Internal::log_region.error("Zero is not a valid ReductionOpID");
+        Internal::MessageDescriptor ZERO_NOT_VALID(2903, "undefined");
+        Internal::log_region.error(ZERO_NOT_VALID.id(), 
+                                   "Zero is not a valid ReductionOpID");
         assert(false);
         exit(ERROR_RESERVED_REDOP_ID);
       }
@@ -904,7 +916,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       if (redop == 0)
       {
-        Internal::log_region.error("Zero is not a valid ReductionOpID");
+        Internal::MessageDescriptor ZERO_NOT_VALID(2904, "undefined");
+        Internal::log_region.error(ZERO_NOT_VALID.id(), 
+                                   "Zero is not a valid ReductionOpID");        
         assert(false);
         exit(ERROR_RESERVED_REDOP_ID);
       }
@@ -929,7 +943,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       if (redop == 0)
       {
-        Internal::log_region.error("Zero is not a valid ReductionOpID");
+        Internal::MessageDescriptor ZERO_NOT_VALID(2905, "undefined");
+        Internal::log_region.error(ZERO_NOT_VALID.id(), 
+                                   "Zero is not a valid ReductionOpID");
         assert(false);
         exit(ERROR_RESERVED_REDOP_ID);
       }
@@ -951,7 +967,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       if (IS_REDUCE(*this)) // Shouldn't use this constructor for reductions
       {
-        Internal::log_region.error("ERROR: Use different RegionRequirement "
+        Internal::MessageDescriptor USE_DIFFERENT_REGIONREQUIREMENT(2906, 
+                                                            "undefined");
+        Internal::log_region.error(USE_DIFFERENT_REGIONREQUIREMENT.id(),
+                                   "Use different RegionRequirement "
                                    "constructor for reductions");
         assert(false);
         exit(ERROR_USE_REDUCTION_REGION_REQ);
@@ -975,7 +994,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       if (IS_REDUCE(*this))
       {
-        Internal::log_region.error("ERROR: Use different RegionRequirement "
+        Internal::MessageDescriptor USE_DIFFERENT_REGIONREQUIREMENT(2907, 
+                                                              "undefined");
+        Internal::log_region.error(USE_DIFFERENT_REGIONREQUIREMENT.id(),
+                                   "Use different RegionRequirement "
                                    "constructor for reductions");
         assert(false);
         exit(ERROR_USE_REDUCTION_REGION_REQ);
@@ -999,7 +1021,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       if (IS_REDUCE(*this))
       {
-        Internal::log_region.error("ERROR: Use different RegionRequirement "
+        Internal::MessageDescriptor USE_DIFFERENT_REGIONREQUIREMENT(2908, 
+                                                            "undefined");
+        Internal::log_region.error(USE_DIFFERENT_REGIONREQUIREMENT.id(),
+                                   "Use different RegionRequirement "
                                    "constructor for reductions");
         assert(false);
         exit(ERROR_USE_REDUCTION_REGION_REQ);
@@ -1022,7 +1047,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       if (redop == 0)
       {
-        Internal::log_region.error("Zero is not a valid ReductionOpID");
+        Internal::MessageDescriptor ZERO_NOT_VALID(2911, "undefined");
+        Internal::log_region.error(ZERO_NOT_VALID.id(), 
+                                   "Zero is not a valid ReductionOpID");        
         assert(false);
         exit(ERROR_RESERVED_REDOP_ID);
       }
@@ -1045,7 +1072,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       if (redop == 0)
       {
-        Internal::log_region.error("Zero is not a valid ReductionOpID");
+        Internal::MessageDescriptor ZERO_NOT_VALID(2909, "undefined");
+        Internal::log_region.error(ZERO_NOT_VALID.id(), 
+                                   "Zero is not a valid ReductionOpID");
         assert(false);
         exit(ERROR_RESERVED_REDOP_ID);
       }
@@ -1068,7 +1097,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       if (redop == 0)
       {
-        Internal::log_region.error("Zero is not a valid ReductionOpID");
+        Internal::MessageDescriptor ZERO_NOT_VALID(2910, "undefined");
+        Internal::log_region.error(ZERO_NOT_VALID.id(), 
+                                   "Zero is not a valid ReductionOpID");
         assert(false);
         exit(ERROR_RESERVED_REDOP_ID);
       }
@@ -1084,7 +1115,7 @@ namespace Legion {
           && (tag == rhs.tag) && (flags == rhs.flags))
       {
         if (((handle_type == SINGULAR) && (region == rhs.region)) ||
-            ((handle_type == PART_PROJECTION) && (partition == rhs.partition) && 
+            ((handle_type == PART_PROJECTION) && (partition == rhs.partition) &&
              (projection == rhs.projection)) ||
             ((handle_type == REG_PROJECTION) && (region == rhs.region)))
         {
@@ -1988,8 +2019,9 @@ namespace Legion {
     {
       if (impl == NULL)
       {
-        Internal::log_run.error("Illegal request for future "
-                                "value from empty future");
+        Internal::MessageDescriptor ILLEGAL_REQ_EMPTY_FUTURE(1000, "undefined");
+        Internal::log_run.error(ILLEGAL_REQ_EMPTY_FUTURE.id(), 
+                          "Illegal request for future value from empty future");
 #ifdef DEBUG_LEGION
         assert(false);
 #endif
@@ -2004,8 +2036,9 @@ namespace Legion {
     {
       if (impl == NULL)
       {
-        Internal::log_run.error("Illegal request for future "
-                                "size from empty future");
+        Internal::MessageDescriptor ILLEGAL_REQ_EMPTY_FUTURE1(1001,"undefined");
+        Internal::log_run.error(ILLEGAL_REQ_EMPTY_FUTURE1.id(), 
+                           "Illegal request for future size from empty future");
 #ifdef DEBUG_LEGION
         assert(false);
 #endif
@@ -2366,8 +2399,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      Internal::log_run.warning("THERE ARE NEW METHODS FOR PROJECTION FUNCTORS "
-                 "THAT MUST BE OVERRIDEN! CALLING DEPRECATED METHODS FOR NOW!");
+      Internal::MessageDescriptor NEW_METHODS_PROJECTION_FUNCTIONS(1002, 
+                                                                  "undefined");
+      Internal::log_run.warning(NEW_METHODS_PROJECTION_FUNCTIONS.id(),
+                                "THERE ARE NEW METHODS FOR PROJECTION FUNCTORS "
+                                "THAT MUST BE OVERRIDEN! CALLING DEPRECATED "
+                                "METHODS FOR NOW!");
 #endif
       switch (mappable->get_mappable_type())
       {
@@ -2375,7 +2412,9 @@ namespace Legion {
           return project(0/*dummy ctx*/, const_cast<Task*>(mappable->as_task()),
                          index, upper_bound, point);
         default:
-          Internal::log_run.error("Unknown mappable type passed to projection "
+          Internal::MessageDescriptor UNKNOWN_MAPPABLE(1003, "undefined");
+          Internal::log_run.error(UNKNOWN_MAPPABLE.id(), "Unknown mappable "
+                                  "type passed to projection "
                                   "functor! You must override the default "
                                   "implementations of the non-deprecated "
                                   "'project' methods!");
@@ -2395,8 +2434,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      Internal::log_run.warning("THERE ARE NEW METHODS FOR PROJECTION FUNCTORS "
-                 "THAT MUST BE OVERRIDEN! CALLING DEPRECATED METHODS FOR NOW!");
+      Internal::MessageDescriptor NEW_METHODS_PROJECTION_FUNCTIONS3(1004, 
+                                                            "undefined");
+      Internal::log_run.warning(NEW_METHODS_PROJECTION_FUNCTIONS3.id(),
+                                "THERE ARE NEW METHODS FOR PROJECTION FUNCTORS "
+                                "THAT MUST BE OVERRIDEN! CALLING DEPRECATED "
+                                "METHODS FOR NOW!");
 #endif
       switch (mappable->get_mappable_type())
       {
@@ -2404,11 +2447,13 @@ namespace Legion {
           return project(0/*dummy ctx*/, const_cast<Task*>(mappable->as_task()),
                          index, upper_bound, point);
         default:
-          Internal::log_run.error("Unknown mappable type passed to projection "
+          Internal::MessageDescriptor UNKNOWN_MAPPABLE2(1005, "undefined");
+          Internal::log_run.error(UNKNOWN_MAPPABLE2.id(),
+                                  "Unknown mappable type passed to projection "
                                   "functor! You must override the default "
                                   "implementations of the non-deprecated "
                                   "'project' methods!");
-          assert(false);
+              assert(false);
       }
       return LogicalRegion::NO_REGION;
     }
@@ -2441,7 +2486,10 @@ namespace Legion {
             unsigned index, LogicalRegion upper_bound, const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
-      Internal::log_run.error("ERROR: INVOCATION OF DEPRECATED PROJECTION "
+      Internal::MessageDescriptor DEPRECATED_PROJECTION_FUNCTOR(1006, 
+                                                        "undefined");
+      Internal::log_run.error(DEPRECATED_PROJECTION_FUNCTOR.id(),
+                              "INVOCATION OF DEPRECATED PROJECTION "
                               "FUNCTOR METHOD WITHOUT AN OVERRIDE!");
       assert(false);
       return LogicalRegion::NO_REGION;
@@ -2452,7 +2500,10 @@ namespace Legion {
          unsigned index, LogicalPartition upper_bound, const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
-      Internal::log_run.error("ERROR: INVOCATION OF DEPRECATED PROJECTION "
+      Internal::MessageDescriptor DEPRECATED_PROJECTION_FUNCTOR2(1007, 
+                                                          "undefined");
+      Internal::log_run.error(DEPRECATED_PROJECTION_FUNCTOR2.id(),
+                              "INVOCATION OF DEPRECATED PROJECTION "
                               "FUNCTOR METHOD WITHOUT AN OVERRIDE!");
       assert(false);
       return LogicalRegion::NO_REGION;
@@ -2939,7 +2990,7 @@ namespace Legion {
       FieldSpace temp_fs = create_field_space(ctx);
       const FieldID color_fid = 1;
       const FieldID pointer_fid = 2;
-      const size_t color_point_size = sizeof(Color);
+      const size_t color_point_size = sizeof(coord_t);
       {
         FieldAllocator allocator = create_field_allocator(ctx,temp_fs);
         allocator.allocate_field(color_point_size, color_fid);
@@ -3153,7 +3204,7 @@ namespace Legion {
       FieldSpace temp_fs = create_field_space(ctx);
       const FieldID color_fid = 1;
       const FieldID range_fid = 2;
-      const size_t color_point_size = sizeof(Color);
+      const size_t color_point_size = sizeof(coord_t);
       size_t range_size = 0;
       switch (coloring.begin()->second.get_dim())
       {
@@ -3407,7 +3458,7 @@ namespace Legion {
       FieldSpace temp_fs = create_field_space(ctx);
       const FieldID color_fid = 1;
       const FieldID range_fid = 2;
-      const size_t color_point_size = sizeof(Color);
+      const size_t color_point_size = sizeof(coord_t);
       size_t range_size = 0;
       switch (coloring.begin()->second.begin()->get_dim())
       {
@@ -6265,7 +6316,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    VariantID Runtime::register_task_variant(const TaskVariantRegistrar &registrar,
+    VariantID Runtime::register_task_variant(
+                  const TaskVariantRegistrar &registrar,
 		  const CodeDescriptor &codedesc,
 		  const void *user_data /*= NULL*/,
 		  size_t user_len /*= 0*/)

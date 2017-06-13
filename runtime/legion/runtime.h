@@ -2077,7 +2077,7 @@ namespace Legion {
       void send_local_field_free(AddressSpaceID target, Serializer &rez);
       void send_local_field_update(AddressSpaceID target, Serializer &rez);
       void send_top_level_region_request(AddressSpaceID target,Serializer &rez);
-      void send_top_level_region_return(AddressSpaceID target, Serializer &rez); 
+      void send_top_level_region_return(AddressSpaceID target, Serializer &rez);
       void send_logical_region_node(AddressSpaceID target, Serializer &rez);
       void send_index_space_destruction(IndexSpace handle, 
                                         AddressSpaceID target);

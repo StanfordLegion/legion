@@ -26,6 +26,7 @@
 #include "legion_analysis.h"
 #include "legion_context.h"
 #include "legion_replication.h"
+#include "logger_message_descriptor.h"
 
 namespace Legion {
   namespace Internal {
@@ -1605,7 +1606,9 @@ namespace Legion {
       {
         if (local_node->intersects_with(node))
         {
-          log_run.error("Illegal partial acquire operation (ID %lld) "
+          MessageDescriptor ILLEGAL_PARTIAL_ACQUIRE(1100, "undefined");
+          log_run.error(ILLEGAL_PARTIAL_ACQUIRE.id(),
+                        "Illegal partial acquire operation (ID %lld) "
                         "performed in task %s (ID %lld)", op->get_unique_id(),
                         op->get_context()->get_task_name(),
                         op->get_context()->get_unique_id());
@@ -1680,7 +1683,9 @@ namespace Legion {
           return;
       }
       // It's bad if we get here
-      log_run.error("Illegal interfering restriction performed by attach "
+      MessageDescriptor ILLEGAL_INTERFERING_RESTRICTON(1101, "undefined");
+      log_run.error(ILLEGAL_INTERFERING_RESTRICTON.id(),
+                    "Illegal interfering restriction performed by attach "
                     "operation (ID %lld) in task %s (ID %lld)",
                     op->get_unique_op_id(), op->get_context()->get_task_name(),
                     op->get_context()->get_unique_id());
@@ -1823,7 +1828,9 @@ namespace Legion {
           return;
       }
       // It's bad if we get here
-      log_run.error("Illegal interfering acquire operation performed by "
+      MessageDescriptor ILLEGAL_INTERFERING_ACQUIRE(1102, "undefined");
+      log_run.error(ILLEGAL_INTERFERING_ACQUIRE.id(),
+                    "Illegal interfering acquire operation performed by "
                     "acquire operation (ID %lld) in task %s (ID %lld)",
                     op->get_unique_op_id(), op->get_context()->get_task_name(),
                     op->get_context()->get_unique_id());
@@ -1863,7 +1870,9 @@ namespace Legion {
       {
         if (local_node->intersects_with(node))
         {
-          log_run.error("Illegal partial restriction operation performed by "
+          MessageDescriptor ILLEGAL_PARTIAL_RESTRICTION(1103, "undefined");
+          log_run.error(ILLEGAL_PARTIAL_RESTRICTION.id(),
+                        "Illegal partial restriction operation performed by "
                         "attach operation (ID %lld) in task %s (ID %lld)",
                         op->get_unique_op_id(), 
                         op->get_context()->get_task_name(),
