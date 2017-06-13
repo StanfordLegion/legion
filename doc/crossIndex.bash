@@ -15,10 +15,13 @@
 #  
 #!/bin/bash
 
+set -e
+
 echo 
 echo INITIALIZE
 echo
 
+cd "$(dirname "${BASH_SOURCE[0]}")"
 
 rm -rf ./publish
 mkdir -p ./publish/glossary ./publish/design_patterns
