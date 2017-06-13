@@ -212,7 +212,6 @@ function base.task:set_params_struct(t)
 end
 
 function base.task:get_params_struct()
-  self:complete()
   assert(self.params_struct)
   return self.params_struct
 end
@@ -224,46 +223,40 @@ function base.task:set_params_map_type(t)
 end
 
 function base.task:has_params_map_type()
-  self:complete()
   return self.params_map_type
 end
 
 function base.task:get_params_map_type()
-  self:complete()
   assert(self.params_map_type)
   return self.params_map_type
 end
 
 function base.task:set_params_map_label(label)
   assert(not self.params_map_label)
-  assert(label)
+  assert(terralib.islabel(label))
   self.params_map_label = label
 end
 
 function base.task:has_params_map_label()
-  self:complete()
   return self.params_map_label
 end
 
 function base.task:get_params_map_label()
-  self:complete()
   assert(self.params_map_label)
   return self.params_map_label
 end
 
 function base.task:set_params_map_symbol(symbol)
   assert(not self.params_map_symbol)
-  assert(symbol)
+  assert(terralib.issymbol(symbol))
   self.params_map_symbol = symbol
 end
 
 function base.task:has_params_map_symbol()
-  self:complete()
   return self.params_map_symbol
 end
 
 function base.task:get_params_map_symbol()
-  self:complete()
   assert(self.params_map_symbol)
   return self.params_map_symbol
 end
@@ -274,7 +267,6 @@ function base.task:set_field_id_param_labels(t)
 end
 
 function base.task:get_field_id_param_labels()
-  self:complete()
   assert(self.field_id_param_labels)
   return self.field_id_param_labels
 end
@@ -285,7 +277,6 @@ function base.task:set_field_id_param_symbols(t)
 end
 
 function base.task:get_field_id_param_symbols()
-  self:complete()
   assert(self.field_id_param_symbols)
   return self.field_id_param_symbols
 end

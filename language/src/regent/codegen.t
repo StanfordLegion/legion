@@ -8319,19 +8319,7 @@ local function unpack_param_helper(cx, node, param_type, params_map_type, i)
   return helper
 end
 
-function codegen.top_task(cx, node)
-  local task = node.prototype
-  local variant = cx.variant
-  assert(variant)
-  assert(task == variant.task)
-
-  -- we temporaily turn off generating two task versions for cuda tasks
-  if node.annotations.cuda:is(ast.annotation.Demand) then
-    node = node { region_divergence = false }
-  end
-
-  variant:set_config_options(node.config_options)
-
+local function setup_regent_calling_convention_metadata(node, task)
   local params_struct_type = terralib.types.newstruct()
   params_struct_type.entries = terralib.newlist()
   task:set_params_struct(params_struct_type)
@@ -8355,11 +8343,6 @@ function codegen.top_task(cx, node)
     task:set_params_map_symbol(params_map_symbol)
   end
 
-  local params = node.params:map(
-    function(param) return param.symbol end)
-  local param_types = task:get_type().parameters
-  local return_type = node.return_type
-
   -- Normal arguments are straight out of the param types.
   params_struct_type.entries:insertall(node.params:map(
     function(param)
@@ -8372,6 +8355,7 @@ function codegen.top_task(cx, node)
   -- reserve some extra slots in the params struct here for those
   -- field IDs.
   local fn_type = task:get_type()
+  local param_types = task:get_type().parameters
   local param_field_id_labels = data.newmap()
   local param_field_id_symbols = data.newmap()
   for _, region_i in pairs(std.fn_params_with_privileges_by_index(fn_type)) do
@@ -8397,6 +8381,20 @@ function codegen.top_task(cx, node)
   end
   task:set_field_id_param_labels(param_field_id_labels)
   task:set_field_id_param_symbols(param_field_id_symbols)
+end
+
+function codegen.top_task(cx, node)
+  local task = node.prototype
+  local variant = cx.variant
+  assert(variant)
+  assert(task == variant.task)
+
+  -- we temporaily turn off generating two task versions for cuda tasks
+  if node.annotations.cuda:is(ast.annotation.Demand) then
+    node = node { region_divergence = false }
+  end
+
+  variant:set_config_options(node.config_options)
 
   local c_task = terralib.newsymbol(c.legion_task_t, "task")
   local c_regions = terralib.newsymbol(&c.legion_physical_region_t, "regions")
@@ -8405,6 +8403,20 @@ function codegen.top_task(cx, node)
   local c_runtime = terralib.newsymbol(c.legion_runtime_t, "runtime")
   local c_params = terralib.newlist({
       c_task, c_regions, c_num_regions, c_context, c_runtime })
+
+  local params = node.params:map(
+    function(param) return param.symbol end)
+
+  local param_types = task:get_type().parameters
+  local return_type = node.return_type
+
+  local params_struct_type = task:get_params_struct()
+  local params_map_type = task:has_params_map_type() and
+    task:get_params_map_type()
+  local params_map_label = task:has_params_map_label() and
+    task:get_params_map_label()
+  local params_map_symbol = task:has_params_map_symbol() and
+    task:get_params_map_symbol()
 
   local cx = cx:new_task_scope(return_type,
                                task:get_constraints(),
@@ -8807,6 +8819,9 @@ end
 function codegen.top(cx, node)
   if node:is(ast.typed.top.Task) then
     local task = node.prototype
+
+    setup_regent_calling_convention_metadata(node, task)
+
     if not (node.annotations.cuda:is(ast.annotation.Demand) and
             cudahelper.check_cuda_available())
     then
