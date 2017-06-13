@@ -876,7 +876,7 @@ function type_check.expr_call(cx, node)
                   " for arguments " .. data.newtuple(unpack(arg_types)):mkstring(", "))
       end
     elseif std.is_task(fn.value) then
-      fn_type = fn.value:gettype()
+      fn_type = fn.value:get_type()
     elseif type(fn.value) == "function" then
       fn_type = untyped_fn
     else
@@ -923,7 +923,7 @@ function type_check.expr_call(cx, node)
       mapping[param_type] = arg_symbol
     end
 
-    local privileges = fn.value:getprivileges()
+    local privileges = fn.value:get_privileges()
     for _, privilege_list in ipairs(privileges) do
       for _, privilege in ipairs(privilege_list) do
         local privilege_type = privilege.privilege
@@ -1743,7 +1743,12 @@ function type_check.expr_image_by_task(cx, node)
   local partition = type_check.expr(cx, node.partition)
   local partition_type = std.check_read(cx, partition)
   local task = type_check.expr_function(cx, node.region.region)
-  local task_type = task.value:gettype()
+  local task_type
+  if std.is_task(task.value) then
+    task_type = task.value:get_type()
+  else
+    task_type = task.value:gettype()
+  end
 
   if parent_type:is_opaque() then
     report.error(node, "type mismatch in argument 1: expected region with structured indexspace " ..
@@ -3643,7 +3648,7 @@ end
 function type_check.top_task(cx, node)
   local return_type = node.return_type
   local cx = cx:new_task_scope(return_type)
-  cx:set_external(node.prototype:getexternal())
+  cx:set_external(node.prototype:get_primary_variant():is_external())
 
   local mapping = {}
   local params = node.params:map(
@@ -3654,7 +3659,7 @@ function type_check.top_task(cx, node)
 
   local task_type = terralib.types.functype(
     params:map(function(param) return param.param_type end), return_type, false)
-  prototype:settype(task_type)
+  prototype:set_type(task_type)
 
   local privileges = type_check.privileges(cx, node.privileges)
   for _, privilege_list in ipairs(privileges) do
@@ -3667,7 +3672,7 @@ function type_check.top_task(cx, node)
       cx:intern_region(region:gettype())
     end
   end
-  prototype:setprivileges(privileges)
+  prototype:set_privileges(privileges)
 
   local coherence_modes = type_check.coherence_modes(cx, node.coherence_modes)
   prototype:set_coherence_modes(coherence_modes)
@@ -3690,7 +3695,7 @@ function type_check.top_task(cx, node)
   end
   task_type = terralib.types.functype(
     params:map(function(param) return param.param_type end), return_type, false)
-  prototype:settype(task_type, true)
+  prototype:set_type(task_type, true)
 
   for _, fixup_node in ipairs(cx.fixup_nodes) do
     if fixup_node:is(ast.typed.expr.Call) then

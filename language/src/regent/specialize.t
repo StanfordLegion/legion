@@ -1801,11 +1801,15 @@ end
 
 function specialize.top_task(cx, node)
   local cx = cx:new_local_scope()
-  local proto = std.newtask(node.name)
-  proto:setexternal(node.annotations.external:is(ast.annotation.Demand))
-  proto:setinline(node.annotations.inline)
+
+  local task = std.new_task(node.name)
+  local variant = task:make_variant("primary")
+  task:set_primary_variant(variant)
+
+  variant:set_is_external(node.annotations.external:is(ast.annotation.Demand))
+  variant:set_is_inline(node.annotations.inline)
   if #node.name == 1 then
-    cx.env:insert(node, node.name[1], proto)
+    cx.env:insert(node, node.name[1], task)
   end
   cx = cx:new_local_scope()
 
@@ -1830,7 +1834,7 @@ function specialize.top_task(cx, node)
     conditions = conditions,
     constraints = constraints,
     body = body,
-    prototype = proto,
+    prototype = task,
     annotations = node.annotations,
     span = node.span,
   }

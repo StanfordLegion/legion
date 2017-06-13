@@ -228,7 +228,7 @@ function inline_tasks.expr(cx, node)
     end
 
     local task = node.fn.value
-    local task_ast = task:hasast()
+    local task_ast = task:get_primary_variant():has_ast()
     if node.annotations.inline:is(ast.annotation.Demand) then
       check_valid_inline_task(task_ast)
     elseif not task_ast or
@@ -488,7 +488,7 @@ function inline_tasks.top(cx, node)
       check_valid_inline_task(node)
     end
     local new_node = inline_tasks.top_task(cx, node)
-    new_node.prototype:setast(new_node)
+    new_node.prototype:get_primary_variant():set_ast(new_node)
     return new_node
 
   elseif node:is(ast.typed.top.Fspace) then

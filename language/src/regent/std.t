@@ -3389,7 +3389,12 @@ end
 -- ## Tasks
 -- #################
 
-std.newtask = base.newtask
+std.initial_regent_task_id = base.initial_regent_task_id
+
+std.new_variant = base.new_variant
+std.is_variant = base.is_variant
+
+std.new_task = base.new_task
 std.is_task = base.is_task
 
 function base.task:printpretty()
@@ -3684,29 +3689,32 @@ function std.setup(main_task, extra_setup_thunk)
   end
 
   local task_registrations = tasks:map(
-    function(task)
-      local options = task:get_config_options()
+    function(variant)
+      local task = variant.task
+
+      local options = variant:get_config_options()
 
       local proc_types = {c.LOC_PROC, c.IO_PROC}
-      if task:getcuda() then proc_types = {c.TOC_PROC} end
+      if variant:is_cuda() then proc_types = {c.TOC_PROC} end
       if std.config["cuda"] and task:is_shard_task() then
         proc_types[#proc_types + 1] = c.TOC_PROC
       end
 
-      local wrapped_task = make_task_wrapper(task:getdefinition())
+      local wrapped_task = make_task_wrapper(variant:get_definition())
 
       local layout_constraints = terralib.newsymbol(
         c.legion_task_layout_constraint_set_t, "layout_constraints")
       local layout_constraint_actions = terralib.newlist()
       if std.config["layout-constraints"] then
-        local fn_type = task:gettype()
+        local fn_type = task:get_type()
         local param_types = fn_type.parameters
         local region_i = 0
         for _, param_i in ipairs(std.fn_param_regions_by_index(fn_type)) do
           local param_type = param_types[param_i]
           local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
-            std.find_task_privileges(param_type, task:getprivileges(),
-                                     task:get_coherence_modes(), task:get_flags())
+            std.find_task_privileges(
+              param_type, task:get_privileges(), task:get_coherence_modes(),
+              task:get_flags())
           for i, privilege in ipairs(privileges) do
             local field_types = privilege_field_types[i]
 
@@ -3717,7 +3725,7 @@ function std.setup(main_task, extra_setup_thunk)
               local field_type = field_types[1]
               layout = layout_reduction[op][field_type]
             end
-            if options.inner or task:getexternal() then
+            if options.inner or variant:is_external() then
               -- No layout constraints for inner tasks
               layout = layout_unconstrained
             end
@@ -3745,8 +3753,8 @@ function std.setup(main_task, extra_setup_thunk)
           }
 
           c.legion_runtime_preregister_task_variant_fnptr(
-            [task:gettaskid()],
-            [task:getname():concat(".")],
+            [task:get_task_id()],
+            [task:get_name():concat(".")],
             execution_constraints, layout_constraints, options,
             [wrapped_task], nil, 0)
           c.legion_execution_constraint_set_destroy(execution_constraints)
@@ -3763,8 +3771,8 @@ function std.setup(main_task, extra_setup_thunk)
     cudahelper.link_driver_library()
     local all_kernels = {}
     tasks:map(function(task)
-      if task:getcuda() then
-        local kernels = task:getcudakernels()
+      if variant:is_cuda() then
+        local kernels = variant:get_cuda_kernels()
         if kernels ~= nil then
           for k, v in pairs(kernels) do
             all_kernels[k] = v
@@ -3788,7 +3796,7 @@ function std.setup(main_task, extra_setup_thunk)
     [task_registrations];
     [cuda_setup];
     [extra_setup];
-    c.legion_runtime_set_top_level_task_id([main_task:gettaskid()])
+    c.legion_runtime_set_top_level_task_id([main_task:get_task_id()])
     return c.legion_runtime_start(argc, argv, false)
   end
 

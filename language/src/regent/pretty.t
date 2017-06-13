@@ -210,7 +210,7 @@ end
 function pretty.expr_function(cx, node)
   local name
   if std.is_task(node.value) then
-    name = node.value:getname():mkstring(".")
+    name = node.value:get_name():mkstring(".")
   elseif terralib.isfunction(node.value) then
     name = node.value:getname()
   else
