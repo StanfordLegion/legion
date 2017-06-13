@@ -91,7 +91,7 @@ echo
 echo CREATE THE INDEX PAGE
 echo 
 
-./createIndexPage.bash ./publish
+./createIndexPage.bash 
 
 echo 
 echo DONE

@@ -15,21 +15,21 @@
 #  
 #!/bin/bash
 
-PUBLISHED_DIR=$1
-OUTPUT_FILE="${PUBLISHED_DIR}/index.html"
+PUBLISHED_DIR=./publish
 
-echo === Creating ${OUTPUT_FILE} ===
-
-rm -f "${OUTPUT_FILE}"
 rm -f .tmp_pages
 ls -1 "${PUBLISHED_DIR}" > .tmp_pages
 
-echo "---" >> "${OUTPUT_FILE}"
-echo "layout: page" >> "${OUTPUT_FILE}"
-echo "---" >> "${OUTPUT_FILE}"
-
 while read PAGE
   do
+    OUTPUT_FILE="${PUBLISHED_DIR}/${PAGE}/index.html"
+    rm -f "${OUTPUT_FILE}"
+
+    echo ===== Creating "${OUTPUT_FILE}" ====
+    echo "---" >> "${OUTPUT_FILE}"
+    echo "layout: page" >> "${OUTPUT_FILE}"
+    echo "---" >> "${OUTPUT_FILE}"
+
     echo "<table style=\"width:100%\" border=1>" >> "${OUTPUT_FILE}"
     echo "<tr> ${PAGE} </tr>" >> "${OUTPUT_FILE}"
 
@@ -38,7 +38,7 @@ while read PAGE
 
     if [[ "${PAGE}" == "glossary" ]]
     then
-      ENTRIES_PER_ROW=10
+      ENTRIES_PER_ROW=8
     else
       ENTRIES_PER_ROW=1
     fi
@@ -51,7 +51,7 @@ while read PAGE
           echo "<tr>" >> "${OUTPUT_FILE}"
         fi
         STRIPPED_PAGE_ENTRY=`echo "${PAGE_ENTRY}" | sed -e "s/.html//"`
-        echo "<td><a href=\"${PAGE}/${PAGE_ENTRY}\">${STRIPPED_PAGE_ENTRY}</a></td>" | sed -e "s://:/:g" >> "${OUTPUT_FILE}"
+        echo "<td><a href=\"${PAGE_ENTRY}\">${STRIPPED_PAGE_ENTRY}</a></td>" | sed -e "s://:/:g" >> "${OUTPUT_FILE}"
         ENTRIES=$((${ENTRIES}+1))
         if [[ ${ENTRIES} -ge ${ENTRIES_PER_ROW} ]]
         then
