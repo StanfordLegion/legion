@@ -117,7 +117,7 @@ function ast_util.mk_expr_call(fn, args)
     fn_type = query_type
     expr_type = fn_type.returntype or terralib.types.unit
   else
-    fn_type = fn:gettype()
+    fn_type = fn:get_type()
     expr_type = fn_type.returntype or terralib.types.unit
   end
 

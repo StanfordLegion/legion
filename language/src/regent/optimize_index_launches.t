@@ -77,13 +77,13 @@ local function check_privilege_noninterference(cx, task, arg,
   local privileges_by_field_path, coherence_modes_by_field_path =
     std.group_task_privileges_by_field_path(
       std.find_task_privileges(
-        param_region_type, task:getprivileges(),
+        param_region_type, task:get_privileges(),
         task:get_coherence_modes(), task:get_flags()))
   local other_privileges_by_field_path, other_coherence_modes_by_field_path =
     std.group_task_privileges_by_field_path(
       std.find_task_privileges(
         other_param_region_type,
-        task:getprivileges(), task:get_coherence_modes(), task:get_flags()))
+        task:get_privileges(), task:get_coherence_modes(), task:get_flags()))
 
   for field_path, privilege in pairs(privileges_by_field_path) do
     local other_privilege = other_privileges_by_field_path[field_path]
@@ -133,7 +133,7 @@ local function analyze_noninterference_self(
   assert(param_region_type)
   local privileges, privilege_field_paths, privilege_field_types,
         privilege_coherence_modes, privilege_flags = std.find_task_privileges(
-    param_region_type, task:getprivileges(),
+    param_region_type, task:get_privileges(),
     task:get_coherence_modes(), task:get_flags())
   for i, privilege in ipairs(privileges) do
     local field_paths = privilege_field_paths[i]
@@ -470,7 +470,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
   --     they come from a disjoint partition, as long as indexing into
   --     said partition is provably disjoint.
 
-  local param_types = task:gettype().parameters
+  local param_types = task:get_type().parameters
   local args = call.args
   local args_provably = ast.IndexLaunchArgsProvably {
     invariant = terralib.newlist(),
