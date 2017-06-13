@@ -12,24 +12,12 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- runs-with:
--- []
-
--- FIXME: Uses deprecated APIs
+local tasklib = require("manual_capi_tasklib")
+local c = tasklib.c
 
 -- This is an example of a failure in the runtime when allocating
 -- fields after the region itself has been created.
 local broken = false
-
--- Note: The binding library is only being used to load the dynamic
--- library for Legion, not for any actual functionality. All Legion
--- calls happen through the C API.
-require('legionlib')
-c = terralib.includecstring([[
-#include "legion_c.h"
-#include <stdio.h>
-#include <stdlib.h>
-]])
 
 FID_1 = 1
 FID_2 = 2
@@ -91,16 +79,17 @@ local args = require("manual_capi_args")
 
 terra main()
   c.printf("in main...\n")
-  c.legion_runtime_register_task_void(
+
+  var execution_constraints = c.legion_execution_constraint_set_create()
+  c.legion_execution_constraint_set_add_processor_constraint(execution_constraints, c.LOC_PROC)
+  var layout_constraints = c.legion_task_layout_constraint_set_create()
+  [ tasklib.preregister_task(top_level_task) ](
     TID_TOP_LEVEL_TASK,
-    c.LOC_PROC,
-    true,
-    false,
-    1, -- c.AUTO_GENERATE_ID,
+    "top_level_task",
+    execution_constraints, layout_constraints,
     c.legion_task_config_options_t {
       leaf = false, inner = false, idempotent = false},
-    "top_level_task",
-    top_level_task)
+    nil, 0)
   c.legion_runtime_set_top_level_task_id(TID_TOP_LEVEL_TASK)
   [args.argv_setup]
   c.legion_runtime_start(args.argc, args.argv, false)

@@ -135,7 +135,7 @@ namespace Legion {
         static inline void end_task(Runtime *rt, 
                                     InternalContext ctx, T *result)
         {
-          // Otherwise this is a struct, so see if it has serialization methods 
+          // Otherwise this is a struct, so see if it has serialization methods
           NonPODSerializer<T,HasSerialize<T>::value>::end_task(rt, ctx, result);
         }
         static inline Future from_value(Runtime *rt, const T *value)
@@ -1956,7 +1956,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline RegionRequirement& RegionRequirement::add_flags(RegionFlags new_flags)
+    inline RegionRequirement& RegionRequirement::add_flags(
+                                                          RegionFlags new_flags)
     //--------------------------------------------------------------------------
     {
       flags |= new_flags;
@@ -4397,7 +4398,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline std::ostream& operator<<(std::ostream& os, const LogicalPartition& lp)
+    inline std::ostream& operator<<(std::ostream& os,const LogicalPartition& lp)
     //--------------------------------------------------------------------------
     {
       os << "LogicalPartition(" << lp.tree_id << "," 

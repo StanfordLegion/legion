@@ -12,20 +12,8 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- runs-with:
--- []
-
--- FIXME: Uses deprecated APIs
-
--- Note: The binding library is only being used to load the dynamic
--- library for Legion, not for any actual functionality. All Legion
--- calls happen through the C API.
-require('legionlib')
-c = terralib.includecstring([[
-#include "legion_c.h"
-#include <stdio.h>
-#include <stdlib.h>
-]])
+local tasklib = require("manual_capi_tasklib")
+local c = tasklib.c
 
 FID_1 = 1
 FID_2 = 2
@@ -37,7 +25,7 @@ terra sub_task(task : c.legion_task_t,
                regions : &c.legion_physical_region_t,
                num_regions : uint32,
                ctx : c.legion_context_t,
-               runtime : c.legion_runtime_t) : c.legion_task_result_t
+               runtime : c.legion_runtime_t) : int32
   var arglen = c.legion_task_get_arglen(task)
   c.printf("in sub_task (%u arglen, %u regions)...\n",
                 arglen, num_regions)
@@ -60,10 +48,7 @@ terra sub_task(task : c.legion_task_t,
 
   c.legion_accessor_array_destroy(a1)
 
-  var v : int32 = 456
-  var result = c.legion_task_result_create(&v, terralib.sizeof(int32))
-  c.printf("returning %d\n", v)
-  return result
+  return 456
 end
 
 terra top_level_task(task : c.legion_task_t,
@@ -129,11 +114,9 @@ terra top_level_task(task : c.legion_task_t,
     launcher, rr1, f1, true --[[ inst ]])
 
   var f = c.legion_task_launcher_execute(runtime, ctx, launcher)
-  var result = c.legion_future_get_result(f)
-  var v = @[&int32](result.value)
+  var v : int32 = @[&int32](c.legion_future_get_untyped_pointer(f))
   c.printf("result from subtask %d\n", v)
   if v ~= 456 then c.abort() end
-  c.legion_task_result_destroy(result)
   c.legion_future_destroy(f)
 
   c.legion_logical_partition_destroy(runtime, ctx, lp)
@@ -147,26 +130,24 @@ local args = require("manual_capi_args")
 
 terra main()
   c.printf("in main...\n")
-  c.legion_runtime_register_task_void(
+
+  var execution_constraints = c.legion_execution_constraint_set_create()
+  c.legion_execution_constraint_set_add_processor_constraint(execution_constraints, c.LOC_PROC)
+  var layout_constraints = c.legion_task_layout_constraint_set_create()
+  [ tasklib.preregister_task(top_level_task) ](
     TID_TOP_LEVEL_TASK,
-    c.LOC_PROC,
-    true,
-    false,
-    1, -- c.AUTO_GENERATE_ID,
-    c.legion_task_config_options_t {
-      leaf = false, inner = false, idempotent = false},
     "top_level_task",
-    top_level_task)
-  c.legion_runtime_register_task(
-    TID_SUB_TASK,
-    c.LOC_PROC,
-    true,
-    false,
-    1, -- c.AUTO_GENERATE_ID,
+    execution_constraints, layout_constraints,
     c.legion_task_config_options_t {
       leaf = false, inner = false, idempotent = false},
+    nil, 0)
+  [ tasklib.preregister_task(sub_task) ](
+    TID_SUB_TASK,
     "sub_task",
-    sub_task)
+    execution_constraints, layout_constraints,
+    c.legion_task_config_options_t {
+      leaf = false, inner = false, idempotent = false},
+    nil, 0)
   c.legion_runtime_set_top_level_task_id(TID_TOP_LEVEL_TASK)
   [args.argv_setup]
   c.legion_runtime_start(args.argc, args.argv, false)
