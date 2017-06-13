@@ -96,6 +96,19 @@ namespace Realm {
 	alloc_first = r->first + ofs;
 	RT alloc_last = alloc_first + size;
 
+        // do we need to carve off a new (free) block before us?
+        if(alloc_first != r->first) {
+          Range *new_prev = new Range(r->first, alloc_first);
+          r->first = alloc_first;
+          new_prev->prev = r->prev; new_prev->prev->next = new_prev;
+          new_prev->next = r;
+          r->prev = new_prev;
+          new_prev->prev_free = r->prev_free;
+          new_prev->prev_free->next_free = new_prev;
+          new_prev->next_free = r;
+          r->prev_free = new_prev;
+        }
+
 	// four cases to deal with
 	if(alloc_last == r->last) {
 	  if(alloc_first == r->first) {
