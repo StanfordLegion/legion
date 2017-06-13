@@ -342,6 +342,14 @@ ifeq ($(strip $(USE_MPI)),1)
 endif
 
 
+# libz
+USE_ZLIB ?= 1
+ZLIB_LIBNAME ?= z
+ifeq ($(strip $(USE_ZLIB)),1)
+  CC_FLAGS      += -DUSE_ZLIB
+  LEGION_LD_FLAGS += -l$(ZLIB_LIBNAME)
+endif
+
 
 ifeq ($(strip $(DEBUG)),1)
 CC_FLAGS	+= -DDEBUG_REALM -DDEBUG_LEGION -ggdb #-ggdb -Wall
@@ -369,9 +377,9 @@ ASM_SRC		?=
 
 # Set the source files
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/runtime_impl.cc \
-	           $(LG_RT_DIR)/channel.cc \
-	           $(LG_RT_DIR)/channel_disk.cc \
-	           $(LG_RT_DIR)/lowlevel_dma.cc \
+	           $(LG_RT_DIR)/realm/transfer/channel.cc \
+	           $(LG_RT_DIR)/realm/transfer/channel_disk.cc \
+	           $(LG_RT_DIR)/realm/transfer/lowlevel_dma.cc \
 	           $(LG_RT_DIR)/realm/module.cc \
 	           $(LG_RT_DIR)/realm/threads.cc \
 	           $(LG_RT_DIR)/realm/faults.cc \
@@ -387,7 +395,7 @@ LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/runtime_impl.cc \
 		   $(LG_RT_DIR)/realm/machine_impl.cc \
 		   $(LG_RT_DIR)/realm/sampling_impl.cc \
                    $(LG_RT_DIR)/lowlevel.cc \
-                   $(LG_RT_DIR)/lowlevel_disk.cc
+                   $(LG_RT_DIR)/realm/transfer/lowlevel_disk.cc
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/numa/numa_module.cc \
 		   $(LG_RT_DIR)/realm/numa/numasysif.cc
 ifeq ($(strip $(USE_OPENMP)),1)
@@ -439,6 +447,7 @@ HIGH_RUNTIME_SRC += $(LG_RT_DIR)/legion/legion.cc \
 		    $(LG_RT_DIR)/legion/legion_trace.cc \
 		    $(LG_RT_DIR)/legion/legion_spy.cc \
 		    $(LG_RT_DIR)/legion/legion_profiling.cc \
+		    $(LG_RT_DIR)/legion/legion_profiling_serializer.cc \
 		    $(LG_RT_DIR)/legion/legion_instances.cc \
 		    $(LG_RT_DIR)/legion/legion_views.cc \
 		    $(LG_RT_DIR)/legion/legion_analysis.cc \

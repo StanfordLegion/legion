@@ -32,6 +32,9 @@
 #ifndef USE_CUDA
 #cmakedefine USE_CUDA
 #endif 
+#ifndef ENABLE_LEGION_TLS
+#cmakedefine ENABLE_LEGION_TLS
+#endif
 #ifndef GASNETI_BUG1389_WORKAROUND
 #cmakedefine GASNETI_BUG1389_WORKAROUND @GASNETI_BUG1389_WORKAROUND@
 #endif

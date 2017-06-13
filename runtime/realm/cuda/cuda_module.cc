@@ -20,8 +20,8 @@
 #include "realm/cmdline.h"
 #include "realm/event_impl.h"
 
-#include "lowlevel_dma.h"
-#include "channel.h"
+#include <realm/transfer/lowlevel_dma.h>
+#include <realm/transfer/channel.h>
 
 #include "realm/cuda/cudart_hijack.h"
 
@@ -354,7 +354,7 @@ namespace Realm {
     {
       log_gpudma.info("gpu memcpy 2d: dst=%p src=%p "
                    "dst_off=%ld src_off=%ld bytes=%ld lines=%ld kind=%d",
-                   dst, src, (long)dst_stride, (long)src_stride, bytes, lines, kind); 
+		      dst, src, (long)dst_stride, (long)src_stride, (long)bytes, (long)lines, kind); 
       CUDA_MEMCPY2D copy_info;
       if (kind == GPU_MEMCPY_PEER_TO_PEER) {
         // If we're doing peer to peer, just let unified memory it deal with it
@@ -386,7 +386,7 @@ namespace Realm {
 
       log_gpudma.info("gpu memcpy 2d complete: dst=%p src=%p "
                    "dst_off=%ld src_off=%ld bytes=%ld lines=%ld kind=%d",
-                   dst, src, (long)dst_stride, (long)src_stride, bytes, lines, kind);
+		      dst, src, (long)dst_stride, (long)src_stride, (long)bytes, (long)lines, kind);
     }
 
   ////////////////////////////////////////////////////////////////////////
@@ -417,8 +417,8 @@ namespace Realm {
                       "dst_off=%ld src_off=%ld dst_hei = %ld src_hei = %ld"
                       "bytes=%ld height=%ld depth=%ld kind=%d",
                       dst, src, (long)dst_stride, (long)src_stride,
-                      (long)dst_height, (long)src_height, bytes, height,
-                      depth, kind);
+                      (long)dst_height, (long)src_height, (long)bytes, (long)height,
+                      (long)depth, kind);
       CUDA_MEMCPY3D copy_info;
       if (kind == GPU_MEMCPY_PEER_TO_PEER) {
         // If we're doing peer to peer, just let unified memory it deal with it
@@ -456,11 +456,11 @@ namespace Realm {
         stream->add_notification(notification);
 
        log_gpudma.info("gpu memcpy 3d complete: dst=%p src=%p"
-                      "dst_off=%ld src_off=%ld dst_hei = %ld src_hei = %ld"
-                      "bytes=%ld height=%ld depth=%ld kind=%d",
-                      dst, src, (long)dst_stride, (long)src_stride,
-                      (long)dst_height, (long)src_height, bytes, height,
-                      depth, kind);
+		       "dst_off=%ld src_off=%ld dst_hei = %ld src_hei = %ld"
+		       "bytes=%ld height=%ld depth=%ld kind=%d",
+		       dst, src, (long)dst_stride, (long)src_stride,
+		       (long)dst_height, (long)src_height, (long)bytes, (long)height,
+		       (long)depth, kind);
     }
 
     ////////////////////////////////////////////////////////////////////////

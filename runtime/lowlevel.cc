@@ -34,7 +34,7 @@
 
 using namespace LegionRuntime::Accessor;
 
-#include "lowlevel_dma.h"
+#include "realm/transfer/lowlevel_dma.h"
 
 #include <sys/types.h>
 #include <sys/stat.h>

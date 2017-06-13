@@ -27,11 +27,11 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/
 # Realm runtime
 list(APPEND LOW_RUNTIME_SRC
   lowlevel_config.h
-  lowlevel_disk.cc
-  channel.h                 channel.cc
-  channel_disk.h            channel_disk.cc
-  lowlevel_dma.h            lowlevel_dma.cc
-  lowlevel_dma.inl
+  realm/transfer/lowlevel_disk.cc
+  realm/transfer/channel.h                 realm/transfer/channel.cc
+  realm/transfer/channel_disk.h            realm/transfer/channel_disk.cc
+  realm/transfer/lowlevel_dma.h            realm/transfer/lowlevel_dma.cc
+  realm/transfer/lowlevel_dma.inl
   lowlevel.h                lowlevel.cc
   lowlevel_impl.h
   realm/event_impl.h        realm/event_impl.cc
@@ -205,32 +205,33 @@ list(APPEND MAPPER_SRC
 # Legion runtime
 list(APPEND HIGH_RUNTIME_SRC
   legion/field_tree.h
-  legion/garbage_collection.h  legion/garbage_collection.cc
-  legion/interval_tree.h
-  legion/legion_allocation.h
-  legion/legion_analysis.h     legion/legion_analysis.cc
-  legion/legion_c.h            legion/legion_c.cc
-  legion/legion_config.h
-  legion/legion_constraint.h   legion/legion_constraint.cc
-  legion/legion_context.h      legion/legion_context.cc
-  legion/legion_c_util.h
-  legion/legion.h              legion/legion.cc
-  legion/legion.inl
-  legion/legion_instances.h    legion/legion_instances.cc
-  legion/legion_mapping.h      legion/legion_mapping.cc
-  legion/legion_ops.h          legion/legion_ops.cc
-  legion/legion_profiling.h    legion/legion_profiling.cc
+  legion/garbage_collection.h             legion/garbage_collection.cc
+  legion/interval_tree.h                 
+  legion/legion_allocation.h             
+  legion/legion_analysis.h                legion/legion_analysis.cc
+  legion/legion_c.h                       legion/legion_c.cc
+  legion/legion_config.h                 
+  legion/legion_constraint.h              legion/legion_constraint.cc
+  legion/legion_context.h                 legion/legion_context.cc
+  legion/legion_c_util.h                 
+  legion/legion.h                         legion/legion.cc
+  legion/legion.inl                      
+  legion/legion_instances.h               legion/legion_instances.cc
+  legion/legion_mapping.h                 legion/legion_mapping.cc
+  legion/legion_ops.h                     legion/legion_ops.cc
+  legion/legion_profiling.h               legion/legion_profiling.cc
+  legion/legion_profiling_serializer.h    legion/legion_profiling_serializer.cc
   legion/legion_realm.h
-  legion/legion_spy.h          legion/legion_spy.cc
-  legion/legion_tasks.h        legion/legion_tasks.cc
-  legion/legion_trace.h        legion/legion_trace.cc
-  legion/legion_types.h
-  legion/legion_utilities.h
-  legion/legion_views.h        legion/legion_views.cc
-  legion/mapper_manager.h      legion/mapper_manager.cc
-  legion/rectangle_set.h
-  legion/region_tree.h         legion/region_tree.cc
-  legion/runtime.h             legion/runtime.cc
+  legion/legion_spy.h                     legion/legion_spy.cc
+  legion/legion_tasks.h                   legion/legion_tasks.cc
+  legion/legion_trace.h                   legion/legion_trace.cc
+  legion/legion_types.h                 
+  legion/legion_utilities.h             
+  legion/legion_views.h                   legion/legion_views.cc
+  legion/mapper_manager.h                 legion/mapper_manager.cc
+  legion/rectangle_set.h                
+  legion/region_tree.h                    legion/region_tree.cc
+  legion/runtime.h                        legion/runtime.cc
 )
 
 add_library(HighLevelRuntime ${MAPPER_SRC} ${HIGH_RUNTIME_SRC})

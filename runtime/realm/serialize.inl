@@ -485,6 +485,18 @@ namespace Realm {
     // STL container helpers
     //
 
+    template <typename S, typename T1, typename T2>
+    bool serialize(S& s, const std::pair<T1, T2>& p)
+    {
+      return (s << p.first) && (s << p.second);
+    }
+
+    template <typename S, typename T1, typename T2>
+    bool deserialize(S& s, std::pair<T1, T2>& p)
+    {
+      return (s >> p.first) && (s >> p.second);
+    }
+
     // vector is special because it can still be trivially_copyable
     template <typename S, typename T>
     bool serialize(S& s, const std::vector<T>& v)
@@ -619,7 +631,10 @@ namespace Realm {
     inline /*static*/ bool PolymorphicSerdezHelper<T>::serialize(FixedBufferSerializer& serializer, const T& obj)
     {
       const char *type_name = typeid(obj).name();
-      assert(get_subclasses().by_typename.count(type_name) != 0);
+      if(get_subclasses().by_typename.count(type_name) == 0) {
+	std::cerr << "FATAL: class " << type_name << " not registered with serdez helper for " << typeid(T).name() << std::endl;
+	assert(0);
+      }
       const PolymorphicSerdezIntfc<T> *sc = get_subclasses().by_typename[type_name];
       return (serializer << sc->tag) && sc->serialize(serializer, obj);
     }
@@ -628,7 +643,10 @@ namespace Realm {
     inline /*static*/ bool PolymorphicSerdezHelper<T>::serialize(DynamicBufferSerializer& serializer, const T& obj)
     {
       const char *type_name = typeid(obj).name();
-      assert(get_subclasses().by_typename.count(type_name) != 0);
+      if(get_subclasses().by_typename.count(type_name) == 0) {
+	std::cerr << "FATAL: class " << type_name << " not registered with serdez helper for " << typeid(T).name() << std::endl;
+	assert(0);
+      }
       const PolymorphicSerdezIntfc<T> *sc = get_subclasses().by_typename[type_name];
       return (serializer << sc->tag) && sc->serialize(serializer, obj);
     }
@@ -637,7 +655,10 @@ namespace Realm {
     inline /*static*/ bool PolymorphicSerdezHelper<T>::serialize(ByteCountSerializer& serializer, const T& obj)
     {
       const char *type_name = typeid(obj).name();
-      assert(get_subclasses().by_typename.count(type_name) != 0);
+      if(get_subclasses().by_typename.count(type_name) == 0) {
+	std::cerr << "FATAL: class " << type_name << " not registered with serdez helper for " << typeid(T).name() << std::endl;
+	assert(0);
+      }
       const PolymorphicSerdezIntfc<T> *sc = get_subclasses().by_typename[type_name];
       return (serializer << sc->tag) && sc->serialize(serializer, obj);
     }
@@ -647,7 +668,10 @@ namespace Realm {
     {
       TypeTag tag;
       if(!(deserializer >> tag)) return 0;
-      assert(get_subclasses().by_tag.count(tag) != 0);
+      if(get_subclasses().by_tag.count(tag) == 0) {
+	std::cerr << "FATAL: unknown tag " << tag << " in serdez helper for " << typeid(T).name() << std::endl;
+	assert(0);
+      }
       return get_subclasses().by_tag[tag]->deserialize_new(deserializer);
     }
   
@@ -682,7 +706,9 @@ namespace Realm {
     template <typename T1, typename T2>
     inline PolymorphicSerdezSubclass<T1,T2>::PolymorphicSerdezSubclass(void)
       : PolymorphicSerdezIntfc<T1>(typeid(T2).name())
-    {}
+    {
+      // TODO: some sort of template-based way to see if T2 defines deserialize_new?
+    }
 
     template <typename T1, typename T2>
     inline bool PolymorphicSerdezSubclass<T1,T2>::serialize(FixedBufferSerializer& serializer, const T1& obj) const

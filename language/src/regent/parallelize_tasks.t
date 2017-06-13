@@ -3245,8 +3245,11 @@ function parallelize_tasks.top_task(global_cx, node)
 
   -- Now make a new task AST node
   local task_name = node.name .. data.newtuple("parallelized")
-  local prototype = std.newtask(task_name)
-  node.prototype:set_parallel_variant(prototype)
+  local task = std.new_task(task_name)
+  local variant = task:make_variant("primary")
+  task:set_primary_variant(variant)
+  node.prototype:set_parallel_task(task)
+
   local params = terralib.newlist()
   -- Existing region-typed parameters will now refer to the subregions
   -- passed by indexspace launch. this will avoid rewriting types in AST nodes
@@ -3264,8 +3267,8 @@ function parallelize_tasks.top_task(global_cx, node)
 
   local task_type = terralib.types.functype(
     params:map(function(param) return param.param_type end), node.return_type, false)
-  prototype:settype(task_type)
-  prototype:set_param_symbols(
+  task:set_type(task_type)
+  task:set_param_symbols(
     params:map(function(param) return param.symbol end))
   local region_universe = {}
   local privileges = terralib.newlist()
@@ -3276,7 +3279,7 @@ function parallelize_tasks.top_task(global_cx, node)
   --    coherence_modes[region][field_path] = true
   --  end)
   --end)
-  privileges:insertall(node.prototype:getprivileges())
+  privileges:insertall(node.prototype:get_privileges())
   for region, _ in pairs(node.prototype:get_region_universe()) do
     region_universe[region] = true
   end
@@ -3299,13 +3302,13 @@ function parallelize_tasks.top_task(global_cx, node)
     --coherence_modes[region][field_path] = std.exclusive
     region_universe[region:gettype()] = true
   end
-	prototype:setprivileges(privileges)
-  prototype:set_coherence_modes(coherence_modes)
-  prototype:set_flags(node.flags)
-  prototype:set_conditions(node.conditions)
-  prototype:set_param_constraints(node.constraints)
-  prototype:set_constraints(node.constraints)
-  prototype:set_region_universe(region_universe)
+  task:set_privileges(privileges)
+  task:set_coherence_modes(coherence_modes)
+  task:set_flags(node.flags)
+  task:set_conditions(node.conditions)
+  task:set_param_constraints(node.constraints)
+  task:set_constraints(node.constraints)
+  task:set_region_universe(region_universe)
 
   local parallelized = parallelize_tasks.top_task_body(task_cx, normalized)
   local task_ast = ast.typed.top.Task {
@@ -3324,7 +3327,7 @@ function parallelize_tasks.top_task(global_cx, node)
       idempotent = false,
     },
     region_divergence = false,
-    prototype = prototype,
+    prototype = task,
     annotations = node.annotations {
       parallel = ast.annotation.Forbid { value = false },
     },
@@ -3332,7 +3335,7 @@ function parallelize_tasks.top_task(global_cx, node)
   }
 
   -- Hack: prevents parallelized verions from going through parallelizer again
-  global_cx[prototype] = {}
+  global_cx[task] = {}
   local task_ast_optimized = passes.optimize(task_ast)
   local task_code = passes.codegen(task_ast_optimized, true)
 
