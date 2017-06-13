@@ -3487,10 +3487,11 @@ end
 -- ## Main
 -- #################
 
-local tasks = terralib.newlist()
+local variants = terralib.newlist()
 
-function std.register_task(task)
-  tasks:insert(task)
+function std.register_variant(variant)
+  assert(std.is_variant(variant))
+  variants:insert(variant)
 end
 
 local function zero(value_type) return terralib.cast(value_type, 0) end
@@ -3688,7 +3689,7 @@ function std.setup(main_task, extra_setup_thunk)
     end
   end
 
-  local task_registrations = tasks:map(
+  local task_registrations = variants:map(
     function(variant)
       local task = variant.task
 

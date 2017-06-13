@@ -8837,7 +8837,7 @@ function codegen.top(cx, node)
           local cx = context.new_global_scope(cpu_variant)
           return codegen.top_task(cx, node)
       end)
-      std.register_task(cpu_variant)
+      std.register_variant(cpu_variant)
       return task
     else
       local cpu_variant = task:get_primary_variant()
@@ -8846,7 +8846,7 @@ function codegen.top(cx, node)
           local cx = context.new_global_scope(cpu_variant)
           return codegen.top_task(cx, node)
       end)
-      std.register_task(cpu_variant)
+      std.register_variant(cpu_variant)
 
       local cuda_variant = task:make_variant("cuda")
       cuda_variant:set_is_cuda(true)
@@ -8855,7 +8855,7 @@ function codegen.top(cx, node)
           local cx = context.new_global_scope(cuda_variant)
           return codegen.top_task(cx, node)
       end)
-      std.register_task(cuda_variant)
+      std.register_variant(cuda_variant)
       task:set_cuda_variant(cuda_variant)
 
       return task
