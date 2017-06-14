@@ -1874,9 +1874,8 @@ function parser.top_task_return(p)
   return function(env) return std.untyped end
 end
 
-function parser.top_task_effects(p)
+function parser.top_task_effects(p, declaration)
   local effect_exprs = terralib.newlist()
-  local continue_to_body = true
   if p:nextif("where") then
     repeat
       if p:matches("[") then
@@ -1892,27 +1891,31 @@ function parser.top_task_effects(p)
         effect_exprs:insert(p:constraint())
       end
     until not p:nextif(",")
-    if p:matches("end") then
-      continue_to_body = false
-    else
+    if not declaration then
       p:expect("do")
+    else
+      p:expect("end")
     end
   end
-  return effect_exprs, continue_to_body
+  return effect_exprs
 end
 
 function parser.top_task(p, annotations)
   local start = ast.save(p)
+  local declaration = false
+  if p:nextif("extern") then
+    declaration = true
+  end
   p:expect("task")
   local name = p:top_task_name()
   local params = p:top_task_params()
   local return_type = p:top_task_return()
-  local effects, continue_to_body = p:top_task_effects()
+  local effects = p:top_task_effects(declaration)
   local body = false
-  if continue_to_body then
+  if not declaration then
     body = p:block()
+    p:expect("end")
   end
-  p:expect("end")
 
   return ast.unspecialized.top.Task {
     name = name,
@@ -2014,7 +2017,7 @@ end
 function parser.top_stat(p)
   local annotations = p:annotations(false, true)
 
-  if p:matches("task") then
+  if p:matches("extern") or p:matches("task") then
     return p:top_task(annotations)
 
   elseif p:matches("fspace") then

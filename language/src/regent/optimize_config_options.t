@@ -293,6 +293,8 @@ end
 local optimize_config_options = {}
 
 function optimize_config_options.top_task(cx, node)
+  if not node.body then return node end
+
   -- Do the analysis first and then mask it out if the configuration
   -- is disabled. This is to ensure that the analysis always works.
   local leaf = analyze_leaf(cx, node.body) and std.config["leaf"]

@@ -62,7 +62,7 @@ struct s {
   d : int32,
 }
 
-task f(r : region(s), x : regentlib.future(float))
+extern task f(r : region(s), x : regentlib.future(float))
 where
   -- Note: With the manual calling convention, these will exactly
   -- correspond to the region requirements passed to the task---so no

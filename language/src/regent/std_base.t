@@ -373,6 +373,8 @@ function base.task:get_region_universe()
 end
 
 function base.task:set_task_id(task_id)
+  assert(not self.is_complete)
+
   -- This is intended for interop with tasks defined externally. It
   -- would be dangerous to call this on a Regent task with variants,
   -- because the task ID might already be baked into the
@@ -408,6 +410,7 @@ function base.task:has_calling_convention()
 end
 
 function base.task:get_calling_convention()
+  assert(not self.is_complete)
   assert(self.calling_convention)
   return self.calling_convention
 end
@@ -450,15 +453,16 @@ function base.task:is_shard_task()
 end
 
 function base.task:make_variant(name)
+  assert(not self.is_complete)
   return base.new_variant(self, name)
 end
 
 function base.task:add_complete_thunk(complete_thunk)
+  assert(not self.is_complete)
   self.complete_thunks:insert(complete_thunk)
 end
 
 function base.task:complete()
-  assert(#self.complete_thunks > 0)
   if not self.is_complete then
     self.is_complete = true
     for _, thunk in ipairs(self.complete_thunks) do
