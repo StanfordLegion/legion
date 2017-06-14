@@ -2360,8 +2360,7 @@ end
 local function expr_call_setup_region_arg(
     cx, task, arg_type, param_type, launcher, index, args_setup)
   local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
-    std.find_task_privileges(param_type, task:get_privileges(),
-                             task:get_coherence_modes(), task:get_flags())
+    std.find_task_privileges(param_type, task)
   local privilege_modes = privileges:map(std.privilege_mode)
   local coherence_modes = coherences:map(std.coherence_mode)
 
@@ -2501,8 +2500,7 @@ end
 local function expr_call_setup_list_of_regions_arg(
     cx, task, arg_type, param_type, launcher, index, args_setup)
   local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
-    std.find_task_privileges(param_type, task:get_privileges(),
-                             task:get_coherence_modes(), task:get_flags())
+    std.find_task_privileges(param_type, task)
   local privilege_modes = privileges:map(std.privilege_mode)
   local coherence_modes = coherences:map(std.coherence_mode)
 
@@ -2597,8 +2595,7 @@ local function expr_call_setup_partition_arg(
     cx, task, arg_type, param_type, partition, launcher, index, args_setup)
   assert(index)
   local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
-    std.find_task_privileges(param_type, task:get_privileges(),
-                             task:get_coherence_modes(), task:get_flags())
+    std.find_task_privileges(param_type, task)
   local privilege_modes = privileges:map(std.privilege_mode)
   local coherence_modes = coherences:map(std.coherence_mode)
   local parent_region =
@@ -8529,8 +8526,7 @@ function codegen.top_task(cx, node)
     end
 
     local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
-      std.find_task_privileges(region_type, task:get_privileges(),
-                               task:get_coherence_modes(), task:get_flags())
+      std.find_task_privileges(region_type, task)
 
     local privileges_by_field_path = std.group_task_privileges_by_field_path(
       privileges, privilege_field_paths)
@@ -8663,8 +8659,7 @@ function codegen.top_task(cx, node)
     local list = params[list_i]
 
     local privileges, privilege_field_paths, privilege_field_types =
-      std.find_task_privileges(list_type, task:get_privileges(),
-                               task:get_coherence_modes(), task:get_flags())
+      std.find_task_privileges(list_type, task)
 
     local privileges_by_field_path = std.group_task_privileges_by_field_path(
       privileges, privilege_field_paths)
