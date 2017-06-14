@@ -22,3 +22,6 @@ if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
+add_executable(glossary markdown)
+target_link_libraries(glossary Legion::Legion)
+

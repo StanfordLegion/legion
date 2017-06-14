@@ -22,6 +22,8 @@ if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_executable(design_patterns markdown)
-target_link_libraries(design_patterns Legion::Legion)
+FILE(GLOB TOOLS *.py *.cc *.template)
+
+add_executable(tools ${TOOLS} legion_prof_files serializer_examples)
+target_link_libraries(tools Legion::Legion)
 

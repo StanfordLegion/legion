@@ -64,9 +64,16 @@ do
   TARGET_NAME=$(basename "${TARGET}")
   while read GLOSSARY_TERM
   do
-    FOUND_REFERENCE=`grep -i "${GLOSSARY_TERM}" "${TARGET}"`
+# do the comparison with no spaces
+    GLOSSARY_TERM_NO_SPACES=`echo "${GLOSSARY_TERM}" | sed -e "s/ //g"`
+    rm -f .tmp_target
+    cat "${TARGET}" | sed -e "s/ //g" > .tmp_target
+    FOUND_REFERENCE=`grep -i "${GLOSSARY_TERM_NO_SPACES}" .tmp_target`
+    rm -f .tmp_target
+
     if [[ "${FOUND_REFERENCE}" != "" ]]
     then
+# don't let a glossary page refer to itself
       if [[ `echo "${TARGET}" | grep -i "${GLOSSARY_TERM}"` && "${TARGET_IS_GLOSSARY}" == "true" ]]
       then
         echo > /dev/null

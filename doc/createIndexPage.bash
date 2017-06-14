@@ -22,10 +22,11 @@ ls -1 "${PUBLISHED_DIR}" > .tmp_pages
 
 while read PAGE
   do
-    OUTPUT_FILE="${PUBLISHED_DIR}/${PAGE}/index.html"
-    rm -f "${OUTPUT_FILE}"
+    FINAL_OUTPUT_FILE="${PUBLISHED_DIR}/${PAGE}/index.html"
+    OUTPUT_FILE=.tmp_index
+    rm -f "${OUTPUT_FILE}" "${FINAL_OUTPUT_FILE}"
 
-    echo ===== Creating "${OUTPUT_FILE}" ====
+    echo ===== Creating "${FINAL_OUTPUT_FILE}" ====
     echo "---" >> "${OUTPUT_FILE}"
     echo "layout: page" >> "${OUTPUT_FILE}"
     echo "---" >> "${OUTPUT_FILE}"
@@ -62,6 +63,7 @@ while read PAGE
 
     echo "</table>" >> "${OUTPUT_FILE}"
     echo "<p>" >> "${OUTPUT_FILE}"
+    mv "${OUTPUT_FILE}" "${FINAL_OUTPUT_FILE}"
   done < .tmp_pages
 rm -f .tmp_pages .tmp_thispage
 

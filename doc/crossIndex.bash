@@ -26,6 +26,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 rm -rf ./publish
 mkdir -p ./publish/glossary ./publish/design_patterns
 
+
 cp glossary/markdown/* ./publish/glossary
 rm -f .tmp_glossary
 ls -1 ./publish/glossary/* | sed -e "s://:/:g" > .tmp_glossary
@@ -94,6 +95,13 @@ echo CREATE THE INDEX PAGE
 echo 
 
 ./createIndexPage.bash 
+
+GLOSSARY_FILE="./publish/glossaryFile.txt"
+
+echo
+echo Creating "${GLOSSARY_FILE}"
+echo
+ls -1 glossary/markdown/ > "${GLOSSARY_FILE}"
 
 echo 
 echo DONE
