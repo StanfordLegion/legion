@@ -9948,11 +9948,8 @@ namespace Legion {
       IndexPartition result = forest->get_index_partition(parent, color);
 #ifdef DEBUG_LEGION
       if (!result.exists())
-      {
-        log_index.error("Invalid color %d for get index partitions", color);
-        assert(false);
-        exit(ERROR_INVALID_INDEX_SPACE_COLOR);
-      }
+        REPORT_LEGION_ERROR(ERROR_INVALID_INDEX_SPACE_COLOR, "undefined",
+            "Invalid color %d for get index partitions", color);
 #endif
       return result;
     }
@@ -11705,14 +11702,9 @@ namespace Legion {
     {
       ProjectionID &next_projection = get_current_static_projection_id();
       if (runtime_started)
-      {
-        log_run.error("Illegal call to 'generate_static_projection_id' after "
+        REPORT_LEGION_ERROR(ERROR_STATIC_CALL_POST_RUNTIME_START, "undefined",
+                      "Illegal call to 'generate_static_projection_id' after "
                       "the runtime has been started!");
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_STATIC_CALL_POST_RUNTIME_START);
-      }
       return next_projection++;
     }
 
