@@ -379,7 +379,7 @@ function base.task:set_task_id(task_id)
   -- would be dangerous to call this on a Regent task with variants,
   -- because the task ID might already be baked into the
   -- implementation of some task.
-  if #self.variants > 0 then
+  if #self:get_variants() > 0 then
     error("task ID can only be set when task has zero variants")
   end
   self.taskid = terralib.constant(c.legion_task_id_t, task_id)
@@ -413,6 +413,10 @@ function base.task:get_calling_convention()
   assert(not self.is_complete)
   assert(self.calling_convention)
   return self.calling_convention
+end
+
+function base.task:get_variants()
+  return self.variants
 end
 
 function base.task:set_primary_variant(task)

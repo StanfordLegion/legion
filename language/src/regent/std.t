@@ -3421,12 +3421,12 @@ function base.task:set_calling_convention(convention)
   assert(convention:is(ast.convention))
 
   if std.convention.is_manual(convention) then
-    if #self.variants > 0 then
+    if #self:get_variants() > 0 then
       error("manual calling convention can only be used with empty task")
     end
     -- Ok
   elseif not convention == std.convention.regent then
-    if #self.variants == 0 then
+    if #self:get_variants() == 0 then
       error("regent calling convention cannot be used with empty task")
     end
     -- Ok
