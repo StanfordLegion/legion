@@ -290,19 +290,36 @@ local function analyze_inner(cx, node)
     node, true)
 end
 
+local function analyze_alloc_node(cx)
+  return function(node)
+    return node:is(ast.typed.expr.New)
+  end
+end
+
+local function analyze_alloc(cx, node)
+  return ast.mapreduce_node_postorder(
+    analyze_alloc_node(cx),
+    data.any,
+    node, false)
+end
+
 local optimize_config_options = {}
 
 function optimize_config_options.top_task(cx, node)
+  if not node.body then return node end
+
   -- Do the analysis first and then mask it out if the configuration
   -- is disabled. This is to ensure that the analysis always works.
   local leaf = analyze_leaf(cx, node.body) and std.config["leaf"]
   local inner = analyze_inner(cx, node.body) and std.config["inner"] and not leaf
+  local alloc = analyze_alloc(cx, node.body)
 
   return node {
     config_options = ast.TaskConfigOptions {
       leaf = leaf,
       inner = inner,
       idempotent = false,
+      alloc = alloc,
     },
   }
 end

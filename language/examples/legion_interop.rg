@@ -56,12 +56,20 @@ do
 end
 
 struct s {
-  a : float,
-  b : float,
+  a : int32,
+  b : int32,
+  c : int32,
+  d : int32,
 }
 
-task f(r : region(s), x : regentlib.future(float))
-where reads(r.a), reads writes(r.b)
+extern task f(r : region(s), x : regentlib.future(float))
+where
+  -- Note: With the manual calling convention, these will exactly
+  -- correspond to the region requirements passed to the task---so no
+  -- grouping or collation of privileges.
+  reads(r.{a, b}),
+  reads(r.c),
+  reads writes(r.d)
 end
 f:set_task_id(clegion_interop.TID_F)
 f:set_calling_convention(regentlib.convention.manual())

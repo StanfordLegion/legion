@@ -212,14 +212,15 @@ end
 function type_check.privilege(cx, node)
   local privileges = type_check.privilege_kinds(cx, node.privileges)
   local region_fields = type_check.regions(cx, node.regions)
-  return privileges:map(
-    function(privilege) return std.privileges(privilege, region_fields) end)
+  return data.flatmap(
+    function(privilege) return std.privileges(privilege, region_fields) end,
+    privileges)
 end
 
 function type_check.privileges(cx, node)
   local result = terralib.newlist()
   for _, privilege in ipairs(node) do
-    result:insertall(type_check.privilege(cx, privilege))
+    result:insert(type_check.privilege(cx, privilege))
   end
   return result
 end
@@ -3736,6 +3737,7 @@ function type_check.top_task(cx, node)
       leaf = false,
       inner = false,
       idempotent = false,
+      alloc = true,
     },
     region_divergence = false,
     prototype = prototype,
