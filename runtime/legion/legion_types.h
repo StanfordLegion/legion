@@ -113,6 +113,8 @@ namespace Legion {
   class PhysicalRegion;
   template<PrivilegeMode,typename,int,typename,typename,bool> 
     class FieldAccessor;
+  template<typename,int,typename,typename>
+    class UnsafeFieldAccessor;
   class IndexIterator;
   template<typename T> struct ColoredPoints; 
   struct InputArgs;

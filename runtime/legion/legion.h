@@ -2134,6 +2134,8 @@ namespace Legion {
       // These methods can only be accessed by the FieldAccessor class
       template<PrivilegeMode, typename, int, typename, typename, bool>
       friend class FieldAccessor;
+      template<typename, int, typename, typename>
+      friend class UnsafeFieldAccessor;
       Realm::RegionInstance get_instance_info(PrivilegeMode mode, FieldID fid,
                                       ptrdiff_t &field_offset, void *realm_is,
                                       TypeTag type_tag, bool silence_warnings,
@@ -2181,11 +2183,11 @@ namespace Legion {
 #endif
     class FieldAccessor {
     public:
-      FieldAccessor(void);
+      FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    bool silence_warnings = false);
+                    bool silence_warnings = false) { }
     };
-
+ 
     /**
      * \class IndexIterator
      * This is a helper class for iterating over the points within
