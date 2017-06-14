@@ -24,7 +24,7 @@ GLOSSARY_FILE="${PUBLISH_DIR}/glossaryFile.txt"
 
 # cross index the glossary and design_patterns
 
-#./crossIndex.bash
+./crossIndex.bash
 
 # collate and cross index the error messages
 
