@@ -5338,11 +5338,16 @@ namespace Legion {
       bool valid_request = true;
       if (allocator == NULL)
       {
+        IndexSpaceAllocator *alloc = create_allocator();
         AutoLock n_lock(node_lock);
-        if (allocator == NULL)
-          allocator = create_allocator();
-        else
+        if (allocator != NULL)
+        {
+          // lost the race
           valid_request = false;
+          delete alloc;
+        }
+        else
+          allocator = alloc;
       }
       else
         valid_request = false;
