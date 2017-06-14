@@ -1179,9 +1179,13 @@ function pretty.top_task(cx, node)
   if #meta > 0 then
     lines:insert(text.Line { value = "where" })
     lines:insert(text.Indent { value = commas(meta) })
-    lines:insert(text.Line { value = "do" })
+    if node.body then
+      lines:insert(text.Line { value = "do" })
+    end
   end
-  lines:insert(pretty.block(cx, node.body))
+  if node.body then
+    lines:insert(pretty.block(cx, node.body))
+  end
   lines:insert(text.Line { value = "end" })
 
   return text.Lines { lines = lines }

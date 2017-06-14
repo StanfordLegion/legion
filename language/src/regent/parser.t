@@ -1876,6 +1876,7 @@ end
 
 function parser.top_task_effects(p)
   local effect_exprs = terralib.newlist()
+  local continue_to_body = true
   if p:nextif("where") then
     repeat
       if p:matches("[") then
@@ -1891,9 +1892,13 @@ function parser.top_task_effects(p)
         effect_exprs:insert(p:constraint())
       end
     until not p:nextif(",")
-    p:expect("do")
+    if p:matches("end") then
+      continue_to_body = false
+    else
+      p:expect("do")
+    end
   end
-  return effect_exprs
+  return effect_exprs, continue_to_body
 end
 
 function parser.top_task(p, annotations)
@@ -1902,8 +1907,11 @@ function parser.top_task(p, annotations)
   local name = p:top_task_name()
   local params = p:top_task_params()
   local return_type = p:top_task_return()
-  local effects = p:top_task_effects()
-  local body = p:block()
+  local effects, continue_to_body = p:top_task_effects()
+  local body = false
+  if continue_to_body then
+    body = p:block()
+  end
   p:expect("end")
 
   return ast.unspecialized.top.Task {

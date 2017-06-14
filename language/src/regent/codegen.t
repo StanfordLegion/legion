@@ -5990,6 +5990,7 @@ local lift_unary_op_to_futures = terralib.memoize(
           ast.typed.top.TaskParam {
             symbol = rhs_symbol,
             param_type = rhs_type,
+            future = false,
             annotations = ast.default_annotations(),
             span = ast.trivial_span(),
           },
@@ -6073,12 +6074,14 @@ local lift_binary_op_to_futures = terralib.memoize(
          ast.typed.top.TaskParam {
             symbol = lhs_symbol,
             param_type = lhs_type,
+            future = false,
             annotations = ast.default_annotations(),
             span = ast.trivial_span(),
          },
          ast.typed.top.TaskParam {
             symbol = rhs_symbol,
             param_type = rhs_type,
+            future = false,
             annotations = ast.default_annotations(),
             span = ast.trivial_span(),
          },
@@ -8821,6 +8824,8 @@ function codegen.top(cx, node)
     local task = node.prototype
 
     setup_regent_calling_convention_metadata(node, task)
+
+    if not node.body then return task end
 
     if not (node.annotations.cuda:is(ast.annotation.Demand) and
             cudahelper.check_cuda_available())

@@ -3398,7 +3398,43 @@ std.new_task = base.new_task
 std.is_task = base.is_task
 
 function base.task:printpretty()
-  print(pretty.entry(self:getast()))
+  print(pretty.entry(self:get_primary_variant():get_ast()))
+end
+
+-- Calling convention:
+std.convention = {}
+std.convention.regent = ast.convention.Regent {}
+
+function std.convention.manual(params)
+  if not params then
+    params = ast.convention_kind.Padded {}
+  end
+  return ast.convention.Manual { params = params }
+end
+
+function std.convention.is_manual(convention)
+  return convention:is(ast.convention.Manual)
+end
+
+function base.task:set_calling_convention(convention)
+  assert(not self.calling_convention)
+  assert(convention:is(ast.convention))
+
+  if std.convention.is_manual(convention) then
+    if #self.variants > 0 then
+      error("manual calling convention can only be used with empty task")
+    end
+    -- Ok
+  elseif not convention == std.convention.regent then
+    if #self.variants == 0 then
+      error("regent calling convention cannot be used with empty task")
+    end
+    -- Ok
+  else
+    error("unrecognized calling convention " .. tostring(convention:type()))
+  end
+
+  self.calling_convention = convention
 end
 
 -- #####################################

@@ -3623,7 +3623,7 @@ function type_check.stat(cx, node)
   end
 end
 
-function type_check.top_task_param(cx, node, mapping)
+function type_check.top_task_param(cx, node, mapping, is_defined)
   local param_type = node.symbol:gettype()
   cx.type_env:insert(node, node.symbol, std.rawref(&param_type))
 
@@ -3637,9 +3637,15 @@ function type_check.top_task_param(cx, node, mapping)
     mapping[param_type] = node.symbol
   end
 
+  -- Check for use of futures in a defined task.
+  if node.future and is_defined then
+    report.error(node, "futures may be used as parameters only when a task is defined externally")
+  end
+
   return ast.typed.top.TaskParam {
     symbol = node.symbol,
     param_type = param_type,
+    future = node.future,
     annotations = node.annotations,
     span = node.span,
   }
@@ -3648,11 +3654,17 @@ end
 function type_check.top_task(cx, node)
   local return_type = node.return_type
   local cx = cx:new_task_scope(return_type)
-  cx:set_external(node.prototype:get_primary_variant():is_external())
+
+  local is_defined = node.prototype:has_primary_variant()
+  if is_defined then
+    cx:set_external(node.prototype:get_primary_variant():is_external())
+  end
 
   local mapping = {}
   local params = node.params:map(
-    function(param) return type_check.top_task_param(cx, param, mapping) end)
+    function(param)
+      return type_check.top_task_param(cx, param, mapping, is_defined)
+    end)
   local prototype = node.prototype
   prototype:set_param_symbols(
     params:map(function(param) return param.symbol end))
@@ -3687,7 +3699,7 @@ function type_check.top_task(cx, node)
   std.add_constraints(cx, constraints)
   prototype:set_param_constraints(constraints)
 
-  local body = type_check.block(cx, node.body)
+  local body = node.body and type_check.block(cx, node.body)
 
   return_type = cx:get_return_type()
   if std.type_eq(return_type, std.untyped) then

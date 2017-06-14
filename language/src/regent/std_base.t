@@ -372,6 +372,17 @@ function base.task:get_region_universe()
   return self.region_universe
 end
 
+function base.task:set_task_id(task_id)
+  -- This is intended for interop with tasks defined externally. It
+  -- would be dangerous to call this on a Regent task with variants,
+  -- because the task ID might already be baked into the
+  -- implementation of some task.
+  if #self.variants > 0 then
+    error("task ID can only be set when task has zero variants")
+  end
+  self.taskid = terralib.constant(c.legion_task_id_t, task_id)
+end
+
 function base.task:get_task_id()
   return self.taskid
 end
@@ -392,12 +403,26 @@ function base.task:get_name()
   return self.name
 end
 
+function base.task:has_calling_convention()
+  return self.calling_convention
+end
+
+function base.task:get_calling_convention()
+  assert(self.calling_convention)
+  return self.calling_convention
+end
+
 function base.task:set_primary_variant(task)
   assert(not self.primary_variant)
   self.primary_variant = task
 end
 
+function base.task:has_primary_variant()
+  return self.primary_variant
+end
+
 function base.task:get_primary_variant()
+  assert(self.primary_variant)
   return self.primary_variant
 end
 
@@ -448,7 +473,7 @@ function base.task:compile()
 end
 
 function base.task:__tostring()
-  return tostring(self:getname())
+  return tostring(self:get_name())
 end
 
 do
@@ -468,6 +493,9 @@ do
       name = name,
       taskid = terralib.constant(c.legion_task_id_t, task_id),
       variants = terralib.newlist(),
+      calling_convention = false,
+
+      -- Metadata for the Regent calling convention:
       param_symbols = false,
       params_struct = false,
       params_map_type = false,
@@ -475,6 +503,8 @@ do
       params_map_symbol = false,
       field_id_param_labels = false,
       field_id_param_symbols = false,
+
+      -- Task metadata:
       type = false,
       privileges = false,
       coherence_modes = false,
@@ -483,9 +513,13 @@ do
       param_constraints = false,
       constraints = false,
       region_universe = false,
+
+      -- Variants and alternative versions:
       primary_variant = false,
       cuda_variant = false,
       parallel_task = false,
+
+      -- Compilation continuations:
       complete_thunks = terralib.newlist(),
       is_complete = false,
     }, base.task)

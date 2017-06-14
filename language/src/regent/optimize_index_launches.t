@@ -668,6 +668,8 @@ function optimize_index_launches.block(cx, node)
 end
 
 function optimize_index_launches.top_task(cx, node)
+  if not node.body then return node end
+
   local cx = cx:new_task_scope(node.prototype:get_constraints())
   local body = optimize_index_launches.block(cx, node.body)
 
