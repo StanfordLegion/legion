@@ -211,15 +211,26 @@ def prefixedPath(fileName, prefix, lineNumber, strip):
         return fileName + '#L' + str(lineNumber)
     return prefix + '/' + fileName + '#L' + str(lineNumber)
 
+def writeGlossaryTerms(file, message, whatToDo, glossary, glossaryURL):
+    for term in glossary:
+        t = term.lower().strip()
+        if message.lower().find(t) >= 0 or whatToDo.lower().find(t) >= 0:
+            href = "<a href=\"" + glossaryURL + "/glossary/" + term.strip() + ".html\">" + term.strip() + "</a>"
+            file.write(href + "\n");
 
-def writeHtmlEntry(type, field, outputFile, row, hrefPrefix, strip):
+
+def writeHtmlEntry(type, field, outputFile, row, hrefPrefix, strip, glossary, glossaryURL):
     (code, name, message, whatToDo, fileName, lineNumber) = row
     outputFile.write("<p id=\"" + htmlMarker(type, field, code) + "\">")
     outputFile.write("<b>" + type + " " + str(code) + "</b>\n")
     outputFile.write("<br>Message: " + message + "\n");
     outputFile.write("<br>Remedy:" + whatToDo + "\n");
-    outputFile.write("<br>Location: line " + str(lineNumber) + " <a href=\"" + prefixedPath(fileName, hrefPrefix, lineNumber, strip) + "\">" + fileName_(fileName) + "</a>\n")
+    href = "<a href=\"" + prefixedPath(fileName, hrefPrefix, lineNumber, strip) + "\">" + fileName_(fileName) + "</a>"
+    outputFile.write("<br>Location: line " + str(lineNumber) + " " + href + "\n")
     outputFile.write("<p>\n")
+    if glossary != None and glossaryURL != None:
+        writeGlossaryTerms(outputFile, message, whatToDo, glossary, glossaryURL)
+    outputFile.write("<br>")
     outputFile.write("<a href=\"index.html\">back to message index</a>\n")
 
 
@@ -230,7 +241,7 @@ def tables(connection):
     return tables
 
 
-def writeHtmlSortedByField(field, connection, hrefPrefix, strip):
+def writeHtmlSortedByField(field, connection, hrefPrefix, strip, glossary, glossaryURL):
     for table in tables(connection):
         tableName = table[0]
         outputFileName = htmlMarker(tableName, field, None) + ".html"
@@ -241,7 +252,7 @@ def writeHtmlSortedByField(field, connection, hrefPrefix, strip):
         cursor.execute(selectCommand)
         row = cursor.fetchone()
         while row != None:
-              writeHtmlEntry(tableName, field, outputFile, row, hrefPrefix, strip)
+              writeHtmlEntry(tableName, field, outputFile, row, hrefPrefix, strip, glossary, glossaryURL)
               row = cursor.fetchone()
         outputFile.close()
 
@@ -303,10 +314,13 @@ def writeHtmlIndexes(connection):
     indexFile.close()
 
 
-def writeHtmlOutput(connection, hrefPrefix, strip):
+def writeHtmlOutput(connection, hrefPrefix, strip, glossaryFile, glossaryURL):
+    glossary = None
+    if glossaryFile != None:
+        glossary = open(glossaryFile, "r").readlines()
     writeHtmlIndexes(connection);
-    writeHtmlSortedByField("code", connection, hrefPrefix, strip)
-    writeHtmlSortedByField("message", connection, hrefPrefix, strip)
+    writeHtmlSortedByField("code", connection, hrefPrefix, strip, glossary, glossaryURL)
+    writeHtmlSortedByField("message", connection, hrefPrefix, strip, glossary, glossaryURL)
 
 
 
@@ -317,11 +331,16 @@ class MyParser(argparse.ArgumentParser):
         print 'error', message
         sys.exit(2)
 parser = MyParser(description = 'Legion Tools: collate messages')
-parser.add_argument('--prefix', dest='prefix', action='store', help='path prefix to source files')
+parser.add_argument('--prefix', dest='prefix', action='store', help='path prefix to source files', default='')
 parser.add_argument('--strip', dest='strip', action='store', type=int, help='num dirs to strip from sourcfile path', default=0)
+parser.add_argument('--glossaryFile', dest='glossaryFile', action='store', help='path to glossary file, requires --glossaryURL')
+parser.add_argument('--glossaryURL', dest='glossaryURL', action='store', help='URL of online glossary, requires --glossaryFile')
 args = parser.parse_args()
+print 'this program parses a list of files.  it reads the filenames from stdin and writes html files as output.'
+print 'example: find . -name *.cc | python collate_messages.py --glossaryFile=glossaryFile.txt --glossaryURL="http://legion.stanford.edu"'
 
 connection = sqlite3.connect(":memory:")
 parseSourceFiles(connection)
-args.prefix = args.prefix.replace("//", "/")
-writeHtmlOutput(connection, args.prefix, args.strip)
+if args.prefix != None:
+    args.prefix = args.prefix.replace("//", "/")
+writeHtmlOutput(connection, args.prefix, args.strip, args.glossaryFile, args.glossaryURL)
