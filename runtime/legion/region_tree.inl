@@ -544,14 +544,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    IndexSpaceAllocator* IndexSpaceNodeT<DIM,T>::create_allocator(void) const
+    IndexSpaceAllocator* IndexSpaceNodeT<DIM,T>::create_allocator(
+                                                          UniqueID ctx_id) const
     //--------------------------------------------------------------------------
     {
       if (!realm_index_space_set.has_triggered())
         realm_index_space_set.lg_wait();
       if (!index_space_ready.has_triggered())
         index_space_ready.lg_wait();
-      return new IndexSpaceAllocator(Domain(realm_index_space));
+      return new IndexSpaceAllocator(Domain(realm_index_space), ctx_id);
     }
 
     //--------------------------------------------------------------------------
@@ -717,8 +718,6 @@ namespace Legion {
                                                std::vector<LegionColor> &colors)
     //--------------------------------------------------------------------------
     {
-      if (!index_space_ready.has_triggered())
-        index_space_ready.lg_wait();
       colors.resize(get_volume());
       unsigned idx = 0;
       if (!realm_index_space_set.has_triggered())
@@ -731,6 +730,27 @@ namespace Legion {
         for (Realm::ZPointInRectIterator<DIM,T> itr(rect_itr.rect);
               itr.valid; itr.step(), idx++)
           colors[idx] = linearize_color(&itr.p, handle.get_type_tag());
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void IndexSpaceNodeT<DIM,T>::instantiate_children(IndexPartNode *part)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(part->color_space == this);
+#endif
+      if (!realm_index_space_set.has_triggered())
+        realm_index_space_set.lg_wait();
+      if (!index_space_ready.has_triggered())
+        index_space_ready.lg_wait();
+      for (Realm::ZIndexSpaceIterator<DIM,T> rect_itr(realm_index_space); 
+            rect_itr.valid; rect_itr.step())
+      {
+        for (Realm::ZPointInRectIterator<DIM,T> itr(rect_itr.rect);
+              itr.valid; itr.step())
+          part->get_child(linearize_color(&itr.p, handle.get_type_tag()));
       }
     }
 
@@ -1074,7 +1094,7 @@ namespace Legion {
       assert(partition->parent == this);
 #endif
       const size_t count = partition->color_space->get_volume(); 
-      std::vector<Realm::ZIndexSpace<DIM,T> > subspaces(count);
+      std::vector<Realm::ZIndexSpace<DIM,T> > subspaces;
       Realm::ProfilingRequestSet requests;
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_partition_request(requests,
@@ -1175,7 +1195,7 @@ namespace Legion {
             preconditions.insert(right_child->index_space_ready);
         }
       }
-      std::vector<Realm::ZIndexSpace<DIM,T> > subspaces(count);
+      std::vector<Realm::ZIndexSpace<DIM,T> > subspaces;
       Realm::ProfilingRequestSet requests;
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_partition_request(requests,
@@ -1275,7 +1295,7 @@ namespace Legion {
             preconditions.insert(right_child->index_space_ready);
         }
       }
-      std::vector<Realm::ZIndexSpace<DIM,T> > subspaces(count);
+      std::vector<Realm::ZIndexSpace<DIM,T> > subspaces;
       Realm::ProfilingRequestSet requests;
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_partition_request(requests,
@@ -1366,7 +1386,7 @@ namespace Legion {
       }
       if (!index_space_ready.has_triggered())
         preconditions.insert(index_space_ready);
-      std::vector<Realm::ZIndexSpace<DIM,T> > subspaces(count);
+      std::vector<Realm::ZIndexSpace<DIM,T> > subspaces;
       Realm::ProfilingRequestSet requests;
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_partition_request(requests,
@@ -1468,7 +1488,7 @@ namespace Legion {
             preconditions.insert(right_child->index_space_ready);
         }
       }
-      std::vector<Realm::ZIndexSpace<DIM,T> > subspaces(count);
+      std::vector<Realm::ZIndexSpace<DIM,T> > subspaces;
       Realm::ProfilingRequestSet requests;
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_partition_request(requests,
@@ -1672,7 +1692,7 @@ namespace Legion {
         context->runtime->profiler->add_partition_request(requests,
                                             op, DEP_PART_BY_FIELD);
       // Perform the operation
-      std::vector<Realm::ZIndexSpace<DIM,T> > subspaces(colors.size());
+      std::vector<Realm::ZIndexSpace<DIM,T> > subspaces;
       if (!realm_index_space_set.has_triggered())
         realm_index_space_set.lg_wait();
       ApEvent result = ApEvent(realm_index_space.create_subspaces_by_field(
@@ -1772,7 +1792,7 @@ namespace Legion {
         context->runtime->profiler->add_partition_request(requests,
                                             op, DEP_PART_BY_IMAGE);
       // Perform the operation
-      std::vector<Realm::ZIndexSpace<DIM1,T1> > subspaces(sources.size());
+      std::vector<Realm::ZIndexSpace<DIM1,T1> > subspaces;
       if (!realm_index_space_set.has_triggered())
         realm_index_space_set.lg_wait();
       ApEvent result(realm_index_space.create_subspaces_by_image(descriptors,
@@ -1893,7 +1913,7 @@ namespace Legion {
         context->runtime->profiler->add_partition_request(requests,
                                             op, DEP_PART_BY_IMAGE_RANGE);
       // Perform the operation
-      std::vector<Realm::ZIndexSpace<DIM1,T1> > subspaces(sources.size());
+      std::vector<Realm::ZIndexSpace<DIM1,T1> > subspaces;
       if (!realm_index_space_set.has_triggered())
         realm_index_space_set.lg_wait();
       ApEvent result(realm_index_space.create_subspaces_by_image(descriptors,
@@ -2013,7 +2033,7 @@ namespace Legion {
         context->runtime->profiler->add_partition_request(requests,
                                             op, DEP_PART_BY_PREIMAGE);
       // Perform the operation
-      std::vector<Realm::ZIndexSpace<DIM1,T1> > subspaces(targets.size());
+      std::vector<Realm::ZIndexSpace<DIM1,T1> > subspaces;
       if (!realm_index_space_set.has_triggered())
         realm_index_space_set.lg_wait();
       ApEvent result(realm_index_space.create_subspaces_by_preimage(
@@ -2134,7 +2154,7 @@ namespace Legion {
         context->runtime->profiler->add_partition_request(requests,
                                             op, DEP_PART_BY_PREIMAGE_RANGE);
       // Perform the operation
-      std::vector<Realm::ZIndexSpace<DIM1,T1> > subspaces(targets.size());
+      std::vector<Realm::ZIndexSpace<DIM1,T1> > subspaces;
       if (!realm_index_space_set.has_triggered())
         realm_index_space_set.lg_wait();
       ApEvent result(realm_index_space.create_subspaces_by_preimage(
@@ -2252,7 +2272,8 @@ namespace Legion {
     {
       DETAILED_PROFILER(context->runtime, REALM_ISSUE_COPY_CALL);
       Realm::ProfilingRequestSet requests;
-      op->add_copy_profiling_request(requests);
+      if (op != NULL)
+        op->add_copy_profiling_request(requests);
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_copy_request(requests, op);
       ApEvent result;
@@ -2349,7 +2370,8 @@ namespace Legion {
     {
       DETAILED_PROFILER(context->runtime, REALM_ISSUE_FILL_CALL);
       Realm::ProfilingRequestSet requests;
-      op->add_copy_profiling_request(requests);
+      if (op != NULL)
+        op->add_copy_profiling_request(requests);
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_fill_request(requests, op);
       ApEvent result;

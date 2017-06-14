@@ -904,8 +904,9 @@ namespace Legion {
     // This class exists for some very minimal backwards compatibility
     class IndexSpaceAllocator {
     public:
-      IndexSpaceAllocator(const Domain &d)
-        : iterator(Domain::DomainPointIterator(d)) { assert(d.get_dim() == 1); }
+      IndexSpaceAllocator(const Domain &d, UniqueID ctx)
+        : ctx_id(ctx), iterator(Domain::DomainPointIterator(d)) 
+      { assert(d.get_dim() == 1); }
     public:
       LEGION_DEPRECATED("Dynamic allocation is no longer supported.")
       coord_t alloc(size_t count = 1) const 
@@ -920,6 +921,8 @@ namespace Legion {
       void free(coord_t ptr, size_t count = 1) const
         { printf("No backwards compatibility for 'free' "
                  "on index space allocators.\n"); assert(false); }
+    public:
+      const UniqueID ctx_id;
     protected:
       mutable Domain::DomainPointIterator iterator;
     };

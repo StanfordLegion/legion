@@ -3701,7 +3701,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      return IndexAllocator(handle, forest->get_index_space_allocator(handle));
+      return IndexAllocator(handle, 
+          forest->get_index_space_allocator(handle, get_context_uid()));
     }
 
     //--------------------------------------------------------------------------
@@ -7783,7 +7784,8 @@ namespace Legion {
       assert(false);
 #endif
       exit(ERROR_LEAF_TASK_VIOLATION);
-      return IndexAllocator(handle, forest->get_index_space_allocator(handle));
+      return IndexAllocator(handle, 
+          forest->get_index_space_allocator(handle, get_context_uid()));
     }
 
     //--------------------------------------------------------------------------

@@ -187,17 +187,18 @@ namespace Legion {
         parent_notified = notified_event;
       }
       RtUserEvent disjointness_event;
+      IndexPartNode *partition = NULL;
       if (part_kind == COMPUTE_KIND)
       {
         disjointness_event = Runtime::create_rt_user_event();
-        create_node(pid, parent_node, color_node, partition_color, 
-            disjointness_event, partition_ready, partial_pending);
+        partition = create_node(pid, parent_node, color_node, partition_color,
+                        disjointness_event, partition_ready, partial_pending);
       }
       else
       {
         const bool disjoint = (part_kind == DISJOINT_KIND);
-        create_node(pid, parent_node, color_node, partition_color, 
-                    disjoint, partition_ready, partial_pending);
+        partition = create_node(pid, parent_node, color_node, partition_color,
+                                disjoint, partition_ready, partial_pending);
         if (Runtime::legion_spy_enabled)
           LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
                                          partition_color);
@@ -216,6 +217,9 @@ namespace Legion {
         runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, NULL,
                                  Runtime::protect_event(partition_ready));
       }
+      // We need to instantiate all the children for the partition before
+      // we return else there can be races on picking the names of the children
+      color_node->instantiate_children(partition);
       return parent_notified;
     }
 
@@ -759,11 +763,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpaceAllocator* RegionTreeForest::get_index_space_allocator(
-                                                              IndexSpace handle)
+                                             IndexSpace handle, UniqueID ctx_id)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *node = get_node(handle);
-      return node->get_allocator();
+      return node->get_allocator(ctx_id);
     }
 
     //--------------------------------------------------------------------------
@@ -5332,25 +5336,30 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpaceAllocator* IndexSpaceNode::get_allocator(void)
+    IndexSpaceAllocator* IndexSpaceNode::get_allocator(UniqueID ctx_id)
     //--------------------------------------------------------------------------
     {
-      bool valid_request = true;
-      if (allocator == NULL)
+      bool valid_request = false; // can't be valid if we're not the owner
+      if (get_owner_space() == context->runtime->address_space)
       {
-        IndexSpaceAllocator *alloc = create_allocator();
-        AutoLock n_lock(node_lock);
-        if (allocator != NULL)
+        valid_request = true;
+        if (allocator == NULL)
         {
-          // lost the race
-          valid_request = false;
-          delete alloc;
+          IndexSpaceAllocator *alloc = create_allocator(ctx_id);
+          AutoLock n_lock(node_lock);
+          if (allocator != NULL)
+          {
+            // lost the race
+            valid_request = false;
+            delete alloc;
+          }
+          else
+            allocator = alloc;
         }
-        else
-          allocator = alloc;
+        // Allow unsafe allocation from multiple context for now
+        //else
+        //  valid_request = (allocator->ctx_id == ctx_id);
       }
-      else
-        valid_request = false;
       if (!valid_request)
       {
         // If we ever get here we've then we've violated our backwards

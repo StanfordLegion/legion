@@ -195,7 +195,8 @@ namespace Legion {
       IndexPartition get_parent_index_partition(IndexSpace handle);
       unsigned get_index_space_depth(IndexSpace handle);
       unsigned get_index_partition_depth(IndexPartition handle);
-      IndexSpaceAllocator* get_index_space_allocator(IndexSpace handle);
+      IndexSpaceAllocator* get_index_space_allocator(IndexSpace handle,
+                                                     UniqueID ctx_id);
       size_t get_domain_volume(IndexSpace handle);
       bool is_index_partition_disjoint(IndexPartition p);
       bool is_index_partition_complete(IndexPartition p);
@@ -800,7 +801,7 @@ namespace Legion {
                            Deserializer &derez, AddressSpaceID source);
     public:
       inline bool has_allocator(void) const { return (allocator != NULL); }
-      IndexSpaceAllocator* get_allocator(void);
+      IndexSpaceAllocator* get_allocator(UniqueID ctx_id);
     public:
       virtual void initialize_union_space(ApUserEvent to_trigger,
               TaskOp *op, const std::vector<IndexSpace> &handles) = 0;
@@ -820,7 +821,7 @@ namespace Legion {
       virtual size_t get_volume(void) const = 0;
       virtual bool contains_point(const void *realm_point, 
                                   TypeTag type_tag) const = 0;
-      virtual IndexSpaceAllocator* create_allocator(void) const = 0;
+      virtual IndexSpaceAllocator* create_allocator(UniqueID ctx_id) const = 0;
       virtual void destroy_node(AddressSpaceID source) = 0;
     public:
       virtual LegionColor get_max_linearized_color(void) const = 0;
@@ -831,6 +832,7 @@ namespace Legion {
       virtual bool contains_color(LegionColor color, 
                                   bool report_error = false) = 0;
       virtual void instantiate_colors(std::vector<LegionColor> &colors) = 0;
+      virtual void instantiate_children(IndexPartNode *partition) = 0;
       virtual Domain get_color_space_domain(void) const = 0;
       virtual DomainPoint get_domain_point_color(void) const = 0;
     public:
@@ -1003,7 +1005,7 @@ namespace Legion {
       virtual size_t get_volume(void) const;
       virtual bool contains_point(const void *realm_point, 
                                   TypeTag type_tag) const;
-      virtual IndexSpaceAllocator* create_allocator(void) const;
+      virtual IndexSpaceAllocator* create_allocator(UniqueID ctx_id) const;
       virtual void destroy_node(AddressSpaceID source);
     public:
       virtual LegionColor get_max_linearized_color(void) const;
@@ -1014,6 +1016,7 @@ namespace Legion {
       virtual bool contains_color(LegionColor color,
                                   bool report_error = false);
       virtual void instantiate_colors(std::vector<LegionColor> &colors);
+      virtual void instantiate_children(IndexPartNode *partition);
       virtual Domain get_color_space_domain(void) const;
       virtual DomainPoint get_domain_point_color(void) const;
     public:
