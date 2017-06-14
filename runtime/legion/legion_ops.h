@@ -1854,7 +1854,6 @@ namespace Legion {
       // and therefore have all of the single tasks and a
       // valid set of constraints.
       bool triggering_complete;
-      std::vector<Mapper::MappingConstraint> constraints;
       // Used for computing the constraints
       std::vector<std::set<SingleTask*> > task_sets;
       // Track the physical instances that we've acquired

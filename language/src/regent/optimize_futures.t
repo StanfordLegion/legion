@@ -1588,6 +1588,8 @@ function optimize_futures.top_task_params(cx, node)
 end
 
 function optimize_futures.top_task(cx, node)
+  if not node.body then return node end
+
   local cx = cx:new_task_scope()
   analyze_var_flow.block(cx, node.body)
   compute_var_futures(cx)

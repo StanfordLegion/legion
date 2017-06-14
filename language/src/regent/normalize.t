@@ -690,7 +690,7 @@ function normalize.top_task(node)
     cx.constraints = node.prototype:get_constraints()
   end
   return node {
-    body = node.body {
+    body = node.body and node.body {
       stats = ast.flatmap_node_continuation(
         normalize.stat(cx),
         node.body.stats)
