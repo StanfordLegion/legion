@@ -79,7 +79,6 @@ namespace Realm {
 
       // TODO: make this part of the metadata so it gets moved around properly
       LinearizedIndexSpaceIntfc *lis;
-      InstanceLayoutGeneric *layout;
 
       class Metadata : public MetadataBase {
       public:

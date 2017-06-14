@@ -497,56 +497,47 @@ namespace Realm {
     {
       MemoryImpl *mem = get_runtime()->get_memory_impl(memory);
 
-      // must have valid data by now - block if we have to
-      metadata.await_data();
+      // this exists for compatibility and assumes N=1, T=coord_t
+      const InstanceLayout<1,coord_t> *inst_layout = dynamic_cast<const InstanceLayout<1,coord_t> *>(metadata.layout);
+      assert(inst_layout != 0);
 
-      off_t offset = metadata.alloc_offset;
-      size_t elmt_stride;
-      
-      if (metadata.block_size == 1) {
-        offset += field_offset;
-        elmt_stride = metadata.elmt_size;
-      } else {
-        off_t field_start=0;
-        int field_size=0;
-        find_field_start(metadata.field_sizes, field_offset, 1, field_start, field_size);
+      // look up the right field
+      std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = inst_layout->fields.find(field_offset);
+      assert(it != inst_layout->fields.end());
 
-        offset += (field_start * metadata.block_size) + (field_offset - field_start);
-	elmt_stride = field_size;
-      }
-
-      base = mem->get_direct_ptr(offset, 0);
-      if (!base) return false;
+      // also only works for a single piece
+      assert(inst_layout->piece_lists[it->second.list_idx].pieces.size() == 1);
+      const InstanceLayoutPiece<1,coord_t> *piece = inst_layout->piece_lists[it->second.list_idx].pieces[0];
+      assert((piece->layout_type == InstanceLayoutPiece<1,coord_t>::AffineLayoutType));
+      const AffineLayoutPiece<1,coord_t> *affine = static_cast<const AffineLayoutPiece<1,coord_t> *>(piece);
 
       // if the caller wants a particular stride and we differ (and have more
       //  than one element), fail
       if(stride != 0) {
-        if((stride != elmt_stride) && (metadata.size > metadata.elmt_size))
+        if((affine->bounds.hi[0] > affine->bounds.lo[0]) &&
+           (affine->strides[0] != stride))
           return false;
       } else {
-        stride = elmt_stride;
+        stride = affine->strides[0];
       }
 
-      // if there's a per-element offset, apply it after we've agreed with the caller on 
-      //  what we're pretending the stride is
-      const DomainLinearization& dl = metadata.linearization;
-      if(dl.get_dim() > 0) {
-	// make sure this instance uses a 1-D linearization
-	assert(dl.get_dim() == 1);
+      // find the offset of the first and last elements and then try to
+      //  turn that into a direct memory pointer
+      size_t start_offset = (metadata.inst_offset +
+                             affine->offset +
+                             affine->strides.dot(affine->bounds.lo) +
+                             it->second.rel_offset);
+      size_t total_bytes = (it->second.size_in_bytes + 
+                            affine->strides[0] * (affine->bounds.hi -
+                                                  affine->bounds.lo));
+ 
+      base = mem->get_direct_ptr(start_offset, total_bytes);
+      if (!base) return false;
 
-	LegionRuntime::Arrays::Mapping<1, 1> *mapping = dl.get_mapping<1>();
-	LegionRuntime::Arrays::Rect<1> preimage = mapping->preimage((coord_t)0);
-	assert(preimage.lo == preimage.hi);
-	// double-check that whole range maps densely
-	preimage.hi.x[0] += 1; // not perfect, but at least detects non-unit-stride case
-	assert(mapping->image_is_dense(preimage));
-	coord_t inst_first_elmt = preimage.lo[0];
-	//printf("adjusting base by %d * %zd: %p -> %p\n", inst_first_elmt, stride,
-	//       base,
-	//       ((char *)base) - inst_first_elmt * stride);
-	base = ((char *)base) - inst_first_elmt * stride;
-      }
-
+      // now adjust the base pointer so that we can use absolute indexing
+      //  again
+      base = ((char *)base) - affine->strides.dot(affine->bounds.lo);
+     
       return true;
     }
 
