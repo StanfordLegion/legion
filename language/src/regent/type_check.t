@@ -3737,6 +3737,7 @@ function type_check.top_task(cx, node)
       leaf = false,
       inner = false,
       idempotent = false,
+      alloc = true,
     },
     region_divergence = false,
     prototype = prototype,
