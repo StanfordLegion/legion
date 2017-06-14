@@ -1462,7 +1462,7 @@ namespace Legion {
       ApEvent launch_mapper_task(Mapper *mapper, Processor proc, 
                                  Processor::TaskFuncID tid,
                                  const TaskArgument &arg, MapperID map_id);
-      void process_mapper_task_result(const MapperTaskArgs *args);
+      void process_mapper_task_result(const MapperTaskArgs *args); 
     public:
       IndexSpace create_index_space(Context ctx, const void *realm_is,
                                     TypeTag type_tag);
@@ -2868,6 +2868,15 @@ namespace Legion {
                       const void *user_data, size_t user_data_size,
                       CodeDescriptor *realm_desc, bool has_ret, 
                       const char *task_name,VariantID vid,bool check_id = true);
+    public:
+      static void report_error_message(const MessageDescriptor &descriptor,
+                                       const char *file_name, 
+                                       const int line_number,
+                                       const char *message);
+      static void report_warning_message(const MessageDescriptor &descriptor,
+                                         const char *file_name, 
+                                         const int line_number,
+                                         const char *message);
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
     public:
       static const char* find_privilege_task_name(void *impl);

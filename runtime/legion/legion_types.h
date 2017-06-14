@@ -1188,6 +1188,7 @@ namespace Legion {
 
     // Forward declarations for runtime level objects
     // runtime.h
+    class MessageDescriptor;
     class Collectable;
     class ArgumentMapImpl;
     class FutureImpl;

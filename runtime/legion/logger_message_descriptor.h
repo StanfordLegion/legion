@@ -11,7 +11,26 @@
 
 #include "realm/logging.h"
 
+#include <stdio.h>
 #include <stdlib.h>
+
+#define REPORT_LEGION_ERROR(code, html, fmt, ...)               \
+  {                                                             \
+    Legion::Internal::MessageDescriptor descriptor(code, html); \
+    char message[4096];                                         \
+    snprintf(message, 4096, fmt, ##__VA_ARGS__);                \
+    Legion::Internal::Runtime::report_error_message(            \
+        descriptor, __FILE__, __LINE__, message);               \
+  }
+
+#define REPORT_LEGION_WARNING(code, html, fmt, ...)             \
+  {                                                             \
+    Legion::Internal::MessageDescriptor descriptor(code, html); \
+    char message[4096];                                         \
+    snprintf(message, 4096, fmt, ##__VA_ARGS__);                \
+    Legion::Internal::Runtime::report_warning_message(          \
+        descriptor, __FILE__, __LINE__, message);               \
+  }
 
 namespace Legion{
   namespace Internal {
