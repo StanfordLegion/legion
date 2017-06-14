@@ -1174,19 +1174,24 @@ function pretty.top_task(cx, node)
   local config_options = pretty.task_config_options(cx, node.config_options)
 
   local lines = terralib.newlist()
-  lines:insert(join({"task " .. name, "(", params, ")", return_type }))
-  lines:insert(join({"-- ", commas(config_options) }))
+  lines:insert(join({((node.body and "") or "extern ") ..
+                     "task " .. name, "(", params, ")", return_type }))
+  if node.body then
+    lines:insert(join({"-- ", commas(config_options) }))
+  end
   if #meta > 0 then
     lines:insert(text.Line { value = "where" })
     lines:insert(text.Indent { value = commas(meta) })
     if node.body then
       lines:insert(text.Line { value = "do" })
+    else
+      lines:insert(text.Line { value = "end" })
     end
   end
   if node.body then
     lines:insert(pretty.block(cx, node.body))
+    lines:insert(text.Line { value = "end" })
   end
-  lines:insert(text.Line { value = "end" })
 
   return text.Lines { lines = lines }
 end

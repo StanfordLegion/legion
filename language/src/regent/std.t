@@ -524,11 +524,14 @@ local function find_field_privilege(privileges, coherence_modes, flags,
   return field_privilege, coherence_mode, flag
 end
 
-function std.find_task_privileges(region_type, privileges, coherence_modes, flags)
+function std.find_task_privileges(region_type, task)
   assert(std.type_supports_privileges(region_type))
-  assert(privileges)
-  assert(data.is_default_map(coherence_modes))
-  assert(data.is_default_map(flags))
+  assert(std.is_task(task))
+
+  local privileges = task:get_privileges()
+  local coherence_modes = task:get_coherence_modes()
+  local flags = task:get_flags()
+
   local grouped_privileges = terralib.newlist()
   local grouped_coherence_modes = terralib.newlist()
   local grouped_flags = terralib.newlist()
@@ -3421,12 +3424,12 @@ function base.task:set_calling_convention(convention)
   assert(convention:is(ast.convention))
 
   if std.convention.is_manual(convention) then
-    if #self.variants > 0 then
+    if #self:get_variants() > 0 then
       error("manual calling convention can only be used with empty task")
     end
     -- Ok
   elseif not convention == std.convention.regent then
-    if #self.variants == 0 then
+    if #self:get_variants() == 0 then
       error("regent calling convention cannot be used with empty task")
     end
     -- Ok
@@ -3749,9 +3752,7 @@ function std.setup(main_task, extra_setup_thunk)
         for _, param_i in ipairs(std.fn_param_regions_by_index(fn_type)) do
           local param_type = param_types[param_i]
           local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
-            std.find_task_privileges(
-              param_type, task:get_privileges(), task:get_coherence_modes(),
-              task:get_flags())
+            std.find_task_privileges(param_type, task)
           for i, privilege in ipairs(privileges) do
             local field_types = privilege_field_types[i]
 
