@@ -5356,9 +5356,8 @@ namespace Legion {
           else
             allocator = alloc;
         }
-        // Allow unsafe allocation from multiple context for now
-        //else
-        //  valid_request = (allocator->ctx_id == ctx_id);
+        else
+          valid_request = (allocator->ctx_id == ctx_id);
       }
       if (!valid_request)
       {

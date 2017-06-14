@@ -519,7 +519,7 @@ create_cross_product(Runtime *runtime,
   }
 #else
   std::map<IndexSpace, IndexPartition> handles;
-  runtime->create_cross_product_partitions(
+  rhs_color = runtime->create_cross_product_partitions(
     ctx, lhs, rhs, handles,
     (runtime->is_index_partition_disjoint(ctx, rhs) ? DISJOINT_KIND : ALIASED_KIND),
     rhs_color);
