@@ -37,6 +37,9 @@ namespace Realm {
 							   const ProfilingRequestSet &reqs,
 							   Event wait_on /*= Event::NO_EVENT*/) const
   {
+    // output vector should start out empty
+    assert(images.empty());
+
     Event e = GenEventImpl::create_genevent()->current_event();
     ImageOperation<N,T,N2,T2> *op = new ImageOperation<N,T,N2,T2>(*this, field_data, reqs, e);
 
@@ -57,6 +60,9 @@ namespace Realm {
 							   const ProfilingRequestSet &reqs,
 							   Event wait_on /*= Event::NO_EVENT*/) const
   {
+    // output vector should start out empty
+    assert(images.empty());
+
     Event e = GenEventImpl::create_genevent()->current_event();
     ImageOperation<N,T,N2,T2> *op = new ImageOperation<N,T,N2,T2>(*this, field_data, reqs, e);
 
@@ -78,6 +84,9 @@ namespace Realm {
 							   const ProfilingRequestSet &reqs,
 							   Event wait_on /*= Event::NO_EVENT*/) const
   {
+    // output vector should start out empty
+    assert(images.empty());
+
     Event e = GenEventImpl::create_genevent()->current_event();
     ImageOperation<N,T,N2,T2> *op = new ImageOperation<N,T,N2,T2>(*this, field_data, reqs, e);
 

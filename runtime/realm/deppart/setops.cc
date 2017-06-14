@@ -37,6 +37,9 @@ namespace Realm {
 						    const ProfilingRequestSet &reqs,
 						    Event wait_on /*= Event::NO_EVENT*/)
   {
+    // output vector should start out empty
+    assert(results.empty());
+
     Event e = GenEventImpl::create_genevent()->current_event();
     UnionOperation<N,T> *op = new UnionOperation<N,T>(reqs, e);
 
@@ -61,6 +64,9 @@ namespace Realm {
 							   const ProfilingRequestSet &reqs,
 							   Event wait_on /*= Event::NO_EVENT*/)
   {
+    // output vector should start out empty
+    assert(results.empty());
+
     Event e = GenEventImpl::create_genevent()->current_event();
     IntersectionOperation<N,T> *op = new IntersectionOperation<N,T>(reqs, e);
 
@@ -85,6 +91,9 @@ namespace Realm {
 							 const ProfilingRequestSet &reqs,
 							 Event wait_on /*= Event::NO_EVENT*/)
   {
+    // output vector should start out empty
+    assert(results.empty());
+
     Event e = GenEventImpl::create_genevent()->current_event();
     DifferenceOperation<N,T> *op = new DifferenceOperation<N,T>(reqs, e);
 

@@ -68,6 +68,9 @@ namespace Realm {
     assert(wait_on.has_triggered());
     //assert(reqs.empty());
 
+    // output vector should start out empty
+    assert(subspaces.empty());
+
     // dense case is easy(er)
     if(dense()) {
       // always split in x dimension for now
@@ -102,6 +105,9 @@ namespace Realm {
     // no support for deferring yet
     assert(wait_on.has_triggered());
     //assert(reqs.empty());
+
+    // output vector should start out empty
+    assert(subspaces.empty());
 
     // determine the total weight
     size_t total_weight = 0;

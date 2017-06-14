@@ -36,6 +36,9 @@ namespace Realm {
 						    const ProfilingRequestSet &reqs,
 						    Event wait_on /*= Event::NO_EVENT*/) const
   {
+    // output vector should start out empty
+    assert(subspaces.empty());
+
     Event e = GenEventImpl::create_genevent()->current_event();
     ByFieldOperation<N,T,FT> *op = new ByFieldOperation<N,T,FT>(*this, field_data, reqs, e);
 
