@@ -191,7 +191,7 @@ function gen_print(label, is, fs, f)
        if (r[i].[f] ~= 0) then c.printf("%s @ (%d,%d,%d) = %g\n", label, i.x, i.y, i.z, r[i].[f]) end
     end
   end
-  print:setname("print_" .. label)
+  print:set_name("print_" .. label)
   return print
 end
 
@@ -419,7 +419,7 @@ function gen_dotproduct(is, fs, f1, f2)
     end
     return total
   end
-  dotproduct:setname("dotproduct_" .. f1 .. "_" .. f2)
+  dotproduct:set_name("dotproduct_" .. f1 .. "_" .. f2)
   return dotproduct
 end
 

@@ -1211,7 +1211,7 @@ function vectorize_loops.stat(node)
 end
 
 function vectorize_loops.top_task(node)
-  local body = vectorize_loops.block(node.body)
+  local body = node.body and vectorize_loops.block(node.body)
 
   return node { body = body }
 end

@@ -165,8 +165,14 @@ local function find_self_recursion(prototype, node)
   return false
 end
 
-local function check_valid_inline_task(task)
+local function check_valid_inline_task(node, task)
+  if not task then
+    report.error(node, "cannot inline a task that has no definition")
+  end
+
   local body = task.body
+  assert(body)
+
   local num_returns = count_returns(body)
   if num_returns > 1 then
     report.error(task, "inline tasks cannot have multiple return statements")
@@ -228,9 +234,9 @@ function inline_tasks.expr(cx, node)
     end
 
     local task = node.fn.value
-    local task_ast = task:hasast()
+    local task_ast = task:has_primary_variant() and task:get_primary_variant():has_ast()
     if node.annotations.inline:is(ast.annotation.Demand) then
-      check_valid_inline_task(task_ast)
+      check_valid_inline_task(node, task_ast)
     elseif not task_ast or
       not task_ast.annotations.inline:is(ast.annotation.Demand) or
       node.annotations.inline:is(ast.annotation.Forbid)
@@ -478,17 +484,19 @@ end
 
 function inline_tasks.top_task(cx, node)
   return node {
-    body = inline_tasks.block(cx, node.body)
+    body = node.body and inline_tasks.block(cx, node.body)
   }
 end
 
 function inline_tasks.top(cx, node)
   if node:is(ast.typed.top.Task) then
     if node.annotations.inline:is(ast.annotation.Demand) then
-      check_valid_inline_task(node)
+      check_valid_inline_task(node, node)
     end
     local new_node = inline_tasks.top_task(cx, node)
-    new_node.prototype:setast(new_node)
+    if new_node.prototype:has_primary_variant() then
+      new_node.prototype:get_primary_variant():set_ast(new_node)
+    end
     return new_node
 
   elseif node:is(ast.typed.top.Fspace) then

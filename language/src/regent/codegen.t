@@ -91,6 +91,7 @@ function context:new_local_scope(divergence, must_epoch, must_epoch_point, break
   end
   assert((must_epoch == false) == (must_epoch_point == false))
   return setmetatable({
+    variant = self.variant,
     expected_return_type = self.expected_return_type,
     constraints = self.constraints,
     task = self.task,
@@ -112,6 +113,7 @@ end
 function context:new_task_scope(expected_return_type, constraints, leaf, task_meta, task, ctx, runtime)
   assert(expected_return_type and task and ctx and runtime)
   return setmetatable({
+    variant = self.variant,
     expected_return_type = expected_return_type,
     constraints = constraints,
     task = task,
@@ -130,8 +132,10 @@ function context:new_task_scope(expected_return_type, constraints, leaf, task_me
   }, context)
 end
 
-function context.new_global_scope()
+function context.new_global_scope(variant)
+  variant = variant or false
   return setmetatable({
+    variant = variant,
   }, context)
 end
 
@@ -1708,7 +1712,7 @@ end
 function codegen.expr_function(cx, node)
   local value_type = std.as_read(node.expr_type)
   local value = node.value
-  if cx.task_meta:getcuda() then
+  if cx.variant:is_cuda() then
     value = cudahelper.replace_with_builtin(value)
   end
   return values.value(
@@ -2199,7 +2203,7 @@ local function expr_call_setup_task_args(
 
   -- Pass field IDs by-value to the task.
   local param_field_ids = task:get_field_id_param_labels()
-  for _, i in ipairs(std.fn_params_with_privileges_by_index(task:gettype())) do
+  for _, i in ipairs(std.fn_params_with_privileges_by_index(task:get_type())) do
     local arg_type = arg_types[i]
     local param_type = param_types[i]
 
@@ -2356,7 +2360,7 @@ end
 local function expr_call_setup_region_arg(
     cx, task, arg_type, param_type, launcher, index, args_setup)
   local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
-    std.find_task_privileges(param_type, task:getprivileges(),
+    std.find_task_privileges(param_type, task:get_privileges(),
                              task:get_coherence_modes(), task:get_flags())
   local privilege_modes = privileges:map(std.privilege_mode)
   local coherence_modes = coherences:map(std.coherence_mode)
@@ -2497,7 +2501,7 @@ end
 local function expr_call_setup_list_of_regions_arg(
     cx, task, arg_type, param_type, launcher, index, args_setup)
   local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
-    std.find_task_privileges(param_type, task:getprivileges(),
+    std.find_task_privileges(param_type, task:get_privileges(),
                              task:get_coherence_modes(), task:get_flags())
   local privilege_modes = privileges:map(std.privilege_mode)
   local coherence_modes = coherences:map(std.coherence_mode)
@@ -2593,7 +2597,7 @@ local function expr_call_setup_partition_arg(
     cx, task, arg_type, param_type, partition, launcher, index, args_setup)
   assert(index)
   local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
-    std.find_task_privileges(param_type, task:getprivileges(),
+    std.find_task_privileges(param_type, task:get_privileges(),
                              task:get_coherence_modes(), task:get_flags())
   local privilege_modes = privileges:map(std.privilege_mode)
   local coherence_modes = coherences:map(std.coherence_mode)
@@ -2749,7 +2753,7 @@ function codegen.expr_call(cx, node)
     end
 
     -- Pass regions through region requirements.
-    local fn_type = fn.value:gettype()
+    local fn_type = fn.value:get_type()
     for _, i in ipairs(std.fn_param_regions_by_index(fn_type)) do
       local arg_type = arg_types[i]
       local param_type = param_types[i]
@@ -2779,7 +2783,7 @@ function codegen.expr_call(cx, node)
       var [tag] = 0
       [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
       var [launcher] = c.legion_task_launcher_create(
-        [fn.value:gettaskid()], [task_args],
+        [fn.value:get_task_id()], [task_args],
         c.legion_predicate_true(), 0, [tag])
       [args_setup]
     end
@@ -3504,7 +3508,7 @@ function codegen.expr_region(cx, node)
     var [r] = [region_type]{ impl = [lr] }
   end
   local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
-  if not cx.task_meta:get_config_options().inner then
+  if not cx.variant:get_config_options().inner then
     actions = quote
       [actions];
       var [tag] = 0
@@ -5739,7 +5743,7 @@ function codegen.expr_attach_hdf5(cx, node)
   local mode_type = std.as_read(node.mode.expr_type)
   local mode = codegen.expr(cx, node.mode):read(cx, mode_type)
 
-  if not cx.task_meta:get_config_options().inner then
+  if not cx.variant:get_config_options().inner then
     report.warn(node, "WARNING: Attach invalidates region contents. DO NOT attempt to access region after using attach.")
   end
 
@@ -5806,7 +5810,7 @@ function codegen.expr_detach_hdf5(cx, node)
   local region_type = std.as_read(node.region.expr_type)
   local region = codegen.expr_region_root(cx, node.region):read(cx, region_type)
 
-  if not cx.task_meta:get_config_options().inner then
+  if not cx.variant:get_config_options().inner then
     report.warn(node, "WARNING: Detach invalidates region contents. DO NOT attempt to access region after using detach.")
   end
 
@@ -5975,13 +5979,16 @@ local lift_unary_op_to_futures = terralib.memoize(
     local name = data.newtuple(
       "__unary_" .. tostring(rhs_type) .. "_" .. tostring(op))
     local rhs_symbol = std.newsymbol(rhs_type, "rhs")
-    local task = std.newtask(name)
+    local task = std.new_task(name)
+    local variant = task:make_variant("primary")
+    task:set_primary_variant(variant)
     local node = ast.typed.top.Task {
       name = name,
       params = terralib.newlist({
           ast.typed.top.TaskParam {
             symbol = rhs_symbol,
             param_type = rhs_type,
+            future = false,
             annotations = ast.default_annotations(),
             span = ast.trivial_span(),
           },
@@ -6023,12 +6030,12 @@ local lift_unary_op_to_futures = terralib.memoize(
       annotations = ast.default_annotations(),
       span = ast.trivial_span(),
     }
-    task:settype(
+    task:set_type(
       terralib.types.functype(
         node.params:map(function(param) return param.param_type end),
         node.return_type,
         false))
-    task:setprivileges(node.privileges)
+    task:set_privileges(node.privileges)
     task:set_conditions({})
     task:set_param_constraints(node.constraints)
     task:set_constraints({})
@@ -6056,19 +6063,23 @@ local lift_binary_op_to_futures = terralib.memoize(
         tostring(rhs_type) .. "_" .. tostring(op))
     local lhs_symbol = std.newsymbol(lhs_type, "lhs")
     local rhs_symbol = std.newsymbol(rhs_type, "rhs")
-    local task = std.newtask(name)
+    local task = std.new_task(name)
+    local variant = task:make_variant("primary")
+    task:set_primary_variant(variant)
     local node = ast.typed.top.Task {
       name = name,
       params = terralib.newlist({
          ast.typed.top.TaskParam {
             symbol = lhs_symbol,
             param_type = lhs_type,
+            future = false,
             annotations = ast.default_annotations(),
             span = ast.trivial_span(),
          },
          ast.typed.top.TaskParam {
             symbol = rhs_symbol,
             param_type = rhs_type,
+            future = false,
             annotations = ast.default_annotations(),
             span = ast.trivial_span(),
          },
@@ -6116,12 +6127,12 @@ local lift_binary_op_to_futures = terralib.memoize(
       annotations = ast.default_annotations(),
       span = ast.trivial_span(),
     }
-    task:settype(
+    task:set_type(
       terralib.types.functype(
         node.params:map(function(param) return param.param_type end),
         node.return_type,
         false))
-    task:setprivileges(node.privileges)
+    task:set_privileges(node.privileges)
     task:set_conditions({})
     task:set_param_constraints(node.constraints)
     task:set_constraints({})
@@ -6138,7 +6149,7 @@ function codegen.expr_unary(cx, node)
     local call = ast.typed.expr.Call {
       fn = ast.typed.expr.Function {
         value = task,
-        expr_type = task:gettype(),
+        expr_type = task:get_type(),
         annotations = ast.default_annotations(),
         span = node.span,
       },
@@ -6229,7 +6240,7 @@ function codegen.expr_binary(cx, node)
     local call = ast.typed.expr.Call {
       fn = ast.typed.expr.Function {
         value = task,
-        expr_type = task:gettype(),
+        expr_type = task:get_type(),
         annotations = ast.default_annotations(),
         span = node.span,
       },
@@ -6825,7 +6836,7 @@ function codegen.stat_for_list(cx, node)
     end
   end
 
-  local cuda = cx.task_meta:getcuda()
+  local cuda = cx.variant:is_cuda()
   local openmp = node.annotations.openmp:is(ast.annotation.Demand) and
                  openmphelper.check_openmp_available()
   if node.annotations.openmp:is(ast.annotation.Demand) and
@@ -7193,7 +7204,7 @@ function codegen.stat_for_list(cx, node)
 end
 
 function codegen.stat_for_list_vectorized(cx, node)
-  if cx.task_meta:getcuda() or node.annotations.openmp:is(ast.annotation.Demand) then
+  if cx.variant:is_cuda() or node.annotations.openmp:is(ast.annotation.Demand) then
     return codegen.stat_for_list(cx,
       ast.typed.stat.ForList {
         symbol = node.symbol,
@@ -7531,7 +7542,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
     end
   end
 
-  local value_type = fn.value:gettype().returntype
+  local value_type = fn.value:get_type().returntype
 
   local params_struct_type = fn.value:get_params_struct()
   local task_args = terralib.newsymbol(c.legion_task_argument_t, "task_args")
@@ -7607,7 +7618,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
   end
 
   -- Pass regions through region requirements.
-  for _, i in ipairs(std.fn_param_regions_by_index(fn.value:gettype())) do
+  for _, i in ipairs(std.fn_param_regions_by_index(fn.value:get_type())) do
     local arg_type = arg_types[i]
     local param_type = param_types[i]
 
@@ -7694,7 +7705,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
     var [tag] = 0
     [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
     var [launcher] = c.legion_index_launcher_create(
-      [fn.value:gettaskid()],
+      [fn.value:get_task_id()],
       [domain], g_args, [argument_map],
       c.legion_predicate_true(), false, 0, [tag])
     [args_setup]
@@ -8324,15 +8335,7 @@ local function unpack_param_helper(cx, node, param_type, params_map_type, i)
   return helper
 end
 
-function codegen.top_task(cx, node)
-  local task = node.prototype
-  -- we temporaily turn off generating two task versions for cuda tasks
-  if node.annotations.cuda:is(ast.annotation.Demand) then
-    node = node { region_divergence = false }
-  end
-
-  task:set_config_options(node.config_options)
-
+local function setup_regent_calling_convention_metadata(node, task)
   local params_struct_type = terralib.types.newstruct()
   params_struct_type.entries = terralib.newlist()
   task:set_params_struct(params_struct_type)
@@ -8356,11 +8359,6 @@ function codegen.top_task(cx, node)
     task:set_params_map_symbol(params_map_symbol)
   end
 
-  local params = node.params:map(
-    function(param) return param.symbol end)
-  local param_types = task:gettype().parameters
-  local return_type = node.return_type
-
   -- Normal arguments are straight out of the param types.
   params_struct_type.entries:insertall(node.params:map(
     function(param)
@@ -8372,7 +8370,8 @@ function codegen.top_task(cx, node)
   -- IDs are going to be passed around dynamically, so we need to
   -- reserve some extra slots in the params struct here for those
   -- field IDs.
-  local fn_type = task:gettype()
+  local fn_type = task:get_type()
+  local param_types = task:get_type().parameters
   local param_field_id_labels = data.newmap()
   local param_field_id_symbols = data.newmap()
   for _, region_i in pairs(std.fn_params_with_privileges_by_index(fn_type)) do
@@ -8398,6 +8397,20 @@ function codegen.top_task(cx, node)
   end
   task:set_field_id_param_labels(param_field_id_labels)
   task:set_field_id_param_symbols(param_field_id_symbols)
+end
+
+function codegen.top_task(cx, node)
+  local task = node.prototype
+  local variant = cx.variant
+  assert(variant)
+  assert(task == variant.task)
+
+  -- we temporaily turn off generating two task versions for cuda tasks
+  if node.annotations.cuda:is(ast.annotation.Demand) then
+    node = node { region_divergence = false }
+  end
+
+  variant:set_config_options(node.config_options)
 
   local c_task = terralib.newsymbol(c.legion_task_t, "task")
   local c_regions = terralib.newsymbol(&c.legion_physical_region_t, "regions")
@@ -8407,9 +8420,23 @@ function codegen.top_task(cx, node)
   local c_params = terralib.newlist({
       c_task, c_regions, c_num_regions, c_context, c_runtime })
 
+  local params = node.params:map(
+    function(param) return param.symbol end)
+
+  local param_types = task:get_type().parameters
+  local return_type = node.return_type
+
+  local params_struct_type = task:get_params_struct()
+  local params_map_type = task:has_params_map_type() and
+    task:get_params_map_type()
+  local params_map_label = task:has_params_map_label() and
+    task:get_params_map_label()
+  local params_map_symbol = task:has_params_map_symbol() and
+    task:get_params_map_symbol()
+
   local cx = cx:new_task_scope(return_type,
                                task:get_constraints(),
-                               task:get_config_options().leaf,
+                               variant:get_config_options().leaf,
                                task, c_task, c_context, c_runtime)
 
   -- Unpack the by-value parameters to the task.
@@ -8499,7 +8526,7 @@ function codegen.top_task(cx, node)
 
   -- Unpack the region requirements.
   local physical_region_i = 0
-  local fn_type = task:gettype()
+  local fn_type = task:get_type()
   for _, region_i in ipairs(std.fn_param_regions_by_index(fn_type)) do
     local region_type = param_types[region_i]
     local index_type = region_type:ispace().index_type
@@ -8515,7 +8542,7 @@ function codegen.top_task(cx, node)
     end
 
     local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
-      std.find_task_privileges(region_type, task:getprivileges(),
+      std.find_task_privileges(region_type, task:get_privileges(),
                                task:get_coherence_modes(), task:get_flags())
 
     local privileges_by_field_path = std.group_task_privileges_by_field_path(
@@ -8551,8 +8578,8 @@ function codegen.top_task(cx, node)
         physical_regions_by_field_path[field_path:hash()] = physical_region
       end
 
-      if not task:get_config_options().inner and
-         not task:getexternal() and
+      if not variant:get_config_options().inner and
+         not variant:is_external() and
          flag ~= std.no_access_flag then
         local pr_actions, pr_base_pointers, pr_strides = unpack(data.zip(unpack(
           data.zip(field_paths, field_types):map(
@@ -8615,7 +8642,7 @@ function codegen.top_task(cx, node)
     task_setup:insertall(physical_region_actions)
 
     -- Force inner tasks to unmap all regions
-    if task:get_config_options().inner then
+    if variant:get_config_options().inner then
       local actions = quote
         c.legion_runtime_unmap_all_regions([cx.runtime], [cx.context])
       end
@@ -8649,7 +8676,7 @@ function codegen.top_task(cx, node)
     local list = params[list_i]
 
     local privileges, privilege_field_paths, privilege_field_types =
-      std.find_task_privileges(list_type, task:getprivileges(),
+      std.find_task_privileges(list_type, task:get_privileges(),
                                task:get_coherence_modes(), task:get_flags())
 
     local privileges_by_field_path = std.group_task_privileges_by_field_path(
@@ -8784,8 +8811,8 @@ function codegen.top_task(cx, node)
     end
     [guard]
   end
-  proto:setname(tostring(task:getname()))
-  task:setdefinition(proto)
+  proto:setname(tostring(task:get_name()))
+  variant:set_definition(proto)
 
   if emergency then proto:compile() end
   manual_gc()
@@ -8807,6 +8834,12 @@ end
 
 function codegen.top(cx, node)
   if node:is(ast.typed.top.Task) then
+    local task = node.prototype
+
+    setup_regent_calling_convention_metadata(node, task)
+
+    if not node.body then return task end
+
     if not (node.annotations.cuda:is(ast.annotation.Demand) and
             cudahelper.check_cuda_available())
     then
@@ -8816,40 +8849,34 @@ function codegen.top(cx, node)
           ":" .. tostring(node.span.start.line) ..
           " since the CUDA compiler is unavailable")
       end
-      local cpu_task = node.prototype
-      cpu_task:set_complete_thunk(
+      local cpu_variant = task:get_primary_variant()
+      task:add_complete_thunk(
         function()
-          local cx = context.new_global_scope()
+          local cx = context.new_global_scope(cpu_variant)
           return codegen.top_task(cx, node)
       end)
-      std.register_task(cpu_task)
-      return cpu_task
+      std.register_variant(cpu_variant)
+      return task
     else
-      local cpu_node = node {
-        annotations = node.annotations {
-          cuda = ast.annotation.Forbid { value = false }
-        }
-      }
-      local cpu_task = node.prototype
-      cpu_task:set_complete_thunk(
+      local cpu_variant = task:get_primary_variant()
+      task:add_complete_thunk(
         function()
-          local cx = context.new_global_scope()
-          return codegen.top_task(cx, cpu_node)
+          local cx = context.new_global_scope(cpu_variant)
+          return codegen.top_task(cx, node)
       end)
-      std.register_task(cpu_task)
+      std.register_variant(cpu_variant)
 
-      local cuda_task = cpu_task:make_variant()
-      cuda_task:setcuda(true)
-      local cuda_node = node { prototype = cuda_task }
-      cuda_task:set_complete_thunk(
+      local cuda_variant = task:make_variant("cuda")
+      cuda_variant:set_is_cuda(true)
+      task:add_complete_thunk(
         function()
-          local cx = context.new_global_scope()
-          return codegen.top_task(cx, cuda_node)
+          local cx = context.new_global_scope(cuda_variant)
+          return codegen.top_task(cx, node)
       end)
-      std.register_task(cuda_task)
-      cpu_task:set_cuda_variant(cuda_task)
+      std.register_variant(cuda_variant)
+      task:set_cuda_variant(cuda_variant)
 
-      return cpu_task
+      return task
     end
 
   elseif node:is(ast.typed.top.Fspace) then

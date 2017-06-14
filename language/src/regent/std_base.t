@@ -33,8 +33,157 @@ local c = terralib.includecstring([[
 base.c = c
 
 -- #####################################
+-- ## Variants
+-- #################
+
+base.variant = {}
+function base.variant:__index(field)
+  local value = base.variant[field]
+  if value ~= nil then return value end
+  error("variant has no field '" .. field .. "' (in lookup)", 2)
+end
+
+function base.variant:__newindex(field, value)
+  error("variant has no field '" .. field .. "' (in assignment)", 2)
+end
+
+function base.variant:set_is_cuda(cuda)
+  self.cuda = cuda
+end
+
+function base.variant:is_cuda()
+  return self.cuda
+end
+
+function base.variant:set_is_external(external)
+  self.external = external
+end
+
+function base.variant:is_external()
+  return self.external
+end
+
+function base.variant:set_is_inline(inline)
+  self.inline = inline
+end
+
+function base.variant:is_inline()
+  return self.inline
+end
+
+do
+  local global_kernel_id = 1
+  function base.variant:add_cuda_kernel(kernel)
+    if not self.cudakernels then
+      self.cudakernels = {}
+    end
+    local kernel_id = global_kernel_id
+    local kernel_name = self.name:concat("_") .. "_cuda" .. tostring(kernel_id)
+    self.cudakernels[kernel_id] = {
+      name = kernel_name,
+      kernel = kernel,
+    }
+    global_kernel_id = global_kernel_id + 1
+    return kernel_id
+  end
+end
+
+function base.variant:get_cuda_kernels()
+  return self.cudakernels or {}
+end
+
+function base.variant:set_config_options(t)
+  assert(not self.config_options)
+  self.config_options = t
+end
+
+function base.variant:get_config_options()
+  self.task:complete()
+  assert(self.config_options)
+  return self.config_options
+end
+
+function base.variant:get_name()
+  return self.name
+end
+
+function base.variant:get_definition()
+  self.task:complete()
+  assert(self.definition)
+  return self.definition
+end
+
+function base.variant:set_definition(definition)
+  assert(not self.definition)
+  self.definition = definition
+end
+
+function base.variant:set_ast(ast)
+  assert(not self.ast)
+  self.ast = ast
+end
+
+function base.variant:has_ast()
+  return self.ast
+end
+
+function base.variant:get_ast()
+  assert(self.ast)
+  return self.ast
+end
+
+function base.variant:compile()
+  self.task:complete()
+  return self:get_definition():compile()
+end
+
+function base.variant:disas()
+  self.task:complete()
+  return self:get_definition():disas()
+end
+
+function base.variant:__tostring()
+  return tostring(self:get_name())
+end
+
+do
+  function base.new_variant(task, name)
+    assert(base.is_task(task))
+
+    if type(name) == "string" then
+      name = data.newtuple(name)
+    elseif data.is_tuple(name) then
+      assert(data.all(name:map(function(n) return type(n) == "string" end)))
+    else
+      assert(false)
+    end
+
+    local variant = setmetatable({
+      task = task,
+      name = name,
+      ast = false,
+      definition = false,
+      cuda = false,
+      external = false,
+      inline = false,
+      cudakernels = false,
+      config_options = false,
+    }, base.variant)
+
+    task.variants:insert(variant)
+    return variant
+  end
+end
+
+function base.is_variant(x)
+  return getmetatable(x) == base.variant
+end
+
+-- #####################################
 -- ## Tasks
 -- #################
+
+base.initial_regent_task_id = 10000
 
 base.task = {}
 function base.task:__index(field)
@@ -49,6 +198,7 @@ end
 
 function base.task:set_param_symbols(symbols, force)
   assert(force or not self.param_symbols)
+  assert(terralib.islist(symbols))
   self.param_symbols = symbols
 end
 
@@ -59,153 +209,107 @@ end
 
 function base.task:set_params_struct(t)
   assert(not self.params_struct)
+  assert(terralib.types.istype(t))
   self.params_struct = t
 end
 
 function base.task:get_params_struct()
-  self:complete()
   assert(self.params_struct)
   return self.params_struct
 end
 
 function base.task:set_params_map_type(t)
   assert(not self.params_map_type)
-  assert(t)
+  assert(terralib.types.istype(t))
   self.params_map_type = t
 end
 
 function base.task:has_params_map_type()
-  self:complete()
   return self.params_map_type
 end
 
 function base.task:get_params_map_type()
-  self:complete()
   assert(self.params_map_type)
   return self.params_map_type
 end
 
 function base.task:set_params_map_label(label)
   assert(not self.params_map_label)
-  assert(label)
+  assert(terralib.islabel(label))
   self.params_map_label = label
 end
 
 function base.task:has_params_map_label()
-  self:complete()
   return self.params_map_label
 end
 
 function base.task:get_params_map_label()
-  self:complete()
   assert(self.params_map_label)
   return self.params_map_label
 end
 
 function base.task:set_params_map_symbol(symbol)
   assert(not self.params_map_symbol)
-  assert(symbol)
+  assert(terralib.issymbol(symbol))
   self.params_map_symbol = symbol
 end
 
 function base.task:has_params_map_symbol()
-  self:complete()
   return self.params_map_symbol
 end
 
 function base.task:get_params_map_symbol()
-  self:complete()
   assert(self.params_map_symbol)
   return self.params_map_symbol
 end
 
 function base.task:set_field_id_param_labels(t)
   assert(not self.field_id_param_labels)
+  assert(t)
   self.field_id_param_labels = t
 end
 
 function base.task:get_field_id_param_labels()
-  self:complete()
   assert(self.field_id_param_labels)
   return self.field_id_param_labels
 end
 
 function base.task:set_field_id_param_symbols(t)
   assert(not self.field_id_param_symbols)
+  assert(t)
   self.field_id_param_symbols = t
 end
 
 function base.task:get_field_id_param_symbols()
-  self:complete()
   assert(self.field_id_param_symbols)
   return self.field_id_param_symbols
 end
 
-function base.task:setcuda(cuda)
-  self.cuda = cuda
-end
-
-function base.task:getcuda()
-  return self.cuda
-end
-
-function base.task:setexternal(external)
-  self.external = external
-end
-
-function base.task:getexternal()
-  return self.external
-end
-
-function base.task:setinline(inline)
-  self.inline = inline
-end
-
-function base.task:getinline()
-  return self.inline
-end
-
-local global_kernel_id = 1
-function base.task:addcudakernel(kernel)
-  if not self.cudakernels then
-    self.cudakernels = {}
-  end
-  local kernel_id = global_kernel_id
-  local kernel_name = self.name:concat("_") .. "_cuda" .. tostring(kernel_id)
-  self.cudakernels[kernel_id] = {
-    name = kernel_name,
-    kernel = kernel,
-  }
-  global_kernel_id = global_kernel_id + 1
-  return kernel_id
-end
-
-function base.task:getcudakernels()
-  return self.cudakernels or {}
-end
-
-function base.task:settype(type, force)
+function base.task:set_type(t, force)
   assert(force or not self.type)
-  self.type = type
+  assert(terralib.types.istype(t))
+  self.type = t
 end
 
-function base.task:gettype()
+function base.task:get_type()
   assert(self.type)
   return self.type
 end
 
-function base.task:setprivileges(t)
+function base.task:set_privileges(t)
   assert(not self.privileges)
+  assert(terralib.islist(t))
   self.privileges = t
 end
 
-function base.task:getprivileges()
+function base.task:get_privileges()
   assert(self.privileges)
   return self.privileges
 end
 
 function base.task:set_coherence_modes(t)
   assert(not self.coherence_modes)
+  assert(t)
   self.coherence_modes = t
 end
 
@@ -216,6 +320,7 @@ end
 
 function base.task:set_flags(t)
   assert(not self.flags)
+  assert(t)
   self.flags = t
 end
 
@@ -247,6 +352,7 @@ end
 
 function base.task:set_constraints(t)
   assert(not self.constraints)
+  assert(t)
   self.constraints = t
 end
 
@@ -257,6 +363,7 @@ end
 
 function base.task:set_region_universe(t)
   assert(not self.region_universe)
+  assert(t)
   self.region_universe = t
 end
 
@@ -265,30 +372,22 @@ function base.task:get_region_universe()
   return self.region_universe
 end
 
-function base.task:set_config_options(t)
-  assert(not self.config_options)
-  self.config_options = t
+function base.task:set_task_id(task_id)
+  -- This is intended for interop with tasks defined externally. It
+  -- would be dangerous to call this on a Regent task with variants,
+  -- because the task ID might already be baked into the
+  -- implementation of some task.
+  if #self.variants > 0 then
+    error("task ID can only be set when task has zero variants")
+  end
+  self.taskid = terralib.constant(c.legion_task_id_t, task_id)
 end
 
-function base.task:get_config_options()
-  self:complete()
-  assert(self.config_options)
-  return self.config_options
-end
-
-function base.task:gettaskid()
+function base.task:get_task_id()
   return self.taskid
 end
 
-function base.task:settaskid(id)
-  self.taskid = id
-end
-
-function base.task:getname()
-  return self.name
-end
-
-function base.task:setname(name)
+function base.task:set_name(name)
   if type(name) == "string" then
     name = data.newtuple(name)
   elseif data.is_tuple(name) then
@@ -296,67 +395,39 @@ function base.task:setname(name)
   else
     assert(false)
   end
+
   self.name = name
-  if self:get_parallel_variant() then
-    self:get_parallel_variant():setname(name .. data.newtuple("parallelized"))
-  end
-  if self:get_cuda_variant() then
-    self:get_cuda_variant():setname(name)
-  end
 end
 
-function base.task:getdefinition()
-  self:complete()
-  assert(self.definition)
-  return self.definition
+function base.task:get_name()
+  return self.name
 end
 
-function base.task:setdefinition(definition)
-  assert(not self.definition)
-  self.definition = definition
+function base.task:has_calling_convention()
+  return self.calling_convention
 end
 
-function base.task:setast(ast)
-  assert(not self.ast)
-  self.ast = ast
+function base.task:get_calling_convention()
+  assert(self.calling_convention)
+  return self.calling_convention
 end
 
-function base.task:hasast()
-  return self.ast
+function base.task:set_primary_variant(task)
+  assert(not self.primary_variant)
+  self.primary_variant = task
 end
 
-function base.task:getast()
-  assert(self.ast)
-  return self.ast
+function base.task:has_primary_variant()
+  return self.primary_variant
 end
 
-function base.task:is_variant_task()
-  if self.source_variant then
-    return true
-  else
-    return false
-  end
-end
-
-function base.task:set_source_variant(source_variant)
-  assert(not self.source_variant)
-  self.source_variant = source_variant
-end
-
-function base.task:get_source_variant()
-  assert(self.source_variant)
-  return self.source_variant
-end
-
-function base.task:set_parallel_variant(task)
-  self.parallel_variant = task
-end
-
-function base.task:get_parallel_variant()
-  return self.parallel_variant
+function base.task:get_primary_variant()
+  assert(self.primary_variant)
+  return self.primary_variant
 end
 
 function base.task:set_cuda_variant(task)
+  assert(not self.cuda_variant)
   self.cuda_variant = task
 end
 
@@ -364,65 +435,67 @@ function base.task:get_cuda_variant()
   return self.cuda_variant
 end
 
+function base.task:set_parallel_task(task)
+  assert(not self.parallel_task)
+  self.parallel_task = task
+end
+
+function base.task:get_parallel_task()
+  return self.parallel_task
+end
+
 function base.task:is_shard_task()
   -- FIXME: This will break if we pick different names for shard tasks
-  return string.sub(tostring(self:getname()), 0, 6) == "<shard"
+  return string.sub(tostring(self:get_name()), 0, 6) == "<shard"
 end
 
-function base.task:make_variant()
-  local variant_task = base.newtask(self.name)
-  variant_task:settaskid(self:gettaskid())
-  variant_task:settype(self:gettype())
-  variant_task:setprivileges(self:getprivileges())
-  variant_task:set_coherence_modes(self:get_coherence_modes())
-  variant_task:set_conditions(self:get_conditions())
-  variant_task:set_param_constraints(self:get_param_constraints())
-  variant_task:set_flags(self:get_flags())
-  variant_task:set_constraints(self:get_constraints())
-  variant_task:set_source_variant(self)
-  return variant_task
+function base.task:make_variant(name)
+  return base.new_variant(self, name)
 end
 
-function base.task:set_complete_thunk(complete_thunk)
-  assert(not self.complete_thunk)
-  self.complete_thunk = complete_thunk
+function base.task:add_complete_thunk(complete_thunk)
+  self.complete_thunks:insert(complete_thunk)
 end
 
 function base.task:complete()
-  assert(self.complete_thunk)
+  assert(#self.complete_thunks > 0)
   if not self.is_complete then
     self.is_complete = true
-    return self.complete_thunk()
+    for _, thunk in ipairs(self.complete_thunks) do
+      thunk()
+    end
   end
+  return self
 end
 
 function base.task:compile()
-  return self:getdefinition():compile()
-end
-
-function base.task:disas()
-  return self:getdefinition():disas()
+  return self:complete()
 end
 
 function base.task:__tostring()
-  return tostring(self:getname())
+  return tostring(self:get_name())
 end
 
 do
-  local next_task_id = 1
-  function base.newtask(name)
-    assert(data.is_tuple(name))
+  local next_task_id = base.initial_regent_task_id
+  function base.new_task(name)
+    if type(name) == "string" then
+      name = data.newtuple(name)
+    elseif data.is_tuple(name) then
+      assert(data.all(name:map(function(n) return type(n) == "string" end)))
+    else
+      assert(false)
+    end
+
     local task_id = next_task_id
     next_task_id = next_task_id + 1
     return setmetatable({
       name = name,
       taskid = terralib.constant(c.legion_task_id_t, task_id),
-      ast = false,
-      definition = false,
-      cuda = false,
-      external = false,
-      inline = false,
-      cudakernels = false,
+      variants = terralib.newlist(),
+      calling_convention = false,
+
+      -- Metadata for the Regent calling convention:
       param_symbols = false,
       params_struct = false,
       params_map_type = false,
@@ -430,6 +503,8 @@ do
       params_map_symbol = false,
       field_id_param_labels = false,
       field_id_param_symbols = false,
+
+      -- Task metadata:
       type = false,
       privileges = false,
       coherence_modes = false,
@@ -438,12 +513,15 @@ do
       param_constraints = false,
       constraints = false,
       region_universe = false,
-      config_options = false,
-      source_variant = false,
-      complete_thunk = false,
-      is_complete = false,
-      parallel_variant = false,
+
+      -- Variants and alternative versions:
+      primary_variant = false,
       cuda_variant = false,
+      parallel_task = false,
+
+      -- Compilation continuations:
+      complete_thunks = terralib.newlist(),
+      is_complete = false,
     }, base.task)
   end
 end
