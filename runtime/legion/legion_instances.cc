@@ -2091,6 +2091,7 @@ namespace Legion {
             // in order to be sound for other parts of the analysis, we need
             // the ancestor to be the root of the region tree so that this
             // instance can be safely used for any empty region in this tree.
+            instance_domain = next->row_source;
             while (next->parent != NULL)
               next = next->parent->parent;
             ancestor = next;

@@ -4735,7 +4735,7 @@ namespace Legion {
         default:
           assert(false);
       }
-      return DomainPoint();
+      return DomainPoint::nil();
     }
 
     //--------------------------------------------------------------------------

@@ -3008,7 +3008,7 @@ namespace Legion {
     {
       AutoRuntimeCall call(this); 
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
-                         handle.get_tree_id(), parent.get_type_tag());
+                         handle.get_tree_id(), handle.get_type_tag());
 #ifdef DEBUG_LEGION
       log_index.debug("Creating partition by image in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
@@ -3063,7 +3063,7 @@ namespace Legion {
     {
       AutoRuntimeCall call(this); 
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
-                         handle.get_tree_id(), parent.get_type_tag());
+                         handle.get_tree_id(), handle.get_type_tag());
 #ifdef DEBUG_LEGION
       log_index.debug("Creating partition by image range in task %s (ID %lld)",
                       get_task_name(), get_unique_id());
