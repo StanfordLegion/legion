@@ -1595,42 +1595,49 @@ namespace LegionRuntime {
     template <int DIM>
     void *AccessorType::Generic::Untyped::raw_rect_ptr(const Arrays::Rect<DIM>& r, Arrays::Rect<DIM>& subrect, ByteOffset *offsets) const
     {
+      using namespace Realm;
       RegionInstanceImpl *impl = (RegionInstanceImpl *) internal;
       MemoryImpl *mem = get_runtime()->get_memory_impl(impl->memory);
 
-      // must have valid data by now - block if we have to
-      impl->metadata.await_data();
+      // this exists for compatibility and assumes N=DIM, T=coord_t
+      const InstanceLayout<DIM,coord_t> *inst_layout = dynamic_cast<const InstanceLayout<DIM,coord_t> *>(impl->metadata.layout);
+      assert(inst_layout != 0);
 
-      Arrays::Mapping<DIM, 1> *mapping = impl->metadata.linearization.get_mapping<DIM>();
+      // look up the right field
+      std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = inst_layout->fields.find(field_offset);
+      assert(it != inst_layout->fields.end());
 
-      Arrays::Point<1> strides[DIM];
-      Arrays::coord_t index = mapping->image_linear_subrect(r, subrect, strides);
+      // find the piece containing the low point in the specified rectangle
+      ZPoint<DIM,coord_t> p;
+      for(unsigned i = 0; i < DIM; i++)
+        p[i] = r.lo[i];
+      const InstanceLayoutPiece<DIM,coord_t> *piece = inst_layout->piece_lists[it->second.list_idx].find_piece(p);
+      assert(piece != 0);
+      assert((piece->layout_type == InstanceLayoutPiece<DIM,coord_t>::AffineLayoutType));
+      const AffineLayoutPiece<DIM,coord_t> *affine = static_cast<const AffineLayoutPiece<DIM,coord_t> *>(piece);
 
-      off_t offset = impl->metadata.alloc_offset;
-      off_t elmt_stride;
+      // ask for a direct pointer to the instance's storage
+      void *direct_base = mem->get_direct_ptr(impl->metadata.inst_offset,
+					      inst_layout->bytes_used);
 
-      if(impl->metadata.block_size <= 1) {
-	offset += index * impl->metadata.elmt_size + field_offset;
-	elmt_stride = impl->metadata.elmt_size;
-      } else {
-	off_t field_start;
-	int field_size;
-	Realm::find_field_start(impl->metadata.field_sizes, field_offset, 1, field_start, field_size);
+      // calculate offset of first element within storage
+      char *dst = ((char *)direct_base +
+		   (affine->offset +
+		    affine->strides.dot(p) +
+		    it->second.rel_offset));
+      if(!dst)
+	return 0;
 
-	size_t block_num = index / impl->metadata.block_size;
-	size_t block_ofs = index % impl->metadata.block_size;
+      // and copy the strides into the byte offsets
+      for(unsigned i = 0; i < DIM; i++)
+        offsets[i].offset = affine->strides[i];
 
-	offset += (((impl->metadata.elmt_size * block_num + field_start) * impl->metadata.block_size) + 
-		   (field_size * block_ofs) +
-		   (field_offset - field_start));
-	elmt_stride = field_size;
-      }
-
-      char *dst = (char *)(mem->get_direct_ptr(offset, subrect.volume() * elmt_stride));
-      if(!dst) return 0;
-
-      for(int i = 0; i < DIM; i++)
-	offsets[i].offset = strides[i][0] * elmt_stride;
+      // constrain the subrectangle based on the requested rectangle and the
+      //  bounds of the piece
+      subrect.lo = r.lo;
+      for(unsigned i = 0; i < DIM; i++)
+	subrect.hi.x[i] = std::min(r.hi[i],
+				   (coord_t)(piece->bounds.hi[i]));
 
       return dst;
     }
