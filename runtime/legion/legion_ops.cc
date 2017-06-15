@@ -10276,7 +10276,6 @@ namespace Legion {
       single_tasks.clear();
       // Remove our reference on the future map
       result_map = FutureMap();
-      constraints.clear();
       task_sets.clear();
 #ifdef DEBUG_LEGION
       assert(acquired_instances.empty());
@@ -10646,29 +10645,53 @@ namespace Legion {
           assert(dst_index >= 0);
 #endif
           // See if the dependence record already exists
-          std::pair<unsigned,unsigned> src_key(src_index,src_idx);
-          std::pair<unsigned,unsigned> dst_key(dst_index,dst_idx);
+          const std::pair<unsigned,unsigned> src_key(src_index,src_idx);
+          const std::pair<unsigned,unsigned> dst_key(dst_index,dst_idx);
           std::map<std::pair<unsigned,unsigned>,unsigned>::iterator
-            record_finder = dependence_map.find(dst_key);
-          if (record_finder == dependence_map.end())
+            src_record_finder = dependence_map.find(src_key);
+          if (src_record_finder != dependence_map.end())
           {
+            // Already have a source record, see if we have 
+            // a destination record too
+            std::map<std::pair<unsigned,unsigned>,unsigned>::iterator
+              dst_record_finder = dependence_map.find(dst_key); 
+            if (dst_record_finder == dependence_map.end())
+            {
+              // Update the destination record entry
+              dependence_map[dst_key] = src_record_finder->second;
+              dependences[src_record_finder->second]->add_entry(dst_index, 
+                                                                dst_idx);
+            }
 #ifdef DEBUG_LEGION
-            assert(dependence_map.find(dst_key) == dependence_map.end());
+            else // both already there so just assert they are the same
+              assert(src_record_finder->second == dst_record_finder->second);
 #endif
-            // We have to make new record
-            DependenceRecord *new_record = new DependenceRecord();
-            new_record->add_entry(src_index, src_idx);
-            new_record->add_entry(dst_index, dst_idx);
-            unsigned record_index = dependences.size();
-            dependence_map[src_key] = record_index;
-            dependence_map[dst_key] = record_index;
-            dependences.push_back(new_record);
           }
           else
           {
-            // Just add the source to the collection
-            dependences[record_finder->second]->add_entry(src_index, src_idx);
-            dependence_map[src_key] = record_finder->second;
+            // No source record
+            // See if we have a destination record entry
+            std::map<std::pair<unsigned,unsigned>,unsigned>::iterator
+              dst_record_finder = dependence_map.find(dst_key);
+            if (dst_record_finder == dependence_map.end())
+            {
+              // Neither source nor destination have an entry so
+              // make a new record
+              DependenceRecord *new_record = new DependenceRecord();
+              new_record->add_entry(src_index, src_idx);
+              new_record->add_entry(dst_index, dst_idx);
+              unsigned record_index = dependences.size();
+              dependence_map[src_key] = record_index;
+              dependence_map[dst_key] = record_index;
+              dependences.push_back(new_record);
+            }
+            else
+            {
+              // Have a destination but no source, so update the source
+              dependence_map[src_key] = dst_record_finder->second;
+              dependences[dst_record_finder->second]->add_entry(src_index,
+                                                                src_idx);
+            }
           }
           return false;
         }

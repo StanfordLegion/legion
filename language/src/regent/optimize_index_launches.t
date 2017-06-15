@@ -76,14 +76,10 @@ local function check_privilege_noninterference(cx, task, arg,
 
   local privileges_by_field_path, coherence_modes_by_field_path =
     std.group_task_privileges_by_field_path(
-      std.find_task_privileges(
-        param_region_type, task:get_privileges(),
-        task:get_coherence_modes(), task:get_flags()))
+      std.find_task_privileges(param_region_type, task))
   local other_privileges_by_field_path, other_coherence_modes_by_field_path =
     std.group_task_privileges_by_field_path(
-      std.find_task_privileges(
-        other_param_region_type,
-        task:get_privileges(), task:get_coherence_modes(), task:get_flags()))
+      std.find_task_privileges(other_param_region_type, task))
 
   for field_path, privilege in pairs(privileges_by_field_path) do
     local other_privilege = other_privileges_by_field_path[field_path]
@@ -133,8 +129,7 @@ local function analyze_noninterference_self(
   assert(param_region_type)
   local privileges, privilege_field_paths, privilege_field_types,
         privilege_coherence_modes, privilege_flags = std.find_task_privileges(
-    param_region_type, task:get_privileges(),
-    task:get_coherence_modes(), task:get_flags())
+    param_region_type, task)
   for i, privilege in ipairs(privileges) do
     local field_paths = privilege_field_paths[i]
     local coherence = privilege_coherence_modes[i]
@@ -668,6 +663,8 @@ function optimize_index_launches.block(cx, node)
 end
 
 function optimize_index_launches.top_task(cx, node)
+  if not node.body then return node end
+
   local cx = cx:new_task_scope(node.prototype:get_constraints())
   local body = optimize_index_launches.block(cx, node.body)
 

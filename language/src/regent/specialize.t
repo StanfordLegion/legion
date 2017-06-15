@@ -1778,6 +1778,13 @@ function specialize.top_task_param(cx, node)
       report.error(node, "param type is not a type")
     end
 
+    -- If the type is a future, strip that out and record it separately.
+    local future = false
+    if std.is_future(param_type) then
+      future = true
+      param_type = param_type.result_type
+    end
+
     if not symbol:hastype() then
       symbol:settype(param_type)
     end
@@ -1786,6 +1793,7 @@ function specialize.top_task_param(cx, node)
     result:insert(
       ast.specialized.top.TaskParam {
         symbol = symbol,
+        future = future,
         annotations = node.annotations,
         span = node.span,
       })
@@ -1803,11 +1811,14 @@ function specialize.top_task(cx, node)
   local cx = cx:new_local_scope()
 
   local task = std.new_task(node.name)
-  local variant = task:make_variant("primary")
-  task:set_primary_variant(variant)
 
-  variant:set_is_external(node.annotations.external:is(ast.annotation.Demand))
-  variant:set_is_inline(node.annotations.inline)
+  if node.body then
+    local variant = task:make_variant("primary")
+    task:set_primary_variant(variant)
+    variant:set_is_external(node.annotations.external:is(ast.annotation.Demand))
+    variant:set_is_inline(node.annotations.inline)
+  end
+
   if #node.name == 1 then
     cx.env:insert(node, node.name[1], task)
   end
@@ -1817,12 +1828,7 @@ function specialize.top_task(cx, node)
   local return_type = node.return_type_expr(cx.env:env())
   local privileges, coherence_modes, flags, conditions, constraints =
     specialize.effects(cx, node.effect_exprs)
-  -- local privileges = specialize.privileges(cx, node.privileges)
-  -- local coherence_modes = specialize.coherence_modes(cx, node.coherence_modes)
-  -- local flags = specialize.flags(cx, node.flags)
-  -- local conditions = specialize.conditions(cx, node.conditions)
-  -- local constraints = specialize.constraints(cx, node.constraints)
-  local body = specialize.block(cx, node.body)
+  local body = node.body and specialize.block(cx, node.body)
 
   return ast.specialized.top.Task {
     name = node.name,

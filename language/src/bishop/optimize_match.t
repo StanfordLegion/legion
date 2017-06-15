@@ -42,10 +42,7 @@ local function fetch_task_signatures()
           local param_name = task_params[idx].symbol:hasname()
           local req_indices = {}
           local privileges, privilege_field_paths =
-            regent_std.find_task_privileges(param_type_in_signature,
-                                     v:get_privileges(),
-                                     v:get_coherence_modes(),
-                                     v:get_flags())
+            regent_std.find_task_privileges(param_type_in_signature, v)
           for fidx = 1, #privilege_field_paths do
             num_reqs = num_reqs + 1
             local req = {

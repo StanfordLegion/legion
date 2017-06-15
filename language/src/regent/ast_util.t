@@ -333,6 +333,7 @@ function ast_util.mk_task_param(symbol)
   return ast.typed.top.TaskParam {
     symbol = symbol,
     param_type = symbol:gettype(),
+    future = false,
     span = ast.trivial_span(),
     annotations = ast.default_annotations(),
   }

@@ -97,6 +97,7 @@ function context:new_local_scope(divergence, must_epoch, must_epoch_point, break
     task = self.task,
     task_meta = self.task_meta,
     leaf = self.leaf,
+    alloc = self.alloc,
     divergence = divergence,
     must_epoch = must_epoch,
     must_epoch_point = must_epoch_point,
@@ -110,7 +111,7 @@ function context:new_local_scope(divergence, must_epoch, must_epoch_point, break
   }, context)
 end
 
-function context:new_task_scope(expected_return_type, constraints, leaf, task_meta, task, ctx, runtime)
+function context:new_task_scope(expected_return_type, constraints, leaf, alloc, task_meta, task, ctx, runtime)
   assert(expected_return_type and task and ctx and runtime)
   return setmetatable({
     variant = self.variant,
@@ -119,6 +120,7 @@ function context:new_task_scope(expected_return_type, constraints, leaf, task_me
     task = task,
     task_meta = task_meta,
     leaf = leaf,
+    alloc = alloc,
     divergence = false,
     must_epoch = false,
     must_epoch_point = false,
@@ -659,7 +661,7 @@ local function unpack_region(cx, region_expr, region_type, static_region_type)
   local lr = terralib.newsymbol(c.legion_logical_region_t, "lr") 
   local is = terralib.newsymbol(c.legion_index_space_t, "is")
   local isa = false
-  if not cx.leaf and region_type:is_opaque() then
+  if cx.alloc and region_type:is_opaque() then
     isa = terralib.newsymbol(c.legion_index_allocator_t, "isa")
   end
   local it = false
@@ -673,17 +675,15 @@ local function unpack_region(cx, region_expr, region_type, static_region_type)
     var [lr] = [r].impl
   end
 
-  if not cx.leaf then
+  actions = quote
+    [actions]
+    var [is] = [lr].index_space
+  end
+  if cx.alloc and region_type:is_opaque() then
     actions = quote
       [actions]
-      var [is] = [lr].index_space
-    end
-    if region_type:is_opaque() then
-      actions = quote
-        [actions]
-        var [isa] = c.legion_index_allocator_create(
-          [cx.runtime], [cx.context], [is])
-      end
+      var [isa] = c.legion_index_allocator_create(
+        [cx.runtime], [cx.context], [is])
     end
   end
 
@@ -1834,7 +1834,7 @@ function codegen.expr_index_access(cx, node)
     local lr = terralib.newsymbol(c.legion_logical_region_t, "lr")
     local is = terralib.newsymbol(c.legion_index_space_t, "is")
     local isa = false
-    if not cx.leaf and parent_region_type:is_opaque() then
+    if cx.alloc and parent_region_type:is_opaque() then
       isa = terralib.newsymbol(c.legion_index_allocator_t, "isa")
     end
     local it = false
@@ -1854,7 +1854,7 @@ function codegen.expr_index_access(cx, node)
       var [r] = [expr_type] { impl = [lr] }
     end
 
-    if not cx.leaf and parent_region_type:is_opaque() then
+    if cx.alloc and parent_region_type:is_opaque() then
       actions = quote
         [actions]
         var [isa] = c.legion_index_allocator_create(
@@ -1904,7 +1904,7 @@ function codegen.expr_index_access(cx, node)
       lr = terralib.newsymbol(c.legion_logical_region_t, "lr")
       local is = terralib.newsymbol(c.legion_index_space_t, "is")
       local isa = false
-      if not cx.leaf and parent_region_type:is_opaque() then
+      if cx.alloc and parent_region_type:is_opaque() then
         isa = terralib.newsymbol(c.legion_index_allocator_t, "isa")
       end
       local it = false
@@ -1920,7 +1920,7 @@ function codegen.expr_index_access(cx, node)
         var [r] = [region_type] { impl = [lr] }
       end
 
-      if not cx.leaf and parent_region_type:is_opaque() then
+      if cx.alloc and parent_region_type:is_opaque() then
         actions = quote
           [actions]
           var [isa] = c.legion_index_allocator_create(
@@ -2360,8 +2360,7 @@ end
 local function expr_call_setup_region_arg(
     cx, task, arg_type, param_type, launcher, index, args_setup)
   local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
-    std.find_task_privileges(param_type, task:get_privileges(),
-                             task:get_coherence_modes(), task:get_flags())
+    std.find_task_privileges(param_type, task)
   local privilege_modes = privileges:map(std.privilege_mode)
   local coherence_modes = coherences:map(std.coherence_mode)
 
@@ -2501,8 +2500,7 @@ end
 local function expr_call_setup_list_of_regions_arg(
     cx, task, arg_type, param_type, launcher, index, args_setup)
   local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
-    std.find_task_privileges(param_type, task:get_privileges(),
-                             task:get_coherence_modes(), task:get_flags())
+    std.find_task_privileges(param_type, task)
   local privilege_modes = privileges:map(std.privilege_mode)
   local coherence_modes = coherences:map(std.coherence_mode)
 
@@ -2597,8 +2595,7 @@ local function expr_call_setup_partition_arg(
     cx, task, arg_type, param_type, partition, launcher, index, args_setup)
   assert(index)
   local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
-    std.find_task_privileges(param_type, task:get_privileges(),
-                             task:get_coherence_modes(), task:get_flags())
+    std.find_task_privileges(param_type, task)
   local privilege_modes = privileges:map(std.privilege_mode)
   local coherence_modes = coherences:map(std.coherence_mode)
   local parent_region =
@@ -3057,6 +3054,7 @@ function codegen.expr_new(cx, node)
   end
   assert(std.is_ispace(ispace_type))
   local isa = cx:ispace(ispace_type).index_allocator
+  assert(isa)
 
   local expr_type = std.as_read(node.expr_type)
   local actions = quote
@@ -3370,7 +3368,7 @@ function codegen.expr_ispace(cx, node)
   -- FIXME: Runtime does not understand how to make multi-dimensional
   -- index spaces allocable.
   local isa = false
-  if ispace_type.dim == 0 then
+  if cx.alloc and ispace_type.dim == 0 then
     isa = terralib.newsymbol(c.legion_index_allocator_t, "isa")
   end
   local it = false
@@ -3394,7 +3392,12 @@ function codegen.expr_ispace(cx, node)
     actions = quote
       [actions]
       var [is] = c.legion_index_space_create([cx.runtime], [cx.context], [extent_value])
-      var [isa] = c.legion_index_allocator_create([cx.runtime], [cx.context],  [is])
+    end
+    if cx.alloc then
+      actions = quote
+        [actions]
+        var [isa] = c.legion_index_allocator_create([cx.runtime], [cx.context],  [is])
+      end
     end
 
     if cache_index_iterator then
@@ -5990,6 +5993,7 @@ local lift_unary_op_to_futures = terralib.memoize(
           ast.typed.top.TaskParam {
             symbol = rhs_symbol,
             param_type = rhs_type,
+            future = false,
             annotations = ast.default_annotations(),
             span = ast.trivial_span(),
           },
@@ -6025,6 +6029,7 @@ local lift_unary_op_to_futures = terralib.memoize(
         leaf = true,
         inner = false,
         idempotent = true,
+        alloc = false,
       },
       region_divergence = false,
       prototype = task,
@@ -6073,12 +6078,14 @@ local lift_binary_op_to_futures = terralib.memoize(
          ast.typed.top.TaskParam {
             symbol = lhs_symbol,
             param_type = lhs_type,
+            future = false,
             annotations = ast.default_annotations(),
             span = ast.trivial_span(),
          },
          ast.typed.top.TaskParam {
             symbol = rhs_symbol,
             param_type = rhs_type,
+            future = false,
             annotations = ast.default_annotations(),
             span = ast.trivial_span(),
          },
@@ -6120,6 +6127,7 @@ local lift_binary_op_to_futures = terralib.memoize(
         leaf = true,
         inner = false,
         idempotent = true,
+        alloc = false,
       },
       region_divergence = false,
       prototype = task,
@@ -8421,6 +8429,7 @@ function codegen.top_task(cx, node)
   local cx = cx:new_task_scope(return_type,
                                task:get_constraints(),
                                variant:get_config_options().leaf,
+                               variant:get_config_options().alloc,
                                task, c_task, c_context, c_runtime)
 
   -- Unpack the by-value parameters to the task.
@@ -8517,7 +8526,7 @@ function codegen.top_task(cx, node)
     local r = params[region_i]:getsymbol()
     local is = terralib.newsymbol(c.legion_index_space_t, "is")
     local isa = false
-    if not cx.leaf and region_type:is_opaque() then
+    if cx.alloc and region_type:is_opaque() then
       isa = terralib.newsymbol(c.legion_index_allocator_t, "isa")
     end
     local it = false
@@ -8526,8 +8535,7 @@ function codegen.top_task(cx, node)
     end
 
     local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
-      std.find_task_privileges(region_type, task:get_privileges(),
-                               task:get_coherence_modes(), task:get_flags())
+      std.find_task_privileges(region_type, task)
 
     local privileges_by_field_path = std.group_task_privileges_by_field_path(
       privileges, privilege_field_paths)
@@ -8588,16 +8596,14 @@ function codegen.top_task(cx, node)
 
     local actions = quote end
 
-    if not cx.leaf then
+    actions = quote
+      [actions]
+      var [is] = [r].impl.index_space
+    end
+    if cx.alloc and region_type:is_opaque() then
       actions = quote
         [actions]
-        var [is] = [r].impl.index_space
-      end
-      if region_type:is_opaque() then
-        actions = quote
-          [actions]
-          var [isa] = c.legion_index_allocator_create([cx.runtime], [cx.context], [is])
-        end
+        var [isa] = c.legion_index_allocator_create([cx.runtime], [cx.context], [is])
       end
     end
 
@@ -8660,8 +8666,7 @@ function codegen.top_task(cx, node)
     local list = params[list_i]
 
     local privileges, privilege_field_paths, privilege_field_types =
-      std.find_task_privileges(list_type, task:get_privileges(),
-                               task:get_coherence_modes(), task:get_flags())
+      std.find_task_privileges(list_type, task)
 
     local privileges_by_field_path = std.group_task_privileges_by_field_path(
       privileges, privilege_field_paths)
@@ -8821,6 +8826,8 @@ function codegen.top(cx, node)
     local task = node.prototype
 
     setup_regent_calling_convention_metadata(node, task)
+
+    if not node.body then return task end
 
     if not (node.annotations.cuda:is(ast.annotation.Demand) and
             cudahelper.check_cuda_available())

@@ -537,6 +537,8 @@ function task_initial_usage(cx, privileges)
 end
 
 function optimize_mapping.top_task(cx, node)
+  if not node.body then return node end
+
   local cx = cx:new_task_scope(
     node.prototype:get_constraints(),
     node.prototype:get_region_universe())

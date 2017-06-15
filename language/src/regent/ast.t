@@ -79,8 +79,8 @@ ast.annotation:leaf("Forbid", {"value"}, true)
 ast.annotation:leaf("Unroll", {"value"}, true)
 
 -- Annotation: Sets
-ast.annotation:leaf("Set", {"cuda", "external", "inline", "openmp", "parallel", "spmd",
-                            "trace", "vectorize"},
+ast.annotation:leaf("Set", {"cuda", "external", "inline", "openmp",
+                            "parallel", "spmd", "trace", "vectorize"},
                     false, true)
 
 function ast.default_annotations()
@@ -96,6 +96,17 @@ function ast.default_annotations()
     vectorize = allow,
   }
 end
+
+-- Calling Conventions
+
+ast:inner("convention_kind")
+ast.convention_kind:leaf("Padded"):set_memoize():set_print_custom("padded")
+ast.convention_kind:leaf("Packed"):set_memoize():set_print_custom("packed")
+
+ast:inner("convention")
+ast.convention:leaf("Regent"):set_memoize():set_print_custom("regent")
+ast.convention:leaf("Manual", {"params"}):set_memoize():set_print_custom(
+  function(node) return "manual(" .. tostring(node.params) .. ")" end)
 
 -- Kinds: Constraints, Privileges, Coherence, Flags, Conditions, Disjointness
 
@@ -371,7 +382,7 @@ ast.specialized.top:leaf("Task", {"name", "params", "return_type",
                                   "privileges", "coherence_modes", "flags",
                                   "conditions", "constraints", "body",
                                   "prototype"})
-ast.specialized.top:leaf("TaskParam", {"symbol"})
+ast.specialized.top:leaf("TaskParam", {"symbol", "future"})
 ast.specialized.top:leaf("Fspace", {"name", "fspace", "constraints"})
 ast.specialized.top:leaf("QuoteExpr", {"expr"})
 ast.specialized.top:leaf("QuoteStat", {"block"})
@@ -488,7 +499,7 @@ ast.typed.stat:leaf("EndTrace", {"trace_id"})
 ast.typed.stat:leaf("MapRegions", {"region_types"})
 ast.typed.stat:leaf("UnmapRegions", {"region_types"})
 
-ast:leaf("TaskConfigOptions", {"leaf", "inner", "idempotent"})
+ast:leaf("TaskConfigOptions", {"leaf", "inner", "idempotent", "alloc"})
 
 ast.typed:inner("top", {"annotations"})
 ast.typed.top:leaf("Fspace", {"name", "fspace"})
@@ -496,6 +507,6 @@ ast.typed.top:leaf("Task", {"name", "params", "return_type", "privileges",
                              "coherence_modes", "flags", "conditions",
                              "constraints", "body", "config_options",
                              "region_divergence", "prototype"})
-ast.typed.top:leaf("TaskParam", {"symbol", "param_type"})
+ast.typed.top:leaf("TaskParam", {"symbol", "param_type", "future"})
 
 return ast
