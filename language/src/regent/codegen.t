@@ -97,7 +97,6 @@ function context:new_local_scope(divergence, must_epoch, must_epoch_point, break
     task = self.task,
     task_meta = self.task_meta,
     leaf = self.leaf,
-    alloc = self.alloc,
     divergence = divergence,
     must_epoch = must_epoch,
     must_epoch_point = must_epoch_point,
@@ -111,7 +110,7 @@ function context:new_local_scope(divergence, must_epoch, must_epoch_point, break
   }, context)
 end
 
-function context:new_task_scope(expected_return_type, constraints, leaf, alloc, task_meta, task, ctx, runtime)
+function context:new_task_scope(expected_return_type, constraints, leaf, task_meta, task, ctx, runtime)
   assert(expected_return_type and task and ctx and runtime)
   return setmetatable({
     variant = self.variant,
@@ -120,7 +119,6 @@ function context:new_task_scope(expected_return_type, constraints, leaf, alloc, 
     task = task,
     task_meta = task_meta,
     leaf = leaf,
-    alloc = alloc,
     divergence = false,
     must_epoch = false,
     must_epoch_point = false,
@@ -661,7 +659,7 @@ local function unpack_region(cx, region_expr, region_type, static_region_type)
   local lr = terralib.newsymbol(c.legion_logical_region_t, "lr") 
   local is = terralib.newsymbol(c.legion_index_space_t, "is")
   local isa = false
-  if cx.alloc and region_type:is_opaque() then
+  if not cx.leaf and region_type:is_opaque() then
     isa = terralib.newsymbol(c.legion_index_allocator_t, "isa")
   end
   local it = false
@@ -675,15 +673,17 @@ local function unpack_region(cx, region_expr, region_type, static_region_type)
     var [lr] = [r].impl
   end
 
-  actions = quote
-    [actions]
-    var [is] = [lr].index_space
-  end
-  if cx.alloc and region_type:is_opaque() then
+  if not cx.leaf then
     actions = quote
       [actions]
-      var [isa] = c.legion_index_allocator_create(
-        [cx.runtime], [cx.context], [is])
+      var [is] = [lr].index_space
+    end
+    if region_type:is_opaque() then
+      actions = quote
+        [actions]
+        var [isa] = c.legion_index_allocator_create(
+          [cx.runtime], [cx.context], [is])
+      end
     end
   end
 
@@ -1834,7 +1834,7 @@ function codegen.expr_index_access(cx, node)
     local lr = terralib.newsymbol(c.legion_logical_region_t, "lr")
     local is = terralib.newsymbol(c.legion_index_space_t, "is")
     local isa = false
-    if cx.alloc and parent_region_type:is_opaque() then
+    if not cx.leaf and parent_region_type:is_opaque() then
       isa = terralib.newsymbol(c.legion_index_allocator_t, "isa")
     end
     local it = false
@@ -1854,7 +1854,7 @@ function codegen.expr_index_access(cx, node)
       var [r] = [expr_type] { impl = [lr] }
     end
 
-    if cx.alloc and parent_region_type:is_opaque() then
+    if not cx.leaf and parent_region_type:is_opaque() then
       actions = quote
         [actions]
         var [isa] = c.legion_index_allocator_create(
@@ -1904,7 +1904,7 @@ function codegen.expr_index_access(cx, node)
       lr = terralib.newsymbol(c.legion_logical_region_t, "lr")
       local is = terralib.newsymbol(c.legion_index_space_t, "is")
       local isa = false
-      if cx.alloc and parent_region_type:is_opaque() then
+      if not cx.leaf and parent_region_type:is_opaque() then
         isa = terralib.newsymbol(c.legion_index_allocator_t, "isa")
       end
       local it = false
@@ -1920,7 +1920,7 @@ function codegen.expr_index_access(cx, node)
         var [r] = [region_type] { impl = [lr] }
       end
 
-      if cx.alloc and parent_region_type:is_opaque() then
+      if not cx.leaf and parent_region_type:is_opaque() then
         actions = quote
           [actions]
           var [isa] = c.legion_index_allocator_create(
@@ -3054,7 +3054,6 @@ function codegen.expr_new(cx, node)
   end
   assert(std.is_ispace(ispace_type))
   local isa = cx:ispace(ispace_type).index_allocator
-  assert(isa)
 
   local expr_type = std.as_read(node.expr_type)
   local actions = quote
@@ -3368,7 +3367,7 @@ function codegen.expr_ispace(cx, node)
   -- FIXME: Runtime does not understand how to make multi-dimensional
   -- index spaces allocable.
   local isa = false
-  if cx.alloc and ispace_type.dim == 0 then
+  if ispace_type.dim == 0 then
     isa = terralib.newsymbol(c.legion_index_allocator_t, "isa")
   end
   local it = false
@@ -3392,12 +3391,7 @@ function codegen.expr_ispace(cx, node)
     actions = quote
       [actions]
       var [is] = c.legion_index_space_create([cx.runtime], [cx.context], [extent_value])
-    end
-    if cx.alloc then
-      actions = quote
-        [actions]
-        var [isa] = c.legion_index_allocator_create([cx.runtime], [cx.context],  [is])
-      end
+      var [isa] = c.legion_index_allocator_create([cx.runtime], [cx.context],  [is])
     end
 
     if cache_index_iterator then
@@ -6029,7 +6023,6 @@ local lift_unary_op_to_futures = terralib.memoize(
         leaf = true,
         inner = false,
         idempotent = true,
-        alloc = false,
       },
       region_divergence = false,
       prototype = task,
@@ -6127,7 +6120,6 @@ local lift_binary_op_to_futures = terralib.memoize(
         leaf = true,
         inner = false,
         idempotent = true,
-        alloc = false,
       },
       region_divergence = false,
       prototype = task,
@@ -8429,7 +8421,6 @@ function codegen.top_task(cx, node)
   local cx = cx:new_task_scope(return_type,
                                task:get_constraints(),
                                variant:get_config_options().leaf,
-                               variant:get_config_options().alloc,
                                task, c_task, c_context, c_runtime)
 
   -- Unpack the by-value parameters to the task.
@@ -8526,7 +8517,7 @@ function codegen.top_task(cx, node)
     local r = params[region_i]:getsymbol()
     local is = terralib.newsymbol(c.legion_index_space_t, "is")
     local isa = false
-    if cx.alloc and region_type:is_opaque() then
+    if not cx.leaf and region_type:is_opaque() then
       isa = terralib.newsymbol(c.legion_index_allocator_t, "isa")
     end
     local it = false
@@ -8596,14 +8587,16 @@ function codegen.top_task(cx, node)
 
     local actions = quote end
 
-    actions = quote
-      [actions]
-      var [is] = [r].impl.index_space
-    end
-    if cx.alloc and region_type:is_opaque() then
+    if not cx.leaf then
       actions = quote
         [actions]
-        var [isa] = c.legion_index_allocator_create([cx.runtime], [cx.context], [is])
+        var [is] = [r].impl.index_space
+      end
+      if region_type:is_opaque() then
+        actions = quote
+          [actions]
+          var [isa] = c.legion_index_allocator_create([cx.runtime], [cx.context], [is])
+        end
       end
     end
 
