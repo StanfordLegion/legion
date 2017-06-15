@@ -50,8 +50,6 @@ end
 task toplevel()
   var r1 = region(ispace(ptr, 10), int)
   var r2 = region(ispace(ptr, 10), int)
-  new(ptr(int, r1), 10)
-  new(ptr(int, r2), 10)
   for e in r2 do
     @e = 0
   end

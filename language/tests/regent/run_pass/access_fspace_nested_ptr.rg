@@ -37,9 +37,9 @@ task g()
   var m = region(ispace(ptr, 5), subsubspace)
   var n = region(ispace(ptr, 5), subspace(m))
   var o = region(ispace(ptr, 5), space(m, n))
-  var p = new(ptr(subsubspace, m))
-  var q = new(ptr(subspace(m), n))
-  var r = new(ptr(space(m, n), o))
+  var p = dynamic_cast(ptr(subsubspace, m), 0)
+  var q = dynamic_cast(ptr(subspace(m), n), 0)
+  var r = dynamic_cast(ptr(space(m, n), o), 0)
 
   r.c = q
   r.c.b = p

@@ -46,11 +46,11 @@ where reads(owned.p), reduces+(owned.v, ghost.v) do
 end
 
 task main()
-  var nodes = region(ispace(ptr, 5), node(wild, wild))
-  var x0 = new(ptr(node(wild, wild), nodes))
-  var x1 = new(ptr(node(wild, wild), nodes))
-  var x2 = new(ptr(node(wild, wild), nodes))
-  var x3 = new(ptr(node(wild, wild), nodes))
+  var nodes = region(ispace(ptr, 4), node(wild, wild))
+  var x0 = dynamic_cast(ptr(node(wild, wild), nodes), 0)
+  var x1 = dynamic_cast(ptr(node(wild, wild), nodes), 1)
+  var x2 = dynamic_cast(ptr(node(wild, wild), nodes), 2)
+  var x3 = dynamic_cast(ptr(node(wild, wild), nodes), 3)
 
   @x0 = [node(wild, wild)]{ p = static_cast(ptr(node(wild, wild), nodes, nodes), x1), v = 0 }
   @x1 = [node(wild, wild)]{ p = static_cast(ptr(node(wild, wild), nodes, nodes), x2), v = 0 }

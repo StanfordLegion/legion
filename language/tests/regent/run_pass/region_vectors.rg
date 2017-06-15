@@ -20,13 +20,13 @@ fspace t {
 }
 
 task f() : int
-  var r = region(ispace(ptr, 10), t)
+  var r = region(ispace(ptr, 5), t)
 
-  var p0 = new(ptr(t, r))
-  var p1 = new(ptr(t, r))
-  var p2 = new(ptr(t, r))
-  var p3 = new(ptr(t, r))
-  var p4 = new(ptr(t, r))
+  var p0 = dynamic_cast(ptr(t, r), 0)
+  var p1 = dynamic_cast(ptr(t, r), 1)
+  var p2 = dynamic_cast(ptr(t, r), 2)
+  var p3 = dynamic_cast(ptr(t, r), 3)
+  var p4 = dynamic_cast(ptr(t, r), 4)
 
   p0.x = vector(5, 4)
   p1.x = vector(40, 39)

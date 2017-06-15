@@ -32,7 +32,7 @@ end
 
 task main()
   var r = region(ispace(ptr, 4), tree(r))
-  var x = new(ptr(tree(r), r))
+  var x = dynamic_cast(ptr(tree(r), r), 0)
   f(r, x)
 end
 regentlib.start(main)

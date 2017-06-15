@@ -298,14 +298,6 @@ function pretty.expr_isnull(cx, node)
   return join({"isnull(", pretty.expr(cx, node.pointer), ")"})
 end
 
-function pretty.expr_new(cx, node)
-  return join({
-      "new(",
-      commas({tostring(node.pointer_type), pretty.expr(cx, node.region),
-              node.extent and pretty.expr(cx, node.extent)}),
-      ")"})
-end
-
 function pretty.expr_null(cx, node)
   return text.Line { value = "null(" .. tostring(node.pointer_type) .. ")" }
 end
@@ -654,9 +646,6 @@ function pretty.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Isnull) then
     return pretty.expr_isnull(cx, node)
-
-  elseif node:is(ast.typed.expr.New) then
-    return pretty.expr_new(cx, node)
 
   elseif node:is(ast.typed.expr.Null) then
     return pretty.expr_null(cx, node)

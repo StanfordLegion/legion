@@ -59,9 +59,9 @@ task main()
   var t = region(ispace(ptr, 5), inner)
   var u = region(ispace(ptr, 5), middle(t))
   var v = region(ispace(ptr, 5), outer(t, u))
-  var w = new(ptr(inner, t))
-  var x = new(ptr(middle(t), u))
-  var y = new(ptr(outer(t, u), v))
+  var w = dynamic_cast(ptr(inner, t), 0)
+  var x = dynamic_cast(ptr(middle(t), u), 0)
+  var y = dynamic_cast(ptr(outer(t, u), v), 0)
 
   w.{a, b, c}.{_0, _1, _2} = 0
   @x = [middle(t)] { e = t, f = w }

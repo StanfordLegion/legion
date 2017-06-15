@@ -20,7 +20,7 @@ import "regent"
 local c = regentlib.c
 
 task main()
-  var t = region(ispace(ptr, 5), int)
-  var y = unsafe_cast(ptr(int, t), 0)
+  var t = region(ispace(ptr, 1), int)
+  var y = unsafe_cast(ptr(int, t), 1)
 end
 regentlib.start(main)

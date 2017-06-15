@@ -149,9 +149,6 @@ task toplevel()
   var rn = region(ispace(ptr, num_circuit_nodes), Node)
   var rw = region(ispace(ptr, num_circuit_wires), Wire(wild, wild, wild))
 
-  new(ptr(Node, rn), num_circuit_nodes)
-  new(ptr(Wire(rn, rn, rn), rw), num_circuit_wires)
-
   c.printf("Generating random circuit...\n")
   helper.generate_random_circuit(rn, rw, conf)
 

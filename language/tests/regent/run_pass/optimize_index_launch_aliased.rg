@@ -23,7 +23,6 @@ end
 
 task toplevel()
   var r = region(ispace(ptr, 10), int)
-  new(ptr(int, r), 10)
   var cs = ispace(int1d, 5)
   var p = partition(equal, r, cs)
 

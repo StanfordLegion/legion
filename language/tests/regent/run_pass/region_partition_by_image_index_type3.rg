@@ -22,11 +22,11 @@ task f()
   var x1 = dynamic_cast(int3d(int, r), { 1, 0, 0 })
   var x2 = dynamic_cast(int3d(int, r), { 2, 0, 0 })
   var x3 = dynamic_cast(int3d(int, r), { 3, 0, 0 })
-  var s = region(ispace(ptr, 5), int3d)
-  var y0 = new(ptr(int3d, s))
-  var y1 = new(ptr(int3d, s))
-  var y2 = new(ptr(int3d, s))
-  var y3 = new(ptr(int3d, s))
+  var s = region(ispace(ptr, 4), int3d)
+  var y0 = dynamic_cast(ptr(int3d, s), 0)
+  var y1 = dynamic_cast(ptr(int3d, s), 1)
+  var y2 = dynamic_cast(ptr(int3d, s), 2)
+  var y3 = dynamic_cast(ptr(int3d, s), 3)
 
   @y0 = x0
   @y1 = x1

@@ -54,7 +54,6 @@ local function analyze_leaf_node(cx)
       return not std.is_task(node.fn.value)
 
     elseif node:is(ast.typed.expr.RawContext) or
-      node:is(ast.typed.expr.New) or
       node:is(ast.typed.expr.Ispace) or
       node:is(ast.typed.expr.Region) or
       node:is(ast.typed.expr.Partition) or
@@ -199,7 +198,6 @@ local function analyze_inner_node(cx)
       node:is(ast.typed.expr.RawRuntime) or
       node:is(ast.typed.expr.RawValue) or
       node:is(ast.typed.expr.Isnull) or
-      node:is(ast.typed.expr.New) or
       node:is(ast.typed.expr.Null) or
       node:is(ast.typed.expr.DynamicCast) or
       node:is(ast.typed.expr.StaticCast) or

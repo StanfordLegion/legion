@@ -971,9 +971,6 @@ function check_vectorizability.expr(cx, node)
       cx:report_error_when_demanded(node,
         error_prefix .. "an isnull expression")
 
-    elseif node:is(ast.typed.expr.New) then
-      cx:report_error_when_demanded(node, error_prefix .. "a new expression")
-
     elseif node:is(ast.typed.expr.Null) then
       cx:report_error_when_demanded(node, error_prefix .. "a null expression")
 

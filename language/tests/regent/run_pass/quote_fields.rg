@@ -34,8 +34,7 @@ local inc_a = make_inc("a")
 local inc_bc = make_inc(terralib.newlist({"b", "c"}))
 
 task main()
-  var r = region(ispace(ptr, 5), elt)
-  new(ptr(elt, r), 3)
+  var r = region(ispace(ptr, 3), elt)
 
   fill(r.{a, b, c}, 1000)
   inc_a(r, 500)

@@ -41,7 +41,6 @@ end
 task main()
   var n = 5
   var r = region(ispace(ptr, n), node)
-  new(ptr(node, r), n)
   fill(r.m, 0)
   foo_non_inner(r)
   foo_inner(r)

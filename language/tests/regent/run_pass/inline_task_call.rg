@@ -41,7 +41,7 @@ end
 task g() : ret
   var id_g = c.legion_context_get_unique_id(__context())
   var r = region(ispace(ptr, 5), int)
-  var x = new(ptr(int, r))
+  var x = dynamic_cast(ptr(int, r), 0)
   @x = 5
   var ret_f = __demand(__inline, f(r, x))
   regentlib.assert(id_g == ret_f.id, "test failed")

@@ -32,7 +32,7 @@ end
 
 task top() : int
   var g = region(ispace(ptr, 5), list(g))
-  var h = new(ptr(list(g), g))
+  var h = dynamic_cast(ptr(list(g), g), 0)
   @h = { data = 5, next = h }
   return deep(g, h)
 end

@@ -22,7 +22,6 @@ task main()
   end
 
   var r = region(ispace(ptr, 5), int)
-  new(ptr(int, r), 5)
   for x in r do
     count += 10
     break

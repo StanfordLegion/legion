@@ -18,11 +18,11 @@ local c = regentlib.c
 
 task f()
   var r = region(ispace(int3d, { 5, 1, 1 }), int)
-  var s = region(ispace(ptr, 5), int3d)
-  var y0 = new(ptr(int3d, s))
-  var y1 = new(ptr(int3d, s))
-  var y2 = new(ptr(int3d, s))
-  var y3 = new(ptr(int3d, s))
+  var s = region(ispace(ptr, 4), int3d)
+  var y0 = dynamic_cast(ptr(int3d, s), 0)
+  var y1 = dynamic_cast(ptr(int3d, s), 1)
+  var y2 = dynamic_cast(ptr(int3d, s), 2)
+  var y3 = dynamic_cast(ptr(int3d, s), 3)
   @y0 = [int3d] { 1, 0, 0 }
   @y1 = [int3d] { 0, 0, 0 }
   @y2 = [int3d] { 1, 0, 0 }

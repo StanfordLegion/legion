@@ -34,7 +34,7 @@ end
 
 task h() : int
   var t = region(ispace(ptr, 5), int)
-  var a = new(ptr(int, t))
+  var a = dynamic_cast(ptr(int, t), 0)
 
   var tc = c.legion_coloring_create()
   c.legion_coloring_add_point(tc, 0, __raw(a))

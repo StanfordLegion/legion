@@ -24,7 +24,7 @@ fspace s {
 
 task f()
   var r = region(ispace(ptr, 5), s)
-  var p = new(ptr(s, r))
+  var p = dynamic_cast(ptr(s, r), 0)
 
   for i = 0, 10 do
     p.x[i] = i*i

@@ -1067,10 +1067,6 @@ task test()
   var rp_all = region(ispace(ptr, conf.np), point)
   var rs_all = region(ispace(ptr, conf.ns), side(wild, wild, wild, wild))
 
-  new(ptr(zone, rz_all), conf.nz)
-  new(ptr(point, rp_all), conf.np)
-  new(ptr(side(wild, wild, wild, wild), rs_all), conf.ns)
-
   c.printf("Reading input (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
 
   var colorings : mesh_colorings

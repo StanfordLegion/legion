@@ -16,8 +16,8 @@ import "regent"
 
 task top() : bool
   var r = region(ispace(ptr, 6), int)
-  var x = new(ptr(int, r))
-  var y = new(ptr(int, r))
+  var x = dynamic_cast(ptr(int, r), 0)
+  var y = dynamic_cast(ptr(int, r), 1)
   return (x == x) and (x ~= y)
 end
 

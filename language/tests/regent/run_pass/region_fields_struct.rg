@@ -42,7 +42,7 @@ end
 
 task tf() : int
   var r = region(ispace(ptr, 1), p1)
-  var x = new(ptr(p1, r))
+  var x = dynamic_cast(ptr(p1, r), 0)
   x.a = 1
   x.b = 20
   return f(r, x)
@@ -59,7 +59,7 @@ end
 
 task tg()
   var r = region(ispace(ptr, 1), p2)
-  var x = new(ptr(p2, r))
+  var x = dynamic_cast(ptr(p2, r), 0)
   g(r, x)
   return x.e.a + x.f.a + x.f.b
 end

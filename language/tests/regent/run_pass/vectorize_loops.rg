@@ -77,19 +77,19 @@ task toplevel()
   var rb = region(ispace(ptr, n), fs2)
   var r1 = region(ispace(ptr, n), fs1(ra, rb))
   for i = 0, n do
-    var ptra = new(ptr(fs2, ra))
+    var ptra = dynamic_cast(ptr(fs2, ra), i)
     ptra.v1.x = 1.0 + i
     ptra.v1.y = 1.0 + i
     ptra.v2.x = 1.0 + i
     ptra.v2.y = 1.0 + i
 
-    var ptrb = new(ptr(fs2, rb))
+    var ptrb = dynamic_cast(ptr(fs2, rb), i)
     ptrb.v1.x = 4.0 + i
     ptrb.v1.y = 4.0 + i
     ptrb.v2.x = 4.0 + i
     ptrb.v2.y = 4.0 + i
 
-    var ptr1 = new(ptr(fs1(ra, rb), r1))
+    var ptr1 = dynamic_cast(ptr(fs1(ra, rb), r1), i)
     ptr1.v1.x = 3.0 + i
     ptr1.v1.y = 3.0 + i
     ptr1.v2.x = 3.0 + i

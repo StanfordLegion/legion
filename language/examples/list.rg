@@ -47,7 +47,6 @@ end
 
 task top() : int
   var f = region(ispace(ptr, 5), list(f))
-  new(ptr(list(f), f), 5)
   var x = make_list(f, 5)
   return sum_list(f, x)
 end

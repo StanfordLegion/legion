@@ -63,7 +63,6 @@ end
 
 task toplevel()
   var r = region(ispace(ptr, 10), int)
-  new(ptr(int, r), 10)
   for e in r do @e = 10 end -- this will create an instance
   var p = get_ptr(r)
   p = foo(r, p)

@@ -44,8 +44,7 @@ end
 task main()
   var m = 5
   var n = region(ispace(ptr, m), a)
-  for _ = 0, m do
-    var o = new(ptr(a, n))
+  for o in n do
     o.b = 1
     o.c = 2
   end

@@ -23,7 +23,6 @@ end
 
 task main()
   var r = region(ispace(ptr, 5), int)
-  new(ptr(int, r), 5)
   fill(r, 0)
 
   var p = partition(equal, r, ispace(int1d, 3))

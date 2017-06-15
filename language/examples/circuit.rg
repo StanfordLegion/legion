@@ -545,9 +545,6 @@ task toplevel()
   var all_nodes = region(ispace(ptr, num_circuit_nodes), node)
   var all_wires = region(ispace(ptr, num_circuit_wires), wire(wild, wild, wild))
 
-  new(ptr(node, all_nodes), num_circuit_nodes)
-  new(ptr(wire(wild, wild, wild), all_wires), num_circuit_wires)
-
   -- report mesh size in bytes
   do
     var node_size = [ terralib.sizeof(node) ]

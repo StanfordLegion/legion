@@ -29,8 +29,7 @@ where [reads_writes_r_a] do
 end
 
 task main()
-  var r = region(ispace(ptr, 5), s)
-  new(ptr(s, r), 3)
+  var r = region(ispace(ptr, 3), s)
   fill(r.a, 10)
   f(r)
 

@@ -181,14 +181,15 @@ function context:ispace(ispace_type)
   return self.ispaces:lookup(nil, ispace_type)
 end
 
-function context:add_ispace_root(ispace_type, index_space, index_allocator,
-                                 index_iterator, bounds)
+function context:add_ispace_root(ispace_type, index_space, index_iterator,
+                                 bounds)
   if not self.ispaces then
     error("not in task context", 2)
   end
   if self:has_ispace(ispace_type) then
     error("ispace " .. tostring(ispace_type) .. " already defined in this context", 2)
   end
+
   self.ispaces:insert(
     nil,
     ispace_type,
@@ -196,15 +197,14 @@ function context:add_ispace_root(ispace_type, index_space, index_allocator,
       {
         index_space = index_space,
         index_partition = nil,
-        index_allocator = index_allocator,
         index_iterator = index_iterator,
         root_ispace_type = ispace_type,
         bounds = bounds,
       }, ispace))
 end
 
-function context:add_ispace_subispace(ispace_type, index_space, index_allocator,
-                                      index_iterator, parent_ispace_type, bounds)
+function context:add_ispace_subispace(ispace_type, index_space, index_iterator,
+                                      parent_ispace_type, bounds)
   if not self.ispaces then
     error("not in task context", 2)
   end
@@ -214,13 +214,13 @@ function context:add_ispace_subispace(ispace_type, index_space, index_allocator,
   if not self:ispace(parent_ispace_type) then
     error("parent to ispace " .. tostring(ispace_type) .. " not defined in this context", 2)
   end
+
   self.ispaces:insert(
     nil,
     ispace_type,
     setmetatable(
       {
         index_space = index_space,
-        index_allocator = index_allocator,
         index_iterator = index_iterator,
         root_ispace_type = self:ispace(parent_ispace_type).root_ispace_type,
         bounds = bounds,
@@ -658,10 +658,6 @@ local function unpack_region(cx, region_expr, region_type, static_region_type)
   local r = terralib.newsymbol(region_type, "r")
   local lr = terralib.newsymbol(c.legion_logical_region_t, "lr") 
   local is = terralib.newsymbol(c.legion_index_space_t, "is")
-  local isa = false
-  if not cx.leaf and region_type:is_opaque() then
-    isa = terralib.newsymbol(c.legion_index_allocator_t, "isa")
-  end
   local it = false
   if cache_index_iterator then
     it = terralib.newsymbol(c.legion_terra_cached_index_iterator_t, "it")
@@ -671,20 +667,7 @@ local function unpack_region(cx, region_expr, region_type, static_region_type)
     var [r] = [std.implicit_cast(
                  static_region_type, region_type, region_expr.value)]
     var [lr] = [r].impl
-  end
-
-  if not cx.leaf then
-    actions = quote
-      [actions]
-      var [is] = [lr].index_space
-    end
-    if region_type:is_opaque() then
-      actions = quote
-        [actions]
-        var [isa] = c.legion_index_allocator_create(
-          [cx.runtime], [cx.context], [is])
-      end
-    end
+    var [is] = [lr].index_space
   end
 
   if cache_index_iterator then
@@ -711,7 +694,7 @@ local function unpack_region(cx, region_expr, region_type, static_region_type)
     actions = quote [actions]; [bounds_actions] end
   end
 
-  cx:add_ispace_subispace(region_type:ispace(), is, isa, it,
+  cx:add_ispace_subispace(region_type:ispace(), is, it,
                           parent_region_type:ispace(), bounds)
   cx:add_region_subregion(region_type, r, parent_region_type)
 
@@ -1833,10 +1816,6 @@ function codegen.expr_index_access(cx, node)
     local r = terralib.newsymbol(expr_type, "r")
     local lr = terralib.newsymbol(c.legion_logical_region_t, "lr")
     local is = terralib.newsymbol(c.legion_index_space_t, "is")
-    local isa = false
-    if not cx.leaf and parent_region_type:is_opaque() then
-      isa = terralib.newsymbol(c.legion_index_allocator_t, "isa")
-    end
     local it = false
     if cache_index_iterator then
       it = terralib.newsymbol(c.legion_terra_cached_index_iterator_t, "it")
@@ -1854,14 +1833,6 @@ function codegen.expr_index_access(cx, node)
       var [r] = [expr_type] { impl = [lr] }
     end
 
-    if not cx.leaf and parent_region_type:is_opaque() then
-      actions = quote
-        [actions]
-        var [isa] = c.legion_index_allocator_create(
-          [cx.runtime], [cx.context], [is])
-      end
-    end
-
     if cache_index_iterator then
       actions = quote
         [actions]
@@ -1877,7 +1848,7 @@ function codegen.expr_index_access(cx, node)
       actions = quote [actions]; [bounds_actions] end
     end
 
-    cx:add_ispace_subispace(expr_type:ispace(), is, isa, it,
+    cx:add_ispace_subispace(expr_type:ispace(), is, it,
                             parent_region_type:ispace(), bounds)
     cx:add_region_subregion(expr_type, r, parent_region_type)
 
@@ -1903,10 +1874,6 @@ function codegen.expr_index_access(cx, node)
       local r = terralib.newsymbol(region_type, "r")
       lr = terralib.newsymbol(c.legion_logical_region_t, "lr")
       local is = terralib.newsymbol(c.legion_index_space_t, "is")
-      local isa = false
-      if not cx.leaf and parent_region_type:is_opaque() then
-        isa = terralib.newsymbol(c.legion_index_allocator_t, "isa")
-      end
       local it = false
       if cache_index_iterator then
         it = terralib.newsymbol(c.legion_terra_cached_index_iterator_t, "it")
@@ -1918,14 +1885,6 @@ function codegen.expr_index_access(cx, node)
           [cx.runtime], [value.value].impl, dp)
         var [is] = [lr].index_space
         var [r] = [region_type] { impl = [lr] }
-      end
-
-      if not cx.leaf and parent_region_type:is_opaque() then
-        actions = quote
-          [actions]
-          var [isa] = c.legion_index_allocator_create(
-            [cx.runtime], [cx.context], [is])
-        end
       end
 
       if cache_index_iterator then
@@ -1943,7 +1902,7 @@ function codegen.expr_index_access(cx, node)
         actions = quote [actions]; [bounds_actions] end
       end
 
-      cx:add_ispace_subispace(region_type:ispace(), is, isa, it,
+      cx:add_ispace_subispace(region_type:ispace(), is, it,
                               parent_region_type:ispace(), bounds)
       cx:add_region_subregion(region_type, r, parent_region_type)
     else
@@ -2013,7 +1972,6 @@ function codegen.expr_index_access(cx, node)
           cx:add_ispace_root(
             region_type:ispace(),
             `([region.value].impl.index_space),
-            false,
             false,
             bounds)
           cx:add_region_root(
@@ -3041,37 +2999,6 @@ function codegen.expr_isnull(cx, node)
   end
 end
 
-function codegen.expr_new(cx, node)
-  local pointer_type = node.pointer_type
-  local region = codegen.expr(cx, node.region):read(cx)
-  local region_type = std.as_read(node.region.expr_type)
-  local extent = node.extent and codegen.expr(cx, node.extent):read(cx)
-  local extent_type = extent and std.as_read(node.extent.expr_type)
-
-  local ispace_type = region_type
-  if std.is_region(region_type) then
-    ispace_type = region_type:ispace()
-  end
-  assert(std.is_ispace(ispace_type))
-  local isa = cx:ispace(ispace_type).index_allocator
-
-  local expr_type = std.as_read(node.expr_type)
-  local actions = quote
-    [region.actions];
-    [(extent and extent.actions) or quote end];
-    [emit_debuginfo(node)]
-  end
-
-  return values.value(
-    node,
-    expr.once_only(
-      actions,
-      `([pointer_type]{ __ptr = c.legion_index_allocator_alloc(
-                          [isa], [(extent and extent.value) or 1]) }),
-      expr_type),
-    expr_type)
-end
-
 function codegen.expr_null(cx, node)
   local pointer_type = node.pointer_type
   local expr_type = std.as_read(node.expr_type)
@@ -3364,12 +3291,6 @@ function codegen.expr_ispace(cx, node)
   local is = terralib.newsymbol(c.legion_index_space_t, "is")
   local i = terralib.newsymbol(ispace_type, "i")
 
-  -- FIXME: Runtime does not understand how to make multi-dimensional
-  -- index spaces allocable.
-  local isa = false
-  if ispace_type.dim == 0 then
-    isa = terralib.newsymbol(c.legion_index_allocator_t, "isa")
-  end
   local it = false
   if cache_index_iterator then
     it = terralib.newsymbol(c.legion_terra_cached_index_iterator_t, "it")
@@ -3379,7 +3300,7 @@ function codegen.expr_ispace(cx, node)
   if not ispace_type:is_opaque() then
     bounds_actions, bounds = index_space_bounds(cx, is, ispace_type.index_type)
   end
-  cx:add_ispace_root(ispace_type, is, isa, it, bounds)
+  cx:add_ispace_root(ispace_type, is, it, bounds)
 
   if ispace_type.dim == 0 then
     if start then
@@ -3391,7 +3312,9 @@ function codegen.expr_ispace(cx, node)
     actions = quote
       [actions]
       var [is] = c.legion_index_space_create([cx.runtime], [cx.context], [extent_value])
-      var [isa] = c.legion_index_allocator_create([cx.runtime], [cx.context],  [is])
+      var isa = c.legion_index_allocator_create([cx.runtime], [cx.context],  [is])
+      c.legion_index_allocator_alloc(isa, [extent_value])
+      c.legion_index_allocator_destroy(isa)
     end
 
     if cache_index_iterator then
@@ -6401,9 +6324,6 @@ function codegen.expr(cx, node)
   elseif node:is(ast.typed.expr.Isnull) then
     return codegen.expr_isnull(cx, node)
 
-  elseif node:is(ast.typed.expr.New) then
-    return codegen.expr_new(cx, node)
-
   elseif node:is(ast.typed.expr.Null) then
     return codegen.expr_null(cx, node)
 
@@ -8482,7 +8402,7 @@ function codegen.top_task(cx, node)
             index_space_bounds(cx, `([param_symbol].impl), param_type.index_type)
           actions = quote [actions]; [bounds_actions] end
         end
-        cx:add_ispace_root(param_type, `([param_symbol].impl), false, false, bounds)
+        cx:add_ispace_root(param_type, `([param_symbol].impl), false, bounds)
       end
       task_setup:insert(actions)
     end
@@ -8516,10 +8436,6 @@ function codegen.top_task(cx, node)
     local index_type = region_type:ispace().index_type
     local r = params[region_i]:getsymbol()
     local is = terralib.newsymbol(c.legion_index_space_t, "is")
-    local isa = false
-    if not cx.leaf and region_type:is_opaque() then
-      isa = terralib.newsymbol(c.legion_index_allocator_t, "isa")
-    end
     local it = false
     if cache_index_iterator then
       it = terralib.newsymbol(c.legion_terra_cached_index_iterator_t, "it")
@@ -8592,12 +8508,6 @@ function codegen.top_task(cx, node)
         [actions]
         var [is] = [r].impl.index_space
       end
-      if region_type:is_opaque() then
-        actions = quote
-          [actions]
-          var [isa] = c.legion_index_allocator_create([cx.runtime], [cx.context], [is])
-        end
-      end
     end
 
 
@@ -8640,7 +8550,7 @@ function codegen.top_task(cx, node)
           index_space_bounds(cx, `([r].impl.index_space), region_type:ispace().index_type)
         task_setup:insert(bounds_actions)
       end
-      cx:add_ispace_root(region_type:ispace(), is, isa, it, bounds)
+      cx:add_ispace_root(region_type:ispace(), is, it, bounds)
     end
     cx:add_region_root(region_type, r,
                        field_paths,

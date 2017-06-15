@@ -48,7 +48,6 @@ end
 
 task main()
   var r = region(ispace(ptr, 5), int)
-  new(ptr(int, r), 5)
   fill(r, 123)
 
   var b = phase_barrier(1)
