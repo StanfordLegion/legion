@@ -5744,11 +5744,8 @@ namespace Legion {
           result = context->create_node(is, NULL/*realm is*/, 
                                         this, c, partition_ready); 
         if (Runtime::legion_spy_enabled)
-        {
           LegionSpy::log_index_subspace(handle.id, is.id, 
                         result->get_domain_point_color());
-          LegionSpy::log_empty_index_space(is.id);
-        }
         return result; 
       }
       // Otherwise, request a child node from the owner node
