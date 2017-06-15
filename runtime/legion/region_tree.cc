@@ -4625,6 +4625,10 @@ namespace Legion {
         realm_index_space_set(Runtime::create_rt_user_event()), allocator(NULL)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      if (parent != NULL)
+        assert(handle.get_type_tag() == parent->handle.get_type_tag());
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -5456,6 +5460,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       if (partial_pending.exists())
         assert(partial_pending == partition_ready);
+      assert(handle.get_type_tag() == parent->handle.get_type_tag());
 #endif
     }
 
@@ -5474,6 +5479,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       if (partial_pending.exists())
         assert(partial_pending == partition_ready);
+      assert(handle.get_type_tag() == parent->handle.get_type_tag());
 #endif
     }
 
