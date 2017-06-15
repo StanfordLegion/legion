@@ -24,6 +24,6 @@ endif()
 
 FILE(GLOB TOOLS *.py *.cc *.template)
 
-add_executable(tools ${TOOLS} legion_prof_files serializer_examples)
-target_link_libraries(tools Legion::Legion)
+#add_executable(tools ${TOOLS} legion_prof_files serializer_examples)
+#target_link_libraries(tools Legion::Legion)
 
