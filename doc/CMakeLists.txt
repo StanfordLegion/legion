@@ -23,7 +23,7 @@ endif()
 add_subdirectory(glossary)
 add_subdirectory(design_patterns)
 
-FILE(GLOB BASH *.bash)
-add_executable(doc ${BASH})
-target_link_libraries(doc Legion::Legion)
+#FILE(GLOB BASH *.bash)
+#add_executable(doc ${BASH})
+#target_link_libraries(doc Legion::Legion)
 
