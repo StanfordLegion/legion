@@ -2840,59 +2840,136 @@ namespace Legion {
       FieldSpace temp_fs = create_field_space(ctx);
       const FieldID color_fid = 1;
       const FieldID pointer_fid = 2;
-      const size_t color_point_size = color_space.get_dim() * sizeof(coord_t);
       {
         FieldAllocator allocator = create_field_allocator(ctx,temp_fs);
-        allocator.allocate_field(color_point_size, color_fid);
-        allocator.allocate_field(sizeof(coord_t), pointer_fid);
+        switch (color_space.get_dim())
+        {
+          case 1:
+            {
+              allocator.allocate_field(
+                  sizeof(Realm::ZPoint<1,coord_t>), color_fid);
+              break;
+            }
+          case 2:
+            {
+              allocator.allocate_field(
+                  sizeof(Realm::ZPoint<2,coord_t>), color_fid);
+              break;
+            }
+          case 3:
+            {
+              allocator.allocate_field(
+                  sizeof(Realm::ZPoint<3,coord_t>), color_fid);
+              break;
+            }
+          default:
+            assert(false);
+        }
+        allocator.allocate_field(sizeof(Realm::ZPoint<1,coord_t>), pointer_fid);
       }
       LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
                                                   temp_is, temp_fs);
       // Fill in the logical region with the data
-      InlineLauncher launcher(RegionRequirement(temp_lr, READ_WRITE, 
+      InlineLauncher launcher(RegionRequirement(temp_lr, WRITE_DISCARD, 
                                                 EXCLUSIVE, temp_lr)); 
       launcher.add_field(color_fid);
       launcher.add_field(pointer_fid);
       PhysicalRegion temp_region = map_region(ctx, launcher);
       temp_region.wait_until_valid();
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> color_acc = 
-                            temp_region.get_field_accessor(color_fid);
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> pointer_acc = 
-                            temp_region.get_field_accessor(pointer_fid);
+      const FieldAccessor<WRITE_DISCARD,Realm::ZPoint<1,coord_t>,1,coord_t> 
+        pointer_acc(temp_region, pointer_fid);
       coord_t next_entry = 0;
-      for (PointColoring::const_iterator cit = coloring.begin();
-            cit != coloring.end(); cit++)
+      switch (color_space.get_dim())
       {
-        for (std::set<ptr_t>::const_iterator it = cit->second.points.begin();
-              it != cit->second.points.end(); it++)
-        {
-#ifdef DEBUG_LEGION
-          assert(next_entry < num_entries);
-#endif
-          color_acc.write_untyped((ptr_t)next_entry, 
-                                  cit->first.point_data, color_point_size); 
-          const coord_t pointer = *it;
-          pointer_acc.write_untyped((ptr_t)next_entry,&pointer,sizeof(pointer));
-          next_entry++;
-        }
-        for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it = 
-              cit->second.ranges.begin(); it != cit->second.ranges.end(); it++)
-        {
-          for (ptr_t ptr = it->first; ptr.value <= it->second.value; ptr++)
+        case 1:
           {
-#ifdef DEBUG_LEGION
-            assert(next_entry < num_entries);
-#endif
-            color_acc.write_untyped((ptr_t)next_entry,
-                                    cit->first.point_data, color_point_size);
-            const coord_t pointer = ptr;
-            pointer_acc.write_untyped((ptr_t)next_entry, 
-                                      &pointer, sizeof(pointer));
-            next_entry++;
+            const FieldAccessor<WRITE_DISCARD,Realm::ZPoint<1,coord_t>,
+                                1,coord_t> color_acc(temp_region, color_fid);
+            for (PointColoring::const_iterator cit = coloring.begin();
+                  cit != coloring.end(); cit++)
+            {
+              const Realm::ZPoint<1,coord_t> color = cit->first;
+              for (std::set<ptr_t>::const_iterator it = 
+                    cit->second.points.begin(); it != 
+                    cit->second.points.end(); it++, next_entry++)
+              {
+                color_acc.write(next_entry, color);
+                pointer_acc.write(next_entry, it->value);
+              }
+              for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it =
+                    cit->second.ranges.begin(); it != 
+                    cit->second.ranges.end(); it++)
+              {
+                for (ptr_t ptr = it->first; 
+                      ptr.value <= it->second.value; ptr++, next_entry++)
+                {
+                  color_acc.write(next_entry, color);
+                  pointer_acc.write(next_entry, ptr.value);
+                }
+              }
+            }
+            break;
           }
-        }
+        case 2:
+          {
+            const FieldAccessor<WRITE_DISCARD,Realm::ZPoint<2,coord_t>,
+                                1,coord_t> color_acc(temp_region, color_fid);
+            for (PointColoring::const_iterator cit = coloring.begin();
+                  cit != coloring.end(); cit++)
+            {
+              const Realm::ZPoint<2,coord_t> color = cit->first;
+              for (std::set<ptr_t>::const_iterator it = 
+                    cit->second.points.begin(); it != 
+                    cit->second.points.end(); it++, next_entry++)
+              {
+                color_acc.write(next_entry, color);
+                pointer_acc.write(next_entry, it->value);
+              }
+              for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it =
+                    cit->second.ranges.begin(); it != 
+                    cit->second.ranges.end(); it++)
+              {
+                for (ptr_t ptr = it->first; 
+                      ptr.value <= it->second.value; ptr++, next_entry++)
+                {
+                  color_acc.write(next_entry, color);
+                  pointer_acc.write(next_entry, ptr.value);
+                }
+              }
+            }
+            break;
+          }
+        case 3:
+          {
+            const FieldAccessor<READ_WRITE,Realm::ZPoint<3,coord_t>,
+                                1,coord_t> color_acc(temp_region, color_fid);
+            for (PointColoring::const_iterator cit = coloring.begin();
+                  cit != coloring.end(); cit++)
+            {
+              const Realm::ZPoint<3,coord_t> color = cit->first;
+              for (std::set<ptr_t>::const_iterator it = 
+                    cit->second.points.begin(); it != 
+                    cit->second.points.end(); it++, next_entry++)
+              {
+                color_acc.write(next_entry, color);
+                pointer_acc.write(next_entry, it->value);
+              }
+              for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it =
+                    cit->second.ranges.begin(); it != 
+                    cit->second.ranges.end(); it++)
+              {
+                for (ptr_t ptr = it->first; 
+                      ptr.value <= it->second.value; ptr++, next_entry++)
+                {
+                  color_acc.write(next_entry, color);
+                  pointer_acc.write(next_entry, ptr.value);
+                }
+              }
+            }
+            break;
+          }
+        default:
+          assert(false);
       }
       unmap_region(ctx, temp_region);
       // Make an index space for the color space, just leak it for now
@@ -2949,58 +3026,43 @@ namespace Legion {
       FieldSpace temp_fs = create_field_space(ctx);
       const FieldID color_fid = 1;
       const FieldID pointer_fid = 2;
-      const size_t color_point_size = sizeof(coord_t);
       {
         FieldAllocator allocator = create_field_allocator(ctx,temp_fs);
-        allocator.allocate_field(color_point_size, color_fid);
-        allocator.allocate_field(sizeof(coord_t), pointer_fid);
+        allocator.allocate_field(sizeof(Realm::ZPoint<1,coord_t>), color_fid);
+        allocator.allocate_field(sizeof(Realm::ZPoint<1,coord_t>), pointer_fid);
       }
       LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
                                                   temp_is, temp_fs);
       // Fill in the logical region with the data
-      InlineLauncher launcher(RegionRequirement(temp_lr, READ_WRITE, 
+      InlineLauncher launcher(RegionRequirement(temp_lr, WRITE_DISCARD, 
                                                 EXCLUSIVE, temp_lr)); 
       launcher.add_field(color_fid);
       launcher.add_field(pointer_fid);
       PhysicalRegion temp_region = map_region(ctx, launcher);
       temp_region.wait_until_valid();
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> color_acc = 
-                            temp_region.get_field_accessor(color_fid);
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> pointer_acc = 
-                            temp_region.get_field_accessor(pointer_fid);
+      const FieldAccessor<WRITE_DISCARD,Realm::ZPoint<1,coord_t>,1,coord_t>
+        color_acc(temp_region, color_fid);
+      const FieldAccessor<WRITE_DISCARD,Realm::ZPoint<1,coord_t>,1,coord_t>
+        pointer_acc(temp_region, pointer_fid);
       coord_t next_entry = 0;
       for (Coloring::const_iterator cit = coloring.begin();
             cit != coloring.end(); cit++)
       {
-        const Color local_color = cit->first;
+        const Realm::ZPoint<1,coord_t> local_color = cit->first;
         for (std::set<ptr_t>::const_iterator it = cit->second.points.begin();
-              it != cit->second.points.end(); it++)
+              it != cit->second.points.end(); it++, next_entry++)
         {
-#ifdef DEBUG_LEGION
-          assert(next_entry < num_entries);
-#endif
-          color_acc.write_untyped((ptr_t)next_entry, 
-                                  &local_color, color_point_size);
-          const coord_t pointer = *it;
-          pointer_acc.write_untyped((ptr_t)next_entry,&pointer,sizeof(pointer));
-          next_entry++;
+          color_acc.write(next_entry, local_color);
+          pointer_acc.write(next_entry, it->value);
         }
         for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it = 
               cit->second.ranges.begin(); it != cit->second.ranges.end(); it++)
         {
-          for (ptr_t ptr = it->first; ptr.value <= it->second.value; ptr++)
+          for (ptr_t ptr = it->first; ptr.value <= it->second.value; 
+                ptr++, next_entry++)
           {
-#ifdef DEBUG_LEGION
-            assert(next_entry < num_entries);
-#endif
-            color_acc.write_untyped((ptr_t)next_entry,
-                                    &local_color, color_point_size);
-            const coord_t pointer = ptr;
-            pointer_acc.write_untyped((ptr_t)next_entry, 
-                                      &pointer, sizeof(pointer));
-            next_entry++;
+            color_acc.write(next_entry, local_color);
+            pointer_acc.write(next_entry, ptr.value);
           }
         }
       }
@@ -3043,90 +3105,137 @@ namespace Legion {
       FieldSpace temp_fs = create_field_space(ctx);
       const FieldID color_fid = 1;
       const FieldID range_fid = 2;
-      const size_t color_point_size = color_space.get_dim() * sizeof(coord_t);
-      size_t range_size = 0;
-      switch (coloring.begin()->second.get_dim())
-      {
-        case 1:
-          {
-            range_size = sizeof(Realm::ZRect<1,coord_t>);
-            break;
-          }
-        case 2:
-          {
-            range_size = sizeof(Realm::ZRect<2,coord_t>);
-            break;
-          }
-        case 3:
-          {
-            range_size = sizeof(Realm::ZRect<3,coord_t>);
-            break;
-          }
-        default:
-          assert(false);
-      }
+      const int color_dim = color_space.get_dim();
+      const int range_dim = coloring.begin()->second.get_dim();
       {
         FieldAllocator allocator = create_field_allocator(ctx,temp_fs);
-        allocator.allocate_field(color_point_size, color_fid);
-        allocator.allocate_field(range_size, range_fid);
-      }
-      LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
-                                                  temp_is, temp_fs);
-      // Fill in the logical region with the data
-      InlineLauncher launcher(RegionRequirement(temp_lr, READ_WRITE, 
-                                                EXCLUSIVE, temp_lr)); 
-      launcher.add_field(color_fid);
-      launcher.add_field(range_fid);
-      PhysicalRegion temp_region = map_region(ctx, launcher);
-      temp_region.wait_until_valid();
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> color_acc = 
-                            temp_region.get_field_accessor(color_fid);
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> range_acc = 
-                            temp_region.get_field_accessor(range_fid);
-      coord_t next_entry = 0;
-      for (DomainPointColoring::const_iterator it = coloring.begin();
-            it != coloring.end(); it++)
-      {
-#ifdef DEBUG_LEGION
-        assert(next_entry < num_entries);
-#endif
-        color_acc.write_untyped((ptr_t)next_entry, 
-                                it->first.point_data, color_point_size); 
-        switch (it->second.get_dim())
+        switch (color_dim)
         {
           case 1:
             {
-              Realm::ZRect<1,coord_t> range = it->second;
-#ifdef DEBUG_LEGION
-              assert(sizeof(range) == range_size); 
-#endif
-              range_acc.write_untyped((ptr_t)next_entry, &range, range_size);
+              allocator.allocate_field(
+                  sizeof(Realm::ZPoint<1,coord_t>), color_fid);
               break;
             }
           case 2:
             {
-              Realm::ZRect<2,coord_t> range = it->second;
-#ifdef DEBUG_LEGION
-              assert(sizeof(range) == range_size); 
-#endif
-              range_acc.write_untyped((ptr_t)next_entry, &range, range_size);
+              allocator.allocate_field(
+                  sizeof(Realm::ZPoint<2,coord_t>), color_fid);
               break;
             }
           case 3:
             {
-              Realm::ZRect<3,coord_t> range = it->second;
-#ifdef DEBUG_LEGION
-              assert(sizeof(range) == range_size); 
-#endif
-              range_acc.write_untyped((ptr_t)next_entry, &range, range_size);
+              allocator.allocate_field(
+                  sizeof(Realm::ZPoint<3,coord_t>), color_fid);
               break;
             }
           default:
             assert(false);
         }
-        next_entry++;
+        switch (range_dim)
+        {
+          case 1:
+            {
+              allocator.allocate_field(
+                  sizeof(Realm::ZRect<1,coord_t>), range_fid);
+              break;
+            }
+          case 2:
+            {
+              allocator.allocate_field(
+                  sizeof(Realm::ZRect<2,coord_t>), range_fid);
+              break;
+            }
+          case 3:
+            {
+              allocator.allocate_field(
+                  sizeof(Realm::ZRect<3,coord_t>), range_fid);
+              break;
+            }
+          default:
+            assert(false);
+        }
+      }
+      LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
+                                                  temp_is, temp_fs);
+      // Fill in the logical region with the data
+      InlineLauncher launcher(RegionRequirement(temp_lr, WRITE_DISCARD, 
+                                                EXCLUSIVE, temp_lr)); 
+      launcher.add_field(color_fid);
+      launcher.add_field(range_fid);
+      PhysicalRegion temp_region = map_region(ctx, launcher);
+      temp_region.wait_until_valid();
+      // write the colors first
+      switch (color_dim)
+      {
+        case 1:
+          {
+            const FieldAccessor<WRITE_DISCARD,Realm::ZPoint<1,coord_t>,
+                                1,coord_t> color_acc(temp_region, color_fid);
+            coord_t next_entry = 0;
+            for (DomainPointColoring::const_iterator it = coloring.begin();
+                  it != coloring.end(); it++, next_entry++)
+              color_acc.write(next_entry, it->first);
+            break;
+          }
+        case 2:
+          {
+            const FieldAccessor<WRITE_DISCARD,Realm::ZPoint<2,coord_t>,
+                                1,coord_t> color_acc(temp_region, color_fid);
+            coord_t next_entry = 0;
+            for (DomainPointColoring::const_iterator it = coloring.begin();
+                  it != coloring.end(); it++, next_entry++)
+              color_acc.write(next_entry, it->first);
+            break;
+          }
+        case 3:
+          {
+            const FieldAccessor<WRITE_DISCARD,Realm::ZPoint<3,coord_t>,
+                                1,coord_t> color_acc(temp_region, color_fid);
+            coord_t next_entry = 0;
+            for (DomainPointColoring::const_iterator it = coloring.begin();
+                  it != coloring.end(); it++, next_entry++)
+              color_acc.write(next_entry, it->first);
+            break;
+          }
+        default:
+          assert(false);
+      }
+      // Now write out the ranges
+      switch (range_dim)
+      {
+        case 1:
+          {
+            const FieldAccessor<WRITE_DISCARD,Realm::ZRect<1,coord_t>,1,coord_t>
+              range_acc(temp_region, range_fid);
+            coord_t next_entry = 0;
+            for (DomainPointColoring::const_iterator it = coloring.begin();
+                  it != coloring.end(); it++, next_entry++)
+              range_acc.write(next_entry, it->second);
+            break;
+          }
+        case 2:
+          {
+            const FieldAccessor<WRITE_DISCARD,Realm::ZRect<2,coord_t>,1,coord_t>
+              range_acc(temp_region, range_fid);
+            coord_t next_entry = 0;
+            for (DomainPointColoring::const_iterator it = coloring.begin();
+                  it != coloring.end(); it++, next_entry++)
+              range_acc.write(next_entry, it->second);
+            break;
+          }
+        case 3:
+          {
+            const FieldAccessor<WRITE_DISCARD,Realm::ZRect<3,coord_t>,1,coord_t>
+              range_acc(temp_region, range_fid);
+            coord_t next_entry = 0;
+            for (DomainPointColoring::const_iterator it = coloring.begin();
+                  it != coloring.end(); it++, next_entry++)
+              range_acc.write(next_entry, it->second);
+            break;
+          }
+        default:
+          assert(false);
       }
       unmap_region(ctx, temp_region);
       // Make an index space for the color space, just leak it for now
@@ -3163,93 +3272,88 @@ namespace Legion {
       FieldSpace temp_fs = create_field_space(ctx);
       const FieldID color_fid = 1;
       const FieldID range_fid = 2;
-      const size_t color_point_size = sizeof(coord_t);
-      size_t range_size = 0;
-      switch (coloring.begin()->second.get_dim())
-      {
-        case 0:
-        case 1:
-          {
-            range_size = sizeof(Realm::ZRect<1,coord_t>);
-            break;
-          }
-        case 2:
-          {
-            range_size = sizeof(Realm::ZRect<2,coord_t>);
-            break;
-          }
-        case 3:
-          {
-            range_size = sizeof(Realm::ZRect<3,coord_t>);
-            break;
-          }
-        default:
-          assert(false);
-      }
+      const int range_dim = coloring.begin()->second.get_dim();
       {
         FieldAllocator allocator = create_field_allocator(ctx,temp_fs);
-        allocator.allocate_field(color_point_size, color_fid);
-        allocator.allocate_field(range_size, range_fid);
-      }
-      LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
-                                                  temp_is, temp_fs);
-      // Fill in the logical region with the data
-      InlineLauncher launcher(RegionRequirement(temp_lr, READ_WRITE, 
-                                                EXCLUSIVE, temp_lr)); 
-      launcher.add_field(color_fid);
-      launcher.add_field(range_fid);
-      PhysicalRegion temp_region = map_region(ctx, launcher);
-      temp_region.wait_until_valid();
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> color_acc = 
-                            temp_region.get_field_accessor(color_fid);
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> range_acc = 
-                            temp_region.get_field_accessor(range_fid);
-      coord_t next_entry = 0;
-      for (DomainColoring::const_iterator it = coloring.begin();
-            it != coloring.end(); it++)
-      {
-        const Color local_color = it->first;
-#ifdef DEBUG_LEGION
-        assert(next_entry < num_entries);
-#endif
-        color_acc.write_untyped((ptr_t)next_entry, 
-                                &local_color, color_point_size);
-        switch (it->second.get_dim())
+        allocator.allocate_field(sizeof(Realm::ZPoint<1,coord_t>), color_fid);
+        switch (range_dim)
         {
-          case 0:
           case 1:
             {
-              Realm::ZRect<1,coord_t> range = it->second;
-#ifdef DEBUG_LEGION
-              assert(sizeof(range) == range_size); 
-#endif
-              range_acc.write_untyped((ptr_t)next_entry, &range, range_size);
+              allocator.allocate_field(
+                  sizeof(Realm::ZRect<1,coord_t>), range_fid);
               break;
             }
           case 2:
             {
-              Realm::ZRect<2,coord_t> range = it->second;
-#ifdef DEBUG_LEGION
-              assert(sizeof(range) == range_size); 
-#endif
-              range_acc.write_untyped((ptr_t)next_entry, &range, range_size);
+              allocator.allocate_field(
+                  sizeof(Realm::ZRect<1,coord_t>), range_fid);
               break;
             }
           case 3:
             {
-              Realm::ZRect<3,coord_t> range = it->second;
-#ifdef DEBUG_LEGION
-              assert(sizeof(range) == range_size); 
-#endif
-              range_acc.write_untyped((ptr_t)next_entry, &range, range_size);
+              allocator.allocate_field(
+                  sizeof(Realm::ZRect<1,coord_t>), range_fid);
               break;
             }
           default:
             assert(false);
         }
-        next_entry++;
+      }
+      LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
+                                                  temp_is, temp_fs);
+      // Fill in the logical region with the data
+      InlineLauncher launcher(RegionRequirement(temp_lr, WRITE_DISCARD, 
+                                                EXCLUSIVE, temp_lr)); 
+      launcher.add_field(color_fid);
+      launcher.add_field(range_fid);
+      PhysicalRegion temp_region = map_region(ctx, launcher);
+      temp_region.wait_until_valid();
+      const FieldAccessor<WRITE_DISCARD,Realm::ZPoint<1,coord_t>,1,coord_t>
+        color_acc(temp_region, color_fid);
+      switch (range_dim)
+      {
+        case 1:
+          {
+            const FieldAccessor<WRITE_DISCARD,Realm::ZRect<1,coord_t>,1,coord_t>
+              range_acc(temp_region, range_fid);
+            coord_t next_entry = 0;
+            for (DomainColoring::const_iterator it = coloring.begin();
+                  it != coloring.end(); it++, next_entry++)
+            {
+              color_acc.write(next_entry, it->first);
+              range_acc.write(next_entry, it->second);
+            }
+            break;
+          }
+        case 2:
+          {
+            const FieldAccessor<WRITE_DISCARD,Realm::ZRect<2,coord_t>,1,coord_t>
+              range_acc(temp_region, range_fid);
+            coord_t next_entry = 0;
+            for (DomainColoring::const_iterator it = coloring.begin();
+                  it != coloring.end(); it++, next_entry++)
+            {
+              color_acc.write(next_entry, it->first);
+              range_acc.write(next_entry, it->second);
+            }
+            break;
+          }
+        case 3:
+          {
+            const FieldAccessor<WRITE_DISCARD,Realm::ZRect<3,coord_t>,1,coord_t>
+              range_acc(temp_region, range_fid);
+            coord_t next_entry = 0;
+            for (DomainColoring::const_iterator it = coloring.begin();
+                  it != coloring.end(); it++, next_entry++)
+            {
+              color_acc.write(next_entry, it->first);
+              range_acc.write(next_entry, it->second);
+            }
+            break;
+          }
+        default:
+          assert(false);
       }
       unmap_region(ctx, temp_region);
       IndexSpaceT<1,coord_t> index_color_space = 
@@ -3290,94 +3394,161 @@ namespace Legion {
       FieldSpace temp_fs = create_field_space(ctx);
       const FieldID color_fid = 1;
       const FieldID range_fid = 2;
-      const size_t color_point_size = color_space.get_dim() * sizeof(coord_t);
-      size_t range_size = 0;
-      switch (coloring.begin()->second.begin()->get_dim())
-      {
-        case 1:
-          {
-            range_size = sizeof(Realm::ZRect<1,coord_t>);
-            break;
-          }
-        case 2:
-          {
-            range_size = sizeof(Realm::ZRect<2,coord_t>);
-            break;
-          }
-        case 3:
-          {
-            range_size = sizeof(Realm::ZRect<3,coord_t>);
-            break;
-          }
-        default:
-          assert(false);
-      }
+      const int color_dim = color_space.get_dim();
+      const int range_dim = coloring.begin()->second.begin()->get_dim();
       {
         FieldAllocator allocator = create_field_allocator(ctx,temp_fs);
-        allocator.allocate_field(color_point_size, color_fid);
-        allocator.allocate_field(range_size, range_fid);
+        switch (color_dim)
+        {
+          case 1:
+            {
+              allocator.allocate_field(
+                  sizeof(Realm::ZPoint<1,coord_t>), color_fid);
+              break;
+            }
+          case 2:
+            {
+              allocator.allocate_field(
+                  sizeof(Realm::ZPoint<2,coord_t>), color_fid);
+              break;
+            }
+          case 3:
+            {
+              allocator.allocate_field(
+                  sizeof(Realm::ZPoint<3,coord_t>), color_fid);
+              break;
+            }
+          default:
+            assert(false);
+        }
+        switch (range_dim)
+        {
+          case 1:
+            {
+              allocator.allocate_field(
+                  sizeof(Realm::ZRect<1,coord_t>), range_fid);
+              break;
+            }
+          case 2:
+            {
+              allocator.allocate_field(
+                  sizeof(Realm::ZRect<2,coord_t>), range_fid);
+              break;
+            }
+          case 3:
+            {
+              allocator.allocate_field(
+                  sizeof(Realm::ZRect<3,coord_t>), range_fid);
+              break;
+            }
+          default:
+            assert(false);
+        }
       }
       LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
                                                   temp_is, temp_fs);
       // Fill in the logical region with the data
-      InlineLauncher launcher(RegionRequirement(temp_lr, READ_WRITE, 
+      InlineLauncher launcher(RegionRequirement(temp_lr, WRITE_DISCARD,
                                                 EXCLUSIVE, temp_lr)); 
       launcher.add_field(color_fid);
       launcher.add_field(range_fid);
       PhysicalRegion temp_region = map_region(ctx, launcher);
       temp_region.wait_until_valid();
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> color_acc = 
-                            temp_region.get_field_accessor(color_fid);
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> range_acc = 
-                            temp_region.get_field_accessor(range_fid);
-      coord_t next_entry = 0;
-      for (MultiDomainPointColoring::const_iterator cit = coloring.begin();
-            cit != coloring.end(); cit++)
+      // Write the colors first
+      switch (color_dim)
       {
-        for (std::set<Domain>::const_iterator it = cit->second.begin();
-              it != cit->second.end(); it++)
-        {
-#ifdef DEBUG_LEGION
-          assert(next_entry < num_entries);
-#endif
-          color_acc.write_untyped((ptr_t)next_entry, 
-                                  cit->first.point_data, color_point_size); 
-          switch (it->get_dim())
+        case 1:
           {
-            case 1:
-              {
-                Realm::ZRect<1,coord_t> range = *it;
-#ifdef DEBUG_LEGION
-                assert(sizeof(range) == range_size); 
-#endif
-                range_acc.write_untyped((ptr_t)next_entry, &range, range_size);
-                break;
-              }
-            case 2:
-              {
-                Realm::ZRect<2,coord_t> range = *it;
-#ifdef DEBUG_LEGION
-                assert(sizeof(range) == range_size); 
-#endif
-                range_acc.write_untyped((ptr_t)next_entry, &range, range_size);
-                break;
-              }
-            case 3:
-              {
-                Realm::ZRect<3,coord_t> range = *it;
-#ifdef DEBUG_LEGION
-                assert(sizeof(range) == range_size); 
-#endif
-                range_acc.write_untyped((ptr_t)next_entry, &range, range_size);
-                break;
-              }
-            default:
-              assert(false);
+            const FieldAccessor<WRITE_DISCARD,Realm::ZPoint<1,coord_t>,
+                                1,coord_t> color_acc(temp_region, color_fid);
+            coord_t next_entry = 0;
+            for (MultiDomainPointColoring::const_iterator it = coloring.begin();
+                  it != coloring.end(); it++)
+            {
+              for (unsigned idx = 0; idx < it->second.size(); 
+                    idx++, next_entry++)
+                color_acc.write(next_entry, it->first);
+            }
+            break;
           }
-          next_entry++;
-        }
+        case 2:
+          {
+            const FieldAccessor<WRITE_DISCARD,Realm::ZPoint<2,coord_t>,
+                                1,coord_t> color_acc(temp_region, color_fid);
+            coord_t next_entry = 0;
+            for (MultiDomainPointColoring::const_iterator it = coloring.begin();
+                  it != coloring.end(); it++)
+            {
+              for (unsigned idx = 0; idx < it->second.size(); 
+                    idx++, next_entry++)
+                color_acc.write(next_entry, it->first);
+            }
+            break;
+          }
+        case 3:
+          {
+            const FieldAccessor<WRITE_DISCARD,Realm::ZPoint<3,coord_t>,
+                                1,coord_t> color_acc(temp_region, color_fid);
+            coord_t next_entry = 0;
+            for (MultiDomainPointColoring::const_iterator it = coloring.begin();
+                  it != coloring.end(); it++)
+            {
+              for (unsigned idx = 0; idx < it->second.size(); 
+                    idx++, next_entry++)
+                color_acc.write(next_entry, it->first);
+            }
+            break;
+          }
+        default:
+          assert(false);
+      }
+      // Now we can write the ranges
+      switch (range_dim)
+      {
+        case 1:
+          {
+            const FieldAccessor<WRITE_DISCARD,Realm::ZRect<1,coord_t>,1,coord_t>
+              range_acc(temp_region, range_fid);
+            coord_t next_entry = 0;
+            for (MultiDomainPointColoring::const_iterator cit = 
+                  coloring.begin(); cit != coloring.end(); cit++)
+            {
+              for (std::set<Domain>::const_iterator it = cit->second.begin();
+                    it != cit->second.end(); it++, next_entry++)
+                range_acc.write(next_entry, *it); 
+            }
+            break;
+          }
+        case 2:
+          {
+            const FieldAccessor<WRITE_DISCARD,Realm::ZRect<2,coord_t>,1,coord_t>
+              range_acc(temp_region, range_fid);
+            coord_t next_entry = 0;
+            for (MultiDomainPointColoring::const_iterator cit = 
+                  coloring.begin(); cit != coloring.end(); cit++)
+            {
+              for (std::set<Domain>::const_iterator it = cit->second.begin();
+                    it != cit->second.end(); it++, next_entry++)
+                range_acc.write(next_entry, *it); 
+            }
+            break;
+          }
+        case 3:
+          {
+            const FieldAccessor<WRITE_DISCARD,Realm::ZRect<3,coord_t>,1,coord_t>
+              range_acc(temp_region, range_fid);
+            coord_t next_entry = 0;
+            for (MultiDomainPointColoring::const_iterator cit = 
+                  coloring.begin(); cit != coloring.end(); cit++)
+            {
+              for (std::set<Domain>::const_iterator it = cit->second.begin();
+                    it != cit->second.end(); it++, next_entry++)
+                range_acc.write(next_entry, *it); 
+            }
+            break;
+          }
+        default:
+          assert(false);
       }
       unmap_region(ctx, temp_region);
       // Make an index space for the color space, just leak it for now
@@ -3417,33 +3588,33 @@ namespace Legion {
       FieldSpace temp_fs = create_field_space(ctx);
       const FieldID color_fid = 1;
       const FieldID range_fid = 2;
-      const size_t color_point_size = sizeof(coord_t);
-      size_t range_size = 0;
-      switch (coloring.begin()->second.begin()->get_dim())
-      {
-        case 0:
-        case 1:
-          {
-            range_size = sizeof(Realm::ZRect<1,coord_t>);
-            break;
-          }
-        case 2:
-          {
-            range_size = sizeof(Realm::ZRect<2,coord_t>);
-            break;
-          }
-        case 3:
-          {
-            range_size = sizeof(Realm::ZRect<3,coord_t>);
-            break;
-          }
-        default:
-          assert(false);
-      }
+      const int range_dim = coloring.begin()->second.begin()->get_dim();
       {
         FieldAllocator allocator = create_field_allocator(ctx,temp_fs);
-        allocator.allocate_field(color_point_size, color_fid);
-        allocator.allocate_field(range_size, range_fid);
+        allocator.allocate_field(sizeof(Realm::ZPoint<1,coord_t>), color_fid);
+        switch (range_dim)
+        {
+          case 1:
+            {
+              allocator.allocate_field(
+                  sizeof(Realm::ZRect<1,coord_t>), range_fid);
+              break;
+            }
+          case 2:
+            {
+              allocator.allocate_field(
+                  sizeof(Realm::ZRect<1,coord_t>), range_fid);
+              break;
+            }
+          case 3:
+            {
+              allocator.allocate_field(
+                  sizeof(Realm::ZRect<1,coord_t>), range_fid);
+              break;
+            }
+          default:
+            assert(false);
+        }
       }
       LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
                                                   temp_is, temp_fs);
@@ -3454,60 +3625,63 @@ namespace Legion {
       launcher.add_field(range_fid);
       PhysicalRegion temp_region = map_region(ctx, launcher);
       temp_region.wait_until_valid();
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> color_acc = 
-                            temp_region.get_field_accessor(color_fid);
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> range_acc = 
-                            temp_region.get_field_accessor(range_fid);
-      coord_t next_entry = 0;
-      for (MultiDomainColoring::const_iterator cit = coloring.begin();
-            cit != coloring.end(); cit++)
+      const FieldAccessor<WRITE_DISCARD,Realm::ZPoint<1,coord_t>,1,coord_t>
+        color_acc(temp_region, color_fid);
+      switch (range_dim)
       {
-        const Color local_color = cit->first;
-        for (std::set<Domain>::const_iterator it = cit->second.begin();
-              it != cit->second.end(); it++)
-        {
-#ifdef DEBUG_LEGION
-          assert(next_entry < num_entries);
-#endif
-          color_acc.write_untyped((ptr_t)next_entry, 
-                                  &local_color, color_point_size);
-          switch (it->get_dim())
+        case 1:
           {
-            case 0:
-            case 1:
+            const FieldAccessor<WRITE_DISCARD,Realm::ZRect<1,coord_t>,1,coord_t>
+              range_acc(temp_region, range_fid);
+            coord_t next_entry = 0;
+            for (MultiDomainColoring::const_iterator cit = coloring.begin();
+                  cit != coloring.end(); cit++)
+            {
+              for (std::set<Domain>::const_iterator it = cit->second.begin();
+                    it != cit->second.end(); it++, next_entry++)
               {
-                Realm::ZRect<1,coord_t> range = *it;
-#ifdef DEBUG_LEGION
-                assert(sizeof(range) == range_size); 
-#endif
-                range_acc.write_untyped((ptr_t)next_entry, &range, range_size);
-                break;
+                color_acc.write(next_entry, cit->first);
+                range_acc.write(next_entry, *it);
               }
-            case 2:
-              {
-                Realm::ZRect<2,coord_t> range = *it;
-#ifdef DEBUG_LEGION
-                assert(sizeof(range) == range_size); 
-#endif
-                range_acc.write_untyped((ptr_t)next_entry, &range, range_size);
-                break;
-              }
-            case 3:
-              {
-                Realm::ZRect<3,coord_t> range = *it;
-#ifdef DEBUG_LEGION
-                assert(sizeof(range) == range_size); 
-#endif
-                range_acc.write_untyped((ptr_t)next_entry, &range, range_size);
-                break;
-              }
-            default:
-              assert(false);
+            }
+            break;
           }
-          next_entry++;
-        }
+        case 2:
+          {
+            const FieldAccessor<WRITE_DISCARD,Realm::ZRect<2,coord_t>,1,coord_t>
+              range_acc(temp_region, range_fid);
+            coord_t next_entry = 0;
+            for (MultiDomainColoring::const_iterator cit = coloring.begin();
+                  cit != coloring.end(); cit++)
+            {
+              for (std::set<Domain>::const_iterator it = cit->second.begin();
+                    it != cit->second.end(); it++, next_entry++)
+              {
+                color_acc.write(next_entry, cit->first);
+                range_acc.write(next_entry, *it);
+              }
+            }
+            break;
+          }
+        case 3:
+          {
+            const FieldAccessor<WRITE_DISCARD,Realm::ZRect<3,coord_t>,1,coord_t>
+              range_acc(temp_region, range_fid);
+            coord_t next_entry = 0;
+            for (MultiDomainColoring::const_iterator cit = coloring.begin();
+                  cit != coloring.end(); cit++)
+            {
+              for (std::set<Domain>::const_iterator it = cit->second.begin();
+                    it != cit->second.end(); it++, next_entry++)
+              {
+                color_acc.write(next_entry, cit->first);
+                range_acc.write(next_entry, *it);
+              }
+            }
+            break;
+          }
+        default:
+          assert(false);
       }
       unmap_region(ctx, temp_region);
       IndexSpaceT<1,coord_t> index_color_space = 
