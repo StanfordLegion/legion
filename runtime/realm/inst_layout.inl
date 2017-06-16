@@ -495,6 +495,11 @@ namespace Realm {
   template <typename FT, int N, typename T>
   AffineAccessor<FT,N,T>::AffineAccessor(RegionInstance inst, ptrdiff_t field_offset, const ZRect<N,T>& subrect)
   {
+    // Special case for empty regions
+    if(subrect.empty()) {
+      base = 0;
+      return;
+    }
     const InstanceLayout<N,T> *layout = dynamic_cast<const InstanceLayout<N,T> *>(inst.get_layout());
     std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(field_offset);
     assert(it != layout->fields.end());
