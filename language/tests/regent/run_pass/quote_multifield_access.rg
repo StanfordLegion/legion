@@ -20,8 +20,7 @@ local elt = terralib.types.newstruct("elt")
 elt.entries = fields:map(function(field) return { field, int } end)
 
 task main()
-  var r = region(ispace(ptr, 5), elt)
-  new(ptr(elt, r), 3)
+  var r = region(ispace(ptr, 3), elt)
 
   fill(r.[fields], 2)
   for e in r do

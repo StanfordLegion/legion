@@ -21,7 +21,7 @@ import "regent"
 
 task main()
   var r = region(ispace(ptr, 3), int[5])
-  var x = new(ptr(int[5], r));
+  var x = dynamic_cast(ptr(int[5], r), 0);
   (@x)[5] = 5
 end
 regentlib.start(main)

@@ -39,10 +39,10 @@ task main()
   var lo, hi = 0, 4
 
   var r_private = region(ispace(ptr, hi-lo), elt)
-  var x0 = new(ptr(elt, r_private))
-  var x1 = new(ptr(elt, r_private))
-  var x2 = new(ptr(elt, r_private))
-  var x3 = new(ptr(elt, r_private))
+  var x0 = dynamic_cast(ptr(elt, r_private), 0)
+  var x1 = dynamic_cast(ptr(elt, r_private), 1)
+  var x2 = dynamic_cast(ptr(elt, r_private), 2)
+  var x3 = dynamic_cast(ptr(elt, r_private), 3)
 
   var cp = c.legion_coloring_create()
   for i = lo, hi do
@@ -56,10 +56,10 @@ task main()
   c.legion_coloring_destroy(cp)
 
   var r_ghost = region(ispace(ptr, hi-lo), elt)
-  var y0 = new(ptr(elt, r_ghost))
-  var y1 = new(ptr(elt, r_ghost))
-  var y2 = new(ptr(elt, r_ghost))
-  var y3 = new(ptr(elt, r_ghost))
+  var y0 = dynamic_cast(ptr(elt, r_ghost), 0)
+  var y1 = dynamic_cast(ptr(elt, r_ghost), 1)
+  var y2 = dynamic_cast(ptr(elt, r_ghost), 2)
+  var y3 = dynamic_cast(ptr(elt, r_ghost), 3)
 
   var cg = c.legion_coloring_create()
   for i = lo, hi do

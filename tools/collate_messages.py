@@ -209,13 +209,19 @@ def prefixedPath(fileName, prefix, lineNumber, strip):
         fileName = "/".join(splitFileName[strip:])
     if prefix == None:
         return fileName + '#L' + str(lineNumber)
-    return prefix + '/' + fileName + '#L' + str(lineNumber)
+    result = prefix + '/' + fileName + '#L' + str(lineNumber)
+    return result
 
 def writeGlossaryTerms(file, message, whatToDo, glossary, glossaryURL):
+    wroteTerm = False
     for term in glossary:
-        t = term.lower().strip()
-        if message.lower().find(t) >= 0 or whatToDo.lower().find(t) >= 0:
+        t = term.replace(' ', '').lower().strip()
+        if message.replace(' ', '').lower().find(t) >= 0 or whatToDo.replace(' ', '').lower().find(t) >= 0:
+            if not wroteTerm:
+                file.write("See also: ")
+                wroteTerm = True
             href = "<a href=\"" + glossaryURL + "/glossary/" + term.strip() + ".html\">" + term.strip() + "</a>"
+            href = href.replace('//', '/')
             file.write(href + "\n");
 
 
@@ -241,11 +247,11 @@ def tables(connection):
     return tables
 
 
-def writeHtmlSortedByField(field, connection, hrefPrefix, strip, glossary, glossaryURL):
+def writeHtmlSortedByField(field, connection, hrefPrefix, strip, glossary, glossaryURL, outputDir):
     for table in tables(connection):
         tableName = table[0]
         outputFileName = htmlMarker(tableName, field, None) + ".html"
-        outputFile = open(outputFileName, "wt")
+        outputFile = open(outputDir + '/' + outputFileName, "wt")
         outputFile.write("---\nlayout: page\n---\n\n")
         selectCommand = "select * from " + tableName + " order by " + field  + ";"
         cursor = connection.cursor()
@@ -303,8 +309,8 @@ def writeHtmlLinks(indexFile, connection, field):
     indexFile.write("</center>\n<p>\n")
 
 
-def writeHtmlIndexes(connection):
-    indexFile = open("index.html", "wt")
+def writeHtmlIndexes(connection, outputDir):
+    indexFile = open(outputDir + '/' + "index.html", "wt")
     indexFile.write("---\nlayout: page\n---\n\n")
     writeHtmlLinks(indexFile, connection, "code");
     writeHtmlLinks(indexFile, connection, "message")
@@ -314,13 +320,13 @@ def writeHtmlIndexes(connection):
     indexFile.close()
 
 
-def writeHtmlOutput(connection, hrefPrefix, strip, glossaryFile, glossaryURL):
+def writeHtmlOutput(connection, hrefPrefix, strip, glossaryFile, glossaryURL, outputDir):
     glossary = None
     if glossaryFile != None:
         glossary = open(glossaryFile, "r").readlines()
-    writeHtmlIndexes(connection);
-    writeHtmlSortedByField("code", connection, hrefPrefix, strip, glossary, glossaryURL)
-    writeHtmlSortedByField("message", connection, hrefPrefix, strip, glossary, glossaryURL)
+    writeHtmlIndexes(connection, outputDir);
+    writeHtmlSortedByField("code", connection, hrefPrefix, strip, glossary, glossaryURL, outputDir)
+    writeHtmlSortedByField("message", connection, hrefPrefix, strip, glossary, glossaryURL, outputDir)
 
 
 
@@ -335,7 +341,9 @@ parser.add_argument('--prefix', dest='prefix', action='store', help='path prefix
 parser.add_argument('--strip', dest='strip', action='store', type=int, help='num dirs to strip from sourcfile path', default=0)
 parser.add_argument('--glossaryFile', dest='glossaryFile', action='store', help='path to glossary file, requires --glossaryURL')
 parser.add_argument('--glossaryURL', dest='glossaryURL', action='store', help='URL of online glossary, requires --glossaryFile')
+parser.add_argument('--output_dir', dest='outputDir', action='store', help='dir to write the output files to', default='.')
 args = parser.parse_args()
+
 print 'this program parses a list of files.  it reads the filenames from stdin and writes html files as output.'
 print 'example: find . -name *.cc | python collate_messages.py --glossaryFile=glossaryFile.txt --glossaryURL="http://legion.stanford.edu"'
 
@@ -343,4 +351,4 @@ connection = sqlite3.connect(":memory:")
 parseSourceFiles(connection)
 if args.prefix != None:
     args.prefix = args.prefix.replace("//", "/")
-writeHtmlOutput(connection, args.prefix, args.strip, args.glossaryFile, args.glossaryURL)
+writeHtmlOutput(connection, args.prefix, args.strip, args.glossaryFile, args.glossaryURL, args.outputDir)

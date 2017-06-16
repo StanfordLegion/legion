@@ -28,8 +28,8 @@ local function raw_to_ptr(t)
 end
 
 task main()
-  var r = region(ispace(ptr, 5), int)
-  var x = [raw_to_ptr(ptr(int, r))](0)
+  var r = region(ispace(ptr, 1), int)
+  var x = [raw_to_ptr(ptr(int, r))](1)
   @x = 5
 end
 regentlib.start(main)

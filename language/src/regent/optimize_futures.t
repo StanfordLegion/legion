@@ -151,9 +151,6 @@ function analyze_var_flow.expr(cx, node)
   elseif node:is(ast.typed.expr.Isnull) then
     return nil
 
-  elseif node:is(ast.typed.expr.New) then
-    return nil
-
   elseif node:is(ast.typed.expr.Null) then
     return nil
 
@@ -655,11 +652,6 @@ function optimize_futures.expr_isnull(cx, node)
   return node { pointer = pointer }
 end
 
-function optimize_futures.expr_new(cx, node)
-  local region = concretize(optimize_futures.expr(cx, node.region))
-  return node { region = region }
-end
-
 function optimize_futures.expr_null(cx, node)
   return node
 end
@@ -1071,9 +1063,6 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Isnull) then
     return optimize_futures.expr_isnull(cx, node)
-
-  elseif node:is(ast.typed.expr.New) then
-    return optimize_futures.expr_new(cx, node)
 
   elseif node:is(ast.typed.expr.Null) then
     return optimize_futures.expr_null(cx, node)

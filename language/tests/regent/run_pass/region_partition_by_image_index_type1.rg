@@ -17,16 +17,16 @@ import "regent"
 local c = regentlib.c
 
 task f()
-  var r = region(ispace(ptr, 5), int)
-  var x0 = new(ptr(int, r))
-  var x1 = new(ptr(int, r))
-  var x2 = new(ptr(int, r))
-  var x3 = new(ptr(int, r))
-  var s = region(ispace(ptr, 5), ptr)
-  var y0 = new(ptr(ptr, s))
-  var y1 = new(ptr(ptr, s))
-  var y2 = new(ptr(ptr, s))
-  var y3 = new(ptr(ptr, s))
+  var r = region(ispace(ptr, 4), int)
+  var x0 = dynamic_cast(ptr(int, r), 0)
+  var x1 = dynamic_cast(ptr(int, r), 1)
+  var x2 = dynamic_cast(ptr(int, r), 2)
+  var x3 = dynamic_cast(ptr(int, r), 3)
+  var s = region(ispace(ptr, 4), ptr)
+  var y0 = dynamic_cast(ptr(ptr, s), 0)
+  var y1 = dynamic_cast(ptr(ptr, s), 1)
+  var y2 = dynamic_cast(ptr(ptr, s), 2)
+  var y3 = dynamic_cast(ptr(ptr, s), 3)
 
   @y0 = x1
   @y1 = x0

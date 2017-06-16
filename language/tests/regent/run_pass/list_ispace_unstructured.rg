@@ -19,13 +19,13 @@ import "regent"
 local c = regentlib.c
 
 task main()
-  var is = ispace(ptr, 5)
+  var is = ispace(ptr, 4)
   var r = region(is, int)
 
-  var x0 = new(ptr(int, r))
-  var x1 = new(ptr(int, r))
-  var x2 = new(ptr(int, r))
-  var x3 = new(ptr(int, r))
+  var x0 = dynamic_cast(ptr(int, r), 0)
+  var x1 = dynamic_cast(ptr(int, r), 1)
+  var x2 = dynamic_cast(ptr(int, r), 2)
+  var x3 = dynamic_cast(ptr(int, r), 3)
 
   var l = list_ispace(is)
 

@@ -33,10 +33,10 @@ where reads(r), writes(r) do
 end
 
 task main()
-  var r = region(ispace(ptr, 5), int)
-  var x0 = new(ptr(int, r))
-  var x1 = new(ptr(int, r))
-  var x2 = new(ptr(int, r))
+  var r = region(ispace(ptr, 3), int)
+  var x0 = dynamic_cast(ptr(int, r), 0)
+  var x1 = dynamic_cast(ptr(int, r), 1)
+  var x2 = dynamic_cast(ptr(int, r), 2)
 
   var rc = c.legion_coloring_create()
   c.legion_coloring_add_point(rc, 0, __raw(x0))

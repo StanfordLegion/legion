@@ -24,7 +24,6 @@ struct t {
 
 task main()
   var r = region(ispace(ptr, 5), t)
-  new(ptr(t, r), 5)
 
   __demand(__vectorize)
   for x in r do

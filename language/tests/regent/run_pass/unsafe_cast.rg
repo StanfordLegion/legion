@@ -18,7 +18,7 @@ local c = regentlib.c
 
 task main()
   var t = region(ispace(ptr, 5), int)
-  var x = new(ptr(int, t))
+  var x = dynamic_cast(ptr(int, t), 0)
   var y = unsafe_cast(ptr(int, t), 0)
 
   @x = 123

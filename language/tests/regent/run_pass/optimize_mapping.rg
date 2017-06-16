@@ -32,7 +32,7 @@ end
 
 task main()
   var r = region(ispace(ptr, 5), int)
-  var x = new(ptr(int, r))
+  var x = dynamic_cast(ptr(int, r), 0)
   @x = 3
   f(r, x)
   f(r, x)

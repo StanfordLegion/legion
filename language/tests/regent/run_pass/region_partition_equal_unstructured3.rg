@@ -16,7 +16,6 @@ import "regent"
 
 task main()
   var r = region(ispace(ptr, 15), int)
-  new(ptr(int, r), 15)
   var cs = ispace(int3d, {2, 1, 3})
   var p = partition(equal, r, cs)
 

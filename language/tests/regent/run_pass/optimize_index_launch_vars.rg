@@ -37,11 +37,11 @@ end
 
 task main()
   var r = region(ispace(ptr, 5), int)
-  var x0 = new(ptr(int, r))
-  var x1 = new(ptr(int, r))
-  var x2 = new(ptr(int, r))
-  var x3 = new(ptr(int, r))
-  var x4 = new(ptr(int, r))
+  var x0 = dynamic_cast(ptr(int, r), 0)
+  var x1 = dynamic_cast(ptr(int, r), 1)
+  var x2 = dynamic_cast(ptr(int, r), 2)
+  var x3 = dynamic_cast(ptr(int, r), 3)
+  var x4 = dynamic_cast(ptr(int, r), 4)
   var p = partition(equal, r, ispace(int1d, 3))
 
   fill(r, 0)

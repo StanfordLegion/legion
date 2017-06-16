@@ -30,14 +30,8 @@ task main()
   -- An unstructured ispace is a collection of opaque points, useful
   -- for pointer data structures such as graphs, trees, linked lists,
   -- and unstructured meshes. The following line creates an ispace
-  -- with capacity for 1024 elements.
+  -- with 1024 elements.
   var unstructured_is = ispace(ptr, 1024)
-
-  -- Unstructured ispaces are initially empty, with a given maximum
-  -- capacity. The individual elements must be allocated individually
-  -- or in bulk. The following line allocates a block of 1024 elements
-  -- inside the ispace.
-  var first_ptr = new(ptr(unstructured_is), 1024)
 
   -- A structured ispace is (multi-dimensional) rectangle of
   -- points. The space below includes the 1-dimensional ints from 0 to 1023.

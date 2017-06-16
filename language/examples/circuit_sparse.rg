@@ -763,9 +763,6 @@ task toplevel()
   var all_nodes = region(ispace(ptr, num_circuit_nodes), node)
   var all_wires = region(ispace(ptr, num_circuit_wires), wire(wild, wild, wild))
 
-  new(ptr(node, all_nodes), num_circuit_nodes)
-  new(ptr(wire(wild, wild, wild), all_wires), num_circuit_wires)
-
   -- report mesh size in bytes
   do
     var node_size = [ terralib.sizeof(node) ]
@@ -788,7 +785,6 @@ task toplevel()
   var rp_wires = partition(equal, all_wires, launch_domain)
 
   var ghost_ranges = region(ispace(ptr, num_pieces), ghost_range)
-  new(ptr(ghost_range, ghost_ranges), num_pieces)
   var rp_ghost_ranges = partition(equal, ghost_ranges, launch_domain)
 
   for j = 0, 1 do
@@ -802,7 +798,6 @@ task toplevel()
   var rp_ghost = create_ghost_partition(conf, all_shared, ghost_ranges)
 
   --var last_shared = region(ispace(ptr, num_pieces * num_pieces), int)
-  --new(ptr(int, last_shared), num_pieces * num_pieces)
 
   --var rp_nodes = partition(equal, all_nodes, launch_domain)
   --var rp_wires = partition(equal, all_wires, launch_domain)

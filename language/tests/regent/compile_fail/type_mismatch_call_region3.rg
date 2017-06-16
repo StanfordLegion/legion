@@ -25,7 +25,7 @@ task g()
   var r = region(ispace(ptr, 5), int)
   var s = region(ispace(ptr, 5), int)
   var t = s
-  var u = new(ptr(int, t))
+  var u = dynamic_cast(ptr(int, t), 0)
   f(r, s, u)
 end
 

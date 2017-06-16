@@ -14,20 +14,15 @@
 
 -- Test: retrieving volume of unstructured ispace.
 
+-- Note: unstructured ispaces are now allocated by default.
+
 import "regent"
 
 task main()
   var is = ispace(ptr, 5)
-  regentlib.assert(is.volume == 0, "volume calculation incorrect")
+  regentlib.assert(is.volume == 5, "volume calculation incorrect")
 
   var r = region(is, int)
-  var x0 = new(ptr(int, r))
-  var x1 = new(ptr(int, r))
-  var x2 = new(ptr(int, r))
-  regentlib.assert(is.volume == 3, "volume calculation incorrect")
-
-  var x3 = new(ptr(int, r))
-  var x4 = new(ptr(int, r))
   regentlib.assert(is.volume == 5, "volume calculation incorrect")
 end
 regentlib.start(main)

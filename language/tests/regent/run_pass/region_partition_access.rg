@@ -22,15 +22,12 @@ import "regent"
 local c = regentlib.c
 
 task f() : int
-  var r = region(ispace(ptr, 5), int)
-  var rc = c.legion_coloring_create()
-  c.legion_coloring_ensure_color(rc, 0)
-  var p = partition(disjoint, r, rc)
-  c.legion_coloring_destroy(rc)
+  var r = region(ispace(ptr, 1), int)
+  var p = partition(equal, r, ispace(int1d, 1))
 
   do
     var r0 = p[0]
-    var x = new(ptr(int, r0))
+    var x = dynamic_cast(ptr(int, r0), 0)
     @x = 1
   end
 

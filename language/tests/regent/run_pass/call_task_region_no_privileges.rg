@@ -27,10 +27,10 @@ task g(r : region(int)) : int
 end
 
 task h() : int
-  var r = region(ispace(ptr, 5), int)
-  var x0 = new(ptr(int, r))
-  var x1 = new(ptr(int, r))
-  var x2 = new(ptr(int, r))
+  var r = region(ispace(ptr, 3), int)
+  var x0 = dynamic_cast(ptr(int, r), 0)
+  var x1 = dynamic_cast(ptr(int, r), 1)
+  var x2 = dynamic_cast(ptr(int, r), 2)
   return g(r)
 end
 

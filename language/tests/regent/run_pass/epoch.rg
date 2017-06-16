@@ -27,12 +27,12 @@ where reads(s), writes(s) do
 end
 
 task k() : int
-  var r = region(ispace(ptr, 5), int)
-  var x = new(ptr(int, r))
-  var s = region(ispace(ptr, 5), int)
-  var y0 = new(ptr(int, s))
-  var y1 = new(ptr(int, s))
-  var y2 = new(ptr(int, s))
+  var r = region(ispace(ptr, 1), int)
+  var x = dynamic_cast(ptr(int, r), 0)
+  var s = region(ispace(ptr, 3), int)
+  var y0 = dynamic_cast(ptr(int, s), 0)
+  var y1 = dynamic_cast(ptr(int, s), 1)
+  var y2 = dynamic_cast(ptr(int, s), 2)
 
   var rc = c.legion_coloring_create()
   c.legion_coloring_add_point(rc, 0, __raw(y0))

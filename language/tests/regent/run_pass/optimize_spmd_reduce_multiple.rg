@@ -52,8 +52,6 @@ task main()
 
   var rn = region(ispace(ptr, num_nodes), node)
   var re = region(ispace(ptr, num_elems), wild_elem)
-  new(ptr(node, rn), num_nodes)
-  new(ptr(wild_elem, re), num_elems)
 
   var colors = ispace(int1d, 10)
   var p_owned_nodes = partition(equal, rn, colors)

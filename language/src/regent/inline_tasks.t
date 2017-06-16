@@ -324,11 +324,6 @@ function inline_tasks.expr(cx, node)
             local tgt = expr_mapping[node.value]
             if rawget(tgt, "expr_type") then node = tgt
             else node = node { value = tgt } end
-          elseif node:is(ast.typed.expr.New) then
-            return node {
-              expr_type = std.type_sub(node.expr_type, type_mapping),
-              pointer_type = std.type_sub(node.pointer_type, type_mapping),
-            }
           elseif node:is(ast.typed.expr.Ispace) then
             local ispace = std.as_read(node.expr_type)
             local new_ispace = std.ispace(ispace.index_type)

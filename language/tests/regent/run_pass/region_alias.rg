@@ -22,7 +22,7 @@ end
 task g() : int
   var r = region(ispace(ptr, 5), int)
   var s = r
-  var x = new(ptr(int, s))
+  var x = dynamic_cast(ptr(int, s), 0)
   @x = 7
   return f(r, x)
 end

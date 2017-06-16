@@ -1251,14 +1251,8 @@ function type_check.expr_new(cx, node)
     extent = insert_implicit_cast(extent, extent_type, index_type)
   end
 
-  return ast.typed.expr.New {
-    pointer_type = node.pointer_type,
-    region = region,
-    extent = extent,
-    expr_type = node.pointer_type,
-    annotations = node.annotations,
-    span = node.span,
-  }
+  report.error(node, "operator new has been removed, instead all regions are allocated by default")
+  assert(false, "unreachable")
 end
 
 function type_check.expr_null(cx, node)
@@ -3737,7 +3731,6 @@ function type_check.top_task(cx, node)
       leaf = false,
       inner = false,
       idempotent = false,
-      alloc = true,
     },
     region_divergence = false,
     prototype = prototype,

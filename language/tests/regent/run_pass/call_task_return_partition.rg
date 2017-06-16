@@ -21,7 +21,6 @@ end
 task main()
   var c = ispace(int1d, 3)
   var a = region(ispace(ptr, 5), int)
-  new(ptr(int, a), 5)
   var b = make_partition(a, c)
   fill(a, 17)
   var t = 0
