@@ -3321,6 +3321,7 @@ namespace Legion {
               default:
                 assert(false);
             }
+            break;
           }
         case 2:
           {
@@ -3350,6 +3351,7 @@ namespace Legion {
               default:
                 assert(false);
             }
+            break;
           }
         case 3:
           {
@@ -3379,6 +3381,7 @@ namespace Legion {
               default:
                 assert(false);
             }
+            break;
           }
         default:
           assert(false);
@@ -3611,6 +3614,7 @@ namespace Legion {
               default:
                 assert(false);
             }
+            break;
           }
         case 2:
           {
@@ -3640,6 +3644,7 @@ namespace Legion {
               default:
                 assert(false);
             }
+            break;
           }
         case 3:
           {
@@ -3669,6 +3674,7 @@ namespace Legion {
               default:
                 assert(false);
             }
+            break;
           }
         default:
           assert(false);
