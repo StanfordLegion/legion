@@ -1773,7 +1773,7 @@ namespace Legion {
         check_region_consistency(ctx, "create_physical_instance", regions);
       if (acquire && (ctx->acquired_instances == NULL))
       {
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_REQUEST6,
+        REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST10,
                             "UNDEFINED",
                         "Ignoring acquire request to create_physical_instance "
                         "in unsupported mapper call %s in mapper %s", 
@@ -1807,8 +1807,8 @@ namespace Legion {
         check_region_consistency(ctx, "create_physical_instance", regions);
       if (acquire && (ctx->acquired_instances == NULL))
       {
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_REQUEST7,
-                            "UNDEFINED",
+        REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST11,
+                              "UNDEFINED",
                         "Ignoring acquire request to create_physical_instance "
                         "in unsupported mapper call %s in mapper %s", 
                         get_mapper_call_name(ctx->kind), get_mapper_name());

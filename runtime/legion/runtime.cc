@@ -18560,7 +18560,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::report_fatal_message(const MessageDescriptor &desc,
-                                                  const char *file_name, const int line,
+                                          const char *file_name, const int line,
                                                   const char *message)
     //--------------------------------------------------------------------------
     {
@@ -18574,7 +18574,7 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::report_error_message(const MessageDescriptor &desc,
-                                                  const char *file_name, const int line,
+                                          const char *file_name, const int line,
                                                   const char *message)
     //--------------------------------------------------------------------------
     {
