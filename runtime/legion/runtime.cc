@@ -17828,6 +17828,21 @@ namespace Legion {
               it != serdez_table.end(); it++)
           realm.register_custom_serdez(it->first, it->second);
       }
+#ifndef DISABLE_PARTITION_SHIM
+      // Preregister any partition shim task variants we need 
+      PartitionShim::ColorPoints<1>::register_task();
+      PartitionShim::ColorPoints<2>::register_task();
+      PartitionShim::ColorPoints<3>::register_task();
+      PartitionShim::ColorRects<1,1>::register_task();
+      PartitionShim::ColorRects<1,2>::register_task();
+      PartitionShim::ColorRects<1,3>::register_task();
+      PartitionShim::ColorRects<2,1>::register_task();
+      PartitionShim::ColorRects<2,2>::register_task();
+      PartitionShim::ColorRects<2,3>::register_task();
+      PartitionShim::ColorRects<3,1>::register_task();
+      PartitionShim::ColorRects<3,2>::register_task();
+      PartitionShim::ColorRects<3,3>::register_task();
+#endif
       
       // Parse any inputs for the high level runtime
       {

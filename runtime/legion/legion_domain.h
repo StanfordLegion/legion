@@ -42,7 +42,7 @@ namespace Legion {
         for (int i = 0; i < MAX_POINT_DIM; i++)
           point_data[i] = 0;
       }
-      DomainPoint(coord_t index) : dim(0)
+      DomainPoint(coord_t index) : dim(1)
       {
         point_data[0] = index;
         for (int i = 1; i < MAX_POINT_DIM; i++)

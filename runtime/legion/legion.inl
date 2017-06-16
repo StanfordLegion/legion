@@ -1404,7 +1404,7 @@ namespace Legion {
         }
     public:
       A accessor;
-    };
+    }; 
 
     //--------------------------------------------------------------------------
     inline IndexSpace& IndexSpace::operator=(const IndexSpace &rhs)

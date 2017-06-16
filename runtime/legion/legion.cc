@@ -24,6 +24,318 @@
 #include "logger_message_descriptor.h"
 
 namespace Legion {
+#ifndef DISABLE_PARTITION_SHIM
+  namespace PartitionShim {
+
+    template<int COLOR_DIM>
+    /*static*/ TaskID ColorPoints<COLOR_DIM>::TASK_ID;
+    template<int COLOR_DIM, int RANGE_DIM>
+    /*static*/ TaskID ColorRects<COLOR_DIM,RANGE_DIM>::TASK_ID;
+    
+    //--------------------------------------------------------------------------
+    template<int CDIM>
+    ColorPoints<CDIM>::ColorPoints(const Coloring &coloring, 
+        LogicalRegion region, FieldID color_field, FieldID pointer_field)
+      : TaskLauncher(TASK_ID, TaskArgument())
+    //--------------------------------------------------------------------------
+    {
+      add_region_requirement(
+          RegionRequirement(region, WRITE_DISCARD, EXCLUSIVE, region));
+      add_field(0/*index*/, color_field);
+      add_field(0/*index*/, pointer_field);
+      // Serialize the coloring into the argument buffer 
+      assert(CDIM == 1);
+      rez.serialize<size_t>(coloring.size());
+      for (Coloring::const_iterator cit = coloring.begin(); 
+            cit != coloring.end(); cit++)
+      {
+        const Realm::ZPoint<CDIM,coord_t> color = DomainPoint(cit->first); 
+        rez.serialize(color);
+        rez.serialize<size_t>(cit->second.points.size());
+        for (std::set<ptr_t>::const_iterator it = cit->second.points.begin();
+              it != cit->second.points.end(); it++)
+        {
+          const Realm::ZPoint<1,coord_t> point = it->value;
+          rez.serialize(point);
+        }
+        rez.serialize<size_t>(cit->second.ranges.size());
+        for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it = 
+              cit->second.ranges.begin(); it != cit->second.ranges.end(); it++)
+        {
+          const Realm::ZPoint<1,coord_t> start = it->first.value;
+          const Realm::ZPoint<1,coord_t> stop = it->second.value;
+          rez.serialize(start);
+          rez.serialize(stop);
+        }
+      }
+      argument = TaskArgument(rez.get_buffer(), rez.get_used_bytes()); 
+    }
+
+    //--------------------------------------------------------------------------
+    template<int CDIM>
+    ColorPoints<CDIM>::ColorPoints(const PointColoring &coloring, 
+        LogicalRegion region, FieldID color_field, FieldID pointer_field)
+      : TaskLauncher(TASK_ID, TaskArgument())
+    //--------------------------------------------------------------------------
+    {
+      add_region_requirement(
+          RegionRequirement(region, WRITE_DISCARD, EXCLUSIVE, region));
+      add_field(0/*index*/, color_field);
+      add_field(0/*index*/, pointer_field);
+      // Serialize the coloring into the argument buffer 
+      for (PointColoring::const_iterator cit = coloring.begin();
+            cit != coloring.end(); cit++)
+      {
+        const Realm::ZPoint<CDIM,coord_t> color = cit->first; 
+        rez.serialize(color);
+        rez.serialize<size_t>(cit->second.points.size());
+        for (std::set<ptr_t>::const_iterator it = cit->second.points.begin();
+              it != cit->second.points.end(); it++)
+        {
+          const Realm::ZPoint<1,coord_t> point = it->value;
+          rez.serialize(point);
+        }
+        rez.serialize<size_t>(cit->second.ranges.size());
+        for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it = 
+              cit->second.ranges.begin(); it != cit->second.ranges.end(); it++)
+        {
+          const Realm::ZPoint<1,coord_t> start = it->first.value;
+          const Realm::ZPoint<1,coord_t> stop = it->second.value;
+          rez.serialize(start);
+          rez.serialize(stop);
+        }
+      }
+      argument = TaskArgument(rez.get_buffer(), rez.get_used_bytes());
+    }
+ 
+    //--------------------------------------------------------------------------
+    template<int CDIM>
+    /*static*/ void ColorPoints<CDIM>::register_task(void)
+    //--------------------------------------------------------------------------
+    {
+      TASK_ID = Legion::Runtime::generate_static_task_id();
+      char variant_name[128];
+      snprintf(variant_name,128,"Color Points <%d>", CDIM);
+      TaskVariantRegistrar registrar(TASK_ID, variant_name);
+      registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+      Legion::Runtime::preregister_task_variant<cpu_variant>(registrar, 
+                                                             variant_name);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int CDIM>
+    /*static*/ void ColorPoints<CDIM>::cpu_variant(const Task *task, 
+      const std::vector<PhysicalRegion> &regions, Context ctx, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      const FieldAccessor<WRITE_DISCARD,Realm::ZPoint<CDIM,coord_t>,1,coord_t>
+        fa_color(regions[0], task->regions[0].instance_fields[0]);
+      const FieldAccessor<WRITE_DISCARD,Realm::ZPoint<1,coord_t>,1,coord_t>
+        fa_point(regions[0], task->regions[0].instance_fields[1]);
+      Deserializer derez(task->args, task->arglen);
+      size_t num_colors;
+      derez.deserialize(num_colors);
+      coord_t next_entry = 0;
+      for (unsigned cidx = 0; cidx < num_colors; cidx++)
+      {
+        Realm::ZPoint<CDIM,coord_t> color;
+        derez.deserialize(color);
+        size_t num_points;
+        derez.deserialize(num_points);
+        for (unsigned idx = 0; idx < num_points; idx++, next_entry++)
+        {
+          Realm::ZPoint<1,coord_t> point;
+          derez.deserialize(point);
+          fa_color.write(next_entry, color);
+          fa_point.write(next_entry, point);
+        }
+        size_t num_ranges;
+        derez.deserialize(num_ranges);
+        for (unsigned idx = 0; idx < num_ranges; idx++)
+        {
+          Realm::ZPoint<1,coord_t> start, stop;
+          derez.deserialize(start);
+          derez.deserialize(stop);
+          for (PointInRectIterator<1,coord_t> 
+                itr(Realm::ZRect<1,coord_t>(start, stop)); 
+                itr(); itr++, next_entry++)
+          {
+            fa_color.write(next_entry, color);
+            fa_point.write(next_entry, *itr);
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<int CDIM, int RDIM>
+    ColorRects<CDIM,RDIM>::ColorRects(const DomainColoring &coloring, 
+        LogicalRegion region, FieldID color_field, FieldID range_field)
+      : TaskLauncher(TASK_ID, TaskArgument())
+    //--------------------------------------------------------------------------
+    {
+      add_region_requirement(
+          RegionRequirement(region, WRITE_DISCARD, EXCLUSIVE, region));
+      add_field(0/*index*/, color_field);
+      add_field(0/*index*/, range_field);
+      // Serialize the coloring into the argument buffer 
+      assert(CDIM == 1);
+      rez.serialize<size_t>(coloring.size());
+      for (DomainColoring::const_iterator cit = coloring.begin();
+            cit != coloring.end(); cit++)
+      {
+        const Realm::ZPoint<CDIM,coord_t> color = DomainPoint(cit->first);
+        rez.serialize(color);
+        rez.serialize<size_t>(1); // number of rects
+        const Realm::ZRect<RDIM,coord_t> rect = cit->second;
+        rez.serialize(rect);
+      }
+      argument = TaskArgument(rez.get_buffer(), rez.get_used_bytes());
+    }
+
+    //--------------------------------------------------------------------------
+    template<int CDIM, int RDIM>
+    ColorRects<CDIM,RDIM>::ColorRects(const MultiDomainColoring &coloring, 
+        LogicalRegion region, FieldID color_field, FieldID range_field)
+      : TaskLauncher(TASK_ID, TaskArgument())
+    //--------------------------------------------------------------------------
+    {
+      add_region_requirement(
+          RegionRequirement(region, WRITE_DISCARD, EXCLUSIVE, region));
+      add_field(0/*index*/, color_field);
+      add_field(0/*index*/, range_field);
+      // Serialize the coloring into the argument buffer 
+      assert(CDIM == 1);
+      rez.serialize<size_t>(coloring.size());
+      for (MultiDomainColoring::const_iterator cit = coloring.begin();
+            cit != coloring.end(); cit++)
+      {
+        const Realm::ZPoint<CDIM,coord_t> color = DomainPoint(cit->first);
+        rez.serialize(color);
+        rez.serialize<size_t>(cit->second.size());
+        for (std::set<Domain>::const_iterator it = cit->second.begin();
+              it != cit->second.end(); it++)
+        {
+          const Realm::ZRect<RDIM,coord_t> rect = *it;
+          rez.serialize(rect);
+        }
+      }
+      argument = TaskArgument(rez.get_buffer(), rez.get_used_bytes());
+    }
+
+    //--------------------------------------------------------------------------
+    template<int CDIM, int RDIM>
+    ColorRects<CDIM,RDIM>::ColorRects(const DomainPointColoring &coloring, 
+        LogicalRegion region, FieldID color_field, FieldID range_field)
+      : TaskLauncher(TASK_ID, TaskArgument())
+    //--------------------------------------------------------------------------
+    {
+      add_region_requirement(
+          RegionRequirement(region, WRITE_DISCARD, EXCLUSIVE, region));
+      add_field(0/*index*/, color_field);
+      add_field(0/*index*/, range_field);
+      // Serialize the coloring into the argument buffer 
+      rez.serialize<size_t>(coloring.size());
+      for (DomainPointColoring::const_iterator cit = coloring.begin();
+            cit != coloring.end(); cit++)
+      {
+        const Realm::ZPoint<CDIM,coord_t> color = cit->first;
+        rez.serialize(color);
+        rez.serialize<size_t>(1); // number of rects
+        const Realm::ZRect<RDIM,coord_t> rect = cit->second;
+        rez.serialize(rect);
+      }
+      argument = TaskArgument(rez.get_buffer(), rez.get_used_bytes());
+    }
+
+    //--------------------------------------------------------------------------
+    template<int CDIM, int RDIM>
+    ColorRects<CDIM,RDIM>::ColorRects(const MultiDomainPointColoring &coloring,
+        LogicalRegion region, FieldID color_field, FieldID range_field)
+      : TaskLauncher(TASK_ID, TaskArgument())
+    //--------------------------------------------------------------------------
+    {
+      add_region_requirement(
+          RegionRequirement(region, WRITE_DISCARD, EXCLUSIVE, region));
+      add_field(0/*index*/, color_field);
+      add_field(0/*index*/, range_field);
+      // Serialize the coloring into the argument buffer 
+      rez.serialize<size_t>(coloring.size());
+      for (MultiDomainPointColoring::const_iterator cit = coloring.begin();
+            cit != coloring.end(); cit++)
+      {
+        const Realm::ZPoint<CDIM,coord_t> color = cit->first;
+        rez.serialize(color);
+        rez.serialize<size_t>(cit->second.size());
+        for (std::set<Domain>::const_iterator it = cit->second.begin();
+              it != cit->second.end(); it++)
+        {
+          const Realm::ZRect<RDIM,coord_t> rect = *it;
+          rez.serialize(rect);
+        }
+      }
+      argument = TaskArgument(rez.get_buffer(), rez.get_used_bytes());
+    }
+
+    //--------------------------------------------------------------------------
+    template<int CDIM, int RDIM>
+    /*static*/ void ColorRects<CDIM,RDIM>::register_task(void)
+    //--------------------------------------------------------------------------
+    {
+      TASK_ID = Legion::Runtime::generate_static_task_id();
+      char variant_name[128];
+      snprintf(variant_name,128,"Color Rects <%d,%d>", CDIM, RDIM);
+      TaskVariantRegistrar registrar(TASK_ID, variant_name);
+      registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+      Legion::Runtime::preregister_task_variant<cpu_variant>(registrar, 
+                                                             variant_name);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int CDIM, int RDIM>
+    /*static*/ void ColorRects<CDIM,RDIM>::cpu_variant(const Task *task,
+      const std::vector<PhysicalRegion> &regions, Context ctx, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      const FieldAccessor<WRITE_DISCARD,Realm::ZPoint<CDIM,coord_t>,1,coord_t>
+        fa_color(regions[0], task->regions[0].instance_fields[0]);
+      const FieldAccessor<WRITE_DISCARD,Realm::ZRect<RDIM,coord_t>,1,coord_t>
+        fa_range(regions[0], task->regions[0].instance_fields[1]);
+      Deserializer derez(task->args, task->arglen);
+      size_t num_colors;
+      derez.deserialize(num_colors);
+      coord_t next_entry = 0;
+      for (unsigned cidx = 0; cidx < num_colors; cidx++)
+      {
+        Realm::ZPoint<CDIM,coord_t> color;
+        derez.deserialize(color);
+        size_t num_ranges;
+        derez.deserialize(num_ranges);
+        for (unsigned idx = 0; idx < num_ranges; idx++, next_entry++)
+        {
+          Realm::ZRect<RDIM,coord_t> range;
+          derez.deserialize(range);
+          fa_color.write(next_entry, color);
+          fa_range.write(next_entry, range);
+        }
+      }
+    }
+
+    // Do the explicit instantiation
+    template class ColorPoints<1>;
+    template class ColorPoints<2>;
+    template class ColorPoints<3>;
+    template class ColorRects<1,1>;
+    template class ColorRects<1,2>;
+    template class ColorRects<1,3>;
+    template class ColorRects<2,1>;
+    template class ColorRects<2,2>;
+    template class ColorRects<2,3>;
+    template class ColorRects<3,1>;
+    template class ColorRects<3,2>;
+    template class ColorRects<3,3>;
+  };
+#endif // DISABLE_PARTITION_SHIM
 
     namespace Internal {
       LEGION_EXTERN_LOGGER_DECLARATIONS
@@ -2712,7 +3024,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       runtime->destroy_index_space(ctx, handle);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_index_partition(Context ctx,
@@ -2723,6 +3035,7 @@ namespace Legion {
                                           Color color, bool allocable)
     //--------------------------------------------------------------------------
     {
+#ifndef DISABLE_PARTITION_SHIM
       if (allocable)
         Internal::log_run.warning("WARNING: allocable index partitions are "
                                   "no longer supported");
@@ -2777,108 +3090,33 @@ namespace Legion {
       LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
                                                   temp_is, temp_fs);
       // Fill in the logical region with the data
-      InlineLauncher launcher(RegionRequirement(temp_lr, WRITE_DISCARD, 
-                                                EXCLUSIVE, temp_lr)); 
-      launcher.add_field(color_fid);
-      launcher.add_field(pointer_fid);
-      PhysicalRegion temp_region = map_region(ctx, launcher);
-      temp_region.wait_until_valid();
-      const FieldAccessor<WRITE_DISCARD,Realm::ZPoint<1,coord_t>,1,coord_t> 
-        pointer_acc(temp_region, pointer_fid);
-      coord_t next_entry = 0;
+      // Do this with a task launch to maintain deferred execution
       switch (color_space.get_dim())
       {
         case 1:
           {
-            const FieldAccessor<WRITE_DISCARD,Realm::ZPoint<1,coord_t>,
-                                1,coord_t> color_acc(temp_region, color_fid);
-            for (PointColoring::const_iterator cit = coloring.begin();
-                  cit != coloring.end(); cit++)
-            {
-              const Realm::ZPoint<1,coord_t> color = cit->first;
-              for (std::set<ptr_t>::const_iterator it = 
-                    cit->second.points.begin(); it != 
-                    cit->second.points.end(); it++, next_entry++)
-              {
-                color_acc.write(next_entry, color);
-                pointer_acc.write(next_entry, it->value);
-              }
-              for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it =
-                    cit->second.ranges.begin(); it != 
-                    cit->second.ranges.end(); it++)
-              {
-                for (ptr_t ptr = it->first; 
-                      ptr.value <= it->second.value; ptr++, next_entry++)
-                {
-                  color_acc.write(next_entry, color);
-                  pointer_acc.write(next_entry, ptr.value);
-                }
-              }
-            }
+            PartitionShim::ColorPoints<1> launcher(coloring, temp_lr,
+                                              color_fid, pointer_fid);
+            runtime->execute_task(ctx, launcher);
             break;
           }
         case 2:
           {
-            const FieldAccessor<WRITE_DISCARD,Realm::ZPoint<2,coord_t>,
-                                1,coord_t> color_acc(temp_region, color_fid);
-            for (PointColoring::const_iterator cit = coloring.begin();
-                  cit != coloring.end(); cit++)
-            {
-              const Realm::ZPoint<2,coord_t> color = cit->first;
-              for (std::set<ptr_t>::const_iterator it = 
-                    cit->second.points.begin(); it != 
-                    cit->second.points.end(); it++, next_entry++)
-              {
-                color_acc.write(next_entry, color);
-                pointer_acc.write(next_entry, it->value);
-              }
-              for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it =
-                    cit->second.ranges.begin(); it != 
-                    cit->second.ranges.end(); it++)
-              {
-                for (ptr_t ptr = it->first; 
-                      ptr.value <= it->second.value; ptr++, next_entry++)
-                {
-                  color_acc.write(next_entry, color);
-                  pointer_acc.write(next_entry, ptr.value);
-                }
-              }
-            }
+            PartitionShim::ColorPoints<2> launcher(coloring, temp_lr,
+                                              color_fid, pointer_fid);
+            runtime->execute_task(ctx, launcher);
             break;
           }
         case 3:
           {
-            const FieldAccessor<READ_WRITE,Realm::ZPoint<3,coord_t>,
-                                1,coord_t> color_acc(temp_region, color_fid);
-            for (PointColoring::const_iterator cit = coloring.begin();
-                  cit != coloring.end(); cit++)
-            {
-              const Realm::ZPoint<3,coord_t> color = cit->first;
-              for (std::set<ptr_t>::const_iterator it = 
-                    cit->second.points.begin(); it != 
-                    cit->second.points.end(); it++, next_entry++)
-              {
-                color_acc.write(next_entry, color);
-                pointer_acc.write(next_entry, it->value);
-              }
-              for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it =
-                    cit->second.ranges.begin(); it != 
-                    cit->second.ranges.end(); it++)
-              {
-                for (ptr_t ptr = it->first; 
-                      ptr.value <= it->second.value; ptr++, next_entry++)
-                {
-                  color_acc.write(next_entry, color);
-                  pointer_acc.write(next_entry, ptr.value);
-                }
-              }
-            }
+            PartitionShim::ColorPoints<3> launcher(coloring, temp_lr,
+                                              color_fid, pointer_fid);
+            runtime->execute_task(ctx, launcher);
             break;
           }
         default:
           assert(false);
       }
-      unmap_region(ctx, temp_region);
       // Make an index space for the color space, just leak it for now
       IndexSpace index_color_space = create_index_space(ctx, color_space);;
       // Partition the logical region by the color field
@@ -2893,6 +3131,10 @@ namespace Legion {
       destroy_field_space(ctx, temp_fs);
       destroy_index_space(ctx, temp_is);
       return result;
+#else // DISABLE_PARTITION_SHIM
+      assert(false);
+      return IndexPartition::NO_PART;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -2903,6 +3145,7 @@ namespace Legion {
                                           Color part_color)
     //--------------------------------------------------------------------------
     {
+#ifndef DISABLE_PARTITION_SHIM
       // Count how many entries there are in the coloring
       coord_t num_entries = 0;
       Color lower_bound = UINT_MAX, upper_bound = 0;
@@ -2941,39 +3184,11 @@ namespace Legion {
       LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
                                                   temp_is, temp_fs);
       // Fill in the logical region with the data
-      InlineLauncher launcher(RegionRequirement(temp_lr, WRITE_DISCARD, 
-                                                EXCLUSIVE, temp_lr)); 
-      launcher.add_field(color_fid);
-      launcher.add_field(pointer_fid);
-      PhysicalRegion temp_region = map_region(ctx, launcher);
-      temp_region.wait_until_valid();
-      const FieldAccessor<WRITE_DISCARD,Realm::ZPoint<1,coord_t>,1,coord_t>
-        color_acc(temp_region, color_fid);
-      const FieldAccessor<WRITE_DISCARD,Realm::ZPoint<1,coord_t>,1,coord_t>
-        pointer_acc(temp_region, pointer_fid);
-      coord_t next_entry = 0;
-      for (Coloring::const_iterator cit = coloring.begin();
-            cit != coloring.end(); cit++)
-      {
-        const Realm::ZPoint<1,coord_t> local_color = cit->first;
-        for (std::set<ptr_t>::const_iterator it = cit->second.points.begin();
-              it != cit->second.points.end(); it++, next_entry++)
-        {
-          color_acc.write(next_entry, local_color);
-          pointer_acc.write(next_entry, it->value);
-        }
-        for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it = 
-              cit->second.ranges.begin(); it != cit->second.ranges.end(); it++)
-        {
-          for (ptr_t ptr = it->first; ptr.value <= it->second.value; 
-                ptr++, next_entry++)
-          {
-            color_acc.write(next_entry, local_color);
-            pointer_acc.write(next_entry, ptr.value);
-          }
-        }
-      }
-      unmap_region(ctx, temp_region);
+      // Do this with a task launch to maintain deferred execution
+      PartitionShim::ColorPoints<1> launcher(coloring, temp_lr, 
+                                             color_fid, pointer_fid);
+      runtime->execute_task(ctx, launcher);
+      
       // Make an index space for the color space, we'll leak it for now
       IndexSpaceT<1,coord_t> index_color_space = 
                                   create_index_space(ctx, color_space);
@@ -2992,6 +3207,10 @@ namespace Legion {
       destroy_field_space(ctx, temp_fs);
       destroy_index_space(ctx, temp_is);
       return result;
+#else // DISABLE_PARTITION_SHIM
+      assert(false);
+      return IndexPartition::NO_PART;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3002,6 +3221,7 @@ namespace Legion {
                                           PartitionKind part_kind, Color color)
     //--------------------------------------------------------------------------
     {
+#ifndef DISABLE_PARTITION_SHIM
       // Count how many entries there are in the coloring
       const coord_t num_entries = coloring.size();
       // Now make a temporary logical region with two fields to handle
@@ -3066,87 +3286,101 @@ namespace Legion {
       LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
                                                   temp_is, temp_fs);
       // Fill in the logical region with the data
-      InlineLauncher launcher(RegionRequirement(temp_lr, WRITE_DISCARD, 
-                                                EXCLUSIVE, temp_lr)); 
-      launcher.add_field(color_fid);
-      launcher.add_field(range_fid);
-      PhysicalRegion temp_region = map_region(ctx, launcher);
-      temp_region.wait_until_valid();
-      // write the colors first
+      // Do this with a task launch to maintain deferred execution
       switch (color_dim)
       {
         case 1:
           {
-            const FieldAccessor<WRITE_DISCARD,Realm::ZPoint<1,coord_t>,
-                                1,coord_t> color_acc(temp_region, color_fid);
-            coord_t next_entry = 0;
-            for (DomainPointColoring::const_iterator it = coloring.begin();
-                  it != coloring.end(); it++, next_entry++)
-              color_acc.write(next_entry, it->first);
-            break;
+            switch (range_dim)
+            {
+              case 1:
+                {
+                  PartitionShim::ColorRects<1,1> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              case 2:
+                {
+                  PartitionShim::ColorRects<1,2> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              case 3:
+                {
+                  PartitionShim::ColorRects<1,3> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              default:
+                assert(false);
+            }
           }
         case 2:
           {
-            const FieldAccessor<WRITE_DISCARD,Realm::ZPoint<2,coord_t>,
-                                1,coord_t> color_acc(temp_region, color_fid);
-            coord_t next_entry = 0;
-            for (DomainPointColoring::const_iterator it = coloring.begin();
-                  it != coloring.end(); it++, next_entry++)
-              color_acc.write(next_entry, it->first);
-            break;
+            switch (range_dim)
+            {
+              case 1:
+                {
+                  PartitionShim::ColorRects<2,1> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              case 2:
+                {
+                  PartitionShim::ColorRects<2,2> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              case 3:
+                {
+                  PartitionShim::ColorRects<2,3> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              default:
+                assert(false);
+            }
           }
         case 3:
           {
-            const FieldAccessor<WRITE_DISCARD,Realm::ZPoint<3,coord_t>,
-                                1,coord_t> color_acc(temp_region, color_fid);
-            coord_t next_entry = 0;
-            for (DomainPointColoring::const_iterator it = coloring.begin();
-                  it != coloring.end(); it++, next_entry++)
-              color_acc.write(next_entry, it->first);
-            break;
+            switch (range_dim)
+            {
+              case 1:
+                {
+                  PartitionShim::ColorRects<3,1> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              case 2:
+                {
+                  PartitionShim::ColorRects<3,2> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              case 3:
+                {
+                  PartitionShim::ColorRects<3,3> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              default:
+                assert(false);
+            }
           }
         default:
           assert(false);
       }
-      // Now write out the ranges
-      switch (range_dim)
-      {
-        case 1:
-          {
-            const FieldAccessor<WRITE_DISCARD,Realm::ZRect<1,coord_t>,1,coord_t>
-              range_acc(temp_region, range_fid);
-            coord_t next_entry = 0;
-            for (DomainPointColoring::const_iterator it = coloring.begin();
-                  it != coloring.end(); it++, next_entry++)
-              range_acc.write(next_entry, it->second);
-            break;
-          }
-        case 2:
-          {
-            const FieldAccessor<WRITE_DISCARD,Realm::ZRect<2,coord_t>,1,coord_t>
-              range_acc(temp_region, range_fid);
-            coord_t next_entry = 0;
-            for (DomainPointColoring::const_iterator it = coloring.begin();
-                  it != coloring.end(); it++, next_entry++)
-              range_acc.write(next_entry, it->second);
-            break;
-          }
-        case 3:
-          {
-            const FieldAccessor<WRITE_DISCARD,Realm::ZRect<3,coord_t>,1,coord_t>
-              range_acc(temp_region, range_fid);
-            coord_t next_entry = 0;
-            for (DomainPointColoring::const_iterator it = coloring.begin();
-                  it != coloring.end(); it++, next_entry++)
-              range_acc.write(next_entry, it->second);
-            break;
-          }
-        default:
-          assert(false);
-      }
-      unmap_region(ctx, temp_region);
       // Make an index space for the color space, just leak it for now
-      IndexSpace index_color_space = create_index_space(ctx, color_space);;
+      IndexSpace index_color_space = create_index_space(ctx, color_space);
       // Partition the logical region by the color field
       IndexPartition temp_ip = create_partition_by_field(ctx, temp_lr, 
                                 temp_lr, color_fid, index_color_space);
@@ -3159,6 +3393,10 @@ namespace Legion {
       destroy_field_space(ctx, temp_fs);
       destroy_index_space(ctx, temp_is);
       return result;
+#else // DISABLE_PARTITION_SHIM
+      assert(false);
+      return IndexPartition::NO_PART;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3169,6 +3407,7 @@ namespace Legion {
                                           bool disjoint, Color part_color)
     //--------------------------------------------------------------------------
     {
+#ifndef DISABLE_PARTITION_SHIM
       // Count how many entries there are in the coloring
       const coord_t num_entries = coloring.size();
       // Now make a temporary logical region with two fields to handle
@@ -3210,59 +3449,34 @@ namespace Legion {
       LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
                                                   temp_is, temp_fs);
       // Fill in the logical region with the data
-      InlineLauncher launcher(RegionRequirement(temp_lr, WRITE_DISCARD, 
-                                                EXCLUSIVE, temp_lr)); 
-      launcher.add_field(color_fid);
-      launcher.add_field(range_fid);
-      PhysicalRegion temp_region = map_region(ctx, launcher);
-      temp_region.wait_until_valid();
-      const FieldAccessor<WRITE_DISCARD,Realm::ZPoint<1,coord_t>,1,coord_t>
-        color_acc(temp_region, color_fid);
+      // Do this with a task launch to maintain deferred execution
       switch (range_dim)
       {
         case 1:
           {
-            const FieldAccessor<WRITE_DISCARD,Realm::ZRect<1,coord_t>,1,coord_t>
-              range_acc(temp_region, range_fid);
-            coord_t next_entry = 0;
-            for (DomainColoring::const_iterator it = coloring.begin();
-                  it != coloring.end(); it++, next_entry++)
-            {
-              color_acc.write(next_entry, it->first);
-              range_acc.write(next_entry, it->second);
-            }
+            PartitionShim::ColorRects<1,1> launcher(coloring,
+                temp_lr, color_fid, range_fid);
+            runtime->execute_task(ctx, launcher);
             break;
           }
         case 2:
           {
-            const FieldAccessor<WRITE_DISCARD,Realm::ZRect<2,coord_t>,1,coord_t>
-              range_acc(temp_region, range_fid);
-            coord_t next_entry = 0;
-            for (DomainColoring::const_iterator it = coloring.begin();
-                  it != coloring.end(); it++, next_entry++)
-            {
-              color_acc.write(next_entry, it->first);
-              range_acc.write(next_entry, it->second);
-            }
+            PartitionShim::ColorRects<1,2> launcher(coloring,
+                temp_lr, color_fid, range_fid);
+            runtime->execute_task(ctx, launcher);
             break;
           }
         case 3:
           {
-            const FieldAccessor<WRITE_DISCARD,Realm::ZRect<3,coord_t>,1,coord_t>
-              range_acc(temp_region, range_fid);
-            coord_t next_entry = 0;
-            for (DomainColoring::const_iterator it = coloring.begin();
-                  it != coloring.end(); it++, next_entry++)
-            {
-              color_acc.write(next_entry, it->first);
-              range_acc.write(next_entry, it->second);
-            }
+            PartitionShim::ColorRects<1,3> launcher(coloring,
+                temp_lr, color_fid, range_fid);
+            runtime->execute_task(ctx, launcher);
             break;
           }
         default:
           assert(false);
       }
-      unmap_region(ctx, temp_region);
+
       IndexSpaceT<1,coord_t> index_color_space = 
                             create_index_space<1,coord_t>(ctx, color_space);
       // Partition the logical region by the color field
@@ -3278,6 +3492,10 @@ namespace Legion {
       destroy_field_space(ctx, temp_fs);
       destroy_index_space(ctx, temp_is);
       return result;
+#else // DISABLE_PARTITION_SHIM
+      assert(false);
+      return IndexPartition::NO_PART;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3288,6 +3506,7 @@ namespace Legion {
                                        PartitionKind part_kind, Color color)
     //--------------------------------------------------------------------------
     {
+#ifndef DISABLE_PARTITION_SHIM
       // Count how many entries there are in the coloring
       coord_t num_entries = 0;
       for (MultiDomainPointColoring::const_iterator it = coloring.begin();
@@ -3355,109 +3574,99 @@ namespace Legion {
       LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
                                                   temp_is, temp_fs);
       // Fill in the logical region with the data
-      InlineLauncher launcher(RegionRequirement(temp_lr, WRITE_DISCARD,
-                                                EXCLUSIVE, temp_lr)); 
-      launcher.add_field(color_fid);
-      launcher.add_field(range_fid);
-      PhysicalRegion temp_region = map_region(ctx, launcher);
-      temp_region.wait_until_valid();
-      // Write the colors first
+      // Do this with a task launch to maintain deferred execution
       switch (color_dim)
       {
         case 1:
           {
-            const FieldAccessor<WRITE_DISCARD,Realm::ZPoint<1,coord_t>,
-                                1,coord_t> color_acc(temp_region, color_fid);
-            coord_t next_entry = 0;
-            for (MultiDomainPointColoring::const_iterator it = coloring.begin();
-                  it != coloring.end(); it++)
+            switch (range_dim)
             {
-              for (unsigned idx = 0; idx < it->second.size(); 
-                    idx++, next_entry++)
-                color_acc.write(next_entry, it->first);
+              case 1:
+                {
+                  PartitionShim::ColorRects<1,1> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              case 2:
+                {
+                  PartitionShim::ColorRects<1,2> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              case 3:
+                {
+                  PartitionShim::ColorRects<1,3> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              default:
+                assert(false);
             }
-            break;
           }
         case 2:
           {
-            const FieldAccessor<WRITE_DISCARD,Realm::ZPoint<2,coord_t>,
-                                1,coord_t> color_acc(temp_region, color_fid);
-            coord_t next_entry = 0;
-            for (MultiDomainPointColoring::const_iterator it = coloring.begin();
-                  it != coloring.end(); it++)
+            switch (range_dim)
             {
-              for (unsigned idx = 0; idx < it->second.size(); 
-                    idx++, next_entry++)
-                color_acc.write(next_entry, it->first);
+              case 1:
+                {
+                  PartitionShim::ColorRects<2,1> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              case 2:
+                {
+                  PartitionShim::ColorRects<2,2> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              case 3:
+                {
+                  PartitionShim::ColorRects<2,3> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              default:
+                assert(false);
             }
-            break;
           }
         case 3:
           {
-            const FieldAccessor<WRITE_DISCARD,Realm::ZPoint<3,coord_t>,
-                                1,coord_t> color_acc(temp_region, color_fid);
-            coord_t next_entry = 0;
-            for (MultiDomainPointColoring::const_iterator it = coloring.begin();
-                  it != coloring.end(); it++)
+            switch (range_dim)
             {
-              for (unsigned idx = 0; idx < it->second.size(); 
-                    idx++, next_entry++)
-                color_acc.write(next_entry, it->first);
+              case 1:
+                {
+                  PartitionShim::ColorRects<3,1> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              case 2:
+                {
+                  PartitionShim::ColorRects<3,2> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              case 3:
+                {
+                  PartitionShim::ColorRects<3,3> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              default:
+                assert(false);
             }
-            break;
           }
         default:
           assert(false);
       }
-      // Now we can write the ranges
-      switch (range_dim)
-      {
-        case 1:
-          {
-            const FieldAccessor<WRITE_DISCARD,Realm::ZRect<1,coord_t>,1,coord_t>
-              range_acc(temp_region, range_fid);
-            coord_t next_entry = 0;
-            for (MultiDomainPointColoring::const_iterator cit = 
-                  coloring.begin(); cit != coloring.end(); cit++)
-            {
-              for (std::set<Domain>::const_iterator it = cit->second.begin();
-                    it != cit->second.end(); it++, next_entry++)
-                range_acc.write(next_entry, *it); 
-            }
-            break;
-          }
-        case 2:
-          {
-            const FieldAccessor<WRITE_DISCARD,Realm::ZRect<2,coord_t>,1,coord_t>
-              range_acc(temp_region, range_fid);
-            coord_t next_entry = 0;
-            for (MultiDomainPointColoring::const_iterator cit = 
-                  coloring.begin(); cit != coloring.end(); cit++)
-            {
-              for (std::set<Domain>::const_iterator it = cit->second.begin();
-                    it != cit->second.end(); it++, next_entry++)
-                range_acc.write(next_entry, *it); 
-            }
-            break;
-          }
-        case 3:
-          {
-            const FieldAccessor<WRITE_DISCARD,Realm::ZRect<3,coord_t>,1,coord_t>
-              range_acc(temp_region, range_fid);
-            coord_t next_entry = 0;
-            for (MultiDomainPointColoring::const_iterator cit = 
-                  coloring.begin(); cit != coloring.end(); cit++)
-            {
-              for (std::set<Domain>::const_iterator it = cit->second.begin();
-                    it != cit->second.end(); it++, next_entry++)
-                range_acc.write(next_entry, *it); 
-            }
-            break;
-          }
-        default:
-          assert(false);
-      }
-      unmap_region(ctx, temp_region);
       // Make an index space for the color space, just leak it for now
       IndexSpace index_color_space = create_index_space(ctx, color_space);;
       // Partition the logical region by the color field
@@ -3472,6 +3681,10 @@ namespace Legion {
       destroy_field_space(ctx, temp_fs);
       destroy_index_space(ctx, temp_is);
       return result;
+#else // DISABLE_PARTITION_SHIM
+      assert(false);
+      return IndexPartition::NO_PART;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3482,6 +3695,7 @@ namespace Legion {
                                           bool disjoint, Color part_color)
     //--------------------------------------------------------------------------
     {
+#ifndef DISABLE_PARTITION_SHIM
       // Count how many entries there are in the coloring
       coord_t num_entries = 0;
       for (MultiDomainColoring::const_iterator it = coloring.begin();
@@ -3526,71 +3740,33 @@ namespace Legion {
       LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
                                                   temp_is, temp_fs);
       // Fill in the logical region with the data
-      InlineLauncher launcher(RegionRequirement(temp_lr, READ_WRITE, 
-                                                EXCLUSIVE, temp_lr)); 
-      launcher.add_field(color_fid);
-      launcher.add_field(range_fid);
-      PhysicalRegion temp_region = map_region(ctx, launcher);
-      temp_region.wait_until_valid();
-      const FieldAccessor<WRITE_DISCARD,Realm::ZPoint<1,coord_t>,1,coord_t>
-        color_acc(temp_region, color_fid);
+      // Do this with a task launch to maintain deferred execution
       switch (range_dim)
       {
         case 1:
           {
-            const FieldAccessor<WRITE_DISCARD,Realm::ZRect<1,coord_t>,1,coord_t>
-              range_acc(temp_region, range_fid);
-            coord_t next_entry = 0;
-            for (MultiDomainColoring::const_iterator cit = coloring.begin();
-                  cit != coloring.end(); cit++)
-            {
-              for (std::set<Domain>::const_iterator it = cit->second.begin();
-                    it != cit->second.end(); it++, next_entry++)
-              {
-                color_acc.write(next_entry, cit->first);
-                range_acc.write(next_entry, *it);
-              }
-            }
+            PartitionShim::ColorRects<1,1> launcher(coloring,
+                temp_lr, color_fid, range_fid);
+            runtime->execute_task(ctx, launcher);
             break;
           }
         case 2:
           {
-            const FieldAccessor<WRITE_DISCARD,Realm::ZRect<2,coord_t>,1,coord_t>
-              range_acc(temp_region, range_fid);
-            coord_t next_entry = 0;
-            for (MultiDomainColoring::const_iterator cit = coloring.begin();
-                  cit != coloring.end(); cit++)
-            {
-              for (std::set<Domain>::const_iterator it = cit->second.begin();
-                    it != cit->second.end(); it++, next_entry++)
-              {
-                color_acc.write(next_entry, cit->first);
-                range_acc.write(next_entry, *it);
-              }
-            }
+            PartitionShim::ColorRects<1,2> launcher(coloring,
+                temp_lr, color_fid, range_fid);
+            runtime->execute_task(ctx, launcher);
             break;
           }
         case 3:
           {
-            const FieldAccessor<WRITE_DISCARD,Realm::ZRect<3,coord_t>,1,coord_t>
-              range_acc(temp_region, range_fid);
-            coord_t next_entry = 0;
-            for (MultiDomainColoring::const_iterator cit = coloring.begin();
-                  cit != coloring.end(); cit++)
-            {
-              for (std::set<Domain>::const_iterator it = cit->second.begin();
-                    it != cit->second.end(); it++, next_entry++)
-              {
-                color_acc.write(next_entry, cit->first);
-                range_acc.write(next_entry, *it);
-              }
-            }
+            PartitionShim::ColorRects<1,3> launcher(coloring,
+                temp_lr, color_fid, range_fid);
+            runtime->execute_task(ctx, launcher);
             break;
           }
         default:
           assert(false);
       }
-      unmap_region(ctx, temp_region);
       IndexSpaceT<1,coord_t> index_color_space = 
                             create_index_space<1,coord_t>(ctx, color_space);
       // Partition the logical region by the color field
@@ -3606,6 +3782,10 @@ namespace Legion {
       destroy_field_space(ctx, temp_fs);
       destroy_index_space(ctx, temp_is);
       return result;
+#else // DISABLE_PARTITION_SHIM
+      assert(false);
+      return IndexPartition::NO_PART; 
+#endif
     }
 
     //--------------------------------------------------------------------------
