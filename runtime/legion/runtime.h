@@ -42,9 +42,8 @@ namespace Legion {
     protected:
       Serializer rez;
     public:
-      static void register_task(void);
-    protected:
       static TaskID TASK_ID;
+      static void register_task(void);
       static void cpu_variant(const Task *task,
           const std::vector<PhysicalRegion> &regions, 
           Context ctx, Runtime *runtime);
@@ -65,9 +64,8 @@ namespace Legion {
     protected:
       Serializer rez;
     public:
-      static void register_task(void);
-    protected:
       static TaskID TASK_ID;
+      static void register_task(void);
       static void cpu_variant(const Task *task,
           const std::vector<PhysicalRegion> &regions, 
           Context ctx, Runtime *runtime);

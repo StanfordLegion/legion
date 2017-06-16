@@ -118,8 +118,8 @@ namespace Legion {
       snprintf(variant_name,128,"Color Points <%d>", CDIM);
       TaskVariantRegistrar registrar(TASK_ID, variant_name);
       registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
-      Legion::Runtime::preregister_task_variant<cpu_variant>(registrar, 
-                                                             variant_name);
+      Legion::Runtime::preregister_task_variant<
+        ColorPoints<CDIM>::cpu_variant>(registrar, variant_name);
     }
 
     //--------------------------------------------------------------------------
@@ -287,8 +287,8 @@ namespace Legion {
       snprintf(variant_name,128,"Color Rects <%d,%d>", CDIM, RDIM);
       TaskVariantRegistrar registrar(TASK_ID, variant_name);
       registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
-      Legion::Runtime::preregister_task_variant<cpu_variant>(registrar, 
-                                                             variant_name);
+      Legion::Runtime::preregister_task_variant<
+        ColorRects<CDIM,RDIM>::cpu_variant>(registrar, variant_name);
     }
 
     //--------------------------------------------------------------------------
