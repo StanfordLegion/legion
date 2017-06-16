@@ -160,10 +160,10 @@ def addToDatabase(type, name, code, message, whatToDo, connection, sourceFile, l
 
 
 
-def parseSourceFile(fileName, connection):
+def parseSourceFile(fileName, preprocessedFileName, connection):
     print fileName
     
-    with open(fileName, 'rt') as sourceFile:
+    with open(preprocessedFileName, 'rt') as sourceFile:
         lineNumber = 0
         tokens = []
         while len(tokens) > 0 or lineNumber == 0:

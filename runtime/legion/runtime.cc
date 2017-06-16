@@ -324,8 +324,8 @@ namespace Legion {
         TaskContext *context = producer_op->get_context();
         if (!context->is_leaf_context())
         {
-          MessageDescriptor WAITING_FUTURE_NONLEAF(1900, "undefined");
-          log_run.warning(WAITING_FUTURE_NONLEAF.id(),
+          REPORT_LEGION_WARNING(LEGION_WARNING_WAITING_FUTURE_NONLEAF,
+                                "UNDEFINED",
              "WARNING: Waiting on a future in non-leaf task %s "
              "(UID %lld) is a violation of Legion's deferred execution model "
              "best practices. You may notice a severe performance degradation.",
@@ -18559,9 +18559,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void Runtime::report_fatal_message(const MessageDescriptor &desc,
+                                                  const char *file_name, const int line,
+                                                  const char *message)
+    //--------------------------------------------------------------------------
+    {
+      log_run.fatal(desc.id(), "LEGION FATAL: %s (from file %s:%d)",
+                    message, file_name, line);
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(desc.id());
+    }
+    
+    //--------------------------------------------------------------------------
     /*static*/ void Runtime::report_error_message(const MessageDescriptor &desc,
-                                       const char *file_name, const int line,
-                                       const char *message)
+                                                  const char *file_name, const int line,
+                                                  const char *message)
     //--------------------------------------------------------------------------
     {
       log_run.error(desc.id(), "LEGION ERROR: %s (from file %s:%d)",
@@ -18571,7 +18585,7 @@ namespace Legion {
 #endif
       exit(desc.id());
     }
-
+    
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::report_warning_message(
                                          const MessageDescriptor &desc,

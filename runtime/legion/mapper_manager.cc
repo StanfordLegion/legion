@@ -1402,8 +1402,8 @@ namespace Legion {
         runtime->find_variant_impl(task_id, vid, true/*can fail*/);
       if (impl == NULL)
       {
-        MessageDescriptor INVALID_MAPPER_REQUEST(1700, "undefined");
-        log_run.error(INVALID_MAPPER_REQUEST.id(),
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_REQUEST,
+                            "UNDEFINED",
                       "Invalid mapper request: mapper %s requested execution "
                       "constraints for variant %ld in mapper call %s, but "
                       "that variant does not exist.", mapper->get_mapper_name(),
@@ -1428,8 +1428,8 @@ namespace Legion {
         runtime->find_variant_impl(task_id, vid, true/*can fail*/);
       if (impl == NULL)
       {
-        MessageDescriptor INVALID_MAPPER_REQUEST2(1701, "undefined");
-        log_run.error(INVALID_MAPPER_REQUEST2.id(),
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_REQUEST2,
+                            "UNDEFINED",
                       "Invalid mapper request: mapper %s requested task layout "
                       "constraints for variant %ld in mapper call %s, but "
                       "that variant does not exist.", mapper->get_mapper_name(),
@@ -1454,8 +1454,8 @@ namespace Legion {
         runtime->find_layout_constraints(layout_id, true/*can fail*/);
       if (constraints == NULL)
       {
-        MessageDescriptor INVALID_MAPPER_REQUEST3(1702, "undefined");
-        log_run.error(INVALID_MAPPER_REQUEST3.id(),
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_REQUEST3,
+                            "UNDEFINED",
                       "Invalid mapper request: mapper %s requested layout "
                       "constraints for layout ID %ld in mapper call %s, but "
                       "that layout constraint ID is invalid.",
@@ -1504,8 +1504,8 @@ namespace Legion {
         runtime->find_layout_constraints(set2, true/*can fail*/);
       if ((c1 == NULL) || (c2 == NULL))
       {
-        MessageDescriptor INVALID_MAPPER_REQUEST4(1703, "undefined");
-        log_run.error(INVALID_MAPPER_REQUEST4.id(),
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_REQUEST4,
+                            "UNDEFINED",
                       "Invalid mapper request: mapper %s passed layout ID %ld "
                       "to conflict test in mapper call %s, but that layout ID "
                       "is invalid.", mapper->get_mapper_name(), 
@@ -1533,8 +1533,8 @@ namespace Legion {
         runtime->find_layout_constraints(target, true/*can fail*/);
       if ((c1 == NULL) || (c2 == NULL))
       {
-        MessageDescriptor INVALID_MAPPER_REQUEST5(1704, "undefined");
-        log_run.error(INVALID_MAPPER_REQUEST5.id(),
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_REQUEST5,
+                            "UNDEFINED",
                       "Invalid mapper request: mapper %s passed layout ID %ld "
                       "to entailment test in mapper call %s, but that layout "
                       "ID is invalid.", mapper->get_mapper_name(), 
@@ -1773,8 +1773,8 @@ namespace Legion {
         check_region_consistency(ctx, "create_physical_instance", regions);
       if (acquire && (ctx->acquired_instances == NULL))
       {
-        MessageDescriptor IGNORING_ACQUIRE_REQUEST(1705, "undefined");
-        log_run.warning(IGNORING_ACQUIRE_REQUEST.id(),
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_REQUEST6,
+                            "UNDEFINED",
                         "Ignoring acquire request to create_physical_instance "
                         "in unsupported mapper call %s in mapper %s", 
                         get_mapper_call_name(ctx->kind), get_mapper_name());
@@ -1807,8 +1807,8 @@ namespace Legion {
         check_region_consistency(ctx, "create_physical_instance", regions);
       if (acquire && (ctx->acquired_instances == NULL))
       {
-        MessageDescriptor IGNORING_ACQUIRE_REQUEST2(1706, "undefined");
-        log_run.warning(IGNORING_ACQUIRE_REQUEST2.id(),
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_REQUEST7,
+                            "UNDEFINED",
                         "Ignoring acquire request to create_physical_instance "
                         "in unsupported mapper call %s in mapper %s", 
                         get_mapper_call_name(ctx->kind), get_mapper_name());
@@ -1843,8 +1843,8 @@ namespace Legion {
                                  regions);
       if (acquire && (ctx->acquired_instances == NULL))
       {
-        MessageDescriptor IGNORING_ACQUIRE_REQUEST3(1707, "undefined");
-        log_run.warning(IGNORING_ACQUIRE_REQUEST3.id(),
+        REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST,
+                              "UNDEFINED",
                         "Ignoring acquire request to find_or_create_physical"
                         "_instance in unsupported mapper call %s in mapper %s",
                         get_mapper_call_name(ctx->kind), get_mapper_name());
@@ -1881,8 +1881,8 @@ namespace Legion {
                                  regions);
       if (acquire && (ctx->acquired_instances == NULL))
       {
-        MessageDescriptor IGNORING_ACQUIRE_REQUEST4(1708, "undefined");
-        log_run.warning(IGNORING_ACQUIRE_REQUEST4.id(),
+        REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST2,
+                              "UNDEFINED",
                         "Ignoring acquire request to find_or_create_physical"
                         "_instance in unsupported mapper call %s in mapper %s",
                         get_mapper_call_name(ctx->kind), get_mapper_name());
@@ -1917,8 +1917,8 @@ namespace Legion {
         check_region_consistency(ctx, "find_physical_instance", regions);
       if (acquire && (ctx->acquired_instances == NULL))
       {
-        MessageDescriptor IGNORING_ACQUIRE_REQUEST5(1709, "undefined");
-        log_run.warning(IGNORING_ACQUIRE_REQUEST5.id(),
+        REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST3,
+                              "UNDEFINED",
                         "Ignoring acquire request to find_physical_instance "
                         "in unsupported mapper call %s in mapper %s",
                         get_mapper_call_name(ctx->kind), get_mapper_name());
@@ -1950,8 +1950,8 @@ namespace Legion {
         check_region_consistency(ctx, "find_physical_instance", regions);
       if (acquire && (ctx->acquired_instances == NULL))
       {
-        MessageDescriptor IGNORING_ACQUIRE_REQUEST6(1710, "undefined");
-        log_run.warning(IGNORING_ACQUIRE_REQUEST6.id(),
+        REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST4,
+                              "UNDEFINED",
                         "Ignoring acquire request to find_physical_instance "
                         "in unsupported mapper call %s in mapper %s",
                         get_mapper_call_name(ctx->kind), get_mapper_name());
@@ -1986,8 +1986,8 @@ namespace Legion {
     {
       if (ctx->acquired_instances == NULL)
       {
-        MessageDescriptor IGNORING_ACQUIRE_REQUEST7(1711, "undefined");
-        log_run.warning(IGNORING_ACQUIRE_REQUEST7.id(),
+        REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST5,
+                              "UNDEFINED",
                         "Ignoring acquire request in unsupported mapper call "
                         "%s in mapper %s", get_mapper_call_name(ctx->kind),
                         get_mapper_name());
@@ -2035,8 +2035,8 @@ namespace Legion {
     {
       if (ctx->acquired_instances == NULL)
       {
-        MessageDescriptor IGNORING_ACQUIRE_REQUEST8(1712, "undefined");
-        log_run.warning(IGNORING_ACQUIRE_REQUEST8.id(),
+        REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST6,
+                              "UNDEFINED",
                         "Ignoring acquire request in unsupported mapper call "
                         "%s in mapper %s", get_mapper_call_name(ctx->kind),
                         get_mapper_name());
@@ -2067,8 +2067,8 @@ namespace Legion {
     {
       if (ctx->acquired_instances == NULL)
       {
-        MessageDescriptor IGNORING_ACQUIRE_REQUEST9(1713, "undefined");
-        log_run.warning(IGNORING_ACQUIRE_REQUEST9.id(),
+        REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST7,
+                              "UNDEFINED",
                         "Ignoring acquire request in unsupported mapper call "
                         "%s in mapper %s", get_mapper_call_name(ctx->kind),
                         get_mapper_name());
@@ -2132,8 +2132,8 @@ namespace Legion {
     {
       if (ctx->acquired_instances == NULL)
       {
-        MessageDescriptor IGNORING_ACQUIRE_REQUEST10(1714, "undefined");
-        log_run.warning(IGNORING_ACQUIRE_REQUEST10.id(),
+        REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST8,
+                              "UNDEFINED",
                         "Ignoring acquire request in unsupported mapper call "
                         "%s in mapper %s", get_mapper_call_name(ctx->kind),
                         get_mapper_name());
@@ -2166,8 +2166,8 @@ namespace Legion {
     {
       if (ctx->acquired_instances == NULL)
       {
-        MessageDescriptor IGNORING_ACQUIRE_REQUEST11(1715, "undefined");
-        log_run.warning(IGNORING_ACQUIRE_REQUEST11.id(),
+        REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST9,
+                              "UNDEFINED",
                         "Ignoring acquire request in unsupported mapper call "
                         "%s in mapper %s", get_mapper_call_name(ctx->kind),
                         get_mapper_name());
@@ -2321,8 +2321,8 @@ namespace Legion {
     {
       if (ctx->acquired_instances == NULL)
       {
-        MessageDescriptor IGNORING_RELEASE_REQUEST(1716, "undefined");
-        log_run.warning(IGNORING_RELEASE_REQUEST.id(),
+        REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_RELEASE_REQUEST,
+                              "UNDEFINED",
                         "Ignoring release request in unsupported mapper call "
                         "%s in mapper %s", get_mapper_call_name(ctx->kind),
                         get_mapper_name());
@@ -2340,8 +2340,8 @@ namespace Legion {
     {
       if (ctx->acquired_instances == NULL)
       {
-        MessageDescriptor IGNORING_RELEASE_REQUEST2(1717, "undefined");
-        log_run.warning(IGNORING_RELEASE_REQUEST2.id(),
+        REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_RELEASE_REQUEST2,
+                              "UNDEFINED",
                         "Ignoring release request in unsupported mapper call "
                         "%s in mapper %s", get_mapper_call_name(ctx->kind),
                         get_mapper_name());
@@ -2360,8 +2360,8 @@ namespace Legion {
     {
       if (ctx->acquired_instances == NULL)
       {
-        MessageDescriptor IGNORING_RELEASE_REQUEST3(1718, "undefined");
-        log_run.warning(IGNORING_RELEASE_REQUEST3.id(),
+        REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_RELEASE_REQUEST3,
+                              "UNDEFINED",
                         "Ignoring release request in unsupported mapper call "
                         "%s in mapper %s", get_mapper_call_name(ctx->kind),
                         get_mapper_name());
@@ -2434,8 +2434,8 @@ namespace Legion {
           RegionTreeID other_id = regions[idx].get_tree_id();
           if (other_id != tree_id)
           {
-            MessageDescriptor INVALID_REGION_ARGUMENTS(1719, "undefined");
-            log_run.error(INVALID_REGION_ARGUMENTS.id(),
+            REPORT_LEGION_ERROR(ERROR_INVALID_REGION_ARGUMENTS,
+                                "UNDEFINED",
                           "Invalid region arguments passed to %s in "
                           "mapper call %s of mapper %s. All region arguments "
                           "must be from the same region tree (%d != %d).",
@@ -3340,8 +3340,8 @@ namespace Legion {
     {
       if (executing_call != info)
       {
-        MessageDescriptor INVALID_MAPPER_CONTENT(1720, "undefined");
-        log_run.error(INVALID_MAPPER_CONTENT.id(),
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_CONTENT,
+                            "UNDEFINED",
                       "Invalid mapper context passed to mapper_rt "
                       "call by mapper %s. Mapper contexts are only valid "
                       "for the mapper call to which they are passed. They "
@@ -3520,8 +3520,8 @@ namespace Legion {
         AutoLock m_lock(mapper_lock); 
         if (current_holders.find(info) != current_holders.end())
         {
-          MessageDescriptor INVALID_DUPLICATE_MAPPER(1721, "undefined");
-          log_run.error(INVALID_DUPLICATE_MAPPER.id(),
+          REPORT_LEGION_ERROR(ERROR_INVALID_DUPLICATE_MAPPER,
+                              "UNDEFINED",
                         "Invalid duplicate mapper lock request in mapper call "
                         "%s for mapper %s", get_mapper_call_name(info->kind),
                         mapper->get_mapper_name());
@@ -3584,8 +3584,8 @@ namespace Legion {
           current_holders.find(info);
         if (finder == current_holders.end())
         {
-          MessageDescriptor INVALID_UNLOCK_MAPPER(1722, "undefined");
-          log_run.error(INVALID_UNLOCK_MAPPER.id(),
+          REPORT_LEGION_ERROR(ERROR_INVALID_UNLOCK_MAPPER,
+                              "UNDEFINED",
                         "Invalid unlock mapper call with no prior lock call "
                         "in mapper call %s for mapper %s",
                         get_mapper_call_name(info->kind),

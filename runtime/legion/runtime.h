@@ -2915,8 +2915,12 @@ namespace Legion {
                       CodeDescriptor *realm_desc, bool has_ret, 
                       const char *task_name,VariantID vid,bool check_id = true);
     public:
+      static void report_fatal_message(const MessageDescriptor &descriptor,
+                                       const char *file_name,
+                                       const int line_number,
+                                       const char *message);
       static void report_error_message(const MessageDescriptor &descriptor,
-                                       const char *file_name, 
+                                       const char *file_name,
                                        const int line_number,
                                        const char *message);
       static void report_warning_message(const MessageDescriptor &descriptor,
