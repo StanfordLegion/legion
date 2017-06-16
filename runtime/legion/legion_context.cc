@@ -8300,7 +8300,7 @@ namespace Legion {
     Predicate LeafContext::create_predicate(const Future &f)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_ILLEGAL_PREDICATE_CREATION,
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_PREDICATE_CREATION3,
                           "UNDEFINED",
         "Illegal predicate creation performed in leaf task %s "
                      "(ID %lld)", get_task_name(), get_unique_id());
@@ -8330,7 +8330,7 @@ namespace Legion {
     Predicate LeafContext::create_predicate(const PredicateLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_ILLEGAL_PREDICATE_CREATION2,
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_PREDICATE_CREATION4,
                           "UNDEFINED",
         "Illegal predicate creation performed in leaf task %s "
                      "(ID %lld)", get_task_name(), get_unique_id());
