@@ -118,6 +118,7 @@ namespace Legion {
       snprintf(variant_name,128,"Color Points <%d>", CDIM);
       TaskVariantRegistrar registrar(TASK_ID, variant_name);
       registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+      registrar.set_leaf();
       Legion::Runtime::preregister_task_variant<
         ColorPoints<CDIM>::cpu_variant>(registrar, variant_name);
     }
@@ -287,6 +288,7 @@ namespace Legion {
       snprintf(variant_name,128,"Color Rects <%d,%d>", CDIM, RDIM);
       TaskVariantRegistrar registrar(TASK_ID, variant_name);
       registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+      registrar.set_leaf();
       Legion::Runtime::preregister_task_variant<
         ColorRects<CDIM,RDIM>::cpu_variant>(registrar, variant_name);
     }
@@ -3132,6 +3134,7 @@ namespace Legion {
       destroy_index_space(ctx, temp_is);
       return result;
 #else // DISABLE_PARTITION_SHIM
+      log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
       assert(false);
       return IndexPartition::NO_PART;
 #endif
@@ -3208,6 +3211,7 @@ namespace Legion {
       destroy_index_space(ctx, temp_is);
       return result;
 #else // DISABLE_PARTITION_SHIM
+      log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
       assert(false);
       return IndexPartition::NO_PART;
 #endif
@@ -3394,6 +3398,7 @@ namespace Legion {
       destroy_index_space(ctx, temp_is);
       return result;
 #else // DISABLE_PARTITION_SHIM
+      log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
       assert(false);
       return IndexPartition::NO_PART;
 #endif
@@ -3493,6 +3498,7 @@ namespace Legion {
       destroy_index_space(ctx, temp_is);
       return result;
 #else // DISABLE_PARTITION_SHIM
+      log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
       assert(false);
       return IndexPartition::NO_PART;
 #endif
@@ -3682,6 +3688,7 @@ namespace Legion {
       destroy_index_space(ctx, temp_is);
       return result;
 #else // DISABLE_PARTITION_SHIM
+      log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
       assert(false);
       return IndexPartition::NO_PART;
 #endif
@@ -3783,6 +3790,7 @@ namespace Legion {
       destroy_index_space(ctx, temp_is);
       return result;
 #else // DISABLE_PARTITION_SHIM
+      log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
       assert(false);
       return IndexPartition::NO_PART; 
 #endif
