@@ -836,6 +836,7 @@ namespace Legion {
       virtual void instantiate_children(IndexPartNode *partition) = 0;
       virtual Domain get_color_space_domain(void) const = 0;
       virtual DomainPoint get_domain_point_color(void) const = 0;
+      virtual DomainPoint delinearize_color_to_point(LegionColor c) = 0;
     public:
       virtual bool intersects_with(IndexSpaceNode *rhs,bool compute = true) = 0;
       virtual bool intersects_with(IndexPartNode *rhs, bool compute = true) = 0;
@@ -1020,6 +1021,7 @@ namespace Legion {
       virtual void instantiate_children(IndexPartNode *partition);
       virtual Domain get_color_space_domain(void) const;
       virtual DomainPoint get_domain_point_color(void) const;
+      virtual DomainPoint delinearize_color_to_point(LegionColor c);
     public:
       virtual bool intersects_with(IndexSpaceNode *rhs, bool compute = true);
       virtual bool intersects_with(IndexPartNode *rhs, bool compute = true);

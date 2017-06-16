@@ -773,9 +773,17 @@ namespace Legion {
     {
       if (parent == NULL)
         return DomainPoint(color);
-      Realm::ZPoint<DIM,coord_t> color_point;
-      parent->color_space->delinearize_color(color, &color_point,
-          NT_TemplateHelper::encode_tag<DIM,coord_t>());
+      return parent->color_space->delinearize_color_to_point(color); 
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    DomainPoint IndexSpaceNodeT<DIM,T>::delinearize_color_to_point(
+                                                                  LegionColor c)
+    //--------------------------------------------------------------------------
+    {
+      Realm::ZPoint<DIM,T> color_point;
+      delinearize_color(c, &color_point, handle.get_type_tag());
       return DomainPoint(color_point);
     }
 
