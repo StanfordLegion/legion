@@ -19,7 +19,7 @@ import argparse
 import sqlite3
 import sys
 
-DECLARATION = "MessageDescriptor"
+DECLARATIONS = [ 'REPORT_LEGION_WARNING', 'REPORT_LEGION_ERROR', 'REPORT_LEGION_FATAL' ]
 splitters = ':;,().#'
 whitespace = ' \n\t\r'
 
@@ -81,7 +81,8 @@ def deleteTokens(tokens, index):
     return tokens
 
 
-def parseInput(sourceFile, tokens, lineNumber):
+
+def parseInput(sourceFile, tokens, lineNumber, enums):
     
     declaration = None
     name = None
@@ -93,43 +94,29 @@ def parseInput(sourceFile, tokens, lineNumber):
     i = 0;
     while i < 100:
         
-        lineNumber = ensureLookahead(sourceFile, tokens, i + 20, lineNumber)
+        lineNumber = ensureLookahead(sourceFile, tokens, i + 5, lineNumber)
         tuple = tokens[i]
         (token, tokenLineNumber) = tuple
         
-        if(type == None and name != None and token == name):
-            type = tokens[i - 2][0]
-            assert tokens[i + 1][0] == '.'
-            assert tokens[i + 2][0] == 'id'
-            messageTokenIndex = i + 6 # NAME.id(), "format string..."
-            if not tokens[messageTokenIndex][0][0] == '"':
-                messageTokenIndex = i + 7 # NAME.id()) << "format string..."
-            message, index, lineNumber = quotedString(sourceFile, tokens, messageTokenIndex, lineNumber);
-            tokens = deleteTokens(tokens, index)
-            i = 0
-            break
-        
-        if(declaration != None and name == None):
-            name = token
+        if token in DECLARATIONS:
+            declaration = token
+            declarationLineNumber = tokenLineNumber
             assert tokens[i + 1][0] == '('
-            code = tokens[i + 2][0]
+            name = tokens[i + 2][0]
             assert tokens[i + 3][0] == ','
             whatToDo, index, lineNumber = quotedString(sourceFile, tokens, i + 4, lineNumber)
             tokens = deleteTokens(tokens, index)
-            i = 0
-            continue
-        
-        if(DECLARATION in token):
-            declaration = token
-            declarationLineNumber = tokenLineNumber
-        
-        i = i + 1
-
-    if declaration == None or name == None or code == None or whatToDo == None or type == None or message == None or lineNumber == None:
-        return None, None, None, None, None, None, lineNumber, None
-    else:
-        deleteTokens(tokens, i)
-    return declaration, name, code, whatToDo, type, message, lineNumber, declarationLineNumber
+            message, index, lineNumber = quotedString(sourceFile, tokens, 1, lineNumber)
+            tokens = deleteTokens(tokens, index)
+            if name in enums:
+                code = enums[name]
+            else:
+                print 'undefined declaration', name
+                sys.exit(1)
+            type = declaration.replace('REPORT_LEGION_', '').lower()
+            return declaration, name, code, whatToDo, type, message, lineNumber, declarationLineNumber
+        else:
+            i = i + 1
 
 
 
@@ -156,22 +143,23 @@ def addToDatabase(type, name, code, message, whatToDo, connection, sourceFile, l
     connection.execute(createTableCommand)
     filename = sourceFile.name
     insertCommand = "insert into " + type + "(code, name, message, whatToDo, filename, lineNumber) values (" + code + ", \"" + name + "\", \"" + sanitizedMessage(message) + "\", \"" + whatToDo + "\", \"" + filename + "\", " + str(lineNumber) + ");"
+    print 'insert', name, 'code', code
     connection.execute(insertCommand)
 
 
 
-def parseSourceFile(fileName, preprocessedFileName, connection):
+def parseSourceFile(fileName, connection, enums):
     print fileName
     
-    with open(preprocessedFileName, 'rt') as sourceFile:
+    with open(fileName, 'rt') as sourceFile:
         lineNumber = 0
         tokens = []
         while len(tokens) > 0 or lineNumber == 0:
             lineNumber = ensureLookahead(sourceFile, tokens, 100, lineNumber)
             tuple = tokens[0]
             (token, tokenLineNumber) = tuple
-            if(DECLARATION in token):
-                declaration, name, code, whatToDo, type, message, lineNumber, declarationLineNumber = parseInput(sourceFile, tokens, lineNumber)
+            if(token in DECLARATIONS):
+                declaration, name, code, whatToDo, type, message, lineNumber, declarationLineNumber = parseInput(sourceFile, tokens, lineNumber, enums)
                 index = 0
                 if declaration != None:
                     addToDatabase(type, name, code, message, whatToDo, connection, sourceFile, declarationLineNumber)
@@ -180,11 +168,11 @@ def parseSourceFile(fileName, preprocessedFileName, connection):
                 del tokens[0]
 
 
-def parseSourceFiles(connection):
+def parseSourceFiles(connection, enums):
     fileName = sys.stdin.readline().strip()
     while(len(fileName) > 0):
         fileName = fileName.replace("//", "/")
-        parseSourceFile(fileName, connection)
+        parseSourceFile(fileName, connection, enums)
         connection.commit()
         fileName = sys.stdin.readline().strip()
 
@@ -329,6 +317,23 @@ def writeHtmlOutput(connection, hrefPrefix, strip, glossaryFile, glossaryURL, ou
     writeHtmlSortedByField("message", connection, hrefPrefix, strip, glossary, glossaryURL, outputDir)
 
 
+def loadEnums(file):
+    enums = {}
+    strings = file.readlines()
+    sawTypedef = False
+    sawEnd = False
+    for string in strings:
+        tokens = string.strip().split(' ')
+        if len(tokens) >= 3:
+            if tokens[0] == 'typedef' and tokens[1] == 'enum' and tokens[2] == 'legion_error_t':
+                sawTypedef = True
+            if sawTypedef and tokens[0] == '}' and tokens[2] == 'legion_error_t;':
+                sawEnd = True
+        if sawTypedef and not sawEnd and len(tokens) >= 3 and tokens[1] == '=' :
+            name = tokens[0]
+            value = tokens[2].replace(',', '')
+            enums[name] = value
+    return enums
 
 
 class MyParser(argparse.ArgumentParser):
@@ -342,13 +347,23 @@ parser.add_argument('--strip', dest='strip', action='store', type=int, help='num
 parser.add_argument('--glossaryFile', dest='glossaryFile', action='store', help='path to glossary file, requires --glossaryURL')
 parser.add_argument('--glossaryURL', dest='glossaryURL', action='store', help='URL of online glossary, requires --glossaryFile')
 parser.add_argument('--output_dir', dest='outputDir', action='store', help='dir to write the output files to', default='.')
+parser.add_argument('--legion_config_h', dest='legionConfigH', action='store', help='path to legion_config.h, REQUIRED', default=None)
+
 args = parser.parse_args()
 
 print 'this program parses a list of files.  it reads the filenames from stdin and writes html files as output.'
 print 'example: find . -name *.cc | python collate_messages.py --glossaryFile=glossaryFile.txt --glossaryURL="http://legion.stanford.edu"'
 
-connection = sqlite3.connect(":memory:")
-parseSourceFiles(connection)
-if args.prefix != None:
-    args.prefix = args.prefix.replace("//", "/")
-writeHtmlOutput(connection, args.prefix, args.strip, args.glossaryFile, args.glossaryURL, args.outputDir)
+if(args.legionConfigH != None):
+    legionConfigFile = open(args.legionConfigH, 'r')
+    if legionConfigFile != None:
+        enums = loadEnums(legionConfigFile)
+        connection = sqlite3.connect(":memory:")
+        parseSourceFiles(connection, enums)
+        if args.prefix != None:
+            args.prefix = args.prefix.replace("//", "/")
+        writeHtmlOutput(connection, args.prefix, args.strip, args.glossaryFile, args.glossaryURL, args.outputDir)
+    else:
+        print 'invalid path to legion_config.h', args.legionConfigH
+else:
+    print 'missing path to legion_config.h, use --legion_config_h'

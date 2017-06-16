@@ -8894,7 +8894,7 @@ namespace Legion {
       {
         if (can_fail)
           return false;
-        REPORT_LEGION_ERROR(ERROR_INVALID_SEMANTIC_TAG6,
+        REPORT_LEGION_ERROR(ERROR_INVALID_SEMANTIC_TAG7,
                             "UNDEFINED",
         "invalid semantic tag %ld for "
                             "region tree node", tag);   

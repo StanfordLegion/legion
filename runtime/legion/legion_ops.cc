@@ -4440,7 +4440,7 @@ namespace Legion {
           parent_ctx->find_parent_region_req(dst_requirements[idx]);
         if (parent_index < 0)
         {
-          REPORT_LEGION_ERROR(ERROR_PARENT_TASK_COPY4,
+          REPORT_LEGION_ERROR(ERROR_PARENT_TASK_COPY6,
                               "undefined",
                            "Parent task %s (ID %lld) of copy operation "
                                    "(ID %lld) does not have a region "
@@ -7386,7 +7386,7 @@ namespace Legion {
           }
         }
         // If we did successfully acquire them, still issue the warning
-        REPORT_LEGION_WARNING(ERROR_MAPPER_FAILED_ACQUIRE,
+        REPORT_LEGION_WARNING(ERROR_MAPPER_FAILED_ACQUIRE2,
                               "UNDEFINED",
                         "mapper %s failed to acquire instance "
                         "for close operation in task %s (ID %lld) in "
