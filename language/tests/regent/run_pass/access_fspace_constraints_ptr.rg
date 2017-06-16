@@ -28,7 +28,7 @@ end
 
 task h() : int
   var t = region(ispace(ptr, 5), int)
-  var y = new(ptr(int, t))
+  var y = dynamic_cast(ptr(int, t), 0)
   @y = 7
   var u = partition(equal, t, ispace(int1d, 1))
   var v = u[0]

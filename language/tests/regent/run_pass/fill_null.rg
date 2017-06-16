@@ -20,7 +20,7 @@ fspace t(r : region(t(r))) {
 
 task main()
   var r = region(ispace(ptr, 5), t(r))
-  var x = new(ptr(t(r), r))
+  var x = dynamic_cast(ptr(t(r), r), 0)
 
   fill(r.x, null(ptr(t(r), r)))
 

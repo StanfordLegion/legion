@@ -24,10 +24,10 @@ struct t {
 
 task main()
   var r = region(ispace(ptr, 5), t)
-  var x0 = new(ptr(t, r))
-  var x1 = new(ptr(t, r))
-  var x2 = new(ptr(t, r))
-  var x3 = new(ptr(t, r))
+  var x0 = dynamic_cast(ptr(t, r), 0)
+  var x1 = dynamic_cast(ptr(t, r), 1)
+  var x2 = dynamic_cast(ptr(t, r), 2)
+  var x3 = dynamic_cast(ptr(t, r), 3)
 
   var i = 0
   for x in r do

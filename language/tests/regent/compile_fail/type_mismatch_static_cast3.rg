@@ -22,7 +22,7 @@ import "regent"
 task f()
   var r = region(ispace(ptr, 5), int)
   var s = region(ispace(ptr, 5), float)
-  var x = new(ptr(float, s))
+  var x = dynamic_cast(ptr(float, s), 0)
   var y = static_cast(ptr(int, r), x)
 end
 f:compile()

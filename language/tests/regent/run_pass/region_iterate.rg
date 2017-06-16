@@ -15,13 +15,13 @@
 import "regent"
 
 task f() : int
-  var r = region(ispace(ptr, 10), int)
+  var r = region(ispace(ptr, 5), int)
 
-  var p0 = new(ptr(int, r))
-  var p1 = new(ptr(int, r))
-  var p2 = new(ptr(int, r))
-  var p3 = new(ptr(int, r))
-  var p4 = new(ptr(int, r))
+  var p0 = dynamic_cast(ptr(int, r), 0)
+  var p1 = dynamic_cast(ptr(int, r), 1)
+  var p2 = dynamic_cast(ptr(int, r), 2)
+  var p3 = dynamic_cast(ptr(int, r), 3)
+  var p4 = dynamic_cast(ptr(int, r), 4)
 
   @p0 = 5
   @p1 = 40

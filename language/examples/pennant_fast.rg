@@ -1582,10 +1582,6 @@ task test()
   var rp_all = region(ispace(ptr, conf.np), point)
   var rs_all = region(ispace(ptr, conf.ns), side(wild, wild, wild, wild))
 
-  new(ptr(zone, rz_all), conf.nz)
-  new(ptr(point, rp_all), conf.np)
-  new(ptr(side(wild, wild, wild, wild), rs_all), conf.ns)
-
   c.printf("Reading input (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
 
   var colorings : mesh_colorings
@@ -1646,19 +1642,15 @@ task test()
 
   -- Create regions and partitions for spans.
   var rz_spans = region(ispace(ptr, conf.npieces * conf.nspans_zones), span)
-  new(ptr(span, rz_spans), conf.npieces * conf.nspans_zones)
   var rz_spans_p = partition(equal, rz_spans, ispace(int1d, conf.npieces))
 
   var rp_spans_private = region(ispace(ptr, conf.npieces * conf.nspans_points), span)
-  new(ptr(span, rp_spans_private), conf.npieces * conf.nspans_points)
   var rp_spans_private_p = partition(equal, rp_spans_private, ispace(int1d, conf.npieces))
 
   var rp_spans_shared = region(ispace(ptr, conf.npieces * conf.nspans_points), span)
-  new(ptr(span, rp_spans_shared), conf.npieces * conf.nspans_points)
   var rp_spans_shared_p = partition(equal, rp_spans_shared, ispace(int1d, conf.npieces))
 
   var rs_spans = region(ispace(ptr, conf.npieces * conf.nspans_zones), span)
-  new(ptr(span, rs_spans), conf.npieces * conf.nspans_zones)
   var rs_spans_p = partition(equal, rs_spans, ispace(int1d, conf.npieces))
 
   fill(rz_spans.{start, stop}, 0)

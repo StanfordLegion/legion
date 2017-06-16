@@ -27,11 +27,11 @@ where reads writes(r) do
 end
 
 task main()
-  var r = region(ispace(ptr, 5), int)
-  var x0 = new(ptr(int, r))
-  var x1 = new(ptr(int, r))
-  var x2 = new(ptr(int, r))
-  var x3 = new(ptr(int, r))
+  var r = region(ispace(ptr, 4), int)
+  var x0 = dynamic_cast(ptr(int, r), 0)
+  var x1 = dynamic_cast(ptr(int, r), 1)
+  var x2 = dynamic_cast(ptr(int, r), 2)
+  var x3 = dynamic_cast(ptr(int, r), 3)
   var p = partition(equal, r, ispace(int1d, 3, 0))
 
   @x0 = 1

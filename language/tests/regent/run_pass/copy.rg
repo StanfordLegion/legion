@@ -15,10 +15,10 @@
 import "regent"
 
 task k() : int
-  var r = region(ispace(ptr, 5), int)
-  var x = new(ptr(int, r))
-  var s = region(ispace(ptr, 5), int)
-  var y = new(ptr(int, s))
+  var r = region(ispace(ptr, 1), int)
+  var x = dynamic_cast(ptr(int, r), 0)
+  var s = region(ispace(ptr, 1), int)
+  var y = dynamic_cast(ptr(int, s), 0)
 
   @x = 123
   @y = 456

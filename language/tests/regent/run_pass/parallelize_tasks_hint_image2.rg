@@ -83,7 +83,6 @@ task test(size : int, p : int)
   c.srand48(12345)
   var r1 = region(ispace(int2d, {size, size}), fs1)
   var r2 = region(ispace(ptr, size * size), fs2(wild))
-  new(ptr(fs2(wild), r2), size * size)
 
   var p_r1 = partition(equal, r1, ispace(int2d, {p, p}))
   init(r1, r2, size)

@@ -72,8 +72,6 @@ end
 task toplevel()
   var r1 = region(ispace(ptr, 10), int)
   var r2 = region(ispace(ptr, 10), int)
-  new(ptr(int, r1), 10)
-  new(ptr(int, r2), 10)
   for e in r2 do @e = 10 end -- this will create an instance
   var ref = ptrs { ptr1 = 0, ptr2 = get_ptr(r2) }
   ref = foo(r1, r2, ref)

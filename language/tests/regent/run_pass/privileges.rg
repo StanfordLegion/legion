@@ -53,8 +53,8 @@ do
 end
 
 task k() : int
-  var r = region(ispace(ptr, 5), t)
-  var x = new(ptr(t, r))
+  var r = region(ispace(ptr, 1), t)
+  var x = dynamic_cast(ptr(t, r), 0)
 
   x.a = 1000
   x.b = 10000

@@ -36,9 +36,9 @@ where reads(s), writes(s) do
 end
 
 task g() : int
-  var r = region(ispace(ptr, 5), int)
+  var r = region(ispace(ptr, 1), int)
   var rc = c.legion_coloring_create()
-  var x = new(ptr(int, r))
+  var x = dynamic_cast(ptr(int, r), 0)
   c.legion_coloring_add_point(rc, 0, __raw(x))
   c.legion_coloring_add_point(rc, 1, __raw(x))
   var p = partition(aliased, r, rc)

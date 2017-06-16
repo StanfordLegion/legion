@@ -45,11 +45,11 @@ end
 task main()
   var cs = ispace(int1d, 3)
   var r = region(ispace(ptr, 5), st)
-  var e0 = new(ptr(st, r))
-  var e1 = new(ptr(st, r))
-  var e2 = new(ptr(st, r))
-  var e3 = new(ptr(st, r))
-  var e4 = new(ptr(st, r))
+  var e0 = dynamic_cast(ptr(st, r), 0)
+  var e1 = dynamic_cast(ptr(st, r), 1)
+  var e2 = dynamic_cast(ptr(st, r), 2)
+  var e3 = dynamic_cast(ptr(st, r), 3)
+  var e4 = dynamic_cast(ptr(st, r), 4)
 
   -- These have to be separate partitions to trigger the bug.
   var m = partition(equal, r, cs)

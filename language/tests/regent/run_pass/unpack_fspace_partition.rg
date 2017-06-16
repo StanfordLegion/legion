@@ -28,7 +28,6 @@ end
 task m1()
   var u = ispace(ptr, 5)
   var v = region(u, int)
-  new(ptr(int, v), 5)
   var i = ispace(int1d, 3)
   var w = partition(equal, v, i)
   var x = partition(equal, v, i)

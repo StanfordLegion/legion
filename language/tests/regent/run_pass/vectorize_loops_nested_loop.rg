@@ -51,10 +51,9 @@ end
 task toplevel()
   var n = 10
   var r = region(ispace(ptr, n), fs1)
-  for i = 0, n do
-    var p = new(ptr(fs1, r))
-    p.v1 = 1.0 + i
-    p.v2 = 1.0 + i
+  for p in r do
+    p.v1 = 1.0 + [int](p)
+    p.v2 = 1.0 + [int](p)
   end
   f(r)
   for e in r do

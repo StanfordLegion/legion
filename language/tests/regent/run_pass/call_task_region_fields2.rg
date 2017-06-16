@@ -34,7 +34,6 @@ end
 
 task toplevel()
   var r = region(ispace(ptr, 10), fs)
-  new(ptr(fs, r), 10)
   for e in r do
     e.x = 10
     e.y = 0

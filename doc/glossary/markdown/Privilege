@@ -1,0 +1,7 @@
+# Privilege
+
+## READ_WRITE
+## READ_ONLY
+## REDUCE
+## WRITE_DISCARD
+

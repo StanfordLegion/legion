@@ -23,7 +23,7 @@ task main()
   for i0 in is0 do
     s0 += 1
   end
-  regentlib.assert(s0 == 0, "test failed")
+  regentlib.assert(s0 == 5, "test failed")
 
   var s1 = 0
   for i1 in is1 do

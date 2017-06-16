@@ -28,7 +28,7 @@ task test_unstructured_simple()
   var r2 = region(ispace(ptr, 5), int)
   var r3 = region(ispace(ptr, 5), double)
 
-  var p_r1, p_r2, p_r3 = new(ptr(int, r1)), new(ptr(int, r2)), new(ptr(double, r3))
+  var p_r1, p_r2, p_r3 = dynamic_cast(ptr(int, r1), 0), dynamic_cast(ptr(int, r2), 0), dynamic_cast(ptr(double, r3), 0)
   @p_r1, @p_r2, @p_r3 = 1, 2, 3.0
   @p_r1, @p_r2 = @p_r2, [int](@p_r1)
   regentlib.assert(@p_r1 == 2, "test failed")
@@ -41,7 +41,7 @@ task test_unstructured_simple()
   regentlib.assert(@p_r2 == 9, "test failed")
 
   @p_r1, @p_r2, @p_r3 = 1, 2, 3.0
-  var p2_r1 = new(ptr(int, r1), 4)
+  var p2_r1 = dynamic_cast(ptr(int, r1), 1)
   var part1 = partition(equal, r1, ispace(int1d, 2))
   var r10 = part1[0]
 

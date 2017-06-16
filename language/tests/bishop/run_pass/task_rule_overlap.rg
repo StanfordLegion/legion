@@ -66,7 +66,6 @@ end
 
 task toplevel()
   var r = region(ispace(ptr, 10), fs)
-  new(ptr(fs, r), 10)
   ta(r)
 end
 

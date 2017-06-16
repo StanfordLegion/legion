@@ -54,7 +54,6 @@ local function analyze_leaf_node(cx)
       return not std.is_task(node.fn.value)
 
     elseif node:is(ast.typed.expr.RawContext) or
-      node:is(ast.typed.expr.New) or
       node:is(ast.typed.expr.Ispace) or
       node:is(ast.typed.expr.Region) or
       node:is(ast.typed.expr.Partition) or
@@ -199,7 +198,6 @@ local function analyze_inner_node(cx)
       node:is(ast.typed.expr.RawRuntime) or
       node:is(ast.typed.expr.RawValue) or
       node:is(ast.typed.expr.Isnull) or
-      node:is(ast.typed.expr.New) or
       node:is(ast.typed.expr.Null) or
       node:is(ast.typed.expr.DynamicCast) or
       node:is(ast.typed.expr.StaticCast) or
@@ -290,19 +288,6 @@ local function analyze_inner(cx, node)
     node, true)
 end
 
-local function analyze_alloc_node(cx)
-  return function(node)
-    return node:is(ast.typed.expr.New)
-  end
-end
-
-local function analyze_alloc(cx, node)
-  return ast.mapreduce_node_postorder(
-    analyze_alloc_node(cx),
-    data.any,
-    node, false)
-end
-
 local optimize_config_options = {}
 
 function optimize_config_options.top_task(cx, node)
@@ -312,14 +297,12 @@ function optimize_config_options.top_task(cx, node)
   -- is disabled. This is to ensure that the analysis always works.
   local leaf = analyze_leaf(cx, node.body) and std.config["leaf"]
   local inner = analyze_inner(cx, node.body) and std.config["inner"] and not leaf
-  local alloc = analyze_alloc(cx, node.body)
 
   return node {
     config_options = ast.TaskConfigOptions {
       leaf = leaf,
       inner = inner,
       idempotent = false,
-      alloc = alloc,
     },
   }
 end

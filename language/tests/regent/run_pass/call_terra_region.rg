@@ -83,10 +83,10 @@ do
 end
 
 task main()
-  var r = region(ispace(ptr, 5), int64)
-  var s = region(ispace(ptr, 12), fs)
-  var x = new(ptr(int64, r))
-  var y = new(ptr(fs, s))
+  var r = region(ispace(ptr, 1), int64)
+  var s = region(ispace(ptr, 1), fs)
+  var x = dynamic_cast(ptr(int64, r), 0)
+  var y = dynamic_cast(ptr(fs, s), 0)
 
   @x = 1
   y.a = 20

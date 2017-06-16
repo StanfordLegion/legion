@@ -26,7 +26,7 @@ end
 task main()
   var is = ispace(ptr, 5)
   var r = region(is, int)
-  var x = new(ptr(int, r))
+  var x = dynamic_cast(ptr(int, r), 0)
 
   var colors = c.legion_coloring_create()
   c.legion_coloring_ensure_color(colors, 0)

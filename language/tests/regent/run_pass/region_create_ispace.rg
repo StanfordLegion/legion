@@ -51,7 +51,7 @@ task main()
   var is2 = ispace(int2d, { x = 2, y = 2 }, { x = 3, y = 4 })
   var r2 = region(is2, int)
 
-  regentlib.assert(f0(r0) == 0, "test failed")
+  regentlib.assert(f0(r0) == 5, "test failed")
 
   for i in is1 do
     r1[i] = i

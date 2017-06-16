@@ -26,9 +26,8 @@ task d(points : region(point)) where reads(points) do --[[ ... ]] end
 
 -- Execution begins at main. Read the code top-down (like a sequential program).
 task main()
-  -- Create a region (like an array) with room for 5 elements.
+  -- Create a region (like an array) with 5 elements.
   var points = region(ispace(ptr, 5), point)
-  new(ptr(point, points), 5) -- Allocate the elements.
 
   -- Partition the region into 3 subregions. Each subregion is a view onto a
   -- subset of the data of the parent.

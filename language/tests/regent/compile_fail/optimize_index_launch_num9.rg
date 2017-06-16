@@ -55,7 +55,7 @@ end
 task main()
   var n = 5
   var r = region(ispace(ptr, n), int)
-  var x0 = new(ptr(int, r))
+  var x0 = dynamic_cast(ptr(int, r), 0)
 
   var rc = c.legion_coloring_create()
   for i = 0, n do

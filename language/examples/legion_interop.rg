@@ -76,7 +76,6 @@ f:set_calling_convention(regentlib.convention.manual())
 
 task main()
   var r = region(ispace(ptr, 5), s)
-  new(ptr(s, r), 5)
   fill(r.{a, b}, 1.0)
 
   f(r, 2.0)

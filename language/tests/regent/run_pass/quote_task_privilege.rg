@@ -26,8 +26,7 @@ where [reads_r] do
 end
 
 task main()
-  var r = region(ispace(ptr, 5), int)
-  new(ptr(int, r), 3)
+  var r = region(ispace(ptr, 3), int)
   fill(r, 10)
   regentlib.assert(f(r) == 30, "test failed")
 end

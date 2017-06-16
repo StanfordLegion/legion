@@ -156,7 +156,6 @@ local function analyze_is_side_effect_free_node(cx)
     elseif node:is(ast.typed.expr.RawContext) or
       node:is(ast.typed.expr.RawPhysical) or
       node:is(ast.typed.expr.RawRuntime) or
-      node:is(ast.typed.expr.New) or
       node:is(ast.typed.expr.Ispace) or
       node:is(ast.typed.expr.Region) or
       node:is(ast.typed.expr.Partition) or
@@ -245,7 +244,6 @@ local function analyze_is_loop_invariant_node(cx)
     elseif node:is(ast.typed.expr.IndexAccess) then
       return not std.is_ref(node.expr_type)
     elseif node:is(ast.typed.expr.Call) or
-      node:is(ast.typed.expr.New) or
       node:is(ast.typed.expr.Ispace) or
       node:is(ast.typed.expr.Region) or
       node:is(ast.typed.expr.Partition) or
