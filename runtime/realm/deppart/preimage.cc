@@ -311,7 +311,7 @@ namespace Realm {
   {
     // try to filter out obviously empty targets
     if(parent.empty() || target.empty())
-      return ZIndexSpace<N,T>(/*empty*/);
+      return ZIndexSpace<N,T>::make_empty();
 
     // otherwise it'll be something smaller than the current parent
     ZIndexSpace<N,T> preimage;

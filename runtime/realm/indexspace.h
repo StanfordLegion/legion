@@ -1370,6 +1370,9 @@ namespace Realm {
     template <typename T2> __CUDA_HD__
     ZRect<N,T>& operator=(const ZRect<N, T2>& copy_from);
 
+    // constructs a guaranteed-empty rectangle
+    static ZRect<N,T> make_empty(void);
+
     __CUDA_HD__
     bool empty(void) const;
     __CUDA_HD__
@@ -1480,6 +1483,9 @@ namespace Realm {
     // construct an index space from a list of points or rects
     ZIndexSpace(const std::vector<ZPoint<N,T> >& points);
     ZIndexSpace(const std::vector<ZRect<N,T> >& rects);
+
+    // constructs a guaranteed-empty index space
+    static ZIndexSpace<N,T> make_empty(void);
 
     // reclaim any physical resources associated with this index space
     //  will clear the sparsity map of this index space if it exists
