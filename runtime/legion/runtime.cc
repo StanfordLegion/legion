@@ -19551,6 +19551,11 @@ namespace Legion {
             PhiView::handle_deferred_view_registration(args);
             break;
           }
+        case LG_TIGHTEN_INDEX_SPACE_TASK_ID:
+          {
+            IndexSpaceNode::handle_tighten_index_space(args);
+            break;
+          }
         case LG_RETRY_SHUTDOWN_TASK_ID:
           {
             const ShutdownManager::RetryShutdownArgs *shutdown_args = 

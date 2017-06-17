@@ -4672,14 +4672,14 @@ namespace Legion {
                                                               IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-      return get_index_space_color_point(ctx, handle); 
+      return runtime->get_index_space_color_point(ctx, handle); 
     }
 
     //--------------------------------------------------------------------------
     DomainPoint Runtime::get_index_space_color_point(IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-      return get_index_space_color_point(handle);
+      return runtime->get_index_space_color_point(handle);
     }
 
     //--------------------------------------------------------------------------
