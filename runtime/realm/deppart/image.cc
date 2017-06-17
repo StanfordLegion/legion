@@ -439,7 +439,7 @@ namespace Realm {
   {
     // try to filter out obviously empty sources
     if(parent.empty() || source.empty())
-      return ZIndexSpace<N,T>(/*empty*/);
+      return ZIndexSpace<N,T>::make_empty();
 
     // otherwise it'll be something smaller than the current parent
     ZIndexSpace<N,T> image;
@@ -475,7 +475,7 @@ namespace Realm {
   {
     // try to filter out obviously empty sources
     if(parent.empty() || source.empty())
-      return ZIndexSpace<N,T>(/*empty*/);
+      return ZIndexSpace<N,T>::make_empty();
 
     // otherwise it'll be something smaller than the current parent
     ZIndexSpace<N,T> image;

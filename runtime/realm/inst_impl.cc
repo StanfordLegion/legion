@@ -505,6 +505,13 @@ namespace Realm {
       std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = inst_layout->fields.find(field_offset);
       assert(it != inst_layout->fields.end());
 
+      // hand out a null pointer for empty instances (stride can be whatever
+      //  the caller wants)
+      if(inst_layout->piece_lists[it->second.list_idx].pieces.empty()) {
+	base = 0;
+	return true;
+      }
+
       // also only works for a single piece
       assert(inst_layout->piece_lists[it->second.list_idx].pieces.size() == 1);
       const InstanceLayoutPiece<1,coord_t> *piece = inst_layout->piece_lists[it->second.list_idx].pieces[0];

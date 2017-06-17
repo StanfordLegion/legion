@@ -350,6 +350,17 @@ namespace Realm {
   }
 
   template <int N, typename T> __CUDA_HD__
+  inline /*static*/ ZRect<N,T> ZRect<N,T>::make_empty(void)
+  {
+    ZRect<N,T> r;
+    T v = T(); // assume any user-defined default constructor initializes things
+    for(int i = 0; i < N; i++) r.hi[i] = v;
+    ++v;
+    for(int i = 0; i < N; i++) r.lo[i] = v;
+    return r;
+  }
+
+  template <int N, typename T> __CUDA_HD__
   inline bool ZRect<N,T>::empty(void) const
   {
     for(int i = 0; i < N; i++) if(lo[i] > hi[i]) return true;
@@ -653,6 +664,13 @@ namespace Realm {
 	sparsity = SparsityMap<N,T>::construct(rects, false /*!always_create*/);
       }
     }
+  }
+
+  // constructs a guaranteed-empty index space
+  template <int N, typename T>
+  inline /*static*/ ZIndexSpace<N,T> ZIndexSpace<N,T>::make_empty(void)
+  {
+    return ZIndexSpace<N,T>(ZRect<N,T>::make_empty());
   }
 
   // reclaim any physical resources associated with this index space

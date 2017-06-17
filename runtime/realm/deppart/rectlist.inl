@@ -212,7 +212,7 @@ namespace Realm {
       }
     }
 
-    std::cout << "slow path!\n";
+    //std::cout << "slow path!\n";
     ZRect<N,T> r = _r;
 
     // scan through rectangles, looking for containment (really good),
