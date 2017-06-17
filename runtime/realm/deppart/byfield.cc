@@ -282,7 +282,7 @@ namespace Realm {
   {
     // an empty parent leads to trivially empty subspaces
     if(parent.empty())
-      return ZIndexSpace<N,T>(/*empty*/);
+      return parent; // convenient "empty" value
 
     // otherwise it'll be something smaller than the current parent
     ZIndexSpace<N,T> subspace;
