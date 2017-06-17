@@ -457,14 +457,20 @@ local function physical_region_get_base_pointer(cx, index_type, field_type, fiel
     -- optimizations to be disabled on the base pointer. When inlined,
     -- this then extends to the caller's scope, causing a significant
     -- performance regression.
-    local terra get_base(accessor : c.legion_accessor_generic_t) : &field_type
+    local terra get_base(accessor : c.legion_accessor_generic_t,
+                         runtime : c.legion_runtime_t,
+                         phys_region : c.legion_physical_region_t) : &field_type
       var base : &opaque = nil
       var stride : c.size_t = [expected_stride]
       var ok = c.legion_accessor_generic_get_soa_parameters(
         [accessor], &base, &stride)
 
       std.assert(ok, "failed to get base pointer")
-      --std.assert(base ~= nil, "base pointer is nil")
+      if (base == nil) then
+        var region = c.legion_physical_region_get_logical_region(phys_region)
+        var domain = c.legion_index_space_get_domain(runtime, region.index_space)
+        std.assert(c.legion_domain_get_volume(domain) == 0, "base pointer is nil for non-empty region")
+      end
       std.assert(stride == [expected_stride],
                  "stride does not match expected value")
       return [&field_type](base)
@@ -472,7 +478,7 @@ local function physical_region_get_base_pointer(cx, index_type, field_type, fiel
 
     local actions = quote
       var accessor = [get_accessor]([accessor_args])
-      var [base_pointer] = [get_base](accessor)
+      var [base_pointer] = [get_base](accessor, [cx.runtime], [physical_region])
       [destroy_accessor](accessor)
     end
     return actions, base_pointer, terralib.newlist({expected_stride})
