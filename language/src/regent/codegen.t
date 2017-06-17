@@ -464,7 +464,7 @@ local function physical_region_get_base_pointer(cx, index_type, field_type, fiel
         [accessor], &base, &stride)
 
       std.assert(ok, "failed to get base pointer")
-      std.assert(base ~= nil, "base pointer is nil")
+      --std.assert(base ~= nil, "base pointer is nil")
       std.assert(stride == [expected_stride],
                  "stride does not match expected value")
       return [&field_type](base)
