@@ -113,7 +113,7 @@ namespace Realm {
 
     if(!difference) {
       if(logger)
-	logger->print("%s %7.6f", message, start_time);
+	logger->info("%s %7.6f", message, start_time);
       else
 	printf("%s %7.6f\n", message, start_time);
     }
@@ -125,7 +125,7 @@ namespace Realm {
       double interval = Clock::current_time() - start_time;
 
       if(logger)
-	logger->print("%s %7.6f", message, interval);
+	logger->info("%s %7.6f", message, interval);
       else
 	printf("%s %7.6f\n", message, interval);
     }
