@@ -442,6 +442,9 @@ namespace Realm {
   template <int N, typename T> __CUDA_HD__
   inline ZRect<N,T> ZRect<N,T>::union_bbox(const ZRect<N,T>& other) const
   {
+    if(empty()) return other;
+    if(other.empty()) return *this;
+    // the code below only works if both rectangles are non-empty
     ZRect<N,T> out;
     for(int i = 0; i < N; i++) {
       out.lo[i] = (lo[i] < other.lo[i]) ? lo[i] : other.lo[i]; // min
@@ -732,18 +735,22 @@ namespace Realm {
 	  empty.hi = bounds.lo;
 	  for(int i = 0; i < N; i++)
 	    empty.lo[i] = empty.hi[i] + 1;
+	  //std::cout << "tighten " << *this << " -> " << empty << "\n";
 	  return ZIndexSpace<N,T>(empty);
 	}
 
 	// 2) single dense rectangle
 	if((entries.size() == 1) &&
-	   !entries[0].sparsity.exists() && (entries[0].bitmap == 0))
+	   !entries[0].sparsity.exists() && (entries[0].bitmap == 0)) {
+	  //std::cout << "tighten " << *this << " -> " << entries[0].bounds << "\n";
 	  return ZIndexSpace<N,T>(entries[0].bounds);
+	}
 
 	// 3) anything else - keep the sparsity map but tighten the bounds
 	ZRect<N,T> bbox = entries[0].bounds;
 	for(size_t i = 1; i < entries.size(); i++)
 	  bbox = bbox.union_bbox(entries[i].bounds);
+	//std::cout << "tighten " << *this << " -> " << bbox << ", " << sparsity << "\n";
 	return ZIndexSpace<N,T>(bbox, sparsity);
       } else {
 	// make sure we're ok with (and have) approximate data
