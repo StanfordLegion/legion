@@ -6374,6 +6374,8 @@ namespace Legion {
        */
       template<LogicalRegion (*PROJ_PTR)(LogicalRegion, const DomainPoint&,
                                          Runtime*)>
+      LEGION_DEPRECATED("Projection functions should now be specified "
+                        "using projection functor objects")
       static ProjectionID register_region_function(ProjectionID handle);
 
       /**
@@ -6386,6 +6388,8 @@ namespace Legion {
        */
       template<LogicalRegion (*PROJ_PTR)(LogicalPartition, const DomainPoint&,
                                          Runtime*)>
+      LEGION_DEPRECATED("Projection functions should now be specified "
+                        "using projection functor objects")
       static ProjectionID register_partition_function(ProjectionID handle);
     public:
       /**
