@@ -176,9 +176,9 @@ namespace Realm {
       if(!entries.empty()) {
 	// TODO: set some sort of threshold for merging entries
 	typename std::vector<SparsityMapEntry<N,T> >::const_iterator it = entries.begin();
-	ZRect<N,T> bbox = it->bounds;
+	ZRect<N,T> bbox = is.bounds.intersection(it->bounds);
 	while(++it != entries.end())
-	  bbox = bbox.union_bbox(it->bounds);
+	  bbox = bbox.union_bbox(is.bounds.intersection(it->bounds));
 	piece_bounds.push_back(bbox);
       }
     }
