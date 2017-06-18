@@ -626,10 +626,9 @@ namespace Legion {
       {
         (*it)->destroy_node(source);
       }
-      if (!realm_index_space_set.has_triggered())
-        realm_index_space_set.lg_wait();
-      if (get_owner_space() == context->runtime->address_space)
-        realm_index_space.destroy();
+      Realm::ZIndexSpace<DIM,T> local_space;
+      get_realm_index_space(local_space, true/*tight*/);
+      local_space.destroy();
       for (typename std::map<IndexTreeNode*,IntersectInfo>::iterator it =
             intersections.begin(); it != intersections.end(); it++)
       {
@@ -2412,7 +2411,7 @@ namespace Legion {
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_copy_request(requests, op);
       ApEvent result;
-      if (intersect == NULL)
+      if ((intersect == NULL) || (intersect == this))
       {
         // Include our event precondition if necessary
         if (!index_space_ready.has_triggered())
@@ -2510,7 +2509,7 @@ namespace Legion {
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_fill_request(requests, op);
       ApEvent result;
-      if (intersect == NULL)
+      if ((intersect == NULL) || (intersect == this))
       {
         // Include our event precondition if necessary
         if (!index_space_ready.has_triggered())

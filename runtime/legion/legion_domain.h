@@ -542,19 +542,10 @@ namespace Legion {
       {
         assert(DIM > 0);
         assert(DIM == dim);
-	if(is_id == 0) {
-	  return LegionRuntime::Arrays::Rect<DIM>(rect_data); 
-	} else {
-	  // TODO: would be nice to do this only once rather than each call
-	  Realm::ZIndexSpace<DIM,coord_t> tight = (operator Realm::ZIndexSpace<DIM,coord_t>()).tighten();
-	  assert(tight.dense());
-	  LegionRuntime::Arrays::Rect<DIM> r;
-	  for(int i = 0; i < DIM; i++) {
-	    r.lo.x[i] = tight.bounds.lo[i];
-	    r.hi.x[i] = tight.bounds.hi[i];
-	  }
-	  return r;
-	}
+        // Runtime only returns tight domains so if it still has
+        // a sparsity map then it is a real sparsity map
+        assert(is_id == 0);
+        return LegionRuntime::Arrays::Rect<DIM>(rect_data);
       }
 
       class DomainPointIterator {
