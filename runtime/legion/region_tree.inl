@@ -178,6 +178,7 @@ namespace Legion {
         AutoLock n_lock(node_lock);
         old_space = realm_index_space;
         realm_index_space = tight_space;
+        __sync_synchronize(); // small memory fence to propagate writes
         tight_index_space = true;
       }
       Runtime::trigger_event(tight_index_space_set);

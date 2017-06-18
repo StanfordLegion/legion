@@ -449,36 +449,42 @@ namespace Legion {
             {
               Realm::ZIndexSpace<1,coord_t> is1 = *this;
               Realm::ZIndexSpace<1,coord_t> is2 = other;
-              Realm::ZIndexSpace<1,coord_t> result;
+              Realm::ZIndexSpace<1,coord_t> temp;
               LgEvent wait_on( 
                 Realm::ZIndexSpace<1,coord_t>::compute_intersection(is1,is2,
-                                                      result,dummy_requests));
+                                                      temp,dummy_requests));
               if (wait_on.exists())
                 wait_on.lg_wait();
+              Realm::ZIndexSpace<1,coord_t> result = temp.tighten();
+              temp.destroy();
               return Domain(result);
             }
           case 2:
             {
               Realm::ZIndexSpace<2,coord_t> is1 = *this;
               Realm::ZIndexSpace<2,coord_t> is2 = other;
-              Realm::ZIndexSpace<2,coord_t> result;
+              Realm::ZIndexSpace<2,coord_t> temp;
               LgEvent wait_on(
                 Realm::ZIndexSpace<2,coord_t>::compute_intersection(is1,is2,
-                                                      result,dummy_requests));
+                                                      temp,dummy_requests));
               if (wait_on.exists())
                 wait_on.lg_wait();
+              Realm::ZIndexSpace<2,coord_t> result = temp.tighten();
+              temp.destroy();
               return Domain(result);
             }
           case 3:
             {
               Realm::ZIndexSpace<3,coord_t> is1 = *this;
               Realm::ZIndexSpace<3,coord_t> is2 = other;
-              Realm::ZIndexSpace<3,coord_t> result;
+              Realm::ZIndexSpace<3,coord_t> temp;
               LgEvent wait_on(
                 Realm::ZIndexSpace<3,coord_t>::compute_intersection(is1,is2,
-                                                      result,dummy_requests));
+                                                      temp,dummy_requests));
               if (wait_on.exists())
                 wait_on.lg_wait();
+              Realm::ZIndexSpace<3,coord_t> result = temp.tighten();
+              temp.destroy();
               return Domain(result);
             }
           default:
@@ -497,38 +503,23 @@ namespace Legion {
         {
           case 1:
             {
-              Realm::ZIndexSpace<1,coord_t> is1 = *this;
-              Realm::ZIndexSpace<1,coord_t> is2(Realm::ZRect<1,coord_t>(p, p));
-              Realm::ZIndexSpace<1,coord_t> result;
-              LgEvent wait_on( 
-                Realm::ZIndexSpace<1,coord_t>::compute_union(is1,is2,
-                                              result,dummy_requests));
-              if (wait_on.exists())
-                wait_on.lg_wait();
+              Realm::ZRect<1,coord_t> is1 = *this;
+              Realm::ZRect<1,coord_t> is2(p, p);
+              Realm::ZRect<1,coord_t> result = is1.union_bbox(is2);
               return Domain(result);
             }
           case 2:
             {
-              Realm::ZIndexSpace<2,coord_t> is1 = *this;
-              Realm::ZIndexSpace<2,coord_t> is2(Realm::ZRect<2,coord_t>(p, p));
-              Realm::ZIndexSpace<2,coord_t> result;
-              LgEvent wait_on(
-                Realm::ZIndexSpace<2,coord_t>::compute_union(is1,is2,
-                                              result,dummy_requests));
-              if (wait_on.exists())
-                wait_on.lg_wait();
+              Realm::ZRect<2,coord_t> is1 = *this;
+              Realm::ZRect<2,coord_t> is2(p, p);
+              Realm::ZRect<2,coord_t> result = is1.union_bbox(is2);
               return Domain(result);
             }
           case 3:
             {
-              Realm::ZIndexSpace<3,coord_t> is1 = *this;
-              Realm::ZIndexSpace<3,coord_t> is2(Realm::ZRect<3,coord_t>(p, p));
-              Realm::ZIndexSpace<3,coord_t> result;
-              LgEvent wait_on(
-                Realm::ZIndexSpace<3,coord_t>::compute_union(is1,is2,
-                                              result,dummy_requests));
-              if (wait_on.exists())
-                wait_on.lg_wait();
+              Realm::ZRect<3,coord_t> is1 = *this;
+              Realm::ZRect<3,coord_t> is2(p, p);
+              Realm::ZRect<3,coord_t> result = is1.union_bbox(is2);
               return Domain(result);
             }
           default:
