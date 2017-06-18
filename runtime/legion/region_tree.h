@@ -1563,11 +1563,12 @@ namespace Legion {
       virtual bool dominates(IndexPartNode *other);
       virtual void destroy_node(AddressSpaceID source);
     public:
-      ApEvent get_union_index_space(Realm::ZIndexSpace<DIM,T> &space);
+      ApEvent get_union_index_space(Realm::ZIndexSpace<DIM,T> &space,
+                                    bool need_tight_result);
     protected:
       Realm::ZIndexSpace<DIM,T> partition_union_space;
       ApEvent partition_union_ready;
-      bool has_union_space;
+      bool has_union_space, union_space_tight;
     protected:
       std::map<IndexTreeNode*,IntersectInfo> intersections;
     };
