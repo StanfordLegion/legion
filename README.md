@@ -251,17 +251,23 @@ Legion contains a task-level profiler. No special compile-time flags
 are required. However, it is recommended to build with `DEBUG=0 make`
 to avoid any undesired performance issues.
 
-Run the application with `-hl:prof <N> -logfile prof_%.log` where `N`
-is the number of nodes to be profiled. (`N` can be less than the total
-node count---this profiles a subset of the nodes.) This will produce a
-log file per node. The profiler itself runs offline and produces an
-HTML file which can be loaded in a web browser.
+To profile an application, run with `-hl:prof <N>` where `N` is the
+number of nodes to be profiled. (`N` can be less than the total number
+of nodes---this profiles a subset of the nodes.) Use the 
+`-hl:prof_logfile <logfile>` flag to save the output from each node to
+a separate file. For example, data from node 0 will be saved in
+`<logfile>0.gz`, data from node 1 in `<logfile>1.gz`, etc. Finally, pass
+the resulting log files to `legion_prof.py`.
 
 ```bash
 DEBUG=0 make
-./app -hl:prof 1 -logfile prof_%.log
-$LG_RT_DIR/../tools/legion_prof.py prof_*.log
+./app -hl:prof kN> -hl:prof_logfile prof_log
+$LG_RT_DIR/../tools/legion_prof.py prof_log*
 ```
+
+This will generate a subdirectory called `legion_prof` under the
+current directory, including a file named `index.html`. Open this file
+in a browser.
 
 ## Other Features
 
