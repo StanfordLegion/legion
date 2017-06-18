@@ -745,7 +745,6 @@ namespace Legion {
       virtual ~IndexSpaceNode(void);
     public:
       IndexSpaceNode& operator=(const IndexSpaceNode &rhs);
-      inline RtEvent get_set_event(void) const { return realm_index_space_set; }
     public:
       virtual bool is_index_space_node(void) const;
 #ifdef DEBUG_LEGION
@@ -1409,7 +1408,6 @@ namespace Legion {
       virtual ~IndexPartNode(void);
     public:
       IndexPartNode& operator=(const IndexPartNode &rhs);
-      RtEvent get_set_event(void) const; 
     public:
       virtual bool is_index_space_node(void) const;
 #ifdef DEBUG_LEGION

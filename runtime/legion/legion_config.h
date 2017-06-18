@@ -107,11 +107,6 @@
 #ifndef DEFAULT_MIN_TASKS_TO_SCHEDULE
 #define DEFAULT_MIN_TASKS_TO_SCHEDULE   32
 #endif
-// Scheduling granularity for how many operations to
-// handle at a time at each stage of the pipeline
-#ifndef DEFAULT_SUPERSCALAR_WIDTH
-#define DEFAULT_SUPERSCALAR_WIDTH       4
-#endif
 // The maximum size of active messages sent by the runtime in bytes
 // Note this value was picked based on making a tradeoff between
 // latency and bandwidth numbers on both Cray and Infiniband

@@ -6178,9 +6178,6 @@ namespace Legion {
        * -lg:sched <int> The run-ahead factor for the runtime.  How many
        *              outstanding tasks ready to run should be on each
        *              processor before backing off the mapping procedure.
-       * -lg:width <int> Scheduling granularity when handling dependence
-       *              analysis and issuing operations.  Effectively the
-       *              Legion runtime superscalar width.
        * -lg:inorder  Execute operations in strict propgram order. This
        *              flag will actually run the entire operation through
        *              the pipeline and wait for it to complete before

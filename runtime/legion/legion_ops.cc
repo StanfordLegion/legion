@@ -659,20 +659,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::enqueue_ready_operation(RtEvent wait_on/*=Event::NO_EVENT*/)
+    void Operation::enqueue_ready_operation(RtEvent wait_on/*=Event::NO_EVENT*/,
+                                LgPriority priority/*= LG_THROUGHPUT_PRIORITY*/)
     //--------------------------------------------------------------------------
     {
       if (wait_on.exists() && !wait_on.has_triggered())
       {
         DeferredEnqueueArgs args;
         args.proxy_this = this;
+        args.priority = priority;
         runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, 
                                          this, wait_on);
       }
       else
       {
         Processor p = parent_ctx->get_executing_processor();
-        runtime->add_to_local_queue(p, this);
+        runtime->add_to_local_queue(p, this, priority);
       }
     }
 
@@ -11467,12 +11469,10 @@ namespace Legion {
     void PendingPartitionOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
-      std::set<RtEvent> preconditions;
-      thunk->find_preconditions(runtime->forest, preconditions);
-      if (!preconditions.empty())
-        enqueue_ready_operation(Runtime::merge_events(preconditions));
-      else
-        enqueue_ready_operation();
+      // Give these slightly higher priority since they are likely
+      // needed by later operations
+      enqueue_ready_operation(RtEvent::NO_RT_EVENT, 
+                              LG_DEFERRED_THROUGHPUT_PRIORITY);
     }
 
     //--------------------------------------------------------------------------
@@ -11520,18 +11520,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PendingPartitionOp::EqualPartitionThunk::find_preconditions(
-                     RegionTreeForest *forest, std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      // Need the parent index space to have been set 
-      IndexPartNode *part = forest->get_node(pid);
-      preconditions.insert(part->parent->get_set_event());
-      // Also need the color space to have been set
-      preconditions.insert(part->color_space->get_set_event());
-    }
-
-    //--------------------------------------------------------------------------
     void PendingPartitionOp::EqualPartitionThunk::perform_logging(
                                                          PendingPartitionOp* op)
     //--------------------------------------------------------------------------
@@ -11541,43 +11529,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PendingPartitionOp::UnionPartitionThunk::find_preconditions(
-                     RegionTreeForest *forest, std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      // Need the parent index space to have been set 
-      IndexPartNode *part = forest->get_node(pid);
-      preconditions.insert(part->parent->get_set_event());
-      // Also need the color space to have been set
-      preconditions.insert(part->color_space->get_set_event());
-      // Also need the two sources to be set
-      preconditions.insert(forest->get_node(handle1)->get_set_event());
-      preconditions.insert(forest->get_node(handle2)->get_set_event());
-    }
-
-    //--------------------------------------------------------------------------
     void PendingPartitionOp::UnionPartitionThunk::perform_logging(
                                                          PendingPartitionOp* op)
     //--------------------------------------------------------------------------
     {
       LegionSpy::log_target_pending_partition(op->unique_op_id, pid.id,
           UNION_PARTITION);
-    }
-    
-    //--------------------------------------------------------------------------
-    void PendingPartitionOp::IntersectionPartitionThunk::find_preconditions(
-                     RegionTreeForest *forest, std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      // Need the parent index space to have been set 
-      IndexPartNode *part = forest->get_node(pid);
-      preconditions.insert(part->parent->get_set_event());
-      // Also need the color space to have been set
-      preconditions.insert(part->color_space->get_set_event());
-      // Also need the two sources to be set
-      preconditions.insert(forest->get_node(handle1)->get_set_event());
-      preconditions.insert(forest->get_node(handle2)->get_set_event());
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void PendingPartitionOp::IntersectionPartitionThunk::perform_logging(
@@ -11586,22 +11544,7 @@ namespace Legion {
     {
       LegionSpy::log_target_pending_partition(op->unique_op_id, pid.id,
           INTERSECTION_PARTITION);
-    }
-
-    //--------------------------------------------------------------------------
-    void PendingPartitionOp::DifferencePartitionThunk::find_preconditions(
-                     RegionTreeForest *forest, std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      // Need the parent index space to have been set 
-      IndexPartNode *part = forest->get_node(pid);
-      preconditions.insert(part->parent->get_set_event());
-      // Also need the color space to have been set
-      preconditions.insert(part->color_space->get_set_event());
-      // Also need the two sources to be set
-      preconditions.insert(forest->get_node(handle1)->get_set_event());
-      preconditions.insert(forest->get_node(handle2)->get_set_event());
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void PendingPartitionOp::DifferencePartitionThunk::perform_logging(
@@ -11610,19 +11553,7 @@ namespace Legion {
     {
       LegionSpy::log_target_pending_partition(op->unique_op_id, pid.id,
           DIFFERENCE_PARTITION);
-    }
-
-    //--------------------------------------------------------------------------
-    void PendingPartitionOp::RestrictedPartitionThunk::find_preconditions(
-                     RegionTreeForest *forest, std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      // Need the parent index space to have been set 
-      IndexPartNode *part = forest->get_node(pid);
-      preconditions.insert(part->parent->get_set_event());
-      // Also need the color space to have been set
-      preconditions.insert(part->color_space->get_set_event());
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void PendingPartitionOp::RestrictedPartitionThunk::perform_logging(
@@ -11634,16 +11565,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PendingPartitionOp::CrossProductThunk::find_preconditions(
-                     RegionTreeForest *forest, std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      // Need both partitions to have been set
-      preconditions.insert(forest->get_node(base)->get_set_event());
-      preconditions.insert(forest->get_node(source)->get_set_event());
-    }
-
-    //--------------------------------------------------------------------------
     void PendingPartitionOp::CrossProductThunk::perform_logging(
                                                          PendingPartitionOp* op)
     //--------------------------------------------------------------------------
@@ -11651,31 +11572,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PendingPartitionOp::ComputePendingSpace::find_preconditions(
-                     RegionTreeForest *forest, std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      for (std::vector<IndexSpace>::const_iterator it = 
-            handles.begin(); it != handles.end(); it++)
-        preconditions.insert(forest->get_node(*it)->get_set_event());
-    }
-
-    //--------------------------------------------------------------------------
     void PendingPartitionOp::ComputePendingSpace::perform_logging(
                                                          PendingPartitionOp* op)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    void PendingPartitionOp::ComputePendingDifference::find_preconditions(
-                     RegionTreeForest *forest, std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      preconditions.insert(forest->get_node(initial)->get_set_event());
-      for (std::vector<IndexSpace>::const_iterator it = 
-            handles.begin(); it != handles.end(); it++)
-        preconditions.insert(forest->get_node(*it)->get_set_event());
     }
 
     //--------------------------------------------------------------------------
@@ -12117,11 +12017,14 @@ namespace Legion {
                                                      privilege_path,
                                                      version_info,
                                                      preconditions);
-        thunk->find_preconditions(runtime->forest, preconditions);
+        // Give these operations slightly higher priority since
+        // they are likely needed for other operations
         if (!preconditions.empty())
-          enqueue_ready_operation(Runtime::merge_events(preconditions));
+          enqueue_ready_operation(Runtime::merge_events(preconditions),
+                                  LG_DEFERRED_THROUGHPUT_PRIORITY);
         else
-          enqueue_ready_operation();
+          enqueue_ready_operation(RtEvent::NO_RT_EVENT, 
+                                  LG_DEFERRED_THROUGHPUT_PRIORITY);
       }
     }
 
@@ -12438,18 +12341,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DependentPartitionOp::ByFieldThunk::find_preconditions(
-                     RegionTreeForest *forest, std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      // Need the parent index space to have been set 
-      IndexPartNode *part = forest->get_node(pid);
-      preconditions.insert(part->parent->get_set_event());
-      // Also need the color space to have been set
-      preconditions.insert(part->color_space->get_set_event());
-    }
-
-    //--------------------------------------------------------------------------
     ApEvent DependentPartitionOp::ByFieldThunk::perform(
      DependentPartitionOp *op, RegionTreeForest *forest,
      ApEvent instances_ready, const std::vector<FieldDataDescriptor> &instances)
@@ -12457,21 +12348,6 @@ namespace Legion {
     {
       return forest->create_partition_by_field(op, pid, 
                                                instances, instances_ready);
-    }
-
-    //--------------------------------------------------------------------------
-    void DependentPartitionOp::ByImageThunk::find_preconditions(
-                     RegionTreeForest *forest, std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      // Need the parent index space to have been set
-      IndexPartNode *part = forest->get_node(pid);
-      preconditions.insert(part->parent->get_set_event());
-      // Also need the color space to have been set
-      preconditions.insert(part->color_space->get_set_event());
-      // Also need the prior projection to have been computed
-      IndexPartNode *proj = forest->get_node(projection);
-      preconditions.insert(proj->get_set_event());
     }
 
     //--------------------------------------------------------------------------
@@ -12485,21 +12361,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DependentPartitionOp::ByImageRangeThunk::find_preconditions(
-                     RegionTreeForest *forest, std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      // Need the parent index space to have been set
-      IndexPartNode *part = forest->get_node(pid);
-      preconditions.insert(part->parent->get_set_event());
-      // Also need the color space to have been set
-      preconditions.insert(part->color_space->get_set_event());
-      // Also need the prior projection to have been computed
-      IndexPartNode *proj = forest->get_node(projection);
-      preconditions.insert(proj->get_set_event());
-    }
-
-    //--------------------------------------------------------------------------
     ApEvent DependentPartitionOp::ByImageRangeThunk::perform(
      DependentPartitionOp *op, RegionTreeForest *forest,
      ApEvent instances_ready, const std::vector<FieldDataDescriptor> &instances)
@@ -12507,21 +12368,6 @@ namespace Legion {
     {
       return forest->create_partition_by_image_range(op, pid, projection, 
                                                      instances,instances_ready);
-    }
-
-    //--------------------------------------------------------------------------
-    void DependentPartitionOp::ByPreimageThunk::find_preconditions(
-                     RegionTreeForest *forest, std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      // Need the parent index space to have been set
-      IndexPartNode *part = forest->get_node(pid);
-      preconditions.insert(part->parent->get_set_event());
-      // Also need the color space to have been set
-      preconditions.insert(part->color_space->get_set_event());
-      // Also need the prior projection to have been computed
-      IndexPartNode *proj = forest->get_node(projection);
-      preconditions.insert(proj->get_set_event());
     }
 
     //--------------------------------------------------------------------------
@@ -12535,21 +12381,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DependentPartitionOp::ByPreimageRangeThunk::find_preconditions(
-                     RegionTreeForest *forest, std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      // Need the parent index space to have been set
-      IndexPartNode *part = forest->get_node(pid);
-      preconditions.insert(part->parent->get_set_event());
-      // Also need the color space to have been set
-      preconditions.insert(part->color_space->get_set_event());
-      // Also need the prior projection to have been computed
-      IndexPartNode *proj = forest->get_node(projection);
-      preconditions.insert(proj->get_set_event());
-    }
-
-    //--------------------------------------------------------------------------
     ApEvent DependentPartitionOp::ByPreimageRangeThunk::perform(
      DependentPartitionOp *op, RegionTreeForest *forest,
      ApEvent instances_ready, const std::vector<FieldDataDescriptor> &instances)
@@ -12557,18 +12388,6 @@ namespace Legion {
     {
       return forest->create_partition_by_preimage_range(op, pid, projection, 
                                                   instances, instances_ready);
-    }
-
-    //--------------------------------------------------------------------------
-    void DependentPartitionOp::AssociationThunk::find_preconditions(
-                     RegionTreeForest *forest, std::set<RtEvent> &preconditions)
-    //--------------------------------------------------------------------------
-    {
-      // Need both domain and range to have been set
-      IndexSpaceNode *dom = forest->get_node(domain);
-      preconditions.insert(dom->get_set_event());
-      IndexSpaceNode *ran = forest->get_node(range);
-      preconditions.insert(ran->get_set_event());
     }
 
     //--------------------------------------------------------------------------

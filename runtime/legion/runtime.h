@@ -552,8 +552,7 @@ namespace Legion {
       };
     public:
       ProcessorManager(Processor proc, Processor::Kind proc_kind,
-                       Runtime *rt,
-                       unsigned width, unsigned default_mappers,  
+                       Runtime *rt, unsigned default_mappers,  
                        unsigned max_steals, bool no_steal, bool replay);
       ProcessorManager(const ProcessorManager &rhs);
       ~ProcessorManager(void);
@@ -579,7 +578,7 @@ namespace Legion {
       void process_advertisement(Processor advertiser, MapperID mid);
     public:
       void add_to_ready_queue(TaskOp *op);
-      void add_to_local_ready_queue(Operation *op);
+      void add_to_local_ready_queue(Operation *op, LgPriority priority);
     public:
       inline void find_visible_memories(std::set<Memory> &visible) const
         { visible = visible_memories; }
@@ -594,8 +593,6 @@ namespace Legion {
       Runtime *const runtime;
       const Processor local_proc;
       const Processor::Kind proc_kind;
-      // Effective super-scalar width of the runtime
-      const unsigned superscalar_width;
       // Maximum number of outstanding steals permitted by any mapper
       const unsigned max_outstanding_steals;
       // Is stealing disabled 
@@ -606,7 +603,6 @@ namespace Legion {
       // Local queue state
       Reservation local_queue_lock;
       unsigned next_local_index;
-      std::vector<RtEvent> local_scheduler_preconditions;
     protected:
       // Scheduling state
       Reservation queue_lock;
@@ -2356,7 +2352,7 @@ namespace Legion {
       void add_to_dependence_queue(TaskContext *ctx, Processor p,Operation *op);
       void add_to_ready_queue(Processor p, TaskOp *task_op, 
                               RtEvent wait_on = RtEvent::NO_RT_EVENT);
-      void add_to_local_queue(Processor p, Operation *op);
+      void add_to_local_queue(Processor p, Operation *op, LgPriority priority);
     public:
       inline Processor find_utility_group(void) { return utility_group; }
       Processor find_processor_group(const std::vector<Processor> &procs);
@@ -2946,7 +2942,6 @@ namespace Legion {
       static int initial_task_window_size;
       static unsigned initial_task_window_hysteresis;
       static unsigned initial_tasks_to_schedule;
-      static unsigned superscalar_width;
       static unsigned max_message_size;
       static unsigned gc_epoch_size;
       static unsigned max_local_fields;

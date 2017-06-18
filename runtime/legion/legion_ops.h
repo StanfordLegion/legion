@@ -122,6 +122,7 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFERRED_ENQUEUE_OP_ID;
       public:
         Operation *proxy_this;
+        LgPriority priority;
       };
       struct DeferredResolutionArgs :
         public LgTaskArgs<DeferredResolutionArgs> {
@@ -358,7 +359,8 @@ namespace Legion {
       // indicate mapping, execution, resolution, completion, and commit
       //
       // Add this to the list of ready operations
-      void enqueue_ready_operation(RtEvent wait_on = RtEvent::NO_RT_EVENT);
+      void enqueue_ready_operation(RtEvent wait_on = RtEvent::NO_RT_EVENT,
+                            LgPriority priority = LG_THROUGHPUT_PRIORITY);
       // Indicate that we are done mapping this operation
       void complete_mapping(RtEvent wait_on = RtEvent::NO_RT_EVENT); 
       // Indicate when this operation has finished executing
@@ -2001,8 +2003,6 @@ namespace Legion {
       public:
         virtual ~PendingPartitionThunk(void) { }
       public:
-        virtual void find_preconditions(RegionTreeForest *forest,
-                                        std::set<RtEvent> &preconditions) = 0;
         virtual ApEvent perform(PendingPartitionOp *op,
                                 RegionTreeForest *forest) = 0;
         virtual void perform_logging(PendingPartitionOp* op) = 0;
@@ -2013,8 +2013,6 @@ namespace Legion {
           : pid(id), granularity(g) { }
         virtual ~EqualPartitionThunk(void) { }
       public:
-        virtual void find_preconditions(RegionTreeForest *forest,
-                                        std::set<RtEvent> &preconditions);
         virtual ApEvent perform(PendingPartitionOp *op,
                                 RegionTreeForest *forest)
         { return forest->create_equal_partition(op, pid, granularity); }
@@ -2030,8 +2028,6 @@ namespace Legion {
           : pid(id), handle1(h1), handle2(h2) { }
         virtual ~UnionPartitionThunk(void) { }
       public:
-          virtual void find_preconditions(RegionTreeForest *forest,
-                                        std::set<RtEvent> &preconditions);
         virtual ApEvent perform(PendingPartitionOp *op,
                                 RegionTreeForest *forest)
         { return forest->create_partition_by_union(op, pid, handle1, handle2); }
@@ -2048,8 +2044,6 @@ namespace Legion {
           : pid(id), handle1(h1), handle2(h2) { }
         virtual ~IntersectionPartitionThunk(void) { }
       public:
-        virtual void find_preconditions(RegionTreeForest *forest,
-                                        std::set<RtEvent> &preconditions);
         virtual ApEvent perform(PendingPartitionOp *op,
                                 RegionTreeForest *forest)
         { return forest->create_partition_by_intersection(op, pid, handle1,
@@ -2067,8 +2061,6 @@ namespace Legion {
           : pid(id), handle1(h1), handle2(h2) { }
         virtual ~DifferencePartitionThunk(void) { }
       public:
-        virtual void find_preconditions(RegionTreeForest *forest,
-                                        std::set<RtEvent> &preconditions);
         virtual ApEvent perform(PendingPartitionOp *op,
                                 RegionTreeForest *forest)
         { return forest->create_partition_by_difference(op, pid, handle1,
@@ -2088,8 +2080,6 @@ namespace Legion {
         virtual ~RestrictedPartitionThunk(void)
           { free(transform); free(extent); }
       public:
-        virtual void find_preconditions(RegionTreeForest *forest,
-                                        std::set<RtEvent> &preconditions);
         virtual ApEvent perform(PendingPartitionOp *op,
                                 RegionTreeForest *forest)
         { return forest->create_partition_by_restriction(pid, 
@@ -2106,8 +2096,6 @@ namespace Legion {
           : base(b), source(s), part_color(c) { }
         virtual ~CrossProductThunk(void) { }
       public:
-        virtual void find_preconditions(RegionTreeForest *forest,
-                                        std::set<RtEvent> &preconditions);
         virtual ApEvent perform(PendingPartitionOp *op,
                                 RegionTreeForest *forest)
         { return forest->create_cross_product_partitions(op, base, source, 
@@ -2127,8 +2115,6 @@ namespace Legion {
           : is_union(is), is_partition(true), target(t), handle(h) { }
         virtual ~ComputePendingSpace(void) { }
       public:
-        virtual void find_preconditions(RegionTreeForest *forest,
-                                        std::set<RtEvent> &preconditions);
         virtual ApEvent perform(PendingPartitionOp *op,
                                 RegionTreeForest *forest)
         { if (is_partition)
@@ -2150,8 +2136,6 @@ namespace Legion {
           : target(t), initial(i), handles(h) { }
         virtual ~ComputePendingDifference(void) { }
       public:
-        virtual void find_preconditions(RegionTreeForest *forest,
-                                        std::set<RtEvent> &preconditions);
         virtual ApEvent perform(PendingPartitionOp *op,
                                 RegionTreeForest *forest)
         { return forest->compute_pending_space(op, target, initial, handles); }
@@ -2233,8 +2217,6 @@ namespace Legion {
       public:
         virtual ~DepPartThunk(void) { }
       public:
-        virtual void find_preconditions(RegionTreeForest *forest,
-                                        std::set<RtEvent> &preconditions) = 0;
         virtual ApEvent perform(DependentPartitionOp *op,
             RegionTreeForest *forest, ApEvent instances_ready,
             const std::vector<FieldDataDescriptor> &instances) = 0;
@@ -2246,8 +2228,6 @@ namespace Legion {
         ByFieldThunk(IndexPartition p)
           : pid(p) { }
       public:
-        virtual void find_preconditions(RegionTreeForest *forest,
-                                        std::set<RtEvent> &preconditions);
         virtual ApEvent perform(DependentPartitionOp *op,
             RegionTreeForest *forest, ApEvent instances_ready,
             const std::vector<FieldDataDescriptor> &instances);
@@ -2261,8 +2241,6 @@ namespace Legion {
         ByImageThunk(IndexPartition p, IndexPartition proj)
           : pid(p), projection(proj) { }
       public:
-        virtual void find_preconditions(RegionTreeForest *forest,
-                                        std::set<RtEvent> &preconditions);
         virtual ApEvent perform(DependentPartitionOp *op,
             RegionTreeForest *forest, ApEvent instances_ready,
             const std::vector<FieldDataDescriptor> &instances);
@@ -2277,8 +2255,6 @@ namespace Legion {
         ByImageRangeThunk(IndexPartition p, IndexPartition proj)
           : pid(p), projection(proj) { }
       public:
-        virtual void find_preconditions(RegionTreeForest *forest,
-                                        std::set<RtEvent> &preconditions);
         virtual ApEvent perform(DependentPartitionOp *op,
             RegionTreeForest *forest, ApEvent instances_ready,
             const std::vector<FieldDataDescriptor> &instances);
@@ -2293,8 +2269,6 @@ namespace Legion {
         ByPreimageThunk(IndexPartition p, IndexPartition proj)
           : pid(p), projection(proj) { }
       public:
-        virtual void find_preconditions(RegionTreeForest *forest,
-                                        std::set<RtEvent> &preconditions);
         virtual ApEvent perform(DependentPartitionOp *op,
             RegionTreeForest *forest, ApEvent instances_ready,
             const std::vector<FieldDataDescriptor> &instances);
@@ -2309,8 +2283,6 @@ namespace Legion {
         ByPreimageRangeThunk(IndexPartition p, IndexPartition proj)
           : pid(p), projection(proj) { }
       public:
-        virtual void find_preconditions(RegionTreeForest *forest,
-                                        std::set<RtEvent> &preconditions);
         virtual ApEvent perform(DependentPartitionOp *op,
             RegionTreeForest *forest, ApEvent instances_ready,
             const std::vector<FieldDataDescriptor> &instances);
@@ -2325,8 +2297,6 @@ namespace Legion {
         AssociationThunk(IndexSpace d, IndexSpace r)
           : domain(d), range(r) { }
       public:
-        virtual void find_preconditions(RegionTreeForest *forest,
-                                        std::set<RtEvent> &preconditions);
         virtual ApEvent perform(DependentPartitionOp *op,
             RegionTreeForest *forest, ApEvent instances_ready,
             const std::vector<FieldDataDescriptor> &instances);
