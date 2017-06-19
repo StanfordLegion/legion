@@ -1920,7 +1920,6 @@ namespace Legion {
       if (field_sizes.empty())
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORE_MEMORY_REQUEST,
-                              "undefined",
                         "Ignoring request to create instance in "
                         "memory " IDFMT " with no fields.",
                         memory_manager->memory.id);
@@ -1998,7 +1997,6 @@ namespace Legion {
             if (field_sizes.size() > 1)
             {
               REPORT_LEGION_ERROR(ERROR_ILLEGAL_REDUCTION_REQUEST,
-                                  "undefined",
                             "Illegal request for a reduction instance "
                             "containing multiple fields. Only a single field "
                             "is currently permitted for reduction instances.");
@@ -2267,7 +2265,6 @@ namespace Legion {
         case VIRTUAL_SPECIALIZE:
         {
           REPORT_LEGION_ERROR(ERROR_ILLEGAL_REQUEST_VIRTUAL_INSTANCE,
-                              "undefined",
                         "Illegal request to create a virtual instance");
           assert(false);
         }

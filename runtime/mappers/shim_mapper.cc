@@ -1073,7 +1073,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_FATAL(LEGION_FATAL_SHIM_MAPPER_SUPPORT,
-                          "UNDEFINED",
                      "Shim mapper doesn't support any tunables directly!");
       assert(0);
       //should never happen, but function needs return statement

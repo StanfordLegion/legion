@@ -568,7 +568,6 @@ namespace Legion {
       if (!parent_node->has_child(child_color))
       {
         REPORT_LEGION_ERROR(ERROR_INVALID_COLOR,
-                            "UNDEFINED",
           "Invalid color in compute pending space!");
 #ifdef DEBUG_LEGION
         assert(false);
@@ -579,7 +578,6 @@ namespace Legion {
       if (!parent_node->get_pending_child(child_color, domain_ready))
       {
         REPORT_LEGION_ERROR(ERROR_INVALID_PENDING_CHILD,
-                            "UNDEFINED",
           "Invalid pending child!");
 #ifdef DEBUG_LEGION
         assert(false);
@@ -693,7 +691,6 @@ namespace Legion {
         if (type_tag != NT_TemplateHelper::encode_tag<1,coord_t>())
         {
           REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH2,
-                              "UNDEFINED",
             "Dynamic type mismatch in 'get_index_space_color'");
 #ifdef DEBUG_LEGION
           assert(false);
@@ -743,7 +740,6 @@ namespace Legion {
       if (node->parent == NULL)
       {
         REPORT_LEGION_ERROR(ERROR_PARENT_INDEX_PARTITION_REQUESTED,
-                            "UNDEFINED",
           "Parent index partition requested for "
                             "index space %x with no parent. Use "
                             "has_parent_index_partition to check "
@@ -954,7 +950,6 @@ namespace Legion {
       if (!node->has_field(fid))
       {
         REPORT_LEGION_ERROR(ERROR_FIELD_SPACE_HAS_NO_FIELD,
-                            "UNDEFINED",
           "FieldSpace %x has no field %d", handle.id, fid);
 #ifdef DEBUG_LEGION
         assert(false);
@@ -1092,7 +1087,6 @@ namespace Legion {
         if (type_tag != NT_TemplateHelper::encode_tag<1,coord_t>())
         {
           REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH3,
-                              "UNDEFINED",
             "Dynamic type mismatch in 'get_logical_region_color'");
 #ifdef DEBUG_LEGION
           assert(false);
@@ -1143,7 +1137,6 @@ namespace Legion {
       if (node->parent == NULL)
       {
         REPORT_LEGION_ERROR(ERROR_PARENT_LOGICAL_PARTITION_REQUESTED,
-                            "UNDEFINED",
           "Parent logical partition requested for "
                             "logical region (%x,%x,%d) with no parent. "
                             "Use has_parent_logical_partition to check "
@@ -3345,7 +3338,6 @@ namespace Legion {
       if (!space.exists())
       {
         REPORT_LEGION_ERROR(ERROR_INVALID_REQUEST_FOR_INDEXSPACE,
-                            "UNDEFINED",
           "Invalid request for IndexSpace NO_SPACE.");
 #ifdef DEBUG_LEGION
         assert(false);
@@ -3364,7 +3356,6 @@ namespace Legion {
       if (owner == runtime->address_space)
       {
         REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
-                            "UNDEFINED",
           "Unable to find entry for index space %x.", space.id);
 #ifdef DEBUG_LEGION
         assert(false);
@@ -3404,7 +3395,6 @@ namespace Legion {
       if (finder == index_nodes.end())
       {
         REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY2,
-                            "UNDEFINED",
           "Unable to find entry for index space %x."
                         "This is definitely a runtime bug.", space.id);
 #ifdef DEBUG_LEGION
@@ -3422,7 +3412,6 @@ namespace Legion {
       if (!part.exists())
       {
         REPORT_LEGION_ERROR(ERROR_INVALID_REQUEST_INDEXPARTITION,
-                            "UNDEFINED",
           "Invalid request for IndexPartition NO_PART.");
 #ifdef DEBUG_LEGION
         assert(false);
@@ -3441,7 +3430,6 @@ namespace Legion {
       if (owner == runtime->address_space)
       {
         REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY3,
-                            "UNDEFINED",
           "Unable to find entry for index partition %x.",part.id);
 #ifdef DEBUG_LEGION
         assert(false);
@@ -3481,7 +3469,6 @@ namespace Legion {
       if (finder == index_parts.end())
       {
         REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY4,
-                            "UNDEFINED",
           "Unable to find entry for index partition %x. "
                         "This is definitely a runtime bug.", part.id);
 #ifdef DEBUG_LEGION
@@ -3499,7 +3486,6 @@ namespace Legion {
       if (!space.exists())
       {
         REPORT_LEGION_ERROR(ERROR_INVALID_REQUEST_FIELDSPACE,
-                            "UNDEFINED",
           "Invalid request for FieldSpace NO_SPACE.");
 #ifdef DEBUG_LEGION
         assert(false);
@@ -3518,7 +3504,6 @@ namespace Legion {
       if (owner == runtime->address_space)
       {
         REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY5,
-                            "UNDEFINED",
           "Unable to find entry for field space %x.", space.id);
 #ifdef DEBUG_LEGION
         assert(false);
@@ -3558,7 +3543,6 @@ namespace Legion {
       if (finder == field_nodes.end())
       {
         REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY6,
-                            "UNDEFINED",
           "Unable to find entry for field space %x. "
                         "This is definitely a runtime bug.", space.id);
 #ifdef DEBUG_LEGION
@@ -3577,7 +3561,6 @@ namespace Legion {
       if (!handle.exists())
       {
         REPORT_LEGION_ERROR(ERROR_INVALID_REQUEST_LOGICALREGION,
-                            "UNDEFINED",
           "Invalid request for LogicalRegion NO_REGION.");
 #ifdef DEBUG_LEGION
         assert(false);
@@ -3608,7 +3591,6 @@ namespace Legion {
         if (owner == runtime->address_space)
         {
           REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY7,
-                              "UNDEFINED",
             "Unable to find entry for logical region tree %d.",
                            handle.get_tree_id());
           assert(false);
@@ -3683,7 +3665,6 @@ namespace Legion {
       if (!handle.exists())
       {
         REPORT_LEGION_ERROR(ERROR_INVALID_REQUEST_LOGICALPARTITION,
-                            "UNDEFINED",
           "Invalid request for LogicalPartition NO_PART.");
 #ifdef DEBUG_LEGION
         assert(false);
@@ -3719,7 +3700,6 @@ namespace Legion {
       if (tid == 0)
       {
         REPORT_LEGION_ERROR(ERROR_INVALID_REQUEST_TREE_ID,
-                            "UNDEFINED",
           "Invalid request for tree ID 0 which is never a tree ID");
 #ifdef DEBUG_LEGION
         assert(false);
@@ -3738,7 +3718,6 @@ namespace Legion {
       if (owner == runtime->address_space)
       {
         REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY8,
-                            "UNDEFINED",
           "Unable to find entry for region tree ID %d", tid);
 #ifdef DEBUG_LEGION
         assert(false);
@@ -3777,7 +3756,6 @@ namespace Legion {
       if (finder == tree_nodes.end())
       {
         REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_TOPLEVEL_TREE,
-               "UNDEFINED",
           "Unable to find top-level tree entry for "
                          "region tree %d.  This is either a runtime "
                          "bug or requires Legion fences if names are "
@@ -3807,7 +3785,6 @@ namespace Legion {
       if (owner == runtime->address_space)
       {
         REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY9,
-                            "UNDEFINED",
           "Unable to find entry for index space %x.", space.id);
 #ifdef DEBUG_LEGION
         assert(false);
@@ -4494,7 +4471,6 @@ namespace Legion {
               if (size != finder->second.size)
               {
                 REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG2,
-                                    "UNDEFINED",
                   "Inconsistent Semantic Tag value "
                               "for tag %ld with different sizes of %zd"
                               " and %zd for index tree node", 
@@ -4514,7 +4490,6 @@ namespace Legion {
                   if (diff)
                   {
                     REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG3,
-                                        "UNDEFINED",
                     "Inconsistent Semantic Tag value "
                                   "for tag %ld with different values at"
                                   "byte %d for index tree node, %x != %x",
@@ -4630,7 +4605,6 @@ namespace Legion {
         if (can_fail)
           return false;
         REPORT_LEGION_ERROR(ERROR_INVALID_SEMANTIC_TAG2,
-                            "UNDEFINED",
           "invalid semantic tag %ld for "
                       "index tree node", tag);
 #ifdef DEBUG_LEGION
@@ -4654,7 +4628,6 @@ namespace Legion {
         if (can_fail)
           return false;
         REPORT_LEGION_ERROR(ERROR_INVALID_SEMANTIC_TAG3,
-                            "UNDEFINED",
         "invalid semantic tag %ld for "
                             "index tree node", tag);   
 #ifdef DEBUG_LEGION
@@ -4937,7 +4910,6 @@ namespace Legion {
         if (remote_handle.exists())
           return context->get_node(remote_handle);
         REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY10,
-                            "UNDEFINED",
           "Unable to find entry for color %lld in "
                         "index space %x.", c, handle.id);
 #ifdef DEBUG_LEGION
@@ -5426,7 +5398,6 @@ namespace Legion {
         // compatibility support of only providing one allocator ever
         // for a given index space
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_DUPLICATE_REQUEST_ALLOCATOR,
-                            "UNDEFINED",
           "Illegal duplicate request for an allocator of index "
                       "tree %d. Allocators are only provided for backwards "
                       "compatbility and there is only permitted to be for "
@@ -6575,7 +6546,6 @@ namespace Legion {
               if (size != finder->second.size)
               {
                 REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG4,
-                                    "UNDEFINED",
                   "Inconsistent Semantic Tag value "
                               "for tag %ld with different sizes of %zd"
                               " and %zd for index tree node", 
@@ -6595,7 +6565,6 @@ namespace Legion {
                   if (diff)
                   {
                     REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG5,
-                                        "UNDEFINED",
                     "Inconsistent Semantic Tag value "
                                   "for tag %ld with different values at"
                                   "byte %d for index tree node, %x != %x", 
@@ -6674,7 +6643,6 @@ namespace Legion {
               if (size != finder->second.size)
               {
                 REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG6,
-                                    "UNDEFINED",
                 "Inconsistent Semantic Tag value "
                               "for tag %ld with different sizes of %zd"
                               " and %zd for index tree node", 
@@ -6694,7 +6662,6 @@ namespace Legion {
                   if (diff)
                   {
                     REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG7,
-                                        "UNDEFINED",
                                         "Inconsistent Semantic Tag value "
                                   "for tag %ld with different values at"
                                   "byte %d for index tree node, %x != %x", 
@@ -6809,7 +6776,6 @@ namespace Legion {
         if (can_fail)
           return false;
         REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG8,
-                            "UNDEFINED",
           "invalid semantic tag %ld for "
                       "field space %d", tag, handle.id);
 #ifdef DEBUG_LEGION
@@ -6843,7 +6809,6 @@ namespace Legion {
         if (can_fail)
           return false;
         REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG9,
-                            "UNDEFINED",
                             "invalid semantic tag %ld for "
                             "field space %d", tag, handle.id);
 #ifdef DEBUG_LEGION
@@ -6918,7 +6883,6 @@ namespace Legion {
         if (can_fail)
           return false;
         REPORT_LEGION_ERROR(ERROR_INVALID_SEMANTIC_TAG4,
-                            "UNDEFINED",
           "invalid semantic tag %ld for field %d "
                       "of field space %d", tag, fid, handle.id);
 #ifdef DEBUG_LEGION
@@ -6955,7 +6919,6 @@ namespace Legion {
         if (can_fail)
           return false;
         REPORT_LEGION_ERROR(ERROR_INVALID_SEMANTIC_TAG5,
-                            "UNDEFINED",
                             "invalid semantic tag %ld for field %d "
                             "of field space %d", tag, fid, handle.id);
 #ifdef DEBUG_LEGION
@@ -7251,7 +7214,6 @@ namespace Legion {
         if (fields.find(fid) != fields.end())
         {
           REPORT_LEGION_ERROR(ERROR_ILLEGAL_DUPLICATE_FIELD_ID,
-                              "UNDEFINED",
             "Illegal duplicate field ID %d used by the "
                           "application in field space %d", fid, handle.id);
 #ifdef DEBUG_LEGION
@@ -7264,7 +7226,6 @@ namespace Legion {
         if (result < 0)
         {
           REPORT_LEGION_ERROR(ERROR_EXCEEDED_MAXIMUM_NUMBER_ALLOCATED_FIELDS,
-                              "UNDEFINED",
             "Exceeded maximum number of allocated fields for "
                           "field space %x. Change MAX_FIELDS from %d and "
                           "related macros at the top of legion_config.h and "
@@ -7348,7 +7309,6 @@ namespace Legion {
           if (fields.find(fid) != fields.end())
           {
             REPORT_LEGION_ERROR(ERROR_ILLEGAL_DUPLICATE_FIELD_ID2,
-                                "UNDEFINED",
               "Illegal duplicate field ID %d used by the "
                             "application in field space %d", fid, handle.id);
 #ifdef DEBUG_LEGION
@@ -7361,7 +7321,6 @@ namespace Legion {
           if (result < 0)
           {
             REPORT_LEGION_ERROR(ERROR_EXCEEDED_MAXIMUM_NUMBER_ALLOCATED_FIELDS2,
-                                "UNDEFINED",
               "Exceeded maximum number of allocated fields for "
                             "field space %x. Change MAX_FIELDS from %d and "
                             "related macros at the top of legion_config.h and "
@@ -7579,7 +7538,6 @@ namespace Legion {
           if (fields.find(fid) != fields.end())
           {
             REPORT_LEGION_ERROR(ERROR_ILLEGAL_DUPLICATE_FIELD_ID3,
-                                "UNDEFINED",
               "Illegal duplicate field ID %d used by the "
                             "application in field space %d", fid, handle.id);
 #ifdef DEBUG_LEGION
@@ -7987,7 +7945,6 @@ namespace Legion {
 	  if (finder == fields.end())
 	  {
       REPORT_LEGION_FATAL(LEGION_FATAL_UNKNOWN_FIELD_ID,
-                          "UNDEFINED",
 	    "unknown field ID %d requested during instance creation", fid);
 	    assert(false);
 	  }
@@ -8737,7 +8694,6 @@ namespace Legion {
               if (size != finder->second.size)
               {
                 REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG10,
-                                    "UNDEFINED",
                   "Inconsistent Semantic Tag value "
                               "for tag %ld with different sizes of %zd"
                               " and %zd for region tree node", 
@@ -8757,7 +8713,6 @@ namespace Legion {
                   if (diff)
                   {
                     REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG11,
-                                        "UNDEFINED",
                       "Inconsistent Semantic Tag value "
                                   "for tag %ld with different values at"
                                   "byte %d for region tree node, %x != %x", 
@@ -8872,7 +8827,6 @@ namespace Legion {
         if (can_fail)
           return false;
         REPORT_LEGION_ERROR(ERROR_INVALID_SEMANTIC_TAG6,
-                            "UNDEFINED",
           "invalid semantic tag %ld for "
                       "region tree node", tag);
 #ifdef DEBUG_LEGION
@@ -8895,7 +8849,6 @@ namespace Legion {
         if (can_fail)
           return false;
         REPORT_LEGION_ERROR(ERROR_INVALID_SEMANTIC_TAG7,
-                            "UNDEFINED",
         "invalid semantic tag %ld for "
                             "region tree node", tag);   
 #ifdef DEBUG_LEGION
@@ -10760,7 +10713,6 @@ namespace Legion {
       LogicalRegion handle = as_region_node()->handle;
       char *field_string = column_source->to_string(uninit);
       REPORT_LEGION_WARNING(LEGION_WARNING_REGION_REQUIREMENT_OPERATION_USING,
-                            "UNDEFINED",
         "WARNING: Region requirement %d of operation %s "
                       "(UID %lld) is using uninitialized data for field(s) %s "
                       "of logical region (%d,%d,%d)", idx, 

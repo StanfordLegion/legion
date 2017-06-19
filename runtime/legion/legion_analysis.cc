@@ -1578,7 +1578,7 @@ namespace Legion {
       {
         if (local_node->intersects_with(node))
         {
-          REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTIAL_ACQUIRE, "undefined",
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTIAL_ACQUIRE, 
                         "Illegal partial acquire operation (ID %lld) "
                         "performed in task %s (ID %lld)", op->get_unique_id(),
                         op->get_context()->get_task_name(),
@@ -1654,7 +1654,7 @@ namespace Legion {
           return;
       }
       // It's bad if we get here
-      REPORT_LEGION_ERROR(ERROR_ILLEGAL_INTERFERING_RESTRICTON, "undefined",
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_INTERFERING_RESTRICTON, 
                     "Illegal interfering restriction performed by attach "
                     "operation (ID %lld) in task %s (ID %lld)",
                     op->get_unique_op_id(), op->get_context()->get_task_name(),
@@ -1798,7 +1798,7 @@ namespace Legion {
           return;
       }
       // It's bad if we get here
-      REPORT_LEGION_ERROR(ERROR_ILLEGAL_INTERFERING_ACQUIRE, "undefined",
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_INTERFERING_ACQUIRE, 
                     "Illegal interfering acquire operation performed by "
                     "acquire operation (ID %lld) in task %s (ID %lld)",
                     op->get_unique_op_id(), op->get_context()->get_task_name(),
@@ -1839,7 +1839,7 @@ namespace Legion {
       {
         if (local_node->intersects_with(node))
         {
-          REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTIAL_RESTRICTION2, "undefined",
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTIAL_RESTRICTION2, 
                         "Illegal partial restriction operation performed by "
                         "attach operation (ID %lld) in task %s (ID %lld)",
                         op->get_unique_op_id(), 

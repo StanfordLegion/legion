@@ -1403,7 +1403,6 @@ namespace Legion {
       if (impl == NULL)
       {
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_REQUEST,
-                            "UNDEFINED",
                       "Invalid mapper request: mapper %s requested execution "
                       "constraints for variant %ld in mapper call %s, but "
                       "that variant does not exist.", mapper->get_mapper_name(),
@@ -1429,7 +1428,6 @@ namespace Legion {
       if (impl == NULL)
       {
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_REQUEST2,
-                            "UNDEFINED",
                       "Invalid mapper request: mapper %s requested task layout "
                       "constraints for variant %ld in mapper call %s, but "
                       "that variant does not exist.", mapper->get_mapper_name(),
@@ -1455,7 +1453,6 @@ namespace Legion {
       if (constraints == NULL)
       {
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_REQUEST3,
-                            "UNDEFINED",
                       "Invalid mapper request: mapper %s requested layout "
                       "constraints for layout ID %ld in mapper call %s, but "
                       "that layout constraint ID is invalid.",
@@ -1505,7 +1502,6 @@ namespace Legion {
       if ((c1 == NULL) || (c2 == NULL))
       {
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_REQUEST4,
-                            "UNDEFINED",
                       "Invalid mapper request: mapper %s passed layout ID %ld "
                       "to conflict test in mapper call %s, but that layout ID "
                       "is invalid.", mapper->get_mapper_name(), 
@@ -1534,7 +1530,6 @@ namespace Legion {
       if ((c1 == NULL) || (c2 == NULL))
       {
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_REQUEST5,
-                            "UNDEFINED",
                       "Invalid mapper request: mapper %s passed layout ID %ld "
                       "to entailment test in mapper call %s, but that layout "
                       "ID is invalid.", mapper->get_mapper_name(), 
@@ -1774,7 +1769,6 @@ namespace Legion {
       if (acquire && (ctx->acquired_instances == NULL))
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST10,
-                            "UNDEFINED",
                         "Ignoring acquire request to create_physical_instance "
                         "in unsupported mapper call %s in mapper %s", 
                         get_mapper_call_name(ctx->kind), get_mapper_name());
@@ -1808,7 +1802,6 @@ namespace Legion {
       if (acquire && (ctx->acquired_instances == NULL))
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST11,
-                              "UNDEFINED",
                         "Ignoring acquire request to create_physical_instance "
                         "in unsupported mapper call %s in mapper %s", 
                         get_mapper_call_name(ctx->kind), get_mapper_name());
@@ -1844,7 +1837,6 @@ namespace Legion {
       if (acquire && (ctx->acquired_instances == NULL))
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST,
-                              "UNDEFINED",
                         "Ignoring acquire request to find_or_create_physical"
                         "_instance in unsupported mapper call %s in mapper %s",
                         get_mapper_call_name(ctx->kind), get_mapper_name());
@@ -1882,7 +1874,6 @@ namespace Legion {
       if (acquire && (ctx->acquired_instances == NULL))
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST2,
-                              "UNDEFINED",
                         "Ignoring acquire request to find_or_create_physical"
                         "_instance in unsupported mapper call %s in mapper %s",
                         get_mapper_call_name(ctx->kind), get_mapper_name());
@@ -1918,7 +1909,6 @@ namespace Legion {
       if (acquire && (ctx->acquired_instances == NULL))
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST3,
-                              "UNDEFINED",
                         "Ignoring acquire request to find_physical_instance "
                         "in unsupported mapper call %s in mapper %s",
                         get_mapper_call_name(ctx->kind), get_mapper_name());
@@ -1951,7 +1941,6 @@ namespace Legion {
       if (acquire && (ctx->acquired_instances == NULL))
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST4,
-                              "UNDEFINED",
                         "Ignoring acquire request to find_physical_instance "
                         "in unsupported mapper call %s in mapper %s",
                         get_mapper_call_name(ctx->kind), get_mapper_name());
@@ -1987,7 +1976,6 @@ namespace Legion {
       if (ctx->acquired_instances == NULL)
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST5,
-                              "UNDEFINED",
                         "Ignoring acquire request in unsupported mapper call "
                         "%s in mapper %s", get_mapper_call_name(ctx->kind),
                         get_mapper_name());
@@ -2036,7 +2024,6 @@ namespace Legion {
       if (ctx->acquired_instances == NULL)
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST6,
-                              "UNDEFINED",
                         "Ignoring acquire request in unsupported mapper call "
                         "%s in mapper %s", get_mapper_call_name(ctx->kind),
                         get_mapper_name());
@@ -2068,7 +2055,6 @@ namespace Legion {
       if (ctx->acquired_instances == NULL)
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST7,
-                              "UNDEFINED",
                         "Ignoring acquire request in unsupported mapper call "
                         "%s in mapper %s", get_mapper_call_name(ctx->kind),
                         get_mapper_name());
@@ -2133,7 +2119,6 @@ namespace Legion {
       if (ctx->acquired_instances == NULL)
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST8,
-                              "UNDEFINED",
                         "Ignoring acquire request in unsupported mapper call "
                         "%s in mapper %s", get_mapper_call_name(ctx->kind),
                         get_mapper_name());
@@ -2167,7 +2152,6 @@ namespace Legion {
       if (ctx->acquired_instances == NULL)
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_ACQUIRE_REQUEST9,
-                              "UNDEFINED",
                         "Ignoring acquire request in unsupported mapper call "
                         "%s in mapper %s", get_mapper_call_name(ctx->kind),
                         get_mapper_name());
@@ -2322,7 +2306,6 @@ namespace Legion {
       if (ctx->acquired_instances == NULL)
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_RELEASE_REQUEST,
-                              "UNDEFINED",
                         "Ignoring release request in unsupported mapper call "
                         "%s in mapper %s", get_mapper_call_name(ctx->kind),
                         get_mapper_name());
@@ -2341,7 +2324,6 @@ namespace Legion {
       if (ctx->acquired_instances == NULL)
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_RELEASE_REQUEST2,
-                              "UNDEFINED",
                         "Ignoring release request in unsupported mapper call "
                         "%s in mapper %s", get_mapper_call_name(ctx->kind),
                         get_mapper_name());
@@ -2361,7 +2343,6 @@ namespace Legion {
       if (ctx->acquired_instances == NULL)
       {
         REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_RELEASE_REQUEST3,
-                              "UNDEFINED",
                         "Ignoring release request in unsupported mapper call "
                         "%s in mapper %s", get_mapper_call_name(ctx->kind),
                         get_mapper_name());
@@ -2435,7 +2416,6 @@ namespace Legion {
           if (other_id != tree_id)
           {
             REPORT_LEGION_ERROR(ERROR_INVALID_REGION_ARGUMENTS,
-                                "UNDEFINED",
                           "Invalid region arguments passed to %s in "
                           "mapper call %s of mapper %s. All region arguments "
                           "must be from the same region tree (%d != %d).",
@@ -3341,7 +3321,6 @@ namespace Legion {
       if (executing_call != info)
       {
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_CONTENT,
-                            "UNDEFINED",
                       "Invalid mapper context passed to mapper_rt "
                       "call by mapper %s. Mapper contexts are only valid "
                       "for the mapper call to which they are passed. They "
@@ -3521,7 +3500,6 @@ namespace Legion {
         if (current_holders.find(info) != current_holders.end())
         {
           REPORT_LEGION_ERROR(ERROR_INVALID_DUPLICATE_MAPPER,
-                              "UNDEFINED",
                         "Invalid duplicate mapper lock request in mapper call "
                         "%s for mapper %s", get_mapper_call_name(info->kind),
                         mapper->get_mapper_name());
@@ -3585,7 +3563,6 @@ namespace Legion {
         if (finder == current_holders.end())
         {
           REPORT_LEGION_ERROR(ERROR_INVALID_UNLOCK_MAPPER,
-                              "UNDEFINED",
                         "Invalid unlock mapper call with no prior lock call "
                         "in mapper call %s for mapper %s",
                         get_mapper_call_name(info->kind),

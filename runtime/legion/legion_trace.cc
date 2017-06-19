@@ -471,7 +471,6 @@ namespace Legion {
           if (index >= dependences.size())
           {
             REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_RECORDED,
-                                "UNDEFINED",
                           "Trace violation! Recorded %zd operations in trace "
                           "%d in task %s (UID %lld) but %d operations have "
                           "now been issued!", dependences.size(), tid,
@@ -487,7 +486,6 @@ namespace Legion {
           if (info.kind != op->get_operation_kind())
           {
             REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_OPERATION,
-                                "UNDEFINED",
                           "Trace violation! Operation at index %d of trace %d "
                           "in task %s (UID %lld) was recorded as having type "
                           "%s but instead has type %s in replay.",
@@ -503,7 +501,6 @@ namespace Legion {
           if (info.count != op->get_region_count())
           {
             REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_OPERATION2,
-                                "UNDEFINED",
                           "Trace violation! Operation at index %d of trace %d "
                           "in task %s (UID %lld) was recorded as having %d "
                           "regions, but instead has %zd regions in replay.",
