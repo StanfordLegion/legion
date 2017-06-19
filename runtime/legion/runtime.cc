@@ -10334,7 +10334,7 @@ namespace Legion {
       if (pointer.is_null())
         return pointer;
       Realm::ZPoint<1,coord_t> realm_point(pointer.value);
-      if (forest->safe_cast(region.get_index_space(), &realm_point, 
+      if (ctx->safe_cast(forest, region.get_index_space(), &realm_point, 
             NT_TemplateHelper::encode_tag<1,coord_t>()))
         return pointer;
       return ptr_t::nil();
@@ -10347,7 +10347,8 @@ namespace Legion {
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT("Illegal dummy context safe cast!");
-      return forest->safe_cast(region.get_index_space(), realm_point, type_tag);
+      return ctx->safe_cast(forest, region.get_index_space(), 
+                            realm_point, type_tag);
     }
 
     //--------------------------------------------------------------------------

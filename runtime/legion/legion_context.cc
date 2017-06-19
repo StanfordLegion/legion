@@ -1479,6 +1479,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool TaskContext::safe_cast(RegionTreeForest *forest, IndexSpace handle,
+                                const void *realm_point, TypeTag type_tag)
+    //--------------------------------------------------------------------------
+    {
+      // Check to see if we already have the pointer for the node
+      std::map<IndexSpace,IndexSpaceNode*>::const_iterator finder =
+        safe_cast_spaces.find(handle);
+      if (finder == safe_cast_spaces.end())
+      {
+        safe_cast_spaces[handle] = forest->get_node(handle);
+        finder = safe_cast_spaces.find(handle);
+      }
+      return finder->second->contains_point(realm_point, type_tag);
+    }
+
+    //--------------------------------------------------------------------------
     bool TaskContext::is_region_mapped(unsigned idx)
     //--------------------------------------------------------------------------
     {

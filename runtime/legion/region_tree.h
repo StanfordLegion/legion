@@ -200,8 +200,6 @@ namespace Legion {
       size_t get_domain_volume(IndexSpace handle);
       bool is_index_partition_disjoint(IndexPartition p);
       bool is_index_partition_complete(IndexPartition p);
-      bool safe_cast(IndexSpace handle, 
-                     const void *realm_point, TypeTag type_tag);
     public:
       void create_field_space(FieldSpace handle);
       void destroy_field_space(FieldSpace handle, AddressSpaceID source);
@@ -1176,8 +1174,8 @@ namespace Legion {
     protected:
       std::map<IndexTreeNode*,IntersectInfo> intersections;
     protected: // linearization meta-data, computed on demand
-      Realm::ZPoint<DIM,ptrdiff_t> strides;
-      size_t offset;
+      Realm::ZPoint<DIM,long long> strides;
+      Realm::ZPoint<DIM,long long> offset;
       bool linearization_ready;
     public:
       struct CreateByFieldHelper {

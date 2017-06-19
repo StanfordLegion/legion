@@ -614,7 +614,7 @@ typedef unsigned long long legion_version_id_t;
 typedef unsigned long long legion_projection_epoch_id_t;
 typedef legion_lowlevel_task_func_id_t legion_task_id_t;
 typedef unsigned long legion_layout_constraint_id_t;
-typedef unsigned long long legion_internal_color_t;
+typedef long long legion_internal_color_t;
 
 #endif // __LEGION_CONFIG_H__
 

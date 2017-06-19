@@ -28,7 +28,7 @@ namespace Legion {
         IndexSpace handle, IndexPartNode *parent, LegionColor color,
         const Realm::ZIndexSpace<DIM,T> *is, ApEvent ready)
       : IndexSpaceNode(ctx, handle, parent, color, ready), 
-        offset(0), linearization_ready(false)
+        linearization_ready(false)
     //--------------------------------------------------------------------------
     {
       if (is != NULL)
@@ -657,27 +657,27 @@ namespace Legion {
       get_realm_index_space(space, true/*tight*/);
       // Don't need to wait for full index space since we just need bounds
       const Realm::ZRect<DIM,T> &bounds = space.bounds;
-      const size_t volume = bounds.volume();
+      const long long volume = bounds.volume();
       if (volume > 0)
       {
-        size_t local_offset = 0;
-        ptrdiff_t stride = 1;
+        long long stride = 1;
         for (int idx = 0; idx < DIM; idx++)
         {
-          local_offset += bounds.lo[idx] * stride;
+          offset[idx] = bounds.lo[idx];
           strides[idx] = stride;
-          stride *= bounds.hi[idx] - bounds.lo[idx] + 1;
+          stride *= ((bounds.hi[idx] - bounds.lo[idx]) + 1);
         }
-        offset = local_offset;
 #ifdef DEBUG_LEGION
-        assert(stride == (ptrdiff_t)volume);
+        assert(stride == volume);
 #endif
       }
       else
       {
-        offset = 0;
         for (int idx = 0; idx < DIM; idx++)
+        {
+          offset[idx] = 0;
           strides[idx] = 0;
+        }
       }
       linearization_ready = true;
     }
@@ -693,15 +693,14 @@ namespace Legion {
 #endif
       if (!linearization_ready)
         compute_linearization_metadata();
-      const Realm::ZPoint<DIM,T> &point = 
+      Realm::ZPoint<DIM,T> point = 
         *(static_cast<const Realm::ZPoint<DIM,T>*>(realm_color));
+      // First subtract the offset to get to the origin
+      point -= offset;
       LegionColor color = 0;
       for (int idx = 0; idx < DIM; idx++)
         color += point[idx] * strides[idx];
-#ifdef DEBUG_LEGION
-      assert(color >= offset);
-#endif
-      return (color - offset); 
+      return color;
     }
 
     //--------------------------------------------------------------------------
@@ -717,15 +716,12 @@ namespace Legion {
         compute_linearization_metadata();
       Realm::ZPoint<DIM,T> &point = 
         *(static_cast<Realm::ZPoint<DIM,T>*>(realm_color));
-      color += offset;
       for (int idx = DIM-1; idx >= 0; idx--)
       {
         point[idx] = color/strides[idx]; // truncates
-#ifdef DEBUG_LEGION
-        assert(color >= (point[idx] * strides[idx]));
-#endif
         color -= point[idx] * strides[idx];
       }
+      point += offset;
     }
 
     //--------------------------------------------------------------------------

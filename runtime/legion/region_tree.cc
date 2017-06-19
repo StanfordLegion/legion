@@ -812,15 +812,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::safe_cast(IndexSpace handle, 
-                                     const void *realm_point, TypeTag type_tag)
-    //--------------------------------------------------------------------------
-    {
-      IndexSpaceNode *node = get_node(handle);
-      return node->contains_point(realm_point, type_tag);
-    }
-
-    //--------------------------------------------------------------------------
     void RegionTreeForest::create_field_space(FieldSpace handle)
     //--------------------------------------------------------------------------
     {
