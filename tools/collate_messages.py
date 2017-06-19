@@ -104,17 +104,15 @@ def parseInput(sourceFile, tokens, lineNumber, enums):
             assert tokens[i + 1][0] == '('
             name = tokens[i + 2][0]
             assert tokens[i + 3][0] == ','
-            whatToDo, index, lineNumber = quotedString(sourceFile, tokens, i + 4, lineNumber)
-            tokens = deleteTokens(tokens, index)
-            message, index, lineNumber = quotedString(sourceFile, tokens, 1, lineNumber)
+            message, index, lineNumber = quotedString(sourceFile, tokens, i + 4, lineNumber)
             tokens = deleteTokens(tokens, index)
             if name in enums:
                 code = enums[name]
             else:
-                print 'undefined declaration', name
+                print 'undefined declaration', name, 'missing enum in legion_config.h'
                 sys.exit(1)
             type = declaration.replace('REPORT_LEGION_', '').lower()
-            return declaration, name, code, whatToDo, type, message, lineNumber, declarationLineNumber
+            return declaration, name, code, type, message, lineNumber, declarationLineNumber
         else:
             i = i + 1
 
@@ -138,14 +136,21 @@ def sanitizedMessage(message):
 
 
 
-def addToDatabase(type, name, code, message, whatToDo, connection, sourceFile, lineNumber):
-    createTableCommand = "create table if not exists " + type + "(code int key constraint c unique on conflict fail, name text, message text key, whatToDo text, filename text, lineNumber int);"
+def addToDatabase(type, name, code, message, connection, sourceFile, lineNumber):
+  
+    createTableCommand = "create table if not exists " + type + "(code int key constraint c unique on conflict replace, name text, message text key);"
     connection.execute(createTableCommand)
     filename = sourceFile.name
-    insertCommand = "insert into " + type + "(code, name, message, whatToDo, filename, lineNumber) values (" + code + ", \"" + name + "\", \"" + sanitizedMessage(message) + "\", \"" + whatToDo + "\", \"" + filename + "\", " + str(lineNumber) + ");"
-    print 'insert', name, 'code', code
+    
+    insertCommand = "insert into " + type + "(code, name, message) values (" + code + ", \"" + name + "\", \"" + sanitizedMessage(message) + "\");"
+    print 'insert', name, 'code', code, filename + ":" + str(lineNumber)
     connection.execute(insertCommand)
+    
+    createInstancesTableCommand = "create table if not exists instances(code int key, sourceFile text, lineNumber int);"
+    connection.execute(createInstancesTableCommand)
 
+    insertInstanceCommand = "insert into instances (code, sourceFile, lineNumber) values (" + code + ", \"" + filename + "\", " + str(lineNumber) + ");"
+    connection.execute(insertInstanceCommand)
 
 
 def parseSourceFile(fileName, connection, enums):
@@ -159,10 +164,10 @@ def parseSourceFile(fileName, connection, enums):
             tuple = tokens[0]
             (token, tokenLineNumber) = tuple
             if(token in DECLARATIONS):
-                declaration, name, code, whatToDo, type, message, lineNumber, declarationLineNumber = parseInput(sourceFile, tokens, lineNumber, enums)
+                declaration, name, code, type, message, lineNumber, declarationLineNumber = parseInput(sourceFile, tokens, lineNumber, enums)
                 index = 0
                 if declaration != None:
-                    addToDatabase(type, name, code, message, whatToDo, connection, sourceFile, declarationLineNumber)
+                    addToDatabase(type, name, code, message, connection, sourceFile, declarationLineNumber)
                     print type, code, name
             else:
                 del tokens[0]
@@ -204,7 +209,7 @@ def writeGlossaryTerms(file, message, whatToDo, glossary, glossaryURL):
     wroteTerm = False
     for term in glossary:
         t = term.replace(' ', '').lower().strip()
-        if message.replace(' ', '').lower().find(t) >= 0 or whatToDo.replace(' ', '').lower().find(t) >= 0:
+        if message.replace(' ', '').lower().find(t) >= 0 or (whatToDo != None and whatToDo.replace(' ', '').lower().find(t) >= 0):
             if not wroteTerm:
                 file.write("See also: ")
                 wroteTerm = True
@@ -213,15 +218,34 @@ def writeGlossaryTerms(file, message, whatToDo, glossary, glossaryURL):
             file.write(href + "\n");
 
 
-def writeHtmlEntry(type, field, outputFile, row, hrefPrefix, strip, glossary, glossaryURL):
-    (code, name, message, whatToDo, fileName, lineNumber) = row
+def writeHtmlEntry(type, field, outputFile, row, hrefPrefix, strip, glossary, glossaryURL, messageDir, messageNames):
+    (code, name, message) = row
     outputFile.write("<p id=\"" + htmlMarker(type, field, code) + "\">")
     outputFile.write("<b>" + type + " " + str(code) + "</b>\n")
     outputFile.write("<br>Message: " + message + "\n");
-    outputFile.write("<br>Remedy:" + whatToDo + "\n");
-    href = "<a href=\"" + prefixedPath(fileName, hrefPrefix, lineNumber, strip) + "\">" + fileName_(fileName) + "</a>"
-    outputFile.write("<br>Location: line " + str(lineNumber) + " " + href + "\n")
+    
+    whatToDo = None
+    if name in messageNames:
+        messageFilePath = messageDir + '/' + name + ".html"
+        messageFile = open(messageFilePath, 'r')
+        strings = messageFile.readlines()
+        whatToDo = ''
+        for string in strings:
+            whatToDo = whatToDo + string.strip()
+    if whatToDo != None:
+        outputFile.write("<br>Remedy:" + whatToDo + "\n");
+
+    selectInstancesCommand = "select sourceFile, lineNumber from instances where code = " + str(code) + " order by sourceFile, lineNumber;"
+    cursor = connection.cursor()
+    cursor.execute(selectInstancesCommand)
+    instance = cursor.fetchone()
+    while instance != None:
+        (sourceFile, lineNumber) = instance
+        href = "<a href=\"" + prefixedPath(sourceFile, hrefPrefix, lineNumber, strip) + "\">" + fileName_(sourceFile) + " line " + str(lineNumber) + "</a>"
+        outputFile.write("<br>" + href + '\n')
+        instance = cursor.fetchone()
     outputFile.write("<p>\n")
+
     if glossary != None and glossaryURL != None:
         writeGlossaryTerms(outputFile, message, whatToDo, glossary, glossaryURL)
     outputFile.write("<br>")
@@ -235,20 +259,21 @@ def tables(connection):
     return tables
 
 
-def writeHtmlSortedByField(field, connection, hrefPrefix, strip, glossary, glossaryURL, outputDir):
+def writeHtmlSortedByField(field, connection, hrefPrefix, strip, glossary, glossaryURL, outputDir, messageDir, messageNames):
     for table in tables(connection):
         tableName = table[0]
-        outputFileName = htmlMarker(tableName, field, None) + ".html"
-        outputFile = open(outputDir + '/' + outputFileName, "wt")
-        outputFile.write("---\nlayout: page\n---\n\n")
-        selectCommand = "select * from " + tableName + " order by " + field  + ";"
-        cursor = connection.cursor()
-        cursor.execute(selectCommand)
-        row = cursor.fetchone()
-        while row != None:
-              writeHtmlEntry(tableName, field, outputFile, row, hrefPrefix, strip, glossary, glossaryURL)
-              row = cursor.fetchone()
-        outputFile.close()
+        if tableName != 'instances':
+            outputFileName = htmlMarker(tableName, field, None) + ".html"
+            outputFile = open(outputDir + '/' + outputFileName, "wt")
+            outputFile.write("---\nlayout: page\n---\n\n")
+            selectCommand = "select * from " + tableName + " order by " + field  + ";"
+            cursor = connection.cursor()
+            cursor.execute(selectCommand)
+            row = cursor.fetchone()
+            while row != None:
+                writeHtmlEntry(tableName, field, outputFile, row, hrefPrefix, strip, glossary, glossaryURL, messageDir, messageNames)
+                row = cursor.fetchone()
+            outputFile.close()
 
 
 def writeHtmlIndexTable(connection, tableName, field, file):
@@ -276,7 +301,7 @@ def writeHtmlIndexTable(connection, tableName, field, file):
             fieldCounter = 0
         file.write("<TD>")
         first = False
-        (code, name, message, whatToDo, fileName, lineNumber) = row
+        (code, name, message) = row
         if field == "code":
             text = str(code)
         elif field == "message":
@@ -303,18 +328,19 @@ def writeHtmlIndexes(connection, outputDir):
     writeHtmlLinks(indexFile, connection, "code");
     writeHtmlLinks(indexFile, connection, "message")
     for table in tables(connection):
-        writeHtmlIndexTable(connection, table[0], "code", indexFile)
-        writeHtmlIndexTable(connection, table[0], "message", indexFile)
+        if table[0] != 'instances':
+            writeHtmlIndexTable(connection, table[0], "code", indexFile)
+            writeHtmlIndexTable(connection, table[0], "message", indexFile)
     indexFile.close()
 
 
-def writeHtmlOutput(connection, hrefPrefix, strip, glossaryFile, glossaryURL, outputDir):
+def writeHtmlOutput(connection, hrefPrefix, strip, glossaryFile, glossaryURL, outputDir, messageDir, messageNames):
     glossary = None
     if glossaryFile != None:
         glossary = open(glossaryFile, "r").readlines()
     writeHtmlIndexes(connection, outputDir);
-    writeHtmlSortedByField("code", connection, hrefPrefix, strip, glossary, glossaryURL, outputDir)
-    writeHtmlSortedByField("message", connection, hrefPrefix, strip, glossary, glossaryURL, outputDir)
+    writeHtmlSortedByField("code", connection, hrefPrefix, strip, glossary, glossaryURL, outputDir, messageDir, messageNames)
+    writeHtmlSortedByField("message", connection, hrefPrefix, strip, glossary, glossaryURL, outputDir, messageDir, messageNames)
 
 
 def loadEnums(file):
@@ -327,13 +353,21 @@ def loadEnums(file):
         if len(tokens) >= 3:
             if tokens[0] == 'typedef' and tokens[1] == 'enum' and tokens[2] == 'legion_error_t':
                 sawTypedef = True
-            if sawTypedef and tokens[0] == '}' and tokens[2] == 'legion_error_t;':
-                sawEnd = True
+                if sawTypedef and tokens[0] == '}' and tokens[2] == 'legion_error_t;':
+                    sawEnd = True
         if sawTypedef and not sawEnd and len(tokens) >= 3 and tokens[1] == '=' :
             name = tokens[0]
             value = tokens[2].replace(',', '')
             enums[name] = value
     return enums
+
+
+def loadMessageNames(file):
+    result = []
+    strings = file.readlines()
+    for string in strings:
+        result.append(string.strip())
+    return result
 
 
 class MyParser(argparse.ArgumentParser):
@@ -344,26 +378,34 @@ class MyParser(argparse.ArgumentParser):
 parser = MyParser(description = 'Legion Tools: collate messages')
 parser.add_argument('--prefix', dest='prefix', action='store', help='path prefix to source files', default='')
 parser.add_argument('--strip', dest='strip', action='store', type=int, help='num dirs to strip from sourcfile path', default=0)
-parser.add_argument('--glossaryFile', dest='glossaryFile', action='store', help='path to glossary file, requires --glossaryURL')
-parser.add_argument('--glossaryURL', dest='glossaryURL', action='store', help='URL of online glossary, requires --glossaryFile')
+parser.add_argument('--glossaryFile', dest='glossaryFile', action='store', help='path to glossary file, requires --glossaryURL', required=True)
+parser.add_argument('--glossaryURL', dest='glossaryURL', action='store', help='URL of online glossary, requires --glossaryFile', required=True)
 parser.add_argument('--output_dir', dest='outputDir', action='store', help='dir to write the output files to', default='.')
-parser.add_argument('--legion_config_h', dest='legionConfigH', action='store', help='path to legion_config.h, REQUIRED', default=None)
+parser.add_argument('--legion_config_h', dest='legionConfigH', action='store', help='path to legion_config.h', required=True)
+parser.add_argument('--messageDir', dest='messageDir', action='store', help='path to dir containing html messages', required=True)
 
 args = parser.parse_args()
 
 print 'this program parses a list of files.  it reads the filenames from stdin and writes html files as output.'
 print 'example: find . -name *.cc | python collate_messages.py --glossaryFile=glossaryFile.txt --glossaryURL="http://legion.stanford.edu"'
 
-if(args.legionConfigH != None):
-    legionConfigFile = open(args.legionConfigH, 'r')
-    if legionConfigFile != None:
-        enums = loadEnums(legionConfigFile)
-        connection = sqlite3.connect(":memory:")
-        parseSourceFiles(connection, enums)
-        if args.prefix != None:
-            args.prefix = args.prefix.replace("//", "/")
-        writeHtmlOutput(connection, args.prefix, args.strip, args.glossaryFile, args.glossaryURL, args.outputDir)
-    else:
-        print 'invalid path to legion_config.h', args.legionConfigH
-else:
-    print 'missing path to legion_config.h, use --legion_config_h'
+legionConfigFile = open(args.legionConfigH, 'r')
+if legionConfigFile == None:
+    print 'invalid legion config file path', legionConfigH
+    sys.exit(-1)
+
+enums = loadEnums(legionConfigFile)
+
+messageListFilePath = args.messageDir + '/messageList.txt'
+messageListFile = open(messageListFilePath, 'r')
+if messageListFile == None:
+    print 'invalid message list file path', messageListFilePath
+      
+messageNames = loadMessageNames(messageListFile)
+connection = sqlite3.connect(":memory:")
+parseSourceFiles(connection, enums)
+
+if args.prefix != None:
+    args.prefix = args.prefix.replace("//", "/")
+
+writeHtmlOutput(connection, args.prefix, args.strip, args.glossaryFile, args.glossaryURL, args.outputDir, args.messageDir, messageNames)

@@ -23,10 +23,10 @@ echo
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
-rm -rf ./publish
 mkdir -p ./publish/glossary ./publish/design_patterns
 
 
+echo Convert glossary
 cp glossary/markdown/* ./publish/glossary
 rm -f .tmp_glossary
 ls -1 ./publish/glossary/* | sed -e "s://:/:g" > .tmp_glossary
@@ -45,6 +45,7 @@ while read GLOSSARY
 wc -l .tmp_glossary
 rm -f .tmp_glossary
 
+echo Convert design patterns
 cp design_patterns/markdown/* ./publish/design_patterns
 rm -f .tmp_design_patterns
 ls -1 ./publish/design_patterns/* | sed -e "s://:/:g" > .tmp_design_patterns
@@ -63,7 +64,10 @@ while read DESIGN_PATTERN
 wc -l .tmp_design_patterns
 rm -f .tmp_design_patterns
 
-echo 
+
+
+
+echo
 echo ADD GLOSSARY TERMS TO GLOSSARY
 echo 
 
