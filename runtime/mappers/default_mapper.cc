@@ -3075,7 +3075,7 @@ namespace Legion {
 	  const LayoutConstraintSet &req_cons = 
             runtime->find_layout_constraints(ctx, it2->second);
 	  if(constraints.conflicts(req_cons)) {
-      REPORT_LEGION_FATAL(LEGION_FATAL_DEFAULT_MAPPER_ERROR2,
+      REPORT_LEGION_FATAL(LEGION_FATAL_DEFAULT_MAPPER_ERROR,
                           "Default mapper error.  Layout constraint "
                           "violation in must_epoch instance creation.");
 	    assert(false);
@@ -3250,7 +3250,7 @@ namespace Legion {
 	assert(ok);
 	if(!ok)
         {
-          REPORT_LEGION_FATAL(LEGION_FATAL_DEFAULT_MAPPER_ERROR3,
+          REPORT_LEGION_FATAL(LEGION_FATAL_DEFAULT_MAPPER_ERROR,
          "Default mapper error. Unable to make instance(s) "
 			   "in memory " IDFMT " for index %d of constrained "
 			   "task %s (ID %lld) in must epoch launch.",

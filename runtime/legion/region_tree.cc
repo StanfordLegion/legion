@@ -582,7 +582,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(false);
 #endif
-        exit(ERROR_INVALID_PENDING_CHILD2);
+        exit(ERROR_INVALID_PENDING_CHILD);
       }
       return child_node->handle;
     }
@@ -690,7 +690,7 @@ namespace Legion {
         // We know the answer here
         if (type_tag != NT_TemplateHelper::encode_tag<1,coord_t>())
         {
-          REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH2,
+          REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
             "Dynamic type mismatch in 'get_index_space_color'");
 #ifdef DEBUG_LEGION
           assert(false);
@@ -1077,7 +1077,7 @@ namespace Legion {
         // We know the answer here
         if (type_tag != NT_TemplateHelper::encode_tag<1,coord_t>())
         {
-          REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH3,
+          REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
             "Dynamic type mismatch in 'get_logical_region_color'");
 #ifdef DEBUG_LEGION
           assert(false);
@@ -3385,7 +3385,7 @@ namespace Legion {
           index_nodes.find(space);
       if (finder == index_nodes.end())
       {
-        REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY2,
+        REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
           "Unable to find entry for index space %x."
                         "This is definitely a runtime bug.", space.id);
 #ifdef DEBUG_LEGION
@@ -3420,7 +3420,7 @@ namespace Legion {
       AddressSpace owner = IndexPartNode::get_owner_space(part, runtime);
       if (owner == runtime->address_space)
       {
-        REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY3,
+        REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
           "Unable to find entry for index partition %x.",part.id);
 #ifdef DEBUG_LEGION
         assert(false);
@@ -3459,7 +3459,7 @@ namespace Legion {
         index_parts.find(part);
       if (finder == index_parts.end())
       {
-        REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY4,
+        REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
           "Unable to find entry for index partition %x. "
                         "This is definitely a runtime bug.", part.id);
 #ifdef DEBUG_LEGION
@@ -3494,7 +3494,7 @@ namespace Legion {
       AddressSpaceID owner = FieldSpaceNode::get_owner_space(space, runtime); 
       if (owner == runtime->address_space)
       {
-        REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY5,
+        REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
           "Unable to find entry for field space %x.", space.id);
 #ifdef DEBUG_LEGION
         assert(false);
@@ -3533,7 +3533,7 @@ namespace Legion {
         field_nodes.find(space);
       if (finder == field_nodes.end())
       {
-        REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY6,
+        REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
           "Unable to find entry for field space %x. "
                         "This is definitely a runtime bug.", space.id);
 #ifdef DEBUG_LEGION
@@ -3581,7 +3581,7 @@ namespace Legion {
           RegionTreeNode::get_owner_space(handle.get_tree_id(), runtime);
         if (owner == runtime->address_space)
         {
-          REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY7,
+          REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
             "Unable to find entry for logical region tree %d.",
                            handle.get_tree_id());
           assert(false);
@@ -3708,7 +3708,7 @@ namespace Legion {
       AddressSpaceID owner = RegionTreeNode::get_owner_space(tid, runtime);
       if (owner == runtime->address_space)
       {
-        REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY8,
+        REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
           "Unable to find entry for region tree ID %d", tid);
 #ifdef DEBUG_LEGION
         assert(false);
@@ -3775,7 +3775,7 @@ namespace Legion {
       AddressSpace owner = IndexSpaceNode::get_owner_space(space, runtime);
       if (owner == runtime->address_space)
       {
-        REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY9,
+        REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
           "Unable to find entry for index space %x.", space.id);
 #ifdef DEBUG_LEGION
         assert(false);
@@ -4461,7 +4461,7 @@ namespace Legion {
               // sure that the bits are the same
               if (size != finder->second.size)
               {
-                REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG2,
+                REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG,
                   "Inconsistent Semantic Tag value "
                               "for tag %ld with different sizes of %zd"
                               " and %zd for index tree node", 
@@ -4480,7 +4480,7 @@ namespace Legion {
                   char diff = orig[idx] ^ next[idx];
                   if (diff)
                   {
-                    REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG3,
+                    REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG,
                     "Inconsistent Semantic Tag value "
                                   "for tag %ld with different values at"
                                   "byte %d for index tree node, %x != %x",
@@ -4595,7 +4595,7 @@ namespace Legion {
         // Nothing to wait on so we have to do something
         if (can_fail)
           return false;
-        REPORT_LEGION_ERROR(ERROR_INVALID_SEMANTIC_TAG2,
+        REPORT_LEGION_ERROR(ERROR_INVALID_SEMANTIC_TAG,
           "invalid semantic tag %ld for "
                       "index tree node", tag);
 #ifdef DEBUG_LEGION
@@ -4618,7 +4618,7 @@ namespace Legion {
       {
         if (can_fail)
           return false;
-        REPORT_LEGION_ERROR(ERROR_INVALID_SEMANTIC_TAG3,
+        REPORT_LEGION_ERROR(ERROR_INVALID_SEMANTIC_TAG,
         "invalid semantic tag %ld for "
                             "index tree node", tag);   
 #ifdef DEBUG_LEGION
@@ -4902,7 +4902,7 @@ namespace Legion {
       {
         if (remote_handle.exists())
           return context->get_node(remote_handle);
-        REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY10,
+        REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
           "Unable to find entry for color %lld in "
                         "index space %x.", c, handle.id);
 #ifdef DEBUG_LEGION
@@ -6546,7 +6546,7 @@ namespace Legion {
               // Check to make sure that the bits are the same
               if (size != finder->second.size)
               {
-                REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG4,
+                REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG,
                   "Inconsistent Semantic Tag value "
                               "for tag %ld with different sizes of %zd"
                               " and %zd for index tree node", 
@@ -6565,7 +6565,7 @@ namespace Legion {
                   char diff = orig[idx] ^ next[idx];
                   if (diff)
                   {
-                    REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG5,
+                    REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG,
                     "Inconsistent Semantic Tag value "
                                   "for tag %ld with different values at"
                                   "byte %d for index tree node, %x != %x", 
@@ -6643,7 +6643,7 @@ namespace Legion {
               // Check to make sure that the bits are the same
               if (size != finder->second.size)
               {
-                REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG6,
+                REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG,
                 "Inconsistent Semantic Tag value "
                               "for tag %ld with different sizes of %zd"
                               " and %zd for index tree node", 
@@ -6662,7 +6662,7 @@ namespace Legion {
                   char diff = orig[idx] ^ next[idx];
                   if (diff)
                   {
-                    REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG7,
+                    REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG,
                                         "Inconsistent Semantic Tag value "
                                   "for tag %ld with different values at"
                                   "byte %d for index tree node, %x != %x", 
@@ -6776,7 +6776,7 @@ namespace Legion {
         // Nothing to wait on so we have to do something
         if (can_fail)
           return false;
-        REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG8,
+        REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG,
           "invalid semantic tag %ld for "
                       "field space %d", tag, handle.id);
 #ifdef DEBUG_LEGION
@@ -6809,7 +6809,7 @@ namespace Legion {
       {
         if (can_fail)
           return false;
-        REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG9,
+        REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG,
                             "invalid semantic tag %ld for "
                             "field space %d", tag, handle.id);
 #ifdef DEBUG_LEGION
@@ -6883,7 +6883,7 @@ namespace Legion {
       {
         if (can_fail)
           return false;
-        REPORT_LEGION_ERROR(ERROR_INVALID_SEMANTIC_TAG4,
+        REPORT_LEGION_ERROR(ERROR_INVALID_SEMANTIC_TAG,
           "invalid semantic tag %ld for field %d "
                       "of field space %d", tag, fid, handle.id);
 #ifdef DEBUG_LEGION
@@ -6919,7 +6919,7 @@ namespace Legion {
       {
         if (can_fail)
           return false;
-        REPORT_LEGION_ERROR(ERROR_INVALID_SEMANTIC_TAG5,
+        REPORT_LEGION_ERROR(ERROR_INVALID_SEMANTIC_TAG,
                             "invalid semantic tag %ld for field %d "
                             "of field space %d", tag, fid, handle.id);
 #ifdef DEBUG_LEGION
@@ -7309,7 +7309,7 @@ namespace Legion {
           FieldID fid = fids[idx];
           if (fields.find(fid) != fields.end())
           {
-            REPORT_LEGION_ERROR(ERROR_ILLEGAL_DUPLICATE_FIELD_ID2,
+            REPORT_LEGION_ERROR(ERROR_ILLEGAL_DUPLICATE_FIELD_ID,
               "Illegal duplicate field ID %d used by the "
                             "application in field space %d", fid, handle.id);
 #ifdef DEBUG_LEGION
@@ -7321,7 +7321,7 @@ namespace Legion {
           int result = allocate_index();
           if (result < 0)
           {
-            REPORT_LEGION_ERROR(ERROR_EXCEEDED_MAXIMUM_NUMBER_ALLOCATED_FIELDS2,
+            REPORT_LEGION_ERROR(ERROR_EXCEEDED_MAXIMUM_NUMBER_ALLOCATED_FIELDS,
               "Exceeded maximum number of allocated fields for "
                             "field space %x. Change MAX_FIELDS from %d and "
                             "related macros at the top of legion_config.h and "
@@ -7538,7 +7538,7 @@ namespace Legion {
           FieldID fid = fids[idx];
           if (fields.find(fid) != fields.end())
           {
-            REPORT_LEGION_ERROR(ERROR_ILLEGAL_DUPLICATE_FIELD_ID3,
+            REPORT_LEGION_ERROR(ERROR_ILLEGAL_DUPLICATE_FIELD_ID,
               "Illegal duplicate field ID %d used by the "
                             "application in field space %d", fid, handle.id);
 #ifdef DEBUG_LEGION
@@ -8694,7 +8694,7 @@ namespace Legion {
               // Check to make sure that the bits are the same
               if (size != finder->second.size)
               {
-                REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG10,
+                REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG,
                   "Inconsistent Semantic Tag value "
                               "for tag %ld with different sizes of %zd"
                               " and %zd for region tree node", 
@@ -8713,7 +8713,7 @@ namespace Legion {
                   char diff = orig[idx] ^ next[idx];
                   if (diff)
                   {
-                    REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG11,
+                    REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG,
                       "Inconsistent Semantic Tag value "
                                   "for tag %ld with different values at"
                                   "byte %d for region tree node, %x != %x", 
@@ -8827,7 +8827,7 @@ namespace Legion {
       {
         if (can_fail)
           return false;
-        REPORT_LEGION_ERROR(ERROR_INVALID_SEMANTIC_TAG6,
+        REPORT_LEGION_ERROR(ERROR_INVALID_SEMANTIC_TAG,
           "invalid semantic tag %ld for "
                       "region tree node", tag);
 #ifdef DEBUG_LEGION
@@ -8849,7 +8849,7 @@ namespace Legion {
       {
         if (can_fail)
           return false;
-        REPORT_LEGION_ERROR(ERROR_INVALID_SEMANTIC_TAG7,
+        REPORT_LEGION_ERROR(ERROR_INVALID_SEMANTIC_TAG,
         "invalid semantic tag %ld for "
                             "region tree node", tag);   
 #ifdef DEBUG_LEGION

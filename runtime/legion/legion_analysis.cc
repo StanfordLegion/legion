@@ -1839,7 +1839,7 @@ namespace Legion {
       {
         if (local_node->intersects_with(node))
         {
-          REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTIAL_RESTRICTION2, 
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTIAL_RESTRICTION, 
                         "Illegal partial restriction operation performed by "
                         "attach operation (ID %lld) in task %s (ID %lld)",
                         op->get_unique_op_id(), 

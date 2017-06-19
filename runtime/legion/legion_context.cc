@@ -1657,7 +1657,7 @@ namespace Legion {
         if (created_requirements[idx].region == child->regions[index].parent)
           return (regions.size() + idx);
       }
-      REPORT_LEGION_ERROR(ERROR_PARENT_TASK_INLINE5,
+      REPORT_LEGION_ERROR(ERROR_PARENT_TASK_INLINE,
                           "Parent task %s (ID %lld) of inline task %s "
                         "(ID %lld) does not have a region "
                         "requirement for region (%x,%x,%x) "
@@ -1684,7 +1684,7 @@ namespace Legion {
         if ((owner_task->indexes[idx].handle == child->indexes[idx].parent))
           return idx;
       }
-      REPORT_LEGION_ERROR(ERROR_PARENT_TASK_INLINE6,
+      REPORT_LEGION_ERROR(ERROR_PARENT_TASK_INLINE,
                           "Parent task %s (ID %lld) of inline task %s "
                             "(ID %lld) does not have an index space "
                             "requirement for index space %x "
@@ -2024,7 +2024,7 @@ namespace Legion {
             }
             else
             {
-              REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING2,
+              REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
                 "WARNING: Runtime is unmapping and remapping "
                   "physical regions around execute_task call in "
                   "task %s (UID %lld).", get_task_name(), get_unique_id());
@@ -2698,7 +2698,7 @@ namespace Legion {
       }
       if (parent.get_tree_id() != handle2.get_tree_id())
       {
-        REPORT_LEGION_ERROR(ERROR_INDEXPARTITION_NOT_SAME_INDEX_TREE2,
+        REPORT_LEGION_ERROR(ERROR_INDEXPARTITION_NOT_SAME_INDEX_TREE,
           "IndexPartition %d is not part of the same "
                         "index tree as IndexSpace %d in create "
                         "partition by union!", handle2.id, parent.id);
@@ -2754,7 +2754,7 @@ namespace Legion {
                       get_task_name(), get_unique_id());
       if (parent.get_tree_id() != handle1.get_tree_id())
       {
-        REPORT_LEGION_ERROR(ERROR_INDEXPARTITION_NOT_SAME_INDEX_TREE3,
+        REPORT_LEGION_ERROR(ERROR_INDEXPARTITION_NOT_SAME_INDEX_TREE,
           "IndexPartition %d is not part of the same "
                         "index tree as IndexSpace %d in create partition by "
                         "intersection!", handle1.id, parent.id);
@@ -2763,7 +2763,7 @@ namespace Legion {
       }
       if (parent.get_tree_id() != handle2.get_tree_id())
       {
-        REPORT_LEGION_ERROR(ERROR_INDEXPARTITION_NOT_SAME_INDEX_TREE4,
+        REPORT_LEGION_ERROR(ERROR_INDEXPARTITION_NOT_SAME_INDEX_TREE,
           "IndexPartition %d is not part of the same "
                         "index tree as IndexSpace %d in create partition by "
                         "intersection!", handle2.id, parent.id);
@@ -2819,7 +2819,7 @@ namespace Legion {
                       get_task_name(), get_unique_id());
       if (parent.get_tree_id() != handle1.get_tree_id())
       {
-        REPORT_LEGION_ERROR(ERROR_INDEXPARTITION_NOT_SAME_INDEX_TREE5,
+        REPORT_LEGION_ERROR(ERROR_INDEXPARTITION_NOT_SAME_INDEX_TREE,
           "IndexPartition %d is not part of the same "
                               "index tree as IndexSpace %d in create "
                               "partition by difference!",
@@ -2829,7 +2829,7 @@ namespace Legion {
       }
       if (parent.get_tree_id() != handle2.get_tree_id())
       {
-        REPORT_LEGION_ERROR(ERROR_INDEXPARTITION_NOT_SAME_INDEX_TREE6,
+        REPORT_LEGION_ERROR(ERROR_INDEXPARTITION_NOT_SAME_INDEX_TREE,
           "IndexPartition %d is not part of the same "
                               "index tree as IndexSpace %d in create "
                               "partition by difference!",
@@ -2876,7 +2876,7 @@ namespace Legion {
                       get_task_name(), get_unique_id());
       if (handle1.get_tree_id() != handle2.get_tree_id())
       {
-        REPORT_LEGION_ERROR(ERROR_INDEXPARTITION_NOT_SAME_INDEX_TREE7,
+        REPORT_LEGION_ERROR(ERROR_INDEXPARTITION_NOT_SAME_INDEX_TREE,
           "IndexPartition %d is not part of the same "
                               "index tree as IndexPartition %d in create "
                               "cross product partitions!",
@@ -2925,7 +2925,7 @@ namespace Legion {
       {
         if (Runtime::runtime_warnings)
         {
-          REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING3,
+          REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
             "Runtime is unmapping and remapping "
               "physical regions around create_association call "
               "in task %s (UID %lld).", get_task_name(), get_unique_id());
@@ -3016,7 +3016,7 @@ namespace Legion {
       {
         if (Runtime::runtime_warnings)
         {
-          REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING4,
+          REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
             "Runtime is unmapping and remapping "
               "physical regions around create_partition_by_field call "
               "in task %s (UID %lld).", get_task_name(), get_unique_id());
@@ -3074,7 +3074,7 @@ namespace Legion {
       {
         if (Runtime::runtime_warnings)
         {
-          REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING5,
+          REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
             "Runtime is unmapping and remapping "
               "physical regions around create_partition_by_image call "
               "in task %s (UID %lld).", get_task_name(), get_unique_id());
@@ -3133,7 +3133,7 @@ namespace Legion {
       {
         if (Runtime::runtime_warnings)
         {
-          REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING6,
+          REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
             "Runtime is unmapping and remapping "
               "physical regions around create_partition_by_image_range call "
               "in task %s (UID %lld).", get_task_name(), get_unique_id());
@@ -3201,7 +3201,7 @@ namespace Legion {
       {
         if (Runtime::runtime_warnings)
         {
-          REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING7,
+          REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
             "Runtime is unmapping and remapping "
               "physical regions around create_partition_by_preimage call "
               "in task %s (UID %lld).", get_task_name(), get_unique_id());
@@ -3261,7 +3261,7 @@ namespace Legion {
       {
         if (Runtime::runtime_warnings)
         {
-          REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING8,
+          REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
             "Runtime is unmapping and remapping "
               "physical regions around create_partition_by_preimage_range call "
               "in task %s (UID %lld).", get_task_name(), get_unique_id());
@@ -3617,7 +3617,7 @@ namespace Legion {
         std::vector<LocalFieldInfo> &infos = local_fields[space];
         if ((infos.size() + sizes.size()) > Runtime::max_local_fields)
         {
-          REPORT_LEGION_ERROR(ERROR_EXCEEDED_MAXIMUM_NUMBER_LOCAL_FIELDS2,
+          REPORT_LEGION_ERROR(ERROR_EXCEEDED_MAXIMUM_NUMBER_LOCAL_FIELDS,
             "Exceeded maximum number of local fields in "
                         "context of task %s (UID %lld). The maximum "
                         "is currently set to %d, but can be modified "
@@ -3636,7 +3636,7 @@ namespace Legion {
         if (!forest->allocate_local_fields(space, resulting_fields, sizes, 
                                   serdez_id, current_indexes, new_indexes))
         {
-          REPORT_LEGION_ERROR(ERROR_UNABLE_ALLOCATE_LOCAL_FIELD2,
+          REPORT_LEGION_ERROR(ERROR_UNABLE_ALLOCATE_LOCAL_FIELD,
             "Unable to allocate local field in context of "
                         "task %s (UID %lld) due to local field size "
                         "fragmentation. This situation can be improved "
@@ -3986,7 +3986,7 @@ namespace Legion {
           TaskImpl *impl = runtime->find_or_create_task_impl(launcher.task_id);
           if (impl->returns_value())
           {
-            REPORT_LEGION_ERROR(ERROR_PREDICATED_INDEX_TASK_LAUNCH2,
+            REPORT_LEGION_ERROR(ERROR_PREDICATED_INDEX_TASK_LAUNCH,
               "Predicated index task launch for task %s "
                           "in parent task %s (UID %lld) has non-void "
                           "return type but no default value for its "
@@ -4009,7 +4009,7 @@ namespace Legion {
       if (launcher.launch_domain.exists() &&
           (launcher.launch_domain.get_volume() == 0))
       {
-        REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_EMPTY_INDEX_TASK_LAUNCH2,
+        REPORT_LEGION_WARNING(LEGION_WARNING_IGNORING_EMPTY_INDEX_TASK_LAUNCH,
           "Ignoring empty index task launch in task %s (ID %lld)",
                         get_task_name(), get_unique_id());
         return Future();
@@ -4082,7 +4082,7 @@ namespace Legion {
       }
       if (inline_conflict)
       {
-        REPORT_LEGION_ERROR(ERROR_ATTEMPTED_INLINE_MAPPING_REGION2,
+        REPORT_LEGION_ERROR(ERROR_ATTEMPTED_INLINE_MAPPING_REGION,
           "Attempted an inline mapping of region (%x,%x,%x) "
                       "that conflicts with previous inline mapping in "
                       "task %s (ID %lld) that would ultimately result in "
@@ -4149,7 +4149,7 @@ namespace Legion {
       {
         if (Runtime::runtime_warnings && !launcher.silence_warnings)
         {
-          REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING9,
+          REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
             "WARNING: Runtime is unmapping and remapping "
               "physical regions around fill_fields call in task %s (UID %lld).",
               get_task_name(), get_unique_id());
@@ -4200,7 +4200,7 @@ namespace Legion {
       {
         if (Runtime::runtime_warnings && !launcher.silence_warnings)
         {
-          REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING10,
+          REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
             "Runtime is unmapping and remapping "
               "physical regions around fill_fields call in task %s (UID %lld).",
               get_task_name(), get_unique_id());
@@ -4238,7 +4238,7 @@ namespace Legion {
       {
         if (Runtime::runtime_warnings && !launcher.silence_warnings)
         {
-          REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING11,
+          REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
             "Runtime is unmapping and remapping "
               "physical regions around issue_copy_operation call in "
               "task %s (UID %lld).", get_task_name(), get_unique_id());
@@ -4289,7 +4289,7 @@ namespace Legion {
       {
         if (Runtime::runtime_warnings && !launcher.silence_warnings)
         {
-          REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING12,
+          REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
             "Runtime is unmapping and remapping "
               "physical regions around issue_copy_operation call in "
               "task %s (UID %lld).", get_task_name(), get_unique_id());
@@ -4327,7 +4327,7 @@ namespace Legion {
       {
         if (Runtime::runtime_warnings && !launcher.silence_warnings)
         {
-          REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING13,
+          REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
             "Runtime is unmapping and remapping "
               "physical regions around issue_acquire call in "
               "task %s (UID %lld).", get_task_name(), get_unique_id());
@@ -4364,7 +4364,7 @@ namespace Legion {
       {
         if (Runtime::runtime_warnings && !launcher.silence_warnings)
         {
-          REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING14,
+          REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
             "Runtime is unmapping and remapping "
               "physical regions around issue_release call in "
               "task %s (UID %lld).", get_task_name(), get_unique_id());
@@ -4418,7 +4418,7 @@ namespace Legion {
       }
       if (inline_conflict)
       {
-        REPORT_LEGION_ERROR(ERROR_ATTEMPTED_ATTACH_HDF5_2,
+        REPORT_LEGION_ERROR(ERROR_ATTEMPTED_ATTACH_HDF5,
           "Attempted an attach hdf5 file operation on region "
                       "(%x,%x,%x) that conflicts with previous inline "
                       "mapping in task %s (ID %lld) "
@@ -4478,7 +4478,7 @@ namespace Legion {
       {
         if (Runtime::runtime_warnings && !launcher.silence_warnings)
         {
-          REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING15,
+          REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
             "Runtime is unmapping and remapping "
               "physical regions around issue_release call in "
               "task %s (UID %lld).", get_task_name(), get_unique_id());
@@ -4595,7 +4595,7 @@ namespace Legion {
       AutoRuntimeCall call(this);
       if (launcher.predicates.empty())
       {
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_PREDICATE_CREATION2,
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_PREDICATE_CREATION,
           "Illegal predicate creation performed on a "
                       "set of empty previous predicates in task %s (ID %lld).",
                       get_task_name(), get_unique_id());
@@ -5079,7 +5079,7 @@ namespace Legion {
       // by the one thread that is running the task.
       if (current_trace != NULL)
       {
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_NESTED_TRACE2,
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_NESTED_TRACE,
           "Illegal nested trace with ID %d attempted in "
                        "task %s (ID %lld)", tid, get_task_name(),
                        get_unique_id());
@@ -5545,7 +5545,7 @@ namespace Legion {
       if (!runtime->forest->remove_restriction(coherence_restrictions, op, req))
       {
         // We failed to remove the restriction
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_OPERATION2,
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_OPERATION,
           "Illegal detach operation (ID %lld) performed in "
                       "task %s (ID %lld). Detach was performed on an region "
                       "that had not previously been attached.",
@@ -5625,7 +5625,7 @@ namespace Legion {
       if ((context_configuration.min_tasks_to_schedule == 0) && 
           (context_configuration.min_frames_to_schedule == 0))
       {
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT64,
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
           "Invalid mapper output from call 'configure_context' "
                       "on mapper %s. One of 'min_tasks_to_schedule' and "
                       "'min_frames_to_schedule' must be non-zero for task "
@@ -6065,7 +6065,7 @@ namespace Legion {
             VariantImpl *impl = 
               runtime->find_variant_impl(single_task->task_id, 
                                          single_task->get_selected_variant());
-            REPORT_LEGION_WARNING(LEGION_WARNING_VARIANT_TASK_NOT_MARKED2,
+            REPORT_LEGION_WARNING(LEGION_WARNING_VARIANT_TASK_NOT_MARKED,
               "Variant %s of task %s (UID %lld) was "
                 "not marked as an 'inner' variant but it only launched "
                 "operations and did not make any accessors. Did you "
@@ -6460,7 +6460,7 @@ namespace Legion {
                                   output.chosen_variant, true/*can fail*/);
       if (variant_impl == NULL)
       {
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT65,
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
           "Invalid mapper output from invoction of "
                       "'select_task_variant' on mapper %s. Mapper selected "
                       "an invalidate variant ID %ld for inlining of task %s "
@@ -7714,7 +7714,7 @@ namespace Legion {
                                                      IndexPartition handle)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_ILLEGAL_CREATE_INDEX_SPACE_UNION2,
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_CREATE_INDEX_SPACE_UNION,
         "Illegal create index space union performed in leaf "
                      "task %s (ID %lld)", get_task_name(), get_unique_id());
 #ifdef DEBUG_LEGION
@@ -7752,7 +7752,7 @@ namespace Legion {
                                                      IndexPartition handle)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_ILLEGAL_CREATE_INDEX_SPACE_INTERSECTION2,
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_CREATE_INDEX_SPACE_INTERSECTION,
         "Illegal create index space intersection performed in "
                      "leaf task %s (ID %lld)", get_task_name(),get_unique_id());
 #ifdef DEBUG_LEGION
@@ -7977,7 +7977,7 @@ namespace Legion {
                                             ReductionOpID redop)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE2,
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
         "Illegal execute index space call performed in leaf "
                      "task %s (ID %lld)", get_task_name(), get_unique_id());
 #ifdef DEBUG_LEGION
@@ -8083,7 +8083,7 @@ namespace Legion {
     void LeafContext::issue_acquire(const AcquireLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_ILLEGAL_ACQUIRE_OPERATION2,
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_ACQUIRE_OPERATION,
         "Illegal acquire operation performed in leaf task %s "
                      "(ID %lld)", get_task_name(), get_unique_id());
 #ifdef DEBUG_LEGION
@@ -8096,7 +8096,7 @@ namespace Legion {
     void LeafContext::issue_release(const ReleaseLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_ILLEGAL_RELEASE_OPERATION2,
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_RELEASE_OPERATION,
         "Illegal release operation performed in leaf task %s "
                      "(ID %lld)", get_task_name(), get_unique_id());
 #ifdef DEBUG_LEGION
@@ -8203,7 +8203,7 @@ namespace Legion {
     Predicate LeafContext::create_predicate(const Future &f)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_ILLEGAL_PREDICATE_CREATION3,
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_PREDICATE_CREATION,
         "Illegal predicate creation performed in leaf task %s "
                      "(ID %lld)", get_task_name(), get_unique_id());
 #ifdef DEBUG_LEGION
@@ -8231,7 +8231,7 @@ namespace Legion {
     Predicate LeafContext::create_predicate(const PredicateLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_ILLEGAL_PREDICATE_CREATION4,
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_PREDICATE_CREATION,
         "Illegal predicate creation performed in leaf task %s "
                      "(ID %lld)", get_task_name(), get_unique_id());
 #ifdef DEBUG_LEGION
@@ -8372,7 +8372,7 @@ namespace Legion {
     void LeafContext::end_static_trace(void)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_ILLEGAL_LEGION_BEGIN_STATIC_TRACE2,
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_LEGION_BEGIN_STATIC_TRACE,
         "Illegal Legion end static trace call in leaf task %s "
                      "(ID %lld)", get_task_name(), get_unique_id());
 #ifdef DEBUG_LEGION

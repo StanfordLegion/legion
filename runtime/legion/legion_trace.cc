@@ -500,7 +500,7 @@ namespace Legion {
           // Check that they have the same number of region requirements
           if (info.count != op->get_region_count())
           {
-            REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_OPERATION2,
+            REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_OPERATION,
                           "Trace violation! Operation at index %d of trace %d "
                           "in task %s (UID %lld) was recorded as having %d "
                           "regions, but instead has %zd regions in replay.",
