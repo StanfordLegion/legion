@@ -242,7 +242,6 @@ set_target_properties(HighLevelRuntime PROPERTIES SOVERSION ${SOVERSION})
 target_compile_definitions(HighLevelRuntime
   PRIVATE
     ASSUME_UNALLOCABLE
-    $<$<CONFIG:Debug>:DEBUG_LEGION>
   PUBLIC
     MAX_FIELDS=${Legion_MAX_FIELDS}
 )
