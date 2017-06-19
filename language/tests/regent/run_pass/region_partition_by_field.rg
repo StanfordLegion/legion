@@ -16,14 +16,11 @@ import "regent"
 
 struct t {
   value : int,
-  color : int,
+  color : int1d,
 }
 
 task f()
   var r = region(ispace(ptr, 3), t)
-  var x0 = dynamic_cast(ptr(t, r), 0)
-  var x1 = dynamic_cast(ptr(t, r), 1)
-  var x2 = dynamic_cast(ptr(t, r), 2)
 
   do
     var i = 0

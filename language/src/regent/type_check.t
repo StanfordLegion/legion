@@ -1588,15 +1588,16 @@ function type_check.expr_partition_by_field(cx, node)
                 tostring(#region.fields))
   end
 
-  local field_type = std.get_field_path(region_type:fspace(), region.fields[1])
-  if not std.type_eq(field_type, int) then
-    report.error(node, "type mismatch in argument 1: expected field of type " .. tostring(int) ..
-                " but got " .. tostring(field_type))
-  end
-
   if not std.is_ispace(colors_type) then
     report.error(node, "type mismatch in argument 2: expected ispace but got " ..
                 tostring(colors_type))
+  end
+
+  -- Field type should be the same as the base type of the colors space is
+  local field_type = std.get_field_path(region_type:fspace(), region.fields[1])
+  if not std.type_eq(field_type, colors_type.index_type) then
+    report.error(node, "type mismatch in argument 1: expected field of type " .. tostring(colors_type.index_type) ..
+                " but got " .. tostring(field_type))
   end
 
   local region_symbol
