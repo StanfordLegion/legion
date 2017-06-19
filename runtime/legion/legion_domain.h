@@ -449,36 +449,42 @@ namespace Legion {
             {
               Realm::ZIndexSpace<1,coord_t> is1 = *this;
               Realm::ZIndexSpace<1,coord_t> is2 = other;
-              Realm::ZIndexSpace<1,coord_t> result;
+              Realm::ZIndexSpace<1,coord_t> temp;
               LgEvent wait_on( 
                 Realm::ZIndexSpace<1,coord_t>::compute_intersection(is1,is2,
-                                                      result,dummy_requests));
+                                                      temp,dummy_requests));
               if (wait_on.exists())
                 wait_on.lg_wait();
+              Realm::ZIndexSpace<1,coord_t> result = temp.tighten();
+              temp.destroy();
               return Domain(result);
             }
           case 2:
             {
               Realm::ZIndexSpace<2,coord_t> is1 = *this;
               Realm::ZIndexSpace<2,coord_t> is2 = other;
-              Realm::ZIndexSpace<2,coord_t> result;
+              Realm::ZIndexSpace<2,coord_t> temp;
               LgEvent wait_on(
                 Realm::ZIndexSpace<2,coord_t>::compute_intersection(is1,is2,
-                                                      result,dummy_requests));
+                                                      temp,dummy_requests));
               if (wait_on.exists())
                 wait_on.lg_wait();
+              Realm::ZIndexSpace<2,coord_t> result = temp.tighten();
+              temp.destroy();
               return Domain(result);
             }
           case 3:
             {
               Realm::ZIndexSpace<3,coord_t> is1 = *this;
               Realm::ZIndexSpace<3,coord_t> is2 = other;
-              Realm::ZIndexSpace<3,coord_t> result;
+              Realm::ZIndexSpace<3,coord_t> temp;
               LgEvent wait_on(
                 Realm::ZIndexSpace<3,coord_t>::compute_intersection(is1,is2,
-                                                      result,dummy_requests));
+                                                      temp,dummy_requests));
               if (wait_on.exists())
                 wait_on.lg_wait();
+              Realm::ZIndexSpace<3,coord_t> result = temp.tighten();
+              temp.destroy();
               return Domain(result);
             }
           default:
@@ -497,38 +503,23 @@ namespace Legion {
         {
           case 1:
             {
-              Realm::ZIndexSpace<1,coord_t> is1 = *this;
-              Realm::ZIndexSpace<1,coord_t> is2(Realm::ZRect<1,coord_t>(p, p));
-              Realm::ZIndexSpace<1,coord_t> result;
-              LgEvent wait_on( 
-                Realm::ZIndexSpace<1,coord_t>::compute_union(is1,is2,
-                                              result,dummy_requests));
-              if (wait_on.exists())
-                wait_on.lg_wait();
+              Realm::ZRect<1,coord_t> is1 = *this;
+              Realm::ZRect<1,coord_t> is2(p, p);
+              Realm::ZRect<1,coord_t> result = is1.union_bbox(is2);
               return Domain(result);
             }
           case 2:
             {
-              Realm::ZIndexSpace<2,coord_t> is1 = *this;
-              Realm::ZIndexSpace<2,coord_t> is2(Realm::ZRect<2,coord_t>(p, p));
-              Realm::ZIndexSpace<2,coord_t> result;
-              LgEvent wait_on(
-                Realm::ZIndexSpace<2,coord_t>::compute_union(is1,is2,
-                                              result,dummy_requests));
-              if (wait_on.exists())
-                wait_on.lg_wait();
+              Realm::ZRect<2,coord_t> is1 = *this;
+              Realm::ZRect<2,coord_t> is2(p, p);
+              Realm::ZRect<2,coord_t> result = is1.union_bbox(is2);
               return Domain(result);
             }
           case 3:
             {
-              Realm::ZIndexSpace<3,coord_t> is1 = *this;
-              Realm::ZIndexSpace<3,coord_t> is2(Realm::ZRect<3,coord_t>(p, p));
-              Realm::ZIndexSpace<3,coord_t> result;
-              LgEvent wait_on(
-                Realm::ZIndexSpace<3,coord_t>::compute_union(is1,is2,
-                                              result,dummy_requests));
-              if (wait_on.exists())
-                wait_on.lg_wait();
+              Realm::ZRect<3,coord_t> is1 = *this;
+              Realm::ZRect<3,coord_t> is2(p, p);
+              Realm::ZRect<3,coord_t> result = is1.union_bbox(is2);
               return Domain(result);
             }
           default:
@@ -542,19 +533,10 @@ namespace Legion {
       {
         assert(DIM > 0);
         assert(DIM == dim);
-	if(is_id == 0) {
-	  return LegionRuntime::Arrays::Rect<DIM>(rect_data); 
-	} else {
-	  // TODO: would be nice to do this only once rather than each call
-	  Realm::ZIndexSpace<DIM,coord_t> tight = (operator Realm::ZIndexSpace<DIM,coord_t>()).tighten();
-	  assert(tight.dense());
-	  LegionRuntime::Arrays::Rect<DIM> r;
-	  for(int i = 0; i < DIM; i++) {
-	    r.lo.x[i] = tight.bounds.lo[i];
-	    r.hi.x[i] = tight.bounds.hi[i];
-	  }
-	  return r;
-	}
+        // Runtime only returns tight domains so if it still has
+        // a sparsity map then it is a real sparsity map
+        assert(is_id == 0);
+        return LegionRuntime::Arrays::Rect<DIM>(rect_data);
       }
 
       class DomainPointIterator {

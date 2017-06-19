@@ -2440,13 +2440,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ProcessorManager::ProcessorManager(Processor proc, Processor::Kind kind,
-                                       Runtime *rt, unsigned width, 
-                                       unsigned def_mappers,unsigned max_steals,
+                                       Runtime *rt, unsigned def_mappers,
+                                       unsigned max_steals,
                                        bool no_steal, bool replay)
       : runtime(rt), local_proc(proc), proc_kind(kind), 
-        superscalar_width(width), max_outstanding_steals(max_steals),
-        stealing_disabled(no_steal), replay_execution(replay),
-        next_local_index(0),
+        max_outstanding_steals(max_steals), stealing_disabled(no_steal), 
+        replay_execution(replay), next_local_index(0),
         task_scheduler_enabled(false), total_active_contexts(0)
     //--------------------------------------------------------------------------
     {
@@ -2456,8 +2455,6 @@ namespace Legion {
       this->stealing_lock = Reservation::create_reservation();
       this->thieving_lock = Reservation::create_reservation();
       context_states.resize(DEFAULT_CONTEXTS);
-      local_scheduler_preconditions.resize(superscalar_width, 
-                                           RtEvent::NO_RT_EVENT);
       // Find our set of visible memories
       Machine::MemoryQuery vis_mems(runtime->machine);
       vis_mems.has_affinity_to(proc);
@@ -2469,8 +2466,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ProcessorManager::ProcessorManager(const ProcessorManager &rhs)
       : runtime(NULL), local_proc(Processor::NO_PROC),
-        proc_kind(Processor::LOC_PROC),
-        superscalar_width(0), max_outstanding_steals(0),
+        proc_kind(Processor::LOC_PROC), max_outstanding_steals(0),
         stealing_disabled(false), replay_execution(false), next_local_index(0),
         task_scheduler_enabled(false), total_active_contexts(0)
     //--------------------------------------------------------------------------
@@ -2873,7 +2869,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ProcessorManager::add_to_local_ready_queue(Operation *op) 
+    void ProcessorManager::add_to_local_ready_queue(Operation *op, 
+                                                    LgPriority priority) 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2882,13 +2879,7 @@ namespace Legion {
       TriggerOpArgs args;
       args.manager = this;
       args.op = op;
-      AutoLock l_lock(local_queue_lock); 
-      RtEvent next = runtime->issue_runtime_meta_task(args, 
-          LG_THROUGHPUT_PRIORITY, op, 
-          local_scheduler_preconditions[next_local_index]);
-      local_scheduler_preconditions[next_local_index++] = next;
-      if (next_local_index == superscalar_width)
-        next_local_index = 0;
+      runtime->issue_runtime_meta_task(args, priority, op); 
     }
 
     //--------------------------------------------------------------------------
@@ -8809,7 +8800,6 @@ namespace Legion {
 #endif
         ProcessorManager *manager = new ProcessorManager(*it,
 				    (*it).kind(), this,
-                                    superscalar_width,
                                     DEFAULT_MAPPER_SLOTS, 
 				    all_procs.count()-1,
                                     stealing_disabled,
@@ -10343,7 +10333,7 @@ namespace Legion {
       if (pointer.is_null())
         return pointer;
       Realm::ZPoint<1,coord_t> realm_point(pointer.value);
-      if (forest->safe_cast(region.get_index_space(), &realm_point, 
+      if (ctx->safe_cast(forest, region.get_index_space(), &realm_point, 
             NT_TemplateHelper::encode_tag<1,coord_t>()))
         return pointer;
       return ptr_t::nil();
@@ -10356,7 +10346,8 @@ namespace Legion {
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT("Illegal dummy context safe cast!");
-      return forest->safe_cast(region.get_index_space(), realm_point, type_tag);
+      return ctx->safe_cast(forest, region.get_index_space(), 
+                            realm_point, type_tag);
     }
 
     //--------------------------------------------------------------------------
@@ -14758,14 +14749,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::add_to_local_queue(Processor p, Operation *op)
+    void Runtime::add_to_local_queue(Processor p, Operation *op, 
+                                     LgPriority priority)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(p.kind() != Processor::UTIL_PROC);
       assert(proc_managers.find(p) != proc_managers.end());
 #endif
-      proc_managers[p]->add_to_local_ready_queue(op);
+      proc_managers[p]->add_to_local_ready_queue(op, priority);
     }
 
     //--------------------------------------------------------------------------
@@ -17733,8 +17725,6 @@ namespace Legion {
                                       DEFAULT_TASK_WINDOW_HYSTERESIS;
     /*static*/ unsigned Runtime::initial_tasks_to_schedule = 
                                       DEFAULT_MIN_TASKS_TO_SCHEDULE;
-    /*static*/ unsigned Runtime::superscalar_width = 
-                                      DEFAULT_SUPERSCALAR_WIDTH;
     /*static*/ unsigned Runtime::max_message_size = 
                                       DEFAULT_MAX_MESSAGE_SIZE;
     /*static*/ unsigned Runtime::gc_epoch_size = 
@@ -17801,7 +17791,6 @@ namespace Legion {
       LEGION_STATIC_ASSERT(MAX_NUM_PROCS > 0);
       LEGION_STATIC_ASSERT(DEFAULT_MAX_TASK_WINDOW > 0);
       LEGION_STATIC_ASSERT(DEFAULT_MIN_TASKS_TO_SCHEDULE > 0);
-      LEGION_STATIC_ASSERT(DEFAULT_SUPERSCALAR_WIDTH > 0);
       LEGION_STATIC_ASSERT(DEFAULT_MAX_MESSAGE_SIZE > 0); 
 
       // Need to pass argc and argv to low-level runtime before we can record 
@@ -17888,7 +17877,6 @@ namespace Legion {
         initial_task_window_size = DEFAULT_MAX_TASK_WINDOW;
         initial_task_window_hysteresis = DEFAULT_TASK_WINDOW_HYSTERESIS;
         initial_tasks_to_schedule = DEFAULT_MIN_TASKS_TO_SCHEDULE;
-        superscalar_width = DEFAULT_SUPERSCALAR_WIDTH;
         max_message_size = DEFAULT_MAX_MESSAGE_SIZE;
         gc_epoch_size = DEFAULT_GC_EPOCH_SIZE;
         max_local_fields = DEFAULT_LOCAL_FIELDS;
@@ -17927,7 +17915,6 @@ namespace Legion {
           INT_ARG("-lg:window", initial_task_window_size);
           INT_ARG("-lg:hysteresis", initial_task_window_hysteresis);
           INT_ARG("-lg:sched", initial_tasks_to_schedule);
-          INT_ARG("-lg:width", superscalar_width);
           INT_ARG("-lg:message",max_message_size);
           INT_ARG("-lg:epoch", gc_epoch_size);
           INT_ARG("-lg:local", max_local_fields);
@@ -17995,7 +17982,6 @@ namespace Legion {
           INT_ARG("-hl:window", initial_task_window_size);
           INT_ARG("-hl:hysteresis", initial_task_window_hysteresis);
           INT_ARG("-hl:sched", initial_tasks_to_schedule);
-          INT_ARG("-hl:width", superscalar_width);
           INT_ARG("-hl:message",max_message_size);
           INT_ARG("-hl:epoch", gc_epoch_size);
           if (!strcmp(argv[i],"-hl:no_dyn"))
@@ -19431,7 +19417,8 @@ namespace Legion {
           {
             const Operation::DeferredEnqueueArgs *deferred_enqueue_args = 
               (const Operation::DeferredEnqueueArgs*)args;
-            deferred_enqueue_args->proxy_this->enqueue_ready_operation();
+            deferred_enqueue_args->proxy_this->enqueue_ready_operation(
+                RtEvent::NO_RT_EVENT, deferred_enqueue_args->priority);
             break;
           }
         case LG_DEFERRED_ENQUEUE_TASK_ID:
@@ -19566,6 +19553,11 @@ namespace Legion {
         case LG_DEFER_PHI_VIEW_REGISTRATION_TASK_ID:
           {
             PhiView::handle_deferred_view_registration(args);
+            break;
+          }
+        case LG_TIGHTEN_INDEX_SPACE_TASK_ID:
+          {
+            IndexSpaceNode::handle_tighten_index_space(args);
             break;
           }
         case LG_RETRY_SHUTDOWN_TASK_ID:

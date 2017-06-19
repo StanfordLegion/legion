@@ -107,11 +107,6 @@
 #ifndef DEFAULT_MIN_TASKS_TO_SCHEDULE
 #define DEFAULT_MIN_TASKS_TO_SCHEDULE   32
 #endif
-// Scheduling granularity for how many operations to
-// handle at a time at each stage of the pipeline
-#ifndef DEFAULT_SUPERSCALAR_WIDTH
-#define DEFAULT_SUPERSCALAR_WIDTH       4
-#endif
 // The maximum size of active messages sent by the runtime in bytes
 // Note this value was picked based on making a tradeoff between
 // latency and bandwidth numbers on both Cray and Infiniband
@@ -1123,7 +1118,7 @@ typedef unsigned long long legion_version_id_t;
 typedef unsigned long long legion_projection_epoch_id_t;
 typedef legion_lowlevel_task_func_id_t legion_task_id_t;
 typedef unsigned long legion_layout_constraint_id_t;
-typedef unsigned long long legion_internal_color_t;
+typedef long long legion_internal_color_t;
 
 #endif // __LEGION_CONFIG_H__
 

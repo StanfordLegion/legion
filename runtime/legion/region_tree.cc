@@ -817,15 +817,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool RegionTreeForest::safe_cast(IndexSpace handle, 
-                                     const void *realm_point, TypeTag type_tag)
-    //--------------------------------------------------------------------------
-    {
-      IndexSpaceNode *node = get_node(handle);
-      return node->contains_point(realm_point, type_tag);
-    }
-
-    //--------------------------------------------------------------------------
     void RegionTreeForest::create_field_space(FieldSpace handle)
     //--------------------------------------------------------------------------
     {
@@ -4650,7 +4641,9 @@ namespace Legion {
                                    ApEvent ready)
       : IndexTreeNode(ctx, (par == NULL) ? 0 : par->depth + 1, c),
         handle(h), parent(par), index_space_ready(ready), 
-        realm_index_space_set(Runtime::create_rt_user_event()), allocator(NULL)
+        realm_index_space_set(Runtime::create_rt_user_event()), 
+        tight_index_space_set(Runtime::create_rt_user_event()),
+        tight_index_space(false), allocator(NULL)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5203,6 +5196,14 @@ namespace Legion {
     {
       const bool disjoint = !left->intersects_with(right);
       parent->record_disjointness(disjoint, left->color, right->color);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexSpaceNode::handle_tighten_index_space(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const TightenIndexSpaceArgs *targs = (const TightenIndexSpaceArgs*)args;
+      targs->proxy_this->tighten_index_space();
     }
 
     //--------------------------------------------------------------------------

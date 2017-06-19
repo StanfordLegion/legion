@@ -65,6 +65,7 @@ namespace LegionRuntime {
 #ifdef EVENT_GRAPH_TRACE
     Logger::Category log_event_graph("graph");
 #endif
+    Logger::Category log_accessor("accessor");
 
 #ifdef EVENT_GRAPH_TRACE
     Event find_enclosing_termination_event(void)
@@ -1612,7 +1613,10 @@ namespace LegionRuntime {
       for(unsigned i = 0; i < DIM; i++)
         p[i] = r.lo[i];
       const InstanceLayoutPiece<DIM,coord_t> *piece = inst_layout->piece_lists[it->second.list_idx].find_piece(p);
-      assert(piece != 0);
+      if(piece == 0) {
+	log_accessor.fatal() << "lower bound of raw_rect_ptr request for " << r << " not contained in any piece of instance " << impl->me << ": " << inst_layout->piece_lists[it->second.list_idx];
+	assert(0);
+      }
       assert((piece->layout_type == InstanceLayoutPiece<DIM,coord_t>::AffineLayoutType));
       const AffineLayoutPiece<DIM,coord_t> *affine = static_cast<const AffineLayoutPiece<DIM,coord_t> *>(piece);
 

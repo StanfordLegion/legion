@@ -654,20 +654,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::enqueue_ready_operation(RtEvent wait_on/*=Event::NO_EVENT*/)
+    void Operation::enqueue_ready_operation(RtEvent wait_on/*=Event::NO_EVENT*/,
+                                LgPriority priority/*= LG_THROUGHPUT_PRIORITY*/)
     //--------------------------------------------------------------------------
     {
       if (wait_on.exists() && !wait_on.has_triggered())
       {
         DeferredEnqueueArgs args;
         args.proxy_this = this;
+        args.priority = priority;
         runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, 
                                          this, wait_on);
       }
       else
       {
         Processor p = parent_ctx->get_executing_processor();
-        runtime->add_to_local_queue(p, this);
+        runtime->add_to_local_queue(p, this, priority);
       }
     }
 
@@ -11362,6 +11364,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PendingPartitionOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      // Give these slightly higher priority since they are likely
+      // needed by later operations
+      enqueue_ready_operation(RtEvent::NO_RT_EVENT, 
+                              LG_DEFERRED_THROUGHPUT_PRIORITY);
+    }
+
+    //--------------------------------------------------------------------------
     void PendingPartitionOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
@@ -11403,6 +11415,72 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return PENDING_PARTITION_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void PendingPartitionOp::EqualPartitionThunk::perform_logging(
+                                                         PendingPartitionOp* op)
+    //--------------------------------------------------------------------------
+    {
+      LegionSpy::log_target_pending_partition(op->unique_op_id, pid.id,
+          EQUAL_PARTITION);
+    }
+
+    //--------------------------------------------------------------------------
+    void PendingPartitionOp::UnionPartitionThunk::perform_logging(
+                                                         PendingPartitionOp* op)
+    //--------------------------------------------------------------------------
+    {
+      LegionSpy::log_target_pending_partition(op->unique_op_id, pid.id,
+          UNION_PARTITION);
+    } 
+
+    //--------------------------------------------------------------------------
+    void PendingPartitionOp::IntersectionPartitionThunk::perform_logging(
+                                                         PendingPartitionOp* op)
+    //--------------------------------------------------------------------------
+    {
+      LegionSpy::log_target_pending_partition(op->unique_op_id, pid.id,
+          INTERSECTION_PARTITION);
+    } 
+
+    //--------------------------------------------------------------------------
+    void PendingPartitionOp::DifferencePartitionThunk::perform_logging(
+                                                         PendingPartitionOp* op)
+    //--------------------------------------------------------------------------
+    {
+      LegionSpy::log_target_pending_partition(op->unique_op_id, pid.id,
+          DIFFERENCE_PARTITION);
+    } 
+
+    //--------------------------------------------------------------------------
+    void PendingPartitionOp::RestrictedPartitionThunk::perform_logging(
+                                                         PendingPartitionOp *op)
+    //--------------------------------------------------------------------------
+    {
+      LegionSpy::log_target_pending_partition(op->unique_op_id, pid.id,
+          RESTRICTED_PARTITION);
+    }
+
+    //--------------------------------------------------------------------------
+    void PendingPartitionOp::CrossProductThunk::perform_logging(
+                                                         PendingPartitionOp* op)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void PendingPartitionOp::ComputePendingSpace::perform_logging(
+                                                         PendingPartitionOp* op)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void PendingPartitionOp::ComputePendingDifference::perform_logging(
+                                                         PendingPartitionOp* op)
+    //--------------------------------------------------------------------------
+    {
     }
 
     /////////////////////////////////////////////////////////////
@@ -11837,10 +11915,14 @@ namespace Legion {
                                                      privilege_path,
                                                      version_info,
                                                      preconditions);
+        // Give these operations slightly higher priority since
+        // they are likely needed for other operations
         if (!preconditions.empty())
-          enqueue_ready_operation(Runtime::merge_events(preconditions));
+          enqueue_ready_operation(Runtime::merge_events(preconditions),
+                                  LG_DEFERRED_THROUGHPUT_PRIORITY);
         else
-          enqueue_ready_operation();
+          enqueue_ready_operation(RtEvent::NO_RT_EVENT, 
+                                  LG_DEFERRED_THROUGHPUT_PRIORITY);
       }
     }
 
@@ -12484,81 +12566,7 @@ namespace Legion {
       }
       else
         parent_req_index = unsigned(parent_index);
-    }
-
-    enum PendingPartitionKind
-    {
-      EQUAL_PARTITION = 0,
-      UNION_PARTITION,
-      INTERSECTION_PARTITION,
-      DIFFERENCE_PARTITION,
-      RESTRICTED_PARTITION,
-    };
-    //--------------------------------------------------------------------------
-    void PendingPartitionOp::EqualPartitionThunk::perform_logging(
-                                                         PendingPartitionOp* op)
-    //--------------------------------------------------------------------------
-    {
-      LegionSpy::log_target_pending_partition(op->unique_op_id, pid.id,
-          EQUAL_PARTITION);
-    }
-
-    //--------------------------------------------------------------------------
-    void PendingPartitionOp::UnionPartitionThunk::perform_logging(
-                                                         PendingPartitionOp* op)
-    //--------------------------------------------------------------------------
-    {
-      LegionSpy::log_target_pending_partition(op->unique_op_id, pid.id,
-          UNION_PARTITION);
-    }
-
-    //--------------------------------------------------------------------------
-    void PendingPartitionOp::IntersectionPartitionThunk::perform_logging(
-                                                         PendingPartitionOp* op)
-    //--------------------------------------------------------------------------
-    {
-      LegionSpy::log_target_pending_partition(op->unique_op_id, pid.id,
-          INTERSECTION_PARTITION);
-    }
-
-    //--------------------------------------------------------------------------
-    void PendingPartitionOp::DifferencePartitionThunk::perform_logging(
-                                                         PendingPartitionOp* op)
-    //--------------------------------------------------------------------------
-    {
-      LegionSpy::log_target_pending_partition(op->unique_op_id, pid.id,
-          DIFFERENCE_PARTITION);
-    }
-
-    //--------------------------------------------------------------------------
-    void PendingPartitionOp::RestrictedPartitionThunk::perform_logging(
-                                                         PendingPartitionOp *op)
-    //--------------------------------------------------------------------------
-    {
-      LegionSpy::log_target_pending_partition(op->unique_op_id, pid.id,
-          RESTRICTED_PARTITION);
-    }
-
-    //--------------------------------------------------------------------------
-    void PendingPartitionOp::CrossProductThunk::perform_logging(
-                                                         PendingPartitionOp* op)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    void PendingPartitionOp::ComputePendingSpace::perform_logging(
-                                                         PendingPartitionOp* op)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    void PendingPartitionOp::ComputePendingDifference::perform_logging(
-                                                         PendingPartitionOp* op)
-    //--------------------------------------------------------------------------
-    {
-    }
+    } 
 
     ///////////////////////////////////////////////////////////// 
     // Point Dependent Partition Op

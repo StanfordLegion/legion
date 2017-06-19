@@ -672,7 +672,7 @@ namespace Realm {
 
   void PartitioningOperation::deferred_launch(Event wait_for)
   {
-    if(1 || wait_for.has_triggered())
+    if(wait_for.has_triggered())
       op_queue->enqueue_partitioning_operation(this);
     else
       EventImpl::add_waiter(wait_for, new DeferredPartitioningOp(this));

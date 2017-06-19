@@ -687,16 +687,17 @@ namespace Realm {
   template <int N, typename T>
   void SparsityMapImpl<N,T>::finalize(void)
   {
-//define DEBUG_PARTITIONING
-#ifdef DEBUG_PARTITIONING
-    std::cout << "finalizing " << this << ", " << this->entries.size() << " entries" << std::endl;
-    for(size_t i = 0; i < this->entries.size(); i++)
-      std::cout << "  [" << i
-		<< "]: bounds=" << this->entries[i].bounds
-		<< " sparsity=" << this->entries[i].sparsity
-		<< " bitmap=" << this->entries[i].bitmap
-		<< std::endl;
-#endif
+    {
+      LoggerMessage msg = log_part.info();
+      if(msg.is_active()) {
+	msg << "finalizing " << me << "(" << this << "), " << this->entries.size() << " entries";
+	for(size_t i = 0; i < this->entries.size(); i++)
+	  msg << "\n  [" << i
+	      << "]: bounds=" << this->entries[i].bounds
+	      << " sparsity=" << this->entries[i].sparsity
+	      << " bitmap=" << this->entries[i].bitmap;
+      }
+    }
 
     // first step is to organize the data a little better - for N=1, this means sorting
     //  the entries list

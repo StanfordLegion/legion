@@ -374,6 +374,9 @@ namespace Realm {
   template <typename IT, typename LT>
   inline void IntervalTree<IT,LT>::add_interval(IT iv_start, IT iv_end, LT iv_label, bool defer /*= true*/)
   {
+    // ignore empty intervals
+    if(iv_start > iv_end)
+      return;
     pending_starts.push_back(iv_start);
     pending_ends.push_back(iv_end);
     pending_labels.push_back(iv_label);
@@ -387,12 +390,14 @@ namespace Realm {
   {
     size_t old_count = pending_starts.size();
     size_t new_count = iv_ranges.size();
-    pending_starts.resize(old_count + new_count);
-    pending_ends.resize(old_count + new_count);
-    pending_labels.resize(old_count + new_count, iv_label); // fill all with same label
+    pending_starts.reserve(old_count + new_count);
+    pending_ends.reserve(old_count + new_count);
+    pending_labels.reserve(old_count + new_count);
     for(size_t i = 0; i < new_count; i++) {
-      pending_starts[old_count + i] = iv_ranges.start(i);
-      pending_ends[old_count + i] = iv_ranges.end(i);
+      if(iv_ranges.start(i) > iv_ranges.end(i)) continue;
+      pending_starts.push_back(iv_ranges.start(i));
+      pending_ends.push_back(iv_ranges.end(i));
+      pending_labels.push_back(iv_label);
     }
     if(!defer)
       construct_tree(false /* incremental rebuild*/);

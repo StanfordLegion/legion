@@ -118,6 +118,7 @@ namespace Legion {
       snprintf(variant_name,128,"Color Points <%d>", CDIM);
       TaskVariantRegistrar registrar(TASK_ID, variant_name);
       registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+      registrar.set_leaf();
       Legion::Runtime::preregister_task_variant<
         ColorPoints<CDIM>::cpu_variant>(registrar, variant_name);
     }
@@ -287,6 +288,7 @@ namespace Legion {
       snprintf(variant_name,128,"Color Rects <%d,%d>", CDIM, RDIM);
       TaskVariantRegistrar registrar(TASK_ID, variant_name);
       registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+      registrar.set_leaf();
       Legion::Runtime::preregister_task_variant<
         ColorRects<CDIM,RDIM>::cpu_variant>(registrar, variant_name);
     }
@@ -3132,6 +3134,7 @@ namespace Legion {
       destroy_index_space(ctx, temp_is);
       return result;
 #else // DISABLE_PARTITION_SHIM
+      log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
       assert(false);
       return IndexPartition::NO_PART;
 #endif
@@ -3208,6 +3211,7 @@ namespace Legion {
       destroy_index_space(ctx, temp_is);
       return result;
 #else // DISABLE_PARTITION_SHIM
+      log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
       assert(false);
       return IndexPartition::NO_PART;
 #endif
@@ -3317,6 +3321,7 @@ namespace Legion {
               default:
                 assert(false);
             }
+            break;
           }
         case 2:
           {
@@ -3346,6 +3351,7 @@ namespace Legion {
               default:
                 assert(false);
             }
+            break;
           }
         case 3:
           {
@@ -3375,6 +3381,7 @@ namespace Legion {
               default:
                 assert(false);
             }
+            break;
           }
         default:
           assert(false);
@@ -3394,6 +3401,7 @@ namespace Legion {
       destroy_index_space(ctx, temp_is);
       return result;
 #else // DISABLE_PARTITION_SHIM
+      log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
       assert(false);
       return IndexPartition::NO_PART;
 #endif
@@ -3493,6 +3501,7 @@ namespace Legion {
       destroy_index_space(ctx, temp_is);
       return result;
 #else // DISABLE_PARTITION_SHIM
+      log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
       assert(false);
       return IndexPartition::NO_PART;
 #endif
@@ -3605,6 +3614,7 @@ namespace Legion {
               default:
                 assert(false);
             }
+            break;
           }
         case 2:
           {
@@ -3634,6 +3644,7 @@ namespace Legion {
               default:
                 assert(false);
             }
+            break;
           }
         case 3:
           {
@@ -3663,6 +3674,7 @@ namespace Legion {
               default:
                 assert(false);
             }
+            break;
           }
         default:
           assert(false);
@@ -3682,6 +3694,7 @@ namespace Legion {
       destroy_index_space(ctx, temp_is);
       return result;
 #else // DISABLE_PARTITION_SHIM
+      log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
       assert(false);
       return IndexPartition::NO_PART;
 #endif
@@ -3783,6 +3796,7 @@ namespace Legion {
       destroy_index_space(ctx, temp_is);
       return result;
 #else // DISABLE_PARTITION_SHIM
+      log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
       assert(false);
       return IndexPartition::NO_PART; 
 #endif
@@ -4658,14 +4672,14 @@ namespace Legion {
                                                               IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-      return get_index_space_color_point(ctx, handle); 
+      return runtime->get_index_space_color_point(ctx, handle); 
     }
 
     //--------------------------------------------------------------------------
     DomainPoint Runtime::get_index_space_color_point(IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-      return get_index_space_color_point(handle);
+      return runtime->get_index_space_color_point(handle);
     }
 
     //--------------------------------------------------------------------------

@@ -176,11 +176,9 @@ namespace Realm {
       if(!entries.empty()) {
 	// TODO: set some sort of threshold for merging entries
 	typename std::vector<SparsityMapEntry<N,T> >::const_iterator it = entries.begin();
-	ZRect<N,T> bbox = it->bounds;
-	while(it != entries.end()) {
-	  ++it;
-	  bbox = bbox.union_bbox(it->bounds);
-	}
+	ZRect<N,T> bbox = is.bounds.intersection(it->bounds);
+	while(++it != entries.end())
+	  bbox = bbox.union_bbox(is.bounds.intersection(it->bounds));
 	piece_bounds.push_back(bbox);
       }
     }
@@ -495,6 +493,11 @@ namespace Realm {
   template <typename FT, int N, typename T>
   AffineAccessor<FT,N,T>::AffineAccessor(RegionInstance inst, ptrdiff_t field_offset, const ZRect<N,T>& subrect)
   {
+    // Special case for empty regions
+    if(subrect.empty()) {
+      base = 0;
+      return;
+    }
     const InstanceLayout<N,T> *layout = dynamic_cast<const InstanceLayout<N,T> *>(inst.get_layout());
     std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(field_offset);
     assert(it != layout->fields.end());
