@@ -10326,21 +10326,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ptr_t Runtime::safe_cast(Context ctx, ptr_t pointer, LogicalRegion region)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context safe cast!");
-      if (pointer.is_null())
-        return pointer;
-      Realm::ZPoint<1,coord_t> realm_point(pointer.value);
-      if (ctx->safe_cast(forest, region.get_index_space(), &realm_point, 
-            NT_TemplateHelper::encode_tag<1,coord_t>()))
-        return pointer;
-      return ptr_t::nil();
-    }
-
-    //--------------------------------------------------------------------------
     bool Runtime::safe_cast(Context ctx, LogicalRegion region,
                             const void *realm_point, TypeTag type_tag)
     //--------------------------------------------------------------------------

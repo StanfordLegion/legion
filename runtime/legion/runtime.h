@@ -1685,7 +1685,6 @@ namespace Legion {
       unsigned get_index_partition_depth(Context ctx, IndexPartition handle);
       unsigned get_index_partition_depth(IndexPartition handle);
     public:
-      ptr_t safe_cast(Context ctx, ptr_t pointer, LogicalRegion region);
       bool safe_cast(Context ctx, LogicalRegion region,
                      const void *realm_point, TypeTag type_tag);
     public:

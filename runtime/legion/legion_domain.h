@@ -438,7 +438,6 @@ namespace Legion {
       }
 
       // Intersects this Domain with another Domain and returns the result.
-      // WARNING: currently only works with structured Domains.
       Domain intersection(const Domain &other) const
       {
         assert(dim == other.dim);

@@ -1320,7 +1320,7 @@ namespace Legion {
      * this accessor if they are confident that they actually do
      * have their privileges and bounds correct
      */
-    template<typename FT, int N, typename T = int,
+    template<typename FT, int N, typename T = coord_t,
              typename A = Realm::AffineAccessor<FT,N,T> >
     class UnsafeFieldAccessor {
     public:
