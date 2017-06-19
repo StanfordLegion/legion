@@ -16,7 +16,7 @@
 #
 
 from __future__ import print_function
-import argparse, codecs, glob, itertools, json, multiprocessing, os, optparse, re, shutil, subprocess, sys, tempfile, traceback
+import argparse, codecs, glob, itertools, json, multiprocessing, os, optparse, re, shutil, subprocess, sys, tempfile, traceback, signal, time
 from collections import OrderedDict
 import regent
 
@@ -55,8 +55,25 @@ def run(filename, debug, verbose, flags, env):
         stderr=None if verbose else subprocess.STDOUT,
         env=env,
         cwd=os.path.dirname(os.path.abspath(filename)))
-    output, _ = proc.communicate()
-    retcode = proc.wait()
+    try:
+        output, _ = proc.communicate()
+        retcode = proc.wait()
+    except (KeyboardInterrupt, TestTimeoutException):
+        if verbose: print('terminating child process...')
+        proc.terminate()
+        maxtime = 15
+        while True:
+            retcode = proc.poll()
+            if retcode is not None:
+                break
+            if maxtime > 0:
+                time.sleep(0.1)
+                maxtime = maxtime - 0.1
+            else:
+                print('Child process failed to terminate - sending SIGKILL')
+                proc.kill()
+                break
+        raise
     if retcode != 0:
         raise TestFailure(' '.join(args), output.decode('utf-8') if output is not None else None)
     return ' '.join(args)
@@ -160,14 +177,27 @@ clear = "\033[0m"
 PASS = 'pass'
 FAIL = 'fail'
 INTERRUPT = 'interrupt'
+TIMEOUT = 'timeout'
 
-def test_runner(test_name, test_closure, debug, verbose, filename):
+class TestTimeoutException(Exception):
+    pass
+
+def sigalrm_handler(signum, frame):
+    raise TestTimeoutException
+
+def test_runner(test_name, test_closure, debug, verbose, filename, timelimit):
     test_fn, test_args = test_closure
     saved_temps = []
+    if timelimit:
+        signal.signal(signal.SIGALRM, sigalrm_handler)
+        signal.alarm(timelimit)
     try:
         test_fn(filename, debug, verbose, *test_args)
+        signal.alarm(0)
     except KeyboardInterrupt:
         return test_name, filename, [], INTERRUPT, None
+    except TestTimeoutException:
+        return test_name, filename, [], TIMEOUT, None
     # except driver.CompilerException as e:
     #     if verbose:
     #         return test_name, filename, e.saved_temps, FAIL, ''.join(traceback.format_exception(*sys.exc_info()))
@@ -238,7 +268,7 @@ def get_test_specs(use_run, use_spy, use_hdf5, extra_flags):
     return result
 
 def run_all_tests(thread_count, debug, run, spy, hdf5, extra_flags, verbose, quiet,
-                  only_patterns, skip_patterns):
+                  only_patterns, skip_patterns, timelimit):
     thread_pool = multiprocessing.Pool(thread_count)
     results = []
 
@@ -259,7 +289,7 @@ def run_all_tests(thread_count, debug, run, spy, hdf5, extra_flags, verbose, qui
                 continue
             if skip_patterns and any(re.search(p,test_path) for p in skip_patterns):
                 continue
-            results.append((test_name, test_path, thread_pool.apply_async(test_runner, (test_name, test_fn, debug, verbose, test_path))))
+            results.append((test_name, test_path, thread_pool.apply_async(test_runner, (test_name, test_fn, debug, verbose, test_path, timelimit))))
 
     thread_pool.close()
 
@@ -293,6 +323,11 @@ def run_all_tests(thread_count, debug, run, spy, hdf5, extra_flags, verbose, qui
             elif outcome == FAIL:
                 if quiet: print()
                 print('[%sFAIL%s] (%s) %s' % (red, clear, test_name, filename))
+                if output is not None: print(output)
+                test_counters[test_name].failed += 1
+            elif outcome == TIMEOUT:
+                if quiet: print()
+                print('[%sTIMEOUT%s] (%s) %s' % (red, clear, test_name, filename))
                 if output is not None: print(output)
                 test_counters[test_name].failed += 1
             else:
@@ -384,6 +419,11 @@ def test_driver(argv):
                         default=[],
                         help='skip tests matching pattern',
                         dest='skip_patterns')
+    parser.add_argument('--limit',
+                        default=600, # 10 minutes
+                        type=int,
+                        help='max run time for each test (in seconds)',
+                        dest='timelimit')
     args = parser.parse_args(argv[1:])
 
     run_all_tests(
@@ -396,7 +436,8 @@ def test_driver(argv):
         args.verbose,
         args.quiet,
         args.only_patterns,
-        args.skip_patterns)
+        args.skip_patterns,
+        args.timelimit)
 
 if __name__ == '__main__':
     test_driver(sys.argv)
