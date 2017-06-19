@@ -868,7 +868,7 @@ create_cross_product_shallow_structured(Runtime *runtime,
         for (size_t j = block_j; j < block_j_max; j++) {
           Domain& rh_dom = rh_doms[j];
           Domain intersection = lh_dom.intersection(rh_dom);
-          if (intersection.get_volume() > 0) {
+          if (!intersection.empty()) {
             legion_terra_logical_region_list_t& sublist = result_->sublists[i];
             size_t idx = sublist.count++;
             sublist.subregions[idx].index_space = CObjectWrapper::wrap(rhs[j]);

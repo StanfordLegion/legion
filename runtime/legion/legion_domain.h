@@ -412,6 +412,8 @@ namespace Legion {
 
       int get_dim(void) const { return dim; }
 
+      bool empty(void) const { return (get_volume() == 0); }
+
       size_t get_volume(void) const
       {
         switch (dim)
