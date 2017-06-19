@@ -5765,7 +5765,7 @@ namespace Legion {
           std::set<ApEvent> child_ready_events;
           {
             AutoLock n_lock(node_lock,1,false/*exclusvie*/);
-            if (color_map.size() == total_children)
+            if (color_map.size() == size_t(total_children))
             {
               for (std::map<LegionColor,IndexSpaceNode*>::const_iterator it =
                     color_map.begin(); it != color_map.end(); it++)

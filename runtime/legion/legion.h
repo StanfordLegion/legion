@@ -91,7 +91,7 @@ namespace Legion {
      * and coordinate type of an index space as template
      * parameters for enhanced type checking and efficiency.
      */
-    template<int DIM, typename COORD_T>
+    template<int DIM, typename COORD_T = coord_t>
     class IndexSpaceT : public IndexSpace {
     protected:
       // Only the runtime should be allowed to make these
@@ -143,7 +143,7 @@ namespace Legion {
      * and coordinate type of an index partition as template
      * parameters for enhanced type checking and efficiency
      */
-    template<int DIM, typename COORD_T>
+    template<int DIM, typename COORD_T = coord_t>
     class IndexPartitionT : public IndexPartition {
     protected:
       // Only the runtime should be allowed to make these
@@ -238,7 +238,7 @@ namespace Legion {
      * and coordinate type of a logical region as template
      * parameters for enhanced type checking and efficiency.
      */
-    template<int DIM, typename COORD_T>
+    template<int DIM, typename COORD_T = coord_t>
     class LogicalRegionT : public LogicalRegion {
     protected:
       // Only the runtime should be allowed to make these
@@ -303,7 +303,7 @@ namespace Legion {
      * and coordinate type of an logical partition as template
      * parameters for enhanced type checking and efficiency
      */
-    template<int DIM, typename COORD_T>
+    template<int DIM, typename COORD_T = coord_t>
     class LogicalPartitionT : public LogicalPartition {
     protected:
       // Only the runtime should be allowed to make these
@@ -2174,7 +2174,7 @@ namespace Legion {
      * REDUCE
      *  - template<typename REDOP> void reduce(const Point<N,T>&, REDOP::RHS)
      */
-    template<PrivilegeMode M, typename FT, int N, typename COORD_T = int,
+    template<PrivilegeMode M, typename FT, int N, typename COORD_T = coord_t,
              typename A = Realm::AffineAccessor<FT,N,COORD_T>,
 #ifdef BOUNDS_CHECKS
              bool CHECK_BOUNDS = true>

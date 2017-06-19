@@ -3838,9 +3838,11 @@ function codegen.expr_cross_product_array(cx, node)
   actions = quote
     var [colors]
     var start : double = c.legion_get_current_time_in_micros()/double(1e6)
-    var color_domain =
+    var color_space =
       c.legion_index_partition_get_color_space(
         [cx.runtime], [lhs.value].impl.index_partition)
+    var color_domain = 
+      c.legion_index_space_get_domain([cx.runtime], color_space)
     regentlib.assert(color_domain.dim == 1, "color domain should be 1D")
     var start_color = color_domain.rect_data[0]
     var end_color = color_domain.rect_data[1]

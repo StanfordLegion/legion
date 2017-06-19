@@ -412,6 +412,8 @@ namespace Legion {
 
       int get_dim(void) const { return dim; }
 
+      bool empty(void) const { return (get_volume() == 0); }
+
       size_t get_volume(void) const
       {
         switch (dim)
@@ -438,7 +440,6 @@ namespace Legion {
       }
 
       // Intersects this Domain with another Domain and returns the result.
-      // WARNING: currently only works with structured Domains.
       Domain intersection(const Domain &other) const
       {
         assert(dim == other.dim);

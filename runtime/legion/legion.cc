@@ -83,6 +83,7 @@ namespace Legion {
       add_field(0/*index*/, color_field);
       add_field(0/*index*/, pointer_field);
       // Serialize the coloring into the argument buffer 
+      rez.serialize<size_t>(coloring.size());
       for (PointColoring::const_iterator cit = coloring.begin();
             cit != coloring.end(); cit++)
       {
@@ -4799,7 +4800,13 @@ namespace Legion {
                                       LogicalRegion region)
     //--------------------------------------------------------------------------
     {
-      return runtime->safe_cast(ctx, pointer, region);
+      if (pointer.is_null())
+        return pointer;
+      Realm::ZPoint<1,coord_t> p(pointer.value);
+      if (runtime->safe_cast(ctx, region, &p,
+            Internal::NT_TemplateHelper::encode_tag<1,coord_t>()))
+        return pointer;
+      return ptr_t::nil();
     }
 
     //--------------------------------------------------------------------------

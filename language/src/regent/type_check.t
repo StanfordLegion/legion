@@ -1660,8 +1660,30 @@ function type_check.expr_image(cx, node)
   end
 
   local field_type = std.get_field_path(region_type:fspace(), region.fields[1])
-  if not (std.is_bounded_type(field_type) and field_type:is_ptr() or std.is_index_type(field_type)) then
-    report.error(node, "type mismatch in argument 3: expected field of ptr type but got " .. tostring(field_type))
+  if not ((std.is_bounded_type(field_type) and std.is_index_type(field_type.index_type)) or std.is_index_type(field_type)) then
+    report.error(node, "type mismatch in argument 3: expected field of index type but got " .. tostring(field_type))
+  else
+    -- TODO: indexspaces should be parametrized by index types.
+    --       currently they only support 64-bit points, which is why we do this check here.
+    local function is_base_type_64bit(ty)
+      if std.type_eq(ty, opaque) or std.type_eq(ty, int64) then
+        return true
+      elseif ty:isstruct() then
+        for _, entry in pairs(ty:getentries()) do
+          local entry_type = entry[2] or entry.type
+          if not is_base_type_64bit(entry_type) then return false end
+        end
+        return true
+      else return false end
+    end
+
+    local index_type = field_type
+    if std.is_bounded_type(index_type) then
+      index_type = index_type.index_type
+    end
+    if not is_base_type_64bit(index_type.base_type) then
+      report.error(node, "type mismatch in argument 3: expected field of 64-bit index type (for now) but got " .. tostring(field_type))
+    end
   end
 
   local region_symbol
@@ -1819,8 +1841,30 @@ function type_check.expr_preimage(cx, node)
   end
 
   local field_type = std.get_field_path(region_type:fspace(), region.fields[1])
-  if not (std.is_bounded_type(field_type) and field_type:is_ptr() or std.is_index_type(field_type)) then
-    report.error(node, "type mismatch in argument 3: expected field of ptr type but got " .. tostring(field_type))
+  if not ((std.is_bounded_type(field_type) and std.is_index_type(field_type.index_type)) or std.is_index_type(field_type)) then
+    report.error(node, "type mismatch in argument 3: expected field of index type but got " .. tostring(field_type))
+  else
+    -- TODO: indexspaces should be parametrized by index types.
+    --       currently they only support 64-bit points, which is why we do this check here.
+    local function is_base_type_64bit(ty)
+      if std.type_eq(ty, opaque) or std.type_eq(ty, int64) then
+        return true
+      elseif ty:isstruct() then
+        for _, entry in pairs(ty:getentries()) do
+          local entry_type = entry[2] or entry.type
+          if not is_base_type_64bit(entry_type) then return false end
+        end
+        return true
+      else return false end
+    end
+
+    local index_type = field_type
+    if std.is_bounded_type(index_type) then
+      index_type = index_type.index_type
+    end
+    if not is_base_type_64bit(index_type.base_type) then
+      report.error(node, "type mismatch in argument 3: expected field of 64-bit index type (for now) but got " .. tostring(field_type))
+    end
   end
 
   local region_symbol
