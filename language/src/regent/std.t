@@ -2254,7 +2254,7 @@ local function validate_index_base_type(base_type)
          "Index type expected a type, got " .. tostring(base_type))
   if std.type_eq(base_type, opaque) then
     return c.legion_ptr_t, 0, terralib.newlist({"value"})
-  elseif std.type_eq(base_type, int64) then
+  elseif std.type_eq(base_type, int32) or std.type_eq(base_type, int64) then
     return base_type, 1, false
   elseif base_type:isstruct() then
     local entries = base_type:getentries()
@@ -2263,14 +2263,14 @@ local function validate_index_base_type(base_type)
              tostring(#entries))
     for _, entry in ipairs(entries) do
       local field_type = entry[2] or entry.type
-      assert(std.type_eq(field_type, int64),
-             "Multi-dimensional index type expected fields to be " .. tostring(int64) ..
-               ", got " .. tostring(field_type))
+      assert(std.type_eq(field_type, int32) or std.type_eq(field_type, int64),
+             "Multi-dimensional index type expected fields to be " .. tostring(int32) .. " or " ..
+             tostring(int64) ..  ", got " .. tostring(field_type))
     end
     return base_type, #entries, entries:map(function(entry) return entry[1] or entry.field end)
   else
     assert(false, "Index type expected " .. tostring(opaque) .. ", " ..
-             tostring(int64) .. " or a struct, got " .. tostring(base_type))
+             tostring(int32) .. ", " .. tostring(int64) .. " or a struct, got " .. tostring(base_type))
   end
 end
 
