@@ -49,12 +49,17 @@ namespace Realm {
   using namespace LegionRuntime::Arrays;
 
   class TransferIteratorIndexSpace : public TransferIterator {
+  protected:
+    TransferIteratorIndexSpace(void); // used by deserializer
   public:
-    TransferIteratorIndexSpace(const IndexSpace is,
+    TransferIteratorIndexSpace(const IndexSpace _is,
 			       RegionInstance inst,
 			       const std::vector<unsigned>& _fields,
 			       size_t _extra_elems);
 
+    template <typename S>
+    static TransferIterator *deserialize_new(S& deserializer);
+      
     virtual ~TransferIteratorIndexSpace(void);
 
     virtual void reset(void);
@@ -64,7 +69,13 @@ namespace Realm {
     virtual void confirm_step(void);
     virtual void cancel_step(void);
 
+    static Serialization::PolymorphicSerdezSubclass<TransferIterator, TransferIteratorIndexSpace> serdez_subclass;
+
+    template <typename S>
+    bool serialize(S& serializer) const;
+
   protected:
+    IndexSpace is;
     const ElementMask *valid_mask;
     coord_t first_enabled;
     ElementMask::Enumerator *enumerator;
@@ -110,6 +121,44 @@ namespace Realm {
 	field_sizes.push_back(*it2);
       }
     }
+  }
+
+  TransferIteratorIndexSpace::TransferIteratorIndexSpace(void)
+    : enumerator(0), field_idx(0)
+    , tentative_valid(false)
+  {}
+
+  template <typename S>
+  /*static*/ TransferIterator *TransferIteratorIndexSpace::deserialize_new(S& deserializer)
+  {
+    IndexSpace is;
+    RegionInstance inst;
+    std::vector<unsigned> field_offsets;
+    std::vector<size_t> field_sizes;
+    size_t extra_elems;
+
+    if(!((deserializer >> is) &&
+	 (deserializer >> inst) &&
+	 (deserializer >> field_offsets) &&
+	 (deserializer >> field_sizes) &&
+	 (deserializer >> extra_elems)))
+      return 0;
+
+    TransferIteratorIndexSpace *tiis = new TransferIteratorIndexSpace;
+
+    tiis->is = is;
+    tiis->field_offsets.swap(field_offsets);
+    tiis->field_sizes.swap(field_sizes);
+    tiis->extra_elems = extra_elems;
+
+    tiis->valid_mask = &(is.get_valid_mask());
+    assert(tiis->valid_mask != 0);
+    tiis->first_enabled = tiis->valid_mask->find_enabled();
+    tiis->inst_impl = get_runtime()->get_instance_impl(inst);
+    tiis->mapping = tiis->inst_impl->metadata.linearization.get_mapping<1>();
+    assert(tiis->mapping != 0);
+
+    return tiis;
   }
 
   TransferIteratorIndexSpace::~TransferIteratorIndexSpace(void)
@@ -260,20 +309,42 @@ namespace Realm {
     tentative_valid = false;
   }
 
+  /*static*/ Serialization::PolymorphicSerdezSubclass<TransferIterator, TransferIteratorIndexSpace> TransferIteratorIndexSpace::serdez_subclass;
+
+  template <typename S>
+  bool TransferIteratorIndexSpace::serialize(S& serializer) const
+  {
+    return ((serializer << is) &&
+	    (serializer << inst_impl->me) &&
+	    (serializer << field_offsets) &&
+	    (serializer << field_sizes) &&
+	    (serializer << extra_elems));
+  }
+
 
   template <unsigned DIM>
   class TransferIteratorRect : public TransferIterator {
+  protected:
+    TransferIteratorRect(void); // used by deserializer
   public:
     TransferIteratorRect(const Rect<DIM>& _r,
 			 RegionInstance inst,
 			 const std::vector<unsigned>& _fields);
 
+    template <typename S>
+    static TransferIterator *deserialize_new(S& deserializer);
+      
     virtual void reset(void);
     virtual bool done(void) const;
     virtual size_t step(size_t max_bytes, AddressInfo& info,
 			bool tentative = false);
     virtual void confirm_step(void);
     virtual void cancel_step(void);
+
+    static Serialization::PolymorphicSerdezSubclass<TransferIterator, TransferIteratorRect<DIM> > serdez_subclass;
+
+    template <typename S>
+    bool serialize(S& serializer) const;
 
   protected:
     Rect<DIM> r;
@@ -315,6 +386,41 @@ namespace Realm {
 	field_sizes.push_back(*it2);
       }
     }
+  }
+
+  template <unsigned DIM>
+  TransferIteratorRect<DIM>::TransferIteratorRect(void)
+    : field_idx(0)
+    , tentative_valid(false)
+  {}
+
+  template <unsigned DIM>
+  template <typename S>
+  /*static*/ TransferIterator *TransferIteratorRect<DIM>::deserialize_new(S& deserializer)
+  {
+    Rect<DIM> r;
+    RegionInstance inst;
+    std::vector<unsigned> field_offsets;
+    std::vector<size_t> field_sizes;
+
+    if(!((deserializer >> r) &&
+	 (deserializer >> inst) &&
+	 (deserializer >> field_offsets) &&
+	 (deserializer >> field_sizes)))
+      return 0;
+
+    TransferIteratorRect<DIM> *tir = new TransferIteratorRect<DIM>;
+
+    tir->r = r;
+    tir->field_offsets.swap(field_offsets);
+    tir->field_sizes.swap(field_sizes);
+
+    tir->p = r.lo;
+    tir->inst_impl = get_runtime()->get_instance_impl(inst);
+    tir->mapping = tir->inst_impl->metadata.linearization.template get_mapping<DIM>();
+    assert(tir->mapping != 0);
+
+    return tir;
   }
 
   template <unsigned DIM>
@@ -486,6 +592,23 @@ namespace Realm {
     tentative_valid = false;
   }
 
+  template <unsigned DIM>
+  /*static*/ Serialization::PolymorphicSerdezSubclass<TransferIterator, TransferIteratorRect<DIM> > TransferIteratorRect<DIM>::serdez_subclass;
+
+  template <unsigned DIM>
+  template <typename S>
+  bool TransferIteratorRect<DIM>::serialize(S& serializer) const
+  {
+    return ((serializer << r) &&
+	    (serializer << inst_impl->me) &&
+	    (serializer << field_offsets) &&
+	    (serializer << field_sizes));
+  }
+
+  template class TransferIteratorRect<1>;
+  template class TransferIteratorRect<2>;
+  template class TransferIteratorRect<3>;
+
 
 #ifdef USE_HDF
   template <unsigned DIM>
@@ -494,6 +617,9 @@ namespace Realm {
     TransferIteratorHDF5(const Rect<DIM>& _r,
 			 RegionInstance inst,
 			 const std::vector<unsigned>& _fields);
+
+    // NOTE: TransferIteratorHDF5 does NOT support serialization - you
+    //  can't move away from the process that called H5Fopen
 
     virtual void reset(void);
     virtual bool done(void) const;
@@ -672,6 +798,7 @@ namespace Realm {
     tentative_valid = false;
   }
 #endif // USE_HDF
+
 
   ////////////////////////////////////////////////////////////////////////
   //

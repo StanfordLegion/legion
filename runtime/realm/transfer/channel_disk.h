@@ -38,6 +38,8 @@ namespace LegionRuntime {
       FileXferDes(
           DmaRequest* _dma_request, gasnet_node_t _launch_node,
           XferDesID _guid, XferDesID _pre_guid, XferDesID _next_guid,
+	  uint64_t next_max_rw_gap,
+	  size_t src_ib_offset, size_t src_ib_size,
           bool mark_started, RegionInstance inst,
 	  Memory _src_mem, Memory _dst_mem,
 	  TransferIterator *_src_iter, TransferIterator *_dst_iter,
@@ -63,6 +65,8 @@ namespace LegionRuntime {
     public:
       DiskXferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
                   XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
+		  uint64_t next_max_rw_gap,
+		  size_t src_ib_offset, size_t src_ib_size,
                   bool mark_started,
 		  Memory _src_mem, Memory _dst_mem,
 		  TransferIterator *_src_iter, TransferIterator *_dst_iter,

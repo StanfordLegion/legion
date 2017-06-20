@@ -210,6 +210,31 @@ namespace LegionRuntime{
       bool is_write_done;
       // whether I am a 1D or 2D transfer
       Dimension dim;
+      // sequence info - used to update read/write counts, handle reordering
+      size_t seq_pos, seq_count;
+    };
+
+    class SequenceAssembler {
+    public:
+      SequenceAssembler(void);
+      SequenceAssembler(const SequenceAssembler& copy_from);
+      ~SequenceAssembler(void);
+
+      void swap(SequenceAssembler& other);
+
+      // asks if a span exists - return value is number of bytes from the
+      //  start that do
+      size_t span_exists(size_t start, size_t count);
+
+      // returns the amount by which the contiguous range has been increased
+      //  (i.e. from [pos, pos+retval) )
+      size_t add_span(size_t pos, size_t count);
+
+    protected:
+      GASNetHSL mutex;
+      size_t contig_amount;  // everything from [0, contig_amount) is covered
+      size_t first_noncontig; // nothing in [contig_amount, first_noncontig) 
+      std::map<size_t, size_t> spans;  // noncontiguous spans
     };
 
     class MemcpyRequest : public Request {
@@ -498,15 +523,16 @@ namespace LegionRuntime{
       bool mark_start;
       // ID of the node that launches this XferDes
       gasnet_node_t launch_node;
-      uint64_t /*bytes_submit, */bytes_read, bytes_write/*, bytes_total*/;
-      bool iteration_completed, writes_completed, reads_completed;
+      //uint64_t /*bytes_submit, */bytes_read, bytes_write/*, bytes_total*/;
+      bool iteration_completed;
       uint64_t bytes_total; // not valid until iteration_completed == true
-      uint64_t pre_bytes_write;
-      uint64_t next_bytes_read;
+      uint64_t pre_bytes_total;
+      //uint64_t next_bytes_read;
       MemoryImpl *src_mem;
       MemoryImpl *dst_mem;
       TransferIterator *src_iter;
       TransferIterator *dst_iter;
+      size_t src_ib_offset, src_ib_size;
       // maximum size for a single request
       uint64_t max_req_size;
       // priority of the containing XferDes
@@ -518,8 +544,7 @@ namespace LegionRuntime{
       XferKind kind;
       // XferOrder of the Xfer Descriptor
       XferOrder::Type order;
-      // map from unique id to request class, this map only keeps
-       std::map<int64_t, uint64_t> segments_read, segments_write;
+      SequenceAssembler seq_read, seq_write, seq_pre_write, seq_next_read;
       // queue that contains all available free requests
       std::queue<Request*> available_reqs;
       enum {
@@ -541,6 +566,7 @@ namespace LegionRuntime{
     public:
       XferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
               XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
+	      uint64_t _next_max_rw_gap, size_t src_ib_offset, size_t src_ib_size,
               bool _mark_start,
 	      Memory _src_mem, Memory _dst_mem,
 	      TransferIterator *_src_iter, TransferIterator *_dst_iter,
@@ -561,21 +587,16 @@ namespace LegionRuntime{
       void default_notify_request_read_done(Request* req);
       void default_notify_request_write_done(Request* req);
 
-      void simple_update_bytes_read(int64_t offset, uint64_t size);
-      void simple_update_bytes_write(int64_t offset, uint64_t size);
+      virtual void update_bytes_read(size_t offset, size_t size);
+      virtual void update_bytes_write(size_t offset, size_t size);
+      void update_pre_bytes_write(size_t offset, size_t size, size_t pre_bytes_total);
+      void update_next_bytes_read(size_t offset, size_t size);
 
-      bool is_completed() {
-	return(iteration_completed &&
-	       (bytes_read == bytes_total) &&
-	       (bytes_write == bytes_total));
-	//return (iteration_completed && writes_completed && reads_completed);
-        // return ((bytes_write == bytes_total)
-        //       &&((next_xd_guid == XFERDES_NO_GUID)
-        //        ||(next_bytes_read == bytes_total)));
-      }
+      bool is_completed(void);
 
       void mark_completed();
 
+#if 0
       void update_pre_bytes_write(size_t new_val) {
         pthread_mutex_lock(&update_write_lock);
         if (pre_bytes_write < new_val)
@@ -597,6 +618,7 @@ namespace LegionRuntime{
         }*/
         pthread_mutex_unlock(&update_read_lock);
       }
+#endif
 
       Request* dequeue_request() {
         Request* req = available_reqs.front();
@@ -616,6 +638,7 @@ namespace LegionRuntime{
     public:
       MemcpyXferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
                     XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
+		    uint64_t _next_max_rw_gap, size_t src_ib_offset, size_t src_ib_size,
                     bool mark_started,
 		    Memory _src_mem, Memory _dst_mem,
 		    TransferIterator *_src_iter, TransferIterator *_dst_iter,
@@ -641,6 +664,7 @@ namespace LegionRuntime{
     public:
       GASNetXferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
                     XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
+		    uint64_t _next_max_rw_gap, size_t src_ib_offset, size_t src_ib_size,
                     bool mark_started,
 		    Memory _src_mem, Memory _dst_mem,
 		    TransferIterator *_src_iter, TransferIterator *_dst_iter,
@@ -665,6 +689,7 @@ namespace LegionRuntime{
     public:
       RemoteWriteXferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
                          XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
+			 uint64_t _next_max_rw_gap, size_t src_ib_offset, size_t src_ib_size,
                          bool mark_started,
 			 Memory _src_mem, Memory _dst_mem,
 			 TransferIterator *_src_iter, TransferIterator *_dst_iter,
@@ -681,6 +706,10 @@ namespace LegionRuntime{
       void notify_request_write_done(Request* req);
       void flush();
 
+      // doesn't do pre_bytes_write updates, since the remote write message
+      //  takes care of it with lower latency
+      virtual void update_bytes_write(size_t offset, size_t size);
+
     private:
       RemoteWriteRequest* requests;
       char *dst_buf_base;
@@ -691,6 +720,7 @@ namespace LegionRuntime{
     public:
       GPUXferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
                  XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
+		 uint64_t _next_max_rw_gap, size_t src_ib_offset, size_t src_ib_size,
                  bool mark_started,
 		 Memory _src_mem, Memory _dst_mem,
 		 TransferIterator *_src_iter, TransferIterator *_dst_iter,
@@ -723,6 +753,7 @@ namespace LegionRuntime{
     public:
       HDFXferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
                  XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
+		 uint64_t _next_max_rw_gap, size_t src_ib_offset, size_t src_ib_size,
                  bool mark_started,
                  RegionInstance inst,
 		 Memory _src_mem, Memory _dst_mem,
@@ -1114,9 +1145,11 @@ namespace LegionRuntime{
 
     struct XferDesRemoteWriteMessage {
       struct RequestArgs : public BaseMedium {
-        void *dst_buf;
+        //void *dst_buf;
         RemoteWriteRequest *req;
         gasnet_node_t sender;
+	XferDesID next_xd_guid;
+	size_t span_start, span_size, pre_bytes_total;
       };
 
       static void handle_request(RequestArgs args, const void *data, size_t datalen);
@@ -1127,11 +1160,19 @@ namespace LegionRuntime{
 
       static void send_request(gasnet_node_t target, void *dst_buf,
                                const void *src_buf, size_t nbytes,
-                               RemoteWriteRequest* req) 
+                               RemoteWriteRequest* req,
+			       XferDesID next_xd_guid,
+			       size_t span_start,
+			       size_t span_size,
+			       size_t pre_bytes_total) 
       {
         RequestArgs args;
-        args.dst_buf = dst_buf;
+        //args.dst_buf = dst_buf;
         args.req = req;
+	args.next_xd_guid = next_xd_guid;
+	args.span_start = span_start;
+	args.span_size = span_size;
+	args.pre_bytes_total = pre_bytes_total;
         args.sender = gasnet_mynode();
         //TODO: need to ask Sean what payload mode we should use
         Message::request(target, args, src_buf, nbytes, PAYLOAD_KEEP, dst_buf);
@@ -1139,11 +1180,19 @@ namespace LegionRuntime{
 
       static void send_request(gasnet_node_t target,  void *dst_buf,
                                const void *src_buf, size_t nbytes, off_t src_str,
-                               size_t nlines, RemoteWriteRequest* req)
+                               size_t nlines, RemoteWriteRequest* req,
+			       XferDesID next_xd_guid,
+			       size_t span_start,
+			       size_t span_size,
+			       size_t pre_bytes_total) 
       {
         RequestArgs args;
-	args.dst_buf = dst_buf;
+	//args.dst_buf = dst_buf;
 	args.req = req;
+	args.next_xd_guid = next_xd_guid;
+	args.span_start = span_start;
+	args.span_size = span_size;
+	args.pre_bytes_total = pre_bytes_total;
 	args.sender = gasnet_mynode();
         //TODO: need to ask Sean what payload mode we should use
         Message::request(target, args, src_buf, nbytes, src_str, nlines,
@@ -1203,39 +1252,13 @@ namespace LegionRuntime{
 
       static void send_request(gasnet_node_t target, DmaRequest* dma_request, gasnet_node_t launch_node,
                                XferDesID guid, XferDesID pre_xd_guid, XferDesID next_xd_guid,
+			       uint64_t next_max_rw_gap, size_t src_ib_offset, size_t src_ib_size,
                                bool mark_started,
 			       Memory _src_mem, Memory _dst_mem,
 			       TransferIterator *_src_iter, TransferIterator *_dst_iter,
                                uint64_t max_req_size, long max_nr, int priority,
                                XferOrder::Type order, XferDes::XferKind kind,
-                               XferDesFence* fence, RegionInstance inst = RegionInstance::NO_INST)
-      {
-        size_t payload_size = sizeof(Payload);// + sizeof(OffsetsAndSize) * oas_vec.size();
-        Payload *payload = (Payload*) malloc(payload_size);
-        payload->dma_request = dma_request;
-        payload->launch_node = launch_node;
-        payload->guid = guid;
-        payload->pre_xd_guid = pre_xd_guid;
-        payload->next_xd_guid = next_xd_guid;
-        payload->mark_started = mark_started;
-        payload->max_req_size = max_req_size;
-        payload->max_nr = max_nr;
-        payload->priority = priority;
-        payload->order = order;
-        payload->kind = kind;
-        //payload->domain = domain;
-        //src_buf.serialize(payload->src_buf_bits);
-        //dst_buf.serialize(payload->dst_buf_bits);
-        //payload->oas_vec_size = oas_vec.size();
-        //for (unsigned i = 0; i < oas_vec.size(); i++)
-        //  payload->oas_vec(i) = oas_vec[i];
-        RequestArgs args;
-        args.inst = inst;
-        args.src_mem = _src_mem; //src_buf.memory;
-        args.dst_mem = _dst_mem; //dst_buf.memory;
-        args.fence = fence;
-        Message::request(target, args, payload, payload_size, PAYLOAD_FREE);
-      }
+                               XferDesFence* fence, RegionInstance inst = RegionInstance::NO_INST);
     };
 
     struct XferDesDestroyMessage {
@@ -1260,7 +1283,7 @@ namespace LegionRuntime{
     struct UpdateBytesWriteMessage {
       struct RequestArgs {
         XferDesID guid;
-        uint64_t bytes_write;
+	size_t span_start, span_size, pre_bytes_total;
       };
 
       static void handle_request(RequestArgs args);
@@ -1269,11 +1292,15 @@ namespace LegionRuntime{
                                         RequestArgs,
                                         handle_request> Message;
 
-      static void send_request(gasnet_node_t target, XferDesID guid, uint64_t bytes_write)
+      static void send_request(gasnet_node_t target, XferDesID guid,
+			       size_t span_start, size_t span_size,
+			       size_t pre_bytes_total)
       {
         RequestArgs args;
         args.guid = guid;
-        args.bytes_write = bytes_write;
+	args.span_start = span_start;
+	args.span_size = span_size;
+	args.pre_bytes_total = pre_bytes_total;
         Message::request(target, args);
       }
     };
@@ -1281,7 +1308,7 @@ namespace LegionRuntime{
     struct UpdateBytesReadMessage {
       struct RequestArgs {
         XferDesID guid;
-        uint64_t bytes_read;
+	size_t span_start, span_size;
       };
 
       static void handle_request(RequestArgs args);
@@ -1290,11 +1317,13 @@ namespace LegionRuntime{
                                         RequestArgs,
                                         handle_request> Message;
 
-      static void send_request(gasnet_node_t target, XferDesID guid, uint64_t bytes_read)
+      static void send_request(gasnet_node_t target, XferDesID guid,
+			       size_t span_start, size_t span_size)
       {
         RequestArgs args;
         args.guid = guid;
-        args.bytes_read = bytes_read;
+	args.span_start = span_start;
+	args.span_size = span_size;
         Message::request(target, args);
       }
     };
@@ -1302,9 +1331,10 @@ namespace LegionRuntime{
     class XferDesQueue {
     public:
       struct XferDesWithUpdates{
-        XferDesWithUpdates(void): xd(NULL), pre_bytes_write(0) {}
+        XferDesWithUpdates(void): xd(NULL), pre_bytes_total((size_t)-1) {}
         XferDes* xd;
-        uint64_t pre_bytes_write;
+	size_t pre_bytes_total;
+	SequenceAssembler seq_pre_write;
       };
       enum {
         NODE_BITS = 16,
@@ -1355,7 +1385,9 @@ namespace LegionRuntime{
         return (((XferDesID)execution_node << (NODE_BITS + INDEX_BITS)) | ((XferDesID)gasnet_mynode() << INDEX_BITS) | idx);
       }
 
-      void update_pre_bytes_write(XferDesID xd_guid, uint64_t bytes_write)
+      void update_pre_bytes_write(XferDesID xd_guid,
+				  size_t span_start, size_t span_size,
+				  size_t pre_bytes_total)
       {
         gasnet_node_t execution_node = xd_guid >> (NODE_BITS + INDEX_BITS);
         if (execution_node == gasnet_mynode()) {
@@ -1363,44 +1395,53 @@ namespace LegionRuntime{
           std::map<XferDesID, XferDesWithUpdates>::iterator it = guid_to_xd.find(xd_guid);
           if (it != guid_to_xd.end()) {
             if (it->second.xd != NULL) {
-              it->second.xd->update_pre_bytes_write(bytes_write);
+              //it->second.xd->update_pre_bytes_write(bytes_write);
+	      it->second.xd->update_pre_bytes_write(span_start, span_size, pre_bytes_total);
             } else {
-              if (bytes_write > it->second.pre_bytes_write)
-                it->second.pre_bytes_write = bytes_write;
+              // if (bytes_write > it->second.pre_bytes_write)
+              //   it->second.pre_bytes_write = bytes_write;
+	      it->second.seq_pre_write.add_span(span_start, span_size);
+	      if(pre_bytes_total != ((size_t)-1)) {
+		assert((it->second.pre_bytes_total == pre_bytes_total) ||
+		       (it->second.pre_bytes_total == (size_t)-1));
+		it->second.pre_bytes_total = pre_bytes_total;
+	      }
             }
           } else {
-            XferDesWithUpdates xd_struct;
-            xd_struct.pre_bytes_write = bytes_write;
-            guid_to_xd[xd_guid] = xd_struct;
+            XferDesWithUpdates& xdup = guid_to_xd[xd_guid];
+	    xdup.seq_pre_write.add_span(span_start, span_size);
+	    xdup.pre_bytes_total = pre_bytes_total;
           }
           pthread_rwlock_unlock(&guid_lock);
         }
         else {
           // send a active message to remote node
-          UpdateBytesWriteMessage::send_request(execution_node, xd_guid, bytes_write);
+          UpdateBytesWriteMessage::send_request(execution_node, xd_guid,
+						span_start, span_size,
+						pre_bytes_total);
         }
       }
 
-      void update_next_bytes_read(XferDesID xd_guid, uint64_t bytes_read)
+      void update_next_bytes_read(XferDesID xd_guid,
+				  size_t span_start, size_t span_size)
       {
         gasnet_node_t execution_node = xd_guid >> (NODE_BITS + INDEX_BITS);
         if (execution_node == gasnet_mynode()) {
           pthread_rwlock_rdlock(&guid_lock);
           std::map<XferDesID, XferDesWithUpdates>::iterator it = guid_to_xd.find(xd_guid);
-          if (it == guid_to_xd.end()) {
+          if (it != guid_to_xd.end()) {
+	    assert(it->second.xd != NULL);
+	    it->second.xd->update_next_bytes_read(span_start, span_size);
+	  } else {
             // This means this update goes slower than future updates, which marks
-            // completion of xfer des (ID = xd_guid). In this case, it is safe to return
-            pthread_rwlock_unlock(&guid_lock);
-            return;
-          }
-          assert(it != guid_to_xd.end());
-          assert(it->second.xd != NULL);
-          it->second.xd->update_next_bytes_read(bytes_read);
+            // completion of xfer des (ID = xd_guid). In this case, it is safe to drop the update
+	  }
           pthread_rwlock_unlock(&guid_lock);
         }
         else {
           // send a active message to remote node
-          UpdateBytesReadMessage::send_request(execution_node, xd_guid, bytes_read);
+          UpdateBytesReadMessage::send_request(execution_node, xd_guid,
+					       span_start, span_size);
         }
       }
 
@@ -1422,8 +1463,8 @@ namespace LegionRuntime{
         assert(it->second.xd != NULL);
         XferDes* xd = it->second.xd;
         guid_to_xd.erase(it);
-        delete xd;
         pthread_rwlock_unlock(&guid_lock);
+        delete xd;
       }
 
       void enqueue_xferDes_local(XferDes* xd) {
@@ -1433,13 +1474,12 @@ namespace LegionRuntime{
           // xerDes_queue has received updates of this xferdes
           // need to integrate these updates into xferdes
           assert(git->second.xd == NULL);
-          xd->update_pre_bytes_write(git->second.pre_bytes_write);
-          git->second.xd = xd;
-          git->second.pre_bytes_write = 0;
+	  git->second.xd = xd;
+	  xd->pre_bytes_total = git->second.pre_bytes_total;
+	  xd->seq_pre_write.swap(git->second.seq_pre_write);
         } else {
-          XferDesWithUpdates xd_struct;
-          xd_struct.xd = xd;
-          guid_to_xd[xd->guid] = xd_struct;
+	  XferDesWithUpdates& xdup = guid_to_xd[xd->guid];
+	  xdup.xd = xd;
         }
         pthread_rwlock_unlock(&guid_lock);
         std::map<Channel*, DMAThread*>::iterator it;
@@ -1525,6 +1565,7 @@ namespace LegionRuntime{
 			 gasnet_node_t _launch_node,
 			 gasnet_node_t _target_node,
                          XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
+			 uint64_t _next_max_rw_gap, size_t src_ib_offset, size_t src_ib_size,
                          bool mark_started,
 			 Memory _src_mem, Memory _dst_mem,
 			 TransferIterator *_src_iter, TransferIterator *_dst_iter,

@@ -18,10 +18,14 @@
 #include "channel_disk.h"
 #include <realm/transfer/transfer.h>
 
+TYPE_IS_SERIALIZABLE(LegionRuntime::LowLevel::XferOrder::Type);
+TYPE_IS_SERIALIZABLE(LegionRuntime::LowLevel::XferDes::XferKind);
+
 namespace LegionRuntime {
   namespace LowLevel {
     Logger::Category log_new_dma("new_dma");
     Logger::Category log_request("request");
+    Logger::Category log_xd("xd");
 
       // TODO: currently we use dma_all_gpus to track the set of GPU* created
 #ifdef USE_CUDA
@@ -39,18 +43,152 @@ namespace LegionRuntime {
         return (nbytes > 0) && (start / buf_size < (start + nbytes - 1) / buf_size);
       }
 #endif
+    SequenceAssembler::SequenceAssembler(void)
+      : contig_amount(0)
+      , first_noncontig((size_t)-1)
+    {}
+
+    SequenceAssembler::SequenceAssembler(const SequenceAssembler& copy_from)
+      : contig_amount(copy_from.contig_amount)
+      , first_noncontig(copy_from.first_noncontig)
+      , spans(copy_from.spans)
+    {}
+
+    SequenceAssembler::~SequenceAssembler(void)
+    {}
+
+    void SequenceAssembler::swap(SequenceAssembler& other)
+    {
+      // need both locks
+      AutoHSLLock al1(mutex);
+      AutoHSLLock al2(other.mutex);
+      std::swap(contig_amount, other.contig_amount);
+      std::swap(first_noncontig, other.first_noncontig);
+      spans.swap(other.spans);
+    }
+
+    // asks if a span exists - return value is number of bytes from the
+    //  start that do
+    size_t SequenceAssembler::span_exists(size_t start, size_t count)
+    {
+      // lock-free case 1: start < contig_amount
+      size_t contig_sample = __sync_fetch_and_add(&contig_amount, 0);
+      if(start < contig_sample) {
+	size_t max_avail = contig_sample - start;
+	if(count < max_avail)
+	  return count;
+	else
+	  return max_avail;
+      }
+
+      // lock-free case 2: contig_amount <= start < first_noncontig
+      size_t noncontig_sample = __sync_fetch_and_add(&first_noncontig, 0);
+      if(start < noncontig_sample)
+	return 0;
+
+      // general case 3: take the lock and look through spans/etc.
+      {
+	AutoHSLLock al(mutex);
+
+	// first, recheck the contig_amount, in case both it and the noncontig
+	//  counters were bumped in between looking at the two of them
+	if(start < contig_amount) {
+	  size_t max_avail = contig_amount - start;
+	  if(count < max_avail)
+	    return count;
+	  else
+	    return max_avail;
+	}
+
+	// otherwise find the first span after us and then back up one to find
+	//  the one that might contain our 'start'
+	std::map<size_t, size_t>::const_iterator it = spans.upper_bound(start);
+	// this should never be the first span
+	assert(it != spans.begin());
+	--it;
+	assert(it->first <= start);
+	// does this span overlap us?
+	if((it->first + it->second) > start) {
+	  size_t max_avail = it->first + it->second - start;
+	  while(max_avail < count) {
+	    // try to get more - return the current 'max_avail' if we fail
+	    if(++it == spans.end())
+	      return max_avail; // no more
+	    if(it->first > (start + max_avail))
+	      return max_avail; // not contiguous
+	    max_avail += it->second;
+	  }
+	  // got at least as much as we wanted
+	  return count;
+	} else
+	  return 0;
+      }
+    }
+
+    // returns the amount by which the contiguous range has been increased
+    //  (i.e. from [pos, pos+retval) )
+    size_t SequenceAssembler::add_span(size_t pos, size_t count)
+    {
+      // first try to bump the contiguous amount without a lock
+      size_t span_end = pos + count;
+      if(__sync_bool_compare_and_swap(&contig_amount, pos, span_end)) {
+	// success: check to see if there are any spans we might need to 
+	//  tack on
+	if(span_end == __sync_fetch_and_add(&first_noncontig, 0)) {
+	  AutoHSLLock al(mutex);
+	  while(!spans.empty()) {
+	    std::map<size_t, size_t>::iterator it = spans.begin();
+	    if(it->first == span_end) {
+	      bool ok = __sync_bool_compare_and_swap(&contig_amount,
+						     span_end,
+						     span_end + it->second);
+	      assert(ok);
+	      span_end += it->second;
+	      spans.erase(it);
+	    } else {
+	      // this is the new first noncontig
+	      first_noncontig = it->first;
+	      break;
+	    }
+	  }
+	  if(spans.empty())
+	    first_noncontig = (size_t)-1;
+	}
+
+	// return total change to contig_amount
+	return (span_end - pos);
+      } else {
+	// failure: have to add ourselves to the span list and possibly update
+	//  the 'first_noncontig', all while holding the lock
+	{
+	  AutoHSLLock al(mutex);
+
+	  if(pos < first_noncontig)
+	    first_noncontig = pos;
+
+	  spans[pos] = count;
+	}
+	
+	return 0; // no change to contig_amount
+      }
+    }
+
+
 
       XferDes::XferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
               XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
+		       uint64_t _next_max_rw_gap, size_t _src_ib_offset, size_t _src_ib_size,
               bool _mark_start,
 	      Memory _src_mem, Memory _dst_mem,
 	      TransferIterator *_src_iter, TransferIterator *_dst_iter,
               uint64_t _max_req_size, int _priority,
               XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence)
         : dma_request(_dma_request), mark_start(_mark_start), launch_node(_launch_node),
-	  bytes_read(0), bytes_write(0), bytes_total(0),
-	  next_bytes_read(0),
+	  iteration_completed(false),
+	  bytes_total(0),
+          pre_bytes_total((size_t)-1),
 	  src_iter(_src_iter), dst_iter(_dst_iter),
+          src_ib_offset(_src_ib_offset), src_ib_size(_src_ib_size),
           max_req_size(_max_req_size), priority(_priority),
           guid(_guid), pre_xd_guid(_pre_xd_guid), next_xd_guid(_next_xd_guid),
           kind (_kind), order(_order), channel(NULL), complete_fence(_complete_fence)
@@ -60,12 +198,14 @@ namespace LegionRuntime {
         //   total_field_size += oas_vec[i].size;
         // }
         //bytes_total = total_field_size * domain.get_volume();
-        pre_bytes_write = 0; //(pre_xd_guid == XFERDES_NO_GUID) ? bytes_total : 0;
-	iteration_completed = (pre_xd_guid != XFERDES_NO_GUID) && (next_xd_guid != XFERDES_NO_GUID);
-	writes_completed = (pre_xd_guid == XFERDES_NO_GUID);
-	reads_completed = (next_xd_guid == XFERDES_NO_GUID);
+        //pre_bytes_write = 0; //(pre_xd_guid == XFERDES_NO_GUID) ? bytes_total : 0;
+	//iteration_completed = (pre_xd_guid != XFERDES_NO_GUID) && (next_xd_guid != XFERDES_NO_GUID);
 	src_mem = get_runtime()->get_memory_impl(_src_mem);
 	dst_mem = get_runtime()->get_memory_impl(_dst_mem);
+	// if we're writing into an IB, the first 'next_max_rw_gap' byte
+	//  locations can be freely written
+	if(next_xd_guid != XFERDES_NO_GUID)
+	  seq_next_read.add_span(0, _next_max_rw_gap);
 #if 0
         if (domain.get_dim() == 0) {
           li = NULL;
@@ -110,6 +250,12 @@ namespace LegionRuntime {
       };
 
       void XferDes::mark_completed() {
+	if(src_ib_size > 0)
+	  free_intermediate_buffer(dma_request,
+				   src_mem->me,
+				   src_ib_offset,
+				   src_ib_size);
+
         // notify owning DmaRequest upon completion of this XferDes
         //printf("complete XD = %lu\n", guid);
         if (launch_node == gasnet_mynode()) {
@@ -165,24 +311,83 @@ namespace LegionRuntime {
         long idx = 0;
 	
 	while((idx < nr) && (available_reqs.size() > 0)) {	  
-	  // is our iterator done?
-	  if(src_iter->done() || dst_iter->done()) {
-	    // non-ib iterators should end at the same time
-	    assert((pre_xd_guid != XFERDES_NO_GUID) || src_iter->done());
-	    assert((next_xd_guid != XFERDES_NO_GUID) || dst_iter->done());
-	    iteration_completed = true;
-	    break;
-	  }
+	  // TODO: we really shouldn't even be trying if the iteration
+	  //   is already done
+	  if(iteration_completed) break;
 
 	  // some sort of per-channel max request size?
 	  size_t max_bytes = 1 << 20;
-	  assert(pre_xd_guid == XFERDES_NO_GUID);
-	  assert(next_xd_guid == XFERDES_NO_GUID);
+
+	  // if we're not the first in the chain, and we know the total bytes
+	  //  written by the predecessor, don't exceed that
+	  if(pre_xd_guid != XFERDES_NO_GUID) {
+	    size_t pre_max = pre_bytes_total - bytes_total;
+	    if(pre_max == 0) {
+	      // this shouldn't happen - we should detect this case on the the
+	      //  transfer of those last bytes
+	      assert(0);
+	      // turns out we're done...
+	      iteration_completed = true;
+	      break;
+	    }
+	    if(pre_max < max_bytes) {
+	      log_request.info() << "pred limits xfer: " << max_bytes << " -> " << pre_max;
+	      max_bytes = pre_max;
+	    }
+	  }
 
 	  TransferIterator::AddressInfo src_info, dst_info;
 	  size_t src_bytes = src_iter->step(max_bytes, src_info,
 					    true /*tentative*/);
-	  size_t dst_bytes = dst_iter->step(src_bytes, dst_info);
+	  size_t src_bytes_avail;
+	  if(pre_xd_guid == XFERDES_NO_GUID) {
+	    src_bytes_avail = src_bytes;
+	  } else {
+	    // if we're reading from an intermediate buffer, make sure we
+	    //  have enough data from the predecessor
+	    assert((src_info.num_lines == 1) && (src_info.num_planes == 1));
+	    src_bytes_avail = seq_pre_write.span_exists(bytes_total, src_bytes);
+	    if(src_bytes_avail == 0) {
+	      // TODO: put this XD to sleep until we do have data
+	      src_iter->cancel_step();
+	      break;
+	    }
+
+	    // if src_bytes_avail < src_bytes, we'll need to redo the src_iter
+	    //  step, but wait until we see if we need to shrink even more due
+	    //  to the destination side
+	  }
+
+	  bool dst_step_tentative = (next_xd_guid != XFERDES_NO_GUID);
+	  size_t dst_bytes = dst_iter->step(src_bytes_avail, dst_info,
+					    dst_step_tentative);
+	  if(next_xd_guid != XFERDES_NO_GUID) {
+	    // if we're writing to an intermediate buffer, make sure the
+	    //  next XD has read the data we want to overwrite
+	    assert((dst_info.num_lines == 1) && (dst_info.num_planes == 1));
+	    size_t dst_bytes_avail = seq_next_read.span_exists(bytes_total,
+							       dst_bytes);
+	    if(dst_bytes_avail == 0) {
+	      // TODO: put this XD to sleep until we do have data
+	      dst_iter->cancel_step();
+	      src_iter->cancel_step();
+	      break;
+	    }
+
+	    // if dst_bytes_avail < dst_bytes, we'll need to redo the dst_iter
+	    // step
+	    if(dst_bytes_avail == dst_bytes) {
+	      dst_iter->confirm_step();
+	    } else {
+	      // cancel and request what we have room to write
+	      dst_iter->cancel_step();
+	      dst_bytes = dst_iter->step(dst_bytes_avail, dst_info);
+	      assert(dst_bytes == dst_bytes_avail);
+	    }
+	  }
+
+	  // this check can fail either if the destination step size is smaller
+	  //  or if one/both of the intermediate buffers were near capacity
 	  if(dst_bytes == src_bytes) {
 	    // looks good - confirm the src step
 	    src_iter->confirm_step();
@@ -194,14 +399,31 @@ namespace LegionRuntime {
 	    // now must match
 	    assert(src_bytes == dst_bytes);
 	  }
-	  bytes_total += src_bytes;
 
 	  Request* new_req = dequeue_request();
+	  new_req->seq_pos = bytes_total;
+	  new_req->seq_count = src_bytes;
 	  new_req->dim = Request::DIM_1D;
 	  new_req->src_off = src_info.base_offset;
 	  new_req->dst_off = dst_info.base_offset;
 	  new_req->nbytes = src_info.bytes_per_chunk;
 	  new_req->nlines = 1;
+
+	  bytes_total += src_bytes;
+
+	  // is our iterator done?
+	  if(src_iter->done() || dst_iter->done() ||
+	     (bytes_total == pre_bytes_total)) {
+	    assert(!iteration_completed);
+	    iteration_completed = true;
+	    
+	    // non-ib iterators should end at the same time
+	    assert((pre_xd_guid != XFERDES_NO_GUID) || src_iter->done());
+	    assert((next_xd_guid != XFERDES_NO_GUID) || dst_iter->done());
+
+	    assert((pre_xd_guid == XFERDES_NO_GUID) || (pre_bytes_total == bytes_total));
+	  }
+
 	  log_request.info() << "[1D] guid(" << guid
 			     << ") src_off(" << new_req->src_off
 			     << ") dst_off(" << new_req->dst_off
@@ -348,14 +570,35 @@ namespace LegionRuntime {
         return idx;
       }
 
-      inline void XferDes::simple_update_bytes_read(int64_t offset, uint64_t size)
+
+    bool XferDes::is_completed(void)
+    {
+      // to be complete, we need to have finished iterating (which may have been
+      //  achieved by getting a pre_bytes_total update) and finished all of our
+      //  writes
+      return (iteration_completed &&
+	      (seq_write.span_exists(0, bytes_total) == bytes_total));
+    }
+
+      void XferDes::update_bytes_read(size_t offset, size_t size)
       {
-	if(pre_xd_guid == XFERDES_NO_GUID) {
-	  bytes_read += size;
-	} else {
-	  assert(0);
+	size_t inc_amt = seq_read.add_span(offset, size);
+	log_xd.info() << "bytes_read: " << guid << " " << offset << "+" << size << " -> " << inc_amt;
+	if(pre_xd_guid != XFERDES_NO_GUID) {
+	  if(inc_amt > 0) {
+	    // we're actually telling the previous XD which offsets are ok to
+	    //  overwrite, so adjust our offset by our (circular) IB size
+            xferDes_queue->update_next_bytes_read(pre_xd_guid,
+						  offset + src_ib_size,
+						  inc_amt);
+	  } else {
+	    // TODO: mode to send non-contiguous updates?
+	  }
 	}
+      }
+
 #if 0
+      inline void XferDes::simple_update_bytes_read(int64_t offset, uint64_t size)
         //printf("update_read[%lx]: offset = %ld, size = %lu, pre = %lx, next = %lx\n", guid, offset, size, pre_xd_guid, next_xd_guid);
         if (pre_xd_guid != XFERDES_NO_GUID) {
           bool update = false;
@@ -384,21 +627,37 @@ namespace LegionRuntime {
         else {
           bytes_read += size;
         }
+      }
 #endif
+
+      void XferDes::update_bytes_write(size_t offset, size_t size)
+      {
+	size_t inc_amt = seq_write.add_span(offset, size);
+	log_xd.info() << "bytes_write: " << guid << " " << offset << "+" << size << " -> " << inc_amt;
+	if(next_xd_guid != XFERDES_NO_GUID) {
+	  if(inc_amt > 0) {
+	    // this update carries our bytes_total amount, if we know it
+	    //  to be final
+            xferDes_queue->update_pre_bytes_write(next_xd_guid,
+						  offset,
+						  inc_amt,
+						  (iteration_completed ?
+						     bytes_total :
+						     (size_t)-1));
+	  } else {
+	    // TODO: mode to send non-contiguous updates?
+	  }
+	}
       }
 
+#if 0
       inline void XferDes::simple_update_bytes_write(int64_t offset, uint64_t size)
       {
         log_request.info(
             "update_write: guid(%llx) off(%zd) size(%zu) pre(%llx) next(%llx)",
             guid, (ssize_t)offset, (size_t)size, pre_xd_guid, next_xd_guid);
 
-	if(next_xd_guid == XFERDES_NO_GUID) {
-	  bytes_write += size;
-	} else {
-	  assert(0);
-	}
-#if 0
+	
         if (next_xd_guid != XFERDES_NO_GUID) {
           bool update = false;
           if ((int64_t)(bytes_write % dst_buf.buf_size) == offset) {
@@ -424,25 +683,51 @@ namespace LegionRuntime {
           bytes_write += size;
         }
         //printf("[%d] offset(%ld), size(%lu), bytes_writes(%lx): %ld\n", gasnet_mynode(), offset, size, guid, bytes_write);
+      }
 #endif
+
+      void XferDes::update_pre_bytes_write(size_t offset, size_t size, size_t pre_bytes_total)
+      {
+	// do this before we add the span
+	if(pre_bytes_total != (size_t)-1) {
+	  if(this->pre_bytes_total == (size_t)-1)
+	    this->pre_bytes_total = pre_bytes_total;
+	  else
+	    assert(this->pre_bytes_total == pre_bytes_total);
+	}
+
+	size_t inc_amt = seq_pre_write.add_span(offset, size);
+	log_xd.info() << "pre_write: " << guid << " " << offset << "+" << size << " -> " << inc_amt << " (" << pre_bytes_total << ")";
+      }
+
+      void XferDes::update_next_bytes_read(size_t offset, size_t size)
+      {
+	size_t inc_amt = seq_next_read.add_span(offset, size);
+	log_xd.info() << "next_read: " << guid << " " << offset << "+" << size << " -> " << inc_amt;
       }
 
       void XferDes::default_notify_request_read_done(Request* req)
       {  
         req->is_read_done = true;
+	update_bytes_read(req->seq_pos, req->seq_count);
+#if 0
         if (req->dim == Request::DIM_1D)
           simple_update_bytes_read(req->src_off, req->nbytes);
         else
           simple_update_bytes_read(req->src_off, req->nbytes * req->nlines);
+#endif
       }
 
       void XferDes::default_notify_request_write_done(Request* req)
       {
         req->is_write_done = true;
+	update_bytes_write(req->seq_pos, req->seq_count);
+#if 0
         if (req->dim == Request::DIM_1D)
           simple_update_bytes_write(req->dst_off, req->nbytes);
         else
           simple_update_bytes_write(req->dst_off, req->nbytes * req->nlines);
+#endif
         enqueue_request(req);
       }
 
@@ -451,6 +736,9 @@ namespace LegionRuntime {
                                         XferDesID _guid,
                                         XferDesID _pre_xd_guid,
                                         XferDesID _next_xd_guid,
+				   uint64_t _next_max_rw_gap,
+				   size_t src_ib_offset,
+				   size_t src_ib_size,
                                         bool mark_started,
 				   Memory _src_mem, Memory _dst_mem,
 				   TransferIterator *_src_iter, TransferIterator *_dst_iter,
@@ -460,7 +748,8 @@ namespace LegionRuntime {
                                         XferOrder::Type _order,
                                         XferDesFence* _complete_fence)
         : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid,
-                  _next_xd_guid, mark_started,
+                  _next_xd_guid, _next_max_rw_gap, src_ib_offset, src_ib_size,
+		  mark_started,
 		  //_src_buf, _dst_buf, _domain, _oas_vec,
 		  _src_mem, _dst_mem, _src_iter, _dst_iter,
 		  _max_req_size, _priority, _order,
@@ -555,6 +844,9 @@ namespace LegionRuntime {
 				   XferDesID _guid,
 				   XferDesID _pre_xd_guid,
 				   XferDesID _next_xd_guid,
+				   uint64_t _next_max_rw_gap,
+				   size_t src_ib_offset,
+				   size_t src_ib_size,
 				   bool mark_started,
 				   Memory _src_mem, Memory _dst_mem,
 				   TransferIterator *_src_iter, TransferIterator *_dst_iter,
@@ -565,7 +857,8 @@ namespace LegionRuntime {
 				   XferKind _kind,
 				   XferDesFence* _complete_fence)
         : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid,
-                  _next_xd_guid, mark_started,
+                  _next_xd_guid, _next_max_rw_gap, src_ib_offset, src_ib_size,
+		  mark_started,
 		  //_src_buf, _dst_buf, _domain, _oas_vec,
 		  _src_mem, _dst_mem, _src_iter, _dst_iter,
 		  _max_req_size, _priority, _order,
@@ -648,6 +941,9 @@ namespace LegionRuntime {
 					     XferDesID _guid,
 					     XferDesID _pre_xd_guid,
 					     XferDesID _next_xd_guid,
+					     uint64_t _next_max_rw_gap,
+					     size_t src_ib_offset,
+					     size_t src_ib_size,
 					     bool mark_started,
 					     Memory _src_mem, Memory _dst_mem,
 					     TransferIterator *_src_iter, TransferIterator *_dst_iter,
@@ -657,7 +953,8 @@ namespace LegionRuntime {
 					     XferOrder::Type _order,
 					     XferDesFence* _complete_fence)
         : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid,
-                  _next_xd_guid, mark_started,
+                  _next_xd_guid, _next_max_rw_gap, src_ib_offset, src_ib_size,
+		  mark_started,
 		  //_src_buf, _dst_buf,_domain, _oas_vec,
 		  _src_mem, _dst_mem, _src_iter, _dst_iter,
 		  _max_req_size, _priority, _order,
@@ -716,12 +1013,22 @@ namespace LegionRuntime {
         //pthread_mutex_unlock(&xd_lock);
       }
 
+      // doesn't do pre_bytes_write updates, since the remote write message
+      //  takes care of it with lower latency
+      void RemoteWriteXferDes::update_bytes_write(size_t offset, size_t size)
+      {
+	seq_write.add_span(offset, size);
+      }
+
 #ifdef USE_CUDA
       GPUXferDes::GPUXferDes(DmaRequest* _dma_request,
 			     gasnet_node_t _launch_node,
 			     XferDesID _guid,
 			     XferDesID _pre_xd_guid,
 			     XferDesID _next_xd_guid,
+			     uint64_t _next_max_rw_gap,
+			     size_t src_ib_offset,
+			     size_t src_ib_size,
 			     bool mark_started,
 			     Memory _src_mem, Memory _dst_mem,
 			     TransferIterator *_src_iter, TransferIterator *_dst_iter,
@@ -732,7 +1039,8 @@ namespace LegionRuntime {
 			     XferKind _kind,
 			     XferDesFence* _complete_fence)
       : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid,
-                _next_xd_guid, mark_started,
+                _next_xd_guid, _next_max_rw_gap, src_ib_offset, src_ib_size,
+		mark_started,
 		//_src_buf, _dst_buf, _domain, _oas_vec,
 		_src_mem, _dst_mem, _src_iter, _dst_iter,
 		_max_req_size, _priority,
@@ -860,6 +1168,9 @@ namespace LegionRuntime {
 			     XferDesID _guid,
 			     XferDesID _pre_xd_guid,
 			     XferDesID _next_xd_guid,
+			     uint64_t _next_max_rw_gap,
+			     size_t src_ib_offset,
+			     size_t src_ib_size,
 			     bool mark_started,
 			     RegionInstance inst,
 			     Memory _src_mem, Memory _dst_mem,
@@ -871,7 +1182,8 @@ namespace LegionRuntime {
 			     XferKind _kind,
 			     XferDesFence* _complete_fence)
         : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid,
-                  _next_xd_guid, mark_started,
+                  _next_xd_guid, _next_max_rw_gap, src_ib_offset, src_ib_size,
+		  mark_started,
 		  //_src_buf, _dst_buf, _domain, _oas_vec,
 		  _src_mem, _dst_mem, _src_iter, _dst_iter,
 		  _max_req_size, _priority,
@@ -1377,14 +1689,18 @@ namespace LegionRuntime {
           RemoteWriteRequest* req = (RemoteWriteRequest*) requests[i];
           if (req->dim == Request::DIM_1D) {
             XferDesRemoteWriteMessage::send_request(
-                req->dst_node, req->dst_base, req->src_base, req->nbytes, req);
+                req->dst_node, req->dst_base, req->src_base, req->nbytes, req,
+		req->xd->next_xd_guid, req->seq_pos, req->seq_count, 
+		(req->xd->iteration_completed ? req->xd->bytes_total : (size_t)-1));
           } else {
             assert(req->dim == Request::DIM_2D);
             // dest MUST be continuous
             assert(req->nlines <= 1 || ((size_t)req->dst_str) == req->nbytes);
             XferDesRemoteWriteMessage::send_request(
                 req->dst_node, req->dst_base, req->src_base, req->nbytes,
-                req->src_str, req->nlines, req);
+                req->src_str, req->nlines, req,
+		req->xd->next_xd_guid, req->seq_pos, req->seq_count, 
+		(req->xd->iteration_completed ? req->xd->bytes_total : (size_t)-1));
           }
           __sync_fetch_and_sub(&capacity, 1);
         /*RemoteWriteRequest* req = (RemoteWriteRequest*) requests[i];
@@ -1559,7 +1875,15 @@ namespace LegionRuntime {
                                                      size_t datalen)
       {
         // assert data copy is in right position
-        assert(data == args.dst_buf);
+        //assert(data == args.dst_buf);
+
+	// if requested, notify (probably-local) next XD
+	if(args.next_xd_guid != XferDes::XFERDES_NO_GUID)
+	  xferDes_queue->update_pre_bytes_write(args.next_xd_guid,
+						args.span_start,
+						args.span_size,
+						args.pre_bytes_total);
+	  
         XferDesRemoteWriteAckMessage::send_request(args.sender, args.req);
       }
 
@@ -1577,6 +1901,7 @@ namespace LegionRuntime {
                                                 const void *msgdata,
                                                 size_t msglen)
       {
+#if 0
         const Payload *payload = (const Payload *)msgdata;
         std::vector<OffsetsAndSize> oas_vec(payload->oas_vec_size);
         for(size_t i = 0; i < payload->oas_vec_size; i++)
@@ -1586,8 +1911,53 @@ namespace LegionRuntime {
         src_buf.memory = args.src_mem;
         dst_buf.deserialize(payload->dst_buf_bits);
         dst_buf.memory = args.dst_mem;
-	// TODO
-	assert(0);
+#else
+	DmaRequest* dma_request;
+	gasnet_node_t launch_node;
+	XferDesID guid, pre_xd_guid, next_xd_guid;
+	uint64_t next_max_rw_gap;
+	size_t src_ib_offset;
+	size_t src_ib_size;
+	bool mark_started;
+	TransferIterator *src_iter;
+	TransferIterator *dst_iter;
+	uint64_t max_req_size;
+	long max_nr;
+	int priority;
+	XferOrder::Type order;
+	XferDes::XferKind kind;
+
+	Realm::Serialization::FixedBufferDeserializer fbd(msgdata, msglen);
+
+	bool ok = ((fbd >> (intptr_t&)dma_request) &&
+		   (fbd >> launch_node) &&
+		   (fbd >> guid) &&
+		   (fbd >> pre_xd_guid) &&
+		   (fbd >> next_xd_guid) &&
+		   (fbd >> next_max_rw_gap) &&
+		   (fbd >> src_ib_offset) &&
+		   (fbd >> src_ib_size) &&
+		   (fbd >> mark_started) &&
+		   (fbd >> max_req_size) &&
+		   (fbd >> max_nr) &&
+		   (fbd >> priority) &&
+		   (fbd >> order) &&
+		   (fbd >> kind));
+	assert(ok);
+	src_iter = TransferIterator::deserialize_new(fbd);
+	dst_iter = TransferIterator::deserialize_new(fbd);
+	assert((src_iter != 0) && (dst_iter != 0));
+	assert(fbd.bytes_left() == 0);
+
+	create_xfer_des(dma_request, launch_node, gasnet_mynode(),
+			guid, pre_xd_guid, next_xd_guid,
+			next_max_rw_gap, src_ib_offset, src_ib_size,
+			mark_started,
+			args.src_mem, args.dst_mem,
+			src_iter, dst_iter,
+			max_req_size, max_nr, priority,
+			order, kind, args.fence, args.inst);
+#endif
 #if 0
         switch(payload->domain.dim) {
         case 0:
@@ -1624,6 +1994,72 @@ namespace LegionRuntime {
 #endif
       }
 
+      /*static*/
+      void XferDesCreateMessage::send_request(gasnet_node_t target, DmaRequest* dma_request, gasnet_node_t launch_node,
+                               XferDesID guid, XferDesID pre_xd_guid, XferDesID next_xd_guid,
+					      uint64_t next_max_rw_gap,
+					      size_t src_ib_offset,
+					      size_t src_ib_size,
+                               bool mark_started,
+			       Memory _src_mem, Memory _dst_mem,
+			       TransferIterator *_src_iter, TransferIterator *_dst_iter,
+                               uint64_t max_req_size, long max_nr, int priority,
+                               XferOrder::Type order, XferDes::XferKind kind,
+                               XferDesFence* fence,
+			       RegionInstance inst /*= RegionInstance::NO_INST*/)
+      {
+#if 0
+        size_t payload_size = sizeof(Payload);// + sizeof(OffsetsAndSize) * oas_vec.size();
+        Payload *payload = (Payload*) malloc(payload_size);
+        payload->dma_request = dma_request;
+        payload->launch_node = launch_node;
+        payload->guid = guid;
+        payload->pre_xd_guid = pre_xd_guid;
+        payload->next_xd_guid = next_xd_guid;
+        payload->mark_started = mark_started;
+        payload->max_req_size = max_req_size;
+        payload->max_nr = max_nr;
+        payload->priority = priority;
+        payload->order = order;
+        payload->kind = kind;
+        //payload->domain = domain;
+        //src_buf.serialize(payload->src_buf_bits);
+        //dst_buf.serialize(payload->dst_buf_bits);
+        //payload->oas_vec_size = oas_vec.size();
+        //for (unsigned i = 0; i < oas_vec.size(); i++)
+        //  payload->oas_vec(i) = oas_vec[i];
+#else
+	Realm::Serialization::DynamicBufferSerializer dbs(128);
+	bool ok = ((dbs << (intptr_t)dma_request) &&
+		   (dbs << launch_node) &&
+		   (dbs << guid) &&
+		   (dbs << pre_xd_guid) &&
+		   (dbs << next_xd_guid) &&
+		   (dbs << next_max_rw_gap) &&
+		   (dbs << src_ib_offset) &&
+		   (dbs << src_ib_size) &&
+		   (dbs << mark_started) &&
+		   (dbs << max_req_size) &&
+		   (dbs << max_nr) &&
+		   (dbs << priority) &&
+		   (dbs << order) &&
+		   (dbs << kind) &&
+		   (dbs << *_src_iter) &&
+		   (dbs << *_dst_iter));
+	assert(ok);
+	
+	size_t payload_size = dbs.bytes_used();
+	void *payload = dbs.detach_buffer(-1 /*no trim*/);
+#endif
+
+        RequestArgs args;
+        args.inst = inst;
+        args.src_mem = _src_mem; //src_buf.memory;
+        args.dst_mem = _dst_mem; //dst_buf.memory;
+        args.fence = fence;
+        Message::request(target, args, payload, payload_size, PAYLOAD_FREE);
+      }
+
       /*static*/ void XferDesDestroyMessage::handle_request(RequestArgs args)
       {
         xferDes_queue->destroy_xferDes(args.guid);
@@ -1631,12 +2067,17 @@ namespace LegionRuntime {
 
       /*static*/ void UpdateBytesWriteMessage::handle_request(RequestArgs args)
       {
-        xferDes_queue->update_pre_bytes_write(args.guid, args.bytes_write);
+        xferDes_queue->update_pre_bytes_write(args.guid,
+					      args.span_start,
+					      args.span_size,
+					      args.pre_bytes_total);
       }
 
       /*static*/ void UpdateBytesReadMessage::handle_request(RequestArgs args)
       {
-        xferDes_queue->update_next_bytes_read(args.guid, args.bytes_read);
+        xferDes_queue->update_next_bytes_read(args.guid,
+					      args.span_start,
+					      args.span_size);
       }
 
       void DMAThread::dma_thread_loop()
@@ -1691,17 +2132,6 @@ namespace LegionRuntime {
               // We flush all changes into destination before mark this XferDes as completed
               xd->flush();
               log_new_dma.info("Finish XferDes : id(" IDFMT ")", xd->guid);
-	      if(xd->pre_xd_guid != XferDes::XFERDES_NO_GUID) {
-		// We eagerly free intermediate buffers here for better performance
-		// TODO
-		assert(0);
-	      }
-              // if(xd->src_buf.is_ib) {
-              //   free_intermediate_buffer(xd->dma_request,
-              //                            xd->src_buf.memory,
-              //                            xd->src_buf.alloc_offset,
-              //                            xd->src_buf.buf_size);
-              // }
               xd->mark_completed();
               /*bool need_to_delete_dma_request = xd->mark_completed();
               if (need_to_delete_dma_request) {
@@ -1910,6 +2340,9 @@ namespace LegionRuntime {
                            XferDesID _guid,
                            XferDesID _pre_xd_guid,
                            XferDesID _next_xd_guid,
+			   uint64_t _next_max_rw_gap,
+			   size_t src_ib_offset,
+			   size_t src_ib_size,
                            bool mark_started,
 			   Memory _src_mem, Memory _dst_mem,
 			   TransferIterator *_src_iter,
@@ -1936,6 +2369,8 @@ namespace LegionRuntime {
           case XferDes::XFER_MEM_CPY:
             xd = new MemcpyXferDes(_dma_request, _launch_node,
 				   _guid, _pre_xd_guid, _next_xd_guid,
+				   _next_max_rw_gap,
+				   src_ib_offset, src_ib_size,
 				   mark_started,
 				   //_src_buf, _dst_buf, _domain, _oas_vec,
 				   _src_mem, _dst_mem, _src_iter, _dst_iter,
@@ -1946,6 +2381,8 @@ namespace LegionRuntime {
           case XferDes::XFER_GASNET_WRITE:
             xd = new GASNetXferDes(_dma_request, _launch_node,
 				   _guid, _pre_xd_guid, _next_xd_guid,
+				   _next_max_rw_gap,
+				   src_ib_offset, src_ib_size,
 				   mark_started,
 				   //_src_buf, _dst_buf, _domain, _oas_vec,
 				   _src_mem, _dst_mem, _src_iter, _dst_iter,
@@ -1955,6 +2392,8 @@ namespace LegionRuntime {
           case XferDes::XFER_REMOTE_WRITE:
             xd = new RemoteWriteXferDes(_dma_request, _launch_node,
 					_guid, _pre_xd_guid, _next_xd_guid,
+					_next_max_rw_gap,
+					src_ib_offset, src_ib_size,
 					mark_started,
 					//_src_buf, _dst_buf, _domain, _oas_vec,
 					_src_mem, _dst_mem, _src_iter, _dst_iter,
@@ -1965,6 +2404,8 @@ namespace LegionRuntime {
           case XferDes::XFER_DISK_WRITE:
             xd = new DiskXferDes(_dma_request, _launch_node,
 				 _guid, _pre_xd_guid, _next_xd_guid,
+				 _next_max_rw_gap,
+				 src_ib_offset, src_ib_size,
 				 mark_started,
 				 //_src_buf, _dst_buf, _domain, _oas_vec,
 				 _src_mem, _dst_mem, _src_iter, _dst_iter,
@@ -1975,6 +2416,8 @@ namespace LegionRuntime {
           case XferDes::XFER_FILE_WRITE:
             xd = new FileXferDes(_dma_request, _launch_node,
 				 _guid, _pre_xd_guid, _next_xd_guid,
+				 _next_max_rw_gap,
+				 src_ib_offset, src_ib_size,
 				 mark_started,
 				 inst,
 				 // _src_buf, _dst_buf, _domain, _oas_vec,
@@ -1989,6 +2432,8 @@ namespace LegionRuntime {
           case XferDes::XFER_GPU_PEER_FB:
             xd = new GPUXferDes(_dma_request, _launch_node,
 				_guid, _pre_xd_guid, _next_xd_guid,
+				_next_max_rw_gap,
+				src_ib_offset, src_ib_size,
 				mark_started,
 				//_src_buf, _dst_buf, _domain, _oas_vec,
 				_src_mem, _dst_mem, _src_iter, _dst_iter,
@@ -2001,6 +2446,8 @@ namespace LegionRuntime {
           case XferDes::XFER_HDF_WRITE:
 	    xd = new HDFXferDes(_dma_request, _launch_node,
 				_guid, _pre_xd_guid, _next_xd_guid,
+				_next_max_rw_gap,
+				src_ib_offset, src_ib_size,
 				mark_started,
 				inst,
 				//_src_buf, _dst_buf, _domain, _oas_vec,
@@ -2025,6 +2472,8 @@ namespace LegionRuntime {
         XferDesCreateMessage::send_request(_target_node,
                                            _dma_request, _launch_node,
                                            _guid, _pre_xd_guid, _next_xd_guid,
+					   _next_max_rw_gap,
+					   src_ib_offset, src_ib_size,
                                            false,
                                            //_src_buf, _dst_buf, _domain, _oas_vec,
 					   _src_mem, _dst_mem, _src_iter, _dst_iter,
