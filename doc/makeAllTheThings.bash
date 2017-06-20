@@ -43,7 +43,7 @@ mkdir -p ${REMEDIES_DIR}
 cp remedies/markdown/* ${REMEDIES_DIR}
 rm -f .tmp_remedies
 ls -1 ${REMEDIES_DIR}/* | sed -e "s://:/:g" | sed -e "s/.md//" > .tmp_remedies
-cat .tmp_remedies | sed -e "s:${REMEDIES_DIR}::" > ${REMEDIES_DIR}/remediesList.txt
+cat .tmp_remedies | sed -e "s:${REMEDIES_DIR}/::" > ${REMEDIES_DIR}/remediesList.txt
 while read REMEDY
   do
     rm -f "${REMEDY}.html"
@@ -60,7 +60,7 @@ BLOB=`git rev-parse HEAD`
 
 ( cd ${LG_RT_DIR} ; \
 	find . -name \*.cc | python "${TOOLS_DIR}/collate_messages.py" \
-	--prefix="https://github.com/StanfordLegion/legion/blob/${BLOB}/runtime/legion" \
+	--prefix="https://github.com/StanfordLegion/legion/blob/${BLOB}/runtime" \
 	--strip=0 \
   --output_dir="${MESSAGES_DIR}" \
 	--glossaryFile="${GLOSSARY_FILE}" \

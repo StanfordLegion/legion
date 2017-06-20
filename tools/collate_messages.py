@@ -241,7 +241,7 @@ def writeHtmlEntry(type, field, outputFile, row, hrefPrefix, strip, glossary, gl
     instance = cursor.fetchone()
     while instance != None:
         (sourceFile, lineNumber) = instance
-        href = "<a href=\"" + prefixedPath(fileName_(sourceFile), hrefPrefix, lineNumber, strip) + "\">" + fileName_(sourceFile) + " line " + str(lineNumber) + "</a>"
+        href = "<a href=\"" + prefixedPath(sourceFile, hrefPrefix, lineNumber, strip) + "\">" + fileName_(sourceFile) + " line " + str(lineNumber) + "</a>"
         outputFile.write("<br>" + href + '\n')
         instance = cursor.fetchone()
     outputFile.write("<p>\n")
