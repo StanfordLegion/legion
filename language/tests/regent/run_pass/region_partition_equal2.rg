@@ -12,8 +12,6 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- FIXME: This needs a shim for Realm before it will run.
-
 import "regent"
 
 struct t {
@@ -21,7 +19,7 @@ struct t {
 }
 
 task f()
-  var r = region(ispace(ptr, 4), t)
+  var r = region(ispace(ptr, 3), t)
   var p = partition(equal, r, ispace(int1d, 3))
 
   for i = 0, 3 do
@@ -43,6 +41,6 @@ task f()
 end
 
 task main()
-  regentlib.assert(f() == 15, "test failed")
+  regentlib.assert(f() == 14, "test failed")
 end
 regentlib.start(main)
