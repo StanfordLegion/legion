@@ -2263,11 +2263,11 @@ namespace Legion {
             break;
           }
         case VIRTUAL_SPECIALIZE:
-        {
-          REPORT_LEGION_ERROR(ERROR_ILLEGAL_REQUEST_VIRTUAL_INSTANCE,
-                        "Illegal request to create a virtual instance");
-          assert(false);
-        }
+          {
+            REPORT_LEGION_ERROR(ERROR_ILLEGAL_REQUEST_VIRTUAL_INSTANCE,
+                          "Illegal request to create a virtual instance");
+            assert(false);
+          }
         default:
           assert(false); // unknown kind
       }
