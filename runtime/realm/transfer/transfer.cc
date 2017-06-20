@@ -36,6 +36,12 @@ namespace Realm {
   TransferIterator::~TransferIterator(void)
   {}
 
+  Event TransferIterator::request_metadata(void)
+  {
+    // many iterators have no metadata
+    return Event::NO_EVENT;
+  }
+
 #ifdef USE_HDF
   size_t TransferIterator::step(size_t max_bytes, AddressInfoHDF5& info,
 				bool tentative /*= false*/)
@@ -61,6 +67,8 @@ namespace Realm {
     static TransferIterator *deserialize_new(S& deserializer);
       
     virtual ~TransferIteratorIndexSpace(void);
+
+    virtual Event request_metadata(void);
 
     virtual void reset(void);
     virtual bool done(void) const;
@@ -96,9 +104,17 @@ namespace Realm {
     : is(_is), enumerator(0), field_idx(0), extra_elems(_extra_elems)
     , tentative_valid(false)
   {
-    valid_mask = &(is.get_valid_mask());
-    assert(valid_mask != 0);
-    first_enabled = valid_mask->find_enabled();
+    IndexSpaceImpl *idx_impl = get_runtime()->get_index_space_impl(is);
+    // if the valid mask is available, grab it and pre-calculate the first
+    //  enabled element, allowing us to optimize the empty-domain case
+    if(idx_impl->request_valid_mask().has_triggered()) {
+      valid_mask = idx_impl->valid_mask;
+      assert(valid_mask != 0);
+      first_enabled = valid_mask->find_enabled();
+    } else {
+      valid_mask = 0;
+      first_enabled = 0; // this prevents the empty-space optimization below
+    }
     // special case - an empty index space skips the rest of the init
     if((first_enabled == -1) || _fields.empty()) {
       // leave fields empty so that done() is always true
@@ -153,14 +169,37 @@ namespace Realm {
     tiis->field_sizes.swap(field_sizes);
     tiis->extra_elems = extra_elems;
 
-    tiis->valid_mask = &(is.get_valid_mask());
-    assert(tiis->valid_mask != 0);
-    tiis->first_enabled = tiis->valid_mask->find_enabled();
-    if(inst.exists()) {
-      tiis->inst_impl = get_runtime()->get_instance_impl(inst);
-      tiis->mapping = tiis->inst_impl->metadata.linearization.get_mapping<1>();
-      assert(tiis->mapping != 0);
+    // if the valid mask is available, grab it and pre-calculate the first
+    //  enabled element, allowing us to optimize the empty-domain case
+    // also, don't even request the valid mask if there are no fields - there's
+    //  nothing to copy anyway
+    if(!tiis->field_sizes.empty()) {
+      IndexSpaceImpl *idx_impl = get_runtime()->get_index_space_impl(is);
+      if(idx_impl->request_valid_mask().has_triggered()) {
+	tiis->valid_mask = idx_impl->valid_mask;
+	assert(tiis->valid_mask != 0);
+	tiis->first_enabled = tiis->valid_mask->find_enabled();
+	if(tiis->first_enabled == -1) {
+	  tiis->field_offsets.clear();
+	  tiis->field_sizes.clear();
+	}
+      } else {
+	tiis->valid_mask = 0;
+	tiis->first_enabled = 0;
+      }
+
+      if(inst.exists()) {
+	tiis->inst_impl = get_runtime()->get_instance_impl(inst);
+	tiis->mapping = tiis->inst_impl->metadata.linearization.get_mapping<1>();
+	assert(tiis->mapping != 0);
+      } else {
+	tiis->inst_impl = 0;
+	tiis->mapping = 0;
+      }
     } else {
+      tiis->valid_mask = 0;
+      tiis->first_enabled = 0;
+
       tiis->inst_impl = 0;
       tiis->mapping = 0;
     }
@@ -171,6 +210,12 @@ namespace Realm {
   TransferIteratorIndexSpace::~TransferIteratorIndexSpace(void)
   {
     delete enumerator;
+  }
+
+  Event TransferIteratorIndexSpace::request_metadata(void)
+  {
+    IndexSpaceImpl *idx_impl = get_runtime()->get_index_space_impl(is);
+    return idx_impl->request_valid_mask();
   }
 
   void TransferIteratorIndexSpace::reset(void)
@@ -188,6 +233,24 @@ namespace Realm {
   size_t TransferIteratorIndexSpace::step(size_t max_bytes, AddressInfo& info,
 					  bool tentative /*= false*/)
   {
+    // if we don't have the valid mask (and we have any fields that we intend
+    //  to iterate over), grab it now (it must be ready, as we aren't allowed
+    //  to wait here), and detect empty case
+    if(!field_sizes.empty() && !valid_mask) {
+      IndexSpaceImpl *idx_impl = get_runtime()->get_index_space_impl(is);
+      Event ready = idx_impl->request_valid_mask();
+      assert(ready.has_triggered());
+      valid_mask = idx_impl->valid_mask;
+      assert(valid_mask != 0);
+      first_enabled = valid_mask->find_enabled();
+      if(first_enabled == -1) {
+	// clear out fields so that done() will return true, even after reset
+	field_idx = 0;
+	field_offsets.clear();
+	field_sizes.clear();
+	return 0;
+      }
+    }
     assert(!done());
     assert(!tentative_valid);
 

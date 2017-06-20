@@ -2374,6 +2374,38 @@ namespace LegionRuntime {
 #endif
       }
 
+      class DeferredXDEnqueue : public Realm::EventWaiter {
+      public:
+	DeferredXDEnqueue(XferDesQueue *_xferDes_queue,
+			  XferDes *_xd)
+	  : xferDes_queue(_xferDes_queue), xd(_xd)
+	{}
+
+	virtual bool event_triggered(Event e, bool poisoned)
+	{
+	  // TODO: handle poisoning
+	  assert(!poisoned);
+	  log_new_dma.info() << "xd metadata ready: xd=" << xd->guid;
+	  xferDes_queue->enqueue_xferDes_local(xd);
+	  return true; // delete us
+	}
+
+	virtual void print(std::ostream& os) const
+	{
+	  os << "deferred xd enqueue: xd=" << xd->guid;
+	}
+
+	virtual Event get_finish_event(void) const
+	{
+	  // TODO: would be nice to provide dma op's finish event here
+	  return Event::NO_EVENT;
+	}
+
+      protected:
+	XferDesQueue *xferDes_queue;
+	XferDes *xd;
+      };
+
       void create_xfer_des(DmaRequest* _dma_request,
                            gasnet_node_t _launch_node,
 			   gasnet_node_t _target_node,
@@ -2499,8 +2531,18 @@ namespace LegionRuntime {
         default:
           printf("_kind = %d\n", _kind);
           assert(false);
-        }
-        xferDes_queue->enqueue_xferDes_local(xd);
+	}
+	// see if the newly-created xd's iterators needs metadata, and if so,
+	//   defer the enqueuing
+	Event src_iter_ready = _src_iter->request_metadata();
+	Event dst_iter_ready = _dst_iter->request_metadata();
+	if(!src_iter_ready.has_triggered() || !dst_iter_ready.has_triggered()) {
+	  Event wait_on = Event::merge_events(src_iter_ready, dst_iter_ready);
+	  log_new_dma.info() << "xd metadata wait: xd=" << _guid << " ready=" << wait_on;
+	  Realm::EventImpl::add_waiter(wait_on, new DeferredXDEnqueue(xferDes_queue,
+								      xd));
+	} else
+	  xferDes_queue->enqueue_xferDes_local(xd);
       } else {
         log_new_dma.info("Create remote XferDes: id(" IDFMT "),"
                          " pre(" IDFMT "), next(" IDFMT "), type(%d)",

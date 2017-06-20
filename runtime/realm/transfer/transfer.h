@@ -39,6 +39,9 @@ namespace Realm {
 
     virtual ~TransferIterator(void);
 
+    // must be called (and waited on) before iteration is possible
+    virtual Event request_metadata(void);
+
     virtual void reset(void) = 0;
     virtual bool done(void) const = 0;
 
