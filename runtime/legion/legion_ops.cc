@@ -7298,6 +7298,7 @@ namespace Legion {
         mapper->invoke_map_close(this, &input, &output);
         requirement.handle_type = PART_PROJECTION;
         requirement.partition = partition;
+        requirement.projection = 0; // always default
       }
       else // This is the common case
         mapper->invoke_map_close(this, &input, &output);
@@ -11741,7 +11742,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      if (!runtime->forest->check_partition_by_field_size(pid,
+      if (!runtime->forest->check_partition_by_field_size(proj,
             handle.get_field_space(), fid, false/*range*/))
       {
         log_run.error("ERROR: Field size of field %d does not match the size "
@@ -11775,7 +11776,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      if (!runtime->forest->check_partition_by_field_size(pid,
+      if (!runtime->forest->check_partition_by_field_size(proj,
             handle.get_field_space(), fid, true/*range*/))
       {
         log_run.error("ERROR: Field size of field %d does not match the size "
@@ -11946,6 +11947,7 @@ namespace Legion {
       // Update the region requirement and other information
       requirement.partition = output.chosen_partition;
       requirement.handle_type = PART_PROJECTION;
+      requirement.projection = 0; // always default
       launch_space = partition_node->color_space->handle;
       index_domain = partition_node->color_space->get_color_space_domain();
       is_index_space = true;
@@ -12033,7 +12035,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(thunk != NULL);
       assert(requirement.handle_type == SINGULAR);
 #endif
       // Perform the mapping call to get the physical isntances

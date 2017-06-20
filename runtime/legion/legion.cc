@@ -3442,13 +3442,13 @@ namespace Legion {
           case 2:
             {
               allocator.allocate_field(
-                  sizeof(Realm::ZRect<1,coord_t>), range_fid);
+                  sizeof(Realm::ZRect<2,coord_t>), range_fid);
               break;
             }
           case 3:
             {
               allocator.allocate_field(
-                  sizeof(Realm::ZRect<1,coord_t>), range_fid);
+                  sizeof(Realm::ZRect<3,coord_t>), range_fid);
               break;
             }
           default:
@@ -3738,13 +3738,13 @@ namespace Legion {
           case 2:
             {
               allocator.allocate_field(
-                  sizeof(Realm::ZRect<1,coord_t>), range_fid);
+                  sizeof(Realm::ZRect<2,coord_t>), range_fid);
               break;
             }
           case 3:
             {
               allocator.allocate_field(
-                  sizeof(Realm::ZRect<1,coord_t>), range_fid);
+                  sizeof(Realm::ZRect<3,coord_t>), range_fid);
               break;
             }
           default:
