@@ -1072,8 +1072,7 @@ namespace Legion {
 				      TunableID tid, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
-      Legion::Internal::MessageDescriptor SHIM_MAPPER_SUPPORT(3900, "undefined");
-      log_shim.fatal(SHIM_MAPPER_SUPPORT.id(),
+      REPORT_LEGION_FATAL(LEGION_FATAL_SHIM_MAPPER_SUPPORT,
                      "Shim mapper doesn't support any tunables directly!");
       assert(0);
       //should never happen, but function needs return statement

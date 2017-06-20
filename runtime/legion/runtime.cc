@@ -48,7 +48,7 @@
 #include <unistd.h> // sleep for warnings
 
 #define REPORT_DUMMY_CONTEXT(message)                        \
-  REPORT_LEGION_ERROR(ERROR_DUMMY_CONTEXT_OPERATION, "undefined", message)
+  REPORT_LEGION_ERROR(ERROR_DUMMY_CONTEXT_OPERATION,  message)
 
 namespace Legion {
   namespace Internal {
@@ -324,9 +324,8 @@ namespace Legion {
         TaskContext *context = producer_op->get_context();
         if (!context->is_leaf_context())
         {
-          MessageDescriptor WAITING_FUTURE_NONLEAF(1900, "undefined");
-          log_run.warning(WAITING_FUTURE_NONLEAF.id(),
-             "WARNING: Waiting on a future in non-leaf task %s "
+          REPORT_LEGION_WARNING(LEGION_WARNING_WAITING_FUTURE_NONLEAF,
+             "Waiting on a future in non-leaf task %s "
              "(UID %lld) is a violation of Legion's deferred execution model "
              "best practices. You may notice a severe performance degradation.",
              context->get_task_name(), context->get_unique_id());
@@ -346,7 +345,7 @@ namespace Legion {
           ready_event.lg_wait();
       }
       if (empty)
-        REPORT_LEGION_ERROR(ERROR_ACCESSING_EMPTY_FUTURE, "undefined",
+        REPORT_LEGION_ERROR(ERROR_ACCESSING_EMPTY_FUTURE, 
                             "Accessing empty future! (UID %lld)",
                             (producer_op == NULL) ? 0 : 
                               producer_op->get_unique_op_id())
@@ -362,8 +361,8 @@ namespace Legion {
       {
         TaskContext *context = producer_op->get_context();
         if (!context->is_leaf_context())
-          REPORT_LEGION_WARNING(LEGION_WARNING_FUTURE_NONLEAF, "undefined",
-             "WARNING: Waiting on a future in non-leaf task %s "
+          REPORT_LEGION_WARNING(LEGION_WARNING_FUTURE_NONLEAF, 
+             "Waiting on a future in non-leaf task %s "
              "(UID %lld) is a violation of Legion's deferred execution model "
              "best practices. You may notice a severe performance degradation.",
              context->get_task_name(), context->get_unique_id())
@@ -382,7 +381,7 @@ namespace Legion {
           ready_event.lg_wait();
       }
       if (empty)
-        REPORT_LEGION_ERROR(ERROR_ACCESSING_EMPTY_FUTURE, "undefined",
+        REPORT_LEGION_ERROR(ERROR_ACCESSING_EMPTY_FUTURE, 
                             "Accessing empty future! (UID %lld)",
                             (producer_op == NULL) ? 0 :
                               producer_op->get_unique_op_id())
@@ -408,8 +407,8 @@ namespace Legion {
       {
         TaskContext *context = producer_op->get_context();
         if (!context->is_leaf_context())
-          REPORT_LEGION_WARNING(LEGION_WARNING_BLOCKING_EMPTY, "undefined",
-              "WARNING: Performing a blocking is_empty test on a "
+          REPORT_LEGION_WARNING(LEGION_WARNING_BLOCKING_EMPTY, 
+              "Performing a blocking is_empty test on a "
               "in non-leaf task %s (UID %lld) is a violation of Legion's "
               "deferred execution model best practices. You may notice a "
               "severe performance degradation.", context->get_task_name(), 
@@ -955,8 +954,8 @@ namespace Legion {
 #endif
       if (Runtime::runtime_warnings && !silence_warnings && 
           (context != NULL) && !context->is_leaf_context())
-        REPORT_LEGION_WARNING(LEGION_WARNING_WAITING_ALL_FUTURES, "undefined",
-            "WARNING: Waiting for all futures in a future map in "
+        REPORT_LEGION_WARNING(LEGION_WARNING_WAITING_ALL_FUTURES, 
+            "Waiting for all futures in a future map in "
             "non-leaf task %s (UID %lld) is a violation of Legion's deferred "
             "execution model best practices. You may notice a severe "
             "performance degredation.", context->get_task_name(),
@@ -1213,15 +1212,15 @@ namespace Legion {
           (context != NULL) && !context->is_leaf_context())
       {
         if (source != NULL)
-          REPORT_LEGION_WARNING(LEGION_WARNING_WAITING_REGION, "undefined",
-              "WARNING: Waiting for a physical region to be valid "
+          REPORT_LEGION_WARNING(LEGION_WARNING_WAITING_REGION, 
+              "Waiting for a physical region to be valid "
               "for call %s in non-leaf task %s (UID %lld) is a violation of "
               "Legion's deferred execution model best practices. You may "
               "notice a severe performance degradation.", source,
               context->get_task_name(), context->get_unique_id())
         else
-          REPORT_LEGION_WARNING(LEGION_WARNING_WAITING_REGION, "undefined",
-              "WARNING: Waiting for a physical region to be valid "
+          REPORT_LEGION_WARNING(LEGION_WARNING_WAITING_REGION, 
+              "Waiting for a physical region to be valid "
               "in non-leaf task %s (UID %lld) is a violation of Legion's "
               "deferred execution model best practices. You may notice a "
               "severe performance degradation.", context->get_task_name(), 
@@ -1236,8 +1235,8 @@ namespace Legion {
       if (!ready_event.has_triggered())
       {
         if (warn && !silence_warnings && (source != NULL))
-          REPORT_LEGION_WARNING(LEGION_WARNING_MISSING_REGION_WAIT, "undefined",
-              "WARNING: Request for %s was performed on a "
+          REPORT_LEGION_WARNING(LEGION_WARNING_MISSING_REGION_WAIT, 
+              "Request for %s was performed on a "
               "physical region in task %s (ID %lld) without first waiting "
               "for the physical region to be valid. Legion is performing "
               "the wait for you.", source, context->get_task_name(), 
@@ -1306,14 +1305,14 @@ namespace Legion {
       if (context != NULL)
       {
         if (context->is_inner_context())
-          REPORT_LEGION_ERROR(ERROR_INNER_TASK_VIOLATION, "undefined",
-            "ERROR: Illegal call to 'get_accessor' inside task "
+          REPORT_LEGION_ERROR(ERROR_INNER_TASK_VIOLATION, 
+            "Illegal call to 'get_accessor' inside task "
             "%s (UID %lld) for a variant that was labeled as an 'inner' "
             "variant.", context->get_task_name(), context->get_unique_id())
         else if (Runtime::runtime_warnings && !silence_warnings &&
                   !context->is_leaf_context())
-          REPORT_LEGION_WARNING(LEGION_WARNING_NONLEAF_ACCESSOR, "undefined",
-              "WARNING: Call to 'get_accessor' in non-leaf task %s "
+          REPORT_LEGION_WARNING(LEGION_WARNING_NONLEAF_ACCESSOR, 
+              "Call to 'get_accessor' in non-leaf task %s "
               "(UID %lld) is a blocking operation in violation of Legion's "
               "deferred execution model best practices. You may notice a "
               "severe performance degradation.", context->get_task_name(),
@@ -1324,13 +1323,13 @@ namespace Legion {
       if (!mapped)
       {
         if (virtual_mapped)
-          REPORT_LEGION_ERROR(ERROR_ILLEGAL_IMPLICIT_MAPPING, "undefined",
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_IMPLICIT_MAPPING, 
                         "Illegal implicit mapping of a virtual mapped region "
                         "in task %s (UID %lld)", context->get_task_name(),
                         context->get_unique_id())
         if (Runtime::runtime_warnings && !silence_warnings)
-          REPORT_LEGION_WARNING(LEGION_WARNING_UNMAPPED_ACCESSOR, "undefined",
-                          "WARNING: Request for 'get_accessor' was "
+          REPORT_LEGION_WARNING(LEGION_WARNING_UNMAPPED_ACCESSOR, 
+                          "Request for 'get_accessor' was "
                           "performed on an unmapped region in task %s "
                           "(UID %lld). Legion is mapping it for you. "
                           "Please try to be more careful.",
@@ -1347,7 +1346,7 @@ namespace Legion {
                        Runtime::runtime_warnings, "get_accessor");
       // You can only legally invoke this method when you have one instance
       if (references.size() > 1)
-        REPORT_LEGION_ERROR(ERROR_DEPRECATED_METHOD_USE, "undefined",
+        REPORT_LEGION_ERROR(ERROR_DEPRECATED_METHOD_USE, 
                       "Illegal invocation of deprecated 'get_accessor' method "
                       "in task %s (ID %lld) on a PhysicalRegion containing "
                       "multiple internal instances. Use of this deprecated "
@@ -1380,14 +1379,14 @@ namespace Legion {
       if (context != NULL)
       {
         if (context->is_inner_context())
-          REPORT_LEGION_ERROR(ERROR_INNER_TASK_VIOLATION, "undefined",
-            "ERROR: Illegal call to 'get_field_accessor' inside "
+          REPORT_LEGION_ERROR(ERROR_INNER_TASK_VIOLATION, 
+            "Illegal call to 'get_field_accessor' inside "
             "task %s (UID %lld) for a variant that was labeled as an 'inner' "
             "variant.", context->get_task_name(), context->get_unique_id())
         else if (Runtime::runtime_warnings && !silence_warnings &&
                   !context->is_leaf_context())
-          REPORT_LEGION_WARNING(LEGION_WARNING_NONLEAF_ACCESSOR, "undefined",
-              "WARNING: Call to 'get_field_accessor' in non-leaf "
+          REPORT_LEGION_WARNING(LEGION_WARNING_NONLEAF_ACCESSOR, 
+              "Call to 'get_field_accessor' in non-leaf "
               "task %s (UID %lld) is a blocking operation in violation of "
               "Legion's deferred execution model best practices. You may "
               "notice a severe performance degradation.", 
@@ -1398,13 +1397,13 @@ namespace Legion {
       if (!mapped)
       {
         if (virtual_mapped)
-          REPORT_LEGION_ERROR(ERROR_ILLEGAL_IMPLICIT_MAPPING, "undefined",
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_IMPLICIT_MAPPING, 
                         "Illegal implicit mapping of a virtual mapped region "
                         "in task %s (UID %lld)", context->get_task_name(),
                         context->get_unique_id())
         if (Runtime::runtime_warnings && !silence_warnings)
-          REPORT_LEGION_WARNING(LEGION_WARNING_UNMAPPED_ACCESSOR, "undefined",
-                          "WARNING: Request for 'get_field_accessor' was "
+          REPORT_LEGION_WARNING(LEGION_WARNING_UNMAPPED_ACCESSOR, 
+                          "Request for 'get_field_accessor' was "
                           "performed on an unmapped region in task %s "
                           "(UID %lld). Legion is mapping it for you. "
                           "Please try to be more careful.",
@@ -1421,7 +1420,7 @@ namespace Legion {
                        Runtime::runtime_warnings, "get_field_acessor");
 #ifdef DEBUG_LEGION
       if (req.privilege_fields.find(fid) == req.privilege_fields.end())
-        REPORT_LEGION_ERROR(ERROR_INVALID_FIELD_PRIVILEGES, "undefined",
+        REPORT_LEGION_ERROR(ERROR_INVALID_FIELD_PRIVILEGES, 
             "Requested field accessor for field %d without privileges!", fid)
 #endif
       made_accessor = true;
@@ -1610,7 +1609,7 @@ namespace Legion {
         case READ_ONLY:
           {
             if (!(READ_ONLY & req.privilege))
-              REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, "undefined",
+              REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, 
                             "Error creating read-only field accessor without "
                             "read-only privileges on field %d in task %s",
                             fid, context->get_task_name())
@@ -1621,15 +1620,15 @@ namespace Legion {
             if (req.privilege == WRITE_DISCARD)
             {
               if (!silence_warnings)
-                REPORT_LEGION_WARNING(LEGION_WARNING_READ_DISCARD, "undefined",
-                                "WARNING: creating read-write accessor for "
+                REPORT_LEGION_WARNING(LEGION_WARNING_READ_DISCARD, 
+                                "creating read-write accessor for "
                                 "field %d in task %s which only has "
                                 "WRITE_DISCARD privileges. You may be "
                                 "accessing uninitialized data.",
                                 fid, context->get_task_name())
             }
             else if (req.privilege != READ_WRITE)
-              REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, "undefined",
+              REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, 
                             "Error creating read-write field accessor without "
                             "read-write privileges on field %d in task %s",
                             fid, context->get_task_name())
@@ -1638,7 +1637,7 @@ namespace Legion {
         case WRITE_DISCARD:
           {
             if (!(WRITE_DISCARD & req.privilege))
-              REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, "undefined",
+              REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, 
                             "Error creating write-discard field accessor "
                             "without write privileges on field %d in task %s",
                             fid, context->get_task_name())
@@ -1649,18 +1648,18 @@ namespace Legion {
             if ((REDUCE != req.privilege) || (redop != req.redop))
             {
               if (!(REDUCE & req.privilege))
-                REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, "undefined",
+                REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, 
                               "Error creating reduction field accessor "
                               "without reduction privileges on field %d in "
                               "task %s", fid, context->get_task_name())
               else if (redop != req.redop)
-                REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, "undefined",
+                REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, 
                               "Error creating reduction field accessor "
                               "with mismatched reduction operators %d and %d "
                               "on field %d in task %s", redop, req.redop,
                               fid, context->get_task_name())
               else
-                REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, "undefined",
+                REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, 
                               "Error creating reduction-only field accessor "
                               "for a region requirement with more than "
                               "reduction-only privileges for field %d in task "
@@ -1675,14 +1674,14 @@ namespace Legion {
       if (context != NULL)
       {
         if (context->is_inner_context())
-          REPORT_LEGION_ERROR(ERROR_INNER_TASK_VIOLATION, "undefined",
-            "ERROR: Illegal accessor construction inside "
+          REPORT_LEGION_ERROR(ERROR_INNER_TASK_VIOLATION, 
+            "Illegal accessor construction inside "
             "task %s (UID %lld) for a variant that was labeled as an 'inner' "
             "variant.", context->get_task_name(), context->get_unique_id())
         else if (Runtime::runtime_warnings && !silence_warnings &&
                   !context->is_leaf_context())
-          REPORT_LEGION_WARNING(LEGION_WARNING_NONLEAF_ACCESSOR, "undefined",
-              "WARNING: Accessor construction in non-leaf "
+          REPORT_LEGION_WARNING(LEGION_WARNING_NONLEAF_ACCESSOR, 
+              "Accessor construction in non-leaf "
               "task %s (UID %lld) is a blocking operation in violation of "
               "Legion's deferred execution model best practices. You may "
               "notice a severe performance degradation.", 
@@ -1693,13 +1692,13 @@ namespace Legion {
       if (!mapped)
       {
         if (virtual_mapped)
-          REPORT_LEGION_ERROR(ERROR_ILLEGAL_IMPLICIT_MAPPING, "undefined",
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_IMPLICIT_MAPPING, 
                         "Illegal implicit mapping of a virtual mapped region "
                         "in task %s (UID %lld)", context->get_task_name(),
                         context->get_unique_id())
         if (Runtime::runtime_warnings && !silence_warnings)
-          REPORT_LEGION_WARNING(LEGION_WARNING_UNMAPPED_ACCESSOR, "undefined",
-                          "WARNING: Accessor construction was "
+          REPORT_LEGION_WARNING(LEGION_WARNING_UNMAPPED_ACCESSOR, 
+                          "Accessor construction was "
                           "performed on an unmapped region in task %s "
                           "(UID %lld). Legion is mapping it for you. "
                           "Please try to be more careful.",
@@ -1712,7 +1711,7 @@ namespace Legion {
 #endif 
       }
       if (req.privilege_fields.find(fid) == req.privilege_fields.end())
-        REPORT_LEGION_ERROR(ERROR_INVALID_FIELD_PRIVILEGES, "undefined",
+        REPORT_LEGION_ERROR(ERROR_INVALID_FIELD_PRIVILEGES, 
                        "Accessor construction for field %d in task %s "
                        "without privileges!", fid, context->get_task_name())
       // Get the index space to use for the accessor
@@ -1759,7 +1758,7 @@ namespace Legion {
       {
         case READ_ONLY:
           {
-            REPORT_LEGION_ERROR(ERROR_ACCESSOR_BOUNDS_CHECK, "undefined",
+            REPORT_LEGION_ERROR(ERROR_ACCESSOR_BOUNDS_CHECK, 
                           "Bounds check failure reading point %s from "
                           "field %d in task %s\n", point_string, fid,
                           context->get_task_name())
@@ -1767,7 +1766,7 @@ namespace Legion {
           }
         case READ_WRITE:
           {
-            REPORT_LEGION_ERROR(ERROR_ACCESSOR_BOUNDS_CHECK, "undefined",
+            REPORT_LEGION_ERROR(ERROR_ACCESSOR_BOUNDS_CHECK, 
                           "Bounds check failure geting a reference to point %s "
                           "from field %d in task %s\n", point_string, fid,
                           context->get_task_name())
@@ -1775,7 +1774,7 @@ namespace Legion {
           }
         case WRITE_DISCARD:
           {
-            REPORT_LEGION_ERROR(ERROR_ACCESSOR_BOUNDS_CHECK, "undefined",
+            REPORT_LEGION_ERROR(ERROR_ACCESSOR_BOUNDS_CHECK, 
                           "Bounds check failure writing to point %s in "
                           "field %d in task %s\n", point_string, fid,
                           context->get_task_name())
@@ -1783,7 +1782,7 @@ namespace Legion {
           }
         case REDUCE:
           {
-            REPORT_LEGION_ERROR(ERROR_ACCESSOR_BOUNDS_CHECK, "undefined",
+            REPORT_LEGION_ERROR(ERROR_ACCESSOR_BOUNDS_CHECK, 
                           "Bounds check failure reducing to point %s in "
                           "field %d in task %s\n", point_string, fid,
                           context->get_task_name())
@@ -2526,7 +2525,7 @@ namespace Legion {
       log_run.spew("Adding mapper %d on processor " IDFMT "", 
                           mid, local_proc.id);
       if (check && (mid == 0))
-        REPORT_LEGION_ERROR(ERROR_RESERVED_MAPPING_ID, "undefined",
+        REPORT_LEGION_ERROR(ERROR_RESERVED_MAPPING_ID, 
                             "Invalid mapping ID. ID 0 is reserved.");
       AutoLock m_lock(mapper_lock);
       std::map<MapperID,std::pair<MapperManager*,bool> >::iterator finder = 
@@ -7040,13 +7039,13 @@ namespace Legion {
         // Make sure that all the variants agree whether there is 
         // a return type or not
         if (has_return_type != impl->returns_value())
-          REPORT_LEGION_ERROR(ERROR_RETURN_SIZE_MISMATCH, "undefined",
+          REPORT_LEGION_ERROR(ERROR_RETURN_SIZE_MISMATCH, 
                         "Variants of task %s (ID %d) disagree on whether "
                         "there is a return type or not. All variants "
                         "of a task must agree on whether there is a "
                         "return type.", get_name(false/*need lock*/), task_id)
         if (all_idempotent != impl->is_idempotent())
-          REPORT_LEGION_ERROR(ERROR_IDEMPOTENT_MISMATCH, "undefined",
+          REPORT_LEGION_ERROR(ERROR_IDEMPOTENT_MISMATCH, 
                         "Variants of task %s (ID %d) have different idempotent "
                         "options.  All variants of the same task must "
                         "all be either idempotent or non-idempotent.",
@@ -7083,7 +7082,7 @@ namespace Legion {
       {
         if (can_fail)
           return NULL;
-        REPORT_LEGION_ERROR(ERROR_UNREGISTERED_VARIANT, "undefined",
+        REPORT_LEGION_ERROR(ERROR_UNREGISTERED_VARIANT, 
                             "Unable to find variant %ld of task %s!",
                             variant_id, get_name())
       }
@@ -7216,8 +7215,8 @@ namespace Legion {
             {
               // Note mutable so check to make sure that the bits are the same
               if (size != finder->second.size)
-                REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG,"undefined",
-                              "ERROR: Inconsistent Semantic Tag value "
+                REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG,
+                              "Inconsistent Semantic Tag value "
                               "for tag %ld with different sizes of %zd"
                               " and %zd for task impl", 
                               tag, size, finder->second.size)
@@ -7229,8 +7228,8 @@ namespace Legion {
                 {
                   char diff = orig[idx] ^ next[idx];
                   if (diff)
-                    REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG, 
-                        "undefined", "ERROR: Inconsistent Semantic Tag value "
+                    REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG,
+                         "Inconsistent Semantic Tag value "
                                      "for tag %ld with different values at"
                                      "byte %d for task impl, %x != %x",
                                      tag, idx, orig[idx], next[idx])
@@ -7354,7 +7353,7 @@ namespace Legion {
         // Nothing to wait on so we have to do something
         if (can_fail)
           return false;
-        REPORT_LEGION_ERROR(ERROR_INVALID_SEMANTIC_TAG, "undefined",
+        REPORT_LEGION_ERROR(ERROR_INVALID_SEMANTIC_TAG, 
                       "Invalid semantic tag %ld for task implementation", tag)
       }
       else
@@ -7372,8 +7371,8 @@ namespace Legion {
       {
         if (can_fail)
           return false;
-        REPORT_LEGION_ERROR(ERROR_INVALID_SEMANTIC_TAG, "undefined",
-            "ERROR: invalid semantic tag %ld for task implementation", tag)
+        REPORT_LEGION_ERROR(ERROR_INVALID_SEMANTIC_TAG, 
+            "invalid semantic tag %ld for task implementation", tag)
       }
       result = finder->second.buffer;
       size = finder->second.size;
@@ -7615,10 +7614,10 @@ namespace Legion {
       // Check that global registration has portable implementations
       if (global && (!realm_descriptor->has_portable_implementations()))
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_GLOBAL_VARIANT_REGISTRATION, 
-            "undefined", "Variant %s requested global registration without "
+             "Variant %s requested global registration without "
                          "a portable implementation.", variant_name)
       if (leaf_variant && inner_variant)
-        REPORT_LEGION_ERROR(ERROR_INNER_LEAF_MISMATCH, "undefined",
+        REPORT_LEGION_ERROR(ERROR_INNER_LEAF_MISMATCH, 
                       "Task variant %s (ID %ld) of task %s (ID %d) is not "
                       "permitted to be both inner and leaf tasks "
                       "simultaneously.", variant_name, vid,
@@ -7749,7 +7748,7 @@ namespace Legion {
         return constraint.get_kind();
       if (warn)
         REPORT_LEGION_WARNING(LEGION_WARNING_MISSING_PROC_CONSTRAINT, 
-          "undefined", "WARNING: NO PROCESSOR CONSTRAINT SPECIFIED FOR VARIANT"
+           "NO PROCESSOR CONSTRAINT SPECIFIED FOR VARIANT"
                         " %s (ID %ld) OF TASK %s (ID %d)! ASSUMING LOC_PROC!",
                       variant_name, vid, owner->get_name(false),owner->task_id)
       return Processor::LOC_PROC;
@@ -7761,7 +7760,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!global)
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_USE_OF_NON_GLOBAL_VARIANT,"undefined",
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_USE_OF_NON_GLOBAL_VARIANT,
                       "Illegal remote use of variant %s of task %s "
                       "which was not globally registered.",
                       variant_name, owner->get_name())
@@ -8537,7 +8536,7 @@ namespace Legion {
       if (result == LogicalRegion::NO_REGION)
         return;
       if (result.get_tree_id() != req.region.get_tree_id())
-        REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, "undefined",
+        REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, 
             "Projection functor %d produced an invalid "
             "logical subregion of tree ID %d for region requirement %d "
             "of task %s (UID %lld) which is different from the upper "
@@ -8546,7 +8545,7 @@ namespace Legion {
             task->get_unique_id(), req.region.get_tree_id())
 #ifdef DEBUG_LEGION
       if (!runtime->forest->is_subregion(result, req.region))
-        REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, "undefined",
+        REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, 
             "Projection functor %d produced an invalid "
             "logical subregion which is not a subregion of the "
             "upper bound region for region requirement %d of "
@@ -8555,7 +8554,7 @@ namespace Legion {
       const unsigned projection_depth = 
         runtime->forest->get_projection_depth(result, req.region);
       if (projection_depth != functor->get_depth())
-        REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, "undefined",
+        REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, 
             "Projection functor %d produced an invalid "
             "logical subregion which has projection depth %d which "
             "is different from stated projection depth of the functor "
@@ -8575,7 +8574,7 @@ namespace Legion {
       if (result == LogicalRegion::NO_REGION)
         return;
       if (result.get_tree_id() != req.partition.get_tree_id())
-        REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, "undefined",
+        REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, 
             "Projection functor %d produced an invalid "
             "logical subregion of tree ID %d for region requirement %d "
             "of task %s (UID %lld) which is different from the upper "
@@ -8584,7 +8583,7 @@ namespace Legion {
             task->get_unique_id(), req.partition.get_tree_id())
 #ifdef DEBUG_LEGION
       if (!runtime->forest->is_subregion(result, req.partition))
-        REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, "undefined",
+        REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, 
             "Projection functor %d produced an invalid "
             "logical subregion which is not a subregion of the "
             "upper bound region for region requirement %d of "
@@ -8593,7 +8592,7 @@ namespace Legion {
       const unsigned projection_depth = 
         runtime->forest->get_projection_depth(result, req.partition);
       if (projection_depth != functor->get_depth())
-        REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, "undefined",
+        REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, 
             "Projection functor %d produced an invalid "
             "logical subregion which has projection depth %d which "
             "is different from stated projection depth of the functor "
@@ -8613,7 +8612,7 @@ namespace Legion {
       if (result == LogicalRegion::NO_REGION)
         return;
       if (result.get_tree_id() != req.region.get_tree_id())
-        REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, "undefined",
+        REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, 
             "Projection functor %d produced an invalid "
             "logical subregion of tree ID %d for region requirement %d "
             "of operation %s (UID %lld) which is different from the upper "
@@ -8622,7 +8621,7 @@ namespace Legion {
             op->get_unique_op_id(), req.region.get_tree_id())
 #ifdef DEBUG_LEGION
       if (!runtime->forest->is_subregion(result, req.region))
-        REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, "undefined",
+        REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, 
             "Projection functor %d produced an invalid "
             "logical subregion which is not a subregion of the "
             "upper bound region for region requirement %d of "
@@ -8631,7 +8630,7 @@ namespace Legion {
       const unsigned projection_depth = 
         runtime->forest->get_projection_depth(result, req.region);
       if (projection_depth != functor->get_depth())
-        REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, "undefined",
+        REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, 
             "Projection functor %d produced an invalid "
             "logical subregion which has projection depth %d which "
             "is different from stated projection depth of the functor "
@@ -8651,7 +8650,7 @@ namespace Legion {
       if (result == LogicalRegion::NO_REGION)
         return;
       if (result.get_tree_id() != req.partition.get_tree_id())
-        REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, "undefined",
+        REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, 
             "Projection functor %d produced an invalid "
             "logical subregion of tree ID %d for region requirement %d "
             "of operation %s (UID %lld) which is different from the upper "
@@ -8660,7 +8659,7 @@ namespace Legion {
             op->get_unique_op_id(), req.partition.get_tree_id())
 #ifdef DEBUG_LEGION
       if (!runtime->forest->is_subregion(result, req.partition))
-        REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, "undefined",
+        REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, 
             "Projection functor %d produced an invalid "
             "logical subregion which is not a subregion of the "
             "upper bound region for region requirement %d of "
@@ -8669,7 +8668,7 @@ namespace Legion {
       const unsigned projection_depth = 
         runtime->forest->get_projection_depth(result, req.partition);
       if (projection_depth != functor->get_depth())
-        REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, "undefined",
+        REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_RESULT, 
             "Projection functor %d produced an invalid "
             "logical subregion which has projection depth %d which "
             "is different from stated projection depth of the functor "
@@ -9938,7 +9937,7 @@ namespace Legion {
       IndexPartition result = forest->get_index_partition(parent, color);
 #ifdef DEBUG_LEGION
       if (!result.exists())
-        REPORT_LEGION_ERROR(ERROR_INVALID_INDEX_SPACE_COLOR, "undefined",
+        REPORT_LEGION_ERROR(ERROR_INVALID_INDEX_SPACE_COLOR, 
             "Invalid color %d for get index partitions", color);
 #endif
       return result;
@@ -11438,7 +11437,7 @@ namespace Legion {
         std::map<Processor,ProcessorManager*>::const_iterator finder = 
           proc_managers.find(target);
         if (finder == proc_managers.end())
-          REPORT_LEGION_ERROR(ERROR_INVALID_PROCESSOR_NAME, "undefined",
+          REPORT_LEGION_ERROR(ERROR_INVALID_PROCESSOR_NAME, 
            "Invalid processor " IDFMT " passed to get mapper call.", target.id);
         if (ctx != DUMMY_CONTEXT)
           ctx->end_runtime_call();
@@ -11477,7 +11476,7 @@ namespace Legion {
     {
       if (mpi_rank_table == NULL)
         REPORT_LEGION_ERROR(ERROR_MPI_INTEROPERABILITY_NOT_CONFIGURED, 
-            "undefined", "Forward MPI mapping call not supported without "
+             "Forward MPI mapping call not supported without "
                       "calling configure_MPI_interoperability during "
                       "start up")
 #ifdef DEBUG_LEGION
@@ -11492,7 +11491,7 @@ namespace Legion {
     {
       if (mpi_rank_table == NULL)
         REPORT_LEGION_ERROR(ERROR_MPI_INTEROPERABILITY_NOT_CONFIGURED,
-            "undefined", "Reverse MPI mapping call not supported without "
+             "Reverse MPI mapping call not supported without "
                       "calling configure_MPI_interoperability during "
                       "start up")
 #ifdef DEBUG_LEGION
@@ -11507,7 +11506,7 @@ namespace Legion {
     {
       if (mpi_rank_table == NULL)
         REPORT_LEGION_ERROR(ERROR_MPI_INTEROPERABILITY_NOT_CONFIGURED,
-            "undefined", "Findling local MPI rank not supported without "
+             "Findling local MPI rank not supported without "
                       "calling configure_MPI_interoperability during "
                       "start up")
       return mpi_rank;
@@ -11573,7 +11572,7 @@ namespace Legion {
     {
       MapperID &next_mapper = get_current_static_mapper_id(); 
       if (runtime_started)
-        REPORT_LEGION_ERROR(ERROR_STATIC_CALL_POST_RUNTIME_START, "undefined",
+        REPORT_LEGION_ERROR(ERROR_STATIC_CALL_POST_RUNTIME_START, 
                       "Illegal call to 'generate_static_mapper_id' after "
                       "the runtime has been started!")
       return next_mapper++;
@@ -11678,7 +11677,7 @@ namespace Legion {
     {
       ProjectionID &next_projection = get_current_static_projection_id();
       if (runtime_started)
-        REPORT_LEGION_ERROR(ERROR_STATIC_CALL_POST_RUNTIME_START, "undefined",
+        REPORT_LEGION_ERROR(ERROR_STATIC_CALL_POST_RUNTIME_START, 
                       "Illegal call to 'generate_static_projection_id' after "
                       "the runtime has been started!");
       return next_projection++;
@@ -11692,11 +11691,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (need_zero_check && (pid == 0))
-        REPORT_LEGION_ERROR(ERROR_RESERVED_PROJECTION_ID, "undefined",
-                            "ERROR: ProjectionID zero is reserved.\n");
+        REPORT_LEGION_ERROR(ERROR_RESERVED_PROJECTION_ID, 
+                            "ProjectionID zero is reserved.\n");
       if (!was_preregistered && (total_address_spaces > 1))
-        REPORT_LEGION_WARNING(LEGION_WARNING_DYNAMIC_PROJECTION_REG,"undefined",
-                        "WARNING: Projection functor %d is being dynamically "
+        REPORT_LEGION_WARNING(LEGION_WARNING_DYNAMIC_PROJECTION_REG,
+                        "Projection functor %d is being dynamically "
                         "registered for a multi-node run with %d nodes. It is "
                         "currently the responsibility of the application to "
                         "ensure that this projection functor is registered on "
@@ -11709,8 +11708,8 @@ namespace Legion {
       std::map<ProjectionID,ProjectionFunction*>::
         const_iterator finder = projection_functions.find(pid);
       if (finder != projection_functions.end())
-        REPORT_LEGION_ERROR(ERROR_DUPLICATE_PROJECTION_ID, "undefined",
-                      "ERROR: ProjectionID %d has already been used in "
+        REPORT_LEGION_ERROR(ERROR_DUPLICATE_PROJECTION_ID, 
+                      "ProjectionID %d has already been used in "
                       "the region projection table\n", pid)
       projection_functions[pid] = function;
       if (Runtime::legion_spy_enabled)
@@ -11723,19 +11722,19 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (runtime_started)
-        REPORT_LEGION_ERROR(ERROR_STATIC_CALL_POST_RUNTIME_START, "undefined",
+        REPORT_LEGION_ERROR(ERROR_STATIC_CALL_POST_RUNTIME_START, 
                       "Illegal call to 'preregister_projection_functor' after "
                       "the runtime has started!")
       if (pid == 0)
-        REPORT_LEGION_ERROR(ERROR_RESERVED_PROJECTION_ID, "undefined",
-                            "ERROR: ProjectionID zero is reserved.\n");
+        REPORT_LEGION_ERROR(ERROR_RESERVED_PROJECTION_ID, 
+                            "ProjectionID zero is reserved.\n");
       std::map<ProjectionID,ProjectionFunctor*> &pending_projection_functors =
         get_pending_projection_table();
       std::map<ProjectionID,ProjectionFunctor*>::const_iterator finder = 
         pending_projection_functors.find(pid);
       if (finder != pending_projection_functors.end())
-        REPORT_LEGION_ERROR(ERROR_DUPLICATE_PROJECTION_ID, "undefined",
-                      "ERROR: ProjectionID %d has already been used in "
+        REPORT_LEGION_ERROR(ERROR_DUPLICATE_PROJECTION_ID, 
+                      "ProjectionID %d has already been used in "
                       "the region projection table\n", pid)
       pending_projection_functors[pid] = functor;
     }
@@ -11748,7 +11747,7 @@ namespace Legion {
       std::map<ProjectionID,ProjectionFunction*>::
         const_iterator finder = projection_functions.find(pid);
       if (finder == projection_functions.end())
-        REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_ID, "undefined",
+        REPORT_LEGION_ERROR(ERROR_INVALID_PROJECTION_ID, 
                         "Unable to find registered region projection ID %d. "
                         "Please upgrade to using projection functors!", pid);
       return finder->second;
@@ -11981,7 +11980,7 @@ namespace Legion {
       // TODO: figure out a way to make this check safe with dynamic generation
 #if 0
       if (check_task_id && (registrar.task_id >= MAX_APPLICATION_TASK_ID))
-        REPORT_LEGION_ERROR(ERROR_MAX_APPLICATION_TASK_ID_EXCEEDED, "undefined",
+        REPORT_LEGION_ERROR(ERROR_MAX_APPLICATION_TASK_ID_EXCEEDED, 
                       "Error registering task with ID %d. Exceeds the "
                       "statically set bounds on application task IDs of %d. "
                       "See %s in legion_config.h.", 
@@ -12238,7 +12237,7 @@ namespace Legion {
     {
       Processor target = task->target_proc;
       if (!target.exists())
-        REPORT_LEGION_ERROR(ERROR_INVALID_TARGET_PROC, "undefined",
+        REPORT_LEGION_ERROR(ERROR_INVALID_TARGET_PROC, 
                       "Mapper requested invalid NO_PROC as target proc!");
       // Check to see if the target processor is still local 
       std::map<Processor,ProcessorManager*>::const_iterator finder = 
@@ -12275,7 +12274,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!target.exists())
-        REPORT_LEGION_ERROR(ERROR_INVALID_TARGET_PROC, "undefined",
+        REPORT_LEGION_ERROR(ERROR_INVALID_TARGET_PROC, 
                       "Mapper requested invalid NO_PROC as target proc!");
       // Check to see if the target processor is still local 
       std::map<Processor,ProcessorManager*>::const_iterator finder = 
@@ -17572,7 +17571,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     { 
       if (runtime_started)
-        REPORT_LEGION_ERROR(ERROR_STATIC_CALL_POST_RUNTIME_START, "undefined",
+        REPORT_LEGION_ERROR(ERROR_STATIC_CALL_POST_RUNTIME_START, 
                       "Illegal call to 'preregister_layout' after "
                       "the runtime has started!");
       std::map<LayoutConstraintID,LayoutConstraintRegistrar> 
@@ -17598,13 +17597,13 @@ namespace Legion {
       else
       {
         if (layout_id == 0)
-          REPORT_LEGION_ERROR(ERROR_RESERVED_CONSTRAINT_ID, "undefined",
+          REPORT_LEGION_ERROR(ERROR_RESERVED_CONSTRAINT_ID, 
                         "Illegal use of reserved constraint ID 0");
         // Check to make sure it is not already used
         std::map<LayoutConstraintID,LayoutConstraintRegistrar>::const_iterator
           finder = pending_constraints.find(layout_id);
         if (finder != pending_constraints.end())
-          REPORT_LEGION_ERROR(ERROR_DUPLICATE_CONSTRAINT_ID, "undefined",
+          REPORT_LEGION_ERROR(ERROR_DUPLICATE_CONSTRAINT_ID, 
                         "Duplicate use of constraint ID %ld", layout_id);
       }
       pending_constraints[layout_id] = registrar;
@@ -17930,13 +17929,15 @@ namespace Legion {
 #else
           if (!strcmp(argv[i],"-lg:tree"))
           {
-            log_run.warning("WARNING: Region tree state logging is "
+            REPORT_LEGION_WARNING(LEGION_WARNING_REGION_TREE_STATE_LOGGING,
+                                  "Region tree state logging is "
                           "disabled.  To enable region tree state logging "
                                                   "compile in debug mode.");
           }
           if (!strcmp(argv[i],"-lg:disjointness"))
           {
-            log_run.warning("WARNING: Disjointness verification for "
+            REPORT_LEGION_WARNING(LEGION_WARNING_DISJOINTNESS_VERIFICATION,
+                                  "Disjointness verification for "
                       "partition creation is disabled.  To enable dynamic "
                               "disjointness testing compile in debug mode.");
           }
@@ -17994,13 +17995,15 @@ namespace Legion {
 #else
           if (!strcmp(argv[i],"-hl:tree"))
           {
-            log_run.warning("WARNING: Region tree state logging is "
+            REPORT_LEGION_WARNING(LEGION_WARNING_REGION_TREE_STATE_LOGGING,
+                                  "Region tree state logging is "
                           "disabled.  To enable region tree state logging "
                                                   "compile in debug mode.");
           }
           if (!strcmp(argv[i],"-hl:disjointness"))
           {
-            log_run.warning("WARNING: Disjointness verification for "
+            REPORT_LEGION_WARNING(LEGION_WARNING_DISJOINTNESS_VERIFICATION,
+                                  "Disjointness verification for "
                       "partition creation is disabled.  To enable dynamic "
                               "disjointness testing compile in debug mode.");
           }
@@ -18163,7 +18166,7 @@ namespace Legion {
       if (separate_runtime_instances)
       {
 #ifdef TRACE_ALLOCATION
-        REPORT_LEGION_ERROR(ERROR_TRACING_ALLOCATION_WITH_SEPARATE, "undefined",
+        REPORT_LEGION_ERROR(ERROR_TRACING_ALLOCATION_WITH_SEPARATE, 
                       "Memory tracing not supported with "
                       "separate runtime instances.")
 #endif
@@ -18171,7 +18174,7 @@ namespace Legion {
         Machine::ProcessorQuery util_procs(machine);
         util_procs.local_address_space().only_kind(Processor::UTIL_PROC);
         if (util_procs.count() > 0)
-          REPORT_LEGION_ERROR(ERROR_SEPARATE_UTILITY_PROCS, "undefined",
+          REPORT_LEGION_ERROR(ERROR_SEPARATE_UTILITY_PROCS, 
                         "Separate runtime instances are not "
                         "supported when running with explicit "
                         "utility processors")
@@ -18198,7 +18201,7 @@ namespace Legion {
         Machine::ProcessorQuery local_procs(machine);
         local_procs.local_address_space();
         if (local_procs.count() > MAX_NUM_PROCS)
-          REPORT_LEGION_ERROR(ERROR_MAXIMUM_PROCS_EXCEEDED, "undefined",
+          REPORT_LEGION_ERROR(ERROR_MAXIMUM_PROCS_EXCEEDED, 
                         "Maximum number of local processors %zd exceeds "
                         "compile time maximum of %d.  Change the value "
                         "in legion_config.h and recompile.",
@@ -18210,7 +18213,7 @@ namespace Legion {
           local_procs.only_kind(Processor::LOC_PROC);
           // If we don't have one that is very bad
           if (local_procs.count() == 0)
-            REPORT_LEGION_ERROR(ERROR_NO_PROCESSORS, "undefined",
+            REPORT_LEGION_ERROR(ERROR_NO_PROCESSORS, 
                           "Machine model contains no CPU processors!")
           top_level_proc = local_procs.first();
         }
@@ -18281,7 +18284,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!runtime_backgrounded)
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_WAIT_FOR_SHUTDOWN, "undefined",
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_WAIT_FOR_SHUTDOWN, 
                       "Illegal call to wait_for_shutdown when runtime was "
                       "not launched in background mode!");
       RealmRuntime::get_runtime().wait_for_shutdown();
@@ -18300,7 +18303,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (runtime_started)
-        REPORT_LEGION_ERROR(ERROR_STATIC_CALL_POST_RUNTIME_START, "undefined",
+        REPORT_LEGION_ERROR(ERROR_STATIC_CALL_POST_RUNTIME_START, 
                       "Illegal call to 'configure_MPI_interoperability' after "
                       "the runtime has been started!");
 #ifdef DEBUG_LEGION
@@ -18310,13 +18313,13 @@ namespace Legion {
       if (mpi_rank >= 0)
       {
         if (rank != mpi_rank)
-          REPORT_LEGION_ERROR(ERROR_DUPLICATE_MPI_CONFIG, "undefined",
-              "ERROR: multiple calls to "
+          REPORT_LEGION_ERROR(ERROR_DUPLICATE_MPI_CONFIG, 
+              "multiple calls to "
               "configure_MPI_interoperability with different ranks "
               "%d and %d on the same Legion runtime!", mpi_rank, rank)
         else
-          REPORT_LEGION_WARNING(LEGION_WARNING_DUPLICATE_MPI_CONFIG,"undefined",
-                                "WARNING: duplicate calls to configure_"
+          REPORT_LEGION_WARNING(LEGION_WARNING_DUPLICATE_MPI_CONFIG,
+                                "duplicate calls to configure_"
                                 "MPI_interoperability on rank %d!", rank);
       }
       mpi_rank = rank;
@@ -18346,12 +18349,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (redop_id == 0)
-        REPORT_LEGION_ERROR(ERROR_RESERVED_REDOP_ID, "undefined",
-                      "ERROR: ReductionOpID zero is reserved.")
+        REPORT_LEGION_ERROR(ERROR_RESERVED_REDOP_ID, 
+                      "ReductionOpID zero is reserved.")
       ReductionOpTable &red_table = Runtime::get_reduction_table();
 #ifdef DEBUG_LEGION
       if (red_table.find(redop_id) == red_table.end())
-        REPORT_LEGION_ERROR(ERROR_INVALID_REDOP_ID, "undefined",
+        REPORT_LEGION_ERROR(ERROR_INVALID_REDOP_ID, 
                       "Invalid ReductionOpID %d",redop_id)
 #endif
       return red_table[redop_id];
@@ -18362,12 +18365,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (serdez_id == 0)
-        REPORT_LEGION_ERROR(ERROR_RESERVED_SERDEZ_ID, "undefined",
-                      "ERROR: CustomSerdezID zero is reserved.")
+        REPORT_LEGION_ERROR(ERROR_RESERVED_SERDEZ_ID, 
+                      "CustomSerdezID zero is reserved.")
       SerdezOpTable &serdez_table = Runtime::get_serdez_table();
 #ifdef DEBUG_LEGION
       if (serdez_table.find(serdez_id) == serdez_table.end())
-        REPORT_LEGION_ERROR(ERROR_INVALID_SERDEZ_ID, "undefined",
+        REPORT_LEGION_ERROR(ERROR_INVALID_SERDEZ_ID, 
                       "Invalid CustomSerdezOpID %d", serdez_id)
 #endif
       return serdez_table[serdez_id];
@@ -18491,7 +18494,7 @@ namespace Legion {
     {
       TaskID &next_task = get_current_static_task_id(); 
       if (runtime_started)
-        REPORT_LEGION_ERROR(ERROR_STATIC_CALL_POST_RUNTIME_START, "undefined",
+        REPORT_LEGION_ERROR(ERROR_STATIC_CALL_POST_RUNTIME_START, 
                       "Illegal call to 'generate_static_task_id' after "
                       "the runtime has been started!")
       return next_task++;
@@ -18507,11 +18510,11 @@ namespace Legion {
     {
       // Report an error if the runtime has already started
       if (runtime_started)
-        REPORT_LEGION_ERROR(ERROR_STATIC_CALL_POST_RUNTIME_START, "undefined",
+        REPORT_LEGION_ERROR(ERROR_STATIC_CALL_POST_RUNTIME_START, 
                       "Illegal call to 'preregister_task_variant' after "
                       "the runtime has been started!")
       if (check_id && (registrar.task_id >= get_current_static_task_id()))
-        REPORT_LEGION_ERROR(ERROR_MAX_APPLICATION_TASK_ID_EXCEEDED, "undefined",
+        REPORT_LEGION_ERROR(ERROR_MAX_APPLICATION_TASK_ID_EXCEEDED, 
                       "Error preregistering task with ID %d. Exceeds the "
                       "statically set bounds on application task IDs of %d. "
                       "See %s in legion_config.h.", 
@@ -18530,27 +18533,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::report_error_message(const MessageDescriptor &desc,
-                                       const char *file_name, const int line,
-                                       const char *message)
+    /*static*/ void Runtime::report_fatal_message(int id,
+                                          const char *file_name, const int line,
+                                                  const char *message)
     //--------------------------------------------------------------------------
     {
-      log_run.error(desc.id(), "LEGION ERROR: %s (from file %s:%d)",
+      log_run.fatal(id, "LEGION FATAL: %s (from file %s:%d)",
                     message, file_name, line);
 #ifdef DEBUG_LEGION
       assert(false);
 #endif
-      exit(desc.id());
+      exit(id);
     }
-
+    
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::report_error_message(int id,
+                                          const char *file_name, const int line,
+                                                  const char *message)
+    //--------------------------------------------------------------------------
+    {
+      log_run.error(id, "LEGION ERROR: %s (from file %s:%d)",
+                    message, file_name, line);
+#ifdef DEBUG_LEGION
+      assert(false);
+#endif
+      exit(id);
+    }
+    
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::report_warning_message(
-                                         const MessageDescriptor &desc,
+                                         int id,
                                          const char *file_name, const int line,
                                          const char *message)
     //--------------------------------------------------------------------------
     {
-      log_run.warning(desc.id(), "LEGION WARNING: %s (from file %s:%d)",
+      log_run.warning(id, "LEGION WARNING: %s (from file %s:%d)",
                       message, file_name, line);
     }
 
@@ -18855,7 +18872,7 @@ namespace Legion {
       machine.get_all_processors(all_procs);
       // not having any processors at all is a fatal error
       if (all_procs.empty())
-        REPORT_LEGION_ERROR(ERROR_NO_PROCESSORS, "undefined",
+        REPORT_LEGION_ERROR(ERROR_NO_PROCESSORS, 
                       "Machine model contains no processors!");
       // Compute the data structures necessary for
       // constructing a runtime instance
