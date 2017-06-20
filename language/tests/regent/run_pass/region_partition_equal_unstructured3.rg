@@ -34,6 +34,6 @@ task main()
     t += @x
   end
 
-  regentlib.assert(t == 130805, "test failed")
+  regentlib.assert(t == 151005, "test failed")
 end
 regentlib.start(main)
