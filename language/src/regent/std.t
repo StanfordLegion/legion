@@ -1516,8 +1516,7 @@ function std.flatten_struct_fields(struct_type, pred)
   local check = pred and pred(struct_type)
 
   local function is_geometric_type(ty)
-    return (std.is_bounded_type(ty) and std.is_index_type(ty.index_type)) or
-           std.is_index_type(ty) or std.is_rect_type(ty)
+    return std.is_index_type(ty) or std.is_rect_type(ty)
   end
 
   if check == nil then
