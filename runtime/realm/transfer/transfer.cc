@@ -89,11 +89,11 @@ namespace Realm {
     bool tentative_valid;
   };
 
-  TransferIteratorIndexSpace::TransferIteratorIndexSpace(const IndexSpace is,
+  TransferIteratorIndexSpace::TransferIteratorIndexSpace(const IndexSpace _is,
 							 RegionInstance inst,
 							 const std::vector<unsigned>& _fields,
 							 size_t _extra_elems)
-    : enumerator(0), field_idx(0), extra_elems(_extra_elems)
+    : is(_is), enumerator(0), field_idx(0), extra_elems(_extra_elems)
     , tentative_valid(false)
   {
     valid_mask = &(is.get_valid_mask());
@@ -102,6 +102,8 @@ namespace Realm {
     // special case - an empty index space skips the rest of the init
     if((first_enabled == -1) || _fields.empty()) {
       // leave fields empty so that done() is always true
+      inst_impl = 0;
+      mapping = 0;
     } else {
       inst_impl = get_runtime()->get_instance_impl(inst);
       mapping = inst_impl->metadata.linearization.get_mapping<1>();
@@ -154,9 +156,14 @@ namespace Realm {
     tiis->valid_mask = &(is.get_valid_mask());
     assert(tiis->valid_mask != 0);
     tiis->first_enabled = tiis->valid_mask->find_enabled();
-    tiis->inst_impl = get_runtime()->get_instance_impl(inst);
-    tiis->mapping = tiis->inst_impl->metadata.linearization.get_mapping<1>();
-    assert(tiis->mapping != 0);
+    if(inst.exists()) {
+      tiis->inst_impl = get_runtime()->get_instance_impl(inst);
+      tiis->mapping = tiis->inst_impl->metadata.linearization.get_mapping<1>();
+      assert(tiis->mapping != 0);
+    } else {
+      tiis->inst_impl = 0;
+      tiis->mapping = 0;
+    }
 
     return tiis;
   }
@@ -315,7 +322,8 @@ namespace Realm {
   bool TransferIteratorIndexSpace::serialize(S& serializer) const
   {
     return ((serializer << is) &&
-	    (serializer << inst_impl->me) &&
+	    (serializer << (inst_impl ? inst_impl->me :
+                                        RegionInstance::NO_INST)) &&
 	    (serializer << field_offsets) &&
 	    (serializer << field_sizes) &&
 	    (serializer << extra_elems));
@@ -365,6 +373,7 @@ namespace Realm {
   {
     // special case - an empty rectangle (or field list) skips most initialization
     if((r.volume() == 0) || _fields.empty()) {
+      inst_impl = 0;
       mapping = 0;
       // leave fields empty so that done() is always true
     } else {
@@ -416,9 +425,24 @@ namespace Realm {
     tir->field_sizes.swap(field_sizes);
 
     tir->p = r.lo;
-    tir->inst_impl = get_runtime()->get_instance_impl(inst);
-    tir->mapping = tir->inst_impl->metadata.linearization.template get_mapping<DIM>();
-    assert(tir->mapping != 0);
+
+    // if there are no fields, don't even bother with the instance info
+    if(tir->field_sizes.empty()) {
+      tir->inst_impl = 0;
+      tir->mapping = 0;
+    } else {
+      if(inst.exists()) {
+	tir->inst_impl = get_runtime()->get_instance_impl(inst);
+	tir->mapping = tir->inst_impl->metadata.linearization.template get_mapping<DIM>();
+	assert(tir->mapping != 0);
+      } else {
+	// clear out fields too since there's no instance data
+	tir->inst_impl = 0;
+	tir->mapping = 0;
+	tir->field_offsets.clear();
+	tir->field_sizes.clear();
+      }
+    }
 
     return tir;
   }
@@ -600,7 +624,8 @@ namespace Realm {
   bool TransferIteratorRect<DIM>::serialize(S& serializer) const
   {
     return ((serializer << r) &&
-	    (serializer << inst_impl->me) &&
+	    (serializer << (inst_impl ? inst_impl->me :
+                                        RegionInstance::NO_INST)) &&
 	    (serializer << field_offsets) &&
 	    (serializer << field_sizes));
   }

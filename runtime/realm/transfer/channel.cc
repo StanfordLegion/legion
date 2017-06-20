@@ -310,10 +310,32 @@ namespace LegionRuntime {
       {
         long idx = 0;
 	
-	while((idx < nr) && (available_reqs.size() > 0)) {	  
+	while((idx < nr) && (available_reqs.size() > 0)) {
 	  // TODO: we really shouldn't even be trying if the iteration
 	  //   is already done
 	  if(iteration_completed) break;
+
+	  // handle special case of empty transfers by generating a 0-byte
+	  //  request
+	  if((bytes_total == 0) &&
+	     ((pre_xd_guid == XFERDES_NO_GUID) ? src_iter->done() :
+	                                         (pre_bytes_total == 0))) {
+	    log_request.info() << "empty xferdes: " << guid;
+	    assert((next_xd_guid != XFERDES_NO_GUID) || dst_iter->done());
+
+	    iteration_completed = true;
+
+	    Request* new_req = dequeue_request();
+	    new_req->seq_pos = 0;
+	    new_req->seq_count = 0;
+	    new_req->dim = Request::DIM_1D;
+	    new_req->src_off = 0;
+	    new_req->dst_off = 0;
+	    new_req->nbytes = 0;
+	    new_req->nlines = 1;
+	    reqs[idx++] = new_req;
+	    break;
+	  }
 
 	  // some sort of per-channel max request size?
 	  size_t max_bytes = 1 << 20;
@@ -323,10 +345,15 @@ namespace LegionRuntime {
 	  if(pre_xd_guid != XFERDES_NO_GUID) {
 	    size_t pre_max = pre_bytes_total - bytes_total;
 	    if(pre_max == 0) {
-	      // this shouldn't happen - we should detect this case on the the
-	      //  transfer of those last bytes
+	      // due to unsynchronized updates to pre_bytes_total, this path
+	      //  can happen for an empty transfer reading from an intermediate
+	      //  buffer - handle it by looping around and letting the check
+	      //  at the top of the loop notice it the second time around
+	      if(bytes_total == 0)
+		continue;
+	      // otherwise, this shouldn't happen - we should detect this case
+	      //  on the the transfer of those last bytes
 	      assert(0);
-	      // turns out we're done...
 	      iteration_completed = true;
 	      break;
 	    }
@@ -1687,21 +1714,32 @@ namespace LegionRuntime {
         assert(nr <= capacity);
         for (long i = 0; i < nr; i ++) {
           RemoteWriteRequest* req = (RemoteWriteRequest*) requests[i];
-          if (req->dim == Request::DIM_1D) {
-            XferDesRemoteWriteMessage::send_request(
+	  // send a request if there's data or if there's a next XD to update
+	  if((req->nbytes > 0) ||
+	     (req->xd->next_xd_guid != XferDes::XFERDES_NO_GUID)) {
+	    if (req->dim == Request::DIM_1D) {
+	      XferDesRemoteWriteMessage::send_request(
                 req->dst_node, req->dst_base, req->src_base, req->nbytes, req,
 		req->xd->next_xd_guid, req->seq_pos, req->seq_count, 
 		(req->xd->iteration_completed ? req->xd->bytes_total : (size_t)-1));
-          } else {
-            assert(req->dim == Request::DIM_2D);
-            // dest MUST be continuous
-            assert(req->nlines <= 1 || ((size_t)req->dst_str) == req->nbytes);
-            XferDesRemoteWriteMessage::send_request(
+	    } else {
+	      assert(req->dim == Request::DIM_2D);
+	      // dest MUST be continuous
+	      assert(req->nlines <= 1 || ((size_t)req->dst_str) == req->nbytes);
+	      XferDesRemoteWriteMessage::send_request(
                 req->dst_node, req->dst_base, req->src_base, req->nbytes,
                 req->src_str, req->nlines, req,
 		req->xd->next_xd_guid, req->seq_pos, req->seq_count, 
 		(req->xd->iteration_completed ? req->xd->bytes_total : (size_t)-1));
-          }
+	    }
+	  }
+	  // for an empty transfer, we do the local completion ourselves
+	  //   instead of waiting for an ack from the other node
+	  if(req->nbytes == 0) {
+	    req->xd->notify_request_read_done(req);
+	    req->xd->notify_request_write_done(req);
+	    notify_completion();
+	  }
           __sync_fetch_and_sub(&capacity, 1);
         /*RemoteWriteRequest* req = (RemoteWriteRequest*) requests[i];
           req->complete_event = GenEventImpl::create_genevent()->current_event();
@@ -1883,8 +1921,10 @@ namespace LegionRuntime {
 						args.span_start,
 						args.span_size,
 						args.pre_bytes_total);
-	  
-        XferDesRemoteWriteAckMessage::send_request(args.sender, args.req);
+
+	// don't ack empty requests
+	if(datalen > 0)
+	  XferDesRemoteWriteAckMessage::send_request(args.sender, args.req);
       }
 
       /*static*/
