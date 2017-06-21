@@ -1513,29 +1513,29 @@ function std.flatten_struct_fields(struct_type, pred)
   assert(terralib.types.istype(struct_type))
   local field_paths = terralib.newlist()
   local field_types = terralib.newlist()
-  local check = pred and pred(struct_type)
-  if check == nil then
-    if struct_type:isstruct() or std.is_fspace_instance(struct_type) then
-      local entries = struct_type:getentries()
-      for _, entry in ipairs(entries) do
-        local entry_name = entry[1] or entry.field
-        -- FIXME: Fix for struct types with symbol fields.
-        assert(type(entry_name) == "string")
-        local entry_type = entry[2] or entry.type
-        local entry_field_paths, entry_field_types =
-          std.flatten_struct_fields(entry_type, pred)
-        field_paths:insertall(
-          entry_field_paths:map(
-            function(entry_field_path)
-              return data.newtuple(entry_name) .. entry_field_path
-            end))
-        field_types:insertall(entry_field_types)
-      end
-    else
-      field_paths:insert(data.newtuple())
-      field_types:insert(struct_type)
+
+  local function is_geometric_type(ty)
+    return std.is_index_type(ty) or std.is_rect_type(ty)
+  end
+
+  if (struct_type:isstruct() or std.is_fspace_instance(struct_type)) and
+     not is_geometric_type(struct_type) then
+    local entries = struct_type:getentries()
+    for _, entry in ipairs(entries) do
+      local entry_name = entry[1] or entry.field
+      -- FIXME: Fix for struct types with symbol fields.
+      assert(type(entry_name) == "string")
+      local entry_type = entry[2] or entry.type
+      local entry_field_paths, entry_field_types =
+        std.flatten_struct_fields(entry_type)
+      field_paths:insertall(
+        entry_field_paths:map(
+          function(entry_field_path)
+            return data.newtuple(entry_name) .. entry_field_path
+          end))
+      field_types:insertall(entry_field_types)
     end
-  elseif check then
+  else
     field_paths:insert(data.newtuple())
     field_types:insert(struct_type)
   end
@@ -2095,7 +2095,7 @@ local bounded_type = terralib.memoize(function(index_type, ...)
 
   local st = terralib.types.newstruct(tostring(index_type))
   st.entries = terralib.newlist({
-      { "__ptr", index_type.impl_type },
+      { "__ptr", index_type },
   })
   if #bounds > 1 then
     -- Find the smallest bitmask that will fit.
@@ -2182,7 +2182,7 @@ local bounded_type = terralib.memoize(function(index_type, ...)
   function st.metamethods.__cast(from, to, expr)
     if std.is_bounded_type(from) then
       if std.validate_implicit_cast(from.index_type, to) then
-        return `([to]([from.index_type]({ __ptr = [expr].__ptr })))
+        return `([to]([expr].__ptr))
       end
     end
     assert(false)
