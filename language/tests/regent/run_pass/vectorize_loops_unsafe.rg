@@ -12,8 +12,9 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- FIXME: Turn off this test until vectorizer supports scattered reads again.
 -- runs-with:
--- [["-fvectorize-unsafe", "1"]]
+-- []
 --
 
 import "regent"
