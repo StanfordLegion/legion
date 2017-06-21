@@ -1513,35 +1513,29 @@ function std.flatten_struct_fields(struct_type, pred)
   assert(terralib.types.istype(struct_type))
   local field_paths = terralib.newlist()
   local field_types = terralib.newlist()
-  local check = pred and pred(struct_type)
 
   local function is_geometric_type(ty)
     return std.is_index_type(ty) or std.is_rect_type(ty)
   end
 
-  if check == nil then
-    if (struct_type:isstruct() or std.is_fspace_instance(struct_type)) and
-       not is_geometric_type(struct_type) then
-      local entries = struct_type:getentries()
-      for _, entry in ipairs(entries) do
-        local entry_name = entry[1] or entry.field
-        -- FIXME: Fix for struct types with symbol fields.
-        assert(type(entry_name) == "string")
-        local entry_type = entry[2] or entry.type
-        local entry_field_paths, entry_field_types =
-          std.flatten_struct_fields(entry_type, pred)
-        field_paths:insertall(
-          entry_field_paths:map(
-            function(entry_field_path)
-              return data.newtuple(entry_name) .. entry_field_path
-            end))
-        field_types:insertall(entry_field_types)
-      end
-    else
-      field_paths:insert(data.newtuple())
-      field_types:insert(struct_type)
+  if (struct_type:isstruct() or std.is_fspace_instance(struct_type)) and
+     not is_geometric_type(struct_type) then
+    local entries = struct_type:getentries()
+    for _, entry in ipairs(entries) do
+      local entry_name = entry[1] or entry.field
+      -- FIXME: Fix for struct types with symbol fields.
+      assert(type(entry_name) == "string")
+      local entry_type = entry[2] or entry.type
+      local entry_field_paths, entry_field_types =
+        std.flatten_struct_fields(entry_type)
+      field_paths:insertall(
+        entry_field_paths:map(
+          function(entry_field_path)
+            return data.newtuple(entry_name) .. entry_field_path
+          end))
+      field_types:insertall(entry_field_types)
     end
-  elseif check then
+  else
     field_paths:insert(data.newtuple())
     field_types:insert(struct_type)
   end
@@ -1997,6 +1991,27 @@ function std.generate_arithmetic_metamethods(ty)
   return methods
 end
 
+function std.generate_arithmetic_metamethods_for_bounded_type(ty)
+  local methods = {}
+  for method, _ in pairs(arithmetic_combinators) do
+    methods[method] = terralib.overloadedfunction(
+      method,
+      {
+        terra(a : ty, b : ty) : ty.index_type
+          return [generate_arithmetic_metamethod_body(ty.index_type, method, `(a.__ptr), `(b.__ptr))]
+        end,
+        terra(a : ty, b : ty.index_type) : ty.index_type
+          return [generate_arithmetic_metamethod_body(ty.index_type, method, `(a.__ptr), b)]
+        end,
+        terra(a : ty.index_type, b : ty) : ty.index_type
+          return [generate_arithmetic_metamethod_body(ty.index_type, method, a, `(b.__ptr))]
+        end
+      }
+    )
+  end
+  return methods
+end
+
 local and_combinator = function(a, b) return `(([a]) and ([b])) end
 local or_combinator = function(a, b) return `(([a]) or ([b])) end
 local conditional_combinators = {
@@ -2066,6 +2081,31 @@ function std.generate_conditional_metamethods(ty)
   return methods
 end
 
+function std.generate_conditional_metamethod_for_bounded_type(ty, method)
+  return macro(function(a, b)
+    if not std.is_rect_type(b:gettype()) then
+      if std.is_bounded_type(a:gettype()) then a = `(a.__ptr) end
+      if std.is_bounded_type(b:gettype()) then b = `(b.__ptr) end
+      return generate_conditional_metamethod_body(ty.index_type, method, a, b)
+    elseif method == "__le" or method == "__lt" then
+      assert(std.is_bounded_type(a:gettype()))
+      a = `(a.__ptr)
+      local combinators = conditional_combinators[method]
+      local lhs = generate_conditional_metamethod_body(ty.index_type, method, `([b].lo), a)
+      local rhs = generate_conditional_metamethod_body(ty.index_type, method, a, `([b].hi))
+      return combinators.res_comb(lhs, rhs)
+    end
+  end)
+end
+
+function std.generate_conditional_metamethods_for_bounded_type(ty)
+  local methods = {}
+  for method, _ in pairs(conditional_combinators) do
+    methods[method] = std.generate_conditional_metamethod_for_bounded_type(ty, method)
+  end
+  return methods
+end
+
 -- WARNING: Bounded types are NOT unique. If two regions are aliased
 -- then it is possible for two different pointer types to be equal:
 --
@@ -2101,7 +2141,7 @@ local bounded_type = terralib.memoize(function(index_type, ...)
 
   local st = terralib.types.newstruct(tostring(index_type))
   st.entries = terralib.newlist({
-      { "__ptr", index_type.impl_type },
+      { "__ptr", index_type },
   })
   if #bounds > 1 then
     -- Find the smallest bitmask that will fit.
@@ -2188,7 +2228,7 @@ local bounded_type = terralib.memoize(function(index_type, ...)
   function st.metamethods.__cast(from, to, expr)
     if std.is_bounded_type(from) then
       if std.validate_implicit_cast(from.index_type, to) then
-        return `([to]([from.index_type]({ __ptr = [expr].__ptr })))
+        return `([to]([expr].__ptr))
       end
     end
     assert(false)
@@ -2196,13 +2236,11 @@ local bounded_type = terralib.memoize(function(index_type, ...)
 
   -- Important: This has to downgrade the type, because arithmetic
   -- isn't guarranteed to stay within bounds.
-  for method, _ in pairs(arithmetic_combinators) do
-    st.metamethods[method] =
-      std.generate_arithmetic_metamethod(st.index_type, method)
+  for method_name, method in pairs(std.generate_arithmetic_metamethods_for_bounded_type(st)) do
+    st.metamethods[method_name] = method
   end
-  for method, _ in pairs(conditional_combinators) do
-    st.metamethods[method] =
-      std.generate_conditional_metamethod(st.index_type, method)
+  for method_name, method in pairs(std.generate_conditional_metamethods_for_bounded_type(st)) do
+    st.metamethods[method_name] = method
   end
 
   terra st:to_point()
