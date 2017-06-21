@@ -759,7 +759,7 @@ function value:__get_field(cx, node, value_type, field_name)
     return self:new(node, self.expr, self.value_type, self.field_path .. data.newtuple("__ptr", field_name))
   elseif std.is_bounded_type(value_type) then
     assert(std.get_field(value_type.index_type.base_type, field_name))
-    return self:new(node, self.expr, self.value_type, self.field_path .. data.newtuple("__ptr", "__ptr", field_name))
+    return self:new(node, self.expr, self.value_type, self.field_path .. data.newtuple("__ptr", field_name))
   else
     return self:new(
       node, self.expr, self.value_type, self.field_path .. data.newtuple(field_name))
@@ -908,46 +908,23 @@ local function get_element_pointer(cx, node, region_types, index_type, field_typ
 
   -- Note: This code is performance-critical and tends to be sensitive
   -- to small changes. Please thoroughly performance-test any changes!
-  if std.is_bounded_type(index_type) then
-    if not index_type.fields then
-      -- Assumes stride[1] == terralib.sizeof(field_type)
-      return `(@[&field_type](&base_pointer[ [index].__ptr.__ptr ]))
-    elseif #index_type.fields == 1 then
-      -- Assumes stride[1] == terralib.sizeof(field_type)
-      local field = index_type.fields[1]
-      return `(@[&field_type](&base_pointer[ [index].__ptr.__ptr.[field] ]))
-    else
-      local offset
-      for i, field in ipairs(index_type.fields) do
-        if offset then
-          offset = `(offset + [index].__ptr.__ptr.[ field ] * [ strides[i] ])
-        else
-          offset = `([index].__ptr.__ptr.[ field ] * [ strides[i] ])
-        end
-      end
-      return `(@([&field_type]([&int8](base_pointer) + offset)))
-    end
-  elseif std.is_index_type(index_type) then
-    if not index_type.fields then
-      -- Assumes stride[1] == terralib.sizeof(field_type)
-      return `(@[&field_type](&base_pointer[ [index].__ptr ]))
-    elseif #index_type.fields == 1 then
-      -- Assumes stride[1] == terralib.sizeof(field_type)
-      local field = index_type.fields[1]
-      return `(@[&field_type](&base_pointer[ [index].__ptr.[field] ]))
-    else
-      local offset
-      for i, field in ipairs(index_type.fields) do
-        if offset then
-          offset = `(offset + [index].__ptr.[ field ] * [ strides[i] ])
-        else
-          offset = `([index].__ptr.[ field ] * [ strides[i] ])
-        end
-      end
-      return `(@([&field_type]([&int8](base_pointer) + offset)))
-    end
+  if not index_type.fields then
+    -- Assumes stride[1] == terralib.sizeof(field_type)
+    return `(@[&field_type](&base_pointer[ [index].__ptr ]))
+  elseif #index_type.fields == 1 then
+    -- Assumes stride[1] == terralib.sizeof(field_type)
+    local field = index_type.fields[1]
+    return `(@[&field_type](&base_pointer[ [index].__ptr.[field] ]))
   else
-    assert(false)
+    local offset
+    for i, field in ipairs(index_type.fields) do
+      if offset then
+        offset = `(offset + [index].__ptr.[ field ] * [ strides[i] ])
+      else
+        offset = `([index].__ptr.[ field ] * [ strides[i] ])
+      end
+    end
+    return `(@([&field_type]([&int8](base_pointer) + offset)))
   end
 end
 
@@ -2983,7 +2960,7 @@ function codegen.expr_raw_value(cx, node)
   elseif std.is_cross_product(value_type) then
     result = `([value.value].product)
   elseif std.is_bounded_type(value_type) then
-    result = `([value.value].__ptr.__ptr)
+    result = `([value.value].__ptr)
   else
     assert(false)
   end
@@ -3694,8 +3671,12 @@ function codegen.expr_image(cx, node)
   local region_parent =
     cx:region(cx:region(region_type).root_region_type).logical_region
 
+  local function is_index_type(ty)
+    return (std.is_bounded_type(ty) and std.is_index_type(ty.index_type)) or
+           std.is_index_type(ty)
+  end
   local field_paths, field_types =
-    std.flatten_struct_fields(region_type:fspace())
+    std.flatten_struct_fields(region_type:fspace(), is_index_type)
   local fields_i = data.filteri(
     function(field) return field:starts_with(node.region.fields[1]) end,
     field_paths)
@@ -3747,8 +3728,12 @@ function codegen.expr_preimage(cx, node)
   local region_parent =
     cx:region(cx:region(region_type).root_region_type).logical_region
 
+  local function is_index_type(ty)
+    return (std.is_bounded_type(ty) and std.is_index_type(ty.index_type)) or
+           std.is_index_type(ty)
+  end
   local field_paths, field_types =
-    std.flatten_struct_fields(region_type:fspace())
+    std.flatten_struct_fields(region_type:fspace(), is_index_type)
   local fields_i = data.filteri(
     function(field) return field:starts_with(node.region.fields[1]) end,
     field_paths)
@@ -6776,10 +6761,8 @@ function codegen.stat_for_list(cx, node)
             var base = iterator_next_span([it], &count, -1).value
             for i = 0, count do
               var [symbol] = [symbol.type]{
-                __ptr = ptr {
-                  __ptr = c.legion_ptr_t {
-                    value = base + i
-                  }
+                __ptr = c.legion_ptr_t {
+                  value = base + i
                 }
               }
               do
