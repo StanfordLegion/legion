@@ -1991,27 +1991,6 @@ function std.generate_arithmetic_metamethods(ty)
   return methods
 end
 
-function std.generate_arithmetic_metamethods_for_bounded_type(ty)
-  local methods = {}
-  for method, _ in pairs(arithmetic_combinators) do
-    methods[method] = terralib.overloadedfunction(
-      method,
-      {
-        terra(a : ty, b : ty) : ty.index_type
-          return [generate_arithmetic_metamethod_body(ty.index_type, method, `(a.__ptr), `(b.__ptr))]
-        end,
-        terra(a : ty, b : ty.index_type) : ty.index_type
-          return [generate_arithmetic_metamethod_body(ty.index_type, method, `(a.__ptr), b)]
-        end,
-        terra(a : ty.index_type, b : ty) : ty.index_type
-          return [generate_arithmetic_metamethod_body(ty.index_type, method, a, `(b.__ptr))]
-        end
-      }
-    )
-  end
-  return methods
-end
-
 local and_combinator = function(a, b) return `(([a]) and ([b])) end
 local or_combinator = function(a, b) return `(([a]) or ([b])) end
 local conditional_combinators = {
@@ -2077,31 +2056,6 @@ function std.generate_conditional_metamethods(ty)
   local methods = {}
   for method, _ in pairs(conditional_combinators) do
     methods[method] = std.generate_conditional_metamethod(ty, method)
-  end
-  return methods
-end
-
-function std.generate_conditional_metamethod_for_bounded_type(ty, method)
-  return macro(function(a, b)
-    if not std.is_rect_type(b:gettype()) then
-      if std.is_bounded_type(a:gettype()) then a = `(a.__ptr) end
-      if std.is_bounded_type(b:gettype()) then b = `(b.__ptr) end
-      return generate_conditional_metamethod_body(ty.index_type, method, a, b)
-    elseif method == "__le" or method == "__lt" then
-      assert(std.is_bounded_type(a:gettype()))
-      a = `(a.__ptr)
-      local combinators = conditional_combinators[method]
-      local lhs = generate_conditional_metamethod_body(ty.index_type, method, `([b].lo), a)
-      local rhs = generate_conditional_metamethod_body(ty.index_type, method, a, `([b].hi))
-      return combinators.res_comb(lhs, rhs)
-    end
-  end)
-end
-
-function std.generate_conditional_metamethods_for_bounded_type(ty)
-  local methods = {}
-  for method, _ in pairs(conditional_combinators) do
-    methods[method] = std.generate_conditional_metamethod_for_bounded_type(ty, method)
   end
   return methods
 end
@@ -2236,11 +2190,13 @@ local bounded_type = terralib.memoize(function(index_type, ...)
 
   -- Important: This has to downgrade the type, because arithmetic
   -- isn't guarranteed to stay within bounds.
-  for method_name, method in pairs(std.generate_arithmetic_metamethods_for_bounded_type(st)) do
-    st.metamethods[method_name] = method
+  for method, _ in pairs(arithmetic_combinators) do
+    st.metamethods[method] =
+      std.generate_arithmetic_metamethod(st.index_type, method)
   end
-  for method_name, method in pairs(std.generate_conditional_metamethods_for_bounded_type(st)) do
-    st.metamethods[method_name] = method
+  for method, _ in pairs(conditional_combinators) do
+    st.metamethods[method] =
+      std.generate_conditional_metamethod(st.index_type, method)
   end
 
   terra st:to_point()

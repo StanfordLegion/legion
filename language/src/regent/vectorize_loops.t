@@ -849,9 +849,7 @@ function check_vectorizability.expr(cx, node)
     if cx:lookup_expr_type(node.index) == V then
       local value_type = std.as_read(node.value.expr_type)
       -- TODO: We currently don't support scattered reads from structured regions
-      --       Update on 06/20/17: index types are no longer sliced. will reject
-      --                           all scattered reads for now. (wclee)
-      if std.is_region(value_type) then
+      if std.is_region(value_type) and not value_type:is_opaque() then
         cx:report_error_when_demanded(node, error_prefix ..
           "a scattered read from a structured region")
         return false
@@ -945,9 +943,7 @@ function check_vectorizability.expr(cx, node)
     local fact = cx:lookup_expr_type(node.value)
     if fact == C then fact = V
     -- TODO: We currently don't support scattered reads from structured regions
-    --       Update on 06/20/17: index types are no longer sliced. will reject
-    --                           all scattered reads for now. (wclee)
-    elseif fact == V then
+    elseif fact == V and not std.as_read(node.value.expr_type).index_type:is_opaque() then
       cx:report_error_when_demanded(node, error_prefix ..
         "a scattered read from a structured region")
       return false
@@ -1051,10 +1047,7 @@ end
 
 -- check if the type is admissible to vectorizer
 function check_vectorizability.type(ty)
-  if (std.is_bounded_type(ty) and std.is_index_type(ty.index_type)) or
-     std.is_index_type(ty) or std.is_rect_type(ty) then
-    return false
-  elseif ty:isprimitive() then
+  if ty:isprimitive() or std.is_bounded_type(ty) then
     return true
   elseif ty:isstruct() then
     for _, entry in pairs(ty.entries) do

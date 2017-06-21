@@ -2074,7 +2074,7 @@ function codegen.expr_index_access(cx, node)
       local point = std.implicit_cast(index_type, pointer_type.index_type, index.value)
       pointer = expr.just(
         index.actions,
-        `([pointer_type] { __ptr = [pointer_type.index_type] { __ptr = [point].__ptr }}))
+        `([pointer_type] { __ptr = [point].__ptr }))
     end
     return values.ref(node, pointer, pointer_type)
   else
@@ -3008,7 +3008,7 @@ function codegen.expr_isnull(cx, node)
       node,
       expr.once_only(
         actions,
-        `([expr_type](c.legion_ptr_is_null([pointer.value].__ptr.__ptr))),
+        `([expr_type](c.legion_ptr_is_null([pointer.value].__ptr))),
         expr_type),
       expr_type)
   else
@@ -3030,7 +3030,7 @@ function codegen.expr_null(cx, node)
     node,
     expr.once_only(
       emit_debuginfo(node),
-      `([pointer_type]{ __ptr = [ptr] { __ptr = c.legion_ptr_nil() }}),
+      `([pointer_type]{ __ptr = c.legion_ptr_nil() }),
       expr_type),
     expr_type)
 end
@@ -3055,9 +3055,7 @@ function codegen.expr_dynamic_cast(cx, node)
     if expr_type.index_type:is_opaque() then
       result = `(
         [expr_type]({
-          __ptr = [ptr] {
-            __ptr = c.legion_ptr_safe_cast([cx.runtime], [cx.context], [input].__ptr, [lr])
-          }
+          __ptr = c.legion_ptr_safe_cast([cx.runtime], [cx.context], [input].__ptr, [lr])
         }))
     else
       result = `(
@@ -3071,7 +3069,7 @@ function codegen.expr_dynamic_cast(cx, node)
     local cases
     if expr_type.index_type:is_opaque() then
       cases = quote
-        [result] = [expr_type]({ __ptr = [ptr] { __ptr = c.legion_ptr_nil() }, __index = 0 })
+        [result] = [expr_type]({ __ptr = c.legion_ptr_nil(), __index = 0 })
       end
       for i = #regions, 1, -1 do
         local region = regions[i]
@@ -3081,7 +3079,7 @@ function codegen.expr_dynamic_cast(cx, node)
           var temp = c.legion_ptr_safe_cast([cx.runtime], [cx.context], [input].__ptr, [lr])
           if not c.legion_ptr_is_null(temp) then
             result = [expr_type]({
-              __ptr = [ptr] { __ptr = temp },
+              __ptr = temp,
               __index = [i],
             })
           else
@@ -3142,7 +3140,7 @@ function codegen.expr_static_cast(cx, node)
       end
     else
       cases = quote
-        [result] = [expr_type]({ __ptr = [ptr] { __ptr = c.legion_ptr_nil() }})
+        [result] = [expr_type]({ __ptr = c.legion_ptr_nil() })
       end
     end
     for i = #input_regions - 1, 1, -1 do
@@ -3158,7 +3156,7 @@ function codegen.expr_static_cast(cx, node)
       else
         cases = quote
           if [input].__index == [i] then
-            [result] = [expr_type]({ __ptr = [ptr] { __ptr = c.legion_ptr_nil() }})
+            [result] = [expr_type]({ __ptr = c.legion_ptr_nil() })
           else
             [cases]
           end
@@ -3249,7 +3247,7 @@ function codegen.expr_unsafe_cast(cx, node)
           if c.legion_ptr_is_null([check]) then
             std.assert_error(false, [get_source_location(node) .. ": pointer " .. tostring(expr_type) .. " is out-of-bounds"])
           end
-          var [result] = [expr_type]({ __ptr = [ptr] { __ptr = [check] }})
+          var [result] = [expr_type]({ __ptr = [check] })
         end
       else
         local check = terralib.newsymbol(c.legion_domain_point_t, "check")
@@ -3266,7 +3264,7 @@ function codegen.expr_unsafe_cast(cx, node)
       if expr_type.index_type:is_opaque() then
         actions = quote
           [actions]
-          var [result] = [expr_type]({ __ptr = [ptr] { __ptr = [input].__ptr }})
+          var [result] = [expr_type]({ __ptr = [input].__ptr })
         end
       else
         actions = quote
@@ -3701,11 +3699,6 @@ function codegen.expr_image(cx, node)
   local fields_i = data.filteri(
     function(field) return field:starts_with(node.region.fields[1]) end,
     field_paths)
-  if #fields_i > 1 then
-    fields_i = data.filteri(
-      function(field) return field:starts_with(node.region.fields[1] .. data.newtuple("__ptr")) end,
-      field_paths)
-  end
   assert(#fields_i == 1)
   local index_fields =
     std.flatten_struct_fields(field_types[fields_i[1]])
@@ -3759,11 +3752,6 @@ function codegen.expr_preimage(cx, node)
   local fields_i = data.filteri(
     function(field) return field:starts_with(node.region.fields[1]) end,
     field_paths)
-  if #fields_i > 1 then
-    fields_i = data.filteri(
-      function(field) return field:starts_with(node.region.fields[1] .. data.newtuple("__ptr")) end,
-      field_paths)
-  end
   assert(#fields_i == 1)
   local index_fields =
     std.flatten_struct_fields(field_types[fields_i[1]])
@@ -7216,14 +7204,14 @@ function codegen.stat_for_list_vectorized(cx, node)
         var i = base
         if count >= vector_width then
           while i < start do
-            var [symbol] = [symbol.type]{ __ptr = [ptr]{ __ptr = c.legion_ptr_t { value = i }}}
+            var [symbol] = [symbol.type]{ __ptr = c.legion_ptr_t { value = i }}
             do
               [orig_block_1]
             end
             i = i + 1
           end
           while i < stop do
-            var [symbol] = [symbol.type]{ __ptr = [ptr]{ __ptr = c.legion_ptr_t { value = i }}}
+            var [symbol] = [symbol.type]{ __ptr = c.legion_ptr_t { value = i }}
             do
               [block]
             end
@@ -7231,7 +7219,7 @@ function codegen.stat_for_list_vectorized(cx, node)
           end
         end
         while i < final do
-          var [symbol] = [symbol.type]{ __ptr = [ptr]{ __ptr = c.legion_ptr_t { value = i }}}
+          var [symbol] = [symbol.type]{ __ptr = c.legion_ptr_t { value = i }}
           do
             [orig_block_2]
           end

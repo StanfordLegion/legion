@@ -360,7 +360,7 @@ where
 do
   var dt : float = DELTAT
   var recip_dt : float = 1.0 / dt
-  --__demand(__vectorize)
+  __demand(__vectorize)
   for w in rw do
     var temp_v : float[WIRE_SEGMENTS + 1]
     var temp_i : float[WIRE_SEGMENTS]
