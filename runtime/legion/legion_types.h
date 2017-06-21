@@ -113,6 +113,8 @@ namespace Legion {
   class PhysicalRegion;
   template<PrivilegeMode,typename,int,typename,typename,bool> 
     class FieldAccessor;
+  template<typename,int,typename,typename>
+    class UnsafeFieldAccessor;
   class IndexIterator;
   template<typename T> struct ColoredPoints; 
   struct InputArgs;
@@ -367,6 +369,7 @@ namespace Legion {
       LG_CONTROL_REP_LAUNCH_TASK_ID,
       LG_CONTROL_REP_DELETE_TASK_ID,
       LG_RECLAIM_FUTURE_MAP_TASK_ID,
+      LG_TIGHTEN_INDEX_SPACE_TASK_ID,
       LG_MESSAGE_ID, // These two must be the last two
       LG_RETRY_SHUTDOWN_TASK_ID,
       LG_LAST_TASK_ID, // This one should always be last
@@ -464,6 +467,7 @@ namespace Legion {
         "Control Replication Launch",                             \
         "Control Replciation Delete",                             \
         "Reclaim Future Map",                                     \
+        "Tighten Index Space",                                    \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \
       };

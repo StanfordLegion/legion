@@ -23,8 +23,8 @@ task f()
   var s = region(ispace(ptr, 5), int)
   var t = region(ispace(ptr, 5), int)
 
-  var xs = new(ptr(int, s))
-  var xt = new(ptr(int, t))
+  var xs = dynamic_cast(ptr(int, s), 0)
+  var xt = dynamic_cast(ptr(int, t), 0)
 
   xs = xt
 end

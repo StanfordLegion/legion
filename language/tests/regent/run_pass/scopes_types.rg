@@ -32,7 +32,6 @@ end
 local t = regentlib.newsymbol("t")
 task main()
   var r = region(ispace(ptr, 5), int)
-  new(ptr(int, r), 5)
   fill(r, 0)
 
   for r : ptr(int, r) in r do -- Region should be in scope for type of loop index.

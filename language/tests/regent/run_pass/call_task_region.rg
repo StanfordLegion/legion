@@ -31,9 +31,9 @@ end
 
 task k() : int
   var r = region(ispace(ptr, 5), int)
-  var x = new(ptr(int, r))
+  var x = dynamic_cast(ptr(int, r), 0)
   var s = region(ispace(ptr, 5), int)
-  var y = new(ptr(int, s))
+  var y = dynamic_cast(ptr(int, s), 0)
 
   @x = 100
   @y = 1

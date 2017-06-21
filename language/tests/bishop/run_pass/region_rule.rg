@@ -55,8 +55,6 @@ end
 task toplevel()
   var r1 = region(ispace(ptr, 10), int)
   var r2 = region(ispace(ptr, 10), int)
-  new(ptr(int, r1), 10)
-  new(ptr(int, r2), 10)
   foo(r1, r2)
 end
 

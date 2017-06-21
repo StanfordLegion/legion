@@ -17,8 +17,7 @@ import "regent"
 local c = regentlib.c
 
 task test_partition()
-  var r = region(ispace(ptr, 5), int)
-  new(ptr(int, r), 4)
+  var r = region(ispace(ptr, 4), int)
   var p = partition(equal, r, ispace(int1d, 3))
 
   var qc = c.legion_coloring_create()
@@ -28,8 +27,7 @@ task test_partition()
 end
 
 task test_partition_by_field()
-  var r = region(ispace(ptr, 5), int)
-  new(ptr(int, r), 4)
+  var r = region(ispace(ptr, 4), int1d)
   fill(r, 0)
   var p = partition(equal, r, ispace(int1d, 3))
 

@@ -40,17 +40,17 @@ fspace wrap_pst(param_r1 : region(ispace(ptr), int),
 }
 
 task main()
-  var r1 = region(ispace(ptr, 5), int)
-  var r2 = region(ispace(ptr, 5), wrap_st(r1))
-  var r3 = region(ispace(ptr, 5), wrap_pst(r1, r2))
+  var r1 = region(ispace(ptr, 2), int)
+  var r2 = region(ispace(ptr, 2), wrap_st(r1))
+  var r3 = region(ispace(ptr, 1), wrap_pst(r1, r2))
 
-  var p1_r1 = new(ptr(int, r1))
-  var p2_r1 = new(ptr(int, r1))
+  var p1_r1 = dynamic_cast(ptr(int, r1), 0)
+  var p2_r1 = dynamic_cast(ptr(int, r1), 1)
 
   @p1_r1, @p2_r1 = 111, 222
 
-  var p1_r2 = new(ptr(wrap_st(r1), r2))
-  var p2_r2 = new(ptr(wrap_st(r1), r2))
+  var p1_r2 = dynamic_cast(ptr(wrap_st(r1), r2), 0)
+  var p2_r2 = dynamic_cast(ptr(wrap_st(r1), r2), 1)
 
   p1_r2.s.x, p1_r2.s.y = p1_r1, p2_r1
   p2_r2.s.y, p2_r2.s.x = p2_r1, p1_r1
@@ -62,7 +62,7 @@ task main()
   regentlib.assert(@p2_r2.s.x == 111, "test failed")
   regentlib.assert(@p2_r2.s.y == 222, "test failed")
 
-  var p_r3 = new(ptr(wrap_pst(r1, r2), r3))
+  var p_r3 = dynamic_cast(ptr(wrap_pst(r1, r2), r3), 0)
   var idx0, idx1 = 0, 1
   p_r3.arr[0].p, p_r3.arr[1].p = p1_r2, p2_r2
   var v1_r3 = @p_r3

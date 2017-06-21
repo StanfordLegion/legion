@@ -1919,8 +1919,7 @@ namespace Legion {
         initialize(forest);
       if (field_sizes.empty())
       {
-        MessageDescriptor IGNORE_MEMORY_REQUEST(1300, "undefined");
-        log_run.warning(IGNORE_MEMORY_REQUEST.id(),
+        REPORT_LEGION_WARNING(LEGION_WARNING_IGNORE_MEMORY_REQUEST,
                         "Ignoring request to create instance in "
                         "memory " IDFMT " with no fields.",
                         memory_manager->memory.id);
@@ -1997,8 +1996,7 @@ namespace Legion {
             // though so all you should have to do is delete this check
             if (field_sizes.size() > 1)
             {
-              MessageDescriptor ILLEGAL_REDUCTION_REQUEST(1301, "undefined");
-              log_run.error(ILLEGAL_REDUCTION_REQUEST.id(),
+              REPORT_LEGION_ERROR(ERROR_ILLEGAL_REDUCTION_REQUEST,
                             "Illegal request for a reduction instance "
                             "containing multiple fields. Only a single field "
                             "is currently permitted for reduction instances.");
@@ -2091,6 +2089,7 @@ namespace Legion {
             // in order to be sound for other parts of the analysis, we need
             // the ancestor to be the root of the region tree so that this
             // instance can be safely used for any empty region in this tree.
+            instance_domain = next->row_source;
             while (next->parent != NULL)
               next = next->parent->parent;
             ancestor = next;
@@ -2264,12 +2263,11 @@ namespace Legion {
             break;
           }
         case VIRTUAL_SPECIALIZE:
-        {
-          MessageDescriptor ILLEGAL_REQUEST_VIRTUAL_INSTANCE(1302, "undefined");
-          log_run.error(ILLEGAL_REQUEST_VIRTUAL_INSTANCE.id(),
-                        "Illegal request to create a virtual instance");
-          assert(false);
-        }
+          {
+            REPORT_LEGION_ERROR(ERROR_ILLEGAL_REQUEST_VIRTUAL_INSTANCE,
+                          "Illegal request to create a virtual instance");
+            assert(false);
+          }
         default:
           assert(false); // unknown kind
       }

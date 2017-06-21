@@ -42,7 +42,7 @@ namespace Legion {
         for (int i = 0; i < MAX_POINT_DIM; i++)
           point_data[i] = 0;
       }
-      DomainPoint(coord_t index) : dim(0)
+      DomainPoint(coord_t index) : dim(1)
       {
         point_data[0] = index;
         for (int i = 1; i < MAX_POINT_DIM; i++)
@@ -412,6 +412,8 @@ namespace Legion {
 
       int get_dim(void) const { return dim; }
 
+      bool empty(void) const { return (get_volume() == 0); }
+
       size_t get_volume(void) const
       {
         switch (dim)
@@ -438,7 +440,6 @@ namespace Legion {
       }
 
       // Intersects this Domain with another Domain and returns the result.
-      // WARNING: currently only works with structured Domains.
       Domain intersection(const Domain &other) const
       {
         assert(dim == other.dim);
@@ -449,36 +450,42 @@ namespace Legion {
             {
               Realm::ZIndexSpace<1,coord_t> is1 = *this;
               Realm::ZIndexSpace<1,coord_t> is2 = other;
-              Realm::ZIndexSpace<1,coord_t> result;
+              Realm::ZIndexSpace<1,coord_t> temp;
               LgEvent wait_on( 
                 Realm::ZIndexSpace<1,coord_t>::compute_intersection(is1,is2,
-                                                      result,dummy_requests));
+                                                      temp,dummy_requests));
               if (wait_on.exists())
                 wait_on.lg_wait();
+              Realm::ZIndexSpace<1,coord_t> result = temp.tighten();
+              temp.destroy();
               return Domain(result);
             }
           case 2:
             {
               Realm::ZIndexSpace<2,coord_t> is1 = *this;
               Realm::ZIndexSpace<2,coord_t> is2 = other;
-              Realm::ZIndexSpace<2,coord_t> result;
+              Realm::ZIndexSpace<2,coord_t> temp;
               LgEvent wait_on(
                 Realm::ZIndexSpace<2,coord_t>::compute_intersection(is1,is2,
-                                                      result,dummy_requests));
+                                                      temp,dummy_requests));
               if (wait_on.exists())
                 wait_on.lg_wait();
+              Realm::ZIndexSpace<2,coord_t> result = temp.tighten();
+              temp.destroy();
               return Domain(result);
             }
           case 3:
             {
               Realm::ZIndexSpace<3,coord_t> is1 = *this;
               Realm::ZIndexSpace<3,coord_t> is2 = other;
-              Realm::ZIndexSpace<3,coord_t> result;
+              Realm::ZIndexSpace<3,coord_t> temp;
               LgEvent wait_on(
                 Realm::ZIndexSpace<3,coord_t>::compute_intersection(is1,is2,
-                                                      result,dummy_requests));
+                                                      temp,dummy_requests));
               if (wait_on.exists())
                 wait_on.lg_wait();
+              Realm::ZIndexSpace<3,coord_t> result = temp.tighten();
+              temp.destroy();
               return Domain(result);
             }
           default:
@@ -497,38 +504,23 @@ namespace Legion {
         {
           case 1:
             {
-              Realm::ZIndexSpace<1,coord_t> is1 = *this;
-              Realm::ZIndexSpace<1,coord_t> is2(Realm::ZRect<1,coord_t>(p, p));
-              Realm::ZIndexSpace<1,coord_t> result;
-              LgEvent wait_on( 
-                Realm::ZIndexSpace<1,coord_t>::compute_union(is1,is2,
-                                              result,dummy_requests));
-              if (wait_on.exists())
-                wait_on.lg_wait();
+              Realm::ZRect<1,coord_t> is1 = *this;
+              Realm::ZRect<1,coord_t> is2(p, p);
+              Realm::ZRect<1,coord_t> result = is1.union_bbox(is2);
               return Domain(result);
             }
           case 2:
             {
-              Realm::ZIndexSpace<2,coord_t> is1 = *this;
-              Realm::ZIndexSpace<2,coord_t> is2(Realm::ZRect<2,coord_t>(p, p));
-              Realm::ZIndexSpace<2,coord_t> result;
-              LgEvent wait_on(
-                Realm::ZIndexSpace<2,coord_t>::compute_union(is1,is2,
-                                              result,dummy_requests));
-              if (wait_on.exists())
-                wait_on.lg_wait();
+              Realm::ZRect<2,coord_t> is1 = *this;
+              Realm::ZRect<2,coord_t> is2(p, p);
+              Realm::ZRect<2,coord_t> result = is1.union_bbox(is2);
               return Domain(result);
             }
           case 3:
             {
-              Realm::ZIndexSpace<3,coord_t> is1 = *this;
-              Realm::ZIndexSpace<3,coord_t> is2(Realm::ZRect<3,coord_t>(p, p));
-              Realm::ZIndexSpace<3,coord_t> result;
-              LgEvent wait_on(
-                Realm::ZIndexSpace<3,coord_t>::compute_union(is1,is2,
-                                              result,dummy_requests));
-              if (wait_on.exists())
-                wait_on.lg_wait();
+              Realm::ZRect<3,coord_t> is1 = *this;
+              Realm::ZRect<3,coord_t> is2(p, p);
+              Realm::ZRect<3,coord_t> result = is1.union_bbox(is2);
               return Domain(result);
             }
           default:
@@ -542,19 +534,10 @@ namespace Legion {
       {
         assert(DIM > 0);
         assert(DIM == dim);
-	if(is_id == 0) {
-	  return LegionRuntime::Arrays::Rect<DIM>(rect_data); 
-	} else {
-	  // TODO: would be nice to do this only once rather than each call
-	  Realm::ZIndexSpace<DIM,coord_t> tight = (operator Realm::ZIndexSpace<DIM,coord_t>()).tighten();
-	  assert(tight.dense());
-	  LegionRuntime::Arrays::Rect<DIM> r;
-	  for(int i = 0; i < DIM; i++) {
-	    r.lo.x[i] = tight.bounds.lo[i];
-	    r.hi.x[i] = tight.bounds.hi[i];
-	  }
-	  return r;
-	}
+        // Runtime only returns tight domains so if it still has
+        // a sparsity map then it is a real sparsity map
+        assert(is_id == 0);
+        return LegionRuntime::Arrays::Rect<DIM>(rect_data);
       }
 
       class DomainPointIterator {
@@ -904,8 +887,9 @@ namespace Legion {
     // This class exists for some very minimal backwards compatibility
     class IndexSpaceAllocator {
     public:
-      IndexSpaceAllocator(const Domain &d)
-        : iterator(Domain::DomainPointIterator(d)) { assert(d.get_dim() == 1); }
+      IndexSpaceAllocator(const Domain &d, UniqueID ctx)
+        : ctx_id(ctx), iterator(Domain::DomainPointIterator(d)) 
+      { assert(d.get_dim() == 1); }
     public:
       LEGION_DEPRECATED("Dynamic allocation is no longer supported.")
       coord_t alloc(size_t count = 1) const 
@@ -920,6 +904,8 @@ namespace Legion {
       void free(coord_t ptr, size_t count = 1) const
         { printf("No backwards compatibility for 'free' "
                  "on index space allocators.\n"); assert(false); }
+    public:
+      const UniqueID ctx_id;
     protected:
       mutable Domain::DomainPointIterator iterator;
     };

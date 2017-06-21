@@ -37,6 +37,9 @@ namespace Realm {
 						    const ProfilingRequestSet &reqs,
 						    Event wait_on /*= Event::NO_EVENT*/)
   {
+    // output vector should start out empty
+    assert(results.empty());
+
     Event e = GenEventImpl::create_genevent()->current_event();
     UnionOperation<N,T> *op = new UnionOperation<N,T>(reqs, e);
 
@@ -61,6 +64,9 @@ namespace Realm {
 							   const ProfilingRequestSet &reqs,
 							   Event wait_on /*= Event::NO_EVENT*/)
   {
+    // output vector should start out empty
+    assert(results.empty());
+
     Event e = GenEventImpl::create_genevent()->current_event();
     IntersectionOperation<N,T> *op = new IntersectionOperation<N,T>(reqs, e);
 
@@ -85,6 +91,9 @@ namespace Realm {
 							 const ProfilingRequestSet &reqs,
 							 Event wait_on /*= Event::NO_EVENT*/)
   {
+    // output vector should start out empty
+    assert(results.empty());
+
     Event e = GenEventImpl::create_genevent()->current_event();
     DifferenceOperation<N,T> *op = new DifferenceOperation<N,T>(reqs, e);
 
@@ -265,17 +274,25 @@ namespace Realm {
     std::cout << "]]\n";
   }
 
-  template <int N, typename T, typename BM>
-  bool try_fast_1d_union(BM& bitmask, const std::vector<ZIndexSpace<N,T> >& spaces)
-  {
-    return false;  // general case doesn't work
-  }
+  template <int N, typename T>
+  class Fast1DUnion {
+  public:
+    template <typename BM>
+    static bool attempt_union(BM& bitmask, const std::vector<ZIndexSpace<N,T> >& spaces)
+    {
+      assert(N != 1); // N==1 covered by case below
+      return false;  // general case doesn't work
+    }
+  };
 
-  template <typename T, typename BM>
-  bool try_fast_1d_union(BM& bitmask, const std::vector<ZIndexSpace<1,T> >& inputs)
-  {
+  template <typename T>
+  class Fast1DUnion<1,T> {
+  public:
     static const int N = 1;
-    // stuff
+    template <typename BM>
+    static bool attempt_union(BM& bitmask, const std::vector<ZIndexSpace<N,T> >& inputs)
+    {
+      // stuff
       // even more special case where inputs.size() == 2
       if(inputs.size() == 2) {
 	ZIndexSpaceIterator<N,T> it_lhs(inputs[0]);
@@ -415,8 +432,9 @@ namespace Realm {
 	}
 #endif
       }
-    return true;
-  }
+      return true;
+    }
+  };
 
   template <int N, typename T>
   template <typename BM>
@@ -424,7 +442,8 @@ namespace Realm {
   {
     // special case: in 1-D, we can count on the iterators being ordered and just do an O(N)
     //  merge-union of the two streams
-    if(try_fast_1d_union<N,T>(bitmask, inputs))
+    //if(try_fast_1d_union<N,T>(bitmask, inputs))
+    if(Fast1DUnion<N,T>::attempt_union(bitmask, inputs))
       return;
 #if 0
     if(N == 1) {
@@ -1101,7 +1120,7 @@ namespace Realm {
   {
     // simple case - if both lhs and rhs are empty, the union must be empty too
     if(lhs.empty() && rhs.empty())
-      return ZIndexSpace<N,T>(/*empty*/);
+      return ZIndexSpace<N,T>::make_empty();
 
     // otherwise create a new index space whose bounds can fit both lhs and rhs
     ZIndexSpace<N,T> output;
@@ -1159,7 +1178,9 @@ namespace Realm {
 	output.bounds = output.bounds.union_bbox(ops[i].bounds);
       }
 
-    if(!all_empty) {
+    if(all_empty) {
+      output.bounds = ZRect<N,T>::make_empty();
+    } else {
       // try to assign sparsity ID near the input sparsity maps (if present)
       int target_node = gasnet_mynode();
       int node_count = 0;
@@ -1230,7 +1251,9 @@ namespace Realm {
     ZIndexSpace<N,T> output;
     output.bounds = lhs.bounds.intersection(rhs.bounds);
     
-    if(!output.bounds.empty()) {
+    if(output.bounds.empty()) {
+      output.sparsity.id = 0;
+    } else {
       // try to assign sparsity ID near one or both of the input sparsity maps (if present)
       // if the target has a sparsity map, use the same node - otherwise
       // get a sparsity ID by round-robin'ing across the nodes that have field data
@@ -1276,7 +1299,7 @@ namespace Realm {
   {
     // special case for empty operand list
     if(ops.empty())
-      return ZIndexSpace<N,T>(/*empty*/);
+      return ZIndexSpace<N,T>::make_empty();
 
     // build the intersection of all bounding boxes
     ZIndexSpace<N,T> output;
@@ -1355,7 +1378,7 @@ namespace Realm {
     // simple cases - an empty lhs or a dense rhs that covers lhs both yield an empty
     //  difference
     if(lhs.empty() || (rhs.dense() && rhs.bounds.contains(lhs.bounds)))
-      return ZIndexSpace<N,T>(/*empty*/);
+      return ZIndexSpace<N,T>::make_empty();
 
     // otherwise the difference is no larger than the lhs
     ZIndexSpace<N,T> output;

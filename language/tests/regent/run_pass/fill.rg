@@ -22,7 +22,7 @@ struct t {
 
 task k() : int
   var r = region(ispace(ptr, 5), t)
-  var x = new(ptr(t, r))
+  var x = dynamic_cast(ptr(t, r), 0)
 
   x.a = 123
   x.b = 3.14

@@ -476,8 +476,7 @@ namespace Legion {
           // Check for exceeding the trace size
           if (index >= dependences.size())
           {
-            MessageDescriptor TRACE_VIOLATION_RECORDED(1600, "undefined");
-            log_run.error(TRACE_VIOLATION_RECORDED.id(),
+            REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_RECORDED,
                           "Trace violation! Recorded %zd operations in trace "
                           "%d in task %s (UID %lld) but %d operations have "
                           "now been issued!", dependences.size(), tid,
@@ -492,8 +491,7 @@ namespace Legion {
           // Check that they are the same kind of operation
           if (info.kind != op->get_operation_kind())
           {
-            MessageDescriptor TRACE_VIOLATION_OPERATION(1601, "undefined");
-            log_run.error(TRACE_VIOLATION_OPERATION.id(),
+            REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_OPERATION,
                           "Trace violation! Operation at index %d of trace %d "
                           "in task %s (UID %lld) was recorded as having type "
                           "%s but instead has type %s in replay.",
@@ -508,8 +506,7 @@ namespace Legion {
           // Check that they have the same number of region requirements
           if (info.count != op->get_region_count())
           {
-            MessageDescriptor TRACE_VIOLATION_OPERATION2(1602, "undefined");
-            log_run.error(TRACE_VIOLATION_OPERATION2.id(),
+            REPORT_LEGION_ERROR(ERROR_TRACE_VIOLATION_OPERATION,
                           "Trace violation! Operation at index %d of trace %d "
                           "in task %s (UID %lld) was recorded as having %d "
                           "regions, but instead has %zd regions in replay.",

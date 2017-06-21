@@ -68,6 +68,9 @@ namespace Realm {
     assert(wait_on.has_triggered());
     //assert(reqs.empty());
 
+    // output vector should start out empty
+    assert(subspaces.empty());
+
     // dense case is easy(er)
     if(dense()) {
       // always split in x dimension for now
@@ -102,6 +105,9 @@ namespace Realm {
     // no support for deferring yet
     assert(wait_on.has_triggered());
     //assert(reqs.empty());
+
+    // output vector should start out empty
+    assert(subspaces.empty());
 
     // determine the total weight
     size_t total_weight = 0;
@@ -666,7 +672,7 @@ namespace Realm {
 
   void PartitioningOperation::deferred_launch(Event wait_for)
   {
-    if(1 || wait_for.has_triggered())
+    if(wait_for.has_triggered())
       op_queue->enqueue_partitioning_operation(this);
     else
       EventImpl::add_waiter(wait_for, new DeferredPartitioningOp(this));

@@ -36,6 +36,9 @@ namespace Realm {
 						    const ProfilingRequestSet &reqs,
 						    Event wait_on /*= Event::NO_EVENT*/) const
   {
+    // output vector should start out empty
+    assert(subspaces.empty());
+
     Event e = GenEventImpl::create_genevent()->current_event();
     ByFieldOperation<N,T,FT> *op = new ByFieldOperation<N,T,FT>(*this, field_data, reqs, e);
 
@@ -279,7 +282,7 @@ namespace Realm {
   {
     // an empty parent leads to trivially empty subspaces
     if(parent.empty())
-      return ZIndexSpace<N,T>(/*empty*/);
+      return ZIndexSpace<N,T>::make_empty();
 
     // otherwise it'll be something smaller than the current parent
     ZIndexSpace<N,T> subspace;

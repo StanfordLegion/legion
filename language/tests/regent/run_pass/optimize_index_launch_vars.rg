@@ -29,25 +29,25 @@ end
 task check(r : region(int), x0 : ptr(int, r), x1 : ptr(int, r), x2 : ptr(int, r), x3 : ptr(int, r), x4 : ptr(int, r))
 where reads(r) do
   regentlib.assert(@x0 == 0, "test failed")
-  regentlib.assert(@x1 == 1, "test failed")
-  regentlib.assert(@x2 == 4, "test failed")
-  regentlib.assert(@x3 == 6, "test failed")
-  regentlib.assert(@x4 == 12, "test failed")
+  regentlib.assert(@x1 == 2, "test failed")
+  regentlib.assert(@x2 == 6, "test failed")
+  regentlib.assert(@x3 == 12, "test failed")
+  regentlib.assert(@x4 == 20, "test failed")
 end
 
 task main()
   var r = region(ispace(ptr, 5), int)
-  var x0 = new(ptr(int, r))
-  var x1 = new(ptr(int, r))
-  var x2 = new(ptr(int, r))
-  var x3 = new(ptr(int, r))
-  var x4 = new(ptr(int, r))
-  var p = partition(equal, r, ispace(int1d, 3))
+  var x0 = dynamic_cast(ptr(int, r), 0)
+  var x1 = dynamic_cast(ptr(int, r), 1)
+  var x2 = dynamic_cast(ptr(int, r), 2)
+  var x3 = dynamic_cast(ptr(int, r), 3)
+  var x4 = dynamic_cast(ptr(int, r), 4)
+  var p = partition(equal, r, ispace(int1d, 5))
 
   fill(r, 0)
 
   __demand(__parallel)
-  for i = 0, 3 do
+  for i = 0, 5 do
     var j = i + 1
     f(p[i], j)
   end
@@ -59,9 +59,9 @@ task main()
   check(r, x0, x1, x2, x3, x4)
 
   -- regentlib.assert(@x0 == 0, "test failed")
-  -- regentlib.assert(@x1 == 1, "test failed")
-  -- regentlib.assert(@x2 == 4, "test failed")
-  -- regentlib.assert(@x3 == 6, "test failed")
-  -- regentlib.assert(@x4 == 12, "test failed")
+  -- regentlib.assert(@x1 == 2, "test failed")
+  -- regentlib.assert(@x2 == 6, "test failed")
+  -- regentlib.assert(@x3 == 12, "test failed")
+  -- regentlib.assert(@x4 == 20, "test failed")
 end
 regentlib.start(main)

@@ -1606,8 +1606,7 @@ namespace Legion {
       {
         if (local_node->intersects_with(node))
         {
-          MessageDescriptor ILLEGAL_PARTIAL_ACQUIRE(1100, "undefined");
-          log_run.error(ILLEGAL_PARTIAL_ACQUIRE.id(),
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTIAL_ACQUIRE, 
                         "Illegal partial acquire operation (ID %lld) "
                         "performed in task %s (ID %lld)", op->get_unique_id(),
                         op->get_context()->get_task_name(),
@@ -1683,8 +1682,7 @@ namespace Legion {
           return;
       }
       // It's bad if we get here
-      MessageDescriptor ILLEGAL_INTERFERING_RESTRICTON(1101, "undefined");
-      log_run.error(ILLEGAL_INTERFERING_RESTRICTON.id(),
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_INTERFERING_RESTRICTON, 
                     "Illegal interfering restriction performed by attach "
                     "operation (ID %lld) in task %s (ID %lld)",
                     op->get_unique_op_id(), op->get_context()->get_task_name(),
@@ -1828,8 +1826,7 @@ namespace Legion {
           return;
       }
       // It's bad if we get here
-      MessageDescriptor ILLEGAL_INTERFERING_ACQUIRE(1102, "undefined");
-      log_run.error(ILLEGAL_INTERFERING_ACQUIRE.id(),
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_INTERFERING_ACQUIRE, 
                     "Illegal interfering acquire operation performed by "
                     "acquire operation (ID %lld) in task %s (ID %lld)",
                     op->get_unique_op_id(), op->get_context()->get_task_name(),
@@ -1870,8 +1867,7 @@ namespace Legion {
       {
         if (local_node->intersects_with(node))
         {
-          MessageDescriptor ILLEGAL_PARTIAL_RESTRICTION(1103, "undefined");
-          log_run.error(ILLEGAL_PARTIAL_RESTRICTION.id(),
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTIAL_RESTRICTION, 
                         "Illegal partial restriction operation performed by "
                         "attach operation (ID %lld) in task %s (ID %lld)",
                         op->get_unique_op_id(), 

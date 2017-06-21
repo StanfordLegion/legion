@@ -31,7 +31,6 @@ end
 
 task main()
   var a = region(ispace(ptr, 5), int)
-  new(ptr(int, a), 5)
   var p = partition(equal, a, ispace(int1d, 2))
   var b = p[0]
   var c = p[1]

@@ -116,7 +116,6 @@ local function validate_vars_node(cx)
       node:is(ast.typed.expr.RawRuntime) or
       node:is(ast.typed.expr.RawValue) or
       node:is(ast.typed.expr.Isnull) or
-      node:is(ast.typed.expr.New) or
       node:is(ast.typed.expr.Null) or
       node:is(ast.typed.expr.DynamicCast) or
       node:is(ast.typed.expr.StaticCast) or

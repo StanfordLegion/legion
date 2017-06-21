@@ -54,7 +54,6 @@ local function analyze_leaf_node(cx)
       return not std.is_task(node.fn.value)
 
     elseif node:is(ast.typed.expr.RawContext) or
-      node:is(ast.typed.expr.New) or
       node:is(ast.typed.expr.Ispace) or
       node:is(ast.typed.expr.Region) or
       node:is(ast.typed.expr.Partition) or
@@ -199,7 +198,6 @@ local function analyze_inner_node(cx)
       node:is(ast.typed.expr.RawRuntime) or
       node:is(ast.typed.expr.RawValue) or
       node:is(ast.typed.expr.Isnull) or
-      node:is(ast.typed.expr.New) or
       node:is(ast.typed.expr.Null) or
       node:is(ast.typed.expr.DynamicCast) or
       node:is(ast.typed.expr.StaticCast) or
@@ -293,6 +291,8 @@ end
 local optimize_config_options = {}
 
 function optimize_config_options.top_task(cx, node)
+  if not node.body then return node end
+
   -- Do the analysis first and then mask it out if the configuration
   -- is disabled. This is to ensure that the analysis always works.
   local leaf = analyze_leaf(cx, node.body) and std.config["leaf"]

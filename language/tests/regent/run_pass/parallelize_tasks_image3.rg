@@ -93,7 +93,6 @@ task test(size : int)
   c.srand48(12345)
   var region1 = region(ispace(int2d, {size, size}), fs1)
   var region2 = region(ispace(ptr, size * size), fs2)
-  new(ptr(fs2, region2), size * size)
   init(region1, region2, size)
   for i = 0, 3 do
     stencil(region1, region2)

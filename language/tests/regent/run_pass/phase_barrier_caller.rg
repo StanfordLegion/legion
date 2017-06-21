@@ -56,7 +56,7 @@ end
 
 task k() : int
   var r = region(ispace(ptr, 5), int)
-  var x = new(ptr(int, r))
+  var x = dynamic_cast(ptr(int, r), 0)
   var p = phase_barrier(1)
   @x = 1
   must_epoch

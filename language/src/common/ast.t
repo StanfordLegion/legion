@@ -64,6 +64,16 @@ local function ast_node_tostring(node, indent, hide)
   if ast.is_node(node) then
     local hidden = node.node_type.print_hidden
     if hide and hidden then return end
+
+    local print_custom = node.node_type.print_custom
+    if print_custom then
+      if type(print_custom) == "string" then
+        return print_custom
+      else
+        return print_custom(node)
+      end
+    end
+
     local collapsed = node.node_type.print_collapsed
     if collapsed then
       newline = ""

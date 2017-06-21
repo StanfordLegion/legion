@@ -37,6 +37,9 @@ namespace Realm {
 							   const ProfilingRequestSet &reqs,
 							   Event wait_on /*= Event::NO_EVENT*/) const
   {
+    // output vector should start out empty
+    assert(images.empty());
+
     Event e = GenEventImpl::create_genevent()->current_event();
     ImageOperation<N,T,N2,T2> *op = new ImageOperation<N,T,N2,T2>(*this, field_data, reqs, e);
 
@@ -57,6 +60,9 @@ namespace Realm {
 							   const ProfilingRequestSet &reqs,
 							   Event wait_on /*= Event::NO_EVENT*/) const
   {
+    // output vector should start out empty
+    assert(images.empty());
+
     Event e = GenEventImpl::create_genevent()->current_event();
     ImageOperation<N,T,N2,T2> *op = new ImageOperation<N,T,N2,T2>(*this, field_data, reqs, e);
 
@@ -78,6 +84,9 @@ namespace Realm {
 							   const ProfilingRequestSet &reqs,
 							   Event wait_on /*= Event::NO_EVENT*/) const
   {
+    // output vector should start out empty
+    assert(images.empty());
+
     Event e = GenEventImpl::create_genevent()->current_event();
     ImageOperation<N,T,N2,T2> *op = new ImageOperation<N,T,N2,T2>(*this, field_data, reqs, e);
 
@@ -430,7 +439,7 @@ namespace Realm {
   {
     // try to filter out obviously empty sources
     if(parent.empty() || source.empty())
-      return ZIndexSpace<N,T>(/*empty*/);
+      return ZIndexSpace<N,T>::make_empty();
 
     // otherwise it'll be something smaller than the current parent
     ZIndexSpace<N,T> image;
@@ -466,7 +475,7 @@ namespace Realm {
   {
     // try to filter out obviously empty sources
     if(parent.empty() || source.empty())
-      return ZIndexSpace<N,T>(/*empty*/);
+      return ZIndexSpace<N,T>::make_empty();
 
     // otherwise it'll be something smaller than the current parent
     ZIndexSpace<N,T> image;

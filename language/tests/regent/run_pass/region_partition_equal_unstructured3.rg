@@ -16,7 +16,6 @@ import "regent"
 
 task main()
   var r = region(ispace(ptr, 15), int)
-  new(ptr(int, r), 15)
   var cs = ispace(int3d, {2, 1, 3})
   var p = partition(equal, r, cs)
 
@@ -35,6 +34,6 @@ task main()
     t += @x
   end
 
-  regentlib.assert(t == 130805, "test failed")
+  regentlib.assert(t == 151005, "test failed")
 end
 regentlib.start(main)

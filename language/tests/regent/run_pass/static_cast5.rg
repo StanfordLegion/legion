@@ -18,18 +18,12 @@ local c = regentlib.c
 
 task main()
   var t = region(ispace(ptr, 5), int)
-  var colors = c.legion_coloring_create()
-  c.legion_coloring_ensure_color(colors, 0)
-  c.legion_coloring_ensure_color(colors, 1)
-
-  var tp = partition(disjoint, t, colors)
+  var tp = partition(equal, t, ispace(int1d, 2))
   var t0 = tp[0]
   var t1 = tp[1]
 
-  var x1 = new(ptr(int, t1))
+  var x1 = dynamic_cast(ptr(int, t1), 4)
   var x0 = static_cast(ptr(int, t0), x1)
   regentlib.assert(isnull(x0), "test failed")
-
-  c.legion_coloring_destroy(colors)
 end
 regentlib.start(main)

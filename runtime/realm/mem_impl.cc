@@ -455,7 +455,7 @@ namespace Realm {
 	  const size_t chunk_size = 8;
 	  size_t old_size = local_instances.instances.size();
 	  size_t new_size = old_size + chunk_size;
-	  local_instances.instances.resize(chunk_size, 0);
+	  local_instances.instances.resize(new_size, 0);
 	  local_instances.free_list.resize(chunk_size - 1);
 	  for(size_t i = 0; i < chunk_size - 1; i++)
 	    local_instances.free_list[i] = new_size - 1 - i;

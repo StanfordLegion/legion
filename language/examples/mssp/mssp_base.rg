@@ -151,9 +151,6 @@ task toplevel()
   var rn = region(ispace(ptr, graph.nodes), Node)
   var re = region(ispace(ptr, graph.edges), Edge(rn))
 
-  new(ptr(Node, rn), graph.nodes)
-  new(ptr(Edge(rn), re), graph.edges)
-
   read_edge_data(graph, rn, re)
 
   for s = 0, graph.num_sources do

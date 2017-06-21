@@ -37,6 +37,9 @@ namespace Realm {
 						       const ProfilingRequestSet &reqs,
 						       Event wait_on /*= Event::NO_EVENT*/) const
   {
+    // output vector should start out empty
+    assert(preimages.empty());
+
     Event e = GenEventImpl::create_genevent()->current_event();
     PreimageOperation<N,T,N2,T2> *op = new PreimageOperation<N,T,N2,T2>(*this, field_data, reqs, e);
 
@@ -58,6 +61,9 @@ namespace Realm {
 						       const ProfilingRequestSet &reqs,
 						       Event wait_on /*= Event::NO_EVENT*/) const
   {
+    // output vector should start out empty
+    assert(preimages.empty());
+
     Event e = GenEventImpl::create_genevent()->current_event();
     PreimageOperation<N,T,N2,T2> *op = new PreimageOperation<N,T,N2,T2>(*this, field_data, reqs, e);
 
@@ -305,7 +311,7 @@ namespace Realm {
   {
     // try to filter out obviously empty targets
     if(parent.empty() || target.empty())
-      return ZIndexSpace<N,T>(/*empty*/);
+      return ZIndexSpace<N,T>::make_empty();
 
     // otherwise it'll be something smaller than the current parent
     ZIndexSpace<N,T> preimage;

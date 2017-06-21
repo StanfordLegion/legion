@@ -29,8 +29,8 @@ end
 task g() : int
   var d = region(ispace(ptr, 5), int)
   var e = region(ispace(ptr, 5), s(d))
-  var w = new(ptr(int, d))
-  var u = new(ptr(s(d), e))
+  var w = dynamic_cast(ptr(int, d), 0)
+  var u = dynamic_cast(ptr(s(d), e), 0)
   @w = 7
   @u = [s(d)] { x = w }
   return f(d, e, u)

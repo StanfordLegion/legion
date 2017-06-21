@@ -122,6 +122,7 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFERRED_ENQUEUE_OP_ID;
       public:
         Operation *proxy_this;
+        LgPriority priority;
       };
       struct DeferredResolutionArgs :
         public LgTaskArgs<DeferredResolutionArgs> {
@@ -359,7 +360,8 @@ namespace Legion {
       // indicate mapping, execution, resolution, completion, and commit
       //
       // Add this to the list of ready operations
-      void enqueue_ready_operation(RtEvent wait_on = RtEvent::NO_RT_EVENT);
+      void enqueue_ready_operation(RtEvent wait_on = RtEvent::NO_RT_EVENT,
+                            LgPriority priority = LG_THROUGHPUT_PRIORITY);
       // Indicate that we are done mapping this operation
       void complete_mapping(RtEvent wait_on = RtEvent::NO_RT_EVENT); 
       // Indicate when this operation has finished executing
@@ -1934,7 +1936,6 @@ namespace Legion {
       // and therefore have all of the single tasks and a
       // valid set of constraints.
       bool triggering_complete;
-      std::vector<Mapper::MappingConstraint> constraints;
       // Used for computing the constraints
       std::vector<std::set<SingleTask*> > task_sets;
       // Track the physical instances that we've acquired
@@ -2066,6 +2067,14 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = PENDING_PARTITION_OP_ALLOC;
     protected:
+      enum PendingPartitionKind
+      {
+        EQUAL_PARTITION = 0,
+        UNION_PARTITION,
+        INTERSECTION_PARTITION,
+        DIFFERENCE_PARTITION,
+        RESTRICTED_PARTITION,
+      };
       // Track pending partition operations as thunks
       class PendingPartitionThunk {
       public:
@@ -2307,6 +2316,7 @@ namespace Legion {
       void activate_pending(void);
       void deactivate_pending(void);
     public:
+      virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual bool is_partition_op(void) const { return true; } 
     public:

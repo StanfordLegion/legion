@@ -211,12 +211,11 @@ namespace Legion {
       IndexPartition get_parent_index_partition(IndexSpace handle);
       unsigned get_index_space_depth(IndexSpace handle);
       unsigned get_index_partition_depth(IndexPartition handle);
-      IndexSpaceAllocator* get_index_space_allocator(IndexSpace handle);
+      IndexSpaceAllocator* get_index_space_allocator(IndexSpace handle,
+                                                     UniqueID ctx_id);
       size_t get_domain_volume(IndexSpace handle);
       bool is_index_partition_disjoint(IndexPartition p);
       bool is_index_partition_complete(IndexPartition p);
-      bool safe_cast(IndexSpace handle, 
-                     const void *realm_point, TypeTag type_tag);
     public:
       void create_field_space(FieldSpace handle);
       void destroy_field_space(FieldSpace handle, AddressSpaceID source);
@@ -725,6 +724,13 @@ namespace Legion {
         SemanticTag tag;
         AddressSpaceID source;
       };
+      struct TightenIndexSpaceArgs : public LgTaskArgs<TightenIndexSpaceArgs> {
+      public:
+        static const LgTaskID TASK_ID = 
+          LG_TIGHTEN_INDEX_SPACE_TASK_ID;
+      public:
+        IndexSpaceNode *proxy_this;
+      };
       class IndexSpaceSetFunctor {
       public:
         IndexSpaceSetFunctor(Runtime *rt, AddressSpaceID src, Serializer &r)
@@ -797,6 +803,7 @@ namespace Legion {
       static void handle_disjointness_test(IndexSpaceNode *parent,
                                            IndexPartNode *left,
                                            IndexPartNode *right);
+      static void handle_tighten_index_space(const void *args);
     public:
       virtual void send_node(AddressSpaceID target, bool up);
       static void handle_node_creation(RegionTreeForest *context,
@@ -817,7 +824,9 @@ namespace Legion {
                            Deserializer &derez, AddressSpaceID source);
     public:
       inline bool has_allocator(void) const { return (allocator != NULL); }
-      IndexSpaceAllocator* get_allocator(void);
+      IndexSpaceAllocator* get_allocator(UniqueID ctx_id);
+    public:
+      virtual void tighten_index_space(void) = 0;
     public:
       virtual void initialize_union_space(ApUserEvent to_trigger,
               TaskOp *op, const std::vector<IndexSpace> &handles) = 0;
@@ -826,7 +835,7 @@ namespace Legion {
       virtual void initialize_difference_space(ApUserEvent to_trigger,
               TaskOp *op, IndexSpace left, IndexSpace right) = 0;
     public:
-      virtual void log_index_space_points(void) const = 0;
+      virtual void log_index_space_points(void) = 0;
       virtual ApEvent compute_pending_space(Operation *op,
             const std::vector<IndexSpace> &handles, bool is_union) = 0;
       virtual ApEvent compute_pending_space(Operation *op,
@@ -834,13 +843,12 @@ namespace Legion {
       virtual ApEvent compute_pending_difference(Operation *op, 
           IndexSpace initial, const std::vector<IndexSpace> &handles) = 0;
       virtual void get_index_space_domain(void *realm_is, TypeTag type_tag) = 0;
-      virtual size_t get_volume(void) const = 0;
-      virtual bool contains_point(const void *realm_point, 
-                                  TypeTag type_tag) const = 0;
-      virtual IndexSpaceAllocator* create_allocator(void) const = 0;
+      virtual size_t get_volume(void) = 0;
+      virtual bool contains_point(const void *realm_point,TypeTag type_tag) = 0;
+      virtual IndexSpaceAllocator* create_allocator(UniqueID ctx_id) = 0;
       virtual void destroy_node(AddressSpaceID source) = 0;
     public:
-      virtual LegionColor get_max_linearized_color(void) const = 0;
+      virtual LegionColor get_max_linearized_color(void) = 0;
       virtual LegionColor linearize_color(const void *realm_color,
                                           TypeTag type_tag) = 0;
       virtual void delinearize_color(LegionColor color, 
@@ -848,8 +856,10 @@ namespace Legion {
       virtual bool contains_color(LegionColor color, 
                                   bool report_error = false) = 0;
       virtual void instantiate_colors(std::vector<LegionColor> &colors) = 0;
-      virtual Domain get_color_space_domain(void) const = 0;
+      virtual void instantiate_children(IndexPartNode *partition) = 0;
+      virtual Domain get_color_space_domain(void) = 0;
       virtual DomainPoint get_domain_point_color(void) const = 0;
+      virtual DomainPoint delinearize_color_to_point(LegionColor c) = 0;
     public:
       virtual bool intersects_with(IndexSpaceNode *rhs,bool compute = true) = 0;
       virtual bool intersects_with(IndexPartNode *rhs, bool compute = true) = 0;
@@ -984,6 +994,9 @@ namespace Legion {
     protected:
       // On the owner node track when the index space is set
       RtUserEvent               realm_index_space_set;
+      // Keep track of whether we've tightened these bounds
+      RtUserEvent               tight_index_space_set;
+      bool                      tight_index_space;
       // Must hold the node lock when accessing the
       // remaining data structures
       std::map<LegionColor,IndexPartNode*> color_map;
@@ -1028,9 +1041,12 @@ namespace Legion {
     public:
       IndexSpaceNodeT& operator=(const IndexSpaceNodeT &rhs);
     public:
-      void get_realm_index_space(Realm::ZIndexSpace<DIM,T> &result) const;
-      void set_realm_index_space(AddressSpaceID source,
-                                 const Realm::ZIndexSpace<DIM,T> &value);
+      inline ApEvent get_realm_index_space(Realm::ZIndexSpace<DIM,T> &result,
+                                           bool need_tight_result);
+      inline void set_realm_index_space(AddressSpaceID source,
+                                        const Realm::ZIndexSpace<DIM,T> &value);
+    public:
+      virtual void tighten_index_space(void);
     public:
       virtual void initialize_union_space(ApUserEvent to_trigger,
               TaskOp *op, const std::vector<IndexSpace> &handles);
@@ -1039,7 +1055,7 @@ namespace Legion {
       virtual void initialize_difference_space(ApUserEvent to_trigger,
               TaskOp *op, IndexSpace left, IndexSpace right);
     public:
-      virtual void log_index_space_points(void) const;
+      virtual void log_index_space_points(void);
       virtual ApEvent compute_pending_space(Operation *op,
             const std::vector<IndexSpace> &handles, bool is_union);
       virtual ApEvent compute_pending_space(Operation *op,
@@ -1047,13 +1063,12 @@ namespace Legion {
       virtual ApEvent compute_pending_difference(Operation *op,
           IndexSpace initial, const std::vector<IndexSpace> &handles);
       virtual void get_index_space_domain(void *realm_is, TypeTag type_tag);
-      virtual size_t get_volume(void) const;
-      virtual bool contains_point(const void *realm_point, 
-                                  TypeTag type_tag) const;
-      virtual IndexSpaceAllocator* create_allocator(void) const;
+      virtual size_t get_volume(void);
+      virtual bool contains_point(const void *realm_point, TypeTag type_tag);
+      virtual IndexSpaceAllocator* create_allocator(UniqueID ctx_id);
       virtual void destroy_node(AddressSpaceID source);
     public:
-      virtual LegionColor get_max_linearized_color(void) const;
+      virtual LegionColor get_max_linearized_color(void);
       virtual LegionColor linearize_color(const void *realm_color,
                                           TypeTag type_tag);
       virtual void delinearize_color(LegionColor color, 
@@ -1061,8 +1076,10 @@ namespace Legion {
       virtual bool contains_color(LegionColor color,
                                   bool report_error = false);
       virtual void instantiate_colors(std::vector<LegionColor> &colors);
-      virtual Domain get_color_space_domain(void) const;
+      virtual void instantiate_children(IndexPartNode *partition);
+      virtual Domain get_color_space_domain(void);
       virtual DomainPoint get_domain_point_color(void) const;
+      virtual DomainPoint delinearize_color_to_point(LegionColor c);
     public:
       virtual bool intersects_with(IndexSpaceNode *rhs, bool compute = true);
       virtual bool intersects_with(IndexPartNode *rhs, bool compute = true);
@@ -1236,8 +1253,8 @@ namespace Legion {
     protected:
       std::map<IndexTreeNode*,IntersectInfo> intersections;
     protected: // linearization meta-data, computed on demand
-      Realm::ZPoint<DIM,ptrdiff_t> strides;
-      size_t offset;
+      Realm::ZPoint<DIM,long long> strides;
+      Realm::ZPoint<DIM,long long> offset;
       bool linearization_ready;
     public:
       struct CreateByFieldHelper {
@@ -1630,11 +1647,12 @@ namespace Legion {
       virtual bool dominates(IndexPartNode *other);
       virtual void destroy_node(AddressSpaceID source);
     public:
-      ApEvent get_union_index_space(Realm::ZIndexSpace<DIM,T> &space);
+      ApEvent get_union_index_space(Realm::ZIndexSpace<DIM,T> &space,
+                                    bool need_tight_result);
     protected:
       Realm::ZIndexSpace<DIM,T> partition_union_space;
       ApEvent partition_union_ready;
-      bool has_union_space;
+      bool has_union_space, union_space_tight;
     protected:
       std::map<IndexTreeNode*,IntersectInfo> intersections;
     };

@@ -29,23 +29,23 @@ fspace pst(param_r1 : region(ispace(ptr), int),
 }
 
 task main()
-  var r1 = region(ispace(ptr, 5), int)
-  var r2 = region(ispace(ptr, 5), st(r1))
-  var r3 = region(ispace(ptr, 5), pst(r1, r2))
+  var r1 = region(ispace(ptr, 2), int)
+  var r2 = region(ispace(ptr, 2), st(r1))
+  var r3 = region(ispace(ptr, 2), pst(r1, r2))
 
-  var p1_r1 = new(ptr(int, r1))
-  var p2_r1 = new(ptr(int, r1))
+  var p1_r1 = dynamic_cast(ptr(int, r1), 0)
+  var p2_r1 = dynamic_cast(ptr(int, r1), 1)
 
   @p1_r1, @p2_r1 = 1, 2
 
-  var p1_r2 = new(ptr(st(r1), r2))
-  var p2_r2 = new(ptr(st(r1), r2))
+  var p1_r2 = dynamic_cast(ptr(st(r1), r2), 0)
+  var p2_r2 = dynamic_cast(ptr(st(r1), r2), 1)
 
   p1_r2.x, p1_r2.y = p1_r1, p2_r1
   p2_r2.y, p2_r2.x = p1_r1, p2_r1
 
-  var p1_r3 = new(ptr(pst(r1, r2), r3))
-  var p2_r3 = new(ptr(pst(r1, r2), r3))
+  var p1_r3 = dynamic_cast(ptr(pst(r1, r2), r3), 0)
+  var p2_r3 = dynamic_cast(ptr(pst(r1, r2), r3), 1)
 
   for idx = 0, 4 do
     if idx % 2 == 0 then

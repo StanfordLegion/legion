@@ -485,6 +485,8 @@ namespace Legion {
       void register_inline_mapped_region(PhysicalRegion &region);
       void unregister_inline_mapped_region(PhysicalRegion &region);
     public:
+      bool safe_cast(RegionTreeForest *forest, IndexSpace handle, 
+                     const void *realm_point, TypeTag type_tag);
       bool is_region_mapped(unsigned idx);
       void clone_requirement(unsigned idx, RegionRequirement &target);
       int find_parent_region_req(const RegionRequirement &req, 
@@ -559,6 +561,9 @@ namespace Legion {
     protected:
       std::map<LocalVariableID,
                std::pair<void*,void (*)(void*)> > task_local_variables;
+    protected:
+      // Cache for accelerating safe casts
+      std::map<IndexSpace,IndexSpaceNode*> safe_cast_spaces;
     protected:
       RtEvent pending_done;
       bool task_executed;

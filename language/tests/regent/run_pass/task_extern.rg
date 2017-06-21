@@ -14,14 +14,19 @@
 
 import "regent"
 
-task f(is : ispace(ptr), x : ptr(is))
-end
+extern task f()
+f:compile()
 
+extern task g() : int
+g:compile()
+
+extern task h(r : region(int)) where reads(r) end
+h:compile()
+
+extern task i(r : region(int)) : int where reads writes(r) end
+i:compile()
+
+-- These are just declarations, nothing left to test.
 task main()
-  var is = ispace(ptr, 5)
-  var x = new(ptr(is))
-  f(is, x)
-
-  var i = [ptr](x)
 end
 regentlib.start(main)

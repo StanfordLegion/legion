@@ -16,14 +16,11 @@ import "regent"
 
 struct t {
   value : int,
-  color : int,
+  color : int1d,
 }
 
 task f()
-  var r = region(ispace(ptr, 5), t)
-  var x0 = new(ptr(t, r))
-  var x1 = new(ptr(t, r))
-  var x2 = new(ptr(t, r))
+  var r = region(ispace(ptr, 3), t)
 
   do
     var i = 0

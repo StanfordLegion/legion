@@ -33,7 +33,7 @@ local function fetch_task_signatures()
         reqs = terralib.newlist(),
         region_params = {},
       }
-      local task_params = v.ast.params
+      local task_params = v:get_primary_variant():get_ast().params
       local num_reqs = 0
       for idx = 1, #task_params do
         local param_type_in_signature =
@@ -42,10 +42,7 @@ local function fetch_task_signatures()
           local param_name = task_params[idx].symbol:hasname()
           local req_indices = {}
           local privileges, privilege_field_paths =
-            regent_std.find_task_privileges(param_type_in_signature,
-                                     v:getprivileges(),
-                                     v:get_coherence_modes(),
-                                     v:get_flags())
+            regent_std.find_task_privileges(param_type_in_signature, v)
           for fidx = 1, #privilege_field_paths do
             num_reqs = num_reqs + 1
             local req = {
@@ -113,7 +110,7 @@ local function fetch_call_graph()
   for k, v in pairs(_G) do
     if regent_std.is_task(v) then
       call_graph[k] = {}
-      local task_ast = v.ast
+      local task_ast = v:get_primary_variant():get_ast()
       local function record_callees(node)
         if node:is(regent_ast.typed.expr.Call) and
            regent_std.is_task(node.fn.value) then

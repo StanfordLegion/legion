@@ -91,7 +91,7 @@ namespace Legion {
      * and coordinate type of an index space as template
      * parameters for enhanced type checking and efficiency.
      */
-    template<int DIM, typename COORD_T>
+    template<int DIM, typename COORD_T = coord_t>
     class IndexSpaceT : public IndexSpace {
     protected:
       // Only the runtime should be allowed to make these
@@ -143,7 +143,7 @@ namespace Legion {
      * and coordinate type of an index partition as template
      * parameters for enhanced type checking and efficiency
      */
-    template<int DIM, typename COORD_T>
+    template<int DIM, typename COORD_T = coord_t>
     class IndexPartitionT : public IndexPartition {
     protected:
       // Only the runtime should be allowed to make these
@@ -238,7 +238,7 @@ namespace Legion {
      * and coordinate type of a logical region as template
      * parameters for enhanced type checking and efficiency.
      */
-    template<int DIM, typename COORD_T>
+    template<int DIM, typename COORD_T = coord_t>
     class LogicalRegionT : public LogicalRegion {
     protected:
       // Only the runtime should be allowed to make these
@@ -303,7 +303,7 @@ namespace Legion {
      * and coordinate type of an logical partition as template
      * parameters for enhanced type checking and efficiency
      */
-    template<int DIM, typename COORD_T>
+    template<int DIM, typename COORD_T = coord_t>
     class LogicalPartitionT : public LogicalPartition {
     protected:
       // Only the runtime should be allowed to make these
@@ -2140,6 +2140,8 @@ namespace Legion {
       // These methods can only be accessed by the FieldAccessor class
       template<PrivilegeMode, typename, int, typename, typename, bool>
       friend class FieldAccessor;
+      template<typename, int, typename, typename>
+      friend class UnsafeFieldAccessor;
       Realm::RegionInstance get_instance_info(PrivilegeMode mode, FieldID fid,
                                       ptrdiff_t &field_offset, void *realm_is,
                                       TypeTag type_tag, bool silence_warnings,
@@ -2178,7 +2180,7 @@ namespace Legion {
      * REDUCE
      *  - template<typename REDOP> void reduce(const Point<N,T>&, REDOP::RHS)
      */
-    template<PrivilegeMode M, typename FT, int N, typename COORD_T = int,
+    template<PrivilegeMode M, typename FT, int N, typename COORD_T = coord_t,
              typename A = Realm::AffineAccessor<FT,N,COORD_T>,
 #ifdef BOUNDS_CHECKS
              bool CHECK_BOUNDS = true>
@@ -2187,11 +2189,11 @@ namespace Legion {
 #endif
     class FieldAccessor {
     public:
-      FieldAccessor(void);
+      FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
-                    bool silence_warnings = false);
+                    bool silence_warnings = false) { }
     };
-
+ 
     /**
      * \class IndexIterator
      * This is a helper class for iterating over the points within
@@ -6272,9 +6274,6 @@ namespace Legion {
        * -lg:sched <int> The run-ahead factor for the runtime.  How many
        *              outstanding tasks ready to run should be on each
        *              processor before backing off the mapping procedure.
-       * -lg:width <int> Scheduling granularity when handling dependence
-       *              analysis and issuing operations.  Effectively the
-       *              Legion runtime superscalar width.
        * -lg:inorder  Execute operations in strict propgram order. This
        *              flag will actually run the entire operation through
        *              the pipeline and wait for it to complete before
@@ -6471,6 +6470,8 @@ namespace Legion {
        */
       template<LogicalRegion (*PROJ_PTR)(LogicalRegion, const DomainPoint&,
                                          Runtime*)>
+      LEGION_DEPRECATED("Projection functions should now be specified "
+                        "using projection functor objects")
       static ProjectionID register_region_function(ProjectionID handle);
 
       /**
@@ -6483,6 +6484,8 @@ namespace Legion {
        */
       template<LogicalRegion (*PROJ_PTR)(LogicalPartition, const DomainPoint&,
                                          Runtime*)>
+      LEGION_DEPRECATED("Projection functions should now be specified "
+                        "using projection functor objects")
       static ProjectionID register_partition_function(ProjectionID handle);
     public:
       /**

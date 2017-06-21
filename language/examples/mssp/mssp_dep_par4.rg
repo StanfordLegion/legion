@@ -264,9 +264,6 @@ task toplevel()
   var rn = region(ispace(ptr, graph.nodes), Node)
   var re = region(ispace(ptr, graph.edges), Edge(rn, rn))
 
-  new(ptr(Node, rn), graph.nodes)
-  new(ptr(Edge(rn), re), graph.edges)
-
   var colors = ispace(int1d, subgraphs)
   var pdst = partition(equal, rn, colors)
 

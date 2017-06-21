@@ -31,7 +31,7 @@ end
 
 task h() : int
   var r = region(ispace(ptr, 5), point)
-  var p = new(ptr(point, r))
+  var p = dynamic_cast(ptr(point, r), 0)
   @p = g()
   return f(r, p)
 end

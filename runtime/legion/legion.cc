@@ -24,6 +24,321 @@
 #include "logger_message_descriptor.h"
 
 namespace Legion {
+#ifndef DISABLE_PARTITION_SHIM
+  namespace PartitionShim {
+
+    template<int COLOR_DIM>
+    /*static*/ TaskID ColorPoints<COLOR_DIM>::TASK_ID;
+    template<int COLOR_DIM, int RANGE_DIM>
+    /*static*/ TaskID ColorRects<COLOR_DIM,RANGE_DIM>::TASK_ID;
+    
+    //--------------------------------------------------------------------------
+    template<int CDIM>
+    ColorPoints<CDIM>::ColorPoints(const Coloring &coloring, 
+        LogicalRegion region, FieldID color_field, FieldID pointer_field)
+      : TaskLauncher(TASK_ID, TaskArgument())
+    //--------------------------------------------------------------------------
+    {
+      add_region_requirement(
+          RegionRequirement(region, WRITE_DISCARD, EXCLUSIVE, region));
+      add_field(0/*index*/, color_field);
+      add_field(0/*index*/, pointer_field);
+      // Serialize the coloring into the argument buffer 
+      assert(CDIM == 1);
+      rez.serialize<size_t>(coloring.size());
+      for (Coloring::const_iterator cit = coloring.begin(); 
+            cit != coloring.end(); cit++)
+      {
+        const Realm::ZPoint<CDIM,coord_t> color = DomainPoint(cit->first); 
+        rez.serialize(color);
+        rez.serialize<size_t>(cit->second.points.size());
+        for (std::set<ptr_t>::const_iterator it = cit->second.points.begin();
+              it != cit->second.points.end(); it++)
+        {
+          const Realm::ZPoint<1,coord_t> point = it->value;
+          rez.serialize(point);
+        }
+        rez.serialize<size_t>(cit->second.ranges.size());
+        for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it = 
+              cit->second.ranges.begin(); it != cit->second.ranges.end(); it++)
+        {
+          const Realm::ZPoint<1,coord_t> start = it->first.value;
+          const Realm::ZPoint<1,coord_t> stop = it->second.value;
+          rez.serialize(start);
+          rez.serialize(stop);
+        }
+      }
+      argument = TaskArgument(rez.get_buffer(), rez.get_used_bytes()); 
+    }
+
+    //--------------------------------------------------------------------------
+    template<int CDIM>
+    ColorPoints<CDIM>::ColorPoints(const PointColoring &coloring, 
+        LogicalRegion region, FieldID color_field, FieldID pointer_field)
+      : TaskLauncher(TASK_ID, TaskArgument())
+    //--------------------------------------------------------------------------
+    {
+      add_region_requirement(
+          RegionRequirement(region, WRITE_DISCARD, EXCLUSIVE, region));
+      add_field(0/*index*/, color_field);
+      add_field(0/*index*/, pointer_field);
+      // Serialize the coloring into the argument buffer 
+      rez.serialize<size_t>(coloring.size());
+      for (PointColoring::const_iterator cit = coloring.begin();
+            cit != coloring.end(); cit++)
+      {
+        const Realm::ZPoint<CDIM,coord_t> color = cit->first; 
+        rez.serialize(color);
+        rez.serialize<size_t>(cit->second.points.size());
+        for (std::set<ptr_t>::const_iterator it = cit->second.points.begin();
+              it != cit->second.points.end(); it++)
+        {
+          const Realm::ZPoint<1,coord_t> point = it->value;
+          rez.serialize(point);
+        }
+        rez.serialize<size_t>(cit->second.ranges.size());
+        for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it = 
+              cit->second.ranges.begin(); it != cit->second.ranges.end(); it++)
+        {
+          const Realm::ZPoint<1,coord_t> start = it->first.value;
+          const Realm::ZPoint<1,coord_t> stop = it->second.value;
+          rez.serialize(start);
+          rez.serialize(stop);
+        }
+      }
+      argument = TaskArgument(rez.get_buffer(), rez.get_used_bytes());
+    }
+ 
+    //--------------------------------------------------------------------------
+    template<int CDIM>
+    /*static*/ void ColorPoints<CDIM>::register_task(void)
+    //--------------------------------------------------------------------------
+    {
+      TASK_ID = Legion::Runtime::generate_static_task_id();
+      char variant_name[128];
+      snprintf(variant_name,128,"Color Points <%d>", CDIM);
+      TaskVariantRegistrar registrar(TASK_ID, variant_name);
+      registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+      registrar.set_leaf();
+      Legion::Runtime::preregister_task_variant<
+        ColorPoints<CDIM>::cpu_variant>(registrar, variant_name);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int CDIM>
+    /*static*/ void ColorPoints<CDIM>::cpu_variant(const Task *task, 
+      const std::vector<PhysicalRegion> &regions, Context ctx, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      const FieldAccessor<WRITE_DISCARD,Realm::ZPoint<CDIM,coord_t>,1,coord_t>
+        fa_color(regions[0], task->regions[0].instance_fields[0]);
+      const FieldAccessor<WRITE_DISCARD,Realm::ZPoint<1,coord_t>,1,coord_t>
+        fa_point(regions[0], task->regions[0].instance_fields[1]);
+      Deserializer derez(task->args, task->arglen);
+      size_t num_colors;
+      derez.deserialize(num_colors);
+      coord_t next_entry = 0;
+      for (unsigned cidx = 0; cidx < num_colors; cidx++)
+      {
+        Realm::ZPoint<CDIM,coord_t> color;
+        derez.deserialize(color);
+        size_t num_points;
+        derez.deserialize(num_points);
+        for (unsigned idx = 0; idx < num_points; idx++, next_entry++)
+        {
+          Realm::ZPoint<1,coord_t> point;
+          derez.deserialize(point);
+          fa_color.write(next_entry, color);
+          fa_point.write(next_entry, point);
+        }
+        size_t num_ranges;
+        derez.deserialize(num_ranges);
+        for (unsigned idx = 0; idx < num_ranges; idx++)
+        {
+          Realm::ZPoint<1,coord_t> start, stop;
+          derez.deserialize(start);
+          derez.deserialize(stop);
+          for (PointInRectIterator<1,coord_t> 
+                itr(Realm::ZRect<1,coord_t>(start, stop)); 
+                itr(); itr++, next_entry++)
+          {
+            fa_color.write(next_entry, color);
+            fa_point.write(next_entry, *itr);
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<int CDIM, int RDIM>
+    ColorRects<CDIM,RDIM>::ColorRects(const DomainColoring &coloring, 
+        LogicalRegion region, FieldID color_field, FieldID range_field)
+      : TaskLauncher(TASK_ID, TaskArgument())
+    //--------------------------------------------------------------------------
+    {
+      add_region_requirement(
+          RegionRequirement(region, WRITE_DISCARD, EXCLUSIVE, region));
+      add_field(0/*index*/, color_field);
+      add_field(0/*index*/, range_field);
+      // Serialize the coloring into the argument buffer 
+      assert(CDIM == 1);
+      rez.serialize<size_t>(coloring.size());
+      for (DomainColoring::const_iterator cit = coloring.begin();
+            cit != coloring.end(); cit++)
+      {
+        const Realm::ZPoint<CDIM,coord_t> color = DomainPoint(cit->first);
+        rez.serialize(color);
+        rez.serialize<size_t>(1); // number of rects
+        const Realm::ZRect<RDIM,coord_t> rect = cit->second;
+        rez.serialize(rect);
+      }
+      argument = TaskArgument(rez.get_buffer(), rez.get_used_bytes());
+    }
+
+    //--------------------------------------------------------------------------
+    template<int CDIM, int RDIM>
+    ColorRects<CDIM,RDIM>::ColorRects(const MultiDomainColoring &coloring, 
+        LogicalRegion region, FieldID color_field, FieldID range_field)
+      : TaskLauncher(TASK_ID, TaskArgument())
+    //--------------------------------------------------------------------------
+    {
+      add_region_requirement(
+          RegionRequirement(region, WRITE_DISCARD, EXCLUSIVE, region));
+      add_field(0/*index*/, color_field);
+      add_field(0/*index*/, range_field);
+      // Serialize the coloring into the argument buffer 
+      assert(CDIM == 1);
+      rez.serialize<size_t>(coloring.size());
+      for (MultiDomainColoring::const_iterator cit = coloring.begin();
+            cit != coloring.end(); cit++)
+      {
+        const Realm::ZPoint<CDIM,coord_t> color = DomainPoint(cit->first);
+        rez.serialize(color);
+        rez.serialize<size_t>(cit->second.size());
+        for (std::set<Domain>::const_iterator it = cit->second.begin();
+              it != cit->second.end(); it++)
+        {
+          const Realm::ZRect<RDIM,coord_t> rect = *it;
+          rez.serialize(rect);
+        }
+      }
+      argument = TaskArgument(rez.get_buffer(), rez.get_used_bytes());
+    }
+
+    //--------------------------------------------------------------------------
+    template<int CDIM, int RDIM>
+    ColorRects<CDIM,RDIM>::ColorRects(const DomainPointColoring &coloring, 
+        LogicalRegion region, FieldID color_field, FieldID range_field)
+      : TaskLauncher(TASK_ID, TaskArgument())
+    //--------------------------------------------------------------------------
+    {
+      add_region_requirement(
+          RegionRequirement(region, WRITE_DISCARD, EXCLUSIVE, region));
+      add_field(0/*index*/, color_field);
+      add_field(0/*index*/, range_field);
+      // Serialize the coloring into the argument buffer 
+      rez.serialize<size_t>(coloring.size());
+      for (DomainPointColoring::const_iterator cit = coloring.begin();
+            cit != coloring.end(); cit++)
+      {
+        const Realm::ZPoint<CDIM,coord_t> color = cit->first;
+        rez.serialize(color);
+        rez.serialize<size_t>(1); // number of rects
+        const Realm::ZRect<RDIM,coord_t> rect = cit->second;
+        rez.serialize(rect);
+      }
+      argument = TaskArgument(rez.get_buffer(), rez.get_used_bytes());
+    }
+
+    //--------------------------------------------------------------------------
+    template<int CDIM, int RDIM>
+    ColorRects<CDIM,RDIM>::ColorRects(const MultiDomainPointColoring &coloring,
+        LogicalRegion region, FieldID color_field, FieldID range_field)
+      : TaskLauncher(TASK_ID, TaskArgument())
+    //--------------------------------------------------------------------------
+    {
+      add_region_requirement(
+          RegionRequirement(region, WRITE_DISCARD, EXCLUSIVE, region));
+      add_field(0/*index*/, color_field);
+      add_field(0/*index*/, range_field);
+      // Serialize the coloring into the argument buffer 
+      rez.serialize<size_t>(coloring.size());
+      for (MultiDomainPointColoring::const_iterator cit = coloring.begin();
+            cit != coloring.end(); cit++)
+      {
+        const Realm::ZPoint<CDIM,coord_t> color = cit->first;
+        rez.serialize(color);
+        rez.serialize<size_t>(cit->second.size());
+        for (std::set<Domain>::const_iterator it = cit->second.begin();
+              it != cit->second.end(); it++)
+        {
+          const Realm::ZRect<RDIM,coord_t> rect = *it;
+          rez.serialize(rect);
+        }
+      }
+      argument = TaskArgument(rez.get_buffer(), rez.get_used_bytes());
+    }
+
+    //--------------------------------------------------------------------------
+    template<int CDIM, int RDIM>
+    /*static*/ void ColorRects<CDIM,RDIM>::register_task(void)
+    //--------------------------------------------------------------------------
+    {
+      TASK_ID = Legion::Runtime::generate_static_task_id();
+      char variant_name[128];
+      snprintf(variant_name,128,"Color Rects <%d,%d>", CDIM, RDIM);
+      TaskVariantRegistrar registrar(TASK_ID, variant_name);
+      registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+      registrar.set_leaf();
+      Legion::Runtime::preregister_task_variant<
+        ColorRects<CDIM,RDIM>::cpu_variant>(registrar, variant_name);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int CDIM, int RDIM>
+    /*static*/ void ColorRects<CDIM,RDIM>::cpu_variant(const Task *task,
+      const std::vector<PhysicalRegion> &regions, Context ctx, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      const FieldAccessor<WRITE_DISCARD,Realm::ZPoint<CDIM,coord_t>,1,coord_t>
+        fa_color(regions[0], task->regions[0].instance_fields[0]);
+      const FieldAccessor<WRITE_DISCARD,Realm::ZRect<RDIM,coord_t>,1,coord_t>
+        fa_range(regions[0], task->regions[0].instance_fields[1]);
+      Deserializer derez(task->args, task->arglen);
+      size_t num_colors;
+      derez.deserialize(num_colors);
+      coord_t next_entry = 0;
+      for (unsigned cidx = 0; cidx < num_colors; cidx++)
+      {
+        Realm::ZPoint<CDIM,coord_t> color;
+        derez.deserialize(color);
+        size_t num_ranges;
+        derez.deserialize(num_ranges);
+        for (unsigned idx = 0; idx < num_ranges; idx++, next_entry++)
+        {
+          Realm::ZRect<RDIM,coord_t> range;
+          derez.deserialize(range);
+          fa_color.write(next_entry, color);
+          fa_range.write(next_entry, range);
+        }
+      }
+    }
+
+    // Do the explicit instantiation
+    template class ColorPoints<1>;
+    template class ColorPoints<2>;
+    template class ColorPoints<3>;
+    template class ColorRects<1,1>;
+    template class ColorRects<1,2>;
+    template class ColorRects<1,3>;
+    template class ColorRects<2,1>;
+    template class ColorRects<2,2>;
+    template class ColorRects<2,3>;
+    template class ColorRects<3,1>;
+    template class ColorRects<3,2>;
+    template class ColorRects<3,3>;
+  };
+#endif // DISABLE_PARTITION_SHIM
 
     namespace Internal {
       LEGION_EXTERN_LOGGER_DECLARATIONS
@@ -804,15 +1119,9 @@ namespace Legion {
       instance_fields = inst_fields;
 #ifdef DEBUG_LEGION
       if (IS_REDUCE(*this)) // Shouldn't use this constructor for reductions
-      {
-        Internal::MessageDescriptor USE_DIFFERENT_REGIONREQUIREMENT(2900, 
-                                                            "undefined");
-        Internal::log_region.error(USE_DIFFERENT_REGIONREQUIREMENT.id(),
+        REPORT_LEGION_ERROR(ERROR_USE_REDUCTION_REGION_REQ, 
                                    "Use different RegionRequirement "
-                                   "constructor for reductions");
-        assert(false);
-        exit(ERROR_USE_REDUCTION_REGION_REQ);
-      }
+                            "constructor for reductions");
 #endif
     }
 
@@ -832,15 +1141,9 @@ namespace Legion {
       instance_fields = inst_fields;
 #ifdef DEBUG_LEGION
       if (IS_REDUCE(*this))
-      {
-        Internal::MessageDescriptor USE_DIFFERENT_REGIONREQUIREMENT(2901, 
-                                                            "undefined");
-        Internal::log_region.error(USE_DIFFERENT_REGIONREQUIREMENT.id(),
+        REPORT_LEGION_ERROR(ERROR_USE_REDUCTION_REGION_REQ, 
                                    "Use different RegionRequirement "
-                                   "constructor for reductions");
-        assert(false);
-        exit(ERROR_USE_REDUCTION_REGION_REQ);
-      }
+                            "constructor for reductions");
 #endif
     }
 
@@ -860,15 +1163,9 @@ namespace Legion {
       instance_fields = inst_fields;
 #ifdef DEBUG_LEGION
       if (IS_REDUCE(*this))
-      {
-        Internal::MessageDescriptor USE_DIFFERENT_REGIONREQUIREMENT(2902, 
-                                                            "undefined");
-        Internal::log_region.error(USE_DIFFERENT_REGIONREQUIREMENT.id(),
+        REPORT_LEGION_ERROR(ERROR_USE_REDUCTION_REGION_REQ, 
                                    "Use different RegionRequirement "
-                                   "constructor for reductions");
-        assert(false);
-        exit(ERROR_USE_REDUCTION_REGION_REQ);
-      }
+                                   "constructor for reductions")
 #endif
     }
 
@@ -888,13 +1185,8 @@ namespace Legion {
       instance_fields = inst_fields;
 #ifdef DEBUG_LEGION
       if (redop == 0)
-      {
-        Internal::MessageDescriptor ZERO_NOT_VALID(2903, "undefined");
-        Internal::log_region.error(ZERO_NOT_VALID.id(), 
-                                   "Zero is not a valid ReductionOpID");
-        assert(false);
-        exit(ERROR_RESERVED_REDOP_ID);
-      }
+        REPORT_LEGION_ERROR(ERROR_RESERVED_REDOP_ID, 
+                                   "Zero is not a valid ReductionOpID")
 #endif
     }
 
@@ -915,13 +1207,8 @@ namespace Legion {
       instance_fields = inst_fields;
 #ifdef DEBUG_LEGION
       if (redop == 0)
-      {
-        Internal::MessageDescriptor ZERO_NOT_VALID(2904, "undefined");
-        Internal::log_region.error(ZERO_NOT_VALID.id(), 
-                                   "Zero is not a valid ReductionOpID");        
-        assert(false);
-        exit(ERROR_RESERVED_REDOP_ID);
-      }
+        REPORT_LEGION_ERROR(ERROR_RESERVED_REDOP_ID, 
+                                   "Zero is not a valid ReductionOpID")        
 #endif
     }
 
@@ -942,13 +1229,8 @@ namespace Legion {
       instance_fields = inst_fields;
 #ifdef DEBUG_LEGION
       if (redop == 0)
-      {
-        Internal::MessageDescriptor ZERO_NOT_VALID(2905, "undefined");
-        Internal::log_region.error(ZERO_NOT_VALID.id(), 
-                                   "Zero is not a valid ReductionOpID");
-        assert(false);
-        exit(ERROR_RESERVED_REDOP_ID);
-      }
+        REPORT_LEGION_ERROR(ERROR_RESERVED_REDOP_ID, 
+                                   "Zero is not a valid ReductionOpID")
 #endif
     }
 
@@ -966,15 +1248,9 @@ namespace Legion {
     { 
 #ifdef DEBUG_LEGION
       if (IS_REDUCE(*this)) // Shouldn't use this constructor for reductions
-      {
-        Internal::MessageDescriptor USE_DIFFERENT_REGIONREQUIREMENT(2906, 
-                                                            "undefined");
-        Internal::log_region.error(USE_DIFFERENT_REGIONREQUIREMENT.id(),
+        REPORT_LEGION_ERROR(ERROR_USE_REDUCTION_REGION_REQ, 
                                    "Use different RegionRequirement "
-                                   "constructor for reductions");
-        assert(false);
-        exit(ERROR_USE_REDUCTION_REGION_REQ);
-      }
+                                   "constructor for reductions")
 #endif
     }
 
@@ -993,15 +1269,9 @@ namespace Legion {
     { 
 #ifdef DEBUG_LEGION
       if (IS_REDUCE(*this))
-      {
-        Internal::MessageDescriptor USE_DIFFERENT_REGIONREQUIREMENT(2907, 
-                                                              "undefined");
-        Internal::log_region.error(USE_DIFFERENT_REGIONREQUIREMENT.id(),
+        REPORT_LEGION_ERROR(ERROR_USE_REDUCTION_REGION_REQ, 
                                    "Use different RegionRequirement "
-                                   "constructor for reductions");
-        assert(false);
-        exit(ERROR_USE_REDUCTION_REGION_REQ);
-      }
+                                   "constructor for reductions")
 #endif
     }
 
@@ -1020,15 +1290,9 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       if (IS_REDUCE(*this))
-      {
-        Internal::MessageDescriptor USE_DIFFERENT_REGIONREQUIREMENT(2908, 
-                                                            "undefined");
-        Internal::log_region.error(USE_DIFFERENT_REGIONREQUIREMENT.id(),
+        REPORT_LEGION_ERROR(ERROR_USE_REDUCTION_REGION_REQ, 
                                    "Use different RegionRequirement "
-                                   "constructor for reductions");
-        assert(false);
-        exit(ERROR_USE_REDUCTION_REGION_REQ);
-      }
+                                   "constructor for reductions")
 #endif
     }
 
@@ -1046,13 +1310,8 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       if (redop == 0)
-      {
-        Internal::MessageDescriptor ZERO_NOT_VALID(2911, "undefined");
-        Internal::log_region.error(ZERO_NOT_VALID.id(), 
-                                   "Zero is not a valid ReductionOpID");        
-        assert(false);
-        exit(ERROR_RESERVED_REDOP_ID);
-      }
+        REPORT_LEGION_ERROR(ERROR_RESERVED_REDOP_ID, 
+                                   "Zero is not a valid ReductionOpID")        
 #endif
     }
 
@@ -1071,13 +1330,8 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       if (redop == 0)
-      {
-        Internal::MessageDescriptor ZERO_NOT_VALID(2909, "undefined");
-        Internal::log_region.error(ZERO_NOT_VALID.id(), 
-                                   "Zero is not a valid ReductionOpID");
-        assert(false);
-        exit(ERROR_RESERVED_REDOP_ID);
-      }
+        REPORT_LEGION_ERROR(ERROR_RESERVED_REDOP_ID, 
+                                   "Zero is not a valid ReductionOpID")
 #endif
     }
 
@@ -1096,13 +1350,8 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       if (redop == 0)
-      {
-        Internal::MessageDescriptor ZERO_NOT_VALID(2910, "undefined");
-        Internal::log_region.error(ZERO_NOT_VALID.id(), 
-                                   "Zero is not a valid ReductionOpID");
-        assert(false);
-        exit(ERROR_RESERVED_REDOP_ID);
-      }
+        REPORT_LEGION_ERROR(ERROR_RESERVED_REDOP_ID, 
+                                   "Zero is not a valid ReductionOpID")
 #endif
     }
 
@@ -2018,15 +2267,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (impl == NULL)
-      {
-        Internal::MessageDescriptor ILLEGAL_REQ_EMPTY_FUTURE(1000, "undefined");
-        Internal::log_run.error(ILLEGAL_REQ_EMPTY_FUTURE.id(), 
-                          "Illegal request for future value from empty future");
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_REQUEST_FOR_EMPTY_FUTURE);
-      }
+        REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
+                          "Illegal request for future value from empty future")
       return impl->get_untyped_result(silence_warnings);
     }
 
@@ -2035,15 +2277,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (impl == NULL)
-      {
-        Internal::MessageDescriptor ILLEGAL_REQ_EMPTY_FUTURE1(1001,"undefined");
-        Internal::log_run.error(ILLEGAL_REQ_EMPTY_FUTURE1.id(), 
-                           "Illegal request for future size from empty future");
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_REQUEST_FOR_EMPTY_FUTURE);
-      }
+        REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
+                          "Illegal request for future size from empty future");
       return impl->get_untyped_size();
     }
 
@@ -2399,12 +2634,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      Internal::MessageDescriptor NEW_METHODS_PROJECTION_FUNCTIONS(1002, 
-                                                                  "undefined");
-      Internal::log_run.warning(NEW_METHODS_PROJECTION_FUNCTIONS.id(),
+      REPORT_LEGION_WARNING(LEGION_WARNING_NEW_PROJECTION_FUNCTORS, 
                                 "THERE ARE NEW METHODS FOR PROJECTION FUNCTORS "
                                 "THAT MUST BE OVERRIDEN! CALLING DEPRECATED "
-                                "METHODS FOR NOW!");
+                            "METHODS FOR NOW!");
 #endif
       switch (mappable->get_mappable_type())
       {
@@ -2412,13 +2645,11 @@ namespace Legion {
           return project(0/*dummy ctx*/, const_cast<Task*>(mappable->as_task()),
                          index, upper_bound, point);
         default:
-          Internal::MessageDescriptor UNKNOWN_MAPPABLE(1003, "undefined");
-          Internal::log_run.error(UNKNOWN_MAPPABLE.id(), "Unknown mappable "
-                                  "type passed to projection "
-                                  "functor! You must override the default "
-                                  "implementations of the non-deprecated "
-                                  "'project' methods!");
-          assert(false);
+          REPORT_LEGION_ERROR(ERROR_UNKNOWN_MAPPABLE, 
+                              "Unknown mappable type passed to projection "
+                              "functor! You must override the default "
+                              "implementations of the non-deprecated "
+                              "'project' methods!");
       }
       return LogicalRegion::NO_REGION;
     }
@@ -2434,9 +2665,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      Internal::MessageDescriptor NEW_METHODS_PROJECTION_FUNCTIONS3(1004, 
-                                                            "undefined");
-      Internal::log_run.warning(NEW_METHODS_PROJECTION_FUNCTIONS3.id(),
+      REPORT_LEGION_WARNING(LEGION_WARNING_NEW_PROJECTION_FUNCTORS, 
                                 "THERE ARE NEW METHODS FOR PROJECTION FUNCTORS "
                                 "THAT MUST BE OVERRIDEN! CALLING DEPRECATED "
                                 "METHODS FOR NOW!");
@@ -2447,8 +2676,7 @@ namespace Legion {
           return project(0/*dummy ctx*/, const_cast<Task*>(mappable->as_task()),
                          index, upper_bound, point);
         default:
-          Internal::MessageDescriptor UNKNOWN_MAPPABLE2(1005, "undefined");
-          Internal::log_run.error(UNKNOWN_MAPPABLE2.id(),
+          REPORT_LEGION_ERROR(ERROR_UNKNOWN_MAPPABLE, 
                                   "Unknown mappable type passed to projection "
                                   "functor! You must override the default "
                                   "implementations of the non-deprecated "
@@ -2486,12 +2714,9 @@ namespace Legion {
             unsigned index, LogicalRegion upper_bound, const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
-      Internal::MessageDescriptor DEPRECATED_PROJECTION_FUNCTOR(1006, 
-                                                        "undefined");
-      Internal::log_run.error(DEPRECATED_PROJECTION_FUNCTOR.id(),
+      REPORT_LEGION_ERROR(ERROR_DEPRECATED_PROJECTION, 
                               "INVOCATION OF DEPRECATED PROJECTION "
                               "FUNCTOR METHOD WITHOUT AN OVERRIDE!");
-      assert(false);
       return LogicalRegion::NO_REGION;
     }
 
@@ -2500,12 +2725,9 @@ namespace Legion {
          unsigned index, LogicalPartition upper_bound, const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
-      Internal::MessageDescriptor DEPRECATED_PROJECTION_FUNCTOR2(1007, 
-                                                          "undefined");
-      Internal::log_run.error(DEPRECATED_PROJECTION_FUNCTOR2.id(),
+      REPORT_LEGION_ERROR(ERROR_DEPRECATED_PROJECTION, 
                               "INVOCATION OF DEPRECATED PROJECTION "
                               "FUNCTOR METHOD WITHOUT AN OVERRIDE!");
-      assert(false);
       return LogicalRegion::NO_REGION;
     }
 
@@ -2846,7 +3068,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       runtime->destroy_index_space(ctx, handle);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_index_partition(Context ctx,
@@ -2857,6 +3079,7 @@ namespace Legion {
                                           Color color, bool allocable)
     //--------------------------------------------------------------------------
     {
+#ifndef DISABLE_PARTITION_SHIM
       if (allocable)
         Internal::log_run.warning("WARNING: allocable index partitions are "
                                   "no longer supported");
@@ -2881,61 +3104,63 @@ namespace Legion {
       FieldSpace temp_fs = create_field_space(ctx);
       const FieldID color_fid = 1;
       const FieldID pointer_fid = 2;
-      const size_t color_point_size = color_space.get_dim() * sizeof(coord_t);
       {
         FieldAllocator allocator = create_field_allocator(ctx,temp_fs);
-        allocator.allocate_field(color_point_size, color_fid);
-        allocator.allocate_field(sizeof(coord_t), pointer_fid);
+        switch (color_space.get_dim())
+        {
+          case 1:
+            {
+              allocator.allocate_field(
+                  sizeof(Realm::ZPoint<1,coord_t>), color_fid);
+              break;
+            }
+          case 2:
+            {
+              allocator.allocate_field(
+                  sizeof(Realm::ZPoint<2,coord_t>), color_fid);
+              break;
+            }
+          case 3:
+            {
+              allocator.allocate_field(
+                  sizeof(Realm::ZPoint<3,coord_t>), color_fid);
+              break;
+            }
+          default:
+            assert(false);
+        }
+        allocator.allocate_field(sizeof(Realm::ZPoint<1,coord_t>), pointer_fid);
       }
       LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
                                                   temp_is, temp_fs);
       // Fill in the logical region with the data
-      InlineLauncher launcher(RegionRequirement(temp_lr, READ_WRITE, 
-                                                EXCLUSIVE, temp_lr)); 
-      launcher.add_field(color_fid);
-      launcher.add_field(pointer_fid);
-      PhysicalRegion temp_region = map_region(ctx, launcher);
-      temp_region.wait_until_valid();
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> color_acc = 
-                            temp_region.get_field_accessor(color_fid);
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> pointer_acc = 
-                            temp_region.get_field_accessor(pointer_fid);
-      coord_t next_entry = 0;
-      for (PointColoring::const_iterator cit = coloring.begin();
-            cit != coloring.end(); cit++)
+      // Do this with a task launch to maintain deferred execution
+      switch (color_space.get_dim())
       {
-        for (std::set<ptr_t>::const_iterator it = cit->second.points.begin();
-              it != cit->second.points.end(); it++)
-        {
-#ifdef DEBUG_LEGION
-          assert(next_entry < num_entries);
-#endif
-          color_acc.write_untyped((ptr_t)next_entry, 
-                                  cit->first.point_data, color_point_size); 
-          const coord_t pointer = *it;
-          pointer_acc.write_untyped((ptr_t)next_entry,&pointer,sizeof(pointer));
-          next_entry++;
-        }
-        for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it = 
-              cit->second.ranges.begin(); it != cit->second.ranges.end(); it++)
-        {
-          for (ptr_t ptr = it->first; ptr.value <= it->second.value; ptr++)
+        case 1:
           {
-#ifdef DEBUG_LEGION
-            assert(next_entry < num_entries);
-#endif
-            color_acc.write_untyped((ptr_t)next_entry,
-                                    cit->first.point_data, color_point_size);
-            const coord_t pointer = ptr;
-            pointer_acc.write_untyped((ptr_t)next_entry, 
-                                      &pointer, sizeof(pointer));
-            next_entry++;
+            PartitionShim::ColorPoints<1> launcher(coloring, temp_lr,
+                                              color_fid, pointer_fid);
+            runtime->execute_task(ctx, launcher);
+            break;
           }
-        }
+        case 2:
+          {
+            PartitionShim::ColorPoints<2> launcher(coloring, temp_lr,
+                                              color_fid, pointer_fid);
+            runtime->execute_task(ctx, launcher);
+            break;
+          }
+        case 3:
+          {
+            PartitionShim::ColorPoints<3> launcher(coloring, temp_lr,
+                                              color_fid, pointer_fid);
+            runtime->execute_task(ctx, launcher);
+            break;
+          }
+        default:
+          assert(false);
       }
-      unmap_region(ctx, temp_region);
       // Make an index space for the color space, just leak it for now
       IndexSpace index_color_space = create_index_space(ctx, color_space);;
       // Partition the logical region by the color field
@@ -2950,6 +3175,11 @@ namespace Legion {
       destroy_field_space(ctx, temp_fs);
       destroy_index_space(ctx, temp_is);
       return result;
+#else // DISABLE_PARTITION_SHIM
+      log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
+      assert(false);
+      return IndexPartition::NO_PART;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -2960,6 +3190,7 @@ namespace Legion {
                                           Color part_color)
     //--------------------------------------------------------------------------
     {
+#ifndef DISABLE_PARTITION_SHIM
       // Count how many entries there are in the coloring
       coord_t num_entries = 0;
       Color lower_bound = UINT_MAX, upper_bound = 0;
@@ -2990,62 +3221,19 @@ namespace Legion {
       FieldSpace temp_fs = create_field_space(ctx);
       const FieldID color_fid = 1;
       const FieldID pointer_fid = 2;
-      const size_t color_point_size = sizeof(coord_t);
       {
         FieldAllocator allocator = create_field_allocator(ctx,temp_fs);
-        allocator.allocate_field(color_point_size, color_fid);
-        allocator.allocate_field(sizeof(coord_t), pointer_fid);
+        allocator.allocate_field(sizeof(Realm::ZPoint<1,coord_t>), color_fid);
+        allocator.allocate_field(sizeof(Realm::ZPoint<1,coord_t>), pointer_fid);
       }
       LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
                                                   temp_is, temp_fs);
       // Fill in the logical region with the data
-      InlineLauncher launcher(RegionRequirement(temp_lr, READ_WRITE, 
-                                                EXCLUSIVE, temp_lr)); 
-      launcher.add_field(color_fid);
-      launcher.add_field(pointer_fid);
-      PhysicalRegion temp_region = map_region(ctx, launcher);
-      temp_region.wait_until_valid();
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> color_acc = 
-                            temp_region.get_field_accessor(color_fid);
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> pointer_acc = 
-                            temp_region.get_field_accessor(pointer_fid);
-      coord_t next_entry = 0;
-      for (Coloring::const_iterator cit = coloring.begin();
-            cit != coloring.end(); cit++)
-      {
-        const Color local_color = cit->first;
-        for (std::set<ptr_t>::const_iterator it = cit->second.points.begin();
-              it != cit->second.points.end(); it++)
-        {
-#ifdef DEBUG_LEGION
-          assert(next_entry < num_entries);
-#endif
-          color_acc.write_untyped((ptr_t)next_entry, 
-                                  &local_color, color_point_size);
-          const coord_t pointer = *it;
-          pointer_acc.write_untyped((ptr_t)next_entry,&pointer,sizeof(pointer));
-          next_entry++;
-        }
-        for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it = 
-              cit->second.ranges.begin(); it != cit->second.ranges.end(); it++)
-        {
-          for (ptr_t ptr = it->first; ptr.value <= it->second.value; ptr++)
-          {
-#ifdef DEBUG_LEGION
-            assert(next_entry < num_entries);
-#endif
-            color_acc.write_untyped((ptr_t)next_entry,
-                                    &local_color, color_point_size);
-            const coord_t pointer = ptr;
-            pointer_acc.write_untyped((ptr_t)next_entry, 
-                                      &pointer, sizeof(pointer));
-            next_entry++;
-          }
-        }
-      }
-      unmap_region(ctx, temp_region);
+      // Do this with a task launch to maintain deferred execution
+      PartitionShim::ColorPoints<1> launcher(coloring, temp_lr, 
+                                             color_fid, pointer_fid);
+      runtime->execute_task(ctx, launcher);
+      
       // Make an index space for the color space, we'll leak it for now
       IndexSpaceT<1,coord_t> index_color_space = 
                                   create_index_space(ctx, color_space);
@@ -3064,6 +3252,11 @@ namespace Legion {
       destroy_field_space(ctx, temp_fs);
       destroy_index_space(ctx, temp_is);
       return result;
+#else // DISABLE_PARTITION_SHIM
+      log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
+      assert(false);
+      return IndexPartition::NO_PART;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3074,6 +3267,7 @@ namespace Legion {
                                           PartitionKind part_kind, Color color)
     //--------------------------------------------------------------------------
     {
+#ifndef DISABLE_PARTITION_SHIM
       // Count how many entries there are in the coloring
       const coord_t num_entries = coloring.size();
       // Now make a temporary logical region with two fields to handle
@@ -3084,94 +3278,158 @@ namespace Legion {
       FieldSpace temp_fs = create_field_space(ctx);
       const FieldID color_fid = 1;
       const FieldID range_fid = 2;
-      const size_t color_point_size = color_space.get_dim() * sizeof(coord_t);
-      size_t range_size = 0;
-      switch (coloring.begin()->second.get_dim())
-      {
-        case 1:
-          {
-            range_size = sizeof(Realm::ZRect<1,coord_t>);
-            break;
-          }
-        case 2:
-          {
-            range_size = sizeof(Realm::ZRect<2,coord_t>);
-            break;
-          }
-        case 3:
-          {
-            range_size = sizeof(Realm::ZRect<3,coord_t>);
-            break;
-          }
-        default:
-          assert(false);
-      }
+      const int color_dim = color_space.get_dim();
+      const int range_dim = coloring.begin()->second.get_dim();
       {
         FieldAllocator allocator = create_field_allocator(ctx,temp_fs);
-        allocator.allocate_field(color_point_size, color_fid);
-        allocator.allocate_field(range_size, range_fid);
-      }
-      LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
-                                                  temp_is, temp_fs);
-      // Fill in the logical region with the data
-      InlineLauncher launcher(RegionRequirement(temp_lr, READ_WRITE, 
-                                                EXCLUSIVE, temp_lr)); 
-      launcher.add_field(color_fid);
-      launcher.add_field(range_fid);
-      PhysicalRegion temp_region = map_region(ctx, launcher);
-      temp_region.wait_until_valid();
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> color_acc = 
-                            temp_region.get_field_accessor(color_fid);
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> range_acc = 
-                            temp_region.get_field_accessor(range_fid);
-      coord_t next_entry = 0;
-      for (DomainPointColoring::const_iterator it = coloring.begin();
-            it != coloring.end(); it++)
-      {
-#ifdef DEBUG_LEGION
-        assert(next_entry < num_entries);
-#endif
-        color_acc.write_untyped((ptr_t)next_entry, 
-                                it->first.point_data, color_point_size); 
-        switch (it->second.get_dim())
+        switch (color_dim)
         {
           case 1:
             {
-              Realm::ZRect<1,coord_t> range = it->second;
-#ifdef DEBUG_LEGION
-              assert(sizeof(range) == range_size); 
-#endif
-              range_acc.write_untyped((ptr_t)next_entry, &range, range_size);
+              allocator.allocate_field(
+                  sizeof(Realm::ZPoint<1,coord_t>), color_fid);
               break;
             }
           case 2:
             {
-              Realm::ZRect<2,coord_t> range = it->second;
-#ifdef DEBUG_LEGION
-              assert(sizeof(range) == range_size); 
-#endif
-              range_acc.write_untyped((ptr_t)next_entry, &range, range_size);
+              allocator.allocate_field(
+                  sizeof(Realm::ZPoint<2,coord_t>), color_fid);
               break;
             }
           case 3:
             {
-              Realm::ZRect<3,coord_t> range = it->second;
-#ifdef DEBUG_LEGION
-              assert(sizeof(range) == range_size); 
-#endif
-              range_acc.write_untyped((ptr_t)next_entry, &range, range_size);
+              allocator.allocate_field(
+                  sizeof(Realm::ZPoint<3,coord_t>), color_fid);
               break;
             }
           default:
             assert(false);
         }
-        next_entry++;
+        switch (range_dim)
+        {
+          case 1:
+            {
+              allocator.allocate_field(
+                  sizeof(Realm::ZRect<1,coord_t>), range_fid);
+              break;
+            }
+          case 2:
+            {
+              allocator.allocate_field(
+                  sizeof(Realm::ZRect<2,coord_t>), range_fid);
+              break;
+            }
+          case 3:
+            {
+              allocator.allocate_field(
+                  sizeof(Realm::ZRect<3,coord_t>), range_fid);
+              break;
+            }
+          default:
+            assert(false);
+        }
       }
-      unmap_region(ctx, temp_region);
+      LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
+                                                  temp_is, temp_fs);
+      // Fill in the logical region with the data
+      // Do this with a task launch to maintain deferred execution
+      switch (color_dim)
+      {
+        case 1:
+          {
+            switch (range_dim)
+            {
+              case 1:
+                {
+                  PartitionShim::ColorRects<1,1> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              case 2:
+                {
+                  PartitionShim::ColorRects<1,2> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              case 3:
+                {
+                  PartitionShim::ColorRects<1,3> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              default:
+                assert(false);
+            }
+            break;
+          }
+        case 2:
+          {
+            switch (range_dim)
+            {
+              case 1:
+                {
+                  PartitionShim::ColorRects<2,1> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              case 2:
+                {
+                  PartitionShim::ColorRects<2,2> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              case 3:
+                {
+                  PartitionShim::ColorRects<2,3> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              default:
+                assert(false);
+            }
+            break;
+          }
+        case 3:
+          {
+            switch (range_dim)
+            {
+              case 1:
+                {
+                  PartitionShim::ColorRects<3,1> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              case 2:
+                {
+                  PartitionShim::ColorRects<3,2> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              case 3:
+                {
+                  PartitionShim::ColorRects<3,3> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              default:
+                assert(false);
+            }
+            break;
+          }
+        default:
+          assert(false);
+      }
       // Make an index space for the color space, just leak it for now
-      IndexSpace index_color_space = create_index_space(ctx, color_space);;
+      IndexSpace index_color_space = create_index_space(ctx, color_space);
       // Partition the logical region by the color field
       IndexPartition temp_ip = create_partition_by_field(ctx, temp_lr, 
                                 temp_lr, color_fid, index_color_space);
@@ -3184,6 +3442,11 @@ namespace Legion {
       destroy_field_space(ctx, temp_fs);
       destroy_index_space(ctx, temp_is);
       return result;
+#else // DISABLE_PARTITION_SHIM
+      log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
+      assert(false);
+      return IndexPartition::NO_PART;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3194,6 +3457,7 @@ namespace Legion {
                                           bool disjoint, Color part_color)
     //--------------------------------------------------------------------------
     {
+#ifndef DISABLE_PARTITION_SHIM
       // Count how many entries there are in the coloring
       const coord_t num_entries = coloring.size();
       // Now make a temporary logical region with two fields to handle
@@ -3204,95 +3468,65 @@ namespace Legion {
       FieldSpace temp_fs = create_field_space(ctx);
       const FieldID color_fid = 1;
       const FieldID range_fid = 2;
-      const size_t color_point_size = sizeof(coord_t);
-      size_t range_size = 0;
-      switch (coloring.begin()->second.get_dim())
-      {
-        case 0:
-        case 1:
-          {
-            range_size = sizeof(Realm::ZRect<1,coord_t>);
-            break;
-          }
-        case 2:
-          {
-            range_size = sizeof(Realm::ZRect<2,coord_t>);
-            break;
-          }
-        case 3:
-          {
-            range_size = sizeof(Realm::ZRect<3,coord_t>);
-            break;
-          }
-        default:
-          assert(false);
-      }
+      const int range_dim = coloring.begin()->second.get_dim();
       {
         FieldAllocator allocator = create_field_allocator(ctx,temp_fs);
-        allocator.allocate_field(color_point_size, color_fid);
-        allocator.allocate_field(range_size, range_fid);
-      }
-      LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
-                                                  temp_is, temp_fs);
-      // Fill in the logical region with the data
-      InlineLauncher launcher(RegionRequirement(temp_lr, READ_WRITE, 
-                                                EXCLUSIVE, temp_lr)); 
-      launcher.add_field(color_fid);
-      launcher.add_field(range_fid);
-      PhysicalRegion temp_region = map_region(ctx, launcher);
-      temp_region.wait_until_valid();
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> color_acc = 
-                            temp_region.get_field_accessor(color_fid);
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> range_acc = 
-                            temp_region.get_field_accessor(range_fid);
-      coord_t next_entry = 0;
-      for (DomainColoring::const_iterator it = coloring.begin();
-            it != coloring.end(); it++)
-      {
-        const Color local_color = it->first;
-#ifdef DEBUG_LEGION
-        assert(next_entry < num_entries);
-#endif
-        color_acc.write_untyped((ptr_t)next_entry, 
-                                &local_color, color_point_size);
-        switch (it->second.get_dim())
+        allocator.allocate_field(sizeof(Realm::ZPoint<1,coord_t>), color_fid);
+        switch (range_dim)
         {
-          case 0:
           case 1:
             {
-              Realm::ZRect<1,coord_t> range = it->second;
-#ifdef DEBUG_LEGION
-              assert(sizeof(range) == range_size); 
-#endif
-              range_acc.write_untyped((ptr_t)next_entry, &range, range_size);
+              allocator.allocate_field(
+                  sizeof(Realm::ZRect<1,coord_t>), range_fid);
               break;
             }
           case 2:
             {
-              Realm::ZRect<2,coord_t> range = it->second;
-#ifdef DEBUG_LEGION
-              assert(sizeof(range) == range_size); 
-#endif
-              range_acc.write_untyped((ptr_t)next_entry, &range, range_size);
+              allocator.allocate_field(
+                  sizeof(Realm::ZRect<2,coord_t>), range_fid);
               break;
             }
           case 3:
             {
-              Realm::ZRect<3,coord_t> range = it->second;
-#ifdef DEBUG_LEGION
-              assert(sizeof(range) == range_size); 
-#endif
-              range_acc.write_untyped((ptr_t)next_entry, &range, range_size);
+              allocator.allocate_field(
+                  sizeof(Realm::ZRect<3,coord_t>), range_fid);
               break;
             }
           default:
             assert(false);
         }
-        next_entry++;
       }
-      unmap_region(ctx, temp_region);
+      LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
+                                                  temp_is, temp_fs);
+      // Fill in the logical region with the data
+      // Do this with a task launch to maintain deferred execution
+      switch (range_dim)
+      {
+        case 1:
+          {
+            PartitionShim::ColorRects<1,1> launcher(coloring,
+                temp_lr, color_fid, range_fid);
+            runtime->execute_task(ctx, launcher);
+            break;
+          }
+        case 2:
+          {
+            PartitionShim::ColorRects<1,2> launcher(coloring,
+                temp_lr, color_fid, range_fid);
+            runtime->execute_task(ctx, launcher);
+            break;
+          }
+        case 3:
+          {
+            PartitionShim::ColorRects<1,3> launcher(coloring,
+                temp_lr, color_fid, range_fid);
+            runtime->execute_task(ctx, launcher);
+            break;
+          }
+        default:
+          assert(false);
+      }
+
       IndexSpaceT<1,coord_t> index_color_space = 
                             create_index_space<1,coord_t>(ctx, color_space);
       // Partition the logical region by the color field
@@ -3308,6 +3542,11 @@ namespace Legion {
       destroy_field_space(ctx, temp_fs);
       destroy_index_space(ctx, temp_is);
       return result;
+#else // DISABLE_PARTITION_SHIM
+      log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
+      assert(false);
+      return IndexPartition::NO_PART;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3318,6 +3557,7 @@ namespace Legion {
                                        PartitionKind part_kind, Color color)
     //--------------------------------------------------------------------------
     {
+#ifndef DISABLE_PARTITION_SHIM
       // Count how many entries there are in the coloring
       coord_t num_entries = 0;
       for (MultiDomainPointColoring::const_iterator it = coloring.begin();
@@ -3331,96 +3571,156 @@ namespace Legion {
       FieldSpace temp_fs = create_field_space(ctx);
       const FieldID color_fid = 1;
       const FieldID range_fid = 2;
-      const size_t color_point_size = color_space.get_dim() * sizeof(coord_t);
-      size_t range_size = 0;
-      switch (coloring.begin()->second.begin()->get_dim())
+      const int color_dim = color_space.get_dim();
+      const int range_dim = coloring.begin()->second.begin()->get_dim();
+      {
+        FieldAllocator allocator = create_field_allocator(ctx,temp_fs);
+        switch (color_dim)
+        {
+          case 1:
+            {
+              allocator.allocate_field(
+                  sizeof(Realm::ZPoint<1,coord_t>), color_fid);
+              break;
+            }
+          case 2:
+            {
+              allocator.allocate_field(
+                  sizeof(Realm::ZPoint<2,coord_t>), color_fid);
+              break;
+            }
+          case 3:
+            {
+              allocator.allocate_field(
+                  sizeof(Realm::ZPoint<3,coord_t>), color_fid);
+              break;
+            }
+          default:
+            assert(false);
+        }
+        switch (range_dim)
+        {
+          case 1:
+            {
+              allocator.allocate_field(
+                  sizeof(Realm::ZRect<1,coord_t>), range_fid);
+              break;
+            }
+          case 2:
+            {
+              allocator.allocate_field(
+                  sizeof(Realm::ZRect<2,coord_t>), range_fid);
+              break;
+            }
+          case 3:
+            {
+              allocator.allocate_field(
+                  sizeof(Realm::ZRect<3,coord_t>), range_fid);
+              break;
+            }
+          default:
+            assert(false);
+        }
+      }
+      LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
+                                                  temp_is, temp_fs);
+      // Fill in the logical region with the data
+      // Do this with a task launch to maintain deferred execution
+      switch (color_dim)
       {
         case 1:
           {
-            range_size = sizeof(Realm::ZRect<1,coord_t>);
+            switch (range_dim)
+            {
+              case 1:
+                {
+                  PartitionShim::ColorRects<1,1> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              case 2:
+                {
+                  PartitionShim::ColorRects<1,2> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              case 3:
+                {
+                  PartitionShim::ColorRects<1,3> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              default:
+                assert(false);
+            }
             break;
           }
         case 2:
           {
-            range_size = sizeof(Realm::ZRect<2,coord_t>);
+            switch (range_dim)
+            {
+              case 1:
+                {
+                  PartitionShim::ColorRects<2,1> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              case 2:
+                {
+                  PartitionShim::ColorRects<2,2> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              case 3:
+                {
+                  PartitionShim::ColorRects<2,3> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              default:
+                assert(false);
+            }
             break;
           }
         case 3:
           {
-            range_size = sizeof(Realm::ZRect<3,coord_t>);
+            switch (range_dim)
+            {
+              case 1:
+                {
+                  PartitionShim::ColorRects<3,1> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              case 2:
+                {
+                  PartitionShim::ColorRects<3,2> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              case 3:
+                {
+                  PartitionShim::ColorRects<3,3> launcher(coloring,
+                      temp_lr, color_fid, range_fid);
+                  runtime->execute_task(ctx, launcher);
+                  break;
+                }
+              default:
+                assert(false);
+            }
             break;
           }
         default:
           assert(false);
       }
-      {
-        FieldAllocator allocator = create_field_allocator(ctx,temp_fs);
-        allocator.allocate_field(color_point_size, color_fid);
-        allocator.allocate_field(range_size, range_fid);
-      }
-      LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
-                                                  temp_is, temp_fs);
-      // Fill in the logical region with the data
-      InlineLauncher launcher(RegionRequirement(temp_lr, READ_WRITE, 
-                                                EXCLUSIVE, temp_lr)); 
-      launcher.add_field(color_fid);
-      launcher.add_field(range_fid);
-      PhysicalRegion temp_region = map_region(ctx, launcher);
-      temp_region.wait_until_valid();
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> color_acc = 
-                            temp_region.get_field_accessor(color_fid);
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> range_acc = 
-                            temp_region.get_field_accessor(range_fid);
-      coord_t next_entry = 0;
-      for (MultiDomainPointColoring::const_iterator cit = coloring.begin();
-            cit != coloring.end(); cit++)
-      {
-        for (std::set<Domain>::const_iterator it = cit->second.begin();
-              it != cit->second.end(); it++)
-        {
-#ifdef DEBUG_LEGION
-          assert(next_entry < num_entries);
-#endif
-          color_acc.write_untyped((ptr_t)next_entry, 
-                                  cit->first.point_data, color_point_size); 
-          switch (it->get_dim())
-          {
-            case 1:
-              {
-                Realm::ZRect<1,coord_t> range = *it;
-#ifdef DEBUG_LEGION
-                assert(sizeof(range) == range_size); 
-#endif
-                range_acc.write_untyped((ptr_t)next_entry, &range, range_size);
-                break;
-              }
-            case 2:
-              {
-                Realm::ZRect<2,coord_t> range = *it;
-#ifdef DEBUG_LEGION
-                assert(sizeof(range) == range_size); 
-#endif
-                range_acc.write_untyped((ptr_t)next_entry, &range, range_size);
-                break;
-              }
-            case 3:
-              {
-                Realm::ZRect<3,coord_t> range = *it;
-#ifdef DEBUG_LEGION
-                assert(sizeof(range) == range_size); 
-#endif
-                range_acc.write_untyped((ptr_t)next_entry, &range, range_size);
-                break;
-              }
-            default:
-              assert(false);
-          }
-          next_entry++;
-        }
-      }
-      unmap_region(ctx, temp_region);
       // Make an index space for the color space, just leak it for now
       IndexSpace index_color_space = create_index_space(ctx, color_space);;
       // Partition the logical region by the color field
@@ -3435,6 +3735,11 @@ namespace Legion {
       destroy_field_space(ctx, temp_fs);
       destroy_index_space(ctx, temp_is);
       return result;
+#else // DISABLE_PARTITION_SHIM
+      log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
+      assert(false);
+      return IndexPartition::NO_PART;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3445,6 +3750,7 @@ namespace Legion {
                                           bool disjoint, Color part_color)
     //--------------------------------------------------------------------------
     {
+#ifndef DISABLE_PARTITION_SHIM
       // Count how many entries there are in the coloring
       coord_t num_entries = 0;
       for (MultiDomainColoring::const_iterator it = coloring.begin();
@@ -3458,99 +3764,64 @@ namespace Legion {
       FieldSpace temp_fs = create_field_space(ctx);
       const FieldID color_fid = 1;
       const FieldID range_fid = 2;
-      const size_t color_point_size = sizeof(coord_t);
-      size_t range_size = 0;
-      switch (coloring.begin()->second.begin()->get_dim())
+      const int range_dim = coloring.begin()->second.begin()->get_dim();
       {
-        case 0:
+        FieldAllocator allocator = create_field_allocator(ctx,temp_fs);
+        allocator.allocate_field(sizeof(Realm::ZPoint<1,coord_t>), color_fid);
+        switch (range_dim)
+        {
+          case 1:
+            {
+              allocator.allocate_field(
+                  sizeof(Realm::ZRect<1,coord_t>), range_fid);
+              break;
+            }
+          case 2:
+            {
+              allocator.allocate_field(
+                  sizeof(Realm::ZRect<2,coord_t>), range_fid);
+              break;
+            }
+          case 3:
+            {
+              allocator.allocate_field(
+                  sizeof(Realm::ZRect<3,coord_t>), range_fid);
+              break;
+            }
+          default:
+            assert(false);
+        }
+      }
+      LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
+                                                  temp_is, temp_fs);
+      // Fill in the logical region with the data
+      // Do this with a task launch to maintain deferred execution
+      switch (range_dim)
+      {
         case 1:
           {
-            range_size = sizeof(Realm::ZRect<1,coord_t>);
+            PartitionShim::ColorRects<1,1> launcher(coloring,
+                temp_lr, color_fid, range_fid);
+            runtime->execute_task(ctx, launcher);
             break;
           }
         case 2:
           {
-            range_size = sizeof(Realm::ZRect<2,coord_t>);
+            PartitionShim::ColorRects<1,2> launcher(coloring,
+                temp_lr, color_fid, range_fid);
+            runtime->execute_task(ctx, launcher);
             break;
           }
         case 3:
           {
-            range_size = sizeof(Realm::ZRect<3,coord_t>);
+            PartitionShim::ColorRects<1,3> launcher(coloring,
+                temp_lr, color_fid, range_fid);
+            runtime->execute_task(ctx, launcher);
             break;
           }
         default:
           assert(false);
       }
-      {
-        FieldAllocator allocator = create_field_allocator(ctx,temp_fs);
-        allocator.allocate_field(color_point_size, color_fid);
-        allocator.allocate_field(range_size, range_fid);
-      }
-      LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
-                                                  temp_is, temp_fs);
-      // Fill in the logical region with the data
-      InlineLauncher launcher(RegionRequirement(temp_lr, READ_WRITE, 
-                                                EXCLUSIVE, temp_lr)); 
-      launcher.add_field(color_fid);
-      launcher.add_field(range_fid);
-      PhysicalRegion temp_region = map_region(ctx, launcher);
-      temp_region.wait_until_valid();
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> color_acc = 
-                            temp_region.get_field_accessor(color_fid);
-      LegionRuntime::Accessor::RegionAccessor<
-        LegionRuntime::Accessor::AccessorType::Generic> range_acc = 
-                            temp_region.get_field_accessor(range_fid);
-      coord_t next_entry = 0;
-      for (MultiDomainColoring::const_iterator cit = coloring.begin();
-            cit != coloring.end(); cit++)
-      {
-        const Color local_color = cit->first;
-        for (std::set<Domain>::const_iterator it = cit->second.begin();
-              it != cit->second.end(); it++)
-        {
-#ifdef DEBUG_LEGION
-          assert(next_entry < num_entries);
-#endif
-          color_acc.write_untyped((ptr_t)next_entry, 
-                                  &local_color, color_point_size);
-          switch (it->get_dim())
-          {
-            case 0:
-            case 1:
-              {
-                Realm::ZRect<1,coord_t> range = *it;
-#ifdef DEBUG_LEGION
-                assert(sizeof(range) == range_size); 
-#endif
-                range_acc.write_untyped((ptr_t)next_entry, &range, range_size);
-                break;
-              }
-            case 2:
-              {
-                Realm::ZRect<2,coord_t> range = *it;
-#ifdef DEBUG_LEGION
-                assert(sizeof(range) == range_size); 
-#endif
-                range_acc.write_untyped((ptr_t)next_entry, &range, range_size);
-                break;
-              }
-            case 3:
-              {
-                Realm::ZRect<3,coord_t> range = *it;
-#ifdef DEBUG_LEGION
-                assert(sizeof(range) == range_size); 
-#endif
-                range_acc.write_untyped((ptr_t)next_entry, &range, range_size);
-                break;
-              }
-            default:
-              assert(false);
-          }
-          next_entry++;
-        }
-      }
-      unmap_region(ctx, temp_region);
       IndexSpaceT<1,coord_t> index_color_space = 
                             create_index_space<1,coord_t>(ctx, color_space);
       // Partition the logical region by the color field
@@ -3566,6 +3837,11 @@ namespace Legion {
       destroy_field_space(ctx, temp_fs);
       destroy_index_space(ctx, temp_is);
       return result;
+#else // DISABLE_PARTITION_SHIM
+      log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
+      assert(false);
+      return IndexPartition::NO_PART; 
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -4438,14 +4714,14 @@ namespace Legion {
                                                               IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-      return get_index_space_color_point(ctx, handle); 
+      return runtime->get_index_space_color_point(ctx, handle); 
     }
 
     //--------------------------------------------------------------------------
     DomainPoint Runtime::get_index_space_color_point(IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-      return get_index_space_color_point(handle);
+      return runtime->get_index_space_color_point(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -4565,7 +4841,13 @@ namespace Legion {
                                       LogicalRegion region)
     //--------------------------------------------------------------------------
     {
-      return runtime->safe_cast(ctx, pointer, region);
+      if (pointer.is_null())
+        return pointer;
+      Realm::ZPoint<1,coord_t> p(pointer.value);
+      if (runtime->safe_cast(ctx, region, &p,
+            Internal::NT_TemplateHelper::encode_tag<1,coord_t>()))
+        return pointer;
+      return ptr_t::nil();
     }
 
     //--------------------------------------------------------------------------
@@ -4602,7 +4884,7 @@ namespace Legion {
         default:
           assert(false);
       }
-      return DomainPoint();
+      return DomainPoint::nil();
     }
 
     //--------------------------------------------------------------------------

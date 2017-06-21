@@ -29,34 +29,34 @@ where reads(s) do
 end
 
 task g() : int
-  var r = region(ispace(ptr, 5), int)
-  var x0 = new(ptr(int, r))
-  var x1 = new(ptr(int, r))
-  var x2 = new(ptr(int, r))
+  var r = region(ispace(ptr, 3), int)
+  var x0 = dynamic_cast(ptr(int, r), 0)
+  var x1 = dynamic_cast(ptr(int, r), 1)
+  var x2 = dynamic_cast(ptr(int, r), 2)
 
-  var n = 5
+  var n = 3
   var cs = ispace(int1d, n)
   var p = partition(equal, r, cs)
 
   var r0 = p[0]
   var x0_ = dynamic_cast(ptr(int, r0), x0)
-  regentlib.assert(not isnull(x0_), "test failed")
+  regentlib.assert(not isnull(x0_), "test failed1")
   @x0_ = 100
 
   var r1 = p[1]
   var x1_ = dynamic_cast(ptr(int, r1), x1)
-  regentlib.assert(not isnull(x1_), "test failed")
+  regentlib.assert(not isnull(x1_), "test failed2")
   @x1_ = 20
 
   var r2 = p[2]
   var x2_ = dynamic_cast(ptr(int, r2), x2)
-  regentlib.assert(not isnull(x2_), "test failed")
+  regentlib.assert(not isnull(x2_), "test failed3")
   @x2_ = 3
 
   return f(r, p, n)
 end
 
 task main()
-  regentlib.assert(g() == 123, "test failed")
+  regentlib.assert(g() == 123, "test failed4")
 end
 regentlib.start(main)

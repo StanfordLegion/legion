@@ -524,11 +524,14 @@ local function find_field_privilege(privileges, coherence_modes, flags,
   return field_privilege, coherence_mode, flag
 end
 
-function std.find_task_privileges(region_type, privileges, coherence_modes, flags)
+function std.find_task_privileges(region_type, task)
   assert(std.type_supports_privileges(region_type))
-  assert(privileges)
-  assert(data.is_default_map(coherence_modes))
-  assert(data.is_default_map(flags))
+  assert(std.is_task(task))
+
+  local privileges = task:get_privileges()
+  local coherence_modes = task:get_coherence_modes()
+  local flags = task:get_flags()
+
   local grouped_privileges = terralib.newlist()
   local grouped_coherence_modes = terralib.newlist()
   local grouped_flags = terralib.newlist()
@@ -1511,8 +1514,14 @@ function std.flatten_struct_fields(struct_type, pred)
   local field_paths = terralib.newlist()
   local field_types = terralib.newlist()
   local check = pred and pred(struct_type)
+
+  local function is_geometric_type(ty)
+    return std.is_index_type(ty) or std.is_rect_type(ty)
+  end
+
   if check == nil then
-    if struct_type:isstruct() or std.is_fspace_instance(struct_type) then
+    if (struct_type:isstruct() or std.is_fspace_instance(struct_type)) and
+       not is_geometric_type(struct_type) then
       local entries = struct_type:getentries()
       for _, entry in ipairs(entries) do
         local entry_name = entry[1] or entry.field
@@ -2244,7 +2253,7 @@ local function validate_index_base_type(base_type)
          "Index type expected a type, got " .. tostring(base_type))
   if std.type_eq(base_type, opaque) then
     return c.legion_ptr_t, 0, terralib.newlist({"value"})
-  elseif std.type_eq(base_type, int) then
+  elseif std.type_eq(base_type, int32) or std.type_eq(base_type, int64) then
     return base_type, 1, false
   elseif base_type:isstruct() then
     local entries = base_type:getentries()
@@ -2253,14 +2262,14 @@ local function validate_index_base_type(base_type)
              tostring(#entries))
     for _, entry in ipairs(entries) do
       local field_type = entry[2] or entry.type
-      assert(std.type_eq(field_type, int),
-             "Multi-dimensional index type expected fields to be " .. tostring(int) ..
-               ", got " .. tostring(field_type))
+      assert(std.type_eq(field_type, int32) or std.type_eq(field_type, int64),
+             "Multi-dimensional index type expected fields to be " .. tostring(int32) .. " or " ..
+             tostring(int64) ..  ", got " .. tostring(field_type))
     end
     return base_type, #entries, entries:map(function(entry) return entry[1] or entry.field end)
   else
     assert(false, "Index type expected " .. tostring(opaque) .. ", " ..
-             tostring(int) .. " or a struct, got " .. tostring(base_type))
+             tostring(int32) .. ", " .. tostring(int64) .. " or a struct, got " .. tostring(base_type))
   end
 end
 
@@ -2525,10 +2534,10 @@ function std.index_type(base_type, displayname)
   return setmetatable(st, index_type)
 end
 
-local struct __int2d { x : int, y : int }
-local struct __int3d { x : int, y : int, z : int }
+local struct __int2d { x : int64, y : int64 }
+local struct __int3d { x : int64, y : int64, z : int64 }
 std.ptr = std.index_type(opaque, "ptr")
-std.int1d = std.index_type(int, "int1d")
+std.int1d = std.index_type(int64, "int1d")
 std.int2d = std.index_type(__int2d, "int2d")
 std.int3d = std.index_type(__int3d, "int3d")
 
@@ -3389,11 +3398,52 @@ end
 -- ## Tasks
 -- #################
 
-std.newtask = base.newtask
+std.initial_regent_task_id = base.initial_regent_task_id
+
+std.new_variant = base.new_variant
+std.is_variant = base.is_variant
+
+std.new_task = base.new_task
 std.is_task = base.is_task
 
 function base.task:printpretty()
-  print(pretty.entry(self:getast()))
+  print(pretty.entry(self:get_primary_variant():get_ast()))
+end
+
+-- Calling convention:
+std.convention = {}
+std.convention.regent = ast.convention.Regent {}
+
+function std.convention.manual(params)
+  if not params then
+    params = ast.convention_kind.Padded {}
+  end
+  return ast.convention.Manual { params = params }
+end
+
+function std.convention.is_manual(convention)
+  return convention:is(ast.convention.Manual)
+end
+
+function base.task:set_calling_convention(convention)
+  assert(not self.calling_convention)
+  assert(convention:is(ast.convention))
+
+  if std.convention.is_manual(convention) then
+    if #self:get_variants() > 0 then
+      error("manual calling convention can only be used with empty task")
+    end
+    -- Ok
+  elseif not convention == std.convention.regent then
+    if #self:get_variants() == 0 then
+      error("regent calling convention cannot be used with empty task")
+    end
+    -- Ok
+  else
+    error("unrecognized calling convention " .. tostring(convention:type()))
+  end
+
+  self.calling_convention = convention
 end
 
 -- #####################################
@@ -3482,10 +3532,11 @@ end
 -- ## Main
 -- #################
 
-local tasks = terralib.newlist()
+local variants = terralib.newlist()
 
-function std.register_task(task)
-  tasks:insert(task)
+function std.register_variant(variant)
+  assert(std.is_variant(variant))
+  variants:insert(variant)
 end
 
 local function zero(value_type) return terralib.cast(value_type, 0) end
@@ -3683,30 +3734,31 @@ function std.setup(main_task, extra_setup_thunk)
     end
   end
 
-  local task_registrations = tasks:map(
-    function(task)
-      local options = task:get_config_options()
+  local task_registrations = variants:map(
+    function(variant)
+      local task = variant.task
+
+      local options = variant:get_config_options()
 
       local proc_types = {c.LOC_PROC, c.IO_PROC}
-      if task:getcuda() then proc_types = {c.TOC_PROC} end
+      if variant:is_cuda() then proc_types = {c.TOC_PROC} end
       if std.config["cuda"] and task:is_shard_task() then
         proc_types[#proc_types + 1] = c.TOC_PROC
       end
 
-      local wrapped_task = make_task_wrapper(task:getdefinition())
+      local wrapped_task = make_task_wrapper(variant:get_definition())
 
       local layout_constraints = terralib.newsymbol(
         c.legion_task_layout_constraint_set_t, "layout_constraints")
       local layout_constraint_actions = terralib.newlist()
       if std.config["layout-constraints"] then
-        local fn_type = task:gettype()
+        local fn_type = task:get_type()
         local param_types = fn_type.parameters
         local region_i = 0
         for _, param_i in ipairs(std.fn_param_regions_by_index(fn_type)) do
           local param_type = param_types[param_i]
           local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
-            std.find_task_privileges(param_type, task:getprivileges(),
-                                     task:get_coherence_modes(), task:get_flags())
+            std.find_task_privileges(param_type, task)
           for i, privilege in ipairs(privileges) do
             local field_types = privilege_field_types[i]
 
@@ -3717,7 +3769,7 @@ function std.setup(main_task, extra_setup_thunk)
               local field_type = field_types[1]
               layout = layout_reduction[op][field_type]
             end
-            if options.inner or task:getexternal() then
+            if options.inner or variant:is_external() then
               -- No layout constraints for inner tasks
               layout = layout_unconstrained
             end
@@ -3745,8 +3797,8 @@ function std.setup(main_task, extra_setup_thunk)
           }
 
           c.legion_runtime_preregister_task_variant_fnptr(
-            [task:gettaskid()],
-            [task:getname():concat(".")],
+            [task:get_task_id()],
+            [task:get_name():concat(".")],
             execution_constraints, layout_constraints, options,
             [wrapped_task], nil, 0)
           c.legion_execution_constraint_set_destroy(execution_constraints)
@@ -3763,8 +3815,8 @@ function std.setup(main_task, extra_setup_thunk)
     cudahelper.link_driver_library()
     local all_kernels = {}
     tasks:map(function(task)
-      if task:getcuda() then
-        local kernels = task:getcudakernels()
+      if variant:is_cuda() then
+        local kernels = variant:get_cuda_kernels()
         if kernels ~= nil then
           for k, v in pairs(kernels) do
             all_kernels[k] = v
@@ -3788,7 +3840,7 @@ function std.setup(main_task, extra_setup_thunk)
     [task_registrations];
     [cuda_setup];
     [extra_setup];
-    c.legion_runtime_set_top_level_task_id([main_task:gettaskid()])
+    c.legion_runtime_set_top_level_task_id([main_task:get_task_id()])
     return c.legion_runtime_start(argc, argv, false)
   end
 

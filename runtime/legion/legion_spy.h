@@ -177,10 +177,10 @@ namespace Legion {
                            const Realm::ZPoint<DIM,T> &point)
       {
         LEGION_STATIC_ASSERT(DIM <= 3);
-        log_spy.print() << "Index Space Point " << handle << " " << DIM
-                        << " " << point[0]
-                        << " " << ((DIM < 2) ? 0 : point[1])
-                        << " " << ((DIM < 3) ? 0 : point[2]);
+        log_spy.print("Index Space Point " IDFMT " %d %lld %lld %lld", handle,
+                      DIM, (long long)(point[0]), 
+                      (long long)((DIM < 2) ? 0 : point[1]),
+                      (long long)((DIM < 3) ? 0 : point[2]));
       }
 
       template<int DIM, typename T>
@@ -188,13 +188,14 @@ namespace Legion {
                                               const Realm::ZRect<DIM,T> &rect)
       {
         LEGION_STATIC_ASSERT(DIM <= 3);
-        log_spy.print() << "Index Space Rect " << handle << " "
-                        << DIM << " " << rect.lo[0]
-                        << " " << ((DIM < 2) ? 0 : rect.lo[1])
-                        << " " << ((DIM < 3) ? 0 : rect.lo[2])
-                        << " " << rect.hi[0]
-                        << " " << ((DIM < 2) ? 0 : rect.hi[1])
-                        << " " << ((DIM < 3) ? 0 : rect.hi[2]);
+        log_spy.print("Index Space Rect " IDFMT " %d "
+                      "%lld %lld %lld %lld %lld %lld", handle, DIM, 
+                      (long long)(rect.lo[0]),
+                      (long long)((DIM < 2) ? 0 : rect.lo[1]), 
+                      (long long)((DIM < 3) ? 0 : rect.lo[2]), 
+                      (long long)(rect.hi[0]), 
+                      (long long)((DIM < 2) ? 0 : rect.hi[1]), 
+                      (long long)((DIM < 3) ? 0 : rect.hi[2]));
       }
 
       static inline void log_empty_index_space(IDType handle)

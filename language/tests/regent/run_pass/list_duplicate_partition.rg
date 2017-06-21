@@ -36,10 +36,10 @@ where reads writes(r, rs) do
 end
 
 task main()
-  var r = region(ispace(ptr, 10), t)
+  var r = region(ispace(ptr, 7), t)
   var rc = c.legion_coloring_create()
   for i = 0, 7 do
-    var x = new(ptr(t, r))
+    var x = dynamic_cast(ptr(t, r), i)
     x.a = i
     x.b = 10*i
     x.c = i

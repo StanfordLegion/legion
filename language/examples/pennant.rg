@@ -1385,10 +1385,6 @@ task test()
   var rp_all = region(ispace(ptr, conf.np), point)
   var rs_all = region(ispace(ptr, conf.ns), side(wild, wild, wild, wild))
 
-  new(ptr(zone, rz_all), conf.nz)
-  new(ptr(point, rp_all), conf.np)
-  new(ptr(side(wild, wild, wild, wild), rs_all), conf.ns)
-
   var colorings : mesh_colorings
 
   regentlib.assert(conf.seq_init or conf.par_init,

@@ -55,8 +55,8 @@ where reads writes simultaneous(s) do
 end
 
 task k() : int
-  var r = region(ispace(ptr, 5), int)
-  var x = new(ptr(int, r))
+  var r = region(ispace(ptr, 1), int)
+  var x = dynamic_cast(ptr(int, r), 0)
   var p = phase_barrier(1)
   @x = 1
   must_epoch

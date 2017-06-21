@@ -86,7 +86,6 @@ task test(size : int)
   c.srand48(12345)
   var is = ispace(ptr, size)
   var primary_region = region(is, fs)
-  new(ptr(fs, primary_region), size)
 
   init(primary_region)
   for i = 0, 5 do

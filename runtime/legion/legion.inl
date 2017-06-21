@@ -1312,6 +1312,100 @@ namespace Legion {
       mutable bool gpu_warning;
     };
 
+    // A hidden class for users that really know what they are doing
+    /**
+     * \class UnsafeFieldAccessor
+     * This is a class for getting access to region data without
+     * privilege checks or bounds checks. Users should only use
+     * this accessor if they are confident that they actually do
+     * have their privileges and bounds correct
+     */
+    template<typename FT, int N, typename T = coord_t,
+             typename A = Realm::AffineAccessor<FT,N,T> >
+    class UnsafeFieldAccessor {
+    public:
+      UnsafeFieldAccessor(void) { }
+      UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
+                          bool silence_warnings = false)
+      {
+        ptrdiff_t field_offset; Realm::ZIndexSpace<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(NO_ACCESS, fid, field_offset, &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
+        accessor = A(instance, field_offset, is.bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Realm::ZPoint<N,T> &p) const
+        {
+          return accessor.read(p);
+        }
+      __CUDA_HD__
+      inline void write(const Realm::ZPoint<N,T> &p, FT val) const
+        {
+          accessor.write(p, val);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Realm::ZPoint<N,T> &p) const
+        {
+          return accessor.ptr(p);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Realm::ZPoint<N,T> &p) const
+        {
+          return accessor[p];
+        }
+      __CUDA_HD__
+      inline FT& operator[](T index) const
+        {
+          return AccessorHelp::ArraySyntaxHelper<
+            UnsafeFieldAccessor<FT,N,T,A>,FT,N,T,2,false/*read only*/>(
+                *this, Realm::ZPoint<1,T>(index));
+        }
+    public:
+      A accessor;
+    };
+
+    // Specialization for UnsafeFieldAccessor for dimension 1 
+    // to avoid ambiguity for array access
+    template<typename FT, typename T, typename A>
+    class UnsafeFieldAccessor<FT,1,T,A> {
+    public:
+      UnsafeFieldAccessor(void) { }
+      UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
+                          bool silence_warnings = false)
+      {
+        ptrdiff_t field_offset; Realm::ZIndexSpace<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(NO_ACCESS, fid, field_offset, &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
+        accessor = A(instance, field_offset, is.bounds);
+      }
+    public:
+      __CUDA_HD__
+      inline FT read(const Realm::ZPoint<1,T> &p) const
+        {
+          return accessor.read(p); 
+        }
+      __CUDA_HD__
+      inline void write(const Realm::ZPoint<1,T> &p, FT val) const
+        {
+          accessor.write(p, val);
+        }
+      __CUDA_HD__
+      inline FT* ptr(const Realm::ZPoint<1,T> &p) const
+        {
+          return accessor.ptr(p);
+        }
+      __CUDA_HD__
+      inline FT& operator[](const Realm::ZPoint<1,T> &p) const
+        {
+          return accessor[p];
+        }
+    public:
+      A accessor;
+    }; 
+
     //--------------------------------------------------------------------------
     inline IndexSpace& IndexSpace::operator=(const IndexSpace &rhs)
     //--------------------------------------------------------------------------

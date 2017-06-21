@@ -27,6 +27,52 @@
 #include "garbage_collection.h"
 
 namespace Legion {
+#ifndef DISABLE_PARTITION_SHIM
+  // An internal namespace with some classes for providing help
+  // with backwards compatibility for partitioning operations
+  namespace PartitionShim {
+
+    template<int COLOR_DIM>
+    class ColorPoints : public TaskLauncher {
+    public:
+      ColorPoints(const Coloring &coloring, LogicalRegion region,
+                  FieldID color_field, FieldID pointer_field);
+      ColorPoints(const PointColoring &coloring, LogicalRegion region,
+                  FieldID color_field, FieldID pointer_field);
+    protected:
+      Serializer rez;
+    public:
+      static TaskID TASK_ID;
+      static void register_task(void);
+      static void cpu_variant(const Task *task,
+          const std::vector<PhysicalRegion> &regions, 
+          Context ctx, Runtime *runtime);
+    };
+
+    template<int COLOR_DIM, int RANGE_DIM>
+    class ColorRects : public TaskLauncher {
+    public:
+      ColorRects(const DomainColoring &coloring, LogicalRegion region,
+                 FieldID color_field, FieldID range_field);
+      ColorRects(const MultiDomainColoring &coloring, LogicalRegion region, 
+                 FieldID color_field, FieldID range_field);
+    public:
+      ColorRects(const DomainPointColoring &coloring,
+          LogicalRegion region, FieldID color_field, FieldID range_field);
+      ColorRects(const MultiDomainPointColoring &coloring,
+          LogicalRegion region, FieldID color_field, FieldID range_field);
+    protected:
+      Serializer rez;
+    public:
+      static TaskID TASK_ID;
+      static void register_task(void);
+      static void cpu_variant(const Task *task,
+          const std::vector<PhysicalRegion> &regions, 
+          Context ctx, Runtime *runtime);
+    };
+  };
+#endif
+
   namespace Internal { 
 
     // Special helper for when we need a dummy context
@@ -497,7 +543,7 @@ namespace Legion {
       RtUserEvent done_event;
       std::vector<int> stage_notifications;
       std::vector<bool> sent_stages;
-    };
+    }; 
 
     /**
      * \class ProcessorManager
@@ -545,8 +591,7 @@ namespace Legion {
       };
     public:
       ProcessorManager(Processor proc, Processor::Kind proc_kind,
-                       Runtime *rt,
-                       unsigned width, unsigned default_mappers,  
+                       Runtime *rt, unsigned default_mappers,  
                        unsigned max_steals, bool no_steal, bool replay);
       ProcessorManager(const ProcessorManager &rhs);
       ~ProcessorManager(void);
@@ -572,7 +617,7 @@ namespace Legion {
       void process_advertisement(Processor advertiser, MapperID mid);
     public:
       void add_to_ready_queue(TaskOp *op);
-      void add_to_local_ready_queue(Operation *op);
+      void add_to_local_ready_queue(Operation *op, LgPriority priority);
     public:
       inline void find_visible_memories(std::set<Memory> &visible) const
         { visible = visible_memories; }
@@ -587,8 +632,6 @@ namespace Legion {
       Runtime *const runtime;
       const Processor local_proc;
       const Processor::Kind proc_kind;
-      // Effective super-scalar width of the runtime
-      const unsigned superscalar_width;
       // Maximum number of outstanding steals permitted by any mapper
       const unsigned max_outstanding_steals;
       // Is stealing disabled 
@@ -599,7 +642,6 @@ namespace Legion {
       // Local queue state
       Reservation local_queue_lock;
       unsigned next_local_index;
-      std::vector<RtEvent> local_scheduler_preconditions;
     protected:
       // Scheduling state
       Reservation queue_lock;
@@ -1567,7 +1609,7 @@ namespace Legion {
       ApEvent launch_mapper_task(Mapper *mapper, Processor proc, 
                                  Processor::TaskFuncID tid,
                                  const TaskArgument &arg, MapperID map_id);
-      void process_mapper_task_result(const MapperTaskArgs *args);
+      void process_mapper_task_result(const MapperTaskArgs *args); 
     public:
       IndexSpace create_index_space(Context ctx, const void *realm_is,
                                     TypeTag type_tag);
@@ -1748,7 +1790,6 @@ namespace Legion {
       unsigned get_index_partition_depth(Context ctx, IndexPartition handle);
       unsigned get_index_partition_depth(IndexPartition handle);
     public:
-      ptr_t safe_cast(Context ctx, ptr_t pointer, LogicalRegion region);
       bool safe_cast(Context ctx, LogicalRegion region,
                      const void *realm_point, TypeTag type_tag);
     public:
@@ -2473,7 +2514,7 @@ namespace Legion {
       void add_to_dependence_queue(TaskContext *ctx, Processor p,Operation *op);
       void add_to_ready_queue(Processor p, TaskOp *task_op, 
                               RtEvent wait_on = RtEvent::NO_RT_EVENT);
-      void add_to_local_queue(Processor p, Operation *op);
+      void add_to_local_queue(Processor p, Operation *op, LgPriority priority);
     public:
       inline Processor find_utility_group(void) { return utility_group; }
       Processor find_processor_group(const std::vector<Processor> &procs);
@@ -3108,6 +3149,19 @@ namespace Legion {
                       const void *user_data, size_t user_data_size,
                       CodeDescriptor *realm_desc, bool has_ret, 
                       const char *task_name,VariantID vid,bool check_id = true);
+    public:
+      static void report_fatal_message(int code,
+                                       const char *file_name,
+                                       const int line_number,
+                                       const char *message);
+      static void report_error_message(int code,
+                                       const char *file_name,
+                                       const int line_number,
+                                       const char *message);
+      static void report_warning_message(int code,
+                                         const char *file_name, 
+                                         const int line_number,
+                                         const char *message);
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
     public:
       static const char* find_privilege_task_name(void *impl);
@@ -3131,7 +3185,6 @@ namespace Legion {
       static int initial_task_window_size;
       static unsigned initial_task_window_hysteresis;
       static unsigned initial_tasks_to_schedule;
-      static unsigned superscalar_width;
       static unsigned max_message_size;
       static unsigned gc_epoch_size;
       static unsigned max_control_replication_contexts;

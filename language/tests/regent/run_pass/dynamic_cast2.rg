@@ -12,11 +12,6 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- type_mismatch_dynamic_cast2.rg:25: dynamic_cast requires ptr as argument 2, got int32
---   var y = dynamic_cast(ptr(int, r), x)
---                      ^
-
 import "regent"
 
 task main()
