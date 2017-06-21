@@ -1,6 +1,7 @@
 language: cpp
 sudo: required
 dist: trusty
+group: edge # Try new Travis image
 os:
   - linux
   - osx
