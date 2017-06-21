@@ -43,7 +43,6 @@
 #include "test_mapper.h"
 #include "replay_mapper.h"
 #include "debug_mapper.h"
-#include "logger_message_descriptor.h"
 
 #include <unistd.h> // sleep for warnings
 

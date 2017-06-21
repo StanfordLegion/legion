@@ -25,7 +25,6 @@
 #include "legion_views.h"
 #include "legion_analysis.h"
 #include "legion_context.h"
-#include "logger_message_descriptor.h"
 
 namespace Legion {
   namespace Internal {
@@ -1577,17 +1576,11 @@ namespace Legion {
       if (!local_node->dominates(node))
       {
         if (local_node->intersects_with(node))
-        {
           REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTIAL_ACQUIRE, 
                         "Illegal partial acquire operation (ID %lld) "
                         "performed in task %s (ID %lld)", op->get_unique_id(),
                         op->get_context()->get_task_name(),
-                        op->get_context()->get_unique_id());
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_ILLEGAL_PARTIAL_ACQUISITION);
-        }
+                        op->get_context()->get_unique_id())
         return;
       }
       // At this point we know we'll be handling the fields one 
@@ -1658,11 +1651,7 @@ namespace Legion {
                     "Illegal interfering restriction performed by attach "
                     "operation (ID %lld) in task %s (ID %lld)",
                     op->get_unique_op_id(), op->get_context()->get_task_name(),
-                    op->get_context()->get_unique_id());
-#ifdef DEBUG_LEGION
-      assert(false);
-#endif
-      exit(ERROR_ILLEGAL_INTERFERING_RESTRICTIONS);
+                    op->get_context()->get_unique_id())
     }
     
     //--------------------------------------------------------------------------
@@ -1802,11 +1791,7 @@ namespace Legion {
                     "Illegal interfering acquire operation performed by "
                     "acquire operation (ID %lld) in task %s (ID %lld)",
                     op->get_unique_op_id(), op->get_context()->get_task_name(),
-                    op->get_context()->get_unique_id());
-#ifdef DEBUG_LEGION
-      assert(false);
-#endif
-      exit(ERROR_ILLEGAL_INTERFERING_ACQUISITIONS);
+                    op->get_context()->get_unique_id())
     }
 
     //--------------------------------------------------------------------------
@@ -1838,18 +1823,12 @@ namespace Legion {
       if (!local_node->dominates(node))
       {
         if (local_node->intersects_with(node))
-        {
           REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTIAL_RESTRICTION, 
                         "Illegal partial restriction operation performed by "
                         "attach operation (ID %lld) in task %s (ID %lld)",
                         op->get_unique_op_id(), 
                         op->get_context()->get_task_name(),
-                        op->get_context()->get_unique_id());
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_ILLEGAL_PARTIAL_RESTRICTION);
-        }
+                        op->get_context()->get_unique_id())
         return;
       }
       // At this point we know we'll be able to do the restriction

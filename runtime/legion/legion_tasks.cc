@@ -23,7 +23,6 @@
 #include "legion_instances.h"
 #include "legion_analysis.h"
 #include "legion_views.h"
-#include "logger_message_descriptor.h"
 
 #include <algorithm>
 
@@ -961,7 +960,6 @@ namespace Legion {
       // registration where we might not know the return size until later
 #ifdef PERFORM_PREDICATE_SIZE_CHECKS
       if (result_size != variants->return_size)
-      {
         REPORT_LEGION_ERROR(ERROR_PREDICATED_TASK_LAUNCH,
                       "Predicated task launch for task %s "
                       "in parent task %s (UID %lld) has predicated "
@@ -969,12 +967,7 @@ namespace Legion {
                       "expected return size is %ld bytes.",
                       get_task_name(), parent_ctx->get_task_name(),
                       parent_ctx->get_unique_id(),
-                      result_size, variants->return_size);
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_PREDICATE_RESULT_SIZE_MISMATCH);
-      }
+                      result_size, variants->return_size)
 #endif
       return result_size;
     }
@@ -1476,11 +1469,8 @@ namespace Legion {
                               "child task's index requirement index %d",
                               parent_ctx->get_task_name(),
                               parent_ctx->get_unique_id(), get_task_name(),
-                              get_unique_id(), indexes[idx].parent.id, idx);
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_BAD_PARENT_INDEX);
+                              get_unique_id(), indexes[idx].parent.id, idx)
+              break;
             }
           case ERROR_BAD_INDEX_PATH:
             {
@@ -1490,11 +1480,8 @@ namespace Legion {
                               "requirement %d of task %s (ID %lld)",
                               indexes[idx].handle.id,
                               indexes[idx].parent.id, idx,
-                              get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_BAD_INDEX_PATH);
+                              get_task_name(), get_unique_id())
+              break;
             }
           case ERROR_BAD_INDEX_PRIVILEGES:
             {
@@ -1505,11 +1492,8 @@ namespace Legion {
                               "requirement %d of task %s (ID %lld)",
                               indexes[idx].privilege,
                               indexes[idx].handle.id, idx,
-                              get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_BAD_INDEX_PRIVILEGES);
+                              get_task_name(), get_unique_id())
+              break;
             }
           default:
             assert(false); // Should never happen
@@ -1543,11 +1527,8 @@ namespace Legion {
                                regions[idx].region.index_space.id,
                                regions[idx].region.field_space.id,
                                regions[idx].region.tree_id, idx,
-                               get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_INVALID_REGION_HANDLE);
+                               get_task_name(), get_unique_id())
+              break;
             }
           case ERROR_INVALID_PARTITION_HANDLE:
             {
@@ -1558,22 +1539,16 @@ namespace Legion {
                                regions[idx].partition.index_partition.id,
                                regions[idx].partition.field_space.id,
                                regions[idx].partition.tree_id, idx,
-                               get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_INVALID_PARTITION_HANDLE);
+                               get_task_name(), get_unique_id())
+              break;
             }
           case ERROR_BAD_PROJECTION_USE:
             {
               REPORT_LEGION_ERROR(ERROR_PROJECTION_REGION_REQUIREMENT,
                                "Projection region requirement %d used "
                                "in non-index space task %s",
-                               idx, get_task_name());
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_BAD_PROJECTION_USE);
+                               idx, get_task_name())
+              break;
             }
           case ERROR_NON_DISJOINT_PARTITION:
             {
@@ -1583,11 +1558,8 @@ namespace Legion {
                                "%s.  All projection partitions "
                                "which are not read-only and not reduce "
                                "must be disjoint",
-                               idx, get_task_name());
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_NON_DISJOINT_PARTITION);
+                               idx, get_task_name())
+              break;
             }
           case ERROR_FIELD_SPACE_FIELD_MISMATCH:
             {
@@ -1600,11 +1572,8 @@ namespace Legion {
                                "space %d for region %d of task %s "
                                "(ID %lld)",
                                bad_field, sp.id, idx, get_task_name(),
-                               get_unique_id());
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_FIELD_SPACE_FIELD_MISMATCH);
+                               get_unique_id())
+              break;
             }
           case ERROR_INVALID_INSTANCE_FIELD:
             {
@@ -1613,11 +1582,8 @@ namespace Legion {
                                "privilege fields for region %d of "
                                "task %s (ID %lld)",
                                bad_field, idx, get_task_name(),
-                               get_unique_id());
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_INVALID_INSTANCE_FIELD);
+                               get_unique_id())
+              break;
             }
           case ERROR_DUPLICATE_INSTANCE_FIELD:
             {
@@ -1625,16 +1591,12 @@ namespace Legion {
                                "Instance field %d is a duplicate for "
                                "region %d of task %s (ID %lld)",
                                bad_field, idx, get_task_name(),
-                               get_unique_id());
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_DUPLICATE_INSTANCE_FIELD);
+                               get_unique_id())
+              break;
             }
           case ERROR_BAD_PARENT_REGION:
             {
               if (bad_index < 0) 
-              {
                 REPORT_LEGION_ERROR(ERROR_PARENT_TASK_TASK,
                                  "Parent task %s (ID %lld) of task %s "
                                  "(ID %lld) does not have a region "
@@ -1647,10 +1609,8 @@ namespace Legion {
                                  get_task_name(), get_unique_id(),
                                  regions[idx].parent.index_space.id,
                                  regions[idx].parent.field_space.id,
-                                 regions[idx].parent.tree_id, idx);
-              } 
+                                 regions[idx].parent.tree_id, idx)
               else if (bad_field == AUTO_GENERATE_ID) 
-              {
                 REPORT_LEGION_ERROR(ERROR_PARENT_TASK_TASK,
                                  "Parent task %s (ID %lld) of task %s "
                                  "(ID %lld) does not have a region "
@@ -1664,10 +1624,8 @@ namespace Legion {
                                  get_task_name(), get_unique_id(),
                                  regions[idx].parent.index_space.id,
                                  regions[idx].parent.field_space.id,
-                                 regions[idx].parent.tree_id, idx, bad_index);
-              } 
+                                 regions[idx].parent.tree_id, idx, bad_index)
               else 
-              {
                 REPORT_LEGION_ERROR(ERROR_PARENT_TASK_TASK,
                                  "Parent task %s (ID %lld) of task %s "
                                  "(ID %lld) does not have a region "
@@ -1681,12 +1639,8 @@ namespace Legion {
                                  regions[idx].parent.index_space.id,
                                  regions[idx].parent.field_space.id,
                                  regions[idx].parent.tree_id, idx,
-                                 bad_index, bad_field);
-              }
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_BAD_PARENT_REGION);
+                                 bad_index, bad_field)
+              break;
             }
           case ERROR_BAD_REGION_PATH:
             {
@@ -1699,11 +1653,8 @@ namespace Legion {
                                regions[idx].region.field_space.id,
                                regions[idx].region.tree_id,
                                PRINT_REG(regions[idx].parent), idx,
-                               get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_BAD_REGION_PATH);
+                               get_task_name(), get_unique_id())
+              break;
             }
           case ERROR_BAD_PARTITION_PATH:
             {
@@ -1716,11 +1667,8 @@ namespace Legion {
                                regions[idx].partition.field_space.id,
                                regions[idx].partition.tree_id,
                                PRINT_REG(regions[idx].parent), idx,
-                               get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_BAD_PARTITION_PATH);
+                               get_task_name(), get_unique_id())
+              break;
             }
           case ERROR_BAD_REGION_TYPE:
             {
@@ -1730,11 +1678,8 @@ namespace Legion {
                                "cannot find privileges for field %d in "
                                "parent task",
                                idx, get_task_name(),
-                               get_unique_id(), bad_field);
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_BAD_REGION_TYPE);
+                               get_unique_id(), bad_field)
+              break;
             }
           case ERROR_BAD_REGION_PRIVILEGES:
             {
@@ -1748,11 +1693,8 @@ namespace Legion {
                                regions[idx].region.index_space.id,
                                regions[idx].region.field_space.id,
                                regions[idx].region.tree_id, idx,
-                               get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_BAD_REGION_PRIVILEGES);
+                               get_task_name(), get_unique_id())
+              break;
             }
           case ERROR_BAD_PARTITION_PRIVILEGES:
             {
@@ -1766,11 +1708,8 @@ namespace Legion {
                                regions[idx].partition.index_partition.id,
                                regions[idx].partition.field_space.id,
                                regions[idx].partition.tree_id, idx,
-                               get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_BAD_PARTITION_PRIVILEGES);
+                               get_task_name(), get_unique_id())
+              break;
             }
           default:
             assert(false); // Should never happen
@@ -2015,7 +1954,6 @@ namespace Legion {
         std::map<unsigned,std::vector<MappingInstance> >::const_iterator 
           finder = output.premapped_instances.find(*it);
         if (finder == output.premapped_instances.end())
-        {
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from 'premap_task' invocation "
                         "on mapper %s. Mapper failed to map required premap "
@@ -2024,12 +1962,7 @@ namespace Legion {
                         mapper->get_mapper_name(), *it, 
                         get_task_name(), get_unique_id(),
                         parent_ctx->get_task_name(), 
-                        parent_ctx->get_unique_id());
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_INVALID_MAPPER_OUTPUT);
-        }
+                        parent_ctx->get_unique_id())
         RegionTreeID bad_tree = 0;
         std::vector<FieldID> missing_fields;
         std::vector<PhysicalManager*> unacquired;
@@ -2039,7 +1972,6 @@ namespace Legion {
             Runtime::unsafe_mapper ? NULL : get_acquired_instances_ref(),
             unacquired, !Runtime::unsafe_mapper);
         if (bad_tree > 0)
-        {
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from 'premap_task' invocation "
                         "on mapper %s. Mapper provided an instance from "
@@ -2047,24 +1979,9 @@ namespace Legion {
                         "requirement %d of task %s (ID %lld) whose region "
                         "is from region tree %d.", mapper->get_mapper_name(),
                         bad_tree, *it, get_task_name(), get_unique_id(), 
-                        regions[*it].region.get_tree_id());
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_INVALID_MAPPER_OUTPUT);
-        }
+                        regions[*it].region.get_tree_id())
         if (!missing_fields.empty())
         {
-          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                        "Invalid mapper output from 'premap_task' invocation "
-                        "on mapper %s. Mapper failed to specify instances "
-                        "for %zd fields of region requirement %d of task %s "
-                        "(ID %lld) launched in parent task %s (ID %lld). "
-                        "The missing fields are listed below.",
-                        mapper->get_mapper_name(), missing_fields.size(),
-                        *it, get_task_name(), get_unique_id(),
-                        parent_ctx->get_task_name(), 
-                        parent_ctx->get_unique_id());
           for (std::vector<FieldID>::const_iterator it = 
                 missing_fields.begin(); it != missing_fields.end(); it++)
           {
@@ -2073,14 +1990,20 @@ namespace Legion {
                 regions[*it].region.get_field_space(), *it,
                 NAME_SEMANTIC_TAG, name, name_size, true, false))
               name = "(no name)";
-            REPORT_LEGION_ERROR(ERROR_MISSING_INSTANCE_FIELD,
-                          "Missing instance for field %s (FieldID: %d)",
+            log_run.error("Missing instance for field %s (FieldID: %d)",
                           static_cast<const char*>(name), *it);
           }
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_INVALID_MAPPER_OUTPUT);
+          REPORT_LEGION_ERROR(ERROR_MISSING_INSTANCE_FIELD,
+                        "Invalid mapper output from 'premap_task' invocation "
+                        "on mapper %s. Mapper failed to specify instances "
+                        "for %zd fields of region requirement %d of task %s "
+                        "(ID %lld) launched in parent task %s (ID %lld). "
+                        "The missing fields are listed below.",
+                        mapper->get_mapper_name(), missing_fields.size(),
+                        *it, get_task_name(), get_unique_id(),
+                        parent_ctx->get_task_name(), 
+                        parent_ctx->get_unique_id())
+          
         }
         if (!unacquired.empty())
         {
@@ -2090,7 +2013,6 @@ namespace Legion {
                 unacquired.begin(); uit != unacquired.end(); uit++)
           {
             if (acquired_instances->find(*uit) == acquired_instances->end())
-            {
               REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                             "Invalid mapper output from 'premap_task' "
                             "invocation on mapper %s. Mapper selected "
@@ -2101,12 +2023,7 @@ namespace Legion {
                             "call it would have detected this. Please "
                             "update the mapper to abide by proper mapping "
                             "conventions.", mapper->get_mapper_name(),
-                            (*it), get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_INVALID_MAPPER_OUTPUT);
-            }
+                            (*it), get_task_name(), get_unique_id())
           }
           // If we did successfully acquire them, still issue the warning
           REPORT_LEGION_WARNING(LEGION_WARNING_MAPPER_FAILED_ACQUIRE,
@@ -2118,7 +2035,6 @@ namespace Legion {
                           get_task_name(), get_unique_id());
         }
         if (composite_index >= 0)
-        {
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from 'premap_task' invocation "
                         "on mapper %s. Mapper requested composite instance "
@@ -2127,12 +2043,7 @@ namespace Legion {
                         mapper->get_mapper_name(), *it,
                         get_task_name(), get_unique_id(),
                         parent_ctx->get_task_name(),
-                        parent_ctx->get_unique_id());
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_INVALID_MAPPER_OUTPUT);
-        } 
+                        parent_ctx->get_unique_id())
         if (Runtime::legion_spy_enabled)
           runtime->forest->log_mapping_decision(unique_op_id, *it,
                                                 regions[*it],
@@ -2146,7 +2057,6 @@ namespace Legion {
           {
             if (!chosen_instances[check_idx].get_manager()->meets_regions(
                                                           regions_to_check))
-            {
               REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                             "Invalid mapper output from invocation of "
                             "'premap_task' on mapper %s. Mapper specified an "
@@ -2156,12 +2066,7 @@ namespace Legion {
                             "(ID %lld).", mapper->get_mapper_name(), *it, 
                             get_task_name(), get_unique_id(), 
                             parent_ctx->get_task_name(), 
-                            parent_ctx->get_unique_id());
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_INVALID_MAPPER_OUTPUT);
-            }
+                            parent_ctx->get_unique_id())
           }
         }
         // Set the current mapping index before doing anything that
@@ -2298,7 +2203,6 @@ namespace Legion {
         int parent_index = 
           parent_ctx->find_parent_region_req(regions[idx]);
         if (parent_index < 0)
-        {
           REPORT_LEGION_ERROR(ERROR_PARENT_TASK_TASK,
                            "Parent task %s (ID %lld) of task %s "
                            "(ID %lld) does not have a region "
@@ -2310,12 +2214,7 @@ namespace Legion {
                            get_task_name(), get_unique_id(),
                            regions[idx].parent.index_space.id,
                            regions[idx].parent.field_space.id, 
-                           regions[idx].parent.tree_id, idx);
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_BAD_PARENT_REGION);
-        }
+                           regions[idx].parent.tree_id, idx)
         parent_req_indexes[idx] = parent_index;
       }
     }
@@ -2805,23 +2704,15 @@ namespace Legion {
         variant_impl = runtime->find_variant_impl(task_id, 
                                 output.chosen_variant, true/*can fail*/);
       }
-      else
-      {
+      else // TODO: invoke a generator if one exists
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Invalid mapper output from invocation of '%s' on "
                       "mapper %s. Mapper specified an invalid task variant "
                       "of ID 0 for task %s (ID %lld), but Legion does not yet "
                       "support task generators.", "map_task", 
                       mapper->get_mapper_name(), 
-                      get_task_name(), get_unique_id());
-        // TODO: invoke a generator if one exists
-#ifdef DEBUG_LEGION
-        assert(false); 
-#endif
-        exit(ERROR_INVALID_MAPPER_OUTPUT);
-      }
+                      get_task_name(), get_unique_id())
       if (variant_impl == NULL)
-      {
         // If we couldn't find or make a variant that is bad
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Invalid mapper output from invocation of '%s' on "
@@ -2829,12 +2720,7 @@ namespace Legion {
                       "task variant or generator capable of create a variant "
                       "implementation of task %s (ID %lld).",
                       "map_task", mapper->get_mapper_name(), get_task_name(),
-                      get_unique_id());
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_MAPPER_OUTPUT);
-      }
+                      get_unique_id())
       // Now that we know which variant to use, we can validate it
       if (!Runtime::unsafe_mapper)
         validate_variant_selection(mapper, variant_impl, "map_task");
@@ -2871,7 +2757,6 @@ namespace Legion {
                 // Not visible from all target processors
                 // Different error messages depending on the cause
                 if (regions[idx].is_restricted()) 
-                {
                   REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                                 "Invalid mapper output from invocation of '%s' "
                                 "on mapper %s. Mapper selected processor(s) "
@@ -2879,10 +2764,8 @@ namespace Legion {
                                 "requirement %d in memory " IDFMT " is not "
                                 "visible for task %s (ID %lld).",
                                 "map_task", mapper->get_mapper_name(), idx,
-                                mem.id, get_task_name(), get_unique_id());
-                } 
+                                mem.id, get_task_name(), get_unique_id())
                 else 
-                {
                   REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                                 "Invalid mapper output from invocation of '%s' "
                                 "on mapper %s. Mapper selected processor(s) "
@@ -2890,12 +2773,7 @@ namespace Legion {
                                 "requirement %d in memory " IDFMT " is not "
                                 "visible for task %s (ID %lld).",
                                 "map_task", mapper->get_mapper_name(), idx,
-                                mem.id, get_task_name(), get_unique_id());
-                }
-#ifdef DEBUG_LEGION
-                assert(false);
-#endif
-                exit(ERROR_INVALID_MAPPER_OUTPUT);
+                                mem.id, get_task_name(), get_unique_id())
               }
             }
           }
@@ -2940,7 +2818,6 @@ namespace Legion {
         if (free_acquired)
           delete acquired;
         if (bad_tree > 0)
-        {
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of '%s' on "
                         "mapper %s. Mapper specified an instance from region "
@@ -2948,22 +2825,9 @@ namespace Legion {
                         "%s (ID %lld) whose region is from tree %d.",
                         "map_task", mapper->get_mapper_name(), bad_tree,
                         idx, get_task_name(), get_unique_id(),
-                        regions[idx].region.get_tree_id());
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_INVALID_MAPPER_OUTPUT);
-        }
+                        regions[idx].region.get_tree_id())
         if (!missing_fields.empty())
         {
-          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                        "Invalid mapper output from invocation of '%s' on "
-                        "mapper %s. Mapper failed to specify an instance for "
-                        "%zd fields of region requirement %d on task %s "
-                        "(ID %lld). The missing fields are listed below.",
-                        "map_task", mapper->get_mapper_name(), 
-                        missing_fields.size(), idx, get_task_name(), 
-                        get_unique_id());
           for (std::vector<FieldID>::const_iterator it = 
                 missing_fields.begin(); it != missing_fields.end(); it++)
           {
@@ -2972,14 +2836,18 @@ namespace Legion {
                 regions[idx].region.get_field_space(), *it, NAME_SEMANTIC_TAG,
                 name, name_size, true/*can fail*/, false))
 	          name = "(no name)";
-            REPORT_LEGION_ERROR(ERROR_MISSING_INSTANCE_FIELD,
-                          "Missing instance for field %s (FieldID: %d)",
+              log_run.error("Missing instance for field %s (FieldID: %d)",
                           static_cast<const char*>(name), *it);
           }
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_INVALID_MAPPER_OUTPUT);
+          REPORT_LEGION_ERROR(ERROR_MISSING_INSTANCE_FIELD,
+                        "Invalid mapper output from invocation of '%s' on "
+                        "mapper %s. Mapper failed to specify an instance for "
+                        "%zd fields of region requirement %d on task %s "
+                        "(ID %lld). The missing fields are listed below.",
+                        "map_task", mapper->get_mapper_name(), 
+                        missing_fields.size(), idx, get_task_name(), 
+                        get_unique_id())
+          
         }
         if (!unacquired.empty())
         {
@@ -2989,7 +2857,6 @@ namespace Legion {
                 unacquired.begin(); it != unacquired.end(); it++)
           {
             if (acquired_instances->find(*it) == acquired_instances->end())
-            {
               REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                             "Invalid mapper output from 'map_task' "
                             "invocation on mapper %s. Mapper selected "
@@ -3000,12 +2867,7 @@ namespace Legion {
                             "call it would have detected this. Please "
                             "update the mapper to abide by proper mapping "
                             "conventions.", mapper->get_mapper_name(),
-                            idx, get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_INVALID_MAPPER_OUTPUT);
-            }
+                            idx, get_task_name(), get_unique_id())
           }
           // Event if we did successfully acquire them, still issue the warning
           REPORT_LEGION_WARNING(LEGION_WARNING_MAPPER_FAILED_ACQUIRE,
@@ -3014,14 +2876,13 @@ namespace Legion {
                           "in 'map_task' call. You may experience "
                           "undefined behavior as a consequence.",
                           mapper->get_mapper_name(), idx, 
-                          get_task_name(), get_unique_id());
+                          get_task_name(), get_unique_id())
         }
         // See if they want a virtual mapping
         if (composite_idx >= 0)
         {
           // Everything better be all virtual or all real
           if (result.size() > 1)
-          {
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                           "Invalid mapper output from invocation of '%s' on "
                           "mapper %s. Mapper specified mixed composite and "
@@ -3029,28 +2890,16 @@ namespace Legion {
                           "task %s (ID %lld). Only full concrete instances "
                           "or a single composite instance is supported.",
                           "map_task", mapper->get_mapper_name(), idx, 
-                          get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-            assert(false);
-#endif
-            exit(ERROR_INVALID_MAPPER_OUTPUT);
-          }
+                          get_task_name(), get_unique_id())
           if (IS_REDUCE(regions[idx]))
-          {
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                           "Invalid mapper output from invocation of '%s' on "
                           "mapper %s. Illegal composite mapping requested on "
                           "region requirement %d of task %s (UID %lld) which "
                           "has only reduction privileges.", 
                           "map_task", mapper->get_mapper_name(), idx, 
-                          get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-            assert(false);
-#endif
-            exit(ERROR_ILLEGAL_REDUCTION_VIRTUAL_MAPPING);
-          }
+                          get_task_name(), get_unique_id())
           if (!IS_EXCLUSIVE(regions[idx]))
-          {
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                           "Invalid mapper output from invocation of '%s' on "
                           "mapper %s. Illegal composite instance requested "
@@ -3058,12 +2907,7 @@ namespace Legion {
                           "which has a relaxed coherence mode. Virtual "
                           "mappings are only permitted for exclusive "
                           "coherence.", "map_task", mapper->get_mapper_name(),
-                          idx, get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-            assert(false);
-#endif
-            exit(ERROR_INVALID_MAPPER_OUTPUT);
-          }
+                          idx, get_task_name(), get_unique_id())
           virtual_mapped[idx] = true;
         } 
         if (Runtime::legion_spy_enabled)
@@ -3081,7 +2925,6 @@ namespace Legion {
           for (unsigned idx2 = 0; idx2 < result.size(); idx2++)
           {
             if (!result[idx2].get_manager()->meets_regions(regions_to_check))
-            {
               // Doesn't satisfy the region requirement
               REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                             "Invalid mapper output from invocation of '%s' on "
@@ -3090,12 +2933,7 @@ namespace Legion {
                             "(ID %lld). The index space for the instance has "
                             "insufficient space for the requested logical "
                             "region.", "map_task", mapper->get_mapper_name(),
-                            idx, get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_INVALID_MAPPER_OUTPUT);
-            }
+                            idx, get_task_name(), get_unique_id())
           }
           if (!regions[idx].is_no_access() &&
               !variant_impl->is_no_access_region(idx))
@@ -3104,7 +2942,6 @@ namespace Legion {
             {
               Memory mem = result[idx2].get_memory();
               if (visible_memories.find(mem) == visible_memories.end())
-              {
                 // Not visible from all target processors
                 REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                               "Invalid mapper output from invocation of '%s' "
@@ -3113,12 +2950,7 @@ namespace Legion {
                               "which is not visible from the target processors "
                               "for task %s (ID %lld).", "map_task", 
                               mapper->get_mapper_name(), idx, mem.id, 
-                              get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-                assert(false);
-#endif
-                exit(ERROR_INVALID_MAPPER_OUTPUT);
-              }
+                              get_task_name(), get_unique_id())
             }
           }
           // If this is a reduction region requirement make sure all the 
@@ -3130,7 +2962,6 @@ namespace Legion {
             for (unsigned idx2 = 0; idx2 < result.size(); idx2++)
             {
               if (!result[idx2].get_manager()->is_reduction_manager())
-              {
                 REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                               "Invalid mapper output from invocation of '%s' "
                               "on mapper %s. Mapper failed to choose a "
@@ -3138,12 +2969,7 @@ namespace Legion {
                               "requirement %d of task %s (ID %lld) which has "
                               "reduction privileges.", "map_task", 
                               mapper->get_mapper_name(), idx,
-                              get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-                assert(false);
-#endif
-                exit(ERROR_INVALID_MAPPER_OUTPUT);
-              }
+                              get_task_name(), get_unique_id())
               std::map<PhysicalManager*,std::pair<unsigned,bool> >::
                 const_iterator finder = acquired->find(
                     result[idx2].get_manager());
@@ -3152,7 +2978,6 @@ namespace Legion {
 #endif
               // Permit this if we are doing replay mapping
               if (!finder->second.second && (Runtime::replay_file == NULL))
-              {
                 REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                               "Invalid mapper output from invocation of '%s' "
                               "on mapper %s. Mapper made an illegal decision "
@@ -3160,12 +2985,7 @@ namespace Legion {
                               "requirement %d of task %s (ID %lld). Reduction "
                               "instances are not currently permitted to be "
                               "recycled.", "map_task",mapper->get_mapper_name(),
-                              idx, get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-                assert(false);
-#endif
-                exit(ERROR_INVALID_MAPPER_OUTPUT);
-              }
+                              idx, get_task_name(), get_unique_id())
             }
           }
           else
@@ -3173,7 +2993,6 @@ namespace Legion {
             for (unsigned idx2 = 0; idx2 < result.size(); idx2++)
             {
               if (!result[idx2].get_manager()->is_instance_manager())
-              {
                 REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                               "Invalid mapper output from invocation of '%s' "
                               "on mapper %s. Mapper selected illegal "
@@ -3181,12 +3000,7 @@ namespace Legion {
                               "requirement %d of task %s (ID %lld) which "
                               "does not have reduction privileges.", "map_task",
                               mapper->get_mapper_name(), idx, 
-                              get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-                assert(false);
-#endif
-                exit(ERROR_INVALID_MAPPER_OUTPUT);
-              }
+                              get_task_name(), get_unique_id())
             }
           }
         }
@@ -3210,7 +3024,6 @@ namespace Legion {
       {
         const Processor &proc = processors[idx];
         if (proc.kind() != kind)
-        {
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output. Mapper %s requested processor "
                         IDFMT " which is of kind %s when mapping task %s "
@@ -3219,14 +3032,8 @@ namespace Legion {
                         mapper->get_mapper_name(), proc.id, 
                         Processor::get_kind_name(proc.kind()), get_task_name(),
                         get_unique_id(), this->target_proc.id, 
-                        Processor::get_kind_name(kind));
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_INVALID_MAPPER_OUTPUT);
-        }
+                        Processor::get_kind_name(kind))
         if (proc.address_space() != space)
-        {
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output. Mapper %s requested processor "
                         IDFMT " which is in address space %d when mapping "
@@ -3235,12 +3042,7 @@ namespace Legion {
                         "be in the same address space.", 
                         mapper->get_mapper_name(), proc.id,
                         proc.address_space(), get_task_name(), get_unique_id(), 
-                        this->target_proc.id, space);
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_INVALID_MAPPER_OUTPUT);
-        }
+                        this->target_proc.id, space)
       }
     }
 
@@ -3267,19 +3069,13 @@ namespace Legion {
         {
           PhysicalManager *manager = instances[idx].get_manager();
           if (manager->conflicts(constraints))
-          {
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                           "Invalid mapper output. Mapper %s selected variant "
                           "%ld for task %s (ID %lld). But instance selected "
                           "for region requirement %d fails to satisfy the "
                           "corresponding constraints.", 
                           local_mapper->get_mapper_name(), impl->vid,
-                          get_task_name(), get_unique_id(), it->first);
-#ifdef DEBUG_LEGION
-            assert(false);
-#endif
-            exit(ERROR_INVALID_MAPPER_OUTPUT);
-          }
+                          get_task_name(), get_unique_id(), it->first)
         }
       }
       // Now we can test against the execution constraints
@@ -3290,7 +3086,6 @@ namespace Legion {
       if (execution_constraints.processor_constraint.is_valid() &&
           (execution_constraints.processor_constraint.get_kind() != 
            this->target_proc.kind()))
-      {
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Invalid mapper output. Mapper %s selected variant %ld "
                       "for task %s (ID %lld). However, this variant has a "
@@ -3300,12 +3095,7 @@ namespace Legion {
                       get_unique_id(), Processor::get_kind_name(
                         execution_constraints.processor_constraint.get_kind()),
                       this->target_proc.id, Processor::get_kind_name(
-                        this->target_proc.kind()));
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_MAPPER_OUTPUT);
-      }
+                        this->target_proc.kind()))
       // Then check the colocation constraints
       for (std::vector<ColocationConstraint>::const_iterator con_it = 
             execution_constraints.colocation_constraints.begin(); con_it !=
@@ -3349,7 +3139,6 @@ namespace Legion {
           else
           {
             if (regions[*it].region.get_field_space() != handle)
-            {
               REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                             "Invalid mapper output. Mapper %s selected variant "
                             "%ld for task %s (ID %lld). However, this variant "
@@ -3358,12 +3147,7 @@ namespace Legion {
                             "field spaces which is illegal.",
                             local_mapper->get_mapper_name(), impl->vid, 
                             get_task_name(), get_unique_id(), 
-                            *(con_it->indexes.begin()), *it);
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_INVALID_MAPPER_OUTPUT);
-            }
+                            *(con_it->indexes.begin()), *it)
           }
           instances[idx] = const_cast<InstanceSet*>(&physical_instances[*it]);
         }
@@ -3382,11 +3166,7 @@ namespace Legion {
                         "co-located for some set of field, but they are not.",
                         local_mapper->get_mapper_name(), impl->vid, 
                         get_task_name(), get_unique_id(), lin_indexes[bad1],
-                        lin_indexes[bad2]);
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_INVALID_MAPPER_OUTPUT);
+                        lin_indexes[bad2])
         }
       }
     }
@@ -3672,7 +3452,6 @@ namespace Legion {
                                 get_acquired_instances_ref(),
                               unacquired, !Runtime::unsafe_mapper);
         if (bad_tree > 0)
-        {
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from 'postmap_task' invocation "
                         "on mapper %s. Mapper provided an instance from region "
@@ -3680,12 +3459,7 @@ namespace Legion {
                         "of task %s (ID %lld) whose region is from region tree "
                         "%d.", mapper->get_mapper_name(), bad_tree, idx,
                         get_task_name(), get_unique_id(), 
-                        regions[idx].region.get_tree_id());
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_INVALID_MAPPER_OUTPUT);
-        }
+                        regions[idx].region.get_tree_id())
         if (!unacquired.empty())
         {
           std::map<PhysicalManager*,std::pair<unsigned,bool> > 
@@ -3694,7 +3468,6 @@ namespace Legion {
                 unacquired.begin(); uit != unacquired.end(); uit++)
           {
             if (acquired_instances->find(*uit) == acquired_instances->end())
-            {
               REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                             "Invalid mapper output from 'postmap_task' "
                             "invocation on mapper %s. Mapper selected "
@@ -3705,12 +3478,7 @@ namespace Legion {
                             "call it would have detected this. Please "
                             "update the mapper to abide by proper mapping "
                             "conventions.", mapper->get_mapper_name(),
-                            idx, get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_INVALID_MAPPER_OUTPUT);
-            }
+                            idx, get_task_name(), get_unique_id())
           }
           // If we did successfully acquire them, still issue the warning
           REPORT_LEGION_WARNING(LEGION_WARNING_MAPPER_FAILED_ACQUIRE,
@@ -3740,19 +3508,13 @@ namespace Legion {
           {
             if (!result[check_idx].get_manager()->meets_regions(
                                                       regions_to_check))
-            {
               REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                             "Invalid mapper output from invocation of "
                             "'postmap_task' on mapper %s. Mapper specified an "
                             "instance region requirement %d of task %s "
                             "(ID %lld) that does not meet the logical region "
                             "requirement.", mapper->get_mapper_name(), idx, 
-                            get_task_name(), get_unique_id()); 
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_INVALID_MAPPER_OUTPUT);
-            }
+                            get_task_name(), get_unique_id())
           }
         }
         if (Runtime::legion_spy_enabled)
@@ -4213,17 +3975,11 @@ namespace Legion {
         mapper = runtime->find_mapper(current_proc, map_id);
       mapper->invoke_slice_task(this, &input, &output);
       if (output.slices.empty())
-      {
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Invalid mapper output from invocation of 'slice_task' "
                       "call on mapper %s. Mapper failed to specify an slices "
                       "for task %s (ID %lld).", mapper->get_mapper_name(),
-                      get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_MAPPER_DOMAIN_SLICE);
-      }
+                      get_task_name(), get_unique_id())
 
 #ifdef DEBUG_LEGION
       size_t total_points = 0;
@@ -4232,18 +3988,12 @@ namespace Legion {
       {
         const Mapper::TaskSlice &slice = output.slices[idx]; 
         if (!slice.proc.exists())
-        {
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of 'slice_task' "
                         "on mapper %s. Mapper returned a slice for task "
                         "%s (ID %lld) with an invalid processor " IDFMT ".",
                         mapper->get_mapper_name(), get_task_name(),
-                        get_unique_id(), slice.proc.id);
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_INVALID_MAPPER_DOMAIN_SLICE);
-        }
+                        get_unique_id(), slice.proc.id)
 #ifdef DEBUG_LEGION
         // Check to make sure the domain is not empty
         const Domain &d = slice.domain;
@@ -4254,15 +4004,11 @@ namespace Legion {
 	else
 	  total_points += volume;
         if (empty)
-        {
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of 'slice_task' "
                         "on mapper %s. Mapper returned an empty slice for task "
                         "%s (ID %lld).", mapper->get_mapper_name(),
-                        get_task_name(), get_unique_id());
-          assert(false);
-          exit(ERROR_INVALID_MAPPER_DOMAIN_SLICE);
-        }
+                        get_task_name(), get_unique_id())
 #endif
         SliceTask *new_slice = this->clone_as_slice_task(slice.domain,
                                                          slice.proc,
@@ -4274,7 +4020,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       // If the volumes don't match, then something bad happend in the mapper
       if (total_points != internal_domain.get_volume())
-      {
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Invalid mapper output from invocation of 'slice_task' "
                       "on mapper %s. Mapper returned slices with a total "
@@ -4282,10 +4027,7 @@ namespace Legion {
                       "%zd when slicing task %s (ID %lld).", 
                       mapper->get_mapper_name(), long(total_points),
                       internal_domain.get_volume(), 
-                      get_task_name(), get_unique_id());
-        assert(false);
-        exit(ERROR_INVALID_MAPPER_DOMAIN_SLICE);
-      }
+                      get_task_name(), get_unique_id())
 #endif
       trigger_slices(); 
       // If we succeeded and this is an intermediate slice task
@@ -4699,7 +4441,6 @@ namespace Legion {
             // TODO: Put this check back in
 #if 0
             if (variants->return_size > 0)
-            {
               log_run.error("Predicated task launch for task %s "
                                   "in parent task %s (UID %lld) has non-void "
                                   "return type but no default value for its "
@@ -4709,12 +4450,7 @@ namespace Legion {
                                   "'predicate_false_future' fields of the "
                                   "TaskLauncher struct.",
                                   get_task_name(), ctx->get_task_name(),
-                                  ctx->get_unique_id());
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_MISSING_DEFAULT_PREDICATE_RESULT);
-            }
+                                  ctx->get_unique_id())
 #endif
           }
           else
@@ -4722,7 +4458,6 @@ namespace Legion {
             // TODO: Put this check back in
 #ifdef PERFORM_PREDICATE_SIZE_CHECKS
             if (predicate_false_size != variants->return_size)
-            {
               REPORT_LEGION_ERROR(ERROR_PREDICATED_TASK_LAUNCH,
                             "Predicated task launch for task %s "
                                  "in parent task %s (UID %lld) has predicated "
@@ -4730,12 +4465,7 @@ namespace Legion {
                                  "expected return size is %ld bytes.",
                                  get_task_name(), parent_ctx->get_task_name(),
                                  parent_ctx->get_unique_id(),
-                                 predicate_false_size, variants->return_size);
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_PREDICATE_RESULT_SIZE_MISMATCH);
-            }
+                                 predicate_false_size, variants->return_size)
 #endif
 #ifdef DEBUG_LEGION
             assert(predicate_false_result == NULL);
@@ -4943,11 +4673,7 @@ namespace Legion {
                     "%d and %d of task %s (UID %lld) in parent task %s "
                     "(UID %lld) are interfering.", idx1, idx2, get_task_name(),
                     get_unique_id(), parent_ctx->get_task_name(),
-                    parent_ctx->get_unique_id());
-#ifdef DEBUG_LEGION
-      assert(false);
-#endif
-      exit(ERROR_ALIASED_REGION_REQUIREMENTS);
+                    parent_ctx->get_unique_id())
 #else
       REPORT_LEGION_WARNING(LEGION_WARNING_REGION_REQUIREMENTS_INDIVIDUAL,
                       "Region requirements %d and %d of individual task "
@@ -4956,7 +4682,7 @@ namespace Legion {
                       "undefined. You better really know what you are "
                       "doing.", idx1, idx2, get_task_name(), 
                       get_unique_id(), parent_ctx->get_task_name(), 
-                      parent_ctx->get_unique_id());
+                      parent_ctx->get_unique_id())
 #endif
     }
 
@@ -5930,7 +5656,8 @@ namespace Legion {
       {
         case 1:
           {
-            log_run.error("Aliased and interfering region requirements for "
+            REPORT_LEGION_ERROR(ERROR_ALIASED_REGION_REQUIREMENTS,
+                    "Aliased and interfering region requirements for "
                     "point tasks are not permitted. Region requirements "
                     "%d and %d of point %lld of index space task %s (UID %lld) "
                     "in parent task %s (UID %lld) are interfering.", 
@@ -5941,7 +5668,8 @@ namespace Legion {
           }
         case 2:
           {
-            log_run.error("Aliased and interfering region requirements for "
+            REPORT_LEGION_ERROR(ERROR_ALIASED_REGION_REQUIREMENTS,
+                    "Aliased and interfering region requirements for "
                     "point tasks are not permitted. Region requirements "
                     "%d and %d of point (%lld,%lld) of index space task %s "
                     "(UID %lld) in parent task %s (UID %lld) are interfering.",
@@ -5952,7 +5680,8 @@ namespace Legion {
           }
         case 3:
           {
-            log_run.error("Aliased and interfering region requirements for "
+            REPORT_LEGION_ERROR(ERROR_ALIASED_REGION_REQUIREMENTS,
+                    "Aliased and interfering region requirements for "
                     "point tasks are not permitted. Region requirements "
                     "%d and %d of point (%lld,%lld,%lld) of index space task %s"
                     " (UID %lld) in parent task %s (UID %lld) are interfering.",
@@ -5964,10 +5693,6 @@ namespace Legion {
         default:
           assert(false);
       }
-#ifdef DEBUG_LEGION
-      assert(false);
-#endif
-      exit(ERROR_ALIASED_REGION_REQUIREMENTS);
     }
 
     //--------------------------------------------------------------------------
@@ -6625,16 +6350,10 @@ namespace Legion {
       reduction_op = Runtime::get_reduction_op(redop);
       serdez_redop_fns = Runtime::get_serdez_redop_fns(redop);
       if (!reduction_op->is_foldable)
-      {
         REPORT_LEGION_ERROR(ERROR_REDUCTION_OPERATION_INDEX,
                       "Reduction operation %d for index task launch %s "
                       "(ID %lld) is not foldable.",
-                      redop, get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_UNFOLDABLE_REDUCTION_OP);
-      }
+                      redop, get_task_name(), get_unique_id())
       else
         initialize_reduction_state();
       initialize_base_task(ctx, track, launcher.static_dependences,
@@ -6681,7 +6400,6 @@ namespace Legion {
           // TODO: Reenable this error if we want to track predicate defaults
 #if 0
           if (variants->return_size > 0)
-          {
             log_run.error("Predicated index task launch for task %s "
                           "in parent task %s (UID %lld) has non-void "
                           "return type but no default value for its "
@@ -6691,11 +6409,7 @@ namespace Legion {
                           "'predicate_false_future' fields of the "
                           "IndexTaskLauncher struct.",
                           get_task_name(), parent_ctx->get_task_name(),
-                          parent_ctx->get_unique_id());
-#ifdef DEBUG_LEGION
-            assert(false);
-#endif
-            exit(ERROR_MISSING_DEFAULT_PREDICATE_RESULT);
+                          parent_ctx->get_unique_id())
           }
 #endif
         }
@@ -6704,7 +6418,6 @@ namespace Legion {
           // TODO: Reenable this error if we want to track predicate defaults
 #ifdef PERFORM_PREDICATE_SIZE_CHECKS
           if (predicate_false_size != variants->return_size)
-          {
             REPORT_LEGION_ERROR(ERROR_PREDICATED_INDEX_TASK,
                           "Predicated index task launch for task %s "
                           "in parent task %s (UID %lld) has predicated "
@@ -6712,12 +6425,7 @@ namespace Legion {
                           "expected return size is %ld bytes.",
                           get_task_name(), parent_ctx->get_task_name(),
                           parent_ctx->get_unique_id(),
-                          predicate_false_size, variants->return_size);
-#ifdef DEBUG_LEGION
-            assert(false);
-#endif
-            exit(ERROR_PREDICATE_RESULT_SIZE_MISMATCH);
-          }
+                          predicate_false_size, variants->return_size)
 #endif
 #ifdef DEBUG_LEGION
           assert(predicate_false_result == NULL);
@@ -6848,16 +6556,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #if 0
-      log_run.error("Aliased region requirements for index tasks "
+      REPORT_LEGION_ERROR(ERROR_ALIASED_REGION_REQUIREMENTS,
+                          "Aliased region requirements for index tasks "
                           "are not permitted. Region requirements %d and %d "
                           "of task %s (UID %lld) in parent task %s (UID %lld) "
                           "are interfering.", idx1, idx2, get_task_name(),
                           get_unique_id(), parent_ctx->get_task_name(),
-                          parent_ctx->get_unique_id());
-#ifdef DEBUG_LEGION
-      assert(false);
-#endif
-      exit(ERROR_ALIASED_REGION_REQUIREMENTS);
+                          parent_ctx->get_unique_id())
 #else
       REPORT_LEGION_WARNING(LEGION_WARNING_REGION_REQUIREMENTS_INDEX,
                       "Region requirements %d and %d of index task %s "
@@ -6870,7 +6575,7 @@ namespace Legion {
                       "actually non-interfering. If you see no further error "
                       "messages for this index task launch then everything "
                       "is good.", idx1, idx2, get_task_name(), get_unique_id(),
-                      parent_ctx->get_task_name(), parent_ctx->get_unique_id());
+                      parent_ctx->get_task_name(), parent_ctx->get_unique_id())
 #endif
 #ifdef DEBUG_LEGION
       interfering_requirements.insert(std::pair<unsigned,unsigned>(idx1,idx2));
@@ -7884,18 +7589,12 @@ namespace Legion {
       {
         if (target_space != 
             runtime->find_address_space(points[idx]->target_proc))
-        {
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Invalid mapper output: two different points in one "
                       "slice of %s (UID %lld) mapped to processors in two"
                       "different address spaces (%d and %d) which is illegal.",
                       get_task_name(), get_unique_id(), target_space,
-                      runtime->find_address_space(points[idx]->target_proc));
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_INVALID_MAPPER_OUTPUT);
-        }
+                      runtime->find_address_space(points[idx]->target_proc))
       }
     }
 

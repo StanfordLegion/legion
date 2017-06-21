@@ -23,7 +23,6 @@
 #include "legion_profiling.h"
 #include "legion_instances.h"
 #include "legion_views.h"
-#include "logger_message_descriptor.h"
 
 namespace Legion {
   namespace Internal {
@@ -1995,16 +1994,10 @@ namespace Legion {
             // instances that contain multiple fields, Legion is ready
             // though so all you should have to do is delete this check
             if (field_sizes.size() > 1)
-            {
               REPORT_LEGION_ERROR(ERROR_ILLEGAL_REDUCTION_REQUEST,
                             "Illegal request for a reduction instance "
                             "containing multiple fields. Only a single field "
-                            "is currently permitted for reduction instances.");
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME);
-            }
+                            "is currently permitted for reduction instances.")
             // Before we can actually use this instance, we have to 
             // initialize it with a fill operation of the proper value
             // Don't record this fill operation because it is just part
