@@ -23,7 +23,7 @@ local c = regentlib.c
 
 function raw_to_ptr(t)
   return terra(x : int, y : int)
-    return [t]{ __ptr = c.legion_ptr_t { value = x }, __index = y }
+    return [t]{ __ptr = [ptr]{ __ptr = c.legion_ptr_t { value = x } }, __index = y }
   end
 end
 
