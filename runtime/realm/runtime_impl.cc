@@ -455,7 +455,7 @@ namespace Realm {
     , num_cpu_procs(1), num_util_procs(1), num_io_procs(0)
     , concurrent_io_threads(1)  // Legion does not support values > 1 right now
     , force_kernel_threads(false)
-    , sysmem_size_in_mb(0 /*SJT DMA HACK - 512*/), stack_size_in_mb(2)
+    , sysmem_size_in_mb(512), stack_size_in_mb(2)
   {}
 
   CoreModule::~CoreModule(void)
@@ -896,7 +896,7 @@ namespace Realm {
       size_t gasnet_mem_size_in_mb = 0;
       size_t reg_ib_mem_size_in_mb = 0;
 #endif
-      size_t reg_mem_size_in_mb = 512 /*SJT DMA HACK - 0*/;
+      size_t reg_mem_size_in_mb = 0;
       size_t disk_mem_size_in_mb = 0;
       // Static variable for stack size since we need to 
       // remember it when we launch threads in run 
@@ -2039,7 +2039,9 @@ namespace Realm {
 	return get_genevent_impl(e);
       if(id.is_barrier())
 	return get_barrier_impl(e);
-      assert(0);
+
+      log_runtime.fatal() << "invalid event handle: id=" << id;
+      assert(0 && "invalid event handle");
       return 0;
     }
 
@@ -2100,7 +2102,8 @@ namespace Realm {
       if(id.is_procgroup())
 	return &(get_procgroup_impl(id)->lock);
 
-      assert(0);
+      log_runtime.fatal() << "invalid reservation handle: id=" << id;
+      assert(0 && "invalid reservation handle");
       return 0;
     }
 
@@ -2140,7 +2143,9 @@ namespace Realm {
 	else
 	  return null_check(nodes[id.instance.owner_node].memories[id.instance.mem_idx]);
       }
-      assert(0);
+
+      log_runtime.fatal() << "invalid memory handle: id=" << id;
+      assert(0 && "invalid memory handle");
       return 0;
     }
 
@@ -2149,13 +2154,20 @@ namespace Realm {
       if(id.is_procgroup())
 	return get_procgroup_impl(id);
 
-      assert(id.is_processor());
+      if(!id.is_processor()) {
+	log_runtime.fatal() << "invalid processor handle: id=" << id;
+	assert(0 && "invalid processor handle");
+      }
+
       return null_check(nodes[id.proc.owner_node].processors[id.proc.proc_idx]);
     }
 
     ProcessorGroup *RuntimeImpl::get_procgroup_impl(ID id)
     {
-      assert(id.is_procgroup());
+      if(!id.is_procgroup()) {
+	log_runtime.fatal() << "invalid processor group handle: id=" << id;
+	assert(0 && "invalid processor group handle");
+      }
 
       Node *n = &nodes[id.pgroup.owner_node];
       ProcessorGroup *impl = n->proc_groups.lookup_entry(id.pgroup.pgroup_idx,
@@ -2166,7 +2178,10 @@ namespace Realm {
 
     IndexSpaceImpl *RuntimeImpl::get_index_space_impl(ID id)
     {
-      assert(id.is_idxspace());
+      if(!id.is_idxspace()) {
+	log_runtime.fatal() << "invalid index space handle: id=" << id;
+	assert(0 && "invalid index space handle");
+      }
 
       Node *n = &nodes[id.idxspace.owner_node];
       IndexSpaceImpl *impl = n->index_spaces.lookup_entry(id.idxspace.idxspace_idx,
@@ -2177,7 +2192,11 @@ namespace Realm {
 
     RegionInstanceImpl *RuntimeImpl::get_instance_impl(ID id)
     {
-      assert(id.is_instance());
+      if(!id.is_instance()) {
+	log_runtime.fatal() << "invalid instance handle: id=" << id;
+	assert(0 && "invalid instance handle");
+      }
+
       MemoryImpl *mem = get_memory_impl(id);
 
       return mem->get_instance(id.convert<RegionInstance>());

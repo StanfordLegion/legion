@@ -1982,12 +1982,12 @@ namespace Legion {
                         regions[*it].region.get_tree_id())
         if (!missing_fields.empty())
         {
-          for (std::vector<FieldID>::const_iterator it = 
-                missing_fields.begin(); it != missing_fields.end(); it++)
+          for (std::vector<FieldID>::const_iterator fit = 
+                missing_fields.begin(); fit != missing_fields.end(); fit++)
           {
             const void *name; size_t name_size;
             if (!runtime->retrieve_semantic_information(
-                regions[*it].region.get_field_space(), *it,
+                regions[*it].region.get_field_space(), *fit,
                 NAME_SEMANTIC_TAG, name, name_size, true, false))
               name = "(no name)";
             log_run.error("Missing instance for field %s (FieldID: %d)",
