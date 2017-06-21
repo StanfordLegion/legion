@@ -15,7 +15,6 @@
 
 #include "legion.h"
 #include "default_mapper.h"
-#include "logger_message_descriptor.h"
 
 #include <cstdlib>
 #include <cassert>
@@ -2982,10 +2981,9 @@ namespace Legion {
 	      if(next_as == curr_as) {
 	      }
         
-        REPORT_LEGION_FATAL(LEGION_FATAL_MUST_EPOCH_NOADDRESS,
-                            "must_epoch: no address space has enough "
-                            "processors to fit a group of %lu tasks!",
-                            group_size);
+              log_mapper.error("must_epoch: no address space has enough "
+                               "processors to fit a group of %lu tasks!",
+                                group_size);
 	      assert(false);
 	    } while(next_as->second.size() < group_size);
 	    curr_as = next_as;
@@ -3032,10 +3030,8 @@ namespace Legion {
 
       // check for case of no tasks that want access
       if(accessing_task_idxs.empty()) {
-        REPORT_LEGION_FATAL(LEGION_FATAL_MUST_EPOCH_NOTASKS,
-        "Must epoch has no tasks that require direct "
-         "access to an instance - DefaultMapper doesn't "
-         "know how to pick one.");
+        log_mapper.error("Must epoch has no tasks that require direct "
+         "access to an instance - DefaultMapper doesn't know how to pick one.");
         assert(false);
       }
 
@@ -3051,10 +3047,10 @@ namespace Legion {
 	for(size_t i = 1; i < accessing_task_idxs.size(); i++) {
 	  Processor p2 = target_procs[accessing_task_idxs[i]];
 	  if(!machine.has_affinity(p2, target_memory)) {
-      REPORT_LEGION_FATAL(LEGION_FATAL_DEFAULT_MAPPER_ERROR,
-      "Default Mapper Error.  Memory chosen for constrained instance was %llu"
-       ", but is not visible to task on processor %llu",
-                          target_memory.id, p2.id);
+            log_mapper.error("Default Mapper Error.  Memory chosen for "
+                             "constrained instance was %llu, but is not "
+                             "visible to task on processor %llu",
+                              target_memory.id, p2.id);
 	    assert(false);
 	  }
 	}
@@ -3075,9 +3071,8 @@ namespace Legion {
 	  const LayoutConstraintSet &req_cons = 
             runtime->find_layout_constraints(ctx, it2->second);
 	  if(constraints.conflicts(req_cons)) {
-      REPORT_LEGION_FATAL(LEGION_FATAL_DEFAULT_MAPPER_ERROR,
-                          "Default mapper error.  Layout constraint "
-                          "violation in must_epoch instance creation.");
+            log_mapper.error("Default mapper error.  Layout constraint "
+                             "violation in must_epoch instance creation.");
 	    assert(false);
 	  }
 	  ++it2;
@@ -3250,8 +3245,7 @@ namespace Legion {
 	assert(ok);
 	if(!ok)
         {
-          REPORT_LEGION_FATAL(LEGION_FATAL_DEFAULT_MAPPER_ERROR,
-         "Default mapper error. Unable to make instance(s) "
+          log_mapper.error("Default mapper error. Unable to make instance(s) "
 			   "in memory " IDFMT " for index %d of constrained "
 			   "task %s (ID %lld) in must epoch launch.",
 			   mem.id, constraint.requirement_indexes[0],
