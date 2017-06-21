@@ -1313,7 +1313,6 @@ namespace LegionRuntime {
 	    // now must match
 	    assert(hdf5_bytes == mem_bytes);
 	  }
-	  bytes_total += hdf5_bytes;
 
 	  HDFRequest* new_req = (HDFRequest *)(dequeue_request());
 	  new_req->dim = Request::DIM_1D;
@@ -1334,6 +1333,11 @@ namespace LegionRuntime {
 	  CHECK_HDF5( H5Sselect_hyperslab(new_req->file_space_id, H5S_SELECT_SET, hdf5_info.offset.data(), 0, hdf5_info.extent.data(), 0) );
 
 	  new_req->nbytes = hdf5_bytes;
+	  new_req->seq_pos = bytes_total;
+	  new_req->seq_count = hdf5_bytes;
+
+	  bytes_total += hdf5_bytes;
+
 	  requests[idx++] = new_req;
 	}
 
@@ -1447,26 +1451,18 @@ namespace LegionRuntime {
 
       void HDFXferDes::notify_request_read_done(Request* req)
       {
-        req->is_read_done = true;
-        // close and release HDF resources
-        // currently we don't support ib case
-        assert(pre_xd_guid == XFERDES_NO_GUID);
-        HDFRequest* hdf_req = (HDFRequest*) req;
-        bytes_read += hdf_req->nbytes;
+	default_notify_request_read_done(req);
       }
 
       void HDFXferDes::notify_request_write_done(Request* req)
       {
-        req->is_write_done = true;
-        // currently we don't support ib case
-        assert(next_xd_guid == XFERDES_NO_GUID);
         HDFRequest* hdf_req = (HDFRequest*) req;
-        bytes_write += hdf_req->nbytes;
         //pthread_rwlock_wrlock(&hdf_metadata->hdf_memory->rwlock);
         CHECK_HDF5( H5Sclose(hdf_req->mem_space_id) );
         CHECK_HDF5( H5Sclose(hdf_req->file_space_id) );
         //pthread_rwlock_unlock(&hdf_metadata->hdf_memory->rwlock);
-        enqueue_request(req);
+
+	default_notify_request_write_done(req);
       }
 
       void HDFXferDes::flush()
