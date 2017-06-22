@@ -1048,7 +1048,7 @@ namespace Legion {
     {
       if (realm_index_space_set.has_triggered())
       {
-        AutoLock n_lock(node_lock,1,false/*exclusive*/);
+        // No need for the lock, held by the caller
         rez.serialize<size_t>(sizeof(realm_index_space));
         rez.serialize(realm_index_space);
       }
