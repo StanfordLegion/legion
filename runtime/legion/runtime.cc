@@ -10762,17 +10762,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexAllocator Runtime::create_index_allocator(Context ctx, 
-                                                   IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context create index allocator!");
-      return ctx->create_index_allocator(forest, handle); 
-    }
-
-    //--------------------------------------------------------------------------
     FieldAllocator Runtime::create_field_allocator(Context ctx, 
                                                             FieldSpace handle)
     //--------------------------------------------------------------------------

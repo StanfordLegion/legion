@@ -256,8 +256,6 @@ namespace Legion {
                                             FieldSpace field_space) = 0;
       virtual void destroy_logical_region(LogicalRegion handle) = 0;
       virtual void destroy_logical_partition(LogicalPartition handle) = 0;
-      virtual IndexAllocator create_index_allocator(RegionTreeForest *forest,
-                                                    IndexSpace handle) = 0;
       virtual FieldAllocator create_field_allocator(Legion::Runtime *external,
                                                     FieldSpace handle) = 0;
     public:
@@ -831,8 +829,6 @@ namespace Legion {
                                             FieldSpace field_space);
       virtual void destroy_logical_region(LogicalRegion handle);
       virtual void destroy_logical_partition(LogicalPartition handle);
-      virtual IndexAllocator create_index_allocator(RegionTreeForest *forest,
-                                                    IndexSpace handle);
       virtual FieldAllocator create_field_allocator(Legion::Runtime *external,
                                                     FieldSpace handle);
     public:
@@ -1339,8 +1335,6 @@ namespace Legion {
                                             FieldSpace field_space);
       virtual void destroy_logical_region(LogicalRegion handle);
       virtual void destroy_logical_partition(LogicalPartition handle);
-      virtual IndexAllocator create_index_allocator(RegionTreeForest *forest,
-                                                    IndexSpace handle);
       virtual FieldAllocator create_field_allocator(Legion::Runtime *external,
                                                     FieldSpace handle);
     public:
@@ -1643,8 +1637,6 @@ namespace Legion {
                                             FieldSpace field_space);
       virtual void destroy_logical_region(LogicalRegion handle);
       virtual void destroy_logical_partition(LogicalPartition handle);
-      virtual IndexAllocator create_index_allocator(RegionTreeForest *forest,
-                                                    IndexSpace handle);
       virtual FieldAllocator create_field_allocator(Legion::Runtime *external,
                                                     FieldSpace handle);
     public:

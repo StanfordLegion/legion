@@ -1794,40 +1794,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline bool IndexAllocator::operator==(const IndexAllocator &rhs) const
-    //--------------------------------------------------------------------------
-    {
-      return ((index_space == rhs.index_space) && (allocator == rhs.allocator));
-    }
-
-    //--------------------------------------------------------------------------
-    inline bool IndexAllocator::operator<(const IndexAllocator &rhs) const
-    //--------------------------------------------------------------------------
-    {
-      if (allocator < rhs.allocator)
-        return true;
-      else if (allocator > rhs.allocator)
-        return false;
-      else
-        return (index_space < rhs.index_space);
-    }
-
-    //--------------------------------------------------------------------------
-    inline ptr_t IndexAllocator::alloc(unsigned num_elements /*= 1*/)
-    //--------------------------------------------------------------------------
-    {
-      ptr_t result(allocator->alloc(num_elements));
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    inline void IndexAllocator::free(ptr_t ptr, unsigned num_elements /*= 1*/)
-    //--------------------------------------------------------------------------
-    {
-      allocator->free(ptr.value,num_elements);
-    }
-
-    //--------------------------------------------------------------------------
     inline bool FieldAllocator::operator==(const FieldAllocator &rhs) const
     //--------------------------------------------------------------------------
     {
@@ -4588,8 +4554,6 @@ namespace LegionRuntime {
     typedef Legion::LogicalRegion LogicalRegion;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::LogicalPartition LogicalPartition;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Legion::IndexAllocator IndexAllocator;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::FieldAllocator FieldAllocator;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")

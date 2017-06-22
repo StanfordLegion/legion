@@ -3738,16 +3738,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexAllocator InnerContext::create_index_allocator(
-                                    RegionTreeForest *forest, IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      AutoRuntimeCall call(this);
-      return IndexAllocator(handle, 
-          forest->get_index_space_allocator(handle, get_context_uid()));
-    }
-
-    //--------------------------------------------------------------------------
     FieldAllocator InnerContext::create_field_allocator(
                                    Legion::Runtime *external, FieldSpace handle)
     //--------------------------------------------------------------------------
@@ -7645,18 +7635,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexAllocator LeafContext::create_index_allocator(RegionTreeForest *forest,
-                                                       IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      REPORT_LEGION_ERROR(ERROR_CREATE_INDEX_ALLOCATION,
-        "Illegal create index allocation requested in leaf "
-                     "task %s (ID %lld)", get_task_name(), get_unique_id())
-      return IndexAllocator(handle, 
-          forest->get_index_space_allocator(handle, get_context_uid()));
-    }
-
-    //--------------------------------------------------------------------------
     FieldAllocator LeafContext::create_field_allocator(
                                    Legion::Runtime *external, FieldSpace handle)
     //--------------------------------------------------------------------------
@@ -8837,14 +8815,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return enclosing->destroy_logical_partition(handle);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexAllocator InlineContext::create_index_allocator(
-                                    RegionTreeForest *forest, IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->create_index_allocator(forest, handle);
     }
 
     //--------------------------------------------------------------------------

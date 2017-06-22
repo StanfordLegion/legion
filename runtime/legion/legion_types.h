@@ -85,7 +85,6 @@ namespace Legion {
   template<int DIM, typename T> class LogicalRegionT;
   class LogicalPartition;
   template<int DIM, typename T> class LogicalPartitionT;
-  class IndexAllocator;
   class FieldAllocator;
   class TaskArgument;
   class ArgumentMap;

@@ -450,10 +450,6 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
     locator.get_field_accessor(FID_LOCATOR).typeify<PointerLocation>();
   ptr_t *first_nodes = new ptr_t[num_pieces];
   {
-    IndexAllocator node_allocator = runtime->create_index_allocator(ctx, ckt.all_nodes.get_index_space());
-    node_allocator.alloc(num_pieces * nodes_per_piece);
-  }
-  {
     IndexIterator itr(runtime, ctx, ckt.all_nodes.get_index_space());
     for (int n = 0; n < num_pieces; n++)
     {
@@ -503,11 +499,6 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
   RegionAccessor<AccessorType::Generic, float> fa_wire_cap = 
     wires.get_field_accessor(FID_WIRE_CAP).typeify<float>();
   ptr_t *first_wires = new ptr_t[num_pieces];
-  // Allocate all the wires
-  {
-    IndexAllocator wire_allocator = runtime->create_index_allocator(ctx, ckt.all_wires.get_index_space());
-    wire_allocator.alloc(num_pieces * wires_per_piece);
-  }
   {
     IndexIterator itr(runtime, ctx, ckt.all_wires.get_index_space());
     for (int n = 0; n < num_pieces; n++)

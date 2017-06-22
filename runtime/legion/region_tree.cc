@@ -742,15 +742,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpaceAllocator* RegionTreeForest::get_index_space_allocator(
-                                             IndexSpace handle, UniqueID ctx_id)
-    //--------------------------------------------------------------------------
-    {
-      IndexSpaceNode *node = get_node(handle);
-      return node->get_allocator(ctx_id);
-    }
-
-    //--------------------------------------------------------------------------
     size_t RegionTreeForest::get_domain_volume(IndexSpace handle)
     //--------------------------------------------------------------------------
     {
@@ -4490,7 +4481,7 @@ namespace Legion {
         handle(h), parent(par), index_space_ready(ready), 
         realm_index_space_set(Runtime::create_rt_user_event()), 
         tight_index_space_set(Runtime::create_rt_user_event()),
-        tight_index_space(false), allocator(NULL)
+        tight_index_space(false)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4502,7 +4493,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpaceNode::IndexSpaceNode(const IndexSpaceNode &rhs)
       : IndexTreeNode(), handle(IndexSpace::NO_SPACE), parent(NULL), 
-        index_space_ready(ApEvent::NO_AP_EVENT), allocator(NULL)
+        index_space_ready(ApEvent::NO_AP_EVENT)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4513,11 +4504,6 @@ namespace Legion {
     IndexSpaceNode::~IndexSpaceNode(void)
     //--------------------------------------------------------------------------
     {
-      if (allocator != NULL)
-      {
-        free(allocator);
-        allocator = NULL;
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -5210,43 +5196,6 @@ namespace Legion {
       derez.deserialize(to_trigger);
       (*target) = handle;
       Runtime::trigger_event(to_trigger);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpaceAllocator* IndexSpaceNode::get_allocator(UniqueID ctx_id)
-    //--------------------------------------------------------------------------
-    {
-      bool valid_request = false; // can't be valid if we're not the owner
-      if (get_owner_space() == context->runtime->address_space)
-      {
-        valid_request = true;
-        if (allocator == NULL)
-        {
-          IndexSpaceAllocator *alloc = create_allocator(ctx_id);
-          AutoLock n_lock(node_lock);
-          if (allocator != NULL)
-          {
-            // lost the race
-            valid_request = false;
-            delete alloc;
-          }
-          else
-            allocator = alloc;
-        }
-        else
-          valid_request = (allocator->ctx_id == ctx_id);
-      }
-      if (!valid_request)
-        // If we ever get here we've then we've violated our backwards
-        // compatibility support of only providing one allocator ever
-        // for a given index space
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_DUPLICATE_REQUEST_ALLOCATOR,
-          "Illegal duplicate request for an allocator of index "
-                      "tree %d. Allocators are only provided for backwards "
-                      "compatbility and there is only permitted to be for "
-                      "each index space tree throughout the lifetime of the "
-                      "program.", handle.get_tree_id())
-      return allocator;
     }
 
     //--------------------------------------------------------------------------

@@ -1795,7 +1795,6 @@ namespace Legion {
                                                     LogicalRegion handle);
       LogicalPartition get_parent_logical_partition(LogicalRegion handle);
     public:
-      IndexAllocator create_index_allocator(Context ctx, IndexSpace handle);
       FieldAllocator create_field_allocator(Context ctx, FieldSpace handle);
       ArgumentMap create_argument_map(void);
     public:

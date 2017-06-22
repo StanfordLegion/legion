@@ -556,17 +556,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    IndexSpaceAllocator* IndexSpaceNodeT<DIM,T>::create_allocator(
-                                                                UniqueID ctx_id)
-    //--------------------------------------------------------------------------
-    {
-      Realm::ZIndexSpace<DIM,T> dom_space;
-      get_realm_index_space(dom_space, true/*tight*/);
-      return new IndexSpaceAllocator(Domain(dom_space), ctx_id);
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
     void IndexSpaceNodeT<DIM,T>::destroy_node(AddressSpaceID source)
     //--------------------------------------------------------------------------
     {

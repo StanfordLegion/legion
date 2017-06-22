@@ -195,8 +195,6 @@ namespace Legion {
       IndexPartition get_parent_index_partition(IndexSpace handle);
       unsigned get_index_space_depth(IndexSpace handle);
       unsigned get_index_partition_depth(IndexPartition handle);
-      IndexSpaceAllocator* get_index_space_allocator(IndexSpace handle,
-                                                     UniqueID ctx_id);
       size_t get_domain_volume(IndexSpace handle);
       bool is_index_partition_disjoint(IndexPartition p);
       bool is_index_partition_complete(IndexPartition p);
@@ -806,9 +804,6 @@ namespace Legion {
       static void handle_index_space_set(RegionTreeForest *forest,
                            Deserializer &derez, AddressSpaceID source);
     public:
-      inline bool has_allocator(void) const { return (allocator != NULL); }
-      IndexSpaceAllocator* get_allocator(UniqueID ctx_id);
-    public:
       virtual void tighten_index_space(void) = 0;
     public:
       virtual void initialize_union_space(ApUserEvent to_trigger,
@@ -828,7 +823,6 @@ namespace Legion {
       virtual void get_index_space_domain(void *realm_is, TypeTag type_tag) = 0;
       virtual size_t get_volume(void) = 0;
       virtual bool contains_point(const void *realm_point,TypeTag type_tag) = 0;
-      virtual IndexSpaceAllocator* create_allocator(UniqueID ctx_id) = 0;
       virtual void destroy_node(AddressSpaceID source) = 0;
     public:
       virtual LegionColor get_max_linearized_color(void) = 0;
@@ -957,8 +951,6 @@ namespace Legion {
       std::set<RegionNode*> logical_nodes;
       std::set<std::pair<LegionColor,LegionColor> > disjoint_subsets;
       std::set<std::pair<LegionColor,LegionColor> > aliased_subsets;
-    private:
-      IndexSpaceAllocator *allocator;
     };
 
     /**
@@ -1018,7 +1010,6 @@ namespace Legion {
       virtual void get_index_space_domain(void *realm_is, TypeTag type_tag);
       virtual size_t get_volume(void);
       virtual bool contains_point(const void *realm_point, TypeTag type_tag);
-      virtual IndexSpaceAllocator* create_allocator(UniqueID ctx_id);
       virtual void destroy_node(AddressSpaceID source);
     public:
       virtual LegionColor get_max_linearized_color(void);

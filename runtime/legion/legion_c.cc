@@ -2809,45 +2809,6 @@ legion_region_requirement_get_projection(legion_region_requirement_t req_)
 // Allocator and Argument Map Operations
 // -------------------------------------------------------
 
-legion_index_allocator_t
-legion_index_allocator_create(legion_runtime_t runtime_,
-                              legion_context_t ctx_,
-                              legion_index_space_t handle_)
-{
-  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
-  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
-  IndexSpace handle = CObjectWrapper::unwrap(handle_);
-
-  IndexAllocator isa = runtime->create_index_allocator(ctx, handle);
-  return CObjectWrapper::wrap(isa);
-}
-
-void
-legion_index_allocator_destroy(legion_index_allocator_t handle_)
-{
-  IndexAllocator handle = CObjectWrapper::unwrap(handle_);
-  // Destructor is a nop anyway.
-}
-
-legion_ptr_t
-legion_index_allocator_alloc(legion_index_allocator_t allocator_,
-                             size_t num_elements)
-{
-  IndexAllocator allocator = CObjectWrapper::unwrap(allocator_);
-  ptr_t ptr = allocator.alloc(num_elements);
-  return CObjectWrapper::wrap(ptr);
-}
-
-void
-legion_index_allocator_free(legion_index_allocator_t allocator_,
-                            legion_ptr_t ptr_,
-                            size_t num_elements)
-{
-  IndexAllocator allocator = CObjectWrapper::unwrap(allocator_);
-  ptr_t ptr = CObjectWrapper::unwrap(ptr_);
-  allocator.free(ptr, num_elements);
-}
-
 legion_field_allocator_t
 legion_field_allocator_create(legion_runtime_t runtime_,
                               legion_context_t ctx_,
