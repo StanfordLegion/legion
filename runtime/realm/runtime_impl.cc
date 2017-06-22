@@ -2077,6 +2077,11 @@ namespace Realm {
 
     SparsityMapImplWrapper *RuntimeImpl::get_sparsity_impl(ID id)
     {
+      if(!id.is_sparsity()) {
+	log_runtime.fatal() << "invalid index space sparsity handle: id=" << id;
+	assert(0 && "invalid index space sparsity handle");
+      }
+
       Node *n = &nodes[id.sparsity.creator_node];
       SparsityMapImplWrapper *impl = n->sparsity_maps.lookup_entry(id.sparsity.sparsity_idx,
 								   id.sparsity.creator_node);

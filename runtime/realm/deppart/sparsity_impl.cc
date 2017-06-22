@@ -623,14 +623,20 @@ namespace Realm {
   {
     size_t n = entries.size();
     // ignore max rects for now and just copy bounds over
-    if((n <= max_rects) || false){//true) {
+    if(n <= max_rects) {
       approx_rects.resize(n);
       for(size_t i = 0; i < n; i++)
 	approx_rects[i] = entries[i].bounds;
       return;
     }
-    
-    assert(0);
+
+    // TODO: partial k-d tree?
+    // for now, just approximate with the bounding box
+    ZRect<N,T> bbox = entries[0].bounds;
+    for(size_t i = 1; i < n; i++)
+      bbox = bbox.union_bbox(entries[i].bounds);
+    approx_rects.resize(1);
+    approx_rects[0] = bbox;
   }
 
   template <typename T>

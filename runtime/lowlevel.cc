@@ -1593,11 +1593,27 @@ namespace LegionRuntime {
       return elem_ptr;
     }
 
+    static const unsigned dummy_data[1024] = { 0xbad0bad0 };
+
     template <int DIM>
     void *AccessorType::Generic::Untyped::raw_rect_ptr(const Arrays::Rect<DIM>& r, Arrays::Rect<DIM>& subrect, ByteOffset *offsets) const
     {
       using namespace Realm;
       RegionInstanceImpl *impl = (RegionInstanceImpl *) internal;
+
+      // if an empty rectangle is requested, hand back a pointer to dummy data
+      //  (we can't just use a null pointer because that will be interpreted as
+      //  failure)
+      if(r.volume() == 0) {
+	log_accessor.info() << "empty raw_rect_ptr request: inst=" << impl->me << " r=" << r;
+	// set all offsets to zero so that any addressing computations stay in our
+	//  dummy data
+	for(int i = 0; i < DIM; i++)
+	  offsets[i].offset = 0;
+	subrect = r;
+	return (void *)(&dummy_data);
+      }
+
       MemoryImpl *mem = get_runtime()->get_memory_impl(impl->memory);
 
       // this exists for compatibility and assumes N=DIM, T=coord_t

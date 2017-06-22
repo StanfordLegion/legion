@@ -167,7 +167,8 @@ namespace Realm {
     std::vector<ZRect<N,T> > piece_bounds;
     if(is.dense()) {
       // dense case is nice and simple
-      piece_bounds.push_back(is.bounds);
+      if(!is.bounds.empty())
+	piece_bounds.push_back(is.bounds);
     } else {
       // we need precise data for non-dense index spaces (the original
       //  'bounds' on the ZIndexSpace is often VERY conservative)
@@ -179,7 +180,8 @@ namespace Realm {
 	ZRect<N,T> bbox = is.bounds.intersection(it->bounds);
 	while(++it != entries.end())
 	  bbox = bbox.union_bbox(is.bounds.intersection(it->bounds));
-	piece_bounds.push_back(bbox);
+	if(!bbox.empty())
+	  piece_bounds.push_back(bbox);
       }
     }
 
@@ -473,6 +475,13 @@ namespace Realm {
     assert(it != layout->fields.end());
     const InstancePieceList<N,T>& ipl = layout->piece_lists[it->second.list_idx];
     
+    // Special case for empty instances
+    if(ipl.pieces.empty()) {
+      base = 0;
+      for(int i = 0; i < N; i++) strides[i] = 0;
+      return;
+    }
+
     // this constructor only works if there's exactly one piece and it's affine
     assert(ipl.pieces.size() == 1);
     const InstanceLayoutPiece<N,T> *ilp = ipl.pieces[0];
@@ -496,6 +505,7 @@ namespace Realm {
     // Special case for empty regions
     if(subrect.empty()) {
       base = 0;
+      for(int i = 0; i < N; i++) strides[i] = 0;
       return;
     }
     const InstanceLayout<N,T> *layout = dynamic_cast<const InstanceLayout<N,T> *>(inst.get_layout());

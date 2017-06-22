@@ -1180,6 +1180,7 @@ namespace Realm {
 
     if(all_empty) {
       output.bounds = ZRect<N,T>::make_empty();
+      output.sparsity.id = 0;
     } else {
       // try to assign sparsity ID near the input sparsity maps (if present)
       int target_node = gasnet_mynode();
