@@ -41,7 +41,9 @@ set(SOVERSION 1)
 #------------------------------------------------------------------------------#
 # More boilerplate to deal with build type and lib type
 #------------------------------------------------------------------------------#
-set(CMAKE_BUILD_TYPE  Debug CACHE STRING "Choose the type of build")
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CXX_FLAGS)
+  set(CMAKE_BUILD_TYPE  Debug CACHE STRING "Choose the type of build" FORCE)
+endif(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CXX_FLAGS)
 set(BUILD_SHARED_LIBS OFF   CACHE BOOL   "Whether or not to build shared libraries instead of static")
 
 add_definitions(-DLEGION_CMAKE)
