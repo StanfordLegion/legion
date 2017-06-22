@@ -4055,6 +4055,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, CLONE_MULTI_CALL);
       this->clone_task_op_from(rhs, p, stealable, false/*duplicate*/);
       this->index_domain = rhs->index_domain;
+      this->launch_space = rhs->launch_space;
       this->internal_domain = d;
       this->must_epoch_task = rhs->must_epoch_task;
       this->sliced = !recurse;
