@@ -2982,8 +2982,15 @@ namespace Legion {
     {
       // This is slow for backwards compatability
       ptr_t result = iterator->p[0];
-      iterator->step();
       act_count = 1;
+      iterator->step();
+      while (has_next() && (act_count < req_count))
+      {
+        if (size_t(iterator->p[0]) != (result.value + act_count))
+          break;
+        act_count++;
+        iterator->step();
+      }
       return result;
     }
 
