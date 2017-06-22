@@ -2147,28 +2147,6 @@ terra read_input(runtime : c.legion_runtime_t,
     &nspans_zones,
     &nspans_points)
 
-  -- Allocate all the mesh data in regions
-  do
-    var rz_ispace = c.legion_physical_region_get_logical_region(rz_physical[0]).index_space
-    var rz_alloc = c.legion_index_allocator_create(runtime, ctx, rz_ispace)
-    regentlib.assert(c.legion_index_allocator_alloc(rz_alloc, conf.nz).value == 0, "rz_alloc returned non-zero pointer")
-    c.legion_index_allocator_destroy(rz_alloc)
-  end
-
-  do
-    var rp_ispace = c.legion_physical_region_get_logical_region(rp_physical[0]).index_space
-    var rp_alloc = c.legion_index_allocator_create(runtime, ctx, rp_ispace)
-    regentlib.assert(c.legion_index_allocator_alloc(rp_alloc, conf.np).value == 0, "rp_alloc returned non-zero pointere")
-    c.legion_index_allocator_destroy(rp_alloc)
-  end
-
-  do
-    var rs_ispace = c.legion_physical_region_get_logical_region(rs_physical[0]).index_space
-    var rs_alloc = c.legion_index_allocator_create(runtime, ctx, rs_ispace)
-    regentlib.assert(c.legion_index_allocator_alloc(rs_alloc, conf.ns).value == 0, "rs_alloc returned non-zero pointer")
-    c.legion_index_allocator_destroy(rs_alloc)
-  end
-
   -- Write mesh data into regions
   do
     var rz_znump = c.legion_physical_region_get_field_accessor_array(

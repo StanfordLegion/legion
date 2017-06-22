@@ -3345,9 +3345,6 @@ function codegen.expr_ispace(cx, node)
     actions = quote
       [actions]
       var [is] = c.legion_index_space_create([cx.runtime], [cx.context], [extent_value])
-      var isa = c.legion_index_allocator_create([cx.runtime], [cx.context],  [is])
-      c.legion_index_allocator_alloc(isa, [extent_value])
-      c.legion_index_allocator_destroy(isa)
     end
 
     if cache_index_iterator then
