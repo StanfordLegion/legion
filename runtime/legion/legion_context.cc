@@ -772,15 +772,28 @@ namespace Legion {
         parent_req_indexes.push_back(parent_index);
       }
       // Now do the same thing for the created requirements
-      unsigned created_index = 0;
-      AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
-      for (std::deque<RegionRequirement>::const_iterator it = 
-            created_requirements.begin(); it != 
-            created_requirements.end(); it++, parent_index++, created_index++)
+      std::deque<RegionRequirement> local_requirements;
+      std::deque<unsigned> parent_indexes;
       {
-        // Different index space trees means we can skip
-        if (handle.get_tree_id() != it->region.index_space.get_tree_id())
-          continue;
+        AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
+        for (std::deque<RegionRequirement>::const_iterator it = 
+              created_requirements.begin(); it != 
+              created_requirements.end(); it++, parent_index++)
+        {  
+          // Different index space trees means we can skip
+          if (handle.get_tree_id() != it->region.index_space.get_tree_id())
+            continue;
+          local_requirements.push_back(*it);
+          parent_indexes.push_back(parent_index);
+        }
+      }
+      if (local_requirements.empty())
+        return;
+      unsigned local_index = 0;
+      for (std::deque<RegionRequirement>::const_iterator it = 
+            local_requirements.begin(); it !=
+            local_requirements.end(); it++, local_index++)
+      {
         // Disjoint index spaces means we can skip
         if (runtime->forest->are_disjoint(handle, it->region.index_space))
           continue;
@@ -799,7 +812,7 @@ namespace Legion {
         req.prop = EXCLUSIVE;
         req.privilege_fields = it->privilege_fields;
         req.handle_type = SINGULAR;
-        parent_req_indexes.push_back(parent_index);
+        parent_req_indexes.push_back(parent_indexes[local_index]);
       }
     }
 
@@ -846,14 +859,28 @@ namespace Legion {
         req.privilege_fields = it->privilege_fields;
         parent_req_indexes.push_back(parent_index);
       }
-      AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
-      for (std::deque<RegionRequirement>::const_iterator it = 
-            created_requirements.begin(); it != 
-            created_requirements.end(); it++, parent_index++)
+      std::deque<RegionRequirement> local_requirements;
+      std::deque<unsigned> parent_indexes;
       {
-        // Different index space trees means we can skip
-        if (handle.get_tree_id() != it->region.index_space.get_tree_id())
-          continue;
+        AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
+        for (std::deque<RegionRequirement>::const_iterator it = 
+              created_requirements.begin(); it != 
+              created_requirements.end(); it++, parent_index++)
+        {
+          // Different index space trees means we can skip
+          if (handle.get_tree_id() != it->region.index_space.get_tree_id())
+            continue;
+          local_requirements.push_back(*it);
+          parent_indexes.push_back(parent_index);
+        }
+      }
+      if (local_requirements.empty())
+        return;
+      unsigned local_index = 0;
+      for (std::deque<RegionRequirement>::const_iterator it = 
+            local_requirements.begin(); it != 
+            local_requirements.end(); it++, local_index++)
+      {
         // Disjoint index spaces means we can skip
         if (runtime->forest->are_disjoint(it->region.index_space, handle))
           continue;
@@ -877,7 +904,7 @@ namespace Legion {
         req.privilege = READ_WRITE;
         req.prop = EXCLUSIVE;
         req.privilege_fields = it->privilege_fields;
-        parent_req_indexes.push_back(parent_index);
+        parent_req_indexes.push_back(parent_indexes[local_index]);
       }
     }
 
@@ -1025,15 +1052,28 @@ namespace Legion {
         req.handle_type = SINGULAR;
         parent_req_indexes.push_back(parent_index);
       }
-      unsigned created_index = 0;
-      AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
-      for (std::deque<RegionRequirement>::const_iterator it = 
-            created_requirements.begin(); it != 
-            created_requirements.end(); it++, parent_index++, created_index++)
+      std::deque<RegionRequirement> local_requirements;
+      std::deque<unsigned> parent_indexes;
       {
-        // Different index space trees means we can skip
-        if (handle.get_tree_id() != it->region.get_tree_id())
-          continue;
+        AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
+        for (std::deque<RegionRequirement>::const_iterator it = 
+              created_requirements.begin(); it != 
+              created_requirements.end(); it++, parent_index++)
+        {
+          // Different index space trees means we can skip
+          if (handle.get_tree_id() != it->region.get_tree_id())
+            continue;
+          local_requirements.push_back(*it);
+          parent_indexes.push_back(parent_index);
+        }
+      }
+      if (local_requirements.empty())
+        return;
+      unsigned local_index = 0;
+      for (std::deque<RegionRequirement>::const_iterator it = 
+            local_requirements.begin(); it != 
+            local_requirements.end(); it++, local_index++)
+      {
         // Disjoint index spaces means we can skip
         if (runtime->forest->are_disjoint(handle.get_index_space(), 
                                           it->region.index_space))
@@ -1052,7 +1092,7 @@ namespace Legion {
         req.prop = EXCLUSIVE;
         req.privilege_fields = it->privilege_fields;
         req.handle_type = SINGULAR;
-        parent_req_indexes.push_back(parent_index);
+        parent_req_indexes.push_back(parent_indexes[local_index]);
       }
     }
 
@@ -1097,10 +1137,27 @@ namespace Legion {
         req.privilege_fields = it->privilege_fields;
         parent_req_indexes.push_back(parent_index);
       }
-      AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
+      std::deque<RegionRequirement> local_requirements;
+      std::deque<unsigned> parent_indexes;
+      {
+        AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
+        for (std::deque<RegionRequirement>::const_iterator it = 
+              created_requirements.begin(); it != 
+              created_requirements.end(); it++, parent_index++)
+        {
+          // Different index space trees means we can skip
+          if (handle.get_tree_id() != it->region.get_tree_id())
+            continue;
+          local_requirements.push_back(*it);
+          parent_indexes.push_back(parent_index);
+        }
+      }
+      if (local_requirements.empty())
+        return;
+      unsigned local_index = 0;
       for (std::deque<RegionRequirement>::const_iterator it = 
-            created_requirements.begin(); it != 
-            created_requirements.end(); it++, parent_index++)
+            local_requirements.begin(); it != 
+            local_requirements.end(); it++, local_index++)
       {
         // Different index space trees means we can skip
         if (handle.get_tree_id() != it->region.get_tree_id())
@@ -1128,7 +1185,7 @@ namespace Legion {
         req.privilege = READ_WRITE;
         req.prop = EXCLUSIVE;
         req.privilege_fields = it->privilege_fields;
-        parent_req_indexes.push_back(parent_index);
+        parent_req_indexes.push_back(parent_indexes[local_index]);
       }
     }
 
