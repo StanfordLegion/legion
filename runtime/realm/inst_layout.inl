@@ -22,7 +22,7 @@ namespace Realm {
 
   // TODO: move to helper include file
   template <typename T, typename T2>
-  inline T roundup(T val, T2 step)
+  inline T round_up(T val, T2 step)
   {
     T rem = val % step;
     if(rem == 0)
@@ -209,7 +209,7 @@ namespace Realm {
 	  //  (or a bit past if alignment is a concern)
 	  offset = gsize;
 	  if(it2->alignment > 1)
-	    offset = roundup(offset, it2->alignment);
+	    offset = round_up(offset, it2->alignment);
 	}
 	// increase size and alignment if needed
 	gsize = max(gsize, offset + it2->size);
@@ -221,7 +221,7 @@ namespace Realm {
       }
       if(galign > 1) {
 	// group size needs to be rounded up to match group alignment
-	gsize = roundup(gsize, galign);
+	gsize = round_up(gsize, galign);
 
 	// overall instance alignment layout must be compatible with group
 	layout->alignment_reqd = lcm(layout->alignment_reqd, galign);
@@ -252,7 +252,7 @@ namespace Realm {
 
 	// starting point for piece is first galign-aligned location above
 	//  existing pieces
-	size_t piece_start = roundup(layout->bytes_used, galign);
+	size_t piece_start = round_up(layout->bytes_used, galign);
 	piece->offset = piece_start;
 	// always do fortran order for now
 	size_t stride = gsize;
