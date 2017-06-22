@@ -3052,7 +3052,12 @@ namespace Legion {
         num_entries += cit->second.points.size();
         for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it = 
               cit->second.ranges.begin(); it != cit->second.ranges.end(); it++)
+        {
+          // Skip empty ranges
+          if (it->first.value > it->second.value)
+            continue;
           num_entries += ((it->second - it->first).value + 1);
+        }
       }
       // Now make a temporary logical region with two fields to handle
       // the colors and points
@@ -3120,7 +3125,7 @@ namespace Legion {
           assert(false);
       }
       // Make an index space for the color space, just leak it for now
-      IndexSpace index_color_space = create_index_space(ctx, color_space);;
+      IndexSpace index_color_space = create_index_space(ctx, color_space);
       // Partition the logical region by the color field
       IndexPartition temp_ip = create_partition_by_field(ctx, temp_lr, 
                                       temp_lr, color_fid, index_color_space);
@@ -3162,7 +3167,12 @@ namespace Legion {
         num_entries += cit->second.points.size();
         for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it = 
               cit->second.ranges.begin(); it != cit->second.ranges.end(); it++)
+        {
+          // Skip empty ranges
+          if (it->first.value > it->second.value)
+            continue;
           num_entries += ((it->second - it->first).value + 1);
+        }
       }
 #ifdef DEBUG_LEGION
       assert(lower_bound <= upper_bound);
@@ -3680,7 +3690,7 @@ namespace Legion {
           assert(false);
       }
       // Make an index space for the color space, just leak it for now
-      IndexSpace index_color_space = create_index_space(ctx, color_space);;
+      IndexSpace index_color_space = create_index_space(ctx, color_space);
       // Partition the logical region by the color field
       IndexPartition temp_ip = create_partition_by_field(ctx, temp_lr, 
                                       temp_lr, color_fid, index_color_space);
