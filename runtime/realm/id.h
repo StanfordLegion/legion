@@ -20,6 +20,16 @@
 
 #include <iostream>
 
+// we use bit-field structures below, and the order of them isn't guaranteed to
+//  match the system endianness (which itself has no standard way to be
+//  detected, so define our own REALM_REVERSE_ID_FIELDS which can be further
+//  tweaked as needed
+#if defined(__BYTE_ORDER__) && defined(__ORDER_BIG_ENDIAN__)
+  #if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    #define REALM_REVERSE_ID_FIELDS
+  #endif
+#endif
+
 namespace Realm {
 
     class ID {
@@ -47,75 +57,139 @@ namespace Realm {
       static const unsigned MAX_NODE_ID = (1U << NODE_FIELD_WIDTH) - 2; // reserve all 1's for special cases
 
       struct FMT_Event {
+#ifdef REALM_REVERSE_ID_FIELDS
+	IDType type_tag : 1;
+	IDType creator_node : NODE_FIELD_WIDTH;
+	IDType gen_event_idx : 27;
+	IDType generation : 20;
+#else
 	IDType generation : 20;
 	IDType gen_event_idx : 27;
 	IDType creator_node : NODE_FIELD_WIDTH;
 	IDType type_tag : 1;
+#endif
 	static const IDType TAG_VALUE = 1;
       };
 
       struct FMT_Barrier {
+#ifdef REALM_REVERSE_ID_FIELDS
+	IDType type_tag : 4;
+	IDType creator_node : 16;
+	IDType barrier_idx : 24;
+	IDType generation : 20;  // MUST MATCH FMT_Event::generation size
+#else
 	IDType generation : 20;  // MUST MATCH FMT_Event::generation size
 	IDType barrier_idx : 24;
 	IDType creator_node : 16;
 	IDType type_tag : 4;
+#endif
 	static const IDType TAG_VALUE = 0x7;
       };
 
       struct FMT_Reservation {
+#ifdef REALM_REVERSE_ID_FIELDS
+	IDType type_tag : 8;
+	IDType creator_node : 16;
+	IDType unused : 8;
+	IDType rsrv_idx : 32;
+#else
 	IDType rsrv_idx : 32;
 	IDType unused : 8;
 	IDType creator_node : 16;
 	IDType type_tag : 8;
+#endif
 	static const IDType TAG_VALUE = 0x1f;
       };
 
       struct FMT_Memory {
+#ifdef REALM_REVERSE_ID_FIELDS
+	IDType type_tag : 8;
+	IDType owner_node : 16;
+	IDType unused : 28;
+	IDType mem_idx : 12;
+#else
 	IDType mem_idx : 12;
 	IDType unused : 28;
 	IDType owner_node : 16;
 	IDType type_tag : 8;
+#endif
 	static const IDType TAG_VALUE = 0x1e;
       };
 
       struct FMT_IB_Memory {
+#ifdef REALM_REVERSE_ID_FIELDS
+        IDType type_tag : 8;
+        IDType owner_node : 16;
+        IDType unused : 28;
+        IDType mem_idx : 12;
+#else
         IDType mem_idx : 12;
         IDType unused : 28;
         IDType owner_node : 16;
         IDType type_tag : 8;
+#endif
         static const IDType TAG_VALUE = 0x1a;
       };
 
       struct FMT_Instance {
+#ifdef REALM_REVERSE_ID_FIELDS
+	IDType type_tag : 4;
+	IDType owner_node : 16;
+	IDType creator_node : 16;
+	IDType mem_idx : 12;
+	IDType inst_idx : 16;
+#else
 	IDType inst_idx : 16;
 	IDType mem_idx : 12;
 	IDType creator_node : 16;
 	IDType owner_node : 16;
 	IDType type_tag : 4;
+#endif
 	static const IDType TAG_VALUE = 0x6;
       };
 
       struct FMT_Processor {
+#ifdef REALM_REVERSE_ID_FIELDS
+	IDType type_tag : 8;
+	IDType owner_node : 16;
+	IDType unused : 28;
+	IDType proc_idx : 12;
+#else
 	IDType proc_idx : 12;
 	IDType unused : 28;
 	IDType owner_node : 16;
 	IDType type_tag : 8;
+#endif
 	static const IDType TAG_VALUE = 0x1d;
       };
 
       struct FMT_ProcGroup {
+#ifdef REALM_REVERSE_ID_FIELDS
+	IDType type_tag : 8;
+	IDType owner_node : 16;
+	IDType creator_node : 16;
+	IDType pgroup_idx : 24;
+#else
 	IDType pgroup_idx : 24;
 	IDType creator_node : 16;
 	IDType owner_node : 16;
 	IDType type_tag : 8;
+#endif
 	static const IDType TAG_VALUE = 0x1c;
       };
 
       struct FMT_IdxSpace {
+#ifdef REALM_REVERSE_ID_FIELDS
+	IDType type_tag : 4;
+	IDType owner_node : 16;
+	IDType creator_node : 16;
+	IDType idxspace_idx : 28;
+#else
 	IDType idxspace_idx : 28;
 	IDType creator_node : 16;
 	IDType owner_node : 16;
 	IDType type_tag : 4;
+#endif
 	static const IDType TAG_VALUE = 0x5;
       };
 
@@ -128,10 +202,17 @@ namespace Realm {
       };
 
       struct FMT_Allocator {
+#ifdef REALM_REVERSE_ID_FIELDS
+	IDType type_tag : 8;
+	IDType owner_node : 16;
+	IDType creator_node : 16;
+	IDType allocator_idx : 24;
+#else
 	IDType allocator_idx : 24;
 	IDType creator_node : 16;
 	IDType owner_node : 16;
 	IDType type_tag : 8;
+#endif
 	static const IDType TAG_VALUE = 0x1b;
       };
 
