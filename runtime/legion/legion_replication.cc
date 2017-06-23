@@ -2295,7 +2295,8 @@ namespace Legion {
       for (std::vector<ShardTask*>::const_iterator it = 
             local_shards.begin(); it != local_shards.end(); it++)
       {
-        const AddressSpaceID target = (*it)->target_proc.address_space();
+        const AddressSpaceID target = 
+          runtime->find_address_space((*it)->target_proc);
         shard_groups[target].push_back(*it); 
 #ifdef DEBUG_LEGION
         assert((*it)->shard_id < address_spaces->size());

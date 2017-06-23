@@ -3856,7 +3856,7 @@ namespace Legion {
 #endif 
       // If we have a shard manager that means we were replicated so
       // we just do the launch directly from the shard manager
-      if (shard_manager != NULL)
+      if ((shard_manager != NULL) && !is_shard_task())
       {
         shard_manager->launch();
         return;
@@ -6748,7 +6748,7 @@ namespace Legion {
             v->is_inner(), regions, parent_req_indexes,
             virtual_mapped, unique_op_id, manager);
         if (mapper == NULL)
-          mapper->runtime->find_mapper(current_proc, map_id);
+          mapper = runtime->find_mapper(current_proc, map_id);
         repl_ctx->configure_context(mapper);
         // The replicate contexts all need to sync up to exchange resources 
         repl_ctx->exchange_common_resources();

@@ -436,6 +436,7 @@ namespace Legion {
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;
       virtual bool is_top_level_task(void) const { return false; }
+      virtual bool is_shard_task(void) const { return false; }
     public:
       virtual void resolve_false(bool speculated, bool launched) = 0;
       virtual void launch_task(void);
@@ -809,6 +810,7 @@ namespace Legion {
     public:
       virtual void activate(void); 
       virtual void deactivate(void);
+      virtual bool is_shard_task(void) const { return true; }
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void resolve_false(bool speculated, bool launched);

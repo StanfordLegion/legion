@@ -6580,6 +6580,7 @@ namespace Legion {
       pending_partition_barrier = manager->get_pending_partition_barrier();
       future_map_barrier = manager->get_future_map_barrier();
       // Configure our collective settings
+      shard_collective_radix = Runtime::legion_collective_radix;
       configure_collective_settings(manager->total_shards, owner->shard_id,
           shard_collective_radix, shard_collective_log_radix,
           shard_collective_stages, shard_collective_participating_shards,
