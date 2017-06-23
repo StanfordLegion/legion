@@ -2290,21 +2290,28 @@ local function validate_index_base_type(base_type)
   assert(terralib.types.istype(base_type),
          "Index type expected a type, got " .. tostring(base_type))
   if std.type_eq(base_type, opaque) then
-    return c.legion_ptr_t, 0, terralib.newlist({"value"})
+    return c.legion_ptr_t, 0, terralib.newlist({"value"}), 64
   elseif std.type_eq(base_type, int32) or std.type_eq(base_type, int64) then
-    return base_type, 1, false
+    return base_type, 1, false, terralib.sizeof(base_type) * 8
   elseif base_type:isstruct() then
     local entries = base_type:getentries()
     assert(#entries >= 1 and #entries <= 3,
            "Multi-dimensional index type expected 1 to 3 fields, got " ..
              tostring(#entries))
+    local num_bits = nil
     for _, entry in ipairs(entries) do
       local field_type = entry[2] or entry.type
       assert(std.type_eq(field_type, int32) or std.type_eq(field_type, int64),
              "Multi-dimensional index type expected fields to be " .. tostring(int32) .. " or " ..
              tostring(int64) ..  ", got " .. tostring(field_type))
+      if num_bits == nil then
+        num_bits = terralib.sizeof(field_type) * 8
+      else
+        assert(num_bits == terralib.sizeof(field_type) * 8,
+               "Multi-dimensional index type expected fields to have the same precision")
+      end
     end
-    return base_type, #entries, entries:map(function(entry) return entry[1] or entry.field end)
+    return base_type, #entries, entries:map(function(entry) return entry[1] or entry.field end), num_bits
   else
     assert(false, "Index type expected " .. tostring(opaque) .. ", " ..
              tostring(int32) .. ", " .. tostring(int64) .. " or a struct, got " .. tostring(base_type))
@@ -2383,7 +2390,7 @@ std.rect_type = terralib.memoize(function(index_type)
   return st
 end)
 function std.index_type(base_type, displayname)
-  local impl_type, dim, fields = validate_index_base_type(base_type)
+  local impl_type, dim, fields, num_bits = validate_index_base_type(base_type)
 
   local st = terralib.types.newstruct(displayname)
   st.entries = terralib.newlist({
@@ -2445,7 +2452,7 @@ function std.index_type(base_type, displayname)
   end
 
   function st:nil_index()
-    return st:const(-(2^31 - 1))
+    return st:const(-(2^(num_bits - 1) - 1))
   end
 
   local function make_point(expr)
