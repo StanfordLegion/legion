@@ -78,7 +78,7 @@ namespace Realm {
       ProfilingMeasurements::InstanceTimeline timeline;
 
       // TODO: make this part of the metadata so it gets moved around properly
-      LinearizedIndexSpaceIntfc *lis;
+      //LinearizedIndexSpaceIntfc *lis;
 
       class Metadata : public MetadataBase {
       public:
@@ -94,7 +94,7 @@ namespace Realm {
 	size_t block_size, elmt_size;
 	std::vector<size_t> field_sizes;
 	RegionInstance parent_inst;
-	DomainLinearization linearization;
+	DomainLinearization linearization_OLD; // do not use
 
 	size_t inst_offset;
 	Event ready_event;

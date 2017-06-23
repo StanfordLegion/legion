@@ -19,6 +19,10 @@
 #include "mem_impl.h"
 #include "logging.h"
 #include "runtime_impl.h"
+#include <realm/deppart/inst_helper.h>
+
+TYPE_IS_SERIALIZABLE(Realm::IndexSpace);
+TYPE_IS_SERIALIZABLE(Realm::InstanceLayoutGeneric::FieldLayout);
 
 namespace Realm {
 
@@ -223,12 +227,14 @@ namespace Realm {
     }
 #endif
 
+#if 0
     const LinearizedIndexSpaceIntfc& RegionInstance::get_lis(void) const
     {
       RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
       assert(r_impl->lis);
       return *(r_impl->lis);
     }
+#endif
 
     const InstanceLayoutGeneric *RegionInstance::get_layout(void) const
     {
@@ -406,7 +412,7 @@ namespace Realm {
 #endif
 
     RegionInstanceImpl::RegionInstanceImpl(RegionInstance _me, Memory _memory)
-      : me(_me), memory(_memory), lis(0)
+      : me(_me), memory(_memory) //, lis(0)
     {
       lock.init(ID(me).convert<Reservation>(), ID(me).instance.creator_node);
       lock.in_use = true;
@@ -565,57 +571,42 @@ namespace Realm {
 
     void *RegionInstanceImpl::Metadata::serialize(size_t& out_size) const
     {
-      // figure out how much space we need
-      out_size = (sizeof(IndexSpace) +
-		  sizeof(off_t) +
-		  sizeof(size_t) +
-		  sizeof(ReductionOpID) +
-		  sizeof(off_t) +
-		  sizeof(off_t) +
-		  sizeof(size_t) +
-		  sizeof(size_t) +
-		  sizeof(size_t) + (field_sizes.size() * sizeof(size_t)) +
-		  sizeof(RegionInstance) +
-		  (MAX_LINEARIZATION_LEN * sizeof(int)));
-      void *data = malloc(out_size);
-      char *pos = (char *)data;
-#define S(val) do { memcpy(pos, &(val), sizeof(val)); pos += sizeof(val); } while(0)
-      S(is);
-      S(alloc_offset);
-      S(size);
-      S(redopid);
-      S(count_offset);
-      S(red_list_size);
-      S(block_size);
-      S(elmt_size);
-      size_t l = field_sizes.size();
-      S(l);
-      for(size_t i = 0; i < l; i++) S(field_sizes[i]);
-      S(parent_inst);
-      linearization.serialize((int *)pos);
-#undef S
-      return data;
+      Serialization::DynamicBufferSerializer dbs(128);
+
+      bool ok = ((dbs << is) &&
+		 (dbs << alloc_offset) &&
+		 (dbs << size) &&
+		 (dbs << redopid) &&
+		 (dbs << count_offset) &&
+		 (dbs << red_list_size) &&
+		 (dbs << block_size) &&
+		 (dbs << elmt_size) &&
+		 (dbs << field_sizes) &&
+		 (dbs << parent_inst) &&
+		 (dbs << *layout));
+      assert(ok);
+
+      out_size = dbs.bytes_used();
+      return dbs.detach_buffer(0 /*trim*/);
     }
 
     void RegionInstanceImpl::Metadata::deserialize(const void *in_data, size_t in_size)
     {
-      const char *pos = (const char *)in_data;
-#define S(val) do { memcpy(&(val), pos, sizeof(val)); pos += sizeof(val); } while(0)
-      S(is);
-      S(alloc_offset);
-      S(size);
-      S(redopid);
-      S(count_offset);
-      S(red_list_size);
-      S(block_size);
-      S(elmt_size);
-      size_t l;
-      S(l);
-      field_sizes.resize(l);
-      for(size_t i = 0; i < l; i++) S(field_sizes[i]);
-      S(parent_inst);
-      linearization.deserialize((const int *)pos);
-#undef S
+      Serialization::FixedBufferDeserializer fbd(in_data, in_size);
+
+      bool ok = ((fbd >> is) &&
+		 (fbd >> alloc_offset) &&
+		 (fbd >> size) &&
+		 (fbd >> redopid) &&
+		 (fbd >> count_offset) &&
+		 (fbd >> red_list_size) &&
+		 (fbd >> block_size) &&
+		 (fbd >> elmt_size) &&
+		 (fbd >> field_sizes) &&
+		 (fbd >> parent_inst));
+      if(ok)
+	layout = InstanceLayoutGeneric::deserialize_new(fbd);
+      assert(ok && (layout != 0) && (fbd.bytes_left() == 0));
     }
 
 #ifdef POINTER_CHECKS
@@ -678,5 +669,16 @@ namespace Realm {
       MemoryImpl *m = get_runtime()->get_memory_impl(memory);
       m->put_bytes(o, src, size);
     }
+
+  template <int N, typename T>
+  /*static*/ Serialization::PolymorphicSerdezSubclass<InstanceLayoutPiece<N,T>, AffineLayoutPiece<N,T> > AffineLayoutPiece<N,T>::serdez_subclass;
+
+  template <int N, typename T>
+  /*static*/ Serialization::PolymorphicSerdezSubclass<InstanceLayoutGeneric, InstanceLayout<N,T> > InstanceLayout<N,T>::serdez_subclass;
+
+#define DOIT(N,T) \
+  template class AffineLayoutPiece<N,T>; \
+  template class InstanceLayout<N,T>;
+  FOREACH_NT(DOIT)
 
 }; // namespace Realm

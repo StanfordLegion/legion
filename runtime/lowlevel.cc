@@ -1566,6 +1566,9 @@ namespace LegionRuntime {
 
     void *AccessorType::Generic::Untyped::raw_span_ptr(ptr_t ptr, size_t req_count, size_t& act_count, ByteOffset& stride) const
     {
+      assert(0 && "raw_span_ptr not implemented for deppart");
+      return 0;
+#if 0
       RegionInstanceImpl *impl = (RegionInstanceImpl *) internal;
 
       // must have valid data by now - block if we have to
@@ -1591,6 +1594,7 @@ namespace LegionRuntime {
       stride.offset = act_stride;
       act_count = req_count; // TODO: return a larger number if we know how big we are
       return elem_ptr;
+#endif
     }
 
     static const unsigned dummy_data[1024] = { 0xbad0bad0 };
@@ -1681,6 +1685,9 @@ namespace LegionRuntime {
     void *AccessorType::Generic::Untyped::raw_rect_ptr(const Arrays::Rect<DIM>& r, Arrays::Rect<DIM>& subrect, ByteOffset *offsets,
 						       const std::vector<off_t> &field_offsets, ByteOffset &field_stride) const
     {
+      assert(0 && "multi-field raw_rect_ptr not implemented in deppart");
+      return 0;
+#if 0
       if(field_offsets.size() < 1)
 	return 0;
 
@@ -1761,11 +1768,15 @@ namespace LegionRuntime {
       field_stride.offset = fld_stride;
 
       return dst;
+#endif
     }
 
     template <int DIM>
     void *AccessorType::Generic::Untyped::raw_dense_ptr(const Arrays::Rect<DIM>& r, Arrays::Rect<DIM>& subrect, ByteOffset &elem_stride) const
     {
+      assert(0 && "raw_dense_ptr not implemented in deppart");
+      return 0;
+#if 0
       RegionInstanceImpl *impl = (RegionInstanceImpl *) internal;
       MemoryImpl *mem = get_runtime()->get_memory_impl(impl->memory);
 
@@ -1803,12 +1814,16 @@ namespace LegionRuntime {
       elem_stride.offset = elmt_stride;
 
       return dst;
+#endif
     }
 
     template <int DIM>
     void *AccessorType::Generic::Untyped::raw_dense_ptr(const Arrays::Rect<DIM>& r, Arrays::Rect<DIM>& subrect, ByteOffset &elem_stride,
 							const std::vector<off_t> &field_offsets, ByteOffset &field_stride) const
     {
+      assert(0 && "multi-field raw_dense_ptr not implemented in deppart");
+      return 0;
+#if 0
       if(field_offsets.size() < 1)
 	return 0;
 
@@ -1886,6 +1901,7 @@ namespace LegionRuntime {
       field_stride.offset = fld_stride;
 
       return dst;
+#endif
     }
 
     template void *AccessorType::Generic::Untyped::raw_rect_ptr<1>(ByteOffset *offset) const;
