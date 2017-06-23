@@ -1102,7 +1102,7 @@ namespace Realm {
 	  nodes[i].sparsity_maps.resize(gasnet_nodes(), 0);
 	  DynamicTable<SparsityMapTableAllocator> *m = new DynamicTable<SparsityMapTableAllocator>;
 	  nodes[i].sparsity_maps[gasnet_mynode()] = m;
-	  local_sparsity_map_free_lists[i] = new SparsityMapTableAllocator::FreeList(*m, gasnet_mynode());
+	  local_sparsity_map_free_lists[i] = new SparsityMapTableAllocator::FreeList(*m, i /*owner_node*/);
 	}
       }
 
@@ -2113,6 +2113,7 @@ namespace Realm {
     SparsityMapImplWrapper *RuntimeImpl::get_available_sparsity_impl(gasnet_node_t target_node)
     {
       SparsityMapImplWrapper *wrap = local_sparsity_map_free_lists[target_node]->alloc_entry();
+      wrap->me.sparsity.creator_node = gasnet_mynode();
       return wrap;
     }
 
