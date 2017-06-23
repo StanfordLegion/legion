@@ -1148,12 +1148,7 @@ namespace Realm {
 	target_node = (lhs_node == gasnet_mynode()) ? rhs_node : lhs_node;
       }
     }
-    SparsityMap<N,T> sparsity;
-    if(target_node == gasnet_mynode()) {
-      SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
-      sparsity = wrap->me.convert<SparsityMap<N,T> >();
-    } else
-      sparsity = ID(get_runtime()->remote_id_allocator.get_remote_id(target_node, ID::ID_SPARSITY)).convert<SparsityMap<N,T> >();
+    SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
     output.sparsity = sparsity;
 
     std::vector<ZIndexSpace<N,T> > ops(2);
@@ -1197,12 +1192,7 @@ namespace Realm {
 	    break;
 	  }
 	}
-      SparsityMap<N,T> sparsity;
-      if(target_node == gasnet_mynode()) {
-	SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
-	sparsity = wrap->me.convert<SparsityMap<N,T> >();
-      } else
-	sparsity = ID(get_runtime()->remote_id_allocator.get_remote_id(target_node, ID::ID_SPARSITY)).convert<SparsityMap<N,T> >();
+      SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
       output.sparsity = sparsity;
 
       inputs.push_back(ops);
@@ -1277,12 +1267,7 @@ namespace Realm {
 	  target_node = (lhs_node == gasnet_mynode()) ? rhs_node : lhs_node;
 	}
       }
-      SparsityMap<N,T> sparsity;
-      if(target_node == gasnet_mynode()) {
-	SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
-	sparsity = wrap->me.convert<SparsityMap<N,T> >();
-      } else
-	sparsity = ID(get_runtime()->remote_id_allocator.get_remote_id(target_node, ID::ID_SPARSITY)).convert<SparsityMap<N,T> >();
+      SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
       output.sparsity = sparsity;
 
       std::vector<ZIndexSpace<N,T> > ops(2);
@@ -1324,12 +1309,7 @@ namespace Realm {
 	    break;
 	  }
 	}
-      SparsityMap<N,T> sparsity;
-      if(target_node == gasnet_mynode()) {
-	SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
-	sparsity = wrap->me.convert<SparsityMap<N,T> >();
-      } else
-	sparsity = ID(get_runtime()->remote_id_allocator.get_remote_id(target_node, ID::ID_SPARSITY)).convert<SparsityMap<N,T> >();
+      SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
       output.sparsity = sparsity;
 
       inputs.push_back(ops);
@@ -1407,12 +1387,7 @@ namespace Realm {
 	target_node = (lhs_node == gasnet_mynode()) ? rhs_node : lhs_node;
       }
     }
-    SparsityMap<N,T> sparsity;
-    if(target_node == gasnet_mynode()) {
-      SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
-      sparsity = wrap->me.convert<SparsityMap<N,T> >();
-    } else
-      sparsity = ID(get_runtime()->remote_id_allocator.get_remote_id(target_node, ID::ID_SPARSITY)).convert<SparsityMap<N,T> >();
+    SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
     output.sparsity = sparsity;
 
     lhss.push_back(lhs);
