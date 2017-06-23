@@ -1337,6 +1337,7 @@ namespace Realm {
       s_impl = 0;
     } else {
       s_impl = space.sparsity.impl();
+      assert(s_impl->is_valid());
       const std::vector<SparsityMapEntry<N,T> >& entries = s_impl->get_entries();
       // no restrictions, so we'll take the first entry (assuming it exists)
       if(entries.empty()) {
