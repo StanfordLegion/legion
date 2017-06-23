@@ -6449,9 +6449,9 @@ namespace Legion {
       : SingleTask(rt), manager(man), shard_id(id)
     //--------------------------------------------------------------------------
     {
+      activate_single();
       target_proc = proc;
       current_proc = proc;
-      activate_single();
     }
     
     //--------------------------------------------------------------------------
