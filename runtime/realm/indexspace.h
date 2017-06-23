@@ -1571,7 +1571,7 @@ namespace Realm {
 
     // index-based:
     Event create_equal_subspace(size_t count, size_t granularity,
-                                unsigned index, ZIndexSpace<N,T> &subspace,
+                                unsigned index, ZIndexSpace<N,T>& subspace,
                                 const ProfilingRequestSet &reqs,
                                 Event wait_on = Event::NO_EVENT) const;
 

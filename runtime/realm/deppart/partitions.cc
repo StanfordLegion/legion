@@ -59,6 +59,18 @@ namespace Realm {
 
   template <int N, typename T>
   __attribute__ ((noinline))
+  Event ZIndexSpace<N,T>::create_equal_subspace(size_t count, size_t granularity, 
+                                                unsigned index, ZIndexSpace<N,T>& subspaces,
+						const ProfilingRequestSet &reqs,
+						Event wait_on /*= Event::NO_EVENT*/) const
+  {
+    // TODO:
+    assert(false);
+    return Event::NO_EVENT;
+  }
+
+  template <int N, typename T>
+  __attribute__ ((noinline))
   Event ZIndexSpace<N,T>::create_equal_subspaces(size_t count, size_t granularity,
 						 std::vector<ZIndexSpace<N,T> >& subspaces,
 						 const ProfilingRequestSet &reqs,
