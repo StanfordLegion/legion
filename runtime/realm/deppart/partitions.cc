@@ -802,7 +802,7 @@ namespace Realm {
 	    log_part.info() << "worker " << this << " starting uop " << p_uop;
 	    p_uop->mark_started();
 	    p_uop->execute();
-	    log_part.info() << "worker " << this << " starting uop " << p_uop;
+	    log_part.info() << "worker " << this << " finished uop " << p_uop;
 	    p_uop->mark_finished();
 	    break;
 	  }
