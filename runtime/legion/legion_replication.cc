@@ -2984,7 +2984,7 @@ namespace Legion {
       for (int idx = 0; idx < shard_collective_radix; idx++)
       {
         const int target_index = local_index * shard_collective_radix + idx; 
-        if (target_index > manager->total_shards)
+        if (target_index > int(manager->total_shards))
           break;
         ShardID target = convert_to_shard(target_index, origin);
         Serializer rez;
@@ -3133,7 +3133,7 @@ namespace Legion {
         shard_collective_last_radix(ctx->get_shard_collective_last_radix()),
         shard_collective_last_log_radix(
             ctx->get_shard_collective_last_log_radix()),
-        participating(local_shard < shard_collective_participating_shards) 
+        participating(int(local_shard) < shard_collective_participating_shards) 
     //--------------------------------------------------------------------------
     { 
       if (participating)
@@ -3172,7 +3172,7 @@ namespace Legion {
         shard_collective_last_radix(ctx->get_shard_collective_last_radix()),
         shard_collective_last_log_radix(
             ctx->get_shard_collective_last_log_radix()),
-        participating(local_shard < shard_collective_participating_shards)
+        participating(int(local_shard) < shard_collective_participating_shards)
     //--------------------------------------------------------------------------
     {
       if (participating)

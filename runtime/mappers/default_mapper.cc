@@ -1504,7 +1504,7 @@ namespace Legion {
             std::map<AddressSpace,int>::const_iterator finder = 
               mpi_interop_mapping.find(space);
             assert(finder != mpi_interop_mapping.end());
-            assert(finder->second < output.task_mappings.size());
+            assert(finder->second < int(output.task_mappings.size()));
             output.task_mappings[finder->second].target_procs.push_back(*it);
           }
         }
