@@ -9369,7 +9369,7 @@ namespace Legion {
     {
       {
         AutoLock ctx_lock(context_lock);
-        std::map<ApEvent,ReplFutureMapImpl*>::const_iterator finder = 
+        std::map<ApEvent,ReplFutureMapImpl*>::iterator finder = 
           future_maps.find(map->future_map_barrier);
 #ifdef DEBUG_LEGION
         assert(finder != future_maps.end());
