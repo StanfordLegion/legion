@@ -6946,21 +6946,15 @@ namespace Legion {
       AutoRuntimeCall call(this);
 #ifdef DEBUG_LEGION 
       if (parent.get_tree_id() != handle1.get_tree_id())
-      {
-        log_index.error("IndexPartition %d is not part of the same "
+        REPORT_LEGION_ERROR(ERROR_INDEX_TREE_MISMATCH,
+                        "IndexPartition %d is not part of the same "
                         "index tree as IndexSpace %d in create "
-                        "partition by union!", handle1.id, parent.id);
-        assert(false);
-        exit(ERROR_INDEX_TREE_MISMATCH);
-      }
+                        "partition by union!", handle1.id, parent.id)
       if (parent.get_tree_id() != handle2.get_tree_id())
-      {
-        log_index.error("IndexPartition %d is not part of the same "
+        REPORT_LEGION_ERROR(ERROR_INDEX_TREE_MISMATCH,
+                        "IndexPartition %d is not part of the same "
                         "index tree as IndexSpace %d in create "
-                        "partition by union!", handle2.id, parent.id);
-        assert(false);
-        exit(ERROR_INDEX_TREE_MISMATCH);
-      }
+                        "partition by union!", handle2.id, parent.id)
 #endif
       LegionColor partition_color = INVALID_COLOR;
       bool color_generated = false;
@@ -7072,21 +7066,15 @@ namespace Legion {
       AutoRuntimeCall call(this);
 #ifdef DEBUG_LEGION 
       if (parent.get_tree_id() != handle1.get_tree_id())
-      {
-        log_index.error("IndexPartition %d is not part of the same "
+        REPORT_LEGION_ERROR(ERROR_INDEX_TREE_MISMATCH,
+                        "IndexPartition %d is not part of the same "
                         "index tree as IndexSpace %d in create partition by "
-                        "intersection!", handle1.id, parent.id);
-        assert(false);
-        exit(ERROR_INDEX_TREE_MISMATCH);
-      }
+                        "intersection!", handle1.id, parent.id)
       if (parent.get_tree_id() != handle2.get_tree_id())
-      {
-        log_index.error("IndexPartition %d is not part of the same "
+        REPORT_LEGION_ERROR(ERROR_INDEX_TREE_MISMATCH,
+                        "IndexPartition %d is not part of the same "
                         "index tree as IndexSpace %d in create partition by "
-                        "intersection!", handle2.id, parent.id);
-        assert(false);
-        exit(ERROR_INDEX_TREE_MISMATCH);
-      }
+                        "intersection!", handle2.id, parent.id)
 #endif
       LegionColor partition_color = INVALID_COLOR;
       bool color_generated = false;
@@ -7198,23 +7186,17 @@ namespace Legion {
       AutoRuntimeCall call(this); 
 #ifdef DEBUG_LEGION 
       if (parent.get_tree_id() != handle1.get_tree_id())
-      {
-        log_index.error("IndexPartition %d is not part of the same "
-                              "index tree as IndexSpace %d in create "
-                              "partition by difference!",
-                              handle1.id, parent.id);
-        assert(false);
-        exit(ERROR_INDEX_TREE_MISMATCH);
-      }
+        REPORT_LEGION_ERROR(ERROR_INDEX_TREE_MISMATCH,
+                            "IndexPartition %d is not part of the same "
+                            "index tree as IndexSpace %d in create "
+                            "partition by difference!",
+                            handle1.id, parent.id)
       if (parent.get_tree_id() != handle2.get_tree_id())
-      {
-        log_index.error("IndexPartition %d is not part of the same "
-                              "index tree as IndexSpace %d in create "
-                              "partition by difference!",
-                              handle2.id, parent.id);
-        assert(false);
-        exit(ERROR_INDEX_TREE_MISMATCH);
-      }
+        REPORT_LEGION_ERROR(ERROR_INDEX_TREE_MISMATCH,
+                            "IndexPartition %d is not part of the same "
+                            "index tree as IndexSpace %d in create "
+                            "partition by difference!",
+                            handle2.id, parent.id)
 #endif
       LegionColor partition_color = INVALID_COLOR;
       bool color_generated = false;
@@ -7321,14 +7303,11 @@ namespace Legion {
       log_index.debug("Creating cross product partitions in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
       if (handle1.get_tree_id() != handle2.get_tree_id())
-      {
-        log_index.error("IndexPartition %d is not part of the same "
-                              "index tree as IndexPartition %d in create "
-                              "cross product partitions!",
-                              handle1.id, handle2.id);
-        assert(false);
-        exit(ERROR_INDEX_TREE_MISMATCH);
-      }
+        REPORT_LEGION_ERROR(ERROR_INDEX_TREE_MISMATCH,
+                            "IndexPartition %d is not part of the same "
+                            "index tree as IndexPartition %d in create "
+                            "cross product partitions!",
+                            handle1.id, handle2.id)
 #endif
       LegionColor partition_color = INVALID_COLOR;
       if (color != AUTO_GENERATE_ID)
@@ -8587,20 +8566,15 @@ namespace Legion {
           // does expect to have a void return type
           TaskImpl *impl = runtime->find_or_create_task_impl(launcher.task_id);
           if (impl->returns_value())
-          {
-            log_run.error("Predicated task launch for task %s in parent "
+            REPORT_LEGION_ERROR(ERROR_MISSING_DEFAULT_PREDICATE_RESULT,
+                          "Predicated task launch for task %s in parent "
                           "task %s (UID %lld) has non-void return type "
                           "but no default value for its future if the task "
                           "predicate evaluates to false.  Please set either "
                           "the 'predicate_false_result' or "
                           "'predicate_false_future' fields of the "
                           "TaskLauncher struct.", impl->get_name(), 
-                          get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-            assert(false);
-#endif
-            exit(ERROR_MISSING_DEFAULT_PREDICATE_RESULT);
-          }
+                          get_task_name(), get_unique_id())
         }
         // Now we can fix the future result
         result->complete_future();
@@ -8691,8 +8665,8 @@ namespace Legion {
           // have a void return type
           TaskImpl *impl = runtime->find_or_create_task_impl(launcher.task_id);
           if (impl->returns_value())
-          {
-            log_run.error("Predicated index task launch for task %s "
+            REPORT_LEGION_ERROR(ERROR_MISSING_DEFAULT_PREDICATE_RESULT,
+                          "Predicated index task launch for task %s "
                           "in parent task %s (UID %lld) has non-void "
                           "return type but no default value for its "
                           "future if the task predicate evaluates to "
@@ -8700,12 +8674,7 @@ namespace Legion {
                           "'predicate_false_result' or "
                           "'predicate_false_future' fields of the "
                           "IndexTaskLauncher struct.", impl->get_name(), 
-                          get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-            assert(false);
-#endif
-            exit(ERROR_MISSING_DEFAULT_PREDICATE_RESULT);
-          }
+                          get_task_name(), get_unique_id())
           // Just initialize all the futures
           for (Domain::DomainPointIterator itr(launcher.launch_domain); 
                 itr; itr++)
@@ -8784,8 +8753,8 @@ namespace Legion {
           // does expect to have a void return type
           TaskImpl *impl = runtime->find_or_create_task_impl(launcher.task_id);
           if (impl->returns_value())
-          {
-            log_run.error("Predicated index task launch for task %s "
+            REPORT_LEGION_ERROR(ERROR_MISSING_DEFAULT_PREDICATE_RESULT,
+                          "Predicated index task launch for task %s "
                           "in parent task %s (UID %lld) has non-void "
                           "return type but no default value for its "
                           "future if the task predicate evaluates to "
@@ -8793,12 +8762,7 @@ namespace Legion {
                           "'predicate_false_result' or "
                           "'predicate_false_future' fields of the "
                           "IndexTaskLauncher struct.", impl->get_name(), 
-                          get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-            assert(false);
-#endif
-            exit(ERROR_MISSING_DEFAULT_PREDICATE_RESULT);
-          }
+                          get_task_name(), get_unique_id())
         }
         // Now we can fix the future result
         result->complete_future();

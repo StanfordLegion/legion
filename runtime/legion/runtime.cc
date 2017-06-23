@@ -12444,14 +12444,9 @@ namespace Legion {
     {
       ShardingID &next_sharding = get_current_static_sharding_id();
       if (runtime_started)
-      {
-        log_run.error("Illegal call to 'generate_static_sharding_id' after "
-                      "the runtime has been started!");
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_STATIC_CALL_POST_RUNTIME_START);
-      }
+        REPORT_LEGION_ERROR(ERROR_STATIC_CALL_POST_RUNTIME_START,
+                      "Illegal call to 'generate_static_sharding_id' after "
+                      "the runtime has been started!")
       return next_sharding++;
     }
 
@@ -12463,41 +12458,26 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (sid == UINT_MAX)
-      {
-        log_run.error("ERROR: %d (UINT_MAX) is a reserved sharding ID.", 
-                        UINT_MAX);
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_RESERVED_SHARDING_ID);
-      }
+        REPORT_LEGION_ERROR(ERROR_RESERVED_SHARDING_ID,
+            "ERROR: %d (UINT_MAX) is a reserved sharding ID.", UINT_MAX)
       else if (need_zero_check && (sid == 0))
-      {
-        log_run.error("ERROR: ShardingID zero is reserved.");
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_RESERVED_SHARDING_ID);
-      }
+        REPORT_LEGION_ERROR(ERROR_RESERVED_SHARDING_ID,
+                            "ERROR: ShardingID zero is reserved.")
       if (!was_preregistered && (total_address_spaces > 1))
-        log_run.warning("WARNING: Sharding functor %d is being dynamically "
+        REPORT_LEGION_WARNING(LEGION_WARNING_DYNAMIC_SHARDING_REG,
+                        "WARNING: Sharding functor %d is being dynamically "
                         "registered for a multi-node run with %d nodes. It is "
                         "currently the responsibility of the application to "
                         "ensure that this sharding functor is registered on "
                         "all nodes where it will be required.",
-                        sid, total_address_spaces);
+                        sid, total_address_spaces)
       AutoLock s_lock(sharding_lock);
       std::map<ShardingID,ShardingFunctor*>::const_iterator finder = 
         sharding_functors.find(sid);
       if (finder != sharding_functors.end())
-      {
-        log_run.error("ERROR: ShardingID %d has already been used by another "
-                      "sharding functor.", sid);
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_DUPLICATE_SHARDING_ID);
-      }
+        REPORT_LEGION_ERROR(ERROR_DUPLICATE_SHARDING_ID,
+                      "ERROR: ShardingID %d has already been used by another "
+                      "sharding functor.", sid)
       sharding_functors[sid] = functor;
     }
 
@@ -12507,44 +12487,23 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (runtime_started)
-      {
-        log_run.error("Illegal call to 'preregister_sharding_functor' after "
+        REPORT_LEGION_ERROR(ERROR_STATIC_CALL_POST_RUNTIME_START,
+                      "Illegal call to 'preregister_sharding_functor' after "
                       "the runtime has started!");
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_STATIC_CALL_POST_RUNTIME_START);
-      }
       if (sid == UINT_MAX)
-      {
-        log_run.error("ERROR: %d (UINT_MAX) is a reserved sharding ID.", 
-                        UINT_MAX);
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_RESERVED_SHARDING_ID);
-      }
+        REPORT_LEGION_ERROR(ERROR_RESERVED_SHARDING_ID,
+            "ERROR: %d (UINT_MAX) is a reserved sharding ID.", UINT_MAX)
       else if (sid == 0)
-      {
-        log_run.error("ERROR: ShardingID zero is reserved.");
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_RESERVED_SHARDING_ID);
-      }
+        REPORT_LEGION_ERROR(ERROR_RESERVED_SHARDING_ID,
+                            "ERROR: ShardingID zero is reserved.")
       std::map<ShardingID,ShardingFunctor*> &pending_sharding_functors = 
         get_pending_sharding_table();
       std::map<ShardID,ShardingFunctor*>::const_iterator finder = 
         pending_sharding_functors.find(sid);
       if (finder != pending_sharding_functors.end())
-      {
-        log_run.error("ERROR: ShardingID %d has already been used by another "
-                      "sharding functor.", sid);
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_DUPLICATE_SHARDING_ID);
-      }
+        REPORT_LEGION_ERROR(ERROR_DUPLICATE_SHARDING_ID,
+                      "ERROR: ShardingID %d has already been used by another "
+                      "sharding functor.", sid)
       pending_sharding_functors[sid] = functor;
     }
 
@@ -12556,13 +12515,8 @@ namespace Legion {
       std::map<ShardingID,ShardingFunctor*>::const_iterator finder = 
         sharding_functors.find(sid);
       if (finder == sharding_functors.end())
-      {
-        log_run.error("Unable to find registered sharding functor ID %d.", sid);
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_SHARDING_ID);
-      }
+        REPORT_LEGION_ERROR(ERROR_INVALID_SHARDING_ID,
+                    "Unable to find registered sharding functor ID %d.", sid)
       return finder->second;
     }
 

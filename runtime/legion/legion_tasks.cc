@@ -1003,31 +1003,21 @@ namespace Legion {
         for (unsigned idx = 0; idx < regions.size(); idx++)
         {
           if (IS_REDUCE(regions[idx]))
-          {
-            log_run.error("Mapper %s requested to replicate task %s (UID %lld) "
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                          "Mapper %s requested to replicate task %s (UID %lld) "
                           "but region requirement %d has reduction privileges. "
                           "Tasks with reduction-only privileges are not "
                           "permitted to be replicated.", 
                           mapper->get_mapper_name(), get_task_name(),
-                          get_unique_id(), idx);
-#ifdef DEBUG_LEGION
-            assert(false);
-#endif
-            exit(ERROR_INVALID_MAPPER_OUTPUT);
-          }
+                          get_unique_id(), idx)
           else if (!IS_EXCLUSIVE(regions[idx]))
-          {
-            log_run.error("Mapper %s requested to replicate task %s (UID %lld) "
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                          "Mapper %s requested to replicate task %s (UID %lld) "
                           "but region requirement %d has relaxed coherence. "
                           "Tasks with relaxed coherence modes are not "
                           "permitted to be replicated.", 
                           mapper->get_mapper_name(), get_task_name(),
-                          get_unique_id(), idx);
-#ifdef DEBUG_LEGION
-            assert(false);
-#endif
-            exit(ERROR_INVALID_MAPPER_OUTPUT);
-          }
+                          get_unique_id(), idx)
         }
       }
       return options.inline_task;
@@ -3190,32 +3180,24 @@ namespace Legion {
       }
       else
       {
-        log_run.error("Invalid mapper output from invocation of '%s' on "
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Invalid mapper output from invocation of '%s' on "
                       "mapper %s. Mapper specified an invalid task variant "
                       "of ID 0 for task %s (ID %lld), but Legion does not yet "
                       "support task generators.", "map_task", 
                       mapper->get_mapper_name(), 
-                      get_task_name(), get_unique_id());
+                      get_task_name(), get_unique_id())
         // TODO: invoke a generator if one exists
-#ifdef DEBUG_LEGION
-        assert(false); 
-#endif
-        exit(ERROR_INVALID_MAPPER_OUTPUT);
       }
-      if (variant_impl == NULL)
-      {
+      if (variant_impl == NULL) 
         // If we couldn't find or make a variant that is bad
-        log_run.error("Invalid mapper output from invocation of '%s' on "
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Invalid mapper output from invocation of '%s' on "
                       "mapper %s. Mapper failed to specify a valid "
                       "task variant or generator capable of create a variant "
                       "implementation of task %s (ID %lld).",
                       "map_task", mapper->get_mapper_name(), get_task_name(),
-                      get_unique_id());
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_MAPPER_OUTPUT);
-      }
+                      get_unique_id())
       // Now that we know which variant to use, we can validate it
       if (!Runtime::unsafe_mapper)
         validate_variant_selection(mapper, variant_impl, "map_task"); 
@@ -3411,17 +3393,12 @@ namespace Legion {
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
       if (must_epoch_owner != NULL)
-      {
-        log_run.error("Mapper %s requested to replicate task %s (UID %lld) "
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Mapper %s requested to replicate task %s (UID %lld) "
                       "which is part of a must epoch launch. Replication of "
                       "tasks in must epoch launches is not permitted.",
                       mapper->get_mapper_name(), get_task_name(),
-                      get_unique_id());
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_MAPPER_OUTPUT);
-      }
+                      get_unique_id())
       Mapper::MapTaskInput input;
       Mapper::MapTaskOutput default_output;
       Mapper::MapReplicateTaskOutput output;
@@ -3433,16 +3410,11 @@ namespace Legion {
       // Now we can invoke the mapper to do the mapping
       mapper->invoke_map_replicate_task(this, &input, &default_output, &output);
       if (output.task_mappings.empty())
-      {
-        log_run.error("Mapper %s failed to provide any mappings for task %s "
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Mapper %s failed to provide any mappings for task %s "
                       "(UID %lld) in 'map_replicate_task' mapper call.",
                       mapper->get_mapper_name(), get_task_name(),
-                      get_unique_id());
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_MAPPER_OUTPUT);
-      }
+                      get_unique_id())
       // Quick test to see if there is only one output requested in which
       // case then there is no replication
       else if (output.task_mappings.size() == 1)
@@ -3464,18 +3436,13 @@ namespace Legion {
           shard_manager = new ShardManager(runtime, repl_context, true/*cr*/,
                                  total_shards, runtime->address_space, this);
           if (output.control_replication_map.size() != total_shards)
-          {
-            log_run.error("Mapper %s specified a non-empty control replication "
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                          "Mapper %s specified a non-empty control replication "
                           "map of size %ld that does not match the requested "
                           "number of %ld shards for task %s (UID %lld).",
                           mapper->get_mapper_name(), 
                           output.control_replication_map.size(), total_shards,
-                          get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-            assert(false);
-#endif
-            exit(ERROR_INVALID_MAPPER_OUTPUT);
-          }
+                          get_task_name(), get_unique_id())
           if (!Runtime::unsafe_mapper)
           {
             // Check to make sure that they all picked the same variant
@@ -3484,37 +3451,27 @@ namespace Legion {
             for (unsigned idx = 1; idx < total_shards; idx++)
             {
               if (output.task_mappings[idx].chosen_variant != chosen_variant)
-              {
-                log_run.error("Invalid mapper output from invocation of '%s' "
+                REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                              "Invalid mapper output from invocation of '%s' "
                               "on mapper %s. Mapper picked different variants "
                               "%ld and %ld for task %s (UID %lld) that was "
                               "designated to be control replicated.", 
                               "map_replicate_task", mapper->get_mapper_name(),
                               chosen_variant, 
                               output.task_mappings[idx].chosen_variant,
-                              get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-                assert(false);
-#endif
-                exit(ERROR_INVALID_MAPPER_OUTPUT);
-              }
+                              get_task_name(), get_unique_id())
             }
             VariantImpl *var_impl = runtime->find_variant_impl(task_id,
                                       chosen_variant, true/*can_fail*/);
             // If it's NULL we'll catch it later in the checks
             if ((var_impl != NULL) && !var_impl->is_replicable())
-            {
-              log_run.error("Invalid mapper output from invocation of '%s' on "
+              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                            "Invalid mapper output from invocation of '%s' on "
                             "mapper %s. Mapper failed to pick a replicable "
                             "variant for task %s (UID %lld) that was designated"
                             " to be control replicated.", "map_replicate_task",
                             mapper->get_mapper_name(), get_task_name(),
-                            get_unique_id());
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_INVALID_MAPPER_OUTPUT);
-            }
+                            get_unique_id())
           }
         }
         else
@@ -3548,19 +3505,14 @@ namespace Legion {
             const bool is_write = IS_WRITE(regions[region_idx]);
             // No virtual mappings are permitted
             if (instances.is_virtual_mapping())
-            {
-              log_run.error("Invalid mapper output from invocation of '%s' on "
+              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                            "Invalid mapper output from invocation of '%s' on "
                             "mapper %s. Mapper selected a virtual mapping for "
                             "region %d of replicated copy %d of task %s "
                             "(UID %lld). Virtual mappings are not permitted "
                             "for replicated tasks.", "map_replicate_task",
                             mapper->get_mapper_name(), region_idx, shard_idx,
-                            get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-              assert(false);
-#endif
-              exit(ERROR_INVALID_MAPPER_OUTPUT);
-            }
+                            get_task_name(), get_unique_id())
             // For each of the shard instances
             for (unsigned idx1 = 0; idx1 < instances.size(); idx1++)
             {
@@ -3575,8 +3527,8 @@ namespace Legion {
                 // overlapping fields to prevent common writes
                 if (is_write && !(local_ref.get_valid_fields() * 
                                   shard_ref.get_valid_fields()))
-                {
-                  log_run.error("Invalid mapper output from invocation of '%s' "
+                  REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                                "Invalid mapper output from invocation of '%s' "
                                 "on mapper %s. Mapper selected the same "
                                 "physical instance for write privilege region "
                                 "%d of two different replicated copies of task "
@@ -3584,12 +3536,7 @@ namespace Legion {
                                 "privileges must be mapped to different "
                                 "physical instances for replicated tasks.",
                                 "map_replicate_task", mapper->get_mapper_name(),
-                                region_idx, get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-                  assert(false);
-#endif
-                  exit(ERROR_INVALID_MAPPER_OUTPUT);
-                }
+                                region_idx, get_task_name(), get_unique_id())
                 // Update the set of needed fields
                 local_ref.update_fields(shard_ref.get_valid_fields());
                 found = true;

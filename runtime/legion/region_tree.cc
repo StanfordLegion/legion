@@ -714,13 +714,8 @@ namespace Legion {
       ApUserEvent space_ready = *(reinterpret_cast<ApUserEvent*>(
                          const_cast<ApEvent*>(&child_node->index_space_ready)));
       if (space_ready.has_triggered())
-      {
-        log_run.error("Invalid pending child!");
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_PENDING_CHILD);
-      }
+        REPORT_LEGION_ERROR(ERROR_INVALID_PENDING_CHILD, 
+                            "Invalid pending child!")
       Runtime::trigger_event(space_ready, op->get_completion_event());
       return child_node->compute_pending_space(op, handle, is_union);
     }
@@ -741,13 +736,8 @@ namespace Legion {
       ApUserEvent space_ready = *(reinterpret_cast<ApUserEvent*>(
                          const_cast<ApEvent*>(&child_node->index_space_ready)));
       if (space_ready.has_triggered())
-      {
-        log_run.error("Invalid pending child!");
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_PENDING_CHILD);
-      }
+        REPORT_LEGION_ERROR(ERROR_INVALID_PENDING_CHILD,
+                            "Invalid pending child!\n")
       Runtime::trigger_event(space_ready, op->get_completion_event());
       return child_node->compute_pending_difference(op, initial, handles);
     }

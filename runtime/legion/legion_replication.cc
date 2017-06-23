@@ -105,15 +105,10 @@ namespace Legion {
       output.chosen_functor = UINT_MAX;
       mapper->invoke_task_select_sharding_functor(this, input, &output);
       if (output.chosen_functor == UINT_MAX)
-      {
-        log_run.error("Mapper %s failed to pick a valid sharding functor for "
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Mapper %s failed to pick a valid sharding functor for "
                       "task %s (UID %lld)", mapper->get_mapper_name(),
-                      get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_MAPPER_OUTPUT);
-      }
+                      get_task_name(), get_unique_id())
       this->sharding_functor = output.chosen_functor;
       sharding_function = 
         repl_ctx->shard_manager->find_sharding_function(sharding_functor);
@@ -126,14 +121,12 @@ namespace Legion {
       sharding_collective->contribute(this->sharding_functor);
       if (sharding_collective->is_target() && 
           !sharding_collective->validate(this->sharding_functor))
-      {
-        log_run.error("ERROR: Mapper %s chose different sharding functions "
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Mapper %s chose different sharding functions "
                       "for individual task %s (UID %lld) in %s "
                       "(UID %lld)", mapper->get_mapper_name(), get_task_name(), 
                       get_unique_id(), parent_ctx->get_task_name(), 
-                      parent_ctx->get_unique_id());
-        assert(false); 
-      }
+                      parent_ctx->get_unique_id())
 #endif
       // Now we can do the normal prepipeline stage
       IndividualTask::trigger_prepipeline_stage();
@@ -359,15 +352,10 @@ namespace Legion {
       output.chosen_functor = UINT_MAX;
       mapper->invoke_task_select_sharding_functor(this, input, &output);
       if (output.chosen_functor == UINT_MAX)
-      {
-        log_run.error("Mapper %s failed to pick a valid sharding functor for "
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Mapper %s failed to pick a valid sharding functor for "
                       "task %s (UID %lld)", mapper->get_mapper_name(),
-                      get_task_name(), get_unique_id());
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_MAPPER_OUTPUT);
-      }
+                      get_task_name(), get_unique_id())
       this->sharding_functor = output.chosen_functor;
       sharding_function = 
         repl_ctx->shard_manager->find_sharding_function(sharding_functor);
@@ -377,14 +365,12 @@ namespace Legion {
       sharding_collective->contribute(this->sharding_functor);
       if (sharding_collective->is_target() &&
           !sharding_collective->validate(this->sharding_functor))
-      {
-        log_run.error("ERROR: Mapper %s chose different sharding functions "
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Mapper %s chose different sharding functions "
                       "for index task %s (UID %lld) in %s (UID %lld)", 
                       mapper->get_mapper_name(), get_task_name(), 
                       get_unique_id(), parent_ctx->get_task_name(), 
-                      parent_ctx->get_unique_id());
-        assert(false);
-      }
+                      parent_ctx->get_unique_id())
 #endif
       // If we have a future map then set the sharding function
       if (redop == 0)
@@ -667,16 +653,11 @@ namespace Legion {
       output.chosen_functor = UINT_MAX;
       mapper->invoke_fill_select_sharding_functor(this, input, &output);
       if (output.chosen_functor == UINT_MAX)
-      {
-        log_run.error("Mapper %s failed to pick a valid sharding functor for "
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Mapper %s failed to pick a valid sharding functor for "
                       "index fill in task %s (UID %lld)", 
                       mapper->get_mapper_name(),
-                      parent_ctx->get_task_name(), parent_ctx->get_unique_id());
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_MAPPER_OUTPUT);
-      }
+                      parent_ctx->get_task_name(), parent_ctx->get_unique_id())
       this->sharding_functor = output.chosen_functor;
       sharding_function = 
         repl_ctx->shard_manager->find_sharding_function(sharding_functor);
@@ -685,13 +666,11 @@ namespace Legion {
       sharding_collective->contribute(this->sharding_functor);
       if (sharding_collective->is_target() &&
           !sharding_collective->validate(this->sharding_functor))
-      {
-        log_run.error("ERROR: Mapper %s chose different sharding functions "
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Mapper %s chose different sharding functions "
                       "for index fill in task %s (UID %lld)", 
                       mapper->get_mapper_name(), parent_ctx->get_task_name(),
-                      parent_ctx->get_unique_id());
-        assert(false);
-      }
+                      parent_ctx->get_unique_id())
 #endif
       // Now we can do the normal prepipeline stage
       IndexFillOp::trigger_prepipeline_stage();
@@ -856,15 +835,10 @@ namespace Legion {
       output.chosen_functor = UINT_MAX; 
       mapper->invoke_copy_select_sharding_functor(this, input, &output);
       if (output.chosen_functor == UINT_MAX)
-      {
-        log_run.error("Mapper %s failed to pick a valid sharding functor for "
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Mapper %s failed to pick a valid sharding functor for "
                       "copy in task %s (UID %lld)", mapper->get_mapper_name(),
-                      parent_ctx->get_task_name(), parent_ctx->get_unique_id());
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_MAPPER_OUTPUT);
-      }
+                      parent_ctx->get_task_name(), parent_ctx->get_unique_id())
       this->sharding_functor = output.chosen_functor;
       sharding_function = 
         repl_ctx->shard_manager->find_sharding_function(sharding_functor);
@@ -873,13 +847,11 @@ namespace Legion {
       sharding_collective->contribute(this->sharding_functor);
       if (sharding_collective->is_target() &&
           !sharding_collective->validate(this->sharding_functor))
-      {
-        log_run.error("ERROR: Mapper %s chose different sharding functions "
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Mapper %s chose different sharding functions "
                       "for copy in task %s (UID %lld)", 
                       mapper->get_mapper_name(), parent_ctx->get_task_name(), 
-                      parent_ctx->get_unique_id());
-        assert(false);
-      }
+                      parent_ctx->get_unique_id())
 #endif
       // Now we can do the normal prepipeline stage
       CopyOp::trigger_prepipeline_stage();
@@ -1030,16 +1002,11 @@ namespace Legion {
       output.chosen_functor = UINT_MAX;
       mapper->invoke_copy_select_sharding_functor(this, input, &output);
       if (output.chosen_functor == UINT_MAX)
-      {
-        log_run.error("Mapper %s failed to pick a valid sharding functor for "
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Mapper %s failed to pick a valid sharding functor for "
                       "index copy in task %s (UID %lld)", 
                       mapper->get_mapper_name(),
-                      parent_ctx->get_task_name(), parent_ctx->get_unique_id());
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_MAPPER_OUTPUT);
-      }
+                      parent_ctx->get_task_name(), parent_ctx->get_unique_id())
       this->sharding_functor = output.chosen_functor;
       sharding_function = 
         repl_ctx->shard_manager->find_sharding_function(sharding_functor); 
@@ -1048,13 +1015,11 @@ namespace Legion {
       sharding_collective->contribute(this->sharding_functor);
       if (sharding_collective->is_target() &&
           !sharding_collective->validate(this->sharding_functor))
-      {
-        log_run.error("ERROR: Mapper %s chose different sharding functions "
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Mapper %s chose different sharding functions "
                       "for index copy in task %s (UID %lld)", 
                       mapper->get_mapper_name(), parent_ctx->get_task_name(),
-                      parent_ctx->get_unique_id());
-        assert(false);
-      }
+                      parent_ctx->get_unique_id())
 #endif
       // Now we can do the normal prepipeline stage
       IndexCopyOp::trigger_prepipeline_stage();
@@ -1573,29 +1538,22 @@ namespace Legion {
       output.chosen_functor = UINT_MAX;
       mapper->invoke_partition_select_sharding_functor(this, input, &output);
       if (output.chosen_functor == UINT_MAX)
-      {
-        log_run.error("Mapper %s failed to pick a valid sharding functor for "
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Mapper %s failed to pick a valid sharding functor for "
                       "dependent partition in task %s (UID %lld)", 
                       mapper->get_mapper_name(),
-                      parent_ctx->get_task_name(), parent_ctx->get_unique_id());
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_MAPPER_OUTPUT);
-      }
+                      parent_ctx->get_task_name(), parent_ctx->get_unique_id())
       this->sharding_functor = output.chosen_functor;
 #ifdef DEBUG_LEGION
       assert(sharding_collective != NULL);
       sharding_collective->contribute(this->sharding_functor);
       if (sharding_collective->is_target() &&
           !sharding_collective->validate(this->sharding_functor))
-      {
-        log_run.error("ERROR: Mapper %s chose different sharding functions "
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Mapper %s chose different sharding functions "
                       "for dependent partition op in task %s (UID %lld)", 
                       mapper->get_mapper_name(), parent_ctx->get_task_name(),
-                      parent_ctx->get_unique_id());
-        assert(false);
-      }
+                      parent_ctx->get_unique_id())
 #endif
       // Now we can do the normal prepipeline stage
       DependentPartitionOp::trigger_prepipeline_stage();
@@ -1937,18 +1895,13 @@ namespace Legion {
       mapper->invoke_map_must_epoch(this, &input, &output);
       // Check that we have a sharding ID
       if (output.chosen_functor == UINT_MAX)
-      {
-        log_run.error("Invalid mapper output from invocation of "
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+            "Invalid mapper output from invocation of "
             "'map_must_epoch' on mapper %s. Mapper failed to specify "
             "a valid sharding ID for a must epoch operation in control "
             "replicated context of task %s (UID %lld).",
             mapper->get_mapper_name(), repl_ctx->get_task_name(),
-            repl_ctx->get_unique_id());
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_MAPPER_OUTPUT);
-      }
+            repl_ctx->get_unique_id())
       sharding_functor = output.chosen_functor;
 #ifdef DEBUG_LEGION
       // Check that the sharding IDs are all the same
@@ -1989,16 +1942,11 @@ namespace Legion {
       // Receive processor decisions from shard 0
       if ((repl_ctx->owner_shard->shard_id != 0) &&
           !broadcast->validate_processors(output.task_processors))
-      {
-        log_run.error("ERROR: Mapper %s chose different processor mappings "
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Mapper %s chose different processor mappings "
                       "for 'map_must_epoch' call across different shards in "
                       "task %s (UID %lld).", mapper->get_mapper_name(),
                       parent_ctx->get_task_name(), parent_ctx->get_unique_id());
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_MAPPER_OUTPUT);
-      }
       // Last we need to prune out any tasks which aren't local to our shard
       std::vector<SingleTask*> local_single_tasks;
       for (std::vector<SingleTask*>::const_iterator it = single_tasks.begin();
@@ -3621,17 +3569,12 @@ namespace Legion {
       size_t other_window_size;
       derez.deserialize(other_window_size);
       if (other_window_size != window_size)
-      {
-        log_run.error("ERROR: Context configurations for control replicated "
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Context configurations for control replicated "
                       "task %s were assigned different maximum window sizes "
                       "of %ld and %ld by the mapper which is illegal.",
                       context->owner_task->get_task_name(), window_size,
-                      other_window_size);
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_MAPPER_OUTPUT);
-      }
+                      other_window_size)
       size_t num_bars;
       derez.deserialize(num_bars);
       for (unsigned idx = 0; idx < num_bars; idx++)
