@@ -388,7 +388,8 @@ namespace Realm {
 
     switch(args.id_type) {
     case ID::ID_SPARSITY: {
-      get_runtime()->local_sparsity_map_free_list->alloc_range(args.count, first, last);
+      assert(0);
+      //get_runtime()->local_sparsity_map_free_list->alloc_range(args.count, first, last);
       first_id = ID::make_sparsity(gasnet_mynode(), 0, first);
       last_id = ID::make_sparsity(gasnet_mynode(), 0, last);
       break;
@@ -572,7 +573,7 @@ namespace Realm {
 	local_event_free_list(0), local_barrier_free_list(0),
 	local_reservation_free_list(0), local_index_space_free_list(0),
 	local_proc_group_free_list(0),
-	local_sparsity_map_free_list(0),
+	//local_sparsity_map_free_list(0),
 	run_method_called(false),
 	shutdown_requested(false), shutdown_condvar(shutdown_mutex),
 	core_map(0), core_reservations(0),
@@ -1095,7 +1096,14 @@ namespace Realm {
 	local_reservation_free_list = new ReservationTableAllocator::FreeList(n.reservations, gasnet_mynode());
 	local_index_space_free_list = new IndexSpaceTableAllocator::FreeList(n.index_spaces, gasnet_mynode());
 	local_proc_group_free_list = new ProcessorGroupTableAllocator::FreeList(n.proc_groups, gasnet_mynode());
-	local_sparsity_map_free_list = new SparsityMapTableAllocator::FreeList(n.sparsity_maps, gasnet_mynode());
+
+	local_sparsity_map_free_lists.resize(gasnet_nodes());
+	for(gasnet_node_t i = 0; i < gasnet_nodes(); i++) {
+	  nodes[i].sparsity_maps.resize(gasnet_nodes(), 0);
+	  DynamicTable<SparsityMapTableAllocator> *m = new DynamicTable<SparsityMapTableAllocator>;
+	  nodes[i].sparsity_maps[gasnet_mynode()] = m;
+	  local_sparsity_map_free_lists[i] = new SparsityMapTableAllocator::FreeList(*m, i /*owner_node*/);
+	}
       }
 
       init_endpoints(handlers, hcount, 
@@ -1113,7 +1121,7 @@ namespace Realm {
       // doesn't make any calls between gasnet_init and gasnet_attach
       gasnet_set_waitmode(GASNET_WAIT_BLOCK);
 
-      remote_id_allocator.set_request_size(ID::ID_SPARSITY, 4096, 3072);
+      //remote_id_allocator.set_request_size(ID::ID_SPARSITY, 4096, 3072);
       remote_id_allocator.make_initial_requests();
 
 #ifdef DEADLOCK_TRACE
@@ -2082,11 +2090,31 @@ namespace Realm {
 	assert(0 && "invalid index space sparsity handle");
       }
 
-      Node *n = &nodes[id.sparsity.creator_node];
-      SparsityMapImplWrapper *impl = n->sparsity_maps.lookup_entry(id.sparsity.sparsity_idx,
-								   id.sparsity.creator_node);
-      assert(impl->me == id);
+      Node *n = &nodes[id.sparsity.owner_node];
+      DynamicTable<SparsityMapTableAllocator> *& m = n->sparsity_maps[id.sparsity.creator_node];
+      // might need to construct this (in a lock-free way)
+      if(m == 0) {
+	// construct one and try to swap it in
+	DynamicTable<SparsityMapTableAllocator> *newm = new DynamicTable<SparsityMapTableAllocator>;
+	if(!__sync_bool_compare_and_swap(&m, 0, newm))
+	  delete newm;  // somebody else made it faster
+      }
+      SparsityMapImplWrapper *impl = m->lookup_entry(id.sparsity.sparsity_idx,
+						     id.sparsity.owner_node);
+      // creator node isn't always right, so try to fix it
+      if(impl->me != id) {
+	if(impl->me.sparsity.creator_node == 0)
+	  impl->me.sparsity.creator_node = id.sparsity.creator_node;
+	assert(impl->me == id);
+      }
       return impl;
+    }
+  
+    SparsityMapImplWrapper *RuntimeImpl::get_available_sparsity_impl(gasnet_node_t target_node)
+    {
+      SparsityMapImplWrapper *wrap = local_sparsity_map_free_lists[target_node]->alloc_entry();
+      wrap->me.sparsity.creator_node = gasnet_mynode();
+      return wrap;
     }
 
     ReservationImpl *RuntimeImpl::get_lock_impl(ID id)

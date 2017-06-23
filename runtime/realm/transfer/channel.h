@@ -99,7 +99,7 @@ namespace LegionRuntime{
       Buffer(RegionInstanceImpl::Metadata* metadata, Memory _memory)
             : alloc_offset(metadata->alloc_offset),
               is_ib(false), block_size(metadata->block_size), elmt_size(metadata->elmt_size),
-              buf_size(metadata->size), linearization(metadata->linearization),
+              buf_size(metadata->size), linearization(metadata->linearization_OLD),
               memory(_memory){}
 
       Buffer(off_t _alloc_offset, bool _is_ib,

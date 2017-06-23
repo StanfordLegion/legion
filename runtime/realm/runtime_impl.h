@@ -134,7 +134,10 @@ namespace Realm {
       DynamicTable<ReservationTableAllocator> reservations;
       DynamicTable<IndexSpaceTableAllocator> index_spaces;
       DynamicTable<ProcessorGroupTableAllocator> proc_groups;
-      DynamicTable<SparsityMapTableAllocator> sparsity_maps;
+
+      // sparsity maps can be created by other nodes, so keep a
+      //  map per-creator_node
+      std::vector<DynamicTable<SparsityMapTableAllocator> *> sparsity_maps;
     };
 
     class RemoteIDAllocator {
@@ -235,6 +238,8 @@ namespace Realm {
       IndexSpaceImpl *get_index_space_impl(ID id);
       RegionInstanceImpl *get_instance_impl(ID id);
       SparsityMapImplWrapper *get_sparsity_impl(ID id);
+      SparsityMapImplWrapper *get_available_sparsity_impl(gasnet_node_t target_node);
+
 #ifdef DEADLOCK_TRACE
       void add_thread(const pthread_t *thread);
 #endif
@@ -257,7 +262,10 @@ namespace Realm {
       ReservationTableAllocator::FreeList *local_reservation_free_list;
       IndexSpaceTableAllocator::FreeList *local_index_space_free_list;
       ProcessorGroupTableAllocator::FreeList *local_proc_group_free_list;
-      SparsityMapTableAllocator::FreeList *local_sparsity_map_free_list;
+
+      // keep a free list for each node we allocate maps on (i.e. indexed
+      //   by owner_node)
+      std::vector<SparsityMapTableAllocator::FreeList *> local_sparsity_map_free_lists;
       RemoteIDAllocator remote_id_allocator;
 
       // legacy behavior if Runtime::run() is used

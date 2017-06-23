@@ -290,12 +290,7 @@ namespace Realm {
 
     // get a sparsity ID by round-robin'ing across the nodes that have field data
     int target_node = ID(field_data[colors.size() % field_data.size()].inst).sparsity.creator_node;
-    SparsityMap<N,T> sparsity;
-    if(target_node == gasnet_mynode()) {
-      SparsityMapImplWrapper *wrap = get_runtime()->local_sparsity_map_free_list->alloc_entry();
-      sparsity = wrap->me.convert<SparsityMap<N,T> >();
-    } else
-      sparsity = ID(get_runtime()->remote_id_allocator.get_remote_id(target_node, ID::ID_SPARSITY)).convert<SparsityMap<N,T> >();
+    SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
     subspace.sparsity = sparsity;
 
     colors.push_back(color);

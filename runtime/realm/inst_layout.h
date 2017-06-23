@@ -19,6 +19,7 @@
 #define REALM_INST_LAYOUT_H
 
 #include "indexspace.h"
+#include "serialize.h"
 
 #include <vector>
 #include <map>
@@ -56,6 +57,9 @@ namespace Realm {
     InstanceLayoutGeneric(void);
 
   public:
+    template <typename S>
+    static InstanceLayoutGeneric *deserialize_new(S& deserializer);
+
     virtual ~InstanceLayoutGeneric(void);
 
     // adjusts offsets of all pieces by 'adjust_amt'
@@ -101,6 +105,10 @@ namespace Realm {
 
     InstanceLayoutPiece(void);
     InstanceLayoutPiece(LayoutType _layout_type);
+
+    template <typename S>
+    static InstanceLayoutPiece<N,T> *deserialize_new(S& deserializer);
+
     virtual ~InstanceLayoutPiece(void);
 
     virtual void relocate(size_t base_offset) = 0;
@@ -119,9 +127,17 @@ namespace Realm {
   public:
     AffineLayoutPiece(void);
 
+    template <typename S>
+    static InstanceLayoutPiece<N,T> *deserialize_new(S& deserializer);
+
     virtual void relocate(size_t base_offset);
 
     virtual void print(std::ostream& os) const;
+
+    static Serialization::PolymorphicSerdezSubclass<InstanceLayoutPiece<N,T>, AffineLayoutPiece<N,T> > serdez_subclass;
+
+    template <typename S>
+    bool serialize(S& serializer) const;
 
     ZPoint<N, size_t> strides;
     size_t offset;
@@ -137,6 +153,11 @@ namespace Realm {
 
     void relocate(size_t base_offset);
 
+    template <typename S>
+    bool serialize(S& serializer) const;
+    template <typename S>
+    bool deserialize(S& deserializer);
+
     std::vector<InstanceLayoutPiece<N,T> *> pieces;
     // placeholder for lookup structure (e.g. K-D tree)
   };
@@ -148,6 +169,10 @@ namespace Realm {
   class InstanceLayout : public InstanceLayoutGeneric {
   public:
     InstanceLayout(void);
+
+    template <typename S>
+    static InstanceLayoutGeneric *deserialize_new(S& deserializer);
+
     virtual ~InstanceLayout(void);
 
     // adjusts offsets of pieces to start from 'base_offset'
@@ -161,6 +186,11 @@ namespace Realm {
 
     ZIndexSpace<N,T> space;
     std::vector<InstancePieceList<N,T> > piece_lists;
+
+    static Serialization::PolymorphicSerdezSubclass<InstanceLayoutGeneric, InstanceLayout<N,T> > serdez_subclass;
+
+    template <typename S>
+    bool serialize(S& serializer) const;
   };
 
   // accessor stuff should eventually move to a different header file I think

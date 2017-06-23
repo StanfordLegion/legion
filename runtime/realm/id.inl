@@ -45,6 +45,11 @@ namespace Realm {
     return this->id == rhs.id;
   }
 
+  inline bool ID::operator!=(const ID& rhs) const 
+  {
+    return this->id != rhs.id;
+  }
+
   template <class T>
   T ID::convert(void) const { T thing_to_return; thing_to_return.id = id; return thing_to_return; }
 

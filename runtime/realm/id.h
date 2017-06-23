@@ -272,6 +272,7 @@ namespace Realm {
       ID(T thing_to_get_id_from);
 
       bool operator==(const ID& rhs) const;
+      bool operator!=(const ID& rhs) const;
 
       template <class T>
       T convert(void) const;
