@@ -579,10 +579,12 @@ namespace Legion {
       void retrieve_name(MappingCallInfo *ctx, LogicalPartition handle,
                          const char *&result);
     public:
+      bool is_MPI_interop_configured(void);
       const std::map<int,AddressSpace>& find_forward_MPI_mapping(
                          MappingCallInfo *ctx);
       const std::map<AddressSpace,int>& find_reverse_MPI_mapping(
                          MappingCallInfo *ctx);
+      int find_local_MPI_rank(void);
     protected:
       // Both these must be called while holding the lock
       MappingCallInfo* allocate_call_info(MappingCallKind kind, 

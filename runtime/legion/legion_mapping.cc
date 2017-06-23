@@ -1090,6 +1090,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool MapperRuntime::is_MPI_interop_configured(MapperContext ctx)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->is_MPI_interop_configured();
+    }
+
+    //--------------------------------------------------------------------------
     const std::map<int,AddressSpace>& MapperRuntime::find_forward_MPI_mapping(
                                                               MapperContext ctx)
     //--------------------------------------------------------------------------
@@ -1103,6 +1110,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return ctx->manager->find_reverse_MPI_mapping(ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    int MapperRuntime::find_local_MPI_rank(MapperContext ctx)
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->find_local_MPI_rank();
     }
 
   }; // namespace Mapping

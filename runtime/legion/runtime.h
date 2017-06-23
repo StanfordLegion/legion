@@ -1986,6 +1986,7 @@ namespace Legion {
       void raise_region_exception(Context ctx, PhysicalRegion region, 
                                   bool nuclear);
     public:
+      bool is_MPI_interop_configured(void);
       const std::map<int,AddressSpace>& find_forward_MPI_mapping(void);
       const std::map<AddressSpace,int>& find_reverse_MPI_mapping(void);
       int find_local_MPI_rank(void);

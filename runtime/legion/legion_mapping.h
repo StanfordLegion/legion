@@ -2100,11 +2100,13 @@ namespace Legion {
       //------------------------------------------------------------------------
       // Methods for MPI interoperability
       //------------------------------------------------------------------------
+      bool is_MPI_interop_configured(MapperContext ctx);
       const std::map<int/*rank*/,AddressSpace>& 
                                     find_forward_MPI_mapping(MapperContext ctx); 
 
       const std::map<AddressSpace,int/*rank*/>&
                                     find_reverse_MPI_mapping(MapperContext ctx);
+      int find_local_MPI_rank(MapperContext ctx);
     public:
       //------------------------------------------------------------------------
       // Support for packing tunable values

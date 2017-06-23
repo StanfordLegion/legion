@@ -5719,6 +5719,11 @@ namespace Legion {
       // MPI Interoperability 
       //------------------------------------------------------------------------
       /**
+       * @return true if the MPI interop has been established
+       */
+      bool is_MPI_interop_configured(void);
+
+      /**
        * Return a reference to the mapping from MPI ranks to address spaces.
        * This method is only valid if the static initialization method
        * 'configure_MPI_interoperability' was called on all nodes before 
