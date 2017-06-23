@@ -6467,6 +6467,8 @@ namespace Legion {
     ShardTask::~ShardTask(void)
     //--------------------------------------------------------------------------
     {
+      // Set our shard manager to NULL since we are not supposed to delete it
+      shard_manager = NULL;
       deactivate_single();
     }
 
