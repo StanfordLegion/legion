@@ -1490,11 +1490,11 @@ namespace Legion {
         // Place on replicate on each node by default
         assert(remote_cpus.size() == total_nodes);
         output.task_mappings.resize(total_nodes, def_output);
-        // Check to see if we're interoperating with MPI
-        const std::map<AddressSpace,int/*rank*/> &mpi_interop_mapping = 
-          runtime->find_reverse_MPI_mapping(ctx);
-        if (!mpi_interop_mapping.empty())
+        if (runtime->is_MPI_interop_configured(ctx))
         {
+          // Check to see if we're interoperating with MPI
+          const std::map<AddressSpace,int/*rank*/> &mpi_interop_mapping = 
+            runtime->find_reverse_MPI_mapping(ctx);
           // If we're interoperating with MPI make the shards align with ranks
           assert(mpi_interop_mapping.size() == total_nodes);
           for (std::vector<Processor>::const_iterator it = 
