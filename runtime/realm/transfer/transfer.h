@@ -34,7 +34,13 @@ namespace Realm {
 
   class TransferIterator {
   public:
+    template <typename S>
+    static TransferIterator *deserialize_new(S& deserializer);
+
     virtual ~TransferIterator(void);
+
+    // must be called (and waited on) before iteration is possible
+    virtual Event request_metadata(void);
 
     virtual void reset(void) = 0;
     virtual bool done(void) const = 0;
@@ -76,6 +82,18 @@ namespace Realm {
     virtual void confirm_step(void) = 0;
     virtual void cancel_step(void) = 0;
   };
+
+  template <typename S>
+  inline bool serialize(S& serializer, const TransferIterator& ti)
+  {
+    return Serialization::PolymorphicSerdezHelper<TransferIterator>::serialize(serializer, ti);
+  }
+
+  template <typename S>
+  /*static*/ inline TransferIterator *TransferIterator::deserialize_new(S& deserializer)
+  {
+    return Serialization::PolymorphicSerdezHelper<TransferIterator>::deserialize_new(deserializer);
+  }
 
   class TransferDomain {
   protected:

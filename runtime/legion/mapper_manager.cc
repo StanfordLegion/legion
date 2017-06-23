@@ -19,7 +19,6 @@
 #include "mapper_manager.h"
 #include "legion_instances.h"
 #include "garbage_collection.h"
-#include "logger_message_descriptor.h"
 
 namespace Legion {
   namespace Internal {
@@ -1616,17 +1615,11 @@ namespace Legion {
       VariantImpl *impl = 
         runtime->find_variant_impl(task_id, vid, true/*can fail*/);
       if (impl == NULL)
-      {
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_REQUEST,
+        REPORT_LEGION_ERROR(ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME,
                       "Invalid mapper request: mapper %s requested execution "
                       "constraints for variant %ld in mapper call %s, but "
                       "that variant does not exist.", mapper->get_mapper_name(),
-                      vid, get_mapper_call_name(ctx->kind));
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME);
-      }
+                      vid, get_mapper_call_name(ctx->kind))
       const ExecutionConstraintSet &result = impl->get_execution_constraints();
       resume_mapper_call(ctx);
       return result;
@@ -1641,17 +1634,11 @@ namespace Legion {
       VariantImpl *impl = 
         runtime->find_variant_impl(task_id, vid, true/*can fail*/);
       if (impl == NULL)
-      {
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_REQUEST,
+        REPORT_LEGION_ERROR(ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME,
                       "Invalid mapper request: mapper %s requested task layout "
                       "constraints for variant %ld in mapper call %s, but "
                       "that variant does not exist.", mapper->get_mapper_name(),
-                      vid, get_mapper_call_name(ctx->kind));
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME);
-      }
+                      vid, get_mapper_call_name(ctx->kind))
       const TaskLayoutConstraintSet& result = impl->get_layout_constraints();
       resume_mapper_call(ctx);
       return result;
@@ -1666,18 +1653,12 @@ namespace Legion {
       LayoutConstraints *constraints = 
         runtime->find_layout_constraints(layout_id, true/*can fail*/);
       if (constraints == NULL)
-      {
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_REQUEST,
+        REPORT_LEGION_ERROR(ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME,
                       "Invalid mapper request: mapper %s requested layout "
                       "constraints for layout ID %ld in mapper call %s, but "
                       "that layout constraint ID is invalid.",
                       mapper->get_mapper_name(), layout_id,
-                      get_mapper_call_name(ctx->kind));
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME);
-      }
+                      get_mapper_call_name(ctx->kind))
       resume_mapper_call(ctx);
       return *constraints;
     }
@@ -1715,18 +1696,12 @@ namespace Legion {
       LayoutConstraints *c2 = 
         runtime->find_layout_constraints(set2, true/*can fail*/);
       if ((c1 == NULL) || (c2 == NULL))
-      {
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_REQUEST,
+        REPORT_LEGION_ERROR(ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME,
                       "Invalid mapper request: mapper %s passed layout ID %ld "
                       "to conflict test in mapper call %s, but that layout ID "
                       "is invalid.", mapper->get_mapper_name(), 
                       (c1 == NULL) ? set1 : set2, 
-                      get_mapper_call_name(ctx->kind));
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME);
-      }
+                      get_mapper_call_name(ctx->kind))
       bool result = c1->conflicts(c2);
       resume_mapper_call(ctx);
       return result;
@@ -1743,18 +1718,12 @@ namespace Legion {
       LayoutConstraints *c2 = 
         runtime->find_layout_constraints(target, true/*can fail*/);
       if ((c1 == NULL) || (c2 == NULL))
-      {
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_REQUEST,
+        REPORT_LEGION_ERROR(ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME,
                       "Invalid mapper request: mapper %s passed layout ID %ld "
                       "to entailment test in mapper call %s, but that layout "
                       "ID is invalid.", mapper->get_mapper_name(), 
                       (c1 == NULL) ? source : target, 
-                      get_mapper_call_name(ctx->kind));
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME);
-      }
+                      get_mapper_call_name(ctx->kind))
       bool result = c1->entails(c2);
       resume_mapper_call(ctx);
       return result;
@@ -2641,18 +2610,12 @@ namespace Legion {
         {
           RegionTreeID other_id = regions[idx].get_tree_id();
           if (other_id != tree_id)
-          {
-            REPORT_LEGION_ERROR(ERROR_INVALID_REGION_ARGUMENTS,
+            REPORT_LEGION_ERROR(ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME,
                           "Invalid region arguments passed to %s in "
                           "mapper call %s of mapper %s. All region arguments "
                           "must be from the same region tree (%d != %d).",
                           call_name, get_mapper_call_name(info->kind),
-                          mapper->get_mapper_name(), tree_id, other_id);
-#ifdef DEBUG_LEGION
-            assert(false);
-#endif
-            exit(ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME);
-          }
+                          mapper->get_mapper_name(), tree_id, other_id)
         }
         else
           tree_id = regions[idx].get_tree_id();
@@ -3562,18 +3525,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (executing_call != info)
-      {
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_CONTENT,
                       "Invalid mapper context passed to mapper_rt "
                       "call by mapper %s. Mapper contexts are only valid "
                       "for the mapper call to which they are passed. They "
                       "cannot be stored beyond the lifetime of the "
-                      "mapper call.", mapper->get_mapper_name());
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME);
-      }
+                      "mapper call.", mapper->get_mapper_name())
       // We definitely know we can't start any non_reentrant calls
       // Screw fairness, we care about throughput, see if there are any
       // pending calls to wake up, and then go to sleep ourself
@@ -3741,16 +3698,10 @@ namespace Legion {
       {
         AutoLock m_lock(mapper_lock); 
         if (current_holders.find(info) != current_holders.end())
-        {
           REPORT_LEGION_ERROR(ERROR_INVALID_DUPLICATE_MAPPER,
                         "Invalid duplicate mapper lock request in mapper call "
                         "%s for mapper %s", get_mapper_call_name(info->kind),
-                        mapper->get_mapper_name());
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_INVALID_MAPPER_SYNCHRONIZATION);
-        }
+                        mapper->get_mapper_name())
         switch (lock_state)
         {
           case UNLOCKED_STATE:
@@ -3804,17 +3755,11 @@ namespace Legion {
         std::set<MappingCallInfo*>::iterator finder = 
           current_holders.find(info);
         if (finder == current_holders.end())
-        {
           REPORT_LEGION_ERROR(ERROR_INVALID_UNLOCK_MAPPER,
                         "Invalid unlock mapper call with no prior lock call "
                         "in mapper call %s for mapper %s",
                         get_mapper_call_name(info->kind),
-                        mapper->get_mapper_name());
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_INVALID_MAPPER_SYNCHRONIZATION);
-        }
+                        mapper->get_mapper_name())
         current_holders.erase(finder);
         // See if we can now give the lock to someone else
         if (current_holders.empty())

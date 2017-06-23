@@ -222,11 +222,6 @@ terra load_circuit(runtime : c.legion_runtime_t,
   var fa_node_subckt =
     c.legion_physical_region_get_field_accessor_array(all_nodes[4], all_nodes_fields[4])
   var all_nodes_ispace = c.legion_physical_region_get_logical_region(all_nodes[0]).index_space
-  do
-    var node_allocator = c.legion_index_allocator_create(runtime, ctx, all_nodes_ispace)
-    c.legion_index_allocator_alloc(node_allocator, conf.num_pieces * conf.nodes_per_piece)
-    c.legion_index_allocator_destroy(node_allocator)
-  end
   --var first_nodes : &c.legion_ptr_t =
   --  [&c.legion_ptr_t](c.malloc(conf.num_pieces * sizeof(c.legion_ptr_t)))
   var piece_node_ptrs : &&c.legion_ptr_t =
@@ -288,11 +283,6 @@ terra load_circuit(runtime : c.legion_runtime_t,
       c.legion_physical_region_get_field_accessor_array(all_wires[17 + i], all_wires_fields[17 + i])
   end
   var all_wires_ispace = c.legion_physical_region_get_logical_region(all_wires[0]).index_space
-  do
-    var wire_allocator = c.legion_index_allocator_create(runtime, ctx, all_wires_ispace)
-    c.legion_index_allocator_alloc(wire_allocator, conf.num_pieces * conf.wires_per_piece)
-    c.legion_index_allocator_destroy(wire_allocator)
-  end
   do
     var itr = c.legion_index_iterator_create(runtime, ctx, all_wires_ispace)
     for n = 0, conf.num_pieces do
@@ -571,7 +561,7 @@ where
 do
   var dt : float = DELTAT
   var recip_dt : float = 1.0 / dt
-  __demand(__vectorize)
+  --__demand(__vectorize)
   for w in rw do
     var temp_v : float[WIRE_SEGMENTS + 1]
     var temp_i : float[WIRE_SEGMENTS]

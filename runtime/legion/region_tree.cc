@@ -27,7 +27,6 @@
 #include "legion_replication.h"
 #include "interval_tree.h"
 #include "rectangle_set.h"
-#include "logger_message_descriptor.h"
 
 #include "region_tree.inl"
 
@@ -694,14 +693,8 @@ namespace Legion {
       ApUserEvent space_ready = *(reinterpret_cast<ApUserEvent*>(
                          const_cast<ApEvent*>(&child_node->index_space_ready)));
       if (space_ready.has_triggered())
-      {
         REPORT_LEGION_ERROR(ERROR_INVALID_PENDING_CHILD,
-          "Invalid pending child!");
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_PENDING_CHILD);
-      }
+          "Invalid pending child!")
       Runtime::trigger_event(space_ready, op->get_completion_event());
       return child_node->compute_pending_space(op, handles, is_union);
     }
@@ -833,14 +826,8 @@ namespace Legion {
       {
         // We know the answer here
         if (type_tag != NT_TemplateHelper::encode_tag<1,coord_t>())
-        {
           REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
-            "Dynamic type mismatch in 'get_index_space_color'");
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_DYNAMIC_TYPE_MISMATCH);
-        }
+            "Dynamic type mismatch in 'get_index_space_color'")
         Realm::ZPoint<1,coord_t> *color = 
           (Realm::ZPoint<1,coord_t>*)realm_color;
         *color = Realm::ZPoint<1,coord_t>(0);
@@ -882,17 +869,11 @@ namespace Legion {
     {
       IndexSpaceNode *node = get_node(handle);
       if (node->parent == NULL)
-      {
         REPORT_LEGION_ERROR(ERROR_PARENT_INDEX_PARTITION_REQUESTED,
           "Parent index partition requested for "
                             "index space %x with no parent. Use "
                             "has_parent_index_partition to check "
-                            "before requesting a parent.", handle.id);
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_PARENT_REQUEST);
-      }
+                            "before requesting a parent.", handle.id)
       return node->parent->handle;
     }
 
@@ -908,15 +889,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return get_node(handle)->depth;
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpaceAllocator* RegionTreeForest::get_index_space_allocator(
-                                             IndexSpace handle, UniqueID ctx_id)
-    //--------------------------------------------------------------------------
-    {
-      IndexSpaceNode *node = get_node(handle);
-      return node->get_allocator(ctx_id);
     }
 
     //--------------------------------------------------------------------------
@@ -1083,14 +1055,8 @@ namespace Legion {
     {
       FieldSpaceNode *node = get_node(handle);
       if (!node->has_field(fid))
-      {
         REPORT_LEGION_ERROR(ERROR_FIELD_SPACE_HAS_NO_FIELD,
-          "FieldSpace %x has no field %d", handle.id, fid);
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_FIELD_ID);
-      }
+          "FieldSpace %x has no field %d", handle.id, fid)
       return node->get_field_size(fid);
     }
 
@@ -1220,14 +1186,8 @@ namespace Legion {
       {
         // We know the answer here
         if (type_tag != NT_TemplateHelper::encode_tag<1,coord_t>())
-        {
           REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
-            "Dynamic type mismatch in 'get_logical_region_color'");
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_DYNAMIC_TYPE_MISMATCH);
-        }
+            "Dynamic type mismatch in 'get_logical_region_color'")
         Realm::ZPoint<1,coord_t> *color = 
           (Realm::ZPoint<1,coord_t>*)realm_color;
         *color = Realm::ZPoint<1,coord_t>(0);
@@ -1270,7 +1230,6 @@ namespace Legion {
     {
       RegionNode *node = get_node(handle);
       if (node->parent == NULL)
-      {
         REPORT_LEGION_ERROR(ERROR_PARENT_LOGICAL_PARTITION_REQUESTED,
           "Parent logical partition requested for "
                             "logical region (%x,%x,%d) with no parent. "
@@ -1278,12 +1237,7 @@ namespace Legion {
                             "before requesting a parent.", 
                             handle.index_space.id,
                             handle.field_space.id,
-                            handle.tree_id);
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_PARENT_REQUEST);
-      }
+                            handle.tree_id)
       return node->parent->handle;
     }
 
@@ -3496,14 +3450,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!space.exists())
-      {
         REPORT_LEGION_ERROR(ERROR_INVALID_REQUEST_FOR_INDEXSPACE,
-          "Invalid request for IndexSpace NO_SPACE.");
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_INDEX_SPACE_ENTRY);
-      }
+          "Invalid request for IndexSpace NO_SPACE.")
       {
         AutoLock l_lock(lookup_lock,1,false/*exclusive*/); 
         std::map<IndexSpace,IndexSpaceNode*>::const_iterator finder = 
@@ -3514,14 +3462,8 @@ namespace Legion {
       // Couldn't find it, so send a request to the owner node
       AddressSpace owner = IndexSpaceNode::get_owner_space(space, runtime);
       if (owner == runtime->address_space)
-      {
         REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
-          "Unable to find entry for index space %x.", space.id);
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_INDEX_SPACE_ENTRY);
-      }
+          "Unable to find entry for index space %x.", space.id)
       // Retake the lock and get something to wait on
       RtEvent wait_on;
       {
@@ -3553,15 +3495,9 @@ namespace Legion {
       std::map<IndexSpace,IndexSpaceNode*>::const_iterator finder = 
           index_nodes.find(space);
       if (finder == index_nodes.end())
-      {
         REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
           "Unable to find entry for index space %x."
-                        "This is definitely a runtime bug.", space.id);
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_INDEX_SPACE_ENTRY);
-      }
+                        "This is definitely a runtime bug.", space.id)
       return finder->second;
     }
 
@@ -3570,14 +3506,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!part.exists())
-      {
         REPORT_LEGION_ERROR(ERROR_INVALID_REQUEST_INDEXPARTITION,
-          "Invalid request for IndexPartition NO_PART.");
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_INDEX_SPACE_ENTRY);
-      }
+          "Invalid request for IndexPartition NO_PART.")
       {
         AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
         std::map<IndexPartition,IndexPartNode*>::const_iterator finder =
@@ -3588,14 +3518,8 @@ namespace Legion {
       // Couldn't find it, so send a request to the owner node
       AddressSpace owner = IndexPartNode::get_owner_space(part, runtime);
       if (owner == runtime->address_space)
-      {
         REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
-          "Unable to find entry for index partition %x.",part.id);
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_INDEX_PART_ENTRY);
-      }
+          "Unable to find entry for index partition %x.",part.id)
       RtEvent wait_on;
       {
         // Retake the lock in exclusive mode and make
@@ -3627,15 +3551,9 @@ namespace Legion {
       std::map<IndexPartition,IndexPartNode*>::const_iterator finder = 
         index_parts.find(part);
       if (finder == index_parts.end())
-      {
         REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
           "Unable to find entry for index partition %x. "
-                        "This is definitely a runtime bug.", part.id);
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_INDEX_PART_ENTRY);
-      }
+                        "This is definitely a runtime bug.", part.id)
       return finder->second;
     }
 
@@ -3644,14 +3562,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!space.exists())
-      {
         REPORT_LEGION_ERROR(ERROR_INVALID_REQUEST_FIELDSPACE,
-          "Invalid request for FieldSpace NO_SPACE.");
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_INDEX_SPACE_ENTRY);
-      }
+          "Invalid request for FieldSpace NO_SPACE.")
       {
         AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
         std::map<FieldSpace,FieldSpaceNode*>::const_iterator finder = 
@@ -3662,14 +3574,8 @@ namespace Legion {
       // Couldn't find it, so send a request to the owner node
       AddressSpaceID owner = FieldSpaceNode::get_owner_space(space, runtime); 
       if (owner == runtime->address_space)
-      {
         REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
-          "Unable to find entry for field space %x.", space.id);
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_FIELD_SPACE_ENTRY);
-      }
+          "Unable to find entry for field space %x.", space.id)
       RtEvent wait_on;
       {
         // Retake the lock in exclusive mode and 
@@ -3701,15 +3607,9 @@ namespace Legion {
       std::map<FieldSpace,FieldSpaceNode*>::const_iterator finder = 
         field_nodes.find(space);
       if (finder == field_nodes.end())
-      {
         REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
           "Unable to find entry for field space %x. "
-                        "This is definitely a runtime bug.", space.id);
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_FIELD_SPACE_ENTRY);
-      }
+                        "This is definitely a runtime bug.", space.id)
       return finder->second;
     }
 
@@ -3719,14 +3619,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!handle.exists())
-      {
         REPORT_LEGION_ERROR(ERROR_INVALID_REQUEST_LOGICALREGION,
-          "Invalid request for LogicalRegion NO_REGION.");
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_INDEX_SPACE_ENTRY);
-      }
+          "Invalid request for LogicalRegion NO_REGION.")
       // Check to see if the node already exists
       bool has_top_level_region;
       {
@@ -3823,14 +3717,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!handle.exists())
-      {
         REPORT_LEGION_ERROR(ERROR_INVALID_REQUEST_LOGICALPARTITION,
-          "Invalid request for LogicalPartition NO_PART.");
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_INDEX_SPACE_ENTRY);
-      }
+          "Invalid request for LogicalPartition NO_PART.")
       // Check to see if the node already exists
       {
         AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
@@ -3858,14 +3746,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (tid == 0)
-      {
         REPORT_LEGION_ERROR(ERROR_INVALID_REQUEST_TREE_ID,
-          "Invalid request for tree ID 0 which is never a tree ID");
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_TREE_ENTRY);
-      }
+          "Invalid request for tree ID 0 which is never a tree ID")
       {
         AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
         std::map<RegionTreeID,RegionNode*>::const_iterator finder = 
@@ -3876,14 +3758,8 @@ namespace Legion {
       // Couldn't find it, so send a request to the owner node
       AddressSpaceID owner = RegionTreeNode::get_owner_space(tid, runtime);
       if (owner == runtime->address_space)
-      {
         REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
-          "Unable to find entry for region tree ID %d", tid);
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_TREE_ENTRY);
-      }
+          "Unable to find entry for region tree ID %d", tid)
       RtEvent wait_on;
       {
         // Retake the lock in exclusive mode and check to
@@ -3914,18 +3790,12 @@ namespace Legion {
       std::map<RegionTreeID,RegionNode*>::const_iterator finder = 
           tree_nodes.find(tid);
       if (finder == tree_nodes.end())
-      {
         REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_TOPLEVEL_TREE,
           "Unable to find top-level tree entry for "
                          "region tree %d.  This is either a runtime "
                          "bug or requires Legion fences if names are "
                          "being returned out of the context in which"
-                         "they are being created.", tid);
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_TREE_ENTRY);
-      }
+                         "they are being created.", tid)
       return finder->second;
     }
 
@@ -3943,14 +3813,8 @@ namespace Legion {
       // Couldn't find it, so send a request to the owner node
       AddressSpace owner = IndexSpaceNode::get_owner_space(space, runtime);
       if (owner == runtime->address_space)
-      {
         REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
-          "Unable to find entry for index space %x.", space.id);
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_INDEX_SPACE_ENTRY);
-      }
+          "Unable to find entry for index space %x.", space.id)
       AutoLock l_lock(lookup_lock);
       // Check to make sure we didn't loose the race
       std::map<IndexSpace,IndexSpaceNode*>::const_iterator finder = 
@@ -4629,17 +4493,11 @@ namespace Legion {
               // It's not mutable so check to make 
               // sure that the bits are the same
               if (size != finder->second.size)
-              {
                 REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG,
                   "Inconsistent Semantic Tag value "
                               "for tag %ld with different sizes of %zd"
                               " and %zd for index tree node", 
-                              tag, size, finder->second.size);
-#ifdef DEBUG_LEGION
-                assert(false);
-#endif
-                exit(ERROR_INCONSISTENT_SEMANTIC_TAG);       
-              }
+                              tag, size, finder->second.size)
               // Otherwise do a bitwise comparison
               {
                 const char *orig = (const char*)finder->second.buffer;
@@ -4648,17 +4506,11 @@ namespace Legion {
                 {
                   char diff = orig[idx] ^ next[idx];
                   if (diff)
-                  {
                     REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG,
                     "Inconsistent Semantic Tag value "
                                   "for tag %ld with different values at"
                                   "byte %d for index tree node, %x != %x",
-                                  tag, idx, orig[idx], next[idx]);
-#ifdef DEBUG_LEGION
-                    assert(false);
-#endif
-                    exit(ERROR_INCONSISTENT_SEMANTIC_TAG);
-                  }
+                                  tag, idx, orig[idx], next[idx])
                 }
               }
               added = false;
@@ -4766,11 +4618,7 @@ namespace Legion {
           return false;
         REPORT_LEGION_ERROR(ERROR_INVALID_SEMANTIC_TAG,
           "invalid semantic tag %ld for "
-                      "index tree node", tag);
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_SEMANTIC_TAG);
+                      "index tree node", tag)
       }
       else
       {
@@ -4788,12 +4636,8 @@ namespace Legion {
         if (can_fail)
           return false;
         REPORT_LEGION_ERROR(ERROR_INVALID_SEMANTIC_TAG,
-        "invalid semantic tag %ld for "
-                            "index tree node", tag);   
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_SEMANTIC_TAG);
+          "invalid semantic tag %ld for "
+                            "index tree node", tag)
       }
       result = finder->second.buffer;
       size = finder->second.size;
@@ -4812,7 +4656,7 @@ namespace Legion {
         handle(h), parent(par), index_space_ready(ready), 
         realm_index_space_set(Runtime::create_rt_user_event()), 
         tight_index_space_set(Runtime::create_rt_user_event()),
-        tight_index_space(false), allocator(NULL)
+        tight_index_space(false)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4824,7 +4668,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpaceNode::IndexSpaceNode(const IndexSpaceNode &rhs)
       : IndexTreeNode(), handle(IndexSpace::NO_SPACE), parent(NULL), 
-        index_space_ready(ApEvent::NO_AP_EVENT), allocator(NULL)
+        index_space_ready(ApEvent::NO_AP_EVENT)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4835,11 +4679,6 @@ namespace Legion {
     IndexSpaceNode::~IndexSpaceNode(void)
     //--------------------------------------------------------------------------
     {
-      if (allocator != NULL)
-      {
-        free(allocator);
-        allocator = NULL;
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -5071,13 +4910,9 @@ namespace Legion {
       {
         if (remote_handle.exists())
           return context->get_node(remote_handle);
-        REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
+        REPORT_LEGION_ERROR(ERROR_INVALID_PARTITION_COLOR,
           "Unable to find entry for color %lld in "
-                        "index space %x.", c, handle.id);
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_PARTITION_COLOR);
+                        "index space %x.", c, handle.id)
       }
       RtUserEvent ready_event = Runtime::create_rt_user_event();
       IndexPartition child_handle = IndexPartition::NO_PART;
@@ -5539,49 +5374,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpaceAllocator* IndexSpaceNode::get_allocator(UniqueID ctx_id)
-    //--------------------------------------------------------------------------
-    {
-      bool valid_request = false; // can't be valid if we're not the owner
-      if (get_owner_space() == context->runtime->address_space)
-      {
-        valid_request = true;
-        if (allocator == NULL)
-        {
-          IndexSpaceAllocator *alloc = create_allocator(ctx_id);
-          AutoLock n_lock(node_lock);
-          if (allocator != NULL)
-          {
-            // lost the race
-            valid_request = false;
-            delete alloc;
-          }
-          else
-            allocator = alloc;
-        }
-        else
-          valid_request = (allocator->ctx_id == ctx_id);
-      }
-      if (!valid_request)
-      {
-        // If we ever get here we've then we've violated our backwards
-        // compatibility support of only providing one allocator ever
-        // for a given index space
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_DUPLICATE_REQUEST_ALLOCATOR,
-          "Illegal duplicate request for an allocator of index "
-                      "tree %d. Allocators are only provided for backwards "
-                      "compatbility and there is only permitted to be for "
-                      "each index space tree throughout the lifetime of the "
-                      "program.", handle.get_tree_id());
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_ILLEGAL_ALLOCATOR_REQUEST);
-      }
-      return allocator;
-    }
-
-    //--------------------------------------------------------------------------
     /*static*/ void IndexSpaceNode::handle_colors_request(
           RegionTreeForest *context, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -5920,12 +5712,9 @@ namespace Legion {
           return finder->second;
       }
       if (!color_space->contains_color(c, true/*report error*/))
-      {
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_INDEX_SPACE_COLOR);
-      }
+        REPORT_LEGION_ERROR(ERROR_INVALID_INDEX_SPACE_COLOR,
+                            "Invalid color space color for child %lld "
+                            "of partition %d", c, handle.get_id())
       // Check to see if we're the owner space this child, in the
       // common case the owner space is whichever node made the 
       // partition, but in the control replication case, we use the
@@ -6460,8 +6249,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(node != NULL);
 #endif
-      derez.deserialize(node->has_complete);
-      derez.deserialize(node->complete);
       node->add_creation_source(source);
       size_t num_semantic;
       derez.deserialize(num_semantic);
@@ -6711,17 +6498,11 @@ namespace Legion {
             {
               // Check to make sure that the bits are the same
               if (size != finder->second.size)
-              {
                 REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG,
                   "Inconsistent Semantic Tag value "
                               "for tag %ld with different sizes of %zd"
                               " and %zd for index tree node", 
-                              tag, size, finder->second.size);
-#ifdef DEBUG_LEGION
-                assert(false);
-#endif
-                exit(ERROR_INCONSISTENT_SEMANTIC_TAG);       
-              }
+                              tag, size, finder->second.size)
               // Otherwise do a bitwise comparison
               {
                 const char *orig = (const char*)finder->second.buffer;
@@ -6730,17 +6511,11 @@ namespace Legion {
                 {
                   char diff = orig[idx] ^ next[idx];
                   if (diff)
-                  {
                     REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG,
                     "Inconsistent Semantic Tag value "
                                   "for tag %ld with different values at"
                                   "byte %d for index tree node, %x != %x", 
-                                  tag, idx, orig[idx], next[idx]);
-#ifdef DEBUG_LEGION
-                    assert(false);
-#endif
-                    exit(ERROR_INCONSISTENT_SEMANTIC_TAG);
-                  }
+                                  tag, idx, orig[idx], next[idx])
                 }
               }
               added = false;
@@ -6808,17 +6583,11 @@ namespace Legion {
             {
               // Check to make sure that the bits are the same
               if (size != finder->second.size)
-              {
                 REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG,
-                "Inconsistent Semantic Tag value "
+                              "Inconsistent Semantic Tag value "
                               "for tag %ld with different sizes of %zd"
                               " and %zd for index tree node", 
-                              tag, size, finder->second.size);
-#ifdef DEBUG_LEGION
-                assert(false);
-#endif
-                exit(ERROR_INCONSISTENT_SEMANTIC_TAG);       
-              }
+                              tag, size, finder->second.size)
               // Otherwise do a bitwise comparison
               {
                 const char *orig = (const char*)finder->second.buffer;
@@ -6827,17 +6596,11 @@ namespace Legion {
                 {
                   char diff = orig[idx] ^ next[idx];
                   if (diff)
-                  {
                     REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG,
                                         "Inconsistent Semantic Tag value "
                                   "for tag %ld with different values at"
                                   "byte %d for index tree node, %x != %x", 
-                                  tag, idx, orig[idx], next[idx]);
-#ifdef DEBUG_LEGION
-                    assert(false);
-#endif
-                    exit(ERROR_INCONSISTENT_SEMANTIC_TAG);
-                  }
+                                  tag, idx, orig[idx], next[idx])
                 }
               }
               added = false;
@@ -6943,12 +6706,8 @@ namespace Legion {
         if (can_fail)
           return false;
         REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG,
-          "invalid semantic tag %ld for "
-                      "field space %d", tag, handle.id);
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_SEMANTIC_TAG);
+                      "invalid semantic tag %ld for "
+                      "field space %d", tag, handle.id)
       }
       else
       {
@@ -6977,11 +6736,7 @@ namespace Legion {
           return false;
         REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG,
                             "invalid semantic tag %ld for "
-                            "field space %d", tag, handle.id);
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_SEMANTIC_TAG);
+                            "field space %d", tag, handle.id)
       }
       result = finder->second.buffer;
       size = finder->second.size;
@@ -7051,11 +6806,7 @@ namespace Legion {
           return false;
         REPORT_LEGION_ERROR(ERROR_INVALID_SEMANTIC_TAG,
           "invalid semantic tag %ld for field %d "
-                      "of field space %d", tag, fid, handle.id);
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_SEMANTIC_TAG);
+                      "of field space %d", tag, fid, handle.id)
       }
       else
       {
@@ -7087,11 +6838,7 @@ namespace Legion {
           return false;
         REPORT_LEGION_ERROR(ERROR_INVALID_SEMANTIC_TAG,
                             "invalid semantic tag %ld for field %d "
-                            "of field space %d", tag, fid, handle.id);
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_SEMANTIC_TAG);
+                            "of field space %d", tag, fid, handle.id)
       }
       result = finder->second.buffer;
       size = finder->second.size;
@@ -7379,29 +7126,17 @@ namespace Legion {
         // We're the owner so do the field allocation
         AutoLock n_lock(node_lock);
         if (fields.find(fid) != fields.end())
-        {
           REPORT_LEGION_ERROR(ERROR_ILLEGAL_DUPLICATE_FIELD_ID,
             "Illegal duplicate field ID %d used by the "
-                          "application in field space %d", fid, handle.id);
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_DUPLICATE_FIELD_ID);
-        }
+                          "application in field space %d", fid, handle.id)
         // Find an index in which to allocate this field  
         int result = allocate_index();
         if (result < 0)
-        {
           REPORT_LEGION_ERROR(ERROR_EXCEEDED_MAXIMUM_NUMBER_ALLOCATED_FIELDS,
             "Exceeded maximum number of allocated fields for "
                           "field space %x. Change MAX_FIELDS from %d and "
                           "related macros at the top of legion_config.h and "
-                          "recompile.", handle.id, MAX_FIELDS);
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_MAX_FIELD_OVERFLOW);
-        }
+                          "recompile.", handle.id, MAX_FIELDS)
         index = result;
         fields[fid] = FieldInfo(size, index, serdez_id);
         if (!!creation_set)
@@ -7474,29 +7209,17 @@ namespace Legion {
         {
           FieldID fid = fids[idx];
           if (fields.find(fid) != fields.end())
-          {
             REPORT_LEGION_ERROR(ERROR_ILLEGAL_DUPLICATE_FIELD_ID,
               "Illegal duplicate field ID %d used by the "
-                            "application in field space %d", fid, handle.id);
-#ifdef DEBUG_LEGION
-            assert(false);
-#endif
-            exit(ERROR_DUPLICATE_FIELD_ID);
-          }
+                            "application in field space %d", fid, handle.id)
           // Find an index in which to allocate this field  
           int result = allocate_index();
           if (result < 0)
-          {
             REPORT_LEGION_ERROR(ERROR_EXCEEDED_MAXIMUM_NUMBER_ALLOCATED_FIELDS,
               "Exceeded maximum number of allocated fields for "
                             "field space %x. Change MAX_FIELDS from %d and "
                             "related macros at the top of legion_config.h and "
-                            "recompile.", handle.id, MAX_FIELDS);
-#ifdef DEBUG_LEGION
-            assert(false);
-#endif
-            exit(ERROR_MAX_FIELD_OVERFLOW);
-          }
+                            "recompile.", handle.id, MAX_FIELDS)
           unsigned index = result;
           fields[fid] = FieldInfo(sizes[idx], index, serdez_id);
           indexes[idx] = index;
@@ -7703,15 +7426,9 @@ namespace Legion {
         {
           FieldID fid = fids[idx];
           if (fields.find(fid) != fields.end())
-          {
             REPORT_LEGION_ERROR(ERROR_ILLEGAL_DUPLICATE_FIELD_ID,
               "Illegal duplicate field ID %d used by the "
-                            "application in field space %d", fid, handle.id);
-#ifdef DEBUG_LEGION
-            assert(false);
-#endif
-            exit(ERROR_DUPLICATE_FIELD_ID);
-          }
+                            "application in field space %d", fid, handle.id)
           fields[fid] = FieldInfo(sizes[idx], new_indexes[idx], serdez_id);
         }
       }
@@ -8859,17 +8576,11 @@ namespace Legion {
             {
               // Check to make sure that the bits are the same
               if (size != finder->second.size)
-              {
                 REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG,
                   "Inconsistent Semantic Tag value "
                               "for tag %ld with different sizes of %zd"
                               " and %zd for region tree node", 
-                              tag, size, finder->second.size);
-#ifdef DEBUG_LEGION
-                assert(false);
-#endif
-                exit(ERROR_INCONSISTENT_SEMANTIC_TAG);       
-              }
+                              tag, size, finder->second.size)
               // Otherwise do a bitwise comparison
               {
                 const char *orig = (const char*)finder->second.buffer;
@@ -8878,17 +8589,11 @@ namespace Legion {
                 {
                   char diff = orig[idx] ^ next[idx];
                   if (diff)
-                  {
                     REPORT_LEGION_ERROR(ERROR_INCONSISTENT_SEMANTIC_TAG,
                       "Inconsistent Semantic Tag value "
                                   "for tag %ld with different values at"
                                   "byte %d for region tree node, %x != %x", 
-                                  tag, idx, orig[idx], next[idx]);
-#ifdef DEBUG_LEGION
-                    assert(false);
-#endif
-                    exit(ERROR_INCONSISTENT_SEMANTIC_TAG);
-                  }
+                                  tag, idx, orig[idx], next[idx])
                 }
               }
               added = false;
@@ -8994,12 +8699,8 @@ namespace Legion {
         if (can_fail)
           return false;
         REPORT_LEGION_ERROR(ERROR_INVALID_SEMANTIC_TAG,
-          "invalid semantic tag %ld for "
-                      "region tree node", tag);
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_SEMANTIC_TAG);
+                      "invalid semantic tag %ld for "
+                      "region tree node", tag)
       }
       else
       {
@@ -9016,12 +8717,8 @@ namespace Legion {
         if (can_fail)
           return false;
         REPORT_LEGION_ERROR(ERROR_INVALID_SEMANTIC_TAG,
-        "invalid semantic tag %ld for "
-                            "region tree node", tag);   
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_INVALID_SEMANTIC_TAG);
+                            "invalid semantic tag %ld for "
+                            "region tree node", tag)
       }
       result = finder->second.buffer;
       size = finder->second.size;

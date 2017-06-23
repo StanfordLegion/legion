@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_partition_by_field3.rg:25: type mismatch in argument 1: expected field of type int32 but got bool
+-- type_mismatch_partition_by_field3.rg:25: type mismatch in argument 1: expected field of type ptr but got bool
 --   var p = partition(r, c)
 --                   ^
 

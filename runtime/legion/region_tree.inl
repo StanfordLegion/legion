@@ -197,15 +197,10 @@ namespace Legion {
       {
         IndexSpaceNode *node = context->get_node(handles[idx]);
         if (handles[idx].get_type_tag() != handle.get_type_tag())
-        {
-          log_run.error("Dynamic type mismatch in 'union_index_spaces' "
+          REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
+                        "Dynamic type mismatch in 'union_index_spaces' "
                         "performed in task %s (UID %lld)",
-                        op->get_task_name(), op->get_unique_id());
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_DYNAMIC_TYPE_MISMATCH);
-        }
+                        op->get_task_name(), op->get_unique_id())
         IndexSpaceNodeT<DIM,T> *space = 
           static_cast<IndexSpaceNodeT<DIM,T>*>(node);
         ApEvent ready = space->get_realm_index_space(spaces[idx], false);
@@ -237,15 +232,10 @@ namespace Legion {
       {
         IndexSpaceNode *node = context->get_node(handles[idx]);
         if (handles[idx].get_type_tag() != handle.get_type_tag())
-        {
-          log_run.error("Dynamic type mismatch in 'intersect_index_spaces' "
+          REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
+                        "Dynamic type mismatch in 'intersect_index_spaces' "
                         "performed in task %s (UID %lld)",
-                        op->get_task_name(), op->get_unique_id());
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_DYNAMIC_TYPE_MISMATCH);
-        }
+                        op->get_task_name(), op->get_unique_id())
         IndexSpaceNodeT<DIM,T> *space = 
           static_cast<IndexSpaceNodeT<DIM,T>*>(node);
         ApEvent ready = space->get_realm_index_space(spaces[idx], false);
@@ -272,15 +262,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (left.get_type_tag() != right.get_type_tag())
-      {
-        log_run.error("Dynamic type mismatch in 'subtract_index_spaces' "
+        REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
+                      "Dynamic type mismatch in 'subtract_index_spaces' "
                       "performed in task %s (UID %lld)",
-                      op->get_task_name(), op->get_unique_id());
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_DYNAMIC_TYPE_MISMATCH);
-      }
+                      op->get_task_name(), op->get_unique_id())
       IndexSpaceNodeT<DIM,T> *left_node = 
         static_cast<IndexSpaceNodeT<DIM,T>*>(context->get_node(left));
       IndexSpaceNodeT<DIM,T> *right_node = 
@@ -339,18 +324,16 @@ namespace Legion {
         {
           TaskContext *ctx = op->get_context();
           if (is_union)
-            log_run.error("Dynamic type mismatch in 'create_index_space_union' "
+            REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
+                          "Dynamic type mismatch in 'create_index_space_union' "
                           "performed in task %s (UID %lld)",
-                          ctx->get_task_name(), ctx->get_unique_id());
+                          ctx->get_task_name(), ctx->get_unique_id())
           else
-            log_run.error("Dynamic type mismatch in "
+            REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
+                          "Dynamic type mismatch in "
                           "'create_index_space_intersection' performed in "
                           "task %s (UID %lld)", ctx->get_task_name(),
-                          ctx->get_unique_id());
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_DYNAMIC_TYPE_MISMATCH);
+                          ctx->get_unique_id())
         }
         IndexSpaceNodeT<DIM,T> *space = 
           static_cast<IndexSpaceNodeT<DIM,T>*>(node);
@@ -395,18 +378,16 @@ namespace Legion {
       {
         TaskContext *ctx = op->get_context();
         if (is_union)
-          log_run.error("Dynamic type mismatch in 'create_index_space_union' "
+          REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
+                        "Dynamic type mismatch in 'create_index_space_union' "
                         "performed in task %s (UID %lld)",
-                        ctx->get_task_name(), ctx->get_unique_id());
+                        ctx->get_task_name(), ctx->get_unique_id())
         else
-          log_run.error("Dynamic type mismatch in "
+          REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
+                        "Dynamic type mismatch in "
                         "'create_index_space_intersection' performed in "
                         "task %s (UID %lld)", ctx->get_task_name(),
-                        ctx->get_unique_id());
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_DYNAMIC_TYPE_MISMATCH);
+                        ctx->get_unique_id())
       }
       IndexPartNode *partition = context->get_node(part_handle);
       std::set<ApEvent> preconditions;
@@ -476,14 +457,11 @@ namespace Legion {
       if (init.get_type_tag() != handle.get_type_tag())
       {
         TaskContext *ctx = op->get_context();
-        log_run.error("Dynamic type mismatch in "
+        REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
+                      "Dynamic type mismatch in "
                       "'create_index_space_difference' performed in "
                       "task %s (%lld)", ctx->get_task_name(), 
-                      ctx->get_unique_id());
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_DYNAMIC_TYPE_MISMATCH);
+                      ctx->get_unique_id())
       }
       std::set<ApEvent> preconditions;
       std::vector<Realm::ZIndexSpace<DIM,T> > spaces(handles.size());
@@ -493,14 +471,11 @@ namespace Legion {
         if (handles[idx].get_type_tag() != handle.get_type_tag())
         {
           TaskContext *ctx = op->get_context();
-          log_run.error("Dynamic type mismatch in "
+          REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
+                        "Dynamic type mismatch in "
                         "'create_index_space_difference' performed in "
                         "task %s (%lld)", ctx->get_task_name(), 
-                        ctx->get_unique_id());
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_DYNAMIC_TYPE_MISMATCH);
+                        ctx->get_unique_id())
         }
         IndexSpaceNodeT<DIM,T> *space = 
           static_cast<IndexSpaceNodeT<DIM,T>*>(node);
@@ -543,13 +518,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (type_tag != handle.get_type_tag())
-      {
-        log_run.error("Dynamic type mismatch in 'get_index_space_domain'");
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_DYNAMIC_TYPE_MISMATCH);
-      }
+        REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
+            "Dynamic type mismatch in 'get_index_space_domain'")
       Realm::ZIndexSpace<DIM,T> *target = 
         static_cast<Realm::ZIndexSpace<DIM,T>*>(realm_is);
       // No need to wait since we're waiting for it to be tight
@@ -574,30 +544,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (type_tag != handle.get_type_tag())
-      {
-        log_run.error("Dynamic type mismatch in 'safe_cast'");
-#ifdef DEBUG_LEGION
-        assert(false);
-#endif
-        exit(ERROR_DYNAMIC_TYPE_MISMATCH);
-      }
+        REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
+            "Dynamic type mismatch in 'safe_cast'")
       const Realm::ZPoint<DIM,T> *point = 
         static_cast<const Realm::ZPoint<DIM,T>*>(realm_point);
       Realm::ZIndexSpace<DIM,T> test_space;
       // Wait for a tight space on which to perform the test
       get_realm_index_space(test_space, true/*tight*/);
       return test_space.contains(*point);
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    IndexSpaceAllocator* IndexSpaceNodeT<DIM,T>::create_allocator(
-                                                                UniqueID ctx_id)
-    //--------------------------------------------------------------------------
-    {
-      Realm::ZIndexSpace<DIM,T> dom_space;
-      get_realm_index_space(dom_space, true/*tight*/);
-      return new IndexSpaceAllocator(Domain(dom_space), ctx_id);
     }
 
     //--------------------------------------------------------------------------
@@ -737,13 +691,8 @@ namespace Legion {
       if (!space.contains(point))
       {
         if (report_error)
-        {
-          log_run.error("Invalid color request");
-#ifdef DEBUG_LEGION
-          assert(false);
-#endif
-          exit(ERROR_INVALID_INDEX_SPACE_COLOR);
-        }
+          REPORT_LEGION_ERROR(ERROR_INVALID_INDEX_SPACE_COLOR,
+              "Invalid color request")
         return false;
       }
       else
@@ -1099,7 +1048,7 @@ namespace Legion {
     {
       if (realm_index_space_set.has_triggered())
       {
-        AutoLock n_lock(node_lock,1,false/*exclusive*/);
+        // No need for the lock, held by the caller
         rez.serialize<size_t>(sizeof(realm_index_space));
         rez.serialize(realm_index_space);
       }

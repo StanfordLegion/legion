@@ -19,7 +19,7 @@
 
 import "regent"
 
-task f(r : region(int))
+task f(r : region(ptr))
   var c = ispace(ptr, 5)
   var p = partition(r, c)
 end

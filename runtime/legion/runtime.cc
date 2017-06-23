@@ -44,7 +44,6 @@
 #include "test_mapper.h"
 #include "replay_mapper.h"
 #include "debug_mapper.h"
-#include "logger_message_descriptor.h"
 
 #include <unistd.h> // sleep for warnings
 
@@ -11438,17 +11437,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return forest->get_parent_logical_partition(handle);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexAllocator Runtime::create_index_allocator(Context ctx, 
-                                                   IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT(
-            "Illegal dummy context create index allocator!");
-      return ctx->create_index_allocator(forest, handle); 
     }
 
     //--------------------------------------------------------------------------

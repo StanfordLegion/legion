@@ -53,13 +53,11 @@ function read_region_data(src_t, dst_t)
 end
 
 -- simple helper to allocate a large block of elements in a region
+-- No longer necessary to explicitly allocate elements
 terra allocate_elements(runtime : c.legion_runtime_t,
 			ctx : c.legion_context_t,
 			region : c.legion_logical_region_t,
-			count : uint64)
-  var i = c.legion_index_allocator_create(runtime, ctx, region.index_space)
-  c.legion_index_allocator_alloc(i, count)
-  c.legion_index_allocator_destroy(i)
+			count : uint64) 
 end
 
 helpers = { 

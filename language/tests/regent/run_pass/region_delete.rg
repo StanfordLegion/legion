@@ -40,7 +40,7 @@ task g() : int
   c.legion_coloring_destroy(rc)
   var r0 = p[0]
   var r0c = c.legion_coloring_create()
-  c.legion_coloring_add_point(rc, 0, c.legion_ptr_t { value = 0 })
+  c.legion_coloring_add_point(r0c, 0, c.legion_ptr_t { value = 0 })
   var p0 = partition(disjoint, r0, r0c)
   c.legion_coloring_destroy(r0c)
   var r1 = p0[0]

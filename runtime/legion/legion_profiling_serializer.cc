@@ -1,4 +1,5 @@
 #include "legion_profiling_serializer.h"
+#include "runtime.h"
 //#include "legion_ops.h"
 //#include "legion_tasks.h"
 #include "lowlevel_config.h"
@@ -16,10 +17,8 @@ namespace Legion {
     {
       f = lp_fopen(filename, "wb");
       if (!f)
-      {
-        printf("Unable to open legion logfile %s for writing!", filename.c_str());
-        exit(-1);
-      }
+        REPORT_LEGION_ERROR(ERROR_INVALID_PROFILER_FILE,
+            "Unable to open legion logfile %s for writing!", filename.c_str())
       writePreamble();
     }
 

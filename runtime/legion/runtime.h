@@ -26,6 +26,30 @@
 #include "legion_allocation.h"
 #include "garbage_collection.h"
 
+#define REPORT_LEGION_FATAL(code, fmt, ...)               \
+{                                                         \
+char message[4096];                                       \
+snprintf(message, 4096, fmt, ##__VA_ARGS__);              \
+Legion::Internal::Runtime::report_fatal_message(          \
+code, __FILE__, __LINE__, message);                       \
+}
+
+#define REPORT_LEGION_ERROR(code, fmt, ...)               \
+{                                                         \
+char message[4096];                                       \
+snprintf(message, 4096, fmt, ##__VA_ARGS__);              \
+Legion::Internal::Runtime::report_error_message(          \
+code, __FILE__, __LINE__, message);                       \
+}
+
+#define REPORT_LEGION_WARNING(code, fmt, ...)             \
+{                                                         \
+char message[4096];                                       \
+snprintf(message, 4096, fmt, ##__VA_ARGS__);              \
+Legion::Internal::Runtime::report_warning_message(        \
+code, __FILE__, __LINE__, message);                       \
+}
+
 namespace Legion {
 #ifndef DISABLE_PARTITION_SHIM
   // An internal namespace with some classes for providing help
@@ -1876,7 +1900,6 @@ namespace Legion {
                                                     LogicalRegion handle);
       LogicalPartition get_parent_logical_partition(LogicalRegion handle);
     public:
-      IndexAllocator create_index_allocator(Context ctx, IndexSpace handle);
       FieldAllocator create_field_allocator(Context ctx, FieldSpace handle);
       ArgumentMap create_argument_map(void);
     public:

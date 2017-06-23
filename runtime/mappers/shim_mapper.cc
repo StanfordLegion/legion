@@ -15,7 +15,6 @@
 
 #include "legion.h"
 #include "shim_mapper.h"
-#include "logger_message_descriptor.h"
 
 #include <cstdlib>
 #include <cassert>
@@ -1072,8 +1071,7 @@ namespace Legion {
 				      TunableID tid, MappingTagID tag)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_FATAL(LEGION_FATAL_SHIM_MAPPER_SUPPORT,
-                     "Shim mapper doesn't support any tunables directly!");
+      log_shim.error("Shim mapper doesn't support any tunables directly!");
       assert(0);
       //should never happen, but function needs return statement
       return(STATIC_MAX_FAILED_MAPPINGS);

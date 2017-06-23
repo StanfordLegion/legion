@@ -243,23 +243,6 @@ namespace Legion {
         return ip;
       }
 
-      static legion_index_allocator_t
-      wrap(IndexAllocator allocator)
-      {
-        legion_index_allocator_t allocator_;
-        allocator_.index_space = wrap(allocator.index_space);
-        allocator_.allocator = wrap(allocator.allocator);
-        return allocator_;
-      }
-
-      static IndexAllocator
-      unwrap(legion_index_allocator_t allocator_)
-      {
-        IndexAllocator allocator(unwrap(allocator_.index_space),
-                                 unwrap(allocator_.allocator));
-        return allocator;
-      } 
-
       static legion_field_space_t
       wrap(FieldSpace fs)
       {

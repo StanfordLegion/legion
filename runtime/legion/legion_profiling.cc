@@ -537,29 +537,27 @@ namespace Legion {
       profiler_lock = Reservation::create_reservation();
 
       if (!strcmp(serializer_type, "binary")) {
-        if (prof_logfile == NULL) {
-          fprintf(stderr, "ERROR: Please specify -lg:prof_logfile "
-              "<logfile_name> when running with -lg:serializer binary");
-          exit(-1);
-        }
+        if (prof_logfile == NULL) 
+          REPORT_LEGION_ERROR(ERROR_UNKNOWN_PROFILER_OPTION,
+              "ERROR: Please specify -lg:prof_logfile "
+              "<logfile_name> when running with -lg:serializer binary")
         Processor current = Processor::get_executing_processor();
         std::stringstream ss;
         ss << prof_logfile << current.address_space();
         serializer = new LegionProfBinarySerializer(ss.str());
       } else if (!strcmp(serializer_type, "ascii")) {
-        if (prof_logfile != NULL) {
-          fprintf(stderr, "ERROR: You should not specify -lg:prof_logfile "
+        if (prof_logfile != NULL)
+          REPORT_LEGION_ERROR(ERROR_MISSING_PROFILER_OPTION,
+                          "ERROR: You should not specify -lg:prof_logfile "
                           "<logfile_name> when running with -lg:serializer "
                           "ascii\n"
                           "       legion_prof output will be written to "
-                          "-logfile <logfile_name> instead");
-          exit(-1);
-        }
+                          "-logfile <logfile_name> instead")
         serializer = new LegionProfASCIISerializer();
       } else {
-        fprintf(stderr, "Invalid serializer (%s), must be 'binary' "
-                "or 'ascii'\n", serializer_type);
-        exit(-1);
+        REPORT_LEGION_ERROR(ERROR_INVALID_PROFILER_SERIALIZER,
+                "Invalid serializer (%s), must be 'binary' "
+                "or 'ascii'\n", serializer_type)
       }
 
       for (unsigned idx = 0; idx < num_meta_tasks; idx++)

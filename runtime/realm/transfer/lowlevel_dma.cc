@@ -3411,6 +3411,9 @@ namespace Realm {
   class WrappingFIFOIterator : public TransferIterator {
   public:
     WrappingFIFOIterator(size_t _base, size_t _size);
+
+    template <typename S>
+    static TransferIterator *deserialize_new(S& deserializer);
       
     virtual void reset(void);
     virtual bool done(void) const;
@@ -3419,6 +3422,11 @@ namespace Realm {
 			bool tentative = false);
     virtual void confirm_step(void);
     virtual void cancel_step(void);
+
+    static Serialization::PolymorphicSerdezSubclass<TransferIterator, WrappingFIFOIterator> serdez_subclass;
+
+    template <typename S>
+    bool serialize(S& serializer) const;
 
   protected:
     size_t base, size, offset, prev_offset;
@@ -3431,6 +3439,16 @@ namespace Realm {
     , offset(0)
     , tentative_valid(false)
   {}
+
+  template <typename S>
+  /*static*/ TransferIterator *WrappingFIFOIterator::deserialize_new(S& deserializer)
+  {
+    size_t base, size;
+    if((deserializer >> base) && (deserializer >> size))
+      return new WrappingFIFOIterator(base, size);
+    else
+      return 0;
+  }   
 
   void WrappingFIFOIterator::reset(void)
   {
@@ -3482,6 +3500,14 @@ namespace Realm {
     assert(tentative_valid);
     offset = prev_offset;
     tentative_valid = false;
+  }
+
+  /*static*/ Serialization::PolymorphicSerdezSubclass<TransferIterator, WrappingFIFOIterator> WrappingFIFOIterator::serdez_subclass;
+
+  template <typename S>
+  bool WrappingFIFOIterator::serialize(S& serializer) const
+  {
+    return (serializer << base) && (serializer << size);
   }
 
     void CopyRequest::perform_new_dma(Memory src_mem, Memory dst_mem)
@@ -3538,9 +3564,9 @@ namespace Realm {
 							     iter_flags);
 
         assert(mem_path.size() - 1 == sub_path.size());
-	assert(ibvec.empty() || (0 && "SJT: intermediate buffer functionality temporarily disabled"));
+	//assert(ibvec.empty() || (0 && "SJT: intermediate buffer functionality temporarily disabled"));
         for (unsigned idx = 0; idx < mem_path.size(); idx ++) {
-          log_new_dma.info("mem_path[%d]: node(%llu), memory(%d)", idx, ID(mem_path[idx]).memory.owner_node, mem_path[idx].kind());
+          log_new_dma.info() << "mem_path[" << idx << "]: " << mem_path[idx] << " kind=" << mem_path[idx].kind();
           if (idx == 0) {
             //pre_buf = src_buf;
           } else {
@@ -3573,20 +3599,28 @@ namespace Realm {
 	    XferDesID next_xd_guid;
 	    Memory xd_dst_mem;
 	    TransferIterator *xd_dst_iter;
+	    size_t next_max_rw_gap;
 	    if(idx == sub_path.size()) {
 	      // last step writes to target
 	      next_xd_guid = XferDes::XFERDES_NO_GUID;
 	      xd_dst_mem = dst_inst.get_location();
 	      xd_dst_iter = dst_iter;
+	      next_max_rw_gap = 0;  // doesn't matter
 	    } else {
 	      // writes to intermediate buffer
 	      next_xd_guid = sub_path[idx];
 	      xd_dst_mem = ibvec[idx - 1].memory;
 	      xd_dst_iter = new WrappingFIFOIterator(ibvec[idx - 1].offset,
 						     ibvec[idx - 1].size);
+	      next_max_rw_gap = ibvec[idx - 1].size;
 	    }
 
             XferDes::XferKind kind = get_xfer_des(mem_path[idx - 1], mem_path[idx]);
+	    // special case: gasnet reads must always be done from the node that
+	    //  owns the destination memory
+	    if(kind == XferDes::XFER_GASNET_READ)
+	      xd_target_node = ID(xd_dst_mem).memory.owner_node;
+
             XferOrder::Type order;
             if (mem_path.size() == 2)
               order = XferOrder::ANY_ORDER;
@@ -3618,7 +3652,10 @@ namespace Realm {
 	    LegionRuntime::LowLevel::
 	      create_xfer_des(this, gasnet_mynode(), xd_target_node,
 			      xd_guid, pre_xd_guid,
-			    next_xd_guid, mark_started,
+			      next_xd_guid, next_max_rw_gap,
+			      ((idx == 1) ? 0 : ibvec[idx - 2].offset),
+			      ((idx == 1) ? 0 : ibvec[idx - 2].size),
+			      mark_started,
 			    //pre_buf, cur_buf, domain, oasvec_src,
 			    xd_src_mem, xd_dst_mem, xd_src_iter, xd_dst_iter,
 			    16 * 1024 * 1024/*max_req_size*/, 100/*max_nr*/,

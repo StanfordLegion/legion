@@ -165,14 +165,6 @@ extern "C" {
   } legion_index_partition_t;
 
   /**
-   * @see Legion::IndexAllocator
-   */
-  typedef struct legion_index_allocator_t {
-    legion_index_space_t index_space;
-    legion_index_space_allocator_t allocator;
-  } legion_index_allocator_t;
-
-  /**
    * @see Legion::FieldSpace
    */
   typedef struct legion_field_space_t {
@@ -1501,39 +1493,6 @@ extern "C" {
   // -----------------------------------------------------------------------
   // Allocator and Argument Map Operations
   // -----------------------------------------------------------------------
-
-  /**
-   * @return Caller takes ownership of return value.
-   *
-   * @see Legion::Runtime::create_index_allocator()
-   */
-  legion_index_allocator_t
-  legion_index_allocator_create(legion_runtime_t runtime,
-                                legion_context_t ctx,
-                                legion_index_space_t handle);
-
-  /**
-   * @param handle Caller must have ownership of parameter `handle`.
-   *
-   * @see Legion::IndexAllocator::~IndexAllocator()
-   */
-  void
-  legion_index_allocator_destroy(legion_index_allocator_t handle);
-
-  /**
-   * @see Legion::IndexAllocator::alloc()
-   */
-  legion_ptr_t
-  legion_index_allocator_alloc(legion_index_allocator_t allocator,
-                               size_t num_elements /* = 1 */);
-
-  /**
-   * @see Legion::IndexAllocator::free()
-   */
-  void
-  legion_index_allocator_free(legion_index_allocator_t allocator,
-                              legion_ptr_t ptr,
-                              size_t num_elements /* = 1 */);
 
   /**
    * @return Caller takes ownership of return value.

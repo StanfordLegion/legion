@@ -554,6 +554,7 @@ function codegen.slice_task(rules, automata, signature, mapper_state_type)
     var singleton : c.legion_domain_t
     var dim = [point_var].dim
     singleton.dim = dim
+    singleton.is_id = 0
     for idx = 0, dim do
       var c = [point_var].point_data[idx]
       singleton.rect_data[idx] = c

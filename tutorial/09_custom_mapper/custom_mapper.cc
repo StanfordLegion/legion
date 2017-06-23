@@ -709,7 +709,7 @@ void top_level_task(const Task *task,
   }
   int num_subregions =
     runtime->select_tunable_value(ctx, SUBREGION_TUNABLE,
-                                  PARTITIONING_MAPPER_ID).get_result<int>();
+                                  PARTITIONING_MAPPER_ID).get_result<size_t>();
 
   printf("Running daxpy for %d elements...\n", num_elements);
   printf("Partitioning data into %d sub-regions...\n", num_subregions);

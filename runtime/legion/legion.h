@@ -320,55 +320,6 @@ namespace Legion {
     //==========================================================================
 
     /**
-     * \class IndexAllocator
-     * Index allocators provide objects for doing allocation on
-     * index spaces.  They must be explicitly created by the
-     * runtime so that they can be linked back to the runtime.
-     * Index allocators can be passed by value to functions
-     * and stored in data structures, but should not escape 
-     * the enclosing context in which they were created.
-     *
-     * Index space allocators operate on a single index space
-     * which is immutable.  Separate index space allocators
-     * must be made to perform allocations on different index
-     * spaces.
-     *
-     * @see Runtime
-     */
-    class IndexAllocator : public Unserializable<IndexAllocator> {
-    public:
-      IndexAllocator(void);
-      IndexAllocator(const IndexAllocator &allocator);
-      ~IndexAllocator(void);
-    protected:
-      FRIEND_ALL_RUNTIME_CLASSES
-      // Only the Runtime should be able to make these
-      IndexAllocator(IndexSpace space, IndexSpaceAllocator *allocator);
-    public:
-      IndexAllocator& operator=(const IndexAllocator &allocator);
-      inline bool operator<(const IndexAllocator &rhs) const;
-      inline bool operator==(const IndexAllocator &rhs) const;
-    public:
-      /**
-       * @param num_elements number of elements to allocate
-       * @return pointer to the first element in the allocated block
-       */
-      inline ptr_t alloc(unsigned num_elements = 1);
-      /**
-       * @param ptr pointer to the first element to free
-       * @param num_elements number of elements to be freed
-       */
-      inline void free(ptr_t ptr, unsigned num_elements = 1);
-      /**
-       * @return the index space associated with this allocator
-       */
-      inline IndexSpace get_index_space(void) const { return index_space; }
-    private:
-      IndexSpace index_space;
-      IndexSpaceAllocator *allocator;
-    };
-
-    /**
      * \class FieldAllocator
      * Field allocators provide objects for performing allocation on
      * field spaces.  They must be explicitly created by the runtime so
@@ -4794,19 +4745,6 @@ namespace Legion {
       //------------------------------------------------------------------------
       // Allocator and Argument Map Operations 
       //------------------------------------------------------------------------
-      /**
-       * @deprecated
-       * Create an index allocator object for a given index space
-       * This method is deprecated becasue index spaces no longer support
-       * dynamic allocation. This will still work only if there is exactly
-       * one allocator made for the index space throughout the duration
-       * of its lifetime.
-       * @param ctx enclosing task context
-       * @param handle for the index space to create an allocator
-       * @return a new index space allocator for the given index space
-       */
-      LEGION_DEPRECATED("Dynamic index allocation is no longer supported.")
-      IndexAllocator create_index_allocator(Context ctx, IndexSpace handle);
 
       /**
        * Create a field space allocator object for the given field space
