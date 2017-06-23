@@ -296,7 +296,11 @@ namespace Legion {
       output.map_locally = false;
       // Control replicate the top-level task in multi-node settings
       // otherwise we do no control replication
+#ifdef DEBUG_CTRL_REPL
+      if (task.get_depth() == 0)
+#else
       if ((total_nodes > 1) && (task.get_depth() == 0))
+#endif
         output.replicate = true;
       else
         output.replicate = false;
@@ -1511,24 +1515,52 @@ namespace Legion {
         else
         {
           // Otherwise we can just assign shards based on address space
-          for (std::vector<Processor>::const_iterator it = 
-                remote_cpus.begin(); it != remote_cpus.end(); it++)
+          if (total_nodes > 1)
           {
-            AddressSpace space = it->address_space();
-            assert(space < output.task_mappings.size());
-            output.task_mappings[space].target_procs.push_back(*it);
+            for (std::vector<Processor>::const_iterator it = 
+                  remote_cpus.begin(); it != remote_cpus.end(); it++)
+            {
+              AddressSpace space = it->address_space();
+              assert(space < output.task_mappings.size());
+              output.task_mappings[space].target_procs.push_back(*it);
+            }
           }
+#ifdef DEBUG_CTRL_REPL
+          else
+          {
+            output.task_mappings.resize(local_cpus.size());
+            unsigned index = 0;
+            for (std::vector<Processor>::const_iterator it = 
+                  local_cpus.begin(); it != local_cpus.end(); it++, index++)
+              output.task_mappings[index].target_procs.push_back(*it);
+          }
+#endif
         }
         // Indicate that we want to do control replication by filling
         // in the control replication map with our chosen processors
         // Also set our chosen variant
-        output.control_replication_map.resize(total_nodes);
-        for (unsigned idx = 0; idx < total_nodes; idx++)
+        if (total_nodes > 1)
         {
-          output.task_mappings[idx].chosen_variant = chosen.variant;
-          output.control_replication_map[idx] = 
-            output.task_mappings[idx].target_procs[0];
+          output.control_replication_map.resize(total_nodes);
+          for (unsigned idx = 0; idx < total_nodes; idx++)
+          {
+            output.task_mappings[idx].chosen_variant = chosen.variant;
+            output.control_replication_map[idx] = 
+              output.task_mappings[idx].target_procs[0];
+          }
         }
+#ifdef DEBUG_CTRL_REPL
+        else
+        {
+          output.control_replication_map.resize(local_cpus.size());
+          for (unsigned idx = 0; idx < local_cpus.size(); idx++)
+          {
+            output.task_mappings[idx].chosen_variant = chosen.variant;
+            output.control_replication_map[idx] = 
+              output.task_mappings[idx].target_procs[0];
+          }
+        }
+#endif
       }
       else
       {
