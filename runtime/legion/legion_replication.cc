@@ -2285,7 +2285,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(!local_shards.empty());
-      assert(address_spaces = NULL);
+      assert(address_spaces == NULL);
 #endif
       address_spaces = new ShardMapping();
       address_spaces->add_reference();
