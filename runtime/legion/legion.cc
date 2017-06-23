@@ -1992,7 +1992,8 @@ namespace Legion {
     TaskVariantRegistrar::TaskVariantRegistrar(void)
       : task_id(0), generator(NULL), global_registration(true), 
         task_variant_name(NULL), leaf_variant(false), 
-        inner_variant(false), idempotent_variant(false)
+        inner_variant(false), idempotent_variant(false), 
+        replicable_variant(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -2003,7 +2004,8 @@ namespace Legion {
                                                const char *name/*= NULL*/)
       : task_id(tid), generator(ctx), global_registration(global), 
         task_variant_name(name), leaf_variant(false), 
-        inner_variant(false), idempotent_variant(false)
+        inner_variant(false), idempotent_variant(false), 
+        replicable_variant(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -2015,7 +2017,8 @@ namespace Legion {
 					       GeneratorContext ctx/*=NULL*/)
       : task_id(task_id), generator(ctx), global_registration(global), 
         task_variant_name(variant_name), leaf_variant(false), 
-        inner_variant(false), idempotent_variant(false)
+        inner_variant(false), idempotent_variant(false),
+        replicable_variant(false)
     //--------------------------------------------------------------------------
     {
     }
