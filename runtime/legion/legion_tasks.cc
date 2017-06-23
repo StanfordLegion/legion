@@ -5140,7 +5140,7 @@ namespace Legion {
       }
       // If we succeeded in mapping and everything was mapped
       // then we get to mark that we are done mapping
-      if (is_leaf() && !has_virtual_instances() && (shard_manager == NULL))
+      if ((shard_manager == NULL) && is_leaf() && !has_virtual_instances())
       {
         RtEvent applied_condition;
         if (!map_applied_conditions.empty())
