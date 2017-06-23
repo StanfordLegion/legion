@@ -5527,7 +5527,7 @@ namespace Legion {
         if (finder != color_map.end())
           return finder->second;
       }
-      if (!color_space->contains_color(c, true/*report error*/))
+      if (!color_space->contains_color(c, false/*report error*/))
         REPORT_LEGION_ERROR(ERROR_INVALID_INDEX_SPACE_COLOR,
                             "Invalid color space color for child %lld "
                             "of partition %d", c, handle.get_id())
@@ -6057,7 +6057,7 @@ namespace Legion {
       ApUserEvent partial_pending;
       derez.deserialize(partial_pending);
       IndexSpaceNode *parent_node = context->get_node(parent);
-      IndexSpaceNode *color_space_node = context->get_node(parent);
+      IndexSpaceNode *color_space_node = context->get_node(color_space);
 #ifdef DEBUG_LEGION
       assert(parent_node != NULL);
       assert(color_space_node != NULL);
