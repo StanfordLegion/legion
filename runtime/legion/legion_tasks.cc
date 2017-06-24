@@ -3488,6 +3488,8 @@ namespace Legion {
             output.control_replication_map[shard_idx];
           ShardTask *shard = shard_manager->create_shard(shard_idx, target);
           shard->clone_single_from(this);
+          // Shard tasks are always effectively mapped locally
+          shard->map_locally = true;
           // Finalize the mapping output
           shard->finalize_map_task_output(input,output.task_mappings[shard_idx],
                                           must_epoch_owner, valid_instances);
@@ -6444,19 +6446,23 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ShardTask::ShardTask(Runtime *rt, ShardManager *man,
+    ShardTask::ShardTask(Runtime *rt, ShardManager *manager,
                          ShardID id, Processor proc)
-      : SingleTask(rt), manager(man), shard_id(id)
+      : SingleTask(rt), shard_id(id)
     //--------------------------------------------------------------------------
     {
       activate_single();
       target_proc = proc;
       current_proc = proc;
+      shard_manager = manager;
+      if (manager->original_task != NULL)
+        remote_owner_uid = 
+          manager->original_task->get_context()->get_unique_id();
     }
     
     //--------------------------------------------------------------------------
     ShardTask::ShardTask(const ShardTask &rhs)
-      : SingleTask(NULL), manager(NULL), shard_id(0)
+      : SingleTask(NULL), shard_id(0)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -6592,7 +6598,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // First invoke the method on the shard manager 
-      manager->trigger_task_complete(true/*local*/);
+      shard_manager->trigger_task_complete(true/*local*/);
       // Then do the normal clean-up operations
       // Remove profiling our guard and trigger the profiling event if necessary
       if ((__sync_add_and_fetch(&outstanding_profiling_requests, -1) == 0) &&
@@ -6617,7 +6623,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // First invoke the method on the shard manager
-      manager->trigger_task_commit(true/*local*/);
+      shard_manager->trigger_task_commit(true/*local*/);
       // Commit this operation
       // Dont' deactivate ourselves, the shard manager will do that for us
       commit_operation(false/*deactivate*/, profiling_reported);
@@ -6661,6 +6667,10 @@ namespace Legion {
       derez.deserialize(remote_owner_uid);
       unpack_version_infos(derez, version_infos, ready_events);
       unpack_restrict_infos(derez, restrict_infos, ready_events);
+      // Figure out what our parent context is
+      parent_ctx = runtime->find_context(remote_owner_uid);
+      // Set our parent task for the user
+      parent_task = parent_ctx->get_task();
       return false;
     }
 
@@ -6706,7 +6716,7 @@ namespace Legion {
     void ShardTask::handle_future(const void *res, size_t res_size, bool owned)
     //--------------------------------------------------------------------------
     {
-      manager->handle_future(res, res_size, owned);
+      shard_manager->handle_future(res, res_size, owned);
     }
 
     //--------------------------------------------------------------------------
@@ -6721,7 +6731,7 @@ namespace Legion {
                                          this, mapped_precondition);
         return;
       }
-      manager->handle_post_mapped(true/*local*/);
+      shard_manager->handle_post_mapped(true/*local*/);
       if (Runtime::legion_spy_enabled)
         execution_context->log_created_requirements();
       // Now we can complete this shard task
@@ -6746,16 +6756,36 @@ namespace Legion {
         // If we have a control replication context then we do the special path
         ReplicateContext *repl_ctx = new ReplicateContext(runtime, this,
             v->is_inner(), regions, parent_req_indexes,
-            virtual_mapped, unique_op_id, manager);
+            virtual_mapped, unique_op_id, shard_manager);
         if (mapper == NULL)
           mapper = runtime->find_mapper(current_proc, map_id);
         repl_ctx->configure_context(mapper);
+        // Save the execution context early since we'll need it
+        execution_context = repl_ctx;
+        // Wait until all the other shards are ready too
+        shard_manager->complete_startup_initialization();
         // The replicate contexts all need to sync up to exchange resources 
         repl_ctx->exchange_common_resources();
         return repl_ctx;
       }
       else // No control replication so do the normal thing
         return SingleTask::initialize_inner_execution_context(v);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardTask::launch_shard(void)
+    //--------------------------------------------------------------------------
+    {
+      // If it is a leaf then we can mark it mapped right now, 
+      // otherwise wait for the call back, note we already know
+      // that it has no virtual instances because it is a 
+      // replicated task
+      if (is_leaf())
+        complete_mapping();
+      // Speculation can always be resolved here
+      resolve_speculation();
+      // Then launch the task for execution
+      launch_task();
     }
 
     //--------------------------------------------------------------------------

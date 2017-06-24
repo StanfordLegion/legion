@@ -870,6 +870,9 @@ namespace Legion {
     public:
       inline size_t size(void) const { return address_spaces.size(); }
       inline void resize(size_t size) { address_spaces.resize(size); }
+    public:
+      void pack_mapping(Serializer &rez) const;
+      void unpack_mapping(Deserializer &derez);
     protected:
       std::vector<AddressSpaceID> address_spaces;
     };
@@ -889,7 +892,7 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_CONTROL_REP_LAUNCH_TASK_ID;
       public:
-        ShardManager *manager;
+        ShardTask *shard;
       };
       struct ShardManagerDeleteArgs :
         public LgTaskArgs<ShardManagerDeleteArgs> {
@@ -901,7 +904,8 @@ namespace Legion {
     public:
       ShardManager(Runtime *rt, ReplicationID repl_id, 
                    bool control, size_t total_shards,
-                   AddressSpaceID owner_space, SingleTask *original = NULL);
+                   AddressSpaceID owner_space, SingleTask *original = NULL,
+                   RtBarrier startup_barrier = RtBarrier::NO_RT_BARRIER);
       ShardManager(const ShardManager &rhs);
       ~ShardManager(void);
     public:
@@ -918,11 +922,12 @@ namespace Legion {
       ShardTask* create_shard(ShardID id, Processor target);
       void extract_event_preconditions(const std::deque<InstanceSet> &insts);
       void launch(void);
-      RtEvent distribute_shards(AddressSpaceID target,
-                                const std::vector<ShardTask*> &shards,
-                                RtEvent start_execution);
+      void distribute_shards(AddressSpaceID target,
+                             const std::vector<ShardTask*> &shards);
       void unpack_shards_and_launch(Deserializer &derez);
-      void launch_shards(void) const;
+      void launch_shard(ShardTask *task,
+                        RtEvent precondition = RtEvent::NO_RT_EVENT) const;
+      void complete_startup_initialization(void) const;
     public:
       void handle_post_mapped(bool local);
       void handle_future(const void *res, size_t res_size, bool owned);
@@ -981,6 +986,7 @@ namespace Legion {
       unsigned    remote_constituents;
       bool        first_future;
     protected:
+      RtBarrier startup_barrier;
       ApBarrier pending_partition_barrier;
       ApBarrier future_map_barrier;
     protected:
