@@ -1143,6 +1143,7 @@ namespace Realm {
 	} else {
 	  field_idx++;
 	  iter.reset(iter.space);
+	  cur_point = iter.rect.lo;
 	}
       } else
 	cur_point = next_point;
@@ -1161,6 +1162,7 @@ namespace Realm {
       } else {
 	field_idx++;
 	iter.reset(iter.space);
+	cur_point = iter.rect.lo;
       }
     } else
       cur_point = next_point;
