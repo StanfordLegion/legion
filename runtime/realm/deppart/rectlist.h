@@ -71,7 +71,8 @@ namespace Realm {
 
     const std::vector<ZRect<N,T> >& convert_to_vector(void);
 
-    std::vector<ZRect<N,T> > as_vector;
+    //std::vector<ZRect<N,T> > as_vector;
+    DenseRectangleList<N,T> as_vector;
     //std::multimap<T, ZRect<N,T> > as_mmap;
   };
     
