@@ -3860,6 +3860,9 @@ namespace Legion {
       // we just do the launch directly from the shard manager
       if ((shard_manager != NULL) && !is_shard_task())
       {
+        // Mark that we've completed execution for this task
+        // since the shards will do all the real work
+        complete_execution();
         shard_manager->launch();
         return;
       }

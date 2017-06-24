@@ -2270,6 +2270,8 @@ namespace Legion {
           AddressSpaceID target = (*address_spaces)[idx];
           if (sent_spaces.find(target) != sent_spaces.end())
             continue;
+          if (target == runtime->address_space)
+            continue;
           Serializer rez;
           {
             RezCheck z(rez);
@@ -2345,6 +2347,8 @@ namespace Legion {
         if (it->first != runtime->address_space)
         {
           distribute_shards(it->first, it->second);
+          // Update the remote constituents count
+          remote_constituents++;
           // Clean up the shards that are now sent remotely
           for (unsigned idx = 0; idx < it->second.size(); idx++)
             delete it->second[idx];
@@ -2399,6 +2403,7 @@ namespace Legion {
       assert(address_spaces == NULL);
 #endif
       address_spaces = new ShardMapping();
+      address_spaces->add_reference();
       address_spaces->unpack_mapping(derez);
       size_t num_shards;
       derez.deserialize(num_shards);
@@ -2585,7 +2590,6 @@ namespace Legion {
       if (target_space == runtime->address_space)
       {
         Deserializer derez(rez.get_buffer(), rez.get_used_bytes());
-        DerezCheck z(derez);
         // Have to unpack the preample we already know
         ReplicationID local_repl;
         derez.deserialize(local_repl);
@@ -2627,7 +2631,6 @@ namespace Legion {
       if (target_space == runtime->address_space)
       {
         Deserializer derez(rez.get_buffer(), rez.get_used_bytes());
-        DerezCheck z(derez);
         // Have to unpack the preample we already know
         ReplicationID local_repl;
         derez.deserialize(local_repl);     
@@ -2670,7 +2673,6 @@ namespace Legion {
       if (target_space == runtime->address_space)
       {
         Deserializer derez(rez.get_buffer(), rez.get_used_bytes());
-        DerezCheck z(derez);
         // Have to unpack the preample we already know
         ReplicationID local_repl;
         derez.deserialize(local_repl);
@@ -2787,7 +2789,6 @@ namespace Legion {
                                                             Runtime *runtime)
     //--------------------------------------------------------------------------
     {
-      DerezCheck z(derez);
       ReplicationID repl_id;
       derez.deserialize(repl_id);
       ShardManager *manager = runtime->find_shard_manager(repl_id);
@@ -2799,7 +2800,6 @@ namespace Legion {
                                                             Runtime *runtime)
     //--------------------------------------------------------------------------
     {
-      DerezCheck z(derez);
       ReplicationID repl_id;
       derez.deserialize(repl_id);
       ShardManager *manager = runtime->find_shard_manager(repl_id);
@@ -2811,7 +2811,6 @@ namespace Legion {
                                           Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
-      DerezCheck z(derez);
       ReplicationID repl_id;
       derez.deserialize(repl_id);
       ShardManager *manager = runtime->find_shard_manager(repl_id);
@@ -2996,7 +2995,6 @@ namespace Legion {
         ShardID target = convert_to_shard(target_index, origin);
         Serializer rez;
         {
-          RezCheck z(rez);
           rez.serialize(manager->repl_id);
           rez.serialize(target);
           rez.serialize(collective_index);
@@ -3099,7 +3097,6 @@ namespace Legion {
       ShardID next = convert_to_shard(target_index, target);
       Serializer rez;
       {
-        RezCheck z(rez);
         rez.serialize(manager->repl_id);
         rez.serialize(next);
         rez.serialize(collective_index);
@@ -3442,7 +3439,6 @@ namespace Legion {
                                                 Serializer &rez) const
     //--------------------------------------------------------------------------
     {
-      RezCheck z(rez);
       rez.serialize(manager->repl_id);
       rez.serialize(target);
       rez.serialize(collective_index);
@@ -3457,6 +3453,21 @@ namespace Legion {
     {
       AutoLock c_lock(collective_lock);
       unpack_collective_stage(derez, stage);
+      // A stage -1 message is counted as part of stage 0 
+      // (if it exists and we are participating)
+      if ((stage == -1) && participating && (shard_collective_stages > 0))
+        stage = 0;
+      if (stage >= 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(stage < int(stage_notifications.size()));
+        if (stage < (shard_collective_stages - 1))
+          assert(stage_notifications[stage] < shard_collective_radix);
+        else
+          assert(stage_notifications[stage] < shard_collective_last_radix);
+#endif
+        stage_notifications[stage]++;
+      }
     }
 
     //--------------------------------------------------------------------------
