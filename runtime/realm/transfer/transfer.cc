@@ -128,7 +128,7 @@ namespace Realm {
       mapping = 0;
     } else {
       inst_impl = get_runtime()->get_instance_impl(inst);
-      mapping = inst_impl->metadata.linearization.get_mapping<1>();
+      mapping = inst_impl->metadata.linearization_OLD.get_mapping<1>();
       for(std::vector<unsigned>::const_iterator it = _fields.begin();
 	  it != _fields.end();
 	  ++it) {
@@ -196,7 +196,7 @@ namespace Realm {
 
       if(inst.exists()) {
 	tiis->inst_impl = get_runtime()->get_instance_impl(inst);
-	tiis->mapping = tiis->inst_impl->metadata.linearization.get_mapping<1>();
+	tiis->mapping = tiis->inst_impl->metadata.linearization_OLD.get_mapping<1>();
 	assert(tiis->mapping != 0);
       } else {
 	tiis->inst_impl = 0;
@@ -452,7 +452,7 @@ namespace Realm {
       // leave fields empty so that done() is always true
     } else {
       inst_impl = get_runtime()->get_instance_impl(_inst);
-      mapping = inst_impl->metadata.linearization.get_mapping<DIM>();
+      mapping = inst_impl->metadata.linearization_OLD.get_mapping<DIM>();
       for(std::vector<unsigned>::const_iterator it = _fields.begin();
 	  it != _fields.end();
 	  ++it) {
@@ -507,7 +507,7 @@ namespace Realm {
     } else {
       if(inst.exists()) {
 	tir->inst_impl = get_runtime()->get_instance_impl(inst);
-	tir->mapping = tir->inst_impl->metadata.linearization.template get_mapping<DIM>();
+	tir->mapping = tir->inst_impl->metadata.linearization_OLD.template get_mapping<DIM>();
 	assert(tir->mapping != 0);
       } else {
 	// clear out fields too since there's no instance data
@@ -906,13 +906,20 @@ namespace Realm {
 
   template <int N, typename T>
   class TransferIteratorZIndexSpace : public TransferIterator {
+  protected:
+    TransferIteratorZIndexSpace(void); // used by deserializer
   public:
     TransferIteratorZIndexSpace(const ZIndexSpace<N,T> &_is,
 				RegionInstance inst,
 				const std::vector<unsigned>& _fields,
 				size_t _extra_elems);
 
+    template <typename S>
+    static TransferIterator *deserialize_new(S& deserializer);
+      
     virtual ~TransferIteratorZIndexSpace(void);
+
+    virtual Event request_metadata(void);
 
     virtual void reset(void);
     virtual bool done(void) const;
@@ -920,6 +927,11 @@ namespace Realm {
 			bool tentative = false);
     virtual void confirm_step(void);
     virtual void cancel_step(void);
+
+    static Serialization::PolymorphicSerdezSubclass<TransferIterator, TransferIteratorZIndexSpace<N,T> > serdez_subclass;
+
+    template <typename S>
+    bool serialize(S& serializer) const;
 
   protected:
     ZIndexSpaceIterator<N,T> iter;
@@ -954,8 +966,57 @@ namespace Realm {
   }
 
   template <int N, typename T>
+  TransferIteratorZIndexSpace<N,T>::TransferIteratorZIndexSpace(void)
+    : field_idx(0)
+    , tentative_valid(false)
+  {}
+
+  template <int N, typename T>
+  template <typename S>
+  /*static*/ TransferIterator *TransferIteratorZIndexSpace<N,T>::deserialize_new(S& deserializer)
+  {
+    ZIndexSpace<N,T> is;
+    RegionInstance inst;
+    std::vector<unsigned> fields;
+    size_t extra_elems;
+
+    if(!((deserializer >> is) &&
+	 (deserializer >> inst) &&
+	 (deserializer >> fields) &&
+	 (deserializer >> extra_elems)))
+      return 0;
+
+    TransferIteratorZIndexSpace<N,T> *tiis = new TransferIteratorZIndexSpace<N,T>;
+    tiis->iter.reset(is);
+
+    if(tiis->iter.valid && inst.exists() && !fields.empty()) {
+      tiis->cur_point = tiis->iter.rect.lo;
+      tiis->fields.swap(fields);
+
+      tiis->inst_impl = get_runtime()->get_instance_impl(inst);
+      tiis->inst_layout = dynamic_cast<const InstanceLayout<N,T> *>(inst.get_layout());
+      assert(tiis->inst_layout != 0);
+    } else {
+      // no iterating to do - clear out some things
+      tiis->inst_impl = 0;
+      tiis->inst_layout = 0;
+    }
+
+    return tiis;
+  }
+
+  template <int N, typename T>
   TransferIteratorZIndexSpace<N,T>::~TransferIteratorZIndexSpace(void)
   {}
+
+  template <int N, typename T>
+  Event TransferIteratorZIndexSpace<N,T>::request_metadata(void)
+  {
+    if(inst_impl && !inst_impl->metadata.is_valid())
+      return inst_impl->request_metadata();
+
+    return Event::NO_EVENT;
+  }
 
   template <int N, typename T>
   void TransferIteratorZIndexSpace<N,T>::reset(void)
@@ -1082,6 +1143,7 @@ namespace Realm {
 	} else {
 	  field_idx++;
 	  iter.reset(iter.space);
+	  cur_point = iter.rect.lo;
 	}
       } else
 	cur_point = next_point;
@@ -1100,6 +1162,7 @@ namespace Realm {
       } else {
 	field_idx++;
 	iter.reset(iter.space);
+	cur_point = iter.rect.lo;
       }
     } else
       cur_point = next_point;
@@ -1111,6 +1174,20 @@ namespace Realm {
   {
     assert(tentative_valid);
     tentative_valid = false;
+  }
+
+  template <int N, typename T>
+  /*static*/ Serialization::PolymorphicSerdezSubclass<TransferIterator, TransferIteratorZIndexSpace<N,T> > TransferIteratorZIndexSpace<N,T>::serdez_subclass;
+
+  template <int N, typename T>
+  template <typename S>
+  bool TransferIteratorZIndexSpace<N,T>::serialize(S& serializer) const
+  {
+    return ((serializer << iter.space) &&
+	    (serializer << (inst_impl ? inst_impl->me :
+                                        RegionInstance::NO_INST)) &&
+	    (serializer << fields) &&
+	    (serializer << extra_elems));
   }
 
 
@@ -1981,7 +2058,9 @@ namespace Realm {
   template Event ZIndexSpace<N,T>::fill(const std::vector<CopySrcDstField>&, \
 					const ProfilingRequestSet&, \
 					const void *, size_t, \
-					Event wait_on) const;
+					Event wait_on) const; \
+  template class TransferIteratorZIndexSpace<N,T>; \
+  template class TransferDomainZIndexSpace<N,T>;
   FOREACH_NT(DOIT)
 
 }; // namespace Realm

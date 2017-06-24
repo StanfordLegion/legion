@@ -152,6 +152,12 @@ namespace Realm {
   inline InstanceLayoutGeneric::InstanceLayoutGeneric(void)
   {}
 
+  template <typename S>
+  /*static*/ inline InstanceLayoutGeneric *InstanceLayoutGeneric::deserialize_new(S& deserializer)
+  {
+    return Serialization::PolymorphicSerdezHelper<InstanceLayoutGeneric>::deserialize_new(deserializer);
+  }
+
   inline InstanceLayoutGeneric::~InstanceLayoutGeneric(void)
   {}
 
@@ -161,7 +167,8 @@ namespace Realm {
   {
     InstanceLayout<N,T> *layout = new InstanceLayout<N,T>;
     layout->bytes_used = 0;
-    layout->alignment_reqd = 1;
+    // require 32B alignment of each instance piece for vectorizing goodness
+    layout->alignment_reqd = 32;
     layout->space = is;
 
     std::vector<ZRect<N,T> > piece_bounds;
@@ -275,6 +282,12 @@ namespace Realm {
     return layout;
   }
 
+  template <typename S>
+  inline bool serialize(S& serializer, const InstanceLayoutGeneric& ilg)
+  {
+    return Serialization::PolymorphicSerdezHelper<InstanceLayoutGeneric>::serialize(serializer, ilg);
+  }
+
   inline std::ostream& operator<<(std::ostream& os, const InstanceLayoutGeneric& ilg)
   {
     ilg.print(os);
@@ -297,8 +310,21 @@ namespace Realm {
   {}
 
   template <int N, typename T>
+  template <typename S>
+  /*static*/ inline InstanceLayoutPiece<N,T> *InstanceLayoutPiece<N,T>::deserialize_new(S& deserializer)
+  {
+    return Serialization::PolymorphicSerdezHelper<InstanceLayoutPiece<N,T> >::deserialize_new(deserializer);
+  }
+
+  template <int N, typename T>
   inline InstanceLayoutPiece<N,T>::~InstanceLayoutPiece(void)
   {}
+
+  template <int N, typename T, typename S>
+  inline bool serialize(S& serializer, const InstanceLayoutPiece<N,T>& ilp)
+  {
+    return Serialization::PolymorphicSerdezHelper<InstanceLayoutPiece<N,T> >::serialize(serializer, ilp);
+  }
 
   template <int N, typename T>
   inline std::ostream& operator<<(std::ostream& os, const InstanceLayoutPiece<N,T>& ilp)
@@ -318,6 +344,21 @@ namespace Realm {
   {}
 
   template <int N, typename T>
+  template <typename S>
+  /*static*/ inline InstanceLayoutPiece<N,T> *AffineLayoutPiece<N,T>::deserialize_new(S& s)
+  {
+    AffineLayoutPiece<N,T> *alp = new AffineLayoutPiece<N,T>;
+    if((s >> alp->bounds) &&
+       (s >> alp->strides) &&
+       (s >> alp->offset)) {
+      return alp;
+    } else {
+      delete alp;
+      return 0;
+    }
+  }
+
+  template <int N, typename T>
   inline void AffineLayoutPiece<N,T>::relocate(size_t base_offset)
   {
     offset += base_offset;
@@ -327,6 +368,15 @@ namespace Realm {
   void AffineLayoutPiece<N,T>::print(std::ostream& os) const
   {
     os << this->bounds << "->affine(" << strides << "+" << offset << ")";
+  }
+
+  template <int N, typename T>
+  template <typename S>
+  inline bool AffineLayoutPiece<N,T>::serialize(S& s) const
+  {
+    return ((s << this->bounds) &&
+	    (s << strides) &&
+	    (s << offset));
   }
 
 
@@ -367,6 +417,45 @@ namespace Realm {
       (*it)->relocate(base_offset);
   }
 
+  template <int N, typename T, typename S>
+  inline bool serialize(S& s, const InstancePieceList<N,T>& ipl)
+  {
+    return ipl.serialize(s);
+  }
+
+  template <int N, typename T, typename S>
+  inline bool deserialize(S& s, InstancePieceList<N,T>& ipl)
+  {
+    return ipl.deserialize(s);
+  }
+
+  template <int N, typename T>
+  template <typename S>
+  inline bool InstancePieceList<N,T>::serialize(S& s) const
+  {
+    size_t len = pieces.size();
+    if(!(s << len)) return false;
+    for(size_t i = 0; i < len; i++)
+      if(!(s << *(pieces[i]))) return false;
+    return true;
+  }
+    
+  template <int N, typename T>
+  template <typename S>
+  inline bool InstancePieceList<N,T>::deserialize(S& s)
+  {
+    size_t len;
+    if(!(s >> len)) return false;
+    pieces.resize(len);
+    for(size_t i = 0; i < len; i++) {
+      InstanceLayoutPiece<N,T> *ilp = InstanceLayoutPiece<N,T>::deserialize_new(s);
+      if(!ilp)
+	return false;
+      pieces[i] = ilp;
+    }
+    return true;
+  }
+
   template <int N, typename T>
   inline std::ostream& operator<<(std::ostream& os, const InstancePieceList<N,T>& ipl)
   {
@@ -391,6 +480,23 @@ namespace Realm {
   template <int N, typename T>
   inline InstanceLayout<N,T>::InstanceLayout(void)
   {}
+
+  template <int N, typename T>
+  template <typename S>
+  /*static*/ InstanceLayoutGeneric *InstanceLayout<N,T>::deserialize_new(S& s)
+  {
+    InstanceLayout<N,T> *il = new InstanceLayout<N,T>;
+    if((s >> il->bytes_used) &&
+       (s >> il->alignment_reqd) &&
+       (s >> il->fields) &&
+       (s >> il->space) &&
+       (s >> il->piece_lists)) {
+      return il;
+    } else {
+      delete il;
+      return 0;
+    }
+  }
 
   template <int N, typename T>
   InstanceLayout<N,T>::~InstanceLayout(void)
@@ -456,6 +562,17 @@ namespace Realm {
       assert(0);
     }
     return offset;
+  }
+
+  template <int N, typename T>
+  template <typename S>
+  inline bool InstanceLayout<N,T>::serialize(S& s) const
+  {
+    return ((s << bytes_used) &&
+	    (s << alignment_reqd) &&
+	    (s << fields) &&
+	    (s << space) &&
+	    (s << piece_lists));
   }
       
 

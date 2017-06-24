@@ -51,15 +51,17 @@ namespace Realm {
 
     template <int N, typename T>
     struct TypeToIndex<ZPoint<N,T> > {
-      static const int INDEX = (((N << 8) + 
-				 DIMTYPES::TypeToIndex<T>::INDEX) << 2) + 1;
+      static const int INDEX = ((N << 5) + 
+				(DIMTYPES::TypeToIndex<T>::INDEX << 2) +
+				1);
     };
 
 #ifdef ZRECT_AS_FIELD_TYPE
     template <int N, typename T>
     struct TypeToIndex<ZRect<N,T> > {
-      static const int INDEX = (((N << 8) +
-				 DIMTYPES::TypeToIndex<T>::INDEX) << 2) + 3;
+      static const int INDEX = ((N << 5) +
+				(DIMTYPES::TypeToIndex<T>::INDEX << 2) +
+				3);
     };
 #endif
 
@@ -131,14 +133,20 @@ namespace Realm {
 
       case 1: // index encodes N,T for ZPoint<N,T>
 	{
-	  NT_TemplateHelper::demux<PointDemux1<TARGET,T1> >(index >> 2, arg1);
+	  // space the index back out into 8-bit fields
+	  int full_index = (((index & 0xe0) << 3) +
+			    ((index & 0x1c) >> 2));
+	  NT_TemplateHelper::demux<PointDemux1<TARGET,T1> >(full_index, arg1);
 	  break;
 	}
 
 #ifdef ZRECT_AS_FIELD_TYPE
       case 3: // index encodes N,T for ZRect<N,T>
 	{
-	  NT_TemplateHelper::demux<RectDemux1<TARGET,T1> >(index >> 2, arg1);
+	  // space the index back out into 8-bit fields
+	  int full_index = (((index & 0xe0) << 3) +
+			    ((index & 0x1c) >> 2));
+	  NT_TemplateHelper::demux<RectDemux1<TARGET,T1> >(full_index, arg1);
 	  break;
 	}
 #endif
@@ -157,14 +165,20 @@ namespace Realm {
 
       case 1: // index encodes N,T for ZPoint<N,T>
 	{
-	  NT_TemplateHelper::demux<PointDemux2<TARGET,T1,T2> >(index >> 2, arg1, arg2);
+	  // space the index back out into 8-bit fields
+	  int full_index = (((index & 0xe0) << 3) +
+			    ((index & 0x1c) >> 2));
+	  NT_TemplateHelper::demux<PointDemux2<TARGET,T1,T2> >(full_index, arg1, arg2);
 	  break;
 	}
 
 #ifdef ZRECT_AS_FIELD_TYPE
       case 3: // index encodes N,T for ZRect<N,T>
 	{
-	  NT_TemplateHelper::demux<RectDemux2<TARGET,T1,T2> >(index >> 2, arg1, arg2);
+	  // space the index back out into 8-bit fields
+	  int full_index = (((index & 0xe0) << 3) +
+			    ((index & 0x1c) >> 2));
+	  NT_TemplateHelper::demux<RectDemux2<TARGET,T1,T2> >(full_index, arg1, arg2);
 	  break;
 	}
 #endif
@@ -183,14 +197,20 @@ namespace Realm {
 
       case 1: // index encodes N,T for ZPoint<N,T>
 	{
-	  NT_TemplateHelper::demux<PointDemux3<TARGET,T1,T2,T3> >(index >> 2, arg1, arg2, arg3);
+	  // space the index back out into 8-bit fields
+	  int full_index = (((index & 0xe0) << 3) +
+			    ((index & 0x1c) >> 2));
+	  NT_TemplateHelper::demux<PointDemux3<TARGET,T1,T2,T3> >(full_index, arg1, arg2, arg3);
 	  break;
 	}
 
 #ifdef ZRECT_AS_FIELD_TYPE
       case 3: // index encodes N,T for ZRect<N,T>
 	{
-	  NT_TemplateHelper::demux<RectDemux3<TARGET,T1,T2,T3> >(index >> 2, arg1, arg2, arg3);
+	  // space the index back out into 8-bit fields
+	  int full_index = (((index & 0xe0) << 3) +
+			    ((index & 0x1c) >> 2));
+	  NT_TemplateHelper::demux<RectDemux3<TARGET,T1,T2,T3> >(full_index, arg1, arg2, arg3);
 	  break;
 	}
 #endif

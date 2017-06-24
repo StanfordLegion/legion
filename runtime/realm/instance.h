@@ -55,7 +55,7 @@ namespace Realm {
     bool exists(void) const;
 
     Memory get_location(void) const;
-    const LinearizedIndexSpaceIntfc& get_lis(void) const;
+    //const LinearizedIndexSpaceIntfc& get_lis(void) const;
     const InstanceLayoutGeneric *get_layout(void) const;
 
     // these methods may be used to access the contents of an instance, but
@@ -104,6 +104,7 @@ namespace Realm {
 				 Memory memory,
 				 const ZIndexSpace<N,T>& space,
 				 const std::vector<size_t>& field_sizes,
+				 size_t block_size, // 0=SOA, 1=AOS, 2+=hybrid
 				 const ProfilingRequestSet& prs,
 				 Event wait_on = Event::NO_EVENT);
 

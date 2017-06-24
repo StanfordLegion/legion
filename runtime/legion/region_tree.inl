@@ -2935,7 +2935,9 @@ namespace Legion {
         PhysicalInstance result;
 	LgEvent ready(PhysicalInstance::create_instance(result, target,
 							local_space,
-							field_sizes, requests));
+							field_sizes,
+							blocking_factor,
+							requests));
 	// TODO
 	ready.lg_wait();
         // If the result exists tell the profiler about it in case
@@ -2954,7 +2956,9 @@ namespace Legion {
         PhysicalInstance result;
 	LgEvent ready(PhysicalInstance::create_instance(result, target,
 							local_space,
-							field_sizes, requests));
+							field_sizes,
+							blocking_factor,
+							requests));
 	// TODO
 	ready.lg_wait();
 	return result;
