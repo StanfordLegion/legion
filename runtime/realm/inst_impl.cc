@@ -549,7 +549,9 @@ namespace Realm {
 
       // now adjust the base pointer so that we can use absolute indexing
       //  again
-      base = ((char *)base) - affine->strides.dot(affine->bounds.lo);
+      // careful - have to use 'stride' instead of 'affine->strides' in
+      //  case we agreed to the caller's incorrect stride when size == 1
+      base = ((char *)base) - (stride * affine->bounds.lo[0]);
      
       return true;
     }
