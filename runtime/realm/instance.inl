@@ -113,10 +113,14 @@ namespace Realm {
 							  Memory memory,
 							  const ZIndexSpace<N,T>& space,
 							  const std::vector<size_t> &field_sizes,
+							  size_t block_size,
 							  const ProfilingRequestSet& reqs,
 							  Event wait_on /*= Event::NO_EVENT*/)
   {
-    InstanceLayoutConstraints ilc(field_sizes, 0 /*SOA*/);
+    // smoosh hybrid block sizes back to SOA for now
+    if(block_size > 1)
+      block_size = 0;
+    InstanceLayoutConstraints ilc(field_sizes, block_size);
     InstanceLayoutGeneric *layout = InstanceLayoutGeneric::choose_instance_layout(space, ilc);
 #if 0
     delete layout;
