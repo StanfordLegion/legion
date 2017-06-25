@@ -184,8 +184,8 @@ parameters. Below are some of the more commonly used flags:
   * `-ll:rsize <int>`: size of GASNET registered RDMA memory available per process (in MB)
   * `-ll:fsize <int>`: size of framebuffer memory for each GPU (in MB)
   * `-ll:zsize <int>`: size of zero-copy memory for each GPU (in MB)
-  * `-hl:window <int>`: maximum number of tasks that can be created in a parent task window
-  * `-hl:sched <int>`: minimum number of tasks to try to schedule for each invocation of the scheduler
+  * `-lg:window <int>`: maximum number of tasks that can be created in a parent task window
+  * `-lg:sched <int>`: minimum number of tasks to try to schedule for each invocation of the scheduler
 
 The default mapper also has several flags for controlling the default mapping.
 See `default_mapper.cc` for more details.
@@ -224,13 +224,13 @@ dependencies). Legion Spy also has a self-checking mode which can
 validate the correctness of the runtime's logical and physical
 dependence algorithms.
 
-To capture a trace, invoke the application with `-hl:spy -logfile
+To capture a trace, invoke the application with `-lg:spy -logfile
 spy_%.log`. (No special compile-time flags are required.) This will
 produce a log file per node. Call the post-processing script to render
 PDF files of the dependence graphs:
 
 ```bash
-./app -hl:spy -logfile spy_%.log
+./app -lg:spy -logfile spy_%.log
 $LG_RT_DIR/../tools/legion_spy.py -dez spy_*.log
 ```
 
@@ -240,7 +240,7 @@ and the script used to validate (or render) the trace.
 
 ```bash
 DEBUG=1 CC_FLAGS="-DLEGION_SPY" make
-./app -hl:spy -logfile spy_%.log
+./app -lg:spy -logfile spy_%.log
 $LG_RT_DIR/../tools/legion_spy.py -lpa spy_*.log
 $LG_RT_DIR/../tools/legion_spy.py -dez spy_*.log
 ```
@@ -251,17 +251,17 @@ Legion contains a task-level profiler. No special compile-time flags
 are required. However, it is recommended to build with `DEBUG=0 make`
 to avoid any undesired performance issues.
 
-To profile an application, run with `-hl:prof <N>` where `N` is the
+To profile an application, run with `-lg:prof <N>` where `N` is the
 number of nodes to be profiled. (`N` can be less than the total number
 of nodes---this profiles a subset of the nodes.) Use the 
-`-hl:prof_logfile <logfile>` flag to save the output from each node to
+`-lg:prof_logfile <logfile>` flag to save the output from each node to
 a separate file. For example, data from node 0 will be saved in
 `<logfile>0.gz`, data from node 1 in `<logfile>1.gz`, etc. Finally, pass
 the resulting log files to `legion_prof.py`.
 
 ```bash
 DEBUG=0 make
-./app -hl:prof kN> -hl:prof_logfile prof_log
+./app -lg:prof kN> -lg:prof_logfile prof_log
 $LG_RT_DIR/../tools/legion_prof.py prof_log*
 ```
 
@@ -272,9 +272,9 @@ in a browser.
 ## Other Features
 
 - Inorder Execution: Users can force the high-level runtime to execute
-all tasks in program order by passing `-hl:inorder` flag on the
+all tasks in program order by passing `-lg:inorder` flag on the
 command-line.
 
 - Dynamic Independence Tests: Users can request the high-level runtime
 perform dynamic independence tests between regions and partitions by
-passing `-hl:dynamic` flag on the command-line.
+passing `-lg:dynamic` flag on the command-line.
