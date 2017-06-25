@@ -2536,7 +2536,7 @@ namespace Legion {
           if (!original_task->is_top_level_task())
             local_shards[0]->return_privilege_state(
                               original_task->get_context());
-          original_task->trigger_task_complete();
+          original_task->trigger_children_complete();
         }
       }
     }
@@ -2574,7 +2574,7 @@ namespace Legion {
           runtime->send_replicate_trigger_commit(owner_space, rez);
         }
         else
-          original_task->trigger_task_commit();
+          original_task->trigger_children_committed();
       }
     }
 
@@ -2933,22 +2933,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void BroadcastCollective::perform_collective_async(void) const
+    void BroadcastCollective::perform_collective_async(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(local_shard == origin);
 #endif
+      // Register this with the context
+      context->register_collective(this);
       send_messages(); 
     }
 
     //--------------------------------------------------------------------------
-    void BroadcastCollective::perform_collective_wait(void) const
+    void BroadcastCollective::perform_collective_wait(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(local_shard != origin);
 #endif     
+      // Register this with the context
+      context->register_collective(this);
       if (!done_event.has_triggered())
         done_event.lg_wait();
     }
@@ -3026,6 +3030,8 @@ namespace Legion {
     void GatherCollective::perform_collective_async(void)
     //--------------------------------------------------------------------------
     {
+      // Register this with the context
+      context->register_collective(this);
       bool done = false;
       {
         AutoLock c_lock(collective_lock);
@@ -3044,7 +3050,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void GatherCollective::perform_collective_wait(void) const
+    void GatherCollective::perform_collective_wait(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3217,6 +3223,8 @@ namespace Legion {
     void AllGatherCollective::perform_collective_async(void)
     //--------------------------------------------------------------------------
     {
+      // Register this with the context
+      context->register_collective(this);
       if (manager->total_shards <= 1)
         return;
       // See if we are a participating shard or not
@@ -3489,9 +3497,7 @@ namespace Legion {
                                   size_t win_size, std::vector<RtBarrier> &bars)
       : AllGatherCollective(ctx), window_size(win_size), barriers(bars)
     //--------------------------------------------------------------------------
-    {
-      // Register this with the context
-      context->register_collective(this);
+    { 
     }
 
     //--------------------------------------------------------------------------
@@ -3610,8 +3616,6 @@ namespace Legion {
       : AllGatherCollective(ctx)
     //--------------------------------------------------------------------------
     {
-      // Register this with the context
-      context->register_collective(this);
     }
 
     //--------------------------------------------------------------------------
@@ -3706,8 +3710,6 @@ namespace Legion {
       : GatherCollective(ctx, target)
     //--------------------------------------------------------------------------
     {
-      // Register this with the context
-      context->register_collective(this);
     }
     
     //--------------------------------------------------------------------------
@@ -3778,7 +3780,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ShardingGatherCollective::validate(ShardingID value) const
+    bool ShardingGatherCollective::validate(ShardingID value)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3804,8 +3806,6 @@ namespace Legion {
       : AllGatherCollective(ctx)
     //--------------------------------------------------------------------------
     {
-      // Register this with the context
-      context->register_collective(this);
     }
 
     //--------------------------------------------------------------------------
@@ -3894,8 +3894,6 @@ namespace Legion {
       : GatherCollective(ctx, target)
     //--------------------------------------------------------------------------
     {
-      // Register this with the context
-      context->register_collective(this);
     }
 
     //--------------------------------------------------------------------------
@@ -3991,8 +3989,6 @@ namespace Legion {
       : BroadcastCollective(ctx, id, source), result(NULL), result_size(0)
     //--------------------------------------------------------------------------
     {
-      // Register this with the context
-      context->register_collective(this);
     }
 
     //--------------------------------------------------------------------------
@@ -4084,8 +4080,6 @@ namespace Legion {
       : AllGatherCollective(ctx), future_size(size)
     //--------------------------------------------------------------------------
     {
-      // Register this with the context
-      context->register_collective(this);
     }
 
     //--------------------------------------------------------------------------
@@ -4180,8 +4174,6 @@ namespace Legion {
       : AllGatherCollective(ctx, id)
     //--------------------------------------------------------------------------
     {
-      // Register this with the context
-      context->register_collective(this);
     }
 
     //--------------------------------------------------------------------------
@@ -4270,8 +4262,6 @@ namespace Legion {
       : BroadcastCollective(ctx, origin)
     //--------------------------------------------------------------------------
     {
-      // Register this with the context
-      context->register_collective(this);
     }
 
     //--------------------------------------------------------------------------
@@ -4353,8 +4343,6 @@ namespace Legion {
       : AllGatherCollective(ctx)
     //--------------------------------------------------------------------------
     {
-      // Register this with the context
-      context->register_collective(this);
     }
 
     //--------------------------------------------------------------------------
@@ -4476,8 +4464,6 @@ namespace Legion {
       : BroadcastCollective(ctx, id, own)
     //--------------------------------------------------------------------------
     {
-      // Register this with the context
-      context->register_collective(this);
     }
 
     //--------------------------------------------------------------------------

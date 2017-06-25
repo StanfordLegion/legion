@@ -63,8 +63,8 @@ namespace Legion {
       virtual void pack_collective(Serializer &rez) const = 0;
       virtual void unpack_collective(Deserializer &derez) = 0;
     public:
-      void perform_collective_async(void) const;
-      void perform_collective_wait(void) const;
+      void perform_collective_async(void);
+      void perform_collective_wait(void);
       virtual void handle_collective_message(Deserializer &derez);
     public:
       RtEvent get_done_event(void) const;
@@ -93,7 +93,7 @@ namespace Legion {
       virtual void unpack_collective(Deserializer &derez) = 0;
     public:
       void perform_collective_async(void);
-      void perform_collective_wait(void) const;
+      void perform_collective_wait(void);
       virtual void handle_collective_message(Deserializer &derez);
       inline bool is_target(void) const { return (target == local_shard); }
     protected:
@@ -191,7 +191,7 @@ namespace Legion {
         { assert(false); return *this; }
       inline void broadcast(const T &v) 
         { value = v; perform_collective_async(); }
-      inline operator T(void) const { perform_collective_wait(); return value; }
+      inline operator T(void) { perform_collective_wait(); return value; }
     public:
       virtual void pack_collective(Serializer &rez) const 
         { rez.serialize(value); }
@@ -240,7 +240,7 @@ namespace Legion {
       virtual void unpack_collective(Deserializer &derez);
     public:
       void contribute(ShardingID value);
-      bool validate(ShardingID value) const;
+      bool validate(ShardingID value);
     protected:
       std::map<ShardID,ShardingID> results;
     };
