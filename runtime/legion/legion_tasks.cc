@@ -6625,8 +6625,6 @@ namespace Legion {
     void ShardTask::trigger_task_commit(void)
     //--------------------------------------------------------------------------
     {
-      // First invoke the method on the shard manager
-      shard_manager->trigger_task_commit(true/*local*/);
       // Commit this operation
       // Dont' deactivate ourselves, the shard manager will do that for us
       commit_operation(false/*deactivate*/, profiling_reported);
@@ -6635,6 +6633,9 @@ namespace Legion {
       // us before we are done with this object
       if (profiling_reported.exists() && !profiling_reported.has_triggered())
         profiling_reported.lg_wait();
+      // Lastly invoke the method on the shard manager, this could
+      // delete us so it has to be last
+      shard_manager->trigger_task_commit(true/*local*/);
     }
 
     //--------------------------------------------------------------------------

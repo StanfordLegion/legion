@@ -2861,8 +2861,6 @@ namespace Legion {
         collective_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
-      // Register this with the context
-      context->register_collective(this);
     }
 
     //--------------------------------------------------------------------------
@@ -2871,9 +2869,7 @@ namespace Legion {
         local_shard(ctx->owner_shard->shard_id), collective_index(id),
         collective_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
-    {
-      // Register this with the context
-      context->register_collective(this);
+    { 
     }
 
     //--------------------------------------------------------------------------
@@ -3494,6 +3490,8 @@ namespace Legion {
       : AllGatherCollective(ctx), window_size(win_size), barriers(bars)
     //--------------------------------------------------------------------------
     {
+      // Register this with the context
+      context->register_collective(this);
     }
 
     //--------------------------------------------------------------------------
@@ -3612,6 +3610,8 @@ namespace Legion {
       : AllGatherCollective(ctx)
     //--------------------------------------------------------------------------
     {
+      // Register this with the context
+      context->register_collective(this);
     }
 
     //--------------------------------------------------------------------------
@@ -3706,6 +3706,8 @@ namespace Legion {
       : GatherCollective(ctx, target)
     //--------------------------------------------------------------------------
     {
+      // Register this with the context
+      context->register_collective(this);
     }
     
     //--------------------------------------------------------------------------
@@ -3802,6 +3804,8 @@ namespace Legion {
       : AllGatherCollective(ctx)
     //--------------------------------------------------------------------------
     {
+      // Register this with the context
+      context->register_collective(this);
     }
 
     //--------------------------------------------------------------------------
@@ -3890,6 +3894,8 @@ namespace Legion {
       : GatherCollective(ctx, target)
     //--------------------------------------------------------------------------
     {
+      // Register this with the context
+      context->register_collective(this);
     }
 
     //--------------------------------------------------------------------------
@@ -3985,6 +3991,8 @@ namespace Legion {
       : BroadcastCollective(ctx, id, source), result(NULL), result_size(0)
     //--------------------------------------------------------------------------
     {
+      // Register this with the context
+      context->register_collective(this);
     }
 
     //--------------------------------------------------------------------------
@@ -4076,6 +4084,8 @@ namespace Legion {
       : AllGatherCollective(ctx), future_size(size)
     //--------------------------------------------------------------------------
     {
+      // Register this with the context
+      context->register_collective(this);
     }
 
     //--------------------------------------------------------------------------
@@ -4170,6 +4180,8 @@ namespace Legion {
       : AllGatherCollective(ctx, id)
     //--------------------------------------------------------------------------
     {
+      // Register this with the context
+      context->register_collective(this);
     }
 
     //--------------------------------------------------------------------------
@@ -4258,6 +4270,8 @@ namespace Legion {
       : BroadcastCollective(ctx, origin)
     //--------------------------------------------------------------------------
     {
+      // Register this with the context
+      context->register_collective(this);
     }
 
     //--------------------------------------------------------------------------
@@ -4339,6 +4353,8 @@ namespace Legion {
       : AllGatherCollective(ctx)
     //--------------------------------------------------------------------------
     {
+      // Register this with the context
+      context->register_collective(this);
     }
 
     //--------------------------------------------------------------------------
@@ -4460,6 +4476,8 @@ namespace Legion {
       : BroadcastCollective(ctx, id, own)
     //--------------------------------------------------------------------------
     {
+      // Register this with the context
+      context->register_collective(this);
     }
 
     //--------------------------------------------------------------------------
