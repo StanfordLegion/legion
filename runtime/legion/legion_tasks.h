@@ -847,13 +847,13 @@ namespace Legion {
     protected:
       virtual InnerContext* initialize_inner_execution_context(VariantImpl *v);
     public:
+      void launch_shard(void);
       void extract_event_preconditions(const std::deque<InstanceSet> &insts);
       void return_privilege_state(ResourceTracker *target);
       void handle_collective_message(Deserializer &derez);
       void handle_future_map_request(Deserializer &derez);
       void handle_composite_view_request(Deserializer &derez);
     public:
-      ShardManager *const manager;
       const ShardID shard_id;
     protected:
       UniqueID                    remote_owner_uid;

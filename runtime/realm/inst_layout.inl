@@ -167,7 +167,8 @@ namespace Realm {
   {
     InstanceLayout<N,T> *layout = new InstanceLayout<N,T>;
     layout->bytes_used = 0;
-    layout->alignment_reqd = 1;
+    // require 32B alignment of each instance piece for vectorizing goodness
+    layout->alignment_reqd = 32;
     layout->space = is;
 
     std::vector<ZRect<N,T> > piece_bounds;

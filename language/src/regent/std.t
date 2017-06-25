@@ -2290,7 +2290,7 @@ local function validate_index_base_type(base_type)
   assert(terralib.types.istype(base_type),
          "Index type expected a type, got " .. tostring(base_type))
   if std.type_eq(base_type, opaque) then
-    return c.legion_ptr_t, 0, terralib.newlist({"value"}), 64
+    return c.legion_ptr_t, 0, terralib.newlist({"value"}), terralib.sizeof(c.legion_ptr_t) * 8
   elseif std.type_eq(base_type, int32) or std.type_eq(base_type, int64) then
     return base_type, 1, false, terralib.sizeof(base_type) * 8
   elseif base_type:isstruct() then

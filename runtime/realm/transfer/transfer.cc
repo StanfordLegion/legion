@@ -1012,7 +1012,7 @@ namespace Realm {
   template <int N, typename T>
   Event TransferIteratorZIndexSpace<N,T>::request_metadata(void)
   {
-    if(!inst_impl->metadata.is_valid())
+    if(inst_impl && !inst_impl->metadata.is_valid())
       return inst_impl->request_metadata();
 
     return Event::NO_EVENT;
@@ -1143,6 +1143,7 @@ namespace Realm {
 	} else {
 	  field_idx++;
 	  iter.reset(iter.space);
+	  cur_point = iter.rect.lo;
 	}
       } else
 	cur_point = next_point;
@@ -1161,6 +1162,7 @@ namespace Realm {
       } else {
 	field_idx++;
 	iter.reset(iter.space);
+	cur_point = iter.rect.lo;
       }
     } else
       cur_point = next_point;

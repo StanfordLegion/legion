@@ -9171,6 +9171,7 @@ namespace Legion {
       // Exchange the close operation barriers across all the shards
       BarrierExchangeCollective close_collective(this, 
           CONTROL_REPLICATION_COMMUNICATION_BARRIERS, inter_close_barriers);
+      close_collective.exchange_barriers_async();
       // Wait for everything to be done
       application_collective.wait_for_barrier_exchange();
       internal_collective.wait_for_barrier_exchange();

@@ -1519,16 +1519,20 @@ namespace LegionRuntime {
 
     bool AccessorType::Generic::Untyped::get_redfold_parameters(void *&base) const
     {
+      using namespace Realm;
       RegionInstanceImpl *impl = (RegionInstanceImpl *)internal;
 
       // must have valid data by now - block if we have to
       impl->metadata.await_data();
 
-      if (impl->metadata.redopid == 0) return false;
-      if (impl->metadata.red_list_size > 0) return false;
+      // new instances no longer know if they're reduction fold, but we
+      //  can handle it as long as we have the right field with the right size
+      const InstanceLayoutGeneric *inst_layout = impl->metadata.layout;
+      std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = inst_layout->fields.find(field_offset);
+      assert(it != inst_layout->fields.end());
 
       // ReductionFold accessors currently assume packed instances
-      size_t stride = impl->metadata.elmt_size;
+      size_t stride = it->second.size_in_bytes;
       return impl->get_strided_parameters(base, stride, field_offset);
 #if 0
       off_t offset = impl->metadata.alloc_offset + field_offset;

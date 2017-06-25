@@ -174,8 +174,9 @@ namespace Realm {
     // if we get all the way through, the rectangles are equal and can be "merged"
     if(idx >= N) return true;
 
-    // if not, this has to be the dimension that is adjacent
-    if((r1.lo[idx] != (r2.hi[idx] + 1)) && (r2.lo[idx] != (r1.hi[idx] + 1)))
+    // if not, this has to be the dimension that is adjacent or overlaps
+    if(((r1.hi[idx] + 1) < r2.lo[idx]) ||
+       ((r2.hi[idx] + 1) < r1.lo[idx]))
       return false;
 
     // and the rest of the dimensions have to match too
@@ -185,6 +186,26 @@ namespace Realm {
 
     return true;
   }
+
+#ifdef REALM_DEBUG_RECT_MERGING
+  extern Logger log_part;
+
+  template <int N, typename T>
+  inline std::ostream& operator<<(std::ostream& os, const std::vector<ZRect<N,T> >& v)
+  {
+    if(v.empty()) {
+      os << "[]";
+    } else {
+      os << "[ ";
+      typename std::vector<ZRect<N,T> >::const_iterator it = v.begin();
+      os << *it;
+      while(++it != v.end())
+	os << ", " << *it;
+      os << " ]";
+    }
+    return os;
+  }
+#endif
 
   template <int N, typename T>
   inline void DenseRectangleList<N,T>::add_rect(const ZRect<N,T>& _r)
@@ -213,77 +234,105 @@ namespace Realm {
     }
 
     //std::cout << "slow path!\n";
-    ZRect<N,T> r = _r;
-
-    // scan through rectangles, looking for containment (really good),
-    //   mergability (also good), or overlap (bad)
-    int merge_with = -1;
-    std::vector<int> absorbed;
-    int count = rects.size();
-    for(int i = 0; i < count; i++) {
-      if(rects[i].contains(r)) return;
-      if(rects[i].overlaps(r)) {
-        assert(N == 1);  // TODO: splitting for 2+-D
-        r = r.union_bbox(rects[i]);
-        absorbed.push_back(i);
-        continue;
-      }
-      if((merge_with == -1) && can_merge(rects[i], r))
-	merge_with = i;
-    }
-
-    if(merge_with == -1) {
-      if(absorbed.empty()) {
-        // no merge candidates and nothing absorbed, just add the new rectangle
-        rects.push_back(r);
-      } else {
-        // replace the first absorbed rectangle, delete the others (if any)
-        rects[absorbed[0]] = r;
-        for(size_t i = 1; i < absorbed.size(); i++) {
-          if(absorbed[i] < (count - 1))
-            std::swap(rects[absorbed[i]], rects[count - 1]);
-          count--;
-        }
-        rects.resize(count);
-      }
-      return;
-    }
-
-#ifdef DEBUG_PARTITIONING
-    std::cout << "merge: " << rects[merge_with] << " and " << r << std::endl;
+    // our rectangle may break into multiple pieces that we have to 
+    //  iteratively add
+    std::vector<ZRect<N,T> > to_add(1, _r);
+#ifdef REALM_DEBUG_RECT_MERGING
+    std::vector<ZRect<N,T> > orig_rects(rects);
 #endif
-    rects[merge_with] = rects[merge_with].union_bbox(r);
 
-    // this may trigger a cascade merge, so look again
-    int last_merged = merge_with;
-    while(true) {
-      merge_with = -1;
-      for(int i = 0; i < (int)rects.size(); i++) {
-	if((i != last_merged) && can_merge(rects[i], rects[last_merged])) {
-	  merge_with = i;
+    while(!to_add.empty()) {
+      ZRect<N,T> r = to_add.back();
+      to_add.pop_back();
+
+      // scan through rectangles, looking for containment (really good),
+      //   mergability (also good), or overlap (bad)
+      std::vector<int> absorbed;
+      int count = rects.size();
+      int i = 0;
+      while(i < count) {
+	// old rect containing new means we can drop the new rectangle
+	if(rects[i].contains(r)) break;
+
+	// new rect containing old absorbs it and continues
+	if(r.contains(rects[i])) {
+	  absorbed.push_back(i);
+	  i++;
+	  continue;
+	}
+
+	// mergeability absorbs the old rect into the new one and starts
+	//  it over in case it can now merge with something bigger
+	if(can_merge(rects[i], r)) {
+	  absorbed.push_back(i);
+	  to_add.push_back(r.union_bbox(rects[i]));
 	  break;
 	}
+
+	// disjoint?  continue on
+	if(!rects[i].overlaps(r)) {
+	  i++;
+	  continue;
+	}
+
+	// if we get here, rects[i] and r overlap partially
+	// nasty case - figure out the up to 2N-1 rectangles that describe
+	//  r - rects[i] and start each of them over from the beginning
+	for(int j = 0; j < N; j++) {
+	  if(r.lo[j] < rects[i].lo[j]) {
+	    // leftover "below"
+	    ZRect<N,T> subr = r;
+	    subr.hi[j] = rects[i].lo[j] - 1;
+	    r.lo[j] = rects[i].lo[j];
+	    to_add.push_back(subr);
+	  }
+
+	  if(r.hi[j] > rects[i].hi[j]) {
+	    // leftover "above"
+	    ZRect<N,T> subr = r;
+	    subr.lo[j] = rects[i].hi[j] + 1;
+	    r.hi[j] = rects[i].hi[j];
+	    to_add.push_back(subr);
+	  }
+	}
+	break;
       }
-      if(merge_with == -1)
-	return;  // all done
 
-      // merge downward in case one of these is the last one
-      if(merge_with > last_merged)
-	std::swap(merge_with, last_merged);
+      // did we actually get to the end?  if so, add our (possibly-grown)
+      //  rectangle, using the first absorbed slot if it exists
+      if(i == count) {
+	if(absorbed.empty()) {
+	  rects.push_back(r);
+	  count++;
+	} else {
+	  rects[absorbed.back()] = r;
+	  absorbed.pop_back();
+	}
+      }
 
-#ifdef DEBUG_PARTITIONING
-      std::cout << "merge: " << rects[merge_with] << " and " << rects[last_merged] << std::endl;
-#endif
-      rects[merge_with] = rects[merge_with].union_bbox(rects[last_merged]);
-
-      // can delete last merged
-      int last = rects.size() - 1;
-      if(last != last_merged)
-	std::swap(rects[last_merged], rects[last]);
-      rects.resize(last);
-
-      last_merged = merge_with;
+      // any other absorbed rectangled need to be deleted - work from the
+      //  highest to lowest to avoid moving any absorbed entries
+      if(!absorbed.empty()) {
+	int i = absorbed.size();
+	while(i-- > 0) {
+	  if(absorbed[i] < (count - 1))
+	    std::swap(rects[absorbed[i]], rects[count - 1]);
+	  count--;
+	}
+	rects.resize(count);
+      }
     }
+
+#ifdef REALM_DEBUG_RECT_MERGING
+    log_part.print() << "add: " << _r << " + " << orig_rects << " = " << rects;
+
+    // sanity-check: no two rectangles should overlap or be mergeable
+    for(size_t i = 0; i < rects.size(); i++)
+      for(size_t j = i + 1; j < rects.size(); j++) {
+	assert(!rects[i].overlaps(rects[j]));
+	assert(!can_merge(rects[i], rects[j]));
+      }
+#endif
   }
 
 
@@ -298,19 +347,21 @@ namespace Realm {
   template <int N, typename T>
   inline void HybridRectangleList<N,T>::add_point(const ZPoint<N,T>& p)
   {
-    as_vector.push_back(ZRect<N,T>(p, p));
+    as_vector.add_point(p);
+    //as_vector.push_back(ZRect<N,T>(p, p));
   }
 
   template <int N, typename T>
   inline void HybridRectangleList<N,T>::add_rect(const ZRect<N,T>& r)
   {
-    as_vector.push_back(r);
+    as_vector.add_rect(r);
+    //as_vector.push_back(r);
   }
 
   template <int N, typename T>
   inline const std::vector<ZRect<N,T> >& HybridRectangleList<N,T>::convert_to_vector(void)
   {
-    return as_vector;
+    return as_vector.rects;
   }
 
 
