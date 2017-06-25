@@ -26,6 +26,7 @@
 #include "utils.h"
 
 #include <dlfcn.h>
+#include <link.h>
 
 #include <list>
 
@@ -61,10 +62,12 @@ namespace Realm {
 
     PyObject *(*PyByteArray_FromStringAndSize)(const char *, Py_ssize_t);
 
+#ifdef PYTHON_HAS_THREADS
     void (*PyEval_AcquireLock)(void);
     void (*PyEval_InitThreads)(void);
     void (*PyEval_RestoreThread)(PyThreadState *);
     PyThreadState *(*PyEval_SaveThread)(void);
+#endif
 
     void (*PyErr_PrintEx)(int set_sys_last_vars);
 
@@ -95,10 +98,12 @@ namespace Realm {
 
     get_symbol(this->PyByteArray_FromStringAndSize, "PyByteArray_FromStringAndSize");
 
+#ifdef PYTHON_HAS_THREADS
     get_symbol(this->PyEval_AcquireLock, "PyEval_AcquireLock");
     get_symbol(this->PyEval_InitThreads, "PyEval_InitThreads");
     get_symbol(this->PyEval_RestoreThread, "PyEval_RestoreThread");
     get_symbol(this->PyEval_SaveThread, "PyEval_SaveThread");
+#endif
 
     get_symbol(this->PyErr_PrintEx, "PyErr_PrintEx");
 
@@ -147,10 +152,31 @@ namespace Realm {
 
   protected:
     void *handle;
-
+#ifdef REALM_USE_DLMOPEN
+    void *dlmproxy_handle;
+#endif
+    
   public:
     PythonAPI *api;
   };
+
+#ifdef REALM_USE_DLMOPEN
+  // dlmproxy symbol lookups have to happen in a function we define so that
+  //  dl[v]sym searches in the right place
+  static void *dlmproxy_lookup(const char *symname, const char *symver)
+  {
+    
+    void *handle = 0;
+    void *sym = (symver ?
+		   dlvsym(handle, symname, symver) :
+		   dlsym(handle, symname));
+    if(sym)
+      log_py.debug() << "found symbol: name=" << symname << " ver=" << (symver ? symver : "(none)") << " ptr=" << sym;
+    else
+      log_py.warning() << "missing symbol: name=" << symname << " ver=" << (symver ? symver : "(none)");
+    return sym;
+  }
+#endif
 
   PythonInterpreter::PythonInterpreter() 
   {
@@ -161,8 +187,40 @@ namespace Realm {
 #endif
 
 #ifdef REALM_USE_DLMOPEN
-    handle = dlmopen(LM_ID_NEWLM, python_lib, RTLD_DEEPBIND | RTLD_LOCAL | RTLD_LAZY);
+    // loading libpython into its own namespace will cause it to try to bring
+    //   in a second copy of libpthread.so.0, which is fairly disastrous
+    // we deal with it by loading a "dlmproxy" of pthreads that tunnels all 
+    //   pthreads calls back to the (only) version in the main executable
+    const char *dlmproxy_filename = getenv("DLMPROXY_LIBPTHREAD");
+    if(!dlmproxy_filename)
+      dlmproxy_filename = "dlmproxy_libpthread.so.0";
+    dlmproxy_handle = dlmopen(LM_ID_NEWLM,
+			      dlmproxy_filename,
+			      RTLD_DEEPBIND | RTLD_LOCAL | RTLD_LAZY);
+    if(!dlmproxy_handle) {
+      const char *error = dlerror();
+      log_py.fatal() << "HELP!  Use of dlmopen for python requires dlmproxy for pthreads!  Failed to\n"
+		     << "  load: " << dlmproxy_filename << "\n"
+		     << "  error: " << error;
+      assert(false);
+    }
+
+    // now that the proxy is loaded, we need to tell it where the real
+    //  libpthreads functions are
+    {
+      void *sym = dlsym(dlmproxy_handle, "dlmproxy_load_symbols");
+      assert(sym != 0);
+      ((void (*)(void *(*)(const char *, const char *)))sym)(dlmproxy_lookup);
+    }
+
+    // now we can load libpython, but make sure we do it in the new namespace
+    Lmid_t lmid;
+    int ret = dlinfo(dlmproxy_handle, RTLD_DI_LMID, &lmid);
+    assert(ret == 0);
+
+    handle = dlmopen(lmid, python_lib, RTLD_DEEPBIND | RTLD_LOCAL | RTLD_NOW);
 #else
+    // life is so much easier if we use dlopen (but we only get one copy then)
     handle = dlopen(python_lib, RTLD_GLOBAL | RTLD_LAZY);
 #endif
     if (!handle) {
@@ -193,10 +251,16 @@ namespace Realm {
 
     delete api;
 
-#if 0
     if (dlclose(handle)) {
       const char *error = dlerror();
-      log_py.fatal() << error;
+      log_py.fatal() << "libpython dlclose error: " << error;
+      assert(false);
+    }
+
+#ifdef REALM_USE_DLMOPEN
+    if (dlclose(dlmproxy_handle)) {
+      const char *error = dlerror();
+      log_py.fatal() << "dlmproxy dlclose error: " << error;
       assert(false);
     }
 #endif
