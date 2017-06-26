@@ -12137,6 +12137,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::print_once(Context ctx, FILE *f, const char *message)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+        REPORT_DUMMY_CONTEXT("Illegal dummy context print once!");
+      ctx->print_once(f, message);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::log_once(Context ctx, Realm::LoggerMessage &message)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+        REPORT_DUMMY_CONTEXT("Illegal dummy context log once!");
+      ctx->log_once(message);
+    }
+
+    //--------------------------------------------------------------------------
     bool Runtime::is_MPI_interop_configured(void)
     //--------------------------------------------------------------------------
     {

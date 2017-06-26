@@ -126,6 +126,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void TaskContext::print_once(FILE *f, const char *message) const
+    //--------------------------------------------------------------------------
+    {
+      fprintf(f, "%s", message);
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskContext::log_once(Realm::LoggerMessage &message) const
+    //--------------------------------------------------------------------------
+    {
+      // Do nothing, just don't deactivate it
+    }
+
+    //--------------------------------------------------------------------------
     void TaskContext::add_physical_region(const RegionRequirement &req,
                                    bool mapped, MapperID mid, MappingTagID tag,
                                    ApUserEvent unmap_event, bool virtual_mapped, 
@@ -6628,6 +6642,24 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::print_once(FILE *f, const char *message) const
+    //--------------------------------------------------------------------------
+    {
+      // Only print from shard 0
+      if (owner_shard->shard_id == 0)
+        fprintf(f, "%s", message);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::log_once(Realm::LoggerMessage &message) const
+    //--------------------------------------------------------------------------
+    {
+      // Deactivate all the messages except shard 0
+      if (owner_shard->shard_id != 0)
+        message.deactivate();
     }
 
     //--------------------------------------------------------------------------

@@ -40,6 +40,13 @@
 // temporary helper macro to turn link errors into runtime errors
 #define UNIMPLEMENTED_METHOD(retval) do { assert(0); return retval; } while(0)
 
+#define LEGION_PRINT_ONCE(runtime, ctx, file, fmt, ...)   \
+{                                                         \
+  char message[4096];                                     \
+  snprintf(message, 4096, fmt, ##__VA_ARGS__);            \
+  runtime->print_once(ctx, file, message);                \
+}
+
 /**
  * \namespace Legion
  * Namespace for all Legion runtime objects
@@ -6050,6 +6057,28 @@ namespace Legion {
        * @param result pointer to assign to the name
        */
       void retrieve_name(LogicalPartition handle, const char *&result);
+    public:
+      //------------------------------------------------------------------------
+      // Printing operations, these are useful for only generating output
+      // from a single task if the task has been replicated (either directly
+      // or as part of control replication).
+      //------------------------------------------------------------------------
+      /**
+       * Print the string to the given C file (may also be stdout/stderr)
+       * exactly once regardless of the replication status of the task.
+       * @param ctx the enclosing task context
+       * @param file the file to be written to
+       * @param message pointer to the C string to be written
+       */
+      void print_once(Context ctx, FILE *f, const char *message);
+
+      /**
+       * Print the logger message exactly once regardless of the control
+       * replication status of the task.
+       * @param ctx the enclosing task context
+       * @param message the Realm Logger Message to be logged
+       */
+      void log_once(Context ctx, Realm::LoggerMessage &message);
     public:
       //------------------------------------------------------------------------
       // Registration Callback Operations

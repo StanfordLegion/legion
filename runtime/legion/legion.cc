@@ -6387,6 +6387,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::print_once(Context ctx, FILE *f, const char *message)
+    //--------------------------------------------------------------------------
+    {
+      runtime->print_once(ctx, f, message);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::log_once(Context ctx, Realm::LoggerMessage &message)
+    //--------------------------------------------------------------------------
+    {
+      runtime->log_once(ctx, message);
+    }
+
+    //--------------------------------------------------------------------------
     FieldID Runtime::allocate_field(Context ctx, FieldSpace space,
                                              size_t field_size, FieldID fid,
                                              bool local, CustomSerdezID sd_id)
