@@ -1591,6 +1591,7 @@ namespace Realm {
 
     GPUFBMemory::~GPUFBMemory(void) {}
 
+#ifdef OLD_ALLOCATORS
     RegionInstance GPUFBMemory::create_instance(IndexSpace is,
 						const int *linearization_bits,
 						size_t bytes_needed,
@@ -1612,6 +1613,7 @@ namespace Realm {
     {
       destroy_instance_local(i, local_destroy);
     }
+#endif
 
     off_t GPUFBMemory::alloc_bytes(size_t size)
     {
@@ -1665,6 +1667,7 @@ namespace Realm {
 
     GPUZCMemory::~GPUZCMemory(void) {}
 
+#ifdef OLD_ALLOCATORS
     RegionInstance GPUZCMemory::create_instance(IndexSpace is,
 						const int *linearization_bits,
 						size_t bytes_needed,
@@ -1686,6 +1689,7 @@ namespace Realm {
     {
       destroy_instance_local(i, local_destroy);
     }
+#endif
 
     off_t GPUZCMemory::alloc_bytes(size_t size)
     {

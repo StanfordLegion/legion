@@ -605,6 +605,7 @@ namespace Realm {
 
       virtual ~GPUFBMemory(void);
 
+#ifdef OLD_ALLOCATORS
       virtual RegionInstance create_instance(IndexSpace is,
 					     const int *linearization_bits,
 					     size_t bytes_needed,
@@ -618,6 +619,7 @@ namespace Realm {
 
       virtual void destroy_instance(RegionInstance i, 
 				    bool local_destroy);
+#endif
 
       virtual off_t alloc_bytes(size_t size);
 
@@ -642,6 +644,7 @@ namespace Realm {
 
       virtual ~GPUZCMemory(void);
 
+#ifdef OLD_ALLOCATORS
       virtual RegionInstance create_instance(IndexSpace is,
 					     const int *linearization_bits,
 					     size_t bytes_needed,
@@ -655,6 +658,7 @@ namespace Realm {
 
       virtual void destroy_instance(RegionInstance i, 
 				    bool local_destroy);
+#endif
 
       virtual off_t alloc_bytes(size_t size);
 
