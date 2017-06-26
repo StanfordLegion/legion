@@ -52,13 +52,68 @@ namespace Realm {
     bool cfg_worker_threads_sleep = false;
   };
 
+  // TODO: C++11 has type_traits and std::make_unsigned
+  namespace {
+    template <typename T> struct MakeUnsigned { typedef T U; };
+#define SIGNED_CASE(S) \
+    template <> struct MakeUnsigned<S> { typedef unsigned S U; }
+    SIGNED_CASE(int);
+    SIGNED_CASE(short);
+    SIGNED_CASE(long);
+    SIGNED_CASE(long long);
+#undef SIGNED_CASE
+  };
 
   ////////////////////////////////////////////////////////////////////////
   //
   // class ZIndexSpace<N,T>
 
   template <int N, typename T>
-  __attribute__ ((noinline))
+  Event ZIndexSpace<N,T>::create_equal_subspace(size_t count, size_t granularity,
+						unsigned index, ZIndexSpace<N,T> &subspace,
+						const ProfilingRequestSet &reqs,
+						Event wait_on /*= Event::NO_EVENT*/) const
+  {
+    // no support for deferring yet
+    assert(wait_on.has_triggered());
+    //assert(reqs.empty());
+
+    // either an empty input or a count of 1 allow us to return the input
+    //  verbatim
+    if(empty() || (count == 1)) {
+      subspace = *this;
+      return Event::NO_EVENT;
+    }
+
+    // dense case is easy(er)
+    if(dense()) {
+      // always split in x dimension for now
+      assert(count >= 1);
+      // avoiding over/underflow here is tricky - use unsigned math and watch
+      //  out for empty subspace case
+      // TODO: still not handling maximal-size input properly
+      typedef typename MakeUnsigned<T>::U U;
+      U total_x = std::max(((U)bounds.hi.x -
+			    (U)bounds.lo.x + 1),
+			   U(0));
+      U rel_span_start = (total_x * index / count);
+      U rel_span_size = (total_x * (index + 1) / count) - rel_span_start;
+      if(rel_span_size > 0) {
+	subspace = *this;
+	subspace.bounds.lo.x = bounds.lo.x + rel_span_start;
+	subspace.bounds.hi.x = bounds.lo.x + rel_span_start + (rel_span_size - 1);
+      } else {
+	subspace = ZIndexSpace<N,T>::make_empty();
+      }
+      return Event::NO_EVENT;
+    }
+
+    // TODO: sparse case
+    assert(0);
+    return Event::NO_EVENT;
+  }
+
+  template <int N, typename T>
   Event ZIndexSpace<N,T>::create_equal_subspaces(size_t count, size_t granularity,
 						 std::vector<ZIndexSpace<N,T> >& subspaces,
 						 const ProfilingRequestSet &reqs,
@@ -95,7 +150,6 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  __attribute__ ((noinline))
   Event ZIndexSpace<N,T>::create_weighted_subspaces(size_t count, size_t granularity,
 						    const std::vector<int>& weights,
 						    std::vector<ZIndexSpace<N,T> >& subspaces,
@@ -155,7 +209,6 @@ namespace Realm {
 
   template <int N, typename T>
   template <int N2, typename T2>
-  __attribute__ ((noinline))
   Event ZIndexSpace<N,T>::create_association(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,
 					                       ZPoint<N2,T2> > >& field_data,
 					     const ZIndexSpace<N2,T2> &range,
