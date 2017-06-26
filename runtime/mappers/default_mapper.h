@@ -421,15 +421,15 @@ namespace Legion {
       static const char* create_default_name(Processor p);
       template<int DIM>
       static void default_decompose_points(
-                              const LegionRuntime::Arrays::Rect<DIM> &point_rect,
+                              const Realm::ZRect<DIM,coord_t> &point_rect,
                               const std::vector<Processor> &targets,
-                              const LegionRuntime::Arrays::Point<DIM> &blocking, 
+                              const Realm::ZPoint<DIM,coord_t> &blocking, 
                               bool recurse, bool stealable,
                               std::vector<TaskSlice> &slices);
       template<int DIM>
-      static LegionRuntime::Arrays::Point<DIM> default_select_num_blocks(
-                            long long int factor, const LegionRuntime::Arrays::
-                            Rect<DIM> &rect_to_factor);
+      static Realm::ZPoint<DIM,coord_t> default_select_num_blocks(
+                            long long int factor, 
+                            const Realm::ZRect<DIM,coord_t> &rect_to_factor);
       static unsigned long long compute_task_hash(const Task &task);
       static inline bool physical_sort_func(
                          const std::pair<PhysicalInstance,unsigned> &left,

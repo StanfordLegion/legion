@@ -19,35 +19,35 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM>
     /*static*/ void DefaultMapper::default_decompose_points(
-                           const LegionRuntime::Arrays::Rect<DIM> &point_rect,
+                           const Realm::ZRect<DIM,coord_t> &point_rect,
                            const std::vector<Processor> &targets,
-                           const LegionRuntime::Arrays::Point<DIM> &num_blocks,
+                           const Realm::ZPoint<DIM,coord_t> &num_blocks,
                            bool recurse, bool stealable,
                            std::vector<TaskSlice> &slices)
     //--------------------------------------------------------------------------
     {
-      LegionRuntime::Arrays::Point<DIM> num_points = point_rect.hi - 
-        point_rect.lo + LegionRuntime::Arrays::Point<DIM>::ONES();
-      LegionRuntime::Arrays::Rect<DIM> blocks(
-          LegionRuntime::Arrays::Point<DIM>::ZEROES(), 
-          num_blocks - LegionRuntime::Arrays::Point<DIM>::ONES());
+      Realm::ZPoint<DIM,coord_t> zeroes;
+      for (int i = 0; i < DIM; i++)
+        zeroes[i] = 0;
+      Realm::ZPoint<DIM,coord_t> ones;
+      for (int i = 0; i < DIM; i++)
+        ones[i] = 1;
+      Realm::ZPoint<DIM,coord_t> num_points = 
+        point_rect.hi - point_rect.lo + ones;
+      Realm::ZRect<DIM> blocks(zeroes, num_blocks - ones);
       size_t next_index = 0;
       slices.reserve(blocks.volume());
-      for (GenericPointInRectIterator<DIM> pir(blocks);
-           pir; pir++) {
-        LegionRuntime::Arrays::Point<DIM> block_lo = 
-          pir.p, block_hi = pir.p + LegionRuntime::Arrays::Point<DIM>::ONES();
-
-        LegionRuntime::Arrays::Point<DIM> slice_lo =
+      for (PointInRectIterator<DIM> pir(blocks); pir(); pir++) {
+        Realm::ZPoint<DIM,coord_t> block_lo = *pir;
+        Realm::ZPoint<DIM,coord_t> block_hi = *pir + ones;
+        Realm::ZPoint<DIM,coord_t> slice_lo =
           num_points * block_lo / num_blocks + point_rect.lo;
-        LegionRuntime::Arrays::Point<DIM> slice_hi = 
-          num_points * block_hi / num_blocks + point_rect.lo - 
-          LegionRuntime::Arrays::Point<DIM>::ONES();
-        LegionRuntime::Arrays::Rect<DIM> slice_rect(slice_lo, slice_hi);
-
+        Realm::ZPoint<DIM,coord_t> slice_hi = 
+          num_points * block_hi / num_blocks + point_rect.lo - ones; 
+        Realm::ZRect<DIM,coord_t> slice_rect(slice_lo, slice_hi);
         if (slice_rect.volume() > 0) {
           TaskSlice slice;
-          slice.domain = Domain::from_rect<DIM>(slice_rect);
+          slice.domain = slice_rect;
           slice.proc = targets[next_index++ % targets.size()];
           slice.recurse = recurse;
           slice.stealable = stealable;
@@ -58,14 +58,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM>
-    /*static*/ LegionRuntime::Arrays::Point<DIM> 
+    /*static*/ Realm::ZPoint<DIM,coord_t> 
                 DefaultMapper::default_select_num_blocks( 
                              long long int factor, 
-                             const LegionRuntime::Arrays::Rect<DIM> &to_factor)
+                             const Realm::ZRect<DIM,coord_t> &to_factor)
     //--------------------------------------------------------------------------
     {
       if (factor == 1)
-        return LegionRuntime::Arrays::Point<DIM>::ONES();
+      {
+        Realm::ZPoint<DIM,coord_t> ones;
+        for (int i = 0; i < DIM; i++)
+          ones[i] = 1;
+        return ones;
+      }
 
       // Fundamental theorem of arithmetic time!
       const unsigned num_primes = 32;
@@ -101,7 +106,7 @@ namespace Legion {
         result[i] = 1;
       double dim_chunks[DIM];
       for (int i = 0; i < DIM; i++)
-        dim_chunks[i] = to_factor.dim_size(i);
+        dim_chunks[i] = ((to_factor.hi[i] - to_factor.lo[i]) + 1);
       for (int idx = prime_factors.size()-1; idx >= 0; idx--)
       {
         // Find the dimension with the biggest dim_chunk 
@@ -120,7 +125,7 @@ namespace Legion {
         result[next_dim] *= next_prime;
         dim_chunks[next_dim] /= next_prime;
       }
-      return LegionRuntime::Arrays::Point<DIM>(result);
+      return Realm::ZPoint<DIM,coord_t>(result);
     }
 
     //--------------------------------------------------------------------------

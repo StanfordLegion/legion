@@ -1003,12 +1003,11 @@ namespace Legion {
 
           output.slices.resize(input.domain.get_volume());
           unsigned idx = 0;
-          LegionRuntime::Arrays::Rect<1> rect = input.domain.get_rect<1>();
-          for (LegionRuntime::Arrays::GenericPointInRectIterator<1> pir(rect);
-              pir; pir++, idx++)
+          Realm::ZRect<1> rect = input.domain;
+          for (PointInRectIterator<1> pir(rect); pir(); pir++, idx++)
           {
-            LegionRuntime::Arrays::Rect<1> slice(pir.p, pir.p);
-            output.slices[idx] = TaskSlice(Domain::from_rect<1>(slice),
+            Realm::ZRect<1> slice(*pir, *pir);
+            output.slices[idx] = TaskSlice(slice,
               remote_procsets[idx % remote_cpus.size()],
               false/*recurse*/, false/*stealable*/);
           }
@@ -1083,9 +1082,8 @@ namespace Legion {
       {
         case 1:
           {
-            LegionRuntime::Arrays::Rect<1> point_rect = 
-              input.domain.get_rect<1>();
-            LegionRuntime::Arrays::Point<1> num_blocks(procs.size());
+            Realm::ZRect<1,coord_t> point_rect = input.domain; 
+            Realm::ZPoint<1,coord_t> num_blocks(procs.size());
             default_decompose_points<1>(point_rect, procs,
                   num_blocks, false/*recurse*/,
                   stealing_enabled, output.slices);
@@ -1093,9 +1091,8 @@ namespace Legion {
           }
         case 2:
           {
-            LegionRuntime::Arrays::Rect<2> point_rect = 
-              input.domain.get_rect<2>();
-            LegionRuntime::Arrays::Point<2> num_blocks =
+            Realm::ZRect<2,coord_t> point_rect = input.domain;
+            Realm::ZPoint<2,coord_t> num_blocks =
               default_select_num_blocks<2>(procs.size(), point_rect);
             default_decompose_points<2>(point_rect, procs,
                 num_blocks, false/*recurse*/,
@@ -1104,9 +1101,8 @@ namespace Legion {
           }
         case 3:
           {
-            LegionRuntime::Arrays::Rect<3> point_rect = 
-              input.domain.get_rect<3>();
-            LegionRuntime::Arrays::Point<3> num_blocks =
+            Realm::ZRect<3,coord_t> point_rect = input.domain;
+            Realm::ZPoint<3,coord_t> num_blocks =
               default_select_num_blocks<3>(procs.size(), point_rect);
             default_decompose_points<3>(point_rect, procs,
                 num_blocks, false/*recurse*/,
@@ -1128,22 +1124,21 @@ namespace Legion {
       {
         case 1:
           {
-            LegionRuntime::Arrays::Rect<1> point_rect = 
-              input.domain.get_rect<1>();
+            Realm::ZRect<1,coord_t> point_rect = input.domain;
             if (remote.size() > 1) {
               if (total_points <= local.size()) {
-                LegionRuntime::Arrays::Point<1> num_blocks(local.size());
+                Realm::ZPoint<1,coord_t> num_blocks(local.size());
                 default_decompose_points<1>(point_rect, local,
                     num_blocks, false/*recurse*/,
                     stealing_enabled, output.slices);
               } else {
-                LegionRuntime::Arrays::Point<1> num_blocks(remote.size());
+                Realm::ZPoint<1,coord_t> num_blocks(remote.size());
                 default_decompose_points<1>(point_rect, remote,
                     num_blocks, true/*recurse*/,
                     stealing_enabled, output.slices);
               }
             } else {
-              LegionRuntime::Arrays::Point<1> num_blocks(local.size());
+              Realm::ZPoint<1,coord_t> num_blocks(local.size());
               default_decompose_points<1>(point_rect, local,
                   num_blocks, false/*recurse*/,
                   stealing_enabled, output.slices);
@@ -1152,24 +1147,23 @@ namespace Legion {
           }
         case 2:
           {
-            LegionRuntime::Arrays::Rect<2> point_rect = 
-              input.domain.get_rect<2>();
+            Realm::ZRect<2,coord_t> point_rect = input.domain;
             if (remote.size() > 1) {
               if (total_points <= local.size()) {
-                LegionRuntime::Arrays::Point<2> num_blocks =
+                Realm::ZPoint<2,coord_t> num_blocks =
                   default_select_num_blocks<2>(local.size(), point_rect);
                 default_decompose_points<2>(point_rect, local,
                     num_blocks, false/*recurse*/,
                     stealing_enabled, output.slices);
               } else {
-                LegionRuntime::Arrays::Point<2> num_blocks =
+                Realm::ZPoint<2,coord_t> num_blocks =
                   default_select_num_blocks<2>(remote.size(), point_rect);
                 default_decompose_points<2>(point_rect, remote,
                     num_blocks, true/*recurse*/,
                     stealing_enabled, output.slices);
               }
             } else {
-              LegionRuntime::Arrays::Point<2> num_blocks =
+              Realm::ZPoint<2,coord_t> num_blocks =
                 default_select_num_blocks<2>(local.size(), point_rect);
               default_decompose_points<2>(point_rect, local,
                   num_blocks, false/*recurse*/,
@@ -1179,24 +1173,23 @@ namespace Legion {
           }
         case 3:
           {
-            LegionRuntime::Arrays::Rect<3> point_rect = 
-              input.domain.get_rect<3>();
+            Realm::ZRect<3,coord_t> point_rect = input.domain;
             if (remote.size() > 1) {
               if (total_points <= local.size()) {
-                LegionRuntime::Arrays::Point<3> num_blocks =
+                Realm::ZPoint<3,coord_t> num_blocks =
                   default_select_num_blocks<3>(local.size(), point_rect);
                 default_decompose_points<3>(point_rect, local,
                     num_blocks, false/*recurse*/,
                     stealing_enabled, output.slices);
               } else {
-                LegionRuntime::Arrays::Point<3> num_blocks =
+                Realm::ZPoint<3,coord_t> num_blocks =
                   default_select_num_blocks<3>(remote.size(), point_rect);
                 default_decompose_points<3>(point_rect, remote,
                     num_blocks, true/*recurse*/,
                     stealing_enabled, output.slices);
               }
             } else {
-              LegionRuntime::Arrays::Point<3> num_blocks =
+              Realm::ZPoint<3,coord_t> num_blocks =
                 default_select_num_blocks<3>(local.size(), point_rect);
               default_decompose_points<3>(point_rect, local,
                   num_blocks, false/*recurse*/,
