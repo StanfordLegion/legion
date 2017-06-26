@@ -146,6 +146,7 @@ namespace Realm {
     LoggerMessage& vprintf(const char *typeName, LoggerMessageID messageID, const char *fmt, va_list ap);
     
     bool is_active(void) const;
+    void deactivate(void);
     
     std::ostream& get_stream(void);
     

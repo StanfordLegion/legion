@@ -414,6 +414,11 @@ namespace Realm {
   {
     return active;
   }
+
+  inline void LoggerMessage::deactivate(void)
+  {
+    active = false;
+  }
   
   inline std::ostream& LoggerMessage::get_stream(void)
   {
