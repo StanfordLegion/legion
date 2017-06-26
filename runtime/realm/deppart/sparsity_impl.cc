@@ -623,7 +623,7 @@ namespace Realm {
   {
     size_t n = entries.size();
     // ignore max rects for now and just copy bounds over
-    if(n <= max_rects) {
+    if(n <= (size_t)max_rects) {
       approx_rects.resize(n);
       for(size_t i = 0; i < n; i++)
 	approx_rects[i] = entries[i].bounds;

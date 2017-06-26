@@ -433,7 +433,7 @@ namespace Realm {
       // see which of the targets this image overlaps
       std::set<int> overlaps;
       overlap_tester->test_overlap(rects, count, overlaps);
-      if(index < ptr_data.size()) {
+      if((size_t)index < ptr_data.size()) {
 	log_part.info() << "image of ptr_data[" << index << "] overlaps " << overlaps.size() << " targets";
 	PreimageMicroOp<N,T,N2,T2> *uop = new PreimageMicroOp<N,T,N2,T2>(parent,
 									 ptr_data[index].index_space,
@@ -449,7 +449,7 @@ namespace Realm {
 	}
 	uop->dispatch(this, false /* do not run in this thread */);
       } else {
-	int rel_index = index - ptr_data.size();
+	size_t rel_index = index - ptr_data.size();
 	assert(rel_index < range_data.size());
 	log_part.info() << "image of range_data[" << rel_index << "] overlaps " << overlaps.size() << " targets";
 	PreimageMicroOp<N,T,N2,T2> *uop = new PreimageMicroOp<N,T,N2,T2>(parent,
@@ -497,7 +497,7 @@ namespace Realm {
 	  it != pending.end();
 	  it++) {
 	// see which instance this is an image from
-	int idx = it->first;
+	size_t idx = it->first;
 	// see which of the targets that image overlaps
 	std::set<int> overlaps;
 	overlap_tester->test_overlap(&it->second[0], it->second.size(), overlaps);
@@ -517,7 +517,7 @@ namespace Realm {
 	  }
 	  uop->dispatch(this, true /* ok to run in this thread */);
 	} else {
-	  int rel_index = idx - ptr_data.size();
+	  size_t rel_index = idx - ptr_data.size();
 	  assert(rel_index < range_data.size());
 	  log_part.info() << "image of range_data[" << rel_index << "] overlaps " << overlaps.size() << " targets";
 	  PreimageMicroOp<N,T,N2,T2> *uop = new PreimageMicroOp<N,T,N2,T2>(parent,
