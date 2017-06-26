@@ -3139,7 +3139,8 @@ namespace Legion {
         shard_collective_last_radix(ctx->get_shard_collective_last_radix()),
         shard_collective_last_log_radix(
             ctx->get_shard_collective_last_log_radix()),
-        participating(int(local_shard) < shard_collective_participating_shards) 
+        participating(int(local_shard) < shard_collective_participating_shards),
+        prefix_stage_notification(false)
     //--------------------------------------------------------------------------
     { 
       if (participating)
@@ -3147,20 +3148,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(shard_collective_stages > 0);
 #endif
-        stage_notifications.resize(shard_collective_stages, 1);
-        sent_stages.resize(shard_collective_stages, false);
-        // Stage 0 always starts with 0 notifications since we'll 
-        // explictcly arrive on it
-	// Special case: if we expect a stage -1 message from a 
-        // non-participating space, we'll count that as part of 
-        // stage 0, it will make it a negative count, but the 
-        // type is 'int' so we're good
-        if ((shard_collective_stages > 0) &&
-            (local_shard < 
-             (manager->total_shards - shard_collective_participating_shards)))
-          stage_notifications[0] = -1;
-        else
-          stage_notifications[0] = 0;
+        stage_notifications.resize(shard_collective_stages, 0);
       }
       if (manager->total_shards > 1)
         done_event = Runtime::create_rt_user_event();
@@ -3178,7 +3166,8 @@ namespace Legion {
         shard_collective_last_radix(ctx->get_shard_collective_last_radix()),
         shard_collective_last_log_radix(
             ctx->get_shard_collective_last_log_radix()),
-        participating(int(local_shard) < shard_collective_participating_shards)
+        participating(int(local_shard) < shard_collective_participating_shards),
+        prefix_stage_notification(false)
     //--------------------------------------------------------------------------
     {
       if (participating)
@@ -3186,20 +3175,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(shard_collective_stages > 0);
 #endif
-        stage_notifications.resize(shard_collective_stages, 1);
-        sent_stages.resize(shard_collective_stages, false);
-        // Stage 0 always starts with 0 notifications since we'll 
-        // explictcly arrive on it
-	// Special case: if we expect a stage -1 message from a 
-        // non-participating space, we'll count that as part of 
-        // stage 0, it will make it a negative count, but the 
-        // type is 'int' so we're good
-        if ((shard_collective_stages > 0) &&
-            (local_shard < 
-             (manager->total_shards - shard_collective_participating_shards)))
-          stage_notifications[0] = -1;
-        else
-          stage_notifications[0] = 0;
+        stage_notifications.resize(shard_collective_stages, 0);
       }
       if (manager->total_shards > 1)
         done_event = Runtime::create_rt_user_event();
@@ -3238,16 +3214,34 @@ namespace Legion {
             (local_shard >= (manager->total_shards - 
                              shard_collective_participating_shards)))
         {
-          const bool all_stages_done = send_explicit_stage(0);
-          if (all_stages_done)
-            complete_exchange();
+          // Can send stage 0 without preconditions
+          send_stage(0);
+          // Do our arrival on stage 1 and see if it is ready
+          for (int stage = 0; stage < shard_collective_stages; stage++)
+          {
+            // Once we are not the last arriver, we can break out
+            if (!arrive_stage(stage))
+              break;
+            send_stage(stage+1);
+          }
+        }
+        else
+        {
+          // Have a precondition for stage 0 so start at 0 
+          for (int stage = -1; stage < shard_collective_stages; stage++)
+          {
+            // Once we are not the last arriver, we can break out
+            if (!arrive_stage(stage))
+              break;
+            send_stage(stage+1);
+          }
         }
       }
       else
       {
         // We are not a participating shard
         // so we just have to send a notification to one node
-        send_explicit_stage(-1);
+        send_stage(-1);
       }
     }
 
@@ -3271,56 +3265,28 @@ namespace Legion {
       assert(participating || (stage == -1));
 #endif
       unpack_stage(stage, derez);
-      bool all_stages_done = false;
-      if (stage == -1)
+      if (participating)
       {
-        if (!participating)
-          Runtime::trigger_event(done_event);
-        else
-          all_stages_done = send_explicit_stage(0); // we can now send stage 0
+        // Keep doing local arrivals until we are not the last one
+        for ( /*nothing*/; stage < shard_collective_stages; stage++)
+        {
+          if (!arrive_stage(stage))
+            break;
+          send_stage(stage+1);
+        }
       }
       else
-        all_stages_done = send_ready_stages();
-      if (all_stages_done)
         complete_exchange();
     }
 
     //--------------------------------------------------------------------------
-    bool AllGatherCollective::send_explicit_stage(int stage) 
+    void AllGatherCollective::send_stage(int stage)
     //--------------------------------------------------------------------------
     {
-      bool all_stages_done = false;
-      {
-        AutoLock c_lock(collective_lock);
-        // Mark that we're sending this stage
-        if (stage >= 0)
-        {
-#ifdef DEBUG_LEGION
-          assert(stage < int(stage_notifications.size()));
-          if (stage == (shard_collective_stages-1))
-            assert(stage_notifications[stage] < shard_collective_last_radix);
-          else
-            assert(stage_notifications[stage] < shard_collective_radix);
-#endif
-          stage_notifications[stage]++;
-          sent_stages[stage] = true;
-          // Check to see if all the stages are done
-          all_stages_done = 
-            (stage_notifications.back() == shard_collective_last_radix);
-          if (all_stages_done)
-          {
-            for (int stage = 1; stage < shard_collective_stages; stage++)
-            {
-              if (stage_notifications[stage-1] == shard_collective_radix)
-                continue;
-              all_stages_done = false;
-              break;
-            }
-          }
-        }
-      }
+      // A few special cases here
       if (stage == -1)
       {
+        // Single message case
         if (participating)
         {
           // Send back to the nodes that are not participating
@@ -3341,101 +3307,39 @@ namespace Legion {
           manager->send_collective_message(target, rez);
         }
       }
+      else if (stage == shard_collective_stages)
+      {
+        // Complete the exchange case 
+        complete_exchange();
+      }
+      else if (stage == (shard_collective_stages-1))
+      {
+        for (int r = 1; r < shard_collective_last_radix; r++)
+        {
+          ShardID target = local_shard ^ 
+            (r << (stage * shard_collective_log_radix));
+#ifdef DEBUG_LEGION
+          assert(int(target) < shard_collective_participating_shards);
+#endif
+          Serializer rez;
+          construct_message(target, stage, rez);
+          manager->send_collective_message(target, rez);
+        }
+      }
       else
       {
-#ifdef DEBUG_LEGION
-        assert(stage >= 0);
-#endif
-        if (stage == (shard_collective_stages-1))
+        for (int r = 1; r < shard_collective_radix; r++)
         {
-          for (int r = 1; r < shard_collective_last_radix; r++)
-          {
-            ShardID target = local_shard ^ 
-              (r << (stage * shard_collective_log_radix));
+          ShardID target = local_shard ^ 
+            (r << (stage * shard_collective_log_radix));
 #ifdef DEBUG_LEGION
-            assert(int(target) < shard_collective_participating_shards);
+          assert(int(target) < shard_collective_participating_shards);
 #endif
-            Serializer rez;
-            construct_message(target, stage, rez);
-            manager->send_collective_message(target, rez);
-          }
-        }
-        else
-        {
-          for (int r = 1; r < shard_collective_radix; r++)
-          {
-            ShardID target = local_shard ^ 
-              (r << (stage * shard_collective_log_radix));
-#ifdef DEBUG_LEGION
-            assert(int(target) < shard_collective_participating_shards);
-#endif
-            Serializer rez;
-            construct_message(target, stage, rez);
-            manager->send_collective_message(target, rez);
-          }
+          Serializer rez;
+          construct_message(target, stage, rez);
+          manager->send_collective_message(target, rez);
         }
       }
-      return all_stages_done;
-    }
-
-    //--------------------------------------------------------------------------
-    bool AllGatherCollective::send_ready_stages(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(participating);
-#endif
-      // Iterate through the stages and send any that are ready
-      // Remember that stages have to be done in order
-      for (int stage = 1; stage < shard_collective_stages; stage++)
-      {
-        {
-          AutoLock c_lock(collective_lock);
-          // If this stage has already been sent then we can keep going
-          if (sent_stages[stage])
-            continue;
-          // Check to see if we're sending this stage
-          // We need all the notifications from the previous stage before
-          // we can send this stage
-          if (stage_notifications[stage-1] < shard_collective_radix)
-            return false;
-          // If we get here then we can send the stage
-          sent_stages[stage] = true;
-        }
-        // Now we can do the send
-        if (stage == (shard_collective_stages-1))
-        {
-          for (int r = 1; r < shard_collective_last_radix; r++)
-          {
-            ShardID target = local_shard ^ 
-              (r << (stage * shard_collective_log_radix));
-#ifdef DEBUG_LEGION
-            assert(int(target) < shard_collective_participating_shards);
-#endif
-            Serializer rez;
-            construct_message(target, stage, rez);
-            manager->send_collective_message(target, rez);
-          }
-        }
-        else
-        {
-          for (int r = 1; r < shard_collective_radix; r++)
-          {
-            ShardID target = local_shard ^ 
-              (r << (stage * shard_collective_log_radix));
-#ifdef DEBUG_LEGION
-            assert(int(target) < shard_collective_participating_shards);
-#endif
-            Serializer rez;
-            construct_message(target, stage, rez);
-            manager->send_collective_message(target, rez);
-          }
-        }
-      }
-      // If we make it here, then we sent the last stage, check to see
-      // if we've seen all the notifications for it
-      AutoLock c_lock(collective_lock,1,false/*exclusive*/);
-      return (stage_notifications.back() == shard_collective_last_radix);
     }
 
     //--------------------------------------------------------------------------
@@ -3452,26 +3356,53 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool AllGatherCollective::arrive_stage(int stage)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(participating);
+#endif
+      if (stage == -1)
+      {
+        AutoLock c_lock(collective_lock);
+        if (!prefix_stage_notification)
+        {
+          prefix_stage_notification = true;
+          return false;
+        }
+        else
+          return true;
+      }
+      else
+      {
+        AutoLock c_lock(collective_lock);
+#ifdef DEBUG_LEGION
+        assert(stage < stage_notifications.size());
+#endif
+        stage_notifications[stage]++;   
+        if (stage < (shard_collective_stages-1))
+        {
+#ifdef DEBUG_LEGION
+          assert(stage_notifications[stage] <= shard_collective_radix);
+#endif
+          return (stage_notifications[stage] == shard_collective_radix); 
+        }
+        else
+        {
+#ifdef DEBUG_LEGION
+          assert(stage_notifications[stage] <= shard_collective_last_radix);
+#endif
+          return (stage_notifications[stage] == shard_collective_last_radix);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void AllGatherCollective::unpack_stage(int stage, Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       AutoLock c_lock(collective_lock);
       unpack_collective_stage(derez, stage);
-      // A stage -1 message is counted as part of stage 0 
-      // (if it exists and we are participating)
-      if ((stage == -1) && participating && (shard_collective_stages > 0))
-        stage = 0;
-      if (stage >= 0)
-      {
-#ifdef DEBUG_LEGION
-        assert(stage < int(stage_notifications.size()));
-        if (stage < (shard_collective_stages - 1))
-          assert(stage_notifications[stage] < shard_collective_radix);
-        else
-          assert(stage_notifications[stage] < shard_collective_last_radix);
-#endif
-        stage_notifications[stage]++;
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -3485,7 +3416,7 @@ namespace Legion {
       if ((int(manager->total_shards) > shard_collective_participating_shards)
           && (int(local_shard) < int(manager->total_shards - 
                                       shard_collective_participating_shards)))
-        send_explicit_stage(-1);
+        send_stage(-1);
     }
 
     /////////////////////////////////////////////////////////////

@@ -129,9 +129,9 @@ namespace Legion {
       void perform_collective_wait(void);
       virtual void handle_collective_message(Deserializer &derez);
     protected:
-      bool send_explicit_stage(int stage);
-      bool send_ready_stages(void);
+      void send_stage(int stage);
       void construct_message(ShardID target, int stage, Serializer &rez) const;
+      bool arrive_stage(int stage);
       void unpack_stage(int stage, Deserializer &derez);
       void complete_exchange(void);
     public: 
@@ -145,7 +145,7 @@ namespace Legion {
     private:
       RtUserEvent done_event;
       std::vector<int> stage_notifications;
-      std::vector<bool> sent_stages;
+      bool prefix_stage_notification; // Only two arrivals so 1 bit necessary
     };
 
     /**
