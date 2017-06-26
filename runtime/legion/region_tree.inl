@@ -1619,8 +1619,9 @@ namespace Legion {
         {
           // Copy the index space from the parent
           Realm::ZIndexSpace<M,T> child_is = parent_is;
-          // Compute the new bounds 
-          child_is.bounds = extent + transform * color_itr.p;
+          // Compute the new bounds and intersect it with the parent bounds
+          child_is.bounds = parent_is.bounds.intersection(
+                              extent + transform * color_itr.p);
           // Get the legion color
           LegionColor color = linearize_color(&color_itr.p, 
                                               handle.get_type_tag());

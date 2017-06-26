@@ -4021,9 +4021,11 @@ namespace Legion {
       // Template version
       template<int DIM, typename COORD_T>
 #if __cplusplus < 201103L
-      Realm::ZIndexSpace<DIM,COORD_T> get_index_space_domain(IndexSpace handle);
+      Realm::ZIndexSpace<DIM,COORD_T> get_index_space_domain(
+                                        IndexSpaceT<DIM,COORD_T> handle);
 #else
-      DomainT<DIM,COORD_T> get_index_space_domain(IndexSpace handle);
+      DomainT<DIM,COORD_T> get_index_space_domain(
+                                        IndexSpaceT<DIM,COORD_T> handle);
 #endif
       ///@}
 

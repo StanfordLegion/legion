@@ -3549,7 +3549,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    Realm::ZIndexSpace<DIM,T> Runtime::get_index_space_domain(IndexSpace handle)
+    Realm::ZIndexSpace<DIM,T> Runtime::get_index_space_domain(
+                                                      IndexSpaceT<DIM,T> handle)
     //--------------------------------------------------------------------------
     {
       Realm::ZIndexSpace<DIM,T> realm_is;

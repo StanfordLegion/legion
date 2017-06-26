@@ -134,13 +134,13 @@ namespace Legion {
   struct SerdezRedopFns;
   // Some typedefs for making things nicer for users with C++11 support
 #if __cplusplus >= 201103L
-  template<int DIM, typename COORD_T>
+  template<int DIM, typename COORD_T = ::legion_lowlevel_coord_t>
   using Point = Realm::ZPoint<DIM,COORD_T>;
-  template<int DIM, typename COORD_T>
+  template<int DIM, typename COORD_T = ::legion_lowlevel_coord_t>
   using Rect = Realm::ZRect<DIM,COORD_T>;
-  template<int DIM1, int DIM2, typename COORD_T>
+  template<int DIM1, int DIM2, typename COORD_T = ::legion_lowlevel_coord_t>
   using Matrix = Realm::ZMatrix<DIM1,DIM2,COORD_T>;
-  template<int DIM, typename COORD_T>
+  template<int DIM, typename COORD_T = ::legion_lowlevel_coord_t>
   using DomainT = Realm::ZIndexSpace<DIM,COORD_T>;
   template<typename FT, int N, typename T = ::legion_lowlevel_coord_t>
   using AffineAccessor = Realm::AffineAccessor<FT,N,T>;
