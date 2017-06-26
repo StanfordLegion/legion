@@ -6,6 +6,7 @@
 #include <cstring>
 #include <csignal>
 #include <cmath>
+#include <climits>
 
 #include <time.h>
 #include <unistd.h>
@@ -280,10 +281,13 @@ public:
     cell_blockid_field_data.resize(n_blocks);
 
     for(size_t i = 0; i < ss_cells_w.size(); i++) {
-      RegionInstance ri = RegionInstance::create_instance(memories[i % memories.size()],
-							  ss_cells_w[i],
-							  cell_fields,
-							  Realm::ProfilingRequestSet());
+      RegionInstance ri;
+      RegionInstance::create_instance(ri,
+				      memories[i % memories.size()],
+				      ss_cells_w[i],
+				      cell_fields,
+				      0 /*SOA*/,
+				      Realm::ProfilingRequestSet()).wait();
       ri_cells[i] = ri;
     
       cell_blockid_field_data[i].index_space = ss_cells_w[i];
@@ -297,10 +301,13 @@ public:
     face_type_field_data.resize(n_blocks);
 
     for(size_t i = 0; i < ss_faces_w.size(); i++) {
-      RegionInstance ri = RegionInstance::create_instance(memories[i % memories.size()],
-							  ss_faces_w[i],
-							  face_fields,
-							  Realm::ProfilingRequestSet());
+      RegionInstance ri;
+      RegionInstance::create_instance(ri,
+				      memories[i % memories.size()],
+				      ss_faces_w[i],
+				      face_fields,
+				      0 /*SOA*/,
+				      Realm::ProfilingRequestSet()).wait();
       ri_faces[i] = ri;
 
       face_left_field_data[i].index_space = ss_faces_w[i];
@@ -994,10 +1001,13 @@ public:
     subckt_field_data.resize(num_pieces);
 
     for(size_t i = 0; i < ss_nodes_eq.size(); i++) {
-      RegionInstance ri = RegionInstance::create_instance(memories[i % memories.size()],
-							  ss_nodes_eq[i],
-							  node_fields,
-							  Realm::ProfilingRequestSet());
+      RegionInstance ri;
+      RegionInstance::create_instance(ri,
+				      memories[i % memories.size()],
+				      ss_nodes_eq[i],
+				      node_fields,
+				      0 /*SOA*/,
+				      Realm::ProfilingRequestSet()).wait();
       ri_nodes[i] = ri;
     
       subckt_field_data[i].index_space = ss_nodes_eq[i];
@@ -1010,10 +1020,13 @@ public:
     out_node_field_data.resize(num_pieces);
 
     for(size_t i = 0; i < ss_edges_eq.size(); i++) {
-      RegionInstance ri = RegionInstance::create_instance(memories[i % memories.size()],
-							  ss_edges_eq[i],
-							  edge_fields,
-							  Realm::ProfilingRequestSet());
+      RegionInstance ri;
+      RegionInstance::create_instance(ri,
+				      memories[i % memories.size()],
+				      ss_edges_eq[i],
+				      edge_fields,
+				      0 /*SOA*/,
+				      Realm::ProfilingRequestSet()).wait();
       ri_edges[i] = ri;
 
       in_node_field_data[i].index_space = ss_edges_eq[i];
@@ -1418,10 +1431,13 @@ public:
     zone_color_field_data.resize(numpc);
 
     for(size_t i = 0; i < ss_zones_w.size(); i++) {
-      RegionInstance ri = RegionInstance::create_instance(memories[i % memories.size()],
-							  ss_zones_w[i],
-							  zone_fields,
-							  Realm::ProfilingRequestSet());
+      RegionInstance ri;
+      RegionInstance::create_instance(ri,
+				      memories[i % memories.size()],
+				      ss_zones_w[i],
+				      zone_fields,
+				      0 /*SOA*/,
+				      Realm::ProfilingRequestSet()).wait();
       ri_zones[i] = ri;
     
       zone_color_field_data[i].index_space = ss_zones_w[i];
@@ -1436,10 +1452,13 @@ public:
     side_ok_field_data.resize(numpc);
 
     for(size_t i = 0; i < ss_sides_w.size(); i++) {
-      RegionInstance ri = RegionInstance::create_instance(memories[i % memories.size()],
-							  ss_sides_w[i],
-							  side_fields,
-							  Realm::ProfilingRequestSet());
+      RegionInstance ri;
+      RegionInstance::create_instance(ri,
+				      memories[i % memories.size()],
+				      ss_sides_w[i],
+				      side_fields,
+				      0 /*SOA*/,
+				      Realm::ProfilingRequestSet()).wait();
       ri_sides[i] = ri;
 
       side_mapsz_field_data[i].index_space = ss_sides_w[i];
@@ -1860,6 +1879,12 @@ float randval<float>(RandStream<>& rs)
   return rs.rand_float();
 }
 
+template <>
+int randval<int>(RandStream<>& rs)
+{
+  return rs.rand_int(INT_MAX);
+}
+
 template <int N1, typename T1, int N2, typename T2, typename FT>
 class RandomTest : public TestInterface {
 public:
@@ -1999,10 +2024,13 @@ Event RandomTest<N1,T1,N2,T2,FT>::initialize_data(const std::vector<Memory>& mem
   fd_ptrs1.resize(num_insts);
 
   for(size_t i = 0; i < num_insts; i++) {
-    RegionInstance ri = RegionInstance::create_instance(memories[i],
-							ss_inst1[i],
-							field_sizes,
-							Realm::ProfilingRequestSet());
+    RegionInstance ri;
+    RegionInstance::create_instance(ri,
+				    memories[i],
+				    ss_inst1[i],
+				    field_sizes,
+				    0 /*SOA*/,
+				    Realm::ProfilingRequestSet()).wait();
     log_app.debug() << "inst[" << i << "] = " << ri << " (" << ss_inst1[i] << ")";
     ri_data1[i] = ri;
 
@@ -2215,7 +2243,7 @@ int main(int argc, char **argv)
     }
 
     if(!strcmp(argv[i], "random")) {
-      testcfg = new RandomTest<1,int,2,int,float>(argc-i, const_cast<const char **>(argv+i));
+      testcfg = new RandomTest<1,int,2,int,int>(argc-i, const_cast<const char **>(argv+i));
       break;
     }
 

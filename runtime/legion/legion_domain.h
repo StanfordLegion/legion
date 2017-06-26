@@ -775,7 +775,7 @@ namespace Legion {
       return os;
     }
 
-    template<int DIM, typename COORD_T>
+    template<int DIM, typename COORD_T = coord_t>
     class PointInRectIterator {
     public:
       PointInRectIterator(void) { }
@@ -797,6 +797,8 @@ namespace Legion {
       inline bool operator()(void) const { return valid(); }
       inline const Realm::ZPoint<DIM,COORD_T>& operator*(void) const
         { return itr.p; }
+      inline COORD_T operator[](unsigned index) const 
+        { return itr.p[index]; }
       inline const Realm::ZPoint<DIM,COORD_T>* operator->(void) const
         { return &itr.p; }
       inline PointInRectIterator<DIM,COORD_T>& operator++(void)
@@ -807,7 +809,7 @@ namespace Legion {
       Realm::ZPointInRectIterator<DIM,COORD_T> itr;
     };
 
-    template<int DIM, typename COORD_T>
+    template<int DIM, typename COORD_T = coord_t>
     class RectInDomainIterator {
     public:
       RectInDomainIterator(void) { }
@@ -837,7 +839,7 @@ namespace Legion {
       Realm::ZIndexSpaceIterator<DIM,COORD_T> itr;
     };
 
-    template<int DIM, typename COORD_T>
+    template<int DIM, typename COORD_T = coord_t>
     class PointInDomainIterator {
     public:
 #if __cplusplus < 201103L
@@ -872,6 +874,8 @@ namespace Legion {
       inline bool operator()(void) const { return valid(); }
       inline const Realm::ZPoint<DIM,COORD_T>& operator*(void) const
         { return *point_itr; }
+      inline COORD_T operator[](unsigned index) const 
+        { return point_itr[index]; }
       inline const Realm::ZPoint<DIM,COORD_T>* operator->(void) const
         { return &(*point_itr); }
       inline PointInDomainIterator& operator++(void)

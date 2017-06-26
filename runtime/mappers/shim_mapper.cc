@@ -975,15 +975,14 @@ namespace Legion {
                                    std::vector<ShimMapper::DomainSplit> &slices)
     //--------------------------------------------------------------------------
     {
-      LegionRuntime::Arrays::Rect<DIM> r = domain.get_rect<DIM>();
+      Realm::ZRect<DIM,coord_t> r = domain;
 
       std::vector<Processor>::const_iterator target_it = targets.begin();
-      for(LegionRuntime::Arrays::GenericPointInRectIterator<DIM> pir(r); 
-           pir; pir++) 
+      for(PointInRectIterator<DIM> pir(r); pir(); pir++) 
       {
         // rect containing a single point
-        LegionRuntime::Arrays::Rect<DIM> subrect(pir.p, pir.p); 
-	ShimMapper::DomainSplit ds(Domain::from_rect<DIM>(subrect), 
+        Realm::ZRect<DIM> subrect(*pir, *pir);
+	ShimMapper::DomainSplit ds(subrect, 
             *target_it++, false /* recurse */, false /* stealable */);
 	slices.push_back(ds);
 	if(target_it == targets.end())
@@ -1018,7 +1017,7 @@ namespace Legion {
       {
         // Only works for one dimensional rectangles right now
         assert(domain.get_dim() == 1);
-        LegionRuntime::Arrays::Rect<1> rect = domain.get_rect<1>();
+        Realm::ZRect<1,coord_t> rect = domain;
         unsigned num_elmts = rect.volume();
         unsigned num_chunks = targets.size()*splitting_factor;
         if (num_chunks > num_elmts)
@@ -1032,13 +1031,12 @@ namespace Legion {
         for (unsigned idx = 0; idx < num_chunks; idx++)
         {
           unsigned elmts = (idx < number_small) ? lower_bound : upper_bound;
-          LegionRuntime::Arrays::Point<1> lo(index);  
-          LegionRuntime::Arrays::Point<1> hi(index+elmts-1);
+          Realm::ZPoint<1,coord_t> lo(index);  
+          Realm::ZPoint<1,coord_t> hi(index+elmts-1);
           index += elmts;
-          LegionRuntime::Arrays::Rect<1> chunk(rect.lo+lo,rect.lo+hi);
+          Realm::ZRect<1,coord_t> chunk(rect.lo+lo,rect.lo+hi);
           unsigned proc_idx = idx % targets.size();
-          slices.push_back(DomainSplit(
-                Domain::from_rect<1>(chunk), targets[proc_idx], false, false));
+          slices.push_back(DomainSplit(chunk, targets[proc_idx], false, false));
         }
       }
     }

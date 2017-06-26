@@ -26,10 +26,6 @@
 namespace Legion {
   namespace Mapping { 
 
-    // for compatibility, many applications that customize mappers expect
-    // to have LegionRuntime::Arrays::{Point,Rect}<DIM> available automatically
-    using namespace LegionRuntime::Arrays;
-
     /**
      * \class PhysicalInstance
      * The PhysicalInstance class provides an interface for
@@ -1963,10 +1959,6 @@ namespace Legion {
 
       bool is_index_partition_disjoint(MapperContext ctx, 
                                                  IndexPartition p) const;
-
-      template<unsigned DIM>
-      IndexSpace get_index_subspace(MapperContext ctx, 
-        IndexPartition p, LegionRuntime::Arrays::Point<DIM> &color_point) const;
 
       Color get_index_space_color(MapperContext ctx, 
                                             IndexSpace handle) const;

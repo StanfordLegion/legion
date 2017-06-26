@@ -1948,20 +1948,22 @@ namespace LegionRuntime {
         dst_buf.deserialize(payload->dst_buf_bits);
         dst_buf.memory = args.dst_mem;
 #else
-	DmaRequest* dma_request;
-	gasnet_node_t launch_node;
-	XferDesID guid, pre_xd_guid, next_xd_guid;
-	uint64_t next_max_rw_gap;
-	size_t src_ib_offset;
-	size_t src_ib_size;
-	bool mark_started;
+	DmaRequest* dma_request = 0;
+	gasnet_node_t launch_node = 0;
+	XferDesID guid = XferDes::XFERDES_NO_GUID;
+	XferDesID pre_xd_guid = XferDes::XFERDES_NO_GUID;
+	XferDesID next_xd_guid = XferDes::XFERDES_NO_GUID;
+	uint64_t next_max_rw_gap = 0;
+	size_t src_ib_offset = 0;
+	size_t src_ib_size = 0;
+	bool mark_started = false;
 	TransferIterator *src_iter;
 	TransferIterator *dst_iter;
-	uint64_t max_req_size;
-	long max_nr;
-	int priority;
-	XferOrder::Type order;
-	XferDes::XferKind kind;
+	uint64_t max_req_size = 0;
+	long max_nr = 0;
+	int priority = 0;
+	XferOrder::Type order = XferOrder::ANY_ORDER;
+	XferDes::XferKind kind = XferDes::XFER_NONE;
 
 	Realm::Serialization::FixedBufferDeserializer fbd(msgdata, msglen);
 
