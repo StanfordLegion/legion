@@ -404,7 +404,7 @@ namespace Legion {
       const Domain &local_domain = 
         sharding_function->find_shard_domain(repl_ctx->owner_shard->shard_id,
                                              launch_space);
-      index_domain = local_domain;
+      internal_domain = local_domain;
       // If it's empty we're done, otherwise we go back on the queue
       if (local_domain.get_volume() == 0)
       {
@@ -2886,9 +2886,9 @@ namespace Legion {
     int ShardCollective::convert_to_index(ShardID id, ShardID origin) const
     //--------------------------------------------------------------------------
     {
-      // shift everything so that the target shard is at index 0 and then add 1
+      // shift everything so that the target shard is at index 0
       const int result = 
-        ((id + (manager->total_shards - origin)) % manager->total_shards) + 1;
+        ((id + (manager->total_shards - origin)) % manager->total_shards);
       return result;
     }
 
@@ -2896,8 +2896,8 @@ namespace Legion {
     ShardID ShardCollective::convert_to_shard(int index, ShardID origin) const
     //--------------------------------------------------------------------------
     {
-      // shift back to zero indexing and add target then take the modulus
-      const ShardID result = (index + origin - 1) % manager->total_shards; 
+      // Add target then take the modulus
+      const ShardID result = (index + origin) % manager->total_shards; 
       return result;
     }
 
@@ -2987,10 +2987,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const int local_index = convert_to_index(local_shard, origin);
-      for (int idx = 0; idx < shard_collective_radix; idx++)
+      for (int idx = 1; idx <= shard_collective_radix; idx++)
       {
         const int target_index = local_index * shard_collective_radix + idx; 
-        if (target_index > int(manager->total_shards))
+        if (target_index >= int(manager->total_shards))
           break;
         ShardID target = convert_to_shard(target_index, origin);
         Serializer rez;
@@ -3091,10 +3091,10 @@ namespace Legion {
       // Convert to our local index
       const int local_index = convert_to_index(local_shard, target);
 #ifdef DEBUG_LEGION
-      assert(local_index >= shard_collective_radix);
+      assert(local_index > 0); // should never be here for zero
 #endif
-      // Always round down to get our target index
-      const int target_index = local_index / shard_collective_radix;
+      // Subtract by 1 and then divide to get the target (truncate)
+      const int target_index = (local_index - 1) / shard_collective_radix;
       // Then convert back to the target
       ShardID next = convert_to_shard(target_index, target);
       Serializer rez;
@@ -3114,10 +3114,10 @@ namespace Legion {
     {
       int result = 1; // always have one arriver for ourself
       const int index = convert_to_index(local_shard, target);
-      for (int idx = 0; idx < shard_collective_radix; idx++)
+      for (int idx = 1; idx <= shard_collective_radix; idx++)
       {
         const int source_index = index * shard_collective_radix + idx;
-        if (source_index > int(manager->total_shards))
+        if (source_index >= int(manager->total_shards))
           break;
         result++;
       }

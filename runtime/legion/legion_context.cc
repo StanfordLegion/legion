@@ -8576,6 +8576,51 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpace ReplicateContext::find_index_launch_space(const Domain &domain)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(domain.dense());
+#endif
+      std::map<Domain,IndexSpace>::const_iterator finder = 
+        index_launch_spaces.find(domain);
+      if (finder != index_launch_spaces.end())
+        return finder->second;
+      // Can't invoke the runtime directly, have to do the same control
+      // flow across all of our shards
+      IndexSpace result = IndexSpace::NO_SPACE;
+      switch (domain.get_dim())
+      {
+        case 1:
+          {
+            Realm::ZIndexSpace<1,coord_t> is = domain;
+            result = create_index_space(runtime->forest, &is, 
+                NT_TemplateHelper::encode_tag<1,coord_t>());
+            break;
+          }
+        case 2:
+          {
+            Realm::ZIndexSpace<2,coord_t> is = domain;
+            result = create_index_space(runtime->forest, &is, 
+                NT_TemplateHelper::encode_tag<2,coord_t>());
+            break;
+          }
+        case 3:
+          {
+            Realm::ZIndexSpace<3,coord_t> is = domain;
+            result = create_index_space(runtime->forest, &is, 
+                NT_TemplateHelper::encode_tag<3,coord_t>());
+            break;
+          }
+        default:
+          assert(false);
+      }
+      // TODO: These are being leaked for now
+      index_launch_spaces[domain] = result;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     Future ReplicateContext::execute_task(const TaskLauncher &launcher)
     //--------------------------------------------------------------------------
     {

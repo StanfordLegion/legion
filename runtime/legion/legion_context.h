@@ -839,6 +839,8 @@ namespace Legion {
       virtual FieldAllocator create_field_allocator(Legion::Runtime *external,
                                                     FieldSpace handle);
     public:
+      // Find an index space name for a concrete launch domain
+      virtual IndexSpace find_index_launch_space(const Domain &launch_domain);
       virtual Future execute_task(const TaskLauncher &launcher);
       virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher);
       virtual Future execute_index_space(const IndexTaskLauncher &launcher,
@@ -965,9 +967,6 @@ namespace Legion {
       void invalidate_remote_contexts(void);
       void send_remote_context(AddressSpaceID remote_instance, 
                                RemoteContext *target);
-    public:
-      // Find an index space name for a concrete launch domain
-      IndexSpace find_index_launch_space(const Domain &launch_domain);
     public:
       void clone_local_fields(
           std::map<FieldSpace,std::vector<LocalFieldInfo> > &child_local) const;
@@ -1286,6 +1285,7 @@ namespace Legion {
       virtual void destroy_logical_region(LogicalRegion handle);
       virtual void destroy_logical_partition(LogicalPartition handle);
     public:
+      virtual IndexSpace find_index_launch_space(const Domain &launch_domain);
       virtual Future execute_task(const TaskLauncher &launcher);
       virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher);
       virtual Future execute_index_space(const IndexTaskLauncher &launcher,

@@ -5513,19 +5513,16 @@ namespace Legion {
             }
           } 
           Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(manager->repl_id);
-            rez.serialize(it->first);
-            rez.serialize(composite_name);
-            rez.serialize(it->second);
-            rez.serialize<size_t>(path.size());
-            for (unsigned idx = 0; idx < path.size(); idx++)
-              rez.serialize(path[idx]);
-            rez.serialize(shard_ready); 
-            rez.serialize(this);
-            rez.serialize(target->context->runtime->address_space);
-          }
+          rez.serialize(manager->repl_id);
+          rez.serialize(it->first);
+          rez.serialize(composite_name);
+          rez.serialize(it->second);
+          rez.serialize<size_t>(path.size());
+          for (unsigned idx = 0; idx < path.size(); idx++)
+            rez.serialize(path[idx]);
+          rez.serialize(shard_ready); 
+          rez.serialize(this);
+          rez.serialize(target->context->runtime->address_space);
           manager->send_composite_view_request(it->first, rez);
           wait_on.insert(shard_ready);
         }

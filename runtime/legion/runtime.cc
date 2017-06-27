@@ -1220,16 +1220,13 @@ namespace Legion {
         // We have to figure out the name of the future from the owner shard
         RtUserEvent done_event = Runtime::create_rt_user_event();
         Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(repl_ctx->shard_manager->repl_id);
-          rez.serialize(owner_shard);
-          rez.serialize<ApEvent>(future_map_barrier);
-          rez.serialize(point);
-          rez.serialize<bool>(allow_empty);
-          rez.serialize(did);
-          rez.serialize(done_event);
-        }
+        rez.serialize(repl_ctx->shard_manager->repl_id);
+        rez.serialize(owner_shard);
+        rez.serialize<ApEvent>(future_map_barrier);
+        rez.serialize(point);
+        rez.serialize<bool>(allow_empty);
+        rez.serialize(did);
+        rez.serialize(done_event);
         repl_ctx->shard_manager->send_future_map_request(owner_shard, rez);
         // Wait for the event
         done_event.lg_wait();
