@@ -33,6 +33,7 @@ def inc(ctx, R, step):
     print(R.x)
     numpy.add(R.x, step, out=R.x)
     print(R.x)
+    return 42
 
 # Define the main Python task. This task is called from C++. See
 # top_level_task in python_iterop.cc.
@@ -50,4 +51,6 @@ def main_task(ctx):
     # Create a region from I and F and launch two tasks.
     R = legion.Region.create(ctx, I, F)
     init(ctx, R)
-    inc(ctx, R, 1)
+    child_result = inc(ctx, R, 1)
+    print("child task returned", child_result.get())
+    print("main_task done")
