@@ -71,6 +71,7 @@ namespace Realm {
     SparsityMapImplWrapper *wrap = get_runtime()->get_available_sparsity_impl(gasnet_mynode());
     SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
     SparsityMapImpl<N,T> *impl = wrap->get_or_create<N,T>(sparsity);
+    impl->set_contributor_count(1);
     impl->contribute_dense_rect_list(dense);
     return sparsity;
   }
@@ -97,6 +98,7 @@ namespace Realm {
     SparsityMapImplWrapper *wrap = get_runtime()->get_available_sparsity_impl(gasnet_mynode());
     SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
     SparsityMapImpl<N,T> *impl = wrap->get_or_create<N,T>(sparsity);
+    impl->set_contributor_count(1);
     impl->contribute_dense_rect_list(dense);
     return sparsity;
   }
