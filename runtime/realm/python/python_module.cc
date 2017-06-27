@@ -14,8 +14,7 @@
  */
 
 #include "python_module.h"
-
-#include "python_source.h"
+#include "python_internal.h"
 
 #include "../numa/numasysif.h"
 #include "logging.h"
@@ -30,10 +29,6 @@
 
 #include <list>
 
-struct PyObject;
-struct PyThreadState;
-typedef ssize_t Py_ssize_t;
-
 namespace Realm {
 
   Logger log_py("python");
@@ -42,68 +37,23 @@ namespace Realm {
   //
   // class PythonAPI
 
-  // This class contains interpreter-specific instances of Python API calls.
-  class PythonAPI {
-  public:
-    PythonAPI(void *handle);
-
-  protected:
-    template<typename T>
-    void get_symbol(T &fn, const char *symbol, bool missing_ok = false);
-
-  protected:
-    void *handle;
-
-  public:
-    // Python API calls
-    void (*Py_DecRef)(PyObject *); // non-macro version of PyDECREF
-    void (*Py_Finalize)(void);
-    void (*Py_Initialize)(void);
-
-    PyObject *(*PyByteArray_FromStringAndSize)(const char *, Py_ssize_t);
-
-#ifdef PYTHON_HAS_THREADS
-    void (*PyEval_AcquireLock)(void);
-    void (*PyEval_InitThreads)(void);
-    void (*PyEval_RestoreThread)(PyThreadState *);
-    PyThreadState *(*PyEval_SaveThread)(void);
-#endif
-
-    void (*PyErr_PrintEx)(int set_sys_last_vars);
-
-    PyObject *(*PyImport_ImportModule)(const char *);
-
-    PyObject *(*PyModule_GetDict)(PyObject *);
-
-    PyObject *(*PyLong_FromUnsignedLong)(unsigned long);
-
-    PyObject *(*PyObject_CallFunction)(PyObject *, const char *, ...);
-    PyObject* (*PyObject_CallObject)(PyObject *callable, PyObject *args);
-    PyObject *(*PyObject_GetAttrString)(PyObject *, const char *);
-    int (*PyObject_Print)(PyObject *, FILE *, int);
-
-    void (*PyRun_SimpleString)(const char *);
-    PyObject *(*PyRun_String)(const char *, int, PyObject *, PyObject *);
-
-    PyObject *(*PyTuple_New)(Py_ssize_t len);
-    int (*PyTuple_SetItem)(PyObject *p, Py_ssize_t pos, PyObject *o);
-  };
-
   PythonAPI::PythonAPI(void *_handle)
     : handle(_handle)
   {
     get_symbol(this->Py_DecRef, "Py_DecRef");
     get_symbol(this->Py_Finalize, "Py_Finalize");
-    get_symbol(this->Py_Initialize, "Py_Initialize");
+    get_symbol(this->Py_InitializeEx, "Py_InitializeEx");
 
     get_symbol(this->PyByteArray_FromStringAndSize, "PyByteArray_FromStringAndSize");
 
-#ifdef PYTHON_HAS_THREADS
-    get_symbol(this->PyEval_AcquireLock, "PyEval_AcquireLock");
     get_symbol(this->PyEval_InitThreads, "PyEval_InitThreads");
+    get_symbol(this->PyThreadState_New, "PyThreadState_New");
+    get_symbol(this->PyThreadState_Clear, "PyThreadState_Clear");
+    get_symbol(this->PyThreadState_Delete, "PyThreadState_Delete");
+    get_symbol(this->PyThreadState_Get, "PyThreadState_Get");
+    get_symbol(this->PyThreadState_Swap, "PyThreadState_Swap");
     get_symbol(this->PyEval_RestoreThread, "PyEval_RestoreThread");
     get_symbol(this->PyEval_SaveThread, "PyEval_SaveThread");
-#endif
 
     get_symbol(this->PyErr_PrintEx, "PyErr_PrintEx");
 
@@ -139,26 +89,6 @@ namespace Realm {
   ////////////////////////////////////////////////////////////////////////
   //
   // class PythonInterpreter
-
-  class PythonInterpreter {
-  public:
-    PythonInterpreter();
-    ~PythonInterpreter();
-
-    PyObject *find_or_import_function(const PythonSourceImplementation *psi);
-
-    void import_module(const std::string& module_name);
-    void run_string(const std::string& script_text);
-
-  protected:
-    void *handle;
-#ifdef REALM_USE_DLMOPEN
-    void *dlmproxy_handle;
-#endif
-    
-  public:
-    PythonAPI *api;
-  };
 
 #ifdef REALM_USE_DLMOPEN
   // dlmproxy symbol lookups have to happen in a function we define so that
@@ -231,8 +161,8 @@ namespace Realm {
 
     api = new PythonAPI(handle);
 
-    (api->Py_Initialize)();
-    //(api->PyEval_InitThreads)();
+    (api->Py_InitializeEx)(0 /*!initsigs*/);
+    (api->PyEval_InitThreads)();
     //(api->Py_Finalize)();
 
     //PyThreadState *state;
@@ -335,72 +265,279 @@ namespace Realm {
     (api->Py_DecRef)(mainmod);
   }
 
+  
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class PythonThreadTaskScheduler
 
+  PythonThreadTaskScheduler::PythonThreadTaskScheduler(LocalPythonProcessor *_pyproc,
+						       CoreReservation& _core_rsrv)
+    : KernelThreadTaskScheduler(_pyproc->me, _core_rsrv)
+    , pyproc(_pyproc)
+  {}
+
+  void PythonThreadTaskScheduler::enqueue_taskreg(LocalPythonProcessor::TaskRegistration *treg)
+  {
+    AutoHSLLock al(lock);
+    taskreg_queue.push_back(treg);
+    // we've added work to the system
+    work_counter.increment_counter();
+  }
+
+  void PythonThreadTaskScheduler::python_scheduler_loop(void)
+  {
+    // hold scheduler lock for whole thing
+    AutoHSLLock al(lock);
+
+    // global startup of python interpreter if needed
+    if(pyproc->interpreter == 0) {
+      log_py.info() << "creating interpreter";
+      pyproc->create_interpreter();
+    }
+
+    // always create and remember our own python thread - does NOT require GIL
+    PyThreadState *pythread = (pyproc->interpreter->api->PyThreadState_New)(pyproc->master_thread->interp);
+    log_py.debug() << "created python thread: " << pythread;
+    
+    assert(pythread != 0);
+    assert(pythreads.count(Thread::self()) == 0);
+    pythreads[Thread::self()] = pythread;
+
+    // now go into main scheduler loop
+    while(true) {
+      // remember the work counter value before we start so that we don't iterate
+      //   unnecessarily
+      long long old_work_counter = work_counter.read_counter();
+
+      // first rule - always yield to a resumable worker
+      while(!resumable_workers.empty()) {
+	Thread *yield_to = resumable_workers.get(0); // priority is irrelevant
+	assert(yield_to != Thread::self());
+
+	// this should only happen if we're at the max active worker count (otherwise
+	//  somebody should have just woken this guy up earlier), and reduces the 
+	// unassigned worker count by one
+	update_worker_count(0, -1);
+
+	idle_workers.push_back(Thread::self());
+	worker_sleep(yield_to);
+
+	// we're awake again, but still looking for work...
+	old_work_counter = work_counter.read_counter();  // re-read - may have changed while we slept
+      }
+
+      // next priority - task registration
+      while(!taskreg_queue.empty()) {
+	LocalPythonProcessor::TaskRegistration *treg = taskreg_queue.front();
+	taskreg_queue.pop_front();
+	
+	// one fewer unassigned worker
+	update_worker_count(0, -1);
+	
+	// we'll run the task after letting go of the lock, but update this thread's
+	//  priority here
+	worker_priorities[Thread::self()] = TaskQueue::PRI_POS_INF;
+
+	// release the lock while we run the task
+	lock.unlock();
+
+#ifndef NDEBUG
+	bool ok =
+#endif
+	  pyproc->perform_task_registration(treg);
+	assert(ok);  // no fault recovery yet
+
+	lock.lock();
+
+	worker_priorities.erase(Thread::self());
+
+	// and we're back to being unassigned
+	update_worker_count(0, +1);
+      }
+
+      // try to get a new task then
+      // remember where a task has come from in case we want to put it back
+      Task *task = 0;
+      TaskQueue *task_source = 0;
+      int task_priority = TaskQueue::PRI_NEG_INF;
+      for(std::vector<TaskQueue *>::const_iterator it = task_queues.begin();
+	  it != task_queues.end();
+	  it++) {
+	int new_priority;
+	Task *new_task = (*it)->get(&new_priority, task_priority);
+	if(new_task) {
+	  // if we got something better, put back the old thing (if any)
+	  if(task)
+	    task_source->put(task, task_priority, false); // back on front of list
+	  
+	  task = new_task;
+	  task_source = *it;
+	  task_priority = new_priority;
+	}
+      }
+
+      // did we find work to do?
+      if(task) {
+	// one fewer unassigned worker
+	update_worker_count(0, -1);
+
+	// we'll run the task after letting go of the lock, but update this thread's
+	//  priority here
+	worker_priorities[Thread::self()] = task_priority;
+
+	// release the lock while we run the task
+	lock.unlock();
+
+	// make our python thread state active, acquiring the GIL
+	assert((pyproc->interpreter->api->PyThreadState_Swap)(0) == 0);
+	log_py.debug() << "RestoreThread <- " << pythread;
+	(pyproc->interpreter->api->PyEval_RestoreThread)(pythread);
+
+#ifndef NDEBUG
+	bool ok =
+#endif
+	  execute_task(task);
+	assert(ok);  // no fault recovery yet
+
+	// release the GIL
+	PyThreadState *saved = (pyproc->interpreter->api->PyEval_SaveThread)();
+	log_py.debug() << "SaveThread -> " << saved;
+	assert(saved == pythread);
+
+	lock.lock();
+
+	worker_priorities.erase(Thread::self());
+
+	// and we're back to being unassigned
+	update_worker_count(0, +1);
+      } else {
+	// no?  thumb twiddling time
+
+	// are we shutting down?
+	if(shutdown_flag) {
+	  // yes, we can terminate - wake up an idler (if any) first though
+	  if(!idle_workers.empty()) {
+	    Thread *to_wake = idle_workers.back();
+	    idle_workers.pop_back();
+	    // no net change in worker counts
+	    worker_terminate(to_wake);
+	  } else {
+	    // nobody to wake, so -1 active/unassigned worker
+	    update_worker_count(-1, -1, false); // ok to drop below mins
+	    worker_terminate(0);
+	  }
+	  return;
+	}
+
+	// do we have more unassigned and idle tasks than we need?
+	int total_idle_count = (unassigned_worker_count +
+				(int)(idle_workers.size()));
+	if(total_idle_count > cfg_max_idle_workers) {
+	  // if there are sleeping idlers, terminate in favor of one of those - keeps
+	  //  worker counts constant
+	  if(!idle_workers.empty()) {
+	    Thread *to_wake = idle_workers.back();
+	    assert(to_wake != Thread::self());
+	    idle_workers.pop_back();
+	    // no net change in worker counts
+	    worker_terminate(to_wake);
+	    return;
+	  }
+	}
+
+	// no, stay awake but suspend until there's a chance that the next iteration
+	//  of this loop would turn out different
+	wait_for_work(old_work_counter);
+      }
+    }
+
+    // should never get here
+    assert(0);
+  }
+
+  Thread *PythonThreadTaskScheduler::worker_create(bool make_active)
+  {
+    // lock is held by caller
+    ThreadLaunchParameters tlp;
+    Thread *t = Thread::create_kernel_thread<PythonThreadTaskScheduler,
+					     &PythonThreadTaskScheduler::python_scheduler_loop>(this,
+												tlp,
+												core_rsrv,
+												this);
+    all_workers.insert(t);
+    if(make_active)
+      active_workers.insert(t);
+    return t;
+  }
+ 
+  // called by a worker thread when it needs to wait for something (and we
+  //   should release the GIL)
+  void PythonThreadTaskScheduler::thread_blocking(Thread *thread)
+  {
+    // if we got here through a cffi call, the GIL has already been released,
+    //  so try to handle that case here - a call PyEval_SaveThread
+    //  if the GIL is not held will assert-fail, and while a call to
+    //  PyThreadState_Swap is technically illegal (and unsafe if python-created
+    //  threads exist), it does what we want for now
+    PyThreadState *saved = (pyproc->interpreter->api->PyThreadState_Swap)(0);
+    if(saved != 0) {
+      log_py.info() << "python worker sleeping - releasing GIL";
+      // put it back so we can save it properly
+      (pyproc->interpreter->api->PyThreadState_Swap)(saved);
+      // would like to sanity-check that this returns the expected thread state,
+      //  but that would require taking the PythonThreadTaskScheduler's lock
+      (pyproc->interpreter->api->PyEval_SaveThread)();
+      log_py.debug() << "SaveThread -> " << saved;
+    } else
+      log_py.info() << "python worker sleeping - GIL already released";
+    
+    KernelThreadTaskScheduler::thread_blocking(thread);
+
+    if(saved) {
+      log_py.info() << "python worker awake - acquiring GIL";
+      log_py.debug() << "RestoreThread <- " << saved;
+      (pyproc->interpreter->api->PyEval_RestoreThread)(saved);
+    } else
+      log_py.info() << "python worker awake - not acquiring GIL";
+  }
+
+  void PythonThreadTaskScheduler::worker_terminate(Thread *switch_to)
+  {
+    // before we can kill the kernel thread, we need to tear down the python thread
+    std::map<Thread *, PyThreadState *>::iterator it = pythreads.find(Thread::self());
+    assert(it != pythreads.end());
+    PyThreadState *pythread = it->second;
+    pythreads.erase(it);
+
+    log_py.debug() << "destroying python thread: " << pythread;
+    
+    // our thread should not be active
+    assert((pyproc->interpreter->api->PyThreadState_Swap)(0) == 0);
+
+    // switch to the master thread, retaining the GIL
+    log_py.debug() << "RestoreThread <- " << pyproc->master_thread;
+    (pyproc->interpreter->api->PyEval_RestoreThread)(pyproc->master_thread);
+
+    // clear and delete the worker thread
+    (pyproc->interpreter->api->PyThreadState_Clear)(pythread);
+    (pyproc->interpreter->api->PyThreadState_Delete)(pythread);
+
+    // release the GIL
+    PyThreadState *saved = (pyproc->interpreter->api->PyEval_SaveThread)();
+    log_py.debug() << "SaveThread -> " << saved;
+    assert(saved == pyproc->master_thread);
+
+    // TODO: tear down interpreter if last thread
+    if(shutdown_flag && pythreads.empty())
+      pyproc->destroy_interpreter();
+
+    KernelThreadTaskScheduler::worker_terminate(switch_to);
+  }
+
+  
   ////////////////////////////////////////////////////////////////////////
   //
   // class LocalPythonProcessor
-
-  // this is nearly identical to a LocalCPUProcessor, but it asks for its thread(s)
-  //  to run on the specified numa domain
-
-  class LocalPythonProcessor : public ProcessorImpl {
-  public:
-    LocalPythonProcessor(Processor _me, int _numa_node,
-                         CoreReservationSet& crs, size_t _stack_size,
-			 const std::vector<std::string>& _import_modules,
-			 const std::vector<std::string>& _init_scripts);
-    virtual ~LocalPythonProcessor(void);
-
-    virtual void enqueue_task(Task *task);
-
-    virtual void spawn_task(Processor::TaskFuncID func_id,
-			    const void *args, size_t arglen,
-			    const ProfilingRequestSet &reqs,
-			    Event start_event, Event finish_event,
-			    int priority);
-
-    virtual void execute_task(Processor::TaskFuncID func_id,
-			      const ByteArrayRef& task_args);
-
-    virtual void shutdown(void);
-
-    virtual void add_to_group(ProcessorGroup *group);
-
-    virtual void register_task(Processor::TaskFuncID func_id,
-                               CodeDescriptor& codedesc,
-                               const ByteArrayRef& user_data);
-
-    void worker_main(void);
-
-  protected:
-    int numa_node;
-    CoreReservation *core_rsrv;
-    const std::vector<std::string>& import_modules;
-    const std::vector<std::string>& init_scripts;
-
-    Thread *worker_thread;
-    GASNetHSL mutex;
-    GASNetCondVar condvar;
-    PythonInterpreter *interpreter;
-    bool shutdown_requested;
-
-    struct TaskTableEntry {
-      PyObject *fnptr;
-      ByteArray user_data;
-    };
-
-    struct TaskRegistration {
-      Processor::TaskFuncID func_id;
-      CodeDescriptor *codedesc;
-      ByteArray user_data;
-    };
-
-    std::map<Processor::TaskFuncID, TaskTableEntry> task_table;
-
-    std::list<TaskRegistration *> taskreg_queue;
-    PriorityQueue<Task *, DummyLock> task_queue; // protected by 'mutex' above
-    ProfilingGauges::AbsoluteRangeGauge<int> ready_task_count;
-  };
 
   LocalPythonProcessor::LocalPythonProcessor(Processor _me, int _numa_node,
                                              CoreReservationSet& crs,
@@ -411,9 +548,7 @@ namespace Realm {
     , numa_node(_numa_node)
     , import_modules(_import_modules)
     , init_scripts(_init_scripts)
-    , condvar(mutex)
     , interpreter(0)
-    , shutdown_requested(false)
     , ready_task_count(stringbuilder() << "realm/proc " << me << "/ready tasks")
   {
     task_queue.set_gauge(&ready_task_count);
@@ -429,38 +564,37 @@ namespace Realm {
     std::string name = stringbuilder() << "Python" << numa_node << " proc " << _me;
 
     core_rsrv = new CoreReservation(name, crs, params);
-    ThreadLaunchParameters tlp;
-    worker_thread = Thread::create_kernel_thread<LocalPythonProcessor,
-						 &LocalPythonProcessor::worker_main>(this,
-										     tlp,
-										     *core_rsrv);
+
+    sched = new PythonThreadTaskScheduler(this, *core_rsrv);
+    sched->add_task_queue(&task_queue);
+    sched->start();
   }
 
   LocalPythonProcessor::~LocalPythonProcessor(void)
   {
     delete core_rsrv;
+    delete sched;
   }
 
   void LocalPythonProcessor::shutdown(void)
   {
     log_py.info() << "shutting down";
 
-    {
-      AutoHSLLock al(mutex);
-      shutdown_requested = true;
-      condvar.signal();
-    }
-    worker_thread->join();
-    delete worker_thread;
+    sched->shutdown();
   }
 
-  void LocalPythonProcessor::worker_main(void)
+  void LocalPythonProcessor::create_interpreter(void)
   {
-    log_py.info() << "worker thread started";
-
+    assert(interpreter == 0);
+  
     // create a python interpreter that stays entirely within this thread
     interpreter = new PythonInterpreter;
+    master_thread = (interpreter->api->PyThreadState_Get)();
 
+    // always need the python threading module
+    interpreter->import_module("threading");
+    
+    // perform requested initialization
     for(std::vector<std::string>::const_iterator it = import_modules.begin();
 	it != import_modules.end();
 	++it)
@@ -471,74 +605,71 @@ namespace Realm {
 	++it)
       interpreter->run_string(*it);
 
-    while(!shutdown_requested) {
-      TaskRegistration *todo_reg = 0;
-      Task *todo_task = 0;
-      {
-	AutoHSLLock al(mutex);
-	if(!taskreg_queue.empty()) {
-	  todo_reg = taskreg_queue.front();
-	  taskreg_queue.pop_front();
-	} else {
-	  if(!task_queue.empty()) {
-	    todo_task = task_queue.get(0);
-	  } else {
-	    log_py.debug() << "no work - sleeping";
-	    condvar.wait();
-	    log_py.debug() << "awake again";
-	  }
-	}
-      }
-      if(todo_reg) {
-	// first, make sure we haven't seen this task id before
-	if(task_table.count(todo_reg->func_id) > 0) {
-	  log_py.fatal() << "duplicate task registration: proc=" << me << " func=" << todo_reg->func_id;
-	  assert(0);
-	}
+    // default state is GIL _released_
+    PyThreadState *saved = (interpreter->api->PyEval_SaveThread)();
+    log_py.debug() << "SaveThread -> " << saved;
+    assert(saved == master_thread);
+  }
 
-	// next, see if we have a Python function to register
-	const PythonSourceImplementation *psi = todo_reg->codedesc->find_impl<PythonSourceImplementation>();
-	if(!psi) {
-	  log_py.fatal() << "invalid code descriptor for python proc: " << *(todo_reg->codedesc);
-	  assert(0);
-	}
-	PyObject *fnptr = interpreter->find_or_import_function(psi);
-	assert(fnptr != 0);
+  void LocalPythonProcessor::destroy_interpreter(void)
+  {
+    assert(interpreter != 0);
 
-	log_py.info() << "task " << todo_reg->func_id << " registered on " << me << ": " << *(todo_reg->codedesc);
-
-	TaskTableEntry &tte = task_table[todo_reg->func_id];
-	tte.fnptr = fnptr;
-	tte.user_data.swap(todo_reg->user_data);
-
-	delete todo_reg->codedesc;
-	delete todo_reg;
-      }
-      if(todo_task) {
-	log_py.debug() << "running task";
-	todo_task->execute_on_processor(me);
-	log_py.debug() << "done running task";
-      }
-    }
-
-    log_py.info() << "worker thread shutting down";
+    // take GIL with master thread
+    assert((interpreter->api->PyThreadState_Swap)(0) == 0);
+    log_py.debug() << "RestoreThread <- " << master_thread;
+    (interpreter->api->PyEval_RestoreThread)(master_thread);
 
     delete interpreter;
     interpreter = 0;
+    master_thread = 0;
+  }
+  
+  bool LocalPythonProcessor::perform_task_registration(LocalPythonProcessor::TaskRegistration *treg)
+  {
+    // first, make sure we haven't seen this task id before
+    if(task_table.count(treg->func_id) > 0) {
+      log_py.fatal() << "duplicate task registration: proc=" << me << " func=" << treg->func_id;
+      assert(0);
+    }
 
-    log_py.info() << "cleanup complete";
+    // next, see if we have a Python function to register
+    const PythonSourceImplementation *psi = treg->codedesc->find_impl<PythonSourceImplementation>();
+    if(!psi) {
+      log_py.fatal() << "invalid code descriptor for python proc: " << *(treg->codedesc);
+      assert(0);
+    }
+
+    // perform import/compile on master thread
+    assert((interpreter->api->PyThreadState_Swap)(0) == 0);
+    log_py.debug() << "RestoreThread <- " << master_thread;
+    (interpreter->api->PyEval_RestoreThread)(master_thread);
+    
+    PyObject *fnptr = interpreter->find_or_import_function(psi);
+    assert(fnptr != 0);
+
+    PyThreadState *saved = (interpreter->api->PyEval_SaveThread)();
+    log_py.debug() << "SaveThread -> " << saved;
+    assert(saved == master_thread);
+
+    log_py.info() << "task " << treg->func_id << " registered on " << me << ": " << *(treg->codedesc);
+
+    TaskTableEntry &tte = task_table[treg->func_id];
+    tte.fnptr = fnptr;
+    tte.user_data.swap(treg->user_data);
+
+    delete treg->codedesc;
+    delete treg;
+
+    return true;
   }
 
   void LocalPythonProcessor::enqueue_task(Task *task)
   {
-    // just jam it into the task queue, signal worker if needed
-    if(task->mark_ready()) {
-      AutoHSLLock al(mutex);
-      bool was_empty = taskreg_queue.empty() && task_queue.empty();
+    // just jam it into the task queue, scheduler will take care of the rest
+    if(task->mark_ready())
       task_queue.put(task, task->priority);
-      if(was_empty)
-	condvar.signal();
-    } else
+    else
       task->mark_finished(false /*!successful*/);
   }
 
@@ -568,7 +699,8 @@ namespace Realm {
 
   void LocalPythonProcessor::add_to_group(ProcessorGroup *group)
   {
-    assert(0);
+    // add the group's task queue to our scheduler too
+    sched->add_task_queue(&group->task_queue);
   }
 
   void LocalPythonProcessor::register_task(Processor::TaskFuncID func_id,
@@ -579,6 +711,8 @@ namespace Realm {
     treg->func_id = func_id;
     treg->codedesc = new CodeDescriptor(codedesc);
     treg->user_data = user_data;
+    sched->enqueue_taskreg(treg);
+#if 0
     {
       AutoHSLLock al(mutex);
       bool was_empty = taskreg_queue.empty() && task_queue.empty();
@@ -586,6 +720,7 @@ namespace Realm {
       if(was_empty)
 	condvar.signal();
     }
+#endif
 #if 0
     // first, make sure we haven't seen this task id before
     if(task_table.count(func_id) > 0) {
@@ -657,7 +792,6 @@ namespace Realm {
       (interpreter->api->PyErr_PrintEx)(0);
       assert(0);
     }
-
   }
 
   namespace Python {
