@@ -202,7 +202,7 @@ namespace Realm {
   ThreadedTaskScheduler::WorkCounter::~WorkCounter(void)
   {}
 
-  inline void ThreadedTaskScheduler::WorkCounter::increment_counter(void)
+  void ThreadedTaskScheduler::WorkCounter::increment_counter(void)
   {
     // common case is that we'll bump the counter and nobody cares, so do this without a lock
     // use __sync_* though to make sure memory ordering is preserved
@@ -243,20 +243,6 @@ namespace Realm {
     long long wv_check = __sync_fetch_and_add(&wait_value, 0);
 #endif
     assert((wv_check == -1) || (wv_check > old_value));
-  }
-
-  inline long long ThreadedTaskScheduler::WorkCounter::read_counter(void) const
-  {
-    // just return the counter value
-    return counter;
-  }
-
-  // returns true if there is new work since the old_counter value was read
-  // this is non-blocking, and may be called while holding another lock
-  inline bool ThreadedTaskScheduler::WorkCounter::check_for_work(long long old_counter)
-  {
-    // test the counter value without synchronization
-    return (counter > old_counter);
   }
 
   // waits until new work arrives - this will possibly take the counter lock and 
