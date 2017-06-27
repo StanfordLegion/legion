@@ -57,7 +57,7 @@ class Future(object):
         value_ptr = c.legion_future_get_untyped_pointer(self.handle)
         value_size = c.legion_future_get_untyped_size(self.handle)
         assert value_size > 0
-        value_str = ffi.unpack(value_ptr, value_size)
+        value_str = ffi.unpack(ffi.cast('char *',value_ptr), value_size)
         value = cPickle.loads(value_str)
         return value
 
@@ -437,6 +437,7 @@ class Task (object):
             result_str = cPickle.dumps(result, protocol=_pickle_version)
             result_size = len(result_str)
             result_ptr = ffi.new('char[]', result_size)
+            ffi.buffer(result_ptr, result_size)[:] = result_str
         else:
             result_size = 0
             result_ptr = ffi.NULL
