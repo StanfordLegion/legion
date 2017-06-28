@@ -31,10 +31,6 @@
 #define INDEX_DIM     1
 
 using namespace Legion;
-using namespace LegionRuntime::Accessor;
-
-// for Point<DIM> and Rect<DIM>
-using namespace LegionRuntime::Arrays;
 
 // Data type definitions
 
@@ -90,9 +86,9 @@ struct CircuitPiece {
   LogicalRegion pvt_nodes, shr_nodes, ghost_nodes;
   LogicalRegion pvt_wires;
   unsigned      num_wires;
-  ptr_t         first_wire;
+  Point<1>      first_wire;
   unsigned      num_nodes;
-  ptr_t         first_node;
+  Point<1>      first_node;
 
   float         dt;
   int           steps;
@@ -134,20 +130,6 @@ public:
   static const bool CPU_BASE_LEAF = true;
   static const bool GPU_BASE_LEAF = true;
   static const int MAPPER_ID = 0;
-protected:
-  static bool dense_calc_new_currents(const CircuitPiece &piece,
-                              RegionAccessor<AccessorType::Generic, ptr_t> fa_in_ptr,
-                              RegionAccessor<AccessorType::Generic, ptr_t> fa_out_ptr,
-                              RegionAccessor<AccessorType::Generic, PointerLocation> fa_in_loc,
-                              RegionAccessor<AccessorType::Generic, PointerLocation> fa_out_loc,
-                              RegionAccessor<AccessorType::Generic, float> fa_inductance,
-                              RegionAccessor<AccessorType::Generic, float> fa_resistance,
-                              RegionAccessor<AccessorType::Generic, float> fa_wire_cap,
-                              RegionAccessor<AccessorType::Generic, float> fa_pvt_voltage,
-                              RegionAccessor<AccessorType::Generic, float> fa_shr_voltage,
-                              RegionAccessor<AccessorType::Generic, float> fa_ghost_voltage,
-                              RegionAccessor<AccessorType::Generic, float> *fa_current,
-                              RegionAccessor<AccessorType::Generic, float> *fa_voltage);
 public:
   static void cpu_base_impl(const CircuitPiece &piece,
                             const std::vector<PhysicalRegion> &regions,

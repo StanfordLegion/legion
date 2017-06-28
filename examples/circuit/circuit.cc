@@ -110,21 +110,20 @@ void top_level_task(const Task *task,
   ArgumentMap local_args;
   for (int idx = 0; idx < num_pieces; idx++)
   {
-    DomainPoint point = DomainPoint::from_point<1>(Point<1>(idx));
+    DomainPoint point(idx);
     local_args.set_point(point, TaskArgument(&(pieces[idx]),sizeof(CircuitPiece)));
   }
 
   // Make the launchers
-  Rect<1> launch_rect(Point<1>(0), Point<1>(num_pieces-1)); 
-  Domain launch_domain = Domain::from_rect<1>(launch_rect);
+  const Rect<1> launch_rect(0, num_pieces-1); 
   CalcNewCurrentsTask cnc_launcher(parts.pvt_wires, parts.pvt_nodes, parts.shr_nodes, parts.ghost_nodes,
-                                   circuit.all_wires, circuit.all_nodes, launch_domain, local_args);
+                                   circuit.all_wires, circuit.all_nodes, launch_rect, local_args);
 
   DistributeChargeTask dsc_launcher(parts.pvt_wires, parts.pvt_nodes, parts.shr_nodes, parts.ghost_nodes,
-                                    circuit.all_wires, circuit.all_nodes, launch_domain, local_args);
+                                    circuit.all_wires, circuit.all_nodes, launch_rect, local_args);
 
   UpdateVoltagesTask upv_launcher(parts.pvt_nodes, parts.shr_nodes, parts.node_locations,
-                                 circuit.all_nodes, circuit.node_locator, launch_domain, local_args);
+                                 circuit.all_nodes, circuit.node_locator, launch_rect, local_args);
 
   printf("Starting main simulation loop\n");
   //struct timespec ts_start, ts_end;
@@ -179,20 +178,20 @@ void top_level_task(const Task *task,
       wires_req.add_field(FID_WIRE_VOLTAGE+i);
     PhysicalRegion wires = runtime->map_region(ctx, wires_req);
     wires.wait_until_valid();
-    RegionAccessor<AccessorType::Generic, float> fa_wire_currents[WIRE_SEGMENTS];
+    FieldAccessor<READ_ONLY,float,1> fa_wire_currents[WIRE_SEGMENTS];
     for (int i = 0; i < WIRE_SEGMENTS; i++)
-      fa_wire_currents[i] = wires.get_field_accessor(FID_CURRENT+i).typeify<float>();
-    RegionAccessor<AccessorType::Generic, float> fa_wire_voltages[WIRE_SEGMENTS-1];
+      fa_wire_currents[i] = FieldAccessor<READ_ONLY,float,1>(wires, FID_CURRENT+i);
+    FieldAccessor<READ_ONLY,float,1> fa_wire_voltages[WIRE_SEGMENTS-1];
     for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
-      fa_wire_voltages[i] = wires.get_field_accessor(FID_WIRE_VOLTAGE+i).typeify<float>();
-    IndexIterator itr(runtime, ctx, circuit.all_wires.get_index_space());
-    while (itr.has_next())
+      fa_wire_voltages[i] = FieldAccessor<READ_ONLY,float,1>(wires, FID_WIRE_VOLTAGE+i);
+
+    for (int i = 0; i < (num_pieces * wires_per_piece); i++)
     {
-      ptr_t wire_ptr = itr.next();
+      const Point<1> wire_ptr(i);
       for (int i = 0; i < WIRE_SEGMENTS; ++i)
-        printf(" %.5g", fa_wire_currents[i].read(wire_ptr));
+        printf(" %.5g", fa_wire_currents[i][wire_ptr]);
       for (int i = 0; i < WIRE_SEGMENTS - 1; ++i)
-        printf(" %.5g", fa_wire_voltages[i].read(wire_ptr));
+        printf(" %.5g", fa_wire_voltages[i][wire_ptr]);
       printf("\n");
     }
     runtime->unmap_region(ctx, wires);
@@ -317,9 +316,9 @@ void allocate_node_fields(Context ctx, Runtime *runtime, FieldSpace node_space)
 void allocate_wire_fields(Context ctx, Runtime *runtime, FieldSpace wire_space)
 {
   FieldAllocator allocator = runtime->create_field_allocator(ctx, wire_space);
-  allocator.allocate_field(sizeof(ptr_t), FID_IN_PTR);
+  allocator.allocate_field(sizeof(Point<1>), FID_IN_PTR);
   runtime->attach_name(wire_space, FID_IN_PTR, "in_ptr");
-  allocator.allocate_field(sizeof(ptr_t), FID_OUT_PTR);
+  allocator.allocate_field(sizeof(Point<1>), FID_OUT_PTR);
   runtime->attach_name(wire_space, FID_OUT_PTR, "out_ptr");
   allocator.allocate_field(sizeof(PointerLocation), FID_IN_LOC);
   runtime->attach_name(wire_space, FID_IN_LOC, "in_loc");
@@ -354,18 +353,19 @@ void allocate_locator_fields(Context ctx, Runtime *runtime, FieldSpace locator_s
   runtime->attach_name(locator_space, FID_LOCATOR, "locator");
 }
 
-PointerLocation find_location(ptr_t ptr, const std::set<ptr_t> &private_nodes,
-                              const std::set<ptr_t> &shared_nodes, const std::set<ptr_t> &ghost_nodes)
+PointerLocation find_location(Point<1> ptr, const std::set<ptr_t> &private_nodes,
+                              const std::set<ptr_t> &shared_nodes, 
+                              const std::set<ptr_t> &ghost_nodes)
 {
-  if (private_nodes.find(ptr) != private_nodes.end())
+  if (private_nodes.find(ptr_t(ptr)) != private_nodes.end())
   {
     return PRIVATE_PTR;
   }
-  else if (shared_nodes.find(ptr) != shared_nodes.end())
+  else if (shared_nodes.find(ptr_t(ptr)) != shared_nodes.end())
   {
     return SHARED_PTR;
   }
-  else if (ghost_nodes.find(ptr) != ghost_nodes.end())
+  else if (ghost_nodes.find(ptr_t(ptr)) != ghost_nodes.end())
   {
     return GHOST_PTR;
   }
@@ -431,103 +431,83 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
   privacy_map[1];
 
   // keep a O(1) indexable list of nodes in each piece for connecting wires
-  std::vector<std::vector<ptr_t> > piece_node_ptrs(num_pieces);
+  std::vector<std::vector<Point<1> > > piece_node_ptrs(num_pieces);
   std::vector<int> piece_shared_nodes(num_pieces, 0);
 
   srand48(random_seed);
 
   nodes.wait_until_valid();
-  RegionAccessor<AccessorType::Generic, float> fa_node_cap = 
-    nodes.get_field_accessor(FID_NODE_CAP).typeify<float>();
-  RegionAccessor<AccessorType::Generic, float> fa_node_leakage = 
-    nodes.get_field_accessor(FID_LEAKAGE).typeify<float>();
-  RegionAccessor<AccessorType::Generic, float> fa_node_charge = 
-    nodes.get_field_accessor(FID_CHARGE).typeify<float>();
-  RegionAccessor<AccessorType::Generic, float> fa_node_voltage = 
-    nodes.get_field_accessor(FID_NODE_VOLTAGE).typeify<float>();
+  const FieldAccessor<READ_WRITE,float,1> fa_node_cap(nodes, FID_NODE_CAP);
+  const FieldAccessor<READ_WRITE,float,1> fa_node_leakage(nodes, FID_LEAKAGE);
+  const FieldAccessor<READ_WRITE,float,1> fa_node_charge(nodes, FID_CHARGE);
+  const FieldAccessor<READ_WRITE,float,1> fa_node_voltage(nodes, FID_NODE_VOLTAGE);
   locator.wait_until_valid();
-  RegionAccessor<AccessorType::Generic, PointerLocation> locator_acc = 
-    locator.get_field_accessor(FID_LOCATOR).typeify<PointerLocation>();
-  ptr_t *first_nodes = new ptr_t[num_pieces];
+  const FieldAccessor<READ_WRITE,PointerLocation,1> locator_acc(locator, FID_LOCATOR);
+  Point<1> *first_nodes = new Point<1>[num_pieces];
   {
-    IndexIterator itr(runtime, ctx, ckt.all_nodes.get_index_space());
     for (int n = 0; n < num_pieces; n++)
     {
       for (int i = 0; i < nodes_per_piece; i++)
       {
-        assert(itr.has_next());
-        ptr_t node_ptr = itr.next();
+        const Point<1> node_ptr(n * nodes_per_piece + i);
         if (i == 0)
           first_nodes[n] = node_ptr;
         float capacitance = drand48() + 1.f;
-        fa_node_cap.write(node_ptr, capacitance);
+        fa_node_cap[node_ptr] = capacitance;
         float leakage = 0.1f * drand48();
-        fa_node_leakage.write(node_ptr, leakage);
-        fa_node_charge.write(node_ptr, 0.f);
-        float init_voltage = 2*drand48() - 1.f;
-        fa_node_voltage.write(node_ptr, init_voltage);
+        fa_node_leakage[node_ptr] = leakage;
+        fa_node_charge[node_ptr] = 0.f;
+        fa_node_voltage[node_ptr] = 2*drand48() - 1.f;
         // Just put everything in everyones private map at the moment       
         // We'll pull pointers out of here later as nodes get tied to 
         // wires that are non-local
-        private_node_map[n].points.insert(node_ptr);
-        privacy_map[0].points.insert(node_ptr);
-        locator_node_map[n].points.insert(node_ptr);
+        private_node_map[n].points.insert(ptr_t(node_ptr));
+        privacy_map[0].points.insert(ptr_t(node_ptr));
+        locator_node_map[n].points.insert(ptr_t(node_ptr));
 	piece_node_ptrs[n].push_back(node_ptr);
       }
     }
   }
 
   wires.wait_until_valid();
-  RegionAccessor<AccessorType::Generic, float> fa_wire_currents[WIRE_SEGMENTS];
+  FieldAccessor<READ_WRITE,float,1> fa_wire_currents[WIRE_SEGMENTS];
   for (int i = 0; i < WIRE_SEGMENTS; i++)
-    fa_wire_currents[i] = wires.get_field_accessor(FID_CURRENT+i).typeify<float>();
-  RegionAccessor<AccessorType::Generic, float> fa_wire_voltages[WIRE_SEGMENTS-1];
+    fa_wire_currents[i] = FieldAccessor<READ_WRITE,float,1>(wires, FID_CURRENT+i);
+  FieldAccessor<READ_WRITE,float,1> fa_wire_voltages[WIRE_SEGMENTS-1];
   for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
-    fa_wire_voltages[i] = wires.get_field_accessor(FID_WIRE_VOLTAGE+i).typeify<float>();
-  RegionAccessor<AccessorType::Generic, ptr_t> fa_wire_in_ptr = 
-    wires.get_field_accessor(FID_IN_PTR).typeify<ptr_t>();
-  RegionAccessor<AccessorType::Generic, ptr_t> fa_wire_out_ptr = 
-    wires.get_field_accessor(FID_OUT_PTR).typeify<ptr_t>();
-  RegionAccessor<AccessorType::Generic, PointerLocation> fa_wire_in_loc = 
-    wires.get_field_accessor(FID_IN_LOC).typeify<PointerLocation>();
-  RegionAccessor<AccessorType::Generic, PointerLocation> fa_wire_out_loc = 
-    wires.get_field_accessor(FID_OUT_LOC).typeify<PointerLocation>();
-  RegionAccessor<AccessorType::Generic, float> fa_wire_inductance = 
-    wires.get_field_accessor(FID_INDUCTANCE).typeify<float>();
-  RegionAccessor<AccessorType::Generic, float> fa_wire_resistance = 
-    wires.get_field_accessor(FID_RESISTANCE).typeify<float>();
-  RegionAccessor<AccessorType::Generic, float> fa_wire_cap = 
-    wires.get_field_accessor(FID_WIRE_CAP).typeify<float>();
-  ptr_t *first_wires = new ptr_t[num_pieces];
+    fa_wire_voltages[i] = FieldAccessor<READ_WRITE,float,1>(wires, FID_WIRE_VOLTAGE+i);
+  const FieldAccessor<READ_WRITE,Point<1>,1> fa_wire_in_ptr(wires, FID_IN_PTR);
+  const FieldAccessor<READ_WRITE,Point<1>,1> fa_wire_out_ptr(wires, FID_OUT_PTR);
+  const FieldAccessor<READ_WRITE,PointerLocation,1> fa_wire_in_loc(wires, FID_IN_LOC);
+  const FieldAccessor<READ_WRITE,PointerLocation,1> fa_wire_out_loc(wires, FID_OUT_LOC);
+  const FieldAccessor<READ_WRITE,float,1> fa_wire_inductance(wires, FID_INDUCTANCE);
+  const FieldAccessor<READ_WRITE,float,1> fa_wire_resistance(wires, FID_RESISTANCE);
+  const FieldAccessor<READ_WRITE,float,1> fa_wire_cap(wires, FID_WIRE_CAP);
+  Point<1> *first_wires = new Point<1>[num_pieces];
   {
-    IndexIterator itr(runtime, ctx, ckt.all_wires.get_index_space());
     for (int n = 0; n < num_pieces; n++)
     {
       for (int i = 0; i < wires_per_piece; i++)
       {
-        assert(itr.has_next());
-        ptr_t wire_ptr = itr.next();
+        const Point<1> wire_ptr(n * wires_per_piece + i);
         // Record the first wire pointer for this piece
         if (i == 0)
           first_wires[n] = wire_ptr;
         for (int j = 0; j < WIRE_SEGMENTS; j++)
-          fa_wire_currents[j].write(wire_ptr, 0.f);
+          fa_wire_currents[j][wire_ptr] = 0.f;
         for (int j = 0; j < WIRE_SEGMENTS-1; j++) 
-          fa_wire_voltages[j].write(wire_ptr, 0.f);
+          fa_wire_voltages[j][wire_ptr] = 0.f;
 
-        float resistance = drand48() * 10.0 + 1.0;
-        fa_wire_resistance.write(wire_ptr, resistance);
+        fa_wire_resistance[wire_ptr] = drand48() * 10.0 + 1.0;
         // Keep inductance on the order of 1e-3 * dt to avoid resonance problems
-        float inductance = (drand48() + 0.1) * DELTAT * 1e-3;
-        fa_wire_inductance.write(wire_ptr, inductance);
-        float capacitance = drand48() * 0.1;
-        fa_wire_cap.write(wire_ptr, capacitance);
+        fa_wire_inductance[wire_ptr] = (drand48() + 0.1) * DELTAT * 1e-3;
+        fa_wire_cap[wire_ptr] = drand48() * 0.1;
 
-        fa_wire_in_ptr.write(wire_ptr, random_element(piece_node_ptrs[n])); //private_node_map[n].points));
+        fa_wire_in_ptr[wire_ptr] = random_element(piece_node_ptrs[n]); //private_node_map[n].points));
 
         if ((100 * drand48()) < pct_wire_in_piece)
         {
-          fa_wire_out_ptr.write(wire_ptr, random_element(piece_node_ptrs[n])); //private_node_map[n].points));
+          fa_wire_out_ptr[wire_ptr] = random_element(piece_node_ptrs[n]); //private_node_map[n].points));
         }
         else
         {
@@ -540,60 +520,57 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
 	  int idx = int(drand48() * piece_node_ptrs[nn].size());
 	  if(idx > piece_shared_nodes[nn])
 	    idx = piece_shared_nodes[nn]++;
-	  ptr_t out_ptr = piece_node_ptrs[nn][idx];
+	  const Point<1> out_ptr = piece_node_ptrs[nn][idx];
 
-          fa_wire_out_ptr.write(wire_ptr, out_ptr); 
+          fa_wire_out_ptr[wire_ptr] = out_ptr; 
           // This node is no longer private
-          privacy_map[0].points.erase(out_ptr);
-          privacy_map[1].points.insert(out_ptr);
-          ghost_node_map[n].points.insert(out_ptr);
+          privacy_map[0].points.erase(ptr_t(out_ptr));
+          privacy_map[1].points.insert(ptr_t(out_ptr));
+          ghost_node_map[n].points.insert(ptr_t(out_ptr));
         }
-        wire_owner_map[n].points.insert(wire_ptr);
+        wire_owner_map[n].points.insert(ptr_t(wire_ptr));
       }
     }
   }
 
   // Second pass: make some random fraction of the private nodes shared
   {
-    IndexIterator itr(runtime, ctx, ckt.all_nodes.get_index_space()); 
     for (int n = 0; n < num_pieces; n++)
     {
       for (int i = 0; i < nodes_per_piece; i++)
       {
-        assert(itr.has_next());
-        ptr_t node_ptr = itr.next();
-        if (privacy_map[0].points.find(node_ptr) == privacy_map[0].points.end())
+        const Point<1> node_ptr(n * nodes_per_piece + i);
+        if (privacy_map[0].points.find(ptr_t(node_ptr)) == 
+            privacy_map[0].points.end())
         {
-          private_node_map[n].points.erase(node_ptr);
+          private_node_map[n].points.erase(ptr_t(node_ptr));
           // node is now shared
-          shared_node_map[n].points.insert(node_ptr);
-          locator_acc.write(node_ptr,SHARED_PTR); // node is shared 
+          shared_node_map[n].points.insert(ptr_t(node_ptr));
+          locator_acc[node_ptr] = SHARED_PTR; // node is shared 
         }
         else
         {
-          locator_acc.write(node_ptr,PRIVATE_PTR); // node is private 
+          locator_acc[node_ptr] = PRIVATE_PTR; // node is private 
         }
       }
     }
   }
   // Second pass (part 2): go through the wires and update the locations
   {
-    IndexIterator itr(runtime, ctx, ckt.all_wires.get_index_space());
     for (int n = 0; n < num_pieces; n++)
     {
       for (int i = 0; i < wires_per_piece; i++)
       {
-        assert(itr.has_next());
-        ptr_t wire_ptr = itr.next();
-        ptr_t in_ptr = fa_wire_in_ptr.read(wire_ptr);
-        ptr_t out_ptr = fa_wire_out_ptr.read(wire_ptr);
+        const Point<1> wire_ptr(n * wires_per_piece + i);
+        const Point<1> in_ptr = fa_wire_in_ptr[wire_ptr];
+        const Point<1> out_ptr = fa_wire_out_ptr[wire_ptr];
 
-        fa_wire_in_loc.write(wire_ptr, 
+        fa_wire_in_loc[wire_ptr] =  
             find_location(in_ptr, private_node_map[n].points, 
-              shared_node_map[n].points, ghost_node_map[n].points));     
-        fa_wire_out_loc.write(wire_ptr, 
+              shared_node_map[n].points, ghost_node_map[n].points);     
+        fa_wire_out_loc[wire_ptr] =  
             find_location(out_ptr, private_node_map[n].points, 
-              shared_node_map[n].points, ghost_node_map[n].points));
+              shared_node_map[n].points, ghost_node_map[n].points);
       }
     }
   }

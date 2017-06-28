@@ -36,8 +36,8 @@ endif
 
 # You can modify these variables, some will be appended to by the runtime makefile
 INC_FLAGS	?=
-CC_FLAGS	?=
-NVCC_FLAGS	?=
+CC_FLAGS	?= -std=c++11
+NVCC_FLAGS	?= -std=c++11
 GASNET_FLAGS	?=
 LD_FLAGS	?=
 
