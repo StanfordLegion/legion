@@ -20,8 +20,6 @@
 #include <unistd.h>
 #include "legion.h"
 using namespace Legion;
-using namespace LegionRuntime::Accessor;
-using namespace LegionRuntime::Arrays;
 
 #define ORDER 2
 
@@ -114,10 +112,9 @@ void top_level_task(const Task *task,
     // index space will have two levels of partitioning.  One level for
     // describing the partioning into pieces, and then a second level 
     // for capturing partitioning to describe ghost regions.
-    Rect<1> elem_rect(Point<1>(0),Point<1>(num_elements-1));
-    IndexSpace is = runtime->create_index_space(ctx,
-                                                Domain::from_rect<1>(elem_rect));
-                                                runtime->attach_name(is, "is");
+    Rect<1> elem_rect(0,num_elements-1);
+    IndexSpace is = runtime->create_index_space(ctx, elem_rect);
+    runtime->attach_name(is, "is");
 
     FieldSpace fs = runtime->create_field_space(ctx);
     {
@@ -127,8 +124,7 @@ void top_level_task(const Task *task,
         allocator.allocate_field(sizeof(double),FID_DERIV);
     }
 
-    Rect<1> color_bounds(Point<1>(0),Point<1>(num_subregions-1));
-    Domain color_domain = Domain::from_rect<1>(color_bounds);
+    Rect<1> color_bounds(0,num_subregions-1);
     char buf[64];
 
     // Create the partition for pieces
@@ -143,11 +139,11 @@ void top_level_task(const Task *task,
         {
             int num_elmts = color < number_small ? lower_bound : upper_bound;
             assert((index+num_elmts) <= num_elements);
-            Rect<1> subrect(Point<1>(index),Point<1>(index+num_elmts-1));
-            disjoint_coloring[color] = Domain::from_rect<1>(subrect);
+            Rect<1> subrect(index,index+num_elmts-1);
+            disjoint_coloring[color] = subrect;
             index += num_elmts;
         }
-        disjoint_ip = runtime->create_index_partition(ctx, is, color_domain,
+        disjoint_ip = runtime->create_index_partition(ctx, is, color_bounds,
             disjoint_coloring, true/*disjoint*/);
     }
     runtime->attach_name(disjoint_ip, "disjoint_ip");
@@ -296,7 +292,7 @@ void spmd_task(const Task *task,
 
     SPMDArgs *args = (SPMDArgs*)task->args;
 
-    int color = task->index_point.get_index();
+    int color = task->index_point[0];
 
     LogicalRegion local_lr = task->regions[0].region;
 
@@ -330,7 +326,7 @@ void spmd_task(const Task *task,
         // The left neighbor needs a right ghost and the right neighbor needs a left ghost
         unsigned ghost = (neighbor == NEIGHBOR_LEFT) ? GHOST_RIGHT : GHOST_LEFT;
 
-        Domain ghost_domain = Domain::from_point<1>(Point<1>(ghost));
+        Domain ghost_domain = Rect<1>(ghost, ghost); 
 
         // Get the index space and domain
         IndexSpace neighbor_is = neighbor_lrs[neighbor].get_index_space();
@@ -339,12 +335,12 @@ void spmd_task(const Task *task,
         // now create the partitioning
 
         DomainColoring ghost_coloring;
-        Rect<1> rect = neighbor_dom.get_rect<1>();
+        Rect<1> rect = neighbor_dom;
 
         if (neighbor == NEIGHBOR_LEFT) 
-            ghost_coloring[ghost] = Domain::from_rect<1>(Rect<1>(rect.hi[0]-(ORDER-1),rect.hi));
+            ghost_coloring[ghost] = Rect<1>(rect.hi[0]-(ORDER-1),rect.hi);
         else
-            ghost_coloring[ghost] = Domain::from_rect<1>(Rect<1>(rect.lo, rect.lo[0]+(ORDER-1)));
+            ghost_coloring[ghost] = Rect<1>(rect.lo, rect.lo[0]+(ORDER-1));
 
         IndexPartition ghost_ip =  runtime->create_index_partition(ctx, neighbor_is, ghost_domain,
                                                                    ghost_coloring, true/*disjoint*/);
@@ -518,20 +514,17 @@ void init_task(const Task *task,
  
     FieldID fid = *(task->regions[0].privilege_fields.begin());
  
-    RegionAccessor<AccessorType::Generic, double> acc = 
-        regions[0].get_field_accessor(fid).typeify<double>();
+    const FieldAccessor<WRITE_DISCARD,double,1> acc(regions[0], fid);
  
-    Domain dom = runtime->get_index_space_domain(ctx, 
+    Rect<1> rect = runtime->get_index_space_domain(ctx, 
         task->regions[0].region.get_index_space());
-    Rect<1> rect = dom.get_rect<1>();
-    for (GenericPointInRectIterator<1> pir(rect); pir; pir++)
+    for (PointInRectIterator<1> pir(rect); pir(); pir++)
     {
         // use a ramp with little ripples
         const int ripple_period = 4;
         const double ripple[ripple_period] = { 0, 0.25, 0, -0.25 };
        
-        double value = (double)(pir.p[0]) + ripple[pir.p[0] % ripple_period];
-        acc.write(DomainPoint::from_point<1>(pir.p), value);
+        acc[*pir] = (double)(pir[0]) + ripple[pir[0] % ripple_period];
     }
 }
 
@@ -548,25 +541,17 @@ void stencil_task(const Task *task,
     FieldID read_fid = *(task->regions[1].privilege_fields.begin());
     FieldID ghost_fid = *(task->regions[2].privilege_fields.begin());
 
-    RegionAccessor<AccessorType::Generic, double> write_acc = 
-        regions[0].get_field_accessor(write_fid).typeify<double>();
-    RegionAccessor<AccessorType::Generic, double> read_acc = 
-        regions[1].get_field_accessor(read_fid).typeify<double>();
-    RegionAccessor<AccessorType::Generic, double> left_ghost_acc = 
-        regions[2].get_field_accessor(ghost_fid).typeify<double>();
-    RegionAccessor<AccessorType::Generic, double> right_ghost_acc = 
-        regions[3].get_field_accessor(ghost_fid).typeify<double>();
+    const FieldAccessor<WRITE_DISCARD,double,1> write_acc(regions[0], write_fid);
+    const FieldAccessor<READ_ONLY,double,1> read_acc(regions[1], read_fid);
+    const FieldAccessor<READ_ONLY,double,1> left_ghost_acc(regions[2], ghost_fid);
+    const FieldAccessor<READ_ONLY,double,1> right_ghost_acc(regions[3], ghost_fid);
 
-    Domain main_dom = runtime->get_index_space_domain(ctx,
+    Rect<1> main_rect = runtime->get_index_space_domain(ctx,
         task->regions[0].region.get_index_space());
-    Domain left_dom = runtime->get_index_space_domain(ctx,
+    Rect<1> left_rect = runtime->get_index_space_domain(ctx,
         task->regions[2].region.get_index_space());
-    Domain right_dom = runtime->get_index_space_domain(ctx,
+    Rect<1> right_rect = runtime->get_index_space_domain(ctx,
         task->regions[3].region.get_index_space());
-
-    Rect<1> left_rect = left_dom.get_rect<1>();
-    Rect<1> right_rect = right_dom.get_rect<1>();
-    Rect<1> main_rect = main_dom.get_rect<1>();
 
     double window[2*ORDER+1];
 
@@ -574,26 +559,27 @@ void stencil_task(const Task *task,
     // for the left, main, and right rectangles, and a write iterator for the main
     // rectangle (the read and write iterators for the main rectangle will effectively
     // be offset by ORDER
-    GenericPointInRectIterator<1> pir_left(left_rect);
-    GenericPointInRectIterator<1> pir_main_read(main_rect);
-    GenericPointInRectIterator<1> pir_main_write(main_rect);
-    GenericPointInRectIterator<1> pir_right(right_rect);
+    PointInRectIterator<1> pir_left(left_rect);
+    PointInRectIterator<1> pir_main_read(main_rect);
+    PointInRectIterator<1> pir_main_write(main_rect);
+    PointInRectIterator<1> pir_right(right_rect);
 
     // Prime the window with the left data and the first ORDER elements of main
     for (int i = 0; i < ORDER; i++)
     {
-        window[i] = left_ghost_acc.read(DomainPoint::from_point<1>((pir_left++).p));
-        window[i + ORDER] = read_acc.read(DomainPoint::from_point<1>((pir_main_read++).p));
+        window[i] = left_ghost_acc[*pir_left]; pir_left++;
+        window[i + ORDER] = read_acc[*pir_main_read]; pir_main_read++;
     }
 
     // now iterate over the main rectangle's write value, pulling from the right ghost
     //  data once the main read iterator is exhausted
-    while (pir_main_write)
+    while (pir_main_write())
     {
-        if (pir_main_read)
-            window[2 * ORDER] = read_acc.read(DomainPoint::from_point<1>((pir_main_read++).p));
-        else
-            window[2 * ORDER] = right_ghost_acc.read(DomainPoint::from_point<1>((pir_right++).p));
+        if (pir_main_read()) {
+            window[2 * ORDER] = read_acc[*pir_main_read]; pir_main_read++; 
+        } else {
+            window[2 * ORDER] = right_ghost_acc[*pir_right]; pir_right++;
+        }
 
         // only have calculation for ORDER == 2
         double deriv;
@@ -619,8 +605,7 @@ void stencil_task(const Task *task,
             default: assert(0);
         }
         
-        write_acc.write(DomainPoint::from_point<1>((pir_main_write++).p),
-                        deriv);
+        write_acc[*pir_main_write] = deriv; pir_main_write++;
 
         // slide the window for the next point
         for (int j = 0; j < (2*ORDER); j++)
@@ -628,10 +613,10 @@ void stencil_task(const Task *task,
     }
 
     // check that we exhausted all the iterators
-    assert(!pir_left);
-    assert(!pir_main_read);
-    assert(!pir_main_write);
-    assert(!pir_right);
+    assert(!pir_left());
+    assert(!pir_main_read());
+    assert(!pir_main_write());
+    assert(!pir_right());
 }
 
 int check_task(const Task *task,
@@ -646,37 +631,35 @@ int check_task(const Task *task,
 
     FieldID fid = *(task->regions[0].privilege_fields.begin());
 
-    RegionAccessor<AccessorType::Generic, double> acc = 
-        regions[0].get_field_accessor(fid).typeify<double>();
+    const FieldAccessor<READ_ONLY,double,1> acc(regions[0], fid);
 
-    Domain dom = runtime->get_index_space_domain(ctx, 
+    Rect<1> rect = runtime->get_index_space_domain(ctx, 
         task->regions[0].region.get_index_space());
-    Rect<1> rect = dom.get_rect<1>();
     int errors = 0;
-    for (GenericPointInRectIterator<1> pir(rect); pir; pir++)
+    for (PointInRectIterator<1> pir(rect); pir(); pir++)
     {
         // the derivative of a ramp with ripples is a constant function with ripples
         const int ripple_period = 4;
         const double deriv_ripple[ripple_period] = { 4.0, 0, -4.0, 0 };
-        double exp_value = 12.0 + deriv_ripple[pir.p[0] % ripple_period];
+        double exp_value = 12.0 + deriv_ripple[pir[0] % ripple_period];
 
         // correct for the wraparound cases
-        if(pir.p[0] < ORDER) 
+        if(pir[0] < ORDER) 
         {
             // again only actually supporting ORDER == 2
             assert(ORDER == 2);
-            if(pir.p[0] == 0) exp_value += -7.0 * args->num_elements;
-            if(pir.p[1] == 1) exp_value += 1.0 * args->num_elements;
+            if(pir[0] == 0) exp_value += -7.0 * args->num_elements;
+            if(pir[0] == 1) exp_value += 1.0 * args->num_elements;
         }
-        if(pir.p[0] >= (args->num_elements - ORDER)) 
+        if(pir[0] >= (args->num_elements - ORDER)) 
         {
             // again only actually supporting ORDER == 2
             assert(ORDER == 2);
-            if(pir.p[0] == (args->num_elements - 1)) exp_value += -7.0 * args->num_elements;
-            if(pir.p[1] == (args->num_elements - 2)) exp_value += 1.0 * args->num_elements;
+            if(pir[0] == (args->num_elements - 1)) exp_value += -7.0 * args->num_elements;
+            if(pir[0] == (args->num_elements - 2)) exp_value += 1.0 * args->num_elements;
         }
 
-        double act_value = acc.read(DomainPoint::from_point<1>(pir.p));
+        double act_value = acc[*pir];
 
         // polarity is important here - comparisons with NaN always return false
         bool ok = ((exp_value < 0) ? ((-act_value >= 0.99 * -exp_value) && 
@@ -688,7 +671,7 @@ int check_task(const Task *task,
         if(!ok) 
         {
             printf("ERROR: check for location %lld failed: expected=%g, actual=%g\n",
-            pir.p[0], exp_value, act_value);
+            pir[0], exp_value, act_value);
             errors++;
         }
     }
