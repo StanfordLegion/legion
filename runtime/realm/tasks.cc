@@ -337,9 +337,9 @@ namespace Realm {
   }
 
   // helper for tracking/sanity-checking worker counts
-  inline void ThreadedTaskScheduler::update_worker_count(int active_delta,
-							 int unassigned_delta,
-							 bool check /*= true*/)
+  void ThreadedTaskScheduler::update_worker_count(int active_delta,
+						  int unassigned_delta,
+						  bool check /*= true*/)
   {
     //define DEBUG_THREAD_SCHEDULER
 #ifdef DEBUG_THREAD_SCHEDULER
