@@ -1779,6 +1779,14 @@ namespace LegionRuntime {
       {
         for (long i = 0; i < nr; i++) {
           GPURequest* req = (GPURequest*) requests[i];
+
+	  // empty transfers don't need to bounce off the GPU
+	  if(req->nbytes == 0) {
+	    req->xd->notify_request_read_done(req);
+	    req->xd->notify_request_write_done(req);
+	    continue;
+	  }
+
           if (req->dim == Request::DIM_1D) { 
             switch (kind) {
               case XferDes::XFER_GPU_TO_FB:
