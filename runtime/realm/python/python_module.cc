@@ -620,6 +620,15 @@ namespace Realm {
     log_py.debug() << "RestoreThread <- " << master_thread;
     (interpreter->api->PyEval_RestoreThread)(master_thread);
 
+    // during shutdown, the threading module tries to remove the Thread object
+    //  associated with this kernel thread - if that doesn't exist (because we're
+    //  shutting down from a different thread that we initialized the interpreter
+    //  _and_ nobody called threading.current_thread() from this kernel thread),
+    //  we'll get a KeyError in threading.py
+    // resolve this by calling threading.current_thread() here, using __import__
+    //  to deal with the case where 'import threading' never got called
+    (interpreter->api->PyRun_SimpleString)("__import__('threading').current_thread()");
+
     delete interpreter;
     interpreter = 0;
     master_thread = 0;
