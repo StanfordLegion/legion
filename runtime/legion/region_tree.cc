@@ -5544,6 +5544,7 @@ namespace Legion {
           ApUserEvent partial_event = Runtime::create_ap_user_event();
           result = context->create_node(is, NULL/*realm is*/,
                                         this, c, partial_event);
+          add_pending_child(c, partial_event);
           // Now check to see if we need to trigger our partition ready event
           std::set<ApEvent> child_ready_events;
           {
