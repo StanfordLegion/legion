@@ -423,18 +423,6 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
   PhysicalRegion nodes = runtime->map_region(ctx, nodes_req);
   PhysicalRegion locator = runtime->map_region(ctx, locator_req);
 
-#ifndef DEPPART
-  Coloring wire_owner_map;
-  Coloring private_node_map;
-  Coloring shared_node_map;
-  Coloring ghost_node_map;
-  Coloring locator_node_map;
-
-  Coloring privacy_map;
-  privacy_map[0];
-  privacy_map[1];
-#endif
-
   // keep a O(1) indexable list of nodes in each piece for connecting wires
   std::vector<std::vector<Point<1> > > piece_node_ptrs(num_pieces);
   std::vector<int> piece_shared_nodes(num_pieces, 0);
@@ -446,9 +434,7 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
   const FieldAccessor<READ_WRITE,float,1> fa_node_leakage(nodes, FID_LEAKAGE);
   const FieldAccessor<READ_WRITE,float,1> fa_node_charge(nodes, FID_CHARGE);
   const FieldAccessor<READ_WRITE,float,1> fa_node_voltage(nodes, FID_NODE_VOLTAGE);
-  const FieldAccessor<READ_WRITE,Point<1>,1> fa_node_color(nodes, FID_PIECE_COLOR);
-  locator.wait_until_valid();
-  const FieldAccessor<READ_WRITE,PointerLocation,1> locator_acc(locator, FID_LOCATOR);
+  const FieldAccessor<READ_WRITE,Point<1>,1> fa_node_color(nodes, FID_PIECE_COLOR); 
   Point<1> *first_nodes = new Point<1>[num_pieces];
   {
     for (int n = 0; n < num_pieces; n++)
@@ -465,14 +451,6 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
         fa_node_charge[node_ptr] = 0.f;
         fa_node_voltage[node_ptr] = 2*drand48() - 1.f;
         fa_node_color[node_ptr] = n;
-        // Just put everything in everyones private map at the moment       
-        // We'll pull pointers out of here later as nodes get tied to 
-        // wires that are non-local
-#ifndef DEPPART 
-        private_node_map[n].points.insert(ptr_t(node_ptr));
-        privacy_map[0].points.insert(ptr_t(node_ptr));
-        locator_node_map[n].points.insert(ptr_t(node_ptr));
-#endif
 	piece_node_ptrs[n].push_back(node_ptr);
       }
     }
@@ -532,70 +510,16 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
 	  const Point<1> out_ptr = piece_node_ptrs[nn][idx];
 
           fa_wire_out_ptr[wire_ptr] = out_ptr; 
-          // This node is no longer private
-#ifndef DEPPART
-          privacy_map[0].points.erase(ptr_t(out_ptr));
-          privacy_map[1].points.insert(ptr_t(out_ptr));
-          ghost_node_map[n].points.insert(ptr_t(out_ptr));
-#endif
-        }
-#ifndef DEPPART
-        wire_owner_map[n].points.insert(ptr_t(wire_ptr));
-#endif
-      }
-    }
-  }
-
-#ifndef DEPPART
-  // Second pass: make some random fraction of the private nodes shared
-  {
-    for (int n = 0; n < num_pieces; n++)
-    {
-      for (int i = 0; i < nodes_per_piece; i++)
-      {
-        const Point<1> node_ptr(n * nodes_per_piece + i);
-        if (privacy_map[0].points.find(ptr_t(node_ptr)) == 
-            privacy_map[0].points.end())
-        {
-          private_node_map[n].points.erase(ptr_t(node_ptr));
-          // node is now shared
-          shared_node_map[n].points.insert(ptr_t(node_ptr));
-          locator_acc[node_ptr] = SHARED_PTR; // node is shared 
-        }
-        else
-        {
-          locator_acc[node_ptr] = PRIVATE_PTR; // node is private 
         }
       }
     }
   }
-  // Second pass (part 2): go through the wires and update the locations
-  {
-    for (int n = 0; n < num_pieces; n++)
-    {
-      for (int i = 0; i < wires_per_piece; i++)
-      {
-        const Point<1> wire_ptr(n * wires_per_piece + i);
-        const Point<1> in_ptr = fa_wire_in_ptr[wire_ptr];
-        const Point<1> out_ptr = fa_wire_out_ptr[wire_ptr];
-
-        fa_wire_in_loc[wire_ptr] =  
-            find_location(in_ptr, private_node_map[n].points, 
-              shared_node_map[n].points, ghost_node_map[n].points);     
-        fa_wire_out_loc[wire_ptr] =  
-            find_location(out_ptr, private_node_map[n].points, 
-              shared_node_map[n].points, ghost_node_map[n].points);
-      }
-    }
-  }
-#endif
 
   runtime->unmap_region(ctx, wires);
   runtime->unmap_region(ctx, nodes);
-  runtime->unmap_region(ctx, locator);
 
   // Now we can create our partitions and update the circuit pieces
-#ifdef DEPPART 
+
   // First a partition based on the color field, we generated the field
   // in this case but it could also have been computed by a partitioner 
   // such as metis
@@ -604,6 +528,7 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
                                                                ckt.all_nodes,
                                                                FID_PIECE_COLOR,
                                                                piece_is);
+  runtime->attach_name(owned_ip, "owned");
 
   // Partition the wires by ownership of the in node
   IndexPartition wire_ip = runtime->create_partition_by_preimage(ctx, owned_ip,
@@ -617,9 +542,11 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
                               ckt.all_nodes.get_index_space(), 
                               runtime->get_logical_partition(ckt.all_wires, wire_ip),
                               ckt.all_wires, FID_OUT_PTR, piece_is);
+  runtime->attach_name(extended_ip, "extended");
   IndexPartition temp_ghost_ip = runtime->create_partition_by_difference(ctx, 
                               ckt.all_nodes.get_index_space(), extended_ip, 
                               owned_ip, piece_is);
+  runtime->attach_name(temp_ghost_ip, "temp ghost");
 
   // Shared nodes are those that are ghost for somebody
   IndexSpace privacy_color_is = runtime->create_index_space(ctx, Rect<1>(0, 1));
@@ -667,42 +594,23 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
   runtime->destroy_index_partition(ctx, extended_ip);
   runtime->destroy_index_partition(ctx, temp_ghost_ip);
 
-
-#else
-  // first create the privacy partition that splits all the nodes into either shared or private
-  IndexPartition privacy_part = runtime->create_index_partition(ctx, ckt.all_nodes.get_index_space(), privacy_map, true/*disjoint*/);
-  runtime->attach_name(privacy_part, "is_private");
-  
-  IndexSpace all_private = runtime->get_index_subspace(ctx, privacy_part, 0);
-  runtime->attach_name(all_private, "private");
-  IndexSpace all_shared  = runtime->get_index_subspace(ctx, privacy_part, 1);
-  runtime->attach_name(all_shared, "shared");
-
-  // Now create partitions for each of the subregions
-  Partitions result;
-  IndexPartition priv = runtime->create_index_partition(ctx, all_private, private_node_map, true/*disjoint*/);
-  runtime->attach_name(priv, "private");
-  result.pvt_nodes = runtime->get_logical_partition_by_tree(ctx, priv, ckt.all_nodes.get_field_space(), ckt.all_nodes.get_tree_id());
-  runtime->attach_name(result.pvt_nodes, "private_nodes");
-  IndexPartition shared = runtime->create_index_partition(ctx, all_shared, shared_node_map, true/*disjoint*/);
-  runtime->attach_name(shared, "shared");
-  result.shr_nodes = runtime->get_logical_partition_by_tree(ctx, shared, ckt.all_nodes.get_field_space(), ckt.all_nodes.get_tree_id());
-  runtime->attach_name(result.shr_nodes, "shared_nodes");
-  IndexPartition ghost = runtime->create_index_partition(ctx, all_shared, ghost_node_map, false/*disjoint*/);
-  runtime->attach_name(ghost, "ghost");
-  result.ghost_nodes = runtime->get_logical_partition_by_tree(ctx, ghost, ckt.all_nodes.get_field_space(), ckt.all_nodes.get_tree_id());
-  runtime->attach_name(result.ghost_nodes, "ghost_nodes");
-
-  IndexPartition pvt_wires = runtime->create_index_partition(ctx, ckt.all_wires.get_index_space(), wire_owner_map, true/*disjoint*/);
-  runtime->attach_name(pvt_wires, "private");
-  result.pvt_wires = runtime->get_logical_partition_by_tree(ctx, pvt_wires, ckt.all_wires.get_field_space(), ckt.all_wires.get_tree_id()); 
-  runtime->attach_name(result.pvt_wires, "private_wires");
-
-  IndexPartition locs = runtime->create_index_partition(ctx, ckt.node_locator.get_index_space(), locator_node_map, true/*disjoint*/);
-  runtime->attach_name(locs, "locs");
-  result.node_locations = runtime->get_logical_partition_by_tree(ctx, locs, ckt.node_locator.get_field_space(), ckt.node_locator.get_tree_id());
-  runtime->attach_name(result.node_locations, "node_locations");
-#endif
+  // Finally we need to figure out where everything ended up
+  locator.wait_until_valid();
+  const FieldAccessor<READ_WRITE,PointerLocation,1> locator_acc(locator, FID_LOCATOR);
+  for (int n = 0; n < num_pieces; n++)
+  {
+    LogicalRegionT<1> private_lr( 
+      runtime->get_logical_subregion_by_color(result.pvt_nodes, n));
+    for (int i = 0; i < nodes_per_piece; i++)
+    {
+      const Point<1> node_ptr(n * nodes_per_piece + i);
+      if (runtime->safe_cast(ctx, node_ptr, private_lr))
+        locator_acc[node_ptr] = PRIVATE_PTR;
+      else
+        locator_acc[node_ptr] = SHARED_PTR;
+    }
+  }
+  runtime->unmap_region(ctx, locator);
 
   char buf[100];
   // Build the pieces
