@@ -62,11 +62,12 @@ struct SaxpyFunctor : public thrust::binary_function<double,double,double> {
 };
 
 __host__
-void gpu_saxpy(double alpha, double *x_ptr, double *y_ptr, double *z_ptr, size_t size)
+void gpu_saxpy(double alpha, const double *x_ptr, 
+               const double *y_ptr, double *z_ptr, size_t size)
 {
   // Make our device pointers 
-  thrust::device_ptr<double> x_vec(x_ptr);
-  thrust::device_ptr<double> y_vec(y_ptr);
+  thrust::device_ptr<double> x_vec(const_cast<double*>(x_ptr));
+  thrust::device_ptr<double> y_vec(const_cast<double*>(y_ptr));
   thrust::device_ptr<double> z_vec(z_ptr);
 
   thrust::transform(x_vec, x_vec + size, y_vec, z_vec, SaxpyFunctor(alpha));

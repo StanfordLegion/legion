@@ -15,5 +15,6 @@
 
 void initialize_gpu_array(double *ptr, size_t size);
 
-void gpu_saxpy(double alpha, double *x_ptr, double *y_ptr, double *z_ptr, size_t size);
+void gpu_saxpy(double alpha, const double *x_ptr, 
+               const double *y_ptr, double *z_ptr, size_t size);
 

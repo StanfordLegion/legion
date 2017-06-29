@@ -758,15 +758,15 @@ bool spmd_main_task(const Task *task,
   Rect<3> blk_space(Point<3>(0,0,0), args.blocks - Point<3>(1,1,1));
 
   int pr_idx = 1;
-  const Domain blk_domain = blk_space;
-  LegionRuntime::Arrays::FortranArrayLinearization<3> fal(blk_domain, pr_idx);
+  const Point<3> blk_strides(1, (blk_space.hi[0] - blk_space.lo[0]) + 1,
+      ((blk_space.hi[0] - blk_space.lo[0]) + 1) * ((blk_space.hi[1] - blk_space.lo[1]) + 1));
 
   for(PointInRectIterator<3> pir(blk_space); pir(); ++pir, ++pr_idx) {
     int owner = fa_owner[*pir];
     if(owner != shard)
       continue;
 
-    assert((int)fal.image(DomainPoint(*pir)) == pr_idx);
+    assert((int)((blk_strides.dot(*pir))+1) == pr_idx);
 
     BlockMetadata& mdata = myblocks[*pir];
 
@@ -800,10 +800,10 @@ bool spmd_main_task(const Task *task,
 
 	  if(fa_owner[p2] == owner) {
 	    g.gtype = GhostInfo::GHOST_LOCAL;
-	    g.lr_parent = regions[fal.image(DomainPoint(p2))].get_logical_region();
+            g.lr_parent = regions[blk_strides.dot(p2)+1].get_logical_region();
 	  } else {
 	    g.gtype = GhostInfo::GHOST_REMOTE;
-	    g.lr_parent = regions[fal.image(DomainPoint(p2))].get_logical_region();
+            g.lr_parent = regions[blk_strides.dot(p2)+1].get_logical_region();
 	    g.pb_shared_ready = fa_ready[p2];
 	    g.pb_shared_done = fa_done[p2];
 	  }
