@@ -128,24 +128,8 @@ void top_level_task(const Task *task,
     char buf[64];
 
     // Create the partition for pieces
-    IndexPartition disjoint_ip;
-    {
-        const int lower_bound = num_elements/num_subregions;
-        const int upper_bound = lower_bound+1;
-        const int number_small = num_subregions - (num_elements % num_subregions);
-        DomainColoring disjoint_coloring;
-        int index = 0;
-        for (int color = 0; color < num_subregions; color++)
-        {
-            int num_elmts = color < number_small ? lower_bound : upper_bound;
-            assert((index+num_elmts) <= num_elements);
-            Rect<1> subrect(index,index+num_elmts-1);
-            disjoint_coloring[color] = subrect;
-            index += num_elmts;
-        }
-        disjoint_ip = runtime->create_index_partition(ctx, is, color_bounds,
-            disjoint_coloring, true/*disjoint*/);
-    }
+    IndexSpace color_is = runtime->create_index_space(ctx, color_bounds);
+    IndexPartition disjoint_ip = runtime->create_equal_partition(ctx, is, color_is);
     runtime->attach_name(disjoint_ip, "disjoint_ip");
     
     //TODO: delete these at the end
@@ -271,6 +255,7 @@ void top_level_task(const Task *task,
     right_ready_barriers.clear();
     right_empty_barriers.clear();
     runtime->destroy_index_space(ctx, is);
+    runtime->destroy_index_space(ctx, color_is);
     runtime->destroy_field_space(ctx, fs);
 }
 
@@ -320,36 +305,38 @@ void spmd_task(const Task *task,
     char buf[64];  const char* parts[2] = {"left", "right"};
 
     // Create the ghost regions we will access from the neighbors.
-
+    IndexSpaceT<1> ghost_color_left_is = runtime->create_index_space(ctx, 
+                                                  Rect<1>(GHOST_LEFT, GHOST_LEFT));
+    IndexSpaceT<1> ghost_color_right_is = runtime->create_index_space(ctx,
+                                                  Rect<1>(GHOST_RIGHT, GHOST_RIGHT));
     for (unsigned neighbor = NEIGHBOR_LEFT; neighbor <= NEIGHBOR_RIGHT; neighbor++)
     {
-        // The left neighbor needs a right ghost and the right neighbor needs a left ghost
-        unsigned ghost = (neighbor == NEIGHBOR_LEFT) ? GHOST_RIGHT : GHOST_LEFT;
-
-        Domain ghost_domain = Rect<1>(ghost, ghost); 
-
         // Get the index space and domain
-        IndexSpace neighbor_is = neighbor_lrs[neighbor].get_index_space();
-        Domain neighbor_dom = runtime->get_index_space_domain(ctx, neighbor_is);
-
+        IndexSpaceT<1> neighbor_is(neighbor_lrs[neighbor].get_index_space());
+        Rect<1> rect = runtime->get_index_space_domain(ctx, neighbor_is);
         // now create the partitioning
-
-        DomainColoring ghost_coloring;
-        Rect<1> rect = neighbor_dom;
-
+        IndexPartition ghost_ip;
+        Matrix<1,1> transform;
+        transform[0][0] = 0;
+        // The left neighbor needs a right ghost and the right neighbor needs a left ghost
         if (neighbor == NEIGHBOR_LEFT) 
-            ghost_coloring[ghost] = Rect<1>(rect.hi[0]-(ORDER-1),rect.hi);
+        {
+            Rect<1> extent(rect.hi[0]-(ORDER-1),rect.hi);
+            ghost_ip = runtime->create_partition_by_restriction(ctx, neighbor_is,
+                ghost_color_right_is, transform, extent, DISJOINT_KIND);
+        }
         else
-            ghost_coloring[ghost] = Rect<1>(rect.lo, rect.lo[0]+(ORDER-1));
-
-        IndexPartition ghost_ip =  runtime->create_index_partition(ctx, neighbor_is, ghost_domain,
-                                                                   ghost_coloring, true/*disjoint*/);
-
+        {
+            Rect<1> extent(rect.lo, rect.lo[0]+(ORDER-1));
+            ghost_ip = runtime->create_partition_by_restriction(ctx, neighbor_is,
+                ghost_color_left_is, transform, extent, DISJOINT_KIND);
+        }
         sprintf(buf, "%s_neighbor_ghost_ip_of_%d", parts[neighbor], color);
         runtime->attach_name(ghost_ip, buf);
         
         // create the logical region
-        IndexSpace ghost_is = runtime->get_index_subspace(ctx, ghost_ip, ghost);
+        IndexSpace ghost_is = runtime->get_index_subspace(ctx, ghost_ip, 
+            (neighbor == NEIGHBOR_LEFT) ? GHOST_RIGHT : GHOST_LEFT);
         ghost_lrs[neighbor] = runtime->create_logical_region(ctx, ghost_is, ghost_fs);
         sprintf(buf, "%s_neighbor_ghost_lr_of_%d", parts[neighbor], color);
         runtime->attach_name(ghost_lrs[neighbor], buf);
@@ -502,6 +489,8 @@ void spmd_task(const Task *task,
     }
 
     runtime->destroy_logical_region(ctx, local_lr);
+    runtime->destroy_index_space(ctx, ghost_color_left_is);
+    runtime->destroy_index_space(ctx, ghost_color_right_is);
 }
 
 void init_task(const Task *task,

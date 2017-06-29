@@ -38,8 +38,8 @@ enum {
 };
 
 enum {
-  GHOST_LEFT,
-  GHOST_RIGHT,
+  GHOST_LEFT = 0,
+  GHOST_RIGHT = 1,
 };
 
 struct SPMDArgs {
@@ -120,48 +120,29 @@ void top_level_task(const Task *task,
   Rect<1> color_bounds(0,num_subregions-1);
 
   // Create the partition for pieces
-  IndexPartition disjoint_ip;
-  {
-    const int lower_bound = num_elements/num_subregions;
-    const int upper_bound = lower_bound+1;
-    const int number_small = num_subregions - (num_elements % num_subregions);
-    DomainColoring disjoint_coloring;
-    int index = 0;
-    for (int color = 0; color < num_subregions; color++)
-    {
-      int num_elmts = color < number_small ? lower_bound : upper_bound;
-      assert((index+num_elmts) <= num_elements);
-      Rect<1> subrect(index,index+num_elmts-1);
-      disjoint_coloring[color] = subrect;
-      index += num_elmts;
-    }
-    disjoint_ip = runtime->create_index_partition(ctx, is, color_bounds,
-                                    disjoint_coloring, true/*disjoint*/);
-  }
+  IndexSpace color_is = runtime->create_index_space(ctx, color_bounds);
+  IndexPartition disjoint_ip = runtime->create_equal_partition(ctx, is, color_is);
   runtime->attach_name(disjoint_ip, "disjoint_ip");
   // Now iterate over each of the sub-regions and make the ghost partitions
-  Rect<1> ghost_bounds(GHOST_LEFT,GHOST_RIGHT);
-  Domain ghost_domain = ghost_bounds;
+  const Rect<1> ghost_bounds(GHOST_LEFT,GHOST_RIGHT);
   std::vector<LogicalRegion> ghost_left;
   std::vector<LogicalRegion> ghost_right;
   char buf[32]; const char* parts[2] = {"L", "R"};
+  IndexSpaceT<1> ghost_color_is = runtime->create_index_space(ctx, ghost_bounds); 
   for (int color = 0; color < num_subregions; color++)
   {
     // Get each of the subspaces
-    IndexSpace subspace = runtime->get_index_subspace(ctx, disjoint_ip, color);
+    IndexSpaceT<1> subspace(runtime->get_index_subspace(ctx, disjoint_ip, color));
     sprintf(buf, "disjoint_subspace_%d", color);
     runtime->attach_name(subspace, buf);
     Domain dom = runtime->get_index_space_domain(ctx, subspace);
     Rect<1> rect = dom; 
     // Make two sub-regions, one on the left, and one on the right
-    DomainColoring ghost_coloring;
-    Rect<1> left(rect.lo, rect.lo[0]+(ORDER-1));
-    ghost_coloring[GHOST_LEFT] = left;
-    Rect<1> right(rect.hi[0]-(ORDER-1),rect.hi);
-    ghost_coloring[GHOST_RIGHT] = right;
-    IndexPartition ghost_ip =
-      runtime->create_index_partition(ctx, subspace, ghost_domain,
-                                      ghost_coloring, true/*disjoint*/);
+    Rect<1> extent(rect.lo, rect.lo[0]+(ORDER-1));
+    Matrix<1,1> transform;
+    transform[0][0] = (rect.hi[0]-(ORDER-1)) - rect.lo[0];
+    IndexPartition ghost_ip = runtime->create_partition_by_restriction(ctx,
+        subspace, ghost_color_is, transform, extent, DISJOINT_KIND);
     sprintf(buf, "ghost_ip_%d", color);
     runtime->attach_name(ghost_ip, buf);
     // Make explicit logical regions for each of the ghost spaces
@@ -303,6 +284,8 @@ void top_level_task(const Task *task,
   right_ready_barriers.clear();
   right_empty_barriers.clear();
   runtime->destroy_index_space(ctx, is);
+  runtime->destroy_index_space(ctx, color_is);
+  runtime->destroy_index_space(ctx, ghost_color_is);
   runtime->destroy_field_space(ctx, ghost_fs);
 }
 

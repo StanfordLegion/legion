@@ -177,8 +177,8 @@ void make_data_task(const Task *task,
   // now we can define a (sub-)subregion of our subregion that is the right size
   // to hold the output
   LogicalRegion my_lr = regions[0].get_logical_region();
-  IndexSpace my_is = my_lr.get_index_space();
-  Rect<1> my_bounds = runtime->get_index_space_domain(my_is);
+  IndexSpaceT<1> my_is(my_lr.get_index_space());
+  Rect<1> my_bounds = Domain(runtime->get_index_space_domain(my_is));
   coord_t bounds_lo = my_bounds.lo[0];
 
   // remember rectangle bounds are inclusive on both sides
@@ -186,16 +186,15 @@ void make_data_task(const Task *task,
 
   // create a new partition with a known part_color so that other tasks can find
   // the color space will consist of the single color '0'
-  DomainColoring dc;
-  Domain color_space = Rect<1>(0, 0);
-  dc[0] = alloc_bounds;
-
-  IndexPartition alloc_ip = runtime->create_index_partition(ctx,
-							    my_is,
-							    color_space,
-							    dc,
-							    DISJOINT_KIND, // trivial
-							    PID_ALLOCED_DATA);
+  IndexSpaceT<1> color_space = runtime->create_index_space(ctx, Rect<1>(0, 0));
+  Matrix<1,1> transform;
+  transform[0][0] = 0;
+  IndexPartition alloc_ip = runtime->create_partition_by_restriction(ctx, my_is,
+                                                                     color_space,
+                                                                     transform,
+                                                                     alloc_bounds,
+                                                                     DISJOINT_KIND, // trivial
+                                                                     PID_ALLOCED_DATA);
 
   // now we get the name of the logical subregion we just created and inline map
   // it to generate our output

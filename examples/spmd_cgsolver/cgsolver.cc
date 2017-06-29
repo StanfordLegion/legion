@@ -785,6 +785,7 @@ bool spmd_main_task(const Task *task,
       mdata.pb_shared_done = PhaseBarrier();
     }
 
+    IndexSpaceT<1> color_space = runtime->create_index_space(ctx, Rect<1>(0, 0));
     for(int dir = DIR_X; dir <= DIR_Z; dir++) {
       for(int side = SIDE_MINUS; side <= SIDE_PLUS; side++) {
 	GhostInfo& g = mdata.ghosts[dir][side];
@@ -808,7 +809,7 @@ bool spmd_main_task(const Task *task,
 	    g.pb_shared_done = fa_done[p2];
 	  }
 
-	  IndexSpace is_parent = g.lr_parent.get_index_space();
+	  IndexSpaceT<3> is_parent(g.lr_parent.get_index_space());
 	  Rect<3> r_parent = runtime->get_index_space_domain(ctx, is_parent);
 	  Rect<3> r_subset(r_parent);
 	  if(side == SIDE_MINUS)
@@ -816,13 +817,17 @@ bool spmd_main_task(const Task *task,
 	  else
 	    r_subset.hi[dir] = r_subset.lo[dir];  // just 1 plane
 	  //std::cout << "dir=" << dir << " side=" << side << " -> " << r_parent << " -> " << r_subset << "\n";
-	  DomainColoring dc;
-	  dc[0] = r_subset;
-	  IndexPartition ip = runtime->create_index_partition(ctx,
-							      is_parent,
-							      Rect<1>(0, 0),
-							      dc,
-							      dir*2+side);
+          Matrix<3,1> transform;
+          transform[0][0] = 0;
+          transform[1][0] = 0;
+          transform[2][0] = 0;
+          IndexPartition ip = runtime->create_partition_by_restriction(ctx, 
+                                                              is_parent, 
+                                                              color_space,
+                                                              transform,
+                                                              r_subset,
+                                                              COMPUTE_KIND,
+                                                              dir*2+side);
 	  IndexSpace is_subset = runtime->get_index_subspace(ctx, ip, 0);
 	  assert(runtime->get_index_space_domain(ctx, is_subset) == r_subset);
 	  g.ispace = is_subset;
