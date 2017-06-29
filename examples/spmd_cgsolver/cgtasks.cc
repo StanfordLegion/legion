@@ -74,19 +74,20 @@ extern Logger log_app;
 		 << ", fid1=" << task->regions[0].instance_fields[0] << "(" << fname1 << ")"
 		 << ", proc=" << runtime->get_executing_processor(ctx);
 
-  RegionAccessor<AccessorType::Affine<3>, double> fa1 = regions[0].get_field_accessor(task->regions[0].instance_fields[0]).typeify<double>().convert<AccessorType::Affine<3> >();
+  const FieldAccessor<READ_ONLY,double,3> fa1(regions[0], 
+                      task->regions[0].instance_fields[0]);
 
   log_app.info() << "&fid1[" << args.bounds.lo << "] = " << (void *)(&fa1[args.bounds.lo]) << "\n";
 
   std::ostringstream oss;
-  for(int z = args.bounds.lo.x[2]; z <= args.bounds.hi.x[2]; z++)
-    for(int y = args.bounds.lo.x[1]; y <= args.bounds.hi.x[1]; y++) {
-      int x_lo = args.bounds.lo.x[0];
-      int x_hi = args.bounds.hi.x[0];
+  for(int z = args.bounds.lo[2]; z <= args.bounds.hi[2]; z++)
+    for(int y = args.bounds.lo[1]; y <= args.bounds.hi[1]; y++) {
+      int x_lo = args.bounds.lo[0];
+      int x_hi = args.bounds.hi[0];
       if(args.minval > 0) {
 	bool show = false;
 	for(int x = x_lo; x <= x_hi; x++) {
-	  double v = fa1[make_point(x, y, z)];
+	  double v = fa1[Point<3>(x, y, z)];
 	  if(fabs(v) >= args.minval) {
 	    show = true;
 	    break;
@@ -96,7 +97,7 @@ extern Logger log_app;
       }
       oss << args.prefix << ": z=" << z << " y=" << y << " x=" << x_lo << ".." << x_hi << ":";
       for(int x = x_lo; x <= x_hi; x++) {
-	double v = fa1[make_point(x, y, z)];
+	double v = fa1[Point<3>(x, y, z)];
 	if(fabs(v) < args.minval)
 	  oss << " -";
 	else
@@ -182,12 +183,14 @@ extern Logger log_app;
 		 << ", fid2=" << task->regions[1].instance_fields[0]
 		 << ", proc=" << runtime->get_executing_processor(ctx);
 
-  RegionAccessor<AccessorType::Affine<3>, double> fa1 = regions[0].get_field_accessor(task->regions[0].instance_fields[0]).typeify<double>().convert<AccessorType::Affine<3> >();
-  RegionAccessor<AccessorType::Affine<3>, double> fa2 = regions[1].get_field_accessor(task->regions[1].instance_fields[0]).typeify<double>().convert<AccessorType::Affine<3> >();
+  const FieldAccessor<READ_ONLY,double,3> fa1(regions[0], 
+                      task->regions[0].instance_fields[0]);
+  const FieldAccessor<READ_ONLY,double,3> fa2(regions[1],
+                      task->regions[1].instance_fields[0]);
   double sum = 0.0;
   
-  for(GenericPointInRectIterator<3> pir(args.bounds); pir; ++pir)
-    sum += fa1[pir.p] * fa2[pir.p];
+  for(PointInRectIterator<3> pir(args.bounds); pir(); ++pir)
+    sum += fa1[*pir] * fa2[*pir];
 
   return sum;
 }
@@ -265,13 +268,15 @@ extern Logger log_app;
 		 << ", fid2=" << task->regions[2].instance_fields[0]
 		 << ", proc=" << runtime->get_executing_processor(ctx);
 
-  RegionAccessor<AccessorType::Affine<3>, double> fa_sum = regions[0].get_field_accessor(task->regions[0].instance_fields[0]).typeify<double>().convert<AccessorType::Affine<3> >();
-  RegionAccessor<AccessorType::Affine<3>, double> fa1 = regions[1].get_field_accessor(task->regions[1].instance_fields[0]).typeify<double>().convert<AccessorType::Affine<3> >();
-  RegionAccessor<AccessorType::Affine<3>, double> fa2 = regions[2].get_field_accessor(task->regions[2].instance_fields[0]).typeify<double>().convert<AccessorType::Affine<3> >();
+  const FieldAccessor<WRITE_DISCARD,double,3> fa_sum(regions[0], 
+                            task->regions[0].instance_fields[0]);
+  const FieldAccessor<READ_ONLY,double,3> fa1(regions[1],
+                            task->regions[1].instance_fields[0]);
+  const FieldAccessor<READ_ONLY,double,3> fa2(regions[2],
+                            task->regions[2].instance_fields[0]);
 
-
-  for(GenericPointInRectIterator<3> pir(args.bounds); pir; ++pir)
-    fa_sum[pir.p] = args.alpha1 * fa1[pir.p] + args.alpha2 * fa2[pir.p];
+  for(PointInRectIterator<3> pir(args.bounds); pir(); ++pir)
+    fa_sum[*pir] = args.alpha1 * fa1[*pir] + args.alpha2 * fa2[*pir];
 }
 
 
@@ -350,12 +355,14 @@ extern Logger log_app;
 		 << ", in=" << task->regions[1].instance_fields[0] << "(" << fname2 << ")"
 		 << ", proc=" << runtime->get_executing_processor(ctx);
 
-  RegionAccessor<AccessorType::Affine<3>, double> fa_acc = regions[0].get_field_accessor(task->regions[0].instance_fields[0]).typeify<double>().convert<AccessorType::Affine<3> >();
-  RegionAccessor<AccessorType::Affine<3>, double> fa_in = regions[1].get_field_accessor(task->regions[1].instance_fields[0]).typeify<double>().convert<AccessorType::Affine<3> >();
+  const FieldAccessor<READ_WRITE,double,3> fa_acc(regions[0], 
+                        task->regions[0].instance_fields[0]);
+  const FieldAccessor<READ_ONLY,double,3> fa_in(regions[1],
+                        task->regions[1].instance_fields[0]);
 
   log_app.info() << "&acc[" << args.bounds.lo << "] = " << (void *)(&fa_acc[args.bounds.lo]) << "\n";
 
-  for(GenericPointInRectIterator<3> pir(args.bounds); pir; ++pir)
-    fa_acc[pir.p] = args.alpha_in * fa_in[pir.p] + args.alpha_acc * fa_acc[pir.p];
+  for(PointInRectIterator<3> pir(args.bounds); pir(); ++pir)
+    fa_acc[*pir] = args.alpha_in * fa_in[*pir] + args.alpha_acc * fa_acc[*pir];
 }
 

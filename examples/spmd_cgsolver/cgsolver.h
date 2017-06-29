@@ -4,8 +4,6 @@
 #include <legion.h>
 
 using namespace Legion;
-using namespace LegionRuntime::Accessor;
-using namespace LegionRuntime::Arrays;
 
 struct GhostInfo {
   GhostInfo(void);
@@ -40,6 +38,6 @@ struct BlockMetadata {
   GhostInfo ghosts[3][2];
 };
 
-typedef std::map<Point<3>, BlockMetadata, Point<3>::STLComparator> MyBlockMap;
+typedef std::map<Point<3>, BlockMetadata> MyBlockMap;
 
 #endif
