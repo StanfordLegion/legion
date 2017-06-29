@@ -1060,7 +1060,7 @@ namespace Legion {
                                             int partition_dim);
       template<int N>
       ApEvent create_by_restriction_helper(IndexPartNode *partition,
-                                   const Realm::ZMatrix<N,DIM> &transform,
+                                   const Realm::ZMatrix<N,DIM,T> &transform,
                                    const Realm::ZRect<N,T> &extent);
       virtual ApEvent create_by_field(Operation *op,
                                       IndexPartNode *partition,
