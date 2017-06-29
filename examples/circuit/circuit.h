@@ -57,6 +57,7 @@ enum NodeFields {
   FID_LEAKAGE,
   FID_CHARGE,
   FID_NODE_VOLTAGE,
+  FID_PIECE_COLOR,
 };
 
 enum WireFields {
