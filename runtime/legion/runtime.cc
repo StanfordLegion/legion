@@ -9644,7 +9644,7 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
                             "Disjointness test failure for create partition "
                             "by union in task %s (UID %lld)",
-                            ctx->get_task_name(), ctx->get_unique_id());
+                            ctx->get_task_name(), ctx->get_unique_id())
       return result;
     }
 
@@ -9670,7 +9670,7 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
                             "Disjointness test failure for create partition "
                             "by intersection in task %s (UID %lld)",
-                            ctx->get_task_name(), ctx->get_unique_id());
+                            ctx->get_task_name(), ctx->get_unique_id())
       return result;
     }
 
@@ -9696,7 +9696,7 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
                             "Disjointness test failure for create partition "
                             "by difference in task %s (UID %lld)",
-                            ctx->get_task_name(), ctx->get_unique_id());
+                            ctx->get_task_name(), ctx->get_unique_id())
       return result;
     }
 
@@ -9711,8 +9711,71 @@ namespace Legion {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT(
             "Illegal dummy context create cross product partition!");
-      return ctx->create_cross_product_partitions(forest, handle1, handle2, 
-                                                  handles, kind, color);
+      Color result = 
+        ctx->create_cross_product_partitions(forest, handle1, handle2, 
+                                             handles, kind, color);
+      if (verify_disjointness && (kind == DISJOINT_KIND))
+      {
+        Domain color_space = get_index_partition_color_space(handle1);
+        // This code will only work if the color space has type coord_t
+        switch (color_space.get_dim())
+        {
+          case 1:
+            {
+              TypeTag type_tag = NT_TemplateHelper::encode_tag<1,coord_t>();
+              assert(handle1.get_type_tag() == type_tag);
+              break;
+            }
+          case 2:
+            {
+              TypeTag type_tag = NT_TemplateHelper::encode_tag<2,coord_t>();
+              assert(handle1.get_type_tag() == type_tag);
+              break;
+            }
+          case 3:
+            {
+              TypeTag type_tag = NT_TemplateHelper::encode_tag<3,coord_t>();
+              assert(handle1.get_type_tag() == type_tag);
+              break;
+            }
+          default:
+            assert(false);
+        }
+        for (Domain::DomainPointIterator itr(color_space); itr; itr++)
+        {
+          IndexSpace subspace;
+          switch (color_space.get_dim())
+          {
+            case 1:
+              {
+                const Realm::ZPoint<1,coord_t> p(itr.p);
+                subspace = get_index_subspace(handle1, &p, sizeof(p));
+                break;
+              }
+            case 2:
+              {
+                const Realm::ZPoint<2,coord_t> p(itr.p);
+                subspace = get_index_subspace(handle1, &p, sizeof(p));
+                break;
+              }
+            case 3:
+              {
+                const Realm::ZPoint<3,coord_t> p(itr.p);
+                subspace = get_index_subspace(handle1, &p, sizeof(p));
+                break;
+              }
+            default:
+              assert(false);
+          }
+          IndexPartition part = get_index_partition(subspace, result);
+          if (!forest->is_disjoint(part))
+            REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
+                                "Disjointness test failure for create cross "
+                                "product partitions in task %s (UID %lld)",
+                                ctx->get_task_name(), ctx->get_unique_id())
+        }
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -9754,7 +9817,7 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
                             "Disjointness test failure for create restricted "
                             "partition in task %s (UID %lld)",
-                            ctx->get_task_name(), ctx->get_unique_id());
+                            ctx->get_task_name(), ctx->get_unique_id())
       return result;
     }
 
@@ -9799,7 +9862,7 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
                             "Disjointness test failure for create partition "
                             "by image in task %s (UID %lld)",
-                            ctx->get_task_name(), ctx->get_unique_id());
+                            ctx->get_task_name(), ctx->get_unique_id())
       return result;
     }
 
@@ -9828,7 +9891,7 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
                             "Disjointness test failure for create partition "
                             "by image range in task %s (UID %lld)",
-                            ctx->get_task_name(), ctx->get_unique_id());
+                            ctx->get_task_name(), ctx->get_unique_id())
       return result;
     }
 
@@ -9857,7 +9920,7 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
                             "Disjointness test failure for create partition "
                             "by preimage in task %s (UID %lld)",
-                            ctx->get_task_name(), ctx->get_unique_id());
+                            ctx->get_task_name(), ctx->get_unique_id())
       return result;
     }
 
@@ -9885,7 +9948,7 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
                             "Disjointness test failure for create partition "
                             "by preimage range in task %s (UID %lld)",
-                            ctx->get_task_name(), ctx->get_unique_id());
+                            ctx->get_task_name(), ctx->get_unique_id())
       return result;
     }
 
