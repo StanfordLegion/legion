@@ -79,6 +79,7 @@ namespace Realm {
       , peak_usage(stringbuilder() << "realm/mem " << _me << "/peak_usage")
       , peak_footprint(stringbuilder() << "realm/mem " << _me << "/peak_footprint")
     {
+      allocator.add_range(0, _size);
     }
 
     MemoryImpl::~MemoryImpl(void)
@@ -619,7 +620,6 @@ namespace Realm {
     log_malloc.debug("CPU memory at %p, size = %zd%s%s", base, _size, 
 		     prealloced ? " (prealloced)" : "", registered ? " (registered)" : "");
     free_blocks[0] = _size;
-    allocator.add_range(0, _size);
   }
 
   LocalCPUMemory::~LocalCPUMemory(void)
