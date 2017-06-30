@@ -2055,7 +2055,10 @@ namespace Legion {
                                          timing_collective->get_done_event());
       }
       else // Shard 0 does the normal timing operation
-        Operation::trigger_mapping();
+      {
+        complete_mapping();
+        deferred_execute();
+      }
     } 
 
     //--------------------------------------------------------------------------

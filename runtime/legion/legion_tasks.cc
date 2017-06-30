@@ -4747,6 +4747,7 @@ namespace Legion {
       map_id = launcher.map_id;
       tag = launcher.tag;
       index_point = launcher.point;
+      index_domain = Domain(index_point, index_point);
       is_index_space = false;
       initialize_base_task(ctx, track, launcher.static_dependences,
                            launcher.predicate, task_id);
