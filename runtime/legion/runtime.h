@@ -3002,10 +3002,10 @@ namespace Legion {
       static bool logical_logging_only;
       static bool physical_logging_only;
       static bool check_privileges;
-      static bool verify_disjointness;
       static bool bit_mask_logging;
 #endif
       static bool program_order_execution;
+      static bool verify_disjointness;
     public:
       static unsigned num_profiling_nodes;
       static const char* serializer_type;

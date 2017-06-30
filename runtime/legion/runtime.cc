@@ -17862,13 +17862,13 @@ namespace Legion {
     /*static*/ std::vector<MPILegionHandshake>* 
                       Runtime::pending_handshakes = NULL;
     /*static*/ bool Runtime::program_order_execution = false;
+    /*static*/ bool Runtime::verify_disjointness = false;
 #ifdef DEBUG_LEGION
     /*static*/ bool Runtime::logging_region_tree_state = false;
     /*static*/ bool Runtime::verbose_logging = false;
     /*static*/ bool Runtime::logical_logging_only = false;
     /*static*/ bool Runtime::physical_logging_only = false;
     /*static*/ bool Runtime::check_privileges = true;
-    /*static*/ bool Runtime::verify_disjointness = false;
     /*static*/ bool Runtime::bit_mask_logging = false;
 #endif
     /*static*/ unsigned Runtime::num_profiling_nodes = 0;
@@ -17981,6 +17981,7 @@ namespace Legion {
         gc_epoch_size = DEFAULT_GC_EPOCH_SIZE;
         max_local_fields = DEFAULT_LOCAL_FIELDS;
         program_order_execution = false;
+        verify_disjointness = false;
         num_profiling_nodes = 0;
         serializer_type = "binary";
         prof_logfile = NULL;
@@ -17996,7 +17997,6 @@ namespace Legion {
         logical_logging_only = false;
         physical_logging_only = false;
         check_privileges = true;
-        verify_disjointness = false;
         bit_mask_logging = false;
 #endif
         unsigned delay_start = 0;
@@ -18012,6 +18012,7 @@ namespace Legion {
           if (!strcmp(argv[i],"-lg:safe_mapper"))
             unsafe_mapper = false;
           BOOL_ARG("-lg:inorder",program_order_execution);
+          BOOL_ARG("-lg:disjointness",verify_disjointness);
           INT_ARG("-lg:window", initial_task_window_size);
           INT_ARG("-lg:hysteresis", initial_task_window_hysteresis);
           INT_ARG("-lg:sched", initial_tasks_to_schedule);
@@ -18039,7 +18040,6 @@ namespace Legion {
           BOOL_ARG("-lg:verbose",verbose_logging);
           BOOL_ARG("-lg:logical_only",logical_logging_only);
           BOOL_ARG("-lg:physical_only",physical_logging_only);
-          BOOL_ARG("-lg:disjointness",verify_disjointness);
           BOOL_ARG("-lg:bit_masks",bit_mask_logging);
 #else
           if (!strcmp(argv[i],"-lg:tree"))
@@ -18079,6 +18079,7 @@ namespace Legion {
           if (!strcmp(argv[i],"-hl:safe_mapper"))
             unsafe_mapper = false;
           BOOL_ARG("-hl:inorder",program_order_execution);
+          BOOL_ARG("-hl:disjointness",verify_disjointness);
           INT_ARG("-hl:window", initial_task_window_size);
           INT_ARG("-hl:hysteresis", initial_task_window_hysteresis);
           INT_ARG("-hl:sched", initial_tasks_to_schedule);
@@ -18105,7 +18106,6 @@ namespace Legion {
           BOOL_ARG("-hl:verbose",verbose_logging);
           BOOL_ARG("-hl:logical_only",logical_logging_only);
           BOOL_ARG("-hl:physical_only",physical_logging_only);
-          BOOL_ARG("-hl:disjointness",verify_disjointness);
           BOOL_ARG("-hl:bit_masks",bit_mask_logging);
 #else
           if (!strcmp(argv[i],"-hl:tree"))
