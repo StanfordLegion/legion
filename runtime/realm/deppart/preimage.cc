@@ -45,8 +45,10 @@ namespace Realm {
 
     size_t n = targets.size();
     preimages.resize(n);
-    for(size_t i = 0; i < n; i++)
+    for(size_t i = 0; i < n; i++) {
       preimages[i] = op->add_target(targets[i]);
+      log_dpops.info() << "preimage: " << *this << " tgt=" << targets[i] << " -> " << preimages[i] << " (" << e << ")";
+    }
 
     op->deferred_launch(wait_on);
     return e;
@@ -69,8 +71,10 @@ namespace Realm {
 
     size_t n = targets.size();
     preimages.resize(n);
-    for(size_t i = 0; i < n; i++)
+    for(size_t i = 0; i < n; i++) {
       preimages[i] = op->add_target(targets[i]);
+      log_dpops.info() << "preimage: " << *this << " tgt=" << targets[i] << " -> " << preimages[i] << " (" << e << ")";
+    }
 
     op->deferred_launch(wait_on);
     return e;

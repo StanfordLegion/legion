@@ -45,8 +45,10 @@ namespace Realm {
 
     size_t n = sources.size();
     images.resize(n);
-    for(size_t i = 0; i < n; i++)
+    for(size_t i = 0; i < n; i++) {
       images[i] = op->add_source(sources[i]);
+      log_dpops.info() << "image: " << *this << " src=" << sources[i] << " -> " << images[i] << " (" << e << ")";
+    }
 
     op->deferred_launch(wait_on);
     return e;
@@ -68,8 +70,10 @@ namespace Realm {
 
     size_t n = sources.size();
     images.resize(n);
-    for(size_t i = 0; i < n; i++)
+    for(size_t i = 0; i < n; i++) {
       images[i] = op->add_source(sources[i]);
+      log_dpops.info() << "image: " << *this << " src=" << sources[i] << " -> " << images[i] << " (" << e << ")";
+    }
 
     op->deferred_launch(wait_on);
     return e;
@@ -92,8 +96,10 @@ namespace Realm {
 
     size_t n = sources.size();
     images.resize(n);
-    for(size_t i = 0; i < n; i++)
+    for(size_t i = 0; i < n; i++) {
       images[i] = op->add_source_with_difference(sources[i], diff_rhss[i]);
+      log_dpops.info() << "image: " << *this << " src=" << sources[i] << " mask=" << diff_rhss[i] << " -> " << images[i] << " (" << e << ")";
+    }
 
     op->deferred_launch(wait_on);
     return e;

@@ -50,6 +50,7 @@ namespace Realm {
       size_t li = (lhss.size() == 1) ? 0 : i;
       size_t ri = (rhss.size() == 1) ? 0 : i;
       results[i] = op->add_union(lhss[li], rhss[ri]);
+      log_dpops.info() << "union: " << lhss[li] << " " << rhss[ri] << " -> " << results[i] << " (" << e << ")";
     }
 
     op->deferred_launch(wait_on);
@@ -77,6 +78,7 @@ namespace Realm {
       size_t li = (lhss.size() == 1) ? 0 : i;
       size_t ri = (rhss.size() == 1) ? 0 : i;
       results[i] = op->add_intersection(lhss[li], rhss[ri]);
+      log_dpops.info() << "isect: " << lhss[li] << " " << rhss[ri] << " -> " << results[i] << " (" << e << ")";
     }
 
     op->deferred_launch(wait_on);
@@ -104,6 +106,7 @@ namespace Realm {
       size_t li = (lhss.size() == 1) ? 0 : i;
       size_t ri = (rhss.size() == 1) ? 0 : i;
       results[i] = op->add_difference(lhss[li], rhss[ri]);
+      log_dpops.info() << "diff: " << lhss[li] << " " << rhss[ri] << " -> " << results[i] << " (" << e << ")";
     }
 
     op->deferred_launch(wait_on);
@@ -121,6 +124,18 @@ namespace Realm {
 
     result = op->add_union(subspaces);
 
+    {
+      LoggerMessage msg = log_dpops.info();
+      if(msg.is_active()) {
+	msg << "union:";
+	for(typename std::vector<ZIndexSpace<N,T> >::const_iterator it = subspaces.begin();
+	    it != subspaces.end();
+	    ++it)
+	  msg << " " << *it;
+	msg << " -> " << result << " (" << e << ")";
+      }
+    }
+
     op->deferred_launch(wait_on);
     return e;
   }
@@ -135,6 +150,18 @@ namespace Realm {
     IntersectionOperation<N,T> *op = new IntersectionOperation<N,T>(reqs, e);
 
     result = op->add_intersection(subspaces);
+
+    {
+      LoggerMessage msg = log_dpops.info();
+      if(msg.is_active()) {
+	msg << "isect:";
+	for(typename std::vector<ZIndexSpace<N,T> >::const_iterator it = subspaces.begin();
+	    it != subspaces.end();
+	    ++it)
+	  msg << " " << *it;
+	msg << " -> " << result << " (" << e << ")";
+      }
+    }
 
     op->deferred_launch(wait_on);
     return e;
