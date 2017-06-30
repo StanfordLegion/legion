@@ -750,16 +750,26 @@ namespace Realm {
 	// 2) single dense rectangle
 	if((entries.size() == 1) &&
 	   !entries[0].sparsity.exists() && (entries[0].bitmap == 0)) {
-	  result = ZIndexSpace<N,T>(entries[0].bounds);
+	  result = ZIndexSpace<N,T>(bounds.intersection(entries[0].bounds));
 	} else
 
-	// 3) anything else - keep the sparsity map but tighten the bounds,
-	//   respecting the previous bounds
+	// 3) anything else - walk rectangles and count/union those that
+	//   overlap our bounds - if only 1, we can drop the sparsity map
 	{
-	  ZRect<N,T> bbox = bounds.intersection(entries[0].bounds);
-	  for(size_t i = 1; i < entries.size(); i++)
-	    bbox = bbox.union_bbox(bounds.intersection(entries[i].bounds));
-	  result = ZIndexSpace<N,T>(bbox, sparsity);
+	  size_t overlap_count = 0;
+	  bool need_sparsity = false;
+	  result = ZIndexSpace<N,T>::make_empty();
+	  for(size_t i = 0; i < entries.size(); i++) {
+	    ZRect<N,T> isect = bounds.intersection(entries[i].bounds);
+	    if(!isect.empty()) {
+	      overlap_count++;
+	      result.bounds = result.bounds.union_bbox(isect);
+	      if(entries[i].sparsity.exists() || (entries[i].bitmap != 0))
+		need_sparsity = true;
+	    }
+	  }
+	  if((overlap_count > 1) || need_sparsity)
+	    result.sparsity = sparsity;
 	}
 
 	log_dpops.info() << "tighten: " << *this << " = " << result;
