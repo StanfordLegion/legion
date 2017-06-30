@@ -2044,10 +2044,11 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      // Shard 0 will handle the timing operation
+      // Shard 0 will handle the timing operation so do the normal mapping
       if (repl_ctx->owner_shard->shard_id > 0)
       {
         complete_mapping();
+        // Which means it will defer until 
         // Trigger this when the timing barrier is done
         DeferredExecuteArgs args;
         args.proxy_this = this;
@@ -2055,10 +2056,7 @@ namespace Legion {
                                          timing_collective->get_done_event());
       }
       else // Shard 0 does the normal timing operation
-      {
-        complete_mapping();
-        deferred_execute();
-      }
+        TimingOp::trigger_mapping();
     } 
 
     //--------------------------------------------------------------------------
