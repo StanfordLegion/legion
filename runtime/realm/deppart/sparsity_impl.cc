@@ -27,6 +27,7 @@
 namespace Realm {
 
   extern Logger log_part;
+  extern Logger log_dpops;
 
   namespace {
     // module-level globals

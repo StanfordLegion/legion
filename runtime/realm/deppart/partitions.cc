@@ -35,6 +35,7 @@ namespace Realm {
 
   Logger log_part("part");
   Logger log_uop_timing("uop_timing");
+  Logger log_dpops("dpops");
 
   namespace {
     // module-level globals

@@ -22,12 +22,16 @@
 //include "inst_layout.h"
 
 #include "serialize.h"
+#include "logging.h"
 
 TEMPLATE_TYPE_IS_SERIALIZABLE2(int N, typename T, Realm::ZPoint<N,T>);
 TEMPLATE_TYPE_IS_SERIALIZABLE2(int N, typename T, Realm::ZRect<N,T>);
 TEMPLATE_TYPE_IS_SERIALIZABLE2(int N, typename T, Realm::ZIndexSpace<N,T>);
 
 namespace Realm {
+
+  extern Logger log_dpops;
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -644,6 +648,7 @@ namespace Realm {
 	sparsity = SparsityMap<N,T>::construct(points, false /*!always_create*/);
       }
     }
+    log_dpops.info() << "construct: " << *this;
   }
 
   template <int N, typename T>
@@ -667,6 +672,7 @@ namespace Realm {
 	sparsity = SparsityMap<N,T>::construct(rects, false /*!always_create*/);
       }
     }
+    log_dpops.info() << "construct: " << *this;
   }
 
   // constructs a guaranteed-empty index space
@@ -733,32 +739,41 @@ namespace Realm {
 
       // always use precise info if it's available
       if(impl->is_valid(true /*precise*/)) {
+	ZIndexSpace<N,T> result;
 	const std::vector<SparsityMapEntry<N,T> >& entries = impl->get_entries();
 	// three cases:
 	// 1) empty index space
 	if(entries.empty()) {
-	  ZRect<N,T> empty;
-	  empty.hi = bounds.lo;
-	  for(int i = 0; i < N; i++)
-	    empty.lo[i] = empty.hi[i] + 1;
-	  //std::cout << "tighten " << *this << " -> " << empty << "\n";
-	  return ZIndexSpace<N,T>(empty);
-	}
+	  result = ZIndexSpace<N,T>::make_empty();
+	} else
 
 	// 2) single dense rectangle
 	if((entries.size() == 1) &&
 	   !entries[0].sparsity.exists() && (entries[0].bitmap == 0)) {
-	  //std::cout << "tighten " << *this << " -> " << entries[0].bounds << "\n";
-	  return ZIndexSpace<N,T>(entries[0].bounds);
+	  result = ZIndexSpace<N,T>(bounds.intersection(entries[0].bounds));
+	} else
+
+	// 3) anything else - walk rectangles and count/union those that
+	//   overlap our bounds - if only 1, we can drop the sparsity map
+	{
+	  size_t overlap_count = 0;
+	  bool need_sparsity = false;
+	  result = ZIndexSpace<N,T>::make_empty();
+	  for(size_t i = 0; i < entries.size(); i++) {
+	    ZRect<N,T> isect = bounds.intersection(entries[i].bounds);
+	    if(!isect.empty()) {
+	      overlap_count++;
+	      result.bounds = result.bounds.union_bbox(isect);
+	      if(entries[i].sparsity.exists() || (entries[i].bitmap != 0))
+		need_sparsity = true;
+	    }
+	  }
+	  if((overlap_count > 1) || need_sparsity)
+	    result.sparsity = sparsity;
 	}
 
-	// 3) anything else - keep the sparsity map but tighten the bounds,
-	//   respecting the previous bounds
-	ZRect<N,T> bbox = bounds.intersection(entries[0].bounds);
-	for(size_t i = 1; i < entries.size(); i++)
-	  bbox = bbox.union_bbox(bounds.intersection(entries[i].bounds));
-	//std::cout << "tighten " << *this << " -> " << bbox << ", " << sparsity << "\n";
-	return ZIndexSpace<N,T>(bbox, sparsity);
+	log_dpops.info() << "tighten: " << *this << " = " << result;
+	return result;
       } else {
 	const std::vector<ZRect<N,T> >& approx_rects = impl->get_approx_rects();
 

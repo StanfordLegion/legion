@@ -44,8 +44,10 @@ namespace Realm {
 
     size_t n = colors.size();
     subspaces.resize(n);
-    for(size_t i = 0; i < n; i++)
+    for(size_t i = 0; i < n; i++) {
       subspaces[i] = op->add_color(colors[i]);
+      log_dpops.info() << "byfield: " << *this << ", " << colors[i] << " -> " << subspaces[i] << " (" << e << ")";
+    }
 
     op->deferred_launch(wait_on);
     return e;

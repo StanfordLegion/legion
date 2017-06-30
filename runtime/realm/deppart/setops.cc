@@ -28,6 +28,123 @@ namespace Realm {
   extern Logger log_part;
   extern Logger log_uop_timing;
 
+  // an intersection of two rectangles is always a rectangle, but the same is not
+  //  true of unions and differences
+
+  template <int N, typename T>
+  static bool union_is_rect(const ZRect<N,T>& lhs, const ZRect<N,T>& rhs)
+  {
+    if(N == 1) {
+      // 1-D case is simple - no gap allowed
+      if((lhs.hi[0] < rhs.lo[0]) && ((lhs.hi[0] + 1) != rhs.lo[0]))
+	return false;
+      if((rhs.hi[0] < lhs.lo[0]) && ((rhs.hi[0] + 1) != lhs.lo[0]))
+	return false;
+      return true;
+    }
+    
+    // containment case is easy
+    if(lhs.contains(rhs) || rhs.contains(lhs))
+      return true;
+
+    // interval in each dimension must match, except one, which must have no gap
+    int i = 0;
+    while((i < N) && (lhs.lo[i] == rhs.lo[i]) && (lhs.hi[i] == rhs.hi[i]))
+      i++;
+    assert(i < N); // containment test above should eliminate i==N case
+
+    // check overlap
+    if((lhs.hi[i] < rhs.lo[i]) && ((lhs.hi[i] + 1) != rhs.lo[i]))
+      return false;
+    if((rhs.hi[i] < lhs.lo[i]) && ((rhs.hi[i] + 1) != lhs.lo[i]))
+      return false;
+
+    // remaining dimensions must match
+    while(++i < N)
+      if((lhs.lo[i] != rhs.lo[i]) || (lhs.hi[i] != rhs.hi[i]))
+	return false;
+
+    return true;
+  }
+
+  template <int N, typename T>
+  static bool attempt_simple_diff(const ZRect<N,T>& lhs, const ZRect<N,T>& rhs,
+				  ZRect<N,T>& out)
+  {
+    // rhs containing lhs always works
+    if(rhs.contains(lhs)) {
+      out = ZRect<N,T>::make_empty();
+      return true;
+    }
+
+    // disjoint rectangles always work too
+    if(!rhs.overlaps(lhs)) {
+      out = lhs;
+      return true;
+    }		 
+
+    if(N == 1) {
+      if(lhs.lo[0] < rhs.lo[0]) {
+	out.lo[0] = lhs.lo[0];
+	// lhs hi must not extend past rhs
+	if(lhs.hi[0] <= rhs.hi[0]) {
+	  out.hi[0] = rhs.lo[0] - 1;
+	  return true;
+	} else
+	  return false;
+      }
+      if(lhs.hi[0] > rhs.hi[0]) {
+	out.hi[0] = lhs.hi[0];
+	// lhs lo must not extend past rhs
+	if(lhs.lo[0] >= rhs.lo[0]) {
+	  out.lo[0] = rhs.hi[0] + 1;
+	  return true;
+	} else
+	  return false;
+      }
+      // shouldn't get here?
+      assert(0);
+    }
+
+    // similar to union, we need N-1 dims to match exactly and one to be like 1-D
+    int i = 0;
+    out = lhs;
+    while((i < N) && (lhs.lo[i] == rhs.lo[i]) && (lhs.hi[i] == rhs.hi[i]))
+      i++;
+    assert(i < N); // containment test above should eliminate i==N case
+
+    // compute difference in dim i
+    {
+      if(lhs.lo[i] < rhs.lo[i]) {
+	out.lo[i] = lhs.lo[i];
+	// lhs hi must not extend past rhs
+	if(lhs.hi[i] <= rhs.hi[i]) {
+	  out.hi[i] = rhs.lo[i] - 1;
+	} else
+	  return false;
+      } else
+      if(lhs.hi[i] > rhs.hi[i]) {
+	out.hi[i] = lhs.hi[i];
+	// lhs lo must not extend past rhs
+	if(lhs.lo[i] >= rhs.lo[i]) {
+	  out.lo[i] = rhs.hi[i] + 1;
+	} else
+	  return false;
+      } else
+      {
+	// shouldn't get here?
+	assert(0);
+      }
+    }
+
+    // remaining dimensions must match
+    while(++i < N)
+      if((lhs.lo[i] != rhs.lo[i]) || (lhs.hi[i] != rhs.hi[i]))
+	return false;
+
+    return true;
+  }
+
 
   template <int N, typename T>
   __attribute__ ((noinline))
@@ -40,8 +157,8 @@ namespace Realm {
     // output vector should start out empty
     assert(results.empty());
 
-    Event e = GenEventImpl::create_genevent()->current_event();
-    UnionOperation<N,T> *op = new UnionOperation<N,T>(reqs, e);
+    Event e = wait_on;
+    UnionOperation<N,T> *op = 0;
 
     size_t n = std::max(lhss.size(), rhss.size());
     assert((lhss.size() == rhss.size()) || (lhss.size() == 1) || (rhss.size() == 1));
@@ -49,10 +166,58 @@ namespace Realm {
     for(size_t i = 0; i < n; i++) {
       size_t li = (lhss.size() == 1) ? 0 : i;
       size_t ri = (rhss.size() == 1) ? 0 : i;
-      results[i] = op->add_union(lhss[li], rhss[ri]);
+
+      // handle a bunch of special cases
+      const ZIndexSpace<N,T> &l = lhss[li];
+      const ZIndexSpace<N,T> &r = rhss[ri];
+
+      // 1) empty lhs
+      if(l.empty()) {
+	results[i] = r;
+	continue;
+      }
+
+      // 2) empty rhs
+      if(rhss[li].empty()) {
+	results[i] = l;
+	continue;
+      }
+
+      // 3) dense lhs containing rhs' bounds -> lhs
+      if(l.dense() && l.bounds.contains(r.bounds)) {
+	results[i] = l;
+	continue;
+      }
+
+      // 4) dense rhs containing lhs' bounds -> rhs
+      if(r.dense() && l.bounds.contains(r.bounds)) {
+	results[i] = l;
+	continue;
+      }
+
+      // 5) same sparsity map (or none) and simple union for bbox
+      if((l.sparsity == r.sparsity) && union_is_rect(l.bounds, r.bounds)) {
+	results[i] = ZIndexSpace<N,T>(l.bounds.union_bbox(r.bounds),
+				      l.sparsity);
+	continue;
+      }
+
+      // general case - create op if needed
+      if(!op) {
+	e = GenEventImpl::create_genevent()->current_event();
+	op = new UnionOperation<N,T>(reqs, e);
+      }
+      results[i] = op->add_union(l, r);
     }
 
-    op->deferred_launch(wait_on);
+    for(size_t i = 0; i < n; i++) {
+      size_t li = (lhss.size() == 1) ? 0 : i;
+      size_t ri = (rhss.size() == 1) ? 0 : i;
+      log_dpops.info() << "union: " << lhss[li] << " " << rhss[ri] << " -> " << results[i] << " (" << e << ")";
+    }
+
+    if(op)
+      op->deferred_launch(wait_on);
     return e;
   }
 
@@ -67,8 +232,8 @@ namespace Realm {
     // output vector should start out empty
     assert(results.empty());
 
-    Event e = GenEventImpl::create_genevent()->current_event();
-    IntersectionOperation<N,T> *op = new IntersectionOperation<N,T>(reqs, e);
+    Event e = wait_on;
+    IntersectionOperation<N,T> *op = 0;
 
     size_t n = std::max(lhss.size(), rhss.size());
     assert((lhss.size() == rhss.size()) || (lhss.size() == 1) || (rhss.size() == 1));
@@ -76,10 +241,47 @@ namespace Realm {
     for(size_t i = 0; i < n; i++) {
       size_t li = (lhss.size() == 1) ? 0 : i;
       size_t ri = (rhss.size() == 1) ? 0 : i;
+
+      // handle a bunch of special cases
+      const ZIndexSpace<N,T> &l = lhss[li];
+      const ZIndexSpace<N,T> &r = rhss[ri];
+
+      // 1) either side empty
+      if(l.empty() || r.empty()) {
+	results[i] = ZIndexSpace<N,T>::make_empty();
+	continue;
+      }
+
+      // 2) rhs is dense or has same sparsity map
+      if(r.dense() || (r.sparsity == l.sparsity)) {
+	results[i] = ZIndexSpace<N,T>(l.bounds.intersection(r.bounds),
+				      l.sparsity);
+	continue;
+      }
+
+      // 3) lhs is dense
+      if(l.dense()) {
+	results[i] = ZIndexSpace<N,T>(l.bounds.intersection(r.bounds),
+				      r.sparsity);
+	continue;
+      }
+
+      // general case - create op if needed
+      if(!op) {
+	e = GenEventImpl::create_genevent()->current_event();
+	op = new IntersectionOperation<N,T>(reqs, e);
+      }
       results[i] = op->add_intersection(lhss[li], rhss[ri]);
     }
 
-    op->deferred_launch(wait_on);
+    for(size_t i = 0; i < n; i++) {
+      size_t li = (lhss.size() == 1) ? 0 : i;
+      size_t ri = (rhss.size() == 1) ? 0 : i;
+      log_dpops.info() << "isect: " << lhss[li] << " " << rhss[ri] << " -> " << results[i] << " (" << e << ")";
+    }
+
+    if(op)
+      op->deferred_launch(wait_on);
     return e;
   }
 
@@ -94,8 +296,8 @@ namespace Realm {
     // output vector should start out empty
     assert(results.empty());
 
-    Event e = GenEventImpl::create_genevent()->current_event();
-    DifferenceOperation<N,T> *op = new DifferenceOperation<N,T>(reqs, e);
+    Event e = wait_on;
+    DifferenceOperation<N,T> *op = 0;
 
     size_t n = std::max(lhss.size(), rhss.size());
     assert((lhss.size() == rhss.size()) || (lhss.size() == 1) || (rhss.size() == 1));
@@ -103,10 +305,60 @@ namespace Realm {
     for(size_t i = 0; i < n; i++) {
       size_t li = (lhss.size() == 1) ? 0 : i;
       size_t ri = (rhss.size() == 1) ? 0 : i;
+
+      // handle a bunch of special cases
+      const ZIndexSpace<N,T> &l = lhss[li];
+      const ZIndexSpace<N,T> &r = rhss[ri];
+
+      // 1) empty lhs
+      if(l.empty()) {
+	results[i] = ZIndexSpace<N,T>::make_empty();
+	continue;
+      }
+
+      // 2) empty rhs
+      if(r.empty()) {
+	results[i] = l;
+	continue;
+      }
+
+      // 3) no overlap between lhs and rhs
+      if(!l.bounds.overlaps(r.bounds)) {
+	results[i] = l;
+	continue;
+      }
+
+      // 4) dense rhs containing lhs' bounds -> empty
+      if(r.dense() && r.bounds.contains(l.bounds)) {
+	results[i] = ZIndexSpace<N,T>::make_empty();
+	continue;
+      }
+
+      // 5) same sparsity map (or none) and simple difference
+      if(r.dense() || (l.sparsity == r.sparsity)) {
+	ZRect<N,T> sdiff;
+	if(attempt_simple_diff(l.bounds, r.bounds, sdiff)) {
+	  results[i] = ZIndexSpace<N,T>(sdiff, l.sparsity);
+	  continue;
+	}
+      }
+
+      // general case - create op if needed
+      if(!op) {
+	e = GenEventImpl::create_genevent()->current_event();
+	op = new DifferenceOperation<N,T>(reqs, e);
+      }
       results[i] = op->add_difference(lhss[li], rhss[ri]);
     }
 
-    op->deferred_launch(wait_on);
+    for(size_t i = 0; i < n; i++) {
+      size_t li = (lhss.size() == 1) ? 0 : i;
+      size_t ri = (rhss.size() == 1) ? 0 : i;
+      log_dpops.info() << "diff: " << lhss[li] << " " << rhss[ri] << " -> " << results[i] << " (" << e << ")";
+    }
+
+    if(op)
+      op->deferred_launch(wait_on);
     return e;
   }
 
@@ -116,12 +368,52 @@ namespace Realm {
 						   const ProfilingRequestSet &reqs,
 						   Event wait_on /*= Event::NO_EVENT*/)
   {
-    Event e = GenEventImpl::create_genevent()->current_event();
-    UnionOperation<N,T> *op = new UnionOperation<N,T>(reqs, e);
+    Event e = wait_on;
 
-    result = op->add_union(subspaces);
+    // various special cases
+    if(subspaces.empty()) {
+      result = ZIndexSpace<N,T>::make_empty();
+    } else {
+      result = subspaces[0];
 
-    op->deferred_launch(wait_on);
+      for(size_t i = 1; i < subspaces.size(); i++) {
+	// empty rhs - skip
+	if(subspaces[i].empty())
+	  continue;
+
+	// lhs dense or subspace match, and containment - skip
+	if((result.dense() || (result.sparsity == subspaces[i].sparsity)) &&
+	   result.bounds.contains(subspaces[i].bounds))
+	  continue;
+
+	// rhs dense and contains lhs - take rhs
+	if(subspaces[i].dense() && subspaces[i].bounds.contains(result.bounds)) {
+	  result = subspaces[i];
+	  continue;
+	}
+
+	// general case - do full computation
+	e = GenEventImpl::create_genevent()->current_event();
+	UnionOperation<N,T> *op = new UnionOperation<N,T>(reqs, e);
+
+	result = op->add_union(subspaces);
+	op->deferred_launch(wait_on);
+	break;
+      }
+    }
+
+    {
+      LoggerMessage msg = log_dpops.info();
+      if(msg.is_active()) {
+	msg << "union:";
+	for(typename std::vector<ZIndexSpace<N,T> >::const_iterator it = subspaces.begin();
+	    it != subspaces.end();
+	    ++it)
+	  msg << " " << *it;
+	msg << " -> " << result << " (" << e << ")";
+      }
+    }
+
     return e;
   }
 
@@ -131,12 +423,62 @@ namespace Realm {
 							  const ProfilingRequestSet &reqs,
 							  Event wait_on /*= Event::NO_EVENT*/)
   {
-    Event e = GenEventImpl::create_genevent()->current_event();
-    IntersectionOperation<N,T> *op = new IntersectionOperation<N,T>(reqs, e);
+    Event e = wait_on;
 
-    result = op->add_intersection(subspaces);
+    // various special cases
+    if(subspaces.empty()) {
+      result = ZIndexSpace<N,T>::make_empty();
+    } else {
+      result = subspaces[0];
 
-    op->deferred_launch(wait_on);
+      for(size_t i = 1; i < subspaces.size(); i++) {
+	// no point in continuing if our result is empty
+	if(result.empty()) {
+	  result.sparsity.id = 0;  // forget any sparsity map we had
+	  break;
+	}
+
+	// empty rhs - result is empty
+	if(subspaces[i].empty()) {
+	  result = ZIndexSpace<N,T>::make_empty();
+	  break;
+	}
+
+	// rhs dense or has same sparsity map
+	if(subspaces[i].dense() || (subspaces[i].sparsity == result.sparsity)) {
+	  result.bounds = result.bounds.intersection(subspaces[i].bounds);
+	  continue;
+	}
+
+	// lhs dense and rhs sparse - intersect and adopt rhs' sparsity map
+	if(result.dense()) {
+	  result.bounds = result.bounds.intersection(subspaces[i].bounds);
+	  result.sparsity = subspaces[i].sparsity;
+	  continue;	  
+	}
+
+	// general case - do full computation
+	e = GenEventImpl::create_genevent()->current_event();
+	IntersectionOperation<N,T> *op = new IntersectionOperation<N,T>(reqs, e);
+
+	result = op->add_intersection(subspaces);
+	op->deferred_launch(wait_on);
+	break;
+      }
+    }
+
+    {
+      LoggerMessage msg = log_dpops.info();
+      if(msg.is_active()) {
+	msg << "isect:";
+	for(typename std::vector<ZIndexSpace<N,T> >::const_iterator it = subspaces.begin();
+	    it != subspaces.end();
+	    ++it)
+	  msg << " " << *it;
+	msg << " -> " << result << " (" << e << ")";
+      }
+    }
+
     return e;
   }
 
@@ -1118,11 +1460,8 @@ namespace Realm {
   ZIndexSpace<N,T> UnionOperation<N,T>::add_union(const ZIndexSpace<N,T>& lhs,
 						  const ZIndexSpace<N,T>& rhs)
   {
-    // simple case - if both lhs and rhs are empty, the union must be empty too
-    if(lhs.empty() && rhs.empty())
-      return ZIndexSpace<N,T>::make_empty();
-
-    // otherwise create a new index space whose bounds can fit both lhs and rhs
+    // simple cases should all be handled before we get here, so
+    // create a new index space whose bounds can fit both lhs and rhs
     ZIndexSpace<N,T> output;
     output.bounds = lhs.bounds.union_bbox(rhs.bounds);
 
@@ -1163,41 +1502,34 @@ namespace Realm {
   template <int N, typename T>
   ZIndexSpace<N,T> UnionOperation<N,T>::add_union(const std::vector<ZIndexSpace<N,T> >& ops)
   {
-    // build a bounding box that can hold all the operands, and pay attention to the
-    //  case where they're all empty
-    ZIndexSpace<N,T> output;
-    bool all_empty = true;
+    // simple cases should be handled before we get here
+    assert(ops.size() > 1);
+
+    // build a bounding box that can hold all the operands
+    ZIndexSpace<N,T> output(ops[0].bounds);
+    for(size_t i = 1; i < ops.size(); i++)
+      output.bounds = output.bounds.union_bbox(ops[i].bounds);
+
+    // try to assign sparsity ID near the input sparsity maps (if present)
+    int target_node = gasnet_mynode();
+    int node_count = 0;
     for(size_t i = 0; i < ops.size(); i++)
-      if(!ops[i].empty()) {
-	all_empty = false;
-	output.bounds = output.bounds.union_bbox(ops[i].bounds);
-      }
-
-    if(all_empty) {
-      output.bounds = ZRect<N,T>::make_empty();
-      output.sparsity.id = 0;
-    } else {
-      // try to assign sparsity ID near the input sparsity maps (if present)
-      int target_node = gasnet_mynode();
-      int node_count = 0;
-      for(size_t i = 0; i < ops.size(); i++)
-	if(!ops[i].dense()) {
-	  int node = ID(ops[i].sparsity).sparsity.creator_node;
-	  if(node_count == 0) {
-	    node_count = 1;
-	    target_node = node;
-	  } else if((node_count == 1) && (node != target_node)) {
-	    //std::cout << "UNION DIFF " << target_node << " or " << node << "\n";
-	    target_node = gasnet_mynode();
-	    break;
-	  }
+      if(!ops[i].dense()) {
+	int node = ID(ops[i].sparsity).sparsity.creator_node;
+	if(node_count == 0) {
+	  node_count = 1;
+	  target_node = node;
+	} else if((node_count == 1) && (node != target_node)) {
+	  //std::cout << "UNION DIFF " << target_node << " or " << node << "\n";
+	  target_node = gasnet_mynode();
+	  break;
 	}
-      SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
-      output.sparsity = sparsity;
+      }
+    SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
+    output.sparsity = sparsity;
 
-      inputs.push_back(ops);
-      outputs.push_back(sparsity);
-    }
+    inputs.push_back(ops);
+    outputs.push_back(sparsity);
 
     return output;
   }
@@ -1243,39 +1575,42 @@ namespace Realm {
     output.bounds = lhs.bounds.intersection(rhs.bounds);
     
     if(output.bounds.empty()) {
+      // this optimization should be handled earlier
+      assert(0);
       output.sparsity.id = 0;
-    } else {
-      // try to assign sparsity ID near one or both of the input sparsity maps (if present)
-      // if the target has a sparsity map, use the same node - otherwise
-      // get a sparsity ID by round-robin'ing across the nodes that have field data
-      int target_node;
-      if(lhs.dense()) {
-	if(rhs.dense()) {
-	  target_node = gasnet_mynode();  // operation will be cheap anyway
-	} else {
-	  target_node = ID(rhs.sparsity).sparsity.creator_node;
-	}
-      } else {
-	if(rhs.dense()) {
-	  target_node = ID(lhs.sparsity).sparsity.creator_node;
-	} else {
-	  int lhs_node = ID(lhs.sparsity).sparsity.creator_node;
-	  int rhs_node = ID(rhs.sparsity).sparsity.creator_node;
-	  //if(lhs_node != rhs_node)
-	  //  std::cout << "ISECT PICK " << lhs_node << " or " << rhs_node << "\n";
-	  // if they're different, and lhs is us, choose rhs to load-balance maybe
-	  target_node = (lhs_node == gasnet_mynode()) ? rhs_node : lhs_node;
-	}
-      }
-      SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
-      output.sparsity = sparsity;
-
-      std::vector<ZIndexSpace<N,T> > ops(2);
-      ops[0] = lhs;
-      ops[1] = rhs;
-      inputs.push_back(ops);
-      outputs.push_back(sparsity);
+      return output;
     }
+
+    // try to assign sparsity ID near one or both of the input sparsity maps (if present)
+    // if the target has a sparsity map, use the same node - otherwise
+    // get a sparsity ID by round-robin'ing across the nodes that have field data
+    int target_node;
+    if(lhs.dense()) {
+      if(rhs.dense()) {
+	target_node = gasnet_mynode();  // operation will be cheap anyway
+      } else {
+	target_node = ID(rhs.sparsity).sparsity.creator_node;
+      }
+    } else {
+      if(rhs.dense()) {
+	target_node = ID(lhs.sparsity).sparsity.creator_node;
+      } else {
+	int lhs_node = ID(lhs.sparsity).sparsity.creator_node;
+	int rhs_node = ID(rhs.sparsity).sparsity.creator_node;
+	//if(lhs_node != rhs_node)
+	//  std::cout << "ISECT PICK " << lhs_node << " or " << rhs_node << "\n";
+	// if they're different, and lhs is us, choose rhs to load-balance maybe
+	target_node = (lhs_node == gasnet_mynode()) ? rhs_node : lhs_node;
+      }
+    }
+    SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
+    output.sparsity = sparsity;
+
+    std::vector<ZIndexSpace<N,T> > ops(2);
+    ops[0] = lhs;
+    ops[1] = rhs;
+    inputs.push_back(ops);
+    outputs.push_back(sparsity);
 
     return output;
   }
@@ -1283,38 +1618,37 @@ namespace Realm {
   template <int N, typename T>
   ZIndexSpace<N,T> IntersectionOperation<N,T>::add_intersection(const std::vector<ZIndexSpace<N,T> >& ops)
   {
-    // special case for empty operand list
-    if(ops.empty())
-      return ZIndexSpace<N,T>::make_empty();
+    // simple cases should be handled before we get here
+    assert(ops.size() > 1);
 
     // build the intersection of all bounding boxes
-    ZIndexSpace<N,T> output;
-    output.bounds = ops[0].bounds;
+    ZIndexSpace<N,T> output(ops[0].bounds);
     for(size_t i = 1; i < ops.size(); i++)
       output.bounds = output.bounds.intersection(ops[i].bounds);
 
-    if(!output.bounds.empty()) {
-      // try to assign sparsity ID near the input sparsity maps (if present)
-      int target_node = gasnet_mynode();
-      int node_count = 0;
-      for(size_t i = 0; i < ops.size(); i++)
-	if(!ops[i].dense()) {
-	  int node = ID(ops[i].sparsity).sparsity.creator_node;
-	  if(node_count == 0) {
-	    node_count = 1;
-	    target_node = node;
-	  } else if((node_count == 1) && (node != target_node)) {
-	    //std::cout << "ISECT DIFF " << target_node << " or " << node << "\n";
-	    target_node = gasnet_mynode();
-	    break;
-	  }
-	}
-      SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
-      output.sparsity = sparsity;
+    // another optimization handled above
+    assert(!output.bounds.empty());
 
-      inputs.push_back(ops);
-      outputs.push_back(sparsity);
-    }
+    // try to assign sparsity ID near the input sparsity maps (if present)
+    int target_node = gasnet_mynode();
+    int node_count = 0;
+    for(size_t i = 0; i < ops.size(); i++)
+      if(!ops[i].dense()) {
+	int node = ID(ops[i].sparsity).sparsity.creator_node;
+	if(node_count == 0) {
+	  node_count = 1;
+	  target_node = node;
+	} else if((node_count == 1) && (node != target_node)) {
+	  //std::cout << "ISECT DIFF " << target_node << " or " << node << "\n";
+	  target_node = gasnet_mynode();
+	  break;
+	}
+      }
+    SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
+    output.sparsity = sparsity;
+
+    inputs.push_back(ops);
+    outputs.push_back(sparsity);
 
     return output;
   }
@@ -1356,12 +1690,13 @@ namespace Realm {
   ZIndexSpace<N,T> DifferenceOperation<N,T>::add_difference(const ZIndexSpace<N,T>& lhs,
 							    const ZIndexSpace<N,T>& rhs)
   {
-    // simple cases - an empty lhs or a dense rhs that covers lhs both yield an empty
-    //  difference
-    if(lhs.empty() || (rhs.dense() && rhs.bounds.contains(lhs.bounds)))
+    if(lhs.empty() || (rhs.dense() && rhs.bounds.contains(lhs.bounds))) {
+      // optimization should be handled above
+      assert(0);
       return ZIndexSpace<N,T>::make_empty();
+    }
 
-    // otherwise the difference is no larger than the lhs
+    // the difference is no larger than the lhs
     ZIndexSpace<N,T> output;
     output.bounds = lhs.bounds;
 
