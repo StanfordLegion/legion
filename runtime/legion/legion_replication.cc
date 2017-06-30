@@ -245,7 +245,7 @@ namespace Legion {
 #endif
       // Before doing the normal thing we have to exchange broadcast/receive
       // the future result
-      if (owner_shard != repl_ctx->owner_shard->shard_id)
+      if (owner_shard == repl_ctx->owner_shard->shard_id)
       {
         FutureBroadcast future_collective(repl_ctx, 
                                           future_collective_id, owner_shard);
@@ -2048,12 +2048,7 @@ namespace Legion {
       if (repl_ctx->owner_shard->shard_id > 0)
       {
         complete_mapping();
-        // Which means it will defer until 
-        // Trigger this when the timing barrier is done
-        DeferredExecuteArgs args;
-        args.proxy_this = this;
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, this, 
-                                         timing_collective->get_done_event());
+        deferred_execute();
       }
       else // Shard 0 does the normal timing operation
         TimingOp::trigger_mapping();
