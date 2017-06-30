@@ -61,6 +61,15 @@ namespace Legion {
           point_data[i] = rhs.point_data[i];
       }
 
+      template<unsigned DIM>
+      operator LegionRuntime::Arrays::Point<DIM>(void) const
+      {
+        LegionRuntime::Arrays::Point<DIM> result;
+        for (int i = 0; i < DIM; i++)
+          result.x[i] = point_data[i];
+        return result;
+      }
+
       operator Realm::DomainPoint(void) const
       {
         Realm::DomainPoint result;
@@ -327,6 +336,19 @@ namespace Legion {
         p.to_array(d.rect_data);
         p.to_array(d.rect_data+DIM);
         return d;
+      }
+
+      template<unsigned DIM>
+      operator LegionRuntime::Arrays::Rect<DIM>(void) const
+      {
+        assert(DIM == dim);
+        assert(is_id == 0); // better not be one of these
+        LegionRuntime::Arrays::Rect<DIM> result;
+        for (int i = 0; i < DIM; i++)
+          result.lo.x[i] = rect_data[i];
+        for (int i = 0; i < DIM; i++)
+          result.hi.x[i] = rect_data[DIM+i];
+        return result;
       }
 
       template<int DIM, typename T>

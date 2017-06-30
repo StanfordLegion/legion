@@ -2023,7 +2023,6 @@ class IndexSpace(object):
         self.parent = parent
         self.color = color
         self.parent.add_child(self)
-        self.update_depth(parent.depth)
 
     def update_depth(self, parent_depth):
         self.depth = parent_depth + 1
@@ -2271,7 +2270,6 @@ class IndexPartition(object):
         self.parent = parent
         self.color = color
         self.parent.add_child(self)
-        self.update_depth(parent.depth)
 
     def update_depth(self, parent_depth):
         self.depth = parent_depth + 1
@@ -9622,6 +9620,9 @@ class State(object):
         return matches
 
     def post_parse(self, simplify_graphs, need_physical):
+        for space in self.index_spaces.itervalues():
+            if space.parent is None:
+                space.update_depth(-1)
         print('Reducing top-level index space shapes...')
         # Have to do the same sets across all index spaces
         # with the same dimensions in case of copy across

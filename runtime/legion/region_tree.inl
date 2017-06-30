@@ -1906,8 +1906,8 @@ namespace Legion {
       {
         case 1:
           {
-            const Realm::ZMatrix<1,DIM> *transform = 
-              static_cast<const Realm::ZMatrix<1,DIM>*>(tran);
+            const Realm::ZMatrix<1,DIM,T> *transform = 
+              static_cast<const Realm::ZMatrix<1,DIM,T>*>(tran);
             const Realm::ZRect<1,T> *extent = 
               static_cast<const Realm::ZRect<1,T>*>(ext);
             return create_by_restriction_helper<1>(partition, *transform, 
@@ -1915,8 +1915,8 @@ namespace Legion {
           }
         case 2:
           {
-            const Realm::ZMatrix<2,DIM> *transform = 
-              static_cast<const Realm::ZMatrix<2,DIM>*>(tran);
+            const Realm::ZMatrix<2,DIM,T> *transform = 
+              static_cast<const Realm::ZMatrix<2,DIM,T>*>(tran);
             const Realm::ZRect<2,T> *extent = 
               static_cast<const Realm::ZRect<2,T>*>(ext);
             return create_by_restriction_helper<2>(partition, *transform, 
@@ -1924,8 +1924,8 @@ namespace Legion {
           }
         case 3:
           {
-            const Realm::ZMatrix<3,DIM> *transform = 
-              static_cast<const Realm::ZMatrix<3,DIM>*>(tran);
+            const Realm::ZMatrix<3,DIM,T> *transform = 
+              static_cast<const Realm::ZMatrix<3,DIM,T>*>(tran);
             const Realm::ZRect<3,T> *extent = 
               static_cast<const Realm::ZRect<3,T>*>(ext);
             return create_by_restriction_helper<3>(partition, *transform, 
@@ -1940,10 +1940,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int N, typename T> template<int M>
     ApEvent IndexSpaceNodeT<N,T>::create_by_restriction_helper(
-                                          IndexPartNode *partition,
-                                          const Realm::ZMatrix<M,N> &transform,
-                                          const Realm::ZRect<M,T> &extent,
-                                          ShardID shard, size_t total_shards)
+                                        IndexPartNode *partition,
+                                        const Realm::ZMatrix<M,N,T> &transform,
+                                        const Realm::ZRect<M,T> &extent,
+                                        ShardID shard, size_t total_shards)
     //--------------------------------------------------------------------------
     {
       // Get the parent index space in case it has a sparsity map

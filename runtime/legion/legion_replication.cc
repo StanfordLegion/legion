@@ -3377,7 +3377,7 @@ namespace Legion {
       {
         AutoLock c_lock(collective_lock);
 #ifdef DEBUG_LEGION
-        assert(stage < stage_notifications.size());
+        assert(stage < int(stage_notifications.size()));
 #endif
         stage_notifications[stage]++;   
         if (stage < (shard_collective_stages-1))

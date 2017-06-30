@@ -505,8 +505,9 @@ namespace Legion {
       {
         log_spy.print("Future Creation %llu " IDFMT " %u %d %d %d",
                       creator_id, future_event.id, point.dim,
-                      (int)point.point_data[0], (int)point.point_data[1],
-                      (int)point.point_data[2]);
+                      (int)point.point_data[0], 
+                      (point.dim > 1) ? (int)point.point_data[1] : 0,
+                      (point.dim > 2) ? (int)point.point_data[2] : 0);
       }
 
       static inline void log_future_use(UniqueID user_id, 
