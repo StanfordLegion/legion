@@ -1352,20 +1352,27 @@ namespace Realm {
       s_impl = 0;
     } else {
       s_impl = space.sparsity.impl();
-      assert(s_impl->is_valid());
       const std::vector<SparsityMapEntry<N,T> >& entries = s_impl->get_entries();
-      // no restrictions, so we'll take the first entry (assuming it exists)
-      if(entries.empty()) {
-	valid = false;
-	return;
-      }
-      cur_entry = 0;
-      const SparsityMapEntry<N,T>& e = entries[cur_entry];
+      // find the first entry that overlaps our restriction - speed this up with a
+      //  binary search on the low end of the restriction if we're 1-D
+      if(N == 1)
+	cur_entry = bsearch_map_entries(entries, restriction.lo);
+      else
+	cur_entry = 0;
 
-      assert(!e.sparsity.exists());
-      assert(e.bitmap == 0);
-      valid = true;
-      rect = e.bounds;
+      while(cur_entry < entries.size()) {
+	const SparsityMapEntry<N,T>& e = entries[cur_entry];
+	rect = restriction.intersection(e.bounds);
+	if(!rect.empty()) {
+	  assert(!e.sparsity.exists());
+	  assert(e.bitmap == 0);
+	  valid = true;
+	  return;
+	}
+	cur_entry++;
+      }
+      // if we fall through, there was no intersection
+      valid = false;
     }
   }
 
