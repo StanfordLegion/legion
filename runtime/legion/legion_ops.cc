@@ -11362,6 +11362,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (requirement.handle_type == PART_PROJECTION)
+      {
         LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/,
                                   false/*region*/,
                                   requirement.partition.index_partition.id,
@@ -11371,6 +11372,10 @@ namespace Legion {
                                   requirement.prop,
                                   requirement.redop,
                                   requirement.parent.index_space.id);
+        LegionSpy::log_requirement_projection(unique_op_id, 0/*idx*/, 
+                                              requirement.projection);
+        runtime->forest->log_launch_space(launch_space, unique_op_id);
+      }
       else
         LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/,
                                   true/*region*/,
@@ -12207,7 +12212,7 @@ namespace Legion {
       parent_req_index = owner->parent_req_index;
       restrict_info = owner->restrict_info;
       if (Runtime::legion_spy_enabled)
-        perform_logging();
+        LegionSpy::log_index_point(own->get_unique_op_id(), unique_op_id, p);
     }
 
     //--------------------------------------------------------------------------
