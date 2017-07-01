@@ -514,7 +514,7 @@ namespace Legion {
       if (!strcmp(serializer_type, "binary")) {
         if (prof_logfile == NULL) {
           fprintf(stderr, "ERROR: Please specify -lg:prof_logfile <logfile_name> "
-                          "when running with -lg:serializer binary");
+                          "when running with -lg:serializer binary\n");
           exit(-1);
         }
         Processor current = Processor::get_executing_processor();
