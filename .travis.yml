@@ -32,7 +32,6 @@ branches:
     - stable
     - master
     - dma
-    - deppart
 before_install:
   - export THREADS=2
   - |
