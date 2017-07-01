@@ -4123,6 +4123,10 @@ class VerificationTraverser(object):
             if not self.visit_fill(node):
                 return
             self.traverse_node(node)
+        elif isinstance(node, RealmDeppart):
+            if not self.visit_deppart(node):
+                return
+            self.traverse_node(node)
         else:
             assert False # should never get here
 
@@ -4889,7 +4893,7 @@ class Operation(object):
                  'start_event', 'finish_event', 'inter_close_ops', 'open_ops', 
                  'advance_ops', 'task', 'task_id', 'predicate', 'predicate_result',
                  'futures', 'index_owner', 'points', 'launch_rect', 'creator', 
-                 'realm_copies', 'realm_fills', 'version_numbers', 
+                 'realm_copies', 'realm_fills', 'realm_depparts', 'version_numbers', 
                  'internal_idx', 'disjoint_close_fields', 'partition_kind', 
                  'partition_node', 'node_name', 'cluster_name', 'generation', 
                  'reachable_cache', 'transitive_warning_issued', 'arrival_barriers', 
@@ -4916,6 +4920,7 @@ class Operation(object):
         self.open_ops = None
         self.advance_ops = None
         self.realm_copies = None
+        self.realm_depparts = None
         self.realm_fills = None
         self.version_numbers = None
         self.predicate = None
@@ -5237,6 +5242,11 @@ class Operation(object):
             self.realm_fills = list()
         self.realm_fills.append(fill)
 
+    def add_realm_deppart(self, deppart):
+        if self.realm_depparts is None:
+            self.realm_depparts = list()
+        self.realm_depparts.append(deppart)
+
     def add_arrival_barrier(self, bar):
         if not self.arrival_barriers:
             self.arrival_barriers = list()
@@ -5368,6 +5378,13 @@ class Operation(object):
                     fill.update_creator(self)
         else:
             assert not other.realm_fills
+        if not self.realm_depparts:
+            self.realm_depparts = other.realm_depparts
+            if self.realm_depparts:
+                for deppart in self.realm_depparts:
+                    deppart.update_creator(self)
+        else:
+            assert not other.realm_deppart
         if self.task_id == -1:
             self.task_id = other.task_id
         elif other.task_id != -1:
@@ -5426,18 +5443,20 @@ class Operation(object):
             traverser.reachable.add(node)
             return False
         if self.start_event.exists():
-            traverser = EventGraphTraverser(False, True,
-                self.state.get_next_traversal_generation(),
-                None, traverse_node, traverse_node, traverse_node)
+            traverser = EventGraphTraverser(forwards=False, use_gen=True,
+                generation=self.state.get_next_traversal_generation(),
+                op_fn=traverse_node, copy_fn=traverse_node, 
+                fill_fn=traverse_node, deppart_fn=traverse_node)
             traverser.reachable = self.physical_incoming
             traverser.visit_event(self.start_event)
             # Keep everything symmetric
             for other in self.physical_incoming:
                 other.physical_outgoing.add(self)
         if self.finish_event.exists():
-            traverser = EventGraphTraverser(True, True,
-                self.state.get_next_traversal_generation(),
-                None, traverse_node, traverse_node, traverse_node)
+            traverser = EventGraphTraverser(forwards=True, use_gen=True,
+                generation=self.state.get_next_traversal_generation(),
+                op_fn=traverse_node, copy_fn=traverse_node, 
+                fill_fn=traverse_node, deppart_fn=traverse_node)
             traverser.reachable = self.physical_outgoing
             traverser.visit_event(self.finish_event)
             # Keep everything symmetric
@@ -5557,10 +5576,12 @@ class Operation(object):
         def post_traverse(node, traverser):
             assert traverser.stack
             traverser.stack.pop()
-        traverser = EventGraphTraverser(False, True,
-            self.state.get_next_traversal_generation(),
-            None, traverse_node, traverse_node, traverse_node,
-            None, post_traverse, post_traverse, post_traverse)
+        traverser = EventGraphTraverser(forwards=False, use_gen=True,
+            generation=self.state.get_next_traversal_generation(),
+            op_fn=traverse_node, copy_fn=traverse_node, 
+            fill_fn=traverse_node, deppart_fn=traverse_node,
+            post_op_fn=post_traverse, post_copy_fn=post_traverse, 
+            post_fill_fn=post_traverse, post_deppart_fn=post_traverse)
         traverser.origin = self
         traverser.cycle = False
         traverser.stack = list()
@@ -6333,6 +6354,10 @@ class Operation(object):
             for fill in self.realm_fills:
                 if fill not in elevate:
                     elevate[fill] = fill.get_context()
+        if self.realm_depparts:
+            for deppart in self.realm_depparts:
+                if deppart not in elevate:
+                    elevate[deppart] = deppart.get_context()
         if self.is_physical_operation():
             # Finally put ourselves in the set if we are a physical operation
             assert self.context is not None
@@ -7703,7 +7728,8 @@ class EventHandle(object):
 class Event(object):
     __slots__ = ['state', 'handle', 'phase_barrier', 'incoming', 'outgoing',
                  'incoming_ops', 'outgoing_ops', 'incoming_fills', 'outgoing_fills',
-                 'incoming_copies', 'outgoing_copies', 'generation', 'ap_user_event',
+                 'incoming_copies', 'outgoing_copies', 'incoming_depparts',
+                 'outgoing_depparts', 'generation', 'ap_user_event',
                  'rt_user_event', 'pred_event', 'user_event_triggered', 
                  'barrier_contributors', 'barrier_waiters']
     def __init__(self, state, handle):
@@ -7718,6 +7744,8 @@ class Event(object):
         self.outgoing_fills = None
         self.incoming_copies = None
         self.outgoing_copies = None
+        self.incoming_depparts = None
+        self.outgoing_depparts = None
         self.ap_user_event = False
         self.rt_user_event = False
         self.pred_event = False
@@ -7798,6 +7826,9 @@ class Event(object):
         if self.incoming_fills:
             for fill in self.incoming_fills:
                 print("    "+str(fill))
+        if self.incoming_depparts:
+            for deppart in self.incoming_depparts:
+                print("    "+str(deppart))
         print("  Outgoing:")
         if self.outgoing:
             for ev in self.outgoing:
@@ -7811,6 +7842,9 @@ class Event(object):
         if self.outgoing_fills:
             for fill in self.outgoing_fills:
                 print("    "+str(fill))
+        if self.outgoing_depparts:
+            for deppart in self.outgoing_depparts:
+                print("    "+str(deppart))
 
     def add_incoming(self, prev):
         if self.incoming is None:
@@ -7861,6 +7895,16 @@ class Event(object):
         if self.outgoing_copies is None:
             self.outgoing_copies = set()
         self.outgoing_copies.add(copy)
+
+    def add_incoming_deppart(self, deppart):
+        if self.incoming_depparts is None:
+            self.incoming_depparts = set()
+        self.incoming_depparts.add(deppart)
+
+    def add_outgoing_deppart(self, deppart):
+        if self.outgoing_depparts is None:
+            self.outgoing_depparts = set()
+        self.outgoing_depparts.add(deppart)
 
     def add_phase_barrier_contributor(self, op):
         if not self.barrier_contributors:
@@ -7926,18 +7970,20 @@ class RealmBase(object):
             traverser.reachable.add(node)
             return False
         if self.start_event.exists():
-            traverser = EventGraphTraverser(False, True,
-                self.state.get_next_traversal_generation(),
-                None, traverse_node, traverse_node, traverse_node)
+            traverser = EventGraphTraverser(forwards=False, use_gen=True,
+                generation=self.state.get_next_traversal_generation(),
+                op_fn=traverse_node, copy_fn=traverse_node, 
+                fill_fn=traverse_node, deppart_fn=traverse_node)
             traverser.reachable = self.physical_incoming
             traverser.visit_event(self.start_event)
             # Keep everything symmetric
             for other in self.physical_incoming:
                 other.physical_outgoing.add(self)
         if self.finish_event.exists():
-            traverser = EventGraphTraverser(True, True,
-                self.state.get_next_traversal_generation(),
-                None, traverse_node, traverse_node, traverse_node)
+            traverser = EventGraphTraverser(forwards=True, use_gen=True,
+                generation=self.state.get_next_traversal_generation(),
+                op_fn=traverse_node, copy_fn=traverse_node, 
+                fill_fn=traverse_node, deppart_fn=traverse_node)
             traverser.reachable = self.physical_outgoing
             traverser.visit_event(self.finish_event)
             # Keep everything symmetric
@@ -7962,10 +8008,12 @@ class RealmBase(object):
         def post_traverse(node, traverser):
             assert traverser.stack
             traverser.stack.pop()
-        traverser = EventGraphTraverser(False, True,
-            self.state.get_next_traversal_generation(),
-            None, traverse_node, traverse_node, traverse_node,
-            None, post_traverse, post_traverse, post_traverse)
+        traverser = EventGraphTraverser(forwards=False, use_gen=True,
+            generation=self.state.get_next_traversal_generation(),
+            op_fn=traverse_node, copy_fn=traverse_node, 
+            fill_fn=traverse_node, deppart_fn=traverse_node,
+            post_op_fn=post_traverse, post_copy_fn=post_traverse, 
+            post_fill_fn=post_traverse, post_deppart_fn=post_traverse)
         traverser.origin = self
         traverser.cycle = False
         traverser.stack = list()
@@ -8190,12 +8238,62 @@ class RealmFill(RealmBase):
             shape = shape & self.intersect.index_space.shape
         return (field_size * shape.volume())
 
+class RealmDeppart(RealmBase):
+    __slots__ = ['index_space', 'node_name']
+    def __init__(self, state, finish, realm_num):
+        RealmBase.__init__(self, state, realm_num)
+        self.index_space = None
+        self.finish_event = finish
+        if finish.exists():
+            finish.add_incoming_deppart(self)
+        self.node_name = 'realm_deppart_'+str(realm_num)
+
+    def __str__(self):
+        return "Realm Deppart ("+str(self.realm_num)+")"
+
+    __repr__ = __str__
+
+    def set_start(self, start):
+        self.start_event = start
+        if start.exists():
+            start.add_outgoing_deppart(self)
+
+    def set_creator(self, creator):
+        assert self.creator is None
+        self.creator = creator
+        self.creator.add_realm_deppart(self)
+
+    def update_creator(self, new_creator):
+        assert self.creator
+        assert new_creator is not self.creator
+        self.creator = new_creator
+
+    def set_index_space(self, index_space):
+        self.index_space = index_space
+
+    def print_event_node(self, printer):
+        if self.state.detailed_graphs:
+            label = "Realm Deppart ("+str(self.realm_num)+") of "+str(self.index_space)
+        else:
+            label = "Realm Deppart of "+str(self.index_space)
+        if self.creator is not None:
+            label += " generated by "+str(self.creator)
+        lines = [[{ "label" : label, "colspan" : 3 }]]
+        color = 'chartreuse'
+        size = 14
+        label = '<table border="0" cellborder="1" cellspacing="0" cellpadding="3" bgcolor="%s">' % color + \
+                "".join([printer.wrap_with_trtd(line) for line in lines]) + '</table>'
+        printer.println(self.node_name+' [label=<'+label+'>,fontsize='+str(size)+\
+                ',fontcolor=black,shape=record,penwidth=0];')
+
 class EventGraphTraverser(object):
     def __init__(self, forwards, use_gen, generation,
                  event_fn = None, op_fn = None,
                  copy_fn = None, fill_fn = None,
+                 deppart_fn = None,
                  post_event_fn = None, post_op_fn = None,
-                 post_copy_fn = None, post_fill_fn = None):
+                 post_copy_fn = None, post_fill_fn = None,
+                 post_deppart_fn = None):
         self.forwards = forwards
         self.use_gen = use_gen
         self.generation = generation
@@ -8203,10 +8301,12 @@ class EventGraphTraverser(object):
         self.op_fn = op_fn
         self.copy_fn = copy_fn
         self.fill_fn = fill_fn
+        self.deppart_fn = deppart_fn
         self.post_event_fn = post_event_fn
         self.post_op_fn = post_op_fn
         self.post_copy_fn = post_copy_fn
         self.post_fill_fn = post_fill_fn
+        self.post_deppart_fn = post_deppart_fn
 
     def visit_event(self, node):
         if self.use_gen:
@@ -8307,6 +8407,26 @@ class EventGraphTraverser(object):
                 self.visit_event(node.start_event)
         if self.post_copy_fn is not None:
             self.post_copy_fn(node, self)
+
+    def visit_deppart(self, node):
+        if self.use_gen:
+            if node.generation == self.generation:
+                return
+            else:
+                node.generation = self.generation
+        do_next = True
+        if self.deppart_fn is not None:
+            do_next = self.deppart_fn(node, self)
+        if not do_next:
+            return
+        if self.forwards:
+            if node.finish_event.exists():
+                self.visit_event(node.finish_event)
+        else:
+            if node.start_event.exists():
+                self.visit_event(node.start_event)
+        if self.post_deppart_fn is not None:
+            self.post_deppart_fn(node, self)
 
 class PhysicalTraverser(object):
     def __init__(self, forwards, use_gen, generation,
@@ -8716,6 +8836,9 @@ realm_fill_field_pat    = re.compile(
 realm_fill_intersect_pat= re.compile(
     prefix+"Fill Intersect (?P<id>[0-9a-f]+) (?P<reg>[0-1]+) "+
            "(?P<index>[0-9a-f]+) (?P<field>[0-9]+) (?P<tid>[0-9]+)")
+realm_deppart_pat       = re.compile(
+    prefix+"Deppart Events (?P<uid>[0-9]+) (?P<ispace>[0-9]+) "+
+           "(?P<preid>[0-9a-f]+) (?P<postid>[0-9a-f]+)")
 barrier_arrive_pat      = re.compile(
     prefix+"Phase Barrier Arrive (?P<uid>[0-9]+) (?P<iid>[0-9a-f]+)")
 barrier_wait_pat        = re.compile(
@@ -8838,6 +8961,17 @@ def parse_legion_spy_line(line, state):
         else:
             fill.set_intersect(state.get_partition(int(m.group('index'),16),
               int(m.group('field')), int(m.group('tid'))))
+        return True
+    m = realm_deppart_pat.match(line)
+    if m is not None:
+        e1 = state.get_event(int(m.group('preid'),16))
+        e2 = state.get_event(int(m.group('postid'),16))
+        deppart = state.get_realm_deppart(e2)
+        deppart.set_start(e1)
+        op = state.get_operation(int(m.group('uid')))
+        deppart.set_creator(op)
+        index_space = state.get_index_space(int(m.group('ispace')))
+        deppart.set_index_space(index_space) 
         return True
     m = barrier_arrive_pat.match(line)
     if m is not None:
@@ -9531,7 +9665,7 @@ class State(object):
                  'processor_kinds', 'memory_kinds', 'index_spaces', 'index_partitions',
                  'field_spaces', 'regions', 'partitions', 'top_spaces', 'trees',
                  'ops', 'tasks', 'task_names', 'variants', 'projection_functions',
-                 'has_mapping_deps', 'instances', 'events', 'copies', 'fills', 
+                 'has_mapping_deps', 'instances', 'events', 'copies', 'fills', 'depparts',
                  'no_event', 'slice_index', 'slice_slice', 'point_slice', 'point_point',
                  'futures', 'next_generation', 'next_realm_num', 'detailed_graphs', 
                  'assert_on_error', 'assert_on_warning', 'config', 'detailed_logging']
@@ -9569,6 +9703,7 @@ class State(object):
         self.events = dict()
         self.copies = dict()
         self.fills = dict()
+        self.depparts = dict()
         self.no_event = Event(self, EventHandle(0))
         # For parsing only
         self.slice_index = dict()
@@ -9716,6 +9851,8 @@ class State(object):
                 copy.compute_physical_reachable()
             for fill in self.fills.itervalues():
                 fill.compute_physical_reachable()
+            for deppart in self.depparts.itervalues():
+                deppart.compute_physical_reachable()
             if need_physical and simplify_graphs:
                 self.simplify_physical_graph()
         if self.verbose:
@@ -9764,6 +9901,9 @@ class State(object):
         for fill in self.fills.itervalues():
             if not fill.physical_incoming:
                 topological_sorter.visit_node(fill)
+        for deppart in self.depparts.itervalues():
+            if not deppart.physical_incoming:
+                topological_sorter.visit_node(deppart)
         # Now that we have everything sorted based on topology
         # Do the simplification in postorder so we simplify
         # the smallest subgraphs first and only do the largest
@@ -10225,6 +10365,14 @@ class State(object):
         result = RealmFill(self, event, self.next_realm_num)
         self.next_realm_num += 1
         self.fills[event] = result
+        return result
+
+    def get_realm_deppart(self, event):
+        if event in self.depparts:
+            return self.depparts[event]
+        result = RealmDeppart(self, event, self.next_realm_num)
+        self.next_realm_num += 1
+        self.depparts[event] = result
         return result
 
     def create_copy(self, creator):
