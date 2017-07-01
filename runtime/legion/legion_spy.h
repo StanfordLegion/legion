@@ -840,6 +840,14 @@ namespace Legion {
 		      post.id,
 		      is_region, index, field, tree_id);
       } 
+
+      static inline void log_deppart_events(UniqueID op_unique_id,
+                                            IndexSpace handle,
+                                            LgEvent pre, LgEvent post)
+      {
+        log_spy.print("Deppart Events %llu %d " IDFMT " " IDFMT,
+                      op_unique_id, handle.get_id(), pre.id, post.id);
+      }
 #endif
     }; // namespace LegionSpy
 

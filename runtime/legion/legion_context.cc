@@ -215,11 +215,11 @@ namespace Legion {
         (owner_task == NULL) ? 0 : owner_task->regions.size();
       for (unsigned idx = 0; idx < created_requirements.size(); idx++)
       {
+        TaskOp::log_requirement(unique_op_id, original_size + idx,
+                                created_requirements[idx]);
         // Skip it if there are no privilege fields
         if (created_requirements[idx].privilege_fields.empty())
           continue;
-        TaskOp::log_requirement(unique_op_id, original_size + idx, 
-                                created_requirements[idx]);
         InstanceSet instance_set;
         std::vector<PhysicalManager*> unacquired;  
         RegionTreeID bad_tree; std::vector<FieldID> missing_fields;

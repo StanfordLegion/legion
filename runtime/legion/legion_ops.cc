@@ -11640,6 +11640,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (requirement.handle_type == PART_PROJECTION)
+      {
         LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/,
                                   false/*region*/,
                                   requirement.partition.index_partition.id,
@@ -11649,6 +11650,10 @@ namespace Legion {
                                   requirement.prop,
                                   requirement.redop,
                                   requirement.parent.index_space.id);
+        LegionSpy::log_requirement_projection(unique_op_id, 0/*idx*/, 
+                                              requirement.projection);
+        runtime->forest->log_launch_space(launch_space, unique_op_id);
+      }
       else
         LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/,
                                   true/*region*/,
@@ -11828,6 +11833,10 @@ namespace Legion {
                                             version_info, valid_instances);
       // We have the valid instances so invoke the mapper
       invoke_mapper(valid_instances, mapped_instances);
+      if (Runtime::legion_spy_enabled)
+        runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
+                                              requirement,
+                                              mapped_instances);
 #ifdef DEBUG_LEGION
       assert(!mapped_instances.empty()); 
 #endif
@@ -11860,6 +11869,11 @@ namespace Legion {
         restricted_postconditions.insert(done_event);
         done_event = Runtime::merge_events(restricted_postconditions);
       }
+#ifdef LEGION_SPY
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_operation_events(unique_op_id, done_event,
+                                        completion_event);
+#endif
       Runtime::trigger_event(completion_event, done_event);
       need_completion_trigger = false;
       complete_execution(Runtime::protect_event(done_event));
@@ -12479,7 +12493,7 @@ namespace Legion {
       parent_req_index = owner->parent_req_index;
       restrict_info = owner->restrict_info;
       if (Runtime::legion_spy_enabled)
-        perform_logging();
+        LegionSpy::log_index_point(own->get_unique_op_id(), unique_op_id, p);
     }
 
     //--------------------------------------------------------------------------

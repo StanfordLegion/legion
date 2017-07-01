@@ -27,7 +27,7 @@
 #include "cmdline.h"
 #include "pri_queue.h"
 #include "nodeset.h"
-#include "interval_tree.h"
+#include "realm/interval_tree.h"
 #include "dynamic_templates.h"
 #include "deppart/sparsity_impl.h"
 #include "deppart/inst_helper.h"
