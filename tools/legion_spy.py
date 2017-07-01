@@ -4318,6 +4318,10 @@ class VerificationTraverser(object):
                                  fill, self.dst_req.index, False, 0, self.dst_version)
         return False
 
+    def visit_deppart(self, deppart):
+        # Can always continue through a deppart object
+        return True
+
     def verified(self, last = False):
         if self.failed_analysis:
             if last and self.op.state.assert_on_error:
@@ -6035,7 +6039,7 @@ class Operation(object):
         return True
 
     def verify_physical_requirement(self, index, req, perform_checks):
-        if req.is_no_access():
+        if req.is_no_access() or len(req.fields) == 0:
             return True
         assert index in self.mappings
         mappings = self.mappings[index]
@@ -6068,7 +6072,7 @@ class Operation(object):
 
     def perform_verification_registration(self, index, req, perform_checks):
         assert self.kind == SINGLE_TASK_KIND
-        if req.is_no_access():
+        if req.is_no_access() or len(req.fields) == 0:
             return True
         assert index in self.mappings
         mappings = self.mappings[index]
@@ -6935,7 +6939,7 @@ class Task(object):
         if self.op.reqs:
             for idx,req in self.op.reqs.iteritems():
                 # Skip any no access requirements
-                if req.is_no_access():
+                if req.is_no_access() or len(req.fields) == 0:
                     continue
                 assert idx in self.op.mappings
                 mappings = self.op.mappings[idx]
