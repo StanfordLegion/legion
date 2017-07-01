@@ -6142,14 +6142,20 @@ class Operation(object):
             # Check to see if this is an index fill
             if self.points:
                 for point in sorted(self.points.itervalues(), key=lambda x: x.uid):
-                  if not point.perform_op_physical_verification(perform_checks):
-                      return False
+                    if not point.perform_op_physical_verification(perform_checks):
+                        return False
                 return True
             # Compute our version numbers first
             self.compute_current_version_numbers()
             for index,req in self.reqs.iteritems():
                 if not self.verify_fill_requirement(index, req, perform_checks):
                     return False
+        elif self.kind == DEP_PART_OP_KIND and self.points:
+            # Index partition operation
+            for point in sorted(self.points.itervalues(), key=lambda x: x.uid):
+                if not point.perform_op_physical_verification(perform_checks):
+                    return False
+            return True
         elif self.kind == DELETION_OP_KIND:
             # Skip deletions, they only impact logical analysis
             pass
