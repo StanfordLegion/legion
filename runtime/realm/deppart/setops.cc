@@ -246,8 +246,8 @@ namespace Realm {
       const ZIndexSpace<N,T> &l = lhss[li];
       const ZIndexSpace<N,T> &r = rhss[ri];
 
-      // 1) either side empty
-      if(l.empty() || r.empty()) {
+      // 1) either side empty or disjoint inputs
+      if(l.empty() || r.empty() || !l.bounds.overlaps(r.bounds)) {
 	results[i] = ZIndexSpace<N,T>::make_empty();
 	continue;
       }
