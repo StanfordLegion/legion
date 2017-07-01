@@ -11550,6 +11550,10 @@ namespace Legion {
                                             version_info, valid_instances);
       // We have the valid instances so invoke the mapper
       invoke_mapper(valid_instances, mapped_instances);
+      if (Runtime::legion_spy_enabled)
+        runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
+                                              requirement,
+                                              mapped_instances);
 #ifdef DEBUG_LEGION
       assert(!mapped_instances.empty()); 
 #endif
@@ -11582,6 +11586,11 @@ namespace Legion {
         restricted_postconditions.insert(done_event);
         done_event = Runtime::merge_events(restricted_postconditions);
       }
+#ifdef LEGION_SPY
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_operation_events(unique_op_id, done_event,
+                                        completion_event);
+#endif
       Runtime::trigger_event(completion_event, done_event);
       need_completion_trigger = false;
       complete_execution(Runtime::protect_event(done_event));
