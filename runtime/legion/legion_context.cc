@@ -6663,6 +6663,49 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    InnerContext* ReplicateContext::find_parent_physical_context(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(regions.size() == virtual_mapped.size());
+      assert(regions.size() == parent_req_indexes.size());
+#endif     
+      const unsigned owner_size = virtual_mapped.size();
+      if (index < owner_size)
+      {
+        // See if it is virtual mapped
+        if (virtual_mapped[index])
+          return find_parent_context()->find_parent_physical_context(
+                                            parent_req_indexes[index]);
+        else // We mapped a physical instance so we're it
+          return this;
+      }
+      else // We created it
+      {
+        // Check to see if this has returnable privileges or not
+        // If they are not returnable, then we can just be the 
+        // context for the handling the meta-data management, 
+        // otherwise we can only support this currently if we are
+        // the context for the top-level task
+        index -= owner_size;
+        AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
+        if ((index >= returnable_privileges.size()) ||
+            returnable_privileges[index])
+        {
+          if (owner_task->get_depth() > 0)
+            REPORT_LEGION_FATAL(LEGION_FATAL_CTRL_REPL_RETURN_PRIV,
+                                "Returnable privileges are not currently "
+                                "supported for control replicated tasks "
+                                "that are are not the top-level task such "
+                                "as task %s (UID %lld)",
+                                owner_task->get_task_name(),
+                                owner_task->get_unique_id())
+        }
+        return this;
+      }
+    }
+
+    //--------------------------------------------------------------------------
     IndexSpace ReplicateContext::create_index_space(RegionTreeForest *forest,
                                          const void *realm_is, TypeTag type_tag)
     //--------------------------------------------------------------------------

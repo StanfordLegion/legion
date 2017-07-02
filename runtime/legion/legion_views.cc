@@ -5859,7 +5859,8 @@ namespace Legion {
           args.invalidated = Runtime::create_rt_user_event();
           runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
                                            NULL/*op*/, shard_invalid_barrier);
-          mutator->record_reference_mutation_effect(args.invalidated);
+          if (mutator != NULL)
+            mutator->record_reference_mutation_effect(args.invalidated);
           return;
         }
         // Otherwise we can fall through and do the rest of the invalidation

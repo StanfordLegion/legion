@@ -1118,6 +1118,8 @@ namespace Legion {
       virtual void print_once(FILE *f, const char *message) const;
       virtual void log_once(Realm::LoggerMessage &message) const;
     public:
+      virtual InnerContext* find_parent_physical_context(unsigned index);
+    public:
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(RegionTreeForest *forest,
                                             const void *realm_is, 

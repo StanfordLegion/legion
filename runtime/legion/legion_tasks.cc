@@ -2663,6 +2663,7 @@ namespace Legion {
       // their valid instances, then fill in the mapper input structure
       valid.resize(regions.size());
       input.valid_instances.resize(regions.size());
+      output.chosen_instances.resize(regions.size());
       // If we have must epoch owner, we have to check for any 
       // constrained mappings which must be heeded
       if (must_epoch_owner != NULL)
@@ -2714,7 +2715,6 @@ namespace Legion {
                               input.valid_instances[idx]);
       }
       // Prepare the output too
-      output.chosen_instances.resize(regions.size());
       output.chosen_variant = 0;
       output.postmap_task = false;
       output.task_priority = 0;
@@ -5379,7 +5379,7 @@ namespace Legion {
                                          this, mapped_precondition);
         return;
       }
-      if (Runtime::legion_spy_enabled)
+      if (Runtime::legion_spy_enabled && (execution_context != NULL))
         execution_context->log_created_requirements();
       // We used to have to apply our virtual state here, but that is now
       // done when the virtual instances are returned in return_virtual_task

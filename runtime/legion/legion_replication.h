@@ -431,7 +431,7 @@ namespace Legion {
     protected:
       std::map<unsigned/*index*/,
                LegionMap<DistributedID,FieldMask>::aligned> versions;
-      std::map<unsigned/*index*/,VersioningSet<> > results;
+      LegionMap<unsigned/*index*/,VersioningSet<> >::aligned results;
     };
 
     /**

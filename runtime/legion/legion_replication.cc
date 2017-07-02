@@ -4507,7 +4507,7 @@ namespace Legion {
               VersioningInfoBroadcast::find_advance_states(unsigned index) const
     //--------------------------------------------------------------------------
     {
-      std::map<unsigned,VersioningSet<> >::const_iterator finder = 
+      LegionMap<unsigned,VersioningSet<> >::aligned::const_iterator finder = 
         results.find(index);
 #ifdef DEBUG_LEGION
       assert(finder != results.end());
