@@ -9191,13 +9191,6 @@ namespace Legion {
     {
       sharding_lock.destroy_reservation();
       sharding_lock = Reservation::NO_RESERVATION;
-      // Clean up any shards that we made
-      for (std::map<std::pair<ShardID,IndexSpace>,Domain>::const_iterator it = 
-            shard_domains.begin(); it != shard_domains.end(); it++)
-      {
-        IndexSpaceNode *node = forest->get_node(it->first.second);
-        node->destroy_shard_domain(it->second);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -9218,29 +9211,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const Domain& ShardingFunction::find_shard_domain(ShardID shard,
-                                                      IndexSpace full_space)
+    IndexSpace ShardingFunction::find_shard_space(ShardID shard,
+                                                  IndexSpace full_space)
     //--------------------------------------------------------------------------
     {
-      std::pair<ShardID,IndexSpace> key(shard, full_space);
       // Check to see if we already have it
       {
         AutoLock s_lock(sharding_lock,1,false/*exclusive*/);
-        std::map<std::pair<ShardID,IndexSpace>,Domain>::const_iterator 
-          finder = shard_domains.find(key);
-        if (finder != shard_domains.end())
+        std::map<ShardID,IndexSpace>::const_iterator finder = 
+          shard_index_spaces.find(shard);
+        if (finder != shard_index_spaces.end())
           return finder->second;
       }
       // Otherwise we need to make it
       IndexSpaceNode *node = forest->get_node(full_space);
-      Domain shard_domain = node->create_shard_domain(this, shard);
+      IndexSpace result = node->create_shard_space(this, shard);
       AutoLock s_lock(sharding_lock);
-      Domain &result = shard_domains[key];
-      // Check to see if we lost the race
-      if (!result.exists())
-        result = shard_domain; // doesn't exist yet so save it
-      else
-        node->destroy_shard_domain(shard_domain); // aready exists so free it
+      shard_index_spaces[shard] = result;
       return result;
     }
 

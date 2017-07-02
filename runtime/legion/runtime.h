@@ -1521,7 +1521,7 @@ namespace Legion {
       ShardingFunction& operator=(const ShardingFunction &rhs);
     public:
       ShardID find_owner(const DomainPoint &point, const Domain &full_space);
-      const Domain& find_shard_domain(ShardID shard, IndexSpace full_space);
+      IndexSpace find_shard_space(ShardID shard, IndexSpace full_space);
     public:
       ShardingFunctor *const functor;
       RegionTreeForest *const forest;
@@ -1529,7 +1529,7 @@ namespace Legion {
       const ShardID max_shard;
     protected:
       Reservation sharding_lock;
-      std::map<std::pair<ShardID,IndexSpace>,Domain> shard_domains; 
+      std::map<ShardID,IndexSpace> shard_index_spaces; 
     };
 
     /**

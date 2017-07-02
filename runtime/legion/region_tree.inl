@@ -3146,8 +3146,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    Domain IndexSpaceNodeT<DIM,T>::create_shard_domain(ShardingFunction *func,
-                                                       ShardID shard)
+    IndexSpace IndexSpaceNodeT<DIM,T>::create_shard_space(
+                                          ShardingFunction *func, ShardID shard)
     //--------------------------------------------------------------------------
     {
       if (!realm_index_space_set.has_triggered())
@@ -3167,7 +3167,12 @@ namespace Legion {
             shard_points.push_back(itr.p);
         }
       }
-      return Domain(Realm::ZIndexSpace<DIM,T>(shard_points));
+      if (shard_points.empty())
+        return IndexSpace::NO_SPACE;
+      Realm::ZIndexSpace<DIM,T> realm_is(shard_points);
+      const Domain domain(realm_is);
+      return context->runtime->find_or_create_index_launch_space(domain, 
+                                      &realm_is, handle.get_type_tag());
     }
 
     //--------------------------------------------------------------------------

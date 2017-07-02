@@ -401,12 +401,11 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       // Compute the local index space of points for this shard
-      const Domain &local_domain = 
-        sharding_function->find_shard_domain(repl_ctx->owner_shard->shard_id,
-                                             launch_space);
-      internal_domain = local_domain;
+      internal_space =
+        sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
+                                            launch_space);
       // If it's empty we're done, otherwise we go back on the queue
-      if (local_domain.get_volume() == 0)
+      if (!internal_space.exists())
       {
         // We have no local points, so we can just trigger
         complete_mapping();
@@ -702,12 +701,11 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       // Compute the local index space of points for this shard
-      const Domain &local_domain = 
-        sharding_function->find_shard_domain(repl_ctx->owner_shard->shard_id, 
-                                             launch_space);
-      index_domain = local_domain;
+      launch_space =
+        sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id, 
+                                            launch_space);
       // If it's empty we're done, otherwise we go back on the queue
-      if (local_domain.get_volume() == 0)
+      if (!launch_space.exists())
       {
         // We have no local points, so we can just trigger
         complete_mapping();
@@ -1076,12 +1074,11 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       // Compute the local index space of points for this shard
-      const Domain &local_domain = 
-        sharding_function->find_shard_domain(repl_ctx->owner_shard->shard_id,
-                                             launch_space);
-      index_domain = local_domain;
+      launch_space =
+        sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
+                                            launch_space);
       // If it's empty we're done, otherwise we go back on the queue
-      if (local_domain.get_volume() == 0)
+      if (!launch_space.exists())
       {
         // We have no local points, so we can just trigger
         complete_mapping();
@@ -1576,12 +1573,11 @@ namespace Legion {
       if (is_index_space)
       {
         // Compute the local index space of points for this shard
-        const Domain &local_domain = 
-          function->find_shard_domain(repl_ctx->owner_shard->shard_id,
-                                      launch_space);
-        index_domain = local_domain;
+        launch_space =
+          function->find_shard_space(repl_ctx->owner_shard->shard_id,
+                                     launch_space);
         // If it's empty we're done, otherwise we go back on the queue
-        if (local_domain.get_volume() == 0)
+        if (!launch_space.exists())
         {
           // We have no local points, so we can just trigger
           complete_mapping();
