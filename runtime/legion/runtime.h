@@ -2583,8 +2583,10 @@ namespace Legion {
                                         ReferenceMutator *mutator);
       FutureMapImpl* find_or_create_future_map(DistributedID did, 
                       TaskContext *ctx, ReferenceMutator *mutator);
-      IndexSpace find_index_launch_space(Context ctx,
-                                         const Domain &launch_domain);
+      IndexSpace find_or_create_index_launch_space(const Domain &launch_domain);
+      IndexSpace find_or_create_index_launch_space(const Domain &launch_domain,
+                                                   const void *realm_is,
+                                                   TypeTag type_tag);
     public:
       void defer_collect_user(LogicalView *view, ApEvent term_event, 
                               ReferenceMutator *mutator);
@@ -2980,7 +2982,7 @@ namespace Legion {
         std::pair<DistributedCollectable*,RtUserEvent> > pending_collectables;
     protected:
       Reservation is_launch_lock;
-      std::map<Domain,IndexSpace> index_launch_spaces;
+      std::map<std::pair<Domain,TypeTag>,IndexSpace> index_launch_spaces;
     protected:
       Reservation gc_epoch_lock;
       GarbageCollectionEpoch *current_gc_epoch;

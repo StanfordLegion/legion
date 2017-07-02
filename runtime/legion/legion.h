@@ -2992,19 +2992,15 @@ namespace Legion {
       //------------------------------------------------------------------------
       // Index Space Operations
       //------------------------------------------------------------------------
+      ///@{
       /**
        * Create a new top-level index space based on the given domain bounds
        * @param ctx the enclosing task context
-       * @param domain the domain for the new index space
+       * @param bounds the bounds for the new index space
        * @return the handle for the new index space
        */
-      IndexSpace create_index_space(Context ctx, Domain domain);
-      /**
-       * Create a new top-level index space with a specific bounds
-       * @param ctx the enclosing task context
-       * @param bounds the bounds for the index spaces
-       * @return the handle for the new index space
-       */
+      IndexSpace create_index_space(Context ctx, Domain bounds);
+      // Template version
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx,
 #if __cplusplus < 201103L
@@ -3013,7 +3009,46 @@ namespace Legion {
                                                   Rect<DIM,COORD_T> bounds
 #endif
                                                   );
-
+      ///@}
+      ///@{
+      /**
+       * Create a new top-level index space from a vector of points
+       * @param ctx the enclosing task context
+       * @param points a vector of points to have in the index space
+       * @return the handle for the new index space
+       */
+      IndexSpace create_index_space(Context ctx, 
+                                    const std::vector<DomainPoint> &points);
+      // Template version
+      template<int DIM, typename COORD_T>
+      IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx,
+#if __cplusplus < 201103L
+                      const std::vector<Realm::ZPoint<DIM,COORD_T> > &points
+#else
+                      const std::vector<Point<DIM,COORD_T> > &points
+#endif
+                      );
+      ///@}
+      ///@{
+      /**
+       * Create a new top-level index space from a vector of rectangles
+       * @param ctx the enclosing task context
+       * @param rects a vector of rectangles to have in the index space
+       * @return the handle for the new index space
+       */
+      IndexSpace create_index_space(Context ctx,
+                                    const std::vector<Domain> &rects);
+      // Template version
+      template<int DIM, typename COORD_T>
+      IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx,
+#if __cplusplus < 201103L
+                      const std::vector<Realm::ZRect<DIM,COORD_T> > &rects
+#else
+                      const std::vector<Rect<DIM,COORD_T> > &rects
+#endif
+                      );
+      ///@}
+      ///@{
       /**
        * Create a new top-level index space by unioning together 
        * several existing index spaces
@@ -3027,7 +3062,8 @@ namespace Legion {
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> union_index_spaces(Context ctx,
                      const std::vector<IndexSpaceT<DIM,COORD_T> > &spaces);
-
+      ///@}
+      ///@{
       /**
        * Create a new top-level index space by intersecting 
        * several existing index spaces
@@ -3041,7 +3077,8 @@ namespace Legion {
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> intersect_index_spaces(Context ctx,
                          const std::vector<IndexSpaceT<DIM,COORD_T> > &spaces);
-
+      ///@}
+      ///@{
       /**
        * Create a new top-level index space by taking the
        * set difference of two different index spaces
@@ -3052,7 +3089,7 @@ namespace Legion {
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> subtract_index_spaces(Context ctx,
            IndexSpaceT<DIM,COORD_T> left, IndexSpaceT<DIM,COORD_T> right);
-
+      ///@}
       /**
        * @deprecated
        * Create a new top-level index space with the maximum number of elements

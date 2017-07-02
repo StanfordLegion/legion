@@ -384,17 +384,24 @@ namespace Legion {
        */
       struct TaskSlice {
       public:
-        TaskSlice(void) : domain(Domain::NO_DOMAIN), 
-          proc(Processor::NO_PROC), recurse(false), stealable(false) { }
+        TaskSlice(void) : domain_is(IndexSpace::NO_SPACE), 
+          domain(Domain::NO_DOMAIN), proc(Processor::NO_PROC), 
+          recurse(false), stealable(false) { }
         TaskSlice(const Domain &d, Processor p, bool r, bool s)
-          : domain(d), proc(p), recurse(r), stealable(s) { }
+          : domain_is(IndexSpace::NO_SPACE), domain(d), 
+            proc(p), recurse(r), stealable(s) { }
+        TaskSlice(IndexSpace is, Processor p, bool r, bool s)
+          : domain_is(is), domain(Domain::NO_DOMAIN),
+            proc(p), recurse(r), stealable(s) { }
       public:
+        IndexSpace                              domain_is;
         Domain                                  domain;
         Processor                               proc;
         bool                                    recurse;
         bool                                    stealable;
       };
       struct SliceTaskInput {
+        IndexSpace                             domain_is;
         Domain                                 domain;
       };
       struct SliceTaskOutput {
@@ -1931,6 +1938,48 @@ namespace Legion {
             const std::vector<std::vector<PhysicalInstance> > &instances) const;
     public:
       //------------------------------------------------------------------------
+      // Methods for creating index spaces which mappers need to do
+      // in order to be able to properly slice index space operations
+      //------------------------------------------------------------------------
+      IndexSpace create_index_space(MapperContext ctx, Domain bounds) const;
+      // Template version
+      template<int DIM, typename COORD_T>
+      IndexSpaceT<DIM,COORD_T> create_index_space(MapperContext ctx,
+#if __cplusplus < 201103L
+                                            Realm::ZRect<DIM,COORD_T> bounds
+#else
+                                            Rect<DIM,COORD_T> bounds
+#endif
+                                            ) const;
+
+      IndexSpace create_index_space(MapperContext ctx, 
+                                  const std::vector<DomainPoint> &points) const;
+      // Template version
+      template<int DIM, typename COORD_T>
+      IndexSpaceT<DIM,COORD_T> create_index_space(MapperContext ctx,
+#if __cplusplus < 201103L
+                    const std::vector<Realm::ZPoint<DIM,COORD_T> > &points
+#else
+                    const std::vector<Point<DIM,COORD_T> > &points
+#endif
+                    ) const;
+
+      IndexSpace create_index_space(MapperContext ctx,
+                                    const std::vector<Domain> &rects) const;
+      // Template version
+      template<int DIM, typename COORD_T>
+      IndexSpaceT<DIM,COORD_T> create_index_space(MapperContext ctx,
+#if __cplusplus < 201103L
+                      const std::vector<Realm::ZRect<DIM,COORD_T> > &rects
+#else
+                      const std::vector<Rect<DIM,COORD_T> > &rects
+#endif
+                      ) const;
+    protected:
+      IndexSpace create_index_space_internal(MapperContext ctx, const Domain &d,
+                  const void *realm_is, TypeTag type_tag) const;
+    public:
+      //------------------------------------------------------------------------
       // Methods for introspecting index space trees 
       // For documentation see methods of the same name in Runtime
       //------------------------------------------------------------------------
@@ -2111,7 +2160,7 @@ namespace Legion {
         output.value = output_result;
         output.size = sizeof(T);
       }
-    };
+    }; 
 
   }; // namespace Mapping
 }; // namespace Legion

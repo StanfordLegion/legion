@@ -9949,7 +9949,7 @@ namespace Legion {
       {
         IndexSpace launch_space = launcher.index_tasks[idx].launch_space;
         if (!launch_space.exists())
-          launch_space = runtime->find_index_launch_space(ctx, 
+          launch_space = runtime->find_or_create_index_launch_space(
                       launcher.index_tasks[idx].launch_domain);
         index_tasks[idx] = runtime->get_available_index_task(true);
         index_tasks[idx]->initialize_task(ctx, launcher.index_tasks[idx],

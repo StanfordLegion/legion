@@ -523,7 +523,7 @@ namespace Legion {
       bool is_sliced(void) const;
       void slice_index_space(void);
       void trigger_slices(void);
-      void clone_multi_from(MultiTask *task, const Domain &d, Processor p,
+      void clone_multi_from(MultiTask *task, IndexSpace is, Processor p,
                             bool recurse, bool stealable);
     public:
       virtual void activate(void) = 0;
@@ -557,7 +557,7 @@ namespace Legion {
                                std::set<RtEvent> &ready_events) = 0;
       virtual void perform_inlining(void) = 0;
     public:
-      virtual SliceTask* clone_as_slice_task(const Domain &d,
+      virtual SliceTask* clone_as_slice_task(IndexSpace is,
           Processor p, bool recurse, bool stealable,
           long long scale_denominator) = 0;
       virtual void handle_future(const DomainPoint &point, const void *result,
@@ -578,8 +578,8 @@ namespace Legion {
       std::vector<ProjectionInfo> projection_infos;
       bool sliced;
     protected:
-      IndexSpace launch_space;
-      Domain internal_domain;
+      IndexSpace launch_space; // global set of points
+      IndexSpace internal_space; // local set of points
       ReductionOpID redop;
       const ReductionOp *reduction_op;
       FutureMap point_arguments;
@@ -932,7 +932,7 @@ namespace Legion {
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                                        get_acquired_instances_ref(void);
     public:
-      virtual SliceTask* clone_as_slice_task(const Domain &d,
+      virtual SliceTask* clone_as_slice_task(IndexSpace is,
           Processor p, bool recurse, bool stealable,
           long long scale_denominator);
     public:
@@ -1047,7 +1047,7 @@ namespace Legion {
                                std::set<RtEvent> &ready_events);
       virtual void perform_inlining(void);
     public:
-      virtual SliceTask* clone_as_slice_task(const Domain &d,
+      virtual SliceTask* clone_as_slice_task(IndexSpace is,
           Processor p, bool recurse, bool stealable,
           long long scale_denominator);
       virtual void handle_future(const DomainPoint &point, const void *result,

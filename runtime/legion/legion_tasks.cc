@@ -4230,7 +4230,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, ACTIVATE_MULTI_CALL);
       activate_task();
       launch_space = IndexSpace::NO_SPACE;
-      internal_domain = Domain::NO_DOMAIN;
+      internal_space = IndexSpace::NO_SPACE;
       sliced = false;
       redop = 0;
       reduction_op = NULL;
@@ -4292,7 +4292,8 @@ namespace Legion {
       stealable = false; // cannot steal something that has been sliced
       Mapper::SliceTaskInput input;
       Mapper::SliceTaskOutput output;
-      input.domain = internal_domain;
+      input.domain_is = internal_space;
+      runtime->forest->find_launch_space_domain(internal_space, input.domain);
       output.verify_correctness = false;
       if (mapper == NULL)
         mapper = runtime->find_mapper(current_proc, map_id);
@@ -4309,7 +4310,7 @@ namespace Legion {
 #endif
       for (unsigned idx = 0; idx < output.slices.size(); idx++)
       {
-        const Mapper::TaskSlice &slice = output.slices[idx]; 
+        Mapper::TaskSlice &slice = output.slices[idx]; 
         if (!slice.proc.exists())
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of 'slice_task' "
@@ -4317,9 +4318,15 @@ namespace Legion {
                         "%s (ID %lld) with an invalid processor " IDFMT ".",
                         mapper->get_mapper_name(), get_task_name(),
                         get_unique_id(), slice.proc.id)
+        // Check to see if we need to get an index space for this domain
+        if (!slice.domain_is.exists() && (slice.domain.get_volume() > 0))
+          slice.domain_is = 
+            runtime->find_or_create_index_launch_space(slice.domain);
 #ifdef DEBUG_LEGION
         // Check to make sure the domain is not empty
-        const Domain &d = slice.domain;
+        Domain &d = slice.domain;
+        if ((d == Domain::NO_DOMAIN) && slice.domain_is.exists())
+          runtime->forest->find_launch_space_domain(slice.domain_is, d);
         bool empty = false;
 	size_t volume = d.get_volume();
 	if (volume == 0)
@@ -4333,7 +4340,7 @@ namespace Legion {
                         "%s (ID %lld).", mapper->get_mapper_name(),
                         get_task_name(), get_unique_id())
 #endif
-        SliceTask *new_slice = this->clone_as_slice_task(slice.domain,
+        SliceTask *new_slice = this->clone_as_slice_task(slice.domain_is,
                                                          slice.proc,
                                                          slice.recurse,
                                                          slice.stealable,
@@ -4342,14 +4349,14 @@ namespace Legion {
       }
 #ifdef DEBUG_LEGION
       // If the volumes don't match, then something bad happend in the mapper
-      if (total_points != internal_domain.get_volume())
+      if (total_points != input.domain.get_volume())
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Invalid mapper output from invocation of 'slice_task' "
                       "on mapper %s. Mapper returned slices with a total "
                       "volume %ld that does not match the expected volume of "
                       "%zd when slicing task %s (ID %lld).", 
                       mapper->get_mapper_name(), long(total_points),
-                      internal_domain.get_volume(), 
+                      input.domain.get_volume(), 
                       get_task_name(), get_unique_id())
 #endif
       trigger_slices(); 
@@ -4371,7 +4378,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MultiTask::clone_multi_from(MultiTask *rhs, const Domain &d,
+    void MultiTask::clone_multi_from(MultiTask *rhs, IndexSpace is,
                                      Processor p, bool recurse, bool stealable)
     //--------------------------------------------------------------------------
     {
@@ -4379,7 +4386,7 @@ namespace Legion {
       this->clone_task_op_from(rhs, p, stealable, false/*duplicate*/);
       this->index_domain = rhs->index_domain;
       this->launch_space = rhs->launch_space;
-      this->internal_domain = d;
+      this->internal_space = is;
       this->must_epoch_task = rhs->must_epoch_task;
       this->sliced = !recurse;
       this->redop = rhs->redop;
@@ -7023,7 +7030,7 @@ namespace Legion {
         runtime->forest->find_launch_space_domain(launch_space, index_domain);
       else
         index_domain = launcher.launch_domain;
-      internal_domain = index_domain;
+      internal_space = launch_space;
       need_intra_task_alias_analysis = !launcher.independent_requirements;
       initialize_base_task(ctx, track, launcher.static_dependences,
                            launcher.predicate, task_id);
@@ -7091,7 +7098,7 @@ namespace Legion {
         runtime->forest->find_launch_space_domain(launch_space, index_domain);
       else
         index_domain = launcher.launch_domain;
-      internal_domain = index_domain;
+      internal_space = launch_space;
       need_intra_task_alias_analysis = !launcher.independent_requirements;
       redop = redop_id;
       reduction_op = Runtime::get_reduction_op(redop);
@@ -7488,7 +7495,7 @@ namespace Legion {
             (target_proc != current_proc))
         {
           // Make a slice copy and send it away
-          SliceTask *clone = clone_as_slice_task(index_domain, target_proc,
+          SliceTask *clone = clone_as_slice_task(launch_space, target_proc,
                                                  true/*needs slice*/,
                                                  stealable, 1LL);
           runtime->send_task(clone);
@@ -7747,7 +7754,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    SliceTask* IndexTask::clone_as_slice_task(const Domain &d, Processor p,
+    SliceTask* IndexTask::clone_as_slice_task(IndexSpace is, Processor p,
                                               bool recurse, bool stealable,
                                               long long scale_denominator)
     //--------------------------------------------------------------------------
@@ -7756,7 +7763,7 @@ namespace Legion {
       SliceTask *result = runtime->get_available_slice_task(false); 
       result->initialize_base_task(parent_ctx, false/*track*/, NULL/*deps*/,
                                    Predicate::TRUE_PRED, this->task_id);
-      result->clone_multi_from(this, d, p, recurse, stealable);
+      result->clone_multi_from(this, is, p, recurse, stealable);
       result->index_complete = this->completion_event;
       result->denominator = scale_denominator;
       result->index_owner = this;
@@ -8534,7 +8541,7 @@ namespace Legion {
       rez.serialize(remote_unique_id);
       rez.serialize(locally_mapped);
       rez.serialize(remote_owner_uid);
-      rez.serialize(internal_domain);
+      rez.serialize(internal_space);
       if (is_locally_mapped())
       {
         // If we've mapped everything and there are no virtual mappings
@@ -8613,7 +8620,7 @@ namespace Legion {
       derez.deserialize(remote_unique_id); 
       derez.deserialize(locally_mapped);
       derez.deserialize(remote_owner_uid);
-      derez.deserialize(internal_domain);
+      derez.deserialize(internal_space);
       unpack_version_infos(derez, version_infos, ready_events);
       unpack_restrict_infos(derez, restrict_infos, ready_events);
       unpack_projection_infos(derez, projection_infos, launch_space);
@@ -8686,7 +8693,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    SliceTask* SliceTask::clone_as_slice_task(const Domain &d, Processor p,
+    SliceTask* SliceTask::clone_as_slice_task(IndexSpace is, Processor p,
                                               bool recurse, bool stealable,
                                               long long scale_denominator)
     //--------------------------------------------------------------------------
@@ -8695,7 +8702,7 @@ namespace Legion {
       SliceTask *result = runtime->get_available_slice_task(false); 
       result->initialize_base_task(parent_ctx,  false/*track*/, NULL/*deps*/,
                                    Predicate::TRUE_PRED, this->task_id);
-      result->clone_multi_from(this, d, p, recurse, stealable);
+      result->clone_multi_from(this, is, p, recurse, stealable);
       result->index_complete = this->index_complete;
       result->denominator = this->denominator * scale_denominator;
       result->index_owner = this->index_owner;
@@ -8793,6 +8800,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_ENUMERATE_POINTS_CALL);
+      Domain internal_domain;
+      runtime->forest->find_launch_space_domain(internal_space,internal_domain);
       size_t num_points = internal_domain.get_volume();
 #ifdef DEBUG_LEGION
       assert(num_points > 0);

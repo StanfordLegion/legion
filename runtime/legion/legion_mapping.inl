@@ -19,8 +19,43 @@
 #include "legion_mapping.h"
 
 namespace Legion {
-
   namespace Mapping {
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline IndexSpaceT<DIM,T> MapperRuntime::create_index_space(
+                            MapperContext ctx, Realm::ZRect<DIM,T> bounds) const
+    //--------------------------------------------------------------------------
+    {
+      Realm::ZIndexSpace<DIM,T> realm_is(bounds);
+      const Domain dom(realm_is);
+      return IndexSpaceT<DIM,T>(create_index_space_internal(ctx, dom, &realm_is,
+            Legion::Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline IndexSpaceT<DIM,T> MapperRuntime::create_index_space(
+      MapperContext ctx, const std::vector<Realm::ZPoint<DIM,T> > &points) const
+    //--------------------------------------------------------------------------
+    {
+      Realm::ZIndexSpace<DIM,T> realm_is(points);
+      const Domain dom(realm_is);
+      return IndexSpaceT<DIM,T>(create_index_space_internal(ctx, dom, &realm_is,
+                Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline IndexSpaceT<DIM,T> MapperRuntime::create_index_space(
+        MapperContext ctx, const std::vector<Realm::ZRect<DIM,T> > &rects) const
+    //--------------------------------------------------------------------------
+    {
+      Realm::ZIndexSpace<DIM,T> realm_is(rects);
+      const Domain dom(realm_is);
+      return IndexSpaceT<DIM,T>(create_index_space_internal(ctx, dom, &realm_is,
+                Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
+    }
 
     //--------------------------------------------------------------------------
     inline ProfilingRequest::ProfilingRequest(void)
