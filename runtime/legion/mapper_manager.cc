@@ -2396,6 +2396,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpace MapperManager::create_index_space(MappingCallInfo *ctx,
+                                                 const Domain &domain,
+                                                 const void *realm_is,
+                                                 TypeTag type_tag)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      IndexSpace result = 
+        runtime->find_or_create_index_launch_space(domain, realm_is, type_tag);
+      resume_mapper_call(ctx);
+      return result; 
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition MapperManager::get_index_partition(MappingCallInfo *ctx,
                                                       IndexSpace parent, 
                                                       Color color)

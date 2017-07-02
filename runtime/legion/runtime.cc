@@ -15333,44 +15333,60 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Runtime::find_index_launch_space(Context ctx, const Domain &dom)
+    IndexSpace Runtime::find_or_create_index_launch_space(const Domain &dom)
     //--------------------------------------------------------------------------
     {
-      AutoLock is_lock(is_launch_lock);
-      std::map<Domain,IndexSpace>::const_iterator finder = 
-        index_launch_spaces.find(dom);
-      if (finder != index_launch_spaces.end())
-        return finder->second;
-      IndexSpace result = IndexSpace::NO_SPACE;
       switch (dom.get_dim())
       {
         case 1:
           {
             Realm::ZIndexSpace<1,coord_t> is = dom;
-            result = ctx->create_index_space(forest, &is, 
-                NT_TemplateHelper::encode_tag<1,coord_t>());
-            break;
+            return find_or_create_index_launch_space(dom, &is,
+                  NT_TemplateHelper::encode_tag<1,coord_t>());
           }
         case 2:
           {
             Realm::ZIndexSpace<2,coord_t> is = dom;
-            result = ctx->create_index_space(forest, &is, 
-                NT_TemplateHelper::encode_tag<2,coord_t>());
-            break;
+            return find_or_create_index_launch_space(dom, &is,
+                  NT_TemplateHelper::encode_tag<2,coord_t>());
           }
         case 3:
           {
             Realm::ZIndexSpace<3,coord_t> is = dom;
-            result = ctx->create_index_space(forest, &is, 
-                NT_TemplateHelper::encode_tag<3,coord_t>());
-            break;
+            return find_or_create_index_launch_space(dom, &is,
+                  NT_TemplateHelper::encode_tag<3,coord_t>());
           }
         default:
           assert(false);
       }
-      index_launch_spaces[dom] = result;
-      return result;
+      return IndexSpace::NO_SPACE;
     } 
+
+    //--------------------------------------------------------------------------
+    IndexSpace Runtime::find_or_create_index_launch_space(const Domain &dom,
+                                                          const void *realm_is,
+                                                          TypeTag type_tag)
+    //--------------------------------------------------------------------------
+    {
+      const std::pair<Domain,TypeTag> key(dom, type_tag);
+      {
+        AutoLock is_lock(is_launch_lock,1,false/*exclusive*/);
+        std::map<std::pair<Domain,TypeTag>,IndexSpace>::const_iterator finder =
+          index_launch_spaces.find(key);
+        if (finder != index_launch_spaces.end())
+          return finder->second;
+      }
+      IndexSpace result(get_unique_index_space_id(),
+                        get_unique_index_tree_id(), type_tag);
+      forest->create_index_space(result, realm_is);
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_top_index_space(result.id);
+      // Overwrite and leak for now, don't care too much as this 
+      // should occur infrequently
+      AutoLock is_lock(is_launch_lock);
+      index_launch_spaces[key] = result;
+      return result;
+    }
 
     //--------------------------------------------------------------------------
     void Runtime::defer_collect_user(LogicalView *view, ApEvent term_event,

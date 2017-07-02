@@ -6340,7 +6340,7 @@ namespace Legion {
         index_launch_spaces.find(domain);
       if (finder != index_launch_spaces.end())
         return finder->second;
-      IndexSpace result = runtime->find_index_launch_space(this, domain);
+      IndexSpace result = runtime->find_or_create_index_launch_space(domain);
       index_launch_spaces[domain] = result;
       return result;
     }

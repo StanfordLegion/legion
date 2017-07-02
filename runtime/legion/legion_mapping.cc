@@ -681,6 +681,131 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexSpace MapperRuntime::create_index_space(MapperContext ctx, 
+                                                 Domain bounds) const
+    //--------------------------------------------------------------------------
+    {
+      switch (bounds.get_dim())
+      {
+        case 1:
+          {
+            Realm::ZIndexSpace<1,coord_t> realm_is = bounds;
+            return ctx->manager->create_index_space(ctx, bounds, &realm_is,
+                Legion::Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
+          }
+        case 2:
+          {
+            Realm::ZIndexSpace<2,coord_t> realm_is = bounds;
+            return ctx->manager->create_index_space(ctx, bounds, &realm_is,
+                Legion::Internal::NT_TemplateHelper::encode_tag<2,coord_t>());
+          }
+        case 3:
+          {
+            Realm::ZIndexSpace<3,coord_t> realm_is = bounds;
+            return ctx->manager->create_index_space(ctx, bounds, &realm_is,
+                Legion::Internal::NT_TemplateHelper::encode_tag<3,coord_t>());
+          }
+        default:
+          assert(false);
+      }
+      return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace MapperRuntime::create_index_space(MapperContext ctx,
+                                   const std::vector<DomainPoint> &points) const
+    //--------------------------------------------------------------------------
+    {
+      switch (points[0].get_dim())
+      {
+        case 1:
+          {
+            std::vector<Realm::ZPoint<1,coord_t> > realm_points(points.size());
+            for (unsigned idx = 0; idx < points.size(); idx++)
+              realm_points[idx] = points[idx];
+            Realm::ZIndexSpace<1,coord_t> realm_is(realm_points);
+            const Domain domain(realm_is);
+            return ctx->manager->create_index_space(ctx, domain, &realm_is,
+                      Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
+          }
+        case 2:
+          {
+            std::vector<Realm::ZPoint<2,coord_t> > realm_points(points.size());
+            for (unsigned idx = 0; idx < points.size(); idx++)
+              realm_points[idx] = points[idx];
+            Realm::ZIndexSpace<2,coord_t> realm_is(realm_points);
+            const Domain domain(realm_is);
+            return ctx->manager->create_index_space(ctx, domain, &realm_is,
+                      Internal::NT_TemplateHelper::encode_tag<2,coord_t>());
+          }
+        case 3:
+          {
+            std::vector<Realm::ZPoint<3,coord_t> > realm_points(points.size());
+            for (unsigned idx = 0; idx < points.size(); idx++)
+              realm_points[idx] = points[idx];
+            Realm::ZIndexSpace<3,coord_t> realm_is(realm_points);
+            const Domain domain(realm_is);
+            return ctx->manager->create_index_space(ctx, domain, &realm_is,
+                      Internal::NT_TemplateHelper::encode_tag<3,coord_t>());
+          }
+        default:
+          assert(false);
+      }
+      return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace MapperRuntime::create_index_space(MapperContext ctx,
+                                         const std::vector<Domain> &rects) const
+    //--------------------------------------------------------------------------
+    {
+      switch (rects[0].get_dim())
+      {
+        case 1:
+          {
+            std::vector<Realm::ZRect<1,coord_t> > realm_rects(rects.size());
+            for (unsigned idx = 0; idx < rects.size(); idx++)
+              realm_rects[idx] = rects[idx];
+            Realm::ZIndexSpace<1,coord_t> realm_is(realm_rects);
+            const Domain domain(realm_is);
+            return ctx->manager->create_index_space(ctx, domain, &realm_is,
+                      Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
+          }
+        case 2:
+          {
+            std::vector<Realm::ZRect<2,coord_t> > realm_rects(rects.size());
+            for (unsigned idx = 0; idx < rects.size(); idx++)
+              realm_rects[idx] = rects[idx];
+            Realm::ZIndexSpace<2,coord_t> realm_is(realm_rects);
+            const Domain domain(realm_is);
+            return ctx->manager->create_index_space(ctx, domain, &realm_is,
+                      Internal::NT_TemplateHelper::encode_tag<2,coord_t>());
+          }
+        case 3:
+          {
+            std::vector<Realm::ZRect<3,coord_t> > realm_rects(rects.size());
+            for (unsigned idx = 0; idx < rects.size(); idx++)
+              realm_rects[idx] = rects[idx];
+            Realm::ZIndexSpace<3,coord_t> realm_is(realm_rects);
+            const Domain domain(realm_is);
+            return ctx->manager->create_index_space(ctx, domain, &realm_is,
+                      Internal::NT_TemplateHelper::encode_tag<3,coord_t>());
+          }
+        default:
+          assert(false);
+      }
+      return IndexSpace::NO_SPACE;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpace MapperRuntime::create_index_space_internal(MapperContext ctx,
+                  const Domain &d, const void *realm_is, TypeTag type_tag) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->create_index_space(ctx, d, realm_is, type_tag);
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition MapperRuntime::get_index_partition(MapperContext ctx,
                                            IndexSpace parent, Color color) const
     //--------------------------------------------------------------------------

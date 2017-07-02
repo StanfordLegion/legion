@@ -426,6 +426,8 @@ namespace Legion {
       bool perform_remote_acquires(MappingCallInfo *info,
                       std::map<MemoryManager*,AcquireStatus> &acquire_requests);
     public:
+      IndexSpace create_index_space(MappingCallInfo *info, const Domain &domain,
+                                    const void *realm_is, TypeTag type_tag);
       IndexPartition get_index_partition(MappingCallInfo *info,
                                          IndexSpace parent, Color color);
       IndexSpace get_index_subspace(MappingCallInfo *info,

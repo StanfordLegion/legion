@@ -3008,6 +3008,28 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    IndexSpaceT<DIM,T> Runtime::create_index_space(Context ctx,
+                               const std::vector<Realm::ZPoint<DIM,T> > &points)
+    //--------------------------------------------------------------------------
+    {
+      Realm::ZIndexSpace<DIM,T> realm_is(points);
+      return IndexSpaceT<DIM,T>(create_index_space_internal(ctx, &realm_is,
+                Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceT<DIM,T> Runtime::create_index_space(Context ctx,
+                                 const std::vector<Realm::ZRect<DIM,T> > &rects)
+    //--------------------------------------------------------------------------
+    {
+      Realm::ZIndexSpace<DIM,T> realm_is(rects);
+      return IndexSpaceT<DIM,T>(create_index_space_internal(ctx, &realm_is,
+                Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     IndexSpaceT<DIM,T> Runtime::union_index_spaces(Context ctx,
                                  const std::vector<IndexSpaceT<DIM,T> > &spaces)
     //--------------------------------------------------------------------------
