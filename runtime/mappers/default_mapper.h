@@ -421,11 +421,11 @@ namespace Legion {
       static const char* create_default_name(Processor p);
       template<int DIM>
       static void default_decompose_points(
-                              const Realm::ZRect<DIM,coord_t> &point_rect,
-                              const std::vector<Processor> &targets,
-                              const Realm::ZPoint<DIM,coord_t> &blocking, 
-                              bool recurse, bool stealable,
-                              std::vector<TaskSlice> &slices);
+                            const Realm::ZIndexSpace<DIM,coord_t> &point_space,
+                            const std::vector<Processor> &targets,
+                            const Realm::ZPoint<DIM,coord_t> &blocking, 
+                            bool recurse, bool stealable,
+                            std::vector<TaskSlice> &slices);
       template<int DIM>
       static Realm::ZPoint<DIM,coord_t> default_select_num_blocks(
                             long long int factor, 
