@@ -3999,6 +3999,14 @@ namespace Legion {
         if (!slice.domain_is.exists() && (slice.domain.get_volume() > 0))
           slice.domain_is = 
             runtime->find_or_create_index_launch_space(slice.domain);
+        if (slice.domain_is.get_type_tag() != internal_space.get_type_tag())
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of 'slice_task' "
+                        "on mapper %s. Mapper returned slice index space %d "
+                        "for task %s (UID %lld) with a different type than "
+                        "original index space to be sliced.",
+                        mapper->get_mapper_name(), slice.domain_is.get_id(),
+                        get_task_name(), get_unique_id());
 #ifdef DEBUG_LEGION
         // Check to make sure the domain is not empty
         Domain &d = slice.domain;
@@ -4036,6 +4044,14 @@ namespace Legion {
                       input.domain.get_volume(), 
                       get_task_name(), get_unique_id())
 #endif
+      if (output.verify_correctness)
+      {
+        std::vector<IndexSpace> slice_spaces(slices.size());
+        for (unsigned idx = 0; idx < output.slices.size(); idx++)
+          slice_spaces[idx] = output.slices[idx].domain_is;
+        runtime->forest->validate_slicing(internal_space, slice_spaces,
+                                          this, mapper);
+      }
       trigger_slices(); 
       // If we succeeded and this is an intermediate slice task
       // then we can reclaim it, otherwise, if it is the original

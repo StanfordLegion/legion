@@ -266,6 +266,9 @@ namespace Legion {
     public:
       // Index space operation methods
       void find_launch_space_domain(IndexSpace handle, Domain &launch_domain);
+      void validate_slicing(IndexSpace input_space,
+                            const std::vector<IndexSpace> &slice_spaces,
+                            MultiTask *task, MapperManager *mapper);
       void log_launch_space(IndexSpace handle, UniqueID op_id);
     public:
       // Logical analysis methods
@@ -933,6 +936,8 @@ namespace Legion {
                                    bool read_only) = 0;
     public:
       virtual void get_launch_space_domain(Domain &launch_domain) = 0;
+      virtual void validate_slicing(const std::vector<IndexSpace> &slice_spaces,
+                                    MultiTask *task, MapperManager *mapper) = 0;
       virtual void log_launch_space(UniqueID op_id) = 0;
     public:
       const IndexSpace handle;
@@ -1157,7 +1162,11 @@ namespace Legion {
                                    bool read_only);
     public:
       virtual void get_launch_space_domain(Domain &launch_domain);
+      virtual void validate_slicing(const std::vector<IndexSpace> &slice_spaces,
+                                    MultiTask *task, MapperManager *mapper);
       virtual void log_launch_space(UniqueID op_id);
+    public:
+      bool contains_point(const Realm::ZPoint<DIM,T> &point);
     protected:
       void compute_linearization_metadata(void);
     protected:
