@@ -556,6 +556,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    bool IndexSpaceNodeT<DIM,T>::contains_point(const Realm::ZPoint<DIM,T> &p)
+    //--------------------------------------------------------------------------
+    {
+      Realm::ZIndexSpace<DIM,T> test_space;
+      // Wait for a tight space on which to perform the test
+      get_realm_index_space(test_space, true/*tight*/);
+      return test_space.contains(p);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     void IndexSpaceNodeT<DIM,T>::destroy_node(AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -3130,6 +3141,54 @@ namespace Legion {
       Realm::ZIndexSpace<DIM,T> local_space;
       get_realm_index_space(local_space, true/*tight*/);
       launch_domain = local_space;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void IndexSpaceNodeT<DIM,T>::validate_slicing(
+                                  const std::vector<IndexSpace> &slice_spaces, 
+                                  MultiTask *task, MapperManager *mapper)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<IndexSpaceNodeT<DIM,T>*> slice_nodes(slice_spaces.size());
+      for (unsigned idx = 0; idx < slice_spaces.size(); idx++)
+      {
+#ifdef DEBUG_LEGION
+        assert(slice_spaces[idx].get_type_tag() == handle.get_type_tag());
+#endif
+        slice_nodes[idx] = static_cast<IndexSpaceNodeT<DIM,T>*>(
+                            context->get_node(slice_spaces[idx]));
+      }
+      // Iterate over the points and make sure that they exist in exactly
+      // one slice space, no more, no less
+      Realm::ZIndexSpace<DIM,T> local_space;
+      get_realm_index_space(local_space, true/*tight*/);
+      for (PointInDomainIterator<DIM,T> itr(local_space); itr(); itr++)
+      {
+        bool found = false;
+        const Realm::ZPoint<DIM,T> &point = *itr;
+        for (unsigned idx = 0; idx < slice_nodes.size(); idx++)
+        {
+          if (!slice_nodes[idx]->contains_point(point))
+            continue;
+          if (found)
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                    "Invalid mapper output from invocation of 'slice_task' "
+                    "on mapper %s. Mapper returned multilple slices that "
+                    "contained the same point for task %s (ID %lld)",
+                    mapper->get_mapper_name(), task->get_task_name(),
+                    task->get_unique_id())
+          else
+            found = true;
+        }
+        if (!found)
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                    "Invalid mapper output from invocation of 'slice_task' "
+                    "on mapper %s. Mapper returned no slices that "
+                    "contained some point(s) for task %s (ID %lld)",
+                    mapper->get_mapper_name(), task->get_task_name(),
+                    task->get_unique_id())
+      }
     }
 
     //--------------------------------------------------------------------------

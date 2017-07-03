@@ -899,6 +899,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeForest::validate_slicing(IndexSpace input_space,
+                                    const std::vector<IndexSpace> &slice_spaces,
+                                    MultiTask *task, MapperManager *mapper)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode *node = get_node(input_space);
+      node->validate_slicing(slice_spaces, task, mapper);
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeForest::log_launch_space(IndexSpace handle, UniqueID op_id)
     //--------------------------------------------------------------------------
     {

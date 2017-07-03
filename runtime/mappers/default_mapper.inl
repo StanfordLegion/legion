@@ -19,7 +19,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM>
     /*static*/ void DefaultMapper::default_decompose_points(
-                           const Realm::ZRect<DIM,coord_t> &point_rect,
+                           const Realm::ZIndexSpace<DIM,coord_t> &point_space,
                            const std::vector<Processor> &targets,
                            const Realm::ZPoint<DIM,coord_t> &num_blocks,
                            bool recurse, bool stealable,
@@ -33,7 +33,7 @@ namespace Legion {
       for (int i = 0; i < DIM; i++)
         ones[i] = 1;
       Realm::ZPoint<DIM,coord_t> num_points = 
-        point_rect.hi - point_rect.lo + ones;
+        point_space.bounds.hi - point_space.bounds.lo + ones;
       Realm::ZRect<DIM> blocks(zeroes, num_blocks - ones);
       size_t next_index = 0;
       slices.reserve(blocks.volume());
@@ -41,13 +41,20 @@ namespace Legion {
         Realm::ZPoint<DIM,coord_t> block_lo = *pir;
         Realm::ZPoint<DIM,coord_t> block_hi = *pir + ones;
         Realm::ZPoint<DIM,coord_t> slice_lo =
-          num_points * block_lo / num_blocks + point_rect.lo;
+          num_points * block_lo / num_blocks + point_space.bounds.lo;
         Realm::ZPoint<DIM,coord_t> slice_hi = 
-          num_points * block_hi / num_blocks + point_rect.lo - ones; 
-        Realm::ZRect<DIM,coord_t> slice_rect(slice_lo, slice_hi);
-        if (slice_rect.volume() > 0) {
+          num_points * block_hi / num_blocks + point_space.bounds.lo - ones;
+        // Construct a new slice space based on the new bounds 
+        // and any existing sparsity map, tighten if necessary
+        Realm::ZIndexSpace<DIM,coord_t> slice_space;
+        slice_space.bounds.lo = slice_lo;
+        slice_space.bounds.hi = slice_hi;
+        slice_space.sparsity = point_space.sparsity;
+        if (!slice_space.dense())
+          slice_space = slice_space.tighten();
+        if (slice_space.volume() > 0) {
           TaskSlice slice;
-          slice.domain = slice_rect;
+          slice.domain = slice_space;
           slice.proc = targets[next_index++ % targets.size()];
           slice.recurse = recurse;
           slice.stealable = stealable;
