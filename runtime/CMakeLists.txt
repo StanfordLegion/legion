@@ -33,6 +33,17 @@ list(APPEND LOW_RUNTIME_SRC
   realm/transfer/transfer.h                realm/transfer/transfer.cc
   realm/transfer/lowlevel_dma.h            realm/transfer/lowlevel_dma.cc
   realm/transfer/lowlevel_dma.inl
+  realm/deppart/byfield.h                  realm/deppart/byfield.cc
+  realm/deppart/deppart_config.h
+  realm/deppart/image.h                    realm/deppart/image.cc
+  realm/deppart/inst_helper.h
+  realm/deppart/partitions.h               realm/deppart/partitions.cc
+  realm/deppart/preimage.h                 realm/deppart/preimage.cc
+  realm/deppart/rectlist.h                 
+  realm/deppart/rectlist.inl
+  realm/deppart/setops.h                   realm/deppart/setops.cc
+  realm/deppart/sparsity_impl.h            realm/deppart/sparsity_impl.cc
+  realm/deppart/sparsity_impl.inl
   lowlevel.h                lowlevel.cc
   lowlevel_impl.h
   realm/event_impl.h        realm/event_impl.cc
@@ -41,6 +52,8 @@ list(APPEND LOW_RUNTIME_SRC
   realm/faults.inl
   realm/idx_impl.h          realm/idx_impl.cc
   realm/inst_impl.h         realm/inst_impl.cc
+  realm/inst_layout.h       realm/inst_layout.inl
+  realm/interval_tree.h     realm/interval_tree.inl
   realm/machine_impl.h      realm/machine_impl.cc
   realm/mem_impl.h          realm/mem_impl.cc
   realm/metadata.h          realm/metadata.cc

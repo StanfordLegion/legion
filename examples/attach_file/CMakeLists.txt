@@ -17,6 +17,16 @@
 cmake_minimum_required(VERSION 3.1)
 project(LegionExample_attach_file)
 
+include(CheckCXXCompilerFlag)
+
+check_cxx_compiler_flag( "-std=c++11" CXX11_COMPILER)
+
+if(CXX11_COMPILER)
+  set(CMAKE_CXX_STANDARD 11)
+else()
+  message(FATAL_ERROR "C++11 compatible compiler not found")
+endif()
+
 # Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
@@ -27,3 +37,6 @@ target_link_libraries(attach_file Legion::Legion)
 if(Legion_ENABLE_TESTING)
   add_test(NAME attach_file COMMAND $<TARGET_FILE:attach_file>) 
 endif()
+
+
+
