@@ -56,8 +56,8 @@ variables:
 
 .openmp: &openmp
   USE_OPENMP: "1"
-.hdf5: &hdf5
-  USE_HDF: "1"
+###.hdf5: &hdf5
+###  USE_HDF: "1"
 .gasnet: &gasnet
   USE_GASNET: "1"
 .cmake: &cmake
@@ -209,14 +209,14 @@ gcc49_cxx98_debug_checks_openmp_regent:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx98_checks, *openmp, *regent]
-gcc49_cxx98_debug_checks_hdf5_cmake_legion:
-  <<: [*linux, *image, *tests]
-  variables:
-    <<: [*gcc49, *terra38, *debug, *cxx98_checks, *hdf5, *cmake, *legion]
-gcc49_cxx98_debug_checks_hdf5_regent:
-  <<: [*linux, *image, *tests]
-  variables:
-    <<: [*gcc49, *terra38, *debug, *cxx98_checks, *hdf5, *regent]
+###gcc49_cxx98_debug_checks_hdf5_cmake_legion:
+###  <<: [*linux, *image, *tests]
+###  variables:
+###    <<: [*gcc49, *terra38, *debug, *cxx98_checks, *hdf5, *cmake, *legion]
+###gcc49_cxx98_debug_checks_hdf5_regent:
+###  <<: [*linux, *image, *tests]
+###  variables:
+###    <<: [*gcc49, *terra38, *debug, *cxx98_checks, *hdf5, *regent]
 gcc49_cxx98_debug_checks_gasnet_cmake_legion:
   <<: [*linux_compute, *image, *tests]
   variables:
@@ -272,14 +272,14 @@ clang38_cxx98_debug_checks_openmp_regent:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_checks, *openmp, *regent]
-clang38_cxx98_debug_checks_hdf5_cmake_legion:
-  <<: [*linux, *image, *tests]
-  variables:
-    <<: [*clang38, *terra38, *debug, *cxx98_checks, *hdf5, *cmake, *legion]
-clang38_cxx98_debug_checks_hdf5_regent:
-  <<: [*linux, *image, *tests]
-  variables:
-    <<: [*clang38, *terra38, *debug, *cxx98_checks, *hdf5, *regent]
+###clang38_cxx98_debug_checks_hdf5_cmake_legion:
+###  <<: [*linux, *image, *tests]
+###  variables:
+###    <<: [*clang38, *terra38, *debug, *cxx98_checks, *hdf5, *cmake, *legion]
+###clang38_cxx98_debug_checks_hdf5_regent:
+###  <<: [*linux, *image, *tests]
+###  variables:
+###    <<: [*clang38, *terra38, *debug, *cxx98_checks, *hdf5, *regent]
 clang38_cxx98_debug_checks_gasnet_cmake_legion:
   <<: [*linux_compute, *image, *tests]
   variables:
