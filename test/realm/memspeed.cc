@@ -1,4 +1,5 @@
 #include "realm/realm.h"
+#include <realm/id.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -39,8 +40,7 @@ void memspeed_cpu_task(const void *args, size_t arglen,
 {
   const SpeedTestArgs& cargs = *(const SpeedTestArgs *)args;
 
-  RegionAccessor<AccessorType::Generic> ra_untyped = cargs.inst.get_accessor();
-  RegionAccessor<AccessorType::Affine<1>, void *> ra = ra_untyped.typeify<void *>().convert<AccessorType::Affine<1> >();
+  AffineAccessor<void *, 1> ra(cargs.inst, 0);
 
   // sequential write test
   double seqwr_bw = 0;
@@ -114,11 +114,14 @@ void memspeed_cpu_task(const void *args, size_t arglen,
 	assert(p != 0);
 	void *exp = &ra[p];
 	void *act = ra[prev];
-	if(exp != act)
+	if(exp != act) {
+	  //log_app.info() << "error: " << exp << " != " << act;
 	  errors++;
+	}
       }
     long long t2 = Clock::current_time_in_nanoseconds();
-    assert(errors == 0);
+    if(errors > 0)
+      log_app.warning() << errors << " errors during random read test";
     rndrd_bw = 1.0 * cargs.reps * count * sizeof(void *) / (t2 - t1);
   } 
 
@@ -160,8 +163,8 @@ void memspeed_gpu_task(const void *args, size_t arglen,
 {
   const SpeedTestArgs& cargs = *(const SpeedTestArgs *)args;
 
-  RegionAccessor<AccessorType::Generic> ra_untyped = cargs.inst.get_accessor();
-  RegionAccessor<AccessorType::Affine<1>, void *> ra = ra_untyped.typeify<void *>().convert<AccessorType::Affine<1> >();
+  AffineAccessor<void *, 1> ra(cargs.inst, 0);
+  assert(ra.strides[0] == sizeof(void *));
 
   // sequential write test
   double seqwr_bw = gpu_seqwr_test(&ra[0], cargs.reps, cargs.elements);
@@ -192,7 +195,7 @@ void top_level_task(const void *args, size_t arglen,
   log_app.print() << "Realm memory speed test";
 
   size_t elements = buffer_size / sizeof(void *);
-  Domain d = Domain::from_rect<1>(Rect<1>(0, elements - 1));
+  ZIndexSpace<1> d = ZRect<1>(0, elements - 1);
 
   // iterate over memories, create and instance, and then let each processor beat on it
   Machine machine = Machine::get_machine();
@@ -207,12 +210,18 @@ void top_level_task(const void *args, size_t arglen,
       log_app.info() << "skipping memory " << m << " (kind=" << m.kind() << ") - slow global memory";
       continue;
     }
+    if(ID(m).is_ib_memory()) {
+      log_app.info() << "skipping memory " << m << " (kind=" << m.kind() << ") - intermediate buffer memory";
+      continue;
+    }
 
     log_app.print() << "Memory: " << m << " Kind:" << m.kind() << " Capacity: " << capacity;
     std::vector<size_t> field_sizes(1, sizeof(void *));
-    RegionInstance inst = d.create_instance(m, 
-					    std::vector<size_t>(1, sizeof(void *)),
-					    elements);
+    RegionInstance inst;
+    RegionInstance::create_instance(inst, m, d,
+				    std::vector<size_t>(1, sizeof(void *)),
+				    0 /*SOA*/,
+				    ProfilingRequestSet()).wait();
     assert(inst.exists());
 
     // clear the instance first - this should also take care of faulting it in
@@ -221,7 +230,7 @@ void top_level_task(const void *args, size_t arglen,
     sdf[0].inst = inst;
     sdf[0].offset = 0;
     sdf[0].size = sizeof(void *);
-    d.fill(sdf, &fill_value, sizeof(fill_value)).wait();
+    d.fill(sdf, ProfilingRequestSet(), &fill_value, sizeof(fill_value)).wait();
 
     Machine::ProcessorQuery pq = Machine::ProcessorQuery(machine).has_affinity_to(m);
     for(Machine::ProcessorQuery::iterator it2 = pq.begin(); it2; ++it2) {
