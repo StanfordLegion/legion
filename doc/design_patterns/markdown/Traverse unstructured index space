@@ -1,0 +1,28 @@
+
+Traverse unstructured index space
+
+```cpp
+typedef double FieldData;
+
+void traverseUnstructuredIndexSpace(int fieldID,
+                                    PhysicalRegion* particle,
+                                    FieldData* &positionBase,
+                                    IndexSpace &positionIS,
+                                    Runtime* runtime,
+                                    Context ctx) {
+  
+  RegionAccessor<AccessorType::Generic, FieldData> acc = particle->get_field_accessor(fieldID).typeify<FieldData>();
+  void* b = NULL;
+  size_t stride = sizeof(FieldData) * 3;
+  acc.get_soa_parameters(b, stride);
+  positionBase = (FieldData*)b;
+  assert(stride == sizeof(FieldData) * 3);//x,y,z
+  positionIS = particle->get_logical_region().get_index_space();
+  IndexIterator positionIterator(runtime, ctx, positionIS);
+  
+  while(positionIterator.has_next()) {
+    FieldData* p = positionBase + positionIterator.next().value * 3;
+    std::cout << "position " << p[0] << "," << p[1] << "," << p[2] << std::endl;
+  }
+}
+```
