@@ -2064,7 +2064,7 @@ Event RandomTest<N1,T1,N2,T2,FT>::perform_partitioning(void)
 					     ProfilingRequestSet());
   e1.wait();
 
-  for(size_t i = 0; i < num_pieces; i++) {
+  for(int i = 0; i < num_pieces; i++) {
     log_app.debug() << "bycolor[" << i << "] (" << colors[i] << ") = " << ss_by_color[i];
     dump_sparse_index_space("", ss_by_color[i]);
   }
@@ -2079,7 +2079,7 @@ Event RandomTest<N1,T1,N2,T2,FT>::perform_partitioning(void)
 
   e2.wait();
 
-  for(size_t i = 0; i < num_pieces; i++) {
+  for(int i = 0; i < num_pieces; i++) {
     log_app.debug() << "image[" << i << "] = " << ss_images[i];
     dump_sparse_index_space("", ss_images[i]);
   }
@@ -2094,7 +2094,7 @@ Event RandomTest<N1,T1,N2,T2,FT>::perform_partitioning(void)
 
   e3.wait();
 
-  for(size_t i = 0; i < num_pieces; i++) {
+  for(int i = 0; i < num_pieces; i++) {
     log_app.debug() << "preimage[" << i << "] = " << ss_preimages[i];
     dump_sparse_index_space("", ss_preimages[i]);
   }
