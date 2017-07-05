@@ -142,20 +142,6 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  inline /*static*/ Event RegionInstance::create_file_instance(RegionInstance& inst,
-							       const char *file_name,
-							       const ZIndexSpace<N,T>& space,
-							       const std::vector<size_t> &field_sizes,
-							       legion_lowlevel_file_mode_t file_mode,
-							       const ProfilingRequestSet& prs,
-							       Event wait_on /*= Event::NO_EVENT*/)
-  {
-    assert(0);
-    inst = RegionInstance::NO_INST;
-    return Event::NO_EVENT;
-  }
-
-  template <int N, typename T>
   inline ZIndexSpace<N,T> RegionInstance::get_indexspace(void) const
   {
 #if 0
