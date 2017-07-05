@@ -1216,12 +1216,16 @@ namespace LegionRuntime {
 		  _max_req_size, _priority,
                   _order, _kind, _complete_fence)
       {
+#ifdef USE_HDF_OLD
         HDF5Memory* hdf_mem;
+#endif
         switch (kind) {
           case XferDes::XFER_HDF_READ:
           {
 	    assert(src_mem->kind == MemoryImpl::MKIND_HDF);
+#ifdef USE_HDF_OLD
             hdf_mem = (HDF5Memory*) src_mem;
+#endif
             //pthread_rwlock_rdlock(&hdf_mem->rwlock);
             // std::map<RegionInstance, HDFMetadata*>::iterator it;
             // it = hdf_mem->hdf_metadata.find(inst);
@@ -1237,7 +1241,9 @@ namespace LegionRuntime {
           case XferDes::XFER_HDF_WRITE:
           {
             assert(dst_mem->kind == MemoryImpl::MKIND_HDF);
+#ifdef USE_HDF_OLD
             hdf_mem = (HDF5Memory*) dst_mem;
+#endif
             //pthread_rwlock_rdlock(&hdf_mem->rwlock);
             // std::map<RegionInstance, HDFMetadata*>::iterator it;
             // it = hdf_mem->hdf_metadata.find(inst);
@@ -1254,10 +1260,14 @@ namespace LegionRuntime {
             assert(0);
         }
 
+#ifdef USE_HDF_OLD
 	std::map<RegionInstance, HDFMetadata*>::iterator it;
 	it = hdf_mem->hdf_metadata.find(inst);
 	assert(it != hdf_mem->hdf_metadata.end());
 	hdf_metadata = it->second;
+#endif
+	// defer H5Fopen and friends so that we can call them from the correct
+	//  thread
 
         hdf_reqs = (HDFRequest*) calloc(max_nr, sizeof(HDFRequest));
         for (int i = 0; i < max_nr; i++) {
@@ -1266,6 +1276,8 @@ namespace LegionRuntime {
           enqueue_request(&hdf_reqs[i]);
         }
      }
+
+  Logger::Category log_hdf5("hdf5");
 
       long HDFXferDes::get_requests(Request** requests, long nr)
       {
@@ -1320,6 +1332,7 @@ namespace LegionRuntime {
 			         dst_mem :
 			         src_mem)->get_direct_ptr(mem_info.base_offset,
 							  mem_info.bytes_per_chunk);
+#ifdef USE_HDF_OLD
 	  new_req->dataset_id = hdf5_info.dset_id;
 	  new_req->datatype_id = hdf5_info.dtype_id;
 
@@ -1331,6 +1344,52 @@ namespace LegionRuntime {
 
 	  CHECK_HDF5( new_req->file_space_id = H5Screate_simple(hdf5_info.dset_bounds.size(), hdf5_info.dset_bounds.data(), 0) );
 	  CHECK_HDF5( H5Sselect_hyperslab(new_req->file_space_id, H5S_SELECT_SET, hdf5_info.offset.data(), 0, hdf5_info.extent.data(), 0) );
+#else
+	  HDFFileInfo *info;
+	  {
+	    std::map<std::string, HDFFileInfo *>::const_iterator it = file_infos.find(*hdf5_info.filename);
+	    if(it != file_infos.end()) {
+	      info = it->second;
+	    } else {
+	      info = new HDFFileInfo;
+	      // have to open the file
+	      CHECK_HDF5( info->file_id = H5Fopen(hdf5_info.filename->c_str(),
+						  ((kind == XferDes::XFER_HDF_READ) ?
+					             H5F_ACC_RDONLY :
+					             H5F_ACC_RDWR),
+						  H5P_DEFAULT) );
+	      log_hdf5.info() << "H5Fopen(\"" << *hdf5_info.filename << "\") = " << info->file_id;
+	      file_infos[*hdf5_info.filename] = info;
+	    }
+	  }
+	  hid_t dset_id;
+	  {
+	    std::map<std::string, hid_t>::const_iterator it = info->dset_ids.find(*hdf5_info.dsetname);
+	    if(it != info->dset_ids.end()) {
+	      dset_id = it->second;
+	    } else {
+	      // have to open the dataset
+	      CHECK_HDF5( dset_id = H5Dopen2(info->file_id,
+					     hdf5_info.dsetname->c_str(),
+					     H5P_DEFAULT) );
+	      log_hdf5.info() << "H5Dopen2(" << info->file_id << ", \"" << *hdf5_info.dsetname << "\") = " << dset_id;
+	      info->dset_ids[*hdf5_info.dsetname] = dset_id;
+	    }
+	  }
+	  hid_t dtype_id;
+	  CHECK_HDF5( dtype_id = H5Dget_type(dset_id) );
+
+	  new_req->dataset_id = dset_id;
+	  new_req->datatype_id = dtype_id;
+
+	  std::vector<hsize_t> mem_dims = hdf5_info.extent;
+	  CHECK_HDF5( new_req->mem_space_id = H5Screate_simple(mem_dims.size(), mem_dims.data(), NULL) );
+	  //std::vector<hsize_t> mem_start(DIM, 0);
+	  //CHECK_HDF5( H5Sselect_hyperslab(new_req->mem_space_id, H5S_SELECT_SET, ms_start, NULL, count, NULL) );
+
+	  CHECK_HDF5( new_req->file_space_id = H5Screate_simple(hdf5_info.dset_bounds.size(), hdf5_info.dset_bounds.data(), 0) );
+	  CHECK_HDF5( H5Sselect_hyperslab(new_req->file_space_id, H5S_SELECT_SET, hdf5_info.offset.data(), 0, hdf5_info.extent.data(), 0) );
+#endif
 
 	  new_req->nbytes = hdf5_bytes;
 	  new_req->seq_pos = bytes_total;
@@ -1470,7 +1529,7 @@ namespace LegionRuntime {
         if (kind == XferDes::XFER_HDF_READ) {
         } else {
           assert(kind == XferDes::XFER_HDF_WRITE);
-	  CHECK_HDF5( H5Fflush(hdf_metadata->file_id, H5F_SCOPE_LOCAL) );
+	  //CHECK_HDF5( H5Fflush(hdf_metadata->file_id, H5F_SCOPE_LOCAL) );
           // for (fit = oas_vec.begin(); fit != oas_vec.end(); fit++) {
           //   off_t hdf_idx = fit->dst_offset;
           //   hid_t dataset_id = hdf_metadata->dataset_ids[hdf_idx];
@@ -1478,6 +1537,20 @@ namespace LegionRuntime {
           //   H5Fflush(dataset_id, H5F_SCOPE_LOCAL);
           // }
         }
+
+	for(std::map<std::string, HDFFileInfo *>::const_iterator it = file_infos.begin();
+	    it != file_infos.end();
+	    ++it) {
+	  for(std::map<std::string, hid_t>::const_iterator it2 = it->second->dset_ids.begin();
+	      it2 != it->second->dset_ids.end();
+	      ++it2) {
+	    log_hdf5.info() << "H5Dclose(" << it2->second << " /* \"" << it2->first << "\" */)";
+	    CHECK_HDF5( H5Dclose(it2->second) );
+	  }
+	  log_hdf5.info() << "H5Fclose(" << it->second->file_id << " /* \"" << it->first << "\" */)";
+	  CHECK_HDF5( H5Fclose(it->second->file_id) );
+	  delete it->second;
+	}
       }
 #endif
 

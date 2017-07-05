@@ -156,21 +156,6 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  inline /*static*/ Event RegionInstance::create_hdf5_instance(RegionInstance& inst,
-							       const char *file_name,
-							       const ZIndexSpace<N,T>& space,
-							       const std::vector<size_t> &field_sizes,
-							       const std::vector<const char*> &field_files,
-							       bool read_only,
-							       const ProfilingRequestSet& prs,
-							       Event wait_on /*= Event::NO_EVENT*/)
-  {
-    assert(0);
-    inst = RegionInstance::NO_INST;
-    return Event::NO_EVENT;
-  }
-
-  template <int N, typename T>
   inline ZIndexSpace<N,T> RegionInstance::get_indexspace(void) const
   {
 #if 0
