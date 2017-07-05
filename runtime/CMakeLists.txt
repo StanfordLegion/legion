@@ -90,6 +90,8 @@ if(Legion_USE_HDF5)
   list(APPEND LOW_RUNTIME_SRC
     realm/hdf5/hdf5_module.h realm/hdf5/hdf5_module.cc
     realm/hdf5/hdf5_internal.h realm/hdf5/hdf5_internal.cc
+    realm/hdf5/hdf5_access.h   realm/hdf5/hdf5_access.inl
+    realm/hdf5/hdf5_access.cc
   )
 endif()
 if(Legion_USE_GASNet)
