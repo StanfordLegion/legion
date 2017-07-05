@@ -51,7 +51,7 @@ legion_cxx_tests = [
     ['examples/dynamic_registration/dynamic_registration', []],
     ['examples/ghost/ghost', ['-ll:cpu', '4']],
     ['examples/ghost_pull/ghost_pull', ['-ll:cpu', '4']],
-    ['examples/realm_saxpy/realm_saxpy', []],
+    # ['examples/realm_saxpy/realm_saxpy', []],
     ['examples/spmd_cgsolver/spmd_cgsolver', ['-ll:cpu', '4', '-perproc']],
     ['examples/virtual_map/virtual_map', []],
 
