@@ -17,6 +17,8 @@
 ifndef LG_RT_DIR
 $(error LG_RT_DIR variable is not defined, aborting build)
 endif
+# vpath stuff below doesn't like a trailing slash in LG_RT_DIR
+override LG_RT_DIR := $(patsubst %/,%,$(LG_RT_DIR))
 
 #Flags for directing the runtime makefile what to include
 DEBUG=1                   # Include debugging symbols

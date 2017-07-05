@@ -237,6 +237,11 @@ namespace Realm {
 
 }; // namespace Realm
 
+#define FOREACH_N(__func__) \
+  __func__(1) \
+  __func__(2) \
+  __func__(3)
+
 #define FOREACH_NT(__func__) \
   __func__(1,int) \
   __func__(1,unsigned) \

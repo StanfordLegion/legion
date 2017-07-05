@@ -57,6 +57,7 @@ namespace LegionRuntime {
       void flush();
     private:
       FileRequest* file_reqs;
+      std::string filename;
       int fd; // The file that stores the physical instance
       //const char *buf_base;
     };

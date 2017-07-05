@@ -101,6 +101,7 @@ namespace Realm {
     enum LayoutType {
       InvalidLayoutType,
       AffineLayoutType,
+      HDF5LayoutType,
     };
 
     InstanceLayoutPiece(void);

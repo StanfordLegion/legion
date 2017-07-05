@@ -99,6 +99,7 @@ namespace Realm {
 	size_t inst_offset;
 	Event ready_event;
 	InstanceLayoutGeneric *layout;
+	std::string filename; // temp hack for attached files
       };
 
       // used for atomic access to metadata

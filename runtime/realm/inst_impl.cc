@@ -20,6 +20,9 @@
 #include "logging.h"
 #include "runtime_impl.h"
 #include <realm/deppart/inst_helper.h>
+#ifdef USE_HDF
+#include <realm/hdf5/hdf5_access.h>
+#endif
 
 TYPE_IS_SERIALIZABLE(Realm::IndexSpace);
 TYPE_IS_SERIALIZABLE(Realm::InstanceLayoutGeneric::FieldLayout);
@@ -175,6 +178,23 @@ namespace Realm {
       // TODO: actually call destructor
       assert(destroyed_fields.empty());
       destroy(wait_on);
+    }
+
+    template <int N, typename T>
+    ZIndexSpace<N,T> RegionInstance::get_indexspace(void) const
+    {
+      const InstanceLayout<N,T> *layout = dynamic_cast<const InstanceLayout<N,T> *>(this->get_layout());
+      if(!layout) {
+	log_inst.fatal() << "dimensionality mismatch between instance and index space!";
+	assert(0);
+      }
+      return layout->space;
+    }
+		
+    template <int N>
+    ZIndexSpace<N,int> RegionInstance::get_indexspace(void) const
+    {
+      return get_indexspace<N,int>();
     }
 
     /*static*/ const RegionInstance RegionInstance::NO_INST = { 0 };
@@ -585,6 +605,7 @@ namespace Realm {
 		 (dbs << elmt_size) &&
 		 (dbs << field_sizes) &&
 		 (dbs << parent_inst) &&
+		 (dbs << filename) &&
 		 (dbs << *layout));
       assert(ok);
 
@@ -605,7 +626,8 @@ namespace Realm {
 		 (fbd >> block_size) &&
 		 (fbd >> elmt_size) &&
 		 (fbd >> field_sizes) &&
-		 (fbd >> parent_inst));
+		 (fbd >> parent_inst) &&
+		 (fbd >> filename));
       if(ok)
 	layout = InstanceLayoutGeneric::deserialize_new(fbd);
       assert(ok && (layout != 0) && (fbd.bytes_left() == 0));
@@ -678,9 +700,26 @@ namespace Realm {
   template <int N, typename T>
   /*static*/ Serialization::PolymorphicSerdezSubclass<InstanceLayoutGeneric, InstanceLayout<N,T> > InstanceLayout<N,T>::serdez_subclass;
 
+#define DOIT(N) \
+  template ZIndexSpace<N,int> RegionInstance::get_indexspace<N>(void) const;
+  FOREACH_N(DOIT)
+#undef DOIT
+  
 #define DOIT(N,T) \
+  template ZIndexSpace<N,T> RegionInstance::get_indexspace<N,T>(void) const; \
   template class AffineLayoutPiece<N,T>; \
   template class InstanceLayout<N,T>;
   FOREACH_NT(DOIT)
+#undef DOIT
+
+#ifdef USE_HDF
+  template <int N, typename T>
+  /*static*/ Serialization::PolymorphicSerdezSubclass<InstanceLayoutPiece<N,T>, HDF5LayoutPiece<N,T> > HDF5LayoutPiece<N,T>::serdez_subclass;
+
+#define DOIT(N,T) \
+  template class HDF5LayoutPiece<N,T>;
+  FOREACH_NT(DOIT)
+#undef DOIT
+#endif
 
 }; // namespace Realm

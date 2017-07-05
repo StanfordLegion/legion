@@ -141,53 +141,6 @@ namespace Realm {
     return create_instance(inst, memory, layout, reqs, wait_on);
   }
 
-  template <int N, typename T>
-  inline /*static*/ Event RegionInstance::create_file_instance(RegionInstance& inst,
-							       const char *file_name,
-							       const ZIndexSpace<N,T>& space,
-							       const std::vector<size_t> &field_sizes,
-							       legion_lowlevel_file_mode_t file_mode,
-							       const ProfilingRequestSet& prs,
-							       Event wait_on /*= Event::NO_EVENT*/)
-  {
-    assert(0);
-    inst = RegionInstance::NO_INST;
-    return Event::NO_EVENT;
-  }
-
-  template <int N, typename T>
-  inline /*static*/ Event RegionInstance::create_hdf5_instance(RegionInstance& inst,
-							       const char *file_name,
-							       const ZIndexSpace<N,T>& space,
-							       const std::vector<size_t> &field_sizes,
-							       const std::vector<const char*> &field_files,
-							       bool read_only,
-							       const ProfilingRequestSet& prs,
-							       Event wait_on /*= Event::NO_EVENT*/)
-  {
-    assert(0);
-    inst = RegionInstance::NO_INST;
-    return Event::NO_EVENT;
-  }
-
-  template <int N, typename T>
-  inline ZIndexSpace<N,T> RegionInstance::get_indexspace(void) const
-  {
-#if 0
-    return get_lis().as_dim<N,T>().indexspace;
-#endif
-    return ZIndexSpace<N,T>();
-  }
-		
-  template <int N>
-  inline ZIndexSpace<N,int> RegionInstance::get_indexspace(void) const
-  {
-#if 0
-    return get_lis().as_dim<N,int>().indexspace;
-#endif
-    return ZIndexSpace<N,int>();
-  }
-
 
   ////////////////////////////////////////////////////////////////////////
   //

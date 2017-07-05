@@ -21,6 +21,9 @@
 #include <realm/mem_impl.h>
 #include <realm/idx_impl.h>
 #include <realm/inst_layout.h>
+#ifdef USE_HDF
+#include <realm/hdf5/hdf5_access.h>
+#endif
 
 TYPE_IS_SERIALIZABLE(Realm::IndexSpace);
 TYPE_IS_SERIALIZABLE(LegionRuntime::Arrays::Rect<1>);
@@ -709,7 +712,7 @@ namespace Realm {
   template class TransferIteratorRect<3>;
 
 
-#ifdef USE_HDF
+#ifdef USE_HDF_OLD
   template <unsigned DIM>
   class TransferIteratorHDF5 : public TransferIterator {
   public:
@@ -925,6 +928,10 @@ namespace Realm {
     virtual bool done(void) const;
     virtual size_t step(size_t max_bytes, AddressInfo& info,
 			bool tentative = false);
+#ifdef USE_HDF
+    virtual size_t step(size_t max_bytes, AddressInfoHDF5& info,
+			bool tentative = false);
+#endif
     virtual void confirm_step(void);
     virtual void cancel_step(void);
 
@@ -1152,6 +1159,126 @@ namespace Realm {
     return info.bytes_per_chunk;
   }
 
+#ifdef USE_HDF
+  template <int N, typename T>
+  size_t TransferIteratorZIndexSpace<N,T>::step(size_t max_bytes, AddressInfoHDF5& info,
+						bool tentative /*= false*/)
+  {
+    assert(!done());
+    assert(!tentative_valid);
+
+    // shouldn't be here if the iterator isn't valid
+    assert(iter.valid);
+
+    // find the layout piece the current point is in
+    const InstanceLayoutPiece<N,T> *layout_piece;
+    //int field_rel_offset;
+    size_t field_size;
+    {
+      std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = inst_layout->fields.find(fields[field_idx]);
+      assert(it != inst_layout->fields.end());
+      const InstancePieceList<N,T>& piece_list = inst_layout->piece_lists[it->second.list_idx];
+      layout_piece = piece_list.find_piece(cur_point);
+      assert(layout_piece != 0);
+      //field_rel_offset = it->second.rel_offset;
+      field_size = it->second.size_in_bytes;
+      //log_dma.print() << "F " << field_idx << " " << fields[field_idx] << " : " << it->second.list_idx << " " << field_rel_offset << " " << field_size;
+    }
+
+    size_t max_elems = max_bytes / field_size;
+    // less than one element?  give up immediately
+    if(max_elems == 0)
+      return 0;
+
+    // std::cout << "step " << this << " " << r << " " << p << " " << field_idx
+    // 	      << " " << max_bytes << ":";
+
+    // HDF5 requires we handle dimensions in order - no permutation allowed
+    // using the current point, find the biggest subrectangle we want to try
+    //  giving out
+    ZRect<N,T> target_subrect;
+    size_t cur_bytes = 0;
+    target_subrect.lo = cur_point;
+    if(layout_piece->layout_type == InstanceLayoutPiece<N,T>::HDF5LayoutType) {
+      const HDF5LayoutPiece<N,T> *hlp = static_cast<const HDF5LayoutPiece<N,T> *>(layout_piece);
+
+      info.filename = &hlp->filename;
+      info.dsetname = &hlp->dsetname;
+
+      bool grow = true;
+      cur_bytes = field_size;
+      for(int d = 0; d < N; d++) {
+	if(grow) {
+	  size_t len = iter.rect.hi[d] - cur_point[d] + 1;
+	  size_t piece_limit = hlp->bounds.hi[d] - cur_point[d] + 1;
+	  if(piece_limit < len) {
+	    len = piece_limit;
+	    grow = false;
+	  }
+	  size_t byte_limit = max_bytes / cur_bytes;
+	  if(byte_limit < len) {
+	    len = byte_limit;
+	    grow = false;
+	  }
+	  target_subrect.hi[d] = cur_point[d] + len - 1;
+	  cur_bytes *= len;
+	} else
+	  target_subrect.hi[d] = cur_point[d];
+      }
+
+      // translate the target_subrect into the dataset's coordinates
+      // HDF5 uses C-style (row-major) ordering, so invert array indices
+      info.dset_bounds.resize(N);
+      info.offset.resize(N);
+      info.extent.resize(N);
+      for(unsigned d = 0; d < N; d++) {
+	info.offset[N - 1 - d] = (target_subrect.lo[d] - hlp->bounds.lo[d] + hlp->offset[d]);
+	info.extent[N - 1 - d] = (target_subrect.hi[d] - target_subrect.lo[d] + 1);
+	info.dset_bounds[N - 1 - d] = (hlp->offset[d] +
+				       (hlp->bounds.hi[d] - hlp->bounds.lo[d]) +
+				       1);
+      }
+    } else {
+      assert(0);
+    }
+
+    // now set 'next_point' to the next point we want - this is just based on
+    //  the iterator rectangle so that iterators using different layouts still
+    //  agree
+    carry = true;
+    for(int d = 0; d < N; d++) {
+      if(carry) {
+	if(target_subrect.hi[d] == iter.rect.hi[d]) {
+	  next_point[d] = iter.rect.lo[d];
+	} else {
+	  next_point[d] = target_subrect.hi[d] + 1;
+	  carry = false;
+	}
+      } else
+	next_point[d] = target_subrect.lo[d];
+    }
+
+    if(tentative) {
+      tentative_valid = true;
+    } else {
+      // if the "carry" propagated all the way through, go on to the next field
+      //  (defer if tentative)
+      if(carry) {
+	if(iter.step()) {
+	  cur_point = iter.rect.lo;
+	} else {
+	  field_idx++;
+	  iter.reset(iter.space);
+	  cur_point = iter.rect.lo;
+	}
+      } else
+	cur_point = next_point;
+    }
+
+    return cur_bytes;
+  }
+#endif
+  
   template <int N, typename T>
   void TransferIteratorZIndexSpace<N,T>::confirm_step(void)
   {
@@ -1380,7 +1507,7 @@ namespace Realm {
 							      const std::vector<unsigned/*FieldID*/>& fields,
 							      unsigned option_flags) const
   {
-#ifdef USE_HDF
+#ifdef USE_HDF_OLD
     // HDF5 memories need special iterators
     if(inst.get_location().kind() == Memory::HDF_MEM)
       return new TransferIteratorHDF5<DIM>(r, inst, fields);
@@ -1500,7 +1627,7 @@ namespace Realm {
 								    const std::vector<unsigned/*FieldID*/>& fields,
 								    unsigned option_flags) const
   {
-#ifdef USE_HDF
+#ifdef USE_HDF_OLD
     // HDF5 memories need special iterators
     if(inst.get_location().kind() == Memory::HDF_MEM) {
       assert(0);

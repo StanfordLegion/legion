@@ -63,8 +63,10 @@ namespace Realm {
 
 #ifdef USE_HDF
     struct AddressInfoHDF5 {
-      hid_t dset_id;
-      hid_t dtype_id;
+      //hid_t dset_id;
+      //hid_t dtype_id;
+      const std::string *filename;
+      const std::string *dsetname;
       std::vector<hsize_t> dset_bounds;
       std::vector<hsize_t> offset; // start location in dataset
       std::vector<hsize_t> extent; // xfer dimensions in memory and dataset
