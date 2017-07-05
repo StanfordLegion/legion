@@ -20,6 +20,9 @@
 #include "logging.h"
 #include "runtime_impl.h"
 #include <realm/deppart/inst_helper.h>
+#ifdef USE_HDF
+#include <realm/hdf5/hdf5_access.h>
+#endif
 
 TYPE_IS_SERIALIZABLE(Realm::IndexSpace);
 TYPE_IS_SERIALIZABLE(Realm::InstanceLayoutGeneric::FieldLayout);
@@ -684,5 +687,16 @@ namespace Realm {
   template class AffineLayoutPiece<N,T>; \
   template class InstanceLayout<N,T>;
   FOREACH_NT(DOIT)
+#undef DOIT
+
+#ifdef USE_HDF
+  template <int N, typename T>
+  /*static*/ Serialization::PolymorphicSerdezSubclass<InstanceLayoutPiece<N,T>, HDF5LayoutPiece<N,T> > HDF5LayoutPiece<N,T>::serdez_subclass;
+
+#define DOIT(N,T) \
+  template class HDF5LayoutPiece<N,T>;
+  FOREACH_NT(DOIT)
+#undef DOIT
+#endif
 
 }; // namespace Realm
