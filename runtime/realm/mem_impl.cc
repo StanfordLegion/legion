@@ -502,7 +502,9 @@ namespace Realm {
 	precondition.wait();
       }
 
-      size_t offset = (size_t)-1;
+      // TODO: ideally use something like (size_t)-2 here, but that will
+      //  currently confuse the file read/write path in dma land
+      size_t offset = (size_t)0; // this will be used for zero-size allocs
       bool ok = allocator.allocate(i, bytes, alignment, offset);
 
       if(ID(i).instance.creator_node == gasnet_mynode()) {

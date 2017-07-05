@@ -59,6 +59,10 @@ namespace Realm {
   template <typename RT, typename TT>
   inline void BasicRangeAllocator<RT,TT>::add_range(RT first, RT last)
   {
+    // ignore empty ranges
+    if(first == last)
+      return;
+
     Range *newr = new Range(first, last);
 
     // simple case - starting range
@@ -81,6 +85,12 @@ namespace Realm {
   template <typename RT, typename TT>
   inline bool BasicRangeAllocator<RT,TT>::allocate(TT tag, RT size, RT alignment, RT& alloc_first)
   {
+    // empty allocation requests are trivial
+    if(size == 0) {
+      allocated[tag] = 0;
+      return true;
+    }
+
     // walk free ranges and just take the first that fits
     Range *r = sentinel.next_free;
     while(r != &sentinel) {
@@ -167,6 +177,11 @@ namespace Realm {
     assert(it != allocated.end());
     Range *r = it->second;
     allocated.erase(it);
+
+    // if there was no Range associated with this tag, it was an zero-size
+    //  allocation, and there's nothing to add to the free list
+    if(!r)
+      return;
 
     // need to add ourselves back to the free list - find previous and next
     //  free entries (which have non-null prev_free/next_free pointers)
