@@ -155,6 +155,7 @@ def run_test_fuzzer(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     env = dict(list(env.items()) + [('WARN_AS_ERROR', '0')])
     fuzz_dir = os.path.join(tmp_dir, 'fuzz-tester')
     cmd(['git', 'clone', 'https://github.com/StanfordLegion/fuzz-tester', fuzz_dir])
+    cmd(['git', 'checkout', 'deppart'])
     cmd(['python', 'main.py'], env=env, cwd=fuzz_dir)
 
 def run_test_realm(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
