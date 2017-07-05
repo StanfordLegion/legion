@@ -505,12 +505,42 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
 	  // pick an arbitrary node, except that if it's one that didn't used to be shared, make the 
 	  //  sequentially next pointer shared instead so that each node's shared pointers stay compact
 	  int idx = int(drand48() * piece_node_ptrs[nn].size());
-	  if(idx > piece_shared_nodes[nn])
+	  if(idx >= piece_shared_nodes[nn])
 	    idx = piece_shared_nodes[nn]++;
 	  const Point<1> out_ptr = piece_node_ptrs[nn][idx];
 
           fa_wire_out_ptr[wire_ptr] = out_ptr; 
         }
+      }
+    }
+  }
+  // Now we have to update the pointer locations
+  for (int n = 0; n < num_pieces; n++)
+  {
+    for (int i = 0; i < wires_per_piece; i++)
+    {
+      const Point<1> wire_ptr(n * wires_per_piece + i);
+      const Point<1> in_ptr = fa_wire_in_ptr[wire_ptr];
+      const Point<1> out_ptr = fa_wire_out_ptr[wire_ptr];
+
+      // In pointers always are local so see if it is shared or not
+      assert((in_ptr[0] / nodes_per_piece) == n);
+      const int local_in_node = in_ptr[0] % nodes_per_piece;
+      if (local_in_node < piece_shared_nodes[n])
+        fa_wire_in_loc[wire_ptr] = SHARED_PTR;
+      else
+        fa_wire_in_loc[wire_ptr] = PRIVATE_PTR;
+      // Out pointers can be anything
+      // Figure out which piece it is in
+      const int nn = out_ptr[0] / nodes_per_piece;
+      if (nn == n) {
+        const int local_out_node = out_ptr[0] % nodes_per_piece;
+        if (local_out_node < piece_shared_nodes[nn])
+          fa_wire_out_loc[wire_ptr] = SHARED_PTR;
+        else
+          fa_wire_out_loc[wire_ptr] = PRIVATE_PTR;
+      } else { // another piece so definitely a ghost pointer
+        fa_wire_out_loc[wire_ptr] = GHOST_PTR; 
       }
     }
   }
