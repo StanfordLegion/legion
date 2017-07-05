@@ -117,6 +117,7 @@ namespace Realm {
 				      const ProfilingRequestSet& prs,
 				      Event wait_on = Event::NO_EVENT);
 
+#ifdef USE_HDF
     template <int N, typename T>
     static Event create_hdf5_instance(RegionInstance& inst,
 				      const char *file_name,
@@ -126,6 +127,7 @@ namespace Realm {
 				      bool read_only,
 				      const ProfilingRequestSet& prs,
 				      Event wait_on = Event::NO_EVENT);
+#endif
 
     void destroy(Event wait_on = Event::NO_EVENT) const;
 

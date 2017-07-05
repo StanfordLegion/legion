@@ -73,6 +73,9 @@ namespace Realm {
                      bool read_only)
 
     {
+      assert(0);
+      return RegionInstance::NO_INST;
+#if 0      
       RegionInstance inst = create_instance_local(is,
                  linearization_bits, bytes_needed,
                  block_size, element_size, field_sizes, redopid,
@@ -109,11 +112,14 @@ namespace Realm {
       hdf_metadata[inst] = new_hdf;
 
       return inst;
+#endif
     }
 
     void HDF5Memory::destroy_instance(RegionInstance i,
                                      bool local_destroy)
     {
+      assert(0);
+#if 0
       std::map<RegionInstance, HDFMetadata *>::iterator it = hdf_metadata.find(i);
       assert(it != hdf_metadata.end());
 
@@ -134,6 +140,7 @@ namespace Realm {
 
       hdf_metadata.erase(it);
       destroy_instance_local(i, local_destroy);
+#endif
     }
 
     off_t HDF5Memory::alloc_bytes(size_t size)
@@ -377,6 +384,7 @@ namespace Realm {
       local_ofs = oas.dst_offset;
     }
 
+#if 0
     template <typename T, unsigned DIM>
     static void copy_rect(LegionRuntime::Arrays::Rect<DIM> r,
 			  T *mpc,
@@ -493,10 +501,13 @@ namespace Realm {
 	H5Sclose(dspace_id);
       }
     }
+#endif
 
     template <typename T>
     bool HDF5InstPairCopier<T>::copy_all_fields(Domain d)
     {
+      assert(0);
+#ifdef DEAD_CODE
       //log_hdf5.print() << "copy all fields";
       switch(d.get_dim()) {
       case 0:
@@ -524,6 +535,7 @@ namespace Realm {
 	assert(false);
 	return false;
       }
+#endif
     }
 
     template <typename T>

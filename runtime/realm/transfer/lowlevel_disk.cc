@@ -17,6 +17,7 @@
 #include "realm/realm_config.h"
 #include "lowlevel_impl.h"
 #include "lowlevel.h"
+#include <realm/deppart/inst_helper.h>
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
@@ -334,5 +335,89 @@ namespace Realm {
       pthread_mutex_unlock(&vector_lock);
       return fd;
     }
+
+  template <int N, typename T>
+  /*static*/ Event RegionInstance::create_file_instance(RegionInstance& inst,
+							const char *file_name,
+							const ZIndexSpace<N,T>& space,
+							const std::vector<size_t> &field_sizes,
+							legion_lowlevel_file_mode_t file_mode,
+							const ProfilingRequestSet& prs,
+							Event wait_on /*= Event::NO_EVENT*/)
+  {
+    // look up the local file memory
+    Memory memory = Machine::MemoryQuery(Machine::get_machine())
+      .local_address_space()
+      .only_kind(Memory::FILE_MEM)
+      .first();
+    assert(memory.exists());
+    
+    // construct an instance layout for the new instance
+    // for now, we put the fields in order and use a fortran
+    //  linearization
+    InstanceLayout<N,T> *layout = new InstanceLayout<N,T>;
+    layout->bytes_used = 0;
+    layout->alignment_reqd = 0;  // no allocation being made
+    layout->space = space;
+    layout->piece_lists.resize(field_sizes.size());
+
+    size_t field_ofs = 0;
+    size_t file_ofs = 0;
+    for(size_t i = 0; i < field_sizes.size(); i++) {
+      InstanceLayoutGeneric::FieldLayout& fl = layout->fields[field_ofs];
+      fl.list_idx = i;
+      fl.rel_offset = 0;
+      fl.size_in_bytes = field_sizes[i];
+      field_ofs += field_sizes[i];
+
+      // create a single piece (for non-empty index spaces)
+      if(!space.empty()) {
+	AffineLayoutPiece<N,T> *alp = new AffineLayoutPiece<N,T>;
+	alp->bounds = space.bounds;
+	alp->offset = file_ofs;
+	size_t stride = field_sizes[i];
+	for(int j = 0; j < N; j++) {
+	  alp->strides[j] = stride;
+	  alp->offset -= space.bounds.lo[j] * stride;
+	  stride *= (space.bounds.hi[j] - space.bounds.lo[j] + 1);
+	}
+	layout->piece_lists[i].pieces.push_back(alp);
+	file_ofs += stride;
+      }
+    }
+
+    // continue to support creating the file for now
+    if(file_mode == LEGION_FILE_CREATE) {
+      int fd = open(file_name, O_CREAT | O_RDWR, 0777);
+      assert(fd != -1);
+      // resize the file to what we want
+      int ret = ftruncate(fd, file_ofs);
+      assert(ret == 0);
+      ret = close(fd);
+      assert(ret == 0);
+    }
+    
+    // and now create the instance using this layout
+    Event e = create_instance(inst, memory, layout, prs, wait_on);
+
+    // stuff the filename into the impl's metadata for now
+    RegionInstanceImpl *impl = get_runtime()->get_instance_impl(inst);
+    impl->metadata.filename = file_name;
+
+    return e;
+  }
+
+  #define DOIT(N,T) \
+  template Event RegionInstance::create_file_instance<N,T>(RegionInstance&, \
+							   const char *, \
+							   const ZIndexSpace<N,T>&, \
+							   const std::vector<size_t>&, \
+                                                           legion_lowlevel_file_mode_t, \
+							   const ProfilingRequestSet&, \
+							   Event);
+  FOREACH_NT(DOIT)
+
+
+
 }
 

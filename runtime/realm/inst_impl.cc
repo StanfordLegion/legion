@@ -585,6 +585,7 @@ namespace Realm {
 		 (dbs << elmt_size) &&
 		 (dbs << field_sizes) &&
 		 (dbs << parent_inst) &&
+		 (dbs << filename) &&
 		 (dbs << *layout));
       assert(ok);
 
@@ -605,7 +606,8 @@ namespace Realm {
 		 (fbd >> block_size) &&
 		 (fbd >> elmt_size) &&
 		 (fbd >> field_sizes) &&
-		 (fbd >> parent_inst));
+		 (fbd >> parent_inst) &&
+		 (fbd >> filename));
       if(ok)
 	layout = InstanceLayoutGeneric::deserialize_new(fbd);
       assert(ok && (layout != 0) && (fbd.bytes_left() == 0));

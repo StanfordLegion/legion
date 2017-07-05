@@ -45,15 +45,20 @@ namespace LegionRuntime {
 		_src_mem, _dst_mem, _src_iter, _dst_iter,
 		_max_req_size, _priority,
                 _order, _kind, _complete_fence)
+      , fd(-1) // defer file open
     {
+      // grab the file's name from the instance metadata
+      RegionInstanceImpl *impl = get_runtime()->get_instance_impl(inst);
+      filename = impl->metadata.filename;
+
       //MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
       //MemoryImpl* dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
       switch (kind) {
         case XferDes::XFER_FILE_READ:
         {
-          ID src_id(inst);
-          unsigned src_index = src_id.instance.inst_idx;
-          fd = ((FileMemory*)src_mem)->get_file_des(src_index);
+          //ID src_id(inst);
+          //unsigned src_index = src_id.instance.inst_idx;
+          //fd = ((FileMemory*)src_mem)->get_file_des(src_index);
           channel = get_channel_manager()->get_file_read_channel();
           //buf_base = (const char*) dst_mem_impl->get_direct_ptr(_dst_buf.alloc_offset, 0);
           assert(src_mem->kind == MemoryImpl::MKIND_FILE);
@@ -61,9 +66,9 @@ namespace LegionRuntime {
         }
         case XferDes::XFER_FILE_WRITE:
         {
-          ID dst_id(inst);
-          unsigned dst_index = dst_id.instance.inst_idx;
-          fd = ((FileMemory*)dst_mem)->get_file_des(dst_index);
+          //ID dst_id(inst);
+          //unsigned dst_index = dst_id.instance.inst_idx;
+          //fd = ((FileMemory*)dst_mem)->get_file_des(dst_index);
           channel = get_channel_manager()->get_file_write_channel();
           //buf_base = (const char*) src_mem_impl->get_direct_ptr(_src_buf.alloc_offset, 0);
           assert(dst_mem->kind == MemoryImpl::MKIND_FILE);
@@ -75,7 +80,6 @@ namespace LegionRuntime {
       file_reqs = (FileRequest*) calloc(max_nr, sizeof(DiskRequest));
       for (int i = 0; i < max_nr; i++) {
         file_reqs[i].xd = this;
-        file_reqs[i].fd = fd;
         enqueue_request(&file_reqs[i]);
       }
     }
@@ -93,6 +97,19 @@ namespace LegionRuntime {
 	    reqs[i]->mem_base = dst_mem->get_direct_ptr(reqs[i]->dst_off,
 							reqs[i]->nbytes);
 	    assert(reqs[i]->mem_base != 0);
+
+	    // have we opened the file yet?
+	    if(fd == -1) {
+#ifdef REALM_USE_KERNEL_AIO
+	      int direct_flag = O_DIRECT;
+#else
+	      int direct_flag = 0;
+#endif
+	      fd = open(filename.c_str(),
+			O_RDONLY | direct_flag, 0777);
+	      assert(fd >= 0);
+	    }
+	    reqs[i]->fd = fd;
           }
           break;
         }
@@ -104,6 +121,19 @@ namespace LegionRuntime {
 							reqs[i]->nbytes);
 	    assert(reqs[i]->mem_base != 0);
             reqs[i]->file_off = reqs[i]->dst_off;
+
+	    // have we opened the file yet?
+	    if(fd == -1) {
+#ifdef REALM_USE_KERNEL_AIO
+	      int direct_flag = O_DIRECT;
+#else
+	      int direct_flag = 0;
+#endif
+	      fd = open(filename.c_str(),
+			O_RDWR | direct_flag, 0777);
+	      assert(fd >= 0);
+	    }
+	    reqs[i]->fd = fd;
           }
           break;
         }
@@ -125,7 +155,10 @@ namespace LegionRuntime {
 
     void FileXferDes::flush()
     {
-      fsync(fd);
+      if(fd >= 0) {
+	close(fd);
+	fd = -1;
+      }
     }
 
     DiskXferDes::DiskXferDes(DmaRequest* _dma_request,
