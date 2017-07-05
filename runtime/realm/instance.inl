@@ -141,24 +141,6 @@ namespace Realm {
     return create_instance(inst, memory, layout, reqs, wait_on);
   }
 
-  template <int N, typename T>
-  inline ZIndexSpace<N,T> RegionInstance::get_indexspace(void) const
-  {
-#if 0
-    return get_lis().as_dim<N,T>().indexspace;
-#endif
-    return ZIndexSpace<N,T>();
-  }
-		
-  template <int N>
-  inline ZIndexSpace<N,int> RegionInstance::get_indexspace(void) const
-  {
-#if 0
-    return get_lis().as_dim<N,int>().indexspace;
-#endif
-    return ZIndexSpace<N,int>();
-  }
-
 
   ////////////////////////////////////////////////////////////////////////
   //

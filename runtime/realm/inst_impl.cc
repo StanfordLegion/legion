@@ -180,6 +180,23 @@ namespace Realm {
       destroy(wait_on);
     }
 
+    template <int N, typename T>
+    ZIndexSpace<N,T> RegionInstance::get_indexspace(void) const
+    {
+      const InstanceLayout<N,T> *layout = dynamic_cast<const InstanceLayout<N,T> *>(this->get_layout());
+      if(!layout) {
+	log_inst.fatal() << "dimensionality mismatch between instance and index space!";
+	assert(0);
+      }
+      return layout->space;
+    }
+		
+    template <int N>
+    ZIndexSpace<N,int> RegionInstance::get_indexspace(void) const
+    {
+      return get_indexspace<N,int>();
+    }
+
     /*static*/ const RegionInstance RegionInstance::NO_INST = { 0 };
 
     // a generic accessor just holds a pointer to the impl and passes all 
@@ -683,7 +700,13 @@ namespace Realm {
   template <int N, typename T>
   /*static*/ Serialization::PolymorphicSerdezSubclass<InstanceLayoutGeneric, InstanceLayout<N,T> > InstanceLayout<N,T>::serdez_subclass;
 
+#define DOIT(N) \
+  template ZIndexSpace<N,int> RegionInstance::get_indexspace<N>(void) const;
+  FOREACH_N(DOIT)
+#undef DOIT
+  
 #define DOIT(N,T) \
+  template ZIndexSpace<N,T> RegionInstance::get_indexspace<N,T>(void) const; \
   template class AffineLayoutPiece<N,T>; \
   template class InstanceLayout<N,T>;
   FOREACH_NT(DOIT)
