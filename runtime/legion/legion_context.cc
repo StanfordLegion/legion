@@ -6593,6 +6593,9 @@ namespace Legion {
       // Get our allocation barriers
       pending_partition_barrier = manager->get_pending_partition_barrier();
       future_map_barrier = manager->get_future_map_barrier();
+#ifdef DEBUG_LEGION_COLLECTIVES
+      collective_check_barrier = manager->get_collective_check_barrier();
+#endif
       // Configure our collective settings
       shard_collective_radix = Runtime::legion_collective_radix;
       configure_collective_settings(manager->total_shards, owner->shard_id,
@@ -6720,7 +6723,7 @@ namespace Legion {
         // Have to register this before broadcasting it
         forest->create_index_space(handle, realm_is);
         // Do our arrival on this generation, should be the last one
-        ValueBroadcast<IndexSpace> collective_space(this);
+        ValueBroadcast<IndexSpace> collective_space(this, COLLECTIVE_LOC_3);
         collective_space.broadcast(handle);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)", 
@@ -6733,7 +6736,7 @@ namespace Legion {
       {
         // We need to get the barrier result 
         ValueBroadcast<IndexSpace> collective_space(this,
-                            index_space_allocator_shard);
+                            index_space_allocator_shard, COLLECTIVE_LOC_3);
         handle = collective_space;
 #ifdef DEBUG_LEGION
         assert(handle.exists());
@@ -6764,7 +6767,7 @@ namespace Legion {
                             spaces[0].get_type_tag());
         // Have to do our registration before broadcasting the result
         forest->create_union_space(handle, owner_task, spaces);
-        ValueBroadcast<IndexSpace> collective_space(this);
+        ValueBroadcast<IndexSpace> collective_space(this, COLLECTIVE_LOC_4);
         collective_space.broadcast(handle);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)", 
@@ -6777,7 +6780,7 @@ namespace Legion {
       {
         // We need to get the barrier result 
         ValueBroadcast<IndexSpace> collective_space(this,
-                            index_space_allocator_shard);
+                            index_space_allocator_shard, COLLECTIVE_LOC_4);
         handle = collective_space;
 #ifdef DEBUG_LEGION
         assert(handle.exists());
@@ -6811,7 +6814,7 @@ namespace Legion {
                             spaces[0].get_type_tag());
         // Have to do our registration before broadcasting the result
         forest->create_intersection_space(handle, owner_task, spaces);
-        ValueBroadcast<IndexSpace> space_collective(this);
+        ValueBroadcast<IndexSpace> space_collective(this, COLLECTIVE_LOC_5);
         space_collective.broadcast(handle);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)", 
@@ -6824,7 +6827,7 @@ namespace Legion {
       {
         // We need to get the barrier result 
         ValueBroadcast<IndexSpace> space_collective(this,
-                            index_space_allocator_shard);
+                            index_space_allocator_shard, COLLECTIVE_LOC_5);
         handle = space_collective;
 #ifdef DEBUG_LEGION
         assert(handle.exists());
@@ -6856,7 +6859,7 @@ namespace Legion {
                             left.get_type_tag());
         // Have to do our registration before broadcasting
         forest->create_difference_space(handle, owner_task, left, right);
-        ValueBroadcast<IndexSpace> space_collective(this);
+        ValueBroadcast<IndexSpace> space_collective(this, COLLECTIVE_LOC_6);
         space_collective.broadcast(handle);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)", 
@@ -6869,7 +6872,7 @@ namespace Legion {
       {
         // We need to get the barrier result 
         ValueBroadcast<IndexSpace> space_collective(this, 
-                            index_space_allocator_shard);
+                            index_space_allocator_shard, COLLECTIVE_LOC_6);
         handle = space_collective;
 #ifdef DEBUG_LEGION
         assert(handle.exists());
@@ -6957,14 +6960,14 @@ namespace Legion {
         // We have to wait before broadcasting the value to other shards
         if (!parent_notified.has_triggered())
           parent_notified.lg_wait();
-        ValueBroadcast<IndexPartition> pid_collective(this);
+        ValueBroadcast<IndexPartition> pid_collective(this, COLLECTIVE_LOC_7);
         pid_collective.broadcast(pid);
         if (color_generated)
         {
 #ifdef DEBUG_LEGION
           assert(partition_color != INVALID_COLOR); // we should have an ID
 #endif
-          ValueBroadcast<LegionColor> color_collective(this);
+          ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_8);
           color_collective.broadcast(partition_color);
         }
       }
@@ -6972,7 +6975,7 @@ namespace Legion {
       {
         // We need to get the barrier result
         ValueBroadcast<IndexPartition> pid_collective(this,
-                          index_partition_allocator_shard);
+                          index_partition_allocator_shard, COLLECTIVE_LOC_7);
         pid = pid_collective;
 #ifdef DEBUG_LEGION
         assert(pid.exists());
@@ -6981,7 +6984,7 @@ namespace Legion {
         if (color_generated)
         {
           ValueBroadcast<LegionColor> color_collective(this,
-                            index_partition_allocator_shard);
+                            index_partition_allocator_shard, COLLECTIVE_LOC_8);
           partition_color = color_collective;
 #ifdef DEBUG_LEGION
           assert(partition_color != INVALID_COLOR);
@@ -7077,14 +7080,14 @@ namespace Legion {
         // We have to wait before broadcasting the value to other shards
         if (!parent_notified.has_triggered())
           parent_notified.lg_wait();
-        ValueBroadcast<IndexPartition> pid_collective(this);
+        ValueBroadcast<IndexPartition> pid_collective(this, COLLECTIVE_LOC_9);
         pid_collective.broadcast(pid);
         if (color_generated)
         {
 #ifdef DEBUG_LEGION
           assert(partition_color != INVALID_COLOR);
 #endif
-          ValueBroadcast<LegionColor> color_collective(this);
+          ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_10);
           color_collective.broadcast(partition_color);
         }
       }
@@ -7092,7 +7095,7 @@ namespace Legion {
       {
         // We need to get the barrier result
         ValueBroadcast<IndexPartition> pid_collective(this, 
-                            index_partition_allocator_shard);
+                            index_partition_allocator_shard, COLLECTIVE_LOC_9);
         pid = pid_collective;
 #ifdef DEBUG_LEGION
         assert(pid.exists());
@@ -7100,7 +7103,7 @@ namespace Legion {
         if (color_generated)
         {
           ValueBroadcast<LegionColor> color_collective(this,
-                              index_partition_allocator_shard);
+                            index_partition_allocator_shard, COLLECTIVE_LOC_10);
           partition_color = color_collective;
 #ifdef DEBUG_LEGION
           assert(partition_color != INVALID_COLOR);
@@ -7196,14 +7199,14 @@ namespace Legion {
         // We have to wait before broadcasting the value to other shards
         if (!parent_notified.has_triggered())
           parent_notified.lg_wait();
-        ValueBroadcast<IndexPartition> pid_collective(this);
+        ValueBroadcast<IndexPartition> pid_collective(this, COLLECTIVE_LOC_11);
         pid_collective.broadcast(pid);
         if (color_generated)
         {
 #ifdef DEBUG_LEGION
           assert(partition_color != INVALID_COLOR);
 #endif
-          ValueBroadcast<LegionColor> color_collective(this);
+          ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_12);
           color_collective.broadcast(partition_color);
         }
       }
@@ -7211,7 +7214,7 @@ namespace Legion {
       {
         // We need to get the barrier result
         ValueBroadcast<IndexPartition> pid_collective(this,
-                          index_partition_allocator_shard);
+                          index_partition_allocator_shard, COLLECTIVE_LOC_11);
         pid = pid_collective;
 #ifdef DEBUG_LEGION
         assert(pid.exists());
@@ -7219,7 +7222,7 @@ namespace Legion {
         if (color_generated)
         {
           ValueBroadcast<LegionColor> color_collective(this,
-                            index_partition_allocator_shard);
+                            index_partition_allocator_shard, COLLECTIVE_LOC_12);
           partition_color = color_collective;
 #ifdef DEBUG_LEGION
           assert(partition_color != INVALID_COLOR);
@@ -7312,14 +7315,14 @@ namespace Legion {
         // We have to wait before broadcasting the value to other shards
         if (!parent_notified.has_triggered())
           parent_notified.lg_wait();
-        ValueBroadcast<IndexPartition> pid_collective(this);
+        ValueBroadcast<IndexPartition> pid_collective(this, COLLECTIVE_LOC_13);
         pid_collective.broadcast(pid);
         if (color_generated)
         {
 #ifdef DEBUG_LEGION
           assert(partition_color != INVALID_COLOR);
 #endif
-          ValueBroadcast<LegionColor> color_collective(this);
+          ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_14);
           color_collective.broadcast(partition_color);
         }
       }
@@ -7327,7 +7330,7 @@ namespace Legion {
       {
         // We need to get the barrier result
         ValueBroadcast<IndexPartition> pid_collective(this,
-                          index_partition_allocator_shard);
+                          index_partition_allocator_shard, COLLECTIVE_LOC_13);
         pid = pid_collective;
 #ifdef DEBUG_LEGION
         assert(pid.exists());
@@ -7335,7 +7338,7 @@ namespace Legion {
         if (color_generated)
         {
           ValueBroadcast<LegionColor> color_collective(this,
-                            index_partition_allocator_shard);
+                            index_partition_allocator_shard, COLLECTIVE_LOC_14);
           partition_color = color_collective;
 #ifdef DEBUG_LEGION
           assert(partition_color != INVALID_COLOR);
@@ -7400,14 +7403,14 @@ namespace Legion {
                                              owner_shard->shard_id,
                                              shard_manager->total_shards);
         // Now broadcast the chosen color to all the other shards
-        ValueBroadcast<LegionColor> color_collective(this);
+        ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_15);
         color_collective.broadcast(partition_color);
       }
       else
       {
         // Get the color result from the owner node
         ValueBroadcast<LegionColor> color_collective(this,
-                          index_partition_allocator_shard);
+                          index_partition_allocator_shard, COLLECTIVE_LOC_15);
         partition_color = color_collective;
 #ifdef DEBUG_LEGION
         assert(partition_color != INVALID_COLOR);
@@ -7425,7 +7428,7 @@ namespace Legion {
       // that all the shards have all the names for the handles they need
       if (!handles.empty())
       {
-        CrossProductCollective collective(this);
+        CrossProductCollective collective(this, COLLECTIVE_LOC_36);
         collective.exchange_partitions(handles);
       }
       // Update our allocation shard
@@ -7450,8 +7453,8 @@ namespace Legion {
       if (owner_shard->shard_id == 0)
         log_index.debug("Creating association in task %s (ID %lld)", 
                         get_task_name(), get_unique_id());
-      part_op->set_sharding_collective(
-          new ShardingGatherCollective(this, 0/*owner shard*/));
+      part_op->set_sharding_collective(new ShardingGatherCollective(this, 
+                                    0/*owner shard*/, COLLECTIVE_LOC_37));
 #endif
       part_op->initialize_by_association(this, domain, domain_parent, 
                                          domain_fid, range, id, tag);
@@ -7519,14 +7522,14 @@ namespace Legion {
         // We have to wait before broadcasting the value to other shards
         if (!parent_notified.has_triggered())
           parent_notified.lg_wait();
-        ValueBroadcast<IndexPartition> pid_collective(this);
+        ValueBroadcast<IndexPartition> pid_collective(this, COLLECTIVE_LOC_16);
         pid_collective.broadcast(pid);
         if (color_generated)
         {
 #ifdef DEBUG_LEGION
           assert(part_color != INVALID_COLOR);
 #endif
-          ValueBroadcast<LegionColor> color_collective(this);
+          ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_17);
           color_collective.broadcast(part_color);
         }
       }
@@ -7534,7 +7537,7 @@ namespace Legion {
       {
         // We need to get the barrier result
         ValueBroadcast<IndexPartition> pid_collective(this, 
-                          index_partition_allocator_shard);
+                          index_partition_allocator_shard, COLLECTIVE_LOC_16);
         pid = pid_collective;
 #ifdef DEBUG_LEGION
         assert(pid.exists());
@@ -7542,7 +7545,7 @@ namespace Legion {
         if (color_generated)
         {
           ValueBroadcast<LegionColor> color_collective(this,
-                            index_partition_allocator_shard);
+                            index_partition_allocator_shard, COLLECTIVE_LOC_17);
           part_color = color_collective;
 #ifdef DEBUG_LEGION
           assert(part_color != INVALID_COLOR);
@@ -7616,14 +7619,14 @@ namespace Legion {
         // We have to wait before broadcasting the value to other shards
         if (!parent_notified.has_triggered())
           parent_notified.lg_wait();
-        ValueBroadcast<IndexPartition> pid_collective(this);
+        ValueBroadcast<IndexPartition> pid_collective(this, COLLECTIVE_LOC_18);
         pid_collective.broadcast(pid);
         if (color_generated)
         {
 #ifdef DEBUG_LEGION
           assert(part_color != INVALID_COLOR);
 #endif
-          ValueBroadcast<LegionColor> color_collective(this);
+          ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_19);
           color_collective.broadcast(part_color);
         }
       }
@@ -7631,7 +7634,7 @@ namespace Legion {
       {
         // We need to get the barrier result
         ValueBroadcast<IndexPartition> pid_collective(this,
-                          index_partition_allocator_shard);
+                          index_partition_allocator_shard, COLLECTIVE_LOC_18);
         pid = pid_collective;
 #ifdef DEBUG_LEGION
         assert(pid.exists());
@@ -7639,7 +7642,7 @@ namespace Legion {
         if (color_generated)
         {
           ValueBroadcast<LegionColor> color_collective(this,
-                            index_partition_allocator_shard);
+                            index_partition_allocator_shard, COLLECTIVE_LOC_19);
           part_color = color_collective;
 #ifdef DEBUG_LEGION
           assert(part_color != INVALID_COLOR);
@@ -7657,8 +7660,8 @@ namespace Legion {
       part_op->initialize_by_field(this, pending_partition_barrier,
                                    pid, handle, parent_priv, fid, id,tag);
 #ifdef DEBUG_LEGION
-      part_op->set_sharding_collective(
-          new ShardingGatherCollective(this, 0/*owner shard*/));
+      part_op->set_sharding_collective(new ShardingGatherCollective(this, 
+                                    0/*owner shard*/, COLLECTIVE_LOC_38));
 #endif
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
@@ -7735,14 +7738,14 @@ namespace Legion {
         // We have to wait before broadcasting the value to other shards
         if (!parent_notified.has_triggered())
           parent_notified.lg_wait();
-        ValueBroadcast<IndexPartition> pid_collective(this);
+        ValueBroadcast<IndexPartition> pid_collective(this, COLLECTIVE_LOC_20);
         pid_collective.broadcast(pid);
         if (color_generated)
         {
 #ifdef DEBUG_LEGION
           assert(part_color != INVALID_COLOR);
 #endif
-          ValueBroadcast<LegionColor> color_collective(this);
+          ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_21);
           color_collective.broadcast(part_color);
         }
       }
@@ -7750,7 +7753,7 @@ namespace Legion {
       {
         // We need to get the barrier result
         ValueBroadcast<IndexPartition> pid_collective(this, 
-                          index_partition_allocator_shard);
+                          index_partition_allocator_shard, COLLECTIVE_LOC_20);
         pid = pid_collective;
 #ifdef DEBUG_LEGION
         assert(pid.exists());
@@ -7758,7 +7761,7 @@ namespace Legion {
         if (color_generated)
         {
           ValueBroadcast<LegionColor> color_collective(this, 
-                            index_partition_allocator_shard);
+                            index_partition_allocator_shard, COLLECTIVE_LOC_21);
           part_color = color_collective;
 #ifdef DEBUG_LEGION
           assert(part_color != INVALID_COLOR);
@@ -7777,8 +7780,8 @@ namespace Legion {
                                    pending_partition_barrier, 
                                    pid, projection, parent, fid, id, tag);
 #ifdef DEBUG_LEGION
-      part_op->set_sharding_collective(
-          new ShardingGatherCollective(this, 0/*owner shard*/));
+      part_op->set_sharding_collective(new ShardingGatherCollective(this, 
+                                    0/*owner shard*/, COLLECTIVE_LOC_39));
 #endif
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
@@ -7855,14 +7858,14 @@ namespace Legion {
         // We have to wait before broadcasting the value to other shards
         if (!parent_notified.has_triggered())
           parent_notified.lg_wait();
-        ValueBroadcast<IndexPartition> pid_collective(this);
+        ValueBroadcast<IndexPartition> pid_collective(this, COLLECTIVE_LOC_22);
         pid_collective.broadcast(pid);
         if (color_generated)
         {
 #ifdef DEBUG_LEGION
           assert(part_color != INVALID_COLOR);
 #endif
-          ValueBroadcast<LegionColor> color_collective(this);
+          ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_23);
           color_collective.broadcast(part_color);
         }
       }
@@ -7870,7 +7873,7 @@ namespace Legion {
       {
         // We need to get the barrier result
         ValueBroadcast<IndexPartition> pid_collective(this,
-                          index_partition_allocator_shard);
+                          index_partition_allocator_shard, COLLECTIVE_LOC_22);
         pid = pid_collective;
 #ifdef DEBUG_LEGION
         assert(pid.exists());
@@ -7878,7 +7881,7 @@ namespace Legion {
         if (color_generated)
         {
           ValueBroadcast<LegionColor> color_collective(this,
-                            index_partition_allocator_shard);
+                            index_partition_allocator_shard, COLLECTIVE_LOC_23);
           part_color = color_collective;
 #ifdef DEBUG_LEGION
           assert(part_color != INVALID_COLOR);
@@ -7897,8 +7900,8 @@ namespace Legion {
                                          pending_partition_barrier,
                                          pid, projection, parent, fid, id, tag);
 #ifdef DEBUG_LEGION
-      part_op->set_sharding_collective(
-          new ShardingGatherCollective(this, 0/*owner shard*/));
+      part_op->set_sharding_collective(new ShardingGatherCollective(this, 
+                                    0/*owner shard*/, COLLECTIVE_LOC_40));
 #endif
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
@@ -7982,14 +7985,14 @@ namespace Legion {
         // We have to wait before broadcasting the value to other shards
         if (!parent_notified.has_triggered())
           parent_notified.lg_wait();
-        ValueBroadcast<IndexPartition> pid_collective(this);
+        ValueBroadcast<IndexPartition> pid_collective(this, COLLECTIVE_LOC_24);
         pid_collective.broadcast(pid);
         if (color_generated)
         {
 #ifdef DEBUG_LEGION
           assert(part_color != INVALID_COLOR);
 #endif
-          ValueBroadcast<LegionColor> color_collective(this);
+          ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_25);
           color_collective.broadcast(part_color);
         }
       }
@@ -7997,7 +8000,7 @@ namespace Legion {
       {
         // We need to get the barrier result
         ValueBroadcast<IndexPartition> pid_collective(this,
-                          index_partition_allocator_shard);
+                          index_partition_allocator_shard, COLLECTIVE_LOC_24);
         pid = pid_collective;
 #ifdef DEBUG_LEGION
         assert(pid.exists());
@@ -8005,7 +8008,7 @@ namespace Legion {
         if (color_generated)
         {
           ValueBroadcast<LegionColor> color_collective(this,
-                            index_partition_allocator_shard);
+                            index_partition_allocator_shard, COLLECTIVE_LOC_25);
           part_color = color_collective;
 #ifdef DEBUG_LEGION
           assert(part_color != INVALID_COLOR);
@@ -8025,8 +8028,8 @@ namespace Legion {
                                       pid, projection, handle,
                                       parent, fid, id, tag);
 #ifdef DEBUG_LEGION
-      part_op->set_sharding_collective(
-          new ShardingGatherCollective(this, 0/*owner shard*/));
+      part_op->set_sharding_collective(new ShardingGatherCollective(this, 
+                                    0/*owner shard*/, COLLECTIVE_LOC_41));
 #endif
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
@@ -8102,14 +8105,14 @@ namespace Legion {
         // We have to wait before broadcasting the value to other shards
         if (!parent_notified.has_triggered())
           parent_notified.lg_wait();
-        ValueBroadcast<IndexPartition> pid_collective(this);
+        ValueBroadcast<IndexPartition> pid_collective(this, COLLECTIVE_LOC_26);
         pid_collective.broadcast(pid);
         if (color_generated)
         {
 #ifdef DEBUG_LEGION
           assert(part_color != INVALID_COLOR);
 #endif
-          ValueBroadcast<LegionColor> color_collective(this);
+          ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_27);
           color_collective.broadcast(part_color);
         }
       }
@@ -8117,7 +8120,7 @@ namespace Legion {
       {
         // We need to get the barrier result
         ValueBroadcast<IndexPartition> pid_collective(this,
-                          index_partition_allocator_shard);
+                          index_partition_allocator_shard, COLLECTIVE_LOC_26);
         pid = pid_collective;
 #ifdef DEBUG_LEGION
         assert(pid.exists());
@@ -8125,7 +8128,7 @@ namespace Legion {
         if (color_generated)
         {
           ValueBroadcast<LegionColor> color_collective(this,
-                            index_partition_allocator_shard);
+                            index_partition_allocator_shard, COLLECTIVE_LOC_27);
           part_color = color_collective;
 #ifdef DEBUG_LEGION
           assert(part_color != INVALID_COLOR);
@@ -8146,8 +8149,8 @@ namespace Legion {
                                             pid, projection, handle,
                                             parent, fid, id, tag);
 #ifdef DEBUG_LEGION
-      part_op->set_sharding_collective(
-          new ShardingGatherCollective(this, 0/*owner shard*/));
+      part_op->set_sharding_collective(new ShardingGatherCollective(this, 
+                                    0/*owner shard*/, COLLECTIVE_LOC_42));
 #endif
       // Now figure out if we need to unmap and re-map any inline mappings
       std::vector<PhysicalRegion> unmapped_regions;
@@ -8221,9 +8224,9 @@ namespace Legion {
         if (!parent_notified.has_triggered())
           parent_notified.lg_wait();
         // Broadcast the partition first and then the barrier
-        ValueBroadcast<IndexPartition> pid_collective(this);
+        ValueBroadcast<IndexPartition> pid_collective(this, COLLECTIVE_LOC_28);
         pid_collective.broadcast(pid);
-        ValueBroadcast<ApBarrier> bar_collective(this);
+        ValueBroadcast<ApBarrier> bar_collective(this, COLLECTIVE_LOC_29);
         bar_collective.broadcast(partition_ready);
         if (color_generated)
         {
@@ -8231,7 +8234,7 @@ namespace Legion {
           assert(part_color != INVALID_COLOR);
 #endif
           // Broadcast the color if needed
-          ValueBroadcast<LegionColor> color_collective(this);
+          ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_30);
           color_collective.broadcast(part_color);
         }
       }
@@ -8239,9 +8242,9 @@ namespace Legion {
       {
         // Get the partition handle and barrier
         ValueBroadcast<IndexPartition> pid_collective(this, 
-                            index_partition_allocator_shard); 
+                            index_partition_allocator_shard, COLLECTIVE_LOC_28);
         ValueBroadcast<ApBarrier> bar_collective(this,
-                            index_partition_allocator_shard);
+                            index_partition_allocator_shard, COLLECTIVE_LOC_29);
         pid = pid_collective;
 #ifdef DEBUG_LEGION
         assert(pid.exists());
@@ -8250,7 +8253,7 @@ namespace Legion {
         if (color_generated)
         {
           ValueBroadcast<LegionColor> color_collective(this,
-                            index_partition_allocator_shard);
+                            index_partition_allocator_shard, COLLECTIVE_LOC_30);
           part_color = color_collective;
 #ifdef DEBUG_LEGION
           assert(part_color != INVALID_COLOR);
@@ -8406,7 +8409,7 @@ namespace Legion {
         space = FieldSpace(runtime->get_unique_field_space_id());
         // Need to register this before broadcasting
         forest->create_field_space(space);
-        ValueBroadcast<FieldSpace> space_collective(this);
+        ValueBroadcast<FieldSpace> space_collective(this, COLLECTIVE_LOC_31);
         space_collective.broadcast(space);
 #ifdef DEBUG_LEGION
         log_field.debug("Creating field space %x in task %s (ID %lld)", 
@@ -8419,7 +8422,7 @@ namespace Legion {
       {
         // We need to get the barrier result
         ValueBroadcast<FieldSpace> space_collective(this,
-                            field_space_allocator_shard);
+                            field_space_allocator_shard, COLLECTIVE_LOC_32);
         space = space_collective;
 #ifdef DEBUG_LEGION
         assert(space.exists());
@@ -8481,7 +8484,7 @@ namespace Legion {
         }
 #endif
         forest->allocate_field(space, field_size, fid, serdez_id);
-        ValueBroadcast<FieldID> field_collective(this);
+        ValueBroadcast<FieldID> field_collective(this, COLLECTIVE_LOC_33);
         field_collective.broadcast(fid);
         if (Runtime::legion_spy_enabled)
           LegionSpy::log_field_creation(space.id, fid, field_size);
@@ -8489,7 +8492,8 @@ namespace Legion {
       else
       {
         // We need to get the barrier result
-        ValueBroadcast<FieldID> field_collective(this, field_allocator_shard);
+        ValueBroadcast<FieldID> field_collective(this, 
+                                  field_allocator_shard, COLLECTIVE_LOC_33);
         fid = field_collective;
         // No need to do the allocation since it was already done
       }
@@ -8553,7 +8557,7 @@ namespace Legion {
         handle.tree_id = runtime->get_unique_region_tree_id();
         // Have to register this before doing the broadcast
         forest->create_logical_region(handle);
-        ValueBroadcast<RegionTreeID> tree_collective(this);
+        ValueBroadcast<RegionTreeID> tree_collective(this, COLLECTIVE_LOC_34);
         tree_collective.broadcast(handle.tree_id);
 #ifdef DEBUG_LEGION
         log_region.debug("Creating logical region in task %s (ID %lld) with "
@@ -8569,7 +8573,7 @@ namespace Legion {
       {
         // We need to get the barrier result
         ValueBroadcast<RegionTreeID> tree_collective(this,
-                          logical_region_allocator_shard);
+                          logical_region_allocator_shard, COLLECTIVE_LOC_34);
         handle.tree_id = tree_collective;
 #ifdef DEBUG_LEGION
         assert(handle.exists());
@@ -8712,8 +8716,8 @@ namespace Legion {
                         "addresss space %d",
                         task->get_unique_id(), task->get_task_name(), 
                         task->get_unique_id(), runtime->address_space);
-      task->set_sharding_collective(
-          new ShardingGatherCollective(this, 0/*owner shard*/));
+      task->set_sharding_collective(new ShardingGatherCollective(this, 
+                                    0/*owner shard*/, COLLECTIVE_LOC_43));
 #else
       Future result = task->initialize_task(this, launcher,
                                             false/*check privileges*/);
@@ -8835,8 +8839,8 @@ namespace Legion {
                        "address space %d",
                        task->get_unique_id(), task->get_task_name(), 
                        task->get_unique_id(), runtime->address_space);
-      task->set_sharding_collective(
-          new ShardingGatherCollective(this, 0/*owner shard*/));
+      task->set_sharding_collective(new ShardingGatherCollective(this, 
+                                    0/*owner shard*/, COLLECTIVE_LOC_44));
 #else
       FutureMap result = task->initialize_task(this, launcher, launch_space,
                                                false/*check privileges*/);
@@ -8909,8 +8913,8 @@ namespace Legion {
                        "address space %d",
                        task->get_unique_id(), task->get_task_name(), 
                        task->get_unique_id(), runtime->address_space);
-      task->set_sharding_collective(
-          new ShardingGatherCollective(this, 0/*owner shard*/));
+      task->set_sharding_collective(new ShardingGatherCollective(this, 
+                                    0/*owner shard*/, COLLECTIVE_LOC_45));
 #else
       Future result = task->initialize_task(this, launcher, launch_space, redop,
                                             false/*check privileges*/);
@@ -8944,8 +8948,8 @@ namespace Legion {
       if (owner_shard->shard_id == 0)
         log_run.debug("Registering an index fill operation in task %s "
                       "(ID %lld)", get_task_name(), get_unique_id());
-      fill_op->set_sharding_collective(
-          new ShardingGatherCollective(this, 0/*owner shard*/));
+      fill_op->set_sharding_collective(new ShardingGatherCollective(this, 
+                                       0/*owner shard*/, COLLECTIVE_LOC_46));
 #else
       fill_op->initialize(this, launcher, launch_space,
                           false/*check privileges*/);
@@ -8984,8 +8988,8 @@ namespace Legion {
       if (owner_shard->shard_id == 0)
         log_run.debug("Registering a copy operation in task %s (ID %lld)",
                       get_task_name(), get_unique_id());
-      copy_op->set_sharding_collective(
-          new ShardingGatherCollective(this, 0/*owner shard*/));
+      copy_op->set_sharding_collective(new ShardingGatherCollective(this, 
+                                       0/*owner shard*/, COLLECTIVE_LOC_47));
 #else
       copy_op->initialize(this, launcher, false/*check privileges*/);
 #endif
@@ -9035,8 +9039,8 @@ namespace Legion {
       if (owner_shard->shard_id == 0)
         log_run.debug("Registering an index copy operation in task %s "
                       "(ID %lld)", get_task_name(), get_unique_id());
-      copy_op->set_sharding_collective(
-          new ShardingGatherCollective(this, 0/*owner shard*/));
+      copy_op->set_sharding_collective(new ShardingGatherCollective(this, 
+                                       0/*owner shard*/, COLLECTIVE_LOC_48));
 #else
       copy_op->initialize(this, launcher, launch_space, 
                           false/*check privileges*/);
@@ -9135,8 +9139,8 @@ namespace Legion {
                       get_task_name(), get_unique_id());
       FutureMap result = epoch_op->initialize(this, launcher, launch_space,
                                               Runtime::check_privileges);
-      epoch_op->set_sharding_collective(
-          new ShardingGatherCollective(this, 0/*owner shard*/));
+      epoch_op->set_sharding_collective(new ShardingGatherCollective(this, 
+                                        0/*owner shard*/, COLLECTIVE_LOC_49));
 #else
       FutureMap result = epoch_op->initialize(this, launcher, launch_space,
                                               false/*check privileges*/);
@@ -9177,7 +9181,8 @@ namespace Legion {
       ReplTimingOp *timing_op = runtime->get_available_repl_timing_op(true);
       Future result = timing_op->initialize(this, launcher);
       ValueBroadcast<long long> *timing_collective = 
-        new ValueBroadcast<long long>(this, 0/*shard 0 is always the owner*/);
+        new ValueBroadcast<long long>(this, 0/*shard 0 is always the owner*/,
+                                      COLLECTIVE_LOC_35);
       timing_op->set_timing_collective(timing_collective);
       runtime->add_to_dependence_queue(this, executing_processor, timing_op);
       return result;
@@ -9282,15 +9287,16 @@ namespace Legion {
       const size_t window_size = context_configuration.max_window_size;
       // Exchange the application barriers across all the shards
       BarrierExchangeCollective application_collective(this, window_size, 
-                                                       application_barriers);
+                                 application_barriers, COLLECTIVE_LOC_50);
       application_collective.exchange_barriers_async();
       // Exchange the internal barriers across all the shards
       BarrierExchangeCollective internal_collective(this, window_size,
-                                                    internal_barriers);
+                                 internal_barriers, COLLECTIVE_LOC_51);
       internal_collective.exchange_barriers_async();
       // Exchange the close operation barriers across all the shards
       BarrierExchangeCollective close_collective(this, 
-          CONTROL_REPLICATION_COMMUNICATION_BARRIERS, inter_close_barriers);
+          CONTROL_REPLICATION_COMMUNICATION_BARRIERS, 
+          inter_close_barriers, COLLECTIVE_LOC_52);
       close_collective.exchange_barriers_async();
       // Wait for everything to be done
       application_collective.wait_for_barrier_exchange();
@@ -9334,9 +9340,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    CollectiveID ReplicateContext::get_next_collective_index(void)
+    CollectiveID ReplicateContext::get_next_collective_index(
+                                                    CollectiveIndexLocation loc)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION_COLLECTIVES
+      CollectiveCheckReduction::RHS location = loc;
+      Runtime::phase_barrier_arrive(collective_check_barrier, 1/*count*/,
+                            RtEvent::NO_RT_EVENT, &location, sizeof(location));
+      collective_check_barrier.lg_wait();
+      CollectiveCheckReduction::RHS actual_location;
+      bool ready = Runtime::get_barrier_result(collective_check_barrier,
+                                   &actual_location, sizeof(actual_location));
+      assert(ready);
+      assert(location == actual_location);
+      Runtime::advance_barrier(collective_check_barrier);
+#endif
       // No need for a lock, should only be coming from the creation
       // of operations directly from the application and therefore
       // should be deterministic

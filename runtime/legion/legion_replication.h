@@ -20,7 +20,27 @@
 #include "legion_tasks.h"
 
 namespace Legion {
-  namespace Internal {
+  namespace Internal { 
+
+#ifdef DEBUG_LEGION_COLLECTIVES
+    /**
+     * \class CollectiveCheckReduction
+     * A small helper reduction for use with checking that 
+     * Legion collectives are properly aligned across all shards
+     */
+    class CollectiveCheckReduction {
+    public:
+      typedef long RHS;
+      typedef long LHS;
+      static const long IDENTITY;
+      static const long identity;
+      static const long BAD;
+      static const ReductionOpID REDOP;
+
+      template<bool EXCLUSIVE> static void apply(LHS &lhs, RHS rhs);
+      template<bool EXCLUSIVE> static void fold(RHS &rhs1, RHS rhs2);
+    }; 
+#endif
 
     /**
      * \class ShardCollective
@@ -29,7 +49,7 @@ namespace Legion {
      */
     class ShardCollective {
     public:
-      ShardCollective(ReplicateContext *ctx);
+      ShardCollective(CollectiveIndexLocation loc, ReplicateContext *ctx);
       ShardCollective(ReplicateContext *ctx, CollectiveID id);
       virtual ~ShardCollective(void);
     public:
@@ -54,7 +74,8 @@ namespace Legion {
      */
     class BroadcastCollective : public ShardCollective {
     public:
-      BroadcastCollective(ReplicateContext *ctx, ShardID origin);
+      BroadcastCollective(CollectiveIndexLocation loc,
+                          ReplicateContext *ctx, ShardID origin);
       BroadcastCollective(ReplicateContext *ctx, 
                           CollectiveID id, ShardID origin); 
       virtual ~BroadcastCollective(void);
@@ -85,7 +106,8 @@ namespace Legion {
      */
     class GatherCollective : public ShardCollective {
     public:
-      GatherCollective(ReplicateContext *ctx, ShardID target);
+      GatherCollective(CollectiveIndexLocation loc,
+                       ReplicateContext *ctx, ShardID target);
       virtual ~GatherCollective(void);
     public:
       // We guarantee that these methods will be called atomically
@@ -116,7 +138,7 @@ namespace Legion {
      */
     class AllGatherCollective : public ShardCollective {
     public:
-      AllGatherCollective(ReplicateContext *ctx);
+      AllGatherCollective(CollectiveIndexLocation loc, ReplicateContext *ctx);
       AllGatherCollective(ReplicateContext *ctx, CollectiveID id);
       virtual ~AllGatherCollective(void);
     public:
@@ -155,7 +177,8 @@ namespace Legion {
     class BarrierExchangeCollective : public AllGatherCollective {
     public:
       BarrierExchangeCollective(ReplicateContext *ctx, size_t window_size, 
-                                std::vector<RtBarrier> &barriers);
+                                std::vector<RtBarrier> &barriers,
+                                CollectiveIndexLocation loc);
       BarrierExchangeCollective(const BarrierExchangeCollective &rhs);
       virtual ~BarrierExchangeCollective(void);
     public:
@@ -180,10 +203,11 @@ namespace Legion {
     template<typename T>
     class ValueBroadcast : public BroadcastCollective {
     public:
-      ValueBroadcast(ReplicateContext *ctx)
-        : BroadcastCollective(ctx, ctx->owner_shard->shard_id) { }
-      ValueBroadcast(ReplicateContext *ctx, ShardID origin)
-        : BroadcastCollective(ctx, origin) { }
+      ValueBroadcast(ReplicateContext *ctx, CollectiveIndexLocation loc)
+        : BroadcastCollective(loc, ctx, ctx->owner_shard->shard_id) { }
+      ValueBroadcast(ReplicateContext *ctx, ShardID origin,
+                     CollectiveIndexLocation loc)
+        : BroadcastCollective(loc, ctx, origin) { }
       ValueBroadcast(const ValueBroadcast &rhs) { assert(false); }
       virtual ~ValueBroadcast(void) { }
     public:
@@ -208,7 +232,8 @@ namespace Legion {
      */
     class CrossProductCollective : public AllGatherCollective {
     public:
-      CrossProductCollective(ReplicateContext *ctx);
+      CrossProductCollective(ReplicateContext *ctx,
+                             CollectiveIndexLocation loc);
       CrossProductCollective(const CrossProductCollective &rhs);
       virtual ~CrossProductCollective(void);
     public:
@@ -230,7 +255,8 @@ namespace Legion {
      */
     class ShardingGatherCollective : public GatherCollective {
     public:
-      ShardingGatherCollective(ReplicateContext *ctx, ShardID target);
+      ShardingGatherCollective(ReplicateContext *ctx, ShardID target,
+                               CollectiveIndexLocation loc);
       ShardingGatherCollective(const ShardingGatherCollective &rhs);
       virtual ~ShardingGatherCollective(void);
     public:
@@ -252,7 +278,8 @@ namespace Legion {
      */
     class FieldDescriptorExchange : public AllGatherCollective {
     public:
-      FieldDescriptorExchange(ReplicateContext *ctx);
+      FieldDescriptorExchange(ReplicateContext *ctx,
+                              CollectiveIndexLocation loc);
       FieldDescriptorExchange(const FieldDescriptorExchange &rhs);
       virtual ~FieldDescriptorExchange(void);
     public:
@@ -275,7 +302,8 @@ namespace Legion {
      */
     class FieldDescriptorGather : public GatherCollective {
     public:
-      FieldDescriptorGather(ReplicateContext *ctx, ShardID target);
+      FieldDescriptorGather(ReplicateContext *ctx, ShardID target,
+                            CollectiveIndexLocation loc);
       FieldDescriptorGather(const FieldDescriptorGather &rhs);
       virtual ~FieldDescriptorGather(void);
     public:
@@ -321,7 +349,8 @@ namespace Legion {
      */
     class FutureExchange : public AllGatherCollective {
     public:
-      FutureExchange(ReplicateContext *ctx, size_t future_size);
+      FutureExchange(ReplicateContext *ctx, size_t future_size,
+                     CollectiveIndexLocation loc);
       FutureExchange(const FutureExchange &rhs);
       virtual ~FutureExchange(void);
     public:
@@ -366,7 +395,8 @@ namespace Legion {
      */
     class MustEpochProcessorBroadcast : public BroadcastCollective {
     public:
-      MustEpochProcessorBroadcast(ReplicateContext *ctx, ShardID origin);
+      MustEpochProcessorBroadcast(ReplicateContext *ctx, ShardID origin,
+                                  CollectiveIndexLocation loc);
       MustEpochProcessorBroadcast(const MustEpochProcessorBroadcast &rhs);
       virtual ~MustEpochProcessorBroadcast(void);
     public:
@@ -389,7 +419,8 @@ namespace Legion {
      */
     class MustEpochMappingExchange : public AllGatherCollective {
     public:
-      MustEpochMappingExchange(ReplicateContext *ctx);
+      MustEpochMappingExchange(ReplicateContext *ctx,
+                               CollectiveIndexLocation loc);
       MustEpochMappingExchange(const MustEpochMappingExchange &rhs);
       virtual ~MustEpochMappingExchange(void);
     public:
@@ -915,6 +946,10 @@ namespace Legion {
         { return pending_partition_barrier; }
       inline ApBarrier get_future_map_barrier(void) const
         { return future_map_barrier; }
+#ifdef DEBUG_LEGION_COLLECTIVES
+      inline RtBarrier get_collective_check_barrier(void) const
+        { return collective_check_barrier; }
+#endif
     public:
       inline ShardMapping* get_mapping(void) const
         { return address_spaces; }
@@ -989,6 +1024,9 @@ namespace Legion {
       RtBarrier startup_barrier;
       ApBarrier pending_partition_barrier;
       ApBarrier future_map_barrier;
+#ifdef DEBUG_LEGION_COLLECTIVES
+      RtBarrier collective_check_barrier;
+#endif
     protected:
       std::map<ShardingID,ShardingFunction*> sharding_functions;
     }; 

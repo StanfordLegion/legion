@@ -1322,7 +1322,7 @@ namespace Legion {
       void handle_composite_view_request(Deserializer &derez);
     public:
       // Collective methods
-      CollectiveID get_next_collective_index(void);
+      CollectiveID get_next_collective_index(CollectiveIndexLocation loc);
       void register_collective(ShardCollective *collective);
       ShardCollective* find_or_buffer_collective(Deserializer &derez);
       void unregister_collective(ShardCollective *collective);
@@ -1361,6 +1361,10 @@ namespace Legion {
     protected:
       ApBarrier pending_partition_barrier;
       ApBarrier future_map_barrier;
+#ifdef DEBUG_LEGION_COLLECTIVES
+    protected:
+      RtBarrier collective_check_barrier;
+#endif
     protected:
       int shard_collective_radix;
       int shard_collective_log_radix;

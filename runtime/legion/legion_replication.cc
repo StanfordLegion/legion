@@ -22,6 +22,80 @@ namespace Legion {
 
     LEGION_EXTERN_LOGGER_DECLARATIONS
 
+#ifdef DEBUG_LEGION_COLLECTIVES
+    /////////////////////////////////////////////////////////////
+    // Collective Check Reduction
+    /////////////////////////////////////////////////////////////
+    
+    /*static*/ const long CollectiveCheckReduction::IDENTITY = -1;
+    /*static*/ const long CollectiveCheckReduction::identity = IDENTITY;
+    /*static*/ const long CollectiveCheckReduction::BAD = -2;
+    /*static*/ const ReductionOpID CollectiveCheckReduction::REDOP = 
+                                                MAX_APPLICATION_REDUCTION_ID;
+
+    //--------------------------------------------------------------------------
+    template<>
+    /*static*/ void CollectiveCheckReduction::apply<true>(LHS &lhs, RHS rhs)
+    //--------------------------------------------------------------------------
+    {
+      assert(rhs > IDENTITY);
+      if (lhs != IDENTITY)
+      {
+        if (lhs != rhs)
+          lhs = BAD;
+      }
+      else
+        lhs = rhs;
+    }
+
+    //--------------------------------------------------------------------------
+    template<>
+    /*static*/ void CollectiveCheckReduction::apply<false>(LHS &lhs, RHS rhs)
+    //--------------------------------------------------------------------------
+    {
+      volatile LHS *ptr = &lhs;
+      LHS temp = *ptr;
+      while ((temp != BAD) && (temp != rhs))
+      {
+        if (temp != IDENTITY)
+          temp = __sync_val_compare_and_swap(ptr, temp, BAD);
+        else
+          temp = __sync_val_compare_and_swap(ptr, temp, rhs); 
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<>
+    /*static*/ void CollectiveCheckReduction::fold<true>(RHS &rhs1, RHS rhs2)
+    //--------------------------------------------------------------------------
+    {
+      assert(rhs2 > IDENTITY);
+      if (rhs1 != IDENTITY)
+      {
+        if (rhs1 != rhs2)
+          rhs1 = BAD;
+      }
+      else
+        rhs1 = rhs2;
+    }
+
+    //--------------------------------------------------------------------------
+    template<>
+    /*static*/ void CollectiveCheckReduction::fold<false>(RHS &rhs1, RHS rhs2)
+    //--------------------------------------------------------------------------
+    {
+      volatile RHS *ptr = &rhs1;
+      RHS temp = *ptr;
+      while ((temp != BAD) && (temp != rhs2))
+      {
+        if (temp != IDENTITY)
+          temp = __sync_val_compare_and_swap(ptr, temp, BAD);
+        else
+          temp = __sync_val_compare_and_swap(ptr, temp, rhs2);
+      }
+    }
+#endif // DEBUG_LEGION_COLLECTIVES
+
     /////////////////////////////////////////////////////////////
     // Repl Individual Task 
     /////////////////////////////////////////////////////////////
@@ -264,8 +338,10 @@ namespace Legion {
     void ReplIndividualTask::initialize_replication(ReplicateContext *ctx)
     //--------------------------------------------------------------------------
     {
-      versioning_collective_id = ctx->get_next_collective_index();
-      future_collective_id = ctx->get_next_collective_index();
+      versioning_collective_id = 
+        ctx->get_next_collective_index(COLLECTIVE_LOC_0);
+      future_collective_id = 
+        ctx->get_next_collective_index(COLLECTIVE_LOC_1);
     }
 
     /////////////////////////////////////////////////////////////
@@ -484,7 +560,8 @@ namespace Legion {
 #endif
       // If we have a reduction op then we need an exchange
       if (redop > 0)
-        reduction_collective = new FutureExchange(ctx, reduction_state_size);
+        reduction_collective = 
+          new FutureExchange(ctx, reduction_state_size, COLLECTIVE_LOC_53);
       launch_space = launch_sp;
     }
 
@@ -780,7 +857,8 @@ namespace Legion {
     void ReplCopyOp::initialize_replication(ReplicateContext *ctx)
     //--------------------------------------------------------------------------
     {
-      versioning_collective_id = ctx->get_next_collective_index();
+      versioning_collective_id = 
+        ctx->get_next_collective_index(COLLECTIVE_LOC_2);
       // Initialize our index domain of a single point
       index_domain = Domain(index_point, index_point);
       launch_space = ctx->find_index_launch_space(index_domain);
@@ -1606,7 +1684,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ReplDependentPartitionOp::ReplByFieldThunk::ReplByFieldThunk(
                                         ReplicateContext *ctx, IndexPartition p)
-      : ByFieldThunk(p), collective(FieldDescriptorExchange(ctx))
+      : ByFieldThunk(p), 
+        collective(FieldDescriptorExchange(ctx, COLLECTIVE_LOC_54))
     //--------------------------------------------------------------------------
     {
     }
@@ -1636,7 +1715,7 @@ namespace Legion {
                                           ReplicateContext *ctx, ShardID target,
                                           IndexPartition p, IndexPartition proj)
       : ByImageThunk(p, proj), 
-        gather_collective(FieldDescriptorGather(ctx, target))
+        gather_collective(FieldDescriptorGather(ctx, target, COLLECTIVE_LOC_55))
     //--------------------------------------------------------------------------
     {
     }
@@ -1673,7 +1752,7 @@ namespace Legion {
                                           ReplicateContext *ctx, ShardID target,
                                           IndexPartition p, IndexPartition proj)
       : ByImageRangeThunk(p, proj), 
-        gather_collective(FieldDescriptorGather(ctx, target))
+        gather_collective(FieldDescriptorGather(ctx, target, COLLECTIVE_LOC_60))
     //--------------------------------------------------------------------------
     {
     }
@@ -1710,7 +1789,7 @@ namespace Legion {
                                           ReplicateContext *ctx, ShardID target,
                                           IndexPartition p, IndexPartition proj)
       : ByPreimageThunk(p, proj), 
-        gather_collective(FieldDescriptorGather(ctx, target))
+        gather_collective(FieldDescriptorGather(ctx, target, COLLECTIVE_LOC_56))
     //--------------------------------------------------------------------------
     {
     }
@@ -1747,7 +1826,7 @@ namespace Legion {
                  ReplByPreimageRangeThunk(ReplicateContext *ctx, ShardID target,
                                           IndexPartition p, IndexPartition proj)
       : ByPreimageRangeThunk(p, proj), 
-        gather_collective(FieldDescriptorGather(ctx, target))
+        gather_collective(FieldDescriptorGather(ctx, target, COLLECTIVE_LOC_57))
     //--------------------------------------------------------------------------
     {
     }
@@ -1970,8 +2049,9 @@ namespace Legion {
       assert(broadcast == NULL);
       assert(exchange == NULL);
 #endif
-      broadcast = new MustEpochProcessorBroadcast(ctx, 0/*owner shard*/);
-      exchange = new MustEpochMappingExchange(ctx);
+      broadcast = new MustEpochProcessorBroadcast(ctx, 0/*owner shard*/,
+                                                  COLLECTIVE_LOC_58);
+      exchange = new MustEpochMappingExchange(ctx, COLLECTIVE_LOC_59);
     }
 
     /////////////////////////////////////////////////////////////
@@ -2216,6 +2296,13 @@ namespace Legion {
           ApBarrier(Realm::Barrier::create_barrier(total_shards));
         future_map_barrier = 
           ApBarrier(Realm::Barrier::create_barrier(total_shards));
+#ifdef DEBUG_LEGION_COLLECTIVES
+        collective_check_barrier = 
+          RtBarrier(Realm::Barrier::create_barrier(total_shards,
+                CollectiveCheckReduction::REDOP,
+                &CollectiveCheckReduction::IDENTITY, 
+                sizeof(CollectiveCheckReduction::IDENTITY)));
+#endif
       }
 #ifdef DEBUG_LEGION
       else if (control_replicated)
@@ -2254,6 +2341,9 @@ namespace Legion {
           startup_barrier.destroy_barrier();
           pending_partition_barrier.destroy_barrier();
           future_map_barrier.destroy_barrier();
+#ifdef DEBUG_LEGION_COLLECTIVES
+          collective_check_barrier.destroy_barrier();
+#endif
         }
         // Send messages to all the remote spaces to remove the manager
         std::set<AddressSpaceID> sent_spaces;
@@ -2373,6 +2463,19 @@ namespace Legion {
         rez.serialize(control_replicated);
         rez.serialize(startup_barrier);
         address_spaces->pack_mapping(rez);
+        if (control_replicated)
+        {
+#ifdef DEBUG_LEGION
+          assert(pending_partition_barrier.exists());
+          assert(future_map_barrier.exists());
+#endif
+          rez.serialize(pending_partition_barrier);
+          rez.serialize(future_map_barrier);
+#ifdef DEBUG_LEGION_COLLECTIVES
+          assert(collective_check_barrier.exists());
+          rez.serialize(collective_check_barrier);
+#endif
+        }
         rez.serialize<size_t>(shards.size());
         for (std::vector<ShardTask*>::const_iterator it = 
               shards.begin(); it != shards.end(); it++)
@@ -2397,6 +2500,14 @@ namespace Legion {
       address_spaces = new ShardMapping();
       address_spaces->add_reference();
       address_spaces->unpack_mapping(derez);
+      if (control_replicated)
+      {
+        derez.deserialize(pending_partition_barrier);
+        derez.deserialize(future_map_barrier);
+#ifdef DEBUG_LEGION_COLLECTIVES
+        derez.deserialize(collective_check_barrier);
+#endif
+      }
       size_t num_shards;
       derez.deserialize(num_shards);
       local_shards.resize(num_shards);
@@ -2846,10 +2957,11 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ShardCollective::ShardCollective(ReplicateContext *ctx)
+    ShardCollective::ShardCollective(CollectiveIndexLocation loc,
+                                     ReplicateContext *ctx)
       : manager(ctx->shard_manager), context(ctx), 
         local_shard(ctx->owner_shard->shard_id), 
-        collective_index(ctx->get_next_collective_index()),
+        collective_index(ctx->get_next_collective_index(loc)),
         collective_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
@@ -2898,8 +3010,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    BroadcastCollective::BroadcastCollective(ReplicateContext *ctx, ShardID o)
-      : ShardCollective(ctx), origin(o),
+    BroadcastCollective::BroadcastCollective(CollectiveIndexLocation loc,
+                                             ReplicateContext *ctx, ShardID o)
+      : ShardCollective(loc, ctx), origin(o),
         shard_collective_radix(ctx->get_shard_collective_radix())
     //--------------------------------------------------------------------------
     {
@@ -3001,8 +3114,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    GatherCollective::GatherCollective(ReplicateContext *ctx, ShardID t)
-      : ShardCollective(ctx), target(t), 
+    GatherCollective::GatherCollective(CollectiveIndexLocation loc,
+                                       ReplicateContext *ctx, ShardID t)
+      : ShardCollective(loc, ctx), target(t), 
         shard_collective_radix(ctx->get_shard_collective_radix()),
         expected_notifications(compute_expected_notifications()),
         received_notifications(0)
@@ -3121,8 +3235,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    AllGatherCollective::AllGatherCollective(ReplicateContext *ctx)
-      : ShardCollective(ctx),       
+    AllGatherCollective::AllGatherCollective(CollectiveIndexLocation loc,
+                                             ReplicateContext *ctx)
+      : ShardCollective(loc, ctx),
         shard_collective_radix(ctx->get_shard_collective_radix()),
         shard_collective_log_radix(ctx->get_shard_collective_log_radix()),
         shard_collective_stages(ctx->get_shard_collective_stages()),
@@ -3417,8 +3532,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     BarrierExchangeCollective::BarrierExchangeCollective(ReplicateContext *ctx,
-                                  size_t win_size, std::vector<RtBarrier> &bars)
-      : AllGatherCollective(ctx), window_size(win_size), barriers(bars)
+     size_t win_size, std::vector<RtBarrier> &bars, CollectiveIndexLocation loc)
+      : AllGatherCollective(loc, ctx), window_size(win_size), barriers(bars)
     //--------------------------------------------------------------------------
     { 
     }
@@ -3535,8 +3650,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    CrossProductCollective::CrossProductCollective(ReplicateContext *ctx)
-      : AllGatherCollective(ctx)
+    CrossProductCollective::CrossProductCollective(ReplicateContext *ctx,
+                                                   CollectiveIndexLocation loc)
+      : AllGatherCollective(loc, ctx)
     //--------------------------------------------------------------------------
     {
     }
@@ -3629,8 +3745,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ShardingGatherCollective::ShardingGatherCollective(ReplicateContext *ctx,
-                                                       ShardID target)
-      : GatherCollective(ctx, target)
+                                   ShardID target, CollectiveIndexLocation loc)
+      : GatherCollective(loc, ctx, target)
     //--------------------------------------------------------------------------
     {
     }
@@ -3725,8 +3841,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    FieldDescriptorExchange::FieldDescriptorExchange(ReplicateContext *ctx)
-      : AllGatherCollective(ctx)
+    FieldDescriptorExchange::FieldDescriptorExchange(ReplicateContext *ctx,
+                                                   CollectiveIndexLocation loc)
+      : AllGatherCollective(loc, ctx)
     //--------------------------------------------------------------------------
     {
     }
@@ -3813,8 +3930,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FieldDescriptorGather::FieldDescriptorGather(ReplicateContext *ctx,
-                                                 ShardID target)
-      : GatherCollective(ctx, target)
+                             ShardID target, CollectiveIndexLocation loc)
+      : GatherCollective(loc, ctx, target)
     //--------------------------------------------------------------------------
     {
     }
@@ -3999,8 +4116,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    FutureExchange::FutureExchange(ReplicateContext *ctx, size_t size)
-      : AllGatherCollective(ctx), future_size(size)
+    FutureExchange::FutureExchange(ReplicateContext *ctx, size_t size,
+                                   CollectiveIndexLocation loc)
+      : AllGatherCollective(loc, ctx), future_size(size)
     //--------------------------------------------------------------------------
     {
     }
@@ -4181,8 +4299,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MustEpochProcessorBroadcast::MustEpochProcessorBroadcast(
-                                          ReplicateContext *ctx, ShardID origin)
-      : BroadcastCollective(ctx, origin)
+            ReplicateContext *ctx, ShardID origin, CollectiveIndexLocation loc)
+      : BroadcastCollective(loc, ctx, origin)
     //--------------------------------------------------------------------------
     {
     }
@@ -4262,8 +4380,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    MustEpochMappingExchange::MustEpochMappingExchange(ReplicateContext *ctx)
-      : AllGatherCollective(ctx)
+    MustEpochMappingExchange::MustEpochMappingExchange(ReplicateContext *ctx,
+                                                 CollectiveIndexLocation loc)
+      : AllGatherCollective(loc, ctx)
     //--------------------------------------------------------------------------
     {
     }

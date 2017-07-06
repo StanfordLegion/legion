@@ -1152,7 +1152,7 @@ namespace Legion {
       : FutureMapImpl(ctx, op, rt, did, owner), 
         repl_ctx(ctx), full_domain(dom), 
         future_map_barrier(ctx->get_next_future_map_barrier()),
-        collective_index(ctx->get_next_collective_index()),
+        collective_index(ctx->get_next_collective_index(COLLECTIVE_LOC_62)),
         sharding_function_ready(Runtime::create_rt_user_event()), 
         sharding_function(NULL), collective_performed(false)
     //--------------------------------------------------------------------------
@@ -19404,10 +19404,16 @@ namespace Legion {
       assert(ok); 
       
       {
+#ifdef DEBUG_LEGION_COLLECTIVES
+        ReductionOpTable& red_table = get_reduction_table();
+        red_table[CollectiveCheckReduction::REDOP] =
+          Realm::ReductionOpUntyped::create_reduction_op<
+                                  CollectiveCheckReduction>();
+#else
 	const ReductionOpTable& red_table = get_reduction_table();
-	for(ReductionOpTable::const_iterator it = red_table.begin();
-	    it != red_table.end();
-	    it++)
+#endif
+	for(ReductionOpTable::const_iterator it = 
+            red_table.begin(); it != red_table.end(); it++)
 	  realm.register_reduction(it->first, it->second);
 
         const SerdezOpTable &serdez_table = get_serdez_table();

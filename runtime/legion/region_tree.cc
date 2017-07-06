@@ -370,7 +370,7 @@ namespace Legion {
           IndexPartNode::DisjointnessArgs args;
           args.pid = pid;
           args.disjointness_collective = 
-            new ValueBroadcast<bool>(ctx, owner_shard);
+            new ValueBroadcast<bool>(ctx, owner_shard, COLLECTIVE_LOC_61);
           disjointness_event = runtime->issue_runtime_meta_task(args,
               LG_DEFERRED_THROUGHPUT_PRIORITY, NULL,
               Runtime::protect_event(partition_ready));
@@ -409,7 +409,7 @@ namespace Legion {
           IndexPartNode::DisjointnessArgs args;
           args.pid = pid;
           args.disjointness_collective = 
-            new ValueBroadcast<bool>(ctx, owner_shard);
+            new ValueBroadcast<bool>(ctx, owner_shard, COLLECTIVE_LOC_61);
           disjointness_event = runtime->issue_runtime_meta_task(args,
                                     LG_DEFERRED_THROUGHPUT_PRIORITY);
         }
