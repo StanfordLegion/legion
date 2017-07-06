@@ -25,6 +25,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 
 _pickle_version = 0 # Use latest Pickle protocol
 
@@ -40,6 +41,11 @@ header = re.sub(r'typedef struct {.+?} max_align_t;', '', header, flags=re.DOTAL
 ffi = cffi.FFI()
 ffi.cdef(header)
 c = ffi.dlopen(None)
+
+# The Legion context is stored in thread-local storage. This assumes
+# that the Python processor maintains the invariant that every task
+# corresponds to one and only one thread.
+_my = threading.local()
 
 class Context(object):
     __slots__ = ['context', 'runtime', 'task', 'regions']
@@ -118,13 +124,12 @@ def _Ispace_unpickle(ispace_tid, ispace_id):
     handle = ffi.new('legion_index_space_t *')
     handle[0].tid = ispace_tid
     handle[0].id = ispace_id
-    return Ispace(None, handle[0])
+    return Ispace(handle[0])
 
 class Ispace(object):
-    __slots__ = ['ctx', 'handle']
+    __slots__ = ['handle']
 
-    def __init__(self, ctx, handle):
-        self.ctx = ctx
+    def __init__(self, handle):
         # Important: Copy handle. Do NOT assume ownership.
         self.handle = ffi.new('legion_index_space_t *', handle)
 
@@ -133,11 +138,8 @@ class Ispace(object):
                 (self.handle[0].tid,
                  self.handle[0].id))
 
-    def _legion_set_context(self, ctx):
-        self.ctx = ctx
-
     @staticmethod
-    def create(ctx, extent, start=None):
+    def create(extent, start=None):
         if start is not None:
             assert len(start) == len(extent)
         else:
@@ -148,20 +150,19 @@ class Ispace(object):
             rect[0].lo.x[i] = start[i]
             rect[0].hi.x[i] = start[i] + extent[i] - 1
         domain = getattr(c, 'legion_domain_from_rect_{}d'.format(len(extent)))(rect[0])
-        handle = c.legion_index_space_create_domain(ctx.runtime, ctx.context, domain)
-        return Ispace(ctx, handle)
+        handle = c.legion_index_space_create_domain(_my.ctx.runtime, _my.ctx.context, domain)
+        return Ispace(handle)
 
 # Hack: Can't pickle static methods.
 def _Fspace_unpickle(fspace_id, field_ids, field_types):
     handle = ffi.new('legion_field_space_t *')
     handle[0].id = fspace_id
-    return Fspace(None, handle[0], field_ids, field_types)
+    return Fspace(handle[0], field_ids, field_types)
 
 class Fspace(object):
-    __slots__ = ['ctx', 'handle', 'field_ids', 'field_types']
+    __slots__ = ['handle', 'field_ids', 'field_types']
 
-    def __init__(self, ctx, handle, field_ids, field_types):
-        self.ctx = ctx
+    def __init__(self, handle, field_ids, field_types):
         # Important: Copy handle. Do NOT assume ownership.
         self.handle = ffi.new('legion_field_space_t *', handle)
         self.field_ids = field_ids
@@ -173,14 +174,11 @@ class Fspace(object):
                  self.field_ids,
                  self.field_types))
 
-    def _legion_set_context(self, ctx):
-        self.ctx = ctx
-
     @staticmethod
-    def create(ctx, fields):
-        handle = c.legion_field_space_create(ctx.runtime, ctx.context)
+    def create(fields):
+        handle = c.legion_field_space_create(_my.ctx.runtime, _my.ctx.context)
         alloc = c.legion_field_allocator_create(
-            ctx.runtime, ctx.context, handle)
+            _my.ctx.runtime, _my.ctx.context, handle)
         field_ids = {}
         field_types = {}
         for field_name, field_entry in fields.items():
@@ -192,11 +190,11 @@ class Fspace(object):
             field_id = c.legion_field_allocator_allocate_field(
                 alloc, field_type.size, field_id)
             c.legion_field_id_attach_name(
-                ctx.runtime, handle, field_id, field_name, False)
+                _my.ctx.runtime, handle, field_id, field_name, False)
             field_ids[field_name] = field_id
             field_types[field_name] = field_type
         c.legion_field_allocator_destroy(alloc)
-        return Fspace(ctx, handle, field_ids, field_types)
+        return Fspace(handle, field_ids, field_types)
 
 # Hack: Can't pickle static methods.
 def _Region_unpickle(tree_id, ispace, fspace):
@@ -206,14 +204,13 @@ def _Region_unpickle(tree_id, ispace, fspace):
     handle[0].index_space.id = ispace.handle[0].id
     handle[0].field_space.id = fspace.handle[0].id
 
-    return Region(None, handle[0], ispace, fspace)
+    return Region(handle[0], ispace, fspace)
 
 class Region(object):
-    __slots__ = ['ctx', 'handle', 'ispace', 'fspace',
+    __slots__ = ['handle', 'ispace', 'fspace',
                  'instances', 'privileges', 'instance_wrappers']
 
-    def __init__(self, ctx, handle, ispace, fspace):
-        self.ctx = ctx
+    def __init__(self, handle, ispace, fspace):
         # Important: Copy handle. Do NOT assume ownership.
         self.handle = ffi.new('legion_logical_region_t *', handle)
         self.ispace = ispace
@@ -228,18 +225,15 @@ class Region(object):
                  self.ispace,
                  self.fspace))
 
-    def _legion_set_context(self, ctx):
-        self.ctx = ctx
-
     @staticmethod
-    def create(ctx, ispace, fspace):
+    def create(ispace, fspace):
         if not isinstance(ispace, Ispace):
-            ispace = Ispace.create(ctx, ispace)
+            ispace = Ispace.create(ispace)
         if not isinstance(fspace, Fspace):
-            fspace = Fspace.create(ctx, fspace)
+            fspace = Fspace.create(fspace)
         handle = c.legion_logical_region_create(
-            ctx.runtime, ctx.context, ispace.handle[0], fspace.handle[0])
-        return Region(ctx, handle, ispace, fspace)
+            _my.ctx.runtime, _my.ctx.context, ispace.handle[0], fspace.handle[0])
+        return Region(handle, ispace, fspace)
 
     def set_instance(self, field_name, instance, privilege):
         assert field_name not in self.instances
@@ -251,7 +245,7 @@ class Region(object):
            field_name in self.instances:
             if field_name not in self.instance_wrappers:
                 self.instance_wrappers[field_name] = RegionField(
-                    self.ctx, self, field_name)
+                    self, field_name)
             return self.instance_wrappers[field_name]
         else:
             raise AttributeError()
@@ -259,16 +253,16 @@ class Region(object):
 class RegionField(numpy.ndarray):
     # NumPy requires us to implement __new__ for subclasses of ndarray:
     # https://docs.scipy.org/doc/numpy/user/basics.subclassing.html
-    def __new__(cls, ctx, region, field_name):
-        accessor = RegionField._get_accessor(ctx, region, field_name)
-        initializer = RegionField._get_array_initializer(ctx, region, field_name, accessor)
+    def __new__(cls, region, field_name):
+        accessor = RegionField._get_accessor(region, field_name)
+        initializer = RegionField._get_array_initializer(region, field_name, accessor)
         obj = numpy.asarray(initializer).view(cls)
 
         obj.accessor = accessor
         return obj
 
     @staticmethod
-    def _get_accessor(ctx, region, field_name):
+    def _get_accessor(region, field_name):
         # Note: the accessor needs to be kept alive, to make sure to
         # save the result of this function in an instance variable.
         instance = region.instances[field_name]
@@ -276,9 +270,9 @@ class RegionField(numpy.ndarray):
             instance, region.fspace.field_ids[field_name])
 
     @staticmethod
-    def _get_base_and_stride(ctx, region, field_name, accessor):
+    def _get_base_and_stride(region, field_name, accessor):
         domain = c.legion_index_space_get_domain(
-            ctx.runtime, region.ispace.handle[0])
+            _my.ctx.runtime, region.ispace.handle[0])
         dim = domain.dim
         rect = getattr(c, 'legion_domain_get_rect_{}d'.format(dim))(domain)
         subrect = ffi.new('legion_rect_{}d_t *'.format(dim))
@@ -298,9 +292,9 @@ class RegionField(numpy.ndarray):
         return base_ptr, shape, strides
 
     @staticmethod
-    def _get_array_initializer(ctx, region, field_name, accessor):
+    def _get_array_initializer(region, field_name, accessor):
         base_ptr, shape, strides = RegionField._get_base_and_stride(
-            ctx, region, field_name, accessor)
+            region, field_name, accessor)
         field_type = region.fspace.field_types[field_name]
 
         # Numpy doesn't know about CFFI pointers, so we have to cast
@@ -338,12 +332,12 @@ class ExternTask(object):
     def __call__(self, *args):
         return self.spawn_task(*args)
 
-    def spawn_task(self, ctx, *args):
+    def spawn_task(self, *args):
         launcher = _TaskLauncher(
             task_id=self.task_id,
             privileges=self.privileges,
             calling_convention=None)
-        return launcher.spawn_task(ctx, *args)
+        return launcher.spawn_task(*args)
 
 def extern_task(**kwargs):
     return ExternTask(**kwargs)
@@ -374,12 +368,12 @@ class Task (object):
         else:
             return self.spawn_task(*args)
 
-    def spawn_task(self, ctx, *args):
+    def spawn_task(self, *args):
         launcher = _TaskLauncher(
             task_id=self.task_id,
             privileges=self.privileges,
             calling_convention='python')
-        return launcher.spawn_task(ctx, *args)
+        return launcher.spawn_task(*args)
 
     def execute_task(self, raw_args, user_data, proc):
         raw_arg_ptr = ffi.new('char[]', bytes(raw_args))
@@ -428,13 +422,20 @@ class Task (object):
         # Build context.
         ctx = Context(context[0], runtime[0], task[0], regions)
 
-        # Update context in any arguments that require it.
-        for arg in args:
-            if hasattr(arg, '_legion_set_context'):
-                arg._legion_set_context(ctx)
+        # Ensure that we're not getting tangled up in another
+        # thread. There should be exactly one thread per task.
+        try:
+            _my.ctx
+        except AttributeError:
+            pass
+        else:
+            raise Exception('thread-local context already set')
+
+        # Store context in thread-local storage.
+        _my.ctx = ctx
 
         # Execute task body.
-        result = self.body(ctx, *args)
+        result = self.body(*args)
 
         # Encode result in Pickle format.
         if result is not None:
@@ -448,6 +449,9 @@ class Task (object):
 
         # Execute postamble.
         c.legion_task_postamble(runtime[0], context[0], result_ptr, result_size)
+
+        # Clear thread-local storage.
+        del _my.ctx
 
     def register(self):
         assert(self.task_id is None)
@@ -494,8 +498,8 @@ class _TaskLauncher(object):
         self.privileges = privileges
         self.calling_convention = calling_convention
 
-    def spawn_task(self, ctx, *args):
-        assert(isinstance(ctx, Context))
+    def spawn_task(self, *args):
+        assert(isinstance(_my.ctx, Context))
 
         # Encode task arguments.
         task_args = ffi.new('legion_task_argument_t *')
@@ -535,7 +539,7 @@ class _TaskLauncher(object):
 
         # Launch the task.
         result = c.legion_task_launcher_execute(
-            ctx.runtime, ctx.context, launcher)
+            _my.ctx.runtime, _my.ctx.context, launcher)
         c.legion_task_launcher_destroy(launcher)
 
         # Build future of result.

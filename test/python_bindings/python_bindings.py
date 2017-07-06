@@ -23,12 +23,12 @@ import numpy
 init = legion.extern_task(task_id=3, privileges=[legion.RW])
 
 @legion.task
-def f(ctx, x, y, z):
+def f(x, y, z):
     print("inside task f%s" % ((x, y, z),))
     return x+1
 
 @legion.task(privileges=[legion.RW])
-def inc(ctx, R, step):
+def inc(R, step):
     print("inside task inc%s" % ((R, step),))
 
     # Sanity check that the values written by init are here, and that
@@ -42,7 +42,7 @@ def inc(ctx, R, step):
     print(R.x)
 
 @legion.task(privileges=[legion.RW])
-def fill(ctx, S, value):
+def fill(S, value):
     print("inside task fill%s" % ((S, value),))
 
     S.x.fill(value)
@@ -51,7 +51,7 @@ def fill(ctx, S, value):
     print(S.y[0:10])
 
 @legion.task(privileges=[legion.RW])
-def saxpy(ctx, S, a):
+def saxpy(S, a):
     print("inside task saxpy%s" % ((S, a),))
 
     print(S.x[0:10])
@@ -60,16 +60,16 @@ def saxpy(ctx, S, a):
     print(S.y[0:10])
 
 @legion.task
-def main_task(ctx):
+def main_task():
     print("inside main_task()")
 
-    x = f(ctx, 1, "asdf", True)
-    print("result of f is %s" % x)
+    x = f(1, "asdf", True)
+    print("result of f is %s" % x.get())
 
-    R = legion.Region.create(ctx, [4, 4], {'x': (legion.double, 1)})
-    init(ctx, R)
-    inc(ctx, R, 1)
+    R = legion.Region.create([4, 4], {'x': (legion.double, 1)})
+    init(R)
+    inc(R, 1)
 
-    S = legion.Region.create(ctx, [1000], {'x': legion.double, 'y': legion.double})
-    fill(ctx, S, 10)
-    saxpy(ctx, S, 2)
+    S = legion.Region.create([1000], {'x': legion.double, 'y': legion.double})
+    fill(S, 10)
+    saxpy(S, 2)
