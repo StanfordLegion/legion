@@ -22,6 +22,7 @@ import cPickle
 import ctypes
 import numpy
 import os
+import re
 import subprocess
 import sys
 
@@ -32,6 +33,9 @@ runtime_dir = os.path.join(root_dir, 'runtime')
 legion_dir = os.path.join(runtime_dir, 'legion')
 
 header = subprocess.check_output(['gcc', '-I', runtime_dir, '-I', legion_dir, '-E', '-P', os.path.join(legion_dir, 'legion_c.h')])
+
+# Hack: Fix for Ubuntu 16.04 versions of standard library headers:
+header = re.sub(r'typedef struct {.+?} max_align_t;', '', header, flags=re.DOTALL)
 
 ffi = cffi.FFI()
 ffi.cdef(header)
