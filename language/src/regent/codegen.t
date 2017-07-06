@@ -7057,7 +7057,7 @@ function codegen.stat_for_list(cx, node)
     local terra kernel([args]) [body] end
 
     -- Register the kernel function to JIT
-    local kernel_id = cx.task_meta:addcudakernel(kernel)
+    local kernel_id = cx.task_meta:get_cuda_variant():add_cuda_kernel(kernel)
 
     ---- kernel launch
     local counts = terralib.newlist()
