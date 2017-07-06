@@ -1152,7 +1152,7 @@ namespace Legion {
       : FutureMapImpl(ctx, op, rt, did, owner), 
         repl_ctx(ctx), full_domain(dom), 
         future_map_barrier(ctx->get_next_future_map_barrier()),
-        collective_index(ctx->get_next_collective_index(COLLECTIVE_LOC_62)),
+        collective_index(ctx->get_next_collective_index(COLLECTIVE_LOC_32)),
         sharding_function_ready(Runtime::create_rt_user_event()), 
         sharding_function(NULL), collective_performed(false)
     //--------------------------------------------------------------------------

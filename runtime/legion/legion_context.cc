@@ -8422,7 +8422,7 @@ namespace Legion {
       {
         // We need to get the barrier result
         ValueBroadcast<FieldSpace> space_collective(this,
-                            field_space_allocator_shard, COLLECTIVE_LOC_32);
+                            field_space_allocator_shard, COLLECTIVE_LOC_31);
         space = space_collective;
 #ifdef DEBUG_LEGION
         assert(space.exists());
