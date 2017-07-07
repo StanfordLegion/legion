@@ -66,10 +66,10 @@ def main_task():
     x = f(1, "asdf", True)
     print("result of f is %s" % x.get())
 
-    R = legion.Region.create([4, 4], {'x': (legion.double, 1)})
+    R = legion.Region.create([4, 4], {'x': (legion.float64, 1)})
     init(R)
     inc(R, 1)
 
-    S = legion.Region.create([1000], {'x': legion.double, 'y': legion.double})
+    S = legion.Region.create([1000], {'x': legion.float64, 'y': legion.float64})
     fill(S, 10)
     saxpy(S, 2)

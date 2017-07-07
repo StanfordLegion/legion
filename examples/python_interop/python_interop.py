@@ -46,11 +46,11 @@ def main_task():
     # Create a 2D index space of size 4x4.
     I = legion.Ispace.create([4, 4])
 
-    # Create a field space with a single field x of type double. For
+    # Create a field space with a single field x of type float64. For
     # interop with C++, we have to choose an explicit field ID here
     # (in this case, 1). We could leave this out if the code were pure
     # Python.
-    F = legion.Fspace.create({'x': (legion.double, 1)})
+    F = legion.Fspace.create({'x': (legion.float64, 1)})
 
     # Create a region from I and F and launch two tasks.
     R = legion.Region.create(I, F)

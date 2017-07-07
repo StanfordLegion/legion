@@ -19,7 +19,7 @@ from __future__ import print_function
 
 import cffi
 import cPickle
-import ctypes
+import collections
 import numpy
 import os
 import re
@@ -79,17 +79,25 @@ class Future(object):
         return value
 
 class Type(object):
-    __slots__ = ['ctype', 'size']
+    __slots__ = ['numpy_type', 'size']
 
-    def __init__(self, ctype):
-        self.ctype = ctype
-        self.size = ctypes.sizeof(self.ctype)
+    def __init__(self, numpy_type):
+        self.numpy_type = numpy_type
+        self.size = numpy.dtype(numpy_type).itemsize
 
     def __reduce__(self):
-        return (Type, (self.ctype,))
+        return (Type, (self.numpy_type,))
 
 # Pre-defined Types
-double = Type(ctypes.c_double)
+float16 = Type(numpy.float16)
+float32 = Type(numpy.float32)
+float64 = Type(numpy.float64)
+int16 = Type(numpy.int16)
+int32 = Type(numpy.int32)
+int64 = Type(numpy.int64)
+uint16 = Type(numpy.uint16)
+uint32 = Type(numpy.uint32)
+uint64 = Type(numpy.uint64)
 
 class Privilege(object):
     __slots__ = ['read', 'write', 'discard']
@@ -98,6 +106,19 @@ class Privilege(object):
         self.read = read
         self.write = write
         self.discard = discard
+
+    def _fields(self):
+        return (self.read, self.write, self.discard)
+
+    def __eq__(self, other):
+        return isinstance(other, Privilege) and self._fields() == other._fields()
+
+    def __cmp__(self, other):
+        assert isinstance(other, Privilege)
+        return self._fields().__cmp__(other._fields())
+
+    def __hash__(self):
+        return hash(self._fields())
 
     def __call__(self, fields):
         return PrivilegeFields(self, fields)
@@ -240,16 +261,58 @@ class Region(object):
             fspace = Fspace.create(fspace)
         handle = c.legion_logical_region_create(
             _my.ctx.runtime, _my.ctx.context, ispace.handle[0], fspace.handle[0])
-        return Region(handle, ispace, fspace)
+        result = Region(handle, ispace, fspace)
+        for field_name in fspace.field_ids.keys():
+            result.set_privilege(field_name, RW)
+        return result
 
-    def set_instance(self, field_name, instance, privilege):
-        assert field_name not in self.instances
-        self.instances[field_name] = instance
+    def destroy(self):
+        # This is not something you want to have happen in a
+        # destructor, since regions may outlive the lifetime of the handle.
+        c.legion_logical_region_destroy(
+            _my.ctx.runtime, _my.ctx.context, self.handle[0])
+        # Clear out references. Technically unnecessary but avoids abuse.
+        del self.instance_wrappers
+        del self.instances
+        del self.handle
+        del self.ispace
+        del self.fspace
+
+    def set_privilege(self, field_name, privilege):
+        assert field_name not in self.privileges
         self.privileges[field_name] = privilege
 
+    def set_instance(self, field_name, instance, privilege=None):
+        assert field_name not in self.instances
+        self.instances[field_name] = instance
+        if privilege is not None:
+            assert field_name not in self.privileges
+            self.privileges[field_name] = privilege
+
+    def map_inline(self):
+        fields_by_privilege = collections.defaultdict(set)
+        for field_name, privilege in self.privileges.iteritems():
+            fields_by_privilege[privilege].add(field_name)
+        for privilege, field_names  in fields_by_privilege.iteritems():
+            launcher = c.legion_inline_launcher_create_logical_region(
+                self.handle[0],
+                privilege._legion_privilege(), 0, # EXCLUSIVE
+                self.handle[0],
+                0, False, 0, 0)
+            for field_name in field_names:
+                c.legion_inline_launcher_add_field(
+                    launcher, self.fspace.field_ids[field_name], True)
+            instance = c.legion_inline_launcher_execute(
+                _my.ctx.runtime, _my.ctx.context, launcher)
+            for field_name in field_names:
+                self.set_instance(field_name, instance)
+
     def __getattr__(self, field_name):
-        if field_name in self.fspace.field_ids and \
-           field_name in self.instances:
+        if field_name in self.fspace.field_ids:
+            if field_name not in self.instances:
+                if self.privileges[field_name] is None:
+                    raise Exception('Invalid attempt to access field "%s" without privileges' % field_name)
+                self.map_inline()
             if field_name not in self.instance_wrappers:
                 self.instance_wrappers[field_name] = RegionField(
                     self, field_name)
@@ -320,7 +383,7 @@ class _RegionNdarray(object):
         self.__array_interface__ = {
             'version': 3,
             'shape': shape,
-            'typestr': numpy.dtype(field_type.ctype).str,
+            'typestr': numpy.dtype(field_type.numpy_type).str,
             'data': (base_ptr, read_only),
             'strides': strides,
         }
