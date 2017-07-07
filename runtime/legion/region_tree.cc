@@ -322,16 +322,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent RegionTreeForest::create_pending_partition_shard(
-                                                  ShardID owner_shard,
-                                                  ReplicateContext *ctx,
-                                                  IndexPartition pid,
-                                                  IndexSpace parent,
-                                                  IndexSpace color_space,
-                                                  LegionColor &partition_color,
-                                                  PartitionKind part_kind,
-                                                  ApEvent partition_ready,
-                                                  ShardMapping *mapping,
-                                                  ApBarrier partial_pending)
+                                              ShardID owner_shard,
+                                              ReplicateContext *ctx,
+                                              IndexPartition pid,
+                                              IndexSpace parent,
+                                              IndexSpace color_space,
+                                              LegionColor &partition_color,
+                                              PartitionKind part_kind,
+                                              ValueBroadcast<bool> *part_result,
+                                              ApEvent partition_ready,
+                                              ShardMapping *mapping,
+                                              ApBarrier partial_pending)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -367,14 +368,20 @@ namespace Legion {
         RtEvent disjointness_event;
         if (part_kind == COMPUTE_KIND)
         {
+#ifdef DEBUG_LEGION
+          assert(part_result != NULL);
+#endif
           IndexPartNode::DisjointnessArgs args;
           args.pid = pid;
-          args.disjointness_collective = 
-            new ValueBroadcast<bool>(ctx, owner_shard, COLLECTIVE_LOC_61);
+          args.disjointness_collective = part_result; 
           disjointness_event = runtime->issue_runtime_meta_task(args,
               LG_DEFERRED_THROUGHPUT_PRIORITY, NULL,
               Runtime::protect_event(partition_ready));
         }
+#ifdef DEBUG_LEGION
+        else
+          assert(part_result == NULL);
+#endif
         IndexPartNode *partition_node;
         if (part_kind == COMPUTE_KIND)
         {
@@ -406,13 +413,19 @@ namespace Legion {
         RtEvent disjointness_event;
         if (part_kind == COMPUTE_KIND)
         {
+#ifdef DEBUG_LEGION
+          assert(part_result != NULL);
+#endif
           IndexPartNode::DisjointnessArgs args;
           args.pid = pid;
-          args.disjointness_collective = 
-            new ValueBroadcast<bool>(ctx, owner_shard, COLLECTIVE_LOC_61);
+          args.disjointness_collective = part_result; 
           disjointness_event = runtime->issue_runtime_meta_task(args,
                                     LG_DEFERRED_THROUGHPUT_PRIORITY);
         }
+#ifdef DEBUG_LEGION
+        else
+          assert(part_result == NULL);
+#endif
         IndexPartNode *partition_node;
         if (part_kind == COMPUTE_KIND)
         {

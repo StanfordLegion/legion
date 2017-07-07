@@ -6954,7 +6954,7 @@ namespace Legion {
                                            index_partition_allocator_shard, 
                                            this, pid, parent,
                                            color_space, partition_color, 
-                                           DISJOINT_KIND,
+                                           DISJOINT_KIND, NULL,
                                            pending_partition_barrier,
                                            shard_manager->get_mapping());
         // We have to wait before broadcasting the value to other shards
@@ -6994,7 +6994,7 @@ namespace Legion {
         forest->create_pending_partition_shard(index_partition_allocator_shard, 
                                          this, pid, parent, 
                                          color_space, partition_color, 
-                                         DISJOINT_KIND,
+                                         DISJOINT_KIND, NULL,
                                          pending_partition_barrier,
                                          shard_manager->get_mapping());
       }
@@ -7058,6 +7058,10 @@ namespace Legion {
         else
           kind = ALIASED_KIND;
       }
+      ValueBroadcast<bool> *disjoint_result = NULL;
+      if (kind == COMPUTE_KIND)
+        disjoint_result = new ValueBroadcast<bool>(this, 
+            index_partition_allocator_shard, COLLECTIVE_LOC_61);
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
       if (owner_shard->shard_id == index_partition_allocator_shard)
       {
@@ -7074,7 +7078,7 @@ namespace Legion {
                                            index_partition_allocator_shard, 
                                            this, pid, parent, 
                                            color_space, partition_color, 
-                                           kind,
+                                           kind, disjoint_result,
                                            pending_partition_barrier,
                                            shard_manager->get_mapping());
         // We have to wait before broadcasting the value to other shards
@@ -7114,7 +7118,7 @@ namespace Legion {
                                          index_partition_allocator_shard,
                                          this, pid, parent, 
                                          color_space, partition_color, 
-                                         kind,
+                                         kind, disjoint_result,
                                          pending_partition_barrier,
                                          shard_manager->get_mapping());
       }
@@ -7177,6 +7181,10 @@ namespace Legion {
         else
           kind = DISJOINT_KIND;
       }
+      ValueBroadcast<bool> *disjoint_result = NULL;
+      if (kind == COMPUTE_KIND)
+        disjoint_result = new ValueBroadcast<bool>(this, 
+            index_partition_allocator_shard, COLLECTIVE_LOC_62);
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
       if (owner_shard->shard_id == index_partition_allocator_shard)
       {
@@ -7193,7 +7201,7 @@ namespace Legion {
                                            index_partition_allocator_shard,
                                            this, pid, parent, 
                                            color_space, partition_color, 
-                                           kind,
+                                           kind, disjoint_result,
                                            pending_partition_barrier,
                                            shard_manager->get_mapping());
         // We have to wait before broadcasting the value to other shards
@@ -7233,7 +7241,7 @@ namespace Legion {
                                          index_partition_allocator_shard,
                                          this, pid, parent, 
                                          color_space, partition_color, 
-                                         kind,
+                                         kind, disjoint_result,
                                          pending_partition_barrier,
                                          shard_manager->get_mapping());
       }
@@ -7293,6 +7301,10 @@ namespace Legion {
         if (p1->is_disjoint(true/*from app*/))
           kind = DISJOINT_KIND;
       }
+      ValueBroadcast<bool> *disjoint_result = NULL;
+      if (kind == COMPUTE_KIND)
+        disjoint_result = new ValueBroadcast<bool>(this, 
+            index_partition_allocator_shard, COLLECTIVE_LOC_63);
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
       if (owner_shard->shard_id == index_partition_allocator_shard)
       {
@@ -7309,7 +7321,7 @@ namespace Legion {
                                            index_partition_allocator_shard,
                                            this, pid, parent, 
                                            color_space, partition_color, 
-                                           kind,
+                                           kind, disjoint_result,
                                            pending_partition_barrier,
                                            shard_manager->get_mapping());
         // We have to wait before broadcasting the value to other shards
@@ -7349,7 +7361,7 @@ namespace Legion {
                                          index_partition_allocator_shard,
                                          this, pid, parent, 
                                          color_space, partition_color, 
-                                         kind,
+                                         kind, disjoint_result,
                                          pending_partition_barrier,
                                          shard_manager->get_mapping());
       }
@@ -7501,6 +7513,10 @@ namespace Legion {
       ReplPendingPartitionOp *part_op = 
         runtime->get_available_repl_pending_partition_op(true);
       ApEvent term_event = part_op->get_completion_event();
+      ValueBroadcast<bool> *disjoint_result = NULL;
+      if (part_kind == COMPUTE_KIND)
+        disjoint_result = new ValueBroadcast<bool>(this, 
+            index_partition_allocator_shard, COLLECTIVE_LOC_64);
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
       if (owner_shard->shard_id == index_partition_allocator_shard)
       {
@@ -7516,7 +7532,7 @@ namespace Legion {
                                            index_partition_allocator_shard,
                                            this, pid, parent, 
                                            color_space, part_color, 
-                                           part_kind,
+                                           part_kind, disjoint_result,
                                            pending_partition_barrier,
                                            shard_manager->get_mapping());
         // We have to wait before broadcasting the value to other shards
@@ -7556,7 +7572,7 @@ namespace Legion {
                                          index_partition_allocator_shard,
                                          this, pid, parent, 
                                          color_space, part_color, 
-                                         part_kind,
+                                         part_kind, disjoint_result,
                                          pending_partition_barrier,
                                          shard_manager->get_mapping());
       }
@@ -7613,7 +7629,7 @@ namespace Legion {
                                            index_partition_allocator_shard,
                                            this, pid, parent, 
                                            color_space, part_color,
-                                           DISJOINT_KIND,
+                                           DISJOINT_KIND, NULL,
                                            pending_partition_barrier,
                                            shard_manager->get_mapping());
         // We have to wait before broadcasting the value to other shards
@@ -7653,7 +7669,7 @@ namespace Legion {
                                          index_partition_allocator_shard,
                                          this, pid, parent, 
                                          color_space, part_color,
-                                         DISJOINT_KIND,
+                                         DISJOINT_KIND, NULL,
                                          pending_partition_barrier,
                                          shard_manager->get_mapping());
       }
@@ -7717,6 +7733,10 @@ namespace Legion {
       ReplDependentPartitionOp *part_op = 
         runtime->get_available_repl_dependent_partition_op(true);
       ApEvent term_event = part_op->get_completion_event(); 
+      ValueBroadcast<bool> *disjoint_result = NULL;
+      if (part_kind == COMPUTE_KIND)
+        disjoint_result = new ValueBroadcast<bool>(this, 
+            index_partition_allocator_shard, COLLECTIVE_LOC_65);
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
       if (owner_shard->shard_id == index_partition_allocator_shard)
       {
@@ -7732,7 +7752,7 @@ namespace Legion {
                                            index_partition_allocator_shard,
                                            this, pid, handle, 
                                            color_space, part_color,
-                                           part_kind,
+                                           part_kind, disjoint_result,
                                            pending_partition_barrier,
                                            shard_manager->get_mapping());
         // We have to wait before broadcasting the value to other shards
@@ -7772,7 +7792,7 @@ namespace Legion {
                                          index_partition_allocator_shard,
                                          this, pid, handle, 
                                          color_space, part_color,
-                                         part_kind,
+                                         part_kind, disjoint_result,
                                          pending_partition_barrier,
                                          shard_manager->get_mapping());
       }
@@ -7837,6 +7857,10 @@ namespace Legion {
       ReplDependentPartitionOp *part_op = 
         runtime->get_available_repl_dependent_partition_op(true);
       ApEvent term_event = part_op->get_completion_event();
+      ValueBroadcast<bool> *disjoint_result = NULL;
+      if (part_kind == COMPUTE_KIND)
+        disjoint_result = new ValueBroadcast<bool>(this, 
+            index_partition_allocator_shard, COLLECTIVE_LOC_66);
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
       if (owner_shard->shard_id == index_partition_allocator_shard)
       {
@@ -7852,7 +7876,7 @@ namespace Legion {
                                            index_partition_allocator_shard,
                                            this, pid, handle,
                                            color_space, part_color,
-                                           part_kind,
+                                           part_kind, disjoint_result,
                                            pending_partition_barrier,
                                            shard_manager->get_mapping());
         // We have to wait before broadcasting the value to other shards
@@ -7892,7 +7916,7 @@ namespace Legion {
                                          index_partition_allocator_shard,
                                          this, pid, handle, 
                                          color_space, part_color,
-                                         part_kind,
+                                         part_kind, disjoint_result,
                                          pending_partition_barrier,
                                          shard_manager->get_mapping());
       }
@@ -7964,6 +7988,10 @@ namespace Legion {
         if (p->is_disjoint(true/*from app*/))
           part_kind = DISJOINT_KIND;
       }
+      ValueBroadcast<bool> *disjoint_result = NULL;
+      if (part_kind == COMPUTE_KIND)
+        disjoint_result = new ValueBroadcast<bool>(this, 
+            index_partition_allocator_shard, COLLECTIVE_LOC_67);
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
       if (owner_shard->shard_id == index_partition_allocator_shard)
       {
@@ -7979,7 +8007,7 @@ namespace Legion {
                                            index_partition_allocator_shard,
                                            this, pid, handle.get_index_space(),
                                            color_space, part_color, 
-                                           part_kind,
+                                           part_kind, disjoint_result,
                                            pending_partition_barrier,
                                            shard_manager->get_mapping());
         // We have to wait before broadcasting the value to other shards
@@ -8019,7 +8047,7 @@ namespace Legion {
                                          index_partition_allocator_shard,
                                          this, pid, handle.get_index_space(),
                                          color_space, part_color, 
-                                         part_kind,
+                                         part_kind, disjoint_result,
                                          pending_partition_barrier,
                                          shard_manager->get_mapping());
       }
@@ -8084,6 +8112,10 @@ namespace Legion {
       ReplDependentPartitionOp *part_op = 
         runtime->get_available_repl_dependent_partition_op(true);
       ApEvent term_event = part_op->get_completion_event();
+      ValueBroadcast<bool> *disjoint_result = NULL;
+      if (part_kind == COMPUTE_KIND)
+        disjoint_result = new ValueBroadcast<bool>(this, 
+            index_partition_allocator_shard, COLLECTIVE_LOC_68);
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
       if (owner_shard->shard_id == index_partition_allocator_shard)
       {
@@ -8099,7 +8131,7 @@ namespace Legion {
                                            index_partition_allocator_shard,
                                            this, pid, handle.get_index_space(),
                                            color_space, part_color, 
-                                           part_kind,
+                                           part_kind, disjoint_result,
                                            pending_partition_barrier,
                                            shard_manager->get_mapping());
         // We have to wait before broadcasting the value to other shards
@@ -8139,7 +8171,7 @@ namespace Legion {
                                          index_partition_allocator_shard,
                                          this, pid, handle.get_index_space(),
                                          color_space, part_color, 
-                                         part_kind,
+                                         part_kind, disjoint_result,
                                          pending_partition_barrier,
                                          shard_manager->get_mapping());
       }
@@ -8197,6 +8229,10 @@ namespace Legion {
         part_color = color; 
       else
         color_generated = true;
+      ValueBroadcast<bool> *disjoint_result = NULL;
+      if (part_kind == COMPUTE_KIND)
+        disjoint_result = new ValueBroadcast<bool>(this, 
+            index_partition_allocator_shard, COLLECTIVE_LOC_69);
       IndexPartition pid(0/*temp*/,parent.get_tree_id(),parent.get_type_tag());
       if (owner_shard->shard_id == index_partition_allocator_shard)
       {
@@ -8216,7 +8252,7 @@ namespace Legion {
                                            index_partition_allocator_shard,
                                            this, pid, parent, 
                                            color_space, part_color, 
-                                           part_kind,
+                                           part_kind, disjoint_result,
                                            partition_ready,
                                            shard_manager->get_mapping(),
                                            partition_ready);
@@ -8264,7 +8300,7 @@ namespace Legion {
                                          index_partition_allocator_shard,
                                          this, pid, parent, 
                                          color_space, part_color, 
-                                         part_kind,
+                                         part_kind, disjoint_result,
                                          partition_ready,
                                          shard_manager->get_mapping(),
                                          partition_ready);

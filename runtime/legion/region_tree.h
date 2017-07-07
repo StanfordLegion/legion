@@ -99,6 +99,7 @@ namespace Legion {
                                              IndexSpace color_space,
                                              LegionColor &partition_color,
                                              PartitionKind part_kind,
+                                             ValueBroadcast<bool> *part_result,
                                              ApEvent partition_ready,
                                              ShardMapping *mapping,
                    ApBarrier partial_pending = ApBarrier::NO_AP_BARRIER);
