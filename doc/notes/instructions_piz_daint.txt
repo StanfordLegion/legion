@@ -1,0 +1,19 @@
+# instructions to run legion on piz daint 7/5/2017
+
+module unload PrgEnv-cray
+module load PrgEnv-gnu
+module load daint-mc
+
+CC=cc CXX=CC HOST_CC=gcc HOST_CXX=g++ scripts/setup_env.py
+mv legion/language/terra.build legion/language/terra.build.master
+git clone -b luajit2.1 https://github.com/magnatelee/terra.git terra.build
+
+cd terra.build
+CC=gcc CXX=g++ make LLVM_CONFIG=`readlink -f ../llvm/install/bin/llvm-config` CLANG=`readlink -f ../llvm/install/bin/clang` -j
+cd ..
+
+test that it's ok
+
+`SAVEOBJ=1 ./regent.py examples/circuit_sparse.rg`
+
+if you see a binary `circuit` in the `language` directory, that means you made it
