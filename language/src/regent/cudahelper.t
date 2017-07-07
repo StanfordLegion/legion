@@ -164,6 +164,19 @@ local terra register_function(handle : &&opaque, id : int, name : &int8)
   HijackAPI.hijackCudaRegisterFunction(handle, [&int8](id), name)
 end
 
+local function find_device_library(target)
+  local device_lib_dir = terralib.cudahome .. "/nvvm/libdevice/"
+  local libdevice = nil
+  for f in io.popen("ls " .. device_lib_dir):lines() do
+    local version = tonumber(string.match(string.match(f, "[0-9][0-9][.]"), "[0-9][0-9]"))
+    if version <= target then
+      libdevice = device_lib_dir .. f
+    end
+  end
+  assert(libdevice ~= nil, "Failed to find a device library")
+  return libdevice
+end
+
 function cudahelper.jit_compile_kernels_and_register(kernels)
   local module = {}
   for k, v in pairs(kernels) do
@@ -171,10 +184,7 @@ function cudahelper.jit_compile_kernels_and_register(kernels)
   end
   local device = init_cuda()
   local version = get_cuda_version(device)
-  local libdevice =
-    terralib.cudahome..
-    string.format("/nvvm/libdevice/libdevice.compute_%d.10.bc",
-                  tonumber(version))
+  local libdevice = find_device_library(tonumber(version))
   local llvmbc = terralib.linkllvm(libdevice)
   externcall_builtin = function(name, ftype)
     return llvmbc:extern(name, ftype)
