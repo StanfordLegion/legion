@@ -413,13 +413,18 @@ def extern_task(**kwargs):
     return ExternTask(**kwargs)
 
 class Task (object):
-    __slots__ = ['body', 'privileges', 'task_id']
+    __slots__ = ['body', 'privileges', 'leaf', 'inner', 'idempotent', 'task_id']
 
-    def __init__(self, body, privileges=None, register=True):
+    def __init__(self, body, privileges=None,
+                 leaf=False, inner=False, idempotent=False,
+                 register=True):
         self.body = body
         if privileges is not None:
             privileges = [(x if x is not None else N) for x in privileges]
         self.privileges = privileges
+        self.leaf = bool(leaf)
+        self.inner = bool(inner)
+        self.idempotent = bool(idempotent)
         self.task_id = None
         if register:
             self.register()
@@ -534,9 +539,9 @@ class Task (object):
         # FIXME: Add layout constraints
 
         options = ffi.new('legion_task_config_options_t *')
-        options[0].leaf = False
-        options[0].inner = False
-        options[0].idempotent = False
+        options[0].leaf = self.leaf
+        options[0].inner = self.inner
+        options[0].idempotent = self.idempotent
 
         task_id = c.legion_runtime_preregister_task_variant_python_source(
             ffi.cast('legion_task_id_t', -1), # AUTO_GENERATE_ID

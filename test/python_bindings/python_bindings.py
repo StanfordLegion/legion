@@ -27,7 +27,7 @@ def f(x, y, z):
     print("inside task f%s" % ((x, y, z),))
     return x+1
 
-@legion.task(privileges=[legion.RW])
+@legion.task(privileges=[legion.RW], leaf=True)
 def inc(R, step):
     print("inside task inc%s" % ((R, step),))
 
@@ -41,7 +41,7 @@ def inc(R, step):
     numpy.add(R.x, step, out=R.x)
     print(R.x)
 
-@legion.task(privileges=[legion.RW])
+@legion.task(privileges=[legion.RW], leaf=True)
 def fill(S, value):
     print("inside task fill%s" % ((S, value),))
 
@@ -50,7 +50,7 @@ def fill(S, value):
     print(S.x[0:10])
     print(S.y[0:10])
 
-@legion.task(privileges=[legion.RW])
+@legion.task(privileges=[legion.RW], leaf=True)
 def saxpy(S, a):
     print("inside task saxpy%s" % ((S, a),))
 
@@ -59,7 +59,7 @@ def saxpy(S, a):
     numpy.add(S.y, a*S.x, out=S.y)
     print(S.y[0:10])
 
-@legion.task
+@legion.task(inner=True)
 def main_task():
     print("inside main_task()")
 
