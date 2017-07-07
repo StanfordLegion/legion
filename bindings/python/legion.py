@@ -48,12 +48,19 @@ c = ffi.dlopen(None)
 _my = threading.local()
 
 class Context(object):
-    __slots__ = ['context', 'runtime', 'task', 'regions']
+    __slots__ = ['context', 'runtime', 'task', 'regions', 'current_launch']
     def __init__(self, context, runtime, task, regions):
         self.context = context
         self.runtime = runtime
         self.task = task
         self.regions = regions
+        self.current_launch = None
+    def begin_launch(self, launch):
+        assert self.current_launch == None
+        self.current_launch = launch
+    def end_launch(self, launch):
+        assert self.current_launch is not None
+        self.current_launch = None
 
 class Future(object):
     __slots__ = ['handle']
@@ -501,6 +508,12 @@ class _TaskLauncher(object):
     def spawn_task(self, *args):
         assert(isinstance(_my.ctx, Context))
 
+        # Do any required preprocessing on arguments.
+        args = [
+            arg._legion_preprocess_task_argument()
+            if hasattr(arg, '_legion_preprocess_task_argument') else arg
+            for arg in args]
+
         # Encode task arguments.
         task_args = ffi.new('legion_task_argument_t *')
         if self.calling_convention == 'python':
@@ -546,3 +559,34 @@ class _TaskLauncher(object):
         future = Future(result)
         c.legion_future_destroy(result)
         return future
+
+class _IndexValue(object):
+    __slots__ = ['value']
+    def __init__(self, value):
+        self.value = value
+    def __int__(self):
+        return self.value
+    def __index__(self):
+        return self.value
+    def __str__(self):
+        return str(self.value)
+    def __repr__(self):
+        return repr(self.value)
+    def _legion_preprocess_task_argument(self):
+        return self.value
+
+class IndexLaunch(object):
+    __slots__ = ['extent']
+    def __init__(self, extent):
+        assert len(extent) == 1
+        self.extent = extent
+    def __iter__(self):
+        _my.ctx.begin_launch(self)
+        point = _IndexValue(None)
+        for i in xrange(self.extent[0]):
+            point.value = i
+            yield point
+        _my.ctx.end_launch(self)
+        self.launch()
+    def launch(self):
+        print('TODO: launch')
