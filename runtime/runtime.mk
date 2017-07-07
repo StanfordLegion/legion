@@ -588,6 +588,11 @@ GEN_GPU_OBJS	:=
 GPU_RUNTIME_OBJS:=
 endif
 
+ifeq ($(strip $(FORTRAN_LEAF_TASK)),1)
+GEN_FORTRAN_OBJS	:= $(GEN_FORTRAN_SRC:.f90=.o)
+LD_FLAGS	+= -lgfortran
+endif
+
 # Provide build rules unless the user asks us not to
 ifndef NO_BUILD_RULES
 # Provide an all unless the user asks us not to
@@ -597,9 +602,15 @@ all: $(OUTFILE)
 endif
 
 # If we're using CUDA we have to link with nvcc
+ifeq ($(strip $(FORTRAN_LEAF_TASK)),1)
+$(OUTFILE) : $(GEN_OBJS) $(GEN_FORTRAN_OBJS) $(GEN_GPU_OBJS) $(SLIB_LEGION) $(SLIB_REALM)
+	@echo "---> Linking objects into one binary: $(OUTFILE)"
+	$(CXX) -o $(OUTFILE) $(GEN_OBJS) $(GEN_FORTRAN_OBJS) $(GEN_GPU_OBJS) $(LD_FLAGS) $(LEGION_LIBS) $(LEGION_LD_FLAGS) $(GASNET_FLAGS)
+else
 $(OUTFILE) : $(GEN_OBJS) $(GEN_GPU_OBJS) $(SLIB_LEGION) $(SLIB_REALM)
 	@echo "---> Linking objects into one binary: $(OUTFILE)"
 	$(CXX) -o $(OUTFILE) $(GEN_OBJS) $(GEN_GPU_OBJS) $(LD_FLAGS) $(LEGION_LIBS) $(LEGION_LD_FLAGS) $(GASNET_FLAGS)
+endif
 
 $(SLIB_LEGION) : $(LEGION_OBJS) $(MAPPER_OBJS)
 	rm -f $@
@@ -611,6 +622,9 @@ $(SLIB_REALM) : $(REALM_OBJS)
 
 $(GEN_OBJS) : %.cc.o : %.cc
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
+	
+$(GEN_FORTRAN_OBJS) : %.o : %.f90
+	$(F90) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 
 $(ASM_OBJS) : %.S.o : %.S
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
