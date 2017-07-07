@@ -187,20 +187,16 @@ namespace Legion {
         runtime->send_index_partition_notification(parent_owner, rez);
         parent_notified = notified_event;
       }
-      RtEvent disjointness_event;
+      IndexPartNode *partition = NULL;
       if (part_kind == COMPUTE_KIND)
       {
         IndexPartNode::DisjointnessArgs args;
         args.pid = pid;
         args.disjointness_collective = NULL;
-        disjointness_event = runtime->issue_runtime_meta_task(args,
+        args.owner = true;
+        RtEvent disjointness_event = runtime->issue_runtime_meta_task(args,
             LG_DEFERRED_THROUGHPUT_PRIORITY, NULL,
             Runtime::protect_event(partition_ready));
-      }
-      IndexPartNode *partition = NULL;
-      if (part_kind == COMPUTE_KIND)
-      {
-        disjointness_event = Runtime::create_rt_user_event();
         partition = create_node(pid, parent_node, color_node, partition_color,
                         disjointness_event, partition_ready, partial_pending);
       }
@@ -374,6 +370,7 @@ namespace Legion {
           IndexPartNode::DisjointnessArgs args;
           args.pid = pid;
           args.disjointness_collective = part_result; 
+          args.owner = true;
           disjointness_event = runtime->issue_runtime_meta_task(args,
               LG_DEFERRED_THROUGHPUT_PRIORITY, NULL,
               Runtime::protect_event(partition_ready));
@@ -419,6 +416,7 @@ namespace Legion {
           IndexPartNode::DisjointnessArgs args;
           args.pid = pid;
           args.disjointness_collective = part_result; 
+          args.owner = false;
           disjointness_event = runtime->issue_runtime_meta_task(args,
                                     LG_DEFERRED_THROUGHPUT_PRIORITY);
         }
@@ -5809,10 +5807,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexPartNode::compute_disjointness(ValueBroadcast<bool> *collective)
+    void IndexPartNode::compute_disjointness(ValueBroadcast<bool> *collective,
+                                             bool owner)
     //--------------------------------------------------------------------------
     {
-      if (get_owner_space() == context->runtime->address_space)
+      if (owner)
       {
         // If we're the owner we do the disjointness test
         disjoint = true;
@@ -6150,7 +6149,7 @@ namespace Legion {
     {
       const DisjointnessArgs *dargs = (const DisjointnessArgs*)args;
       IndexPartNode *node = forest->get_node(dargs->pid);
-      node->compute_disjointness(dargs->disjointness_collective);
+      node->compute_disjointness(dargs->disjointness_collective, dargs->owner);
       // We can now delete the collective
       if (dargs->disjointness_collective != NULL)
         delete dargs->disjointness_collective;

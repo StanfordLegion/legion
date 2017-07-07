@@ -1451,6 +1451,7 @@ namespace Legion {
       public:
         IndexPartition pid;
         ValueBroadcast<bool> *disjointness_collective;
+        bool owner;
       };
     public:
       struct DynamicIndependenceArgs : 
@@ -1523,7 +1524,7 @@ namespace Legion {
       void add_child(IndexSpaceNode *child);
       void remove_child(const LegionColor c);
       size_t get_num_children(void) const;
-      void compute_disjointness(ValueBroadcast<bool> *collective);
+      void compute_disjointness(ValueBroadcast<bool> *collective, bool owner);
       void get_subspace_preconditions(std::set<ApEvent> &preconditions);
     public:
       bool is_disjoint(bool from_app = false);
