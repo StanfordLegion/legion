@@ -325,6 +325,7 @@ namespace Legion {
       LG_SPACE_INDEPENDENCE_TASK_ID,
       LG_PENDING_CHILD_TASK_ID,
       LG_DECREMENT_PENDING_TASK_ID,
+      LG_POST_DECREMENT_TASK_ID,
       LG_SEND_VERSION_STATE_UPDATE_TASK_ID,
       LG_UPDATE_VERSION_STATE_REDUCE_TASK_ID,
       LG_ADD_TO_DEP_QUEUE_TASK_ID,
@@ -421,6 +422,7 @@ namespace Legion {
         "Index Space Independence Test",                          \
         "Remove Pending Child",                                   \
         "Decrement Pending Task",                                 \
+        "Post Decrement Task",                                    \
         "Send Version State Update",                              \
         "Update Version State Reduce",                            \
         "Add to Dependence Queue",                                \
