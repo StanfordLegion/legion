@@ -324,8 +324,8 @@ namespace Legion {
       virtual void increment_outstanding(void) = 0;
       virtual void decrement_outstanding(void) = 0;
       virtual void increment_pending(void) = 0;
-      virtual RtEvent decrement_pending(TaskOp *child) const = 0;
-      virtual void decrement_pending(void) = 0;
+      virtual RtEvent decrement_pending(TaskOp *child) = 0;
+      virtual RtEvent decrement_pending(bool need_deferral) = 0;
       virtual void increment_frame(void) = 0;
       virtual void decrement_frame(void) = 0;
     public:
@@ -591,6 +591,12 @@ namespace Legion {
       struct DecrementArgs : public LgTaskArgs<DecrementArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DECREMENT_PENDING_TASK_ID;
+      public:
+        InnerContext *parent_ctx;
+      };
+      struct PostDecrementArgs : public LgTaskArgs<PostDecrementArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_POST_DECREMENT_TASK_ID;
       public:
         InnerContext *parent_ctx;
       };
@@ -899,8 +905,8 @@ namespace Legion {
       virtual void increment_outstanding(void);
       virtual void decrement_outstanding(void);
       virtual void increment_pending(void);
-      virtual RtEvent decrement_pending(TaskOp *child) const;
-      virtual void decrement_pending(void);
+      virtual RtEvent decrement_pending(TaskOp *child);
+      virtual RtEvent decrement_pending(bool need_deferral);
       virtual void increment_frame(void);
       virtual void decrement_frame(void);
     public:
@@ -1718,8 +1724,8 @@ namespace Legion {
       virtual void increment_outstanding(void);
       virtual void decrement_outstanding(void);
       virtual void increment_pending(void);
-      virtual RtEvent decrement_pending(TaskOp *child) const;
-      virtual void decrement_pending(void);
+      virtual RtEvent decrement_pending(TaskOp *child);
+      virtual RtEvent decrement_pending(bool need_deferral);
       virtual void increment_frame(void);
       virtual void decrement_frame(void);
     public:
@@ -2025,8 +2031,8 @@ namespace Legion {
       virtual void increment_outstanding(void);
       virtual void decrement_outstanding(void);
       virtual void increment_pending(void);
-      virtual RtEvent decrement_pending(TaskOp *child) const;
-      virtual void decrement_pending(void);
+      virtual RtEvent decrement_pending(TaskOp *child);
+      virtual RtEvent decrement_pending(bool need_deferral);
       virtual void increment_frame(void);
       virtual void decrement_frame(void);
     public:
