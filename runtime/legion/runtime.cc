@@ -20492,6 +20492,13 @@ continue;					\
           dargs->parent_ctx->decrement_pending();
           break;
         }
+        case LG_POST_DECREMENT_TASK_ID:
+          {
+            InnerContext::PostDecrementArgs *dargs = 
+              (InnerContext::PostDecrementArgs*)args;
+            Runtime::get_runtime(p)->activate_context(dargs->parent_ctx);
+            break;
+          }
         case LG_SEND_VERSION_STATE_UPDATE_TASK_ID:
         {
           VersionState::SendVersionStateArgs *vargs =
