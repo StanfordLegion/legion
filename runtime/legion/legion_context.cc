@@ -5665,23 +5665,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent InnerContext::decrement_pending(TaskOp *child) const
+    RtEvent InnerContext::decrement_pending(TaskOp *child)
     //--------------------------------------------------------------------------
     {
       // Don't need to do this if we are scheduled by frames
       if (context_configuration.min_tasks_to_schedule == 0)
         return RtEvent::NO_RT_EVENT;
-      // This may involve waiting, so always issue it as a meta-task 
-      DecrementArgs decrement_args;
-      decrement_args.parent_ctx = const_cast<InnerContext*>(this);
       RtEvent precondition = 
         Runtime::acquire_rt_reservation(context_lock, true/*exclusive*/);
-      return runtime->issue_runtime_meta_task(decrement_args, 
-                  LG_RESOURCE_PRIORITY, child, precondition);
+      // If we didn't get the lock defer it
+      if (!precondition.has_triggered())
+      {
+        // This may involve waiting, so always issue it as a meta-task 
+        DecrementArgs decrement_args;
+        decrement_args.parent_ctx = this;
+        return runtime->issue_runtime_meta_task(decrement_args, 
+                    LG_RESOURCE_PRIORITY, child, precondition);  
+      }
+      else
+        return decrement_pending(true/*need deferral*/);
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::decrement_pending(void)
+    RtEvent InnerContext::decrement_pending(bool need_deferral)
     //--------------------------------------------------------------------------
     {
       RtEvent wait_on;
@@ -5704,10 +5710,23 @@ namespace Legion {
       // Do anything that we need to do
       if (to_trigger.exists())
       {
-        wait_on.lg_wait();
-        runtime->activate_context(this);
-        Runtime::trigger_event(to_trigger);
+        if (need_deferral)
+        {
+          PostDecrementArgs post_decrement_args;
+          post_decrement_args.parent_ctx = this;
+          RtEvent done = runtime->issue_runtime_meta_task(post_decrement_args,
+              LG_LATENCY_PRIORITY, NULL, wait_on); 
+          Runtime::trigger_event(to_trigger, done);
+          return to_trigger;
+        }
+        else
+        {
+          wait_on.lg_wait();
+          runtime->activate_context(this);
+          Runtime::trigger_event(to_trigger);
+        }
       }
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -8654,7 +8673,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent LeafContext::decrement_pending(TaskOp *child) const
+    RtEvent LeafContext::decrement_pending(TaskOp *child)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -8662,10 +8681,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::decrement_pending(void)
+    RtEvent LeafContext::decrement_pending(bool need_deferral)
     //--------------------------------------------------------------------------
     {
       assert(false);
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -9791,17 +9811,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent InlineContext::decrement_pending(TaskOp *child) const
+    RtEvent InlineContext::decrement_pending(TaskOp *child)
     //--------------------------------------------------------------------------
     {
       return enclosing->decrement_pending(child);
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::decrement_pending(void)
+    RtEvent InlineContext::decrement_pending(bool need_deferral)
     //--------------------------------------------------------------------------
     {
-      enclosing->decrement_pending();
+      return enclosing->decrement_pending(need_deferral);
     }
 
     //--------------------------------------------------------------------------
