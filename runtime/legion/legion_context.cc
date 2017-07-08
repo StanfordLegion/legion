@@ -5683,11 +5683,11 @@ namespace Legion {
                     LG_RESOURCE_PRIORITY, child, precondition);  
       }
       else
-        return decrement_pending();
+        return decrement_pending(true/*need deferral*/);
     }
 
     //--------------------------------------------------------------------------
-    RtEvent InnerContext::decrement_pending(void)
+    RtEvent InnerContext::decrement_pending(bool need_deferral)
     //--------------------------------------------------------------------------
     {
       RtEvent wait_on;
@@ -5710,15 +5710,23 @@ namespace Legion {
       // Do anything that we need to do
       if (to_trigger.exists())
       {
-        PostDecrementArgs post_decrement_args;
-        post_decrement_args.parent_ctx = this;
-        RtEvent done = runtime->issue_runtime_meta_task(post_decrement_args,
-            LG_LATENCY_PRIORITY, NULL, wait_on); 
-        Runtime::trigger_event(to_trigger, done);
-        return to_trigger;
+        if (need_deferral)
+        {
+          PostDecrementArgs post_decrement_args;
+          post_decrement_args.parent_ctx = this;
+          RtEvent done = runtime->issue_runtime_meta_task(post_decrement_args,
+              LG_LATENCY_PRIORITY, NULL, wait_on); 
+          Runtime::trigger_event(to_trigger, done);
+          return to_trigger;
+        }
+        else
+        {
+          wait_on.lg_wait();
+          runtime->activate_context(this);
+          Runtime::trigger_event(to_trigger);
+        }
       }
-      else
-        return RtEvent::NO_RT_EVENT;
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -8673,7 +8681,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent LeafContext::decrement_pending(void)
+    RtEvent LeafContext::decrement_pending(bool need_deferral)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -9810,10 +9818,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent InlineContext::decrement_pending(void)
+    RtEvent InlineContext::decrement_pending(bool need_deferral)
     //--------------------------------------------------------------------------
     {
-      return enclosing->decrement_pending();
+      return enclosing->decrement_pending(need_deferral);
     }
 
     //--------------------------------------------------------------------------

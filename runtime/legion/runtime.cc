@@ -20489,7 +20489,7 @@ continue;					\
         {
           InnerContext::DecrementArgs *dargs =
           (InnerContext::DecrementArgs*)args;
-          dargs->parent_ctx->decrement_pending();
+          dargs->parent_ctx->decrement_pending(false/*need deferral*/);
           break;
         }
         case LG_POST_DECREMENT_TASK_ID:
