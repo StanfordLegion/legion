@@ -46,6 +46,11 @@ enum {
   DISTRIBUTE_CHARGE_TASK_ID,
   UPDATE_VOLTAGES_TASK_ID,
   CHECK_FIELD_TASK_ID,
+#ifndef SEQUENTIAL_LOAD_CIRCUIT
+  INIT_NODES_TASK_ID,
+  INIT_WIRES_TASK_ID,
+  INIT_LOCATION_TASK_ID,
+#endif
 };
 
 enum {
@@ -216,6 +221,88 @@ public:
                        Context ctx, Runtime *runtime);
   static void register_task(void);
 };
+
+#ifndef SEQUENTIAL_LOAD_CIRCUIT
+class InitNodesTask : public IndexLauncher {
+public:
+  InitNodesTask(LogicalRegion lr_all_nodes,
+                LogicalPartition lp_equal_nodes,
+                IndexSpace launch_space);
+public:
+  static const char * const TASK_NAME;
+  static const int TASK_ID = INIT_NODES_TASK_ID;
+  static const bool LEAF = true;
+  static const int MAPPER_ID = 0;
+public:
+  static void cpu_base_impl(const Task *task,
+                            const std::vector<PhysicalRegion> &regions,
+                            Context ctx, Runtime *runtime);
+  static void register_task(void);
+};
+
+class InitWiresTask : public IndexLauncher {
+public:
+  struct Args {
+  public:
+    Args(int p, int n, int pct)
+      : num_pieces(p), nodes_per_piece(n), pct_wire_in_piece(pct) { }
+  public:
+    int num_pieces;
+    int nodes_per_piece;
+    int pct_wire_in_piece;
+  };
+public:
+  InitWiresTask(LogicalRegion lr_all_wires,
+                LogicalPartition lp_equal_wires,
+                IndexSpace launch_space,
+                int num_pieces, int nodes_per_piece,
+                int pct_wire_in_piece);
+protected:
+  Args args;
+public:
+  static const char * const TASK_NAME;
+  static const int TASK_ID = INIT_WIRES_TASK_ID;
+  static const bool LEAF = true;
+  static const int MAPPER_ID = 0;
+public:
+  static void cpu_base_impl(const Task *task,
+                            const std::vector<PhysicalRegion> &regions,
+                            Context ctx, Runtime *runtime);
+  static void register_task(void);
+};
+
+class InitLocationTask : public IndexLauncher {
+public:
+  struct Args {
+  public:
+    Args(LogicalPartition p, LogicalPartition s)
+      : lp_private(p), lp_shared(s) { }
+  public:
+    LogicalPartition lp_private;
+    LogicalPartition lp_shared;
+  };
+public:
+  InitLocationTask(LogicalRegion lr_location,
+                   LogicalPartition lp_equal_location,
+                   LogicalRegion lr_all_wires,
+                   LogicalPartition lp_equal_wires,
+                   IndexSpace launch_space,
+                   LogicalPartition lp_private,
+                   LogicalPartition lp_shared);
+protected:
+  Args args;
+public:
+  static const char * const TASK_NAME;
+  static const int TASK_ID = INIT_LOCATION_TASK_ID;
+  static const bool LEAF = true;
+  static const int MAPPER_ID = 0;
+public:
+  static void cpu_base_impl(const Task *task,
+                            const std::vector<PhysicalRegion> &regions,
+                            Context ctx, Runtime *runtime);
+  static void register_task(void);
+};
+#endif
 
 namespace TaskHelper {
   template<typename T>
