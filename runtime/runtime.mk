@@ -591,6 +591,7 @@ endif
 ifeq ($(strip $(FORTRAN_LEAF_TASK)),1)
 GEN_FORTRAN_OBJS	:= $(GEN_FORTRAN_SRC:.f90=.o)
 LD_FLAGS	+= -lgfortran
+F90	:= gfortran
 endif
 
 # Provide build rules unless the user asks us not to
@@ -622,9 +623,11 @@ $(SLIB_REALM) : $(REALM_OBJS)
 
 $(GEN_OBJS) : %.cc.o : %.cc
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
-	
+
+ifeq ($(strip $(FORTRAN_LEAF_TASK)),1)	
 $(GEN_FORTRAN_OBJS) : %.o : %.f90
 	$(F90) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
+endif
 
 $(ASM_OBJS) : %.S.o : %.S
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
