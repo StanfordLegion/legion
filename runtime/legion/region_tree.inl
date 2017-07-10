@@ -731,25 +731,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    void IndexSpaceNodeT<DIM,T>::instantiate_children(IndexPartNode *part)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(part->color_space == this);
-#endif
-      Realm::ZIndexSpace<DIM,T> space;
-      get_realm_index_space(space, true/*tight*/);
-      for (Realm::ZIndexSpaceIterator<DIM,T> rect_itr(space); 
-            rect_itr.valid; rect_itr.step())
-      {
-        for (Realm::ZPointInRectIterator<DIM,T> itr(rect_itr.rect);
-              itr.valid; itr.step())
-          part->get_child(linearize_color(&itr.p, handle.get_type_tag()));
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
     Domain IndexSpaceNodeT<DIM,T>::get_color_space_domain(void)
     //--------------------------------------------------------------------------
     {
