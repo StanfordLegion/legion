@@ -559,10 +559,6 @@ namespace Legion {
       IndexPartNode *parent_node = get_node(parent);
       LegionColor child_color = 
         parent_node->color_space->linearize_color(realm_color, type_tag);
-      // First get the child node   
-      if (!parent_node->has_child(child_color))
-        REPORT_LEGION_ERROR(ERROR_INVALID_COLOR,
-          "Invalid color in compute pending space!")
       IndexSpaceNode *child_node = parent_node->get_child(child_color);
       if (!parent_node->get_pending_child(child_color, domain_ready))
         REPORT_LEGION_ERROR(ERROR_INVALID_PENDING_CHILD,
