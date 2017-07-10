@@ -375,24 +375,19 @@ namespace Legion {
         else
           assert(part_result == NULL);
 #endif
-        IndexPartNode *partition_node;
-        if (part_kind == COMPUTE_KIND)
-        {
-          partition_node = create_node(pid, parent_node, color_node,
-                                partition_color, disjointness_event, 
-                                partition_ready, partial_pending, mapping);
-        }
-        else
+        if (part_kind != COMPUTE_KIND)
         {
           const bool disjoint = (part_kind == DISJOINT_KIND);
-          partition_node = create_node(pid, parent_node, color_node,
-                                          partition_color, disjoint, 
-                                          partition_ready, partial_pending,
-                                          mapping);
+          create_node(pid, parent_node, color_node, partition_color, 
+                      disjoint, partition_ready, partial_pending, mapping);
           if (Runtime::legion_spy_enabled)
             LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
                                            partition_color);
         }
+        else
+          create_node(pid, parent_node, color_node,
+                      partition_color, disjointness_event, 
+                      partition_ready, partial_pending, mapping);
         return parent_notified;
       }
       else
@@ -420,22 +415,16 @@ namespace Legion {
         else
           assert(part_result == NULL);
 #endif
-        IndexPartNode *partition_node;
-        if (part_kind == COMPUTE_KIND)
-        {
-          partition_node = create_node(pid, parent_node, color_node,
-                                       partition_color, disjointness_event, 
-                                       partition_ready, partial_pending,
-                                       mapping);
-        }
-        else
+        if (part_kind != COMPUTE_KIND)
         {
           const bool disjoint = (part_kind == DISJOINT_KIND);
-          partition_node = create_node(pid, parent_node, color_node,
-                                       partition_color, disjoint, 
-                                       partition_ready, partial_pending,
-                                       mapping);
+          create_node(pid, parent_node, color_node, partition_color, 
+                      disjoint, partition_ready, partial_pending, mapping);
         }
+        else
+          create_node(pid, parent_node, color_node,
+                      partition_color, disjointness_event, 
+                      partition_ready, partial_pending, mapping);
         // We know the parent is notified or we wouldn't even have
         // been given our pid
         return RtEvent::NO_RT_EVENT;
