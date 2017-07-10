@@ -1052,7 +1052,7 @@ namespace Legion {
      */
     class CompositeCopier {
     public:
-      CompositeCopier(RegionTreeNode *root, const FieldMask &copy_mask);
+      CompositeCopier(const FieldMask &copy_mask);
       CompositeCopier(const CompositeCopier &rhs);
       ~CompositeCopier(void);
     public:
@@ -1075,8 +1075,6 @@ namespace Legion {
       // They are only dirty if they are not also valid
       inline bool has_dirty_destination_fields(void) const
         { return !!(destination_dirty - destination_valid); }
-    public:
-      RegionTreeNode *const root;
     protected:
       LegionMap<RegionTreeNode*,FieldMask>::aligned written_nodes;
     protected:

@@ -2515,10 +2515,8 @@ namespace Legion {
 #endif
             intersection = finder->second.intersection;
           }
-#ifdef DEBUG_LEGION
           else
-            assert(false);
-#endif
+            return ApEvent::NO_AP_EVENT;
         }
         else
         {
@@ -2533,10 +2531,8 @@ namespace Legion {
 #endif
             intersection = finder->second.intersection;
           }
-#ifdef DEBUG_LEGION
           else
-            assert(false);
-#endif
+            return ApEvent::NO_AP_EVENT;
         }
         // Have to protect against misspeculation
         if (predicate_guard.exists())
