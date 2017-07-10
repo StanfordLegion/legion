@@ -854,7 +854,6 @@ namespace Legion {
       virtual bool contains_color(LegionColor color, 
                                   bool report_error = false) = 0;
       virtual void instantiate_colors(std::vector<LegionColor> &colors) = 0;
-      virtual void instantiate_children(IndexPartNode *partition) = 0;
       virtual Domain get_color_space_domain(void) = 0;
       virtual DomainPoint get_domain_point_color(void) const = 0;
       virtual DomainPoint delinearize_color_to_point(LegionColor c) = 0;
@@ -1073,7 +1072,6 @@ namespace Legion {
       virtual bool contains_color(LegionColor color,
                                   bool report_error = false);
       virtual void instantiate_colors(std::vector<LegionColor> &colors);
-      virtual void instantiate_children(IndexPartNode *partition);
       virtual Domain get_color_space_domain(void);
       virtual DomainPoint get_domain_point_color(void) const;
       virtual DomainPoint delinearize_color_to_point(LegionColor c);
@@ -1599,6 +1597,7 @@ namespace Legion {
       // Must hold the node lock when accessing
       // the remaining data structures
       std::map<LegionColor,IndexSpaceNode*> color_map;
+      std::map<LegionColor,RtUserEvent> pending_child_map;
       std::set<PartitionNode*> logical_nodes;
       std::set<std::pair<LegionColor,LegionColor> > disjoint_subspaces;
       std::set<std::pair<LegionColor,LegionColor> > aliased_subspaces;
@@ -2278,7 +2277,6 @@ namespace Legion {
       virtual RegionTreeID get_tree_id(void) const = 0;
       virtual RegionTreeNode* get_parent(void) const = 0;
       virtual RegionTreeNode* get_tree_child(const LegionColor c) = 0; 
-      virtual void instantiate_children(void) = 0;
       virtual bool is_region(void) const = 0;
 #ifdef DEBUG_LEGION
       virtual RegionNode* as_region_node(void) const = 0;
@@ -2439,7 +2437,6 @@ namespace Legion {
       virtual bool are_children_disjoint(const LegionColor c1, 
                                          const LegionColor c2);
       virtual bool are_all_children_disjoint(void);
-      virtual void instantiate_children(void);
       virtual bool is_region(void) const;
 #ifdef DEBUG_LEGION
       virtual RegionNode* as_region_node(void) const;
@@ -2633,7 +2630,6 @@ namespace Legion {
       virtual bool are_children_disjoint(const LegionColor c1, 
                                          const LegionColor c2);
       virtual bool are_all_children_disjoint(void);
-      virtual void instantiate_children(void);
       virtual bool is_region(void) const;
 #ifdef DEBUG_LEGION
       virtual RegionNode* as_region_node(void) const;

@@ -35,6 +35,7 @@ endif()
 set(CPU_SOURCES
   circuit.h         circuit.cc
                     circuit_cpu.cc
+                    circuit_init.cc
   circuit_mapper.h  circuit_mapper.cc
 )
 if(Legion_USE_CUDA)

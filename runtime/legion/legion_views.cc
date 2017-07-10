@@ -5015,16 +5015,14 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    CompositeCopier::CompositeCopier(RegionTreeNode *r,
-                                     const FieldMask &copy_mask)
-      : root(r), destination_valid(copy_mask)
+    CompositeCopier::CompositeCopier(const FieldMask &copy_mask)
+      : destination_valid(copy_mask)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     CompositeCopier::CompositeCopier(const CompositeCopier &rhs)
-      : root(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -5060,11 +5058,9 @@ namespace Legion {
         mask -= finder->second;
         if (!mask)
           return;
-        // Not entirely convinced the second part of this expression
-        // is correct, so we'll let legion spy find any bugs
-        if ((node == root) || (node->get_depth() <= root->get_depth()))
-          return;
         node = node->get_parent();
+        if (node == NULL)
+          break;
         finder = written_nodes.find(node);
       }
     }
@@ -5080,12 +5076,9 @@ namespace Legion {
       while (finder != written_nodes.end())
       {
         written_mask |= finder->second;
-        if (node == root)
-          break;
-#ifdef DEBUG_LEGION
-        assert(node->get_depth() > root->get_depth());
-#endif
         node = node->get_parent();
+        if (node == NULL)
+          break;
         finder = written_nodes.find(node);
       }
       mask &= written_mask;
@@ -6004,7 +5997,7 @@ namespace Legion {
                                               bool restrict_out)
     //--------------------------------------------------------------------------
     {
-      CompositeCopier copier(logical_node, copy_mask);
+      CompositeCopier copier(copy_mask);
       FieldMask top_locally_complete;
       FieldMask dominate_capture(copy_mask);
       CompositeCopyNode *copy_tree = construct_copy_tree(dst, closed_tree, 
@@ -6116,7 +6109,7 @@ namespace Legion {
       DETAILED_PROFILER(context->runtime, 
                         COMPOSITE_VIEW_ISSUE_DEFERRED_COPIES_CALL);
       LegionMap<ApEvent,FieldMask>::aligned postreductions;
-      CompositeCopier copier(logical_node, copy_mask);
+      CompositeCopier copier(copy_mask);
       FieldMask dummy_locally_complete;
       FieldMask dominate_capture(copy_mask);
       CompositeCopyNode *copy_tree = construct_copy_tree(dst, closed_tree,

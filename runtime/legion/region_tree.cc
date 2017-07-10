@@ -209,9 +209,6 @@ namespace Legion {
           LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
                                          partition_color);
       }
-      // We need to instantiate all the children for the partition before
-      // we return else there can be races on picking the names of the children
-      color_node->instantiate_children(partition);
       return parent_notified;
     }
 
@@ -5737,25 +5734,61 @@ namespace Legion {
       // If we own the index partition, create a new subspace here
       if (owner_space == local_space)
       {
-        IndexSpace is(context->runtime->get_unique_index_space_id(),
-                      handle.get_tree_id(), handle.get_type_tag());
-        IndexSpaceNode *result = NULL;
-        if (partial_pending.exists())
+        // First do a check to see someone else is already making
+        // the child in which case we should just wait for it to
+        // be ready
+        RtEvent wait_on;
         {
-          ApUserEvent partial_event = Runtime::create_ap_user_event();
-          result = context->create_node(is, NULL/*realm is*/,
-                                        this, c, partial_event);
-          Runtime::phase_barrier_arrive(partial_pending, 
-                                        1/*count*/, partial_event);
+          AutoLock n_lock(node_lock);
+          // Check to make sure we didn't loose the race
+          std::map<LegionColor,IndexSpaceNode*>::const_iterator child_finder =
+            color_map.find(c);
+          if (child_finder != color_map.end())
+            return child_finder->second;
+          // Didn't loose the race so we can keep going
+          std::map<LegionColor,RtUserEvent>::const_iterator finder = 
+            pending_child_map.find(c);
+          if (finder == pending_child_map.end())
+            pending_child_map[c] = Runtime::create_rt_user_event();
+          else
+            wait_on = finder->second;
+        }
+        if (wait_on.exists())
+        {
+          // Someone else is already making it so just wait
+          wait_on.lg_wait();
+          AutoLock n_lock(node_lock,1,false/*exclusive*/);
+          std::map<LegionColor,IndexSpaceNode*>::const_iterator finder =
+            color_map.find(c);
+#ifdef DEBUG_LEGION
+          // It better be here when we wake up
+          assert(finder != color_map.end());
+#endif
+          return finder->second;
         }
         else
-          // Make a new index space node ready when the partition is ready
-          result = context->create_node(is, NULL/*realm is*/, 
-                                        this, c, partition_ready); 
-        if (Runtime::legion_spy_enabled)
-          LegionSpy::log_index_subspace(handle.id, is.id, 
-                        result->get_domain_point_color());
-        return result; 
+        {
+          // We're making this so just do it
+          IndexSpace is(context->runtime->get_unique_index_space_id(),
+                        handle.get_tree_id(), handle.get_type_tag());
+          IndexSpaceNode *result = NULL;
+          if (partial_pending.exists())
+          {
+            ApUserEvent partial_event = Runtime::create_ap_user_event();
+            result = context->create_node(is, NULL/*realm is*/,
+                                          this, c, partial_event);
+            Runtime::phase_barrier_arrive(partial_pending, 
+                                        1/*count*/, partial_event);
+          }
+          else
+            // Make a new index space node ready when the partition is ready
+            result = context->create_node(is, NULL/*realm is*/, 
+                                          this, c, partition_ready); 
+          if (Runtime::legion_spy_enabled)
+            LegionSpy::log_index_subspace(handle.id, is.id, 
+                          result->get_domain_point_color());
+          return result; 
+        }
       }
       // Otherwise, request a child node from the owner node
       else
@@ -5785,11 +5818,21 @@ namespace Legion {
     void IndexPartNode::add_child(IndexSpaceNode *child)
     //--------------------------------------------------------------------------
     {
-      AutoLock n_lock(node_lock);
+      RtUserEvent to_trigger;
+      {
+        AutoLock n_lock(node_lock);
 #ifdef DEBUG_LEGION
-      assert(color_map.find(child->color) == color_map.end());
+        assert(color_map.find(child->color) == color_map.end());
 #endif
-      color_map[child->color] = child;
+        color_map[child->color] = child;
+        std::map<LegionColor,RtUserEvent>::iterator finder = 
+          pending_child_map.find(child->color);
+        if (finder == pending_child_map.end())
+          return;
+        to_trigger = finder->second;
+        pending_child_map.erase(finder);
+      }
+      Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -13356,19 +13399,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionNode::instantiate_children(void)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<LegionColor> all_colors;
-      row_source->get_colors(all_colors);
-      // This may look like it does nothing, but it checks to see
-      // if we have instantiated all the child nodes
-      for (std::vector<LegionColor>::const_iterator it = all_colors.begin(); 
-            it != all_colors.end(); it++)
-        get_child(*it);
-    }
-
-    //--------------------------------------------------------------------------
     bool RegionNode::is_region(void) const
     //--------------------------------------------------------------------------
     {
@@ -15049,19 +15079,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return row_source->is_disjoint();
-    }
-
-    //--------------------------------------------------------------------------
-    void PartitionNode::instantiate_children(void)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<LegionColor> all_colors;
-      row_source->get_colors(all_colors);
-      // This may look like it does nothing, but it checks to see
-      // if we have instantiated all the child nodes
-      for (std::vector<LegionColor>::const_iterator it = all_colors.begin(); 
-            it != all_colors.end(); it++)
-        get_child(*it);
     }
 
     //--------------------------------------------------------------------------
