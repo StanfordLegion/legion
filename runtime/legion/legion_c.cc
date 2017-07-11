@@ -4308,7 +4308,7 @@ legion_accessor_array_3d_destroy(legion_accessor_array_3d_t handle_)
 }
 
 void *
-legion_accessor_array_raw_rect_ptr_1d(legion_accessor_array_1d_t handle_,
+legion_accessor_array_1d_raw_rect_ptr(legion_accessor_array_1d_t handle_,
                                       legion_rect_1d_t rect_,
                                       legion_rect_1d_t *subrect_,
                                       legion_byte_offset_t *offsets_)
@@ -4324,7 +4324,7 @@ legion_accessor_array_raw_rect_ptr_1d(legion_accessor_array_1d_t handle_,
 }
 
 void *
-legion_accessor_array_raw_rect_ptr_2d(legion_accessor_array_2d_t handle_,
+legion_accessor_array_2d_raw_rect_ptr(legion_accessor_array_2d_t handle_,
                                       legion_rect_2d_t rect_,
                                       legion_rect_2d_t *subrect_,
                                       legion_byte_offset_t *offsets_)
@@ -4341,7 +4341,7 @@ legion_accessor_array_raw_rect_ptr_2d(legion_accessor_array_2d_t handle_,
 }
 
 void *
-legion_accessor_array_raw_rect_ptr_3d(legion_accessor_array_3d_t handle_,
+legion_accessor_array_3d_raw_rect_ptr(legion_accessor_array_3d_t handle_,
                                       legion_rect_3d_t rect_,
                                       legion_rect_3d_t *subrect_,
                                       legion_byte_offset_t *offsets_)

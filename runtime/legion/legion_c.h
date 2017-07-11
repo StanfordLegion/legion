@@ -2630,19 +2630,19 @@ extern "C" {
     legion_field_id_t fid);
 
   void *
-  legion_accessor_array_raw_rect_ptr_1d(legion_accessor_array_1d_t handle,
+  legion_accessor_array_1d_raw_rect_ptr(legion_accessor_array_1d_t handle,
                                         legion_rect_1d_t rect,
                                         legion_rect_1d_t *subrect,
                                         legion_byte_offset_t *offsets);
 
   void *
-  legion_accessor_array_raw_rect_ptr_2d(legion_accessor_array_2d_t handle,
+  legion_accessor_array_2d_raw_rect_ptr(legion_accessor_array_2d_t handle,
                                         legion_rect_2d_t rect,
                                         legion_rect_2d_t *subrect,
                                         legion_byte_offset_t *offsets);
 
   void *
-  legion_accessor_array_raw_rect_ptr_3d(legion_accessor_array_3d_t handle,
+  legion_accessor_array_3d_raw_rect_ptr(legion_accessor_array_3d_t handle,
                                         legion_rect_3d_t rect,
                                         legion_rect_3d_t *subrect,
                                         legion_byte_offset_t *offsets);
