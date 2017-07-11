@@ -227,6 +227,8 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
             def reader(log):
                 raw_val = log.read(num_bytes)
                 val = struct.unpack(fmt, raw_val)[0]
+                if param_type == "timestamp_t":
+                    val = val / 1000
                 return val
             return reader
 
