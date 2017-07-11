@@ -37,11 +37,12 @@ namespace Legion {
 
     class CObjectWrapper {
     public:
-
-      typedef LegionRuntime::Accessor::AccessorType::Generic Generic;
-      typedef LegionRuntime::Accessor::AccessorType::SOA<0> SOA;
-      typedef LegionRuntime::Accessor::RegionAccessor<Generic> AccessorGeneric;
-      typedef LegionRuntime::Accessor::RegionAccessor<SOA, char> AccessorArray;
+      typedef Legion::UnsafeFieldAccessor<char,1,coord_t,
+                Realm::AffineAccessor<char,1,coord_t> >   ArrayAccessor1D;
+      typedef Legion::UnsafeFieldAccessor<char,2,coord_t,
+                Realm::AffineAccessor<char,2,coord_t> >   ArrayAccessor2D;
+      typedef Legion::UnsafeFieldAccessor<char,3,coord_t,
+                Realm::AffineAccessor<char,3,coord_t> >   ArrayAccessor3D;
 
 #define NEW_OPAQUE_WRAPPER(T_, T)                                       \
       static T_ wrap(T t) {                                             \
@@ -83,8 +84,9 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_release_launcher_t, ReleaseLauncher *);
       NEW_OPAQUE_WRAPPER(legion_must_epoch_launcher_t, MustEpochLauncher *);
       NEW_OPAQUE_WRAPPER(legion_physical_region_t, PhysicalRegion *);
-      NEW_OPAQUE_WRAPPER(legion_accessor_generic_t, AccessorGeneric *);
-      NEW_OPAQUE_WRAPPER(legion_accessor_array_t, AccessorArray *);
+      NEW_OPAQUE_WRAPPER(legion_accessor_array_1d_t, ArrayAccessor1D *);
+      NEW_OPAQUE_WRAPPER(legion_accessor_array_2d_t, ArrayAccessor2D *);
+      NEW_OPAQUE_WRAPPER(legion_accessor_array_3d_t, ArrayAccessor3D *);
       NEW_OPAQUE_WRAPPER(legion_index_iterator_t, IndexIterator *);
       NEW_OPAQUE_WRAPPER(legion_task_t, Task *);
       NEW_OPAQUE_WRAPPER(legion_inline_t, InlineMapping *);
@@ -129,17 +131,23 @@ namespace Legion {
 #define NEW_POINT_WRAPPER(T_, T, DIM)                \
       static T_ wrap(T t) {                          \
         T_ t_;                                       \
-        std::copy(t.x, t.x + DIM, t_.x);             \
+        for (int i = 0; i < DIM; i++)                \
+          t_.x[i] = t[i];                            \
         return t_;                                   \
       }                                              \
       static T unwrap(T_ t_) {                       \
-        T t(t_.x);                                   \
+        T t;                                         \
+        for (int i = 0; i < DIM; i++)                \
+          t[i] = t_.x[i];                            \
         return t;                                    \
       }
 
-      NEW_POINT_WRAPPER(legion_point_1d_t, LegionRuntime::Arrays::Point<1>, 1);
-      NEW_POINT_WRAPPER(legion_point_2d_t, LegionRuntime::Arrays::Point<2>, 2);
-      NEW_POINT_WRAPPER(legion_point_3d_t, LegionRuntime::Arrays::Point<3>, 3);
+      typedef Realm::ZPoint<1,coord_t> Point1D;
+      typedef Realm::ZPoint<2,coord_t> Point2D;
+      typedef Realm::ZPoint<3,coord_t> Point3D;
+      NEW_POINT_WRAPPER(legion_point_1d_t, Point1D, 1);
+      NEW_POINT_WRAPPER(legion_point_2d_t, Point2D, 2);
+      NEW_POINT_WRAPPER(legion_point_3d_t, Point3D, 3);
 #undef NEW_POINT_WRAPPER
 
 #define NEW_RECT_WRAPPER(T_, T)                         \
@@ -154,20 +162,32 @@ namespace Legion {
         return t;                                       \
       }
 
-      NEW_RECT_WRAPPER(legion_rect_1d_t, LegionRuntime::Arrays::Rect<1>);
-      NEW_RECT_WRAPPER(legion_rect_2d_t, LegionRuntime::Arrays::Rect<2>);
-      NEW_RECT_WRAPPER(legion_rect_3d_t, LegionRuntime::Arrays::Rect<3>);
-#undef NEW_RECT_WRAPPER
+      typedef Realm::ZRect<1,coord_t> Rect1D;
+      typedef Realm::ZRect<2,coord_t> Rect2D;
+      typedef Realm::ZRect<3,coord_t> Rect3D;
+      NEW_RECT_WRAPPER(legion_rect_1d_t, Rect1D);
+      NEW_RECT_WRAPPER(legion_rect_2d_t, Rect2D);
+      NEW_RECT_WRAPPER(legion_rect_3d_t, Rect3D);
+#undef NEW_RECT_WRAPPER 
 
 #define NEW_BLOCKIFY_WRAPPER(T_, T)                     \
       static T unwrap(T_ t_) {                          \
         T t(unwrap(t_.block_size), unwrap(t_.offset));  \
         return t;                                       \
       }
+      template<int DIM>
+      struct Blockify {
+      public:
+        Blockify(Realm::ZPoint<DIM,coord_t> b, 
+                 Realm::ZPoint<DIM,coord_t> o)
+          : block_size(b), offset(o) { }
+      public:
+        Realm::ZPoint<DIM,coord_t> block_size, offset;
+      };
 
-      NEW_BLOCKIFY_WRAPPER(legion_blockify_1d_t, LegionRuntime::Arrays::Blockify<1>);
-      NEW_BLOCKIFY_WRAPPER(legion_blockify_2d_t, LegionRuntime::Arrays::Blockify<2>);
-      NEW_BLOCKIFY_WRAPPER(legion_blockify_3d_t, LegionRuntime::Arrays::Blockify<3>);
+      NEW_BLOCKIFY_WRAPPER(legion_blockify_1d_t, Blockify<1>);
+      NEW_BLOCKIFY_WRAPPER(legion_blockify_2d_t, Blockify<2>);
+      NEW_BLOCKIFY_WRAPPER(legion_blockify_3d_t, Blockify<3>);
 #undef NEW_RECT_WRAPPER
       static legion_domain_t
       wrap(Domain domain) {
@@ -312,18 +332,17 @@ namespace Legion {
       }
 
       static const legion_byte_offset_t
-      wrap(const LegionRuntime::Accessor::ByteOffset offset)
+      wrap(const ptrdiff_t offset)
       {
         legion_byte_offset_t offset_;
-        offset_.offset = offset.offset;
+        offset_.offset = offset;
         return offset_;
       }
 
-      static const LegionRuntime::Accessor::ByteOffset
+      static const ptrdiff_t
       unwrap(const legion_byte_offset_t offset_)
       {
-        const LegionRuntime::Accessor::ByteOffset offset(offset_.offset);
-        return offset;
+        return offset_.offset;
       }
 
       static const legion_input_args_t

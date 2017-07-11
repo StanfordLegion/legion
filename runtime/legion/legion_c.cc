@@ -16,7 +16,6 @@
 #include "legion.h"
 #include "legion_c.h"
 #include "legion_c_util.h"
-#include "utilities.h"
 #ifdef REALM_USE_LLVM
 #include "realm/llvmjit/llvmjit.h"
 #endif
@@ -24,10 +23,12 @@
 using namespace Legion;
 using namespace Legion::Mapping;
 using namespace Legion::Mapping::Utilities;
-typedef CObjectWrapper::Generic Generic;
-typedef CObjectWrapper::SOA SOA;
-typedef CObjectWrapper::AccessorGeneric AccessorGeneric;
-typedef CObjectWrapper::AccessorArray AccessorArray;
+typedef Realm::ZPoint<1,coord_t> Point1D;
+typedef Realm::ZPoint<2,coord_t> Point2D;
+typedef Realm::ZPoint<3,coord_t> Point3D;
+typedef Realm::ZRect<1,coord_t> Rect1D;
+typedef Realm::ZRect<2,coord_t> Rect2D;
+typedef Realm::ZRect<3,coord_t> Rect3D;
 
 // -----------------------------------------------------------------------
 // Pointer Operations
@@ -69,25 +70,25 @@ legion_ptr_safe_cast(legion_runtime_t runtime_,
 legion_domain_t
 legion_domain_from_rect_1d(legion_rect_1d_t r_)
 {
-  LegionRuntime::Arrays::Rect<1> r = CObjectWrapper::unwrap(r_);
+  Rect1D r = CObjectWrapper::unwrap(r_);
 
-  return CObjectWrapper::wrap(Domain::from_rect<1>(r));
+  return CObjectWrapper::wrap(Domain(r));
 }
 
 legion_domain_t
 legion_domain_from_rect_2d(legion_rect_2d_t r_)
 {
-  LegionRuntime::Arrays::Rect<2> r = CObjectWrapper::unwrap(r_);
+  Rect2D r = CObjectWrapper::unwrap(r_);
 
-  return CObjectWrapper::wrap(Domain::from_rect<2>(r));
+  return CObjectWrapper::wrap(Domain(r));
 }
 
 legion_domain_t
 legion_domain_from_rect_3d(legion_rect_3d_t r_)
 {
-  LegionRuntime::Arrays::Rect<3> r = CObjectWrapper::unwrap(r_);
+  Rect3D r = CObjectWrapper::unwrap(r_);
 
-  return CObjectWrapper::wrap(Domain::from_rect<3>(r));
+  return CObjectWrapper::wrap(Domain(r));
 }
 
 legion_domain_t
@@ -104,24 +105,27 @@ legion_rect_1d_t
 legion_domain_get_rect_1d(legion_domain_t d_)
 {
   Domain d = CObjectWrapper::unwrap(d_);
+  Rect1D r = d;
 
-  return CObjectWrapper::wrap(d.get_rect<1>());
+  return CObjectWrapper::wrap(r);
 }
 
 legion_rect_2d_t
 legion_domain_get_rect_2d(legion_domain_t d_)
 {
   Domain d = CObjectWrapper::unwrap(d_);
+  Rect2D r = d;
 
-  return CObjectWrapper::wrap(d.get_rect<2>());
+  return CObjectWrapper::wrap(r);
 }
 
 legion_rect_3d_t
 legion_domain_get_rect_3d(legion_domain_t d_)
 {
   Domain d = CObjectWrapper::unwrap(d_);
+  Rect3D r = d;
 
-  return CObjectWrapper::wrap(d.get_rect<3>());
+  return CObjectWrapper::wrap(r);
 }
 
 size_t
@@ -139,49 +143,52 @@ legion_domain_get_volume(legion_domain_t d_)
 legion_domain_point_t
 legion_domain_point_from_point_1d(legion_point_1d_t p_)
 {
-  LegionRuntime::Arrays::Point<1> p = CObjectWrapper::unwrap(p_);
+  Point1D p = CObjectWrapper::unwrap(p_);
 
-  return CObjectWrapper::wrap(DomainPoint::from_point<1>(p));
+  return CObjectWrapper::wrap(DomainPoint(p));
 }
 
 legion_domain_point_t
 legion_domain_point_from_point_2d(legion_point_2d_t p_)
 {
-  LegionRuntime::Arrays::Point<2> p = CObjectWrapper::unwrap(p_);
+  Point2D p = CObjectWrapper::unwrap(p_);
 
-  return CObjectWrapper::wrap(DomainPoint::from_point<2>(p));
+  return CObjectWrapper::wrap(DomainPoint(p));
 }
 
 legion_domain_point_t
 legion_domain_point_from_point_3d(legion_point_3d_t p_)
 {
-  LegionRuntime::Arrays::Point<3> p = CObjectWrapper::unwrap(p_);
+  Point3D p = CObjectWrapper::unwrap(p_);
 
-  return CObjectWrapper::wrap(DomainPoint::from_point<3>(p));
+  return CObjectWrapper::wrap(DomainPoint(p));
 }
 
 legion_point_1d_t
 legion_domain_point_get_point_1d(legion_domain_point_t p_)
 {
-  DomainPoint p = CObjectWrapper::unwrap(p_);
+  DomainPoint d = CObjectWrapper::unwrap(p_);
+  Point1D p = d;
 
-  return CObjectWrapper::wrap(p.get_point<1>());
+  return CObjectWrapper::wrap(p);
 }
 
 legion_point_2d_t
 legion_domain_point_get_point_2d(legion_domain_point_t p_)
 {
-  DomainPoint p = CObjectWrapper::unwrap(p_);
+  DomainPoint d = CObjectWrapper::unwrap(p_);
+  Point2D p = d;
 
-  return CObjectWrapper::wrap(p.get_point<2>());
+  return CObjectWrapper::wrap(p);
 }
 
 legion_point_3d_t
 legion_domain_point_get_point_3d(legion_domain_point_t p_)
 {
-  DomainPoint p = CObjectWrapper::unwrap(p_);
+  DomainPoint d = CObjectWrapper::unwrap(p_);
+  Point3D p = d;
 
-  return CObjectWrapper::wrap(p.get_point<3>());
+  return CObjectWrapper::wrap(p);
 }
 
 legion_domain_point_t
@@ -367,9 +374,7 @@ legion_domain_coloring_get_color_space(legion_domain_coloring_t handle_)
     color_min = std::min(color_min, it->first);
     color_max = std::max(color_max, it->first);
   }
-  Domain domain = Domain::from_rect<1>(
-    LegionRuntime::Arrays::Rect<1>(LegionRuntime::Arrays::Point<1>(color_min), 
-                                   LegionRuntime::Arrays::Point<1>(color_max)));
+  Domain domain = Rect1D(Point1D(color_min), Point1D(color_max));
   return CObjectWrapper::wrap(domain);
 }
 
@@ -726,10 +731,11 @@ legion_index_partition_create_blockify_1d(
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexSpace parent = CObjectWrapper::unwrap(parent_);
-  LegionRuntime::Arrays::Blockify<1> blockify = CObjectWrapper::unwrap(blockify_);
+  CObjectWrapper::Blockify<1> blockify = CObjectWrapper::unwrap(blockify_);
 
   IndexPartition ip =
-    runtime->create_index_partition(ctx, parent, blockify, part_color);
+    runtime->create_partition_by_blockify(ctx, IndexSpaceT<1,coord_t>(parent),
+        blockify.block_size, blockify.offset, part_color);
   return CObjectWrapper::wrap(ip);
 }
 
@@ -744,10 +750,11 @@ legion_index_partition_create_blockify_2d(
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexSpace parent = CObjectWrapper::unwrap(parent_);
-  LegionRuntime::Arrays::Blockify<2> blockify = CObjectWrapper::unwrap(blockify_);
+  CObjectWrapper::Blockify<2> blockify = CObjectWrapper::unwrap(blockify_);
 
   IndexPartition ip =
-    runtime->create_index_partition(ctx, parent, blockify, part_color);
+    runtime->create_partition_by_blockify(ctx, IndexSpaceT<2,coord_t>(parent),
+        blockify.block_size, blockify.offset, part_color);
   return CObjectWrapper::wrap(ip);
 }
 
@@ -762,10 +769,11 @@ legion_index_partition_create_blockify_3d(
   Runtime *runtime = CObjectWrapper::unwrap(runtime_);
   Context ctx = CObjectWrapper::unwrap(ctx_)->context();
   IndexSpace parent = CObjectWrapper::unwrap(parent_);
-  LegionRuntime::Arrays::Blockify<3> blockify = CObjectWrapper::unwrap(blockify_);
+  CObjectWrapper::Blockify<3> blockify = CObjectWrapper::unwrap(blockify_);
 
   IndexPartition ip =
-    runtime->create_index_partition(ctx, parent, blockify, part_color);
+    runtime->create_partition_by_blockify(ctx, IndexSpaceT<3,coord_t>(parent),
+        blockify.block_size, blockify.offset, part_color);
   return CObjectWrapper::wrap(ip);
 }
 
@@ -775,7 +783,7 @@ legion_index_partition_create_blockify_3d(
 static DomainPoint upgrade_point(DomainPoint p)
 {
   if (p.get_dim() == 0) {
-    return DomainPoint::from_point<1>(LegionRuntime::Arrays::Point<1>(p[0]));
+    return DomainPoint(Point1D(p[0]));
   }
   return p;
 }
@@ -1554,16 +1562,14 @@ PartitionByFieldShim::task(const Task *task,
   PointColoring coloring;
   assert(color_space_domain.get_dim() == 1);
 
-  LegionRuntime::Accessor::RegionAccessor<SOA, Color> accessor =
-    regions[0].get_field_accessor(args.fid).typeify<Color>().convert<SOA>();
+  FieldAccessor<READ_ONLY,Color,1,coord_t> accessor(regions, args.fid);
   for (IndexIterator it(runtime, ctx, regions[0].get_logical_region());
        it.has_next();) {
     size_t count = 0;
     ptr_t start = it.next_span(count);
     for (ptr_t p(start); p.value - start.value < (off_t)count; p++) {
       Color c = accessor.read(p);
-      coloring[DomainPoint::from_point<1>(
-          LegionRuntime::Arrays::Point<1>(c))].points.insert(p);
+      coloring[DomainPoint(Point1D(c))].points.insert(p);
     }
   }
 
@@ -1738,8 +1744,6 @@ PartitionByImageShim::unstructured(const Task *task,
                                    const std::vector<PhysicalRegion> &regions,
                                    Context ctx, HighLevelRuntime *runtime)
 {
-  using namespace LegionRuntime::Accessor;
-
   assert(task->arglen == sizeof(Args));
   Args &args = *(Args *)task->args;
 
@@ -1749,8 +1753,7 @@ PartitionByImageShim::unstructured(const Task *task,
 
   STLSetSerializer<ptr_t> points;
   if (args.source_dim == 0) {
-    RegionAccessor<SOA, ptr_t> accessor =
-      regions[0].get_field_accessor(args.fid).typeify<ptr_t>().convert<SOA>();
+    FieldAccessor<READ_ONLY, ptr_t, 1, coord_t> accessor(regions[0], args.fid);
     for (IndexIterator it(runtime, ctx, r); it.has_next();) {
       size_t count = 0;
       ptr_t start = it.next_span(count);
@@ -1761,8 +1764,7 @@ PartitionByImageShim::unstructured(const Task *task,
   }
   else { // args.source_dim != 0
     // FIXME: A raw pointer should have been used here...
-    RegionAccessor<AccessorType::Generic, ptr_t> accessor =
-      regions[0].get_field_accessor(args.fid).typeify<ptr_t>();
+    FieldAccessor<READ_ONLY, ptr_t, 1, coord_t> accessor(regions[0], args.fid);
     Domain domain =
       runtime->get_index_space_domain(ctx, r.get_index_space());
     for (Domain::DomainPointIterator it(domain); it; it++) {
@@ -1778,8 +1780,6 @@ PartitionByImageShim::structured(const Task *task,
                                  const std::vector<PhysicalRegion> &regions,
                                  Context ctx, HighLevelRuntime *runtime)
 {
-  using namespace LegionRuntime::Accessor;
-
   assert(task->arglen == sizeof(Args));
   Args &args = *(Args *)task->args;
 
@@ -2016,8 +2016,6 @@ PartitionByPreimageShim::task(const Task *task,
                               const std::vector<PhysicalRegion> &regions,
                               Context ctx, HighLevelRuntime *runtime)
 {
-  using namespace LegionRuntime::Accessor;
-
   assert(task->arglen == sizeof(Args));
   Args &args = *(Args *)task->args;
 
@@ -4243,212 +4241,133 @@ legion_physical_region_get_field_id(legion_physical_region_t handle_, size_t ind
   return fields[index];
 }
 
-legion_accessor_generic_t
-legion_physical_region_get_field_accessor_generic(
+legion_accessor_array_1d_t
+legion_physical_region_get_field_accessor_array_1d(
   legion_physical_region_t handle_,
   legion_field_id_t fid)
 {
   PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
+  UnsafeFieldAccessor<char,1,coord_t,Realm::AffineAccessor<char,1,coord_t> >
+    *accessor = new UnsafeFieldAccessor<char,1,coord_t,
+                      Realm::AffineAccessor<char,1,coord_t> >(*handle, fid);
 
-  AccessorGeneric *accessor =
-    new AccessorGeneric(handle->get_field_accessor(fid));
-  return CObjectWrapper::wrap(accessor);
-}
-
-legion_accessor_array_t
-legion_physical_region_get_field_accessor_array(
-  legion_physical_region_t handle_,
-  legion_field_id_t fid)
-{
-  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
-
-  AccessorArray *accessor =
-    new AccessorArray(
-      handle->get_field_accessor(fid).typeify<char>().convert<SOA>());
   return CObjectWrapper::wrap(accessor);
 }
 
 void
-legion_accessor_generic_destroy(legion_accessor_generic_t handle_)
+legion_accessor_array_1d_destroy(legion_accessor_array_1d_t handle_)
 {
-  AccessorGeneric *handle = CObjectWrapper::unwrap(handle_);
+  UnsafeFieldAccessor<char,1,coord_t,Realm::AffineAccessor<char,1,coord_t> >
+    *handle = CObjectWrapper::unwrap(handle_);
 
   delete handle;
 }
 
-void
-legion_accessor_generic_read(legion_accessor_generic_t handle_,
-                             legion_ptr_t ptr_,
-                             void *dst,
-                             size_t bytes)
+legion_accessor_array_2d_t
+legion_physical_region_get_field_accessor_array_2d(
+  legion_physical_region_t handle_,
+  legion_field_id_t fid)
 {
-  AccessorGeneric *handle = CObjectWrapper::unwrap(handle_);
-  ptr_t ptr = CObjectWrapper::unwrap(ptr_);
+  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
+  UnsafeFieldAccessor<char,2,coord_t,Realm::AffineAccessor<char,2,coord_t> >
+    *accessor = new UnsafeFieldAccessor<char,2,coord_t,
+                      Realm::AffineAccessor<char,2,coord_t> >(*handle, fid);
 
-  handle->read_untyped(ptr, dst, bytes);
+  return CObjectWrapper::wrap(accessor);
 }
 
 void
-legion_accessor_generic_write(legion_accessor_generic_t handle_,
-                              legion_ptr_t ptr_,
-                              const void *src,
-                              size_t bytes)
+legion_accessor_array_2d_destroy(legion_accessor_array_2d_t handle_)
 {
-  AccessorGeneric *handle = CObjectWrapper::unwrap(handle_);
-  ptr_t ptr = CObjectWrapper::unwrap(ptr_);
+  UnsafeFieldAccessor<char,2,coord_t,Realm::AffineAccessor<char,2,coord_t> >
+    *handle = CObjectWrapper::unwrap(handle_);
 
-  handle->write_untyped(ptr, src, bytes);
+  delete handle;
+}
+
+legion_accessor_array_3d_t
+legion_physical_region_get_field_accessor_array_3d(
+  legion_physical_region_t handle_,
+  legion_field_id_t fid)
+{
+  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
+  UnsafeFieldAccessor<char,3,coord_t,Realm::AffineAccessor<char,3,coord_t> >
+    *accessor = new UnsafeFieldAccessor<char,3,coord_t,
+                      Realm::AffineAccessor<char,3,coord_t> >(*handle, fid);
+
+  return CObjectWrapper::wrap(accessor);
 }
 
 void
-legion_accessor_generic_read_domain_point(legion_accessor_generic_t handle_,
-                                          legion_domain_point_t dp_,
-                                          void *dst,
-                                          size_t bytes)
+legion_accessor_array_3d_destroy(legion_accessor_array_3d_t handle_)
 {
-  AccessorGeneric *handle = CObjectWrapper::unwrap(handle_);
-  DomainPoint dp = CObjectWrapper::unwrap(dp_);
+  UnsafeFieldAccessor<char,3,coord_t,Realm::AffineAccessor<char,3,coord_t> >
+    *handle = CObjectWrapper::unwrap(handle_);
 
-  handle->read_untyped(dp, dst, bytes);
-}
-
-void
-legion_accessor_generic_write_domain_point(legion_accessor_generic_t handle_,
-                                           legion_domain_point_t dp_,
-                                           const void *src,
-                                           size_t bytes)
-{
-  AccessorGeneric *handle = CObjectWrapper::unwrap(handle_);
-  DomainPoint dp = CObjectWrapper::unwrap(dp_);
-
-  handle->write_untyped(dp, src, bytes);
+  delete handle;
 }
 
 void *
-legion_accessor_generic_raw_span_ptr(legion_accessor_generic_t handle_,
-                                     legion_ptr_t ptr_,
-                                     size_t req_count,
-                                     size_t *act_count,
-                                     legion_byte_offset_t *stride_)
+legion_accessor_array_raw_rect_ptr_1d(legion_accessor_array_1d_t handle_,
+                                      legion_rect_1d_t rect_,
+                                      legion_rect_1d_t *subrect_,
+                                      legion_byte_offset_t *offsets_)
 {
-  AccessorGeneric *handle = CObjectWrapper::unwrap(handle_);
-  ptr_t ptr = CObjectWrapper::unwrap(ptr_);
+  UnsafeFieldAccessor<char,1,coord_t,Realm::AffineAccessor<char,1,coord_t> >
+    *handle = CObjectWrapper::unwrap(handle_);
+  Rect1D rect = CObjectWrapper::unwrap(rect_);
 
-  LegionRuntime::Accessor::ByteOffset stride;
-  void *data = handle->raw_span_ptr(ptr, req_count, *act_count, stride);
-  *stride_ = CObjectWrapper::wrap(stride);
+  void *data = handle->ptr(rect.lo);
+  *subrect_ = CObjectWrapper::wrap(rect); // no checks
+  offsets_[0] = CObjectWrapper::wrap(handle->accessor.strides[0]);
   return data;
 }
 
 void *
-legion_accessor_generic_raw_rect_ptr_1d(legion_accessor_generic_t handle_,
-                                        legion_rect_1d_t rect_,
-                                        legion_rect_1d_t *subrect_,
-                                        legion_byte_offset_t *offsets_)
+legion_accessor_array_raw_rect_ptr_2d(legion_accessor_array_2d_t handle_,
+                                      legion_rect_2d_t rect_,
+                                      legion_rect_2d_t *subrect_,
+                                      legion_byte_offset_t *offsets_)
 {
-  AccessorGeneric *handle = CObjectWrapper::unwrap(handle_);
-  LegionRuntime::Arrays::Rect<1> rect = CObjectWrapper::unwrap(rect_);
+  UnsafeFieldAccessor<char,2,coord_t,Realm::AffineAccessor<char,2,coord_t> >
+    *handle = CObjectWrapper::unwrap(handle_);
+  Rect2D rect = CObjectWrapper::unwrap(rect_);
 
-  LegionRuntime::Arrays::Rect<1> subrect;
-  LegionRuntime::Accessor::ByteOffset offsets[1];
-  void *data = handle->raw_rect_ptr<1>(rect, subrect, &offsets[0]);
-  *subrect_ = CObjectWrapper::wrap(subrect);
-  offsets_[0] = CObjectWrapper::wrap(offsets[0]);
+  void *data = handle->ptr(rect.lo);
+  *subrect_ = CObjectWrapper::wrap(rect); // no checks
+  offsets_[0] = CObjectWrapper::wrap(handle->accessor.strides[0]);
+  offsets_[1] = CObjectWrapper::wrap(handle->accessor.strides[1]);
   return data;
 }
 
 void *
-legion_accessor_generic_raw_rect_ptr_2d(legion_accessor_generic_t handle_,
-                                        legion_rect_2d_t rect_,
-                                        legion_rect_2d_t *subrect_,
-                                        legion_byte_offset_t *offsets_)
+legion_accessor_array_raw_rect_ptr_3d(legion_accessor_array_3d_t handle_,
+                                      legion_rect_3d_t rect_,
+                                      legion_rect_3d_t *subrect_,
+                                      legion_byte_offset_t *offsets_)
 {
-  AccessorGeneric *handle = CObjectWrapper::unwrap(handle_);
-  LegionRuntime::Arrays::Rect<2> rect = CObjectWrapper::unwrap(rect_);
+  UnsafeFieldAccessor<char,3,coord_t,Realm::AffineAccessor<char,3,coord_t> >
+    *handle = CObjectWrapper::unwrap(handle_);
+  Rect3D rect = CObjectWrapper::unwrap(rect_);
 
-  LegionRuntime::Arrays::Rect<2> subrect;
-  LegionRuntime::Accessor::ByteOffset offsets[2];
-  void *data = handle->raw_rect_ptr<2>(rect, subrect, &offsets[0]);
-  *subrect_ = CObjectWrapper::wrap(subrect);
-  offsets_[0] = CObjectWrapper::wrap(offsets[0]);
-  offsets_[1] = CObjectWrapper::wrap(offsets[1]);
-  return data;
-}
-
-void *
-legion_accessor_generic_raw_rect_ptr_3d(legion_accessor_generic_t handle_,
-                                        legion_rect_3d_t rect_,
-                                        legion_rect_3d_t *subrect_,
-                                        legion_byte_offset_t *offsets_)
-{
-  AccessorGeneric *handle = CObjectWrapper::unwrap(handle_);
-  LegionRuntime::Arrays::Rect<3> rect = CObjectWrapper::unwrap(rect_);
-
-  LegionRuntime::Arrays::Rect<3> subrect;
-  LegionRuntime::Accessor::ByteOffset offsets[3];
-  void *data = handle->raw_rect_ptr<3>(rect, subrect, &offsets[0]);
-  *subrect_ = CObjectWrapper::wrap(subrect);
-  offsets_[0] = CObjectWrapper::wrap(offsets[0]);
-  offsets_[1] = CObjectWrapper::wrap(offsets[1]);
-  offsets_[2] = CObjectWrapper::wrap(offsets[2]);
+  void *data = handle->ptr(rect.lo);
+  *subrect_ = CObjectWrapper::wrap(rect); // no checks
+  offsets_[0] = CObjectWrapper::wrap(handle->accessor.strides[0]);
+  offsets_[1] = CObjectWrapper::wrap(handle->accessor.strides[1]);
+  offsets_[2] = CObjectWrapper::wrap(handle->accessor.strides[2]);
   return data;
 }
 
 bool
-legion_accessor_generic_get_soa_parameters(legion_accessor_generic_t handle_,
-                                           void **base,
-                                           size_t *stride)
+legion_accessor_array_get_soa_parameters(legion_accessor_array_1d_t handle_,
+                                         void **base,
+                                         size_t *stride)
 {
-  AccessorGeneric *handle = CObjectWrapper::unwrap(handle_);
-
-  return handle->get_soa_parameters(*base, *stride);
-}
-
-void
-legion_accessor_array_destroy(legion_accessor_array_t handle_)
-{
-  AccessorArray *handle = CObjectWrapper::unwrap(handle_);
-
-  delete handle;
-}
-
-void
-legion_accessor_array_read(legion_accessor_array_t handle_,
-                           legion_ptr_t ptr_,
-                           void *dst,
-                           size_t bytes)
-{
-  AccessorArray *handle = CObjectWrapper::unwrap(handle_);
-  ptr_t ptr = CObjectWrapper::unwrap(ptr_);
-
-  char *data = &(handle->ref(ptr));
-  std::copy(data, data + bytes, static_cast<char *>(dst));
-}
-
-void
-legion_accessor_array_write(legion_accessor_array_t handle_,
-                            legion_ptr_t ptr_,
-                            const void *src,
-                            size_t bytes)
-{
-  AccessorArray *handle = CObjectWrapper::unwrap(handle_);
-  ptr_t ptr = CObjectWrapper::unwrap(ptr_);
-
-  char *data = &(handle->ref(ptr));
-  std::copy(static_cast<const char *>(src),
-            static_cast<const char *>(src) + bytes,
-            data);
-}
-
-void *
-legion_accessor_array_ref(legion_accessor_array_t handle_,
-                          legion_ptr_t ptr_)
-{
-  AccessorArray *handle = CObjectWrapper::unwrap(handle_);
-  ptr_t ptr = CObjectWrapper::unwrap(ptr_);
-
-  char *data = &(handle->ref(ptr));
-  return static_cast<void *>(data);
+  UnsafeFieldAccessor<char,1,coord_t,Realm::AffineAccessor<char,1,coord_t> >
+    *handle = CObjectWrapper::unwrap(handle_);
+  *base = (void*)handle->accessor.base; // no checks
+  *stride = handle->accessor.strides[0];
+  return true;
 }
 
 legion_index_iterator_t

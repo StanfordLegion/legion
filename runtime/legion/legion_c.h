@@ -67,8 +67,9 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_release_launcher_t);
   NEW_OPAQUE_TYPE(legion_must_epoch_launcher_t);
   NEW_OPAQUE_TYPE(legion_physical_region_t);
-  NEW_OPAQUE_TYPE(legion_accessor_generic_t);
-  NEW_OPAQUE_TYPE(legion_accessor_array_t);
+  NEW_OPAQUE_TYPE(legion_accessor_array_1d_t);
+  NEW_OPAQUE_TYPE(legion_accessor_array_2d_t);
+  NEW_OPAQUE_TYPE(legion_accessor_array_3d_t);
   NEW_OPAQUE_TYPE(legion_index_iterator_t);
   NEW_OPAQUE_TYPE(legion_task_t);
   NEW_OPAQUE_TYPE(legion_inline_t);
@@ -197,9 +198,6 @@ extern "C" {
     size_t arglen;
   } legion_task_argument_t;
 
-  /**
-   * @see LegionRuntime::Accessor::ByteOffset
-   */
   typedef struct legion_byte_offset_t {
     int offset;
   } legion_byte_offset_t;
@@ -2606,8 +2604,18 @@ extern "C" {
    *
    * @see Legion::PhysicalRegion::get_field_accessor()
    */
-  legion_accessor_generic_t
-  legion_physical_region_get_field_accessor_generic(
+  legion_accessor_array_1d_t
+  legion_physical_region_get_field_accessor_array_1d(
+    legion_physical_region_t handle,
+    legion_field_id_t fid);
+  
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::PhysicalRegion::get_field_accessor()
+   */
+  legion_accessor_array_2d_t
+  legion_physical_region_get_field_accessor_array_2d(
     legion_physical_region_t handle,
     legion_field_id_t fid);
 
@@ -2616,128 +2624,51 @@ extern "C" {
    *
    * @see Legion::PhysicalRegion::get_field_accessor()
    */
-  legion_accessor_array_t
-  legion_physical_region_get_field_accessor_array(
+  legion_accessor_array_3d_t
+  legion_physical_region_get_field_accessor_array_3d(
     legion_physical_region_t handle,
     legion_field_id_t fid);
 
-  /**
-   * @param handle Caller must have ownership of parameter `handle`.
-   */
-  void
-  legion_accessor_generic_destroy(legion_accessor_generic_t handle);
-
-  /**
-   * @see LegionRuntime::Accessor::Generic::Untyped::read_untyped()
-   */
-  void
-  legion_accessor_generic_read(legion_accessor_generic_t handle,
-                               legion_ptr_t ptr,
-                               void *dst,
-                               size_t bytes);
-
-  /**
-   * @see LegionRuntime::Accessor::Generic::Untyped::write_untyped()
-   */
-  void
-  legion_accessor_generic_write(legion_accessor_generic_t handle,
-                                legion_ptr_t ptr,
-                                const void *src,
-                                size_t bytes);
-
-  /**
-   * @see LegionRuntime::Accessor::Generic::Untyped::read_untyped()
-   */
-  void
-  legion_accessor_generic_read_domain_point(legion_accessor_generic_t handle,
-                                            legion_domain_point_t dp,
-                                            void *dst,
-                                            size_t bytes);
-
-  /**
-   * @see LegionRuntime::Accessor::Generic::Untyped::write_untyped()
-   */
-  void
-  legion_accessor_generic_write_domain_point(legion_accessor_generic_t handle,
-                                             legion_domain_point_t dp,
-                                             const void *src,
-                                             size_t bytes);
-
-  /**
-   * @see LegionRuntime::Accessor::Generic::Untyped::raw_span_ptr()
-   */
   void *
-  legion_accessor_generic_raw_span_ptr(legion_accessor_generic_t handle,
-                                       legion_ptr_t ptr,
-                                       size_t req_count,
-                                       size_t *act_count,
-                                       legion_byte_offset_t *stride);
+  legion_accessor_array_raw_rect_ptr_1d(legion_accessor_array_1d_t handle,
+                                        legion_rect_1d_t rect,
+                                        legion_rect_1d_t *subrect,
+                                        legion_byte_offset_t *offsets);
 
-  /**
-   * @see LegionRuntime::Accessor::Generic::Untyped::raw_rect_ptr()
-   */
   void *
-  legion_accessor_generic_raw_rect_ptr_1d(legion_accessor_generic_t handle,
-                                          legion_rect_1d_t rect,
-                                          legion_rect_1d_t *subrect,
-                                          legion_byte_offset_t *offsets);
+  legion_accessor_array_raw_rect_ptr_2d(legion_accessor_array_2d_t handle,
+                                        legion_rect_2d_t rect,
+                                        legion_rect_2d_t *subrect,
+                                        legion_byte_offset_t *offsets);
 
-  /**
-   * @see LegionRuntime::Accessor::Generic::Untyped::raw_rect_ptr()
-   */
   void *
-  legion_accessor_generic_raw_rect_ptr_2d(legion_accessor_generic_t handle,
-                                          legion_rect_2d_t rect,
-                                          legion_rect_2d_t *subrect,
-                                          legion_byte_offset_t *offsets);
+  legion_accessor_array_raw_rect_ptr_3d(legion_accessor_array_3d_t handle,
+                                        legion_rect_3d_t rect,
+                                        legion_rect_3d_t *subrect,
+                                        legion_byte_offset_t *offsets);
 
-  /**
-   * @see LegionRuntime::Accessor::Generic::Untyped::raw_rect_ptr()
-   */
-  void *
-  legion_accessor_generic_raw_rect_ptr_3d(legion_accessor_generic_t handle,
-                                          legion_rect_3d_t rect,
-                                          legion_rect_3d_t *subrect,
-                                          legion_byte_offset_t *offsets);
-
-  /**
-   * @see LegionRuntime::Accessor::Generic::Untyped::get_soa_parameters()
-   */
   bool
-  legion_accessor_generic_get_soa_parameters(legion_accessor_generic_t handle,
-                                             void **base,
-                                             size_t *stride);
+  legion_accessor_array_get_soa_parameters(legion_accessor_array_1d_t handle,
+                                           void **base,
+                                           size_t *stride);
 
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    */
   void
-  legion_accessor_array_destroy(legion_accessor_array_t handle);
+  legion_accessor_array_1d_destroy(legion_accessor_array_1d_t handle);
 
   /**
-   * @see LegionRuntime::Accessor::SOA::Untyped::elem_ptr()
+   * @param handle Caller must have ownership of parameter `handle`.
    */
   void
-  legion_accessor_array_read(legion_accessor_array_t handle,
-                             legion_ptr_t ptr,
-                             void *dst,
-                             size_t bytes);
+  legion_accessor_array_2d_destroy(legion_accessor_array_2d_t handle);
 
   /**
-   * @see LegionRuntime::Accessor::SOA::Untyped::elem_ptr()
+   * @param handle Caller must have ownership of parameter `handle`.
    */
   void
-  legion_accessor_array_write(legion_accessor_array_t handle,
-                              legion_ptr_t ptr,
-                              const void *src,
-                              size_t bytes);
-
-  /**
-   * @see LegionRuntime::Accessor::SOA::Untyped::elem_ptr()
-   */
-  void *
-  legion_accessor_array_ref(legion_accessor_array_t handle,
-                            legion_ptr_t ptr);
+  legion_accessor_array_3d_destroy(legion_accessor_array_3d_t handle);
 
   /**
    * @return Caller takes ownership of return value.
