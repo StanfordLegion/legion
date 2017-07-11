@@ -478,7 +478,9 @@ local function physical_region_get_base_pointer(cx, index_type, field_type, fiel
           accessor, rect, &subrect, &(offsets[0])))
 
       -- Sanity check the outputs.
-      std.assert(base_pointer ~= nil, "base pointer is nil")
+      std.assert(base_pointer ~= nil or
+                 c.legion_domain_get_volume(domain) <= 1,
+                 "base pointer is nil")
       [data.range(dim):map(
          function(i)
            return quote
