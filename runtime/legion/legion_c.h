@@ -395,6 +395,18 @@ extern "C" {
   legion_rect_3d_t
   legion_domain_get_rect_3d(legion_domain_t d);
 
+  // These are the same as above but will ignore 
+  // the existence of any sparsity map, whereas the 
+  // ones above will fail if a sparsity map exists
+  legion_rect_1d_t
+  legion_domain_get_bounds_1d(legion_domain_t d);
+
+  legion_rect_2d_t
+  legion_domain_get_bounds_2d(legion_domain_t d);
+
+  legion_rect_3d_t
+  legion_domain_get_bounds_3d(legion_domain_t d);
+
   /**
    * @see Legion::Domain::get_volume()
    */
