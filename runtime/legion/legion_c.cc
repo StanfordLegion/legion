@@ -4358,16 +4358,144 @@ legion_accessor_array_3d_raw_rect_ptr(legion_accessor_array_3d_t handle_,
   return data;
 }
 
-bool
-legion_accessor_array_get_soa_parameters(legion_accessor_array_1d_t handle_,
-                                         void **base,
-                                         size_t *stride)
+void
+legion_accessor_array_1d_read(legion_accessor_array_1d_t handle_,
+                              legion_ptr_t ptr_,
+                              void *dst, size_t bytes)
 {
   UnsafeFieldAccessor<char,1,coord_t,Realm::AffineAccessor<char,1,coord_t> >
     *handle = CObjectWrapper::unwrap(handle_);
-  *base = (void*)handle->accessor.base; // no checks
-  *stride = handle->accessor.strides[0];
-  return true;
+  ptr_t ptr = CObjectWrapper::unwrap(ptr_);
+
+  memcpy(dst, handle->ptr(ptr.value), bytes);
+}
+
+void
+legion_accessor_array_1d_read_point(legion_accessor_array_1d_t handle_,
+                                    legion_point_1d_t point_,
+                                    void *dst, size_t bytes)
+{
+  UnsafeFieldAccessor<char,1,coord_t,Realm::AffineAccessor<char,1,coord_t> >
+    *handle = CObjectWrapper::unwrap(handle_);
+  Point1D point = CObjectWrapper::unwrap(point_);
+
+  memcpy(dst, handle->ptr(point), bytes);
+}
+
+void
+legion_accessor_array_2d_read_point(legion_accessor_array_2d_t handle_,
+                                    legion_point_2d_t point_,
+                                    void *dst, size_t bytes)
+{
+  UnsafeFieldAccessor<char,2,coord_t,Realm::AffineAccessor<char,2,coord_t> >
+    *handle = CObjectWrapper::unwrap(handle_);
+  Point2D point = CObjectWrapper::unwrap(point_);
+
+  memcpy(dst, handle->ptr(point), bytes);
+}
+
+void
+legion_accessor_array_3d_read_point(legion_accessor_array_3d_t handle_,
+                                    legion_point_3d_t point_,
+                                    void *dst, size_t bytes)
+{
+  UnsafeFieldAccessor<char,3,coord_t,Realm::AffineAccessor<char,3,coord_t> >
+    *handle = CObjectWrapper::unwrap(handle_);
+  Point3D point = CObjectWrapper::unwrap(point_);
+
+  memcpy(dst, handle->ptr(point), bytes);
+}
+
+void
+legion_accessor_array_1d_write(legion_accessor_array_1d_t handle_,
+                               legion_ptr_t ptr_,
+                               const void *src, size_t bytes)
+{
+  UnsafeFieldAccessor<char,1,coord_t,Realm::AffineAccessor<char,1,coord_t> >
+    *handle = CObjectWrapper::unwrap(handle_);
+  ptr_t ptr = CObjectWrapper::unwrap(ptr_);
+
+  memcpy(handle->ptr(ptr.value), src, bytes); 
+}
+
+void
+legion_accessor_array_1d_write_point(legion_accessor_array_1d_t handle_,
+                                     legion_point_1d_t point_,
+                                     const void *src, size_t bytes)
+{
+  UnsafeFieldAccessor<char,1,coord_t,Realm::AffineAccessor<char,1,coord_t> >
+    *handle = CObjectWrapper::unwrap(handle_);
+  Point1D point = CObjectWrapper::unwrap(point_);
+
+  memcpy(handle->ptr(point), src, bytes);
+}
+
+void
+legion_accessor_array_2d_write_point(legion_accessor_array_2d_t handle_,
+                                     legion_point_2d_t point_,
+                                     const void *src, size_t bytes)
+{
+  UnsafeFieldAccessor<char,2,coord_t,Realm::AffineAccessor<char,2,coord_t> >
+    *handle = CObjectWrapper::unwrap(handle_);
+  Point2D point = CObjectWrapper::unwrap(point_);
+
+  memcpy(handle->ptr(point), src, bytes);
+}
+
+void
+legion_accessor_array_3d_write_point(legion_accessor_array_3d_t handle_,
+                                     legion_point_3d_t point_,
+                                     const void *src, size_t bytes)
+{
+  UnsafeFieldAccessor<char,3,coord_t,Realm::AffineAccessor<char,3,coord_t> >
+    *handle = CObjectWrapper::unwrap(handle_);
+  Point3D point = CObjectWrapper::unwrap(point_);
+
+  memcpy(handle->ptr(point), src, bytes);
+}
+
+void *
+legion_accessor_array_1d_ref(legion_accessor_array_1d_t handle_,
+                             legion_ptr_t ptr_)
+{
+  UnsafeFieldAccessor<char,1,coord_t,Realm::AffineAccessor<char,1,coord_t> >
+    *handle = CObjectWrapper::unwrap(handle_);
+  ptr_t ptr = CObjectWrapper::unwrap(ptr_);
+
+  return handle->ptr(ptr.value);
+}
+
+void *
+legion_accessor_array_1d_ref_point(legion_accessor_array_1d_t handle_,
+                                   legion_point_1d_t point_)
+{
+  UnsafeFieldAccessor<char,1,coord_t,Realm::AffineAccessor<char,1,coord_t> >
+    *handle = CObjectWrapper::unwrap(handle_);
+  Point1D point = CObjectWrapper::unwrap(point_);
+
+  return handle->ptr(point);
+}
+
+void *
+legion_accessor_array_2d_ref_point(legion_accessor_array_2d_t handle_,
+                                   legion_point_2d_t point_)
+{
+  UnsafeFieldAccessor<char,2,coord_t,Realm::AffineAccessor<char,2,coord_t> >
+    *handle = CObjectWrapper::unwrap(handle_);
+  Point2D point = CObjectWrapper::unwrap(point_);
+
+  return handle->ptr(point);
+}
+
+void *
+legion_accessor_array_3d_ref_point(legion_accessor_array_3d_t handle_,
+                                   legion_point_3d_t point_)
+{
+  UnsafeFieldAccessor<char,3,coord_t,Realm::AffineAccessor<char,3,coord_t> >
+    *handle = CObjectWrapper::unwrap(handle_);
+  Point3D point = CObjectWrapper::unwrap(point_);
+
+  return handle->ptr(point);
 }
 
 legion_index_iterator_t

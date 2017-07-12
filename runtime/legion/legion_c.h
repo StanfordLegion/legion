@@ -2647,10 +2647,64 @@ extern "C" {
                                         legion_rect_3d_t *subrect,
                                         legion_byte_offset_t *offsets);
 
-  bool
-  legion_accessor_array_get_soa_parameters(legion_accessor_array_1d_t handle,
-                                           void **base,
-                                           size_t *stride);
+  // Read
+  void
+  legion_accessor_array_1d_read(legion_accessor_array_1d_t handle,
+                                legion_ptr_t ptr,
+                                void *dst, size_t bytes);
+
+  void
+  legion_accessor_array_1d_read_point(legion_accessor_array_1d_t handle,
+                                      legion_point_1d_t point,
+                                      void *dst, size_t bytes);
+
+  void
+  legion_accessor_array_2d_read_point(legion_accessor_array_2d_t handle,
+                                      legion_point_2d_t point,
+                                      void *dst, size_t bytes);
+  
+  void
+  legion_accessor_array_3d_read_point(legion_accessor_array_3d_t handle,
+                                      legion_point_3d_t point,
+                                      void *dst, size_t bytes);
+
+  // Write
+  void
+  legion_accessor_array_1d_write(legion_accessor_array_1d_t handle,
+                                 legion_ptr_t ptr,
+                                 const void *src, size_t bytes);
+
+  void
+  legion_accessor_array_1d_write_point(legion_accessor_array_1d_t handle,
+                                       legion_point_1d_t point,
+                                       const void *src, size_t bytes);
+
+  void
+  legion_accessor_array_2d_write_point(legion_accessor_array_2d_t handle,
+                                       legion_point_2d_t point,
+                                       const void *src, size_t bytes);
+
+  void
+  legion_accessor_array_3d_write_point(legion_accessor_array_3d_t handle,
+                                       legion_point_3d_t point,
+                                       const void *src, size_t bytes);
+
+  // Ref
+  void *
+  legion_accessor_array_1d_ref(legion_accessor_array_1d_t handle,
+                               legion_ptr_t ptr);
+
+  void *
+  legion_accessor_array_1d_ref_point(legion_accessor_array_1d_t handle,
+                                     legion_point_1d_t point);
+
+  void *
+  legion_accessor_array_2d_ref_point(legion_accessor_array_2d_t handle,
+                                     legion_point_2d_t point);
+
+  void *
+  legion_accessor_array_3d_ref_point(legion_accessor_array_3d_t handle,
+                                     legion_point_3d_t point);
 
   /**
    * @param handle Caller must have ownership of parameter `handle`.
