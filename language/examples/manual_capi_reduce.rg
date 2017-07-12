@@ -40,13 +40,13 @@ terra sub_task(task : c.legion_task_t,
   var p1 = @[&c.legion_ptr_t](c.legion_task_get_args(task))
   c.printf("got arg %d\n", p1)
 
-  var a1 = c.legion_physical_region_get_field_accessor_generic(
+  var a1 = c.legion_physical_region_get_field_accessor_array_1d(
     regions[0], FID_1)
 
   -- FIMXE: This has privilege problems.
   -- c.reduce_plus_int32(a1, p1, 123)
 
-  c.legion_accessor_generic_destroy(a1)
+  c.legion_accessor_array_1d_destroy(a1)
 end
 
 terra top_level_task(task : c.legion_task_t,

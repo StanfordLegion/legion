@@ -38,15 +38,15 @@ terra sub_task(task : c.legion_task_t,
   var p1 = @[&c.legion_ptr_t](c.legion_task_get_args(task))
   c.printf("got arg %d\n", p1)
 
-  var a1 = c.legion_physical_region_get_field_accessor_array(
+  var a1 = c.legion_physical_region_get_field_accessor_array_1d(
     regions[0], FID_1)
 
-  var x1 = [&int](c.legion_accessor_array_ref(a1, p1))
+  var x1 = [&int](c.legion_accessor_array_1d_ref(a1, p1))
 
   @x1 = 123
   c.printf("writing %d\n", @x1)
 
-  c.legion_accessor_array_destroy(a1)
+  c.legion_accessor_array_1d_destroy(a1)
 
   return 456
 end

@@ -182,12 +182,12 @@ terra load_circuit(runtime : c.legion_runtime_t,
         --  first_nodes[n] = node_ptr
         --end
         var capacitance = drand48() + 1.0
-        @[&float](c.legion_accessor_array_ref(fa_node_cap, node_ptr)) = capacitance
+        @[&float](c.legion_accessor_array_1d_ref(fa_node_cap, node_ptr)) = capacitance
         var leakage = 0.1 * drand48()
-        @[&float](c.legion_accessor_array_ref(fa_node_leakage, node_ptr)) = leakage
-        @[&float](c.legion_accessor_array_ref(fa_node_charge, node_ptr)) = 0.0
+        @[&float](c.legion_accessor_array_1d_ref(fa_node_leakage, node_ptr)) = leakage
+        @[&float](c.legion_accessor_array_1d_ref(fa_node_charge, node_ptr)) = 0.0
         var init_voltage = 2 * drand48() - 1.0
-        @[&float](c.legion_accessor_array_ref(fa_node_voltage, node_ptr)) = init_voltage
+        @[&float](c.legion_accessor_array_1d_ref(fa_node_voltage, node_ptr)) = init_voltage
         c.legion_coloring_add_point(private_node_map, n, node_ptr)
         c.legion_coloring_add_point(privacy_map, 0, node_ptr)
         piece_node_ptrs[n][i] = node_ptr
@@ -214,7 +214,7 @@ terra load_circuit(runtime : c.legion_runtime_t,
     c.legion_physical_region_get_field_accessor_array_1d(all_wires[5], all_wires_fields[5])
   var fa_wire_cap =
     c.legion_physical_region_get_field_accessor_array_1d(all_wires[6], all_wires_fields[6])
-  var fa_wire_currents : &c.legion_accessor_array_t =
+  var fa_wire_currents : &c.legion_accessor_array_1d_t =
     [&c.legion_accessor_array_1d_t](c.malloc(sizeof(c.legion_accessor_array_1d_t) * WIRE_SEGMENTS))
   for i = 0, WIRE_SEGMENTS do
     fa_wire_currents[i] =
@@ -224,7 +224,7 @@ terra load_circuit(runtime : c.legion_runtime_t,
     [&c.legion_accessor_array_1d_t](c.malloc(sizeof(c.legion_accessor_array_1d_t) * (WIRE_SEGMENTS - 1)))
   for i = 0, WIRE_SEGMENTS - 1 do
     fa_wire_voltages[i] =
-      c.legion_physical_region_get_field_accessor_array(all_wires[17 + i], all_wires_fields[17 + i])
+      c.legion_physical_region_get_field_accessor_array_1d(all_wires[17 + i], all_wires_fields[17 + i])
   end
   var first_wires : &c.legion_ptr_t =
     [&c.legion_ptr_t](c.malloc(conf.num_pieces * sizeof(c.legion_ptr_t)))
