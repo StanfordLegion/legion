@@ -39,8 +39,8 @@
 #endif
 
 // why must I define this every time I need it?
-CUDAPREFIX static inline int imin(int a, int b) { return (a < b) ? a : b; }
-CUDAPREFIX static inline int imax(int a, int b) { return (a > b) ? a : b; }
+CUDAPREFIX static inline ::legion_lowlevel_coord_t imin(::legion_lowlevel_coord_t a, ::legion_lowlevel_coord_t b) { return (a < b) ? a : b; }
+CUDAPREFIX static inline ::legion_lowlevel_coord_t imax(::legion_lowlevel_coord_t a, ::legion_lowlevel_coord_t b) { return (a > b) ? a : b; }
 
 namespace LegionRuntime {
   namespace Arrays {
