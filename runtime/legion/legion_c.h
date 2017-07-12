@@ -395,6 +395,9 @@ extern "C" {
   legion_rect_3d_t
   legion_domain_get_rect_3d(legion_domain_t d);
 
+  bool
+  legion_domain_is_dense(legion_domain_t d);
+
   // These are the same as above but will ignore 
   // the existence of any sparsity map, whereas the 
   // ones above will fail if a sparsity map exists

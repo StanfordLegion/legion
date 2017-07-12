@@ -128,6 +128,14 @@ legion_domain_get_rect_3d(legion_domain_t d_)
   return CObjectWrapper::wrap(r);
 }
 
+bool
+legion_domain_is_dense(legion_domain_t d_)
+{
+  Domain d = CObjectWrapper::unwrap(d_);
+
+  return d.dense();
+}
+
 legion_rect_1d_t
 legion_domain_get_bounds_1d(legion_domain_t d_)
 {
