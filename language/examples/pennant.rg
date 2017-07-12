@@ -658,22 +658,6 @@ do
   end
 end
 
-local function accessor_generic_get_base_pointer(field_type)
-  return terra(accessor : c.legion_accessor_generic_t)
-
-    var base_pointer : &opaque = nil
-    var stride : c.size_t = terralib.sizeof(field_type)
-    var ok = c.legion_accessor_generic_get_soa_parameters(
-      accessor, &base_pointer, &stride)
-
-    regentlib.assert(ok, "failed to get base pointer")
-    regentlib.assert(stride == terralib.sizeof(field_type),
-                     "stride does not match expected value")
-
-    return [&field_type](base_pointer)
-  end
-end
-
 -- Reduce forces into points.
 task sum_point_force(rz : region(zone), rpp : region(point), rpg : region(point),
                      rs : region(side(rz, rpp, rpg, rs)),

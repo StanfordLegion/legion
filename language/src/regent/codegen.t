@@ -444,46 +444,11 @@ end
 
 local function physical_region_get_base_pointer(cx, index_type, field_type, field_id, privilege, physical_region)
   assert(index_type and field_type and field_id and privilege and physical_region)
-  local get_accessor = c.legion_physical_region_get_field_accessor_generic
-  local destroy_accessor = c.legion_accessor_generic_destroy
   local accessor_args = terralib.newlist({physical_region, field_id})
 
   local base_pointer = terralib.newsymbol(&field_type, "base_pointer")
-  if index_type:is_opaque() then
-    local expected_stride = terralib.sizeof(field_type)
-
-    -- Note: This function MUST NOT be inlined. The presence of the
-    -- address-of operator in the body of function causes
-    -- optimizations to be disabled on the base pointer. When inlined,
-    -- this then extends to the caller's scope, causing a significant
-    -- performance regression.
-    local terra get_base(accessor : c.legion_accessor_generic_t,
-                         runtime : c.legion_runtime_t,
-                         phys_region : c.legion_physical_region_t) : &field_type
-      var base : &opaque = nil
-      var stride : c.size_t = [expected_stride]
-      var ok = c.legion_accessor_generic_get_soa_parameters(
-        [accessor], &base, &stride)
-
-      std.assert(ok, "failed to get base pointer")
-      if (base == nil) then
-        var region = c.legion_physical_region_get_logical_region(phys_region)
-        var domain = c.legion_index_space_get_domain(runtime, region.index_space)
-        std.assert(c.legion_domain_get_volume(domain) == 0, "base pointer is nil for non-empty region")
-      end
-      std.assert(stride == [expected_stride],
-                 "stride does not match expected value")
-      return [&field_type](base)
-    end
-
-    local actions = quote
-      var accessor = [get_accessor]([accessor_args])
-      var [base_pointer] = [get_base](accessor, [cx.runtime], [physical_region])
-      [destroy_accessor](accessor)
-    end
-    return actions, base_pointer, terralib.newlist({expected_stride})
-  else
-    local dim = index_type.dim
+  do -- Used to be `index_type:is_opaque()`. Now all cases are structured.
+    local dim = data.max(index_type.dim, 1)
     local expected_stride = terralib.sizeof(field_type)
 
     local dims = data.range(2, dim + 1)
@@ -493,16 +458,19 @@ local function physical_region_get_base_pointer(cx, index_type, field_type, fiel
       strides:insert(terralib.newsymbol(c.size_t, "stride" .. tostring(i)))
     end
 
+    local get_accessor = c["legion_physical_region_get_field_accessor_array_" .. tostring(dim) .. "d"]
+    local destroy_accessor = c["legion_accessor_array_" .. tostring(dim) .. "d_destroy"]
+    local raw_rect_ptr = c["legion_accessor_array_" .. tostring(dim) .. "d_raw_rect_ptr"]
+
     local rect_t = c["legion_rect_" .. tostring(dim) .. "d_t"]
-    local domain_get_rect = c["legion_domain_get_rect_" .. tostring(dim) .. "d"]
-    local raw_rect_ptr = c["legion_accessor_generic_raw_rect_ptr_" .. tostring(dim) .. "d"]
+    local domain_get_bounds = c["legion_domain_get_bounds_" .. tostring(dim) .. "d"]
 
     local actions = quote
       var accessor = [get_accessor]([accessor_args])
 
       var region = c.legion_physical_region_get_logical_region([physical_region])
       var domain = c.legion_index_space_get_domain([cx.runtime], region.index_space)
-      var rect = [domain_get_rect](domain)
+      var rect = [domain_get_bounds](domain)
 
       var subrect : rect_t
       var offsets : c.legion_byte_offset_t[dim]
@@ -510,7 +478,9 @@ local function physical_region_get_base_pointer(cx, index_type, field_type, fiel
           accessor, rect, &subrect, &(offsets[0])))
 
       -- Sanity check the outputs.
-      std.assert(base_pointer ~= nil, "base pointer is nil")
+      std.assert(base_pointer ~= nil or
+                 c.legion_domain_get_volume(domain) <= 1,
+                 "base pointer is nil")
       [data.range(dim):map(
          function(i)
            return quote

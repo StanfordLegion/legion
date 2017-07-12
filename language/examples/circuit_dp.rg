@@ -212,15 +212,15 @@ terra load_circuit(runtime : c.legion_runtime_t,
   srand48(conf.random_seed)
 
   var fa_node_cap =
-    c.legion_physical_region_get_field_accessor_array(all_nodes[0], all_nodes_fields[0])
+    c.legion_physical_region_get_field_accessor_array_1d(all_nodes[0], all_nodes_fields[0])
   var fa_node_leakage =
-    c.legion_physical_region_get_field_accessor_array(all_nodes[1], all_nodes_fields[1])
+    c.legion_physical_region_get_field_accessor_array_1d(all_nodes[1], all_nodes_fields[1])
   var fa_node_charge =
-    c.legion_physical_region_get_field_accessor_array(all_nodes[2], all_nodes_fields[2])
+    c.legion_physical_region_get_field_accessor_array_1d(all_nodes[2], all_nodes_fields[2])
   var fa_node_voltage =
-    c.legion_physical_region_get_field_accessor_array(all_nodes[3], all_nodes_fields[3])
+    c.legion_physical_region_get_field_accessor_array_1d(all_nodes[3], all_nodes_fields[3])
   var fa_node_subckt =
-    c.legion_physical_region_get_field_accessor_array(all_nodes[4], all_nodes_fields[4])
+    c.legion_physical_region_get_field_accessor_array_1d(all_nodes[4], all_nodes_fields[4])
   var all_nodes_ispace = c.legion_physical_region_get_logical_region(all_nodes[0]).index_space
   --var first_nodes : &c.legion_ptr_t =
   --  [&c.legion_ptr_t](c.malloc(conf.num_pieces * sizeof(c.legion_ptr_t)))
@@ -237,50 +237,50 @@ terra load_circuit(runtime : c.legion_runtime_t,
         --if i == 0 then
         --  first_nodes[n] = node_ptr
         --end
-        @[&int](c.legion_accessor_array_ref(fa_node_subckt, node_ptr)) = n
+        @[&int](c.legion_accessor_array_1d_ref(fa_node_subckt, node_ptr)) = n
         var capacitance = drand48() + 1.0
-        @[&float](c.legion_accessor_array_ref(fa_node_cap, node_ptr)) = capacitance
+        @[&float](c.legion_accessor_array_1d_ref(fa_node_cap, node_ptr)) = capacitance
         var leakage = 0.1 * drand48()
-        @[&float](c.legion_accessor_array_ref(fa_node_leakage, node_ptr)) = leakage
-        @[&float](c.legion_accessor_array_ref(fa_node_charge, node_ptr)) = 0.0
+        @[&float](c.legion_accessor_array_1d_ref(fa_node_leakage, node_ptr)) = leakage
+        @[&float](c.legion_accessor_array_1d_ref(fa_node_charge, node_ptr)) = 0.0
         var init_voltage = 2 * drand48() - 1.0
-        @[&float](c.legion_accessor_array_ref(fa_node_voltage, node_ptr)) = init_voltage
+        @[&float](c.legion_accessor_array_1d_ref(fa_node_voltage, node_ptr)) = init_voltage
         piece_node_ptrs[n][i] = node_ptr
       end
     end
     c.legion_index_iterator_destroy(itr)
   end
-  c.legion_accessor_array_destroy(fa_node_cap)
-  c.legion_accessor_array_destroy(fa_node_leakage)
-  c.legion_accessor_array_destroy(fa_node_charge)
-  c.legion_accessor_array_destroy(fa_node_voltage)
-  c.legion_accessor_array_destroy(fa_node_subckt)
+  c.legion_accessor_array_1d_destroy(fa_node_cap)
+  c.legion_accessor_array_1d_destroy(fa_node_leakage)
+  c.legion_accessor_array_1d_destroy(fa_node_charge)
+  c.legion_accessor_array_1d_destroy(fa_node_voltage)
+  c.legion_accessor_array_1d_destroy(fa_node_subckt)
 
   var fa_wire_in_ptr =
-    c.legion_physical_region_get_field_accessor_array(all_wires[0], all_wires_fields[0])
+    c.legion_physical_region_get_field_accessor_array_1d(all_wires[0], all_wires_fields[0])
   var fa_wire_in_ptr_index =
-    c.legion_physical_region_get_field_accessor_array(all_wires[1], all_wires_fields[1])
+    c.legion_physical_region_get_field_accessor_array_1d(all_wires[1], all_wires_fields[1])
   var fa_wire_out_ptr =
-    c.legion_physical_region_get_field_accessor_array(all_wires[2], all_wires_fields[2])
+    c.legion_physical_region_get_field_accessor_array_1d(all_wires[2], all_wires_fields[2])
   var fa_wire_out_ptr_index =
-    c.legion_physical_region_get_field_accessor_array(all_wires[3], all_wires_fields[3])
+    c.legion_physical_region_get_field_accessor_array_1d(all_wires[3], all_wires_fields[3])
   var fa_wire_inductance =
-    c.legion_physical_region_get_field_accessor_array(all_wires[4], all_wires_fields[4])
+    c.legion_physical_region_get_field_accessor_array_1d(all_wires[4], all_wires_fields[4])
   var fa_wire_resistance =
-    c.legion_physical_region_get_field_accessor_array(all_wires[5], all_wires_fields[5])
+    c.legion_physical_region_get_field_accessor_array_1d(all_wires[5], all_wires_fields[5])
   var fa_wire_cap =
-    c.legion_physical_region_get_field_accessor_array(all_wires[6], all_wires_fields[6])
-  var fa_wire_currents : &c.legion_accessor_array_t =
-    [&c.legion_accessor_array_t](c.malloc(sizeof(c.legion_accessor_array_t) * WIRE_SEGMENTS))
+    c.legion_physical_region_get_field_accessor_array_1d(all_wires[6], all_wires_fields[6])
+  var fa_wire_currents : &c.legion_accessor_array_1d_t =
+    [&c.legion_accessor_array_1d_t](c.malloc(sizeof(c.legion_accessor_array_1d_t) * WIRE_SEGMENTS))
   for i = 0, WIRE_SEGMENTS do
     fa_wire_currents[i] =
-      c.legion_physical_region_get_field_accessor_array(all_wires[7 + i], all_wires_fields[7 + i])
+      c.legion_physical_region_get_field_accessor_array_1d(all_wires[7 + i], all_wires_fields[7 + i])
   end
   var fa_wire_voltages =
-    [&c.legion_accessor_array_t](c.malloc(sizeof(c.legion_accessor_array_t) * (WIRE_SEGMENTS - 1)))
+    [&c.legion_accessor_array_1d_t](c.malloc(sizeof(c.legion_accessor_array_1d_t) * (WIRE_SEGMENTS - 1)))
   for i = 0, WIRE_SEGMENTS - 1 do
     fa_wire_voltages[i] =
-      c.legion_physical_region_get_field_accessor_array(all_wires[17 + i], all_wires_fields[17 + i])
+      c.legion_physical_region_get_field_accessor_array_1d(all_wires[17 + i], all_wires_fields[17 + i])
   end
   var all_wires_ispace = c.legion_physical_region_get_logical_region(all_wires[0]).index_space
   do
@@ -290,25 +290,25 @@ terra load_circuit(runtime : c.legion_runtime_t,
         regentlib.assert(c.legion_index_iterator_has_next(itr), "test failed")
         var wire_ptr = c.legion_index_iterator_next(itr)
         for j = 0, WIRE_SEGMENTS do
-          @[&float](c.legion_accessor_array_ref(fa_wire_currents[j], wire_ptr)) = 0.0
+          @[&float](c.legion_accessor_array_1d_ref(fa_wire_currents[j], wire_ptr)) = 0.0
         end
         for j = 0, WIRE_SEGMENTS - 1 do
-          @[&float](c.legion_accessor_array_ref(fa_wire_voltages[j], wire_ptr)) = 0.0
+          @[&float](c.legion_accessor_array_1d_ref(fa_wire_voltages[j], wire_ptr)) = 0.0
         end
 
         var resistance = drand48() * 10.0 + 1.0
-        @[&float](c.legion_accessor_array_ref(fa_wire_resistance, wire_ptr)) = resistance
+        @[&float](c.legion_accessor_array_1d_ref(fa_wire_resistance, wire_ptr)) = resistance
         -- Keep inductance on the order of 1e-3 * dt to avoid resonance problems
         var inductance = (drand48() + 0.1) * DELTAT * 1e-3
-        @[&float](c.legion_accessor_array_ref(fa_wire_inductance, wire_ptr)) = inductance
+        @[&float](c.legion_accessor_array_1d_ref(fa_wire_inductance, wire_ptr)) = inductance
         var capacitance = drand48() * 0.1
-        @[&float](c.legion_accessor_array_ref(fa_wire_cap, wire_ptr)) = capacitance
+        @[&float](c.legion_accessor_array_1d_ref(fa_wire_cap, wire_ptr)) = capacitance
 
-        @[&c.legion_ptr_t](c.legion_accessor_array_ref(fa_wire_in_ptr, wire_ptr)) =
+        @[&c.legion_ptr_t](c.legion_accessor_array_1d_ref(fa_wire_in_ptr, wire_ptr)) =
           random_element(piece_node_ptrs[n], conf.nodes_per_piece)
 
         if ((100 * drand48()) < conf.pct_wire_in_piece) or (conf.num_pieces == 1) then
-          @[&c.legion_ptr_t](c.legion_accessor_array_ref(fa_wire_out_ptr, wire_ptr)) =
+          @[&c.legion_ptr_t](c.legion_accessor_array_1d_ref(fa_wire_out_ptr, wire_ptr)) =
             random_element(piece_node_ptrs[n], conf.nodes_per_piece)
         else
           -- pick a random other piece and a node from there
@@ -324,24 +324,24 @@ terra load_circuit(runtime : c.legion_runtime_t,
           end
           var out_ptr = piece_node_ptrs[nn][idx]
 
-          @[&c.legion_ptr_t](c.legion_accessor_array_ref(fa_wire_out_ptr, wire_ptr)) = out_ptr
+          @[&c.legion_ptr_t](c.legion_accessor_array_1d_ref(fa_wire_out_ptr, wire_ptr)) = out_ptr
         end
-        @[&uint32](c.legion_accessor_array_ref(fa_wire_in_ptr_index, wire_ptr)) = 0
-        @[&uint32](c.legion_accessor_array_ref(fa_wire_out_ptr_index, wire_ptr)) = 0
+        @[&uint32](c.legion_accessor_array_1d_ref(fa_wire_in_ptr_index, wire_ptr)) = 0
+        @[&uint32](c.legion_accessor_array_1d_ref(fa_wire_out_ptr_index, wire_ptr)) = 0
       end
     end
     c.legion_index_iterator_destroy(itr)
   end
-  c.legion_accessor_array_destroy(fa_wire_in_ptr)
-  c.legion_accessor_array_destroy(fa_wire_out_ptr)
-  c.legion_accessor_array_destroy(fa_wire_inductance)
-  c.legion_accessor_array_destroy(fa_wire_resistance)
-  c.legion_accessor_array_destroy(fa_wire_cap)
+  c.legion_accessor_array_1d_destroy(fa_wire_in_ptr)
+  c.legion_accessor_array_1d_destroy(fa_wire_out_ptr)
+  c.legion_accessor_array_1d_destroy(fa_wire_inductance)
+  c.legion_accessor_array_1d_destroy(fa_wire_resistance)
+  c.legion_accessor_array_1d_destroy(fa_wire_cap)
   for i = 0, WIRE_SEGMENTS do
-    c.legion_accessor_array_destroy(fa_wire_currents[i])
+    c.legion_accessor_array_1d_destroy(fa_wire_currents[i])
   end
   for i = 0, WIRE_SEGMENTS - 1 do
-    c.legion_accessor_array_destroy(fa_wire_voltages[i])
+    c.legion_accessor_array_1d_destroy(fa_wire_voltages[i])
   end
 
   c.free(fa_wire_currents)
@@ -353,28 +353,28 @@ terra load_circuit(runtime : c.legion_runtime_t,
   c.free(piece_node_ptrs)
 end
 
-struct cached_accessor { base : &int8; stride : int64; acc : c.legion_accessor_array_t; }
+struct cached_accessor { base : &int8; stride : int64; acc : c.legion_accessor_array_1d_t; }
 
-terra cached_accessor:init(acc : c.legion_accessor_array_t)
+terra cached_accessor:init(acc : c.legion_accessor_array_1d_t)
   self.acc = acc  -- for debug
   var ptr : c.legion_ptr_t
   ptr.value = 0
-  self.base = [&int8](c.legion_accessor_array_ref(acc, ptr))
+  self.base = [&int8](c.legion_accessor_array_1d_ref(acc, ptr))
   ptr.value = 1
   var basep1 : &int8
-  basep1 = [&int8](c.legion_accessor_array_ref(acc, ptr))
+  basep1 = [&int8](c.legion_accessor_array_1d_ref(acc, ptr))
   self.stride = basep1 - self.base
   --c.printf("got %p + %zd\n", self.base, self.stride)
 end
 
 terra cached_accessor:ref(ptr : c.legion_ptr_t) : &int8
   var act_ptr : &int8 = self.base + ptr.value * self.stride
-  --var chk_ptr : &int8 = [&int8](c.legion_accessor_array_ref(self.acc, ptr))
+  --var chk_ptr : &int8 = [&int8](c.legion_accessor_array_1d_ref(self.acc, ptr))
   --regentlib.assert(act_ptr == chk_ptr, "ptr mismatch")
   return act_ptr
 end
 
-terra cache_accessor(acc : c.legion_accessor_array_t) : cached_accessor
+terra cache_accessor(acc : c.legion_accessor_array_1d_t) : cached_accessor
   var ca : cached_accessor
   ca:init(acc)
   return ca
@@ -406,7 +406,7 @@ terra create_colorings(runtime : c.legion_runtime_t,
 
   -- figure out which subckt each node says it's in
   var fa_node_subckt =
-    c.legion_physical_region_get_field_accessor_array(all_nodes[4], all_nodes_fields[4])
+    c.legion_physical_region_get_field_accessor_array_1d(all_nodes[4], all_nodes_fields[4])
 
   var cfa_node_subckt = cache_accessor(fa_node_subckt)
 
@@ -425,7 +425,7 @@ terra create_colorings(runtime : c.legion_runtime_t,
         regentlib.assert(c.legion_index_iterator_has_next(itr), "test failed")
         var node_ptr = c.legion_index_iterator_next(itr)
 
-        --var subckt = @[&int](c.legion_accessor_array_ref(fa_node_subckt, node_ptr))
+        --var subckt = @[&int](c.legion_accessor_array_1d_ref(fa_node_subckt, node_ptr))
         var subckt = @[&int](cfa_node_subckt:ref(node_ptr))
 	regentlib.assert(subckt == n, "subckt mismatch")
 
@@ -436,13 +436,13 @@ terra create_colorings(runtime : c.legion_runtime_t,
     end
     c.legion_index_iterator_destroy(itr)
   end
-  c.legion_accessor_array_destroy(fa_node_subckt)
+  c.legion_accessor_array_1d_destroy(fa_node_subckt)
 
   -- now iterate over wires to (re)figure out topology
   var fa_wire_in_ptr =
-    c.legion_physical_region_get_field_accessor_array(all_wires[0], all_wires_fields[0])
+    c.legion_physical_region_get_field_accessor_array_1d(all_wires[0], all_wires_fields[0])
   var fa_wire_out_ptr =
-    c.legion_physical_region_get_field_accessor_array(all_wires[2], all_wires_fields[2])
+    c.legion_physical_region_get_field_accessor_array_1d(all_wires[2], all_wires_fields[2])
 
   var cfa_wire_in_ptr = cache_accessor(fa_wire_in_ptr)
   var cfa_wire_out_ptr = cache_accessor(fa_wire_out_ptr)
@@ -467,9 +467,9 @@ terra create_colorings(runtime : c.legion_runtime_t,
 	    first_wires[n] = wire_ptr
           end
 
-	  --var in_ptr = @[&c.legion_ptr_t](c.legion_accessor_array_ref(fa_wire_in_ptr, wire_ptr))
+	  --var in_ptr = @[&c.legion_ptr_t](c.legion_accessor_array_1d_ref(fa_wire_in_ptr, wire_ptr))
 	  var in_ptr = @[&c.legion_ptr_t](cfa_wire_in_ptr:ref(wire_ptr))
-	  --var out_ptr = @[&c.legion_ptr_t](c.legion_accessor_array_ref(fa_wire_out_ptr, wire_ptr))
+	  --var out_ptr = @[&c.legion_ptr_t](c.legion_accessor_array_1d_ref(fa_wire_out_ptr, wire_ptr))
 	  var out_ptr = @[&c.legion_ptr_t](cfa_wire_out_ptr:ref(wire_ptr))
 
 	  var in_local = contains_element(piece_node_ptrs[n], conf.nodes_per_piece, in_ptr)
@@ -497,8 +497,8 @@ terra create_colorings(runtime : c.legion_runtime_t,
     end
     c.legion_index_iterator_destroy(itr)
   end
-  c.legion_accessor_array_destroy(fa_wire_in_ptr)
-  c.legion_accessor_array_destroy(fa_wire_out_ptr)
+  c.legion_accessor_array_1d_destroy(fa_wire_in_ptr)
+  c.legion_accessor_array_1d_destroy(fa_wire_out_ptr)
 
   -- Second pass: make some random fraction of the private nodes shared
   do
@@ -644,24 +644,24 @@ end
 local vec4 = vector(float, 4)
 
 local terra get_vec_node_voltage(current_wire : c.legion_ptr_t,
-                                 priv  : c.legion_accessor_array_t,
-                                 shr   : c.legion_accessor_array_t,
-                                 ghost : c.legion_accessor_array_t,
-                                 ptrs  : c.legion_accessor_array_t,
-                                 locs  : c.legion_accessor_array_t) : vec4
+                                 priv  : c.legion_accessor_array_1d_t,
+                                 shr   : c.legion_accessor_array_1d_t,
+                                 ghost : c.legion_accessor_array_1d_t,
+                                 ptrs  : c.legion_accessor_array_1d_t,
+                                 locs  : c.legion_accessor_array_1d_t) : vec4
   var voltages : float[4]
   for i = 0, 4 do
     var ptr = c.legion_ptr_t { value = current_wire.value + i }
     var node_ptr =
-      @[&c.legion_ptr_t](c.legion_accessor_array_ref(ptrs, ptr))
+      @[&c.legion_ptr_t](c.legion_accessor_array_1d_ref(ptrs, ptr))
     var loc =
-      @[&uint](c.legion_accessor_array_ref(locs, ptr))
+      @[&uint](c.legion_accessor_array_1d_ref(locs, ptr))
     if loc == 1 then
-      voltages[i] = @[&float](c.legion_accessor_array_ref(priv, node_ptr))
+      voltages[i] = @[&float](c.legion_accessor_array_1d_ref(priv, node_ptr))
     elseif loc == 2 then
-      voltages[i] = @[&float](c.legion_accessor_array_ref(shr, node_ptr))
+      voltages[i] = @[&float](c.legion_accessor_array_1d_ref(shr, node_ptr))
     elseif loc == 3 then
-      voltages[i] = @[&float](c.legion_accessor_array_ref(ghost, node_ptr))
+      voltages[i] = @[&float](c.legion_accessor_array_1d_ref(ghost, node_ptr))
     else
       regentlib.assert(false, "bad location")
     end
@@ -669,20 +669,20 @@ local terra get_vec_node_voltage(current_wire : c.legion_ptr_t,
   return vector(voltages[0], voltages[1], voltages[2], voltages[3])
 end
 
-local terra get_node_voltage(priv  : c.legion_accessor_array_t,
-                             shr   : c.legion_accessor_array_t,
-                             ghost : c.legion_accessor_array_t,
+local terra get_node_voltage(priv  : c.legion_accessor_array_1d_t,
+                             shr   : c.legion_accessor_array_1d_t,
+                             ghost : c.legion_accessor_array_1d_t,
                              loc : uint,
                              ptr : c.legion_ptr_t)
   var tmp : float
   if loc == 1 then
-    c.legion_accessor_array_read(priv, ptr, &tmp, sizeof(float))
+    c.legion_accessor_array_1d_read(priv, ptr, &tmp, sizeof(float))
     return tmp
   elseif loc == 2 then
-    c.legion_accessor_array_read(shr, ptr, &tmp, sizeof(float))
+    c.legion_accessor_array_1d_read(shr, ptr, &tmp, sizeof(float))
     return tmp
   elseif loc == 3 then
-    c.legion_accessor_array_read(ghost, ptr, &tmp, sizeof(float))
+    c.legion_accessor_array_1d_read(ghost, ptr, &tmp, sizeof(float))
     return tmp
   else
     regentlib.assert(false, "bad location")
@@ -693,18 +693,18 @@ terra dense_calc_new_currents(steps : uint,
                               dt : float,
                               first_wire : c.legion_ptr_t,
                               num_wires : uint,
-                              fa_in_ptr        : c.legion_accessor_array_t,
-                              fa_out_ptr       : c.legion_accessor_array_t,
-                              fa_in_loc        : c.legion_accessor_array_t,
-                              fa_out_loc       : c.legion_accessor_array_t,
-                              fa_inductance    : c.legion_accessor_array_t,
-                              fa_resistance    : c.legion_accessor_array_t,
-                              fa_wire_cap      : c.legion_accessor_array_t,
-                              fa_pvt_voltage   : c.legion_accessor_array_t,
-                              fa_shr_voltage   : c.legion_accessor_array_t,
-                              fa_ghost_voltage : c.legion_accessor_array_t,
-                              fa_current       : &c.legion_accessor_array_t,
-                              fa_voltage       : &c.legion_accessor_array_t)
+                              fa_in_ptr        : c.legion_accessor_array_1d_t,
+                              fa_out_ptr       : c.legion_accessor_array_1d_t,
+                              fa_in_loc        : c.legion_accessor_array_1d_t,
+                              fa_out_loc       : c.legion_accessor_array_1d_t,
+                              fa_inductance    : c.legion_accessor_array_1d_t,
+                              fa_resistance    : c.legion_accessor_array_1d_t,
+                              fa_wire_cap      : c.legion_accessor_array_1d_t,
+                              fa_pvt_voltage   : c.legion_accessor_array_1d_t,
+                              fa_shr_voltage   : c.legion_accessor_array_1d_t,
+                              fa_ghost_voltage : c.legion_accessor_array_1d_t,
+                              fa_current       : &c.legion_accessor_array_1d_t,
+                              fa_voltage       : &c.legion_accessor_array_1d_t)
   var index      : uint = 0
   var temp_v     : vec4[WIRE_SEGMENTS+1]
   var temp_i     : vec4[WIRE_SEGMENTS+1]
@@ -715,11 +715,11 @@ terra dense_calc_new_currents(steps : uint,
   while index + 3 < num_wires do
     var current_wire : c.legion_ptr_t = c.legion_ptr_t { value = first_wire.value + index }
     for i = 0, WIRE_SEGMENTS do
-      temp_i[i] = @[&vec4](c.legion_accessor_array_ref(fa_current[i], current_wire))
+      temp_i[i] = @[&vec4](c.legion_accessor_array_1d_ref(fa_current[i], current_wire))
       old_i[i] = temp_i[i]
     end
     for i = 0, WIRE_SEGMENTS - 1 do
-      temp_v[i + 1] = @[&vec4](c.legion_accessor_array_ref(fa_voltage[i], current_wire))
+      temp_v[i + 1] = @[&vec4](c.legion_accessor_array_1d_ref(fa_voltage[i], current_wire))
       old_v[i] = temp_v[i + 1]
     end
     temp_v[0] = get_vec_node_voltage(current_wire, fa_pvt_voltage,
@@ -728,9 +728,9 @@ terra dense_calc_new_currents(steps : uint,
     temp_v[WIRE_SEGMENTS] = get_vec_node_voltage(current_wire, fa_pvt_voltage,
                                                  fa_shr_voltage, fa_ghost_voltage,
                                                  fa_out_ptr, fa_out_loc)
-    var inductance : vec4 = @[&vec4](c.legion_accessor_array_ref(fa_inductance, current_wire))
-    var recip_resistance  : vec4 = 1.0 / @[&vec4](c.legion_accessor_array_ref(fa_resistance, current_wire))
-    var recip_capacitance : vec4 = 1.0 / @[&vec4](c.legion_accessor_array_ref(fa_wire_cap, current_wire))
+    var inductance : vec4 = @[&vec4](c.legion_accessor_array_1d_ref(fa_inductance, current_wire))
+    var recip_resistance  : vec4 = 1.0 / @[&vec4](c.legion_accessor_array_1d_ref(fa_resistance, current_wire))
+    var recip_capacitance : vec4 = 1.0 / @[&vec4](c.legion_accessor_array_1d_ref(fa_wire_cap, current_wire))
     for j = 0, steps do
       for i = 0, WIRE_SEGMENTS do
         var dv  : vec4 = temp_v[i + 1] - temp_v[i]
@@ -745,10 +745,10 @@ terra dense_calc_new_currents(steps : uint,
     end
 
     for i = 0, WIRE_SEGMENTS do
-      @[&vec4](c.legion_accessor_array_ref(fa_current[i], current_wire)) = temp_i[i]
+      @[&vec4](c.legion_accessor_array_1d_ref(fa_current[i], current_wire)) = temp_i[i]
     end
     for i = 0, WIRE_SEGMENTS - 1 do
-      @[&vec4](c.legion_accessor_array_ref(fa_voltage[i], current_wire)) = temp_v[i + 1]
+      @[&vec4](c.legion_accessor_array_1d_ref(fa_voltage[i], current_wire)) = temp_v[i + 1]
     end
     index = index + 4
   end
@@ -761,28 +761,28 @@ terra dense_calc_new_currents(steps : uint,
     var wire_ptr : c.legion_ptr_t = c.legion_ptr_t { value = first_wire.value + index }
 
     for i = 0, WIRE_SEGMENTS do
-      temp_i[i] = @[&float](c.legion_accessor_array_ref(fa_current[i], wire_ptr))
+      temp_i[i] = @[&float](c.legion_accessor_array_1d_ref(fa_current[i], wire_ptr))
       old_i[i] = temp_i[i]
     end
     for i = 0, WIRE_SEGMENTS - 1 do
-      temp_v[i + 1] = @[&float](c.legion_accessor_array_ref(fa_voltage[i], wire_ptr))
+      temp_v[i + 1] = @[&float](c.legion_accessor_array_1d_ref(fa_voltage[i], wire_ptr))
       old_v[i] = temp_v[i+1]
     end
 
     -- Pin the outer voltages to the node voltages
-    var in_ptr = @[&c.legion_ptr_t](c.legion_accessor_array_ref(fa_in_ptr, wire_ptr))
-    var in_loc = @[&uint](c.legion_accessor_array_ref(fa_in_loc, wire_ptr))
+    var in_ptr = @[&c.legion_ptr_t](c.legion_accessor_array_1d_ref(fa_in_ptr, wire_ptr))
+    var in_loc = @[&uint](c.legion_accessor_array_1d_ref(fa_in_loc, wire_ptr))
     temp_v[0] =
       get_node_voltage(fa_pvt_voltage, fa_shr_voltage, fa_ghost_voltage, in_loc, in_ptr)
-    var out_ptr = @[&c.legion_ptr_t](c.legion_accessor_array_ref(fa_out_ptr, wire_ptr))
-    var out_loc = @[&uint](c.legion_accessor_array_ref(fa_out_loc, wire_ptr))
+    var out_ptr = @[&c.legion_ptr_t](c.legion_accessor_array_1d_ref(fa_out_ptr, wire_ptr))
+    var out_loc = @[&uint](c.legion_accessor_array_1d_ref(fa_out_loc, wire_ptr))
     temp_v[WIRE_SEGMENTS] =
       get_node_voltage(fa_pvt_voltage, fa_shr_voltage, fa_ghost_voltage, out_loc, out_ptr)
 
     -- Solve the RLC model iteratively
-    var inductance : float = @[&float](c.legion_accessor_array_ref(fa_inductance, wire_ptr))
-    var recip_resistance : float = 1.0 / @[&float](c.legion_accessor_array_ref(fa_resistance, wire_ptr))
-    var recip_capacitance : float = 1.0 / @[&float](c.legion_accessor_array_ref(fa_wire_cap, wire_ptr))
+    var inductance : float = @[&float](c.legion_accessor_array_1d_ref(fa_inductance, wire_ptr))
+    var recip_resistance : float = 1.0 / @[&float](c.legion_accessor_array_1d_ref(fa_resistance, wire_ptr))
+    var recip_capacitance : float = 1.0 / @[&float](c.legion_accessor_array_1d_ref(fa_wire_cap, wire_ptr))
     var recip_dt : float = 1.0 / dt
     for j = 0, steps do
       -- first, figure out the new current from the voltage differential
@@ -800,10 +800,10 @@ terra dense_calc_new_currents(steps : uint,
 
     -- Write out the results
     for i = 0, WIRE_SEGMENTS do
-      @[&float](c.legion_accessor_array_ref(fa_current[i], wire_ptr)) = temp_i[i]
+      @[&float](c.legion_accessor_array_1d_ref(fa_current[i], wire_ptr)) = temp_i[i]
     end
     for i = 0, WIRE_SEGMENTS - 1 do
-      @[&float](c.legion_accessor_array_ref(fa_voltage[i], wire_ptr)) = temp_v[i + 1]
+      @[&float](c.legion_accessor_array_1d_ref(fa_voltage[i], wire_ptr)) = temp_v[i + 1]
     end
     -- Update the index
     index = index + 1
@@ -833,36 +833,36 @@ do
   var fid_rgn = __fields(rgn)
   var fid_rw = __fields(rw)
 
-  var fa_current : c.legion_accessor_array_t[WIRE_SEGMENTS]
+  var fa_current : c.legion_accessor_array_1d_t[WIRE_SEGMENTS]
   for i = 0, WIRE_SEGMENTS do
     fa_current[i] =
-      c.legion_physical_region_get_field_accessor_array(phy_rw[7 + i], fid_rw[7 + i])
+      c.legion_physical_region_get_field_accessor_array_1d(phy_rw[7 + i], fid_rw[7 + i])
   end
-  var fa_voltage : c.legion_accessor_array_t[WIRE_SEGMENTS - 1]
+  var fa_voltage : c.legion_accessor_array_1d_t[WIRE_SEGMENTS - 1]
   for i = 0, WIRE_SEGMENTS - 1 do
     fa_voltage[i] =
-      c.legion_physical_region_get_field_accessor_array(phy_rw[17 + i], fid_rw[17 + i])
+      c.legion_physical_region_get_field_accessor_array_1d(phy_rw[17 + i], fid_rw[17 + i])
   end
   var fa_in_ptr =
-    c.legion_physical_region_get_field_accessor_array(phy_rw[0], fid_rw[0])
+    c.legion_physical_region_get_field_accessor_array_1d(phy_rw[0], fid_rw[0])
   var fa_out_ptr =
-    c.legion_physical_region_get_field_accessor_array(phy_rw[2], fid_rw[2])
+    c.legion_physical_region_get_field_accessor_array_1d(phy_rw[2], fid_rw[2])
   var fa_in_loc =
-    c.legion_physical_region_get_field_accessor_array(phy_rw[1], fid_rw[1])
+    c.legion_physical_region_get_field_accessor_array_1d(phy_rw[1], fid_rw[1])
   var fa_out_loc =
-    c.legion_physical_region_get_field_accessor_array(phy_rw[3], fid_rw[3])
+    c.legion_physical_region_get_field_accessor_array_1d(phy_rw[3], fid_rw[3])
   var fa_inductance =
-    c.legion_physical_region_get_field_accessor_array(phy_rw[4], fid_rw[4])
+    c.legion_physical_region_get_field_accessor_array_1d(phy_rw[4], fid_rw[4])
   var fa_resistance =
-    c.legion_physical_region_get_field_accessor_array(phy_rw[5], fid_rw[5])
+    c.legion_physical_region_get_field_accessor_array_1d(phy_rw[5], fid_rw[5])
   var fa_wire_cap =
-    c.legion_physical_region_get_field_accessor_array(phy_rw[6], fid_rw[6])
+    c.legion_physical_region_get_field_accessor_array_1d(phy_rw[6], fid_rw[6])
   var fa_pvt_voltage =
-    c.legion_physical_region_get_field_accessor_array(phy_rpn[0], fid_rpn[0])
+    c.legion_physical_region_get_field_accessor_array_1d(phy_rpn[0], fid_rpn[0])
   var fa_shr_voltage =
-    c.legion_physical_region_get_field_accessor_array(phy_rsn[0], fid_rsn[0])
+    c.legion_physical_region_get_field_accessor_array_1d(phy_rsn[0], fid_rsn[0])
   var fa_ghost_voltage =
-    c.legion_physical_region_get_field_accessor_array(phy_rgn[0], fid_rgn[0])
+    c.legion_physical_region_get_field_accessor_array_1d(phy_rgn[0], fid_rgn[0])
 
   dense_calc_new_currents(steps, dt, first_wire, num_wires,
                           fa_in_ptr, fa_out_ptr, fa_in_loc, fa_out_loc,
@@ -871,21 +871,21 @@ do
                           fa_current, fa_voltage)
 
   for i = 0, WIRE_SEGMENTS do
-    c.legion_accessor_array_destroy(fa_current[i])
+    c.legion_accessor_array_1d_destroy(fa_current[i])
   end
   for i = 0, WIRE_SEGMENTS - 1 do
-    c.legion_accessor_array_destroy(fa_voltage[i])
+    c.legion_accessor_array_1d_destroy(fa_voltage[i])
   end
-  c.legion_accessor_array_destroy(fa_in_ptr)
-  c.legion_accessor_array_destroy(fa_out_ptr)
-  c.legion_accessor_array_destroy(fa_in_loc)
-  c.legion_accessor_array_destroy(fa_out_loc)
-  c.legion_accessor_array_destroy(fa_inductance)
-  c.legion_accessor_array_destroy(fa_resistance)
-  c.legion_accessor_array_destroy(fa_wire_cap)
-  c.legion_accessor_array_destroy(fa_pvt_voltage)
-  c.legion_accessor_array_destroy(fa_shr_voltage)
-  c.legion_accessor_array_destroy(fa_ghost_voltage)
+  c.legion_accessor_array_1d_destroy(fa_in_ptr)
+  c.legion_accessor_array_1d_destroy(fa_out_ptr)
+  c.legion_accessor_array_1d_destroy(fa_in_loc)
+  c.legion_accessor_array_1d_destroy(fa_out_loc)
+  c.legion_accessor_array_1d_destroy(fa_inductance)
+  c.legion_accessor_array_1d_destroy(fa_resistance)
+  c.legion_accessor_array_1d_destroy(fa_wire_cap)
+  c.legion_accessor_array_1d_destroy(fa_pvt_voltage)
+  c.legion_accessor_array_1d_destroy(fa_shr_voltage)
+  c.legion_accessor_array_1d_destroy(fa_ghost_voltage)
 end
 
 task distribute_charge(rpn : region(node),
