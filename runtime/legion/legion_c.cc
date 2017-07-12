@@ -105,7 +105,8 @@ legion_rect_1d_t
 legion_domain_get_rect_1d(legion_domain_t d_)
 {
   Domain d = CObjectWrapper::unwrap(d_);
-  Rect1D r = d;
+  Realm::ZIndexSpace<1,coord_t> space = d;
+  Rect1D r = space.bounds;
 
   return CObjectWrapper::wrap(r);
 }
@@ -114,7 +115,8 @@ legion_rect_2d_t
 legion_domain_get_rect_2d(legion_domain_t d_)
 {
   Domain d = CObjectWrapper::unwrap(d_);
-  Rect2D r = d;
+  Realm::ZIndexSpace<2,coord_t> space = d;
+  Rect2D r = space.bounds;
 
   return CObjectWrapper::wrap(r);
 }
@@ -123,7 +125,8 @@ legion_rect_3d_t
 legion_domain_get_rect_3d(legion_domain_t d_)
 {
   Domain d = CObjectWrapper::unwrap(d_);
-  Rect3D r = d;
+  Realm::ZIndexSpace<3,coord_t> space = d;
+  Rect3D r = space.bounds;
 
   return CObjectWrapper::wrap(r);
 }
