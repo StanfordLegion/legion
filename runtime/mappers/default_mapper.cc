@@ -2975,8 +2975,8 @@ namespace Legion {
 	      }
         
               log_mapper.error("must_epoch: no address space has enough "
-                               "processors to fit a group of %lu tasks!",
-                                group_size);
+                               "processors to fit a group of %d tasks!",
+                                int(group_size));
 	      assert(false);
 	    } while(next_as->second.size() < group_size);
 	    curr_as = next_as;
