@@ -463,14 +463,14 @@ local function physical_region_get_base_pointer(cx, index_type, field_type, fiel
     local raw_rect_ptr = c["legion_accessor_array_" .. tostring(dim) .. "d_raw_rect_ptr"]
 
     local rect_t = c["legion_rect_" .. tostring(dim) .. "d_t"]
-    local domain_get_rect = c["legion_domain_get_rect_" .. tostring(dim) .. "d"]
+    local domain_get_bounds = c["legion_domain_get_bounds_" .. tostring(dim) .. "d"]
 
     local actions = quote
       var accessor = [get_accessor]([accessor_args])
 
       var region = c.legion_physical_region_get_logical_region([physical_region])
       var domain = c.legion_index_space_get_domain([cx.runtime], region.index_space)
-      var rect = [domain_get_rect](domain)
+      var rect = [domain_get_bounds](domain)
 
       var subrect : rect_t
       var offsets : c.legion_byte_offset_t[dim]
