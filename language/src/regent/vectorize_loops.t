@@ -855,6 +855,12 @@ function check_vectorizability.expr(cx, node)
         return false
       -- TODO: This should be supported
       elseif std.is_region(value_type) and value_type:is_opaque() and
+             not std.is_bounded_type(std.as_read(node.index.expr_type)) then
+        cx:report_error_when_demanded(node, error_prefix ..
+          "a scattered read from a different region")
+        return false
+      -- TODO: This should be supported
+      elseif std.is_region(value_type) and value_type:is_opaque() and
              not data.all(unpack(std.as_read(node.index.expr_type):bounds():map(function(ty)
                    return std.type_eq(ty, value_type) end)))
       then
