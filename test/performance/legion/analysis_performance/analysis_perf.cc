@@ -33,6 +33,46 @@ enum
 };
 
 //------------------------------------------------------------------------------
+// Reduction Operator
+//------------------------------------------------------------------------------
+enum
+{
+  REDUCE_ID = 1,
+};
+
+class ReduceNothing {
+public:
+  typedef float LHS;
+  typedef float RHS;
+  static const float identity;
+
+  template <bool EXCLUSIVE> static void apply(LHS &lhs, RHS rhs);
+  template <bool EXCLUSIVE> static void fold(RHS &rhs1, RHS rhs2);
+};
+
+const float ReduceNothing::identity = 0.0f;
+
+template <>
+void ReduceNothing::apply<true>(LHS &lhs, RHS rhs)
+{
+}
+
+template<>
+void ReduceNothing::apply<false>(LHS &lhs, RHS rhs)
+{
+}
+
+template <>
+void ReduceNothing::fold<true>(RHS &rhs1, RHS rhs2)
+{
+}
+
+template<>
+void ReduceNothing::fold<false>(RHS &rhs1, RHS rhs2)
+{
+}
+
+//------------------------------------------------------------------------------
 // Mapper
 //------------------------------------------------------------------------------
 
@@ -72,6 +112,7 @@ class PerfMapper : public DefaultMapper
 
   private:
     typedef vector<vector<PhysicalInstance> > CachedMapping;
+    typedef vector<LayoutConstraintSet> CachedConstraints;
 
   private:
     vector<Processor>& procs_list;
@@ -80,6 +121,7 @@ class PerfMapper : public DefaultMapper
     map<Processor, Memory>& proc_sysmems;
     // [partition color][task point] --> cached mapping
     vector<vector<CachedMapping> > mapping_cache;
+    vector<vector<CachedConstraints> > constraint_cache;
     vector<VariantID> variant_id;
     vector<TaskSlice> slice_cache;
 };
@@ -185,46 +227,82 @@ void PerfMapper::map_task(const MapperContext  ctx,
     size_t point = runtime->get_logical_region_color_point(ctx, req.region)[0];
     size_t part_id = runtime->get_logical_partition_color(ctx,
         runtime->get_parent_logical_partition(ctx, req.region));
-    if (mapping_cache.size() <= part_id) mapping_cache.resize(part_id + 1);
-    vector<CachedMapping>& mappings = mapping_cache[part_id];
-    if (mappings.size() <= point) mappings.resize(point + 1);
-    CachedMapping& cached_mapping = mappings[point];
-    if (cached_mapping.size() == 0)
+    bool has_reduction = req.privilege != READ_WRITE;
+    if (has_reduction)
     {
-      cached_mapping.resize(task.regions.size());
+      if (constraint_cache.size() <= part_id)
+        constraint_cache.resize(part_id + 1);
+      vector<CachedConstraints>& cons_for_partition =
+        constraint_cache[part_id];
+      if (cons_for_partition.size() <= point) cons_for_partition.resize(point + 1);
+      CachedConstraints& cons_for_task = cons_for_partition[point];
       Memory target_memory = proc_sysmems[procs_list[0]];
+      if (cons_for_task.size() == 0)
+      {
+        for (size_t idx = 0; idx < task.regions.size(); ++idx)
+        {
+          LayoutConstraintSet constraints;
+          constraints.add_constraint(SpecializedConstraint(
+                REDUCTION_FOLD_SPECIALIZE, task.regions[idx].redop))
+            .add_constraint(FieldConstraint(task.regions[idx].instance_fields,
+                  false, false))
+            .add_constraint(MemoryConstraint(target_memory.kind()));
+          cons_for_task.push_back(constraints);
+        }
+      }
       for (size_t idx = 0; idx < task.regions.size(); ++idx)
       {
         PhysicalInstance inst;
         vector<LogicalRegion> target_region;
         target_region.push_back(task.regions[idx].region);
-        LayoutConstraintSet constraints;
-        std::vector<DimensionKind> dimension_ordering(4);
-        dimension_ordering[0] = DIM_X;
-        dimension_ordering[1] = DIM_Y;
-        dimension_ordering[2] = DIM_Z;
-        dimension_ordering[3] = DIM_F;
-        constraints.add_constraint(MemoryConstraint(target_memory.kind()))
-          .add_constraint(FieldConstraint(req.instance_fields, false, false))
-          .add_constraint(OrderingConstraint(dimension_ordering, false));
         runtime->create_physical_instance(ctx, target_memory,
-              constraints, target_region, inst);
-        runtime->set_garbage_collection_priority(ctx, inst, GC_NEVER_PRIORITY);
-        cached_mapping[idx].push_back(inst);
+            cons_for_task[idx], target_region, inst);
+        runtime->set_garbage_collection_priority(ctx, inst, GC_FIRST_PRIORITY);
+        output.chosen_instances[idx].push_back(inst);
       }
     }
     else
     {
+      if (mapping_cache.size() <= part_id) mapping_cache.resize(part_id + 1);
+      vector<CachedMapping>& mappings = mapping_cache[part_id];
+      if (mappings.size() <= point) mappings.resize(point + 1);
+      CachedMapping& cached_mapping = mappings[point];
+      if (cached_mapping.size() == 0)
+      {
+        cached_mapping.resize(task.regions.size());
+        Memory target_memory = proc_sysmems[procs_list[0]];
+        for (size_t idx = 0; idx < task.regions.size(); ++idx)
+        {
+          PhysicalInstance inst;
+          vector<LogicalRegion> target_region;
+          target_region.push_back(task.regions[idx].region);
+          LayoutConstraintSet constraints;
+          std::vector<DimensionKind> dimension_ordering(4);
+          dimension_ordering[0] = DIM_X;
+          dimension_ordering[1] = DIM_Y;
+          dimension_ordering[2] = DIM_Z;
+          dimension_ordering[3] = DIM_F;
+          constraints.add_constraint(MemoryConstraint(target_memory.kind()))
+            .add_constraint(FieldConstraint(req.instance_fields, false, false))
+            .add_constraint(OrderingConstraint(dimension_ordering, false));
+          runtime->create_physical_instance(ctx, target_memory,
+                constraints, target_region, inst);
+          runtime->set_garbage_collection_priority(ctx, inst, GC_NEVER_PRIORITY);
+          cached_mapping[idx].push_back(inst);
+        }
+      }
+      else
+      {
 #ifdef DEBUG_LEGION
-      bool ok =
+        bool ok =
 #endif
-        runtime->acquire_and_filter_instances(ctx, cached_mapping);
+          runtime->acquire_and_filter_instances(ctx, cached_mapping);
 #ifdef DEBUG_LEGION
-      assert(ok);
+        assert(ok);
 #endif
+      }
+      output.chosen_instances = cached_mapping;
     }
-
-    output.chosen_instances = cached_mapping;
   }
   else
     DefaultMapper::map_task(ctx, task, input, output);
@@ -640,12 +718,14 @@ void top_level_task(const Task *task,
     {
       for (unsigned p = 0; p < num_partitions; ++p)
       {
-        PrivilegeMode priv = alternate && p % 2 == 1 ? READ_ONLY : READ_WRITE;
         for (unsigned i = 0; i < num_tasks; ++i)
         {
           TaskLauncher launcher(DO_NOTHING_TASK_ID, TaskArgument());
           if (block && l == 0 && p == 0) launcher.add_wait_barrier(next_barrier);
-          DomainPoint dp = DomainPoint::from_point<1>(make_point(i));
+          DomainPoint dp;
+          dp.dim = dims;
+          dp.point_data[0] = i;
+          for (unsigned k = 1; k < dims; ++k) dp.point_data[k] = 0;
           for (unsigned r = 0; r < num_regions; ++r)
           {
             LogicalPartition lp = lps[r][p];
@@ -657,9 +737,18 @@ void top_level_task(const Task *task,
                 lp = runtime->get_logical_partition_by_color(ctx, lr, p);
             }
 
-            RegionRequirement req(lr, priv, EXCLUSIVE, lrs[r]);
-            for (unsigned k = 0; k < num_fields; ++k) req.add_field(100 + k);
-            launcher.add_region_requirement(req);
+            if (alternate && p % 2 == 1)
+            {
+              RegionRequirement req(lr, REDUCE_ID, SIMULTANEOUS, lrs[r]);
+              req.add_field(100);
+              launcher.add_region_requirement(req);
+            }
+            else
+            {
+              RegionRequirement req(lr, READ_WRITE, EXCLUSIVE, lrs[r]);
+              for (unsigned k = 0; k < num_fields; ++k) req.add_field(100 + k);
+              launcher.add_region_requirement(req);
+            }
           }
 
           runtime->execute_task(ctx, launcher);
@@ -673,17 +762,26 @@ void top_level_task(const Task *task,
     {
       for (unsigned p = 0; p < num_partitions; ++p)
       {
-        PrivilegeMode priv = alternate && p % 2 == 1 ? READ_ONLY : READ_WRITE;
         IndexTaskLauncher launcher(DO_NOTHING_TASK_ID, launch_domain,
                                    TaskArgument(), ArgumentMap());
         if (block && l == 0 && p == 0) launcher.add_wait_barrier(next_barrier);
         for (unsigned r = 0; r < num_regions; ++r)
         {
-          RegionRequirement req(lps[r][p], pid, priv, EXCLUSIVE, lrs[r]);
-          for (unsigned k = 0; k < num_fields; ++k) req.add_field(100 + k);
-          launcher.add_region_requirement(req);
+          if (alternate && p % 2 == 1)
+          {
+            RegionRequirement req(lps[r][p], pid, REDUCE_ID, SIMULTANEOUS,
+                lrs[r]);
+            req.add_field(100);
+            launcher.add_region_requirement(req);
+          }
+          else
+          {
+            RegionRequirement req(lps[r][p], pid, READ_WRITE, EXCLUSIVE,
+                lrs[r]);
+            for (unsigned k = 0; k < num_fields; ++k) req.add_field(100 + k);
+            launcher.add_region_requirement(req);
+          }
         }
-
         runtime->execute_index_space(ctx, launcher);
       }
     }
@@ -724,6 +822,7 @@ int main(int argc, char** argv)
 
   parse_num_slices(argv, argc);
   Runtime::add_registration_callback(register_mappers);
+  Runtime::register_reduction_op<ReduceNothing>(REDUCE_ID);
 
   return Runtime::start(argc, argv);
 }
