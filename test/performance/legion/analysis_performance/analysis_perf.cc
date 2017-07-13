@@ -234,7 +234,8 @@ void PerfMapper::map_task(const MapperContext  ctx,
         constraint_cache.resize(part_id + 1);
       vector<CachedConstraints>& cons_for_partition =
         constraint_cache[part_id];
-      if (cons_for_partition.size() <= point) cons_for_partition.resize(point + 1);
+      if (cons_for_partition.size() <= point)
+        cons_for_partition.resize(point + 1);
       CachedConstraints& cons_for_task = cons_for_partition[point];
       Memory target_memory = proc_sysmems[procs_list[0]];
       if (cons_for_task.size() == 0)
@@ -283,7 +284,8 @@ void PerfMapper::map_task(const MapperContext  ctx,
           dimension_ordering[2] = DIM_Z;
           dimension_ordering[3] = DIM_F;
           constraints.add_constraint(MemoryConstraint(target_memory.kind()))
-            .add_constraint(FieldConstraint(req.instance_fields, false, false))
+            .add_constraint(FieldConstraint(
+                  task.regions[idx].instance_fields, false, false))
             .add_constraint(OrderingConstraint(dimension_ordering, false));
           runtime->create_physical_instance(ctx, target_memory,
                 constraints, target_region, inst);
@@ -429,7 +431,8 @@ static void parse_arguments(char** argv, int argc, unsigned& num_tasks,
                             unsigned& num_loops, unsigned& num_regions,
                             unsigned& num_partitions, unsigned& tree_depth,
                             unsigned& num_fields, unsigned& dims,
-                            bool& alternate, bool& single_launch, bool& block)
+                            unsigned& blast, bool& alternate,
+                            bool& single_launch, bool& block)
 {
   int i = 1;
   while (i < argc)
@@ -441,6 +444,7 @@ static void parse_arguments(char** argv, int argc, unsigned& num_tasks,
     else if (strcmp(argv[i], "-d") == 0) tree_depth = atoi(argv[++i]);
     else if (strcmp(argv[i], "-f") == 0) num_fields = atoi(argv[++i]);
     else if (strcmp(argv[i], "-D") == 0) dims = atoi(argv[++i]);
+    else if (strcmp(argv[i], "-B") == 0) blast = atoi(argv[++i]);
     else if (strcmp(argv[i], "-a") == 0) alternate = true;
     else if (strcmp(argv[i], "-s") == 0) single_launch = true;
     else if (strcmp(argv[i], "-b") == 0) block = true;
@@ -523,6 +527,7 @@ void top_level_task(const Task *task,
   unsigned tree_depth = 1;
   unsigned num_fields = 1;
   unsigned dims = 1;
+  unsigned blast = 1;
   bool alternate = false;
   bool single_launch = false;
   bool block = false;
@@ -532,8 +537,8 @@ void top_level_task(const Task *task,
     char **argv = command_args.argv;
     int argc = command_args.argc;
     parse_arguments(argv, argc, num_tasks, num_loops, num_regions,
-        num_partitions, tree_depth, num_fields, dims, alternate,
-        single_launch, block);
+        num_partitions, tree_depth, num_fields, dims, blast,
+        alternate, single_launch, block);
     if (num_regions == 0) num_partitions = 1;
     if (num_regions > 0 && num_partitions > 0 && tree_depth == 0)
     {
@@ -559,6 +564,12 @@ void top_level_task(const Task *task,
       fprintf(stderr, "Dimensionality should be 1D, 2D, or 3D.\n");
       exit(-1);
     }
+    if (num_fields % blast != 0)
+    {
+      fprintf(stderr,
+          "Number of fields should be divisible by blast factor.\n");
+      exit(-1);
+    }
   }
 
   // TODO: Single task launches with root regions should be supported
@@ -570,15 +581,18 @@ void top_level_task(const Task *task,
   printf("***************************************\n");
   printf("* Runtime Analysis Performance Test   *\n");
   printf("*                                     *\n");
-  printf("* Number of Tasks       :       %5d *\n", num_tasks);
-  printf("* Number of Iterations  :       %5d *\n", num_loops);
-  printf("* Number of Regions     :       %5d *\n", num_regions);
+  printf("* Number of Tasks       :       %5u *\n", num_tasks);
+  printf("* Number of Iterations  :       %5u *\n", num_loops);
+  printf("* Number of Regions     :       %5u *\n", num_regions);
   printf("* Number of Partitions per Region : %1d *\n", num_partitions);
-  printf("* Depth of Region Trees :       %5d *\n", tree_depth);
-  printf("* Number of Fields      :       %5d *\n", num_fields);
+  printf("* Depth of Region Trees :       %5u *\n", tree_depth);
+  printf("* Number of Fields      :       %5u *\n", num_fields);
   printf("* Alternate disjoint/aliased :    %s *\n", alternate ? "yes" : " no");
-  printf("* Use Single Launch     :         %s *\n", single_launch ? "yes" : " no");
-  printf("* Number of Slices      :       %5d *\n", num_slices);
+  printf("* Use Single Launch     :         %s *\n",
+      single_launch ? "yes" : " no");
+  printf("* Number of Slices      :       %5u *\n", num_slices);
+  printf("* Dimensionality        :       %5u *\n", dims);
+  printf("* Blast Factor          :       %5u *\n", blast);
   printf("***************************************\n");
 
   Domain launch_domain;
@@ -739,15 +753,27 @@ void top_level_task(const Task *task,
 
             if (alternate && p % 2 == 1)
             {
-              RegionRequirement req(lr, REDUCE_ID, SIMULTANEOUS, lrs[r]);
-              req.add_field(100);
-              launcher.add_region_requirement(req);
+              for (unsigned k = 0; k < num_fields; ++k)
+              {
+                RegionRequirement req(lr, REDUCE_ID, SIMULTANEOUS, lrs[r]);
+                req.add_field(100 + k);
+                launcher.add_region_requirement(req);
+              }
             }
             else
             {
-              RegionRequirement req(lr, READ_WRITE, EXCLUSIVE, lrs[r]);
-              for (unsigned k = 0; k < num_fields; ++k) req.add_field(100 + k);
-              launcher.add_region_requirement(req);
+              FieldID fid = 100;
+              unsigned fid_block = num_fields / blast;
+              for (unsigned b = 0; b < blast; ++b)
+              {
+                RegionRequirement req(lr, READ_WRITE, EXCLUSIVE, lrs[r]);
+                for (unsigned k = 0; k < fid_block; ++k)
+                {
+                  req.add_field(fid + k);
+                }
+                launcher.add_region_requirement(req);
+                fid += fid_block;
+              }
             }
           }
 
@@ -769,17 +795,29 @@ void top_level_task(const Task *task,
         {
           if (alternate && p % 2 == 1)
           {
-            RegionRequirement req(lps[r][p], pid, REDUCE_ID, SIMULTANEOUS,
-                lrs[r]);
-            req.add_field(100);
-            launcher.add_region_requirement(req);
+            for (unsigned k = 0; k < num_fields; ++k)
+            {
+              RegionRequirement req(lps[r][p], pid, REDUCE_ID, SIMULTANEOUS,
+                  lrs[r]);
+              req.add_field(100 + k);
+              launcher.add_region_requirement(req);
+            }
           }
           else
           {
-            RegionRequirement req(lps[r][p], pid, READ_WRITE, EXCLUSIVE,
-                lrs[r]);
-            for (unsigned k = 0; k < num_fields; ++k) req.add_field(100 + k);
-            launcher.add_region_requirement(req);
+            FieldID fid = 100;
+            unsigned fid_block = num_fields / blast;
+            for (unsigned b = 0; b < blast; ++b)
+            {
+              RegionRequirement req(lps[r][p], pid, READ_WRITE, EXCLUSIVE,
+                  lrs[r]);
+              for (unsigned k = 0; k < fid_block; ++k)
+              {
+                req.add_field(fid + k);
+              }
+              launcher.add_region_requirement(req);
+              fid += fid_block;
+            }
           }
         }
         runtime->execute_index_space(ctx, launcher);
