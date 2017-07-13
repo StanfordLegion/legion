@@ -136,19 +136,23 @@ void PerfMapper::slice_task(const MapperContext      ctx,
   {
     if (slice_cache.size() == 0)
     {
-      Rect<1> dom = input.domain.get_rect<1>();
-      assert(dom.volume() >= num_slices);
-      size_t block_size = dom.volume() / num_slices;
+      Domain dom = input.domain;
+      assert(dom.get_volume() >= num_slices);
+      size_t block_size = dom.get_volume() / num_slices;
       assert(block_size > 0);
-      Point<1> lo = dom.lo;
+      int dim = dom.dim;
+      coord_t lo = dom.rect_data[0];
       for (unsigned i = 0; i < num_slices; ++i)
       {
-        Point<1> hi = lo + make_point(block_size) - Point<1>(1);
-        if (i == num_slices - 1) hi = dom.hi;
-        slice_cache.push_back(TaskSlice(
-              Domain::from_rect<1>(Rect<1>(lo, hi)),
-              procs_list[0], false, false));
-        lo = hi + Point<1>(1);
+        coord_t hi = lo + block_size - 1;
+        if (i == num_slices - 1) hi = dom.rect_data[dim];
+        Domain slice;
+        slice.dim = dim;
+        for (int i = 0; i < dim * 2; ++i) slice.rect_data[i] = 0;
+        slice.rect_data[0] = lo;
+        slice.rect_data[dim] = hi;
+        slice_cache.push_back(TaskSlice(slice, procs_list[0], false, false));
+        lo = hi + 1;
       }
     }
     output.slices = slice_cache;
@@ -346,8 +350,8 @@ void do_nothing(const Task *task,
 static void parse_arguments(char** argv, int argc, unsigned& num_tasks,
                             unsigned& num_loops, unsigned& num_regions,
                             unsigned& num_partitions, unsigned& tree_depth,
-                            unsigned& num_fields, bool& alternate,
-                            bool& single_launch, bool& block)
+                            unsigned& num_fields, unsigned& dims,
+                            bool& alternate, bool& single_launch, bool& block)
 {
   int i = 1;
   while (i < argc)
@@ -358,6 +362,7 @@ static void parse_arguments(char** argv, int argc, unsigned& num_tasks,
     else if (strcmp(argv[i], "-p") == 0) num_partitions = atoi(argv[++i]);
     else if (strcmp(argv[i], "-d") == 0) tree_depth = atoi(argv[++i]);
     else if (strcmp(argv[i], "-f") == 0) num_fields = atoi(argv[++i]);
+    else if (strcmp(argv[i], "-D") == 0) dims = atoi(argv[++i]);
     else if (strcmp(argv[i], "-a") == 0) alternate = true;
     else if (strcmp(argv[i], "-s") == 0) single_launch = true;
     else if (strcmp(argv[i], "-b") == 0) block = true;
@@ -365,47 +370,67 @@ static void parse_arguments(char** argv, int argc, unsigned& num_tasks,
   }
 }
 
+template<int DIM>
 void create_index_partitions(Context ctx, Runtime *runtime, IndexSpace is,
                              int fanout, int part_color, bool alternate,
                              int depth, int max_depth)
 {
   if (depth == max_depth) return;
   IndexPartition ip;
-  Rect<1> rect = runtime->get_index_space_domain(ctx, is).get_rect<1>();
+  Rect<DIM> rect = runtime->get_index_space_domain(ctx, is).get_rect<DIM>();
   size_t num_elmts = rect.volume();
   assert(num_elmts > 0);
   size_t block_size = num_elmts / fanout;
   assert(block_size > 0);
   if (alternate && part_color % 2 == 1)
   {
+    Point<DIM> colors;
+    colors.x[0] = fanout - 1;
+    for (unsigned idx = 1; idx < DIM; ++idx) colors.x[idx] = 0;
+
     Domain color_space =
-      Domain::from_rect<1>(Rect<1>(make_point(0), make_point(fanout - 1)));
+      Domain::from_rect<DIM>(Rect<DIM>(Point<DIM>::ZEROES(), colors));
     DomainPointColoring coloring;
-    Point<1> start = rect.lo;
+    Point<DIM> start = rect.lo;
+    Point<DIM> block;
+    block.x[0] = block_size;
+    for (unsigned idx = 1; idx < DIM; ++idx) block.x[idx] = 0;
+    Point<DIM> one;
+    one.x[0] = 1;
+    for (unsigned idx = 1; idx < DIM; ++idx) one.x[idx] = 0;
     for (int i = 0; i < fanout; ++i)
     {
-      Point<1> end = start + make_point(block_size);
-      coloring[DomainPoint::from_point<1>(make_point(i))] =
-        Domain::from_rect<1>(Rect<1>(
-              Point<1>::max(start, rect.lo),
-              Point<1>::min(rect.hi, end)));
-      start = end - Point<1>(1);
+      Point<DIM> end = start + block;
+      Point<DIM> color;
+      color.x[0] = i;
+      for (unsigned idx = 1; idx < DIM; ++idx) color.x[idx] = 0;
+      coloring[DomainPoint::from_point<DIM>(color)] =
+        Domain::from_rect<DIM>(Rect<DIM>(
+              Point<DIM>::max(start, rect.lo),
+              Point<DIM>::min(rect.hi, end)));
+      start = end - one;
     }
     ip = runtime->create_index_partition(ctx, is, color_space, coloring,
       ALIASED_KIND, part_color);
   }
   else
   {
-    Blockify<1> blockify(num_elmts / fanout, rect.lo);
+    Point<DIM> block;
+    block.x[0] = num_elmts / fanout;
+    for (unsigned idx = 1; idx < DIM; ++idx) block.x[idx] = 1;
+    Blockify<DIM> blockify(block, rect.lo);
     ip = runtime->create_index_partition(ctx, is, blockify, part_color);
   }
 
   for (int i = 0; i < fanout; ++i)
   {
+    Point<DIM> color;
+    color.x[0] = i;
+    for (unsigned idx = 1; idx < DIM; ++idx) color.x[idx] = 0;
     IndexSpace sis = runtime->get_index_subspace(ctx, ip,
-        DomainPoint::from_point<1>(make_point(i)));
-    create_index_partitions(ctx, runtime, sis, fanout, part_color, alternate,
-        depth + 1, max_depth);
+        DomainPoint::from_point<DIM>(color));
+    create_index_partitions<DIM>(ctx, runtime, sis, fanout, part_color,
+        alternate, depth + 1, max_depth);
   }
 }
 
@@ -419,6 +444,7 @@ void top_level_task(const Task *task,
   unsigned num_partitions = 1;
   unsigned tree_depth = 1;
   unsigned num_fields = 1;
+  unsigned dims = 1;
   bool alternate = false;
   bool single_launch = false;
   bool block = false;
@@ -427,8 +453,9 @@ void top_level_task(const Task *task,
     const InputArgs &command_args = Runtime::get_input_args();
     char **argv = command_args.argv;
     int argc = command_args.argc;
-    parse_arguments(argv, argc, num_tasks, num_loops, num_regions, num_partitions,
-        tree_depth, num_fields, alternate, single_launch, block);
+    parse_arguments(argv, argc, num_tasks, num_loops, num_regions,
+        num_partitions, tree_depth, num_fields, dims, alternate,
+        single_launch, block);
     if (num_regions == 0) num_partitions = 1;
     if (num_regions > 0 && num_partitions > 0 && tree_depth == 0)
     {
@@ -447,6 +474,11 @@ void top_level_task(const Task *task,
     {
       fprintf(stderr,
           "Number of slices cannot be greater than number of tasks.\n");
+      exit(-1);
+    }
+    if (dims > 3)
+    {
+      fprintf(stderr, "Dimensionality should be 1D, 2D, or 3D.\n");
       exit(-1);
     }
   }
@@ -471,8 +503,33 @@ void top_level_task(const Task *task,
   printf("* Number of Slices      :       %5d *\n", num_slices);
   printf("***************************************\n");
 
-  Domain launch_domain =
-    Domain::from_rect<1>(Rect<1>(make_point(0), make_point(num_tasks - 1)));
+  Domain launch_domain;
+  switch (dims)
+  {
+    case 1 :
+      {
+        launch_domain =
+          Domain::from_rect<1>(Rect<1>(make_point(0),
+                                       make_point(num_tasks - 1)));
+        break;
+      }
+    case 2 :
+      {
+        launch_domain =
+          Domain::from_rect<2>(Rect<2>(make_point(0, 0),
+                                       make_point(num_tasks - 1, 0)));
+        break;
+      }
+    case 3 :
+      {
+        launch_domain =
+          Domain::from_rect<3>(Rect<3>(make_point(0, 0, 0),
+                                       make_point(num_tasks - 1, 0, 0)));
+        break;
+      }
+    default:
+      assert(false);
+  }
   vector<LogicalRegion> lrs;
   vector<vector<LogicalPartition> > lps;
   ProjectionID pid = 0;
@@ -489,13 +546,63 @@ void top_level_task(const Task *task,
         allocator.allocate_field(sizeof(int), 100 + i);
     }
 
-    Domain region_domain =
-      Domain::from_rect<1>(Rect<1>(make_point(1), make_point(num_elmts)));
+    Domain region_domain;
+    switch (dims)
+    {
+      case 1 :
+        {
+          region_domain =
+            Domain::from_rect<1>(Rect<1>(make_point(1),
+                                         make_point(num_elmts)));
+          break;
+        }
+      case 2 :
+        {
+          region_domain =
+            Domain::from_rect<2>(Rect<2>(make_point(1, 1),
+                                         make_point(num_elmts, 1)));
+          break;
+        }
+      case 3 :
+        {
+          region_domain =
+            Domain::from_rect<3>(Rect<3>(make_point(1, 1, 1),
+                                         make_point(num_elmts, 1, 1)));
+          break;
+        }
+      default:
+        assert(false);
+    }
+
+
     IndexSpace is = runtime->create_index_space(ctx, region_domain);
 
     for (unsigned p = 0; p < num_partitions; ++p)
-      create_index_partitions(ctx, runtime, is, num_tasks, p, alternate, 0,
-          tree_depth);
+    {
+      switch (dims)
+      {
+        case 1 :
+          {
+            create_index_partitions<1>(ctx, runtime, is, num_tasks, p,
+                alternate, 0, tree_depth);
+            break;
+          }
+        case 2 :
+          {
+            create_index_partitions<2>(ctx, runtime, is, num_tasks, p,
+                alternate, 0, tree_depth);
+            break;
+          }
+        case 3 :
+          {
+            create_index_partitions<3>(ctx, runtime, is, num_tasks, p,
+                alternate, 0, tree_depth);
+            break;
+          }
+        default:
+          assert(false);
+      }
+    }
 
     for (unsigned i = 0; i < num_regions; ++i)
       lrs.push_back(runtime->create_logical_region(ctx, is, fs));
