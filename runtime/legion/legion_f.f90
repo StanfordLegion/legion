@@ -1,7 +1,8 @@
-#define NEW_OPAQUE_TYPE_F(T) type, bind(C) :: T; type(c_ptr) :: impl; end type T
 module legion_fortran
     use, intrinsic :: iso_c_binding
+    
     ! C NEW_OPAQUE_TYPE_F
+#define NEW_OPAQUE_TYPE_F(T) type, bind(C) :: T; type(c_ptr) :: impl; end type T
     NEW_OPAQUE_TYPE_F(legion_runtime_f_t)
     NEW_OPAQUE_TYPE_F(legion_context_f_t)
     NEW_OPAQUE_TYPE_F(legion_domain_point_iterator_f_t)
@@ -47,6 +48,39 @@ module legion_fortran
     NEW_OPAQUE_TYPE_F(legion_mapper_runtime_f_t)
     NEW_OPAQUE_TYPE_F(legion_mapper_context_f_t)
     NEW_OPAQUE_TYPE_F(legion_field_map_f_t)
+#undef NEW_OPAQUE_TYPE_F
+
+    ! point 1d, 2d, 3d
+#define NEW_POINT_TYPE_F(T, DIM) type, bind(C) :: T; integer(c_long_long), dimension(0:DIM-1) :: x; end type T
+    NEW_POINT_TYPE_F(legion_point_1d_f_t, 1)
+    NEW_POINT_TYPE_F(legion_point_2d_f_t, 2)
+    NEW_POINT_TYPE_F(legion_point_3d_f_t, 3)
+#undef NEW_POINT_TYPE_F
+
+    ! rect 1d, 2d, 3d
+#define NEW_RECT_TYPE_F(T, PT) type, bind(C) :: T; type(PT) :: lo, hi; end type T
+    NEW_RECT_TYPE_F(legion_rect_1d_f_t, legion_point_1d_f_t)
+    NEW_RECT_TYPE_F(legion_rect_2d_f_t, legion_point_2d_f_t)
+    NEW_RECT_TYPE_F(legion_rect_3d_f_t, legion_point_3d_f_t)
+#undef NEW_RECT_TYPE_F
+
+    ! legion domain
+    type, bind(C) :: legion_domain_f_t
+        integer(c_long_long)                                  :: is_id
+        integer(c_int)                                        :: dim
+        ! check MAX_DOMAIN_DIM = 2 * REALM_MAX_RECT_DIM
+#define MAX_DOMAIN_DIM_F 6 
+        integer(c_long_long), dimension(0:MAX_DOMAIN_DIM_F-1) :: rect_data
+#undef MAX_DOMAIN_DIM_F        
+    end type legion_domain_f_t
+    
+    ! domain point
+    type, bind(C) :: legion_domain_point_f_t
+        integer(c_int)                                        :: dim
+#define MAX_POINT_DIM_F 6
+        integer(c_long_long), dimension(0:MAX_POINT_DIM_F-1) :: point_data
+#undef  MAX_POINT_DIM_F
+    end type legion_domain_point_f_t
     
     type, bind(C) :: legion_task_config_options_f_t
         logical(c_bool) :: leaf
@@ -167,6 +201,7 @@ module legion_fortran
             integer(c_size_t), value, intent(in)        :: retsize
         end subroutine
         
+        ! task launcher
         function legion_task_launcher_create_f(tid, arg, pred, id, tag) bind(C, name="legion_task_launcher_create")
             use iso_c_binding
             import legion_task_launcher_f_t
@@ -190,10 +225,64 @@ module legion_fortran
             import legion_task_launcher_f_t
             implicit none
             
-            type(legion_future_f_t)                     :: legion_task_launcher_execute_f
+            type(legion_future_f_t)                            :: legion_task_launcher_execute_f
             type(legion_runtime_f_t), value, intent(in)        :: runtime
             type(legion_context_f_t), value, intent(in)        :: ctx
             type(legion_task_launcher_f_t), value, intent(in)  :: launcher
+        end function
+        
+        ! index launcher
+        function legion_index_launcher_create_f(tid, domain, global_arg, map, pred, must, id, tag) &
+                                                bind(C, name="legion_index_launcher_create")
+            use iso_c_binding
+            import legion_index_launcher_f_t
+            import legion_domain_f_t
+            import legion_task_argument_f_t
+            import legion_argument_map_f_t
+            import legion_predicate_f_t
+            implicit none
+            
+            type(legion_index_launcher_f_t)                     :: legion_index_launcher_create_f
+            integer(c_int), value, intent(in)                   :: tid
+            type(legion_domain_f_t), value, intent(in)          :: domain
+            type(legion_task_argument_f_t), value, intent(in)   :: global_arg
+            type(legion_argument_map_f_t), value, intent(in)    :: map
+            type(legion_predicate_f_t), value, intent(in)       :: pred
+            logical(c_bool), value, intent(in)                  :: must
+            integer(c_int), value, intent(in)                   :: id
+            integer(c_long), value, intent(in)                  :: tag
+        end function
+        
+        
+        function legion_index_launcher_execute_f(runtime, ctx, launcher) &
+                                                 bind(C, name="legion_index_launcher_execute")
+            use iso_c_binding
+            import legion_future_map_f_t
+            import legion_runtime_f_t
+            import legion_context_f_t
+            import legion_index_launcher_f_t
+            implicit none
+            
+            type(legion_future_map_f_t)                         :: legion_index_launcher_execute_f
+            type(legion_runtime_f_t), value, intent(in)         :: runtime
+            type(legion_context_f_t), value, intent(in)         :: ctx
+            type(legion_index_launcher_f_t), value, intent(in)  :: launcher
+        end function
+        
+        function legion_index_launcher_execute_reduction_f(runtime, ctx, launcher, redop) &
+                                                           bind(C, name="legion_index_launcher_execute_reduction")
+            use iso_c_binding
+            import legion_future_f_t
+            import legion_runtime_f_t
+            import legion_context_f_t
+            import legion_index_launcher_f_t
+            implicit none
+            
+            type(legion_future_f_t)                            :: legion_index_launcher_execute_reduction_f
+            type(legion_runtime_f_t), value, intent(in)        :: runtime
+            type(legion_context_f_t), value, intent(in)        :: ctx
+            type(legion_index_launcher_f_t), value, intent(in) :: launcher
+            integer(c_int), value, intent(in)                  :: redop 
         end function
         
         function legion_predicate_true_f() bind(C, name="legion_predicate_true")
@@ -204,13 +293,38 @@ module legion_fortran
             type(legion_predicate_f_t)  :: legion_predicate_true_f
         end function
         
+        ! argument map
+        function legion_argument_map_create_f() bind(C, name="legion_argument_map_create")
+            use iso_c_binding
+            import legion_argument_map_f_t
+            
+            implicit none
+            
+            type(legion_argument_map_f_t) :: legion_argument_map_create_f
+        end function
+        
+        subroutine legion_argument_map_set_point_f(map, dp, arg, replace) bind(C, name="legion_argument_map_set_point")
+            use iso_c_binding
+            import legion_argument_map_f_t
+            import legion_domain_point_f_t
+            import legion_task_argument_f_t
+            
+            implicit none
+            
+            type(legion_argument_map_f_t), value, intent(in)  :: map
+            type(legion_domain_point_f_t), value, intent(in)  :: dp 
+            type(legion_task_argument_f_t), value, intent(in) :: arg
+            logical(c_bool), value, intent(in)                :: replace 
+        end subroutine
+        
+        ! task args
         function legion_task_get_args_f(task) bind(C, name="legion_task_get_args")
             use iso_c_binding
             import legion_task_f_t
             implicit none
             
-            type(c_ptr)                         :: legion_task_get_args_f
-            type(legion_task_f_t), value, intent(in)   :: task
+            type(c_ptr)                              :: legion_task_get_args_f
+            type(legion_task_f_t), value, intent(in) :: task
         end function
         
         function legion_task_get_arglen_f(task) bind(C, name="legion_task_get_arglen")
@@ -218,9 +332,97 @@ module legion_fortran
             import legion_task_f_t
             implicit none
             
-            integer(c_size_t)                   :: legion_task_get_arglen_f
-            type(legion_task_f_t), value, intent(in)   :: task
+            integer(c_size_t)                        :: legion_task_get_arglen_f
+            type(legion_task_f_t), value, intent(in) :: task
         end function
+        
+        function legion_task_get_local_args_f(task) bind(C, name="legion_task_get_local_args")
+            use iso_c_binding
+            import legion_task_f_t
+            implicit none
+            
+            type(c_ptr)                              :: legion_task_get_local_args_f
+            type(legion_task_f_t), value, intent(in) :: task
+        end function
+        
+        function legion_task_get_local_arglen_f(task) bind(C, name="legion_task_get_local_arglen")
+            use iso_c_binding
+            import legion_task_f_t
+            implicit none
+            
+            integer(c_size_t)                        :: legion_task_get_local_arglen_f
+            type(legion_task_f_t), value, intent(in) :: task
+        end function
+        
+        ! legion domain
+        function legion_domain_from_rect_1d_f(r) bind(C, name="legion_domain_from_rect_1d")
+            use iso_c_binding
+            import legion_rect_1d_f_t
+            import legion_domain_f_t
+            implicit none
+            
+            type(legion_domain_f_t)                     :: legion_domain_from_rect_1d_f
+            type(legion_rect_1d_f_t), value, intent(in) :: r
+        end function
+        
+        function legion_domain_from_rect_2d_f(r) bind(C, name="legion_domain_from_rect_2d")
+            use iso_c_binding
+            import legion_rect_2d_f_t
+            import legion_domain_f_t
+            implicit none
+            
+            type(legion_domain_f_t)                     :: legion_domain_from_rect_2d_f
+            type(legion_rect_2d_f_t), value, intent(in) :: r
+        end function
+        
+        function legion_domain_from_rect_3d_f(r) bind(C, name="legion_domain_from_rect_3d")
+            use iso_c_binding
+            import legion_rect_3d_f_t
+            import legion_domain_f_t
+            implicit none
+            
+            type(legion_domain_f_t)                     :: legion_domain_from_rect_3d_f
+            type(legion_rect_3d_f_t), value, intent(in) :: r
+        end function
+        
+        function legion_domain_point_from_point_1d_f(p) bind(C, name="legion_domain_point_from_point_1d")
+            use iso_c_binding
+            import legion_domain_point_f_t
+            import legion_point_1d_f_t
+            implicit none
+            
+            type(legion_domain_point_f_t)                :: legion_domain_point_from_point_1d_f
+            type(legion_point_1d_f_t), value, intent(in) :: p
+        end function
+        
+        function legion_domain_point_from_point_2d_f(p) bind(C, name="legion_domain_point_from_point_2d")
+            use iso_c_binding
+            import legion_domain_point_f_t
+            import legion_point_2d_f_t
+            implicit none
+            
+            type(legion_domain_point_f_t)                :: legion_domain_point_from_point_2d_f
+            type(legion_point_2d_f_t), value, intent(in) :: p
+        end function
+        
+        function legion_domain_point_from_point_3d_f(p) bind(C, name="legion_domain_point_from_point_3d")
+            use iso_c_binding
+            import legion_domain_point_f_t
+            import legion_point_3d_f_t
+            implicit none
+            
+            type(legion_domain_point_f_t)                :: legion_domain_point_from_point_3d_f
+            type(legion_point_3d_f_t), value, intent(in) :: p
+        end function
+        
+        ! future map
+        subroutine legion_future_map_wait_all_results_f(handle) bind(C, name="legion_future_map_wait_all_results")
+            use iso_c_binding
+            import legion_future_map_f_t
+            implicit none
+            
+            type(legion_future_map_f_t), value, intent(in) :: handle
+        end subroutine
     
     end interface
 end module legion_fortran
