@@ -946,6 +946,8 @@ namespace Legion {
         { return pending_partition_barrier; }
       inline ApBarrier get_future_map_barrier(void) const
         { return future_map_barrier; }
+      inline RtBarrier get_creation_barrier(void) const
+        { return creation_barrier; }
 #ifdef DEBUG_LEGION_COLLECTIVES
       inline RtBarrier get_collective_check_barrier(void) const
         { return collective_check_barrier; }
@@ -1024,6 +1026,7 @@ namespace Legion {
       RtBarrier startup_barrier;
       ApBarrier pending_partition_barrier;
       ApBarrier future_map_barrier;
+      RtBarrier creation_barrier;
 #ifdef DEBUG_LEGION_COLLECTIVES
       RtBarrier collective_check_barrier;
 #endif

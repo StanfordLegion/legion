@@ -2791,7 +2791,8 @@ namespace Legion {
                                   ShardManager *manager);
       void unregister_shard_manager(ReplicationID repl_id, 
                                     bool reclaim_id);
-      ShardManager* find_shard_manager(ReplicationID repl_id);
+      ShardManager* find_shard_manager(ReplicationID repl_id, 
+                                       bool can_fail = false);
     public:
       bool is_local(Processor proc) const;
       void find_visible_memories(Processor proc, std::set<Memory> &visible);

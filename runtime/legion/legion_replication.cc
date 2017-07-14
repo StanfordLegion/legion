@@ -2296,6 +2296,10 @@ namespace Legion {
           ApBarrier(Realm::Barrier::create_barrier(total_shards));
         future_map_barrier = 
           ApBarrier(Realm::Barrier::create_barrier(total_shards));
+        // Only need shards-1 for arrivals here since it is used
+        // to signal from all the non-creator shards to the creator shard
+        creation_barrier = 
+          RtBarrier(Realm::Barrier::create_barrier(total_shards-1));
 #ifdef DEBUG_LEGION_COLLECTIVES
         collective_check_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards,
@@ -2341,6 +2345,7 @@ namespace Legion {
           startup_barrier.destroy_barrier();
           pending_partition_barrier.destroy_barrier();
           future_map_barrier.destroy_barrier();
+          creation_barrier.destroy_barrier();
 #ifdef DEBUG_LEGION_COLLECTIVES
           collective_check_barrier.destroy_barrier();
 #endif
@@ -2468,9 +2473,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(pending_partition_barrier.exists());
           assert(future_map_barrier.exists());
+          assert(creation_barrier.exists());
 #endif
           rez.serialize(pending_partition_barrier);
           rez.serialize(future_map_barrier);
+          rez.serialize(creation_barrier);
 #ifdef DEBUG_LEGION_COLLECTIVES
           assert(collective_check_barrier.exists());
           rez.serialize(collective_check_barrier);
@@ -2504,6 +2511,7 @@ namespace Legion {
       {
         derez.deserialize(pending_partition_barrier);
         derez.deserialize(future_map_barrier);
+        derez.deserialize(creation_barrier);
 #ifdef DEBUG_LEGION_COLLECTIVES
         derez.deserialize(collective_check_barrier);
 #endif
@@ -2941,9 +2949,6 @@ namespace Legion {
         sharding_functions.find(sid);
       if (finder != sharding_functions.end())
         return finder->second;
-#ifdef DEBUG_LEGION
-      assert(address_spaces != NULL); // used to get number of shards
-#endif
       // total_shards-1 because we want the upper bound inclusive
       ShardingFunction *result = 
         new ShardingFunction(functor, runtime->forest, sid, total_shards - 1);

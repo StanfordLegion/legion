@@ -82,7 +82,8 @@ namespace Legion {
       virtual Task* get_task(void); 
       virtual TaskContext* find_parent_context(void);
       virtual void pack_remote_context(Serializer &rez, 
-                                       AddressSpaceID target) = 0;
+                                       AddressSpaceID target,
+                                       bool replicate = false) = 0;
       virtual bool attempt_children_complete(void) = 0;
       virtual bool attempt_children_commit(void) = 0;
       virtual void inline_child_task(TaskOp *child) = 0;
@@ -666,7 +667,8 @@ namespace Legion {
       virtual UniqueID get_context_uid(void) const;
       virtual int get_depth(void) const;
       virtual bool is_inner_context(void) const;
-      virtual void pack_remote_context(Serializer &rez, AddressSpaceID target);
+      virtual void pack_remote_context(Serializer &rez, 
+          AddressSpaceID target, bool replicate = false);
       virtual void unpack_remote_context(Deserializer &derez,
                                          std::set<RtEvent> &preconditions);
       virtual AddressSpaceID get_version_owner(RegionTreeNode *node,
@@ -963,6 +965,8 @@ namespace Legion {
       virtual void find_collective_contributions(DynamicCollective dc,
                                        std::vector<Future> &contributions);
     public:
+      virtual ShardingFunction* find_sharding_function(ShardingID sid);
+    public:
       static void handle_version_owner_request(Deserializer &derez,
                             Runtime *runtime, AddressSpaceID source);
       void process_version_owner_response(RegionTreeNode *node, 
@@ -1065,7 +1069,8 @@ namespace Legion {
       TopLevelContext& operator=(const TopLevelContext &rhs);
     public:
       virtual int get_depth(void) const;
-      virtual void pack_remote_context(Serializer &rez, AddressSpaceID target);
+      virtual void pack_remote_context(Serializer &rez, 
+          AddressSpaceID target, bool replicate = false);
       virtual TaskContext* find_parent_context(void);
     public:
       virtual InnerContext* find_outermost_local_context(
@@ -1322,6 +1327,12 @@ namespace Legion {
       virtual InterCloseOp* get_inter_close_op(void);
       virtual IndexCloseOp* get_index_close_op(void);
     public:
+      virtual void pack_remote_context(Serializer &rez, 
+                                       AddressSpaceID target,
+                                       bool replicate = false);
+    public:
+      virtual ShardingFunction* find_sharding_function(ShardingID sid);
+    public:
       void exchange_common_resources(void);
       void handle_collective_message(Deserializer &derez);
       void handle_future_map_request(Deserializer &derez);
@@ -1367,6 +1378,7 @@ namespace Legion {
     protected:
       ApBarrier pending_partition_barrier;
       ApBarrier future_map_barrier;
+      RtBarrier creation_barrier;
 #ifdef DEBUG_LEGION_COLLECTIVES
     protected:
       RtBarrier collective_check_barrier;
@@ -1448,6 +1460,8 @@ namespace Legion {
                   const FieldMask &version_mask, VersionInfo &version_info);
       virtual InnerContext* find_parent_physical_context(unsigned index);
     public:
+      virtual ShardingFunction* find_sharding_function(ShardingID sid);
+    public:
       void unpack_local_field_update(Deserializer &derez);
       static void handle_local_field_update(Deserializer &derez);
     public:
@@ -1459,6 +1473,7 @@ namespace Legion {
     protected:
       UniqueID parent_context_uid;
       TaskContext *parent_ctx;
+      ShardManager *shard_manager; // if we're lucky and one is already here
     protected:
       int depth;
       ApEvent remote_completion_event;
@@ -1472,6 +1487,10 @@ namespace Legion {
       // Cached physical contexts recorded from the owner
       std::map<unsigned/*index*/,InnerContext*> physical_contexts;
       std::map<unsigned,RtEvent> pending_physical_contexts;
+    protected:
+      // For remote replicate contexts
+      size_t total_shards;
+      std::map<ShardingID,ShardingFunction*> sharding_functions;
     };
 
     /**
@@ -1490,7 +1509,7 @@ namespace Legion {
       virtual RegionTreeContext get_context(void) const;
       virtual ContextID get_context_id(void) const;
       virtual void pack_remote_context(Serializer &rez, 
-                                       AddressSpaceID target);
+          AddressSpaceID target, bool replicate = false);
       virtual bool attempt_children_complete(void);
       virtual bool attempt_children_commit(void);
       virtual void inline_child_task(TaskOp *child);
@@ -1798,7 +1817,7 @@ namespace Legion {
       virtual UniqueID get_context_uid(void) const;
       virtual int get_depth(void) const;
       virtual void pack_remote_context(Serializer &rez, 
-                                       AddressSpaceID target);
+          AddressSpaceID target, bool replicate);
       virtual bool attempt_children_complete(void);
       virtual bool attempt_children_commit(void);
       virtual void inline_child_task(TaskOp *child);

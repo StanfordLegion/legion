@@ -3425,13 +3425,7 @@ namespace Legion {
         {
           ShardingID sid;
           derez.deserialize(sid);
-#ifdef DEBUG_LEGION
-          ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(ctx);
-          assert(repl_ctx != NULL);
-#else
-          ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(ctx);
-#endif
-          key.second = repl_ctx->shard_manager->find_sharding_function(sid);
+          key.second = ctx->find_sharding_function(sid);
         }
         LegionMap<IndexSpaceNode*,FieldMask>::aligned &spaces = 
           projections[key];

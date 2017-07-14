@@ -831,6 +831,11 @@ namespace Legion {
       virtual void trigger_task_complete(void);
       virtual void trigger_task_commit(void);
     public:
+      virtual VersionInfo& get_version_info(unsigned idx);
+      virtual RestrictInfo& get_restrict_info(unsigned idx);
+      virtual const std::vector<VersionInfo>* get_version_infos(void);
+      virtual const std::vector<RestrictInfo>* get_restrict_infos(void);
+    public:
       virtual void perform_physical_traversal(unsigned idx,
                                 RegionTreeContext ctx, InstanceSet &valid);
       virtual bool pack_task(Serializer &rez, Processor target);

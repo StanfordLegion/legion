@@ -2488,7 +2488,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::pack_remote_context(Serializer &rez, 
-                                           AddressSpaceID target)
+                                           AddressSpaceID target,bool replicate)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, PACK_REMOTE_CONTEXT_CALL);
@@ -2543,6 +2543,7 @@ namespace Legion {
         for (unsigned idx = 0; idx < it->second.size(); idx++)
           rez.serialize(it->second[idx]);
       }
+      rez.serialize<bool>(replicate);
     }
 
     //--------------------------------------------------------------------------
@@ -2550,7 +2551,7 @@ namespace Legion {
                                            std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
     {
-      assert(false); // should only be called for RemoteTask
+      assert(false); // should only be called for RemoteContext
     }
 
     //--------------------------------------------------------------------------
@@ -5544,6 +5545,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ShardingFunction* InnerContext::find_sharding_function(ShardingID sid)
+    //--------------------------------------------------------------------------
+    {
+      // Should only be called by inherited classes
+      assert(false);
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
     void InnerContext::configure_context(MapperManager *mapper)
     //--------------------------------------------------------------------------
     {
@@ -6475,7 +6485,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TopLevelContext::pack_remote_context(Serializer &rez, 
-                                              AddressSpaceID target)
+                                          AddressSpaceID target, bool replicate)
     //--------------------------------------------------------------------------
     {
       rez.serialize<bool>(true); // top level context, all we need to pack
@@ -6612,6 +6622,7 @@ namespace Legion {
       // Get our allocation barriers
       pending_partition_barrier = manager->get_pending_partition_barrier();
       future_map_barrier = manager->get_future_map_barrier();
+      creation_barrier = manager->get_creation_barrier();
 #ifdef DEBUG_LEGION_COLLECTIVES
       collective_check_barrier = manager->get_collective_check_barrier();
 #endif
@@ -6741,6 +6752,9 @@ namespace Legion {
                             runtime->get_unique_index_tree_id(), type_tag);
         // Have to register this before broadcasting it
         forest->create_index_space(handle, realm_is);
+        // Update the set of remote instances that exist
+        IndexSpaceNode *is_node = forest->get_node(handle);
+        is_node->update_creation_set(*shard_manager->get_mapping());
         // Do our arrival on this generation, should be the last one
         ValueBroadcast<IndexSpace> collective_space(this, COLLECTIVE_LOC_3);
         collective_space.broadcast(handle);
@@ -6750,6 +6764,8 @@ namespace Legion {
 #endif
         if (Runtime::legion_spy_enabled)
           LegionSpy::log_top_index_space(handle.id);
+        // Wait for the creation to finish
+        creation_barrier.lg_wait();
       }
       else
       {
@@ -6761,7 +6777,10 @@ namespace Legion {
         assert(handle.exists());
 #endif
         forest->create_index_space(handle, realm_is);
+        // Arrive on the creation barrier
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
+      Runtime::advance_barrier(creation_barrier);
       register_index_space_creation(handle);
       index_space_allocator_shard++;
       if (index_space_allocator_shard == shard_manager->total_shards)
@@ -6786,6 +6805,9 @@ namespace Legion {
                             spaces[0].get_type_tag());
         // Have to do our registration before broadcasting the result
         forest->create_union_space(handle, owner_task, spaces);
+        // Update the set of remote instances that exist
+        IndexSpaceNode *is_node = forest->get_node(handle);
+        is_node->update_creation_set(*shard_manager->get_mapping());
         ValueBroadcast<IndexSpace> collective_space(this, COLLECTIVE_LOC_4);
         collective_space.broadcast(handle);
 #ifdef DEBUG_LEGION
@@ -6794,6 +6816,8 @@ namespace Legion {
 #endif
         if (Runtime::legion_spy_enabled)
           LegionSpy::log_top_index_space(handle.id);
+        // Wait for the creation to finish
+        creation_barrier.lg_wait();
       }
       else
       {
@@ -6806,7 +6830,10 @@ namespace Legion {
 #endif
         // Now we can do our local registration
         forest->create_union_space(handle, owner_task, spaces);
+        // Signal we're done our creation
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
+      Runtime::advance_barrier(creation_barrier);
       // Register the local creation
       register_index_space_creation(handle);
       // Update our allocator shard
@@ -6833,6 +6860,9 @@ namespace Legion {
                             spaces[0].get_type_tag());
         // Have to do our registration before broadcasting the result
         forest->create_intersection_space(handle, owner_task, spaces);
+        // Update the set of remote instances that exist
+        IndexSpaceNode *is_node = forest->get_node(handle);
+        is_node->update_creation_set(*shard_manager->get_mapping());
         ValueBroadcast<IndexSpace> space_collective(this, COLLECTIVE_LOC_5);
         space_collective.broadcast(handle);
 #ifdef DEBUG_LEGION
@@ -6841,6 +6871,8 @@ namespace Legion {
 #endif
         if (Runtime::legion_spy_enabled)
           LegionSpy::log_top_index_space(handle.id);
+        // Wait for the creation to finish
+        creation_barrier.lg_wait();
       }
       else
       {
@@ -6853,7 +6885,10 @@ namespace Legion {
 #endif
         // Once we have the answer we can do our own registration
         forest->create_intersection_space(handle, owner_task, spaces);
+        // Signal that we're done our creation
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
+      Runtime::advance_barrier(creation_barrier);
       // Register the creation
       register_index_space_creation(handle);
       // Update the index space allocator shard
@@ -6878,6 +6913,9 @@ namespace Legion {
                             left.get_type_tag());
         // Have to do our registration before broadcasting
         forest->create_difference_space(handle, owner_task, left, right);
+        // Update the set of remote instances that exist
+        IndexSpaceNode *is_node = forest->get_node(handle);
+        is_node->update_creation_set(*shard_manager->get_mapping());
         ValueBroadcast<IndexSpace> space_collective(this, COLLECTIVE_LOC_6);
         space_collective.broadcast(handle);
 #ifdef DEBUG_LEGION
@@ -6886,6 +6924,8 @@ namespace Legion {
 #endif
         if (Runtime::legion_spy_enabled)
           LegionSpy::log_top_index_space(handle.id);
+        // Wait for the creation to finish
+        creation_barrier.lg_wait();
       }
       else
       {
@@ -6898,7 +6938,10 @@ namespace Legion {
 #endif
         // Do our own registration
         forest->create_difference_space(handle, owner_task, left, right);
+        // Signal that we're done our creation
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
+      Runtime::advance_barrier(creation_barrier);
       // Record our created space
       register_index_space_creation(handle);
       // Update the allocation shard
@@ -6975,10 +7018,12 @@ namespace Legion {
                                            color_space, partition_color, 
                                            DISJOINT_KIND, NULL,
                                            pending_partition_barrier,
-                                           shard_manager->get_mapping());
+                                           shard_manager->get_mapping(),
+                                           creation_barrier); 
         // We have to wait before broadcasting the value to other shards
         if (!parent_notified.has_triggered())
           parent_notified.lg_wait();
+        // Then we can broadcast the name of the partition
         ValueBroadcast<IndexPartition> pid_collective(this, COLLECTIVE_LOC_7);
         pid_collective.broadcast(pid);
         if (color_generated)
@@ -6989,6 +7034,8 @@ namespace Legion {
           ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_8);
           color_collective.broadcast(partition_color);
         }
+        // Wait for the creation to finish
+        creation_barrier.lg_wait();
       }
       else
       {
@@ -7015,8 +7062,12 @@ namespace Legion {
                                          color_space, partition_color, 
                                          DISJOINT_KIND, NULL,
                                          pending_partition_barrier,
-                                         shard_manager->get_mapping());
+                                         shard_manager->get_mapping(),
+                                         creation_barrier);
+        // Signal that we're done our creation
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
+      Runtime::advance_barrier(creation_barrier);
       part_op->initialize_equal_partition(this, pid, granularity);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
@@ -7099,10 +7150,12 @@ namespace Legion {
                                            color_space, partition_color, 
                                            kind, disjoint_result,
                                            pending_partition_barrier,
-                                           shard_manager->get_mapping());
+                                           shard_manager->get_mapping(),
+                                           creation_barrier);
         // We have to wait before broadcasting the value to other shards
         if (!parent_notified.has_triggered())
           parent_notified.lg_wait();
+        // Then we can broadcast the name of the partition
         ValueBroadcast<IndexPartition> pid_collective(this, COLLECTIVE_LOC_9);
         pid_collective.broadcast(pid);
         if (color_generated)
@@ -7113,6 +7166,8 @@ namespace Legion {
           ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_10);
           color_collective.broadcast(partition_color);
         }
+        // Wait for the creation to be done
+        creation_barrier.lg_wait();
       }
       else
       {
@@ -7139,8 +7194,12 @@ namespace Legion {
                                          color_space, partition_color, 
                                          kind, disjoint_result,
                                          pending_partition_barrier,
-                                         shard_manager->get_mapping());
+                                         shard_manager->get_mapping(),
+                                         creation_barrier);
+        // Signal that we're done our creation
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
+      Runtime::advance_barrier(creation_barrier);
       part_op->initialize_union_partition(this, pid, handle1, handle2);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
@@ -7222,10 +7281,12 @@ namespace Legion {
                                            color_space, partition_color, 
                                            kind, disjoint_result,
                                            pending_partition_barrier,
-                                           shard_manager->get_mapping());
+                                           shard_manager->get_mapping(),
+                                           creation_barrier);
         // We have to wait before broadcasting the value to other shards
         if (!parent_notified.has_triggered())
           parent_notified.lg_wait();
+        // Then we can broadcast the name of the partition
         ValueBroadcast<IndexPartition> pid_collective(this, COLLECTIVE_LOC_11);
         pid_collective.broadcast(pid);
         if (color_generated)
@@ -7236,6 +7297,8 @@ namespace Legion {
           ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_12);
           color_collective.broadcast(partition_color);
         }
+        // Wait for the creation to be done
+        creation_barrier.lg_wait();
       }
       else
       {
@@ -7262,8 +7325,12 @@ namespace Legion {
                                          color_space, partition_color, 
                                          kind, disjoint_result,
                                          pending_partition_barrier,
-                                         shard_manager->get_mapping());
+                                         shard_manager->get_mapping(),
+                                         creation_barrier);
+        // Signal that we are done our creation
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
+      Runtime::advance_barrier(creation_barrier);
       part_op->initialize_intersection_partition(this, pid, handle1, handle2);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
@@ -7342,10 +7409,12 @@ namespace Legion {
                                            color_space, partition_color, 
                                            kind, disjoint_result,
                                            pending_partition_barrier,
-                                           shard_manager->get_mapping());
+                                           shard_manager->get_mapping(),
+                                           creation_barrier);
         // We have to wait before broadcasting the value to other shards
         if (!parent_notified.has_triggered())
           parent_notified.lg_wait();
+        // Then we can broadcast the name of the partition
         ValueBroadcast<IndexPartition> pid_collective(this, COLLECTIVE_LOC_13);
         pid_collective.broadcast(pid);
         if (color_generated)
@@ -7356,6 +7425,8 @@ namespace Legion {
           ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_14);
           color_collective.broadcast(partition_color);
         }
+        // Wait for the creation to be done
+        creation_barrier.lg_wait();
       }
       else
       {
@@ -7382,8 +7453,12 @@ namespace Legion {
                                          color_space, partition_color, 
                                          kind, disjoint_result,
                                          pending_partition_barrier,
-                                         shard_manager->get_mapping());
+                                         shard_manager->get_mapping(),
+                                         creation_barrier);
+        // Signal that we're done with our creation
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
+      Runtime::advance_barrier(creation_barrier);
       part_op->initialize_difference_partition(this, pid, handle1, handle2);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
@@ -7553,10 +7628,12 @@ namespace Legion {
                                            color_space, part_color, 
                                            part_kind, disjoint_result,
                                            pending_partition_barrier,
-                                           shard_manager->get_mapping());
+                                           shard_manager->get_mapping(),
+                                           creation_barrier);
         // We have to wait before broadcasting the value to other shards
         if (!parent_notified.has_triggered())
           parent_notified.lg_wait();
+        // Then we can broadcast the name of the partition
         ValueBroadcast<IndexPartition> pid_collective(this, COLLECTIVE_LOC_16);
         pid_collective.broadcast(pid);
         if (color_generated)
@@ -7567,6 +7644,8 @@ namespace Legion {
           ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_17);
           color_collective.broadcast(part_color);
         }
+        // Wait for the creation to be done
+        creation_barrier.lg_wait();
       }
       else
       {
@@ -7593,8 +7672,12 @@ namespace Legion {
                                          color_space, part_color, 
                                          part_kind, disjoint_result,
                                          pending_partition_barrier,
-                                         shard_manager->get_mapping());
+                                         shard_manager->get_mapping(),
+                                         creation_barrier);
+        // Signal we are done with the creation
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
+      Runtime::advance_barrier(creation_barrier);
       part_op->initialize_restricted_partition(this, pid, transform, 
                                 transform_size, extent, extent_size);
       // Now we can add the operation to the queue
@@ -7650,10 +7733,12 @@ namespace Legion {
                                            color_space, part_color,
                                            DISJOINT_KIND, NULL,
                                            pending_partition_barrier,
-                                           shard_manager->get_mapping());
+                                           shard_manager->get_mapping(),
+                                           creation_barrier);
         // We have to wait before broadcasting the value to other shards
         if (!parent_notified.has_triggered())
           parent_notified.lg_wait();
+        // Then we can broadcast the name of the partition
         ValueBroadcast<IndexPartition> pid_collective(this, COLLECTIVE_LOC_18);
         pid_collective.broadcast(pid);
         if (color_generated)
@@ -7664,6 +7749,8 @@ namespace Legion {
           ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_19);
           color_collective.broadcast(part_color);
         }
+        // Wait for the creation to be done
+        creation_barrier.lg_wait();
       }
       else
       {
@@ -7690,8 +7777,12 @@ namespace Legion {
                                          color_space, part_color,
                                          DISJOINT_KIND, NULL,
                                          pending_partition_barrier,
-                                         shard_manager->get_mapping());
+                                         shard_manager->get_mapping(),
+                                         creation_barrier);
+        // Signal that we are done our creation
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
+      Runtime::advance_barrier(creation_barrier);
       part_op->initialize_by_field(this, pending_partition_barrier,
                                    pid, handle, parent_priv, fid, id,tag);
 #ifdef DEBUG_LEGION
@@ -7773,10 +7864,12 @@ namespace Legion {
                                            color_space, part_color,
                                            part_kind, disjoint_result,
                                            pending_partition_barrier,
-                                           shard_manager->get_mapping());
+                                           shard_manager->get_mapping(),
+                                           creation_barrier);
         // We have to wait before broadcasting the value to other shards
         if (!parent_notified.has_triggered())
           parent_notified.lg_wait();
+        // Then we can broadcast the name of the partition
         ValueBroadcast<IndexPartition> pid_collective(this, COLLECTIVE_LOC_20);
         pid_collective.broadcast(pid);
         if (color_generated)
@@ -7787,6 +7880,8 @@ namespace Legion {
           ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_21);
           color_collective.broadcast(part_color);
         }
+        // Wait for the creation to be done
+        creation_barrier.lg_wait();
       }
       else
       {
@@ -7813,8 +7908,12 @@ namespace Legion {
                                          color_space, part_color,
                                          part_kind, disjoint_result,
                                          pending_partition_barrier,
-                                         shard_manager->get_mapping());
+                                         shard_manager->get_mapping(),
+                                         creation_barrier);
+        // Signal that we are done with our creation
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
+      Runtime::advance_barrier(creation_barrier);
       part_op->initialize_by_image(this, index_partition_allocator_shard,
                                    pending_partition_barrier, 
                                    pid, projection, parent, fid, id, tag);
@@ -7897,10 +7996,12 @@ namespace Legion {
                                            color_space, part_color,
                                            part_kind, disjoint_result,
                                            pending_partition_barrier,
-                                           shard_manager->get_mapping());
+                                           shard_manager->get_mapping(),
+                                           creation_barrier);
         // We have to wait before broadcasting the value to other shards
         if (!parent_notified.has_triggered())
           parent_notified.lg_wait();
+        // Then we can broadcast the name of the partition
         ValueBroadcast<IndexPartition> pid_collective(this, COLLECTIVE_LOC_22);
         pid_collective.broadcast(pid);
         if (color_generated)
@@ -7911,6 +8012,8 @@ namespace Legion {
           ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_23);
           color_collective.broadcast(part_color);
         }
+        // Wait for the creation to be done
+        creation_barrier.lg_wait();
       }
       else
       {
@@ -7937,8 +8040,12 @@ namespace Legion {
                                          color_space, part_color,
                                          part_kind, disjoint_result,
                                          pending_partition_barrier,
-                                         shard_manager->get_mapping());
+                                         shard_manager->get_mapping(),
+                                         creation_barrier);
+        // Signal that we are done with the creation
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
+      Runtime::advance_barrier(creation_barrier);
       part_op->initialize_by_image_range(this, index_partition_allocator_shard,
                                          pending_partition_barrier,
                                          pid, projection, parent, fid, id, tag);
@@ -8028,10 +8135,12 @@ namespace Legion {
                                            color_space, part_color, 
                                            part_kind, disjoint_result,
                                            pending_partition_barrier,
-                                           shard_manager->get_mapping());
+                                           shard_manager->get_mapping(),
+                                           creation_barrier);
         // We have to wait before broadcasting the value to other shards
         if (!parent_notified.has_triggered())
           parent_notified.lg_wait();
+        // Then we can broadcast the name of the partition
         ValueBroadcast<IndexPartition> pid_collective(this, COLLECTIVE_LOC_24);
         pid_collective.broadcast(pid);
         if (color_generated)
@@ -8042,6 +8151,8 @@ namespace Legion {
           ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_25);
           color_collective.broadcast(part_color);
         }
+        // Wait for the creation to be done
+        creation_barrier.lg_wait();
       }
       else
       {
@@ -8068,8 +8179,12 @@ namespace Legion {
                                          color_space, part_color, 
                                          part_kind, disjoint_result,
                                          pending_partition_barrier,
-                                         shard_manager->get_mapping());
+                                         shard_manager->get_mapping(),
+                                         creation_barrier);
+        // Signal that we are done with our creation
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
+      Runtime::advance_barrier(creation_barrier);
       part_op->initialize_by_preimage(this, index_partition_allocator_shard,
                                       pending_partition_barrier,
                                       pid, projection, handle,
@@ -8152,10 +8267,12 @@ namespace Legion {
                                            color_space, part_color, 
                                            part_kind, disjoint_result,
                                            pending_partition_barrier,
-                                           shard_manager->get_mapping());
+                                           shard_manager->get_mapping(),
+                                           creation_barrier);
         // We have to wait before broadcasting the value to other shards
         if (!parent_notified.has_triggered())
           parent_notified.lg_wait();
+        // Then we can broadcast the name of the partition
         ValueBroadcast<IndexPartition> pid_collective(this, COLLECTIVE_LOC_26);
         pid_collective.broadcast(pid);
         if (color_generated)
@@ -8166,6 +8283,8 @@ namespace Legion {
           ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_27);
           color_collective.broadcast(part_color);
         }
+        // Wait for the creation to be done
+        creation_barrier.lg_wait();
       }
       else
       {
@@ -8192,8 +8311,12 @@ namespace Legion {
                                          color_space, part_color, 
                                          part_kind, disjoint_result,
                                          pending_partition_barrier,
-                                         shard_manager->get_mapping());
+                                         shard_manager->get_mapping(),
+                                         creation_barrier);
+        // Signal that we are done with our creation
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
+      Runtime::advance_barrier(creation_barrier);
       part_op->initialize_by_preimage_range(this, 
                                             index_partition_allocator_shard, 
                                             pending_partition_barrier,
@@ -8274,10 +8397,11 @@ namespace Legion {
                                            part_kind, disjoint_result,
                                            partition_ready,
                                            shard_manager->get_mapping(),
-                                           partition_ready);
+                                           creation_barrier, partition_ready);
         // Have to wait for the parent to be notified before broadcasting 
         if (!parent_notified.has_triggered())
           parent_notified.lg_wait();
+        // Then we can broadcast the name of the partition
         // Broadcast the partition first and then the barrier
         ValueBroadcast<IndexPartition> pid_collective(this, COLLECTIVE_LOC_28);
         pid_collective.broadcast(pid);
@@ -8292,6 +8416,8 @@ namespace Legion {
           ValueBroadcast<LegionColor> color_collective(this, COLLECTIVE_LOC_30);
           color_collective.broadcast(part_color);
         }
+        // Wait for the creation to be done
+        creation_barrier.lg_wait();
       }
       else
       {
@@ -8322,8 +8448,11 @@ namespace Legion {
                                          part_kind, disjoint_result,
                                          partition_ready,
                                          shard_manager->get_mapping(),
-                                         partition_ready);
+                                         creation_barrier, partition_ready);
+        // Signal that we are done with our creation
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
+      Runtime::advance_barrier(creation_barrier);
       // Update our allocation shard
       index_partition_allocator_shard++;
       if (index_partition_allocator_shard == shard_manager->total_shards)
@@ -8464,6 +8593,11 @@ namespace Legion {
         space = FieldSpace(runtime->get_unique_field_space_id());
         // Need to register this before broadcasting
         forest->create_field_space(space);
+        // Before broadcastint we need to update the creation set
+        // with all the address spaces for remote shards in case
+        // we end up doing field allocation
+        FieldSpaceNode *fs_node = forest->get_node(space);
+        fs_node->update_creation_set(*shard_manager->get_mapping());
         ValueBroadcast<FieldSpace> space_collective(this, COLLECTIVE_LOC_31);
         space_collective.broadcast(space);
 #ifdef DEBUG_LEGION
@@ -8472,6 +8606,8 @@ namespace Legion {
 #endif
         if (Runtime::legion_spy_enabled)
           LegionSpy::log_field_space(space.id);
+        // Wait for the creation to be done
+        creation_barrier.lg_wait();
       }
       else
       {
@@ -8483,7 +8619,10 @@ namespace Legion {
         assert(space.exists());
 #endif
         forest->create_field_space(space);
+        // Signal that we are done with our creation
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
+      Runtime::advance_barrier(creation_barrier);
       // Register the field space creation
       register_field_space_creation(space);
       // Update the allocator
@@ -8612,6 +8751,8 @@ namespace Legion {
         handle.tree_id = runtime->get_unique_region_tree_id();
         // Have to register this before doing the broadcast
         forest->create_logical_region(handle);
+        RegionNode *rg_node = forest->get_node(handle);
+        rg_node->update_creation_set(*shard_manager->get_mapping());
         ValueBroadcast<RegionTreeID> tree_collective(this, COLLECTIVE_LOC_34);
         tree_collective.broadcast(handle.tree_id);
 #ifdef DEBUG_LEGION
@@ -8623,6 +8764,8 @@ namespace Legion {
         if (Runtime::legion_spy_enabled)
           LegionSpy::log_top_region(index_space.id, field_space.id, 
                                     handle.tree_id);
+        // Wait for the creation to be done
+        creation_barrier.lg_wait();
       }
       else
       {
@@ -8634,7 +8777,10 @@ namespace Legion {
         assert(handle.exists());
 #endif
         forest->create_logical_region(handle);
+        // Signal that we are done our creation
+        Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
+      Runtime::advance_barrier(creation_barrier);
       // Register the creation of a top-level region with the context
       register_region_creation(handle);
       // Update the allocator shard
@@ -9336,6 +9482,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplicateContext::pack_remote_context(Serializer &rez,
+                                          AddressSpaceID target, bool replicate)
+    //--------------------------------------------------------------------------
+    {
+      // Do the normal inner pack with replicate true
+      InnerContext::pack_remote_context(rez, target, true/*replicate*/);
+      // Then pack our additional information
+      rez.serialize<size_t>(shard_manager->total_shards);
+      rez.serialize(shard_manager->repl_id);
+    }
+
+    //--------------------------------------------------------------------------
+    ShardingFunction* ReplicateContext::find_sharding_function(ShardingID sid)
+    //--------------------------------------------------------------------------
+    {
+      return shard_manager->find_sharding_function(sid);
+    }
+
+    //--------------------------------------------------------------------------
     void ReplicateContext::exchange_common_resources(void)
     //--------------------------------------------------------------------------
     {
@@ -9748,8 +9913,8 @@ namespace Legion {
       : InnerContext(rt, NULL, false/*full inner*/, remote_task.regions, 
           local_parent_req_indexes, local_virtual_mapped, 
           context_uid, true/*remote*/),
-        parent_ctx(NULL), depth(-1), top_level_context(false), 
-        remote_task(RemoteTask(this))
+        parent_ctx(NULL), shard_manager(NULL), depth(-1), 
+        top_level_context(false), remote_task(RemoteTask(this))
     //--------------------------------------------------------------------------
     {
     }
@@ -10052,6 +10217,37 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ShardingFunction* RemoteContext::find_sharding_function(ShardingID sid)
+    //--------------------------------------------------------------------------
+    {
+      if (shard_manager != NULL)
+        return shard_manager->find_sharding_function(sid);
+      // Check to see if it is in the cache
+      {
+        AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
+        std::map<ShardingID,ShardingFunction*>::const_iterator finder = 
+          sharding_functions.find(sid);
+        if (finder != sharding_functions.end())
+          return finder->second;
+      }
+      // Get the functor from the runtime
+      ShardingFunctor *functor = runtime->find_sharding_functor(sid);
+      // Retake the lock
+      AutoLock ctx_lock(context_lock);
+      // See if we lost the race
+      std::map<ShardingID,ShardingFunction*>::const_iterator finder = 
+        sharding_functions.find(sid);
+      if (finder != sharding_functions.end())
+        return finder->second;
+      // total_shards-1 because we want the upper bound inclusive
+      ShardingFunction *result = 
+        new ShardingFunction(functor, runtime->forest, sid, total_shards - 1);
+      // Save the result for the future
+      sharding_functions[sid] = result;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     void RemoteContext::unpack_remote_context(Deserializer &derez,
                                               std::set<RtEvent> &preconditions)
     //--------------------------------------------------------------------------
@@ -10088,7 +10284,16 @@ namespace Legion {
       derez.deserialize(parent_context_uid);
       // Unpack any local fields that we have
       unpack_local_field_update(derez);
-      
+      bool replicate;
+      derez.deserialize(replicate);
+      if (replicate)
+      {
+        derez.deserialize(total_shards);
+        ReplicationID repl_id;
+        derez.deserialize(repl_id);
+        // See if we have a local shard manager
+        shard_manager = runtime->find_shard_manager(repl_id, true/*can fail*/);
+      }
       // See if we can find our parent task, if not don't worry about it
       // DO NOT CHANGE THIS UNLESS YOU THINK REALLY HARD ABOUT VIRTUAL 
       // CHANNELS AND HOW CONTEXT META-DATA IS MOVED!
@@ -10268,7 +10473,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::pack_remote_context(Serializer &rez,AddressSpaceID target)
+    void LeafContext::pack_remote_context(Serializer &rez,
+                                          AddressSpaceID target, bool replicate)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -11556,7 +11762,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InlineContext::pack_remote_context(Serializer &rez,
-                                            AddressSpaceID target)
+                                          AddressSpaceID target, bool replicate)
     //--------------------------------------------------------------------------
     {
       assert(false);

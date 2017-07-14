@@ -102,6 +102,7 @@ namespace Legion {
                                              ValueBroadcast<bool> *part_result,
                                              ApEvent partition_ready,
                                              ShardMapping *mapping,
+                                             RtEvent creation_ready,
                    ApBarrier partial_pending = ApBarrier::NO_AP_BARRIER);
       void destroy_index_space(IndexSpace handle, AddressSpaceID source);
       void destroy_index_partition(IndexPartition handle, 
@@ -686,12 +687,13 @@ namespace Legion {
                         const void *buffer, size_t size, bool is_mutable,
                         RtUserEvent ready = RtUserEvent::NO_RT_USER_EVENT) = 0;
     public:
+      void update_creation_set(const ShardMapping &mapping);
+    public:
       RegionTreeForest *const context;
       const unsigned depth;
       const LegionColor color;
     public:
       NodeSet creation_set;
-      NodeSet child_creation;
       bool destroyed;
     protected:
       Reservation node_lock;
@@ -1836,7 +1838,8 @@ namespace Legion {
                                const std::vector<CustomSerdezID> &serdez_ids,
                                const std::vector<unsigned> &indexes);
       void remove_local_fields(const std::vector<FieldID> &to_removes);
-    protected:
+    public:
+      void update_creation_set(const ShardMapping &mapping);
       void process_alloc_notification(Deserializer &derez);
     public:
       bool has_field(FieldID fid);
@@ -2347,7 +2350,9 @@ namespace Legion {
           const FieldMask &check_mask);
     public:
       inline FieldSpaceNode* get_column_source(void) const 
-      { return column_source; }
+        { return column_source; }
+    public:
+      void update_creation_set(const ShardMapping &mapping);
     public:
       RegionTreeForest *const context;
       FieldSpaceNode *const column_source;

@@ -324,6 +324,7 @@ namespace Legion {
                                               ValueBroadcast<bool> *part_result,
                                               ApEvent partition_ready,
                                               ShardMapping *mapping,
+                                              RtEvent creation_ready,
                                               ApBarrier partial_pending)
     //--------------------------------------------------------------------------
     {
@@ -367,27 +368,32 @@ namespace Legion {
           args.pid = pid;
           args.disjointness_collective = part_result; 
           args.owner = true;
+          // Don't do the disjointness test until all the partition
+          // is ready and has been created on all the nodes
           disjointness_event = runtime->issue_runtime_meta_task(args,
               LG_DEFERRED_THROUGHPUT_PRIORITY, NULL,
-              Runtime::protect_event(partition_ready));
+              Runtime::merge_events(creation_ready,
+                Runtime::protect_event(partition_ready)));
         }
 #ifdef DEBUG_LEGION
         else
           assert(part_result == NULL);
 #endif
+        IndexPartNode *part_node;
         if (part_kind != COMPUTE_KIND)
         {
           const bool disjoint = (part_kind == DISJOINT_KIND);
-          create_node(pid, parent_node, color_node, partition_color, 
-                      disjoint, partition_ready, partial_pending, mapping);
+          part_node = create_node(pid, parent_node, color_node, partition_color,
+                        disjoint, partition_ready, partial_pending, mapping);
           if (Runtime::legion_spy_enabled)
             LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
                                            partition_color);
         }
         else
-          create_node(pid, parent_node, color_node,
-                      partition_color, disjointness_event, 
-                      partition_ready, partial_pending, mapping);
+          part_node = create_node(pid, parent_node, color_node,
+                                  partition_color, disjointness_event, 
+                                  partition_ready, partial_pending, mapping);
+        part_node->update_creation_set(*mapping);
         return parent_notified;
       }
       else
@@ -409,22 +415,24 @@ namespace Legion {
           args.disjointness_collective = part_result; 
           args.owner = false;
           disjointness_event = runtime->issue_runtime_meta_task(args,
-                                    LG_DEFERRED_THROUGHPUT_PRIORITY);
+                                     LG_DEFERRED_THROUGHPUT_PRIORITY);
         }
 #ifdef DEBUG_LEGION
         else
           assert(part_result == NULL);
 #endif
+        IndexPartNode *part_node;
         if (part_kind != COMPUTE_KIND)
         {
           const bool disjoint = (part_kind == DISJOINT_KIND);
-          create_node(pid, parent_node, color_node, partition_color, 
-                      disjoint, partition_ready, partial_pending, mapping);
+          part_node = create_node(pid, parent_node, color_node, partition_color,
+                          disjoint, partition_ready, partial_pending, mapping);
         }
         else
-          create_node(pid, parent_node, color_node,
-                      partition_color, disjointness_event, 
-                      partition_ready, partial_pending, mapping);
+          part_node = create_node(pid, parent_node, color_node,
+                                  partition_color, disjointness_event,
+                                  partition_ready, partial_pending, mapping);
+        part_node->update_creation_set(*mapping);
         // We know the parent is notified or we wouldn't even have
         // been given our pid
         return RtEvent::NO_RT_EVENT;
@@ -4640,6 +4648,19 @@ namespace Legion {
       return true;
     }
 
+    //--------------------------------------------------------------------------
+    void IndexTreeNode::update_creation_set(const ShardMapping &mapping)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock n_lock(node_lock);
+      for (unsigned idx = 0; idx < mapping.size(); idx++)
+      {
+        const AddressSpaceID space = mapping[idx];
+        if (space != context->runtime->address_space)
+          creation_set.add(space);
+      }
+    }
+
     /////////////////////////////////////////////////////////////
     // Index Space Node 
     /////////////////////////////////////////////////////////////
@@ -6204,6 +6225,12 @@ namespace Legion {
 #endif
       if (up)
         parent->send_node(target, true/*up*/);
+      // Do a quick test to see if it already exists there
+      {
+        AutoLock n_lock(node_lock,1,false/*exclusive*/);
+        if (creation_set.contains(target))
+          return;
+      }
       // Always send the color space ahead of this 
       color_space->send_node(target, false/*up*/);
       std::map<LegionColor,IndexSpaceNode*> valid_copy;
@@ -7551,6 +7578,19 @@ namespace Legion {
         assert(finder != fields.end());
 #endif
         finder->second.destroyed = true;  
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldSpaceNode::update_creation_set(const ShardMapping &mapping)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock n_lock(node_lock);
+      for (unsigned idx = 0; idx < mapping.size(); idx++)
+      {
+        const AddressSpaceID space = mapping[idx];
+        if (space != context->runtime->address_space)
+          creation_set.add(space);
       }
     }
 
@@ -13092,6 +13132,19 @@ namespace Legion {
           else
             it++;
         }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::update_creation_set(const ShardMapping &mapping)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock n_lock(node_lock);
+      for (unsigned idx = 0; idx < mapping.size(); idx++)
+      {
+        const AddressSpaceID space = mapping[idx];
+        if (space != context->runtime->address_space)
+          creation_set.add(space);
       }
     }
 

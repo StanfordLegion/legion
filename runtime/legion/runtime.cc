@@ -18325,15 +18325,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardManager* Runtime::find_shard_manager(ReplicationID repl_id)
+    ShardManager* Runtime::find_shard_manager(ReplicationID repl_id, 
+                                              bool can_fail)
     //--------------------------------------------------------------------------
     {
       AutoLock s_lock(shard_lock,1,false/*exclusive*/);
       std::map<ReplicationID,ShardManager*>::const_iterator
         finder = shard_managers.find(repl_id);
-#ifdef DEBUG_LEGION
-      assert(finder != shard_managers.end());
-#endif
+      if (finder == shard_managers.end())
+      {
+        if (can_fail)
+          return NULL;
+        assert(false); // Should never get here
+      }
       return finder->second;
     }
 

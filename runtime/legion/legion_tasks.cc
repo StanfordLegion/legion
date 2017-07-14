@@ -6663,6 +6663,40 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    VersionInfo& ShardTask::get_version_info(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(idx < version_infos.size());
+#endif
+      return version_infos[idx];
+    }
+
+    //--------------------------------------------------------------------------
+    RestrictInfo& ShardTask::get_restrict_info(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(idx < restrict_infos.size());
+#endif
+      return restrict_infos[idx];
+    }
+
+    //--------------------------------------------------------------------------
+    const std::vector<VersionInfo>* ShardTask::get_version_infos(void)
+    //--------------------------------------------------------------------------
+    {
+      return &version_infos;
+    }
+
+    //--------------------------------------------------------------------------
+    const std::vector<RestrictInfo>* ShardTask::get_restrict_infos(void)
+    //--------------------------------------------------------------------------
+    {
+      return &restrict_infos;
+    }
+
+    //--------------------------------------------------------------------------
     void ShardTask::perform_physical_traversal(unsigned idx,
                                       RegionTreeContext ctx, InstanceSet &valid)
     //--------------------------------------------------------------------------
@@ -8880,7 +8914,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       trigger_slice_commit();
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void SliceTask::record_reference_mutation_effect(RtEvent event)
