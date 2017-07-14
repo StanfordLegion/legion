@@ -556,6 +556,8 @@ LEGION_SRC 	+= $(LG_RT_DIR)/legion/legion.cc \
 		    $(LG_RT_DIR)/legion/garbage_collection.cc \
 		    $(LG_RT_DIR)/legion/mapper_manager.cc
 
+LEGION_FORTRAN_API_SRC += $(LG_RT_DIR)/legion/legion_f.f90
+
 # General shell commands
 SHELL	:= /bin/sh
 SH	:= sh
@@ -579,6 +581,8 @@ REALM_OBJS	:= $(REALM_SRC:.cc=.cc.o)
 LEGION_OBJS	:= $(LEGION_SRC:.cc=.cc.o)
 MAPPER_OBJS	:= $(MAPPER_SRC:.cc=.cc.o)
 ASM_OBJS	:= $(ASM_SRC:.S=.S.o)
+LEGION_FORTRAN_API_OBJS	:= $(LEGION_FORTRAN_API_SRC:.f90=.o)
+LEGION_FORTRAN_API_MODS	:= $(LEGION_FORTRAN_API_SRC:.f90=.mod)
 # Only compile the gpu objects if we need to 
 ifeq ($(strip $(USE_CUDA)),1)
 GEN_GPU_OBJS	:= $(GEN_GPU_SRC:.cu=.cu.o)
@@ -594,6 +598,16 @@ LD_FLAGS	+= -lgfortran
 F90	:= gfortran
 endif
 
+ifeq ($(strip $(LEGION_WITH_FORTRAN)),1)
+GEN_FORTRAN_OBJS	:= $(GEN_FORTRAN_SRC:.f90=.o)
+LD_FLAGS	+= -lgfortran
+F90	:= gfortran
+endif
+
+ifeq ($(strip $(LEGION_WITH_C)),1)
+GEN_C_OBJS	:= $(GEN_C_SRC:.c=.o)
+endif
+
 # Provide build rules unless the user asks us not to
 ifndef NO_BUILD_RULES
 # Provide an all unless the user asks us not to
@@ -607,13 +621,21 @@ ifeq ($(strip $(FORTRAN_LEAF_TASK)),1)
 $(OUTFILE) : $(GEN_OBJS) $(GEN_FORTRAN_OBJS) $(GEN_GPU_OBJS) $(SLIB_LEGION) $(SLIB_REALM)
 	@echo "---> Linking objects into one binary: $(OUTFILE)"
 	$(CXX) -o $(OUTFILE) $(GEN_OBJS) $(GEN_FORTRAN_OBJS) $(GEN_GPU_OBJS) $(LD_FLAGS) $(LEGION_LIBS) $(LEGION_LD_FLAGS) $(GASNET_FLAGS)
+else ifeq ($(strip $(LEGION_WITH_C)),1)
+$(OUTFILE) : $(GEN_OBJS) $(GEN_C_OBJS) $(GEN_GPU_OBJS) $(SLIB_LEGION) $(SLIB_REALM)
+	@echo "---> Linking objects into one binary: $(OUTFILE)"
+	$(CXX) -o $(OUTFILE) $(GEN_OBJS) $(GEN_C_OBJS) $(GEN_GPU_OBJS) $(LD_FLAGS) $(LEGION_LIBS) $(LEGION_LD_FLAGS) $(GASNET_FLAGS)
+else ifeq ($(strip $(LEGION_WITH_FORTRAN)),1)
+$(OUTFILE) : $(SLIB_LEGION) $(SLIB_REALM) $(GEN_OBJS) $(GEN_FORTRAN_OBJS) $(GEN_GPU_OBJS)
+	@echo "---> Linking objects into one binary: $(OUTFILE)"
+	$(CXX) -o $(OUTFILE) $(GEN_OBJS) $(GEN_FORTRAN_OBJS) $(GEN_GPU_OBJS) $(LD_FLAGS) $(LEGION_LIBS) $(LEGION_LD_FLAGS) $(GASNET_FLAGS)
 else
 $(OUTFILE) : $(GEN_OBJS) $(GEN_GPU_OBJS) $(SLIB_LEGION) $(SLIB_REALM)
 	@echo "---> Linking objects into one binary: $(OUTFILE)"
 	$(CXX) -o $(OUTFILE) $(GEN_OBJS) $(GEN_GPU_OBJS) $(LD_FLAGS) $(LEGION_LIBS) $(LEGION_LD_FLAGS) $(GASNET_FLAGS)
 endif
 
-$(SLIB_LEGION) : $(LEGION_OBJS) $(MAPPER_OBJS)
+$(SLIB_LEGION) : $(LEGION_OBJS) $(MAPPER_OBJS) $(LEGION_FORTRAN_API_OBJS)
 	rm -f $@
 	$(AR) rc $@ $^
 
@@ -646,12 +668,33 @@ $(GEN_GPU_OBJS) : %.cu.o : %.cu
 
 $(GPU_RUNTIME_OBJS): %.cu.o : %.cu
 	$(NVCC) -o $@ -c $< $(NVCC_FLAGS) $(INC_FLAGS)
+	
+$(LEGION_FORTRAN_API_OBJS) : %.o : %.f90
+	gfortran -cpp -J$(LG_RT_DIR)/legion -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
+	
+$(GEN_OBJS) : %.o : %.cc
+	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
+
+ifeq ($(strip $(FORTRAN_LEAF_TASK)),1)	
+$(GEN_FORTRAN_OBJS) : %.o : %.f90
+	$(F90) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
+endif
+
+ifeq ($(strip $(LEGION_WITH_FORTRAN)),1)	
+$(GEN_FORTRAN_OBJS) : %.o : %.f90
+	$(F90) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
+endif
+
+ifeq ($(strip $(LEGION_WITH_C)),1)
+$(GEN_C_OBJS) : %.o : %.c
+	gcc -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
+endif
 
 # disable gmake's default rule for building % from %.o
 % : %.o
 
 clean::
-	$(RM) -f $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(GEN_OBJS) $(GEN_GPU_OBJS) $(REALM_OBJS) $(LEGION_OBJS) $(GPU_RUNTIME_OBJS) $(MAPPER_OBJS) $(ASM_OBJS)
+	$(RM) -f $(OUTFILE) $(SLIB_LEGION) $(SLIB_REALM) $(GEN_OBJS) $(GEN_GPU_OBJS) $(REALM_OBJS) $(LEGION_OBJS) $(GPU_RUNTIME_OBJS) $(MAPPER_OBJS) $(ASM_OBJS) $(LEGION_FORTRAN_API_OBJS) $(LEGION_FORTRAN_API_MODS)
 
 endif
 
