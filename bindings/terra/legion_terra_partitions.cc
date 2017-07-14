@@ -16,14 +16,11 @@
 #include "legion_terra_partitions.h"
 #include "legion_terra_partitions_cxx.h"
 
-#include "arrays.h"
 #include "legion.h"
 #include "legion_c_util.h"
 #include "legion_utilities.h"
 #include "lowlevel.h"
 #include "utilities.h"
-
-using namespace LegionRuntime::Arrays;
 
 #ifndef USE_TLS
 // Mac OS X and GCC <= 4.7 do not support C++11 thread_local.
@@ -288,213 +285,6 @@ should_flip_cross_product(Runtime *runtime,
   return rhs_span_count < lhs_span_count;
 }
 
-#ifdef USE_LEGION_PARTAPI_SHIM
-// Creates cross product between structured IndexPartition's.
-// See documentation of `create_cross_product()` for details.
-static Color
-create_cross_product_structured(Runtime *runtime,
-                                Context ctx,
-                                IndexPartition lhs,
-                                IndexPartition rhs,
-                                Color rhs_color,
-                                bool consistent_ids,
-                                std::map<IndexSpace, Color> *chosen_colors,
-                                const std::set<DomainPoint> *lhs_filter,
-                                const std::set<DomainPoint> *rhs_filter)
-{
-  // In the structured case, it makes no difference to "flip" `lhs` and `rhs`.
-
-  Domain lhs_colors = runtime->get_index_partition_color_space(ctx, lhs);
-  Domain rhs_colors = runtime->get_index_partition_color_space(ctx, rhs);
-
-  // Double for-loop: take rectangle intersection between each pair of
-  // subspaces.
-  for (Domain::DomainPointIterator lh_dp(lhs_colors); lh_dp; lh_dp++) {
-    const DomainPoint &lh_color = lh_dp.p;
-    if (lhs_filter && !lhs_filter->count(lh_color)) continue;
-
-    DomainPointColoring lh_coloring; // Coloring for current lhs region.
-
-    IndexSpace lh_space = runtime->get_index_subspace(ctx, lhs, lh_color);
-    // Doesn't currently handle structured index spaces consisting of multiple
-    // domains.
-    assert(!runtime->has_multiple_domains(lh_space));
-    Domain lh_domain = runtime->get_index_space_domain(lh_space);
-    // Verify that index space is indeed structured.
-    assert(lh_domain.get_dim() > 0);
-
-    for (Domain::DomainPointIterator rh_dp(rhs_colors); rh_dp; rh_dp++) {
-      const DomainPoint &rh_color = rh_dp.p;
-      if (rhs_filter && !rhs_filter->count(rh_color)) continue;
-
-      IndexSpace rh_space = runtime->get_index_subspace(ctx, rhs, rh_color);
-      assert(!runtime->has_multiple_domains(rh_space));
-      Domain rh_domain = runtime->get_index_space_domain(rh_space);
-      assert(rh_domain.get_dim() > 0);
-
-      // Take and store intersecton of the two rect domains.
-      lh_coloring[rh_color] = lh_domain.intersection(rh_domain);
-    }
-
-    // Create cross-product partition for current region in `lhs`.  We simply
-    // put `rhs_colors` as the color space, which may unfortunately include
-    // indices that are filtered out.
-    IndexPartition part = runtime->create_index_partition(
-      ctx, lh_space, rhs_colors, lh_coloring,
-      runtime->is_index_partition_disjoint(ctx, rhs) ? DISJOINT_KIND : ALIASED_KIND,
-      rhs_color);
-    if (chosen_colors) {
-      (*chosen_colors)[lh_space] = runtime->get_index_partition_color(ctx, part);
-    }
-    if (rhs_color == Color(-1) && consistent_ids) {
-      rhs_color = runtime->get_index_partition_color(ctx, part);
-    }
-  }
-
-  return rhs_color;
-}
-
-// Creates and stores coloring for cross product in the `coloring` parameter,
-// for unstructured IndexPartition's `lhs` and `rhs`.
-//
-// If `flip_coloring` is set, `coloring` will be created as a Map (rh_color =>
-// lh_color => intersection); otherwise, it will be a Map (lh_color => rh_color
-// => intersection).
-static void
-create_cross_product_coloring_unstructured(Runtime *runtime,
-                                           Context ctx,
-                                           IndexPartition lhs,
-                                           IndexPartition rhs,
-                                           std::map<DomainPoint, PointColoring> &coloring,
-                                           bool flip_coloring,
-                                           const std::set<DomainPoint> *lhs_filter,
-                                           const std::set<DomainPoint> *rhs_filter)
-{
-  Domain lhs_colors = runtime->get_index_partition_color_space(ctx, lhs);
-  Domain rhs_colors = runtime->get_index_partition_color_space(ctx, rhs);
-
-  // Double for-loop: take intersection between each pair of subspaces.
-  for (Domain::DomainPointIterator lh_dp(lhs_colors); lh_dp; lh_dp++) {
-    const DomainPoint &lh_color = lh_dp.p;
-    if (lhs_filter && !lhs_filter->count(lh_color)) continue;
-    IndexSpace lh_space = runtime->get_index_subspace(ctx, lhs, lh_color);
-
-    for (Domain::DomainPointIterator rh_dp(rhs_colors); rh_dp; rh_dp++) {
-      const DomainPoint &rh_color = rh_dp.p;
-      if (rhs_filter && !rhs_filter->count(rh_color)) continue;
-      IndexSpace rh_space = runtime->get_index_subspace(ctx, rhs, rh_color);
-
-      PointColoring::mapped_type &write_to = flip_coloring ?
-        coloring[rh_color][lh_color] : coloring[lh_color][rh_color];
-
-      // Take intersection between `lh_space` and `rh_space` by iterating
-      // through spans in each with a double for-loop and taking intersection
-      // between spans.
-      for (IndexIterator lh_it(runtime, ctx, lh_space); lh_it.has_next(); ) {
-        size_t lh_count = 0;
-        ptr_t lh_ptr = lh_it.next_span(lh_count);
-        ptr_t lh_end = lh_ptr.value + lh_count - 1;
-
-        for (IndexIterator rh_it(runtime, ctx, rh_space, /* start = */ lh_ptr);
-             rh_it.has_next(); ) {
-          size_t rh_count = 0;
-          ptr_t rh_ptr = rh_it.next_span(rh_count);
-          ptr_t rh_end = rh_ptr.value + rh_count - 1;
-
-          if (rh_ptr.value > lh_end.value) {
-            // lh_ptr           lh_end
-            //  |------------------|
-            //                       |----------------|-->     |---...
-            //                      rh_ptr         rh_end     rh_ptr'
-            // RHS span entirely exceeds LHS span; there isn't, and won't be,
-            // any overlap as the RHS span continues moving forward.
-            break;
-          }
-          if (rh_end.value > lh_end.value) {
-            // lh_ptr           lh_end
-            //  |------------------|
-            //            |----------------|-->      |---...
-            //           rh_ptr         rh_end      rh_ptr'
-            // This is the last time there's any overlap as RHS continues
-            // moving forward.
-            write_to.ranges.insert(std::pair<ptr_t, ptr_t>(rh_ptr, lh_end));
-            break;
-          }
-
-          // lh_ptr           lh_end
-          //  |------------------|
-          //    |---------|-->
-          //   rh_ptr  rh_end
-          // More overlap is possible as RHS moves forward.
-          write_to.ranges.insert(std::pair<ptr_t, ptr_t>(rh_ptr, rh_end));
-        }
-      }
-    }
-  }
-}
-
-// Creates cross product between unstructured IndexPartition's.
-// See documentation of `create_cross_product()` for details.
-static Color
-create_cross_product_unstructured(Runtime *runtime,
-                                  Context ctx,
-                                  IndexPartition lhs,
-                                  IndexPartition rhs,
-                                  Color rhs_color,
-                                  bool consistent_ids,
-                                  std::map<IndexSpace, Color> *chosen_colors,
-                                  const std::set<DomainPoint> *lhs_filter,
-                                  const std::set<DomainPoint> *rhs_filter)
-{
-  std::map<DomainPoint, PointColoring> coloring; // lh_color->rh_color->intersection
-
-  // The efficiency of this algorithm depends heavily on how many
-  // spans are in lhs and rhs. Since it is *MUCH* better to have a
-  // smaller number of spans on lhs, it is worth spending a little
-  // time here estimating which will have fewer spans.
-  bool flip = should_flip_cross_product(runtime, ctx, lhs, rhs, lhs_filter, rhs_filter);
-  if (flip) {
-    // We switch `lhs` and `rhs` (and their filters) in the params and also
-    // set `flip_coloring`, so that the output `map` be in the same format.
-    create_cross_product_coloring_unstructured(runtime, ctx, rhs, lhs,
-        coloring, /* flip_coloring = */ true,  rhs_filter, lhs_filter);
-  } else {
-    create_cross_product_coloring_unstructured(runtime, ctx, lhs, rhs,
-        coloring, /* flip_coloring = */ false, lhs_filter, rhs_filter);
-  }
-
-  // Create index partitions for each LHS partition.
-  Domain lhs_colors = runtime->get_index_partition_color_space(ctx, lhs);
-  Domain rhs_colors = runtime->get_index_partition_color_space(ctx, rhs);
-  bool allocable =
-#ifdef ASSUME_UNALLOCABLE
-    false
-#else
-    true
-#endif
-    ;
-
-  for (Domain::DomainPointIterator lh_dp(lhs_colors); lh_dp; lh_dp++) {
-    const DomainPoint &lh_color = lh_dp.p;
-    if (lhs_filter && !lhs_filter->count(lh_color)) continue;
-    IndexSpace lh_space = runtime->get_index_subspace(ctx, lhs, lh_color);
-
-    IndexPartition part = runtime->create_index_partition(
-        ctx, lh_space, rhs_colors, coloring[lh_color],
-        runtime->is_index_partition_disjoint(ctx, rhs) ? DISJOINT_KIND : ALIASED_KIND,
-        rhs_color, allocable);
-    if (chosen_colors) {
-      (*chosen_colors)[lh_space] = runtime->get_index_partition_color(ctx, part);
-    }
-    if (rhs_color == Color(-1) && consistent_ids) {
-      rhs_color = runtime->get_index_partition_color(ctx, part);
-    }
-  }
-
-  return rhs_color;
-}
-#endif
-
 Color
 create_cross_product(Runtime *runtime,
                      Context ctx,
@@ -506,25 +296,12 @@ create_cross_product(Runtime *runtime,
                      const std::set<DomainPoint> *lhs_filter /* = NULL */,
                      const std::set<DomainPoint> *rhs_filter /* = NULL */)
 {
-#ifdef USE_LEGION_PARTAPI_SHIM
-  // The two partitions should belong to the same index tree.
-  assert(lhs.get_tree_id() == rhs.get_tree_id());
-  
-  if (is_structured(runtime, ctx, lhs)) {
-    return create_cross_product_structured(runtime, ctx, lhs, rhs, rhs_color,
-        consistent_ids, chosen_colors, lhs_filter, rhs_filter);
-  } else {
-    return create_cross_product_unstructured(runtime, ctx, lhs, rhs, rhs_color,
-        consistent_ids, chosen_colors, lhs_filter, rhs_filter);
-  }
-#else
   std::map<IndexSpace, IndexPartition> handles;
   rhs_color = runtime->create_cross_product_partitions(
     ctx, lhs, rhs, handles,
     (runtime->is_index_partition_disjoint(ctx, rhs) ? DISJOINT_KIND : ALIASED_KIND),
     rhs_color);
   return rhs_color;
-#endif
 }
 
 // For each unstructured IndexSpace in `index_spaces`, stores its bounds (first & last

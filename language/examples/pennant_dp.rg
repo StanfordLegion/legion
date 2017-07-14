@@ -1014,22 +1014,6 @@ do
   end
 end
 
-local function accessor_generic_get_base_pointer(field_type)
-  return terra(accessor : c.legion_accessor_generic_t)
-
-    var base_pointer : &opaque = nil
-    var stride : c.size_t = terralib.sizeof(field_type)
-    var ok = c.legion_accessor_generic_get_soa_parameters(
-      accessor, &base_pointer, &stride)
-
-    regentlib.assert(ok, "failed to get base pointer")
-    regentlib.assert(stride == terralib.sizeof(field_type),
-                     "stride does not match expected value")
-
-    return [&field_type](base_pointer)
-  end
-end
-
 -- Reduce forces into points.
 task sum_point_force(rz : region(zone), rpp : region(point), rpg : region(point),
                      rs : region(side(rz, rpp, rpg, rs)),
@@ -2149,62 +2133,62 @@ terra read_input(runtime : c.legion_runtime_t,
 
   -- Write mesh data into regions
   do
-    var rz_znump = c.legion_physical_region_get_field_accessor_array(
+    var rz_znump = c.legion_physical_region_get_field_accessor_array_1d(
       rz_physical[23], rz_fields[23])
 
     for i = 0, conf.nz do
       var p = c.legion_ptr_t { value = i }
       regentlib.assert(zonesize[i] < 255, "zone has more than 255 sides")
-      @[&uint8](c.legion_accessor_array_ref(rz_znump, p)) = uint8(zonesize[i])
+      @[&uint8](c.legion_accessor_array_1d_ref(rz_znump, p)) = uint8(zonesize[i])
     end
 
-    c.legion_accessor_array_destroy(rz_znump)
+    c.legion_accessor_array_1d_destroy(rz_znump)
   end
 
   do
-    var rp_px_x = c.legion_physical_region_get_field_accessor_array(
+    var rp_px_x = c.legion_physical_region_get_field_accessor_array_1d(
       rp_physical[4], rp_fields[4])
-    var rp_px_y = c.legion_physical_region_get_field_accessor_array(
+    var rp_px_y = c.legion_physical_region_get_field_accessor_array_1d(
       rp_physical[5], rp_fields[5])
-    var rp_has_bcx = c.legion_physical_region_get_field_accessor_array(
+    var rp_has_bcx = c.legion_physical_region_get_field_accessor_array_1d(
       rp_physical[15], rp_fields[15])
-    var rp_has_bcy = c.legion_physical_region_get_field_accessor_array(
+    var rp_has_bcy = c.legion_physical_region_get_field_accessor_array_1d(
       rp_physical[16], rp_fields[16])
 
     var eps : double = 1e-12
     for i = 0, conf.np do
       var p = c.legion_ptr_t { value = i }
-      @[&double](c.legion_accessor_array_ref(rp_px_x, p)) = pointpos_x[i]
-      @[&double](c.legion_accessor_array_ref(rp_px_y, p)) = pointpos_y[i]
+      @[&double](c.legion_accessor_array_1d_ref(rp_px_x, p)) = pointpos_x[i]
+      @[&double](c.legion_accessor_array_1d_ref(rp_px_y, p)) = pointpos_y[i]
 
-      @[&bool](c.legion_accessor_array_ref(rp_has_bcx, p)) = (
+      @[&bool](c.legion_accessor_array_1d_ref(rp_has_bcx, p)) = (
         (conf.bcx_n > 0 and cmath.fabs(pointpos_x[i] - conf.bcx[0]) < eps) or
         (conf.bcx_n > 1 and cmath.fabs(pointpos_x[i] - conf.bcx[1]) < eps))
-      @[&bool](c.legion_accessor_array_ref(rp_has_bcy, p)) = (
+      @[&bool](c.legion_accessor_array_1d_ref(rp_has_bcy, p)) = (
         (conf.bcy_n > 0 and cmath.fabs(pointpos_y[i] - conf.bcy[0]) < eps) or
         (conf.bcy_n > 1 and cmath.fabs(pointpos_y[i] - conf.bcy[1]) < eps))
     end
 
-    c.legion_accessor_array_destroy(rp_px_x)
-    c.legion_accessor_array_destroy(rp_px_y)
-    c.legion_accessor_array_destroy(rp_has_bcx)
-    c.legion_accessor_array_destroy(rp_has_bcy)
+    c.legion_accessor_array_1d_destroy(rp_px_x)
+    c.legion_accessor_array_1d_destroy(rp_px_y)
+    c.legion_accessor_array_1d_destroy(rp_has_bcx)
+    c.legion_accessor_array_1d_destroy(rp_has_bcy)
   end
 
   do
-    var rs_mapsz = c.legion_physical_region_get_field_accessor_array(
+    var rs_mapsz = c.legion_physical_region_get_field_accessor_array_1d(
       rs_physical[0], rs_fields[0])
-    var rs_mapsp1_ptr = c.legion_physical_region_get_field_accessor_array(
+    var rs_mapsp1_ptr = c.legion_physical_region_get_field_accessor_array_1d(
       rs_physical[1], rs_fields[1])
-    var rs_mapsp1_index = c.legion_physical_region_get_field_accessor_array(
+    var rs_mapsp1_index = c.legion_physical_region_get_field_accessor_array_1d(
       rs_physical[2], rs_fields[2])
-    var rs_mapsp2_ptr = c.legion_physical_region_get_field_accessor_array(
+    var rs_mapsp2_ptr = c.legion_physical_region_get_field_accessor_array_1d(
       rs_physical[3], rs_fields[3])
-    var rs_mapsp2_index = c.legion_physical_region_get_field_accessor_array(
+    var rs_mapsp2_index = c.legion_physical_region_get_field_accessor_array_1d(
       rs_physical[4], rs_fields[4])
-    var rs_mapss3 = c.legion_physical_region_get_field_accessor_array(
+    var rs_mapss3 = c.legion_physical_region_get_field_accessor_array_1d(
       rs_physical[5], rs_fields[5])
-    var rs_mapss4 = c.legion_physical_region_get_field_accessor_array(
+    var rs_mapss4 = c.legion_physical_region_get_field_accessor_array_1d(
       rs_physical[6], rs_fields[6])
 
     var sstart = 0
@@ -2216,24 +2200,24 @@ terra read_input(runtime : c.legion_runtime_t,
         var izs4 = (izs + 1)%zsize
 
         var p = c.legion_ptr_t { value = sstart + izs }
-        @[&c.legion_ptr_t](c.legion_accessor_array_ref(rs_mapsz, p)) = c.legion_ptr_t { value = iz }
-        @[&c.legion_ptr_t](c.legion_accessor_array_ref(rs_mapsp1_ptr, p)) = c.legion_ptr_t { value = zonepoints[zstart + izs] }
-        @[&uint8](c.legion_accessor_array_ref(rs_mapsp1_index, p)) = 0
-        @[&c.legion_ptr_t](c.legion_accessor_array_ref(rs_mapsp2_ptr, p)) = c.legion_ptr_t { value = zonepoints[zstart + izs4] }
-        @[&uint8](c.legion_accessor_array_ref(rs_mapsp2_index, p)) = 0
-        @[&c.legion_ptr_t](c.legion_accessor_array_ref(rs_mapss3, p)) = c.legion_ptr_t { value = sstart + izs3 }
-        @[&c.legion_ptr_t](c.legion_accessor_array_ref(rs_mapss4, p)) = c.legion_ptr_t { value = sstart + izs4 }
+        @[&c.legion_ptr_t](c.legion_accessor_array_1d_ref(rs_mapsz, p)) = c.legion_ptr_t { value = iz }
+        @[&c.legion_ptr_t](c.legion_accessor_array_1d_ref(rs_mapsp1_ptr, p)) = c.legion_ptr_t { value = zonepoints[zstart + izs] }
+        @[&uint8](c.legion_accessor_array_1d_ref(rs_mapsp1_index, p)) = 0
+        @[&c.legion_ptr_t](c.legion_accessor_array_1d_ref(rs_mapsp2_ptr, p)) = c.legion_ptr_t { value = zonepoints[zstart + izs4] }
+        @[&uint8](c.legion_accessor_array_1d_ref(rs_mapsp2_index, p)) = 0
+        @[&c.legion_ptr_t](c.legion_accessor_array_1d_ref(rs_mapss3, p)) = c.legion_ptr_t { value = sstart + izs3 }
+        @[&c.legion_ptr_t](c.legion_accessor_array_1d_ref(rs_mapss4, p)) = c.legion_ptr_t { value = sstart + izs4 }
       end
       sstart = sstart + zsize
     end
 
-    c.legion_accessor_array_destroy(rs_mapsz)
-    c.legion_accessor_array_destroy(rs_mapsp1_ptr)
-    c.legion_accessor_array_destroy(rs_mapsp1_index)
-    c.legion_accessor_array_destroy(rs_mapsp2_ptr)
-    c.legion_accessor_array_destroy(rs_mapsp2_index)
-    c.legion_accessor_array_destroy(rs_mapss3)
-    c.legion_accessor_array_destroy(rs_mapss4)
+    c.legion_accessor_array_1d_destroy(rs_mapsz)
+    c.legion_accessor_array_1d_destroy(rs_mapsp1_ptr)
+    c.legion_accessor_array_1d_destroy(rs_mapsp1_index)
+    c.legion_accessor_array_1d_destroy(rs_mapsp2_ptr)
+    c.legion_accessor_array_1d_destroy(rs_mapsp2_index)
+    c.legion_accessor_array_1d_destroy(rs_mapss3)
+    c.legion_accessor_array_1d_destroy(rs_mapss4)
   end
 
   -- Free buffers
@@ -2256,28 +2240,28 @@ terra read_input(runtime : c.legion_runtime_t,
 end
 read_input:compile()
 
-struct cached_accessor { base : &int8; stride : int64; acc : c.legion_accessor_array_t; }
+struct cached_accessor { base : &int8; stride : int64; acc : c.legion_accessor_array_1d_t; }
 
-terra cached_accessor:init(acc : c.legion_accessor_array_t)
+terra cached_accessor:init(acc : c.legion_accessor_array_1d_t)
   self.acc = acc  -- for debug
   var ptr : c.legion_ptr_t
   ptr.value = 0
-  self.base = [&int8](c.legion_accessor_array_ref(acc, ptr))
+  self.base = [&int8](c.legion_accessor_array_1d_ref(acc, ptr))
   ptr.value = 1
   var basep1 : &int8
-  basep1 = [&int8](c.legion_accessor_array_ref(acc, ptr))
+  basep1 = [&int8](c.legion_accessor_array_1d_ref(acc, ptr))
   self.stride = basep1 - self.base
   --c.printf("got %p + %zd\n", self.base, self.stride)
 end
 
 terra cached_accessor:ref(ptr : c.legion_ptr_t) : &int8
   var act_ptr : &int8 = self.base + ptr.value * self.stride
-  --var chk_ptr : &int8 = [&int8](c.legion_accessor_array_ref(self.acc, ptr))
+  --var chk_ptr : &int8 = [&int8](c.legion_accessor_array_1d_ref(self.acc, ptr))
   --regentlib.assert(act_ptr == chk_ptr, "ptr mismatch")
   return act_ptr
 end
 
-terra cache_accessor(acc : c.legion_accessor_array_t) : cached_accessor
+terra cache_accessor(acc : c.legion_accessor_array_1d_t) : cached_accessor
   var ca : cached_accessor
   ca:init(acc)
   return ca
@@ -2334,11 +2318,11 @@ terra slow_create_colorings(runtime : c.legion_runtime_t,
   --  1) use the pointed-to zone's color to color the side
   --  2) use the side's color to color the point-to points - detect when more than one color exists
   do
-    var rs_mapsz = c.legion_physical_region_get_field_accessor_array(
+    var rs_mapsz = c.legion_physical_region_get_field_accessor_array_1d(
       rs_physical[0], rs_fields[0])
-    var rs_mapsp1_ptr = c.legion_physical_region_get_field_accessor_array(
+    var rs_mapsp1_ptr = c.legion_physical_region_get_field_accessor_array_1d(
       rs_physical[1], rs_fields[1])
-    --var rs_mapsp2_ptr = c.legion_physical_region_get_field_accessor_array(
+    --var rs_mapsp2_ptr = c.legion_physical_region_get_field_accessor_array_1d(
     --  rs_physical[3], rs_fields[3])
 
     var crs_mapsz = cache_accessor(rs_mapsz)
@@ -2347,11 +2331,11 @@ terra slow_create_colorings(runtime : c.legion_runtime_t,
     for i = 0, conf.ns do
       var ps = c.legion_ptr_t { value = i }
 
-      --var pz = @[&c.legion_ptr_t](c.legion_accessor_array_ref(rs_mapsz, ps)) 
+      --var pz = @[&c.legion_ptr_t](c.legion_accessor_array_1d_ref(rs_mapsz, ps)) 
       var pz = @[&c.legion_ptr_t](crs_mapsz:ref(ps)) 
-      --var pp1 = @[&c.legion_ptr_t](c.legion_accessor_array_ref(rs_mapsp1_ptr, ps)) 
+      --var pp1 = @[&c.legion_ptr_t](c.legion_accessor_array_1d_ref(rs_mapsp1_ptr, ps)) 
       var pp1 = @[&c.legion_ptr_t](crs_mapsp1_ptr:ref(ps)) 
-      --var pp2 = @[&c.legion_ptr_t](c.legion_accessor_array_ref(rs_mapsp2_ptr, ps)) 
+      --var pp2 = @[&c.legion_ptr_t](c.legion_accessor_array_1d_ref(rs_mapsp2_ptr, ps)) 
 
       var color = zonecolors[pz.value]
       c.legion_coloring_add_point(result.rs_all_c, color, ps)
@@ -2376,9 +2360,9 @@ terra slow_create_colorings(runtime : c.legion_runtime_t,
       end
     end
 
-    c.legion_accessor_array_destroy(rs_mapsz)
-    c.legion_accessor_array_destroy(rs_mapsp1_ptr)
-    --c.legion_accessor_array_destroy(rs_mapsp2_ptr)
+    c.legion_accessor_array_1d_destroy(rs_mapsz)
+    c.legion_accessor_array_1d_destroy(rs_mapsp1_ptr)
+    --c.legion_accessor_array_1d_destroy(rs_mapsp2_ptr)
   end
 
   -- span-related stuff is not used in baseline version
@@ -2687,11 +2671,11 @@ terra validate_output(runtime : c.legion_runtime_t,
   end
 
   do
-    var rz_zr = c.legion_physical_region_get_field_accessor_array(
+    var rz_zr = c.legion_physical_region_get_field_accessor_array_1d(
       rz_physical[12], rz_fields[12])
     for i = 0, conf.nz do
       var p = c.legion_ptr_t { value = i }
-      var ck = @[&double](c.legion_accessor_array_ref(rz_zr, p))
+      var ck = @[&double](c.legion_accessor_array_1d_ref(rz_zr, p))
       var sol = solution_zr[i]
       if cmath.fabs(ck - sol) > absolute_eps or
         (cmath.fabs(ck - sol) / sol > relative_eps and
@@ -2705,15 +2689,15 @@ terra validate_output(runtime : c.legion_runtime_t,
         c.abort()
       end
     end
-    c.legion_accessor_array_destroy(rz_zr)
+    c.legion_accessor_array_1d_destroy(rz_zr)
   end
 
   do
-    var rz_ze = c.legion_physical_region_get_field_accessor_array(
+    var rz_ze = c.legion_physical_region_get_field_accessor_array_1d(
       rz_physical[13], rz_fields[13])
     for i = 0, conf.nz do
       var p = c.legion_ptr_t { value = i }
-      var ck = @[&double](c.legion_accessor_array_ref(rz_ze, p))
+      var ck = @[&double](c.legion_accessor_array_1d_ref(rz_ze, p))
       var sol = solution_ze[i]
       if cmath.fabs(ck - sol) > absolute_eps or
         (cmath.fabs(ck - sol) / sol > relative_eps and
@@ -2727,15 +2711,15 @@ terra validate_output(runtime : c.legion_runtime_t,
         c.abort()
       end
     end
-    c.legion_accessor_array_destroy(rz_ze)
+    c.legion_accessor_array_1d_destroy(rz_ze)
   end
 
   do
-    var rz_zp = c.legion_physical_region_get_field_accessor_array(
+    var rz_zp = c.legion_physical_region_get_field_accessor_array_1d(
       rz_physical[17], rz_fields[17])
     for i = 0, conf.nz do
       var p = c.legion_ptr_t { value = i }
-      var ck = @[&double](c.legion_accessor_array_ref(rz_zp, p))
+      var ck = @[&double](c.legion_accessor_array_1d_ref(rz_zp, p))
       var sol = solution_zp[i]
       if cmath.fabs(ck - sol) > absolute_eps or
         (cmath.fabs(ck - sol) / sol > relative_eps and
@@ -2749,7 +2733,7 @@ terra validate_output(runtime : c.legion_runtime_t,
         c.abort()
       end
     end
-    c.legion_accessor_array_destroy(rz_zp)
+    c.legion_accessor_array_1d_destroy(rz_zp)
   end
 
   c.printf("Successfully validate output\n")

@@ -296,8 +296,8 @@ terra get_base_and_stride(rect : c.legion_rect_2d_t,
                           field : c.legion_field_id_t)
   var subrect : c.legion_rect_2d_t
   var offsets : c.legion_byte_offset_t[2]
-  var accessor = c.legion_physical_region_get_field_accessor_generic(physical, field)
-  var base_pointer = [&DTYPE](c.legion_accessor_generic_raw_rect_ptr_2d(
+  var accessor = c.legion_physical_region_get_field_accessor_array_2d(physical, field)
+  var base_pointer = [&DTYPE](c.legion_accessor_array_2d_raw_rect_ptr(
                                       accessor, rect, &subrect, &(offsets[0])))
   regentlib.assert(base_pointer ~= nil, "base pointer is nil")
   regentlib.assert(subrect.lo.x[0] == rect.lo.x[0] and subrect.lo.x[1] == rect.lo.x[1], "subrect not equal to rect")

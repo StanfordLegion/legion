@@ -327,18 +327,21 @@ int main(int argc, char **argv)
   {
     TaskVariantRegistrar registrar(INIT_FIELD_TASK_ID, "init_field");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    registrar.set_leaf();
     Runtime::preregister_task_variant<init_field_task>(registrar, "init_field");
   }
 
   {
     TaskVariantRegistrar registrar(STENCIL_TASK_ID, "stencil");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    registrar.set_leaf();
     Runtime::preregister_task_variant<stencil_task>(registrar, "stencil");
   }
 
   {
     TaskVariantRegistrar registrar(CHECK_TASK_ID, "check");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    registrar.set_leaf();
     Runtime::preregister_task_variant<check_task>(registrar, "check");
   }
 

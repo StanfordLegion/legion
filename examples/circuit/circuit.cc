@@ -130,8 +130,8 @@ void top_level_task(const Task *task,
   printf("Starting main simulation loop\n");
   //struct timespec ts_start, ts_end;
   //clock_gettime(CLOCK_MONOTONIC, &ts_start);
-  double ts_start, ts_end;
-  ts_start = Realm::Clock::current_time_in_microseconds();
+  Future f_start = runtime->get_current_time_in_microseconds(ctx);
+  double ts_start = f_start.get_result<long long>();
   // Run the main loop
   bool simulation_success = true;
   for (int i = 0; i < num_loops; i++)
@@ -144,7 +144,10 @@ void top_level_task(const Task *task,
                                                   perform_checks, simulation_success,
                                                   ((i+1)==num_loops));
   }
-  ts_end = Realm::Clock::current_time_in_microseconds();
+  // Execution fence to wait for all prior operations to be done before getting our timing result
+  runtime->issue_execution_fence(ctx);
+  Future f_end = runtime->get_current_time_in_microseconds(ctx);
+  double ts_end = f_end.get_result<long long>();
   if (simulation_success)
     printf("SUCCESS!\n");
   else

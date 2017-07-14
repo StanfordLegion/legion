@@ -148,6 +148,7 @@ int main(int argc, char **argv)
   {
     TaskVariantRegistrar registrar(INDEX_SPACE_TASK_ID, "index_space_task");
     registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+    registrar.set_leaf();
     Runtime::preregister_task_variant<int, index_space_task>(registrar, "index_space_task");
   }
 
