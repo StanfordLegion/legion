@@ -2665,6 +2665,23 @@ std.wild = std.newsymbol(std.wild_type, "wild")
 std.disjoint = ast.disjointness_kind.Disjoint {}
 std.aliased = ast.disjointness_kind.Aliased {}
 
+-- This is used in methods such as subregion_constant where the index
+-- of a subregion has to be munged to make it safe to go in a map.
+local function get_subregion_index(i)
+  if type(i) == "number" or std.is_symbol(i) then
+    return i
+  elseif terralib.isconstant(i) and std.is_index_type(i.type) then
+    -- Terra, pretty please give me the value inside this constant
+    local value = (terra() return i end)()
+    return data.newtuple(
+      unpack(
+        i.type.fields:map(
+          function(field_name) return value.__ptr[field_name] end)))
+  else
+    assert(false)
+  end
+end
+
 function std.partition(disjointness, region_symbol, colors_symbol)
   if colors_symbol == nil then
     colors_symbol = std.newsymbol(std.ispace(std.ptr))
@@ -2699,7 +2716,7 @@ function std.partition(disjointness, region_symbol, colors_symbol)
   st.disjointness = disjointness
   st.parent_region_symbol = region_symbol
   st.colors_symbol = colors_symbol
-  st.subregions = {}
+  st.subregions = data.newmap()
 
   function st:is_disjoint()
     return self.disjointness:is(ast.disjointness_kind.Disjoint)
@@ -2734,7 +2751,7 @@ function std.partition(disjointness, region_symbol, colors_symbol)
   end
 
   function st:subregion_constant(i)
-    assert(type(i) == "number" or std.is_symbol(i))
+    local i = get_subregion_index(i)
     if not self.subregions[i] then
       self.subregions[i] = self:subregion_dynamic()
     end
@@ -2801,7 +2818,7 @@ function std.cross_product(...)
 
   st.is_cross_product = true
   st.partition_symbols = data.newtuple(unpack(partition_symbols))
-  st.subpartitions = {}
+  st.subpartitions = data.newmap()
 
   function st:partitions()
     return self.partition_symbols:map(
@@ -2846,6 +2863,7 @@ function std.cross_product(...)
 
   function st:subpartition_constant(i)
     local region_type = self:subregion_constant(i)
+    local i = get_subregion_index(i)
     if not self.subpartitions[i] then
       local partition = st:subpartition_dynamic(region_type)
       self.subpartitions[i] = partition
