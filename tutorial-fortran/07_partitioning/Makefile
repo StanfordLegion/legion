@@ -42,6 +42,8 @@ NVCC_FLAGS	?=
 GASNET_FLAGS	?=
 LD_FLAGS	?=
 FORTRAN_LEAF_TASK	?= 1
+# For Point and Rect typedefs
+CC_FLAGS	+= -std=c++11
 
 ###########################################################################
 #
