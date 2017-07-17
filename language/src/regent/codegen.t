@@ -1686,9 +1686,16 @@ end
 function codegen.expr_constant(cx, node)
   local value = node.value
   local value_type = std.as_read(node.expr_type)
+
+  if terralib.isconstant(value) then
+    assert(std.type_eq(value.type, value_type))
+  else
+    value = terralib.constant(value_type, value)
+  end
+
   return values.value(
     node,
-    expr.just(emit_debuginfo(node), `([terralib.constant(value_type, value)])),
+    expr.just(emit_debuginfo(node), value),
     value_type)
 end
 

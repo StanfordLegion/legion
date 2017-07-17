@@ -768,6 +768,7 @@ function parallel_task_context.new_task_scope(params)
   cx.field_access_stats = {}
   cx.stencils = terralib.newlist()
   cx.ghost_symbols = {}
+  cx.use_primary = {}
   return setmetatable(cx, parallel_task_context)
 end
 
@@ -1631,11 +1632,13 @@ local function create_indexspace_launch(parallelizable, caller_cx, expr, lhs)
   end
   -- Now push subregions of ghost partitions
   for idx = 1, #task_cx.stencils do
-    local gp = caller_cx:find_ghost_partition(expr, task_cx.stencils[idx])
-    local pr_type = gp:gettype().parent_region_symbol:gettype()
-    local sr_type = gp:gettype():subregion_dynamic()
-    args:insert(ast_util.mk_expr_index_access(ast_util.mk_expr_id(gp), color_expr, sr_type))
-    caller_cx:update_constraint(args[#args])
+    if not task_cx.use_primary[task_cx.stencils[idx]] then
+      local gp = caller_cx:find_ghost_partition(expr, task_cx.stencils[idx])
+      local pr_type = gp:gettype().parent_region_symbol:gettype()
+      local sr_type = gp:gettype():subregion_dynamic()
+      args:insert(ast_util.mk_expr_index_access(ast_util.mk_expr_id(gp), color_expr, sr_type))
+      caller_cx:update_constraint(args[#args])
+    end
   end
   -- Append the original region-typed arguments at the end
   for idx = 1, #expr.args do
@@ -2587,12 +2590,6 @@ function normalize_accesses.stat(task_cx, normalizer_cx)
         find_field_accesses(access_cx, accesses_lhs), node.lhs)
       ast.traverse_node_continuation(
         find_field_accesses(access_cx, accesses_rhs), node.rhs)
-      assert(data.all(unpack(accesses_lhs:map(function(access)
-        if not is_centered(loop_bound, access) then
-          return false
-        end
-        return true
-      end))))
       return lift_all_accesses(task_cx, normalizer_cx, accesses_rhs, node)
     else
       return continuation(node, true)
@@ -3251,12 +3248,42 @@ function parallelize_tasks.top_task(global_cx, node)
   -- passed by indexspace launch. this will avoid rewriting types in AST nodes
   params:insertall(node.params)
   -- each stencil corresponds to one ghost region
+  local orig_privileges = node.prototype:get_privileges()
+  local function has_interfering_update(stencil)
+    local region = stencil:region()
+    local fields = stencil:fields()
+    for i = 1, #fields do
+      for j = 1, #orig_privileges do
+        for k = 1, #orig_privileges[j] do
+          local pv = orig_privileges[j][k]
+          if pv.privilege == std.writes and
+             pv.region == region and
+             pv.field_path == fields[i] then
+             return true
+          end
+        end
+      end
+    end
+    return false
+  end
+
   for idx = 1, #task_cx.stencils do
     local stencil = task_cx.stencils[idx]
-    local ghost_symbol =
-      copy_region_symbol(stencil:region(), "__ghost" .. tostring(idx))
-    task_cx.ghost_symbols[stencil] = ghost_symbol
-    params:insert(mk_task_param(task_cx.ghost_symbols[stencil]))
+    local check = has_interfering_update(stencil)
+    if check then
+      -- FIXME: Ghost accesses can be out of bounds because we force them to use
+      --        primary partition here. Task is in general not parallelizable
+      --        if it has stencils that conflict with its update set. We assume
+      --        that the programmer specified right hints to make it parallelizable.
+      task_cx.ghost_symbols[stencil] = stencil:region()
+      task_cx.use_primary[stencil] = true
+    else
+      local ghost_symbol =
+        copy_region_symbol(stencil:region(), "__ghost" .. tostring(idx))
+      task_cx.ghost_symbols[stencil] = ghost_symbol
+      task_cx.use_primary[stencil] = false
+      params:insert(mk_task_param(task_cx.ghost_symbols[stencil]))
+    end
   end
   -- Append parameters reserved for the metadata of original region parameters
   task_cx:insert_metadata_parameters(params)
@@ -3275,7 +3302,7 @@ function parallelize_tasks.top_task(global_cx, node)
   --    coherence_modes[region][field_path] = true
   --  end)
   --end)
-  privileges:insertall(node.prototype:get_privileges())
+  privileges:insertall(orig_privileges)
   for region, _ in pairs(node.prototype:get_region_universe()) do
     region_universe[region] = true
   end
@@ -3289,14 +3316,16 @@ function parallelize_tasks.top_task(global_cx, node)
 
   for idx = 1, #task_cx.stencils do
     local stencil = task_cx.stencils[idx]
-		local region = task_cx.ghost_symbols[stencil]
-		--local fields = task_cx.stencils[idx]:fields()
-    -- TODO: handle reductions on ghost regions
-    privileges:insert(fields:map(function(field)
-      return std.privilege(std.reads, region, field)
-    end))
-    --coherence_modes[region][field_path] = std.exclusive
-    region_universe[region:gettype()] = true
+    if not task_cx.use_primary[stencil] then
+		  local region = task_cx.ghost_symbols[stencil]
+		  --local fields = task_cx.stencils[idx]:fields()
+      -- TODO: handle reductions on ghost regions
+      privileges:insert(fields:map(function(field)
+        return std.privilege(std.reads, region, field)
+      end))
+      --coherence_modes[region][field_path] = std.exclusive
+      region_universe[region:gettype()] = true
+    end
   end
   task:set_privileges(privileges)
   task:set_coherence_modes(coherence_modes)
