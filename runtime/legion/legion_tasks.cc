@@ -3431,6 +3431,9 @@ namespace Legion {
         // First make a shard manager to handle the all the shard tasks
         const size_t total_shards = output.task_mappings.size();
         const ReplicationID repl_context = runtime->get_unique_replication_id();
+        if (Runtime::legion_spy_enabled)
+          LegionSpy::log_replication(get_unique_id(), repl_context,
+                                     !output.control_replication_map.empty());
         if (!output.control_replication_map.empty())
         {
           shard_manager = new ShardManager(runtime, repl_context, true/*cr*/,
@@ -6812,6 +6815,8 @@ namespace Legion {
     InnerContext* ShardTask::initialize_inner_execution_context(VariantImpl *v)
     //--------------------------------------------------------------------------
     {
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_shard(shard_manager->repl_id, shard_id, get_unique_id());
       // Check to see if we are control replicated or not
       if (shard_manager->control_replicated)
       {

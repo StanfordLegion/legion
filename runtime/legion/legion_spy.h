@@ -420,6 +420,19 @@ namespace Legion {
                       (int)point.point_data[1], (int)point.point_data[2]);
       }
 
+      static inline void log_replication(UniqueID uid, ReplicationID repl_id,
+                                         bool control_replicated)
+      {
+        log_spy.print("Replicate Task %llu %d %d", uid, repl_id,
+                                    (control_replicated ? 1 : 0));
+      }
+
+      static inline void log_shard(ReplicationID repl_id, 
+                                   ShardID sid, UniqueID uid)
+      {
+        log_spy.print("Replicate Shard %d %d %llu", repl_id, sid, uid);
+      }
+
       static inline void log_child_operation_index(UniqueID parent_id, 
                                        unsigned index, UniqueID child_id)
       {
