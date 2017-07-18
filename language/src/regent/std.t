@@ -2579,10 +2579,10 @@ function std.index_type(base_type, displayname)
   return setmetatable(st, index_type)
 end
 
-struct std.__int2d { x : int, y : int }
-struct std.__int3d { x : int, y : int, z : int }
+struct std.__int2d { x : int64, y : int64 }
+struct std.__int3d { x : int64, y : int64, z : int64 }
 std.ptr = std.index_type(opaque, "ptr")
-std.int1d = std.index_type(int, "int1d")
+std.int1d = std.index_type(int64, "int1d")
 std.int2d = std.index_type(std.__int2d, "int2d")
 std.int3d = std.index_type(std.__int3d, "int3d")
 
