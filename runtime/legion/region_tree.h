@@ -189,6 +189,7 @@ namespace Legion {
       size_t get_domain_volume(IndexSpace handle);
       bool is_index_partition_disjoint(IndexPartition p);
       bool is_index_partition_complete(IndexPartition p);
+      bool has_index_partition(IndexSpace parent, const ColorPoint &color);
     public:
       void create_field_space(FieldSpace handle);
       void destroy_field_space(FieldSpace handle, AddressSpaceID source);

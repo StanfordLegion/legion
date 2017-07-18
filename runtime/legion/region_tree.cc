@@ -1216,6 +1216,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool RegionTreeForest::has_index_partition(IndexSpace parent,
+                                               const ColorPoint &color)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode *parent_node = get_node(parent);
+      return parent_node->has_child(color);
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeForest::create_field_space(FieldSpace handle)
     //--------------------------------------------------------------------------
     {
