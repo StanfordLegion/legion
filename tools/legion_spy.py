@@ -6552,8 +6552,8 @@ class Task(object):
     __slots__ = ['state', 'op', 'point', 'operations', 'depth', 
                  'current_fence', 'restrictions', 'dumb_acquisitions', 
                  'used_instances', 'virtual_indexes', 'processor', 'priority', 
-                 'premappings', 'postmappings', 'tunables',
-                 'operation_indexes', 'close_indexes', 'variant']
+                 'premappings', 'postmappings', 'tunables', 'operation_indexes', 
+                 'close_indexes', 'variant', 'replicants', 'shard']
                   # If you add a field here, you must update the merge method
     def __init__(self, state, op):
         self.state = state
@@ -6575,9 +6575,14 @@ class Task(object):
         self.operation_indexes = None
         self.close_indexes = None
         self.variant = None
+        self.replicants = None
+        self.shard = None
 
     def __str__(self):
-        return str(self.op)
+        if self.shard is not None:
+            return str(self.op)+" (Shard "+str(self.shard)+")"
+        else:
+            return str(self.op)
 
     __repr__ = __str__
 
@@ -6598,6 +6603,10 @@ class Task(object):
     def set_variant(self, variant):
         assert not self.variant
         self.variant = variant
+
+    def set_shard(self, shard):
+        assert not self.shard
+        self.shard = shard
 
     def add_premapping(self, index):
         if not self.premappings:
@@ -7295,6 +7304,30 @@ class PointUser(object):
 
     def is_relaxed(self):
         return self.coher == RELAXED
+
+class Replicants(object):
+    __slots__ = ['repl', 'orig', 'shards', 'control_replicated']
+    def __init__(self, repl):
+        self.repl = repl
+        self.orig = None
+        self.shards = dict()
+        self.control_replicated = None
+
+    def set_original(self, orig, ctrl):
+        assert not self.orig
+        self.orig = orig
+        self.control_replicated = ctrl
+
+    def add_shard(self, sid, shard):
+        assert sid not in self.shards
+        self.shards[sid] = shard
+
+    def update_shards(self):
+        assert self.orig
+        self.orig.replicants = self 
+        for sid,shard in self.shards.iteritems():
+            shard.set_shard(sid)
+            shard.merge(self.orig)
 
 class SpecializedConstraint(object):
     __slots__ = ['kind', 'redop']
@@ -8717,6 +8750,10 @@ point_point_pat          = re.compile(
 index_point_pat          = re.compile(
     prefix+"Index Point (?P<index>[0-9]+) (?P<point>[0-9]+) (?P<dim>[0-9]+) "+
            "(?P<val1>\-?[0-9]+) (?P<val2>\-?[0-9]+) (?P<val3>\-?[0-9]+)")
+replicate_pat            = re.compile(
+    prefix+"Replicate Task (?P<uid>[0-9]+) (?P<repl>[0-9]+) (?P<ctrl>[0-1])")
+shard_pat                = re.compile(
+    prefix+"Replicate Shard (?P<repl>[0-9]+) (?P<shard>[0-9]+) (?P<uid>[0-9]+)")
 op_index_pat             = re.compile(
     prefix+"Operation Index (?P<parent>[0-9]+) (?P<index>[0-9]+) (?P<child>[0-9]+)")
 close_index_pat          = re.compile(
@@ -9490,6 +9527,18 @@ def parse_legion_spy_line(line, state):
         index = state.get_operation(int(m.group('index')))
         index.add_point_op(point, index_point) 
         return True
+    m = replicate_pat.match(line)
+    if m is not None:
+        repl = state.get_repl(int(m.group('repl')))
+        repl.set_original(state.get_task(int(m.group('uid'))),
+                          True if int(m.group('ctrl')) == 1 else False)
+        return True 
+    m = shard_pat.match(line)
+    if m is not None:
+        repl = state.get_repl(int(m.group('repl')))
+        task = state.get_task(int(m.group('uid')))
+        repl.add_shard(int(m.group('shard')), task)
+        return True
     m = op_index_pat.match(line)
     if m is not None:
         task = state.get_task(int(m.group('parent')))
@@ -9678,7 +9727,8 @@ class State(object):
                  'has_mapping_deps', 'instances', 'events', 'copies', 'fills', 'depparts',
                  'no_event', 'slice_index', 'slice_slice', 'point_slice', 'point_point',
                  'futures', 'next_generation', 'next_realm_num', 'detailed_graphs', 
-                 'assert_on_error', 'assert_on_warning', 'config', 'detailed_logging']
+                 'assert_on_error', 'assert_on_warning', 'config', 'detailed_logging',
+                 'replicants']
     def __init__(self, verbose, details, assert_on_error, assert_on_warning):
         self.config = False
         self.detailed_logging = True
@@ -9721,6 +9771,7 @@ class State(object):
         self.point_slice = dict()
         self.point_point = dict()
         self.futures = dict()
+        self.replicants = dict()
         # For physical traversals
         self.next_generation = 1
         self.next_realm_num = 1
@@ -9813,6 +9864,9 @@ class State(object):
                 slice_ = self.slice_slice[slice_]
             assert slice_ in self.slice_index
             self.slice_index[slice_].add_point_task(point)
+        # Hook up any replicated tasks
+        for replicant in self.replicants.itervalues():
+            replicant.update_shards()
         # Check for any interfering index space launches
         for op in self.ops.itervalues():
             if op.kind == INDEX_TASK_KIND and op.is_interfering_index_space_launch():
@@ -9874,6 +9928,7 @@ class State(object):
             print("Found %d region trees" % len(self.trees))
             print("")
             print("Found %d tasks" % len(self.tasks))
+            print("Found %d replicated task" % len(self.replicants))
             print("Found %d operations (including tasks)" % len(self.ops))
             print("")
             print("Found %d instances" % len(self.instances))
@@ -10320,6 +10375,13 @@ class State(object):
         op.set_op_kind(SINGLE_TASK_KIND)
         result = Task(self, op)
         self.tasks[op] = result
+        return result
+
+    def get_repl(self, repl):
+        if repl in self.replicants:
+            return self.replicants[repl]
+        result = Replicants(repl)
+        self.replicants[repl] = result
         return result
 
     def get_future(self, iid):
