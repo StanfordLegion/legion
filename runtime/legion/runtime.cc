@@ -10525,9 +10525,7 @@ namespace Legion {
                                       const DomainPoint &color)
     //--------------------------------------------------------------------------
     {
-      IndexPartition result = forest->get_index_partition(parent,
-                                                          ColorPoint(color));
-      return result.exists();
+      return forest->has_index_partition(parent, ColorPoint(color));
     }
     
     //--------------------------------------------------------------------------

@@ -586,10 +586,6 @@ function normalize.stat_assignment_or_reduce(cx, node)
   end
 end
 
-for k, v in pairs(ast_util) do
-  _G[k] = v
-end
-
 --
 -- De-sugar statement "var ip = image(r, p, f)" into the following statements:
 --
@@ -615,44 +611,50 @@ local function desugar_image_by_task(cx, node)
 
   local coloring_symbol =
     regentlib.newsymbol(capi.legion_domain_point_coloring_t)
-  local coloring_expr = mk_expr_id(coloring_symbol)
+  local coloring_expr = ast_util.mk_expr_id(coloring_symbol)
   stats:insert(
-    mk_stat_var(coloring_symbol, nil,
-                mk_expr_call(capi.legion_domain_point_coloring_create)))
+    ast_util.mk_stat_var(
+      coloring_symbol, nil,
+      ast_util.mk_expr_call(capi.legion_domain_point_coloring_create)))
 
   local colors_symbol = regentlib.newsymbol(partition_type:colors())
   local color_symbol =
     regentlib.newsymbol(partition_type:colors().index_type(colors_symbol))
-  local colors_expr = mk_expr_colors_access(partition)
+  local colors_expr = ast_util.mk_expr_colors_access(partition)
   local subregion_type = partition_type:subregion_dynamic()
   std.add_constraint(cx, subregion_type, partition_type, std.subregion, false)
 
-  local subregion_expr = mk_expr_index_access(partition,
-                                              mk_expr_id(color_symbol),
-                                              subregion_type)
+  local subregion_expr =
+    ast_util.mk_expr_index_access(partition,
+                                  ast_util.mk_expr_id(color_symbol),
+                                  subregion_type)
   local rect_expr =
-    mk_expr_call(node.values[1].task.value,
-                 mk_expr_bounds_access(subregion_expr))
+    ast_util.mk_expr_call(node.values[1].task.value,
+                          ast_util.mk_expr_bounds_access(subregion_expr))
   local loop_body =
-    mk_stat_expr(
-      mk_expr_call(capi.legion_domain_point_coloring_color_domain,
-                   terralib.newlist { coloring_expr,
-                                      mk_expr_id(color_symbol),
-                                      rect_expr }))
+    ast_util.mk_stat_expr(
+      ast_util.mk_expr_call(capi.legion_domain_point_coloring_color_domain,
+                            terralib.newlist { coloring_expr,
+                                               ast_util.mk_expr_id(color_symbol),
+                                               rect_expr }))
 
-  stats:insert(mk_stat_var(colors_symbol, nil, colors_expr))
+  stats:insert(ast_util.mk_stat_var(colors_symbol, nil, colors_expr))
   stats:insert(
-    mk_stat_for_list(color_symbol, mk_expr_id(colors_symbol), mk_block(loop_body)))
+    ast_util.mk_stat_for_list(color_symbol,
+                              ast_util.mk_expr_id(colors_symbol),
+                              ast_util.mk_block(loop_body)))
 
-  stats:insert(mk_stat_var(node.symbols[1], image_partition_type,
-                           mk_expr_partition(image_partition_type,
-                                             mk_expr_id(colors_symbol),
-                                             coloring_expr)))
+  stats:insert(
+    ast_util.mk_stat_var(node.symbols[1], image_partition_type,
+                         ast_util.mk_expr_partition(image_partition_type,
+                                                    ast_util.mk_expr_id(colors_symbol),
+                                                    coloring_expr)))
   std.add_constraint(cx, image_partition_type, parent_type, std.subregion, false)
 
   stats:insert(
-    mk_stat_expr(mk_expr_call(capi.legion_domain_point_coloring_destroy,
-                              coloring_expr)))
+    ast_util.mk_stat_expr(
+      ast_util.mk_expr_call(capi.legion_domain_point_coloring_destroy,
+                            coloring_expr)))
 
   return stats
 end
