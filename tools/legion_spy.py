@@ -4897,12 +4897,13 @@ class Operation(object):
                  'logical_outgoing', 'physical_incoming', 'physical_outgoing', 
                  'start_event', 'finish_event', 'inter_close_ops', 'open_ops', 
                  'advance_ops', 'task', 'task_id', 'predicate', 'predicate_result',
-                 'futures', 'index_owner', 'points', 'launch_rect', 'creator', 
-                 'realm_copies', 'realm_fills', 'realm_depparts', 'version_numbers', 
-                 'internal_idx', 'disjoint_close_fields', 'partition_kind', 
-                 'partition_node', 'node_name', 'cluster_name', 'generation', 
-                 'reachable_cache', 'transitive_warning_issued', 'arrival_barriers', 
-                 'wait_barriers', 'created_futures', 'used_futures', 'merged']
+                 'futures', 'owner_shard', 'index_owner', 'points', 'launch_rect', 
+                 'creator', 'realm_copies', 'realm_fills', 'realm_depparts', 
+                 'version_numbers', 'internal_idx', 'disjoint_close_fields', 
+                 'partition_kind', 'partition_node', 'node_name', 'cluster_name', 
+                 'generation', 'reachable_cache', 'transitive_warning_issued', 
+                 'arrival_barriers', 'wait_barriers', 'created_futures', 
+                 'used_futures', 'merged']
                   # If you add a field here, you must update the merge method
     def __init__(self, state, uid):
         self.state = state
@@ -4931,6 +4932,7 @@ class Operation(object):
         self.predicate = None
         self.predicate_result = True
         self.futures = None
+        self.owner_shard = None
         # Only valid for tasks
         self.task = None
         self.task_id = -1
@@ -5196,6 +5198,10 @@ class Operation(object):
 
     def set_predicate_result(self, result):
         self.predicate_result = result
+
+    def set_owner_shard(self, shard):
+        assert self.owner_shard is None
+        self.owner_shard = shard
 
     def add_future(self, future):
         if not self.futures:
@@ -6094,6 +6100,12 @@ class Operation(object):
         # If we were predicated false, then there is nothing to do
         if not self.predicate_result:
             return True
+        # If we're part of a control replication environment only do
+        # this operation if we are the owner
+        if self.owner_shard is not None:
+            assert self.context.shard is not None
+            if self.owner_shard != self.context.shard:
+                return
         prefix = ''
         if self.context:
             depth = self.context.get_depth()
@@ -6160,11 +6172,41 @@ class Operation(object):
         elif self.kind == DELETION_OP_KIND:
             # Skip deletions, they only impact logical analysis
             pass
+        elif self.task and self.task.replicants:
+            # Special case for if we are (control) replicated
+            self.compute_current_version_numbers()
+            assert self.mapping is None
+            # We have to do verification for all our replicatnts first
+            for shard in self.task.replicants.shards.itervalues():
+                self.mapping = shard.op.mapping
+                for index,req in self.reqs.iteritems():
+                    if not self.verify_physical_requirement(index, req, perform_checks):
+                        return False
+                self.mapping = None
+            # Then we do the registration for all our replicants
+            for shard in self.task.replicants.shards.itervalues():
+                self.mapping = shard.op.mapping
+                for index,req in self.reqs.iteritems():
+                    if not self.perform_verification_registration(index, req, 
+                                                                  perform_checks):
+                        return False
+                self.mapping = None
+            # Last decided how to analyze each of the shards depending
+            # on whether we are control replicated or not
+            if self.task.replicants.control_replicated:
+                # Traverse it like a single logical task 
+                if not self.task.perform_task_physical_verification(perform_checks):
+                    return False
+            else:
+                # Can verify each of these separately 
+                for shard in self.task.replicants.shards.itervalues():
+                    if not shard.perform_task_physical_verification(perform_checks):
+                        return False
         else:
             if self.reqs:
                 # Compute our version numbers first
                 self.compute_current_version_numbers()
-                for index,req, in self.reqs.iteritems():
+                for index,req in self.reqs.iteritems():
                     if not self.verify_physical_requirement(index, req, perform_checks):
                         return False
             if self.kind == SINGLE_TASK_KIND:
@@ -6172,7 +6214,7 @@ class Operation(object):
                 # requirements since we didn't do it as part of the 
                 # normal physical analysis
                 if self.reqs:
-                    for index,req, in self.reqs.iteritems():
+                    for index,req in self.reqs.iteritems():
                         if not self.perform_verification_registration(index, req, 
                                                                       perform_checks):
                             return False
@@ -6328,6 +6370,11 @@ class Operation(object):
         # If we were predicated false then we don't get printed
         if not self.predicate_result:
             return
+        # If this is in a control replication context see if we should print ourself
+        if self.owner_shard is not None:
+            assert self.context.shard is not None
+            if self.owner_shard != self.context.shard:
+                return
         # Do any of our close operations too
         if self.inter_close_ops:
             for close in self.inter_close_ops:
@@ -6605,9 +6652,10 @@ class Task(object):
         assert not self.variant
         self.variant = variant
 
-    def set_shard(self, shard):
+    def set_shard(self, shard, original):
         assert not self.shard
         self.shard = shard
+        self.op.set_context(original, False)
 
     def add_premapping(self, index):
         if not self.premappings:
@@ -6946,30 +6994,61 @@ class Task(object):
 
     def perform_task_physical_verification(self, perform_checks):
         if not self.operations:
-            return True
+            if not self.replicants:
+                return True
+            assert self.replicants.control_replicated 
         # Depth is a proxy for context 
         depth = self.get_depth()
         assert self.used_instances is None
         self.used_instances = set()
         # Initialize any regions that we mapped
         if self.op.reqs:
-            for idx,req in self.op.reqs.iteritems():
+            # A small helper function for initializing a requirement state
+            def initialize_requirement(task, idx, req):
                 # Skip any no access requirements
                 if req.is_no_access() or len(req.fields) == 0:
-                    continue
-                assert idx in self.op.mappings
-                mappings = self.op.mappings[idx]
+                    return
+                assert idx in task.op.mappings
+                mappings = task.op.mappings[idx]
                 for field in req.fields:
                     assert field.fid in mappings
                     inst = mappings[field.fid]
                     if inst.is_virtual():
                         continue
                     req.logical_node.initialize_verification_state(depth, field, inst)
+            if self.replicants:
+                # Control replicated path
+                for shard in self.replicants.shards.itervalues():
+                    for idx,req in shard.op.reqs.iteritems():
+                        initialize_requirement(shard, idx, req)
+            else:
+                # Normal path for non-control replicated
+                for idx,req in self.op.reqs.iteritems():
+                    initialize_requirement(self, idx, req) 
         success = True
-        for op in self.operations:
-            if not op.perform_op_physical_verification(perform_checks):
-                success = False
-                break
+        if self.replicants:
+            # Control-replicated path
+            num_ops = -1
+            for shard in self.replicants.shards.itervalues():
+                if num_ops == -1:
+                    num_ops = len(shard.operations)
+                else:
+                    assert num_ops == len(shard.operations)
+            # Perform all the operations in order across the shards
+            for idx in range(num_ops):
+                for shard in self.replicants.shards.itervalues():
+                    op = shard.operations[idx]
+                    if not op.perform_op_physical_verification(perform_checks):
+                        success = False
+                        break
+                if not success:
+                    break
+        else:
+            # Normal path
+            for op in self.operations:
+                if not op.perform_op_physical_verification(perform_checks):
+                    success = False
+                    break
         # Reset any physical user lists at our depth
         for inst,fid in self.used_instances:
             inst.reset_verification_users(depth)
@@ -7057,7 +7136,11 @@ class Task(object):
 
     def print_event_graph_context(self, printer, elevate, all_nodes, top):
         if not self.operations:
-            return 
+            # Check to see if we were replicated
+            if self.replicants:
+                for shard in self.replicants.shards.itervalues():
+                    shard.print_event_graph_context(printer, elevate, all_nodes, top)
+            return
         if not top:
             # Start the cluster 
             title = str(self)+' (UID: '+str(self.op.uid)+')'
@@ -7327,7 +7410,7 @@ class Replicants(object):
         assert self.orig
         self.orig.replicants = self 
         for sid,shard in self.shards.iteritems():
-            shard.set_shard(sid)
+            shard.set_shard(sid, self.orig)
             shard.merge(self.orig)
 
 class SpecializedConstraint(object):
@@ -8755,6 +8838,8 @@ replicate_pat            = re.compile(
     prefix+"Replicate Task (?P<uid>[0-9]+) (?P<repl>[0-9]+) (?P<ctrl>[0-1])")
 shard_pat                = re.compile(
     prefix+"Replicate Shard (?P<repl>[0-9]+) (?P<shard>[0-9]+) (?P<uid>[0-9]+)")
+owner_shard_pat          = re.compile(
+    prefix+"Owner Shard (?P<uid>[0-9]+) (?P<shard>[0-9]+)")
 op_index_pat             = re.compile(
     prefix+"Operation Index (?P<parent>[0-9]+) (?P<index>[0-9]+) (?P<child>[0-9]+)")
 close_index_pat          = re.compile(
@@ -9539,6 +9624,11 @@ def parse_legion_spy_line(line, state):
         repl = state.get_repl(int(m.group('repl')))
         task = state.get_task(int(m.group('uid')))
         repl.add_shard(int(m.group('shard')), task)
+        return True
+    m = owner_shard_pat.match(line)
+    if m is not None:
+        op = state.get_operation(int(m.group('uid')))
+        op.set_owner_shard(int(m.group('shard')))
         return True
     m = op_index_pat.match(line)
     if m is not None:
