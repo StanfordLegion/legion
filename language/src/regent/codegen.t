@@ -1121,6 +1121,13 @@ function ref:reduce(cx, value, op, expr_type)
   assert(fold_op)
   local value_expr = value:read(cx, expr_type)
   local actions, values, value_type, field_paths, field_types = self:__ref(cx, expr_type)
+  local function quote_vector_binary_op(fold_op, sym, result, expr_type)
+    if fold_op == "min" or fold_op == "max" then
+      return `([std["v" .. fold_op](expr_type)](sym, result))
+    else
+      return std.quote_binary_op(fold_op, sym, result)
+    end
+  end
   actions = quote
     [value_expr.actions];
     [actions];
@@ -1149,7 +1156,7 @@ function ref:reduce(cx, value, op, expr_type)
              var [sym] =
                terralib.attrload(&[field_value], {align = [align]})
              terralib.attrstore(&[field_value],
-               [std.quote_binary_op(fold_op, sym, result)],
+               [quote_vector_binary_op(fold_op, sym, result, expr_type)],
                {align = [align]})
            end
          else
