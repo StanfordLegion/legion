@@ -769,8 +769,8 @@ namespace Legion {
       static void handle_semantic_info(RegionTreeForest *forest,
                                  Deserializer &derez, AddressSpaceID source);
     public:
-      bool has_child(const LegionColor c);
-      IndexPartNode* get_child(const LegionColor c);
+      bool has_color(const LegionColor c);
+      IndexPartNode* get_child(const LegionColor c, bool can_fail = false);
       void add_child(IndexPartNode *child);
       void remove_child(const LegionColor c);
       size_t get_num_children(void) const;
@@ -1429,7 +1429,7 @@ namespace Legion {
       static void handle_semantic_info(RegionTreeForest *forest,
                                    Deserializer &derez, AddressSpaceID source);
     public:
-      bool has_child(const LegionColor c);
+      bool has_color(const LegionColor c);
       IndexSpaceNode* get_child(const LegionColor c);
       void add_child(IndexSpaceNode *child);
       void remove_child(const LegionColor c);
@@ -2315,7 +2315,6 @@ namespace Legion {
     public:
       RegionNode& operator=(const RegionNode &rhs);
     public:
-      bool has_child(const LegionColor p);
       bool has_color(const LegionColor p);
       PartitionNode* get_child(const LegionColor p);
       void add_child(PartitionNode *child);
@@ -2508,7 +2507,6 @@ namespace Legion {
     public:
       PartitionNode& operator=(const PartitionNode &rhs);
     public:
-      bool has_child(const LegionColor c);
       bool has_color(const LegionColor c);
       RegionNode* get_child(const LegionColor c);
       void add_child(RegionNode *child);
