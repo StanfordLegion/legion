@@ -677,12 +677,12 @@ $(GEN_OBJS) : %.o : %.cc
 
 ifeq ($(strip $(FORTRAN_LEAF_TASK)),1)	
 $(GEN_FORTRAN_OBJS) : %.o : %.f90
-	$(F90) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
+	$(F90) -cpp -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 endif
 
 ifeq ($(strip $(LEGION_WITH_FORTRAN)),1)	
 $(GEN_FORTRAN_OBJS) : %.o : %.f90
-	$(F90) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
+	$(F90) -cpp -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
 endif
 
 ifeq ($(strip $(LEGION_WITH_C)),1)

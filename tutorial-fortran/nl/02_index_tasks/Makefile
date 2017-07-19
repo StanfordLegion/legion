@@ -39,7 +39,8 @@ NVCC_FLAGS	?=
 GASNET_FLAGS	?=
 LD_FLAGS	?=
 LEGION_WITH_FORTRAN	?= 1
-
+# For Point and Rect typedefs
+CC_FLAGS	+= -std=c++11
 ###########################################################################
 #
 #   Don't change anything below here

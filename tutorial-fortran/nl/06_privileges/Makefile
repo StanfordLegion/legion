@@ -27,9 +27,9 @@ USE_HDF         ?= 0		# Include HDF5 support (requires HDF5)
 ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
 
 # Put the binary file name here
-OUTFILE		?= hello_world
+OUTFILE		?= privileges
 # List all the application source files here
-GEN_FORTRAN_SRC	?= hello_world.f90		# .c files
+GEN_FORTRAN_SRC	?= privileges.f90		# .c files
 GEN_GPU_SRC	?=				# .cu files
 
 # You can modify these variables, some will be appended to by the runtime makefile

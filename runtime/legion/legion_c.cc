@@ -6253,6 +6253,7 @@ legion_mapper_runtime_find_physical_instance_layout_constraint_id(
   return ret;
 }
 
+<<<<<<< ee52a4e921fec38a9b540a0443422fceeb7905c7
 bool
 legion_mapper_runtime_acquire_instance(
     legion_mapper_runtime_t runtime_,
@@ -6278,4 +6279,30 @@ legion_mapper_runtime_acquire_instances(
   for (size_t idx = 0; idx < instances_size; ++idx)
     instances.push_back(*CObjectWrapper::unwrap(instances_[idx]));
   return runtime->acquire_instances(ctx, instances);
+}
+
+legion_physical_region_t
+legion_get_physical_region_by_id(
+    legion_physical_region_t *regionptr, 
+    int id, 
+    int num_regions)
+{
+  assert(id < num_regions);
+  return regionptr[id];
+}
+
+legion_index_space_t
+legion_logical_region_get_index_space(legion_logical_region_t lr_)
+{
+  LogicalRegion lr = CObjectWrapper::unwrap(lr_);
+  return CObjectWrapper::wrap(lr.get_index_space());
+}
+
+legion_index_space_t
+legion_task_get_index_space_from_logical_region(
+    legion_task_t task, unsigned idx)
+{
+  legion_region_requirement_t req = legion_task_get_region(task, idx);
+  legion_logical_region_t lr = legion_region_requirement_get_region(req);
+  return legion_logical_region_get_index_space(lr);
 }
