@@ -433,6 +433,11 @@ namespace Legion {
         log_spy.print("Replicate Shard %d %d %llu", repl_id, sid, uid);
       }
 
+      static inline void log_owner_shard(UniqueID uid, ShardID sid)
+      {
+        log_spy.print("Owner Shard %llu %d", uid, sid);
+      }
+
       static inline void log_child_operation_index(UniqueID parent_id, 
                                        unsigned index, UniqueID child_id)
       {

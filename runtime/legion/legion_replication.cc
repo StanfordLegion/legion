@@ -219,6 +219,8 @@ namespace Legion {
 #endif
       // Figure out whether this shard owns this point
       owner_shard = sharding_function->find_owner(index_point, index_domain);
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_owner_shard(get_unique_id(), owner_shard);
       // If we own it we go on the queue, otherwise we complete early
       if (owner_shard != repl_ctx->owner_shard->shard_id)
       {
@@ -946,6 +948,8 @@ namespace Legion {
       // Figure out whether this shard owns this point
       ShardID owner_shard = 
         sharding_function->find_owner(index_point, index_domain); 
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_owner_shard(get_unique_id(), owner_shard);
       // If we own it we go on the queue, otherwise we complete early
       if (owner_shard != repl_ctx->owner_shard->shard_id)
       {
