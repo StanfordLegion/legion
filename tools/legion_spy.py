@@ -83,9 +83,9 @@ DEP_PART_OP_KIND = 17
 PENDING_PART_OP_KIND = 18
 DYNAMIC_COLLECTIVE_OP_KIND = 19
 TRACE_OP_KIND = 20
-TIMING_OP_KIND = 21,
-PREDICATE_OP_KIND = 22,
-MUST_EPOCH_OP_KIND = 23,
+TIMING_OP_KIND = 21
+PREDICATE_OP_KIND = 22
+MUST_EPOCH_OP_KIND = 23
 
 OPEN_NONE = 0
 OPEN_READ_ONLY = 1
@@ -113,6 +113,7 @@ OpNames = [
 "Detach Op",
 "Dependent Partition Op",
 "Pending Partition Op",
+"Dynamic Collective Op",
 "Trace Op",
 "Timing Op",
 "Predicate Op",
@@ -9551,22 +9552,22 @@ def parse_legion_spy_line(line, state):
         return True
     m = field_space_pat.match(line)
     if m is not None:
-        state.get_field_space(int(m.group('uid'),16))
+        state.get_field_space(int(m.group('uid')))
         return True
     m = field_space_name_pat.match(line)
     if m is not None:
-        space = state.get_field_space(int(m.group('uid'),16))
+        space = state.get_field_space(int(m.group('uid')))
         space.set_name(m.group('name'))
         return True
     m = field_create_pat.match(line)
     if m is not None:
-        space = state.get_field_space(int(m.group('uid'),16))
+        space = state.get_field_space(int(m.group('uid')))
         field = space.get_field(int(m.group('fid')))
         field.size = int(m.group('size'))
         return True
     m = field_name_pat.match(line)
     if m is not None:
-        space = state.get_field_space(int(m.group('uid'),16))
+        space = state.get_field_space(int(m.group('uid')))
         field = space.get_field(int(m.group('fid')))
         field.set_name(m.group('name'))
         return True
@@ -9922,7 +9923,7 @@ class State(object):
         for src in topological_sorter.postorder:
             if self.verbose:
                 print('Simplifying node %s %d of %d' % (str(src), count, 
-                                          len(topological_sorter.order)))
+                                          len(topological_sorter.postorder)))
                 count += 1
             if src.physical_outgoing is None:
                 continue
