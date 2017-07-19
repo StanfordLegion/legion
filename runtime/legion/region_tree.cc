@@ -937,6 +937,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool RegionTreeForest::has_index_partition(IndexSpace parent, Color color)
+    //--------------------------------------------------------------------------
+    {
+      IndexSpaceNode *parent_node = get_node(parent);
+      return parent_node->has_color(color);
+    }
+
+    //--------------------------------------------------------------------------
     void RegionTreeForest::create_field_space(FieldSpace handle)
     //--------------------------------------------------------------------------
     {
@@ -4890,17 +4898,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool IndexSpaceNode::has_child(const LegionColor c)
+    bool IndexSpaceNode::has_color(const LegionColor c)
     //--------------------------------------------------------------------------
     {
-      AutoLock n_lock(node_lock,1,false/*exclusive*/);
-      std::map<LegionColor,IndexPartNode*>::const_iterator finder = 
-        color_map.find(c);
-      return ((finder != color_map.end()) && (finder->second != NULL));
+      IndexPartNode *child = get_child(c, true/*can fail*/);
+      return (child != NULL);
     }
 
     //--------------------------------------------------------------------------
-    IndexPartNode* IndexSpaceNode::get_child(const LegionColor c)
+    IndexPartNode* IndexSpaceNode::get_child(const LegionColor c, bool can_fail)
     //--------------------------------------------------------------------------
     {
       // See if we have it locally if not go find it
@@ -4927,6 +4933,8 @@ namespace Legion {
       {
         if (remote_handle.exists())
           return context->get_node(remote_handle);
+        if (can_fail)
+          return NULL;
         REPORT_LEGION_ERROR(ERROR_INVALID_PARTITION_COLOR,
           "Unable to find entry for color %lld in "
                         "index space %x.", c, handle.id)
@@ -4946,10 +4954,14 @@ namespace Legion {
       ready_event.lg_wait();
       // Stupid volatile-ness
       IndexPartition handle_copy = *handle_ptr;
-#ifdef DEBUG_LEGION
-      // stupid volatile-ness
-      assert(handle_copy.exists());
-#endif
+      if (!handle_copy.exists())
+      {
+        if (can_fail)
+          return NULL;
+        REPORT_LEGION_ERROR(ERROR_INVALID_PARTITION_COLOR,
+          "Unable to find entry for color %lld in "
+                        "index space %x.", c, handle.id)
+      }
       return context->get_node(handle_copy);
     }
 
@@ -5363,15 +5375,20 @@ namespace Legion {
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
       IndexSpaceNode *parent = forest->get_node(handle);
-      IndexPartNode *child = parent->get_child(child_color);
-      Serializer rez;
+      IndexPartNode *child = parent->get_child(child_color, true/*can fail*/);
+      if (child != NULL)
       {
-        RezCheck z(rez);
-        rez.serialize(child->handle);
-        rez.serialize(target);
-        rez.serialize(to_trigger);
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(child->handle);
+          rez.serialize(target);
+          rez.serialize(to_trigger);
+        }
+        forest->runtime->send_index_space_child_response(source, rez);
       }
-      forest->runtime->send_index_space_child_response(source, rez);
+      else // Failed so just trigger the result
+        Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -5709,11 +5726,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool IndexPartNode::has_child(const LegionColor c)
+    bool IndexPartNode::has_color(const LegionColor c)
     //--------------------------------------------------------------------------
     {
-      AutoLock n_lock(node_lock,1,false/*exclusive*/);
-      return (color_map.find(c) != color_map.end());
+      return color_space->contains_color(c);
     }
 
     //--------------------------------------------------------------------------
@@ -13188,19 +13204,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool RegionNode::has_child(const LegionColor c)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock n_lock(node_lock,1,false/*exclusive*/);
-      return (color_map.find(c) != color_map.end());
-    }
-
-    //--------------------------------------------------------------------------
     bool RegionNode::has_color(const LegionColor c)
     //--------------------------------------------------------------------------
     {
       // Ask the row source since it eagerly instantiates
-      return row_source->has_child(c);
+      return row_source->has_color(c);
     }
 
     //--------------------------------------------------------------------------
@@ -14930,19 +14938,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PartitionNode::has_child(const LegionColor c)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock n_lock(node_lock,1,false/*exclusive*/);
-      return (color_map.find(c) != color_map.end());
-    }
-
-    //--------------------------------------------------------------------------
     bool PartitionNode::has_color(const LegionColor c)
     //--------------------------------------------------------------------------
     {
       // Ask the row source because it eagerly instantiates
-      return row_source->has_child(c);
+      return row_source->has_color(c);
     }
 
     //--------------------------------------------------------------------------

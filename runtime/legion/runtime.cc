@@ -10748,8 +10748,7 @@ namespace Legion {
     bool Runtime::has_index_partition(IndexSpace parent, Color color)
     //--------------------------------------------------------------------------
     {
-      IndexPartition result = forest->get_index_partition(parent, color);
-      return result.exists();
+      return forest->has_index_partition(parent, color);
     }
 
     //--------------------------------------------------------------------------
