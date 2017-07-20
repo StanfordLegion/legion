@@ -4906,7 +4906,15 @@ legion_runtime_start(int argc,
                      char **argv,
                      bool background /* = false */)
 {
-  return Runtime::start(argc, argv, background);
+    int argc_tmp = 3;
+    char *argv1 = "/home/wwu/legion-up/tutorial-c/00_hello_world/./hello_world";
+    char *argv2 = "-ll:cpu";
+    char *argv3 = "7";
+    char **argv_tmp = (char**)malloc(sizeof(char*));
+    argv_tmp[0] = argv1;
+    argv_tmp[1] = argv2;
+    argv_tmp[2] = argv3;
+  return Runtime::start(argc_tmp, argv_tmp, background);
 }
 
 void
