@@ -859,6 +859,9 @@ namespace Legion {
       void handle_future_map_request(Deserializer &derez);
       void handle_composite_view_request(Deserializer &derez);
     public:
+      InstanceView* create_instance_top_view(PhysicalManager *manager,
+                                             AddressSpaceID source);
+    public:
       const ShardID shard_id;
     protected:
       UniqueID                    remote_owner_uid;

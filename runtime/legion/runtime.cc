@@ -6338,6 +6338,17 @@ namespace Legion {
               runtime->handle_control_replicate_composite_view_response(derez);
               break;
             }
+          case SEND_REPL_TOP_VIEW_REQUEST:
+            {
+              runtime->handle_control_replicate_top_view_request(derez,
+                                                        remote_address_space);
+              break;
+            }
+          case SEND_REPL_TOP_VIEW_RESPONSE:
+            {
+              runtime->handle_control_replicate_top_view_response(derez);
+              break;
+            }
           case SEND_MAPPER_MESSAGE:
             {
               runtime->handle_mapper_message(derez);
@@ -14023,6 +14034,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_control_replicate_top_view_request(AddressSpaceID target,
+                                                          Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_REPL_TOP_VIEW_REQUEST,
+                                  COLLECTIVE_VIRTUAL_CHANNEL, true/*flush*/);
+
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_control_replicate_top_view_response(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_REPL_TOP_VIEW_RESPONSE,
+                COLLECTIVE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_mapper_message(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -15199,6 +15229,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       CompositeBase::handle_composite_view_response(derez, this); 
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_control_replicate_top_view_request(Deserializer &derez,
+                                                          AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      ShardManager::handle_top_view_request(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_control_replicate_top_view_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ShardManager::handle_top_view_response(derez, this);
     }
 
     //--------------------------------------------------------------------------

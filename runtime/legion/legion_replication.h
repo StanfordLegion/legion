@@ -993,8 +993,17 @@ namespace Legion {
       static void handle_future_map_request(Deserializer &derez, Runtime *rt);
       static void handle_composite_view_request(Deserializer &derez, 
                                                 Runtime *rt);
+      static void handle_top_view_request(Deserializer &derez, Runtime *rt,
+                                          AddressSpaceID request_source);
+      static void handle_top_view_response(Deserializer &derez, Runtime *rt);
     public:
       ShardingFunction* find_sharding_function(ShardingID sid);
+    public:
+      void create_instance_top_view(PhysicalManager *manager, 
+                                    AddressSpaceID source, 
+                                    ReplicateContext *request_context,
+                                    AddressSpaceID request_source,
+                                    bool handle_now = false);
     public:
       Runtime *const runtime;
       const ReplicationID repl_id;
@@ -1032,6 +1041,9 @@ namespace Legion {
 #endif
     protected:
       std::map<ShardingID,ShardingFunction*> sharding_functions;
+    protected:
+      // A unique set of address spaces on which shards exist 
+      std::set<AddressSpaceID> unique_shard_spaces;
     }; 
 
   }; // namespace Internal

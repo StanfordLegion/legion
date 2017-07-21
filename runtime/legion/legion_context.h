@@ -352,7 +352,7 @@ namespace Legion {
       virtual void send_back_created_state(AddressSpaceID target) = 0;
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
-                             AddressSpaceID source, RtEvent *ready = NULL) = 0;
+                                                     AddressSpaceID source) = 0;
       static void handle_remote_view_creation(const void *args);
       static void handle_create_top_view_request(Deserializer &derez, 
                             Runtime *runtime, AddressSpaceID source);
@@ -936,7 +936,7 @@ namespace Legion {
       virtual void send_back_created_state(AddressSpaceID target);
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
-                             AddressSpaceID source, RtEvent *ready = NULL);
+                                                     AddressSpaceID source);
       static void handle_remote_view_creation(const void *args);
       void notify_instance_deletion(PhysicalManager *deleted); 
       static void handle_create_top_view_request(Deserializer &derez, 
@@ -1333,6 +1333,13 @@ namespace Legion {
     public:
       virtual ShardingFunction* find_sharding_function(ShardingID sid);
     public:
+      virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
+                                                     AddressSpaceID source);
+      InstanceView* create_replicate_instance_top_view(PhysicalManager *manager,
+                                                       AddressSpaceID source);
+      void record_replicate_instance_top_view(PhysicalManager *manager, 
+                                              InstanceView *result);
+    public:
       void exchange_common_resources(void);
       void handle_collective_message(Deserializer &derez);
       void handle_future_map_request(Deserializer &derez);
@@ -1404,6 +1411,9 @@ namespace Legion {
       std::map<RtEvent/*done event*/,CompositeView*> live_composite_views;
       std::map<RtEvent,std::vector<
                 std::pair<void*,size_t> > > pending_composite_view_requests;
+    protected:
+      // Different from pending_top_views as this applies to our requests
+      std::map<PhysicalManager*,RtUserEvent> pending_request_views;
     };
 
     /**
@@ -1459,6 +1469,8 @@ namespace Legion {
       virtual void find_parent_version_info(unsigned index, unsigned depth, 
                   const FieldMask &version_mask, VersionInfo &version_info);
       virtual InnerContext* find_parent_physical_context(unsigned index);
+      virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
+                                                     AddressSpaceID source);
     public:
       virtual ShardingFunction* find_sharding_function(ShardingID sid);
     public:
@@ -1490,6 +1502,7 @@ namespace Legion {
     protected:
       // For remote replicate contexts
       size_t total_shards;
+      ReplicationID repl_id;
       std::map<ShardingID,ShardingFunction*> sharding_functions;
     };
 
@@ -1769,7 +1782,7 @@ namespace Legion {
       virtual void send_back_created_state(AddressSpaceID target);
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
-                             AddressSpaceID source, RtEvent *ready = NULL);
+                                                     AddressSpaceID source);
       static void handle_remote_view_creation(const void *args);
       static void handle_create_top_view_request(Deserializer &derez, 
                             Runtime *runtime, AddressSpaceID source);
@@ -2077,7 +2090,7 @@ namespace Legion {
       virtual void send_back_created_state(AddressSpaceID target);
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
-                             AddressSpaceID source, RtEvent *ready = NULL);
+                                                     AddressSpaceID source);
       static void handle_remote_view_creation(const void *args);
       static void handle_create_top_view_request(Deserializer &derez, 
                             Runtime *runtime, AddressSpaceID source);

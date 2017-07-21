@@ -5698,7 +5698,8 @@ namespace Legion {
         for (std::map<PhysicalManager*,InstanceView*>::const_iterator it = 
               instance_top_views.begin(); it != instance_top_views.end(); it++)
         {
-          it->first->unregister_active_context(this);
+          if (it->first->is_owner())
+            it->first->unregister_active_context(this);
           if (it->second->remove_base_resource_ref(CONTEXT_REF))
             delete (it->second);
         }
@@ -5724,8 +5725,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceView* InnerContext::create_instance_top_view(
-                        PhysicalManager *manager, AddressSpaceID request_source,
-                        RtEvent *ready_event/*=NULL*/)
+                        PhysicalManager *manager, AddressSpaceID request_source)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, CREATE_INSTANCE_TOP_VIEW_CALL);
@@ -5849,16 +5849,9 @@ namespace Legion {
       derez.deserialize(to_trigger);
       // Get the context first
       InnerContext *context = runtime->find_context(context_uid);
-      // Find the manager too, we know we are local so it should already
-      // be registered in the set of distributed IDs
-      DistributedCollectable *dc = 
-        runtime->find_distributed_collectable(manager_did);
-#ifdef DEBUG_LEGION
-      PhysicalManager *manager = dynamic_cast<PhysicalManager*>(dc);
-      assert(manager != NULL);
-#else
-      PhysicalManager *manager = static_cast<PhysicalManager*>(dc);
-#endif
+      RtEvent ready;
+      PhysicalManager *manager = 
+        runtime->find_or_request_physical_manager(manager_did, ready);
       // Nasty deadlock case: if the request came from a different node
       // we have to defer this because we are in the view virtual channel
       // and we might invoke the update virtual channel, but we already
@@ -5872,7 +5865,7 @@ namespace Legion {
       args.to_trigger = to_trigger;
       args.source = source;
       runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, 
-                                       context->get_owner_task());
+                                       context->get_owner_task(), ready);
     }
 
     //--------------------------------------------------------------------------
@@ -9501,6 +9494,97 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    InstanceView* ReplicateContext::create_instance_top_view(
+                                PhysicalManager *manager, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      // First do a little check to see if we already have it and if not record
+      // that we're the first ones requesting from this replicate context
+      RtEvent wait_on;
+      bool send_request = false;
+      {
+        AutoLock ctx_lock(context_lock);
+        std::map<PhysicalManager*,InstanceView*>::const_iterator finder = 
+          instance_top_views.find(manager);
+        if (finder != instance_top_views.end())
+          return finder->second;
+        // Didn't find it, see if we need to request it or whether 
+        // someone else is already doing that
+        std::map<PhysicalManager*,RtUserEvent>::const_iterator wait_finder = 
+          pending_request_views.find(manager);
+        if (wait_finder == pending_request_views.end())
+        {
+          RtUserEvent wait_for = Runtime::create_rt_user_event();
+          pending_request_views[manager] = wait_for;
+          wait_on = wait_for;
+          send_request = true;
+        }
+        else
+          wait_on = wait_finder->second;
+      }
+      // Send the request if we're first
+      // Since we are a control replicated context we have to bounce this
+      // off the shard manager to find the right context to make the view
+      if (send_request)
+        shard_manager->create_instance_top_view(manager, source, this,
+                                                runtime->address_space);
+      // Wait for the result to be ready
+      wait_on.lg_wait();
+      // Retake the lock and retrieve the result
+      AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
+#ifdef DEBUG_LEGION
+      assert(instance_top_views.find(manager) != instance_top_views.end());
+#endif
+      return instance_top_views[manager];
+    }
+
+    //--------------------------------------------------------------------------
+    InstanceView* ReplicateContext::create_replicate_instance_top_view(
+                                PhysicalManager *manager, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      // If we got picked then we can just do the base inner version
+      return InnerContext::create_instance_top_view(manager, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::record_replicate_instance_top_view(
+                                 PhysicalManager *manager, InstanceView *result)
+    //--------------------------------------------------------------------------
+    {
+      // Always add the reference, we'll remove duplicates if necessary
+      result->add_base_resource_ref(CONTEXT_REF);
+      bool remove_duplicate_reference = false;
+      RtUserEvent to_trigger;
+      {
+        AutoLock ctx_lock(context_lock);
+        std::map<PhysicalManager*,InstanceView*>::const_iterator finder = 
+          instance_top_views.find(manager);
+        if (finder != instance_top_views.end())
+        {
+#ifdef DEBUG_LEGION
+          assert(finder->second == result);
+#endif
+          remove_duplicate_reference = true;
+        }
+        else
+          instance_top_views[manager] = result;
+        // Now we find the event to trigger
+        std::map<PhysicalManager*,RtUserEvent>::iterator pending_finder = 
+          pending_request_views.find(manager);
+#ifdef DEBUG_LEGION
+        assert(pending_finder != pending_request_views.end());
+#endif
+        to_trigger = pending_finder->second;
+        pending_request_views.erase(pending_finder);
+      }
+      Runtime::trigger_event(to_trigger);
+      if (remove_duplicate_reference && 
+          result->remove_base_resource_ref(CONTEXT_REF))
+        delete result;
+    }
+
+    //--------------------------------------------------------------------------
     void ReplicateContext::exchange_common_resources(void)
     //--------------------------------------------------------------------------
     {
@@ -9914,7 +9998,7 @@ namespace Legion {
           local_parent_req_indexes, local_virtual_mapped, 
           context_uid, true/*remote*/),
         parent_ctx(NULL), shard_manager(NULL), depth(-1), 
-        top_level_context(false), remote_task(RemoteTask(this))
+        top_level_context(false), remote_task(RemoteTask(this)), repl_id(0)
     //--------------------------------------------------------------------------
     {
     }
@@ -10217,6 +10301,37 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    InstanceView* RemoteContext::create_instance_top_view(
+                                PhysicalManager* manager, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      // Check to see if we are part of a replicate context, if we do
+      // then we need to send this request back to our owner node
+      if (repl_id > 0)
+      {
+        InstanceView *volatile result = NULL;
+        RtUserEvent wait_on = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize<UniqueID>(context_uid);
+          rez.serialize(manager->did);
+          rez.serialize<InstanceView**>(const_cast<InstanceView**>(&result));
+          rez.serialize(wait_on); 
+        }
+        const AddressSpaceID target = runtime->get_runtime_owner(context_uid);
+        runtime->send_create_top_view_request(target, rez);
+        wait_on.lg_wait();
+#ifdef DEBUG_LEGION
+        assert(result != NULL);
+#endif
+        return result;
+      }
+      else
+        return InnerContext::create_instance_top_view(manager, source);
+    }
+
+    //--------------------------------------------------------------------------
     ShardingFunction* RemoteContext::find_sharding_function(ShardingID sid)
     //--------------------------------------------------------------------------
     {
@@ -10289,7 +10404,6 @@ namespace Legion {
       if (replicate)
       {
         derez.deserialize(total_shards);
-        ReplicationID repl_id;
         derez.deserialize(repl_id);
         // See if we have a local shard manager
         shard_manager = runtime->find_shard_manager(repl_id, true/*can fail*/);
@@ -11484,7 +11598,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceView* LeafContext::create_instance_top_view(
-                PhysicalManager *manager, AddressSpaceID source, RtEvent *ready)
+                                PhysicalManager *manager, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -12630,7 +12744,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceView* InlineContext::create_instance_top_view(
-                PhysicalManager *manager, AddressSpaceID source, RtEvent *ready)
+                                PhysicalManager *manager, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       assert(false);

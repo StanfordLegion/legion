@@ -6950,6 +6950,23 @@ namespace Legion {
       repl_ctx->handle_composite_view_request(derez);
     }
 
+    //--------------------------------------------------------------------------
+    InstanceView* ShardTask::create_instance_top_view(PhysicalManager *manager,
+                                                      AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(execution_context != NULL);
+      ReplicateContext *repl_ctx = 
+        dynamic_cast<ReplicateContext*>(execution_context);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = 
+        static_cast<ReplicateContext*>(execution_context);
+#endif
+      return repl_ctx->create_replicate_instance_top_view(manager, source);
+    }
+
     /////////////////////////////////////////////////////////////
     // Index Task 
     /////////////////////////////////////////////////////////////
