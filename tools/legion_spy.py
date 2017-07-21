@@ -6105,7 +6105,7 @@ class Operation(object):
         if self.owner_shard is not None:
             assert self.context.shard is not None
             if self.owner_shard != self.context.shard:
-                return
+                return True
         prefix = ''
         if self.context:
             depth = self.context.get_depth()
