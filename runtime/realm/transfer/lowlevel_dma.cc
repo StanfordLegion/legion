@@ -3593,7 +3593,7 @@ namespace LegionRuntime {
               IndexSpaceImpl *ispace = get_runtime()->get_index_space_impl(domain.get_index_space());
               coord_t range = ispace->valid_mask->last_enabled()
                               - ispace->valid_mask->first_enabled() + 1;
-              if (range != ispace->valid_mask->pop_count()) {
+              if (range != (coord_t) ispace->valid_mask->pop_count()) {
                 log_new_dma.info("Sparse copies: pop_count(%zu) first(%lld) last(%lld)",
                                  ispace->valid_mask->pop_count(),
                                  ispace->valid_mask->first_enabled(),
