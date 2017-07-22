@@ -1908,6 +1908,8 @@ namespace Legion {
                     IndexSpace space, ptr_t start = ptr_t());
       IndexIterator(Runtime *rt, Context ctx, 
                     LogicalRegion lr, ptr_t start = ptr_t());
+      IndexIterator(Runtime *rt,
+                    IndexSpace space, ptr_t start = ptr_t());
       IndexIterator(const IndexIterator &rhs);
       ~IndexIterator(void);
     public:
