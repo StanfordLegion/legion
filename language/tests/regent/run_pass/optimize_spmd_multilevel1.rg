@@ -70,7 +70,6 @@ task main()
   var T_leaf = partition(equal, T, colors)
   var B_leaf = partition(equal, B, colors)
 
-  __forbid(__vectorize) -- FIXME: Triggers vectorizer bug
   for x in grid do
     @x = 1000 + int(x)+1 * int(x)+2
   end
