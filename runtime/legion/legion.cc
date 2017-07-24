@@ -2525,6 +2525,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexIterator::IndexIterator(Runtime *rt,
+                                 IndexSpace space, ptr_t start)
+    //--------------------------------------------------------------------------
+    {
+      Domain dom = rt->get_index_space_domain(space);
+      enumerator = dom.get_index_space().get_valid_mask()
+                     .enumerate_enabled(start.value);
+      finished = !(enumerator->get_next(current_pointer,remaining_elmts));
+    }
+
+    //--------------------------------------------------------------------------
     IndexIterator::IndexIterator(const IndexIterator &rhs)
       : iterator(NULL)
     //--------------------------------------------------------------------------
