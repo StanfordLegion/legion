@@ -227,7 +227,8 @@ void PerfMapper::map_task(const MapperContext  ctx,
     size_t point = runtime->get_logical_region_color_point(ctx, req.region)[0];
     size_t part_id = runtime->get_logical_partition_color(ctx,
         runtime->get_parent_logical_partition(ctx, req.region));
-    bool has_reduction = req.privilege != READ_WRITE;
+    bool has_reduction =
+      req.privilege != READ_WRITE && req.privilege != READ_ONLY;
     if (has_reduction)
     {
       if (constraint_cache.size() <= part_id)
@@ -455,7 +456,8 @@ static void parse_arguments(char** argv, int argc, unsigned& num_tasks,
 template<int DIM>
 void create_index_partitions(Context ctx, Runtime *runtime, IndexSpace is,
                              int fanout, int part_color, bool alternate,
-                             int depth, int max_depth)
+                             int depth, int max_depth, int pattern_length,
+                             const int* pattern)
 {
   if (depth == max_depth) return;
   IndexPartition ip;
@@ -464,7 +466,7 @@ void create_index_partitions(Context ctx, Runtime *runtime, IndexSpace is,
   assert(num_elmts > 0);
   size_t block_size = num_elmts / fanout;
   assert(block_size > 0);
-  if (alternate && part_color % 2 == 1)
+  if (alternate && pattern[part_color % pattern_length] != 0)
   {
     Point<DIM> colors;
     colors.x[0] = fanout - 1;
@@ -512,7 +514,7 @@ void create_index_partitions(Context ctx, Runtime *runtime, IndexSpace is,
     IndexSpace sis = runtime->get_index_subspace(ctx, ip,
         DomainPoint::from_point<DIM>(color));
     create_index_partitions<DIM>(ctx, runtime, sis, fanout, part_color,
-        alternate, depth + 1, max_depth);
+        alternate, depth + 1, max_depth, pattern_length, pattern);
   }
 }
 
@@ -531,6 +533,8 @@ void top_level_task(const Task *task,
   bool alternate = false;
   bool single_launch = false;
   bool block = false;
+  const int pattern_length = 9;
+  const int pattern[] = {0, 1, 2, 2, 1, 2, 0, 2, 1};
 
   {
     const InputArgs &command_args = Runtime::get_input_args();
@@ -676,19 +680,19 @@ void top_level_task(const Task *task,
         case 1 :
           {
             create_index_partitions<1>(ctx, runtime, is, num_tasks, p,
-                alternate, 0, tree_depth);
+                alternate, 0, tree_depth, pattern_length, pattern);
             break;
           }
         case 2 :
           {
             create_index_partitions<2>(ctx, runtime, is, num_tasks, p,
-                alternate, 0, tree_depth);
+                alternate, 0, tree_depth, pattern_length, pattern);
             break;
           }
         case 3 :
           {
             create_index_partitions<3>(ctx, runtime, is, num_tasks, p,
-                alternate, 0, tree_depth);
+                alternate, 0, tree_depth, pattern_length, pattern);
             break;
           }
         default:
@@ -751,7 +755,7 @@ void top_level_task(const Task *task,
                 lp = runtime->get_logical_partition_by_color(ctx, lr, p);
             }
 
-            if (alternate && p % 2 == 1)
+            if (alternate && pattern[p % pattern_length] == 2)
             {
               for (unsigned k = 0; k < num_fields; ++k)
               {
@@ -766,7 +770,10 @@ void top_level_task(const Task *task,
               unsigned fid_block = num_fields / blast;
               for (unsigned b = 0; b < blast; ++b)
               {
-                RegionRequirement req(lr, READ_WRITE, EXCLUSIVE, lrs[r]);
+                PrivilegeMode priv =
+                  !alternate || pattern[p % pattern_length] == 0 ?
+                  READ_WRITE : READ_ONLY;
+                RegionRequirement req(lr, priv, EXCLUSIVE, lrs[r]);
                 for (unsigned k = 0; k < fid_block; ++k)
                 {
                   req.add_field(fid + k);
@@ -793,7 +800,7 @@ void top_level_task(const Task *task,
         if (block && l == 0 && p == 0) launcher.add_wait_barrier(next_barrier);
         for (unsigned r = 0; r < num_regions; ++r)
         {
-          if (alternate && p % 2 == 1)
+          if (alternate && pattern[p % pattern_length] == 2)
           {
             for (unsigned k = 0; k < num_fields; ++k)
             {
@@ -809,7 +816,10 @@ void top_level_task(const Task *task,
             unsigned fid_block = num_fields / blast;
             for (unsigned b = 0; b < blast; ++b)
             {
-              RegionRequirement req(lps[r][p], pid, READ_WRITE, EXCLUSIVE,
+              PrivilegeMode priv =
+                !alternate || pattern[p % pattern_length] == 0 ?
+                READ_WRITE : READ_ONLY;
+              RegionRequirement req(lps[r][p], pid, priv, EXCLUSIVE,
                   lrs[r]);
               for (unsigned k = 0; k < fid_block; ++k)
               {
