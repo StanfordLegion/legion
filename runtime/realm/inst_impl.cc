@@ -140,6 +140,8 @@ namespace Realm {
       }
 
       inst = impl->me;
+      log_inst.info() << "instance created: inst=" << inst << " bytes=" << ilg->bytes_used << " ready=" << ready_event;
+      log_inst.debug() << "instance layout: inst=" << inst << " layout=" << *ilg;
       return ready_event;
     }
 
@@ -605,6 +607,7 @@ namespace Realm {
 		 (dbs << elmt_size) &&
 		 (dbs << field_sizes) &&
 		 (dbs << parent_inst) &&
+		 (dbs << inst_offset) &&
 		 (dbs << filename) &&
 		 (dbs << *layout));
       assert(ok);
@@ -627,6 +630,7 @@ namespace Realm {
 		 (fbd >> elmt_size) &&
 		 (fbd >> field_sizes) &&
 		 (fbd >> parent_inst) &&
+		 (fbd >> inst_offset) &&
 		 (fbd >> filename));
       if(ok)
 	layout = InstanceLayoutGeneric::deserialize_new(fbd);
