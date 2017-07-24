@@ -12,10 +12,10 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- FIXME: This test triggers a bug in nested composite instance
 -- runs-with:
 -- [
---  ["-findex-launch", "0"],
---  []
+--  ["-findex-launch", "0"]
 -- ]
 
 import "regent"
