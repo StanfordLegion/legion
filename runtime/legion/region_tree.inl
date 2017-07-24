@@ -1908,7 +1908,7 @@ namespace Legion {
       }
       if (colors.empty())
         return ApEvent::NO_AP_EVENT;
-      std::vector<Realm::ZIndexSpace<DIM,T> > subspaces(colors.size());
+      std::vector<Realm::ZIndexSpace<DIM,T> > subspaces;
       Realm::ProfilingRequestSet requests;
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_partition_request(requests,

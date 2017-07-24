@@ -722,13 +722,16 @@ namespace Legion {
     public:
       class ReplByFieldThunk : public ByFieldThunk {
       public:
-        ReplByFieldThunk(ReplicateContext *ctx, IndexPartition p);
+        ReplByFieldThunk(ReplicateContext *ctx, IndexPartition p,
+                         ShardID shard_id, size_t total_shards);
       public:
         virtual ApEvent perform(DependentPartitionOp *op,
             RegionTreeForest *forest, ApEvent instances_ready,
             const std::vector<FieldDataDescriptor> &instances);
       protected:
         FieldDescriptorExchange collective; 
+        const ShardID shard_id;
+        const size_t total_shards;
       };
       class ReplByImageThunk : public ByImageThunk {
       public:
@@ -785,7 +788,8 @@ namespace Legion {
       void initialize_by_field(ReplicateContext *ctx, ApEvent ready_event,
                                IndexPartition pid,
                                LogicalRegion handle, LogicalRegion parent,
-                               FieldID fid, MapperID id, MappingTagID tag); 
+                               FieldID fid, MapperID id, MappingTagID tag,
+                               ShardID shard, size_t total_shards); 
       void initialize_by_image(ReplicateContext *ctx, ShardID target,
                                ApEvent ready_event, IndexPartition pid,
                                LogicalPartition projection,

@@ -1386,7 +1386,9 @@ namespace Legion {
                                                        LogicalRegion parent,
                                                        FieldID fid,
                                                        MapperID id, 
-                                                       MappingTagID t)
+                                                       MappingTagID t,
+                                                       ShardID shard,
+                                                       size_t total_shards)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1412,7 +1414,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(thunk == NULL);
 #endif
-      thunk = new ReplByFieldThunk(ctx, pid);
+      thunk = new ReplByFieldThunk(ctx, pid, shard, total_shards);
       partition_ready = ready_event;
       if (Runtime::legion_spy_enabled)
         perform_logging();
@@ -1687,9 +1689,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReplDependentPartitionOp::ReplByFieldThunk::ReplByFieldThunk(
-                                        ReplicateContext *ctx, IndexPartition p)
+        ReplicateContext *ctx, IndexPartition p, ShardID s, size_t t)
       : ByFieldThunk(p), 
-        collective(FieldDescriptorExchange(ctx, COLLECTIVE_LOC_54))
+        collective(FieldDescriptorExchange(ctx, COLLECTIVE_LOC_54)),
+        shard_id(s), total_shards(t)
     //--------------------------------------------------------------------------
     {
     }
@@ -1707,11 +1710,11 @@ namespace Legion {
         ApEvent all_ready = collective.exchange_descriptors(instances_ready,
                                                             instances);
         return forest->create_partition_by_field(op, pid, 
-                                    collective.descriptors, all_ready); 
+                collective.descriptors, all_ready, shard_id, total_shards);
       }
       else // singular so just do the normal thing
         return forest->create_partition_by_field(op, pid, 
-                                                 instances, instances_ready);
+                        instances, instances_ready, shard_id, total_shards);
     }
 
     //--------------------------------------------------------------------------

@@ -3283,9 +3283,6 @@ namespace Legion {
                                                  ShardMapping *shard_mapping)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!pending.exists() || (shard_mapping == NULL));
-#endif
       IndexPartCreator creator(this, p, parent, color_space, color, 
                      disjointness_ready, part_ready, pending, shard_mapping);
       NT_TemplateHelper::demux<IndexPartCreator>(p.get_type_tag(), &creator);
