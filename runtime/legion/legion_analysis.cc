@@ -2886,19 +2886,31 @@ namespace Legion {
         case OPEN_READ_ONLY_PROJ:
           {
             logger->log("Field State: OPEN READ-ONLY PROJECTION %d",
-                        projection);
+                        projection->projection_id);
             break;
           }
         case OPEN_READ_WRITE_PROJ:
           {
             logger->log("Field State: OPEN READ WRITE PROJECTION %d",
-                        projection);
+                        projection->projection_id);
+            break;
+          }
+        case OPEN_READ_WRITE_PROJ_DISJOINT_SHALLOW:
+          {
+            logger->log("Field State: OPEN READ WRITE PROJECTION (Disjoint Shallow) %d",
+                        projection->projection_id);
             break;
           }
         case OPEN_REDUCE_PROJ:
           {
             logger->log("Field State: OPEN REDUCE PROJECTION %d Mode %d",
-                        projection, redop);
+                        projection->projection_id, redop);
+            break;
+          }
+        case OPEN_REDUCE_PROJ_DIRTY:
+          {
+            logger->log("Field State: OPEN REDUCE PROJECTION (Dirty) %d Mode %d",
+                        projection->projection_id, redop);
             break;
           }
         default:

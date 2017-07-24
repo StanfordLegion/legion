@@ -17203,6 +17203,7 @@ namespace Legion {
                                            const FieldMask &capture_mask) 
     //--------------------------------------------------------------------------
     {
+      logger->log("==========");
       switch (row_source->color.get_dim())
       {
         case 0:
@@ -17344,6 +17345,37 @@ namespace Legion {
     {
       // Open Field States 
       {
+        // Dirty Fields
+        {
+          char *mask_string = state.dirty_fields.to_string();
+          logger->log("Dirty Field Mask %s", mask_string);
+          free(mask_string);
+        }
+        {
+          char *mask_string = state.reduction_fields.to_string();
+          logger->log("Reduction Mask %s", mask_string);
+          free(mask_string);
+        }
+        // Outstanding Reductions
+        {
+          logger->log("Outstanding Reductions (%ld)",
+              state.outstanding_reductions.size());
+          logger->down();
+          for (LegionMap<ReductionOpID,FieldMask>::aligned::iterator it =
+                state.outstanding_reductions.begin(); it !=
+                state.outstanding_reductions.end(); it++)
+          {
+            char *mask_string = it->second.to_string();
+            logger->log("Op ID %d Mask %s\n", it->first, mask_string);
+            free(mask_string);
+          }
+          logger->up();
+        }
+        {
+          char *mask_string = state.dirty_below.to_string();
+          logger->log("Dirty Below Mask %s", mask_string);
+          free(mask_string);
+        }
         logger->log("Open Field States (%ld)", state.field_states.size());
         logger->down();
         for (std::list<FieldState>::const_iterator it = 
@@ -18187,44 +18219,47 @@ namespace Legion {
                                               const FieldMask &capture_mask)
     //--------------------------------------------------------------------------
     {
+      logger->log("==========");
+      const char* disjointness =
+        row_source->is_disjoint() ? "disjoint" : "aliased";
       switch (row_source->color.get_dim())
       {
         case 0:
           {
             logger->log("Partition Node (" IDFMT ",%d,%d) Color %d "
-                        "disjoint at depth %d", 
+                        "%s at depth %d", 
               handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color.get_index(), row_source->is_disjoint(), 
+              row_source->color.get_index(), disjointness, 
               logger->get_depth());
             break;
           }
         case 1:
           {
             logger->log("Partition Node (" IDFMT ",%d,%d) Color %d "
-                        "disjoint %d at depth %d", 
+                        "%s at depth %d", 
               handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], row_source->is_disjoint(), 
+              row_source->color[0], disjointness,
               logger->get_depth());
             break;
           }
         case 2:
           {
             logger->log("Partition Node (" IDFMT ",%d,%d) Color (%d,%d) "
-                        "disjoint %d at depth %d", 
+                        "%s at depth %d", 
               handle.index_partition.id, handle.field_space.id,handle.tree_id,
               row_source->color[0], 
               row_source->color[1], 
-              row_source->is_disjoint(), logger->get_depth());
+              disjointness, logger->get_depth());
             break;
           }
         case 3:
           {
             logger->log("Partition Node (" IDFMT ",%d,%d) Color (%d,%d,%d) "
-                        "disjoint at depth %d", 
+                        "%s at depth %d", 
               handle.index_partition.id, handle.field_space.id,handle.tree_id,
               row_source->color[0], row_source->color[2],
               row_source->color[2], 
-              row_source->is_disjoint(), logger->get_depth());
+              disjointness, logger->get_depth());
             break;
           }
         default:
@@ -18339,6 +18374,37 @@ namespace Legion {
                                         TreeStateLogger *logger)
     //--------------------------------------------------------------------------
     {
+      // Dirty Fields
+      {
+        char *mask_string = state.dirty_fields.to_string();
+        logger->log("Dirty Field Mask %s", mask_string);
+        free(mask_string);
+      }
+      {
+        char *mask_string = state.reduction_fields.to_string();
+        logger->log("Reduction Mask %s", mask_string);
+        free(mask_string);
+      }
+      // Outstanding Reductions
+      {
+        logger->log("Outstanding Reductions (%ld)",
+            state.outstanding_reductions.size());
+        logger->down();
+        for (LegionMap<ReductionOpID,FieldMask>::aligned::iterator it =
+              state.outstanding_reductions.begin(); it !=
+              state.outstanding_reductions.end(); it++)
+        {
+          char *mask_string = it->second.to_string();
+          logger->log("Op ID %d Mask %s\n", it->first, mask_string);
+          free(mask_string);
+        }
+        logger->up();
+      }
+      {
+        char *mask_string = state.dirty_below.to_string();
+        logger->log("Dirty Below Mask %s", mask_string);
+        free(mask_string);
+      }
       // Open Field States
       {
         logger->log("Open Field States (%ld)", state.field_states.size()); 
