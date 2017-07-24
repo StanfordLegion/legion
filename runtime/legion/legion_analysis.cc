@@ -5418,40 +5418,64 @@ namespace Legion {
     void VersionManager::print_physical_state(RegionTreeNode *arg_node,
                                 const FieldMask &capture_mask,
                           LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
-                                TreeStateLogger *logger)
+                                TreeStateLogger *logger,
+                                VersionInfo *version_info)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(node == arg_node);
 #endif
-      PhysicalState temp_state(node, false/*dummy path only*/);
-      logger->log("Versions:");
-      logger->down();
-      for (LegionMap<VersionID,ManagerVersions>::aligned::const_iterator vit =
-            current_version_infos.begin(); vit != 
-            current_version_infos.end(); vit++)
+      if (version_info != NULL)
       {
-        if (capture_mask * vit->second.get_valid_mask())
-          continue;
-        FieldMask version_fields;
-        for (ManagerVersions::iterator it = vit->second.begin();
-              it != vit->second.end(); it++)
+        PhysicalState* state = version_info->find_physical_state(arg_node);
+        assert(state != NULL);
+        FieldVersions field_versions;
+        logger->log("Versions:");
+        logger->down();
+        version_info->get_advance_versions(arg_node, true, capture_mask,
+            field_versions);
+        for (FieldVersions::const_iterator vit =
+              field_versions.begin(); vit != 
+              field_versions.end(); vit++)
         {
-          FieldMask overlap = capture_mask & it->second;
-          if (!overlap)
-            continue;
-          version_fields |= overlap;
-          VersionState *vs = dynamic_cast<VersionState*>(it->first);
-          assert(vs != NULL);
-          vs->update_physical_state(&temp_state, overlap);
+          char *version_buffer = vit->second.to_string();
+          logger->log("%lld: %s", vit->first, version_buffer);
+          free(version_buffer);
         }
-        assert(!!version_fields);
-        char *version_buffer = version_fields.to_string();
-        logger->log("%lld: %s", vit->first, version_buffer);
-        free(version_buffer);
+        logger->up();
+        state->print_physical_state(capture_mask, to_traverse, logger);
       }
-      logger->up();
-      temp_state.print_physical_state(capture_mask, to_traverse, logger);
+      else
+      {
+        PhysicalState temp_state(node, false/*dummy path only*/);
+        logger->log("Versions:");
+        logger->down();
+        for (LegionMap<VersionID,ManagerVersions>::aligned::const_iterator vit =
+              current_version_infos.begin(); vit != 
+              current_version_infos.end(); vit++)
+        {
+          if (capture_mask * vit->second.get_valid_mask())
+            continue;
+          FieldMask version_fields;
+          for (ManagerVersions::iterator it = vit->second.begin();
+                it != vit->second.end(); it++)
+          {
+            FieldMask overlap = capture_mask & it->second;
+            if (!overlap)
+              continue;
+            version_fields |= overlap;
+            VersionState *vs = dynamic_cast<VersionState*>(it->first);
+            assert(vs != NULL);
+            vs->update_physical_state(&temp_state, overlap);
+          }
+          assert(!!version_fields);
+          char *version_buffer = version_fields.to_string();
+          logger->log("%lld: %s", vit->first, version_buffer);
+          free(version_buffer);
+        }
+        logger->up();
+        temp_state.print_physical_state(capture_mask, to_traverse, logger);
+      }
     }
 
     //--------------------------------------------------------------------------

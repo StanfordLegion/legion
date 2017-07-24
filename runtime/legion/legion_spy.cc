@@ -126,7 +126,8 @@ namespace Legion {
                   const char *task_name, long long uid, 
                   RegionTreeNode *node, ContextID ctx, bool before, 
                   bool pre_map, bool closing, bool logical, 
-                  FieldMask capture_mask, FieldMask working_mask)
+                  FieldMask capture_mask, FieldMask working_mask,
+                  VersionInfo *version_info)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -230,7 +231,7 @@ namespace Legion {
         if (logical)
           node->print_logical_context(ctx, logger, capture_mask);
         else
-          node->print_physical_context(ctx, logger, capture_mask);
+          node->print_physical_context(ctx, logger, capture_mask, version_info);
 
         logger->finish_block();
       }

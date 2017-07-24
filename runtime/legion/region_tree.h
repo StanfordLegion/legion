@@ -1690,7 +1690,8 @@ namespace Legion {
                                          const FieldMask &mask) = 0;
       virtual void print_physical_context(ContextID ctx, 
                                           TreeStateLogger *logger,
-                                          const FieldMask &mask) = 0;
+                                          const FieldMask &mask,
+                                          VersionInfo *version_info) = 0;
 #ifdef DEBUG_LEGION
     public:
       // These methods are only ever called by a debugger
@@ -1849,7 +1850,8 @@ namespace Legion {
                                          const FieldMask &mask);
       virtual void print_physical_context(ContextID ctx, 
                                           TreeStateLogger *logger,
-                                          const FieldMask &mask);
+                                          const FieldMask &mask,
+                                          VersionInfo *version_info);
       void print_logical_state(LogicalState &state,
                                const FieldMask &capture_mask,
                          LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
@@ -2060,7 +2062,8 @@ namespace Legion {
                                          const FieldMask &mask);
       virtual void print_physical_context(ContextID ctx, 
                                           TreeStateLogger *logger,
-                                          const FieldMask &mask);
+                                          const FieldMask &mask,
+                                          VersionInfo *version_info);
       void print_logical_state(LogicalState &state,
                                const FieldMask &capture_mask,
                          LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,

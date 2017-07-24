@@ -944,7 +944,8 @@ namespace Legion {
       void print_physical_state(RegionTreeNode *node,
                                 const FieldMask &capture_mask,
                           LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
-                                TreeStateLogger *logger);
+                                TreeStateLogger *logger,
+                                VersionInfo *version_info = NULL);
     protected:
       VersionState* create_new_version_state(VersionID vid);
     public:

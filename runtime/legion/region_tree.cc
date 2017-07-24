@@ -2300,7 +2300,8 @@ namespace Legion {
                                      child_node, ctx.get_id(), 
                                      false/*before*/, false/*premap*/, 
                                      false/*closing*/, false/*logical*/,
-                   FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
+                   FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask,
+                                     &version_info);
 #endif
     }
 
@@ -17270,7 +17271,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionNode::print_physical_context(ContextID ctx, 
                                             TreeStateLogger *logger,
-                                            const FieldMask &capture_mask)
+                                            const FieldMask &capture_mask,
+                                            VersionInfo *version_info)
     //--------------------------------------------------------------------------
     {
       switch (row_source->color.get_dim())
@@ -17312,10 +17314,11 @@ namespace Legion {
       }
       logger->down();
       LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
-      if (logical_states.has_entry(ctx))
+      if (current_versions.has_entry(ctx))
       {
         VersionManager &manager= get_current_version_manager(ctx);
-        manager.print_physical_state(this, capture_mask, to_traverse, logger);
+        manager.print_physical_state(this, capture_mask, to_traverse, logger,
+            version_info);
       }
       else
       {
@@ -17330,7 +17333,8 @@ namespace Legion {
           std::map<ColorPoint,PartitionNode*>::const_iterator finder = 
             color_map.find(it->first);
           if (finder != color_map.end())
-            finder->second->print_physical_context(ctx, logger, it->second);
+            finder->second->print_physical_context(ctx, logger, it->second,
+                version_info);
         }
       }
       logger->up();
@@ -18295,7 +18299,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void PartitionNode::print_physical_context(ContextID ctx,
                                                TreeStateLogger *logger,
-                                               const FieldMask &capture_mask)
+                                               const FieldMask &capture_mask,
+                                               VersionInfo *version_info)
     //--------------------------------------------------------------------------
     {
       switch (row_source->color.get_dim())
@@ -18346,7 +18351,8 @@ namespace Legion {
       if (logical_states.has_entry(ctx))
       {
         VersionManager &manager = get_current_version_manager(ctx);
-        manager.print_physical_state(this, capture_mask, to_traverse, logger);
+        manager.print_physical_state(this, capture_mask, to_traverse, logger,
+            version_info);
       }
       else
       {
@@ -18361,7 +18367,8 @@ namespace Legion {
           std::map<ColorPoint,RegionNode*>::const_iterator 
             finder = color_map.find(it->first);
           if (finder != color_map.end())
-            finder->second->print_physical_context(ctx, logger, it->second);
+            finder->second->print_physical_context(ctx, logger, it->second,
+                version_info);
         }
       }
       logger->up();
