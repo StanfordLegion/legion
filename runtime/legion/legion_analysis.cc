@@ -4877,14 +4877,9 @@ namespace Legion {
           if (!overlap)
             continue;
           ManagerVersions &info = vit->second;
-          bool need_overlap_update = false;
           // Might be an overapproximation, so we might need to
           // update the overlap because we need it precise below
-          if (info.size() > 1)
-          {
-            need_overlap_update = true;
-            overlap.clear();
-          }
+          const bool need_overlap_update = (info.size() > 1);
           // See if everyone is going away or just some of them
           if (overlap == info.get_valid_mask())
           {
@@ -4892,6 +4887,7 @@ namespace Legion {
             // the valid references on the version state objects
             if (need_overlap_update)
             {
+              overlap.clear();
               for (ManagerVersions::iterator it = info.begin();
                     it != info.end(); it++)
                 overlap |= it->second;
@@ -4902,6 +4898,8 @@ namespace Legion {
           {
             // Only some of the state are being filtered
             std::vector<VersionState*> to_delete;
+            if (need_overlap_update)
+              overlap.clear();
             for (ManagerVersions::iterator it = info.begin();
                   it != info.end(); it++)
             {
@@ -4957,12 +4955,7 @@ namespace Legion {
           // If we have more than one element then the
           // valid mask might be an over approximation and
           // we're going to need the precise overlap set below
-          bool need_version_overlap_update = false;
-          if (info.size() > 1)
-          {
-            need_version_overlap_update = true;
-            version_overlap.clear();
-          }
+          const bool need_version_overlap_update = (info.size() > 1);
           if (version_overlap == info.get_valid_mask())
           {
             // Send back the whole version state info to previous
@@ -4974,6 +4967,7 @@ namespace Legion {
             {
               if (need_version_overlap_update)
               {
+                version_overlap.clear();
                 for (ManagerVersions::iterator it = info.begin();
                       it != info.end(); it++)
                   version_overlap |= it->second; 
@@ -4985,6 +4979,8 @@ namespace Legion {
             {
               // prev_inf already existed
               // Filter back the version states
+              if (need_version_overlap_update)
+                version_overlap.clear();
               for (ManagerVersions::iterator it = info.begin();
                     it != info.end(); it++)
               {
@@ -4997,6 +4993,8 @@ namespace Legion {
           }
           else
           {
+            if (need_version_overlap_update)
+              version_overlap.clear();
             // Filter back only some of the version states
             std::vector<VersionState*> to_delete;
             ManagerVersions &prev_info = previous_version_infos[vit->first];
