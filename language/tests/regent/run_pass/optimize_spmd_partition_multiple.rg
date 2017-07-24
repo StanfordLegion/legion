@@ -57,8 +57,6 @@ task main()
   var o = partition(equal, r, cs)
   var p = partition(equal, r, cs)
 
-  -- FIXME: This triggers a vectorizer bug.
-  __forbid(__vectorize)
   for e in r do
     e.x = 0
     e.y = int(e)

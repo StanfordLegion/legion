@@ -12,11 +12,6 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- runs-with:
--- [["-fvectorize", "0"]]
-
--- FIXME: Breaks vectorizer
-
 import "regent"
 
 local function make_check(r, t)

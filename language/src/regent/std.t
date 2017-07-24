@@ -3100,7 +3100,7 @@ std.future = terralib.memoize(function(result_type)
   return st
 end)
 
-std.list = terralib.memoize(function(element_type, partition_type, privilege_depth, region_root, shallow)
+std.list = terralib.memoize(function(element_type, partition_type, privilege_depth, region_root, shallow, barrier_depth)
   if not terralib.types.istype(element_type) then
     error("list expected a type as argument 1, got " .. tostring(element_type))
   end
@@ -3121,6 +3121,10 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
     error("list expected a boolean as argument 5, got " .. tostring(shallow))
   end
 
+  if barrier_depth and type(barrier_depth) ~= "number" then
+    error("list expected a number as argument 3, got " .. tostring(barrier_depth))
+  end
+
   if region_root and privilege_depth and privilege_depth ~= 0 then
     error("list privilege depth and region root are mutually exclusive")
   end
@@ -3137,6 +3141,7 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
   st.privilege_depth = privilege_depth or 0
   st.region_root = region_root or false
   st.shallow = shallow or false
+  st.barrier_depth = barrier_depth or false
 
   function st:is_list_of_regions()
     return std.is_region(self.element_type) or
