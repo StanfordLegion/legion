@@ -3478,8 +3478,35 @@ namespace Legion {
           }
         }
         else
+        {
           shard_manager = new ShardManager(runtime, repl_context, false/*cr*/,
                                   total_shards, runtime->address_space, this);
+          if (!Runtime::unsafe_mapper)
+          {
+            // Currently we only support non-control replication of 
+            // leaf task variants because there is no way to guarantee
+            // that the physical instances chosen by the sub-operations
+            // launched by the replicated tasks are not the same and we
+            // could end up with interfering sub-operations
+            for (unsigned idx = 0; idx < total_shards; idx++)
+            {
+              VariantID variant = output.task_mappings[idx].chosen_variant;
+              VariantImpl *var_impl = runtime->find_variant_impl(task_id,
+                                                variant, true/*can_fail*/);
+              // If it's NULL we'll catch it later in the checks
+              if ((var_impl != NULL) && !var_impl->is_leaf())
+                REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                              "Invalid mapper output from invocation of '%s' "
+                              "on mapper %s. Mapper failed to pick a leaf task "
+                              "variant for task %s (UID %lld) that was chosen "
+                              "to be replicated. Only leaf task variants are "
+                              "currently permitted for non-control-replicated "
+                              "task invocations.", "map_replicate_task",
+                              mapper->get_mapper_name(), get_task_name(),
+                              get_unique_id())
+            }
+          }
+        }
         // We're going to store the needed instances locally so we can
         // do the mapping when we return on behalf of all the shards
         physical_instances.resize(regions.size());
