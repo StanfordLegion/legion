@@ -1668,7 +1668,11 @@ namespace Legion {
           complete_execution();
         }
         else // If we have valid points then we do the base call
+        {
+          // Update the index domain to match the launch space
+          runtime->forest->find_launch_space_domain(launch_space, index_domain);
           DependentPartitionOp::trigger_ready();
+        }
       }
       else
       {
