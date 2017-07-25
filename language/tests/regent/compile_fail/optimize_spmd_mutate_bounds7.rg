@@ -16,7 +16,7 @@
 -- [["-ll:cpu", "4", "-fflow-spmd", "1"]]
 
 -- fails-with:
--- optimize_spmd_mutate_bounds7.rg:45: unable to apply SPMD transformation
+-- optimize_spmd_mutate_bounds7.rg:45: unable to apply SPMD transformation: leaf loops use inconsistent bounds
 --   for i = 0, tstep do
 --     ^
 
