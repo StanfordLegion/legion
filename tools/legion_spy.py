@@ -2040,35 +2040,23 @@ class IndexSpace(object):
         if self.shape is None:
             self.shape = Shape()
             self.shape.add_point(point.copy())
-            # Help with dynamic allocation
-            if self.parent is not None:
-                self.parent.parent.add_point(point)
         else:
             update = Shape()
             update.add_point(point.copy())
             update -= self.shape
             if not update.empty():
                 self.shape |= update
-                # Help with dynamic allocation
-                if self.parent is not None:
-                    self.parent.parent.add_point(point)
 
     def add_rect(self, rect):
         if self.shape is None:
             self.shape = Shape()
             self.shape.add_rect(rect.copy())
-            # Help with dynamic allocation
-            if self.parent is not None:
-                self.parent.parent.add_rect(rect)
         else:
             update = Shape()
             update.add_rect(rect.copy())
             update -= self.shape
             if not update.empty():
                 self.shape |= update
-                # Help with dynamic allocation
-                if self.parent is not None:
-                    self.parent.parent.add_rect(rect)
 
     def update_index_sets(self, index_sets):
         if self.shape is None or self.shape.empty():
