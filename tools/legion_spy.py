@@ -10364,6 +10364,7 @@ class State(object):
         return self.no_event
 
     def get_realm_copy(self, event):
+        assert event.exists()
         if event in self.copies:
             return self.copies[event]
         result = RealmCopy(self, event, self.next_realm_num)
@@ -10372,6 +10373,7 @@ class State(object):
         return result
 
     def get_realm_fill(self, event):
+        assert event.exists()
         if event in self.fills:
             return self.fills[event]
         result = RealmFill(self, event, self.next_realm_num)
@@ -10380,6 +10382,7 @@ class State(object):
         return result
 
     def get_realm_deppart(self, event):
+        assert event.exists()
         if event in self.depparts:
             return self.depparts[event]
         result = RealmDeppart(self, event, self.next_realm_num)
