@@ -14,10 +14,8 @@
 
 -- runs-with:
 -- [
---   ["-ll:cpu", "2", "-fflow-spmd", "0"]
+--   ["-ll:cpu", "2", "-fflow-spmd", "1"]
 -- ]
-
--- FIXME: Non-deterministic failures in SPMD
 
 import "regent"
 
