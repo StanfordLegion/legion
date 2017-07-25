@@ -2873,7 +2873,15 @@ namespace Legion {
             intersection = finder->second.intersection;
           }
           else
+          {
+#ifdef LEGION_SPY
+            ApUserEvent new_result = Runtime::create_ap_user_event();
+            Runtime::trigger_event(new_result);
+            return new_result;
+#else
             return ApEvent::NO_AP_EVENT;
+#endif
+          }
         }
         else
         {
@@ -2889,7 +2897,15 @@ namespace Legion {
             intersection = finder->second.intersection;
           }
           else
+          {
+#ifdef LEGION_SPY
+            ApUserEvent new_result = Runtime::create_ap_user_event();
+            Runtime::trigger_event(new_result);
+            return new_result;
+#else
             return ApEvent::NO_AP_EVENT;
+#endif
+          }
         }
         // Have to protect against misspeculation
         if (predicate_guard.exists())
