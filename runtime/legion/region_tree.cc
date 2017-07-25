@@ -2295,14 +2295,6 @@ namespace Legion {
         child_node->register_region(info, logical_ctx_uid, context, 
             restrict_info, term_event, usage, defer_add_users, targets);
       }
-#ifdef DEBUG_LEGION 
-      TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
-                                     child_node, ctx.get_id(), 
-                                     false/*before*/, false/*premap*/, 
-                                     false/*closing*/, false/*logical*/,
-                   FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask,
-                                     &version_info);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -17272,7 +17264,7 @@ namespace Legion {
     void RegionNode::print_physical_context(ContextID ctx, 
                                             TreeStateLogger *logger,
                                             const FieldMask &capture_mask,
-                                            VersionInfo *version_info)
+                                       std::deque<RegionTreeNode*> &to_traverse)
     //--------------------------------------------------------------------------
     {
       switch (row_source->color.get_dim())
@@ -17313,29 +17305,21 @@ namespace Legion {
           assert(false);
       }
       logger->down();
-      LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
       if (current_versions.has_entry(ctx))
       {
         VersionManager &manager= get_current_version_manager(ctx);
-        manager.print_physical_state(this, capture_mask, to_traverse, logger,
-            version_info);
+        manager.print_physical_state(this, capture_mask, logger);
       }
       else
       {
         logger->log("No state");
       }
       logger->log("");
-      if (!to_traverse.empty())
+      if (to_traverse.size() > 0)
       {
-        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =
-              to_traverse.begin(); it != to_traverse.end(); it++)
-        {
-          std::map<ColorPoint,PartitionNode*>::const_iterator finder = 
-            color_map.find(it->first);
-          if (finder != color_map.end())
-            finder->second->print_physical_context(ctx, logger, it->second,
-                version_info);
-        }
+        RegionTreeNode *node = to_traverse.front();
+        to_traverse.pop_front();
+        node->print_physical_context(ctx, logger, capture_mask, to_traverse);
       }
       logger->up();
     }
@@ -17520,26 +17504,14 @@ namespace Legion {
           assert(false);
       }
       logger->down();
-      LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
       if (logical_states.has_entry(ctx))
       {
         VersionManager &manager = get_current_version_manager(ctx);
-        manager.print_physical_state(this, capture_mask, to_traverse, logger);
+        manager.print_physical_state(this, capture_mask, logger);
       }
       else
         logger->log("No state");
       logger->log("");
-      if (!to_traverse.empty())
-      {
-        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =
-              to_traverse.begin(); it != to_traverse.end(); it++)
-        {
-          std::map<ColorPoint,PartitionNode*>::const_iterator finder = 
-            color_map.find(it->first);
-          if (finder != color_map.end())
-            finder->second->dump_physical_context(ctx, logger, it->second);
-        }
-      }
       logger->up();
     }
 #endif
@@ -18300,7 +18272,7 @@ namespace Legion {
     void PartitionNode::print_physical_context(ContextID ctx,
                                                TreeStateLogger *logger,
                                                const FieldMask &capture_mask,
-                                               VersionInfo *version_info)
+                                       std::deque<RegionTreeNode*> &to_traverse)
     //--------------------------------------------------------------------------
     {
       switch (row_source->color.get_dim())
@@ -18347,29 +18319,21 @@ namespace Legion {
           assert(false);
       }
       logger->down();
-      LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
-      if (logical_states.has_entry(ctx))
+      if (current_versions.has_entry(ctx))
       {
         VersionManager &manager = get_current_version_manager(ctx);
-        manager.print_physical_state(this, capture_mask, to_traverse, logger,
-            version_info);
+        manager.print_physical_state(this, capture_mask, logger);
       }
       else
       {
         logger->log("No state");
       }
       logger->log("");
-      if (!to_traverse.empty())
+      if (to_traverse.size() > 0)
       {
-        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =
-              to_traverse.begin(); it != to_traverse.end(); it++)
-        {
-          std::map<ColorPoint,RegionNode*>::const_iterator 
-            finder = color_map.find(it->first);
-          if (finder != color_map.end())
-            finder->second->print_physical_context(ctx, logger, it->second,
-                version_info);
-        }
+        RegionTreeNode *node = to_traverse.front();
+        to_traverse.pop_front();
+        node->print_physical_context(ctx, logger, capture_mask, to_traverse);
       }
       logger->up();
     }
@@ -18566,28 +18530,16 @@ namespace Legion {
           assert(false);
       }
       logger->down();
-      LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
       if (logical_states.has_entry(ctx))
       {
         VersionManager &manager = get_current_version_manager(ctx);
-        manager.print_physical_state(this, capture_mask, to_traverse, logger);
+        manager.print_physical_state(this, capture_mask, logger);
       }
       else
       {
         logger->log("No state");
       }
       logger->log("");
-      if (!to_traverse.empty())
-      {
-        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =
-              to_traverse.begin(); it != to_traverse.end(); it++)
-        {
-          std::map<ColorPoint,RegionNode*>::const_iterator finder = 
-            color_map.find(it->first);
-          if (finder != color_map.end())
-            finder->second->dump_physical_context(ctx, logger, it->second);
-        }
-      }
       logger->up();
     }
 #endif 

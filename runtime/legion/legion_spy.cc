@@ -126,8 +126,7 @@ namespace Legion {
                   const char *task_name, long long uid, 
                   RegionTreeNode *node, ContextID ctx, bool before, 
                   bool pre_map, bool closing, bool logical, 
-                  FieldMask capture_mask, FieldMask working_mask,
-                  VersionInfo *version_info)
+                  FieldMask capture_mask, FieldMask working_mask)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -231,7 +230,17 @@ namespace Legion {
         if (logical)
           node->print_logical_context(ctx, logger, capture_mask);
         else
-          node->print_physical_context(ctx, logger, capture_mask, version_info);
+        {
+          RegionTreeNode *parent_node = rt->forest->get_node(req->parent);
+          std::deque<RegionTreeNode*> to_traverse;
+          while (node != parent_node)
+          {
+            to_traverse.push_front(node);
+            node = node->get_parent();
+          }
+          parent_node->print_physical_context(ctx, logger, capture_mask,
+              to_traverse);
+        }
 
         logger->finish_block();
       }

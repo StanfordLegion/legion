@@ -806,7 +806,6 @@ namespace Legion {
       void clone_to(const FieldMask &mask, VersionInfo &target_info) const;
     public:
       void print_physical_state(const FieldMask &capture_mask,
-          LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
                                 TreeStateLogger *logger);
     public:
       RegionTreeNode *const node;
@@ -943,9 +942,7 @@ namespace Legion {
     public:
       void print_physical_state(RegionTreeNode *node,
                                 const FieldMask &capture_mask,
-                          LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
-                                TreeStateLogger *logger,
-                                VersionInfo *version_info = NULL);
+                                TreeStateLogger *logger);
     protected:
       VersionState* create_new_version_state(VersionID vid);
     public:

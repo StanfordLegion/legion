@@ -469,6 +469,10 @@ namespace Legion {
                                       const UniqueID logical_context_uid,
                                       VersionInfo &version_info,
                                       std::set<RtEvent> &ready_events);
+#ifdef DEBUG_LEGION
+    protected:
+      virtual void capture_post_state(RegionRequirement *req, unsigned idx);
+#endif
     public:
       Runtime *const runtime;
     protected:

@@ -862,8 +862,7 @@ namespace Legion {
                                 long long uid, RegionTreeNode *node, 
                                 ContextID ctx, bool before, 
                                 bool pre_map, bool closing, bool logical, 
-                                FieldMask capture_mask, FieldMask working_mask,
-                                VersionInfo *version_info = NULL);
+                                FieldMask capture_mask, FieldMask working_mask);
     private:
       void println(const char *fmt, va_list args);
     public:

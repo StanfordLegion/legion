@@ -5128,8 +5128,13 @@ namespace Legion {
       stealable = false;
       // Also flush out physical regions
       for (unsigned idx = 0; idx < version_infos.size(); idx++)
+      {
         if (!virtual_mapped[idx] && !no_access_regions[idx])
           version_infos[idx].apply_mapping(map_applied_conditions);
+#ifdef DEBUG_LEGION
+        capture_post_state(&regions[idx], idx);
+#endif
+      }
       // We can now apply any arrives or releases
       if (!arrive_barriers.empty() || !grants.empty())
       {
@@ -6072,8 +6077,13 @@ namespace Legion {
       map_all_regions(point_termination, must_epoch_owner);
       // Flush out the state for any mapped region requirements
       for (unsigned idx = 0; idx < version_infos.size(); idx++)
+      {
         if (!virtual_mapped[idx] && !no_access_regions[idx])
           version_infos[idx].apply_mapping(map_applied_conditions);
+#ifdef DEBUG_LEGION
+        capture_post_state(&regions[idx], idx);
+#endif
+      }
       // If we succeeded in mapping and had no virtual mappings
       // then we are done mapping
       if (is_leaf() && !has_virtual_instances()) 
