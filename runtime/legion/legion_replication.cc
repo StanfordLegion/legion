@@ -3661,14 +3661,14 @@ namespace Legion {
     void AllGatherCollective::complete_exchange(void)
     //--------------------------------------------------------------------------
     {
-      // We are done
-      Runtime::trigger_event(done_event);
       // See if we have to send a message back to a
       // non-participating shard 
       if ((int(manager->total_shards) > shard_collective_participating_shards)
           && (int(local_shard) < int(manager->total_shards - 
                                       shard_collective_participating_shards)))
         send_stage(-1);
+      // We are done
+      Runtime::trigger_event(done_event);
     }
 
     /////////////////////////////////////////////////////////////
