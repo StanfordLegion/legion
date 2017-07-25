@@ -7059,6 +7059,9 @@ namespace Legion {
                                          creation_barrier);
         // Signal that we're done our creation
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        // Also have to wait for creation to finish on all shards because 
+        // any shard can handle requests for sub-regions of a partition
+        creation_barrier.lg_wait();
       }
       Runtime::advance_barrier(creation_barrier);
       part_op->initialize_equal_partition(this, pid, granularity);
@@ -7191,6 +7194,9 @@ namespace Legion {
                                          creation_barrier);
         // Signal that we're done our creation
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        // Also have to wait for creation to finish on all shards because 
+        // any shard can handle requests for sub-regions of a partition
+        creation_barrier.lg_wait();
       }
       Runtime::advance_barrier(creation_barrier);
       part_op->initialize_union_partition(this, pid, handle1, handle2);
@@ -7322,6 +7328,9 @@ namespace Legion {
                                          creation_barrier);
         // Signal that we are done our creation
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        // Also have to wait for creation to finish on all shards because 
+        // any shard can handle requests for sub-regions of a partition
+        creation_barrier.lg_wait();
       }
       Runtime::advance_barrier(creation_barrier);
       part_op->initialize_intersection_partition(this, pid, handle1, handle2);
@@ -7450,6 +7459,9 @@ namespace Legion {
                                          creation_barrier);
         // Signal that we're done with our creation
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        // Also have to wait for creation to finish on all shards because 
+        // any shard can handle requests for sub-regions of a partition
+        creation_barrier.lg_wait();
       }
       Runtime::advance_barrier(creation_barrier);
       part_op->initialize_difference_partition(this, pid, handle1, handle2);
@@ -7669,6 +7681,9 @@ namespace Legion {
                                          creation_barrier);
         // Signal we are done with the creation
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        // Also have to wait for creation to finish on all shards because 
+        // any shard can handle requests for sub-regions of a partition
+        creation_barrier.lg_wait();
       }
       Runtime::advance_barrier(creation_barrier);
       part_op->initialize_restricted_partition(this, pid, transform, 
@@ -7774,6 +7789,9 @@ namespace Legion {
                                          creation_barrier);
         // Signal that we are done our creation
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        // Also have to wait for creation to finish on all shards because 
+        // any shard can handle requests for sub-regions of a partition
+        creation_barrier.lg_wait();
       }
       Runtime::advance_barrier(creation_barrier);
       part_op->initialize_by_field(this, pending_partition_barrier,
@@ -7907,6 +7925,9 @@ namespace Legion {
                                          creation_barrier);
         // Signal that we are done with our creation
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        // Also have to wait for creation to finish on all shards because 
+        // any shard can handle requests for sub-regions of a partition
+        creation_barrier.lg_wait();
       }
       Runtime::advance_barrier(creation_barrier);
       part_op->initialize_by_image(this, index_partition_allocator_shard,
@@ -8039,6 +8060,9 @@ namespace Legion {
                                          creation_barrier);
         // Signal that we are done with the creation
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        // Also have to wait for creation to finish on all shards because 
+        // any shard can handle requests for sub-regions of a partition
+        creation_barrier.lg_wait();
       }
       Runtime::advance_barrier(creation_barrier);
       part_op->initialize_by_image_range(this, index_partition_allocator_shard,
@@ -8179,6 +8203,9 @@ namespace Legion {
                                          creation_barrier);
         // Signal that we are done with our creation
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        // Also have to wait for creation to finish on all shards because 
+        // any shard can handle requests for sub-regions of a partition
+        creation_barrier.lg_wait();
       }
       Runtime::advance_barrier(creation_barrier);
       part_op->initialize_by_preimage(this, index_partition_allocator_shard,
@@ -8312,6 +8339,9 @@ namespace Legion {
                                          creation_barrier);
         // Signal that we are done with our creation
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        // Also have to wait for creation to finish on all shards because 
+        // any shard can handle requests for sub-regions of a partition
+        creation_barrier.lg_wait();
       }
       Runtime::advance_barrier(creation_barrier);
       part_op->initialize_by_preimage_range(this, 
@@ -8448,6 +8478,9 @@ namespace Legion {
                                          creation_barrier, partition_ready);
         // Signal that we are done with our creation
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        // Also have to wait for creation to finish on all shards because 
+        // any shard can handle requests for sub-regions of a partition
+        creation_barrier.lg_wait();
       }
       Runtime::advance_barrier(creation_barrier);
       // Update our allocation shard
