@@ -11353,7 +11353,10 @@ namespace Legion {
               it->first->end_dependence_analysis();
             }
           }
-          else if (IS_REDUCE(user.usage) && !proj_info.is_projecting())
+          else if (IS_REDUCE(user.usage) && (!proj_info.is_projecting() ||
+                // Special case for depth 0 region projections
+                ((proj_info.projection_type == REG_PROJECTION) && 
+                 (proj_info.projection->depth == 0))))
           {
             // Figure out which advances need to come to this level
             FieldMask advance_here =
