@@ -471,7 +471,9 @@ namespace Legion {
                                       std::set<RtEvent> &ready_events);
 #ifdef DEBUG_LEGION
     protected:
-      virtual void capture_post_state(RegionRequirement *req, unsigned idx);
+      virtual void dump_physical_state(RegionRequirement *req, unsigned idx,
+                                       bool before = false,
+                                       bool closing = false);
 #endif
     public:
       Runtime *const runtime;

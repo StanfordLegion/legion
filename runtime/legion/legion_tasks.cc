@@ -5132,7 +5132,7 @@ namespace Legion {
         if (!virtual_mapped[idx] && !no_access_regions[idx])
           version_infos[idx].apply_mapping(map_applied_conditions);
 #ifdef DEBUG_LEGION
-        capture_post_state(&regions[idx], idx);
+        dump_physical_state(&regions[idx], idx);
 #endif
       }
       // We can now apply any arrives or releases
@@ -6081,7 +6081,7 @@ namespace Legion {
         if (!virtual_mapped[idx] && !no_access_regions[idx])
           version_infos[idx].apply_mapping(map_applied_conditions);
 #ifdef DEBUG_LEGION
-        capture_post_state(&regions[idx], idx);
+        dump_physical_state(&regions[idx], idx);
 #endif
       }
       // If we succeeded in mapping and had no virtual mappings

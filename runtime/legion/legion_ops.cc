@@ -1440,7 +1440,8 @@ namespace Legion {
 
 #ifdef DEBUG_LEGION
     //--------------------------------------------------------------------------
-    void Operation::capture_post_state(RegionRequirement *req, unsigned idx)
+    void Operation::dump_physical_state(RegionRequirement *req, unsigned idx,
+                                        bool before, bool closing)
     //--------------------------------------------------------------------------
     {
       InnerContext *context = find_physical_context(idx);
@@ -1451,8 +1452,8 @@ namespace Legion {
       TreeStateLogger::capture_state(runtime, req, idx,
                                      get_logging_name(), unique_op_id,
                                      child_node, ctx.get_id(),
-                                     false/*before*/, false/*premap*/,
-                                     false/*closing*/, false/*logical*/,
+                                     before/*before*/, false/*premap*/,
+                                     closing/*closing*/, false/*logical*/,
                    FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
     }
 #endif
@@ -2438,7 +2439,7 @@ namespace Legion {
       // We're done so apply our mapping changes
       version_info.apply_mapping(map_applied_conditions);
 #ifdef DEBUG_LEGION
-      capture_post_state(&requirement, 0);
+      dump_physical_state(&requirement, 0);
 #endif
       // Update our physical instance with the newly mapped instances
       // Have to do this before triggering the mapped event
@@ -3961,8 +3962,8 @@ namespace Legion {
           src_versions[idx].apply_mapping(map_applied_conditions);
         dst_versions[idx].apply_mapping(map_applied_conditions); 
 #ifdef DEBUG_LEGION
-      capture_post_state(&src_requirements[idx], idx);
-      capture_post_state(&dst_requirements[idx], idx + src_requirements.size());
+      dump_physical_state(&src_requirements[idx], idx);
+      dump_physical_state(&dst_requirements[idx], idx + src_requirements.size());
 #endif
       }
       ApEvent copy_complete_event = Runtime::merge_events(copy_complete_events);
@@ -6986,6 +6987,9 @@ namespace Legion {
                                   close_info.version_info);
       const LegionMap<ProjectionEpochID,FieldMask>::aligned *projection_epochs =
         &(projection_info.get_projection_epochs());
+#ifdef DEBUG_LEGION
+      dump_physical_state(&requirement, 0, true, true);
+#endif
       runtime->forest->physical_perform_close(requirement,
                                               close_info.version_info,
                                               this, 0/*idx*/, 
@@ -7003,6 +7007,9 @@ namespace Legion {
                                               );
       // It is important that we apply our version info when we are done
       close_info.version_info.apply_mapping(ready_events); 
+#ifdef DEBUG_LEGION
+      dump_physical_state(&requirement, 0, false, true);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -7107,6 +7114,9 @@ namespace Legion {
       assert(completion_event.exists());
       assert(chosen_instances.empty());
 #endif
+#ifdef DEBUG_LEGION
+      dump_physical_state(&requirement, 0, true, true);
+#endif
       // See if we are restricted or not and if not find our valid instances 
       if (!restrict_info.has_restrictions())
       {
@@ -7196,6 +7206,9 @@ namespace Legion {
                                               chosen_instances);
       }
       version_info.apply_mapping(map_applied_conditions);
+#ifdef DEBUG_LEGION
+      dump_physical_state(&requirement, 0, false, true);
+#endif
       // Remove profiling our guard and trigger the profiling event if necessary
       if ((__sync_add_and_fetch(&outstanding_profiling_requests, -1) == 0) &&
           profiling_reported.exists())
@@ -8305,7 +8318,7 @@ namespace Legion {
                                               );
       version_info.apply_mapping(map_applied_conditions);
 #ifdef DEBUG_LEGION
-      capture_post_state(&requirement, 0);
+      dump_physical_state(&requirement, 0);
 #endif
       // Get all the events that need to happen before we can consider
       // ourselves acquired: reference ready and all synchronization
@@ -8945,7 +8958,7 @@ namespace Legion {
                                               );
       version_info.apply_mapping(map_applied_conditions);
 #ifdef DEBUG_LEGION
-      capture_post_state(&requirement, 0);
+      dump_physical_state(&requirement, 0);
 #endif
       std::set<ApEvent> release_preconditions;
       for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
@@ -12255,7 +12268,7 @@ namespace Legion {
         }
         version_info.apply_mapping(map_applied_conditions);
 #ifdef DEBUG_LEGION
-      capture_post_state(&requirement, 0);
+      dump_physical_state(&requirement, 0);
 #endif
         // Clear value and value size since the forest ended up 
         // taking ownership of them
@@ -12345,7 +12358,7 @@ namespace Legion {
       }
       version_info.apply_mapping(map_applied_conditions);
 #ifdef DEBUG_LEGION
-      capture_post_state(&requirement, 0);
+      dump_physical_state(&requirement, 0);
 #endif
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
