@@ -3135,7 +3135,7 @@ namespace Legion {
                      LegionMap<ShardID,FieldMask>::aligned &needed_shards) const
     //--------------------------------------------------------------------------
     {
-      if (!projections.empty())
+      if (projections.empty())
         return;
       for (std::map<std::pair<ProjectionFunction*,ShardingFunction*>,
                LegionMap<IndexSpaceNode*,FieldMask>::aligned>::const_iterator
