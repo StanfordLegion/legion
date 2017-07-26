@@ -2947,7 +2947,7 @@ namespace Legion {
             }
           case 3:
             {
-              logger->log("Color %d   Mask %s", 
+              logger->log("Color (%d,%d,%d)   Mask %s", 
                           it->first[0], it->first[1],
                           it->first[2], mask_buffer);
               break;
