@@ -8664,13 +8664,10 @@ namespace Legion {
     ProjectionFunction::ProjectionFunction(ProjectionID pid, 
                                            ProjectionFunctor *func)
       : depth(func->get_depth()), is_exclusive(func->is_exclusive()),
-        is_functional(func->is_functional()), projection_id(pid), functor(func)
+        is_functional(func->is_functional()), projection_id(pid), functor(func),
+        projection_reservation(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
-      if (is_exclusive)
-        projection_reservation = Reservation::create_reservation();
-      else
-        projection_reservation = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
@@ -8689,8 +8686,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       delete functor;
-      if (projection_reservation.exists())
-        projection_reservation.destroy_reservation();
+      projection_reservation.destroy_reservation();
+      projection_reservation = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
@@ -8702,7 +8699,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(req.handle_type != SINGULAR);
 #endif
-      if (projection_reservation.exists())
+      if (!is_exclusive)
       {
         AutoLock p_lock(projection_reservation);
         if (req.handle_type == PART_PROJECTION)
@@ -8751,7 +8748,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(req.handle_type != SINGULAR);
 #endif
-      if (projection_reservation.exists())
+      if (!is_exclusive)
       {
         AutoLock p_lock(projection_reservation);
         if (req.handle_type == PART_PROJECTION)
@@ -8825,7 +8822,7 @@ namespace Legion {
       assert(req.handle_type != SINGULAR);
       assert(mappable != NULL);
 #endif
-      if (projection_reservation.exists())
+      if (!is_exclusive)
       {
         AutoLock p_lock(projection_reservation);
         if (req.handle_type == PART_PROJECTION)

@@ -6284,7 +6284,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(closed_local_node == closed_tree);
+      if (closed_local_node != NULL)
+        assert(closed_local_node == closed_tree);
 #endif
       // See if we need to do a sharding test for control replication
       if ((closed_local_node != NULL) && 
