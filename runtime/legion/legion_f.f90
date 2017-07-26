@@ -15,6 +15,11 @@ module legion_fortran
     integer(c_int), parameter :: SIMULTANEOUS = 2
     integer(c_int), parameter :: RELAXED = 3
     
+    !legion_file_mode_t
+    integer(c_int), parameter :: LEGION_FILE_READ_ONLY = 0
+    integer(c_int), parameter :: LEGION_FILE_READ_WRITE = 0
+    integer(c_int), parameter :: LEGION_FILE_CREATE = 0
+    
     ! C NEW_OPAQUE_TYPE_F
 #define NEW_OPAQUE_TYPE_F(T) type, bind(C) :: T; type(c_ptr) :: impl; end type T
     NEW_OPAQUE_TYPE_F(legion_runtime_f_t)
@@ -292,6 +297,16 @@ module legion_fortran
             integer(c_long), value, intent(in)                  :: tag
         end function
         
+        ! @see Legion::TaskLauncher::~TaskLauncher()
+        subroutine legion_task_launcher_destroy_f(handle) &
+                       bind(C, name="legion_task_launcher_destroy")
+            use iso_c_binding
+            import legion_task_launcher_f_t
+            implicit none
+            
+            type(legion_task_launcher_f_t), value, intent(in) :: handle
+        end subroutine
+        
         ! @see Legion::Runtime::execute_task()
         function legion_task_launcher_execute_f(runtime, ctx, launcher) &
                      bind(C, name="legion_task_launcher_execute")
@@ -363,6 +378,16 @@ module legion_fortran
             integer(c_int), value, intent(in)                   :: id
             integer(c_long), value, intent(in)                  :: tag
         end function
+        
+        ! @see Legion::IndexTaskLauncher::~IndexTaskLauncher()
+        subroutine legion_index_launcher_destroy_f(handle) &
+                       bind(C, name="legion_index_launcher_destroy")
+            use iso_c_binding
+            import legion_index_launcher_f_t
+            implicit none
+            
+            type(legion_index_launcher_f_t), value, intent(in) :: handle
+        end subroutine
         
         ! @see Legion::Runtime::execute_index_space(Context, const IndexTaskLauncher &)
         function legion_index_launcher_execute_f(runtime, ctx, launcher) &
@@ -539,6 +564,19 @@ module legion_fortran
             
             type(legion_domain_f_t)                  :: legion_task_get_index_domain_f
             type(legion_task_f_t), value, intent(in) :: task
+        end function
+        
+        ! @see Legion::Task::regions
+        function legion_task_get_region_f(task, idx) &
+                     bind(C, name="legion_task_get_region")
+            use iso_c_binding
+            import legion_region_requirement_f_t
+            import legion_task_f_t
+            implicit none
+            
+            type(legion_region_requirement_f_t)        :: legion_task_get_region_f
+            type(legion_task_f_t), value, intent(in) :: task
+            integer(c_int), value, intent(in)        :: idx
         end function
         
         ! -----------------------------------------------------------------------
@@ -931,6 +969,21 @@ module legion_fortran
         end function
         
         ! -----------------------------------------------------------------------
+        ! Region Requirement Operations
+        ! -----------------------------------------------------------------------
+        ! @see Legion::RegionRequirement::privilege_fields
+        function legion_region_requirement_get_privilege_field_f(handle, idx) &
+                     bind (C, name="legion_region_requirement_get_privilege_field")
+            use iso_c_binding
+            import legion_region_requirement_f_t
+            implicit none
+            
+            integer(c_int)                                       :: legion_region_requirement_get_privilege_field_f
+            type(legion_region_requirement_f_t), value, intent(in) :: handle
+            integer(c_int), value, intent(in)                    :: idx
+        end function 
+        
+        ! -----------------------------------------------------------------------
         ! Physical Data Operations
         ! -----------------------------------------------------------------------
         function legion_get_physical_region_by_id_f(regionptr, id, num_regions) &
@@ -1115,6 +1168,177 @@ module legion_fortran
             type(c_ptr), value, intent(in)                        :: src
             integer(c_size_t), value, intent(in)                  :: bytes
         end subroutine 
+        
+        ! -----------------------------------------------------------------------
+        ! File Operations
+        ! -----------------------------------------------------------------------
+        function legion_field_map_create_f() &
+                     bind(C, name="legion_field_map_create")
+            use iso_c_binding
+            import legion_field_map_f_t
+            implicit none
+            
+            type(legion_field_map_f_t) :: legion_field_map_create_f
+        end function
+        
+        subroutine legion_field_map_destroy_f(handle) &
+                       bind(C, name="legion_field_map_destroy")
+            use iso_c_binding
+            import legion_field_map_f_t
+            implicit none
+            
+            type(legion_field_map_f_t), value, intent(in) :: handle
+        end subroutine
+        
+        subroutine legion_field_map_insert_f(handle, key, value) &
+                       bind(C, name="legion_field_map_insert")
+            use iso_c_binding
+            import legion_field_map_f_t
+            implicit none
+            
+            type(legion_field_map_f_t), value, intent(in) :: handle
+            integer(c_int), value, intent(in)             :: key
+            type(c_ptr), value, intent(in)                :: value
+        end subroutine
+        
+        ! @see Legion::Runtime::attach_hdf5()
+        function legion_runtime_attach_hdf5_f(runtime, ctx, filename, handle, parent, field_map, mode) &
+                     bind(C, name="legion_runtime_attach_hdf5")
+            use iso_c_binding
+            import legion_physical_region_f_t
+            import legion_runtime_f_t
+            import legion_context_f_t
+            import legion_logical_region_f_t
+            import legion_field_map_f_t
+            implicit none
+            
+            type(legion_physical_region_f_t)                   :: legion_runtime_attach_hdf5_f
+            type(legion_runtime_f_t), value, intent(in)        :: runtime
+            type(legion_context_f_t), value, intent(in)        :: ctx
+            type(c_ptr), value, intent(in)                     :: filename
+            type(legion_logical_region_f_t), value, intent(in) :: handle
+            type(legion_logical_region_f_t), value, intent(in) :: parent
+            type(legion_field_map_f_t), value, intent(in)      :: field_map
+            integer(c_int), value, intent(in)                  :: mode
+        end function
+        
+        ! @see Legion::Runtime::detach_hdf5()
+        subroutine legion_runtime_detach_hdf5_f(runtime, ctx, region) &
+                       bind(C, name="legion_runtime_detach_hdf5")
+            use iso_c_binding
+            import legion_runtime_f_t
+            import legion_context_f_t
+            import legion_physical_region_f_t
+            implicit none
+            
+            type(legion_runtime_f_t), value, intent(in)         :: runtime
+            type(legion_context_f_t), value, intent(in)         :: ctx
+            type(legion_physical_region_f_t), value, intent(in) :: region
+        end subroutine
+        ! -----------------------------------------------------------------------
+        ! Copy Operations
+        ! -----------------------------------------------------------------------
+        ! @see Legion::CopyLauncher::CopyLauncher()
+        function legion_copy_launcher_create_f(pred, id, launcher_tag) &
+                     bind(C, name="legion_copy_launcher_create")
+            use iso_c_binding
+            import legion_copy_launcher_f_t
+            import legion_predicate_f_t
+            implicit none
+            
+            type(legion_copy_launcher_f_t) :: legion_copy_launcher_create_f
+            type(legion_predicate_f_t), value, intent(in) :: pred
+            integer(c_int), value, intent(in)             :: id
+            integer(c_long), value, intent(in)            :: launcher_tag
+        end function
+        
+        ! @see Legion::CopyLauncher::~CopyLauncher()
+        subroutine legion_copy_launcher_destroy_f(handle) &
+                       bind(C, name="legion_copy_launcher_destroy")
+            use iso_c_binding
+            import legion_copy_launcher_f_t
+            implicit none
+            
+            type(legion_copy_launcher_f_t), value, intent(in) :: handle
+        end subroutine
+        
+        ! @see Legion::Runtime::issue_copy_operation()
+        subroutine legion_copy_launcher_execute_f(runtime, ctx, launcher) &
+                       bind(C, name="legion_copy_launcher_execute")
+            use iso_c_binding
+            import legion_runtime_f_t
+            import legion_context_f_t
+            import legion_copy_launcher_f_t
+            implicit none
+            
+            type(legion_runtime_f_t), value, intent(in)       :: runtime
+            type(legion_context_f_t), value, intent(in)       :: ctx
+            type(legion_copy_launcher_f_t), value, intent(in) :: launcher
+        end subroutine
+        
+        ! @see Legion::CopyLauncher::add_copy_requirements()
+        function legion_copy_launcher_add_src_region_requirement_lr_f(launcher, handle, priv, prop, &
+                                                                      parent, tag, verified) &
+                     bind(C, name="legion_copy_launcher_add_src_region_requirement_logical_region")
+            use iso_c_binding
+            import legion_copy_launcher_f_t
+            import legion_logical_region_f_t
+            implicit none
+            
+            integer(c_int) :: legion_copy_launcher_add_src_region_requirement_lr_f
+            type(legion_copy_launcher_f_t), value, intent(in)  :: launcher
+            type(legion_logical_region_f_t), value, intent(in) :: handle
+            integer(c_int), value, intent(in)                  :: priv
+            integer(c_int), value, intent(in)                  :: prop
+            type(legion_logical_region_f_t), value, intent(in) :: parent
+            integer(c_long), value, intent(in)                 :: tag
+            logical(c_bool), value, intent(in)                 :: verified
+        end function
+        
+        ! @see Legion::CopyLauncher::add_copy_requirements()
+        function legion_copy_launcher_add_dst_region_requirement_lr_f(launcher, handle, priv, prop, &
+                                                                      parent, tag, verified) &
+                     bind(C, name="legion_copy_launcher_add_dst_region_requirement_logical_region")
+            use iso_c_binding
+            import legion_copy_launcher_f_t
+            import legion_logical_region_f_t
+            implicit none
+            
+            integer(c_int) :: legion_copy_launcher_add_dst_region_requirement_lr_f
+            type(legion_copy_launcher_f_t), value, intent(in)  :: launcher
+            type(legion_logical_region_f_t), value, intent(in) :: handle
+            integer(c_int), value, intent(in)                  :: priv
+            integer(c_int), value, intent(in)                  :: prop
+            type(legion_logical_region_f_t), value, intent(in) :: parent
+            integer(c_long), value, intent(in)                 :: tag
+            logical(c_bool), value, intent(in)                 :: verified
+        end function
+        
+        ! @see Legion::CopyLauncher::add_src_field()
+        subroutine legion_copy_launcher_add_src_field_f(launcher, idx, fid, inst) &
+                       bind(C, name="legion_copy_launcher_add_src_field")
+            use iso_c_binding
+            import legion_copy_launcher_f_t
+            implicit none
+            
+            type(legion_copy_launcher_f_t), value, intent(in) :: launcher
+            integer(c_int), value, intent(in)                 :: idx
+            integer(c_int), value, intent(in)                 :: fid
+            logical(c_bool), value, intent(in)                :: inst
+        end subroutine
+        
+        ! @see Legion::CopyLauncher::add_dst_field()
+        subroutine legion_copy_launcher_add_dst_field_f(launcher, idx, fid, inst) &
+                       bind(C, name="legion_copy_launcher_add_dst_field")
+            use iso_c_binding
+            import legion_copy_launcher_f_t
+            implicit none
+            
+            type(legion_copy_launcher_f_t), value, intent(in) :: launcher
+            integer(c_int), value, intent(in)                 :: idx
+            integer(c_int), value, intent(in)                 :: fid
+            logical(c_bool), value, intent(in)                :: inst
+        end subroutine
         
         ! -----------------------------------------------------------------------
         ! Combined Operations
