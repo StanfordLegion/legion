@@ -110,6 +110,9 @@ class PerfMapper : public DefaultMapper
                           const MapTaskInput&  input,
                                 MapTaskOutput& output);
 
+    virtual bool default_policy_select_close_virtual(const MapperContext ctx,
+                                                     const Close &close);
+
   private:
     typedef vector<vector<PhysicalInstance> > CachedMapping;
     typedef vector<LayoutConstraintSet> CachedConstraints;
@@ -311,6 +314,12 @@ void PerfMapper::map_task(const MapperContext  ctx,
     DefaultMapper::map_task(ctx, task, input, output);
 }
 
+bool PerfMapper::default_policy_select_close_virtual(const MapperContext ctx,
+                                                     const Close &close)
+{
+  return true;
+}
+
 static void register_mappers(Machine machine, Runtime *runtime,
                              const set<Processor> &local_procs)
 {
@@ -433,7 +442,8 @@ static void parse_arguments(char** argv, int argc, unsigned& num_tasks,
                             unsigned& num_partitions, unsigned& tree_depth,
                             unsigned& num_fields, unsigned& dims,
                             unsigned& blast, bool& alternate,
-                            bool& single_launch, bool& block)
+                            bool& alternate_loop, bool& single_launch,
+                            bool& block)
 {
   int i = 1;
   while (i < argc)
@@ -447,6 +457,7 @@ static void parse_arguments(char** argv, int argc, unsigned& num_tasks,
     else if (strcmp(argv[i], "-D") == 0) dims = atoi(argv[++i]);
     else if (strcmp(argv[i], "-B") == 0) blast = atoi(argv[++i]);
     else if (strcmp(argv[i], "-a") == 0) alternate = true;
+    else if (strcmp(argv[i], "-A") == 0) alternate_loop = true;
     else if (strcmp(argv[i], "-s") == 0) single_launch = true;
     else if (strcmp(argv[i], "-b") == 0) block = true;
     ++i;
@@ -531,10 +542,11 @@ void top_level_task(const Task *task,
   unsigned dims = 1;
   unsigned blast = 1;
   bool alternate = false;
+  bool alternate_loop = false;
   bool single_launch = false;
   bool block = false;
-  const int pattern_length = 9;
-  const int pattern[] = {0, 1, 2, 2, 1, 2, 0, 2, 1};
+  const int pattern_length = 8;
+  const int pattern[] = {0, 2, 2, 1, 2, 0, 2, 1};
 
   {
     const InputArgs &command_args = Runtime::get_input_args();
@@ -542,7 +554,7 @@ void top_level_task(const Task *task,
     int argc = command_args.argc;
     parse_arguments(argv, argc, num_tasks, num_loops, num_regions,
         num_partitions, tree_depth, num_fields, dims, blast,
-        alternate, single_launch, block);
+        alternate, alternate_loop, single_launch, block);
     if (num_regions == 0) num_partitions = 1;
     if (num_regions > 0 && num_partitions > 0 && tree_depth == 0)
     {
@@ -574,6 +586,11 @@ void top_level_task(const Task *task,
           "Number of fields should be divisible by blast factor.\n");
       exit(-1);
     }
+    if (alternate && alternate_loop)
+    {
+      fprintf(stderr, "Two alternate modes cannot coexist.\n");
+      exit(-1);
+    }
   }
 
   // TODO: Single task launches with root regions should be supported
@@ -591,7 +608,9 @@ void top_level_task(const Task *task,
   printf("* Number of Partitions per Region : %1d *\n", num_partitions);
   printf("* Depth of Region Trees :       %5u *\n", tree_depth);
   printf("* Number of Fields      :       %5u *\n", num_fields);
-  printf("* Alternate disjoint/aliased :    %s *\n", alternate ? "yes" : " no");
+  printf("* Alternate Partitions  :         %s *\n", alternate ? "yes" : " no");
+  printf("* Alternate Iterations  :         %s *\n",
+      alternate_loop ? "yes" : " no");
   printf("* Use Single Launch     :         %s *\n",
       single_launch ? "yes" : " no");
   printf("* Number of Slices      :       %5u *\n", num_slices);
@@ -755,7 +774,8 @@ void top_level_task(const Task *task,
                 lp = runtime->get_logical_partition_by_color(ctx, lr, p);
             }
 
-            if (alternate && pattern[p % pattern_length] == 2)
+            if ((alternate && pattern[p % pattern_length] == 2) ||
+                (alternate_loop && pattern[l % pattern_length] == 2))
             {
               for (unsigned k = 0; k < num_fields; ++k)
               {
@@ -772,7 +792,8 @@ void top_level_task(const Task *task,
               {
                 PrivilegeMode priv =
                   !alternate || pattern[p % pattern_length] == 0 ?
-                  READ_WRITE : READ_ONLY;
+                  (!alternate_loop || pattern[l % pattern_length] == 0 ?
+                   READ_WRITE : READ_ONLY) : READ_ONLY;
                 RegionRequirement req(lr, priv, EXCLUSIVE, lrs[r]);
                 for (unsigned k = 0; k < fid_block; ++k)
                 {
@@ -800,7 +821,8 @@ void top_level_task(const Task *task,
         if (block && l == 0 && p == 0) launcher.add_wait_barrier(next_barrier);
         for (unsigned r = 0; r < num_regions; ++r)
         {
-          if (alternate && pattern[p % pattern_length] == 2)
+          if ((alternate && pattern[p % pattern_length] == 2) ||
+              (alternate_loop && pattern[l % pattern_length] == 2))
           {
             for (unsigned k = 0; k < num_fields; ++k)
             {
@@ -818,7 +840,8 @@ void top_level_task(const Task *task,
             {
               PrivilegeMode priv =
                 !alternate || pattern[p % pattern_length] == 0 ?
-                READ_WRITE : READ_ONLY;
+                (!alternate_loop || pattern[l % pattern_length] == 0 ?
+                 READ_WRITE : READ_ONLY) : READ_ONLY;
               RegionRequirement req(lps[r][p], pid, priv, EXCLUSIVE,
                   lrs[r]);
               for (unsigned k = 0; k < fid_block; ++k)
