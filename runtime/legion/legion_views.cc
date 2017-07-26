@@ -4947,6 +4947,101 @@ namespace Legion {
       return NULL;
     }
 
+    //--------------------------------------------------------------------------
+    void CompositeBase::print_view_state(const FieldMask &capture_mask,
+                                         TreeStateLogger* logger,
+                                         int current_nesting,
+                                         int max_nesting)
+    //--------------------------------------------------------------------------
+    {
+      {
+        char *mask_string = dirty_mask.to_string();
+        logger->log("Dirty Mask: %s", mask_string);
+        free(mask_string);
+      }
+      {
+        char *mask_string = reduction_mask.to_string();
+        logger->log("Reduction Mask: %s", mask_string);
+        free(mask_string);
+      }
+      {
+        unsigned num_valid = 0;
+        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
+              valid_views.begin(); it != valid_views.end(); it++)
+        {
+          if (it->second * capture_mask)
+            continue;
+          num_valid++;
+        }
+        logger->log("Valid Instances (%d)", num_valid);
+        if (num_valid > 0)
+        {
+          logger->down();
+          for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
+                valid_views.begin(); it != valid_views.end(); it++)
+          {
+            FieldMask overlap = it->second & capture_mask;
+            if (!overlap)
+              continue;
+            assert(it->first->as_instance_view()->is_materialized_view());
+            MaterializedView *current = 
+              it->first->as_instance_view()->as_materialized_view();
+            char *valid_mask = overlap.to_string();
+            logger->log("Instance " IDFMT "   Memory " IDFMT "   Mask %s",
+                        current->manager->get_instance().id, 
+                        current->manager->get_memory().id, valid_mask);
+            free(valid_mask);
+          }
+          logger->up();
+        }
+      }
+      {
+        unsigned num_valid = 0;
+        for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
+              reduction_views.begin(); it != 
+              reduction_views.end(); it++)
+        {
+          if (it->second * capture_mask)
+            continue;
+          num_valid++;
+        }
+        logger->log("Valid Reduction Instances (%d)", num_valid);
+        if (num_valid > 0)
+        {
+          logger->down();
+          for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
+                reduction_views.begin(); it !=
+                reduction_views.end(); it++)
+          {
+            FieldMask overlap = it->second & capture_mask;
+            if (!overlap)
+              continue;
+            char *valid_mask = overlap.to_string();
+            logger->log("Reduction Instance " IDFMT "   Memory " IDFMT
+                        "  Mask %s",
+                        it->first->manager->get_instance().id, 
+                        it->first->manager->get_memory().id, valid_mask);
+            free(valid_mask);
+          }
+          logger->up();
+        }
+      }
+      for (LegionMap<CompositeNode*,FieldMask>::aligned::iterator it =
+            children.begin(); it !=
+            children.end(); it++)
+      {
+        {
+          char *mask_string = it->second.to_string();
+          logger->log("Field Mask: %s", mask_string);
+          free(mask_string);
+        }
+        logger->down();
+        it->first->print_view_state(
+                            capture_mask, logger, current_nesting, max_nesting);
+        logger->up();
+      }
+    }
+
     /////////////////////////////////////////////////////////////
     // CompositeView
     /////////////////////////////////////////////////////////////
@@ -5915,6 +6010,54 @@ namespace Legion {
       const DeferCompositeViewRefArgs *ref_args = 
         (const DeferCompositeViewRefArgs*)args;
       ref_args->dc->add_nested_resource_ref(ref_args->did);
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeView::print_view_state(const FieldMask &capture_mask,
+                                         TreeStateLogger* logger,
+                                         int current_nesting,
+                                         int max_nesting)
+    //--------------------------------------------------------------------------
+    {
+      CompositeBase::print_view_state(
+                            capture_mask, logger, current_nesting, max_nesting);
+      int num_nested_views = 0;
+      for (LegionMap<CompositeView*,FieldMask>::aligned::iterator it =
+            nested_composite_views.begin(); it !=
+            nested_composite_views.end(); it++)
+      {
+        if (it->second * capture_mask)
+          continue;
+        num_nested_views++;
+      }
+      if (num_nested_views > 0)
+      {
+        if (current_nesting < max_nesting)
+        {
+          logger->log("---- Nested Instances (Depth: %d) ----",
+              current_nesting + 1);
+          for (LegionMap<CompositeView*,FieldMask>::aligned::iterator it =
+                nested_composite_views.begin(); it !=
+                nested_composite_views.end(); it++)
+          {
+            {
+              char *mask_string = it->second.to_string();
+              logger->log("Field Mask: %s", mask_string);
+              free(mask_string);
+            }
+            logger->down();
+            it->first->print_view_state(
+                          capture_mask, logger, current_nesting + 1, max_nesting);
+            logger->up();
+          }
+          logger->log("--------------------------------------");
+        }
+        else
+        {
+          logger->log("--- Instances of Depth > %d Elided ---",
+              current_nesting);
+        }
+      }
     }
 
     /////////////////////////////////////////////////////////////

@@ -4026,7 +4026,19 @@ namespace Legion {
           if (!overlap)
             continue;
           if (it->first->is_deferred_view())
+          {
+            CompositeView *composite_view = it->first->as_composite_view();
+            if (composite_view != NULL)
+            {
+              logger->log("=== Composite Instance ===");
+              logger->down();
+              // We go only two levels down into the nested composite views
+              composite_view->print_view_state(capture_mask, logger, 0, 2);
+              logger->up();
+              logger->log("==========================");
+            }
             continue;
+          }
 #ifdef DEBUG_LEGION
           assert(it->first->as_instance_view()->is_materialized_view());
 #endif

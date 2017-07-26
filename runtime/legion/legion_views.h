@@ -1127,6 +1127,13 @@ namespace Legion {
                                     const FieldMask &up_mask,
                   LegionMap<LogicalView*,FieldMask>::aligned &valid_views,
                                     bool needs_lock = true) = 0;
+#ifdef DEBUG_LEGION
+    public:
+      virtual void print_view_state(const FieldMask &capture_mask,
+                                    TreeStateLogger* logger,
+                                    int current_nesting,
+                                    int max_nesting);
+#endif
     public:
       CompositeNode* find_child_node(RegionTreeNode *child);
     private:
@@ -1255,6 +1262,13 @@ namespace Legion {
       RtEvent defer_add_reference(DistributedCollectable *dc, 
                                   RtEvent precondition) const;
       static void handle_deferred_view_ref(const void *args);
+#ifdef DEBUG_LEGION
+    public:
+      virtual void print_view_state(const FieldMask &capture_mask,
+                                    TreeStateLogger* logger,
+                                    int current_nesting,
+                                    int max_nesting);
+#endif
     public:
       // The path version info for this composite instance
       DeferredVersionInfo *const version_info;
