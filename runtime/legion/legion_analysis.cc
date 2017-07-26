@@ -4007,6 +4007,13 @@ namespace Legion {
         logger->log("Dirty Mask: %s",dirty_buffer);
         free(dirty_buffer);
       }
+      // Reduction Mask
+      {
+        FieldMask overlap = reduction_mask & capture_mask;
+        char *reduction_buffer = overlap.to_string();
+        logger->log("Reduction Mask: %s",reduction_buffer);
+        free(reduction_buffer);
+      }
       // Valid Views
       {
         unsigned num_valid = 0;

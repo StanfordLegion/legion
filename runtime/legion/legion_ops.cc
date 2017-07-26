@@ -1446,7 +1446,9 @@ namespace Legion {
     {
       InnerContext *context = find_physical_context(idx);
       RegionTreeContext ctx = context->get_context();
-      RegionNode *child_node = runtime->forest->get_node(req->region);
+      RegionTreeNode *child_node = req->handle_type == PART_PROJECTION ? 
+        static_cast<RegionTreeNode*>(runtime->forest->get_node(req->partition)) :
+        static_cast<RegionTreeNode*>(runtime->forest->get_node(req->region));
       FieldMask user_mask =
         child_node->column_source->get_field_mask(req->privilege_fields);
       TreeStateLogger::capture_state(runtime, req, idx,
@@ -6985,8 +6987,6 @@ namespace Legion {
 #endif
       version_info.clone_to_depth(child_depth-1, close_info.close_mask,
                                   close_info.version_info);
-      const LegionMap<ProjectionEpochID,FieldMask>::aligned *projection_epochs =
-        &(projection_info.get_projection_epochs());
 #ifdef DEBUG_LEGION
       dump_physical_state(&requirement, 0, true, true);
 #endif
@@ -7007,9 +7007,6 @@ namespace Legion {
                                               );
       // It is important that we apply our version info when we are done
       close_info.version_info.apply_mapping(ready_events); 
-#ifdef DEBUG_LEGION
-      dump_physical_state(&requirement, 0, false, true);
-#endif
     }
 
     //--------------------------------------------------------------------------

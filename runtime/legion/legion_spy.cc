@@ -167,19 +167,26 @@ namespace Legion {
                req->partition.index_partition.id, req->partition.field_space.id,
                req->partition.tree_id, idx, task_name, uid, ctx, mask_string);
           }
-          else
+          else if (closing)
           {
-            assert(req->handle_type == SINGULAR);
-            if (closing)
+            if (req->handle_type == SINGULAR)
               logger->start_block("BEFORE CLOSING REGION (%x,%d,%d) index %d "
                                 "of %s (UID %lld) in context %d mask %s",
                   req->region.index_space.id, req->region.field_space.id, 
                   req->region.tree_id, idx, task_name, uid, ctx, mask_string);
             else
-              logger->start_block("BEFORE MAPPING REGION (%x,%d,%d) index %d "
-                                "of %s (UID %lld) in context %d mask %s",
-                  req->region.index_space.id, req->region.field_space.id, 
-                  req->region.tree_id, idx, task_name, uid, ctx, mask_string);
+              logger->start_block("BEFORE CLOSING PARTITION (%x,%d,%d) index %d"
+                                " of %s (UID %lld) in context %d mask %s",
+               req->partition.index_partition.id, req->partition.field_space.id,
+               req->partition.tree_id, idx, task_name, uid, ctx, mask_string);
+          }
+          else
+          {
+            assert(req->handle_type == SINGULAR);
+            logger->start_block("BEFORE MAPPING REGION (%x,%d,%d) index %d "
+                              "of %s (UID %lld) in context %d mask %s",
+                req->region.index_space.id, req->region.field_space.id, 
+                req->region.tree_id, idx, task_name, uid, ctx, mask_string);
           }
         }
         else
@@ -210,19 +217,26 @@ namespace Legion {
                req->partition.index_partition.id, req->partition.field_space.id,
                req->partition.tree_id, idx, task_name, uid, ctx, mask_string);
           }
-          else
+          else if (closing)
           {
-            assert(req->handle_type == SINGULAR);
-            if (closing)
+            if (req->handle_type == SINGULAR)
               logger->start_block("AFTER CLOSING REGION (%x,%d,%d) index %d "
                                 "of %s (UID %lld) in context %d mask %s",
                   req->region.index_space.id, req->region.field_space.id, 
                   req->region.tree_id, idx, task_name, uid, ctx, mask_string);
             else
-              logger->start_block("AFTER MAPPING REGION (%x,%d,%d) index %d "
+              logger->start_block("AFTER CLOSING PARTITION (%x,%d,%d) index %d "
                                 "of %s (UID %lld) in context %d mask %s",
-                  req->region.index_space.id, req->region.field_space.id, 
-                  req->region.tree_id, idx, task_name, uid, ctx, mask_string);
+               req->partition.index_partition.id, req->partition.field_space.id,
+               req->partition.tree_id, idx, task_name, uid, ctx, mask_string);
+          }
+          else
+          {
+            assert(req->handle_type == SINGULAR);
+            logger->start_block("AFTER MAPPING REGION (%x,%d,%d) index %d "
+                              "of %s (UID %lld) in context %d mask %s",
+                req->region.index_space.id, req->region.field_space.id, 
+                req->region.tree_id, idx, task_name, uid, ctx, mask_string);
           }
         }
         free(mask_string);
