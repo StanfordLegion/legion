@@ -25,8 +25,7 @@ function init_task(tdata, tdatalen, userdata, userlen, p)
         
     type(legion_domain_f_t) :: index_domain
     type(legion_index_space_f_t) :: index_space
-    type(legion_rect_1d_f_t) :: index_rect, subrect
-    type(legion_byte_offset_f_t) :: offset
+    type(legion_rect_1d_f_t) :: index_rect
     real(c_double), target :: x_value
     type(c_ptr) :: x_ptr
     type(legion_point_1d_f_t) :: point
@@ -40,29 +39,29 @@ function init_task(tdata, tdatalen, userdata, userlen, p)
                                 regionptr, num_regions, &
                                 ctx, runtime)
                                 
-    pr = legion_get_physical_region_by_id_f(regionptr, 0, num_regions)
-    task_arg_ptr = legion_task_get_args_f(task)
+    call legion_get_physical_region_by_id_f(regionptr, 0, num_regions, pr)
+    call legion_task_get_args_f(task, task_arg_ptr)
     call c_f_pointer(task_arg_ptr, task_arg)
-    arglen = legion_task_get_arglen_f(task)
+    call legion_task_get_arglen_f(task, arglen)
     fid = task_arg
     
 !    if (fid == 0) then
  !       call sleep(5)
   !  end if
   
-    rr = legion_task_get_region_f(task, 0)
-    rrfid = legion_region_requirement_get_privilege_field_f(rr, 0)
+    call legion_task_get_region_f(task, 0, rr)
+    call legion_region_requirement_get_privilege_field_f(rr, 0, rrfid)
     
     
-    accessor = legion_physical_region_get_field_accessor_array_1d_f(pr, fid)
-    index_space = legion_task_get_index_space_from_logical_region_f(task, 0)
-    index_domain = legion_index_space_get_domain_f(runtime, index_space)
-    index_rect = legion_domain_get_rect_1d_f(index_domain)
+    call legion_physical_region_get_field_accessor_array_1d_f(pr, fid, accessor)
+    call legion_task_get_index_space_from_logical_region_f(task, 0, index_space)
+    call legion_index_space_get_domain_f(runtime, index_space, index_domain)
+    call legion_domain_get_rect_1d_f(index_domain, index_rect)
     
     Print *, "Init Task!", rrfid, fid, index_rect%lo%x(0), arglen
     do i = index_rect%lo%x(0), index_rect%hi%x(0)
         point%x(0) = i
-        x_value = 1.1 * (fid+1)
+        x_value = 2.2 * (fid+1)
         x_ptr = c_loc(x_value)
         call legion_accessor_array_1d_write_point_f(accessor, point, x_ptr, c_sizeof(x_value))
     end do
@@ -98,8 +97,7 @@ function daxpy_task(tdata, tdatalen, userdata, userlen, p)
         
     type(legion_domain_f_t) :: index_domain
     type(legion_index_space_f_t) :: index_space
-    type(legion_rect_1d_f_t) :: index_rect, subrect
-    type(legion_byte_offset_f_t) :: offset
+    type(legion_rect_1d_f_t) :: index_rect
     real(c_double), target :: xy_value, x_value, y_value
     type(c_ptr) :: xy_ptr, x_ptr, y_ptr
     type(legion_point_1d_f_t) :: point
@@ -110,19 +108,19 @@ function daxpy_task(tdata, tdatalen, userdata, userlen, p)
                                 regionptr, num_regions, &
                                 ctx, runtime)
 
-    pr1 = legion_get_physical_region_by_id_f(regionptr, 0, num_regions)
-    pr2 = legion_get_physical_region_by_id_f(regionptr, 1, num_regions)
-    task_arg_ptr = legion_task_get_args_f(task)
+    call legion_get_physical_region_by_id_f(regionptr, 0, num_regions, pr1)
+    call legion_get_physical_region_by_id_f(regionptr, 1, num_regions, pr2)
+    call legion_task_get_args_f(task, task_arg_ptr)
     call c_f_pointer(task_arg_ptr, task_arg)
-    arglen = legion_task_get_arglen_f(task)
+    call legion_task_get_arglen_f(task, arglen)
     Print *, "Daxpy Task!", task_arg, arglen
     
-    accessor_x = legion_physical_region_get_field_accessor_array_1d_f(pr1, 0)
-    accessor_y = legion_physical_region_get_field_accessor_array_1d_f(pr1, 1)
-    accessor_z = legion_physical_region_get_field_accessor_array_1d_f(pr2, 2)
-    index_space = legion_task_get_index_space_from_logical_region_f(task, 0)
-    index_domain = legion_index_space_get_domain_f(runtime, index_space)
-    index_rect = legion_domain_get_rect_1d_f(index_domain)
+    call legion_physical_region_get_field_accessor_array_1d_f(pr1, 0, accessor_x)
+    call legion_physical_region_get_field_accessor_array_1d_f(pr1, 1, accessor_y)
+    call legion_physical_region_get_field_accessor_array_1d_f(pr2, 2, accessor_z)
+    call legion_task_get_index_space_from_logical_region_f(task, 0, index_space)
+    call legion_index_space_get_domain_f(runtime, index_space, index_domain)
+    call legion_domain_get_rect_1d_f(index_domain, index_rect)
     
     do i = index_rect%lo%x(0), index_rect%hi%x(0)
         point%x(0) = i
@@ -166,10 +164,7 @@ function check_task(tdata, tdatalen, userdata, userlen, p)
         
     type(legion_domain_f_t) :: index_domain
     type(legion_index_space_f_t) :: index_space
-    type(legion_rect_1d_f_t) :: index_rect, subrect
-    type(legion_byte_offset_f_t) :: offset
-    type(c_ptr) :: raw_ptr_x, raw_ptr_y, raw_ptr_z
-    real(c_double), pointer :: x(:), y(:), z(:)
+    type(legion_rect_1d_f_t) :: index_rect
     type(legion_point_1d_f_t) :: point
     type(c_ptr) :: x_ptr, y_ptr, z_ptr
     real(c_double), target :: x_value = 0
@@ -183,19 +178,19 @@ function check_task(tdata, tdatalen, userdata, userlen, p)
                                 regionptr, num_regions, &
                                 ctx, runtime)
 
-    pr1 = legion_get_physical_region_by_id_f(regionptr, 0, num_regions)
-    pr2 = legion_get_physical_region_by_id_f(regionptr, 1, num_regions)
-    task_arg_ptr = legion_task_get_args_f(task)
+    call legion_get_physical_region_by_id_f(regionptr, 0, num_regions, pr1)
+    call legion_get_physical_region_by_id_f(regionptr, 1, num_regions, pr2)
+    call legion_task_get_args_f(task, task_arg_ptr)
     call c_f_pointer(task_arg_ptr, task_arg)
-    arglen = legion_task_get_arglen_f(task)
+    call legion_task_get_arglen_f(task, arglen)
     Print *, "Check Task!", task_arg, arglen
     
-    accessor_x = legion_physical_region_get_field_accessor_array_1d_f(pr1, 0)
-    accessor_y = legion_physical_region_get_field_accessor_array_1d_f(pr1, 1)
-    accessor_z = legion_physical_region_get_field_accessor_array_1d_f(pr2, 2)
-    index_space = legion_task_get_index_space_from_logical_region_f(task, 0)
-    index_domain = legion_index_space_get_domain_f(runtime, index_space)
-    index_rect = legion_domain_get_rect_1d_f(index_domain)
+    call legion_physical_region_get_field_accessor_array_1d_f(pr1, 0, accessor_x)
+    call legion_physical_region_get_field_accessor_array_1d_f(pr1, 1, accessor_y)
+    call legion_physical_region_get_field_accessor_array_1d_f(pr2, 2, accessor_z)
+    call legion_task_get_index_space_from_logical_region_f(task, 0, index_space)
+    call legion_index_space_get_domain_f(runtime, index_space, index_domain)
+    call legion_domain_get_rect_1d_f(index_domain, index_rect)
     
     do i = index_rect%lo%x(0), index_rect%hi%x(0)
         point%x(0) = i
@@ -272,8 +267,8 @@ function top_level_task(tdata, tdatalen, userdata, userlen, p)
     type(legion_future_map_f_t) :: init_task_future_map, daxpy_task_future_map
     type(legion_argument_map_f_t) :: arg_map
         
-    character (len=10), target :: hdf5_file_name = "hdf5_file"//c_null_char
-    character (len=13), target :: hdf5_dataset_name = "hdf5_dataset"//c_null_char
+    character (len=10) :: hdf5_file_name = "hdf5_file"//c_null_char
+    character (len=13) :: hdf5_dataset_name = "hdf5_dataset"//c_null_char
     logical(c_bool) :: hdf5_file_is_valid
     type(legion_field_map_f_t) :: hdf5_field_map
     type(legion_physical_region_f_t) :: cp_pr
@@ -301,28 +296,28 @@ function top_level_task(tdata, tdatalen, userdata, userlen, p)
     hi%x(0) = num_elements-1
     index_rect%lo = lo
     index_rect%hi = hi
-    index_domain = legion_domain_from_rect_1d_f(index_rect)
-    is = legion_index_space_create_domain_f(runtime, ctx, index_domain)
-    input_fs = legion_field_space_create_f(runtime, ctx)
-    ifs_allocator = legion_field_allocator_create_f(runtime, ctx, input_fs)
-    fid_x = legion_field_allocator_allocate_field_f(ifs_allocator, c_sizeof(real_number), 0)
-    fid_y = legion_field_allocator_allocate_field_f(ifs_allocator, c_sizeof(real_number), 1)
+    call legion_domain_from_rect_1d_f(index_rect, index_domain)
+    call legion_index_space_create_domain_f(runtime, ctx, index_domain, is)
+    call legion_field_space_create_f(runtime, ctx, input_fs)
+    call legion_field_allocator_create_f(runtime, ctx, input_fs, ifs_allocator)
+    call legion_field_allocator_allocate_field_f(ifs_allocator, c_sizeof(real_number), 0, fid_x)
+    call legion_field_allocator_allocate_field_f(ifs_allocator, c_sizeof(real_number), 1, fid_y)
     call legion_field_allocator_destroy_f(ifs_allocator)
     
-    output_fs = legion_field_space_create_f(runtime, ctx)
-    ofs_allocator = legion_field_allocator_create_f(runtime, ctx, output_fs)
-    fid_z = legion_field_allocator_allocate_field_f(ofs_allocator, c_sizeof(real_number), 2)
+    call legion_field_space_create_f(runtime, ctx, output_fs)
+    call legion_field_allocator_create_f(runtime, ctx, output_fs, ofs_allocator)
+    call legion_field_allocator_allocate_field_f(ofs_allocator, c_sizeof(real_number), 2, fid_z)
     call legion_field_allocator_destroy_f(ofs_allocator)
     
-    input_lr = legion_logical_region_create_f(runtime, ctx, is, input_fs)
-    output_lr = legion_logical_region_create_f(runtime, ctx, is, output_fs)
+    call legion_logical_region_create_f(runtime, ctx, is, input_fs, input_lr)
+    call legion_logical_region_create_f(runtime, ctx, is, output_fs, output_lr)
     
     ! create logical region for hdf5 file
-    cp_fs = legion_field_space_create_f(runtime, ctx)
-    cpfs_allocator = legion_field_allocator_create_f(runtime, ctx, cp_fs)
-    fid_cpz = legion_field_allocator_allocate_field_f(cpfs_allocator, c_sizeof(real_number), 3)
+    call legion_field_space_create_f(runtime, ctx, cp_fs)
+    call legion_field_allocator_create_f(runtime, ctx, cp_fs, cpfs_allocator)
+    call legion_field_allocator_allocate_field_f(cpfs_allocator, c_sizeof(real_number), 3, fid_cpz)
     call legion_field_allocator_destroy_f(cpfs_allocator)
-    cp_lr = legion_logical_region_create_f(runtime, ctx, is, cp_fs)
+    call legion_logical_region_create_f(runtime, ctx, is, cp_fs, cp_lr)
     
     print *, fid_x, fid_y, fid_z, fid_cpz
     
@@ -331,40 +326,40 @@ function top_level_task(tdata, tdatalen, userdata, userlen, p)
     hi_c%x(0) = num_subregions-1
     color_rect%lo = lo_c
     color_rect%hi = hi_c
-    color_domain = legion_domain_from_rect_1d_f(color_rect)
-    color_is = legion_index_space_create_domain_f(runtime, ctx, color_domain)
-    ip = legion_index_partition_create_equal_f(runtime, ctx, is, color_is, granularity, 0)
-    call legion_index_partition_attach_name_f(runtime, ip, c_loc(ip_name), is_mutable)
+    call legion_domain_from_rect_1d_f(color_rect, color_domain)
+    call legion_index_space_create_domain_f(runtime, ctx, color_domain, color_is)
+    call legion_index_partition_create_equal_f(runtime, ctx, is, color_is, granularity, 0, ip)
+    call legion_index_partition_attach_name_f(runtime, ip, ip_name, is_mutable)
     
-    input_lp = legion_logical_partition_create_f(runtime, ctx, input_lr, ip)
-    call legion_logical_partition_attach_name_f(runtime, input_lp, c_loc(input_ip_name), is_mutable)
-    output_lp = legion_logical_partition_create_f(runtime, ctx, output_lr, ip)
-    call legion_logical_partition_attach_name_f(runtime, output_lp, c_loc(output_ip_name), is_mutable)
+    call legion_logical_partition_create_f(runtime, ctx, input_lr, ip, input_lp)
+    call legion_logical_partition_attach_name_f(runtime, input_lp, input_ip_name, is_mutable)
+    call legion_logical_partition_create_f(runtime, ctx, output_lr, ip, output_lp)
+    call legion_logical_partition_attach_name_f(runtime, output_lp, output_ip_name, is_mutable)
     
-    pred = legion_predicate_true_f() 
-    arg_map = legion_argument_map_create_f()
+    call legion_predicate_true_f(pred) 
+    call legion_argument_map_create_f(arg_map)
     
     !init task for X
     i = 0
     task_args%args = c_loc(i)
     task_args%arglen = c_sizeof(i)
-    init_launcher_x = legion_index_launcher_create_f(INIT_TASK_ID, color_domain, task_args, arg_map, pred, must, 0, tag)
-    rr_ix = legion_index_launcher_add_region_requirement_lp_f(init_launcher_x, input_lp, 0, & 
+    call legion_index_launcher_create_f(INIT_TASK_ID, color_domain, task_args, arg_map, pred, must, 0, tag, init_launcher_x)
+    call legion_index_launcher_add_region_requirement_lp_f(init_launcher_x, input_lp, 0, & 
                                                                           WRITE_DISCARD, EXCLUSIVE, &
-                                                                          input_lr, tag, verified)
+                                                                          input_lr, tag, verified, rr_ix)
     call legion_index_launcher_add_field_f(init_launcher_x, rr_ix, 0, inst)
-    init_task_future_map = legion_index_launcher_execute_f(runtime, ctx, init_launcher_x)
+    call legion_index_launcher_execute_f(runtime, ctx, init_launcher_x, init_task_future_map)
     
     !init task for Y
     i = 1
     task_args%args = c_loc(i)
     task_args%arglen = c_sizeof(i)
-    init_launcher_y = legion_index_launcher_create_f(INIT_TASK_ID, color_domain, task_args, arg_map, pred, must, 0, tag)
-    rr_iy = legion_index_launcher_add_region_requirement_lp_f(init_launcher_y, input_lp, 0, & 
+    call legion_index_launcher_create_f(INIT_TASK_ID, color_domain, task_args, arg_map, pred, must, 0, tag, init_launcher_y)
+    call legion_index_launcher_add_region_requirement_lp_f(init_launcher_y, input_lp, 0, & 
                                                                           WRITE_DISCARD, EXCLUSIVE, &
-                                                                          input_lr, tag, verified)
+                                                                          input_lr, tag, verified, rr_iy)
     call legion_index_launcher_add_field_f(init_launcher_y, rr_iy, 1, inst)
-    init_task_future_map = legion_index_launcher_execute_f(runtime, ctx, init_launcher_y)
+    call legion_index_launcher_execute_f(runtime, ctx, init_launcher_y, init_task_future_map)
     
     print *, rr_ix, rr_iy
     
@@ -372,30 +367,31 @@ function top_level_task(tdata, tdatalen, userdata, userlen, p)
     i = 2
     task_args%args = c_loc(i)
     task_args%arglen = c_sizeof(i)
-    daxpy_launcher = legion_index_launcher_create_f(DAXPY_TASK_ID, color_domain, task_args, arg_map, pred, must, 0, tag)
-    rr_cxy = legion_index_launcher_add_region_requirement_lp_f(daxpy_launcher, input_lp, 0, & 
+    call legion_index_launcher_create_f(DAXPY_TASK_ID, color_domain, task_args, arg_map, pred, must, 0, tag, daxpy_launcher)
+    call legion_index_launcher_add_region_requirement_lp_f(daxpy_launcher, input_lp, 0, & 
                                                                        READ_ONLY, EXCLUSIVE, &
-                                                                       input_lr, tag, verified)
+                                                                       input_lr, tag, verified, rr_cxy)
     call legion_index_launcher_add_field_f(daxpy_launcher, rr_cxy, 0, inst)
     call legion_index_launcher_add_field_f(daxpy_launcher, rr_cxy, 1, inst)
-    rr_cz = legion_index_launcher_add_region_requirement_lp_f(daxpy_launcher, output_lp, 0, & 
+    call legion_index_launcher_add_region_requirement_lp_f(daxpy_launcher, output_lp, 0, & 
                                                                        WRITE_DISCARD, EXCLUSIVE, &
-                                                                       output_lr, tag, verified)
+                                                                       output_lr, tag, verified, rr_cz)
     call legion_index_launcher_add_field_f(daxpy_launcher, rr_cz, 2, inst)
-    daxpy_task_future_map = legion_index_launcher_execute_f(runtime, ctx, daxpy_launcher)
+    call legion_index_launcher_execute_f(runtime, ctx, daxpy_launcher, daxpy_task_future_map)
     
     !create HDF5 file
     hdf5_file_is_valid = generate_hdf_file(hdf5_file_name, hdf5_dataset_name, num_elements)
-    hdf5_field_map = legion_field_map_create_f()
-    call legion_field_map_insert_f(hdf5_field_map, 3, c_loc(hdf5_dataset_name))
-    cp_pr = legion_runtime_attach_hdf5_f(runtime, ctx, c_loc(hdf5_file_name), cp_lr, cp_lr, hdf5_field_map, LEGION_FILE_READ_WRITE)
+    call legion_field_map_create_f(hdf5_field_map)
+    call legion_field_map_insert_f(hdf5_field_map, 3, hdf5_dataset_name)
+    call legion_runtime_attach_hdf5_f(runtime, ctx, hdf5_file_name, &
+                                      cp_lr, cp_lr, hdf5_field_map, LEGION_FILE_READ_WRITE, cp_pr)
     
     ! create copy task
-    cp_launcher = legion_copy_launcher_create_f(pred, 0, tag)
-    rridx_cp = legion_copy_launcher_add_src_region_requirement_lr_f(cp_launcher, output_lr, READ_ONLY, EXCLUSIVE, &
-                                                                    output_lr, tag, verified)
-    rridx_cp = legion_copy_launcher_add_dst_region_requirement_lr_f(cp_launcher, cp_lr, WRITE_DISCARD, EXCLUSIVE, &
-                                                                    cp_lr, tag, verified)
+    call legion_copy_launcher_create_f(pred, 0, tag, cp_launcher)
+    call legion_copy_launcher_add_src_region_requirement_lr_f(cp_launcher, output_lr, READ_ONLY, EXCLUSIVE, &
+                                                              output_lr, tag, verified, rridx_cp)
+    call legion_copy_launcher_add_dst_region_requirement_lr_f(cp_launcher, cp_lr, WRITE_DISCARD, EXCLUSIVE, &
+                                                              cp_lr, tag, verified, rridx_cp)
     call legion_copy_launcher_add_src_field_f(cp_launcher, 0, 2, inst)
     call legion_copy_launcher_add_dst_field_f(cp_launcher, 0, 3, inst)
     call legion_copy_launcher_execute_f(runtime, ctx, cp_launcher)
@@ -405,17 +401,17 @@ function top_level_task(tdata, tdatalen, userdata, userlen, p)
     i = 3
     task_args%args = c_loc(i)
     task_args%arglen = c_sizeof(i)
-    check_launcher = legion_task_launcher_create_f(CHECK_TASK_ID, task_args, pred, 0, tag)
-    rr_cxy = legion_task_launcher_add_region_requirement_logical_region_f(check_launcher, input_lr, & 
+    call legion_task_launcher_create_f(CHECK_TASK_ID, task_args, pred, 0, tag, check_launcher)
+    call legion_task_launcher_add_region_requirement_logical_region_f(check_launcher, input_lr, & 
                                                                        READ_ONLY, EXCLUSIVE, &
-                                                                       input_lr, tag, verified)
+                                                                       input_lr, tag, verified, rr_cxy)
     call legion_task_launcher_add_field_f(check_launcher, rr_cxy, 0, inst)
     call legion_task_launcher_add_field_f(check_launcher, rr_cxy, 1, inst)
-    rr_cz = legion_task_launcher_add_region_requirement_logical_region_f(check_launcher, output_lr, & 
+    call legion_task_launcher_add_region_requirement_logical_region_f(check_launcher, output_lr, & 
                                                                        READ_ONLY, EXCLUSIVE, &
-                                                                       output_lr, tag, verified)
+                                                                       output_lr, tag, verified, rr_cz)
     call legion_task_launcher_add_field_f(check_launcher, rr_cz, 2, inst)
-    check_task_future = legion_task_launcher_execute_f(runtime, ctx, check_launcher)
+    call legion_task_launcher_execute_f(runtime, ctx, check_launcher, check_task_future)
     
     print *, rr_cxy, rr_cz
     

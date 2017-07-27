@@ -14,7 +14,7 @@ function hello_world_task(tdata, tdatalen, userdata, userlen, p)
     integer(c_int) :: num_regions
     type(legion_context_f_t) :: ctx
     type(legion_runtime_f_t) :: runtime
-    type(legion_physical_region_f_t) :: regionptr
+    type(c_ptr) :: regionptr
     integer(c_size_t) :: retsize = 0
     integer(c_size_t) :: global_arglen, local_arglen
     integer*4, pointer :: global_task_args, local_task_args
@@ -25,13 +25,13 @@ function hello_world_task(tdata, tdatalen, userdata, userlen, p)
                                 regionptr, num_regions, &
                                 ctx, runtime)
 
-    global_task_args_ptr = legion_task_get_args_f(task)
+    call legion_task_get_args_f(task, global_task_args_ptr)
     call c_f_pointer(global_task_args_ptr, global_task_args)
-    global_arglen = legion_task_get_arglen_f(task)
+    call legion_task_get_arglen_f(task, global_arglen)
     
-    local_task_args_ptr = legion_task_get_local_args_f(task)
+    call legion_task_get_local_args_f(task, local_task_args_ptr)
     call c_f_pointer(local_task_args_ptr, local_task_args)
-    local_arglen = legion_task_get_local_arglen_f(task)
+    call legion_task_get_local_arglen_f(task, local_arglen)
     Print *, "Hello World Task!", local_task_args, local_arglen, global_task_args, global_arglen
     
     call legion_task_postamble_f(runtime, ctx, c_null_ptr, retsize)
@@ -54,7 +54,7 @@ function top_level_task(tdata, tdatalen, userdata, userlen, p)
     integer(c_int) :: num_regions
     type(legion_context_f_t) :: ctx
     type(legion_runtime_f_t) :: runtime
-    type(legion_physical_region_f_t) :: regionptr
+    type(c_ptr) :: regionptr
     integer(c_size_t) :: retsize = 0
     
     type(legion_predicate_f_t) :: pred
@@ -84,7 +84,7 @@ function top_level_task(tdata, tdatalen, userdata, userlen, p)
                                 regionptr, num_regions, &
                                 ctx, runtime)
 
-    pred = legion_predicate_true_f() 
+    call legion_predicate_true_f(pred) 
     global_task_args%args = c_loc(i)
     global_task_args%arglen = c_sizeof(i)
     
@@ -93,10 +93,10 @@ function top_level_task(tdata, tdatalen, userdata, userlen, p)
     hi%x(0) = 9
     launch_bound%lo = lo
     launch_bound%hi = hi
-    domain = legion_domain_from_rect_1d_f(launch_bound)
+    call legion_domain_from_rect_1d_f(launch_bound, domain)
     
     ! create arg map
-    arg_map = legion_argument_map_create_f()
+    call legion_argument_map_create_f(arg_map)
     do i = 0, 9
         input = i + 10
         local_task_args(i)%args = c_loc(input)
@@ -107,8 +107,8 @@ function top_level_task(tdata, tdatalen, userdata, userlen, p)
     end do
     
     ! index launcher
-    index_launcher = legion_index_launcher_create_f(HELLO_WORLD_TASK_ID, domain, global_task_args, arg_map, pred, must, 0, tag)
-    hello_world_task_future_map = legion_index_launcher_execute_f(runtime, ctx, index_launcher)
+    call legion_index_launcher_create_f(HELLO_WORLD_TASK_ID, domain, global_task_args, arg_map, pred, must, 0, tag, index_launcher)
+    call legion_index_launcher_execute_f(runtime, ctx, index_launcher, hello_world_task_future_map)
     call legion_future_map_wait_all_results_f(hello_world_task_future_map)
     
     call legion_task_postamble_f(runtime, ctx, c_null_ptr, retsize)

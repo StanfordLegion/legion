@@ -556,7 +556,9 @@ LEGION_SRC 	+= $(LG_RT_DIR)/legion/legion.cc \
 		    $(LG_RT_DIR)/legion/garbage_collection.cc \
 		    $(LG_RT_DIR)/legion/mapper_manager.cc
 
-LEGION_FORTRAN_API_SRC += $(LG_RT_DIR)/legion/legion_f.f90
+LEGION_FORTRAN_API_SRC += $(LG_RT_DIR)/legion/legion_f_types.f90 \
+			$(LG_RT_DIR)/legion/legion_f_c_interface.f90 \
+			$(LG_RT_DIR)/legion/legion_f.f90
 
 # General shell commands
 SHELL	:= /bin/sh

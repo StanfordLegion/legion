@@ -14,7 +14,7 @@ function hello_world_task(tdata, tdatalen, userdata, userlen, p)
     integer(c_int) :: num_regions
     type(legion_context_f_t) :: ctx
     type(legion_runtime_f_t) :: runtime
-    type(legion_physical_region_f_t) :: regionptr
+    type(c_ptr) :: regionptr
     integer(c_size_t) :: retsize = 0
     integer(c_size_t) :: arglen
     integer*4, pointer :: task_arg
@@ -25,9 +25,9 @@ function hello_world_task(tdata, tdatalen, userdata, userlen, p)
                                 regionptr, num_regions, &
                                 ctx, runtime)
 
-    task_arg_ptr = legion_task_get_args_f(task)
+    call legion_task_get_args_f(task, task_arg_ptr)
     call c_f_pointer(task_arg_ptr, task_arg)
-    arglen = legion_task_get_arglen_f(task)
+    call legion_task_get_arglen_f(task, arglen)
     Print *, "Hello World Task!", task_arg, arglen
     
     call legion_task_postamble_f(runtime, ctx, c_null_ptr, retsize)
@@ -50,7 +50,7 @@ function top_level_task(tdata, tdatalen, userdata, userlen, p)
     integer(c_int) :: num_regions
     type(legion_context_f_t) :: ctx
     type(legion_runtime_f_t) :: runtime
-    type(legion_physical_region_f_t) :: regionptr
+    type(c_ptr) :: regionptr
     integer(c_size_t) :: retsize = 0
     type(legion_predicate_f_t) :: pred
     type(legion_task_argument_f_t) :: task_args
@@ -69,13 +69,14 @@ function top_level_task(tdata, tdatalen, userdata, userlen, p)
                                 regionptr, num_regions, &
                                 ctx, runtime)
 
-    pred = legion_predicate_true_f() 
+    call legion_predicate_true_f(pred) 
     do i = 0, 10
         task_args%args = c_loc(i)
         task_args%arglen = c_sizeof(i)
-        launcher = legion_task_launcher_create_f(HELLO_WORLD_TASK_ID, task_args, pred, 0, tag)
-        hello_world_task_future = legion_task_launcher_execute_f(runtime, ctx, launcher)
+        call legion_task_launcher_create_f(HELLO_WORLD_TASK_ID, task_args, pred, 0, tag, launcher)
+        call legion_task_launcher_execute_f(runtime, ctx, launcher, hello_world_task_future)
     end do
+    call legion_task_launcher_destroy_f(launcher)
     call legion_task_postamble_f(runtime, ctx, c_null_ptr, retsize)
     top_level_task = 0
 end function
