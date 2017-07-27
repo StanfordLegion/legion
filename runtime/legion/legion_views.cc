@@ -4954,7 +4954,6 @@ namespace Legion {
                                          int max_nesting)
     //--------------------------------------------------------------------------
     {
-      perform_ready_check(capture_mask);
       {
         char *mask_string = dirty_mask.to_string();
         logger->log("Dirty Mask: %s", mask_string);
