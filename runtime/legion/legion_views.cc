@@ -4947,6 +4947,7 @@ namespace Legion {
       return NULL;
     }
 
+#ifdef DEBUG_LEGION
     //--------------------------------------------------------------------------
     void CompositeBase::print_view_state(const FieldMask &capture_mask,
                                          TreeStateLogger* logger,
@@ -5065,6 +5066,7 @@ namespace Legion {
         logger->up();
       }
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // CompositeView
@@ -6036,6 +6038,7 @@ namespace Legion {
       ref_args->dc->add_nested_resource_ref(ref_args->did);
     }
 
+#ifdef DEBUG_LEGION
     //--------------------------------------------------------------------------
     void CompositeView::print_view_state(const FieldMask &capture_mask,
                                          TreeStateLogger* logger,
@@ -6083,6 +6086,7 @@ namespace Legion {
         }
       }
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // CompositeNode 

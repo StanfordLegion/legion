@@ -4036,6 +4036,7 @@ namespace Legion {
               continue;
             if (it->first->is_deferred_view())
             {
+#ifdef DEBUG_LEGION
               if (it->first->is_composite_view())
               {
                 CompositeView *composite_view = it->first->as_composite_view();
@@ -4049,6 +4050,7 @@ namespace Legion {
                   logger->log("==========================");
                 }
               }
+#endif
               continue;
             }
 #ifdef DEBUG_LEGION
