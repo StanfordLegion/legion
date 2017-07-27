@@ -3532,6 +3532,18 @@ namespace Legion {
       }
     }
 
+#ifndef LEGION_SPY
+    //--------------------------------------------------------------------------
+    void LogicalCloser::pop_closed_user(bool read_only)
+    //--------------------------------------------------------------------------
+    {
+      if (read_only)
+        read_only_closed_users.pop_back();
+      else
+        normal_closed_users.pop_back();
+    }
+#endif
+
     //--------------------------------------------------------------------------
     void LogicalCloser::initialize_close_operations(LogicalState &state, 
                                                    Operation *creator,

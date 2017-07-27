@@ -707,6 +707,9 @@ namespace Legion {
       ClosedNode* find_closed_node(RegionTreeNode *node);
       void record_closed_user(const LogicalUser &user, 
                               const FieldMask &mask, bool read_only);
+#ifndef LEGION_SPY
+      void pop_closed_user(bool read_only);
+#endif
       void initialize_close_operations(LogicalState &state, 
                                        Operation *creator,
                                        const VersionInfo &version_info,
