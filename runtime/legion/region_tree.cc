@@ -18239,7 +18239,7 @@ namespace Legion {
                         "%s at depth %d", 
               handle.index_partition.id, handle.field_space.id,handle.tree_id,
               row_source->color.get_index(), disjointness, 
-              logger->get_depth());
+              get_depth());
             break;
           }
         case 1:
@@ -18248,7 +18248,7 @@ namespace Legion {
                         "%s at depth %d", 
               handle.index_partition.id, handle.field_space.id,handle.tree_id,
               row_source->color[0], disjointness,
-              logger->get_depth());
+              get_depth());
             break;
           }
         case 2:
@@ -18258,7 +18258,7 @@ namespace Legion {
               handle.index_partition.id, handle.field_space.id,handle.tree_id,
               row_source->color[0], 
               row_source->color[1], 
-              disjointness, logger->get_depth());
+              disjointness, get_depth());
             break;
           }
         case 3:
@@ -18268,7 +18268,7 @@ namespace Legion {
               handle.index_partition.id, handle.field_space.id,handle.tree_id,
               row_source->color[0], row_source->color[2],
               row_source->color[2], 
-              disjointness, logger->get_depth());
+              disjointness, get_depth());
             break;
           }
         default:
@@ -18349,49 +18349,7 @@ namespace Legion {
                                              const FieldMask &capture_mask)
     //--------------------------------------------------------------------------
     {
-      switch (row_source->color.get_dim())
-      {
-        case 0:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color %d "
-                        "disjoint at depth %d (%p)", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color.get_index(), row_source->is_disjoint(), 
-              logger->get_depth(), this);
-            break;
-          }
-        case 1:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color %d "
-                        "disjoint %d at depth %d (%p)", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], row_source->is_disjoint(), 
-              logger->get_depth(), this);
-            break;
-          }
-        case 2:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color (%d,%d) "
-                        "disjoint %d at depth %d (%p)", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], 
-              row_source->color[1], row_source->is_disjoint(), 
-              logger->get_depth(), this);
-            break;
-          }
-        case 3:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color (%d,%d,%d) "
-                        "disjoint at depth %d (%p)", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], row_source->color[2],
-              row_source->color[2], row_source->is_disjoint(), 
-              logger->get_depth(), this);
-            break;
-          }
-        default:
-          assert(false);
-      }
+      print_context_header(logger);
       logger->down();
       LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
       if (logical_states.has_entry(ctx))
@@ -18424,49 +18382,7 @@ namespace Legion {
                                               const FieldMask &capture_mask)
     //--------------------------------------------------------------------------
     {
-      switch (row_source->color.get_dim())
-      {
-        case 0:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color %d "
-                        "disjoint at depth %d (%p)", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color.get_index(), row_source->is_disjoint(), 
-              logger->get_depth(), this);
-            break;
-          }
-        case 1:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color %d "
-                        "disjoint %d at depth %d (%p)", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], row_source->is_disjoint(), 
-              logger->get_depth(), this);
-            break;
-          }
-        case 2:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color (%d,%d) "
-                        "disjoint %d at depth %d (%p)", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], 
-              row_source->color[1], row_source->is_disjoint(), 
-              logger->get_depth(), this);
-            break;
-          }
-        case 3:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color (%d,%d,%d) "
-                        "disjoint at depth %d (%p)", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], row_source->color[2],
-              row_source->color[2], row_source->is_disjoint(), 
-              logger->get_depth(), this);
-            break;
-          }
-        default:
-          assert(false);
-      }
+      print_context_header(logger);
       logger->down();
       if (logical_states.has_entry(ctx))
       {
