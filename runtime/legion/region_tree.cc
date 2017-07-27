@@ -15463,12 +15463,17 @@ namespace Legion {
 #ifdef LEGION_SPY
             // Always add the reference for Legion Spy
             it->op->add_mapping_reference(it->gen);
+            it++;
 #else
             // If not Legion Spy we can prune the user if it's done
             if (!it->op->add_mapping_reference(it->gen))
+            {
               closer.pop_closed_user(read_only_close);
+              it = users.erase(it);
+            }
+            else
+              it++;
 #endif
-            it++;
           }
         }
         else
