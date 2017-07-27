@@ -1692,6 +1692,7 @@ namespace Legion {
                                           TreeStateLogger *logger,
                                           const FieldMask &mask,
                                   std::deque<RegionTreeNode*> &to_traverse) = 0;
+      virtual void print_context_header(TreeStateLogger *logger) = 0;
 #ifdef DEBUG_LEGION
     public:
       // These methods are only ever called by a debugger
@@ -1852,6 +1853,7 @@ namespace Legion {
                                           TreeStateLogger *logger,
                                           const FieldMask &mask,
                                       std::deque<RegionTreeNode*> &to_traverse);
+      virtual void print_context_header(TreeStateLogger *logger);
       void print_logical_state(LogicalState &state,
                                const FieldMask &capture_mask,
                          LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,
@@ -2064,6 +2066,7 @@ namespace Legion {
                                           TreeStateLogger *logger,
                                           const FieldMask &mask,
                                       std::deque<RegionTreeNode*> &to_traverse);
+      virtual void print_context_header(TreeStateLogger *logger);
       void print_logical_state(LogicalState &state,
                                const FieldMask &capture_mask,
                          LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,

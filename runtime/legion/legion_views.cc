@@ -4974,9 +4974,9 @@ namespace Legion {
             continue;
           num_valid++;
         }
-        logger->log("Valid Instances (%d)", num_valid);
         if (num_valid > 0)
         {
+          logger->log("Valid Instances (%d)", num_valid);
           logger->down();
           for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
                 valid_views.begin(); it != valid_views.end(); it++)
@@ -5023,9 +5023,9 @@ namespace Legion {
             continue;
           num_valid++;
         }
-        logger->log("Valid Reduction Instances (%d)", num_valid);
         if (num_valid > 0)
         {
+          logger->log("Valid Reduction Instances (%d)", num_valid);
           logger->down();
           for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
                 reduction_views.begin(); it !=
@@ -5044,18 +5044,25 @@ namespace Legion {
           logger->up();
         }
       }
-      for (LegionMap<CompositeNode*,FieldMask>::aligned::iterator it =
-            children.begin(); it !=
-            children.end(); it++)
+      if (!children.empty())
       {
-        {
-          char *mask_string = it->second.to_string();
-          logger->log("Field Mask: %s", mask_string);
-          free(mask_string);
-        }
+        logger->log("Children (%lu):", children.size());
         logger->down();
-        it->first->print_view_state(
-                            capture_mask, logger, current_nesting, max_nesting);
+        for (LegionMap<CompositeNode*,FieldMask>::aligned::iterator it =
+              children.begin(); it !=
+              children.end(); it++)
+        {
+          it->first->logical_node->print_context_header(logger);
+          {
+            char *mask_string = it->second.to_string();
+            logger->log("Field Mask: %s", mask_string);
+            free(mask_string);
+          }
+          logger->down();
+          it->first->print_view_state(
+                              capture_mask, logger, current_nesting, max_nesting);
+          logger->up();
+        }
         logger->up();
       }
     }

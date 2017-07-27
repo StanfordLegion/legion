@@ -17197,43 +17197,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       logger->log("==========");
-      switch (row_source->color.get_dim())
-      {
-        case 0:
-          {
-            logger->log("Region Node (%x,%d,%d) Color %d at depth %d", 
-              handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color.get_index(), logger->get_depth());
-            break;
-          }
-        case 1:
-          {
-            logger->log("Region Node (%x,%d,%d) Color %d at depth %d", 
-              handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], logger->get_depth());
-            break;
-          }
-        case 2:
-          {
-            logger->log("Region Node (%x,%d,%d) Color (%d,%d) at "
-                        "depth %d", 
-              handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], 
-              row_source->color[1], logger->get_depth());
-            break;
-          }
-        case 3:
-          {
-            logger->log("Region Node (%x,%d,%d) Color (%d,%d,%d) at "
-                        "depth %d", 
-              handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], row_source->color[2],
-              row_source->color[2], logger->get_depth());
-            break;
-          }
-        default:
-          assert(false);
-      }
+      print_context_header(logger);
       logger->down();
       LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
       if (logical_states.has_entry(ctx))
@@ -17267,43 +17231,8 @@ namespace Legion {
                                        std::deque<RegionTreeNode*> &to_traverse)
     //--------------------------------------------------------------------------
     {
-      switch (row_source->color.get_dim())
-      {
-        case 0:
-          {
-            logger->log("Region Node (%x,%d,%d) Color %d at depth %d", 
-              handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color.get_index(), logger->get_depth());
-            break;
-          }
-        case 1:
-          {
-            logger->log("Region Node (%x,%d,%d) Color %d at depth %d", 
-              handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], logger->get_depth());
-            break;
-          }
-        case 2:
-          {
-            logger->log("Region Node (%x,%d,%d) Color (%d,%d) at "
-                        "depth %d", 
-              handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], 
-              row_source->color[1], logger->get_depth());
-            break;
-          }
-        case 3:
-          {
-            logger->log("Region Node (%x,%d,%d) Color (%d,%d,%d) at "
-                        "depth %d", 
-              handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], row_source->color[2],
-              row_source->color[2], logger->get_depth());
-            break;
-          }
-        default:
-          assert(false);
-      }
+      logger->log("==========");
+      print_context_header(logger);
       logger->down();
       if (current_versions.has_entry(ctx))
       {
@@ -17322,6 +17251,49 @@ namespace Legion {
         node->print_physical_context(ctx, logger, capture_mask, to_traverse);
       }
       logger->up();
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionNode::print_context_header(TreeStateLogger *logger)
+    //--------------------------------------------------------------------------
+    {
+      switch (row_source->color.get_dim())
+      {
+        case 0:
+          {
+            logger->log("Region Node (%x,%d,%d) Color %d at depth %d", 
+              handle.index_space.id, handle.field_space.id,handle.tree_id,
+              row_source->color.get_index(), get_depth());
+            break;
+          }
+        case 1:
+          {
+            logger->log("Region Node (%x,%d,%d) Color %d at depth %d", 
+              handle.index_space.id, handle.field_space.id,handle.tree_id,
+              row_source->color[0], get_depth());
+            break;
+          }
+        case 2:
+          {
+            logger->log("Region Node (%x,%d,%d) Color (%d,%d) at "
+                        "depth %d", 
+              handle.index_space.id, handle.field_space.id,handle.tree_id,
+              row_source->color[0], 
+              row_source->color[1], get_depth());
+            break;
+          }
+        case 3:
+          {
+            logger->log("Region Node (%x,%d,%d) Color (%d,%d,%d) at "
+                        "depth %d", 
+              handle.index_space.id, handle.field_space.id,handle.tree_id,
+              row_source->color[0], row_source->color[2],
+              row_source->color[2], get_depth());
+            break;
+          }
+        default:
+          assert(false);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -17404,7 +17376,7 @@ namespace Legion {
             logger->log("Region Node (%x,%d,%d) Color %d at "
                         "depth %d (%p)", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color.get_index(), logger->get_depth(), this);
+              row_source->color.get_index(), get_depth(), this);
             break;
           }
         case 1:
@@ -17412,7 +17384,7 @@ namespace Legion {
             logger->log("Region Node (%x,%d,%d) Color %d at "
                         "depth %d (%p)", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], logger->get_depth(), this);
+              row_source->color[0], get_depth(), this);
             break;
           }
         case 2:
@@ -17421,7 +17393,7 @@ namespace Legion {
                         "depth %d (%p)", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
               row_source->color[0], 
-              row_source->color[1], logger->get_depth(), this);
+              row_source->color[1], get_depth(), this);
             break;
           }
         case 3:
@@ -17430,7 +17402,7 @@ namespace Legion {
                         "depth %d (%p)", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
               row_source->color[0], row_source->color[2],
-              row_source->color[2], logger->get_depth(), this);
+              row_source->color[2], get_depth(), this);
             break;
           }
         default:
@@ -18196,6 +18168,67 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       logger->log("==========");
+      print_context_header(logger);
+      logger->down();
+      LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
+      if (logical_states.has_entry(ctx))
+      {
+        LogicalState &state = get_logical_state(ctx);
+        print_logical_state(state, capture_mask, to_traverse, logger);    
+      }
+      else
+      {
+        logger->log("No state");
+      }
+      logger->log("");
+      if (!to_traverse.empty())
+      {
+        AutoLock n_lock(node_lock,1,false/*exclusive*/);
+        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =
+              to_traverse.begin(); it != to_traverse.end(); it++)
+        {
+          std::map<ColorPoint,RegionNode*>::const_iterator finder = 
+            color_map.find(it->first);
+          if (finder != color_map.end())
+            finder->second->print_logical_context(ctx, logger, it->second);
+        }
+      }
+      logger->up();
+    }
+
+    //--------------------------------------------------------------------------
+    void PartitionNode::print_physical_context(ContextID ctx,
+                                               TreeStateLogger *logger,
+                                               const FieldMask &capture_mask,
+                                       std::deque<RegionTreeNode*> &to_traverse)
+    //--------------------------------------------------------------------------
+    {
+      logger->log("==========");
+      print_context_header(logger);
+      logger->down();
+      if (current_versions.has_entry(ctx))
+      {
+        VersionManager &manager = get_current_version_manager(ctx);
+        manager.print_physical_state(this, capture_mask, logger);
+      }
+      else
+      {
+        logger->log("No state");
+      }
+      logger->log("");
+      if (to_traverse.size() > 0)
+      {
+        RegionTreeNode *node = to_traverse.front();
+        to_traverse.pop_front();
+        node->print_physical_context(ctx, logger, capture_mask, to_traverse);
+      }
+      logger->up();
+    }
+
+    //--------------------------------------------------------------------------
+    void PartitionNode::print_context_header(TreeStateLogger *logger)
+    //--------------------------------------------------------------------------
+    {
       const char* disjointness =
         row_source->is_disjoint() ? "disjoint" : "aliased";
       switch (row_source->color.get_dim())
@@ -18241,101 +18274,6 @@ namespace Legion {
         default:
           assert(false);
       }
-      logger->down();
-      LegionMap<ColorPoint,FieldMask>::aligned to_traverse;
-      if (logical_states.has_entry(ctx))
-      {
-        LogicalState &state = get_logical_state(ctx);
-        print_logical_state(state, capture_mask, to_traverse, logger);    
-      }
-      else
-      {
-        logger->log("No state");
-      }
-      logger->log("");
-      if (!to_traverse.empty())
-      {
-        AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        for (LegionMap<ColorPoint,FieldMask>::aligned::const_iterator it =
-              to_traverse.begin(); it != to_traverse.end(); it++)
-        {
-          std::map<ColorPoint,RegionNode*>::const_iterator finder = 
-            color_map.find(it->first);
-          if (finder != color_map.end())
-            finder->second->print_logical_context(ctx, logger, it->second);
-        }
-      }
-      logger->up();
-    }
-
-    //--------------------------------------------------------------------------
-    void PartitionNode::print_physical_context(ContextID ctx,
-                                               TreeStateLogger *logger,
-                                               const FieldMask &capture_mask,
-                                       std::deque<RegionTreeNode*> &to_traverse)
-    //--------------------------------------------------------------------------
-    {
-      switch (row_source->color.get_dim())
-      {
-        case 0:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color %d "
-                        "disjoint at depth %d", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color.get_index(), 
-              row_source->is_disjoint(), logger->get_depth());
-            break;
-          }
-        case 1:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color %d "
-                        "disjoint %d at depth %d", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], 
-              row_source->is_disjoint(), logger->get_depth());
-            break;
-          }
-        case 2:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color (%d,%d) "
-                        "disjoint %d at depth %d", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], 
-              row_source->color[1], 
-              row_source->is_disjoint(), logger->get_depth());
-            break;
-          }
-        case 3:
-          {
-            logger->log("Partition Node (" IDFMT ",%d,%d) Color (%d,%d,%d) "
-                        "disjoint at depth %d", 
-              handle.index_partition.id, handle.field_space.id,handle.tree_id,
-              row_source->color[0], row_source->color[2],
-              row_source->color[2], 
-              row_source->is_disjoint(), logger->get_depth());
-            break;
-          }
-        default:
-          assert(false);
-      }
-      logger->down();
-      if (current_versions.has_entry(ctx))
-      {
-        VersionManager &manager = get_current_version_manager(ctx);
-        manager.print_physical_state(this, capture_mask, logger);
-      }
-      else
-      {
-        logger->log("No state");
-      }
-      logger->log("");
-      if (to_traverse.size() > 0)
-      {
-        RegionTreeNode *node = to_traverse.front();
-        to_traverse.pop_front();
-        node->print_physical_context(ctx, logger, capture_mask, to_traverse);
-      }
-      logger->up();
     }
 
     //--------------------------------------------------------------------------
