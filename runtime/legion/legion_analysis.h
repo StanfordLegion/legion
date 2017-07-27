@@ -941,7 +941,8 @@ namespace Legion {
                             ProjectionEpochID open_epoch = 0,
                             bool dedup_advances = false, 
                             ProjectionEpochID advance_epoch = 0,
-                            const FieldMask *dirty_previous = NULL);
+                            const FieldMask *dirty_previous = NULL,
+                            const ProjectionInfo *proj_info = NULL);
       void update_child_versions(InnerContext *context,
                                  const ColorPoint &child_color,
                                  VersioningSet<> &new_states,

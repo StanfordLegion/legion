@@ -812,6 +812,7 @@ namespace Legion {
       virtual UniqueID get_unique_id(void) const;
       virtual unsigned get_context_index(void) const;
       virtual int get_depth(void) const;
+      virtual const ProjectionInfo* get_projection_info(unsigned idx, bool src);
     protected:
       void check_copy_privilege(const RegionRequirement &req, 
                                 unsigned idx, bool src,
@@ -886,6 +887,8 @@ namespace Legion {
       void check_point_requirements(void);
 #endif
     public:
+      virtual const ProjectionInfo* get_projection_info(unsigned idx, bool src);
+    public:
       std::vector<ProjectionInfo>   src_projection_infos;
       std::vector<ProjectionInfo>   dst_projection_infos;
     protected:
@@ -931,6 +934,8 @@ namespace Legion {
       // From ProjectionPoint
       virtual const DomainPoint& get_domain_point(void) const;
       virtual void set_projection_result(unsigned idx,LogicalRegion result);
+    public:
+      virtual const ProjectionInfo* get_projection_info(unsigned idx, bool src);
     protected:
       IndexCopyOp*              owner;
     };
@@ -2290,6 +2295,7 @@ namespace Legion {
       virtual unsigned find_parent_index(unsigned idx);
       virtual void trigger_commit(void);
       virtual ApEvent get_restrict_precondition(void) const;
+      virtual const ProjectionInfo* get_projection_info(void);
     public:
       void check_fill_privilege(void);
       void compute_parent_index(void);
@@ -2339,6 +2345,8 @@ namespace Legion {
       void check_point_requirements(void);
 #endif
     public:
+      virtual const ProjectionInfo* get_projection_info(void);
+    public:
       ProjectionInfo                projection_info;
     protected:
       std::vector<PointFillOp*>     points;
@@ -2374,6 +2382,8 @@ namespace Legion {
       // From ProjectionPoint
       virtual const DomainPoint& get_domain_point(void) const;
       virtual void set_projection_result(unsigned idx,LogicalRegion result);
+    public:
+      virtual const ProjectionInfo* get_projection_info(void);
     protected:
       IndexFillOp*              owner;
     };
