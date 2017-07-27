@@ -10634,10 +10634,26 @@ namespace Legion {
         {
           // Move a copy over to the previous epoch users for
           // the fields that were dominated
-          state.prev_epoch_users.push_back(*it);
-          state.prev_epoch_users.back().field_mask = local_dom;
+#ifdef LEGION_SPY
           // Add a mapping reference
           it->op->add_mapping_reference(it->gen);
+          // Always do this for Legion Spy 
+          state.prev_epoch_users.push_back(*it);
+          state.prev_epoch_users.back().field_mask = local_dom;
+#else
+          // Without Legion Spy we can filter early if the op is done
+          if (it->op->add_mapping_reference(it->gen))
+          {
+            state.prev_epoch_users.push_back(*it);
+            state.prev_epoch_users.back().field_mask = local_dom;
+          }
+          else
+          {
+            // It's already done so just prune it
+            it = state.curr_epoch_users.erase(it);
+            continue;
+          }
+#endif
         }
         else
         {
@@ -13044,7 +13060,7 @@ namespace Legion {
       // in the state of the logical region tree
       close_op->add_mapping_reference(close_op->get_generation());
       // Mark that we are done, this puts the close op in the pipeline!
-      // This is why we cache the LogicalUser before kicking off the op
+      // This is why we cache the GenerationID when making the op
       close_op->end_dependence_analysis();
     }
 
@@ -13101,8 +13117,20 @@ namespace Legion {
             it = users.erase(it);
           else
           {
+#ifdef LEGION_SPY
+            // Always add the reference for Legion Spy
             it->op->add_mapping_reference(it->gen);
             it++;
+#else
+            // If not Legion Spy we can prune the user if it's done
+            if (!it->op->add_mapping_reference(it->gen))
+            {
+              closer.pop_closed_user(read_only_close);
+              it = users.erase(it);
+            }
+            else
+              it++;
+#endif
           }
         }
         else

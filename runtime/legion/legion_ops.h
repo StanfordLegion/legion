@@ -434,7 +434,7 @@ namespace Legion {
       // how many places additional dependences can come from.
       // Once the mapping reference count goes to zero, no
       // additional dependences can be registered.
-      void add_mapping_reference(GenerationID gen);
+      bool add_mapping_reference(GenerationID gen);
       void remove_mapping_reference(GenerationID gen);
     public:
       // Some extra support for tracking dependences that we've 

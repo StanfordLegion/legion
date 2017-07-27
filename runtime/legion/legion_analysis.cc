@@ -59,6 +59,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    LogicalUser::LogicalUser(Operation *o, GenerationID g, unsigned id, 
+                             const RegionUsage &u, const FieldMask &m)
+      : GenericUser(u, m), op(o), idx(id), gen(g), timeout(TIMEOUT)
+#ifdef LEGION_SPY
+        , uid(o->get_unique_op_id())
+#endif
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalUser::PhysicalUser(void)
     //--------------------------------------------------------------------------
     {
@@ -3614,6 +3625,18 @@ namespace Legion {
       }
     }
 
+#ifndef LEGION_SPY
+    //--------------------------------------------------------------------------
+    void LogicalCloser::pop_closed_user(bool read_only)
+    //--------------------------------------------------------------------------
+    {
+      if (read_only)
+        read_only_closed_users.pop_back();
+      else
+        normal_closed_users.pop_back();
+    }
+#endif
+
     //--------------------------------------------------------------------------
     void LogicalCloser::initialize_close_operations(LogicalState &state, 
                                                    Operation *creator,
@@ -3638,6 +3661,7 @@ namespace Legion {
       if (!!normal_close_mask)
       {
         normal_close_op = ctx->get_inter_close_op();
+        normal_close_gen = normal_close_op->get_generation();
         // Compute the set of fields that we need
         root_node->column_source->get_field_set(normal_close_mask,
                                                trace_info.req.privilege_fields,
@@ -3678,6 +3702,7 @@ namespace Legion {
       if (!!read_only_close_mask)
       {
         read_only_close_op = ctx->get_read_only_close_op(); 
+        read_only_close_gen = read_only_close_op->get_generation();
         req.privilege_fields.clear();
         root_node->column_source->get_field_set(read_only_close_mask,
                                                trace_info.req.privilege_fields,
@@ -3691,6 +3716,7 @@ namespace Legion {
       if (!!flush_only_close_mask)
       {
         flush_only_close_op = ctx->get_inter_close_op();
+        flush_only_close_gen = flush_only_close_op->get_generation();
         req.privilege_fields.clear();
         // Compute the set of fields that we need
         root_node->column_source->get_field_set(flush_only_close_mask,
@@ -3803,10 +3829,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // No need to add mapping references, we did that in 
+      // Note we also use the cached generation IDs since the close
+      // operations have already been kicked off and might be done
       // LogicalCloser::register_dependences
       if (normal_close_op != NULL)
       {
-        LogicalUser close_user(normal_close_op, 0/*idx*/, 
+        LogicalUser close_user(normal_close_op, normal_close_gen, 0/*idx*/, 
             RegionUsage(READ_WRITE, EXCLUSIVE, 0/*redop*/), normal_close_mask);
         users.push_back(close_user);
       }
@@ -3818,13 +3846,14 @@ namespace Legion {
       }
       if (read_only_close_op != NULL)
       {
-        LogicalUser close_user(read_only_close_op, 0/*idx*/, 
+        LogicalUser close_user(read_only_close_op, read_only_close_gen,0/*idx*/,
           RegionUsage(READ_WRITE, EXCLUSIVE, 0/*redop*/), read_only_close_mask);
         users.push_back(close_user);
       }
       if (flush_only_close_op != NULL)
       {
-        LogicalUser close_user(flush_only_close_op, 0/*idx*/, 
+        LogicalUser close_user(flush_only_close_op, 
+                               flush_only_close_gen, 0/*idx*/,
          RegionUsage(READ_WRITE, EXCLUSIVE, 0/*redop*/), flush_only_close_mask);
         users.push_back(close_user);
       }

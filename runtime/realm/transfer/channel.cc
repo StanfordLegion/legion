@@ -282,7 +282,10 @@ namespace LegionRuntime {
         } else {
           offset = (alloc_offset + field_start * domain_size + (elmt_size - field_start) * idx2 + (index - idx2) * field_size);
         }
-        return offset % buf_size;
+	// the final step is to wrap the offset around within the buf_size
+	//  (i.e. offset %= buf_size), but that is done by the caller after
+	//  checking flow control limits
+        return offset;
       }
 #endif
 
@@ -492,6 +495,8 @@ namespace LegionRuntime {
             todo = std::min(todo, std::max((coord_t)0,
 					   (coord_t)(pre_bytes_write - src_start))
                                     / oas_vec[offset_idx].size);
+	    // wrap src_start around within src_buf if needed
+	    src_start %= src_buf.buf_size;
           } else {
             src_start = Realm::calc_mem_loc(0,
                                      oas_vec[offset_idx].src_offset,
@@ -510,6 +515,8 @@ namespace LegionRuntime {
             todo = std::min(todo, std::max((coord_t)0,
 					   (coord_t)(next_bytes_read + dst_buf.buf_size - dst_start))
                                     / oas_vec[offset_idx].size);
+	    // wrap dst_start around within dst_buf if needed
+	    dst_start %= dst_buf.buf_size;
           } else {
             dst_start = Realm::calc_mem_loc(0,
                                      oas_vec[offset_idx].dst_offset,

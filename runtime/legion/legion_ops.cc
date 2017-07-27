@@ -1120,15 +1120,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::add_mapping_reference(GenerationID our_gen)
+    bool Operation::add_mapping_reference(GenerationID our_gen)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
 #ifdef DEBUG_LEGION
       assert(our_gen <= gen); // better not be ahead of where we are now
 #endif
-      if (our_gen == gen)
-        outstanding_mapping_references++;
+      if (our_gen < gen)
+        return false;
+      outstanding_mapping_references++;
+      return true;
     }
 
     //--------------------------------------------------------------------------

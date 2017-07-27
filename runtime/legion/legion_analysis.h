@@ -49,6 +49,8 @@ namespace Legion {
       LogicalUser(void);
       LogicalUser(Operation *o, unsigned id, 
                   const RegionUsage &u, const FieldMask &m);
+      LogicalUser(Operation *o, GenerationID gen, unsigned id,
+                  const RegionUsage &u, const FieldMask &m);
     public:
       Operation *op;
       unsigned idx;
@@ -730,6 +732,9 @@ namespace Legion {
       ClosedNode* find_closed_node(RegionTreeNode *node);
       void record_closed_user(const LogicalUser &user, 
                               const FieldMask &mask, bool read_only);
+#ifndef LEGION_SPY
+      void pop_closed_user(bool read_only);
+#endif
       void initialize_close_operations(LogicalState &state, 
                                        Operation *creator,
                                        const VersionInfo &version_info,
@@ -774,6 +779,11 @@ namespace Legion {
       IndexCloseOp *index_close_op;
       ReadCloseOp *read_only_close_op;
       InterCloseOp *flush_only_close_op;
+    protected:
+      // Cache the generation IDs so we can kick off ops before adding users
+      GenerationID normal_close_gen;
+      GenerationID read_only_close_gen;
+      GenerationID flush_only_close_gen;
     }; 
 
     /**
