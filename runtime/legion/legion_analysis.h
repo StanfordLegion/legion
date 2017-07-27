@@ -49,6 +49,8 @@ namespace Legion {
       LogicalUser(void);
       LogicalUser(Operation *o, unsigned id, 
                   const RegionUsage &u, const FieldMask &m);
+      LogicalUser(Operation *o, GenerationID gen, unsigned id,
+                  const RegionUsage &u, const FieldMask &m);
     public:
       Operation *op;
       unsigned idx;
@@ -748,6 +750,11 @@ namespace Legion {
       InterCloseOp *normal_close_op;
       ReadCloseOp *read_only_close_op;
       InterCloseOp *flush_only_close_op;
+    protected:
+      // Cache the generation IDs so we can kick off ops before adding users
+      GenerationID normal_close_gen;
+      GenerationID read_only_close_gen;
+      GenerationID flush_only_close_gen;
     }; 
 
     /**

@@ -15387,7 +15387,7 @@ namespace Legion {
       // in the state of the logical region tree
       close_op->add_mapping_reference(close_op->get_generation());
       // Mark that we are done, this puts the close op in the pipeline!
-      // This is why we cache the LogicalUser before kicking off the op
+      // This is why we cache the GenerationID when making the op
       close_op->end_dependence_analysis();
     }
 
