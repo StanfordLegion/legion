@@ -170,7 +170,8 @@ namespace Legion {
         if (first)
         {
 #ifdef DEBUG_LEGION
-          assert(!has_gc_references);
+          // Should have at least one reference here
+          assert(__sync_fetch_and_add(&gc_references, 0) > 0);
 #endif
           has_gc_references = true;
           first = false;
@@ -214,10 +215,10 @@ namespace Legion {
         AutoLock gc(gc_lock);
         if (first)
         {
-#ifdef DEBUG_LEGION
-          assert(has_gc_references);
-#endif
-          has_gc_references = false;
+          // Check to see if we lost the race for changing state
+          if (has_gc_references && 
+              (__sync_fetch_and_add(&gc_references, 0) == 0))
+            has_gc_references = false;
           first = false;
         }
         done = update_state(need_activate, need_validate,
@@ -258,7 +259,8 @@ namespace Legion {
         if (first)
         {
 #ifdef DEBUG_LEGION
-          assert(!has_valid_references);
+          // Should have at least one reference here
+          assert(__sync_fetch_and_add(&valid_references, 0) > 0);
 #endif
           has_valid_references = true;
           first = false;
@@ -306,10 +308,10 @@ namespace Legion {
         AutoLock gc(gc_lock);
         if (first)
         {
-#ifdef DEBUG_LEGION
-          assert(has_valid_references);
-#endif
-          has_valid_references = false;
+          // Check to see if we lost the race for changing state
+          if (has_valid_references &&
+              (__sync_fetch_and_add(&valid_references, 0) == 0))
+            has_valid_references = false;
           first = false;
         }
         done = update_state(need_activate, need_validate,

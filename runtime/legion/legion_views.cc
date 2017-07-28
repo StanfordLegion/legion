@@ -1509,7 +1509,7 @@ namespace Legion {
         else
           send_remote_gc_update(owner_space, mutator, 1, false/*add*/);
       }
-      else if(parent->remove_nested_gc_ref(did, mutator))
+      else if (parent->remove_nested_gc_ref(did, mutator))
         delete parent;
     }
 
