@@ -1791,7 +1791,8 @@ namespace Legion {
                                                bool defer_add_users,
                                                bool need_read_only_reservations,
                                                std::set<RtEvent> &map_applied,
-                                               InstanceSet &targets
+                                               InstanceSet &targets,
+                                               const ProjectionInfo *proj_info
 #ifdef DEBUG_LEGION
                                                , const char *log_name
                                                , UniqueID uid
@@ -1853,7 +1854,8 @@ namespace Legion {
         TraversalInfo info(ctx.get_id(), op, index, req, version_info, 
                            user_mask, local_applied);
         child_node->register_region(info, logical_ctx_uid, context, 
-            restrict_info, term_event, usage, defer_add_users, targets);
+                                    restrict_info, term_event, usage, 
+                                    defer_add_users, targets, proj_info);
         
         if (!local_applied.empty())
         {
@@ -1880,7 +1882,8 @@ namespace Legion {
         TraversalInfo info(ctx.get_id(), op, index, req, version_info, 
                            user_mask, map_applied);
         child_node->register_region(info, logical_ctx_uid, context, 
-            restrict_info, term_event, usage, defer_add_users, targets);
+                                    restrict_info, term_event, usage, 
+                                    defer_add_users, targets, proj_info);
       }
 #ifdef DEBUG_LEGION 
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
@@ -13614,7 +13617,8 @@ namespace Legion {
                                      InnerContext *context,
                                      RestrictInfo &restrict_info,
                                    ApEvent term_event, const RegionUsage &usage,
-                                     bool defer_add_users, InstanceSet &targets)
+                                     bool defer_add_users, InstanceSet &targets,
+                                     const ProjectionInfo *proj_info)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REGION_NODE_REGISTER_REGION_CALL);
@@ -13632,7 +13636,9 @@ namespace Legion {
           !info.version_info.is_upper_bound_node(this);
         const AddressSpaceID local_space = context->runtime->address_space;
         manager.advance_versions(info.traversal_mask, logical_ctx_uid, context,
-            update_parent_state, local_space, info.map_applied_events);
+            update_parent_state, local_space, info.map_applied_events,
+            false/*dedup opens*/, 0/*epoch*/, false/*dedup advances*/, 
+            0/*epoch*/, NULL/*dirty previous*/, proj_info);
       }
       // Sine we're mapping we need to record the advance versions
       // where we'll put the results when we're done
@@ -13962,7 +13968,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionNode::close_state(const TraversalInfo &info, RegionUsage &usage, 
                                  UniqueID logical_ctx_uid,InnerContext *context, 
-                                 InstanceSet &targets)
+                                 InstanceSet &targets) 
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REGION_NODE_CLOSE_STATE_CALL);
@@ -13975,7 +13981,8 @@ namespace Legion {
       // logical analysis or will be done as part of the registration.
       RestrictInfo empty_restrict_info;
       register_region(info, logical_ctx_uid, context, empty_restrict_info, 
-          ApEvent::NO_AP_EVENT, usage, false/*defer add users*/, targets);
+                      ApEvent::NO_AP_EVENT, usage, false/*defer add users*/, 
+                      targets, NULL/*no advance close projection info*/);
     }
 
     //--------------------------------------------------------------------------

@@ -4709,7 +4709,8 @@ namespace Legion {
                                           ProjectionEpochID open_epoch,
                                           bool dedup_advances, 
                                           ProjectionEpochID advance_epoch,
-                                          const FieldMask *dirty_previous)
+                                          const FieldMask *dirty_previous,
+                                          const ProjectionInfo *proj_info)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(node->context->runtime, 
@@ -4854,6 +4855,50 @@ namespace Legion {
           }
           else
             previous_advancers[key] = mask;
+        }
+        // Record any epoch updates
+        if (proj_info != NULL)
+        {
+          const LegionMap<ProjectionEpochID,FieldMask>::aligned 
+            &advance_epochs = proj_info->get_projection_epochs();
+          for (LegionMap<ProjectionEpochID,FieldMask>::aligned::const_iterator
+               pit = advance_epochs.begin(); pit != advance_epochs.end(); pit++)
+          {
+            const ProjectionEpoch key(logical_context_uid, pit->first);
+            FieldMask update_mask = pit->second;
+            // Filter out any previous advancers with overlapping fields
+            std::vector<ProjectionEpoch> to_delete;
+            for (LegionMap<ProjectionEpoch,FieldMask>::aligned::iterator it = 
+                  previous_advancers.begin(); it !=
+                  previous_advancers.end(); it++)
+            {
+              if (it->first == key)
+              {
+                update_mask -= it->second;
+                if (!update_mask)
+                  break;
+                continue;
+              }
+              it->second -= pit->second;
+              if (!it->second)
+                to_delete.push_back(it->first);
+            }
+            if (!to_delete.empty())
+            {
+              for (std::vector<ProjectionEpoch>::const_iterator it = 
+                    to_delete.begin(); it != to_delete.end(); it++)
+                previous_advancers.erase(*it);
+            }
+            if (!!update_mask)
+            {
+              LegionMap<ProjectionEpoch,FieldMask>::aligned::iterator finder =
+                previous_advancers.find(key);
+              if (finder == previous_advancers.end())
+                previous_advancers[key] = update_mask;
+              else
+                finder->second |= update_mask;
+            }
+          }
         }
         // Now send any invalidations to get them in flight
         if (!remote_valid.empty() && !(remote_valid_fields * mask))

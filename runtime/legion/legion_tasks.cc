@@ -1214,6 +1214,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const ProjectionInfo* TaskOp::get_projection_info(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+      // this should never be called
+      assert(false);
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
     const std::vector<VersionInfo>* TaskOp::get_version_infos(void)
     //--------------------------------------------------------------------------
     {
@@ -2079,7 +2088,8 @@ namespace Legion {
                               version_info, restrict_info, this, *it,
                               completion_event, true/*defer users*/, 
                               true/*need read only reservations*/,
-                              applied_conditions, chosen_instances
+                              applied_conditions, chosen_instances,
+                              get_projection_info(*it)
 #ifdef DEBUG_LEGION
                               , get_logging_name(), unique_op_id
 #endif
@@ -3329,7 +3339,8 @@ namespace Legion {
                                     multiple_requirements/*defer add users*/,
                                     !multiple_requirements/*read only locks*/,
                                     map_applied_conditions,
-                                    physical_instances[idx]
+                                    physical_instances[idx],
+                                    get_projection_info(idx)
 #ifdef DEBUG_LEGION
                                     , get_logging_name()
                                     , unique_op_id
@@ -3531,7 +3542,8 @@ namespace Legion {
                           ApEvent::NO_AP_EVENT/*done immediately*/, 
                           true/*defer add users*/, 
                           true/*need read only locks*/,
-                          map_applied_conditions, result
+                          map_applied_conditions, result, 
+                          get_projection_info(idx)
 #ifdef DEBUG_LEGION
                           , get_logging_name(), unique_op_id
 #endif
@@ -4309,6 +4321,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const ProjectionInfo* MultiTask::get_projection_info(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(idx < projection_infos.size());
+#endif
+      return &projection_infos[idx]; 
+    }
+
+    //--------------------------------------------------------------------------
     const std::vector<VersionInfo>* MultiTask::get_version_infos(void)
     //--------------------------------------------------------------------------
     {
@@ -4916,6 +4938,13 @@ namespace Legion {
       assert(idx < restrict_infos.size());
 #endif
       return restrict_infos[idx];
+    }
+
+    //--------------------------------------------------------------------------
+    const ProjectionInfo* IndividualTask::get_projection_info(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+      return NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -5842,6 +5871,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return slice_owner->get_restrict_info(idx);
+    }
+
+    //--------------------------------------------------------------------------
+    const ProjectionInfo* PointTask::get_projection_info(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+      return slice_owner->get_projection_info(idx);
     }
 
     //--------------------------------------------------------------------------

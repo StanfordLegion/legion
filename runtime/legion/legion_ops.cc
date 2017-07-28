@@ -2356,7 +2356,8 @@ namespace Legion {
                                                 false/*defer add users*/,
                                                 true/*read only locks*/,
                                                 map_applied_conditions,
-                                                mapped_instances
+                                                mapped_instances, 
+                                                NULL/*advance projections*/
 #ifdef DEBUG_LEGION
                                                , get_logging_name()
                                                , unique_op_id
@@ -2380,7 +2381,8 @@ namespace Legion {
                                                 false/*defer add users*/,
                                                 true/*read only locks*/,
                                                 map_applied_conditions,
-                                                mapped_instances
+                                                mapped_instances,
+                                                NULL/*advance projections*/
 #ifdef DEBUG_LEGION
                                                 , get_logging_name()
                                                 , unique_op_id
@@ -3657,7 +3659,8 @@ namespace Legion {
                                                   false/*defer add users*/,
                                                   true/*read only locks*/,
                                                   map_applied_conditions,
-                                                  src_targets
+                                                  src_targets,
+                                                  get_projection_info(idx, true)
 #ifdef DEBUG_LEGION
                                                   , get_logging_name()
                                                   , unique_op_id
@@ -3684,7 +3687,8 @@ namespace Legion {
                                                 false/*defer add users*/,
                                                 false/*not read only*/,
                                                 map_applied_conditions,
-                                                dst_targets
+                                                dst_targets,
+                                                get_projection_info(idx, false)
 #ifdef DEBUG_LEGION
                                                 , get_logging_name()
                                                 , unique_op_id
@@ -3976,6 +3980,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return (parent_ctx->get_depth() + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    const ProjectionInfo* CopyOp::get_projection_info(unsigned idx, bool src)
+    //--------------------------------------------------------------------------
+    {
+      // No advance projection epochs for normal copy operations
+      return NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -4996,6 +5008,27 @@ namespace Legion {
     }
 #endif
 
+    //--------------------------------------------------------------------------
+    const ProjectionInfo* IndexCopyOp::get_projection_info(unsigned idx, 
+                                                           bool src)
+    //--------------------------------------------------------------------------
+    {
+      if (src)
+      {
+#ifdef DEBUG_LEGION
+        assert(idx < src_projection_infos.size());
+#endif
+        return &src_projection_infos[idx];
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(idx < dst_projection_infos.size());
+#endif
+        return &dst_projection_infos[idx]; 
+      }
+    }
+
     /////////////////////////////////////////////////////////////
     // Point Copy Operation 
     /////////////////////////////////////////////////////////////
@@ -5219,6 +5252,14 @@ namespace Legion {
         dst_requirements[idx].region = result;
         dst_requirements[idx].handle_type = SINGULAR;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    const ProjectionInfo* PointCopyOp::get_projection_info(unsigned idx, 
+                                                           bool src)
+    //--------------------------------------------------------------------------
+    {
+      return owner->get_projection_info(idx, src);
     }
 
     /////////////////////////////////////////////////////////////
@@ -7876,7 +7917,8 @@ namespace Legion {
                                               false/*defer add users*/,
                                               false/*not read only*/,
                                               map_applied_conditions,
-                                              mapped_instances
+                                              mapped_instances,
+                                              NULL/*advance projections*/
 #ifdef DEBUG_LEGION
                                               , get_logging_name()
                                               , unique_op_id
@@ -8482,7 +8524,8 @@ namespace Legion {
                                               false/*defer add users*/,
                                               false/*not read only*/,
                                               map_applied_conditions,
-                                              mapped_instances
+                                              mapped_instances,
+                                              NULL/*advance projections*/
 #ifdef DEBUG_LEGION
                                               , get_logging_name()
                                               , unique_op_id
@@ -11572,7 +11615,8 @@ namespace Legion {
                                               false/*defer add users*/,
                                               true/*read only locks*/,
                                               map_applied_conditions,
-                                              mapped_instances
+                                              mapped_instances,
+                                              NULL/*no projection info*/
 #ifdef DEBUG_LEGION
                                               , get_logging_name()
                                               , unique_op_id
@@ -12609,7 +12653,8 @@ namespace Legion {
                                                   false/*defer add users*/,
                                                   false/*not read only*/,
                                                   map_applied_conditions,
-                                                  mapped_instances
+                                                  mapped_instances,
+                                                  get_projection_info()
 #ifdef DEBUG_LEGION
                                                   , get_logging_name()
                                                   , unique_op_id
@@ -12696,7 +12741,8 @@ namespace Legion {
                                                 false/*defer add users*/,
                                                 false/*not read only*/,
                                                 map_applied_conditions,
-                                                mapped_instances
+                                                mapped_instances,
+                                                get_projection_info()
 #ifdef DEBUG_LEGION
                                                 , get_logging_name()
                                                 , unique_op_id
@@ -12765,6 +12811,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return merge_restrict_preconditions(grants, wait_barriers);
+    }
+
+    //--------------------------------------------------------------------------
+    const ProjectionInfo* FillOp::get_projection_info(void)
+    //--------------------------------------------------------------------------
+    {
+      // No advance projection info for normal fills
+      return NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -13303,6 +13357,13 @@ namespace Legion {
     }
 #endif
 
+    //--------------------------------------------------------------------------
+    const ProjectionInfo* IndexFillOp::get_projection_info(void)
+    //--------------------------------------------------------------------------
+    {
+      return &projection_info;
+    }
+
     ///////////////////////////////////////////////////////////// 
     // Point Fill Op 
     /////////////////////////////////////////////////////////////
@@ -13457,6 +13518,13 @@ namespace Legion {
 #endif
       requirement.region = result;
       requirement.handle_type = SINGULAR;
+    }
+
+    //--------------------------------------------------------------------------
+    const ProjectionInfo* PointFillOp::get_projection_info(void)
+    //--------------------------------------------------------------------------
+    {
+      return owner->get_projection_info();
     }
 
     ///////////////////////////////////////////////////////////// 

@@ -365,7 +365,8 @@ namespace Legion {
                                   bool defer_add_users,
                                   bool need_read_only_reservations,
                                   std::set<RtEvent> &map_applied,
-                                  InstanceSet &targets
+                                  InstanceSet &targets,
+                                  const ProjectionInfo *proj_info
 #ifdef DEBUG_LEGION
                                  , const char *log_name
                                  , UniqueID uid
@@ -2414,7 +2415,8 @@ namespace Legion {
       void register_region(const TraversalInfo &info, UniqueID logical_ctx_uid,
                            InnerContext *context, RestrictInfo &restrict_info, 
                            ApEvent term_event, const RegionUsage &usage, 
-                           bool defer_add_users, InstanceSet &targets);
+                           bool defer_add_users, InstanceSet &targets,
+                           const ProjectionInfo *proj_info);
       void seed_state(ContextID ctx, ApEvent term_event,
                              const RegionUsage &usage,
                              const FieldMask &user_mask,
