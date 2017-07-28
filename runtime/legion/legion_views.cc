@@ -5153,12 +5153,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (prune_depth >= LEGION_PRUNE_DEPTH_WARNING)
-        log_run.warning("WARNING: Composite View Tree has depth %d which "
+        REPORT_LEGION_WARNING(LEGION_WARNING_PRUNE_DEPTH_EXCEEDED,
+                        "WARNING: Composite View Tree has depth %d which "
                         "is larger than LEGION_PRUNE_DEPTH_WARNING of %d. "
                         "Please report this use case to the Legion developers "
                         "mailing list as it could be an important "
                         "runtime performance bug.", prune_depth,
-                        LEGION_PRUNE_DEPTH_WARNING);
+                        LEGION_PRUNE_DEPTH_WARNING)
       // Figure out which fields are not dominated
       FieldMask non_dominated = valid_mask;
       new_tree->filter_dominated_fields(closed_tree, non_dominated);
