@@ -414,6 +414,7 @@ namespace Legion {
       void pack_info(Serializer &rez) const;
       void unpack_info(Deserializer &derez, Runtime *runtime,
           const RegionRequirement &req, const Domain &launch_domain);
+    public:
       void pack_epochs(Serializer &rez) const;
       void unpack_epochs(Deserializer &derez);
     public:
