@@ -426,6 +426,9 @@ namespace Legion {
       void unpack_info(Deserializer &derez, Runtime *runtime,
           const RegionRequirement &req, IndexSpaceNode* launch_node);
     public:
+      void pack_epochs(Serializer &rez) const;
+      void unpack_epochs(Deserializer &derez);
+    public:
       ProjectionFunction *projection;
       ProjectionType projection_type;
       IndexSpaceNode *projection_space;
@@ -995,7 +998,8 @@ namespace Legion {
                                   ProjectionEpochID open_epoch,
                                   bool dedup_advances,
                                   ProjectionEpochID advance_epoch,
-                                  const FieldMask *dirty_previous);
+                                  const FieldMask *dirty_previous,
+                                  const ProjectionInfo *proj_info);
       static void handle_remote_advance(Deserializer &derez, Runtime *runtime,
                                         AddressSpaceID source_space);
     public:

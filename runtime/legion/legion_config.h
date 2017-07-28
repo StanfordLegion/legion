@@ -187,6 +187,11 @@
 #define LEGION_SHUTDOWN_RADIX             8
 #endif
 
+// Maximum depth of composite instances before warnings
+#ifndef LEGION_PRUNE_DEPTH_WARNING
+#define LEGION_PRUNE_DEPTH_WARNING        8
+#endif
+
 // Some helper macros
 
 // This statically computes an integer log base 2 for a number
@@ -601,6 +606,7 @@ typedef enum legion_error_t {
   LEGION_WARNING_MAPPER_REQUESTED_POST = 1088,
   LEGION_WARNING_IGNORING_RELEASE_REQUEST = 1089,
   LEGION_WARNING_DYNAMIC_SHARDING_REG = 1090,
+  LEGION_WARNING_PRUNE_DEPTH_EXCEEDED = 1091,
   
   
   
