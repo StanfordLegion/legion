@@ -964,7 +964,14 @@ namespace Legion {
                             bool dedup_advances = false, 
                             ProjectionEpochID advance_epoch = 0,
                             const FieldMask *dirty_previous = NULL,
-                            const VersioningSet<> *remote_states_to_use = NULL);
+                            const ProjectionInfo *proj_info = NULL);
+      void advance_remote_versions(FieldMask version_mask, 
+                                   UniqueID logical_context_uid,
+                                   InnerContext *physical_context,
+                                   bool update_parent_state,
+                                   AddressSpaceID source_space,
+                                   std::set<RtEvent> &applied_events,
+                                   const VersioningSet<> &remote_states_to_use);
       void update_child_versions(InnerContext *context,
                                  LegionColor child_color,
                                  VersioningSet<> &new_states,
