@@ -1984,6 +1984,36 @@ namespace Legion {
       derez.deserialize<bool>(dirty_reduction);
     }
 
+    //--------------------------------------------------------------------------
+    void ProjectionInfo::pack_epochs(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(projection_epochs.size());
+      for (LegionMap<ProjectionEpochID,FieldMask>::aligned::const_iterator it =
+            projection_epochs.begin(); it != projection_epochs.end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize(it->second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionInfo::unpack_epochs(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(projection_epochs.empty());
+#endif
+      size_t num_epochs;
+      derez.deserialize(num_epochs);
+      for (unsigned idx = 0; idx < num_epochs; idx++)
+      {
+        ProjectionEpochID epoch;
+        derez.deserialize(epoch);
+        derez.deserialize(projection_epochs[epoch]);
+      }
+    }
+
     /////////////////////////////////////////////////////////////
     // PathTraverser 
     /////////////////////////////////////////////////////////////
@@ -4732,7 +4762,7 @@ namespace Legion {
                                                logical_context_uid,
                                                dedup_opens, open_epoch, 
                                                dedup_advances, advance_epoch,
-                                               dirty_previous);
+                                               dirty_previous, proj_info);
         applied_events.insert(advanced); 
         // Now filter out any of our current version states that are
         // no longer valid for the given fields
@@ -5427,7 +5457,8 @@ namespace Legion {
                                                 ProjectionEpochID open_epoch,
                                                 bool dedup_advances,
                                                 ProjectionEpochID advance_epoch,
-                                                const FieldMask *dirty_previous)
+                                                const FieldMask *dirty_previous,
+                                                const ProjectionInfo *proj_info)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5462,6 +5493,14 @@ namespace Legion {
         {
           rez.serialize<bool>(true);
           rez.serialize(*dirty_previous);
+        }
+        else
+          rez.serialize<bool>(false);
+        if (proj_info != NULL)
+        {
+          rez.serialize<bool>(true);
+          // Only need to pack the projection epochs
+          proj_info->pack_epochs(rez);
         }
         else
           rez.serialize<bool>(false);
@@ -5516,6 +5555,11 @@ namespace Legion {
       FieldMask dirty_previous;
       if (has_dirty_previous)
         derez.deserialize(dirty_previous);
+      bool has_proj_info;
+      derez.deserialize(has_proj_info);
+      ProjectionInfo proj_info;
+      if (has_proj_info)
+        proj_info.unpack_epochs(derez);
 
       InnerContext *context = runtime->find_context(physical_context_uid);
       ContextID ctx = context->get_context_id();
@@ -5525,7 +5569,8 @@ namespace Legion {
                                update_parent, source_space, done_preconditions, 
                                dedup_opens, open_epoch, 
                                dedup_advances, advance_epoch,
-                               has_dirty_previous ? &dirty_previous : NULL);
+                               has_dirty_previous ? &dirty_previous : NULL,
+                               has_proj_info ? &proj_info : NULL);
       if (!done_preconditions.empty())
         Runtime::trigger_event(done_event, 
             Runtime::merge_events(done_preconditions));

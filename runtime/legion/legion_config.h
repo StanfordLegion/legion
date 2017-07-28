@@ -170,6 +170,11 @@
 #define LEGION_SHUTDOWN_RADIX             8
 #endif
 
+// Maximum depth of composite instances before warnings
+#ifndef LEGION_PRUNE_DEPTH_WARNING
+#define LEGION_PRUNE_DEPTH_WARNING        8
+#endif
+
 // Some helper macros
 
 // This statically computes an integer log base 2 for a number
