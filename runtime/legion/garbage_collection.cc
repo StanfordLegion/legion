@@ -378,35 +378,46 @@ namespace Legion {
     bool DistributedCollectable::try_active_deletion(void)
     //--------------------------------------------------------------------------
     {
-      AutoLock gc(gc_lock);
-      // We can only do this from five states
+      // We can only do this from four states
+      // The fifth state is a little weird in that we have to continue
+      // polling until it is safely out of the valid state
       // Note this also prevents duplicate deletions
-      if (current_state == INACTIVE_STATE)
+      bool result = false;
+      while (true)
       {
-        current_state = DELETED_STATE;
-        return true;
+        AutoLock gc(gc_lock);
+        if (current_state == INACTIVE_STATE)
+        {
+          current_state = DELETED_STATE;
+          return true;
+        }
+        if (current_state == ACTIVE_INVALID_STATE)
+        {
+          current_state = ACTIVE_DELETED_STATE;
+          return true;
+        }
+        if (current_state == PENDING_INACTIVE_STATE)
+        {
+          current_state = PENDING_INACTIVE_DELETED_STATE;
+          return true;
+        }
+        if (current_state == PENDING_ACTIVE_STATE)
+        {
+          current_state = PENDING_ACTIVE_DELETED_STATE;
+          return true;
+        }
+        // If we're in PENDING_INVALID_STATE go to the deleted
+        // version and then keep going around the loop again until
+        // we end up in the ACTIVE_DELETED_STATE
+        if (current_state == PENDING_INVALID_STATE)
+        { 
+          current_state = PENDING_INVALID_DELETED_STATE;
+          result = true;
+        }
+        else if (current_state != PENDING_INVALID_DELETED_STATE)
+          break;
       }
-      if (current_state == ACTIVE_INVALID_STATE)
-      {
-        current_state = ACTIVE_DELETED_STATE;
-        return true;
-      }
-      if (current_state == PENDING_INACTIVE_STATE)
-      {
-        current_state = PENDING_INACTIVE_DELETED_STATE;
-        return true;
-      }
-      if (current_state == PENDING_ACTIVE_STATE)
-      {
-        current_state = PENDING_ACTIVE_DELETED_STATE;
-        return true;
-      }
-      if (current_state == PENDING_INVALID_STATE)
-      {
-        current_state = PENDING_INVALID_DELETED_STATE;
-        return true;
-      }
-      return false; 
+      return result;
     }
 
     //--------------------------------------------------------------------------
