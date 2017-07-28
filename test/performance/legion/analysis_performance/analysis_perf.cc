@@ -302,7 +302,7 @@ void PerfMapper::map_task(const MapperContext  ctx,
 #ifdef DEBUG_LEGION
         bool ok =
 #endif
-          runtime->acquire_and_filter_instances(ctx, cached_mapping);
+          runtime->acquire_instances(ctx, cached_mapping);
 #ifdef DEBUG_LEGION
         assert(ok);
 #endif
