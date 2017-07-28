@@ -32,6 +32,14 @@ enum
   BLOCK_TASK_ID,
 };
 
+enum
+{
+  RO = 1,
+  WO = 2,
+  RW = 3,
+  RD = 4,
+};
+
 //------------------------------------------------------------------------------
 // Reduction Operator
 //------------------------------------------------------------------------------
@@ -76,8 +84,6 @@ void ReduceNothing::fold<false>(RHS &rhs1, RHS rhs2)
 // Mapper
 //------------------------------------------------------------------------------
 
-static unsigned num_slices = 1;
-
 class PerfMapper : public DefaultMapper
 {
   public:
@@ -118,6 +124,8 @@ class PerfMapper : public DefaultMapper
     typedef vector<LayoutConstraintSet> CachedConstraints;
 
   private:
+    unsigned num_slices;
+    bool cache_mapping;
     vector<Processor>& procs_list;
     //vector<Memory>& sysmems_list;
     //map<Memory, vector<Processor> >& sysmem_local_procs;
@@ -136,12 +144,25 @@ PerfMapper::PerfMapper(MapperRuntime *rt, Machine machine, Processor local,
                        //map<Memory, vector<Processor> >* _sysmem_local_procs,
                        map<Processor, Memory>* _proc_sysmems)
   : DefaultMapper(rt, machine, local, mapper_name),
+    num_slices(1),
+    cache_mapping(true),
     procs_list(*_procs_list),
     //sysmems_list(*_sysmems_list),
     //sysmem_local_procs(*_sysmem_local_procs),
     proc_sysmems(*_proc_sysmems),
     variant_id(0)
 {
+  const InputArgs &command_args = Runtime::get_input_args();
+
+  char **argv = command_args.argv;
+  int argc = command_args.argc;
+  int i = 1;
+  while (i < argc)
+  {
+    if (strcmp(argv[i], "-S") == 0) num_slices = atoi(argv[++i]);
+    else if (strcmp(argv[i], "-F") == 0) cache_mapping = false;
+    ++i;
+  }
 }
 
 PerfMapper::~PerfMapper()
@@ -294,6 +315,8 @@ void PerfMapper::map_task(const MapperContext  ctx,
           runtime->create_physical_instance(ctx, target_memory,
                 constraints, target_region, inst);
           runtime->set_garbage_collection_priority(ctx, inst, GC_NEVER_PRIORITY);
+          runtime->set_garbage_collection_priority(ctx, inst,
+              cache_mapping ? GC_NEVER_PRIORITY : GC_FIRST_PRIORITY);
           cached_mapping[idx].push_back(inst);
         }
       }
@@ -308,6 +331,7 @@ void PerfMapper::map_task(const MapperContext  ctx,
 #endif
       }
       output.chosen_instances = cached_mapping;
+      if (!cache_mapping) cached_mapping.clear();
     }
   }
   else
@@ -437,13 +461,23 @@ void do_nothing(const Task *task,
 {
 }
 
+#define expect(q, c) \
+{ \
+  const char* __p = (q); \
+  if (*__p != (c)) { \
+    fprintf(stderr, "Ill-formed pattern\n"); \
+    exit(-1); \
+  } \
+} \
+
 static void parse_arguments(char** argv, int argc, unsigned& num_tasks,
                             unsigned& num_loops, unsigned& num_regions,
-                            unsigned& num_partitions, unsigned& tree_depth,
-                            unsigned& num_fields, unsigned& dims,
-                            unsigned& blast, bool& alternate,
+                            unsigned& num_partitions, unsigned& num_slices,
+                            unsigned& tree_depth, unsigned& num_fields,
+                            unsigned& dims, unsigned& blast, bool& alternate,
                             bool& alternate_loop, bool& single_launch,
-                            bool& block)
+                            bool& block, bool& cache_mapping,
+                            vector<int>& pattern)
 {
   int i = 1;
   while (i < argc)
@@ -452,6 +486,7 @@ static void parse_arguments(char** argv, int argc, unsigned& num_tasks,
     else if (strcmp(argv[i], "-l") == 0) num_loops = atoi(argv[++i]);
     else if (strcmp(argv[i], "-r") == 0) num_regions = atoi(argv[++i]);
     else if (strcmp(argv[i], "-p") == 0) num_partitions = atoi(argv[++i]);
+    else if (strcmp(argv[i], "-S") == 0) num_slices = atoi(argv[++i]);
     else if (strcmp(argv[i], "-d") == 0) tree_depth = atoi(argv[++i]);
     else if (strcmp(argv[i], "-f") == 0) num_fields = atoi(argv[++i]);
     else if (strcmp(argv[i], "-D") == 0) dims = atoi(argv[++i]);
@@ -460,6 +495,37 @@ static void parse_arguments(char** argv, int argc, unsigned& num_tasks,
     else if (strcmp(argv[i], "-A") == 0) alternate_loop = true;
     else if (strcmp(argv[i], "-s") == 0) single_launch = true;
     else if (strcmp(argv[i], "-b") == 0) block = true;
+    else if (strcmp(argv[i], "-F") == 0) cache_mapping = false;
+    else if (strcmp(argv[i], "-P") == 0)
+    {
+      const char* p = argv[++i];
+      while (*p != '\0')
+      {
+        if (*p == 'w')
+        {
+          expect(++p, 'o');
+          pattern.push_back(WO);
+        }
+        else if(*p++ == 'r')
+        {
+          if (*p == 'd') pattern.push_back(RD);
+          else if (*p == 'w') pattern.push_back(RW);
+          else if (*p == 'o') pattern.push_back(RO);
+          else
+          {
+            fprintf(stderr, "Ill-formed pattern\n");
+            exit(-1);
+          }
+        }
+
+        if (*++p != '\0') expect(p++, '-');
+      }
+      if (pattern.empty())
+      {
+        fprintf(stderr, "ERROR: Empty alternation pattern.\n");
+        exit(-1);
+      }
+    }
     ++i;
   }
 }
@@ -467,8 +533,8 @@ static void parse_arguments(char** argv, int argc, unsigned& num_tasks,
 template<int DIM>
 void create_index_partitions(Context ctx, Runtime *runtime, IndexSpace is,
                              int fanout, int part_color, bool alternate,
-                             int depth, int max_depth, int pattern_length,
-                             const int* pattern)
+                             int depth, int max_depth,
+                             const vector<int>& pattern)
 {
   if (depth == max_depth) return;
   IndexPartition ip;
@@ -477,7 +543,7 @@ void create_index_partitions(Context ctx, Runtime *runtime, IndexSpace is,
   assert(num_elmts > 0);
   size_t block_size = num_elmts / fanout;
   assert(block_size > 0);
-  if (alternate && pattern[part_color % pattern_length] != 0)
+  if (alternate && (pattern[part_color % pattern.size()] & WO) == 0)
   {
     Point<DIM> colors;
     colors.x[0] = fanout - 1;
@@ -525,8 +591,24 @@ void create_index_partitions(Context ctx, Runtime *runtime, IndexSpace is,
     IndexSpace sis = runtime->get_index_subspace(ctx, ip,
         DomainPoint::from_point<DIM>(color));
     create_index_partitions<DIM>(ctx, runtime, sis, fanout, part_color,
-        alternate, depth + 1, max_depth, pattern_length, pattern);
+        alternate, depth + 1, max_depth, pattern);
   }
+}
+
+static void print_pattern(const vector<int>& pattern)
+{
+  string str;
+  for (vector<int>::const_iterator it = pattern.begin(); it != pattern.end();
+       ++it)
+  {
+    if (*it == RO) str += "ro";
+    else if (*it == WO) str += "wo";
+    else if (*it == RW) str += "rw";
+    else if (*it == RD) str += "rd";
+    if (it + 1 != pattern.end()) str += "-";
+  }
+  string pad(max(25 - ((int64_t)pattern.size() * 3 - 1), (int64_t)0), ' ');
+  printf("* Pattern : %s%s *\n", pad.c_str(), str.c_str());
 }
 
 void top_level_task(const Task *task,
@@ -537,6 +619,7 @@ void top_level_task(const Task *task,
   unsigned num_loops = 10;
   unsigned num_regions = 1;
   unsigned num_partitions = 1;
+  unsigned num_slices = 1;
   unsigned tree_depth = 1;
   unsigned num_fields = 1;
   unsigned dims = 1;
@@ -545,52 +628,60 @@ void top_level_task(const Task *task,
   bool alternate_loop = false;
   bool single_launch = false;
   bool block = false;
-  const int pattern_length = 8;
-  const int pattern[] = {0, 2, 2, 1, 2, 0, 2, 1};
+  bool cache_mapping = true;
+  vector<int> pattern;
 
   {
     const InputArgs &command_args = Runtime::get_input_args();
     char **argv = command_args.argv;
     int argc = command_args.argc;
     parse_arguments(argv, argc, num_tasks, num_loops, num_regions,
-        num_partitions, tree_depth, num_fields, dims, blast,
-        alternate, alternate_loop, single_launch, block);
+        num_partitions, num_slices, tree_depth, num_fields, dims, blast,
+        alternate, alternate_loop, single_launch, block, cache_mapping,
+        pattern);
     if (num_regions == 0) num_partitions = 1;
     if (num_regions > 0 && num_partitions > 0 && tree_depth == 0)
     {
       fprintf(stderr,
-          "The depth of tree should be greater than 0 "
+          "ERROR: The depth of tree should be greater than 0 "
           "if partitions are being used.\n");
       exit(-1);
     }
     if (!single_launch && num_partitions == 0)
     {
       fprintf(stderr,
-          "Index launch cannot be used if there is no partition.\n");
+          "ERROR: Index launch cannot be used if there is no partition.\n");
       exit(-1);
     }
     if (num_tasks < num_slices)
     {
       fprintf(stderr,
-          "Number of slices cannot be greater than number of tasks.\n");
+          "ERROR: Number of slices cannot be greater than number of tasks.\n");
       exit(-1);
     }
     if (dims > 3)
     {
-      fprintf(stderr, "Dimensionality should be 1D, 2D, or 3D.\n");
+      fprintf(stderr, "ERROR: Dimensionality should be 1D, 2D, or 3D.\n");
       exit(-1);
     }
     if (num_fields % blast != 0)
     {
       fprintf(stderr,
-          "Number of fields should be divisible by blast factor.\n");
+          "ERROR: Number of fields should be divisible by blast factor.\n");
       exit(-1);
     }
     if (alternate && alternate_loop)
     {
-      fprintf(stderr, "Two alternate modes cannot coexist.\n");
+      fprintf(stderr, "ERROR: Two alternate modes cannot coexist.\n");
       exit(-1);
     }
+  }
+
+  if (pattern.empty())
+  {
+    const int default_pattern[] = {RW, RD, RD, RO, RD, RO, RW, RD, RO};
+    for (unsigned idx = 0; idx < 8; ++idx)
+      pattern.push_back(default_pattern[idx]);
   }
 
   // TODO: Single task launches with root regions should be supported
@@ -611,8 +702,11 @@ void top_level_task(const Task *task,
   printf("* Alternate Partitions  :         %s *\n", alternate ? "yes" : " no");
   printf("* Alternate Iterations  :         %s *\n",
       alternate_loop ? "yes" : " no");
+  if (alternate || alternate_loop) print_pattern(pattern);
   printf("* Use Single Launch     :         %s *\n",
       single_launch ? "yes" : " no");
+  printf("* Cache Mapping         :         %s *\n",
+      cache_mapping ? "yes" : " no");
   printf("* Number of Slices      :       %5u *\n", num_slices);
   printf("* Dimensionality        :       %5u *\n", dims);
   printf("* Blast Factor          :       %5u *\n", blast);
@@ -699,19 +793,19 @@ void top_level_task(const Task *task,
         case 1 :
           {
             create_index_partitions<1>(ctx, runtime, is, num_tasks, p,
-                alternate, 0, tree_depth, pattern_length, pattern);
+                alternate, 0, tree_depth, pattern);
             break;
           }
         case 2 :
           {
             create_index_partitions<2>(ctx, runtime, is, num_tasks, p,
-                alternate, 0, tree_depth, pattern_length, pattern);
+                alternate, 0, tree_depth, pattern);
             break;
           }
         case 3 :
           {
             create_index_partitions<3>(ctx, runtime, is, num_tasks, p,
-                alternate, 0, tree_depth, pattern_length, pattern);
+                alternate, 0, tree_depth, pattern);
             break;
           }
         default:
@@ -774,8 +868,8 @@ void top_level_task(const Task *task,
                 lp = runtime->get_logical_partition_by_color(ctx, lr, p);
             }
 
-            if ((alternate && pattern[p % pattern_length] == 2) ||
-                (alternate_loop && pattern[l % pattern_length] == 2))
+            if ((alternate && pattern[p % pattern.size()] == RD) ||
+                (alternate_loop && pattern[l % pattern.size()] == RD))
             {
               for (unsigned k = 0; k < num_fields; ++k)
               {
@@ -790,10 +884,17 @@ void top_level_task(const Task *task,
               unsigned fid_block = num_fields / blast;
               for (unsigned b = 0; b < blast; ++b)
               {
-                PrivilegeMode priv =
-                  !alternate || pattern[p % pattern_length] == 0 ?
-                  (!alternate_loop || pattern[l % pattern_length] == 0 ?
-                   READ_WRITE : READ_ONLY) : READ_ONLY;
+                PrivilegeMode priv = READ_WRITE;
+                if (alternate)
+                {
+                  if (pattern[p % pattern.size()] == RO) priv = READ_ONLY;
+                  else if (pattern[p % pattern.size()] == WO) priv = WRITE_ONLY;
+                }
+                else if (alternate_loop)
+                {
+                  if (pattern[l % pattern.size()] == RO) priv = READ_ONLY;
+                  else if (pattern[l % pattern.size()] == WO) priv = WRITE_ONLY;
+                }
                 RegionRequirement req(lr, priv, EXCLUSIVE, lrs[r]);
                 for (unsigned k = 0; k < fid_block; ++k)
                 {
@@ -821,8 +922,8 @@ void top_level_task(const Task *task,
         if (block && l == 0 && p == 0) launcher.add_wait_barrier(next_barrier);
         for (unsigned r = 0; r < num_regions; ++r)
         {
-          if ((alternate && pattern[p % pattern_length] == 2) ||
-              (alternate_loop && pattern[l % pattern_length] == 2))
+          if ((alternate && pattern[p % pattern.size()] == RD) ||
+              (alternate_loop && pattern[l % pattern.size()] == RD))
           {
             for (unsigned k = 0; k < num_fields; ++k)
             {
@@ -838,10 +939,17 @@ void top_level_task(const Task *task,
             unsigned fid_block = num_fields / blast;
             for (unsigned b = 0; b < blast; ++b)
             {
-              PrivilegeMode priv =
-                !alternate || pattern[p % pattern_length] == 0 ?
-                (!alternate_loop || pattern[l % pattern_length] == 0 ?
-                 READ_WRITE : READ_ONLY) : READ_ONLY;
+              PrivilegeMode priv = READ_WRITE;
+              if (alternate)
+              {
+                if (pattern[p % pattern.size()] == RO) priv = READ_ONLY;
+                else if (pattern[p % pattern.size()] == WO) priv = WRITE_ONLY;
+              }
+              else if (alternate_loop)
+              {
+                if (pattern[l % pattern.size()] == RO) priv = READ_ONLY;
+                else if (pattern[l % pattern.size()] == WO) priv = WRITE_ONLY;
+              }
               RegionRequirement req(lps[r][p], pid, priv, EXCLUSIVE,
                   lrs[r]);
               for (unsigned k = 0; k < fid_block; ++k)
@@ -858,16 +966,6 @@ void top_level_task(const Task *task,
     }
   }
   barrier_for_block.arrive(1);
-}
-
-static void parse_num_slices(char** argv, int argc)
-{
-  int i = 1;
-  while (i < argc)
-  {
-    if (strcmp(argv[i], "-S") == 0) num_slices = atoi(argv[++i]);
-    ++i;
-  }
 }
 
 int main(int argc, char** argv)
@@ -891,7 +989,6 @@ int main(int argc, char** argv)
     Runtime::preregister_task_variant<block>(registrar, "block");
   }
 
-  parse_num_slices(argv, argc);
   Runtime::add_registration_callback(register_mappers);
   Runtime::register_reduction_op<ReduceNothing>(REDUCE_ID);
 
