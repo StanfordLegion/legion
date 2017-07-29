@@ -56,12 +56,14 @@ namespace Legion {
       : Mapper(rt), local_proc(local), local_kind(local.kind()), 
         node_id(local.address_space()), machine(m),
         mapper_name((name == NULL) ? create_default_name(local) : strdup(name)),
-        next_local_io(0), next_local_cpu(0), next_local_gpu(0), 
-        next_local_procset(0), next_global_io(Processor::NO_PROC), 
-        next_global_cpu(Processor::NO_PROC),next_global_gpu(Processor::NO_PROC),
-        next_global_procset(Processor::NO_PROC), global_io_query(NULL), 
-        global_cpu_query(NULL), global_gpu_query(NULL), 
-        global_procset_query(NULL),
+        next_local_gpu(0), next_local_cpu(0), next_local_io(0),
+        next_local_procset(0), next_local_omp(0),
+        next_global_gpu(Processor::NO_PROC),
+        next_global_cpu(Processor::NO_PROC), next_global_io(Processor::NO_PROC),
+        next_global_procset(Processor::NO_PROC),
+        next_global_omp(Processor::NO_PROC),
+        global_gpu_query(NULL), global_cpu_query(NULL), global_io_query(NULL),
+        global_procset_query(NULL), global_omp_query(NULL),
         max_steals_per_theft(STATIC_MAX_PERMITTED_STEALS),
         max_steal_count(STATIC_MAX_STEAL_COUNT),
         breadth_first_traversal(STATIC_BREADTH_FIRST),
@@ -135,6 +137,11 @@ namespace Legion {
                 local_procsets.push_back(*it);
                 break;
               }
+            case Processor::OMP_PROC:
+              {
+                local_omps.push_back(*it);
+                break;
+              }
             default: // ignore anything else
               break;
           }
@@ -177,6 +184,15 @@ namespace Legion {
                 remote_procsets[node] = *it;
               break;
             }
+          case Processor::OMP_PROC:
+            {
+              // See if we already have a target OMP processor for this node
+              if (node >= remote_omps.size())
+                remote_omps.resize(node+1, Processor::NO_PROC);
+              if (!remote_omps[node].exists())
+                remote_omps[node] = *it;
+              break;
+            }
           default: // ignore anything else
             break;
         }
@@ -212,6 +228,18 @@ namespace Legion {
           if (!remote_ios[idx].exists()) {
             log_mapper.error("Default mapper has I/O procs on node %d, but "
                              "could not detect I/O procs on node %d. The "
+                             "current default mapper implementation assumes "
+                             "symmetric heterogeneity.", node_id, idx);
+            assert(false);
+          }
+        }
+      }
+      if (!local_omps.empty()) {
+        for (unsigned idx = 0; idx < remote_omps.size(); idx++) {
+	  if (idx == node_id) continue;  // ignore our own node
+          if (!remote_omps[idx].exists()) {
+            log_mapper.error("Default mapper has OMP procs on node %d, but "
+                             "could not detect OMP procs on node %d. The "
                              "current default mapper implementation assumes "
                              "symmetric heterogeneity.", node_id, idx);
             assert(false);
@@ -326,6 +354,8 @@ namespace Legion {
             return default_get_next_local_gpu();
           case Processor::IO_PROC:
             return default_get_next_local_io();
+          case Processor::OMP_PROC:
+            return default_get_next_local_omp();
           default: // make warnings go away
             break;
         }
@@ -351,6 +381,8 @@ namespace Legion {
                 return default_get_next_local_gpu();
               case Processor::IO_PROC:
                 return default_get_next_local_io();
+              case Processor::OMP_PROC:
+                return default_get_next_local_omp();
               default: // make warnings go away
                 break;
             }
@@ -369,6 +401,8 @@ namespace Legion {
                 return default_get_next_global_gpu();
               case Processor::IO_PROC: // Don't distribute I/O
                 return default_get_next_local_io();
+              case Processor::OMP_PROC:
+                return default_get_next_global_omp();
               default: // make warnings go away
                 break;
             }
@@ -385,6 +419,8 @@ namespace Legion {
                 return default_get_next_local_gpu();
               case Processor::IO_PROC:
                 return default_get_next_local_io();
+              case Processor::OMP_PROC:
+                return default_get_next_local_omp();
               default: // make warnings go away
                 break;
             }
@@ -534,6 +570,38 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Processor DefaultMapper::default_get_next_local_omp(void)
+    //--------------------------------------------------------------------------
+    {
+      Processor result = local_omps[next_local_omp++];
+      if (next_local_omp == local_omps.size())
+        next_local_omp = 0;
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    Processor DefaultMapper::default_get_next_global_omp(void)
+    //--------------------------------------------------------------------------
+    {
+      if (total_nodes == 1)
+        return default_get_next_local_omp();
+      if (!next_global_omp.exists())
+      {
+        global_omp_query = new Machine::ProcessorQuery(machine);
+        global_omp_query->only_kind(Processor::OMP_PROC);
+        next_global_omp = global_omp_query->first();
+      }
+      Processor result = next_global_omp;
+      next_global_omp = global_omp_query->next(result);
+      if (!next_global_omp.exists())
+      {
+        delete global_omp_query;
+        global_omp_query = NULL;
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     DefaultMapper::VariantInfo DefaultMapper::default_find_preferred_variant(
                                      const Task &task, MapperContext ctx, 
                                      bool needs_tight_bound, bool cache_result,
@@ -613,6 +681,12 @@ namespace Legion {
               case Processor::PROC_SET:
                 {
                   if (local_procsets.empty())
+                    continue;
+                  break;
+                }
+              case Processor::OMP_PROC:
+                {
+                  if (local_omps.empty())
                     continue;
                   break;
                 }
@@ -748,10 +822,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Default mapper is ignorant about task IDs so just do whatever
-      // GPU > procset > IO > cpu
+      // GPU > OMP > procset > cpu > IO
       // It is up to the caller to filter out processor kinds that aren't
       // suitable for a given task
       if (local_gpus.size() > 0) ranking.push_back(Processor::TOC_PROC);
+      if (local_omps.size() > 0) ranking.push_back(Processor::OMP_PROC);
       if (local_procsets.size() > 0) ranking.push_back(Processor::PROC_SET);
       ranking.push_back(Processor::LOC_PROC);
       if (local_ios.size() > 0) ranking.push_back(Processor::IO_PROC);
@@ -880,6 +955,23 @@ namespace Legion {
                 }
                 break;
               }
+            case Processor::OMP_PROC:
+              {
+                if (task.index_domain.get_volume() > local_omps.size())
+                {
+                  if (!global_memory.exists())
+                  {
+                    log_mapper.error("Default mapper failure. No memory found "
+                        "for OMP task %s (ID %lld) which is visible "
+                        "for all point in the index space.",
+                        task.get_task_name(), task.get_unique_id());
+                    assert(false);
+                  }
+                  else
+                    target_memory = global_memory;
+                }
+                break;
+              }
             default:
               assert(false); // unrecognized processor kind
           }
@@ -916,9 +1008,10 @@ namespace Legion {
         visible_memories.has_affinity_to(task.target_proc);
         switch (task.target_proc.kind())
         {
-          case Processor::IO_PROC:
           case Processor::LOC_PROC:
+          case Processor::IO_PROC:
           case Processor::PROC_SET:
+          case Processor::OMP_PROC:
             {
               visible_memories.only_kind(Memory::SYSTEM_MEM);
               if (visible_memories.count() == 0)
@@ -1052,6 +1145,12 @@ namespace Legion {
           {
             default_slice_task(task, local_procsets, remote_procsets, 
                                input, output, procset_slices_cache);
+            break;
+          }
+        case Processor::OMP_PROC:
+          {
+            default_slice_task(task, local_omps, remote_omps,
+                               input, output, omp_slices_cache);
             break;
           }
         default:
@@ -1507,6 +1606,19 @@ namespace Legion {
           case Processor::PROC_SET:
             {
               target_procs.push_back(task.target_proc);
+              break;
+            }
+          case Processor::OMP_PROC:
+            {
+              // Put any of our local omps on here
+              // TODO: NUMA-ness needs to go here
+              // If we're part of a must epoch launch, our 
+              // target proc will be sufficient
+              if (!task.must_epoch_task)
+                target_procs.insert(target_procs.end(),
+                    local_omps.begin(), local_omps.end());
+              else
+                target_procs.push_back(task.target_proc);
               break;
             }
           default:
@@ -2715,14 +2827,14 @@ namespace Legion {
             *result = total_nodes;
             break;
           }
-        case DEFAULT_TUNABLE_LOCAL_CPUS:
-          {
-            *result = local_cpus.size();
-            break;
-          }
         case DEFAULT_TUNABLE_LOCAL_GPUS:
           {
             *result = local_gpus.size();
+            break;
+          }
+        case DEFAULT_TUNABLE_LOCAL_CPUS:
+          {
+            *result = local_cpus.size();
             break;
           }
         case DEFAULT_TUNABLE_LOCAL_IOS:
@@ -2730,10 +2842,9 @@ namespace Legion {
             *result = local_ios.size();
             break;
           }
-        case DEFAULT_TUNABLE_GLOBAL_CPUS:
+        case DEFAULT_TUNABLE_LOCAL_OMPS:
           {
-            // TODO: deal with machine asymmetry here
-            *result = (local_cpus.size() * total_nodes);
+            *result = local_omps.size();
             break;
           }
         case DEFAULT_TUNABLE_GLOBAL_GPUS:
@@ -2742,10 +2853,22 @@ namespace Legion {
             *result = (local_gpus.size() * total_nodes);
             break;
           }
+        case DEFAULT_TUNABLE_GLOBAL_CPUS:
+          {
+            // TODO: deal with machine asymmetry here
+            *result = (local_cpus.size() * total_nodes);
+            break;
+          }
         case DEFAULT_TUNABLE_GLOBAL_IOS:
           {
             // TODO: deal with machine asymmetry here
             *result = (local_ios.size() * total_nodes);
+            break;
+          }
+        case DEFAULT_TUNABLE_GLOBAL_OMPS:
+          {
+            // TODO: deal with machine asymmetry here
+            *result = (local_omps.size() * total_nodes);
             break;
           }
         default:
