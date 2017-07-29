@@ -16416,7 +16416,7 @@ namespace Legion {
           else // the normal path here
             update_reduction_views(state, user_mask, new_view);
           // Skip adding the user if requested
-          if (defer_add_users || (targets.size() > 1))
+          if (defer_add_users)
             continue;
           if (targets.size() > 1)
           {
@@ -16684,7 +16684,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionNode::close_state(const TraversalInfo &info, RegionUsage &usage, 
-                                 UniqueID logical_ctx_uid,InnerContext *context, 
+                                 UniqueID logical_ctx_uid,InnerContext *context,
                                  InstanceSet &targets) 
     //--------------------------------------------------------------------------
     {
