@@ -31,7 +31,7 @@ local default_options = {
   ["inner"] = true,
   ["mapping"] = true,
   ["openmp"] = false,
-  ["openmp-kindhack"] = false,
+  ["openmp-strict"] = false,
   ["vectorize"] = true,
   ["vectorize-unsafe"] = false,
 
