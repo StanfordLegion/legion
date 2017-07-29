@@ -31,7 +31,8 @@
 #define LEGION_PROF_SELF_PROFILE
 
 #ifdef DETAILED_LEGION_PROF
-#define DETAILED_PROFILER(runtime, call) DetailedProfiler(runtime, call)
+#define DETAILED_PROFILER(runtime, call) \
+  DetailedProfiler __detailed_profiler(runtime, call)
 #else
 #define DETAILED_PROFILER(runtime, call) // Nothing
 #endif
