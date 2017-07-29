@@ -17,7 +17,7 @@
 --  ["-ll:cpu", "4", "-fbounds-checks", "1", "-fdebug", "1",
 --   "-fparallelize-dop", "9"],
 --  ["-ll:cpu", "4"],
---  ["-ll:cpu", "4", "-fparallelize-dop", "4", "-fopenmp", "1"]
+--  ["-ll:cpu", "4", "-fparallelize-dop", "4", "-fopenmp", "1", "-fopenmp-kindhack", "1"]
 -- ]
 
 import "regent"

@@ -3758,6 +3758,19 @@ function std.setup(main_task, extra_setup_thunk)
       local options = variant:get_config_options()
 
       local proc_types = {c.LOC_PROC, c.IO_PROC}
+      local openmp = false
+      if not std.config["openmp-kindhack"] then
+        ast.traverse_node_postorder(
+          function(node)
+            if node:is(ast.typed.stat) and
+              node.annotations.openmp:is(ast.annotation.Demand)
+            then
+              openmp = true
+            end
+          end,
+          variant:get_ast())
+      end
+      if openmp then proc_types = {c.OMP_PROC} end
       if variant:is_cuda() then proc_types = {c.TOC_PROC} end
       if std.config["cuda"] and task:is_shard_task() then
         proc_types[#proc_types + 1] = c.TOC_PROC
