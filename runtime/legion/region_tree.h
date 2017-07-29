@@ -369,8 +369,8 @@ namespace Legion {
                                   std::set<RtEvent> &map_applied,
                                   const RestrictInfo &restrict_info,
                                   const InstanceSet &targets,
-                                  // projection_epochs can be NULL
-        const LegionMap<ProjectionEpochID,FieldMask>::aligned *projection_epochs
+                                  // projection_info can be NULL
+                                  const ProjectionInfo *projection_info
 #ifdef DEBUG_LEGION
                                   , const char *log_name
                                   , UniqueID uid
@@ -1521,7 +1521,7 @@ namespace Legion {
                                      InnerContext *owner_context,
                                      ClosedNode *closed_tree,
                                      std::set<RtEvent> &ready_events,
-        const LegionMap<ProjectionEpochID,FieldMask>::aligned *epochs); 
+                                     const ProjectionInfo *proj_info);
       // This method will always add valid references to the set of views
       // that are returned.  It is up to the caller to remove the references.
       void find_valid_instance_views(ContextID ctx,

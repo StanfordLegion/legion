@@ -2448,7 +2448,7 @@ namespace Legion {
                 ClosedNode *closed_tree, RegionTreeNode *close_node,
                 const FieldMask &closing_mask, std::set<RtEvent> &map_applied, 
                 const RestrictInfo &restrict_info, const InstanceSet &targets,
-      const LegionMap<ProjectionEpochID,FieldMask>::aligned *projection_epochs
+                const ProjectionInfo *projection_info
 #ifdef DEBUG_LEGION
                 , const char *log_name
                 , UniqueID uid
@@ -2469,7 +2469,7 @@ namespace Legion {
       // update copies to the target instances from the composite instance
       CompositeView *result = close_node->create_composite_instance(info.ctx, 
                           closing_mask, version_info, logical_ctx_uid, 
-                          context, closed_tree, map_applied, projection_epochs);
+                          context, closed_tree, map_applied, projection_info);
       if (targets.empty())
         return;
       PhysicalState *physical_state = NULL;
@@ -13797,7 +13797,7 @@ namespace Legion {
                                                 InnerContext *owner_ctx,
                                                 ClosedNode *closed_tree,
                                                 std::set<RtEvent> &ready_events,
-                  const LegionMap<ProjectionEpochID,FieldMask>::aligned *epochs)
+                                                const ProjectionInfo *proj_info)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -13814,21 +13814,26 @@ namespace Legion {
       // is necessary to maintain the monotonicity of the 
       // version state objects.
       const bool update_parent_state = !version_info.is_upper_bound_node(this);
-      if (epochs != NULL)
+      if (proj_info != NULL)
       {
         // This is the uncommon case that occurs when we are doing a 
         // disjoint partition close and we're actually closing each 
         // of the children individually. We we do this we need to advance
         // with an open of the new projection epoch
+        const LegionMap<ProjectionEpochID,FieldMask>::aligned &epochs = 
+          proj_info->get_projection_epochs();
         for (LegionMap<ProjectionEpochID,FieldMask>::aligned::const_iterator 
-              it = epochs->begin(); it != epochs->end(); it++)
+              it = epochs.begin(); it != epochs.end(); it++)
         {
           FieldMask overlap = it->second & closing_mask;
           if (!overlap)
             continue;
           manager.advance_versions(overlap, logical_context_uid, owner_ctx, 
                                    true/*update parent*/, local_space, 
-                                   ready_events, true/*dedup opens*/,it->first);
+                                   ready_events, true/*dedup opens*/,
+                                   it->first, false/*dedup advances*/, 
+                                   0/*epoch*/, NULL/*dirty previous*/, 
+                                   proj_info);
         }
       }
       else // The common case
@@ -16416,7 +16421,7 @@ namespace Legion {
           else // the normal path here
             update_reduction_views(state, user_mask, new_view);
           // Skip adding the user if requested
-          if (defer_add_users || (targets.size() > 1))
+          if (defer_add_users)
             continue;
           if (targets.size() > 1)
           {
@@ -16684,7 +16689,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionNode::close_state(const TraversalInfo &info, RegionUsage &usage, 
-                                 UniqueID logical_ctx_uid,InnerContext *context, 
+                                 UniqueID logical_ctx_uid,InnerContext *context,
                                  InstanceSet &targets) 
     //--------------------------------------------------------------------------
     {

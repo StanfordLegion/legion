@@ -1509,7 +1509,7 @@ namespace Legion {
         else
           send_remote_gc_update(owner_space, mutator, 1, false/*add*/);
       }
-      else if(parent->remove_nested_gc_ref(did, mutator))
+      else if (parent->remove_nested_gc_ref(did, mutator))
         delete parent;
     }
 
@@ -5181,9 +5181,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CompositeView::prune(ClosedNode *new_tree, FieldMask &valid_mask,
-                     LegionMap<CompositeView*,FieldMask>::aligned &replacements)
+                     LegionMap<CompositeView*,FieldMask>::aligned &replacements, 
+                     unsigned prune_depth)
     //--------------------------------------------------------------------------
     {
+      if (prune_depth >= LEGION_PRUNE_DEPTH_WARNING)
+        log_run.warning("WARNING: Composite View Tree has depth %d which "
+                        "is larger than LEGION_PRUNE_DEPTH_WARNING of %d. "
+                        "Please report this use case to the Legion developers "
+                        "mailing list as it could be an important "
+                        "runtime performance bug.", prune_depth,
+                        LEGION_PRUNE_DEPTH_WARNING);
       // Figure out which fields are not dominated
       FieldMask non_dominated = valid_mask;
       new_tree->filter_dominated_fields(closed_tree, non_dominated);
@@ -5200,7 +5208,7 @@ namespace Legion {
           FieldMask overlap = it->second & dominated;
           if (!overlap)
             continue;
-          it->first->prune(new_tree, overlap, replacements);
+          it->first->prune(new_tree, overlap, replacements, prune_depth+1);
           if (!!overlap)
           {
             // Some fields are still valid so add them to the replacements
@@ -5229,7 +5237,8 @@ namespace Legion {
         if (!overlap)
           continue;
         FieldMask still_valid = overlap;
-        it->first->prune(new_tree, still_valid, local_replacements);
+        it->first->prune(new_tree, still_valid, 
+                         local_replacements, prune_depth+1);
         // See if any fields were pruned, if so they are changed
         FieldMask changed = overlap - still_valid;
         if (!!changed)
@@ -5759,7 +5768,7 @@ namespace Legion {
             it->first->add_nested_resource_ref(did);
             continue;
           }
-          it->first->prune(closed_tree, it->second, replacements);
+          it->first->prune(closed_tree, it->second, replacements, 0/*depth*/);
           if (!it->second)
             to_erase.push_back(it->first);
           else

@@ -7001,8 +7001,6 @@ namespace Legion {
 #endif
       version_info.clone_to_depth(child_depth-1, close_info.close_mask,
                                   close_info.version_info);
-      const LegionMap<ProjectionEpochID,FieldMask>::aligned *projection_epochs =
-        &(projection_info.get_projection_epochs());
       runtime->forest->physical_perform_close(requirement,
                                               close_info.version_info,
                                               this, 0/*idx*/, 
@@ -7012,7 +7010,7 @@ namespace Legion {
                                               ready_events,
                                               restrict_info,
                                               chosen_instances, 
-                                              projection_epochs
+                                              &projection_info
 #ifdef DEBUG_LEGION
                                               , get_logging_name()
                                               , unique_op_id
