@@ -3768,7 +3768,7 @@ function std.setup(main_task, extra_setup_thunk)
               openmp = true
             end
           end,
-          variant:get_ast())
+          variant:has_ast() and variant:get_ast())
       end
       if openmp then proc_types = {c.OMP_PROC} end
       if variant:is_cuda() then proc_types = {c.TOC_PROC} end
