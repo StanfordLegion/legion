@@ -967,14 +967,8 @@ namespace Legion {
                             bool dedup_advances = false, 
                             ProjectionEpochID advance_epoch = 0,
                             const FieldMask *dirty_previous = NULL,
-                            const ProjectionInfo *proj_info = NULL);
-      void advance_remote_versions(FieldMask version_mask, 
-                                   UniqueID logical_context_uid,
-                                   InnerContext *physical_context,
-                                   bool update_parent_state,
-                                   AddressSpaceID source_space,
-                                   std::set<RtEvent> &applied_events,
-                                   const VersioningSet<> &remote_states_to_use);
+                            const ProjectionInfo *proj_info = NULL,
+                            const VersioningSet<> *repl_states_to_use = NULL);
       void update_child_versions(InnerContext *context,
                                  LegionColor child_color,
                                  VersioningSet<> &new_states,
@@ -999,7 +993,8 @@ namespace Legion {
                                   bool dedup_advances,
                                   ProjectionEpochID advance_epoch,
                                   const FieldMask *dirty_previous,
-                                  const ProjectionInfo *proj_info);
+                                  const ProjectionInfo *proj_info,
+                                  const VersioningSet<> *repl_states_to_user);
       static void handle_remote_advance(Deserializer &derez, Runtime *runtime,
                                         AddressSpaceID source_space);
     public:

@@ -4887,7 +4887,8 @@ namespace Legion {
                                           bool dedup_advances, 
                                           ProjectionEpochID advance_epoch,
                                           const FieldMask *dirty_previous,
-                                          const ProjectionInfo *proj_info)
+                                          const ProjectionInfo *proj_info,
+                                          const VersioningSet<> *repl_states)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(node->context->runtime, 
@@ -4909,7 +4910,8 @@ namespace Legion {
                                                logical_context_uid,
                                                dedup_opens, open_epoch, 
                                                dedup_advances, advance_epoch,
-                                               dirty_previous, proj_info);
+                                               dirty_previous, proj_info,
+                                               repl_states);
         applied_events.insert(advanced); 
         // Now filter out any of our current version states that are
         // no longer valid for the given fields
@@ -5275,7 +5277,28 @@ namespace Legion {
           VersionID next_version = vit->first+1;
           // Remove this version number from the delete set if it exists
           to_delete_current.erase(next_version);
-          VersionState *new_state = create_new_version_state(next_version);
+          VersionState *new_state = NULL;
+          if (repl_states != NULL)
+          {
+            // If we've been given remote states to use from another
+            // control replicated context then we should be able
+            // to find a version state with the right version number
+            for (VersioningSet<>::iterator it = repl_states->begin();
+                  it != repl_states->end(); it++)
+            {
+              if (it->first->version_number != next_version)
+                continue;
+              if (it->second != version_overlap)
+                continue;
+              new_state = it->first;
+              break;
+            }
+#ifdef DEBUG_LEGION
+            assert(new_state != NULL);
+#endif
+          }
+          else
+            new_state = create_new_version_state(next_version);
           if (update_parent_state || (dirty_previous != NULL))
             new_states.insert(new_state, version_overlap, &mutator);
           // Kind of dangerous to be getting another iterator to this
@@ -5303,7 +5326,28 @@ namespace Legion {
         // are being initialized and should be added as version 1
         if (!!current_filter)
         {
-          VersionState *new_state = create_new_version_state(init_version);
+          VersionState *new_state = NULL;
+          if (repl_states != NULL)
+          {
+            // If we've been given remote states to use from another
+            // control replicated context then we should be able
+            // to find a version state with the right version number
+            for (VersioningSet<>::iterator it = repl_states->begin();
+                  it != repl_states->end(); it++)
+            {
+              if (it->first->version_number != init_version)
+                continue;
+              if (it->second != current_filter)
+                continue;
+              new_state = it->first;
+              break;
+            }
+#ifdef DEBUG_LEGION
+            assert(new_state != NULL);
+#endif
+          }
+          else
+            new_state = create_new_version_state(init_version);
           if (update_parent_state || (dirty_previous != NULL))
             new_states.insert(new_state, current_filter, &mutator);
           current_version_infos[init_version].insert(new_state, 
@@ -5598,14 +5642,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent VersionManager::send_remote_advance(const FieldMask &advance_mask,
-                                                bool update_parent_state,
-                                                UniqueID logical_context_uid,
-                                                bool dedup_opens,
-                                                ProjectionEpochID open_epoch,
-                                                bool dedup_advances,
-                                                ProjectionEpochID advance_epoch,
-                                                const FieldMask *dirty_previous,
-                                                const ProjectionInfo *proj_info)
+                                            bool update_parent_state,
+                                            UniqueID logical_context_uid,
+                                            bool dedup_opens,
+                                            ProjectionEpochID open_epoch,
+                                            bool dedup_advances,
+                                            ProjectionEpochID advance_epoch,
+                                            const FieldMask *dirty_previous,
+                                            const ProjectionInfo *proj_info,
+                                            const VersioningSet<> *repl_states)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5651,6 +5696,18 @@ namespace Legion {
         }
         else
           rez.serialize<bool>(false);
+        if (repl_states != NULL)
+        {
+          rez.serialize<size_t>(repl_states->size());
+          for (VersioningSet<>::iterator it = repl_states->begin();
+                it != repl_states->end(); it++)
+          {
+            rez.serialize(it->first->did);
+            rez.serialize(it->second);
+          }
+        }
+        else
+          rez.serialize<size_t>(0);
       }
       runtime->send_version_manager_advance(owner_space, rez);
       return remote_advance;
@@ -5707,6 +5764,31 @@ namespace Legion {
       ProjectionInfo proj_info;
       if (has_proj_info)
         proj_info.unpack_epochs(derez);
+      VersioningSet<> repl_states;
+      size_t num_repl_states;
+      derez.deserialize(num_repl_states);
+      if (num_repl_states > 0)
+      {
+        std::set<RtEvent> ready_events;
+        for (unsigned idx = 0; idx < num_repl_states; idx++)
+        {
+          DistributedID did;
+          derez.deserialize(did);
+          RtEvent ready;
+          VersionState *state = 
+            runtime->find_or_request_version_state(did, ready);
+          FieldMask state_mask;
+          derez.deserialize(state_mask);
+          ready = repl_states.insert(state, state_mask, runtime, ready);
+          if (ready.exists())
+            ready_events.insert(ready);
+        }
+        if (!ready_events.empty())
+        {
+          RtEvent wait_on = Runtime::merge_events(ready_events);
+          wait_on.lg_wait();
+        }
+      }
 
       InnerContext *context = runtime->find_context(physical_context_uid);
       ContextID ctx = context->get_context_id();
@@ -5717,7 +5799,8 @@ namespace Legion {
                                dedup_opens, open_epoch, 
                                dedup_advances, advance_epoch,
                                has_dirty_previous ? &dirty_previous : NULL,
-                               has_proj_info ? &proj_info : NULL);
+                               has_proj_info ? &proj_info : NULL,
+                               num_repl_states > 0 ? &repl_states : NULL);
       if (!done_preconditions.empty())
         Runtime::trigger_event(done_event, 
             Runtime::merge_events(done_preconditions));

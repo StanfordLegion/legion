@@ -1529,8 +1529,9 @@ namespace Legion {
       assert(ctx.exists());
 #endif
       VersionManager &manager = node->get_current_version_manager(ctx.get_id());
-      manager.advance_remote_versions(advance_mask, logical_ctx_uid, context,
-          !parent_is_upper_bound, local, ready_events, versions);
+      manager.advance_versions(advance_mask, logical_ctx_uid, context,
+          !parent_is_upper_bound, local, ready_events, false, 0, false, 0,
+          NULL, NULL, &versions);
     }
 
     //--------------------------------------------------------------------------
