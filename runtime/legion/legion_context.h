@@ -966,6 +966,7 @@ namespace Legion {
                                        std::vector<Future> &contributions);
     public:
       virtual ShardingFunction* find_sharding_function(ShardingID sid);
+      virtual ShardManager* find_shard_manager(void) const;
     public:
       static void handle_version_owner_request(Deserializer &derez,
                             Runtime *runtime, AddressSpaceID source);
@@ -1332,6 +1333,7 @@ namespace Legion {
                                        bool replicate = false);
     public:
       virtual ShardingFunction* find_sharding_function(ShardingID sid);
+      virtual ShardManager* find_shard_manager(void) const;
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source);
@@ -1473,6 +1475,7 @@ namespace Legion {
                                                      AddressSpaceID source);
     public:
       virtual ShardingFunction* find_sharding_function(ShardingID sid);
+      virtual ShardManager* find_shard_manager(void) const;
     public:
       void unpack_local_field_update(Deserializer &derez);
       static void handle_local_field_update(Deserializer &derez);

@@ -21119,6 +21119,11 @@ namespace Legion {
             CompositeNode::handle_deferred_node_ref(args);
             break;
           }
+        case LG_DEFER_COMPOSITE_NODE_VALID_TASK_ID:
+          {
+            CompositeNode::handle_deferred_valid(args);
+            break;
+          }
         case LG_DEFER_COMPOSITE_NODE_CAPTURE_TASK_ID:
           {
             CompositeNode::handle_deferred_capture(args);

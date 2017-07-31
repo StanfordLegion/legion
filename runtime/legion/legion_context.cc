@@ -5554,6 +5554,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ShardManager* InnerContext::find_shard_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+      // Should only be called by inherited classes
+      assert(false);
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
     void InnerContext::configure_context(MapperManager *mapper)
     //--------------------------------------------------------------------------
     {
@@ -9531,6 +9540,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ShardManager* ReplicateContext::find_shard_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+      return shard_manager;
+    }
+
+    //--------------------------------------------------------------------------
     InstanceView* ReplicateContext::create_instance_top_view(
                                 PhysicalManager *manager, AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -10397,6 +10413,17 @@ namespace Legion {
       // Save the result for the future
       sharding_functions[sid] = result;
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    ShardManager* RemoteContext::find_shard_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (shard_manager != NULL)
+        return shard_manager;
+      // TODO: what happens if we get this and don't have a shard manager
+      assert(false);
+      return NULL;
     }
 
     //--------------------------------------------------------------------------

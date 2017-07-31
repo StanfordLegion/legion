@@ -1189,8 +1189,6 @@ namespace Legion {
                                           RegionTreeNode *node,
                                           size_t remaining_depth,
                                           Deserializer &derez);
-      void unpack_composite_view_response(Deserializer &derez,
-                                          Runtime *runtime);
       static void handle_composite_view_response(Deserializer &derez,
                                                  Runtime *runtime);
     public:
@@ -1206,6 +1204,8 @@ namespace Legion {
       virtual ShardManager* prepare_sharding_request(RtEvent &name,
                                   std::vector<LegionColor> &path,
                                   LegionColor child_color = INVALID_COLOR) = 0;
+      virtual void unpack_composite_view_response(Deserializer &derez,
+                                                  Runtime *runtime) = 0;
     public:
       CompositeNode* find_child_node(RegionTreeNode *child); 
     private:
@@ -1340,6 +1340,8 @@ namespace Legion {
       virtual ShardManager* prepare_sharding_request(RtEvent &name,
                                   std::vector<LegionColor> &path,
                                   LegionColor child_color = INVALID_COLOR);
+      virtual void unpack_composite_view_response(Deserializer &derez,
+                                                  Runtime *runtime);
     public:
       static void handle_send_composite_view(Runtime *runtime, 
                               Deserializer &derez, AddressSpaceID source);
@@ -1402,6 +1404,14 @@ namespace Legion {
         VersionState *state;
         DistributedID owner_did;
       };
+      struct DeferCompositeNodeValidArgs : 
+        public LgTaskArgs<DeferCompositeNodeValidArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_COMPOSITE_NODE_VALID_TASK_ID;
+      public:
+        CompositeNode *node;
+        bool root;
+      };
       struct DeferCaptureArgs : public LgTaskArgs<DeferCaptureArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_COMPOSITE_NODE_CAPTURE_TASK_ID;
@@ -1430,6 +1440,8 @@ namespace Legion {
       virtual ShardManager* prepare_sharding_request(RtEvent &name,
                                   std::vector<LegionColor> &path,
                                   LegionColor child_color = INVALID_COLOR);
+      virtual void unpack_composite_view_response(Deserializer &derez,
+                                                  Runtime *runtime);
       void capture(RtUserEvent capture_event, ReferenceMutator *mutator);
       static void handle_deferred_capture(const void *args);
     public:
@@ -1440,10 +1452,12 @@ namespace Legion {
                      DistributedID owner_did, std::set<RtEvent> &preconditions);
       // For merging composite node children from different shards
       static CompositeNode* unpack_composite_node(Deserializer &derez,
-                 CompositeBase *parent, Runtime *runtime, 
+                 CompositeBase *parent, Runtime *runtime,
                  DistributedID owner_did, std::set<RtEvent> &preconditions,
-                 const LegionMap<CompositeNode*,FieldMask>::aligned &existing);
+                 const LegionMap<CompositeNode*,FieldMask>::aligned &existing,
+                 const bool currently_valid, const bool root);
       static void handle_deferred_node_ref(const void *args);
+      static void handle_deferred_valid(const void *args);
     public:
       void notify_valid(ReferenceMutator *mutator, bool root);
       void notify_invalid(ReferenceMutator *mutator, bool root);

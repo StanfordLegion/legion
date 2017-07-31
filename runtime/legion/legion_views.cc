@@ -5568,6 +5568,8 @@ namespace Legion {
         assert(!children_to_send.empty());
 #endif
         Serializer rez;
+        Runtime *runtime = node->context->runtime;
+        if (runtime->address_space != source)
         {
           RezCheck z(rez);
           rez.serialize(target);
@@ -5580,8 +5582,26 @@ namespace Legion {
           }
           rez.serialize(done_event); 
         }
-        node->context->runtime->send_control_replicate_composite_view_response(
-                                                                   source, rez);
+        else
+        {
+          // No check or target here since we know where we're going
+          rez.serialize<size_t>(children_to_send.size());
+          for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
+                children_to_send.begin(); it != children_to_send.end(); it++)
+          {
+            it->first->pack_composite_node(rez);
+            rez.serialize(it->second);
+          }
+          rez.serialize(done_event);
+        }
+        if (runtime->address_space == source)
+        {
+          // same node so can send it directly
+          Deserializer local_derez(rez.get_buffer(), rez.get_used_bytes());
+          target->unpack_composite_view_response(local_derez, runtime);
+        }
+        else
+          runtime->send_control_replicate_composite_view_response(source, rez);
       }
       else
       {
@@ -5593,35 +5613,6 @@ namespace Legion {
         child->handle_sharding_update_request(mask, child_node, 
                                               remaining_depth-1, derez);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeBase::unpack_composite_view_response(Deserializer &derez,
-                                                       Runtime *runtime)
-    //--------------------------------------------------------------------------
-    {
-      size_t num_children;
-      derez.deserialize(num_children);
-      DistributedID owner_did = get_owner_did();
-      std::set<RtEvent> ready_events;
-      {
-        AutoLock b_lock(base_lock);
-        for (unsigned idx = 0; idx < num_children; idx++)
-        {
-          CompositeNode *child = CompositeNode::unpack_composite_node(derez,
-              this, runtime, owner_did, ready_events, children);
-          FieldMask child_mask;
-          derez.deserialize(child_mask);
-          // Have to do a merge of field masks here
-          children[child] |= child_mask;
-        }
-      }
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
-      if (!ready_events.empty())
-        Runtime::trigger_event(done_event, Runtime::merge_events(ready_events));
-      else
-        Runtime::trigger_event(done_event);
     }
 
     //--------------------------------------------------------------------------
@@ -5871,10 +5862,9 @@ namespace Legion {
       for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
             reduction_views.begin(); it != reduction_views.end(); it++)
         it->first->remove_nested_valid_ref(did, mutator);
-      if (shard_invalid_barrier.exists())
+      if (shard_invalid_barrier.exists() && is_owner())
       {
 #ifdef DEBUG_LEGION
-        assert(is_owner());
         ReplicateContext *ctx = dynamic_cast<ReplicateContext*>(owner_context);
         assert(ctx != NULL);
 #else
@@ -6265,19 +6255,42 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(is_owner());
       assert(shard_invalid_barrier.exists());
 #endif
       name = shard_invalid_barrier;
       if (child_color != INVALID_COLOR)
         path.push_back(child_color);
-#ifdef DEBUG_LEGION
-      ReplicateContext *ctx = dynamic_cast<ReplicateContext*>(owner_context);
-      assert(ctx != NULL);
-#else
-      ReplicateContext *ctx = static_cast<ReplicateContext*>(owner_context);
-#endif
-      return ctx->shard_manager;
+      return owner_context->find_shard_manager();
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeView::unpack_composite_view_response(Deserializer &derez,
+                                                       Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_children;
+      derez.deserialize(num_children);
+      DistributedID owner_did = get_owner_did();
+      std::set<RtEvent> ready_events;
+      {
+        AutoLock v_lock(view_lock);
+        for (unsigned idx = 0; idx < num_children; idx++)
+        {
+          CompositeNode *child = CompositeNode::unpack_composite_node(derez,
+                            this, runtime, owner_did, ready_events, children, 
+                            true/*currently valid*/, true/*root*/);
+          FieldMask child_mask;
+          derez.deserialize(child_mask);
+          // Have to do a merge of field masks here
+          children[child] |= child_mask;
+        }
+      }
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      if (!ready_events.empty())
+        Runtime::trigger_event(done_event, Runtime::merge_events(ready_events));
+      else
+        Runtime::trigger_event(done_event);
     }
 
     //--------------------------------------------------------------------------
@@ -6635,6 +6648,7 @@ namespace Legion {
         it->first->pack_composite_node(rez);
         rez.serialize(it->second);
       }
+      rez.serialize(shard_invalid_barrier);
     }
 
     //--------------------------------------------------------------------------
@@ -6697,6 +6711,7 @@ namespace Legion {
                               this, context->runtime, did, preconditions);
         derez.deserialize(children[child]);
       }
+      derez.deserialize(shard_invalid_barrier);
     }
 
     //--------------------------------------------------------------------------
@@ -6833,6 +6848,36 @@ namespace Legion {
       if (child_color != INVALID_COLOR)
         path.push_back(child_color);
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void CompositeNode::unpack_composite_view_response(Deserializer &derez,
+                                                       Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_children;
+      derez.deserialize(num_children);
+      DistributedID owner_did = get_owner_did();
+      std::set<RtEvent> ready_events;
+      {
+        AutoLock n_lock(node_lock);
+        for (unsigned idx = 0; idx < num_children; idx++)
+        {
+          CompositeNode *child = CompositeNode::unpack_composite_node(derez,
+                            this, runtime, owner_did, ready_events, children,
+                            currently_valid, false/*root*/);
+          FieldMask child_mask;
+          derez.deserialize(child_mask);
+          // Have to do a merge of field masks here
+          children[child] |= child_mask;
+        }
+      }
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      if (!ready_events.empty())
+        Runtime::trigger_event(done_event, Runtime::merge_events(ready_events));
+      else
+        Runtime::trigger_event(done_event);
     }
 
     //--------------------------------------------------------------------------
@@ -7108,7 +7153,8 @@ namespace Legion {
     /*static*/ CompositeNode* CompositeNode::unpack_composite_node(
         Deserializer &derez, CompositeBase *parent, Runtime *runtime, 
         DistributedID owner_did, std::set<RtEvent> &preconditions,
-        const LegionMap<CompositeNode*,FieldMask>::aligned &existing)
+        const LegionMap<CompositeNode*,FieldMask>::aligned &existing,
+        const bool currently_valid, const bool root)
     //--------------------------------------------------------------------------
     {
       bool is_region;
@@ -7137,10 +7183,14 @@ namespace Legion {
         break;
       }
       // If we didn't find it then we get to make it
+      bool created = true;
       if (result == NULL)
         result = new CompositeNode(node, parent, owner_did);
+      else
+        created = false;
       size_t num_versions;
       derez.deserialize(num_versions);
+      std::set<RtEvent> local_preconditions;
       for (unsigned idx = 0; idx < num_versions; idx++)
       {
         DistributedID did;
@@ -7157,10 +7207,38 @@ namespace Legion {
           RtEvent precondition = 
             runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
                                              NULL/*op*/, ready);
-          preconditions.insert(precondition);
+          // If this is a precondition for a valid ref it will
+          // ultimately also be a precondition for the result
+          if (created && currently_valid)
+            local_preconditions.insert(precondition);
+          else
+            preconditions.insert(precondition);
         }
         else
           state->add_nested_resource_ref(owner_did);
+      }
+      if (created && currently_valid)
+      {
+        if (!local_preconditions.empty())
+        {
+          RtEvent add_valid_precondition = 
+            Runtime::merge_events(local_preconditions);
+          if (add_valid_precondition.exists())
+          {
+            // Defer adding the valid reference
+            DeferCompositeNodeValidArgs args;
+            args.node = result;
+            args.root = root;
+            RtEvent precondition = 
+              runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+                                       NULL/*op*/, add_valid_precondition);
+            preconditions.insert(precondition);
+            return result;
+          }
+          // Otherwise fall through and add it now
+        }
+        WrapperReferenceMutator mutator(preconditions);
+        result->notify_valid(&mutator, root);
       }
       return result;
     }
@@ -7172,6 +7250,16 @@ namespace Legion {
       const DeferCompositeNodeRefArgs *nargs = 
         (const DeferCompositeNodeRefArgs*)args;
       nargs->state->add_nested_resource_ref(nargs->owner_did);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CompositeNode::handle_deferred_valid(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferCompositeNodeValidArgs *vargs = 
+        (const DeferCompositeNodeValidArgs*)args;
+      LocalReferenceMutator mutator;
+      vargs->node->notify_valid(&mutator, vargs->root);
     }
 
     //--------------------------------------------------------------------------
