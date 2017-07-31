@@ -690,8 +690,23 @@ function check_vectorizability.stat(cx, node)
 
       -- TODO: for the moment we reject an assignment such as
       -- 'r[i] = i' where 'i' is of an index type
-      if std.is_bounded_type(rh.expr_type) and
-         rh.expr_type.dim >= 1 then
+      local function contains_loop_var(node)
+        if node:is(ast.typed.expr.Cast) then
+          return contains_loop_var(node.arg)
+        elseif node:is(ast.typed.expr.Binary) then
+          return contains_loop_var(node.lhs) or
+                 contains_loop_var(node.rhs)
+        elseif node:is(ast.typed.expr.Unary) then
+          return contains_loop_var(node.rhs)
+        elseif node:is(ast.typed.expr.ID) then
+          return cx.loop_symbol == node.value or
+                 (std.is_bounded_type(node.expr_type) and
+                  std.type_eq(cx.loop_symbol:gettype(), node.expr_type))
+        else
+          return false
+        end
+      end
+      if contains_loop_var(rh) then
         cx:report_error_when_demanded(node, error_prefix ..
           "a corner case statement not supported for the moment")
         return false
@@ -852,6 +867,12 @@ function check_vectorizability.expr(cx, node)
       if std.is_region(value_type) and not value_type:is_opaque() then
         cx:report_error_when_demanded(node, error_prefix ..
           "a scattered read from a structured region")
+        return false
+      -- TODO: This should be supported
+      elseif std.is_region(value_type) and value_type:is_opaque() and
+             not std.is_bounded_type(std.as_read(node.index.expr_type)) then
+        cx:report_error_when_demanded(node, error_prefix ..
+          "a scattered read from a different region")
         return false
       -- TODO: This should be supported
       elseif std.is_region(value_type) and value_type:is_opaque() and

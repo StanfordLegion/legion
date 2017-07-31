@@ -1862,6 +1862,7 @@ namespace LegionRuntime {
       template class HDFXferDes<2>;
       template class HDFXferDes<3>;
 #endif
+      template long XferDes::default_get_requests<0>(Request**, long);
       template long XferDes::default_get_requests<1>(Request**, long);
       template long XferDes::default_get_requests<2>(Request**, long);
       template long XferDes::default_get_requests<3>(Request**, long);

@@ -6638,7 +6638,7 @@ namespace Legion {
         RegionTreePath one_up_path;
         runtime->forest->initialize_path(
                                  child_node->get_parent()->get_row_source(),
-                                 parent_node->get_row_source(), path);
+                                 parent_node->get_row_source(), one_up_path);
         runtime->forest->advance_version_numbers(this, 0/*idx*/,
                                                  true/*update parent state*/,
                                                  parent_is_upper_bound,

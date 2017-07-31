@@ -612,7 +612,7 @@ function type_check.expr_index_access(cx, node)
 
       if value_type:is_disjoint() then
         local other_subregions = value_type:subregions_constant()
-        for other_index, other_subregion in pairs(other_subregions) do
+        for other_index, other_subregion in other_subregions:items() do
           if static_index ~= other_index then
             std.add_constraint(cx, subregion, other_subregion, std.disjointness, true)
           end
@@ -648,7 +648,7 @@ function type_check.expr_index_access(cx, node)
 
       if value_type:is_disjoint() then
         local other_subregions = value_type:subregions_constant()
-        for other_index, other_subregion in pairs(other_subregions) do
+        for other_index, other_subregion in other_subregions:items() do
           if static_index ~= other_index then
             std.add_constraint(cx, subregion, other_subregion, std.disjointness, true)
           end

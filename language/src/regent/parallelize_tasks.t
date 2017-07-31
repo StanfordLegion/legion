@@ -514,7 +514,7 @@ do
     if Lambda.is_lambda(self:expr()) then
       expr_str = tostring(self:expr())
     else
-      expr_str = render(self:expr())
+      expr_str = ast_util.render(self:expr())
     end
     return "\\" .. binder_str .. "." .. expr_str
   end
@@ -690,7 +690,7 @@ do
     if #fields > 1 then field_str = "{" .. field_str .. "}" end
     local index_str = tostring(self:index())
     if not Lambda.is_lambda(self:index()) then
-      index_str = render(self:index())
+      index_str = ast_util.render(self:index())
     end
     return tostring(self:region()) .. "[" ..  index_str .. "]." ..
            field_str .. " (range: " ..  tostring(self:range()) .. ")"
@@ -789,10 +789,10 @@ function parallel_task_context:insert_metadata_parameters(params)
     local region_param =
       self.region_params[self.region_param_indices[idx]]
     if region_param.bounds then
-      params:insert(mk_task_param(region_param.bounds))
+      params:insert(ast_util.mk_task_param(region_param.bounds))
     end
   end
-  params:insert(mk_task_param(self:get_task_point_symbol()))
+  params:insert(ast_util.mk_task_param(self:get_task_point_symbol()))
 end
 
 function parallel_task_context:make_param_arg_mapping(caller_cx, args)
@@ -862,7 +862,7 @@ function parallel_param:hash()
     end
     if self.__constraints then
       for idx = 1, #self.__constraints do
-        str = str .. "#" .. render(self.__constraints[idx])
+        str = str .. "#" .. ast_util.render(self.__constraints[idx])
       end
     end
     self.__hash = str
@@ -1471,7 +1471,7 @@ local function create_image_partition(caller_cx, pr, pp, stencil, pparam)
                                     sr_bounds_expr,
                                     ast_util.mk_expr_id(tmp_var),
                                     polarity_expr })
-  --loop_body:insert(ast_util.mk_stat_block(mk_block(terralib.newlist {
+  --loop_body:insert(ast_util.mk_stat_block(ast_util.mk_block(terralib.newlist {
   --  ast_util.mk_stat_expr(ast_util.mk_expr_call(print_rect[pr_rect_type],
   --                            pr_bounds_expr)),
   --  ast_util.mk_stat_expr(ast_util.mk_expr_call(print_rect[pr_rect_type],
@@ -1490,7 +1490,7 @@ local function create_image_partition(caller_cx, pr, pp, stencil, pparam)
                                     ghost_rect_expr })))
 
   stats:insert(
-    ast_util.mk_stat_for_list(color_symbol, color_space_expr, mk_block(loop_body)))
+    ast_util.mk_stat_for_list(color_symbol, color_space_expr, ast_util.mk_block(loop_body)))
   stats:insert(
     ast_util.mk_stat_var(gp_symbol, nil,
                 ast_util.mk_expr_partition(gp_type, color_space_expr, coloring_expr)))
@@ -1573,7 +1573,7 @@ local function create_subset_partition(caller_cx, sr, pp, pparam)
                                     intersect_expr })))
 
   stats:insert(
-    ast_util.mk_stat_for_list(color_symbol, color_space_expr, mk_block(loop_body)))
+    ast_util.mk_stat_for_list(color_symbol, color_space_expr, ast_util.mk_block(loop_body)))
   stats:insert(
     ast_util.mk_stat_var(sp_symbol, nil,
                 ast_util.mk_expr_partition(sp_type, color_space_expr, coloring_expr)))
@@ -1660,7 +1660,7 @@ local function create_indexspace_launch(parallelizable, caller_cx, expr, lhs)
     call_stat = ast_util.mk_stat_expr(expr)
   end
   local index_launch =
-    ast_util.mk_stat_for_list(color_symbol, color_space_expr, mk_block(call_stat))
+    ast_util.mk_stat_for_list(color_symbol, color_space_expr, ast_util.mk_block(call_stat))
   if not std.config["flow-spmd"] then
     index_launch = index_launch {
       annotations = index_launch.annotations {
@@ -2975,7 +2975,7 @@ function stencil_analysis.top(cx)
     elseif a1.span.start.offset > a2.span.start.offset then
       return false
     else
-      return render(a1) < render(a2)
+      return ast_util.render(a1) < ast_util.render(a2)
     end
   end)
 
@@ -3282,7 +3282,7 @@ function parallelize_tasks.top_task(global_cx, node)
         copy_region_symbol(stencil:region(), "__ghost" .. tostring(idx))
       task_cx.ghost_symbols[stencil] = ghost_symbol
       task_cx.use_primary[stencil] = false
-      params:insert(mk_task_param(task_cx.ghost_symbols[stencil]))
+      params:insert(ast_util.mk_task_param(task_cx.ghost_symbols[stencil]))
     end
   end
   -- Append parameters reserved for the metadata of original region parameters

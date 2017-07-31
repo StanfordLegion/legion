@@ -894,6 +894,7 @@ namespace LegionRuntime {
         ib_elmnt_size += it->size;
       }
       if (domain.get_dim() == 0) {
+#ifdef COPY_ALL_ELEMENTS_FOR_UNSTRUCTURED
         IndexSpaceImpl *ispace = get_runtime()->get_index_space_impl(domain.get_index_space());
         assert(get_runtime()->get_instance_impl(inst_pair.second)->metadata.is_valid());
         if (ispace->me == get_runtime()->get_instance_impl(inst_pair.second)->metadata.is) {
@@ -904,8 +905,11 @@ namespace LegionRuntime {
           Domain new_domain = Domain::from_rect<1>(new_rect);
           domain_size = new_domain.get_volume();
         } else {
+#endif
           domain_size = domain.get_volume();
+#ifdef COPY_ALL_ELEMENTS_FOR_UNSTRUCTURED
         }
+#endif
       } else {
         domain_size = domain.get_volume();
       }
@@ -3586,6 +3590,17 @@ namespace LegionRuntime {
             XferDesFence* complete_fence = new XferDesFence(this);
             add_async_work_item(complete_fence);
             if (DIM == 0) {
+              IndexSpaceImpl *ispace = get_runtime()->get_index_space_impl(domain.get_index_space());
+              coord_t range = ispace->valid_mask->last_enabled()
+                              - ispace->valid_mask->first_enabled() + 1;
+              if (range != (coord_t) ispace->valid_mask->pop_count()) {
+                log_new_dma.info("Sparse copies: pop_count(%zu) first(%lld) last(%lld)",
+                                 ispace->valid_mask->pop_count(),
+                                 ispace->valid_mask->first_enabled(),
+                                 ispace->valid_mask->last_enabled());
+              }
+
+#ifdef COPY_ALL_ELEMENTS_FOR_UNSTRUCTURED
               // Need to do something special for unstructured data: we perform a 1D copy from first_elemnt to last_elemnt
               // First we should make sure destination instance space's index space match what we're copying
               IndexSpaceImpl *ispace = get_runtime()->get_index_space_impl(domain.get_index_space());
@@ -3610,6 +3625,7 @@ namespace LegionRuntime {
                                    16 * 1024 * 1024/*max_req_size*/, 100/*max_nr*/,
                                    priority, order, kind, complete_fence, attach_inst);
               } else {
+#endif
                 if (idx != mem_path.size() - 1) {
                   cur_buf = simple_create_intermediate_buffer(ibvec[idx-1],
                               domain, oasvec, oasvec_src, oasvec_dst, dst_buf.linearization);
@@ -3623,7 +3639,9 @@ namespace LegionRuntime {
                                    domain, oasvec_src,
                                    16 * 1024 * 1024 /*max_req_size*/, 100/*max_nr*/,
                                    priority, order, kind, complete_fence, attach_inst);
+#ifdef COPY_ALL_ELEMENTS_FOR_UNSTRUCTURED
               }
+#endif
             }
             else {
               if (idx != mem_path.size() - 1) {

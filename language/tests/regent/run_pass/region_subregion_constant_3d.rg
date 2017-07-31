@@ -14,27 +14,18 @@
 
 import "regent"
 
-local function make_check(r, t)
-  local x = regentlib.newsymbol(ptr(int, r), "x")
-  return rquote
-    var [t] = 0
-    for [x] in r do -- Region should be in scope for type of loop index.
-      [t] += @x
-    end
-  end
-end
+task assert_disjoint(x : region(ispace(int3d), int),
+                     y : region(ispace(int3d), int))
+where x * y do end
 
-local t = regentlib.newsymbol("t")
+local zero = terralib.constant(`int3d { regentlib.__int3d { 0, 0, 0 } })
+local one = terralib.constant(`int3d { regentlib.__int3d { 0, 0, 1 } })
+
 task main()
-  var r = region(ispace(ptr, 5), int)
-  fill(r, 0)
-
-  for r : ptr(int, r) in r do -- Region should be in scope for type of loop index.
-    @r += r
-  end
-
-  [make_check(r, t)]
-
-  regentlib.assert([t] == 10, "test failed")
+  var r = region(ispace(int3d, { 2, 2, 2 }), int)
+  var p = partition(equal, r, ispace(int3d, { 1, 1, 2 }))
+  var r0 = p[zero]
+  var r1 = p[one]
+  assert_disjoint(r0, r1)
 end
 regentlib.start(main)

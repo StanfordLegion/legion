@@ -2528,12 +2528,12 @@ function std.index_type(base_type, displayname)
   return setmetatable(st, index_type)
 end
 
-local struct __int2d { x : int, y : int }
-local struct __int3d { x : int, y : int, z : int }
+struct std.__int2d { x : int, y : int }
+struct std.__int3d { x : int, y : int, z : int }
 std.ptr = std.index_type(opaque, "ptr")
 std.int1d = std.index_type(int, "int1d")
-std.int2d = std.index_type(__int2d, "int2d")
-std.int3d = std.index_type(__int3d, "int3d")
+std.int2d = std.index_type(std.__int2d, "int2d")
+std.int3d = std.index_type(std.__int3d, "int3d")
 
 std.rect1d = std.rect_type(std.int1d)
 std.rect2d = std.rect_type(std.int2d)
@@ -2665,6 +2665,23 @@ std.wild = std.newsymbol(std.wild_type, "wild")
 std.disjoint = ast.disjointness_kind.Disjoint {}
 std.aliased = ast.disjointness_kind.Aliased {}
 
+-- This is used in methods such as subregion_constant where the index
+-- of a subregion has to be munged to make it safe to go in a map.
+local function get_subregion_index(i)
+  if type(i) == "number" or std.is_symbol(i) then
+    return i
+  elseif terralib.isconstant(i) and std.is_index_type(i.type) then
+    -- Terra, pretty please give me the value inside this constant
+    local value = (terra() return i end)()
+    return data.newtuple(
+      unpack(
+        i.type.fields:map(
+          function(field_name) return value.__ptr[field_name] end)))
+  else
+    assert(false)
+  end
+end
+
 function std.partition(disjointness, region_symbol, colors_symbol)
   if colors_symbol == nil then
     colors_symbol = std.newsymbol(std.ispace(std.ptr))
@@ -2699,7 +2716,7 @@ function std.partition(disjointness, region_symbol, colors_symbol)
   st.disjointness = disjointness
   st.parent_region_symbol = region_symbol
   st.colors_symbol = colors_symbol
-  st.subregions = {}
+  st.subregions = data.newmap()
 
   function st:is_disjoint()
     return self.disjointness:is(ast.disjointness_kind.Disjoint)
@@ -2734,7 +2751,7 @@ function std.partition(disjointness, region_symbol, colors_symbol)
   end
 
   function st:subregion_constant(i)
-    assert(type(i) == "number" or std.is_symbol(i))
+    local i = get_subregion_index(i)
     if not self.subregions[i] then
       self.subregions[i] = self:subregion_dynamic()
     end
@@ -2801,7 +2818,7 @@ function std.cross_product(...)
 
   st.is_cross_product = true
   st.partition_symbols = data.newtuple(unpack(partition_symbols))
-  st.subpartitions = {}
+  st.subpartitions = data.newmap()
 
   function st:partitions()
     return self.partition_symbols:map(
@@ -2846,6 +2863,7 @@ function std.cross_product(...)
 
   function st:subpartition_constant(i)
     local region_type = self:subregion_constant(i)
+    local i = get_subregion_index(i)
     if not self.subpartitions[i] then
       local partition = st:subpartition_dynamic(region_type)
       self.subpartitions[i] = partition
@@ -3082,7 +3100,7 @@ std.future = terralib.memoize(function(result_type)
   return st
 end)
 
-std.list = terralib.memoize(function(element_type, partition_type, privilege_depth, region_root, shallow)
+std.list = terralib.memoize(function(element_type, partition_type, privilege_depth, region_root, shallow, barrier_depth)
   if not terralib.types.istype(element_type) then
     error("list expected a type as argument 1, got " .. tostring(element_type))
   end
@@ -3103,6 +3121,10 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
     error("list expected a boolean as argument 5, got " .. tostring(shallow))
   end
 
+  if barrier_depth and type(barrier_depth) ~= "number" then
+    error("list expected a number as argument 3, got " .. tostring(barrier_depth))
+  end
+
   if region_root and privilege_depth and privilege_depth ~= 0 then
     error("list privilege depth and region root are mutually exclusive")
   end
@@ -3119,6 +3141,7 @@ std.list = terralib.memoize(function(element_type, partition_type, privilege_dep
   st.privilege_depth = privilege_depth or 0
   st.region_root = region_root or false
   st.shallow = shallow or false
+  st.barrier_depth = barrier_depth or false
 
   function st:is_list_of_regions()
     return std.is_region(self.element_type) or
