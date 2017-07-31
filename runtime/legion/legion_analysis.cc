@@ -59,6 +59,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    LogicalUser::LogicalUser(Operation *o, GenerationID g, unsigned id, 
+                             const RegionUsage &u, const FieldMask &m)
+      : GenericUser(u, m), op(o), idx(id), gen(g), timeout(TIMEOUT)
+#ifdef LEGION_SPY
+        , uid(o->get_unique_op_id())
+#endif
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalUser::PhysicalUser(void)
     //--------------------------------------------------------------------------
     {
@@ -1997,6 +2008,36 @@ namespace Legion {
       derez.deserialize<bool>(dirty_reduction);
     }
 
+    //--------------------------------------------------------------------------
+    void ProjectionInfo::pack_epochs(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(projection_epochs.size());
+      for (LegionMap<ProjectionEpochID,FieldMask>::aligned::const_iterator it =
+            projection_epochs.begin(); it != projection_epochs.end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize(it->second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionInfo::unpack_epochs(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(projection_epochs.empty());
+#endif
+      size_t num_epochs;
+      derez.deserialize(num_epochs);
+      for (unsigned idx = 0; idx < num_epochs; idx++)
+      {
+        ProjectionEpochID epoch;
+        derez.deserialize(epoch);
+        derez.deserialize(projection_epochs[epoch]);
+      }
+    }
+
     /////////////////////////////////////////////////////////////
     // PathTraverser 
     /////////////////////////////////////////////////////////////
@@ -3533,6 +3574,18 @@ namespace Legion {
       }
     }
 
+#ifndef LEGION_SPY
+    //--------------------------------------------------------------------------
+    void LogicalCloser::pop_closed_user(bool read_only)
+    //--------------------------------------------------------------------------
+    {
+      if (read_only)
+        read_only_closed_users.pop_back();
+      else
+        normal_closed_users.pop_back();
+    }
+#endif
+
     //--------------------------------------------------------------------------
     void LogicalCloser::initialize_close_operations(LogicalState &state, 
                                                    Operation *creator,
@@ -3556,6 +3609,7 @@ namespace Legion {
       if (!!normal_close_mask)
       {
         normal_close_op = creator->runtime->get_available_inter_close_op(false);
+        normal_close_gen = normal_close_op->get_generation();
         // Compute the set of fields that we need
         root_node->column_source->get_field_set(normal_close_mask,
                                                trace_info.req.privilege_fields,
@@ -3593,6 +3647,7 @@ namespace Legion {
       {
         read_only_close_op = 
           creator->runtime->get_available_read_close_op(false);
+        read_only_close_gen = read_only_close_op->get_generation();
         req.privilege_fields.clear();
         root_node->column_source->get_field_set(read_only_close_mask,
                                                trace_info.req.privilege_fields,
@@ -3607,6 +3662,7 @@ namespace Legion {
       {
         flush_only_close_op =
           creator->runtime->get_available_inter_close_op(false);
+        flush_only_close_gen = flush_only_close_op->get_generation();
         req.privilege_fields.clear();
         // Compute the set of fields that we need
         root_node->column_source->get_field_set(flush_only_close_mask,
@@ -3712,22 +3768,25 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // No need to add mapping references, we did that in 
+      // Note we also use the cached generation IDs since the close
+      // operations have already been kicked off and might be done
       // LogicalCloser::register_dependences
       if (normal_close_op != NULL)
       {
-        LogicalUser close_user(normal_close_op, 0/*idx*/, 
+        LogicalUser close_user(normal_close_op, normal_close_gen, 0/*idx*/, 
             RegionUsage(READ_WRITE, EXCLUSIVE, 0/*redop*/), normal_close_mask);
         users.push_back(close_user);
       }
       if (read_only_close_op != NULL)
       {
-        LogicalUser close_user(read_only_close_op, 0/*idx*/, 
+        LogicalUser close_user(read_only_close_op, read_only_close_gen,0/*idx*/,
           RegionUsage(READ_WRITE, EXCLUSIVE, 0/*redop*/), read_only_close_mask);
         users.push_back(close_user);
       }
       if (flush_only_close_op != NULL)
       {
-        LogicalUser close_user(flush_only_close_op, 0/*idx*/, 
+        LogicalUser close_user(flush_only_close_op, 
+                               flush_only_close_gen, 0/*idx*/,
          RegionUsage(READ_WRITE, EXCLUSIVE, 0/*redop*/), flush_only_close_mask);
         users.push_back(close_user);
       }
@@ -4825,7 +4884,8 @@ namespace Legion {
                                           ProjectionEpochID open_epoch,
                                           bool dedup_advances, 
                                           ProjectionEpochID advance_epoch,
-                                          const FieldMask *dirty_previous)
+                                          const FieldMask *dirty_previous,
+                                          const ProjectionInfo *proj_info)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(node->context->runtime, 
@@ -4847,7 +4907,7 @@ namespace Legion {
                                                logical_context_uid,
                                                dedup_opens, open_epoch, 
                                                dedup_advances, advance_epoch,
-                                               dirty_previous);
+                                               dirty_previous, proj_info);
         applied_events.insert(advanced); 
         // Now filter out any of our current version states that are
         // no longer valid for the given fields
@@ -4970,6 +5030,50 @@ namespace Legion {
           }
           else
             previous_advancers[key] = mask;
+        }
+        // Record any epoch updates
+        if (proj_info != NULL)
+        {
+          const LegionMap<ProjectionEpochID,FieldMask>::aligned 
+            &advance_epochs = proj_info->get_projection_epochs();
+          for (LegionMap<ProjectionEpochID,FieldMask>::aligned::const_iterator
+               pit = advance_epochs.begin(); pit != advance_epochs.end(); pit++)
+          {
+            const ProjectionEpoch key(logical_context_uid, pit->first);
+            FieldMask update_mask = pit->second;
+            // Filter out any previous advancers with overlapping fields
+            std::vector<ProjectionEpoch> to_delete;
+            for (LegionMap<ProjectionEpoch,FieldMask>::aligned::iterator it = 
+                  previous_advancers.begin(); it !=
+                  previous_advancers.end(); it++)
+            {
+              if (it->first == key)
+              {
+                update_mask -= it->second;
+                if (!update_mask)
+                  break;
+                continue;
+              }
+              it->second -= pit->second;
+              if (!it->second)
+                to_delete.push_back(it->first);
+            }
+            if (!to_delete.empty())
+            {
+              for (std::vector<ProjectionEpoch>::const_iterator it = 
+                    to_delete.begin(); it != to_delete.end(); it++)
+                previous_advancers.erase(*it);
+            }
+            if (!!update_mask)
+            {
+              LegionMap<ProjectionEpoch,FieldMask>::aligned::iterator finder =
+                previous_advancers.find(key);
+              if (finder == previous_advancers.end())
+                previous_advancers[key] = update_mask;
+              else
+                finder->second |= update_mask;
+            }
+          }
         }
         // Now send any invalidations to get them in flight
         if (!remote_valid.empty() && !(remote_valid_fields * mask))
@@ -5497,7 +5601,8 @@ namespace Legion {
                                                 ProjectionEpochID open_epoch,
                                                 bool dedup_advances,
                                                 ProjectionEpochID advance_epoch,
-                                                const FieldMask *dirty_previous)
+                                                const FieldMask *dirty_previous,
+                                                const ProjectionInfo *proj_info)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5532,6 +5637,14 @@ namespace Legion {
         {
           rez.serialize<bool>(true);
           rez.serialize(*dirty_previous);
+        }
+        else
+          rez.serialize<bool>(false);
+        if (proj_info != NULL)
+        {
+          rez.serialize<bool>(true);
+          // Only need to pack the projection epochs
+          proj_info->pack_epochs(rez);
         }
         else
           rez.serialize<bool>(false);
@@ -5586,6 +5699,11 @@ namespace Legion {
       FieldMask dirty_previous;
       if (has_dirty_previous)
         derez.deserialize(dirty_previous);
+      bool has_proj_info;
+      derez.deserialize(has_proj_info);
+      ProjectionInfo proj_info;
+      if (has_proj_info)
+        proj_info.unpack_epochs(derez);
 
       InnerContext *context = runtime->find_context(physical_context_uid);
       ContextID ctx = context->get_context_id();
@@ -5595,7 +5713,8 @@ namespace Legion {
                                update_parent, source_space, done_preconditions, 
                                dedup_opens, open_epoch, 
                                dedup_advances, advance_epoch,
-                               has_dirty_previous ? &dirty_previous : NULL);
+                               has_dirty_previous ? &dirty_previous : NULL,
+                               has_proj_info ? &proj_info : NULL);
       if (!done_preconditions.empty())
         Runtime::trigger_event(done_event, 
             Runtime::merge_events(done_preconditions));

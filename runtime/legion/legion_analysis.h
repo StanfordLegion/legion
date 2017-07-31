@@ -49,6 +49,8 @@ namespace Legion {
       LogicalUser(void);
       LogicalUser(Operation *o, unsigned id, 
                   const RegionUsage &u, const FieldMask &m);
+      LogicalUser(Operation *o, GenerationID gen, unsigned id,
+                  const RegionUsage &u, const FieldMask &m);
     public:
       Operation *op;
       unsigned idx;
@@ -413,6 +415,9 @@ namespace Legion {
       void unpack_info(Deserializer &derez, Runtime *runtime,
           const RegionRequirement &req, const Domain &launch_domain);
     public:
+      void pack_epochs(Serializer &rez) const;
+      void unpack_epochs(Deserializer &derez);
+    public:
       ProjectionFunction *projection;
       ProjectionType projection_type;
       Domain projection_domain;
@@ -705,6 +710,9 @@ namespace Legion {
       ClosedNode* find_closed_node(RegionTreeNode *node);
       void record_closed_user(const LogicalUser &user, 
                               const FieldMask &mask, bool read_only);
+#ifndef LEGION_SPY
+      void pop_closed_user(bool read_only);
+#endif
       void initialize_close_operations(LogicalState &state, 
                                        Operation *creator,
                                        const VersionInfo &version_info,
@@ -748,6 +756,11 @@ namespace Legion {
       InterCloseOp *normal_close_op;
       ReadCloseOp *read_only_close_op;
       InterCloseOp *flush_only_close_op;
+    protected:
+      // Cache the generation IDs so we can kick off ops before adding users
+      GenerationID normal_close_gen;
+      GenerationID read_only_close_gen;
+      GenerationID flush_only_close_gen;
     }; 
 
     /**
@@ -930,7 +943,8 @@ namespace Legion {
                             ProjectionEpochID open_epoch = 0,
                             bool dedup_advances = false, 
                             ProjectionEpochID advance_epoch = 0,
-                            const FieldMask *dirty_previous = NULL);
+                            const FieldMask *dirty_previous = NULL,
+                            const ProjectionInfo *proj_info = NULL);
       void update_child_versions(InnerContext *context,
                                  const ColorPoint &child_color,
                                  VersioningSet<> &new_states,
@@ -953,7 +967,8 @@ namespace Legion {
                                   ProjectionEpochID open_epoch,
                                   bool dedup_advances,
                                   ProjectionEpochID advance_epoch,
-                                  const FieldMask *dirty_previous);
+                                  const FieldMask *dirty_previous,
+                                  const ProjectionInfo *proj_info);
       static void handle_remote_advance(Deserializer &derez, Runtime *runtime,
                                         AddressSpaceID source_space);
     public:

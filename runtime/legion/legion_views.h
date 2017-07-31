@@ -1205,7 +1205,8 @@ namespace Legion {
       virtual void send_view(AddressSpaceID target); 
     public:
       void prune(ClosedNode *closed_tree, FieldMask &valid_mask,
-                 LegionMap<CompositeView*,FieldMask>::aligned &replacements);
+                 LegionMap<CompositeView*,FieldMask>::aligned &replacements,
+                 unsigned prune_depth);
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          FieldMask copy_mask,

@@ -2204,7 +2204,8 @@ namespace Legion {
                                                bool defer_add_users,
                                                bool need_read_only_reservations,
                                                std::set<RtEvent> &map_applied,
-                                               InstanceSet &targets
+                                               InstanceSet &targets,
+                                               const ProjectionInfo *proj_info
 #ifdef DEBUG_LEGION
                                                , const char *log_name
                                                , UniqueID uid
@@ -2266,7 +2267,8 @@ namespace Legion {
         TraversalInfo info(ctx.get_id(), op, index, req, version_info, 
                            user_mask, local_applied);
         child_node->register_region(info, logical_ctx_uid, context, 
-            restrict_info, term_event, usage, defer_add_users, targets);
+                                    restrict_info, term_event, usage, 
+                                    defer_add_users, targets, proj_info);
         
         if (!local_applied.empty())
         {
@@ -2293,7 +2295,8 @@ namespace Legion {
         TraversalInfo info(ctx.get_id(), op, index, req, version_info, 
                            user_mask, map_applied);
         child_node->register_region(info, logical_ctx_uid, context, 
-            restrict_info, term_event, usage, defer_add_users, targets);
+                                    restrict_info, term_event, usage, 
+                                    defer_add_users, targets, proj_info);
       }
     }
 
@@ -2438,7 +2441,7 @@ namespace Legion {
                 ClosedNode *closed_tree, RegionTreeNode *close_node,
                 const FieldMask &closing_mask, std::set<RtEvent> &map_applied, 
                 const RestrictInfo &restrict_info, const InstanceSet &targets,
-      const LegionMap<ProjectionEpochID,FieldMask>::aligned *projection_epochs
+                const ProjectionInfo *projection_info
 #ifdef DEBUG_LEGION
                 , const char *log_name
                 , UniqueID uid
@@ -2459,7 +2462,7 @@ namespace Legion {
       // update copies to the target instances from the composite instance
       CompositeView *result = close_node->create_composite_instance(info.ctx, 
                           closing_mask, version_info, logical_ctx_uid, 
-                          context, closed_tree, map_applied, projection_epochs);
+                          context, closed_tree, map_applied, projection_info);
       if (targets.empty())
         return;
       PhysicalState *physical_state = NULL;
@@ -11346,7 +11349,10 @@ namespace Legion {
               it->first->end_dependence_analysis();
             }
           }
-          else if (IS_REDUCE(user.usage) && !proj_info.is_projecting())
+          else if (IS_REDUCE(user.usage) && (!proj_info.is_projecting() ||
+                // Special case for depth 0 region projections
+                ((proj_info.projection_type == REG_PROJECTION) && 
+                 (proj_info.projection->depth == 0))))
           {
             // Figure out which advances need to come to this level
             FieldMask advance_here =
@@ -12952,10 +12958,26 @@ namespace Legion {
         {
           // Move a copy over to the previous epoch users for
           // the fields that were dominated
-          state.prev_epoch_users.push_back(*it);
-          state.prev_epoch_users.back().field_mask = local_dom;
+#ifdef LEGION_SPY
           // Add a mapping reference
           it->op->add_mapping_reference(it->gen);
+          // Always do this for Legion Spy 
+          state.prev_epoch_users.push_back(*it);
+          state.prev_epoch_users.back().field_mask = local_dom;
+#else
+          // Without Legion Spy we can filter early if the op is done
+          if (it->op->add_mapping_reference(it->gen))
+          {
+            state.prev_epoch_users.push_back(*it);
+            state.prev_epoch_users.back().field_mask = local_dom;
+          }
+          else
+          {
+            // It's already done so just prune it
+            it = state.curr_epoch_users.erase(it);
+            continue;
+          }
+#endif
         }
         else
         {
@@ -13768,7 +13790,7 @@ namespace Legion {
                                                 InnerContext *owner_ctx,
                                                 ClosedNode *closed_tree,
                                                 std::set<RtEvent> &ready_events,
-                  const LegionMap<ProjectionEpochID,FieldMask>::aligned *epochs)
+                                                const ProjectionInfo *proj_info)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -13785,21 +13807,26 @@ namespace Legion {
       // is necessary to maintain the monotonicity of the 
       // version state objects.
       const bool update_parent_state = !version_info.is_upper_bound_node(this);
-      if (epochs != NULL)
+      if (proj_info != NULL)
       {
         // This is the uncommon case that occurs when we are doing a 
         // disjoint partition close and we're actually closing each 
         // of the children individually. We we do this we need to advance
         // with an open of the new projection epoch
+        const LegionMap<ProjectionEpochID,FieldMask>::aligned &epochs = 
+          proj_info->get_projection_epochs();
         for (LegionMap<ProjectionEpochID,FieldMask>::aligned::const_iterator 
-              it = epochs->begin(); it != epochs->end(); it++)
+              it = epochs.begin(); it != epochs.end(); it++)
         {
           FieldMask overlap = it->second & closing_mask;
           if (!overlap)
             continue;
           manager.advance_versions(overlap, logical_context_uid, owner_ctx, 
                                    true/*update parent*/, local_space, 
-                                   ready_events, true/*dedup opens*/,it->first);
+                                   ready_events, true/*dedup opens*/,
+                                   it->first, false/*dedup advances*/, 
+                                   0/*epoch*/, NULL/*dirty previous*/, 
+                                   proj_info);
         }
       }
       else // The common case
@@ -15377,7 +15404,7 @@ namespace Legion {
       // in the state of the logical region tree
       close_op->add_mapping_reference(close_op->get_generation());
       // Mark that we are done, this puts the close op in the pipeline!
-      // This is why we cache the LogicalUser before kicking off the op
+      // This is why we cache the GenerationID when making the op
       close_op->end_dependence_analysis();
     }
 
@@ -15434,8 +15461,20 @@ namespace Legion {
             it = users.erase(it);
           else
           {
+#ifdef LEGION_SPY
+            // Always add the reference for Legion Spy
             it->op->add_mapping_reference(it->gen);
             it++;
+#else
+            // If not Legion Spy we can prune the user if it's done
+            if (!it->op->add_mapping_reference(it->gen))
+            {
+              closer.pop_closed_user(read_only_close);
+              it = users.erase(it);
+            }
+            else
+              it++;
+#endif
           }
         }
         else
@@ -16293,7 +16332,8 @@ namespace Legion {
                                      InnerContext *context,
                                      RestrictInfo &restrict_info,
                                    ApEvent term_event, const RegionUsage &usage,
-                                     bool defer_add_users, InstanceSet &targets)
+                                     bool defer_add_users, InstanceSet &targets,
+                                     const ProjectionInfo *proj_info)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REGION_NODE_REGISTER_REGION_CALL);
@@ -16311,7 +16351,9 @@ namespace Legion {
           !info.version_info.is_upper_bound_node(this);
         const AddressSpaceID local_space = context->runtime->address_space;
         manager.advance_versions(info.traversal_mask, logical_ctx_uid, context,
-            update_parent_state, local_space, info.map_applied_events);
+            update_parent_state, local_space, info.map_applied_events,
+            false/*dedup opens*/, 0/*epoch*/, false/*dedup advances*/, 
+            0/*epoch*/, NULL/*dirty previous*/, proj_info);
       }
       // Sine we're mapping we need to record the advance versions
       // where we'll put the results when we're done
@@ -16372,7 +16414,7 @@ namespace Legion {
           else // the normal path here
             update_reduction_views(state, user_mask, new_view);
           // Skip adding the user if requested
-          if (defer_add_users || (targets.size() > 1))
+          if (defer_add_users)
             continue;
           if (targets.size() > 1)
           {
@@ -16640,8 +16682,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionNode::close_state(const TraversalInfo &info, RegionUsage &usage, 
-                                 UniqueID logical_ctx_uid,InnerContext *context, 
-                                 InstanceSet &targets)
+                                 UniqueID logical_ctx_uid,InnerContext *context,
+                                 InstanceSet &targets) 
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REGION_NODE_CLOSE_STATE_CALL);
@@ -16654,7 +16696,8 @@ namespace Legion {
       // logical analysis or will be done as part of the registration.
       RestrictInfo empty_restrict_info;
       register_region(info, logical_ctx_uid, context, empty_restrict_info, 
-          ApEvent::NO_AP_EVENT, usage, false/*defer add users*/, targets);
+                      ApEvent::NO_AP_EVENT, usage, false/*defer add users*/, 
+                      targets, NULL/*no advance close projection info*/);
     }
 
     //--------------------------------------------------------------------------
