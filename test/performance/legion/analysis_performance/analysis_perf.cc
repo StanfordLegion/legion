@@ -214,7 +214,7 @@ void PerfMapper::slice_task(const MapperContext      ctx,
         if (i == num_slices - 1) hi = dom.rect_data[dim];
         Domain slice;
         slice.dim = dim;
-        for (int i = 0; i < dim * 2; ++i) slice.rect_data[i] = 0;
+        for (int k = 0; k < dim * 2; ++k) slice.rect_data[k] = 0;
         slice.rect_data[0] = lo;
         slice.rect_data[dim] = hi;
         slice_cache.push_back(TaskSlice(slice, procs_list[0], false, false));
