@@ -477,7 +477,7 @@ static void parse_arguments(char** argv, int argc, unsigned& num_tasks,
                             unsigned& dims, unsigned& blast, bool& alternate,
                             bool& alternate_loop, bool& single_launch,
                             bool& block, bool& cache_mapping,
-                            vector<int>& pattern)
+                            bool& tracing, vector<int>& pattern)
 {
   int i = 1;
   while (i < argc)
@@ -496,6 +496,7 @@ static void parse_arguments(char** argv, int argc, unsigned& num_tasks,
     else if (strcmp(argv[i], "-s") == 0) single_launch = true;
     else if (strcmp(argv[i], "-b") == 0) block = true;
     else if (strcmp(argv[i], "-F") == 0) cache_mapping = false;
+    else if (strcmp(argv[i], "-T") == 0) tracing = true;
     else if (strcmp(argv[i], "-P") == 0)
     {
       const char* p = argv[++i];
@@ -629,6 +630,7 @@ void top_level_task(const Task *task,
   bool single_launch = false;
   bool block = false;
   bool cache_mapping = true;
+  bool tracing = false;
   vector<int> pattern;
 
   {
@@ -638,7 +640,7 @@ void top_level_task(const Task *task,
     parse_arguments(argv, argc, num_tasks, num_loops, num_regions,
         num_partitions, num_slices, tree_depth, num_fields, dims, blast,
         alternate, alternate_loop, single_launch, block, cache_mapping,
-        pattern);
+        tracing, pattern);
     if (num_regions == 0) num_partitions = 1;
     if (num_regions > 0 && num_partitions > 0 && tree_depth == 0)
     {
@@ -675,6 +677,11 @@ void top_level_task(const Task *task,
       fprintf(stderr, "ERROR: Two alternate modes cannot coexist.\n");
       exit(-1);
     }
+    if (block && tracing)
+    {
+      fprintf(stderr, "ERROR: Tracing cannot be used in the blocking mode.\n");
+      exit(-1);
+    }
   }
 
   if (pattern.empty())
@@ -707,6 +714,8 @@ void top_level_task(const Task *task,
       single_launch ? "yes" : " no");
   printf("* Cache Mapping         :         %s *\n",
       cache_mapping ? "yes" : " no");
+  printf("* Block until Analyze   :         %s *\n", block ? "yes" : " no");
+  printf("* Logical Tracing       :         %s *\n", tracing ? "yes" : " no");
   printf("* Number of Slices      :       %5u *\n", num_slices);
   printf("* Dimensionality        :       %5u *\n", dims);
   printf("* Blast Factor          :       %5u *\n", blast);
@@ -847,6 +856,7 @@ void top_level_task(const Task *task,
   {
     for (unsigned l = 0; l < num_loops; ++l)
     {
+      if (tracing) runtime->begin_trace(ctx, 0);
       for (unsigned p = 0; p < num_partitions; ++p)
       {
         for (unsigned i = 0; i < num_tasks; ++i)
@@ -905,16 +915,17 @@ void top_level_task(const Task *task,
               }
             }
           }
-
           runtime->execute_task(ctx, launcher);
         }
       }
+      if (tracing) runtime->end_trace(ctx, 0);
     }
   }
   else
   {
     for (unsigned l = 0; l < num_loops; ++l)
     {
+      if (tracing) runtime->begin_trace(ctx, 0);
       for (unsigned p = 0; p < num_partitions; ++p)
       {
         IndexTaskLauncher launcher(DO_NOTHING_TASK_ID, launch_domain,
@@ -963,6 +974,7 @@ void top_level_task(const Task *task,
         }
         runtime->execute_index_space(ctx, launcher);
       }
+      if (tracing) runtime->end_trace(ctx, 0);
     }
   }
   barrier_for_block.arrive(1);
