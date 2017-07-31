@@ -5098,6 +5098,37 @@ local function expand_phase_barriers(value, value_type, thunk)
   end
 end
 
+local function map_phase_barriers(value, value_type, fn)
+  if std.is_list(value_type) then
+    local result = terralib.newsymbol(value_type, "result")
+    local element_type = value_type.element_type
+    local element = terralib.newsymbol(element_type, "barrier")
+    local index = terralib.newsymbol(uint64, "index")
+
+    local inner_actions, inner_result = map_phase_barriers(
+      element, element_type, fn)
+
+    local actions = quote
+      var data = c.malloc(
+        terralib.sizeof([value_type.element_type]) * [value].__size)
+      regentlib.assert(data ~= nil, "malloc failed in copy")
+      var [result] = value_type {
+        __size = [value].__size,
+        __data = data,
+      }
+
+      for [index] = 0, [value].__size do
+        var [element] = [value_type:data(value)][ [index] ]
+        [inner_actions]
+        [value_type:data(result)][ [index] ] = [inner_result]
+      end
+    end
+    return actions, result
+  else
+    return fn(value, value_type)
+  end
+end
+
 local function expr_copy_issue_phase_barriers(values, types, condition_kinds,
                                               launcher)
   local actions = terralib.newlist()
@@ -5129,30 +5160,40 @@ end
 
 local function expr_copy_adjust_phase_barriers(cx, values, value_types,
                                                need_adjust, count)
-  local actions = terralib.newlist()
+  local result_actions, results = terralib.newlist(), terralib.newlist()
   for i, value in ipairs(values) do
     local value_type = value_types[i]
     if need_adjust[i] then
-      actions:insert(
-        expand_phase_barriers(
-          value, value_type,
-          function(value)
-            return quote
-              -- The barrier is expecting 1 arrival. We're going to be
-              -- arriving with [count]. Adjust the expect arrivals to match.
-              var adjust = [count] - 1
-              if adjust > 0 then
-                -- Extra arrivals, increase count.
-                c.legion_phase_barrier_alter_arrival_count([cx.runtime], [cx.context], [value].impl, adjust)
-              elseif adjust < 0 then
-                -- Fewer arrivals, decrement count.
-                c.legion_phase_barrier_arrive([cx.runtime], [cx.context], [value].impl, -adjust)
-              end
+      local actions, result = map_phase_barriers(
+        value, value_type,
+        function(value, value_type)
+          local result = terralib.newsymbol(value_type, "result")
+          local actions = quote
+            var [result] = [value]
+            -- The barrier is expecting 1 arrival. We're going to be
+            -- arriving with [count]. Adjust the expect arrivals to match.
+            var adjust = [count] - 1
+            if adjust > 0 then
+              -- Extra arrivals, increase count.
+              [result] = std.phase_barrier {
+                impl = c.legion_phase_barrier_alter_arrival_count(
+                  [cx.runtime], [cx.context], [value].impl, adjust)
+              }
+            elseif adjust < 0 then
+              -- Fewer arrivals, decrement count.
+              c.legion_phase_barrier_arrive(
+                [cx.runtime], [cx.context], [value].impl, -adjust)
             end
-          end))
+          end
+          return actions, result
+        end)
+      result_actions:insert(actions)
+      results:insert(result)
+    else
+      results:insert(value)
     end
   end
-  return actions
+  return result_actions, results
 end
 
 local function expr_copy_extract_phase_barriers(index, values, value_types, depth)
@@ -5169,7 +5210,7 @@ local function expr_copy_extract_phase_barriers(index, values, value_types, dept
 
     local result_type, result_value
     if std.is_list(value_type) and
-      (not value_type.barrier_depth or depth < value_type.barrier_depth)
+      (not value_type.barrier_depth or depth <= value_type.barrier_depth)
     then
       result_type = value_type.element_type
       result_value = terralib.newsymbol(result_type, "extract_" .. tostring(value))
@@ -5333,21 +5374,22 @@ local function expr_copy_setup_list_one_to_many(
     local index = terralib.newsymbol(uint64, "index")
     local c_actions, c_values, c_types, c_stopped = expr_copy_extract_phase_barriers(
       index, condition_values, condition_types, depth)
-    local adjust_actions = terralib.newlist()
+    local update_actions = terralib.newlist()
     if data.any(unpack(c_stopped)) then
       local count, count_actions = count_nested_list_size(
         dst_element, dst_element_type)
-      adjust_actions:insertall(count_actions)
+      update_actions:insertall(count_actions)
 
-      adjust_actions:insertall(
-        expr_copy_adjust_phase_barriers(
-          cx, condition_values, condition_types, c_stopped, count))
+      local adjust_actions, adjust_values = expr_copy_adjust_phase_barriers(
+          cx, c_values, c_types, c_stopped, count)
+      update_actions:insertall(adjust_actions)
+      c_values = adjust_values
     end
     return quote
       for [index] = 0, [dst_value].__size do
         var [dst_element] = [dst_type:data(dst_value)][ [index] ]
         [c_actions]
-        [adjust_actions]
+        [update_actions]
         [expr_copy_setup_region(
            cx, src_value, src_type, src_container_type, src_fields,
            dst_element, dst_element_type, dst_container_type, dst_fields,
@@ -5377,15 +5419,16 @@ local function expr_copy_setup_list_one_to_one(
     local index = terralib.newsymbol(uint64, "index")
     local c_actions, c_values, c_types, c_stopped = expr_copy_extract_phase_barriers(
       index, condition_values, condition_types, depth)
-    local adjust_actions = terralib.newlist()
+    local update_actions = terralib.newlist()
     if data.any(unpack(c_stopped)) then
       local count, count_actions = count_nested_list_size(
         dst_element, dst_element_type)
-      adjust_actions:insertall(count_actions)
+      update_actions:insertall(count_actions)
 
-      adjust_actions:insertall(
-        expr_copy_adjust_phase_barriers(
-          cx, condition_values, condition_types, c_stopped, count))
+      local adjust_actions, adjust_values = expr_copy_adjust_phase_barriers(
+          cx, c_values, c_types, c_stopped, count)
+      update_actions:insertall(adjust_actions)
+      c_values = adjust_values
     end
     return quote
       std.assert([src_value].__size == [dst_value].__size, "mismatch in number of regions to copy")
@@ -5393,7 +5436,7 @@ local function expr_copy_setup_list_one_to_one(
         var [src_element] = [src_type:data(src_value)][ [index] ]
         var [dst_element] = [dst_type:data(dst_value)][ [index] ]
         [c_actions]
-        [adjust_actions]
+        [update_actions]
         [expr_copy_setup_list_one_to_one(
            cx, src_element, src_element_type, src_container_type, src_fields,
            dst_element, dst_element_type, dst_container_type, dst_fields,
