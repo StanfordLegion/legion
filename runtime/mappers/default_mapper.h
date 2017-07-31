@@ -45,10 +45,12 @@ namespace Legion {
         DEFAULT_TUNABLE_LOCAL_CPUS = 1,
         DEFAULT_TUNABLE_LOCAL_GPUS = 2,
         DEFAULT_TUNABLE_LOCAL_IOS = 3,
-        DEFAULT_TUNABLE_GLOBAL_CPUS = 4,
-        DEFAULT_TUNABLE_GLOBAL_GPUS = 5,
-        DEFAULT_TUNABLE_GLOBAL_IOS = 6,
-        DEFAULT_TUNABLE_LAST = 7, // this one must always be last and unused
+        DEFAULT_TUNABLE_LOCAL_OMPS = 4,
+        DEFAULT_TUNABLE_GLOBAL_CPUS = 5,
+        DEFAULT_TUNABLE_GLOBAL_GPUS = 6,
+        DEFAULT_TUNABLE_GLOBAL_IOS = 7,
+        DEFAULT_TUNABLE_GLOBAL_OMPS = 8,
+        DEFAULT_TUNABLE_LAST = 9, // this one must always be last and unused
       };
       enum MappingKind {
         TASK_MAPPING,
@@ -422,6 +424,8 @@ namespace Legion {
       Processor default_get_next_global_io(void);
       Processor default_get_next_local_procset(void);
       Processor default_get_next_global_procset(void);
+      Processor default_get_next_local_omp(void);
+      Processor default_get_next_global_omp(void);
       VariantInfo default_find_preferred_variant(
                                  const Task &task, MapperContext ctx,
                                  bool needs_tight_bound, bool cache = true,
@@ -492,26 +496,32 @@ namespace Legion {
       unsigned               total_nodes;
       // There are a couple of parameters from the machine description that 
       // the default mapper uses to determine how to perform mapping.
-      std::vector<Processor> local_ios;
-      std::vector<Processor> local_cpus;
       std::vector<Processor> local_gpus;
+      std::vector<Processor> local_cpus;
+      std::vector<Processor> local_ios;
       std::vector<Processor> local_procsets;
-      std::vector<Processor> remote_ios;
-      std::vector<Processor> remote_cpus;
+      std::vector<Processor> local_omps;
       std::vector<Processor> remote_gpus;
+      std::vector<Processor> remote_cpus;
+      std::vector<Processor> remote_ios;
       std::vector<Processor> remote_procsets;
+      std::vector<Processor> remote_omps;
     protected:
       // For doing round-robining of tasks onto processors
-      unsigned next_local_io, next_local_cpu, next_local_gpu, next_local_procset;
-      Processor next_global_io,next_global_cpu,next_global_gpu,next_global_procset;
-      Machine::ProcessorQuery *global_io_query, *global_cpu_query,
-                              *global_gpu_query, *global_procset_query;
+      unsigned next_local_gpu, next_local_cpu, next_local_io,
+               next_local_procset, next_local_omp;
+      Processor next_global_gpu, next_global_cpu, next_global_io,
+                next_global_procset, next_global_omp;
+      Machine::ProcessorQuery *global_gpu_query, *global_cpu_query,
+                              *global_io_query, *global_procset_query,
+                              *global_omp_query;
     protected: 
       // Cached mapping information about the application
-      std::map<Domain,std::vector<TaskSlice> > cpu_slices_cache,
-                                               gpu_slices_cache,
+      std::map<Domain,std::vector<TaskSlice> > gpu_slices_cache,
+                                               cpu_slices_cache,
                                                io_slices_cache,
-                                               procset_slices_cache;
+                                               procset_slices_cache,
+                                               omp_slices_cache;
       std::map<TaskID,VariantInfo>             preferred_variants; 
       std::map<std::pair<TaskID,Processor>,
                std::list<CachedTaskMapping> >  cached_task_mappings;
