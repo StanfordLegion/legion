@@ -7030,9 +7030,6 @@ namespace Legion {
 #endif
       version_info.clone_to_depth(child_depth-1, close_info.close_mask,
                                   close_info.version_info);
-#ifdef DEBUG_LEGION
-      dump_physical_state(&requirement, 0, true, true);
-#endif
       runtime->forest->physical_perform_close(requirement,
                                               close_info.version_info,
                                               this, 0/*idx*/, 
