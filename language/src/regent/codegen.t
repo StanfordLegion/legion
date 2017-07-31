@@ -4924,7 +4924,7 @@ local function expr_adjust_list(cx, barrier, barrier_type, value, value_type)
       var data = c.malloc(
         terralib.sizeof([barrier_type.element_type]) * [barrier].__size)
       regentlib.assert(data ~= nil, "malloc failed in adjust")
-      var [result] = expr_type {
+      var [result] = barrier_type {
         __size = [barrier].__size,
         __data = data,
       }
@@ -4932,7 +4932,7 @@ local function expr_adjust_list(cx, barrier, barrier_type, value, value_type)
       for i = 0, [barrier].__size do
         var [element] = [barrier_type:data(barrier)][i]
         [inner_actions]
-        [barrier_type:data(result)][i] = [inner_reuslt]
+        [barrier_type:data(result)][i] = [inner_result]
       end
     end
     return actions, result
