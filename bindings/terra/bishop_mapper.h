@@ -38,7 +38,7 @@ namespace Legion {
                      const std::vector<bishop_transition_fn_t>&,
                      bishop_mapper_state_init_fn_t,
                      MapperRuntime*, Machine, Processor);
-        ~BishopMapper();
+        virtual ~BishopMapper();
 
         virtual void select_task_options(const MapperContext ctx,
                                          const Task&         task,

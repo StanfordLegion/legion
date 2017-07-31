@@ -209,6 +209,7 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
 
     def __init__(self, state, callbacks):
         LegionDeserializer.__init__(self, state, callbacks)
+        self.callbacks_translated = False
 
     @staticmethod
     def create_type_reader(num_bytes, param_type):
@@ -226,6 +227,8 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
             def reader(log):
                 raw_val = log.read(num_bytes)
                 val = struct.unpack(fmt, raw_val)[0]
+                if param_type == "timestamp_t":
+                    val = val / 1000
                 return val
             return reader
 
@@ -261,10 +264,11 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
 
 
         # change the callbacks to be by id
-        new_callbacks = {LegionProfBinaryDeserializer.name_to_id[name]: callback 
-                            for name, callback in self.callbacks.iteritems()}
-        
-        self.callbacks = new_callbacks
+        if not self.callbacks_translated:
+            new_callbacks = {LegionProfBinaryDeserializer.name_to_id[name]: callback 
+                               for name, callback in self.callbacks.iteritems()}
+            self.callbacks = new_callbacks
+            self.callbacks_translated = True
 
 
         # callbacks_valid = True
