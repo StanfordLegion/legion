@@ -4894,16 +4894,21 @@ end
 
 local function expr_adjust_phase_barrier(cx, barrier, barrier_type,
                                          value, value_type)
+  local result = terralib.newsymbol(barrier_type, "result")
   if std.is_phase_barrier(barrier_type) then
     return quote
-      c.legion_phase_barrier_alter_arrival_count(
-        [cx.runtime], [cx.context], [barrier].impl, [value])
-    end
+      var [result] = std.phase_barrier {
+        impl = c.legion_phase_barrier_alter_arrival_count(
+          [cx.runtime], [cx.context], [barrier].impl, [value])
+      }
+    end, result
   elseif std.is_dynamic_collective(barrier_type) then
     return quote
-      c.legion_dynamic_collective_alter_arrival_count(
-        [cx.runtime], [cx.context], [barrier].impl, [value])
-    end
+      var [result] = std.phase_barrier {
+        impl = c.legion_dynamic_collective_alter_arrival_count(
+          [cx.runtime], [cx.context], [barrier].impl, [value])
+      }
+    end, result
   else
     assert(false)
   end
@@ -4913,12 +4918,21 @@ local function expr_adjust_list(cx, barrier, barrier_type, value, value_type)
   if std.is_list(barrier_type) then
     local result = terralib.newsymbol(barrier_type, "result")
     local element = terralib.newsymbol(barrier_type.element_type, "element")
-    local inner_actions = expr_adjust_list(
+    local inner_actions, inner_result = expr_adjust_list(
       cx, element, barrier_type.element_type, value, value_type)
     local actions = quote
+      var data = c.malloc(
+        terralib.sizeof([barrier_type.element_type]) * [barrier].__size)
+      regentlib.assert(data ~= nil, "malloc failed in adjust")
+      var [result] = expr_type {
+        __size = [barrier].__size,
+        __data = data,
+      }
+
       for i = 0, [barrier].__size do
         var [element] = [barrier_type:data(barrier)][i]
         [inner_actions]
+        [barrier_type:data(result)][i] = [inner_reuslt]
       end
     end
     return actions, result
