@@ -34,6 +34,9 @@ processor_kinds = {
     2 : 'CPU',
     3 : 'Utility',
     4 : 'IO',
+    5 : 'Proc Group',
+    6 : 'Proc Set',
+    7 : 'OpenMP',
 }
 
 # Make sure this is up to date with lowlevel.h
