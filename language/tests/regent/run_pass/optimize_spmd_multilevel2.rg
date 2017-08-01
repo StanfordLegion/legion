@@ -55,17 +55,17 @@ task main()
   var LR = partition(equal, grid, ispace(int1d, 2))
   var TB = partition(equal, grid, ispace(int1d, 3))
 
-  var L = LR[0]
-  var R = LR[1]
-  var T = TB[0]
-  var B = TB[1]
+  var L_all = LR[0]
+  var R_all = LR[1]
+  var T_all = TB[0]
+  var B_all = TB[1]
 
   var colors = ispace(int1d, 4)
   var C = partition(equal, grid, colors)
-  var L_leaf = partition(equal, L, colors)
-  var R_leaf = partition(equal, R, colors)
-  var T_leaf = partition(equal, T, colors)
-  var B_leaf = partition(equal, B, colors)
+  var L = partition(equal, L_all, colors)
+  var R = partition(equal, R_all, colors)
+  var T = partition(equal, T_all, colors)
+  var B = partition(equal, B_all, colors)
 
   for x in grid do
     @x = 1000 + int(x)+1 * int(x)+2
@@ -81,10 +81,10 @@ task main()
       g(C[i])
     end
     for i in colors do
-      f(L_leaf[i], R_leaf[i])
+      f(L[i], R[i])
     end
     for i in colors do
-      f(T_leaf[i], B_leaf[i])
+      f(T[i], B[i])
     end
     for i in colors do
       g(C[i])
