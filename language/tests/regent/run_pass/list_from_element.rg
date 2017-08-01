@@ -64,8 +64,8 @@ where
   no_access_flag(qs)
 do
   var rs_product = list_cross_product_complete(r, qs)
+  barrier = adjust(barrier, qs:num_leaves())
   var barriers = list_from_element(qs, barrier)
-  adjust(barrier, barriers:num_leaves())
   regentlib.assert(barriers:num_leaves() == 1, "test failed")
   copy(r, rs_product, arrives(barriers))
   do

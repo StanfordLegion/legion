@@ -4670,7 +4670,7 @@ class VerificationState(object):
         # Otherwise we can do our normal copy routine from this state 
         if self.valid_instances:
             src = next(iter(self.valid_instances))
-            self.perform_copy_across(src, inst, op, redop, src_depth, src_field, 
+            self.perform_copy_across(src, dst_inst, op, redop, src_depth, src_field, 
                       src_req, dst_depth, dst_field, dst_req, dst_version_number)
         elif self.pending_fill:
             # Should be no reductions here

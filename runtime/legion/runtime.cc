@@ -18874,6 +18874,21 @@ namespace Legion {
                 LegionSpy::log_processor_kind(kind, "IO");
                 break;
               }
+            case Processor::PROC_GROUP:
+              {
+                LegionSpy::log_processor_kind(kind, "ProcGroup");
+                break;
+              }
+            case Processor::PROC_SET:
+              {
+                LegionSpy::log_processor_kind(kind, "ProcSet");
+                break;
+              }
+            case Processor::OMP_PROC:
+              {
+                LegionSpy::log_processor_kind(kind, "OpenMP");
+                break;
+              }
             default:
               assert(false); // unknown processor kind
           }
