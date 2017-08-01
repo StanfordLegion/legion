@@ -5100,7 +5100,7 @@ end
 
 local function map_phase_barriers(value, value_type, fn)
   if std.is_list(value_type) then
-    local result = terralib.newsymbol(value_type, "result")
+    local result = terralib.newsymbol(value_type, "map_" .. tostring(value))
     local element_type = value_type.element_type
     local element = terralib.newsymbol(element_type, "barrier")
     local index = terralib.newsymbol(uint64, "index")
@@ -5158,12 +5158,15 @@ local function expr_copy_issue_phase_barriers(values, types, condition_kinds,
   return actions
 end
 
-local function expr_copy_adjust_phase_barriers(cx, values, value_types,
+local function expr_copy_adjust_phase_barriers(cx, values, value_types, condition_kinds,
                                                need_adjust, count)
   local result_actions, results = terralib.newlist(), terralib.newlist()
   for i, value in ipairs(values) do
     local value_type = value_types[i]
-    if need_adjust[i] then
+    local arrives = data.filter(
+      function(kind) return kind == std.arrives end, condition_kinds[i])
+    assert(#arrives <= 1)
+    if #arrives > 0 and need_adjust[i] then
       local actions, result = map_phase_barriers(
         value, value_type,
         function(value, value_type)
@@ -5172,7 +5175,7 @@ local function expr_copy_adjust_phase_barriers(cx, values, value_types,
             var [result] = [value]
             -- The barrier is expecting 1 arrival. We're going to be
             -- arriving with [count]. Adjust the expect arrivals to match.
-            var adjust = [count] - 1
+            var adjust = [int64]([count]) - 1
             if adjust > 0 then
               -- Extra arrivals, increase count.
               [result] = std.phase_barrier {
@@ -5381,7 +5384,7 @@ local function expr_copy_setup_list_one_to_many(
       update_actions:insertall(count_actions)
 
       local adjust_actions, adjust_values = expr_copy_adjust_phase_barriers(
-          cx, c_values, c_types, c_stopped, count)
+          cx, c_values, c_types, condition_kinds, c_stopped, count)
       update_actions:insertall(adjust_actions)
       c_values = adjust_values
     end
@@ -5426,7 +5429,7 @@ local function expr_copy_setup_list_one_to_one(
       update_actions:insertall(count_actions)
 
       local adjust_actions, adjust_values = expr_copy_adjust_phase_barriers(
-          cx, c_values, c_types, c_stopped, count)
+          cx, c_values, c_types, condition_kinds, c_stopped, count)
       update_actions:insertall(adjust_actions)
       c_values = adjust_values
     end
