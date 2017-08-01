@@ -50,10 +50,10 @@ task main()
   var B_all = TB[x0y1]
 
   var colors = ispace(int2d, { 2, 1 }) -- These have to use uniform colors for now.
-  var L = partition(equal, L, colors)
-  var R = partition(equal, R, colors)
-  var T = partition(equal, T, colors)
-  var B = partition(equal, B, colors)
+  var L = partition(equal, L_all, colors)
+  var R = partition(equal, R_all, colors)
+  var T = partition(equal, T_all, colors)
+  var B = partition(equal, B_all, colors)
 
   __demand(__spmd)
   for t = 0, 3 do
