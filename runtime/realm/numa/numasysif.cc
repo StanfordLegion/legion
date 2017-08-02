@@ -29,6 +29,7 @@
 
 #ifdef __linux__
 #include <unistd.h>
+#include <asm-generic/unistd.h>
 #include <sys/syscall.h>
 #include <linux/mempolicy.h>
 #include <dirent.h>
