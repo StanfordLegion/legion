@@ -251,8 +251,7 @@ void PerfMapper::map_task(const MapperContext  ctx,
     size_t point = runtime->get_logical_region_color_point(ctx, req.region)[0];
     size_t part_id = runtime->get_logical_partition_color(ctx,
         runtime->get_parent_logical_partition(ctx, req.region));
-    bool has_reduction =
-      req.privilege != READ_WRITE && req.privilege != READ_ONLY;
+    bool has_reduction = req.privilege == REDUCE;
     if (has_reduction)
     {
       if (constraint_cache.size() <= part_id)
