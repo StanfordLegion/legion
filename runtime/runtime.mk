@@ -620,7 +620,7 @@ endif
 
 # If we're using CUDA we have to link with nvcc
 ifeq ($(strip $(FORTRAN_LEAF_TASK)),1)
-$(OUTFILE) : $(GEN_OBJS) $(GEN_FORTRAN_OBJS) $(GEN_GPU_OBJS) $(SLIB_LEGION) $(SLIB_REALM)
+$(OUTFILE) : $(SLIB_LEGION) $(SLIB_REALM) $(GEN_OBJS) $(GEN_FORTRAN_OBJS) $(GEN_GPU_OBJS)
 	@echo "---> Linking objects into one binary: $(OUTFILE)"
 	$(CXX) -o $(OUTFILE) $(GEN_OBJS) $(GEN_FORTRAN_OBJS) $(GEN_GPU_OBJS) $(LD_FLAGS) $(LEGION_LIBS) $(LEGION_LD_FLAGS) $(GASNET_FLAGS)
 else ifeq ($(strip $(LEGION_WITH_C)),1)

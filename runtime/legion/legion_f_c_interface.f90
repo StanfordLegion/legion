@@ -923,7 +923,7 @@ module legion_fortran_c_interface
             type(legion_accessor_array_2d_f_t), value, intent(in) :: handle
             type(legion_rect_2d_f_t), value, intent(in)           :: rect
             type(legion_rect_2d_f_t), intent(out)                 :: subrect ! pass reference
-            type(legion_byte_offset_f_t), intent(out)             :: offset  ! pass reference
+            type(legion_byte_offset_f_t), intent(out)             :: offset(2)  ! pass reference
         end function legion_accessor_array_2d_raw_rect_ptr_c
     
         ! @see Legion::UnsafeFieldAccessor::ptr
@@ -939,7 +939,7 @@ module legion_fortran_c_interface
             type(legion_accessor_array_3d_f_t), value, intent(in) :: handle
             type(legion_rect_3d_f_t), value, intent(in)           :: rect
             type(legion_rect_3d_f_t), intent(out)                 :: subrect ! pass reference
-            type(legion_byte_offset_f_t), intent(out)             :: offset  ! pass reference
+            type(legion_byte_offset_f_t), intent(out)             :: offset(3)  ! pass reference
         end function legion_accessor_array_3d_raw_rect_ptr_c
     
         ! @see Legion::UnsafeFieldAccessor::ptr
@@ -1211,5 +1211,17 @@ module legion_fortran_c_interface
             type(legion_task_f_t), value, intent(in) :: handle
             integer(c_int), value, intent(in)        :: tid
         end function legion_task_get_index_space_from_logical_region_c
+        
+        subroutine legion_convert_1d_to_2d_column_major_c(src, dst, offset, num_columns) &
+            bind (C, name="legion_convert_1d_to_2d_column_major")
+            use iso_c_binding
+            import legion_byte_offset_f_t
+            implicit none
+            
+            type(c_ptr), value, intent(in)                  :: src
+            type(c_ptr), intent(in)                         :: dst(num_columns) ! this is OUT, set IN to cheat compiler
+            type(legion_byte_offset_f_t), value, intent(in) :: offset
+            integer(c_int), value, intent(in)               :: num_columns
+        end subroutine
     end interface
 end module

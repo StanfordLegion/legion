@@ -25,7 +25,9 @@ function init_task(tdata, tdatalen, userdata, userlen, p)
         
     type(legion_domain_f_t) :: index_domain
     type(legion_index_space_f_t) :: index_space
-    type(legion_rect_1d_f_t) :: index_rect
+    type(legion_rect_1d_f_t) :: index_rect, subrect
+    type(legion_byte_offset_f_t) :: offset
+    type(c_ptr) :: raw_ptr_x, raw_ptr_y, raw_ptr_z
     real(c_double), target :: x_value
     type(c_ptr) :: x_ptr
     type(legion_point_1d_f_t) :: point
@@ -58,11 +60,13 @@ function init_task(tdata, tdatalen, userdata, userlen, p)
     call legion_index_space_get_domain_f(runtime, index_space, index_domain)
     call legion_domain_get_rect_1d_f(index_domain, index_rect)
     
-    if (index_rect%lo%x(0) == 0) then 
-        call sleep(5)
-    end if
+    call legion_accessor_array_1d_raw_rect_ptr_f(accessor, index_rect, subrect, offset, raw_ptr_x)
     
-    Print *, "Init Task!", rrfid, fid, index_rect%lo%x(0), arglen
+   ! if (index_rect%lo%x(0) == 0) then 
+    !    call sleep(5)
+    !end if
+    
+    Print *, "Init Task!", rrfid, fid, index_rect%lo%x(0), arglen, raw_ptr_x
     do i = index_rect%lo%x(0), index_rect%hi%x(0)
         point%x(0) = i
         x_value = 1.1 * (fid+1) + i
@@ -101,10 +105,12 @@ function daxpy_task(tdata, tdatalen, userdata, userlen, p)
         
     type(legion_domain_f_t) :: index_domain
     type(legion_index_space_f_t) :: index_space
-    type(legion_rect_1d_f_t) :: index_rect
+    type(legion_rect_1d_f_t) :: index_rect, subrect
     real(c_double), target :: xy_value, x_value, y_value
     type(c_ptr) :: xy_ptr, x_ptr, y_ptr
     type(legion_point_1d_f_t) :: point
+    type(c_ptr) :: raw_ptr_x, raw_ptr_y, raw_ptr_z
+    type(legion_byte_offset_f_t) :: offset
     integer :: i
         
     call legion_task_preamble_f(tdata, tdatalen, p, &
@@ -117,7 +123,7 @@ function daxpy_task(tdata, tdatalen, userdata, userlen, p)
     call legion_task_get_args_f(task, task_arg_ptr)
     call c_f_pointer(task_arg_ptr, task_arg)
     call legion_task_get_arglen_f(task, arglen)
-    Print *, "Daxpy Task!", task_arg, arglen
+ !   Print *, "Daxpy Task!", task_arg, arglen
     
     call legion_physical_region_get_field_accessor_array_1d_f(pr1, 0, accessor_x)
     call legion_physical_region_get_field_accessor_array_1d_f(pr1, 1, accessor_y)
@@ -126,6 +132,11 @@ function daxpy_task(tdata, tdatalen, userdata, userlen, p)
     call legion_index_space_get_domain_f(runtime, index_space, index_domain)
     call legion_domain_get_rect_1d_f(index_domain, index_rect)
     
+    call legion_accessor_array_1d_raw_rect_ptr_f(accessor_x, index_rect, subrect, offset, raw_ptr_x)
+    call legion_accessor_array_1d_raw_rect_ptr_f(accessor_y, index_rect, subrect, offset, raw_ptr_y)
+    call legion_accessor_array_1d_raw_rect_ptr_f(accessor_z, index_rect, subrect, offset, raw_ptr_z)
+    
+    Print *, "Daxpy Task!", task_arg, arglen, raw_ptr_x, raw_ptr_y, raw_ptr_z
     do i = index_rect%lo%x(0), index_rect%hi%x(0)
         point%x(0) = i
         x_ptr = c_loc(x_value)
@@ -168,7 +179,7 @@ function check_task(tdata, tdatalen, userdata, userlen, p)
         
     type(legion_domain_f_t) :: index_domain
     type(legion_index_space_f_t) :: index_space
-    type(legion_rect_1d_f_t) :: index_rect
+    type(legion_rect_1d_f_t) :: index_rect, subrect
     type(legion_point_1d_f_t) :: point
     type(c_ptr) :: x_ptr, y_ptr, z_ptr
     real(c_double), target :: x_value = 0
@@ -176,6 +187,8 @@ function check_task(tdata, tdatalen, userdata, userlen, p)
     real(c_double), target :: z_value = 0
     integer :: i
     logical :: all_passed = .true.
+    type(c_ptr) :: raw_ptr_x, raw_ptr_y, raw_ptr_z
+    type(legion_byte_offset_f_t) :: offset
         
     call legion_task_preamble_f(tdata, tdatalen, p, &
                                 task, &
@@ -187,7 +200,6 @@ function check_task(tdata, tdatalen, userdata, userlen, p)
     call legion_task_get_args_f(task, task_arg_ptr)
     call c_f_pointer(task_arg_ptr, task_arg)
     call legion_task_get_arglen_f(task, arglen)
-    Print *, "Check Task!", task_arg, arglen
     
     call legion_physical_region_get_field_accessor_array_1d_f(pr1, 0, accessor_x)
     call legion_physical_region_get_field_accessor_array_1d_f(pr1, 1, accessor_y)
@@ -196,6 +208,11 @@ function check_task(tdata, tdatalen, userdata, userlen, p)
     call legion_index_space_get_domain_f(runtime, index_space, index_domain)
     call legion_domain_get_rect_1d_f(index_domain, index_rect)
     
+    call legion_accessor_array_1d_raw_rect_ptr_f(accessor_x, index_rect, subrect, offset, raw_ptr_x)
+    call legion_accessor_array_1d_raw_rect_ptr_f(accessor_y, index_rect, subrect, offset, raw_ptr_y)
+    call legion_accessor_array_1d_raw_rect_ptr_f(accessor_z, index_rect, subrect, offset, raw_ptr_z)
+    
+    Print *, "Check Task!", task_arg, arglen, raw_ptr_x, raw_ptr_y, raw_ptr_z
     do i = index_rect%lo%x(0), index_rect%hi%x(0)
         point%x(0) = i
         x_ptr = c_loc(x_value)
@@ -275,7 +292,7 @@ function top_level_task(tdata, tdatalen, userdata, userlen, p)
     integer(c_int) :: CHECK_TASK_ID=3
     integer*4, target :: i
     integer*4 :: num_elements = 1024
-    integer*4 :: num_subregions = 8
+    integer*4 :: num_subregions = 4
    ! common HELLO_WORLD_TASK_ID
     
     Print *, "TOP Level Task!"

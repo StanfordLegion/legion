@@ -1,4 +1,4 @@
-/* Copyright 2018 Stanford University
+/* Copyright 2017 Stanford University
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@
 #include <cassert>
 #include <cstdlib>
 #include "legion.h"
+#include "legion_c.h"
 using namespace Legion;
 
 enum TaskIDs {
@@ -32,6 +33,12 @@ enum FieldIDs {
   FID_Y,
   FID_Z,
 };
+
+#ifdef __cplusplus
+extern "C" {
+void daxpy_task_f(const void *data, size_t datalen, const void *userdata, size_t userlen, legion_lowlevel_id_t p);
+}
+#endif
 
 void top_level_task(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
@@ -183,7 +190,7 @@ void top_level_task(const Task *task,
   init_launcher.region_requirements[0].add_field(FID_Y);
   runtime->execute_index_space(ctx, init_launcher);
 
-  const double alpha = drand48();
+  const double alpha = 1.0;
   // We launch the subtasks for performing the daxpy computation
   // in a similar way to the initialize field tasks.  Note we
   // again make use of two RegionRequirements which use a
@@ -248,26 +255,12 @@ void init_field_task(const Task *task,
     acc[*pir] = drand48();
 }
 
-void daxpy_task(const Task *task,
-                const std::vector<PhysicalRegion> &regions,
-                Context ctx, Runtime *runtime)
+
+
+void daxpy_task(const void *data, size_t datalen, const void *userdata, size_t userlen, legion_lowlevel_id_t p)
 {
-  assert(regions.size() == 2);
-  assert(task->regions.size() == 2);
-  assert(task->arglen == sizeof(double));
-  const double alpha = *((const double*)task->args);
-  const int point = task->index_point.point_data[0];
-
-  const FieldAccessor<READ_ONLY,double,1> acc_x(regions[0], FID_X);
-  const FieldAccessor<READ_ONLY,double,1> acc_y(regions[0], FID_Y);
-  const FieldAccessor<WRITE_DISCARD,double,1> acc_z(regions[1], FID_Z);
-  printf("Running daxpy computation with alpha %.8g for point %d...\n", 
-          alpha, point);
-
-  Rect<1> rect = runtime->get_index_space_domain(ctx,
-                  task->regions[0].region.get_index_space());
-  for (PointInRectIterator<1> pir(rect); pir(); pir++)
-    acc_z[*pir] = alpha * acc_x[*pir] + acc_y[*pir];
+    printf("daxpy task C\n");
+    daxpy_task_f(data, datalen, userdata, userlen, p);
 }
 
 void check_task(const Task *task,
@@ -320,12 +313,19 @@ int main(int argc, char **argv)
     Runtime::preregister_task_variant<init_field_task>(registrar, "init_field");
   }
 
-  {
-    TaskVariantRegistrar registrar(DAXPY_TASK_ID, "daxpy");
-    registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
-    registrar.set_leaf();
-    Runtime::preregister_task_variant<daxpy_task>(registrar, "daxpy");
-  }
+  
+  legion_execution_constraint_set_t execution_constraints = legion_execution_constraint_set_create();
+  legion_execution_constraint_set_add_processor_constraint(execution_constraints, LOC_PROC);
+  legion_task_layout_constraint_set_t layout_constraints = legion_task_layout_constraint_set_create();
+  legion_task_config_options_t config_options = {.leaf = false, .inner = false, .idempotent = false};
+  legion_runtime_preregister_task_variant_fnptr(DAXPY_TASK_ID,
+                                                "daxpy",
+                                                execution_constraints,
+                                                layout_constraints,
+                                                config_options,
+                                                daxpy_task,
+                                                NULL,
+                                                0);
 
   {
     TaskVariantRegistrar registrar(CHECK_TASK_ID, "check");

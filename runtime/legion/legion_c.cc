@@ -4906,7 +4906,7 @@ legion_runtime_start(int argc,
                      char **argv,
                      bool background /* = false */)
 {
-    int argc_tmp = 3;
+/*    int argc_tmp = 3;
     char *argv1 = "/home/wwu/legion-up/tutorial-c/00_hello_world/./hello_world";
     char *argv2 = "-ll:cpu";
     char *argv3 = "7";
@@ -4915,6 +4915,8 @@ legion_runtime_start(int argc,
     argv_tmp[1] = argv2;
     argv_tmp[2] = argv3;
   return Runtime::start(argc_tmp, argv_tmp, background);
+    */
+    return Runtime::start(argc, argv, background);
 }
 
 void
@@ -6313,4 +6315,14 @@ legion_task_get_index_space_from_logical_region(
   legion_region_requirement_t req = legion_task_get_region(task, idx);
   legion_logical_region_t lr = legion_region_requirement_get_region(req);
   return legion_logical_region_get_index_space(lr);
+}
+
+void 
+legion_convert_1d_to_2d_column_major(
+    void *src, void *dst[], legion_byte_offset_t offset, int num_columns)
+{
+    int i;
+    for (i = 0; i < num_columns; i++) {
+        dst[i] = (void*)((unsigned char*)src + offset.offset * i);
+    }
 }

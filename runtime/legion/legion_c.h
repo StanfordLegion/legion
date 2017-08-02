@@ -4780,6 +4780,10 @@ extern "C" {
   legion_task_get_index_space_from_logical_region(
       legion_task_t task, unsigned idx);
 
+
+  void 
+  legion_convert_1d_to_2d_column_major(
+      void *src, void *dst[], legion_byte_offset_t offset, int num_columns);
 #ifdef __cplusplus
 }
 #endif

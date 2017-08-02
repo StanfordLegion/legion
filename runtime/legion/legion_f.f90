@@ -779,7 +779,7 @@ contains
         type(legion_accessor_array_2d_f_t), intent(in) :: handle
         type(legion_rect_2d_f_t), intent(in)           :: rect
         type(legion_rect_2d_f_t), intent(out)          :: subrect ! pass reference
-        type(legion_byte_offset_f_t), intent(out)      :: offset  ! pass reference
+        type(legion_byte_offset_f_t), intent(out)      :: offset(2)  ! pass reference
         type(c_ptr), intent(out)                       :: raw_ptr
             
         raw_ptr = legion_accessor_array_2d_raw_rect_ptr_c(handle, rect, subrect, offset)
@@ -792,7 +792,7 @@ contains
         type(legion_accessor_array_3d_f_t), intent(in) :: handle
         type(legion_rect_3d_f_t), intent(in)           :: rect
         type(legion_rect_3d_f_t), intent(out)          :: subrect ! pass reference
-        type(legion_byte_offset_f_t), intent(out)      :: offset  ! pass reference
+        type(legion_byte_offset_f_t), intent(out)      :: offset(3)  ! pass reference
         type(c_ptr), intent(out)                       :: raw_ptr
             
         raw_ptr = legion_accessor_array_3d_raw_rect_ptr_c(handle, rect, subrect, offset)
