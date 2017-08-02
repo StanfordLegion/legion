@@ -28,7 +28,6 @@ function init_task(tdata, tdatalen, userdata, userlen, p)
     type(legion_point_2d_f_t) :: lo, hi
     type(legion_rect_2d_f_t) :: index_rect
     real(c_double), target :: x_value
-    type(c_ptr) :: x_ptr
     type(legion_point_2d_f_t) :: point
     integer :: i, j
 
@@ -60,8 +59,7 @@ function init_task(tdata, tdatalen, userdata, userlen, p)
             point%x(0) = j
             point%x(1) = i
             x_value = 1.1 * (fid+1)
-            x_ptr = c_loc(x_value)
-            call legion_accessor_array_2d_write_point_f(accessor, point, x_ptr, c_sizeof(x_value))
+            call legion_accessor_array_2d_write_point_f(accessor, point, x_value)
         end do
     end do
     
@@ -101,7 +99,6 @@ function daxpy_task(tdata, tdatalen, userdata, userlen, p)
     type(legion_point_2d_f_t) :: lo, hi
     type(legion_rect_2d_f_t) :: index_rect
     real(c_double), target :: xy_value, x_value, y_value
-    type(c_ptr) :: xy_ptr, x_ptr, y_ptr
     type(legion_point_2d_f_t) :: point
     integer :: i, j
         
@@ -130,13 +127,10 @@ function daxpy_task(tdata, tdatalen, userdata, userlen, p)
         do j = lo%x(1), hi%x(1)
             point%x(0) = j
             point%x(1) = i
-            x_ptr = c_loc(x_value)
-            y_ptr = c_loc(y_value)
-            call legion_accessor_array_2d_read_point_f(accessor_x, point, x_ptr, c_sizeof(x_value))
-            call legion_accessor_array_2d_read_point_f(accessor_y, point, y_ptr, c_sizeof(y_value))
+            call legion_accessor_array_2d_read_point_f(accessor_x, point, x_value)
+            call legion_accessor_array_2d_read_point_f(accessor_y, point, y_value)
             xy_value = x_value + y_value
-            xy_ptr = c_loc(xy_value)
-            call legion_accessor_array_2d_write_point_f(accessor_z, point, xy_ptr, c_sizeof(xy_value))
+            call legion_accessor_array_2d_write_point_f(accessor_z, point, xy_value)
         end do
     end do
     
@@ -174,7 +168,6 @@ function check_task(tdata, tdatalen, userdata, userlen, p)
     type(legion_point_2d_f_t) :: lo, hi
     type(legion_rect_2d_f_t) :: index_rect
     type(legion_point_2d_f_t) :: point
-    type(c_ptr) :: x_ptr, y_ptr, z_ptr
     real(c_double), target :: x_value = 0
     real(c_double), target :: y_value = 0
     real(c_double), target :: z_value = 0
@@ -206,12 +199,9 @@ function check_task(tdata, tdatalen, userdata, userlen, p)
         do j = lo%x(1), hi%x(1)
             point%x(0) = i
             point%x(1) = j
-            x_ptr = c_loc(x_value)
-            y_ptr = c_loc(y_value)
-            z_ptr = c_loc(z_value)
-            call legion_accessor_array_2d_read_point_f(accessor_x, point, x_ptr, c_sizeof(x_value))
-            call legion_accessor_array_2d_read_point_f(accessor_y, point, y_ptr, c_sizeof(y_value))
-            call legion_accessor_array_2d_read_point_f(accessor_z, point, z_ptr, c_sizeof(z_value))
+            call legion_accessor_array_2d_read_point_f(accessor_x, point, x_value)
+            call legion_accessor_array_2d_read_point_f(accessor_y, point, y_value)
+            call legion_accessor_array_2d_read_point_f(accessor_z, point, z_value)
             if (x_value + y_value == z_value) then
             else
                 print *, "wrong", i, x_value, y_value, z_value

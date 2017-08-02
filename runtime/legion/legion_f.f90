@@ -2,6 +2,7 @@ module legion_fortran
     use, intrinsic :: iso_c_binding
     use legion_fortran_types
     use legion_fortran_c_interface
+ !   use legion_fortran_object_oriented
     implicit none
     
     interface legion_accessor_array_1d_read_point_f
@@ -15,95 +16,62 @@ module legion_fortran
         module procedure legion_accessor_array_1d_read_point_complex8_f
     end interface
     
-    type LegionPoint
-        integer :: dim
-    end type LegionPoint
-
-    type, extends(LegionPoint) :: LegionPoint1D
-        type(legion_point_1d_f_t) :: point
-    end type LegionPoint1D
+    interface legion_accessor_array_2d_read_point_f
+        module procedure legion_accessor_array_2d_read_point_ptr_f
+        module procedure legion_accessor_array_2d_read_point_integer2_f
+        module procedure legion_accessor_array_2d_read_point_integer4_f
+        module procedure legion_accessor_array_2d_read_point_integer8_f
+        module procedure legion_accessor_array_2d_read_point_real4_f
+        module procedure legion_accessor_array_2d_read_point_real8_f
+        module procedure legion_accessor_array_2d_read_point_complex4_f
+        module procedure legion_accessor_array_2d_read_point_complex8_f
+    end interface
     
-    type LegionFieldAccessor
-        integer :: dim
-        integer(c_size_t) :: data_size
-    contains
-        procedure :: init => legion_field_accessor_init
-        procedure, private :: legion_field_accessor_read_point_ptr
-        procedure, private :: legion_field_accessor_read_point_real8
-        generic :: read_point => legion_field_accessor_read_point_ptr, legion_field_accessor_read_point_real8
-    end type LegionFieldAccessor
-
-    type, extends(LegionFieldAccessor) :: LegionFieldAccessor1D
-        type(legion_accessor_array_1d_f_t) :: accessor
-    end type LegionFieldAccessor1D
+    interface legion_accessor_array_3d_read_point_f
+        module procedure legion_accessor_array_3d_read_point_ptr_f
+        module procedure legion_accessor_array_3d_read_point_integer2_f
+        module procedure legion_accessor_array_3d_read_point_integer4_f
+        module procedure legion_accessor_array_3d_read_point_integer8_f
+        module procedure legion_accessor_array_3d_read_point_real4_f
+        module procedure legion_accessor_array_3d_read_point_real8_f
+        module procedure legion_accessor_array_3d_read_point_complex4_f
+        module procedure legion_accessor_array_3d_read_point_complex8_f
+    end interface
+    
+    interface legion_accessor_array_1d_write_point_f
+        module procedure legion_accessor_array_1d_write_point_ptr_f
+        module procedure legion_accessor_array_1d_write_point_integer2_f
+        module procedure legion_accessor_array_1d_write_point_integer4_f
+        module procedure legion_accessor_array_1d_write_point_integer8_f
+        module procedure legion_accessor_array_1d_write_point_real4_f
+        module procedure legion_accessor_array_1d_write_point_real8_f
+        module procedure legion_accessor_array_1d_write_point_complex4_f
+        module procedure legion_accessor_array_1d_write_point_complex8_f
+    end interface
+    
+    interface legion_accessor_array_2d_write_point_f
+        module procedure legion_accessor_array_2d_write_point_ptr_f
+        module procedure legion_accessor_array_2d_write_point_integer2_f
+        module procedure legion_accessor_array_2d_write_point_integer4_f
+        module procedure legion_accessor_array_2d_write_point_integer8_f
+        module procedure legion_accessor_array_2d_write_point_real4_f
+        module procedure legion_accessor_array_2d_write_point_real8_f
+        module procedure legion_accessor_array_2d_write_point_complex4_f
+        module procedure legion_accessor_array_2d_write_point_complex8_f
+    end interface
+    
+    interface legion_accessor_array_3d_write_point_f
+        module procedure legion_accessor_array_3d_write_point_ptr_f
+        module procedure legion_accessor_array_3d_write_point_integer2_f
+        module procedure legion_accessor_array_3d_write_point_integer4_f
+        module procedure legion_accessor_array_3d_write_point_integer8_f
+        module procedure legion_accessor_array_3d_write_point_real4_f
+        module procedure legion_accessor_array_3d_write_point_real8_f
+        module procedure legion_accessor_array_3d_write_point_complex4_f
+        module procedure legion_accessor_array_3d_write_point_complex8_f
+    end interface
     
 contains
-    
-    subroutine legion_field_accessor_init(this, physical_region, fid, data_size)
-        implicit none
-        
-        class(LegionFieldAccessor), intent(inout)    :: this
-        type(legion_physical_region_f_t), intent(in) :: physical_region
-        integer(c_int), intent(in)                   :: fid
-        integer(c_size_t), intent(in)                  :: data_size
-        
-        select type (this)
-        type is (LegionFieldAccessor)
-              ! no further initialization required
-        class is (LegionFieldAccessor1D)
-            ! 1D
-            this%dim = 1
-            this%data_size = data_size
-            this%accessor = legion_physical_region_get_field_accessor_array_1d_c(physical_region, fid)
-        class default
-          ! give error for unexpected/unsupported type
-             stop 'initialize: unexpected type for LegionFieldAccessor object!'
-        end select
-    end subroutine legion_field_accessor_init
-    
-    subroutine legion_field_accessor_read_point_ptr(this, point, dst)
-        implicit none
-        
-        class(LegionFieldAccessor), intent(in)    :: this
-        class(LegionPoint), intent(in)            :: point
-        type(c_ptr), intent(out)                  :: dst 
-        
-        select type (this)
-        type is (LegionFieldAccessor)
-              ! no further initialization required
-        class is (LegionFieldAccessor1D)
-            ! 1D
-            select type (point)
-            type is (LegionPoint1D)
-                call legion_accessor_array_1d_read_point_c(this%accessor, point%point, dst, this%data_size)
-            end select
-        class default
-          ! give error for unexpected/unsupported type
-             stop 'initialize: unexpected type for LegionFieldAccessor object!'
-        end select
-    end subroutine legion_field_accessor_read_point_ptr
-    
-    subroutine legion_field_accessor_read_point_real8(this, point, dst)
-        implicit none
-        
-        class(LegionFieldAccessor), intent(in)    :: this
-        class(LegionPoint), intent(in)            :: point
-        real(kind=8), target, intent(out)         :: dst
-        
-        select type (this)
-        type is (LegionFieldAccessor)
-              ! no further initialization required
-        class is (LegionFieldAccessor1D)
-            ! 1D
-            select type (point)
-            type is (LegionPoint1D)
-                call legion_accessor_array_1d_read_point_c(this%accessor, point%point, c_loc(dst), this%data_size)
-            end select
-        class default
-          ! give error for unexpected/unsupported type
-             stop 'initialize: unexpected type for LegionFieldAccessor object!'
-        end select
-    end subroutine legion_field_accessor_read_point_real8
     
     ! -----------------------------------------------------------------------
     ! Task Launcher
@@ -798,6 +766,7 @@ contains
         raw_ptr = legion_accessor_array_3d_raw_rect_ptr_c(handle, rect, subrect, offset)
     end subroutine legion_accessor_array_3d_raw_rect_ptr_f
 
+    ! --------- 1D read -----------
     ! @see Legion::UnsafeFieldAccessor::ptr
     subroutine legion_accessor_array_1d_read_point_ptr_f(handle, point, dst, bytes)
         implicit none
@@ -887,20 +856,99 @@ contains
         call legion_accessor_array_1d_read_point_c(handle, point, c_loc(dst), c_sizeof(dst))
     end subroutine legion_accessor_array_1d_read_point_complex8_f
 
+    ! --------- 2D read -----------
     ! @see Legion::UnsafeFieldAccessor::ptr
-    subroutine legion_accessor_array_2d_read_point_f(handle, point, dst, bytes)
+    subroutine legion_accessor_array_2d_read_point_ptr_f(handle, point, dst, bytes)
         implicit none
     
         type(legion_accessor_array_2d_f_t), intent(in) :: handle
         type(legion_point_2d_f_t), intent(in)          :: point
-        type(c_ptr), intent(out)                       :: dst
+        type(c_ptr), intent(out)                       :: dst 
         integer(c_size_t), intent(in)                  :: bytes
         
         call legion_accessor_array_2d_read_point_c(handle, point, dst, bytes)
-    end subroutine legion_accessor_array_2d_read_point_f
-
+    end subroutine legion_accessor_array_2d_read_point_ptr_f
+    
     ! @see Legion::UnsafeFieldAccessor::ptr
-    subroutine legion_accessor_array_3d_read_point_f(handle, point, dst, bytes)
+    subroutine legion_accessor_array_2d_read_point_integer2_f(handle, point, dst)
+        implicit none
+    
+        type(legion_accessor_array_2d_f_t), intent(in) :: handle
+        type(legion_point_2d_f_t), intent(in)          :: point
+        integer(kind=2), target, intent(out)           :: dst 
+        
+        call legion_accessor_array_2d_read_point_c(handle, point, c_loc(dst), c_sizeof(dst))
+    end subroutine legion_accessor_array_2d_read_point_integer2_f
+    
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_2d_read_point_integer4_f(handle, point, dst)
+        implicit none
+    
+        type(legion_accessor_array_2d_f_t), intent(in) :: handle
+        type(legion_point_2d_f_t), intent(in)          :: point
+        integer(kind=4), target, intent(out)           :: dst 
+        
+        call legion_accessor_array_2d_read_point_c(handle, point, c_loc(dst), c_sizeof(dst))
+    end subroutine legion_accessor_array_2d_read_point_integer4_f
+    
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_2d_read_point_integer8_f(handle, point, dst)
+        implicit none
+    
+        type(legion_accessor_array_2d_f_t), intent(in) :: handle
+        type(legion_point_2d_f_t), intent(in)          :: point
+        integer(kind=8), target, intent(out)           :: dst 
+        
+        call legion_accessor_array_2d_read_point_c(handle, point, c_loc(dst), c_sizeof(dst))
+    end subroutine legion_accessor_array_2d_read_point_integer8_f
+    
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_2d_read_point_real4_f(handle, point, dst)
+        implicit none
+    
+        type(legion_accessor_array_2d_f_t), intent(in) :: handle
+        type(legion_point_2d_f_t), intent(in)          :: point
+        real(kind=4), target, intent(out)              :: dst 
+        
+        call legion_accessor_array_2d_read_point_c(handle, point, c_loc(dst), c_sizeof(dst))
+    end subroutine legion_accessor_array_2d_read_point_real4_f
+    
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_2d_read_point_real8_f(handle, point, dst)
+        implicit none
+    
+        type(legion_accessor_array_2d_f_t), intent(in) :: handle
+        type(legion_point_2d_f_t), intent(in)          :: point
+        real(kind=8), target, intent(out)              :: dst 
+        
+        call legion_accessor_array_2d_read_point_c(handle, point, c_loc(dst), c_sizeof(dst))
+    end subroutine legion_accessor_array_2d_read_point_real8_f
+    
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_2d_read_point_complex4_f(handle, point, dst)
+        implicit none
+    
+        type(legion_accessor_array_2d_f_t), intent(in) :: handle
+        type(legion_point_2d_f_t), intent(in)          :: point
+        complex(kind=4), target, intent(out)           :: dst 
+        
+        call legion_accessor_array_2d_read_point_c(handle, point, c_loc(dst), c_sizeof(dst))
+    end subroutine legion_accessor_array_2d_read_point_complex4_f
+    
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_2d_read_point_complex8_f(handle, point, dst)
+        implicit none
+    
+        type(legion_accessor_array_2d_f_t), intent(in) :: handle
+        type(legion_point_2d_f_t), intent(in)          :: point
+        complex(kind=8), target, intent(out)           :: dst 
+        
+        call legion_accessor_array_2d_read_point_c(handle, point, c_loc(dst), c_sizeof(dst))
+    end subroutine legion_accessor_array_2d_read_point_complex8_f
+
+    ! --------- 3D read -----------
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_3d_read_point_ptr_f(handle, point, dst, bytes)
         implicit none
     
         type(legion_accessor_array_3d_f_t), intent(in) :: handle
@@ -909,10 +957,88 @@ contains
         integer(c_size_t), intent(in)                  :: bytes
         
         call legion_accessor_array_3d_read_point_c(handle, point, dst, bytes)
-    end subroutine legion_accessor_array_3d_read_point_f
-
+    end subroutine legion_accessor_array_3d_read_point_ptr_f
+    
     ! @see Legion::UnsafeFieldAccessor::ptr
-    subroutine legion_accessor_array_1d_write_point_f(handle, point, src, bytes)
+    subroutine legion_accessor_array_3d_read_point_integer2_f(handle, point, dst)
+        implicit none
+    
+        type(legion_accessor_array_3d_f_t), intent(in) :: handle
+        type(legion_point_3d_f_t), intent(in)          :: point
+        integer(kind=2), target, intent(out)           :: dst 
+        
+        call legion_accessor_array_3d_read_point_c(handle, point, c_loc(dst), c_sizeof(dst))
+    end subroutine legion_accessor_array_3d_read_point_integer2_f
+    
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_3d_read_point_integer4_f(handle, point, dst)
+        implicit none
+    
+        type(legion_accessor_array_3d_f_t), intent(in) :: handle
+        type(legion_point_3d_f_t), intent(in)          :: point
+        integer(kind=4), target, intent(out)           :: dst 
+        
+        call legion_accessor_array_3d_read_point_c(handle, point, c_loc(dst), c_sizeof(dst))
+    end subroutine legion_accessor_array_3d_read_point_integer4_f
+    
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_3d_read_point_integer8_f(handle, point, dst)
+        implicit none
+    
+        type(legion_accessor_array_3d_f_t), intent(in) :: handle
+        type(legion_point_3d_f_t), intent(in)          :: point
+        integer(kind=8), target, intent(out)           :: dst 
+        
+        call legion_accessor_array_3d_read_point_c(handle, point, c_loc(dst), c_sizeof(dst))
+    end subroutine legion_accessor_array_3d_read_point_integer8_f
+    
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_3d_read_point_real4_f(handle, point, dst)
+        implicit none
+    
+        type(legion_accessor_array_3d_f_t), intent(in) :: handle
+        type(legion_point_3d_f_t), intent(in)          :: point
+        real(kind=4), target, intent(out)              :: dst 
+        
+        call legion_accessor_array_3d_read_point_c(handle, point, c_loc(dst), c_sizeof(dst))
+    end subroutine legion_accessor_array_3d_read_point_real4_f
+    
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_3d_read_point_real8_f(handle, point, dst)
+        implicit none
+    
+        type(legion_accessor_array_3d_f_t), intent(in) :: handle
+        type(legion_point_3d_f_t), intent(in)          :: point
+        real(kind=8), target, intent(out)              :: dst 
+        
+        call legion_accessor_array_3d_read_point_c(handle, point, c_loc(dst), c_sizeof(dst))
+    end subroutine legion_accessor_array_3d_read_point_real8_f
+    
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_3d_read_point_complex4_f(handle, point, dst)
+        implicit none
+    
+        type(legion_accessor_array_3d_f_t), intent(in) :: handle
+        type(legion_point_3d_f_t), intent(in)          :: point
+        complex(kind=4), target, intent(out)           :: dst 
+        
+        call legion_accessor_array_3d_read_point_c(handle, point, c_loc(dst), c_sizeof(dst))
+    end subroutine legion_accessor_array_3d_read_point_complex4_f
+    
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_3d_read_point_complex8_f(handle, point, dst)
+        implicit none
+    
+        type(legion_accessor_array_3d_f_t), intent(in) :: handle
+        type(legion_point_3d_f_t), intent(in)          :: point
+        complex(kind=8), target, intent(out)           :: dst 
+        
+        call legion_accessor_array_3d_read_point_c(handle, point, c_loc(dst), c_sizeof(dst))
+    end subroutine legion_accessor_array_3d_read_point_complex8_f
+
+    ! --------- 1D write -----------
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_1d_write_point_ptr_f(handle, point, src, bytes)
         implicit none
     
         type(legion_accessor_array_1d_f_t), intent(in) :: handle
@@ -921,10 +1047,88 @@ contains
         integer(c_size_t), intent(in)                  :: bytes
         
         call legion_accessor_array_1d_write_point_c(handle, point, src, bytes)
-    end subroutine legion_accessor_array_1d_write_point_f
-
+    end subroutine legion_accessor_array_1d_write_point_ptr_f
+    
     ! @see Legion::UnsafeFieldAccessor::ptr
-    subroutine legion_accessor_array_2d_write_point_f(handle, point, src, bytes)
+    subroutine legion_accessor_array_1d_write_point_integer2_f(handle, point, src)
+        implicit none
+    
+        type(legion_accessor_array_1d_f_t), intent(in) :: handle
+        type(legion_point_1d_f_t), intent(in)          :: point
+        integer(kind=2), target, intent(in)                    :: src
+        
+        call legion_accessor_array_1d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
+    end subroutine legion_accessor_array_1d_write_point_integer2_f
+    
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_1d_write_point_integer4_f(handle, point, src)
+        implicit none
+    
+        type(legion_accessor_array_1d_f_t), intent(in) :: handle
+        type(legion_point_1d_f_t), intent(in)          :: point
+        integer(kind=4), target, intent(in)                    :: src
+        
+        call legion_accessor_array_1d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
+    end subroutine legion_accessor_array_1d_write_point_integer4_f
+    
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_1d_write_point_integer8_f(handle, point, src)
+        implicit none
+    
+        type(legion_accessor_array_1d_f_t), intent(in) :: handle
+        type(legion_point_1d_f_t), intent(in)          :: point
+        integer(kind=8), target, intent(in)                    :: src
+        
+        call legion_accessor_array_1d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
+    end subroutine legion_accessor_array_1d_write_point_integer8_f
+    
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_1d_write_point_real4_f(handle, point, src)
+        implicit none
+    
+        type(legion_accessor_array_1d_f_t), intent(in) :: handle
+        type(legion_point_1d_f_t), intent(in)          :: point
+        real(kind=4), target, intent(in)                    :: src
+        
+        call legion_accessor_array_1d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
+    end subroutine legion_accessor_array_1d_write_point_real4_f
+    
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_1d_write_point_real8_f(handle, point, src)
+        implicit none
+    
+        type(legion_accessor_array_1d_f_t), intent(in) :: handle
+        type(legion_point_1d_f_t), intent(in)          :: point
+        real(kind=8), target, intent(in)                    :: src
+        
+        call legion_accessor_array_1d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
+    end subroutine legion_accessor_array_1d_write_point_real8_f
+    
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_1d_write_point_complex4_f(handle, point, src)
+        implicit none
+    
+        type(legion_accessor_array_1d_f_t), intent(in) :: handle
+        type(legion_point_1d_f_t), intent(in)          :: point
+        complex(kind=4), target, intent(in)                    :: src
+        
+        call legion_accessor_array_1d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
+    end subroutine legion_accessor_array_1d_write_point_complex4_f
+    
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_1d_write_point_complex8_f(handle, point, src)
+        implicit none
+    
+        type(legion_accessor_array_1d_f_t), intent(in) :: handle
+        type(legion_point_1d_f_t), intent(in)          :: point
+        complex(kind=8), target, intent(in)                    :: src
+        
+        call legion_accessor_array_1d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
+    end subroutine legion_accessor_array_1d_write_point_complex8_f
+
+    ! --------- 2D write -----------
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_2d_write_point_ptr_f(handle, point, src, bytes)
         implicit none
     
         type(legion_accessor_array_2d_f_t), intent(in) :: handle
@@ -933,10 +1137,88 @@ contains
         integer(c_size_t), intent(in)                  :: bytes
         
         call legion_accessor_array_2d_write_point_c(handle, point, src, bytes)
-    end subroutine legion_accessor_array_2d_write_point_f 
-
+    end subroutine legion_accessor_array_2d_write_point_ptr_f
+    
     ! @see Legion::UnsafeFieldAccessor::ptr
-    subroutine legion_accessor_array_3d_write_point_f(handle, point, src, bytes)
+    subroutine legion_accessor_array_2d_write_point_integer2_f(handle, point, src)
+        implicit none
+    
+        type(legion_accessor_array_2d_f_t), intent(in) :: handle
+        type(legion_point_2d_f_t), intent(in)          :: point
+        integer(kind=2), target, intent(in)                    :: src
+        
+        call legion_accessor_array_2d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
+    end subroutine legion_accessor_array_2d_write_point_integer2_f
+    
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_2d_write_point_integer4_f(handle, point, src)
+        implicit none
+    
+        type(legion_accessor_array_2d_f_t), intent(in) :: handle
+        type(legion_point_2d_f_t), intent(in)          :: point
+        integer(kind=4), target, intent(in)                    :: src
+        
+        call legion_accessor_array_2d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
+    end subroutine legion_accessor_array_2d_write_point_integer4_f
+    
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_2d_write_point_integer8_f(handle, point, src)
+        implicit none
+    
+        type(legion_accessor_array_2d_f_t), intent(in) :: handle
+        type(legion_point_2d_f_t), intent(in)          :: point
+        integer(kind=8), target, intent(in)                    :: src
+        
+        call legion_accessor_array_2d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
+    end subroutine legion_accessor_array_2d_write_point_integer8_f
+    
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_2d_write_point_real4_f(handle, point, src)
+        implicit none
+    
+        type(legion_accessor_array_2d_f_t), intent(in) :: handle
+        type(legion_point_2d_f_t), intent(in)          :: point
+        real(kind=4), target, intent(in)                    :: src
+        
+        call legion_accessor_array_2d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
+    end subroutine legion_accessor_array_2d_write_point_real4_f
+    
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_2d_write_point_real8_f(handle, point, src)
+        implicit none
+    
+        type(legion_accessor_array_2d_f_t), intent(in) :: handle
+        type(legion_point_2d_f_t), intent(in)          :: point
+        real(kind=8), target, intent(in)                    :: src
+        
+        call legion_accessor_array_2d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
+    end subroutine legion_accessor_array_2d_write_point_real8_f
+    
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_2d_write_point_complex4_f(handle, point, src)
+        implicit none
+    
+        type(legion_accessor_array_2d_f_t), intent(in) :: handle
+        type(legion_point_2d_f_t), intent(in)          :: point
+        complex(kind=4), target, intent(in)                    :: src
+        
+        call legion_accessor_array_2d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
+    end subroutine legion_accessor_array_2d_write_point_complex4_f
+    
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_2d_write_point_complex8_f(handle, point, src)
+        implicit none
+    
+        type(legion_accessor_array_2d_f_t), intent(in) :: handle
+        type(legion_point_2d_f_t), intent(in)          :: point
+        complex(kind=8), target, intent(in)                    :: src
+        
+        call legion_accessor_array_2d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
+    end subroutine legion_accessor_array_2d_write_point_complex8_f
+
+    ! --------- 3D write -----------
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_3d_write_point_ptr_f(handle, point, src, bytes)
         implicit none
     
         type(legion_accessor_array_3d_f_t), intent(in) :: handle
@@ -945,7 +1227,84 @@ contains
         integer(c_size_t), intent(in)                  :: bytes
         
         call legion_accessor_array_3d_write_point_c(handle, point, src, bytes)
-    end subroutine legion_accessor_array_3d_write_point_f
+    end subroutine legion_accessor_array_3d_write_point_ptr_f
+    
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_3d_write_point_integer2_f(handle, point, src)
+        implicit none
+    
+        type(legion_accessor_array_3d_f_t), intent(in) :: handle
+        type(legion_point_3d_f_t), intent(in)          :: point
+        integer(kind=2), target, intent(in)                    :: src
+        
+        call legion_accessor_array_3d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
+    end subroutine legion_accessor_array_3d_write_point_integer2_f
+    
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_3d_write_point_integer4_f(handle, point, src)
+        implicit none
+    
+        type(legion_accessor_array_3d_f_t), intent(in) :: handle
+        type(legion_point_3d_f_t), intent(in)          :: point
+        integer(kind=4), target, intent(in)                    :: src
+        
+        call legion_accessor_array_3d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
+    end subroutine legion_accessor_array_3d_write_point_integer4_f
+    
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_3d_write_point_integer8_f(handle, point, src)
+        implicit none
+    
+        type(legion_accessor_array_3d_f_t), intent(in) :: handle
+        type(legion_point_3d_f_t), intent(in)          :: point
+        integer(kind=8), target, intent(in)                    :: src
+        
+        call legion_accessor_array_3d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
+    end subroutine legion_accessor_array_3d_write_point_integer8_f
+    
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_3d_write_point_real4_f(handle, point, src)
+        implicit none
+    
+        type(legion_accessor_array_3d_f_t), intent(in) :: handle
+        type(legion_point_3d_f_t), intent(in)          :: point
+        real(kind=4), target, intent(in)                    :: src
+        
+        call legion_accessor_array_3d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
+    end subroutine legion_accessor_array_3d_write_point_real4_f
+    
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_3d_write_point_real8_f(handle, point, src)
+        implicit none
+    
+        type(legion_accessor_array_3d_f_t), intent(in) :: handle
+        type(legion_point_3d_f_t), intent(in)          :: point
+        real(kind=8), target, intent(in)                    :: src
+        
+        call legion_accessor_array_3d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
+    end subroutine legion_accessor_array_3d_write_point_real8_f
+    
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_3d_write_point_complex4_f(handle, point, src)
+        implicit none
+    
+        type(legion_accessor_array_3d_f_t), intent(in) :: handle
+        type(legion_point_3d_f_t), intent(in)          :: point
+        complex(kind=4), target, intent(in)                    :: src
+        
+        call legion_accessor_array_3d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
+    end subroutine legion_accessor_array_3d_write_point_complex4_f
+    
+    ! @see Legion::UnsafeFieldAccessor::ptr
+    subroutine legion_accessor_array_3d_write_point_complex8_f(handle, point, src)
+        implicit none
+    
+        type(legion_accessor_array_3d_f_t), intent(in) :: handle
+        type(legion_point_3d_f_t), intent(in)          :: point
+        complex(kind=8), target, intent(in)                    :: src
+        
+        call legion_accessor_array_3d_write_point_c(handle, point, c_loc(src), c_sizeof(src))
+    end subroutine legion_accessor_array_3d_write_point_complex8_f
     
     ! -----------------------------------------------------------------------
     ! File Operations
