@@ -121,7 +121,7 @@ namespace Legion {
       assert(mask_index_map.size() == 
                 size_t(FieldMask::pop_count(allocated_fields)));
 #endif
-#ifndef NEW_INSTANCE_CREATION
+#ifndef REALM_USE_FIELD_IDS 
       std::vector<size_t> offsets(field_sizes.size(),0);
       for (unsigned idx = 1; idx < field_sizes.size(); idx++)
         offsets[idx] = offsets[idx-1] + field_sizes[idx-1].second;
@@ -133,7 +133,9 @@ namespace Legion {
         FieldID fid = field_sizes[index].first;
         field_indexes[fid] = idx;
         CopySrcDstField &info = field_infos[idx];
+#ifndef REALM_USE_FIELD_IDS
         info.offset = offsets[index];
+#endif
         info.size = field_sizes[index].second;
         info.field_id = fid;
         info.serdez_id = serdez[index];
@@ -1925,7 +1927,7 @@ namespace Legion {
         return NULL;
       }
       // If there are no fields then we are done
-#ifdef NEW_INSTANCE_CREATION
+#ifdef REALM_USE_FIELD_IDS 
       PhysicalInstance instance = PhysicalInstance::NO_INST;
       ApEvent ready = instance_domain->create_instance( 
                   memory_manager->memory, field_sizes, instance, constraints);
@@ -2052,11 +2054,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       compute_ancestor_and_domain(forest); 
-#ifdef NEW_INSTANCE_CREATION
-      compute_new_parameters();
-#else
-      compute_old_parameters();
-#endif
+      compute_layout_parameters();
     }
 
     //--------------------------------------------------------------------------
@@ -2156,22 +2154,25 @@ namespace Legion {
       return one;
     }
 
+#ifdef USE_REALM_FIELD_IDS
     //--------------------------------------------------------------------------
-    void InstanceBuilder::compute_new_parameters(void)
+    void InstanceBuilder::compute_layout_parameters(void)
     //--------------------------------------------------------------------------
     {
-      FieldSpaceNode *field_node = ancestor->column_source;      
-      const std::vector<FieldID> &field_set = 
-        constraints.field_constraint.get_field_set(); 
-      field_sizes.resize(field_set.size());
-      mask_index_map.resize(field_set.size());
-      serdez.resize(field_set.size());
-      field_node->compute_create_offsets(field_set, field_sizes,
-                                         mask_index_map, serdez, instance_mask);
-    }
+      // First look at the OrderingConstraint to Figure out what kind
+      // of instance we are building here, SOA, AOS, or hybrid
+      // Make sure to check for splitting constraints if see sub-dimensions
 
+      // From this we should be able to compute the field groups 
+      // Use the FieldConstraint to put any fields in the proper order
+
+      // Next go through and check for any offset constraints for fields
+
+      // Then pad things as necessary for the alignment constraints
+    }
+#else
     //--------------------------------------------------------------------------
-    void InstanceBuilder::compute_old_parameters(void)
+    void InstanceBuilder::compute_layout_parameters(void)
     //--------------------------------------------------------------------------
     {
       FieldSpaceNode *field_node = ancestor->column_source;      
@@ -2182,11 +2183,9 @@ namespace Legion {
       serdez.resize(field_set.size());
       field_node->compute_create_offsets(field_set, field_sizes,
                                          mask_index_map, serdez, instance_mask);
-#ifndef NEW_INSTANCE_CREATION
       sizes_only.resize(field_sizes.size());
       for (unsigned idx = 0; idx < field_sizes.size(); idx++)
         sizes_only[idx] = field_sizes[idx].second;
-#endif
       // Now figure out what kind of instance we're going to make, look at
       // the constraints and see if we recognize any of them
       switch (constraints.specialized_constraint.get_kind())
@@ -2208,16 +2207,13 @@ namespace Legion {
 #endif
               it->second = reduction_op->sizeof_rhs;
             }
-#ifndef NEW_INSTANCE_CREATION
             for (unsigned idx = 0; idx < field_sizes.size(); idx++)
               sizes_only[idx] = reduction_op->sizeof_rhs;
-#endif
             // Then we fall through and do the normal layout routine
           }
         case NO_SPECIALIZE:
         case NORMAL_SPECIALIZE:
           {
-#ifndef NEW_INSTANCE_CREATION
             const std::vector<DimensionKind> &ordering = 
                                       constraints.ordering_constraint.ordering;
             size_t max_block_size = instance_domain->get_volume();
@@ -2243,7 +2239,6 @@ namespace Legion {
             }
             else
               block_size = max_block_size;
-#endif
             // redop id is already zero
             break;
           }
@@ -2265,6 +2260,7 @@ namespace Legion {
           assert(false); // unknown kind
       }
     }
+#endif
     
   }; // namespace Internal
 }; // namespace Legion

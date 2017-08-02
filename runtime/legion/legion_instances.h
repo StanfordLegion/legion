@@ -86,11 +86,7 @@ namespace Legion {
       FieldSpaceNode *const owner;
     protected:
       // In order by index of bit mask
-#ifdef NEW_INSTANCE_CREATION
-      std::vector<CopySrcDstFieldInfo> field_infos;
-#else
       std::vector<CopySrcDstField> field_infos;
-#endif
       // A mapping from FieldIDs to indexes into our field_infos
       std::map<FieldID,unsigned/*index*/> field_indexes;
     protected:
@@ -493,6 +489,14 @@ namespace Legion {
      * A helper for building physical instances of logical regions
      */
     class InstanceBuilder {
+    protected:
+      struct FieldInfo {
+      public:
+        FieldID field_id;
+        int offset;
+        int size;
+        int alignment;
+      };
     public:
       InstanceBuilder(const std::vector<LogicalRegion> &regs,
                       const LayoutConstraintSet &cons,
@@ -508,8 +512,7 @@ namespace Legion {
       void compute_ancestor_and_domain(RegionTreeForest *forest);
       RegionNode* find_common_ancestor(RegionNode *one, RegionNode *two) const;
     protected:
-      void compute_new_parameters(void);
-      void compute_old_parameters(void);
+      void compute_layout_parameters(void);
     protected:
       const std::vector<LogicalRegion> &regions;
       LayoutConstraintSet constraints;
@@ -525,7 +528,10 @@ namespace Legion {
       FieldMask instance_mask;
       ReductionOpID redop_id;
       const ReductionOp *reduction_op;
-#ifndef NEW_INSTANCE_CREATION
+#ifdef REALM_USE_FIELD_IDS 
+      Realm::InstanceLayoutGeneric *realm_layout;
+      std::vector<std::vector<FieldInfo> > field_groups;
+#else
       std::vector<size_t> sizes_only;
       size_t block_size;
 #endif

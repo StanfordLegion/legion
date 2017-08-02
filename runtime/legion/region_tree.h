@@ -917,12 +917,7 @@ namespace Legion {
                   ApEvent precondition, PredEvent predicate_guard,
                   IndexTreeNode *intersect = NULL) = 0;
     public:
-#ifdef NEW_INSTANCE_CREATION
-      virtual ApEvent create_instance(Memory target,
-                            const std::vector<std::pair<FieldID,size_t> > &fids,
-                            PhysicalInstance &instance,
-                            LegionConstraintSet &constraints) = 0;
-#else
+#ifndef REALM_USE_FIELD_IDS 
       virtual PhysicalInstance create_instance(Memory target,
                                        const std::vector<size_t> &field_sizes,
                                        size_t blocking_factor, 
@@ -1143,12 +1138,7 @@ namespace Legion {
                   ApEvent precondition, PredEvent predicate_guard,
                   IndexTreeNode *intersect = NULL);
     public:
-#ifdef NEW_INSTANCE_CREATION
-      virtual ApEvent create_instance(Memory target,
-                            const std::vector<std::pair<FieldID,size_t> > &fids,
-                            PhysicalInstance &instance,
-                            LegionConstraintSet &constraints);
-#else
+#ifndef REALM_USE_FIELD_IDS
       virtual PhysicalInstance create_instance(Memory target,
                                        const std::vector<size_t> &field_sizes,
                                        size_t blocking_factor, UniqueID op_id);

@@ -371,11 +371,19 @@ namespace Legion {
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
       {
+#ifdef REALM_USE_FIELD_IDS
+        Realm::ZIndexSpace<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_ONLY, fid, &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
+        accessor = A(instance, fid, is.bounds);
+#else
         ptrdiff_t field_offset; Realm::ZIndexSpace<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, field_offset, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
         accessor = A(instance, field_offset, is.bounds);
+#endif
       }
     public:
       __CUDA_HD__

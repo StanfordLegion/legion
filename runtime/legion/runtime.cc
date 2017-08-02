@@ -1597,8 +1597,12 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    PhysicalInstance PhysicalRegionImpl::get_instance_info(PrivilegeMode mode,
-        FieldID fid, ptrdiff_t &field_offset, void *realm_is, TypeTag type_tag, 
+    PhysicalInstance PhysicalRegionImpl::get_instance_info(
+                                    PrivilegeMode mode, FieldID fid, 
+#ifndef REALM_USE_FIELD_IDS
+                                    ptrdiff_t &field_offset, 
+#endif
+                                    void *realm_is, TypeTag type_tag, 
                                     bool silence_warnings, ReductionOpID redop)
     //--------------------------------------------------------------------------
     {
@@ -1726,7 +1730,9 @@ namespace Legion {
         if (ref.is_field_set(fid))
         {
           PhysicalManager *manager = ref.get_manager();
+#ifndef REALM_USE_FIELD_IDS
           field_offset = manager->layout->find_field_info(fid).offset;
+#endif
           return manager->get_instance();
         }
       }
