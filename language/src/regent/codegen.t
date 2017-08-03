@@ -1841,10 +1841,6 @@ function codegen.expr_index_access(cx, node)
     actions = quote
       [actions]
       var dp = [color]:to_domain_point()
-      std.assert_error(
-        c.legion_logical_partition_has_logical_subregion_by_color_domain_point(
-          [cx.runtime], [value.value].impl, dp),
-        [get_source_location(node) .. ": attempt to access subregion of " .. tostring(value.value) .. " is out-of-bounds"])
       var [lr] = c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
         [cx.runtime], [value.value].impl, dp)
       var [is] = [lr].index_space
@@ -1899,10 +1895,6 @@ function codegen.expr_index_access(cx, node)
       actions = quote
         [actions]
         var dp = [color]:to_domain_point()
-        std.assert_error(
-          c.legion_logical_partition_has_logical_subregion_by_color_domain_point(
-            [cx.runtime], [value.value].impl, dp),
-          [get_source_location(node) .. ": attempt to access subregion of " .. tostring(value.value) .. " is out-of-bounds"])
         var [lr] = c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
           [cx.runtime], [value.value].impl, dp)
         var [is] = [lr].index_space
