@@ -39,12 +39,22 @@ namespace Legion {
     class LayoutDescription : public Collectable,
                               public LegionHeapify<LayoutDescription> {
     public:
+#ifdef REALM_USE_FIELD_IDS
+      LayoutDescription(FieldSpaceNode *owner,
+                        const FieldMask &mask,
+                        LayoutConstraints *constraints,
+                        const std::vector<unsigned> &mask_index_map,
+                        const std::vector<FieldID> &fids,
+                        const std::vector<size_t> &field_sizes,
+                        const std::vector<CustomSerdezID> &serdez);
+#else
       LayoutDescription(FieldSpaceNode *owner,
                         const FieldMask &mask,
                         LayoutConstraints *constraints,
                         const std::vector<unsigned> &mask_index_map,
                         const std::vector<CustomSerdezID> &serdez,
           const std::vector<std::pair<FieldID,size_t> > &field_sizes);
+#endif
       // Used only by the virtual manager
       LayoutDescription(const FieldMask &mask, LayoutConstraints *constraints);
       LayoutDescription(const LayoutDescription &rhs);
@@ -489,21 +499,21 @@ namespace Legion {
      * A helper for building physical instances of logical regions
      */
     class InstanceBuilder {
-    protected:
-      struct FieldInfo {
-      public:
-        FieldID field_id;
-        int offset;
-        int size;
-        int alignment;
-      };
     public:
       InstanceBuilder(const std::vector<LogicalRegion> &regs,
-                      const LayoutConstraintSet &cons,
+                      const LayoutConstraintSet &cons, Runtime *rt,
                       MemoryManager *memory, UniqueID cid)
-        : regions(regs), constraints(cons), memory_manager(memory),
+        : regions(regs), constraints(cons), runtime(rt), memory_manager(memory),
           creator_id(cid), ancestor(NULL), instance_domain(NULL), 
-          own_domain(false), redop_id(0), reduction_op(NULL), valid(false) { }
+          own_domain(false), redop_id(0), reduction_op(NULL) 
+#ifdef REALM_USE_FIELD_IDS
+          , realm_layout(NULL), own_realm_layout(true)
+#endif
+          , valid(false)
+        { }
+#ifdef REALM_USE_FIELD_IDS
+      ~InstanceBuilder(void);
+#endif
     public:
       size_t compute_needed_size(RegionTreeForest *forest);
       PhysicalManager* create_physical_instance(RegionTreeForest *forest);
@@ -516,21 +526,27 @@ namespace Legion {
     protected:
       const std::vector<LogicalRegion> &regions;
       LayoutConstraintSet constraints;
+      Runtime *const runtime;
       MemoryManager *const memory_manager;
       const UniqueID creator_id;
     protected:
       RegionNode *ancestor;
       IndexSpaceNode *instance_domain;
       bool own_domain;
-      std::vector<std::pair<FieldID,size_t> > field_sizes;
+      // Mapping from logical field order to layout order
       std::vector<unsigned> mask_index_map;
+#ifdef REALM_USE_FIELD_IDS
+      std::vector<size_t> field_sizes;
+#else
+      std::vector<std::pair<FieldID,size_t> > field_sizes;
+#endif
       std::vector<CustomSerdezID> serdez;
       FieldMask instance_mask;
       ReductionOpID redop_id;
       const ReductionOp *reduction_op;
 #ifdef REALM_USE_FIELD_IDS 
       Realm::InstanceLayoutGeneric *realm_layout;
-      std::vector<std::vector<FieldInfo> > field_groups;
+      bool own_realm_layout;
 #else
       std::vector<size_t> sizes_only;
       size_t block_size;

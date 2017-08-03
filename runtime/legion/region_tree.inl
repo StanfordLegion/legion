@@ -539,6 +539,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    size_t IndexSpaceNodeT<DIM,T>::get_num_dims(void) const
+    //--------------------------------------------------------------------------
+    {
+      return DIM;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     bool IndexSpaceNodeT<DIM,T>::contains_point(const void *realm_point, 
                                                 TypeTag type_tag)
     //--------------------------------------------------------------------------
@@ -2652,6 +2660,18 @@ namespace Legion {
       return result;
     }
 
+#ifdef REALM_USE_FIELD_IDS
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    Realm::InstanceLayoutGeneric* IndexSpaceNodeT<DIM,T>::create_layout(
+                                    const Realm::InstanceLayoutConstraints &ilc)
+    //--------------------------------------------------------------------------
+    {
+      Realm::ZIndexSpace<DIM,T> local_is;
+      get_realm_index_space(local_is, true/*tight*/);
+      return Realm::InstanceLayoutGeneric::choose_instance_layout(local_is,ilc);
+    }
+#else
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     PhysicalInstance IndexSpaceNodeT<DIM,T>::create_instance(Memory target,
@@ -2698,6 +2718,7 @@ namespace Legion {
 	return result;
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>

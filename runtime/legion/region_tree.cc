@@ -7699,6 +7699,46 @@ namespace Legion {
       }
     }
 
+#ifdef REALM_USE_FIELD_IDS
+    //--------------------------------------------------------------------------
+    void FieldSpaceNode::compute_field_layout(
+                                      const std::vector<FieldID> &create_fields,
+                                      std::vector<size_t> &field_sizes,
+                                      std::vector<unsigned> &mask_index_map,
+                                      std::vector<CustomSerdezID> &serdez,
+                                      FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(field_sizes.size() == create_fields.size());
+      assert(mask_index_map.size() == create_fields.size());
+      assert(serdez.size() == create_fields.size());
+#endif
+      std::map<unsigned/*mask index*/,unsigned/*layout index*/> index_map;
+      {
+        // Need to hold the lock when accessing field infos
+        AutoLock n_lock(node_lock,1,false/*exclusive*/);
+        for (unsigned idx = 0; idx < create_fields.size(); idx++)
+        {
+          FieldID fid = create_fields[idx];
+          std::map<FieldID,FieldInfo>::const_iterator finder = fields.find(fid);
+	  // Catch unknown fields here for now
+	  if (finder == fields.end())
+            REPORT_LEGION_FATAL(LEGION_FATAL_UNKNOWN_FIELD_ID,
+	      "unknown field ID %d requested during instance creation", fid)
+          field_sizes[idx] = finder->second.field_size; 
+          index_map[finder->second.idx] = idx;
+          serdez[idx] = finder->second.serdez_id;
+          mask.set_bit(finder->second.idx);
+        }
+      }
+      // Now we can linearize the index map without holding the lock
+      unsigned idx = 0;
+      for (std::map<unsigned,unsigned>::const_iterator it = 
+            index_map.begin(); it != index_map.end(); it++, idx++)
+        mask_index_map[idx] = it->second;
+    }
+#else
     //--------------------------------------------------------------------------
     void FieldSpaceNode::compute_create_offsets(
                                       const std::vector<FieldID> &create_fields,
@@ -7723,11 +7763,8 @@ namespace Legion {
           std::map<FieldID,FieldInfo>::const_iterator finder = fields.find(fid);
 	  // Catch unknown fields here for now
 	  if (finder == fields.end())
-	  {
-      REPORT_LEGION_FATAL(LEGION_FATAL_UNKNOWN_FIELD_ID,
-	    "unknown field ID %d requested during instance creation", fid);
-	    assert(false);
-	  }
+            REPORT_LEGION_FATAL(LEGION_FATAL_UNKNOWN_FIELD_ID,
+	      "unknown field ID %d requested during instance creation", fid)
           field_sizes[idx] = 
             std::pair<FieldID,size_t>(fid, finder->second.field_size);
           index_map[finder->second.idx] = idx;
@@ -7741,6 +7778,7 @@ namespace Legion {
             index_map.begin(); it != index_map.end(); it++, idx++)
         mask_index_map[idx] = it->second;
     }
+#endif
 
     //--------------------------------------------------------------------------
     /*static*/ void FieldSpaceNode::handle_alloc_request(
@@ -7917,19 +7955,33 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::vector<FieldID> field_set(create_fields.begin(),create_fields.end());
+#ifdef REALM_USE_FIELD_IDS
+      std::vector<size_t> field_sizes;
+#else
       std::vector<std::pair<FieldID,size_t> > field_sizes(create_fields.size());
+#endif
       std::vector<unsigned> mask_index_map(create_fields.size());
       std::vector<CustomSerdezID> serdez(create_fields.size());
       FieldMask file_mask;
+#ifdef REALM_USE_FIELD_IDS
+      compute_field_layout(field_set, field_sizes, 
+                           mask_index_map, serdez, file_mask);
+#else
       compute_create_offsets(field_set, field_sizes, 
                              mask_index_map, serdez, file_mask);
-      // Now make the instance, this should always succeed
       std::vector<size_t> only_sizes(field_sizes.size());
       for (unsigned idx = 0; idx < field_sizes.size(); idx++)
         only_sizes[idx] = field_sizes[idx].second;
+#endif
+      // Now make the instance, this should always succeed
       LayoutConstraintSet constraints;
+#ifdef REALM_USE_FIELD_IDS
+      PhysicalInstance inst = 
+        attach_op->create_instance(node->row_source, field_sizes, constraints);
+#else
       PhysicalInstance inst = 
         attach_op->create_instance(node->row_source, only_sizes, constraints);
+#endif
       // Pull out the pointer constraint so that we can use it separately
       // and not have it included in the layout constraints
       PointerConstraint pointer_constraint = constraints.pointer_constraint;
@@ -7941,8 +7993,14 @@ namespace Legion {
       {
         LayoutConstraints *layout_constraints = 
           context->runtime->register_layout(handle, constraints);
+#ifdef REALM_USE_FIELD_IDS
+        layout = create_layout_description(file_mask, layout_constraints,
+                                           mask_index_map, field_set,
+                                           field_sizes, serdez);
+#else
         layout = create_layout_description(file_mask, layout_constraints, 
                                            mask_index_map, serdez, field_sizes);
+#endif
       }
 #ifdef DEBUG_LEGION
       assert(layout != NULL);
@@ -8027,6 +8085,23 @@ namespace Legion {
       return NULL;
     }
 
+#ifdef REALM_USE_FIELD_IDS
+    //--------------------------------------------------------------------------
+    LayoutDescription* FieldSpaceNode::create_layout_description(
+                                     const FieldMask &layout_mask,
+                                     LayoutConstraints *constraints,
+                                   const std::vector<unsigned> &mask_index_map,
+                                   const std::vector<FieldID> &fids,
+                                   const std::vector<size_t> &field_sizes,
+                                   const std::vector<CustomSerdezID> &serdez)
+    //--------------------------------------------------------------------------
+    {
+      // Make the new field description and then register it
+      LayoutDescription *result = new LayoutDescription(this, layout_mask, 
+                        constraints, mask_index_map, fids, field_sizes, serdez);
+      return register_layout_description(result);
+    }
+#else
     //--------------------------------------------------------------------------
     LayoutDescription* FieldSpaceNode::create_layout_description(
                                      const FieldMask &layout_mask,
@@ -8041,6 +8116,7 @@ namespace Legion {
                         constraints, mask_index_map, serdez, field_sizes);
       return register_layout_description(result);
     }
+#endif
 
     //--------------------------------------------------------------------------
     LayoutDescription* FieldSpaceNode::register_layout_description(

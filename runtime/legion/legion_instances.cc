@@ -102,6 +102,40 @@ namespace Legion {
     // Layout Description 
     /////////////////////////////////////////////////////////////
 
+#ifdef REALM_USE_FIELD_IDS
+    //--------------------------------------------------------------------------
+    LayoutDescription::LayoutDescription(FieldSpaceNode *own,
+                                         const FieldMask &mask,
+                                         LayoutConstraints *con,
+                                   const std::vector<unsigned> &mask_index_map,
+                                   const std::vector<FieldID> &field_ids,
+                                   const std::vector<size_t> &field_sizes,
+                                   const std::vector<CustomSerdezID> &serdez)
+      : allocated_fields(mask), constraints(con), owner(own) 
+    //--------------------------------------------------------------------------
+    {
+      constraints->add_reference();
+      layout_lock = Reservation::create_reservation();
+      field_infos.resize(field_sizes.size());
+      // Switch data structures from layout by field order to order
+      // of field locations in the bit mask
+#ifdef DEBUG_LEGION
+      assert(mask_index_map.size() == 
+                size_t(FieldMask::pop_count(allocated_fields)));
+#endif
+      for (unsigned idx = 0; idx < mask_index_map.size(); idx++)
+      {
+        // This gives us the index in the field ordered data structures
+        unsigned index = mask_index_map[idx];
+        FieldID fid = field_ids[index];
+        field_indexes[fid] = idx;
+        CopySrcDstField &info = field_infos[idx];
+        info.size = field_sizes[index];
+        info.field_id = fid;
+        info.serdez_id = serdez[index];
+      }
+    }
+#else
     //--------------------------------------------------------------------------
     LayoutDescription::LayoutDescription(FieldSpaceNode *own,
                                          const FieldMask &mask,
@@ -121,11 +155,9 @@ namespace Legion {
       assert(mask_index_map.size() == 
                 size_t(FieldMask::pop_count(allocated_fields)));
 #endif
-#ifndef REALM_USE_FIELD_IDS 
       std::vector<size_t> offsets(field_sizes.size(),0);
       for (unsigned idx = 1; idx < field_sizes.size(); idx++)
         offsets[idx] = offsets[idx-1] + field_sizes[idx-1].second;
-#endif
       for (unsigned idx = 0; idx < mask_index_map.size(); idx++)
       {
         // This gives us the index in the field ordered data structures
@@ -133,14 +165,13 @@ namespace Legion {
         FieldID fid = field_sizes[index].first;
         field_indexes[fid] = idx;
         CopySrcDstField &info = field_infos[idx];
-#ifndef REALM_USE_FIELD_IDS
         info.offset = offsets[index];
-#endif
         info.size = field_sizes[index].second;
         info.field_id = fid;
         info.serdez_id = serdez[index];
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     LayoutDescription::LayoutDescription(const FieldMask &mask,
@@ -453,6 +484,16 @@ namespace Legion {
       FieldMask instance_mask;
       const std::vector<FieldID> &field_set = 
         constraints->field_constraint.get_field_set(); 
+#ifdef REALM_USE_FIELD_IDS
+      std::vector<size_t> field_sizes(field_set.size());
+      std::vector<unsigned> mask_index_map(field_set.size());
+      std::vector<CustomSerdezID> serdez(field_set.size());
+      field_space_node->compute_field_layout(field_set, field_sizes,
+                               mask_index_map, serdez, instance_mask);
+      LayoutDescription *result = 
+        field_space_node->create_layout_description(instance_mask, constraints,
+                                mask_index_map, field_set, field_sizes, serdez);
+#else
       std::vector<std::pair<FieldID,size_t> > field_sizes(field_set.size());
       std::vector<unsigned> mask_index_map(field_set.size());
       std::vector<CustomSerdezID> serdez(field_set.size());
@@ -461,6 +502,7 @@ namespace Legion {
       LayoutDescription *result = 
         field_space_node->create_layout_description(instance_mask, constraints,
                                        mask_index_map, serdez, field_sizes);
+#endif
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
@@ -1899,6 +1941,17 @@ namespace Legion {
     // Instance Builder
     /////////////////////////////////////////////////////////////
 
+#ifdef REALM_USE_FIELD_IDS
+    //--------------------------------------------------------------------------
+    InstanceBuilder::~InstanceBuilder(void)
+    //--------------------------------------------------------------------------
+    {
+      // This only happens if we failed to make the instance
+      if (own_realm_layout && (realm_layout != NULL))
+        delete realm_layout;
+    }
+#endif
+
     //--------------------------------------------------------------------------
     size_t InstanceBuilder::compute_needed_size(RegionTreeForest *forest)
     //--------------------------------------------------------------------------
@@ -1906,8 +1959,13 @@ namespace Legion {
       if (!valid)
         initialize(forest);
       size_t total_field_bytes = 0;
+#ifdef REALM_USE_FIELD_IDS
+      for (unsigned idx = 0; idx < field_sizes.size(); idx++)
+        total_field_bytes += field_sizes[idx];
+#else
       for (unsigned idx = 0; idx < field_sizes.size(); idx++)
         total_field_bytes += field_sizes[idx].second;
+#endif
       return (total_field_bytes * instance_domain->get_volume());
     }
 
@@ -1928,9 +1986,28 @@ namespace Legion {
       }
       // If there are no fields then we are done
 #ifdef REALM_USE_FIELD_IDS 
+#ifdef DEBUG_LEGION
+      assert(realm_layout != NULL);
+#endif
       PhysicalInstance instance = PhysicalInstance::NO_INST;
-      ApEvent ready = instance_domain->create_instance( 
-                  memory_manager->memory, field_sizes, instance, constraints);
+      Realm::ProfilingRequestSet requests;
+      ApEvent ready;
+      if (runtime->profiler != NULL)
+      {
+        runtime->profiler->add_inst_request(requests, creator_id);
+        ready = ApEvent(PhysicalInstance::create_instance(instance,
+                  memory_manager->memory, realm_layout, requests));
+        if (instance.exists())
+        {
+          unsigned long long creation_time = 
+            Realm::Clock::current_time_in_nanoseconds();
+          runtime->profiler->record_instance_creation(instance, 
+              memory_manager->memory, creator_id, creation_time);
+        }
+      }
+      else
+        ready = ApEvent(PhysicalInstance::create_instance(instance,
+                  memory_manager->memory, realm_layout, requests));
 #else
       PhysicalInstance instance = instance_domain->create_instance(
                                        memory_manager->memory, sizes_only, 
@@ -1940,6 +2017,11 @@ namespace Legion {
       // If we couldn't make it then we are done
       if (!instance.exists())
         return NULL;
+#ifdef REALM_USE_FIELD_IDS
+      // If we successfully made the instance then Realm 
+      // took over ownership of the layout
+      own_realm_layout = false;
+#endif
       PhysicalManager *result = NULL;
       DistributedID did = forest->runtime->get_available_distributed_id(false);
       AddressSpaceID local_space = forest->runtime->address_space;
@@ -1969,8 +2051,15 @@ namespace Legion {
         LayoutConstraints *layout_constraints = 
          forest->runtime->register_layout(field_node->handle,constraints);
         // Then make our description
+#ifdef REALM_USE_FIELD_IDS
+        layout = field_node->create_layout_description(instance_mask,
+                                  layout_constraints, mask_index_map,
+                                  constraints.field_constraint.get_field_set(),
+                                  field_sizes, serdez);
+#else
         layout = field_node->create_layout_description(instance_mask,
                  layout_constraints, mask_index_map, serdez, field_sizes);
+#endif
       }
       // Figure out what kind of instance we just made
       switch (constraints.specialized_constraint.get_kind())
@@ -2009,9 +2098,8 @@ namespace Legion {
             reduction_op->init(fill_buffer, 1);
             std::vector<CopySrcDstField> dsts;
             {
-              std::vector<FieldID> fill_fields(field_sizes.size());
-              for (unsigned idx = 0; idx < field_sizes.size(); idx++)
-                fill_fields[idx] = field_sizes[idx].first;
+              const std::vector<FieldID> &fill_fields = 
+                constraints.field_constraint.get_field_set();
               layout->compute_copy_offsets(fill_fields, instance, dsts);
             }
             ApEvent filled_and_ready =
@@ -2154,7 +2242,7 @@ namespace Legion {
       return one;
     }
 
-#ifdef USE_REALM_FIELD_IDS
+#ifdef REALM_USE_FIELD_IDS
     //--------------------------------------------------------------------------
     void InstanceBuilder::compute_layout_parameters(void)
     //--------------------------------------------------------------------------
@@ -2162,13 +2250,186 @@ namespace Legion {
       // First look at the OrderingConstraint to Figure out what kind
       // of instance we are building here, SOA, AOS, or hybrid
       // Make sure to check for splitting constraints if see sub-dimensions
-
+      if (!constraints.splitting_constraints.empty())
+        REPORT_LEGION_FATAL(ERROR_UNSUPPORTED_LAYOUT_CONSTRAINT,
+            "Splitting layout constraints are not currently supported")
+      const size_t num_dims = instance_domain->get_num_dims();
+      OrderingConstraint &ord = constraints.ordering_constraint;
+      if (!ord.ordering.empty())
+      {
+        // Find the index of the fields, if it is specified
+        int field_idx = -1;
+        std::set<DimensionKind> spatial_dims, to_remove;
+        for (unsigned idx = 0; idx < ord.ordering.size(); idx++)
+        {
+          if (ord.ordering[idx] == DIM_F)
+          {
+            // Should never be duplicated 
+            if (field_idx != -1)
+              REPORT_LEGION_ERROR(ERROR_ILLEGAL_LAYOUT_CONSTRAINT,
+                  "Illegal ordering constraint used during instance "
+                  "creation contained multiple instances of DIM_F")
+            else
+            {
+              // Check for AOS or SOA for now
+              if ((idx > 0) && (idx != (ord.ordering.size()-1)))
+                REPORT_LEGION_FATAL(ERROR_UNSUPPORTED_LAYOUT_CONSTRAINT,
+                    "Ordering constraints must currently place DIM_F "
+                    "in the first or last position as only AOS and SOA "
+                    "layout constraints are currently supported")
+              field_idx = idx;
+            }
+          }
+          else if (ord.ordering[idx] > DIM_F)
+            REPORT_LEGION_FATAL(ERROR_UNSUPPORTED_LAYOUT_CONSTRAINT,
+              "Splitting layout constraints are not currently supported")
+          else
+          {
+            // Should never be duplicated
+            if (spatial_dims.find(ord.ordering[idx]) != spatial_dims.end())
+              REPORT_LEGION_ERROR(ERROR_ILLEGAL_LAYOUT_CONSTRAINT,
+                  "Illegal ordering constraint used during instance "
+                  "creation contained multiple instances of dimension %d",
+                  ord.ordering[idx])
+            else
+            {
+              // Check to make sure that it is one of our dims
+              // if not we can just filter it out of the ordering
+              if (ord.ordering[idx] >= num_dims)
+                to_remove.insert(ord.ordering[idx]);
+              else
+                spatial_dims.insert(ord.ordering[idx]);
+            }
+          }
+        }
+        // Remove any dimensions which don't matter
+        if (!to_remove.empty())
+        {
+          for (std::vector<DimensionKind>::iterator it = ord.ordering.begin();
+                it != ord.ordering.end(); /*nothing*/)
+          {
+            if (to_remove.find(*it) != to_remove.end())
+              it = ord.ordering.erase(it);
+            else
+              it++;
+          }
+        }
+#ifdef DEBUG_LEGION
+        assert(spatial_dims.size() <= num_dims);
+#endif
+        // Fill in any spatial dimensions that we didn't see if necessary
+        if (spatial_dims.size() < num_dims)
+        {
+          // See if we should push these dims front or back
+          if (field_idx > -1)
+          {
+            // See if we should add these at the front or the back
+            if (field_idx == 0)
+            {
+              // Add them to the back
+              for (unsigned idx = 0; idx < num_dims; idx++)
+              {
+                DimensionKind dim = (DimensionKind)(DIM_X + idx);
+                if (spatial_dims.find(dim) == spatial_dims.end())
+                  ord.ordering.push_back(dim);
+              }
+            }
+            else if (field_idx == (ord.ordering.size()-1))
+            {
+              // Add them to the front
+              for (int idx = (num_dims-1); idx >= 0; idx--)
+              {
+                DimensionKind dim = (DimensionKind)(DIM_X + idx);
+                if (spatial_dims.find(dim) == spatial_dims.end())
+                  ord.ordering.insert(ord.ordering.begin(), dim);
+              }
+            }
+            else // Should either be AOS or SOA for now
+              assert(false);
+          }
+          else
+          {
+            // No field dimension so just add the spatial ones on the back
+            for (unsigned idx = 0; idx < num_dims; idx++)
+            {
+              DimensionKind dim = (DimensionKind)(DIM_X + idx);
+              if (spatial_dims.find(dim) == spatial_dims.end())
+                ord.ordering.push_back(dim);
+            }
+          }
+        }
+        // If we didn't see the field dimension either then add that
+        // at the end to give us SOA layouts in general
+        if (field_idx == -1)
+          ord.ordering.push_back(DIM_F);
+        // We've now got all our dimensions so we can set the
+        // contiguous flag to true
+        ord.contiguous = true;
+      }
+      else
+      {
+        // We had no ordering constraints so populate it with 
+        // SOA constraints for now
+        for (unsigned idx = 0; idx < num_dims; idx++)
+          ord.ordering.push_back((DimensionKind)(DIM_X + idx));
+        ord.ordering.push_back(DIM_F);
+        ord.contiguous = true;
+      }
+#ifdef DEBUG_LEGION
+      assert(ord.contiguous);
+      assert(ord.ordering.size() == (num_dims + 1));
+#endif
       // From this we should be able to compute the field groups 
       // Use the FieldConstraint to put any fields in the proper order
-
+      FieldSpaceNode *field_node = ancestor->column_source;      
+      const std::vector<FieldID> &field_set = 
+        constraints.field_constraint.get_field_set(); 
+      field_sizes.resize(field_set.size());
+      mask_index_map.resize(field_set.size());
+      serdez.resize(field_set.size());
+      field_node->compute_field_layout(field_set, field_sizes,
+                                       mask_index_map, serdez, instance_mask);
+      // Compute the field groups for realm 
+      Realm::InstanceLayoutConstraints realm_constraints;
+      if (ord.ordering.front() == DIM_F)
+      {
+        // AOS - all field groups in same group
+        realm_constraints.field_groups.resize(1);
+        realm_constraints.field_groups[0].resize(field_set.size());
+        for (unsigned idx = 0; idx < field_set.size(); idx++)
+        {
+          realm_constraints.field_groups[0][idx].field_id = field_set[idx];
+          realm_constraints.field_groups[0][idx].offset = -1;
+          realm_constraints.field_groups[0][idx].size = field_sizes[idx];
+          // Natrual alignment
+          realm_constraints.field_groups[0][idx].alignment = field_sizes[idx];
+        }
+      }
+      else if (ord.ordering.back() == DIM_F)
+      {
+        // SOA - each field is its own group
+        realm_constraints.field_groups.resize(field_set.size());
+        for (unsigned idx = 0; idx < field_set.size(); idx++)
+        {
+          realm_constraints.field_groups[idx].resize(1);
+          realm_constraints.field_groups[idx][0].field_id = field_set[idx];
+          realm_constraints.field_groups[idx][0].offset = -1;
+          realm_constraints.field_groups[idx][0].size = field_sizes[idx];
+          // Natural alignment
+          realm_constraints.field_groups[idx][0].alignment = field_sizes[idx];
+        }
+      }
+      else // Have to be AOS or SOA for now
+        assert(false);
       // Next go through and check for any offset constraints for fields
 
-      // Then pad things as necessary for the alignment constraints
+      // Then update the alignments per the alignment constraints
+
+      // Create the layout
+#ifdef DEBUG_LEGION
+      assert(realm_layout == NULL);
+#endif
+      realm_layout = instance_domain->create_layout(realm_constraints);
     }
 #else
     //--------------------------------------------------------------------------
