@@ -673,7 +673,31 @@ legion_index_partition_create_domain_point_coloring(
 
   // Ensure all colors exist in coloring.
   for(Domain::DomainPointIterator c(color_space); c; c++) {
-    (*coloring)[c.p];
+    if (!(*coloring).count(c.p)) {
+      switch (c.p.get_dim()) {
+        case 1:
+          {
+            (*coloring)[c.p] = Domain::from_rect<1>(Rect<1>(0, -1));
+            break;
+          }
+      case 2:
+          {
+            (*coloring)[c.p] =
+              Domain::from_rect<2>(Rect<2>(make_point(0, 0),
+                                           make_point(-1, -1)));
+            break;
+          }
+      case 3:
+          {
+            (*coloring)[c.p] =
+              Domain::from_rect<3>(Rect<3>(make_point(0, 0, 0),
+                                           make_point(-1, -1, -1)));
+            break;
+          }
+      default:
+        break;
+      }
+    }
   }
 
   IndexPartition ip =
