@@ -441,6 +441,16 @@ legion_domain_point_coloring_destroy(
 }
 
 void
+legion_domain_point_coloring_ensure_color(
+  legion_domain_point_coloring_t handle_,
+  legion_domain_point_t color_)
+{
+  DomainPointColoring *handle = CObjectWrapper::unwrap(handle_);
+  DomainPoint color = CObjectWrapper::unwrap(color_);
+  (*handle)[color];
+}
+
+void
 legion_domain_point_coloring_color_domain(
   legion_domain_point_coloring_t handle_,
   legion_domain_point_t color_,
@@ -468,6 +478,16 @@ legion_multi_domain_point_coloring_destroy(
   legion_multi_domain_point_coloring_t handle_)
 {
   delete CObjectWrapper::unwrap(handle_);
+}
+
+void
+legion_multi_domain_point_coloring_ensure_color(
+  legion_multi_domain_point_coloring_t handle_,
+  legion_domain_point_t color_)
+{
+  MultiDomainPointColoring *handle = CObjectWrapper::unwrap(handle_);
+  DomainPoint color = CObjectWrapper::unwrap(color_);
+  (*handle)[color];
 }
 
 void
