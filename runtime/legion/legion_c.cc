@@ -616,6 +616,12 @@ legion_index_partition_create_domain_coloring(
   Domain color_space = CObjectWrapper::unwrap(color_space_);
   DomainColoring *coloring = CObjectWrapper::unwrap(coloring_);
 
+  // Ensure all colors exist in coloring.
+  for(Domain::DomainPointIterator c(color_space); c; c++) {
+    assert(c.p.get_dim() <= 1);
+    (*coloring)[c.p[0]];
+  }
+
   IndexPartition ip =
     runtime->create_index_partition(ctx, parent, color_space, *coloring,
                                     disjoint, part_color);
@@ -637,6 +643,11 @@ legion_index_partition_create_point_coloring(
   IndexSpace parent = CObjectWrapper::unwrap(parent_);
   Domain color_space = CObjectWrapper::unwrap(color_space_);
   PointColoring *coloring = CObjectWrapper::unwrap(coloring_);
+
+  // Ensure all colors exist in coloring.
+  for(Domain::DomainPointIterator c(color_space); c; c++) {
+    (*coloring)[c.p];
+  }
 
   IndexPartition ip =
     runtime->create_index_partition(ctx, parent, color_space, *coloring,
@@ -660,6 +671,11 @@ legion_index_partition_create_domain_point_coloring(
   Domain color_space = CObjectWrapper::unwrap(color_space_);
   DomainPointColoring *coloring = CObjectWrapper::unwrap(coloring_);
 
+  // Ensure all colors exist in coloring.
+  for(Domain::DomainPointIterator c(color_space); c; c++) {
+    (*coloring)[c.p];
+  }
+
   IndexPartition ip =
     runtime->create_index_partition(ctx, parent, color_space, *coloring,
                                     part_kind, color);
@@ -681,6 +697,11 @@ legion_index_partition_create_multi_domain_point_coloring(
   IndexSpace parent = CObjectWrapper::unwrap(parent_);
   Domain color_space = CObjectWrapper::unwrap(color_space_);
   MultiDomainPointColoring *coloring = CObjectWrapper::unwrap(coloring_);
+
+  // Ensure all colors exist in coloring.
+  for(Domain::DomainPointIterator c(color_space); c; c++) {
+    (*coloring)[c.p];
+  }
 
   IndexPartition ip =
     runtime->create_index_partition(ctx, parent, color_space, *coloring,
