@@ -32,7 +32,7 @@ local default_options = {
   ["mapping"] = true,
   ["openmp"] = false,
   ["openmp-strict"] = false,
-  ["skip-empty-tasks"] = false,
+  ["skip-empty-tasks"] = true,
   ["vectorize"] = true,
   ["vectorize-unsafe"] = false,
 
