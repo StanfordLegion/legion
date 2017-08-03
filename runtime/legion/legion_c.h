@@ -660,14 +660,6 @@ extern "C" {
    * @see Legion::DomainPointColoring
    */
   void
-  legion_domain_point_coloring_ensure_color(
-    legion_domain_point_coloring_t handle,
-    legion_domain_point_t color);
-
-  /**
-   * @see Legion::DomainPointColoring
-   */
-  void
   legion_domain_point_coloring_color_domain(
     legion_domain_point_coloring_t handle,
     legion_domain_point_t color,
@@ -693,14 +685,6 @@ extern "C" {
   void
   legion_multi_domain_point_coloring_destroy(
     legion_multi_domain_point_coloring_t handle);
-
-  /**
-   * @see Legion::MultiDomainPointColoring
-   */
-  void
-  legion_multi_domain_point_coloring_ensure_color(
-    legion_multi_domain_point_coloring_t handle,
-    legion_domain_point_t color);
 
   /**
    * @see Legion::MultiDomainPointColoring
