@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- bounds_check_fail_partition1.rg:27: attempt to access subregion of $p is out-of-bounds
+-- test_region_out_of_bounds.rg:27: attempt to access subregion of $p is out-of-bounds
 
 import "regent"
 
