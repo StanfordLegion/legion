@@ -2389,6 +2389,48 @@ namespace Legion {
       serdez.resize(field_set.size());
       field_node->compute_field_layout(field_set, field_sizes,
                                        mask_index_map, serdez, instance_mask);
+      // See if we have any specialization here that will 
+      // require us to update the field sizes
+      switch (constraints.specialized_constraint.get_kind())
+      {
+        case NO_SPECIALIZE:
+        case NORMAL_SPECIALIZE:
+          break;
+        case REDUCTION_FOLD_SPECIALIZE:
+          {
+            // Reduction folds are a special case of normal specialize
+            redop_id = constraints.specialized_constraint.get_reduction_op();
+            reduction_op = Runtime::get_reduction_op(redop_id);
+            for (unsigned idx = 0; idx < field_sizes.size(); idx++)
+            {
+              if (field_sizes[idx] != reduction_op->sizeof_lhs)
+                REPORT_LEGION_ERROR(ERROR_UNSUPPORTED_LAYOUT_CONSTRAINT,
+                    "Illegal reduction instance request with field %d "
+                    "which has size %ld but the LHS type of reduction "
+                    "operator %d is %ld", field_set[idx], field_sizes[idx],
+                    redop_id, reduction_op->sizeof_lhs)
+              // Update the field sizes to the rhs of the reduction op
+              field_sizes[idx] = reduction_op->sizeof_rhs;
+            }
+            break;
+          }
+        case REDUCTION_LIST_SPECIALIZE:
+          {
+            // TODO: implement list reduction instances
+            assert(false);
+            redop_id = constraints.specialized_constraint.get_reduction_op();
+            reduction_op = Runtime::get_reduction_op(redop_id);
+            break;
+          }
+        case VIRTUAL_SPECIALIZE:
+          {
+            REPORT_LEGION_ERROR(ERROR_ILLEGAL_REQUEST_VIRTUAL_INSTANCE,
+                          "Illegal request to create a virtual instance");
+            assert(false);
+          }
+        default:
+          assert(false); // unknown kind
+      }
       // Compute the field groups for realm 
       Realm::InstanceLayoutConstraints realm_constraints;
       if (ord.ordering.front() == DIM_F)
