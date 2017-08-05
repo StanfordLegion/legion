@@ -25,6 +25,7 @@
 #include "legion_instances.h"
 #include "legion_views.h"
 #include "legion_analysis.h"
+#include "legion_trace.h"
 #include "interval_tree.h"
 #include "rectangle_set.h"
 
@@ -2205,7 +2206,8 @@ namespace Legion {
                                                bool need_read_only_reservations,
                                                std::set<RtEvent> &map_applied,
                                                InstanceSet &targets,
-                                               const ProjectionInfo *proj_info
+                                               const ProjectionInfo *proj_info,
+                                               PhysicalTraceInfo &trace_info
 #ifdef DEBUG_LEGION
                                                , const char *log_name
                                                , UniqueID uid
@@ -2268,7 +2270,8 @@ namespace Legion {
                            user_mask, local_applied);
         child_node->register_region(info, logical_ctx_uid, context, 
                                     restrict_info, term_event, usage, 
-                                    defer_add_users, targets, proj_info);
+                                    defer_add_users, targets, proj_info,
+                                    trace_info);
         
         if (!local_applied.empty())
         {
@@ -2296,7 +2299,8 @@ namespace Legion {
                            user_mask, map_applied);
         child_node->register_region(info, logical_ctx_uid, context, 
                                     restrict_info, term_event, usage, 
-                                    defer_add_users, targets, proj_info);
+                                    defer_add_users, targets, proj_info,
+                                    trace_info);
       }
     }
 
@@ -16333,7 +16337,8 @@ namespace Legion {
                                      RestrictInfo &restrict_info,
                                    ApEvent term_event, const RegionUsage &usage,
                                      bool defer_add_users, InstanceSet &targets,
-                                     const ProjectionInfo *proj_info)
+                                     const ProjectionInfo *proj_info,
+                                     PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REGION_NODE_REGISTER_REGION_CALL);
@@ -16386,7 +16391,7 @@ namespace Legion {
           convert_target_views(restricted_instances, context,
                                restricted_views);
         }
-        std::vector<ReductionView*> new_views;
+        std::vector<InstanceView*> new_views;
         if (!defer_add_users && (targets.size() > 1))
           new_views.resize(targets.size());
         LegionMap<ReductionView*,FieldMask>::aligned reduce_out_views;
@@ -16494,7 +16499,23 @@ namespace Legion {
           }
         }
         std::vector<InstanceView*> new_views(targets.size());
-        convert_target_views(targets, context, new_views);
+        if (trace_info.memoizing)
+        {
+#ifdef DEBUG_LEGION
+          assert(trace_info.trace != NULL);
+#endif
+          if (!trace_info.trace->is_fixed())
+          {
+            convert_target_views(targets, context, new_views);
+            trace_info.trace->record_target_views(&trace_info, info.index,
+                new_views);
+          }
+          else
+            trace_info.trace->get_target_views(&trace_info, info.index,
+                new_views);
+        }
+        else
+          convert_target_views(targets, context, new_views);
         if (!IS_WRITE_ONLY(info.req))
         {
           // Any case but write-only
@@ -16695,9 +16716,11 @@ namespace Legion {
       // need to be done would have been issued as part of the 
       // logical analysis or will be done as part of the registration.
       RestrictInfo empty_restrict_info;
+      PhysicalTraceInfo trace_info;
       register_region(info, logical_ctx_uid, context, empty_restrict_info, 
                       ApEvent::NO_AP_EVENT, usage, false/*defer add users*/, 
-                      targets, NULL/*no advance close projection info*/);
+                      targets, NULL/*no advance close projection info*/,
+                      trace_info);
     }
 
     //--------------------------------------------------------------------------

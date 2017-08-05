@@ -33,7 +33,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LegionTrace::LegionTrace(TaskContext *c)
-      : ctx(c)
+      : ctx(c), physical_trace(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -173,6 +173,12 @@ namespace Legion {
     {
       std::pair<Operation*,GenerationID> key(op,gen);
       const unsigned index = operations.size();
+      if (op->is_memoizing())
+      {
+        if (physical_trace == NULL)
+          physical_trace = new PhysicalTrace();
+        physical_trace->record_trace_local_id(op, index);
+      }
       if (!op->is_internal_op())
       {
         const LegionVector<DependenceRecord>::aligned &deps = 
@@ -441,6 +447,12 @@ namespace Legion {
     {
       std::pair<Operation*,GenerationID> key(op,gen);
       const unsigned index = operations.size();
+      if (op->is_memoizing())
+      {
+        if (physical_trace == NULL)
+          physical_trace = new PhysicalTrace();
+        physical_trace->record_trace_local_id(op, index);
+      }
       // Only need to save this in the map if we are not done tracing
       if (tracing)
       {
@@ -821,14 +833,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TraceCaptureOp::TraceCaptureOp(Runtime *rt)
-      : Operation(rt)
+      : FenceOp(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     TraceCaptureOp::TraceCaptureOp(const TraceCaptureOp &rhs)
-      : Operation(NULL)
+      : FenceOp(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -854,7 +866,7 @@ namespace Legion {
     void TraceCaptureOp::initialize_capture(TaskContext *ctx)
     //--------------------------------------------------------------------------
     {
-      initialize_operation(ctx, true/*track*/);
+      initialize(ctx, MIXED_FENCE);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
       assert(trace->is_dynamic_trace());
@@ -906,6 +918,21 @@ namespace Legion {
 #endif
       // Indicate that we are done capturing this trace
       local_trace->end_trace_capture();
+      // Register this fence with all previous users in the parent's context
+      parent_ctx->perform_fence_analysis(this);
+      // Now update the parent context with this fence before we can complete
+      // the dependence analysis and possibly be deactivated
+      parent_ctx->update_current_fence(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceCaptureOp::deferred_execute(void)
+    //--------------------------------------------------------------------------
+    {
+      // Now finish capturing the physical trace
+      if (local_trace->has_physical_trace())
+        local_trace->get_physical_trace()->fix_trace();
+      FenceOp::deferred_execute();
     }
 
     /////////////////////////////////////////////////////////////
@@ -1008,7 +1035,126 @@ namespace Legion {
           delete static_trace;
       }
     }
-    
+
+    /////////////////////////////////////////////////////////////
+    // PhysicalTrace
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PhysicalTrace::PhysicalTrace()
+      : fixed(false), trace_lock(Reservation::create_reservation())
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalTrace::PhysicalTrace(const PhysicalTrace &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalTrace::~PhysicalTrace()
+    //--------------------------------------------------------------------------
+    {
+      trace_lock.destroy_reservation();
+      trace_lock = Reservation::NO_RESERVATION;
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalTrace& PhysicalTrace::operator=(const PhysicalTrace &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTrace::record_trace_local_id(Operation* op, unsigned local_id)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(trace_lock);
+
+#ifdef DEBUG_LEGION
+      assert(trace_local_ids.find(op->get_unique_op_id()) ==
+          trace_local_ids.end());
+#endif
+      trace_local_ids[op->get_unique_op_id()] = local_id;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned PhysicalTrace::get_trace_local_id(Operation* op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(trace_lock, 1, false/*exclusive*/);
+
+#ifdef DEBUG_LEGION
+      assert(trace_local_ids.find(op->get_unique_op_id()) !=
+          trace_local_ids.end());
+#endif
+      return trace_local_ids[op->get_unique_op_id()];
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTrace::record_target_views(PhysicalTraceInfo *trace_info,
+                                            unsigned idx,
+                                 const std::vector<InstanceView*>& target_views)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(trace_lock);
+
+      CachedViews &cached_views = cached_views_map[
+        std::make_pair(trace_info->trace_local_id, trace_info->color)];
+      cached_views.resize(idx + 1);
+      LegionVector<InstanceView*>::aligned &cache = cached_views[idx];
+      cache.resize(target_views.size());
+      for (unsigned i = 0; i < target_views.size(); ++i)
+        cache[i] = target_views[i];
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTrace::get_target_views(PhysicalTraceInfo *trace_info,
+                                         unsigned idx,
+                                 std::vector<InstanceView*>& target_views) const
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(trace_lock, 1, false/*exclusive*/);
+
+      CachedViewsMap::const_iterator finder = cached_views_map.find(
+          std::make_pair(trace_info->trace_local_id, trace_info->color));
+#ifdef DEBUG_LEGION
+      assert(finder != cached_views_map.end());
+#endif
+      const CachedViews &cached_views = finder->second;
+      const LegionVector<InstanceView*>::aligned &cache = cached_views[idx];
+      for (unsigned i = 0; i < target_views.size(); ++i)
+        target_views[i] = cache[i];
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTrace::fix_trace()
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!fixed);
+#endif
+      fixed = true;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // PhysicalTraceInfo
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PhysicalTraceInfo::PhysicalTraceInfo()
+    //--------------------------------------------------------------------------
+      : memoizing(false), is_point_task(false), trace_local_id(0), color(),
+        trace(NULL)
+    {
+    }
+
   }; // namespace Internal 
 }; // namespace Legion
 

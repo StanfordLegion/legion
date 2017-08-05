@@ -215,6 +215,7 @@ namespace Legion {
       inline TaskContext* get_context(void) const { return parent_ctx; }
       inline UniqueID get_unique_op_id(void) const { return unique_op_id; } 
       inline bool is_tracing(void) const { return tracing; }
+      inline bool is_memoizing(void) const { return memoizing; }
       inline bool is_tracking_parent(void) const { return track_parent; } 
       inline bool already_traced(void) const 
         { return ((trace != NULL) && !tracing); }
@@ -539,6 +540,8 @@ namespace Legion {
       LegionTrace *trace;
       // Track whether we are tracing this operation
       bool tracing;
+      // Track whether we are memoizing physical analysis for this operation
+      bool memoizing;
       // Our must epoch if we have one
       MustEpochOp *must_epoch;
       // A set list or recorded dependences during logical traversal

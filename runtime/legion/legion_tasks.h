@@ -463,6 +463,8 @@ namespace Legion {
                                  size_t res_size, bool owned) = 0; 
       virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT) = 0;
       virtual void handle_misspeculation(void) = 0;
+    public:
+      virtual void get_physical_trace_info(PhysicalTraceInfo& trace_info) = 0;
     protected:
       // Boolean for each region saying if it is virtual mapped
       std::vector<bool> virtual_mapped;
@@ -646,6 +648,8 @@ namespace Legion {
       virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual void handle_misspeculation(void);
     public:
+      virtual void get_physical_trace_info(PhysicalTraceInfo& trace_info);
+    public:
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
       virtual void perform_physical_traversal(unsigned idx,
@@ -763,6 +767,8 @@ namespace Legion {
                                  size_t res_size, bool owned);
       virtual void handle_post_mapped(RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual void handle_misspeculation(void);
+    public:
+      virtual void get_physical_trace_info(PhysicalTraceInfo& trace_info);
     public:
       // ProjectionPoint methods
       virtual const DomainPoint& get_domain_point(void) const;

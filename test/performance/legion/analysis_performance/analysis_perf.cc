@@ -126,6 +126,7 @@ class PerfMapper : public DefaultMapper
   private:
     unsigned num_slices;
     bool cache_mapping;
+    bool tracing;
     vector<Processor>& procs_list;
     //vector<Memory>& sysmems_list;
     //map<Memory, vector<Processor> >& sysmem_local_procs;
@@ -146,6 +147,7 @@ PerfMapper::PerfMapper(MapperRuntime *rt, Machine machine, Processor local,
   : DefaultMapper(rt, machine, local, mapper_name),
     num_slices(1),
     cache_mapping(true),
+    tracing(false),
     procs_list(*_procs_list),
     //sysmems_list(*_sysmems_list),
     //sysmem_local_procs(*_sysmem_local_procs),
@@ -161,7 +163,14 @@ PerfMapper::PerfMapper(MapperRuntime *rt, Machine machine, Processor local,
   {
     if (strcmp(argv[i], "-S") == 0) num_slices = atoi(argv[++i]);
     else if (strcmp(argv[i], "-F") == 0) cache_mapping = false;
+    else if (strcmp(argv[i], "-T") == 0) tracing = true;
     ++i;
+  }
+  if (tracing && !cache_mapping)
+  {
+    fprintf(stderr,
+        "WARNING: Only the first mapping decision will be effective "
+        "because of the physical tracing\n");
   }
 }
 
@@ -184,6 +193,7 @@ void PerfMapper::select_task_options(const MapperContext ctx,
   output.inline_task = false;
   output.stealable = false;
   output.map_locally = false;
+  output.memoize = task.task_id == DO_NOTHING_TASK_ID ? tracing : false;
 }
 
 void PerfMapper::default_policy_select_target_processors(MapperContext ctx,
@@ -690,6 +700,15 @@ void top_level_task(const Task *task,
       pattern.push_back(default_pattern[idx]);
   }
 
+  if (tracing && alternate_loop && num_loops % pattern.size() != 0)
+  {
+    fprintf(stderr,
+        "WARNING: Rounding up the number of loops "
+        "to the closest multiple of the pattern size\n");
+    num_loops += pattern.size() - num_loops % pattern.size();
+    assert(num_loops % pattern.size() == 0);
+  }
+
   // TODO: Single task launches with root regions should be supported
   if (num_partitions == 0)
     fprintf(stderr,
@@ -855,7 +874,8 @@ void top_level_task(const Task *task,
   {
     for (unsigned l = 0; l < num_loops; ++l)
     {
-      if (tracing) runtime->begin_trace(ctx, 0);
+      if (tracing && (!alternate_loop || l % pattern.size() == 0))
+        runtime->begin_trace(ctx, 0);
       for (unsigned p = 0; p < num_partitions; ++p)
       {
         for (unsigned i = 0; i < num_tasks; ++i)
@@ -917,7 +937,8 @@ void top_level_task(const Task *task,
           runtime->execute_task(ctx, launcher);
         }
       }
-      if (tracing) runtime->end_trace(ctx, 0);
+      if (tracing && (!alternate_loop || (l + 1) % pattern.size() == 0))
+        runtime->end_trace(ctx, 0);
     }
   }
   else

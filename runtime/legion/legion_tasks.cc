@@ -995,11 +995,24 @@ namespace Legion {
       options.inline_task = false;
       options.stealable = false;
       options.map_locally = false;
+      options.memoize = false;
       mapper->invoke_select_task_options(this, &options);
       options_selected = true;
       target_proc = options.initial_proc;
       stealable = options.stealable;
       map_locally = options.map_locally;
+      memoizing = options.memoize;
+      if (trace == NULL && memoizing)
+      {
+        MessageDescriptor INVALID_PHYSICAL_TRACING(3800, "undefined");
+        log_run.error(INVALID_PHYSICAL_TRACING.id(),
+            "Invalid mapper output from 'select_task_options'. Mapper requested"
+            " memoization of a task that is not being traced.");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INVALID_PHYSICAL_TRACING);
+      }
       return options.inline_task;
     }
 
@@ -2199,6 +2212,8 @@ namespace Legion {
         // Set the current mapping index before doing anything that
         // could result in the generation of a copy
         set_current_mapping_index(*it);
+        // TODO: Implement physical tracing for premapped regions
+        PhysicalTraceInfo trace_info;
         // Passed all the error checking tests so register it
         // Always defer the users, the point tasks will do that
         // for themselves when they map their regions
@@ -2207,7 +2222,8 @@ namespace Legion {
                               completion_event, true/*defer users*/, 
                               true/*need read only reservations*/,
                               applied_conditions, chosen_instances,
-                              get_projection_info(*it)
+                              get_projection_info(*it),
+                              trace_info
 #ifdef DEBUG_LEGION
                               , get_logging_name(), unique_op_id
 #endif
@@ -3545,6 +3561,10 @@ namespace Legion {
                                           local_termination_event);
       }
 #endif
+      PhysicalTraceInfo trace_info;
+      if (memoizing)
+        get_physical_trace_info(trace_info);
+
       // Now do the mapping call
       invoke_mapper(must_epoch_op);
       const bool multiple_requirements = (regions.size() > 1);
@@ -3607,7 +3627,8 @@ namespace Legion {
                                     !multiple_requirements/*read only locks*/,
                                     map_applied_conditions,
                                     physical_instances[idx],
-                                    get_projection_info(idx)
+                                    get_projection_info(idx),
+                                    trace_info
 #ifdef DEBUG_LEGION
                                     , get_logging_name()
                                     , unique_op_id
@@ -3827,6 +3848,8 @@ namespace Legion {
                                                 true/*postmapping*/);
         // No restrictions for postmappings
         RestrictInfo empty_restrict_info;
+        // TODO: Implement physical tracing for postmapped regions
+        PhysicalTraceInfo trace_info;
         // Register this with a no-event so that the instance can
         // be used as soon as it is valid from the copy to it
         runtime->forest->physical_register_only(regions[idx], 
@@ -3836,7 +3859,8 @@ namespace Legion {
                           true/*defer add users*/, 
                           true/*need read only locks*/,
                           map_applied_conditions, result, 
-                          get_projection_info(idx)
+                          get_projection_info(idx),
+                          trace_info
 #ifdef DEBUG_LEGION
                           , get_logging_name(), unique_op_id
 #endif
@@ -5500,6 +5524,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndividualTask::get_physical_trace_info(PhysicalTraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(memoizing);
+      assert(trace != NULL);
+#endif
+      trace_info.memoizing = memoizing;
+      trace_info.is_point_task = false;
+      trace_info.trace = trace->get_physical_trace();
+      trace_info.trace_local_id = trace_info.trace->get_trace_local_id(this);
+    }
+
+    //--------------------------------------------------------------------------
     void IndividualTask::record_reference_mutation_effect(RtEvent event)
     //--------------------------------------------------------------------------
     {
@@ -6450,6 +6488,26 @@ namespace Legion {
       size_t result_size;
       const void *result = slice_owner->get_predicate_false_result(result_size);
       execution_context->end_task(result, result_size, false/*owned*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void PointTask::get_physical_trace_info(PhysicalTraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(memoizing);
+      assert(slice_owner != NULL);
+      assert(slice_owner->index_owner != NULL);
+      assert(slice_owner->index_owner->get_trace() != NULL);
+#endif
+      trace_info.memoizing = memoizing;
+      trace_info.is_point_task = true;
+      // TODO: This chain of deferences is unsafe on multi-node
+      IndexTask* index_owner = slice_owner->index_owner;
+      trace_info.trace = index_owner->get_trace()->get_physical_trace();
+      trace_info.trace_local_id =
+        trace_info.trace->get_trace_local_id(index_owner);
+      trace_info.color = index_point;
     }
 
     //--------------------------------------------------------------------------
@@ -7419,6 +7477,7 @@ namespace Legion {
       result->denominator = scale_denominator;
       result->index_owner = this;
       result->remote_owner_uid = parent_ctx->get_unique_id();
+      result->memoizing = memoizing;
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_index_slice(get_unique_id(), 
                                    result->get_unique_id());
@@ -8353,6 +8412,7 @@ namespace Legion {
       result->denominator = this->denominator * scale_denominator;
       result->index_owner = this->index_owner;
       result->remote_owner_uid = this->remote_owner_uid;
+      result->memoizing = memoizing;
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_slice_slice(get_unique_id(), 
                                    result->get_unique_id());
@@ -8432,6 +8492,7 @@ namespace Legion {
       result->is_index_space = true;
       result->must_epoch_task = this->must_epoch_task;
       result->index_domain = this->index_domain;
+      result->memoizing = memoizing;
       // Now figure out our local point information
       result->initialize_point(this, point, point_arguments);
       if (Runtime::legion_spy_enabled)

@@ -346,7 +346,8 @@ namespace Legion {
                                   bool need_read_only_reservations,
                                   std::set<RtEvent> &map_applied,
                                   InstanceSet &targets,
-                                  const ProjectionInfo *proj_info
+                                  const ProjectionInfo *proj_info,
+                                  PhysicalTraceInfo &trace_info
 #ifdef DEBUG_LEGION
                                  , const char *log_name
                                  , UniqueID uid
@@ -1879,7 +1880,8 @@ namespace Legion {
                            InnerContext *context, RestrictInfo &restrict_info, 
                            ApEvent term_event, const RegionUsage &usage, 
                            bool defer_add_users, InstanceSet &targets,
-                           const ProjectionInfo *proj_info);
+                           const ProjectionInfo *proj_info,
+                           PhysicalTraceInfo &trace_info);
       void seed_state(ContextID ctx, ApEvent term_event,
                              const RegionUsage &usage,
                              const FieldMask &user_mask,

@@ -313,6 +313,7 @@ namespace Legion {
         bool                                   inline_task;  // = false
         bool                                   stealable;   // = false
         bool                                   map_locally;  // = false
+        bool                                   memoize;  // = false
       };
       //------------------------------------------------------------------------
       virtual void select_task_options(const MapperContext    ctx,

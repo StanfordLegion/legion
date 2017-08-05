@@ -1242,6 +1242,7 @@ namespace Legion {
     class DynamicTrace;
     class TraceCaptureOp;
     class TraceCompleteOp;
+    class PhysicalTrace;
 
     // region_tree.h
     class RegionTreeForest;

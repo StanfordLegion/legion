@@ -93,6 +93,7 @@ namespace Legion {
         commit_event = Runtime::create_rt_user_event(); 
       trace = NULL;
       tracing = false;
+      memoizing = false;
       must_epoch = NULL;
 #ifdef DEBUG_LEGION
       assert(mapped_event.exists());
@@ -2399,6 +2400,8 @@ namespace Legion {
       if (remap_region)
       {
         region.impl->get_references(mapped_instances);
+        // TODO: Implement physical tracing for map operation
+        PhysicalTraceInfo trace_info;
         runtime->forest->physical_register_only(requirement,
                                                 version_info, restrict_info,
                                                 this, 0/*idx*/, 
@@ -2407,7 +2410,8 @@ namespace Legion {
                                                 true/*read only locks*/,
                                                 map_applied_conditions,
                                                 mapped_instances, 
-                                                NULL/*advance projections*/
+                                                NULL/*advance projections*/,
+                                                trace_info
 #ifdef DEBUG_LEGION
                                                , get_logging_name()
                                                , unique_op_id
@@ -2416,6 +2420,8 @@ namespace Legion {
       }
       else
       {
+        // TODO: Implement physical tracing for map operation
+        PhysicalTraceInfo trace_info;
         // We're going to need to invoke the mapper, find the set of valid
         // instances as part of our traversal
         InstanceSet valid_instances;
@@ -2432,7 +2438,8 @@ namespace Legion {
                                                 true/*read only locks*/,
                                                 map_applied_conditions,
                                                 mapped_instances,
-                                                NULL/*advance projections*/
+                                                NULL/*advance projections*/,
+                                                trace_info
 #ifdef DEBUG_LEGION
                                                 , get_logging_name()
                                                 , unique_op_id
@@ -3759,6 +3766,8 @@ namespace Legion {
     void CopyOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
+      // TODO: Implement physical tracing for copy across operation
+      PhysicalTraceInfo trace_info;
       std::vector<InstanceSet> valid_src_instances(src_requirements.size());
       std::vector<InstanceSet> valid_dst_instances(dst_requirements.size());
       Mapper::MapCopyInput input;
@@ -3876,7 +3885,8 @@ namespace Legion {
                                                   true/*read only locks*/,
                                                   map_applied_conditions,
                                                   src_targets,
-                                                  get_projection_info(idx, true)
+                                                  get_projection_info(idx, true),
+                                                  trace_info
 #ifdef DEBUG_LEGION
                                                   , get_logging_name()
                                                   , unique_op_id
@@ -3904,7 +3914,8 @@ namespace Legion {
                                                 false/*not read only*/,
                                                 map_applied_conditions,
                                                 dst_targets,
-                                                get_projection_info(idx, false)
+                                                get_projection_info(idx, false),
+                                                trace_info
 #ifdef DEBUG_LEGION
                                                 , get_logging_name()
                                                 , unique_op_id
@@ -8338,6 +8349,8 @@ namespace Legion {
       // Map this is a restricted region. We already know the 
       // physical region that we want to map.
       InstanceSet mapped_instances = restrict_info.get_instances();
+      // TODO: Implement physical tracing for acquire operation
+      PhysicalTraceInfo trace_info;
       // Invoke the mapper before doing anything else 
       invoke_mapper();
       // Now we can map the operation
@@ -8348,7 +8361,8 @@ namespace Legion {
                                               false/*not read only*/,
                                               map_applied_conditions,
                                               mapped_instances,
-                                              NULL/*advance projections*/
+                                              NULL/*advance projections*/,
+                                              trace_info
 #ifdef DEBUG_LEGION
                                               , get_logging_name()
                                               , unique_op_id
@@ -8979,6 +8993,8 @@ namespace Legion {
     {
       // We already know what the answer has to be here 
       InstanceSet mapped_instances = restrict_info.get_instances();
+      // TODO: Implement physical tracing for release operation
+      PhysicalTraceInfo trace_info;
       // Invoke the mapper before doing anything else 
       invoke_mapper();
       // Now we can map the operation
@@ -8989,7 +9005,8 @@ namespace Legion {
                                               false/*not read only*/,
                                               map_applied_conditions,
                                               mapped_instances,
-                                              NULL/*advance projections*/
+                                              NULL/*advance projections*/,
+                                              trace_info
 #ifdef DEBUG_LEGION
                                               , get_logging_name()
                                               , unique_op_id
@@ -12273,6 +12290,8 @@ namespace Legion {
         if (restrict_info.has_restrictions())
         {
           mapped_instances = restrict_info.get_instances();
+          // TODO: Implement physical tracing for fill operation
+          PhysicalTraceInfo trace_info;
           runtime->forest->physical_register_only(requirement,
                                                   version_info, restrict_info,
                                                   this, 0/*idx*/,
@@ -12281,7 +12300,8 @@ namespace Legion {
                                                   false/*not read only*/,
                                                   map_applied_conditions,
                                                   mapped_instances,
-                                                  get_projection_info()
+                                                  get_projection_info(),
+                                                  trace_info
 #ifdef DEBUG_LEGION
                                                   , get_logging_name()
                                                   , unique_op_id
@@ -12364,6 +12384,8 @@ namespace Legion {
       if (restrict_info.has_restrictions())
       {
         mapped_instances = restrict_info.get_instances();
+        // TODO: Implement physical tracing for fill operation
+        PhysicalTraceInfo trace_info;
         runtime->forest->physical_register_only(requirement,
                                                 version_info, restrict_info,
                                                 this, 0/*idx*/,
@@ -12372,7 +12394,8 @@ namespace Legion {
                                                 false/*not read only*/,
                                                 map_applied_conditions,
                                                 mapped_instances,
-                                                get_projection_info()
+                                                get_projection_info(),
+                                                trace_info
 #ifdef DEBUG_LEGION
                                                 , get_logging_name()
                                                 , unique_op_id

@@ -467,6 +467,20 @@ namespace Legion {
     }; 
 
     /**
+     * \struct PhysicalTraceInfo
+     */
+    struct PhysicalTraceInfo {
+    public:
+      PhysicalTraceInfo();
+    public:
+      bool memoizing;
+      bool is_point_task;
+      unsigned trace_local_id;
+      DomainPoint color;
+      PhysicalTrace *trace;
+    };
+
+    /**
      * \struct TraversalInfo
      */
     struct TraversalInfo {

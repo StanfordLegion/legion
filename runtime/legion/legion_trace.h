@@ -84,6 +84,9 @@ namespace Legion {
       virtual void record_aliased_children(unsigned req_index, unsigned depth,
                                            const FieldMask &aliased_mask) = 0;
     public:
+      bool has_physical_trace() { return physical_trace != NULL; }
+      PhysicalTrace* get_physical_trace() { return physical_trace; }
+    public:
       void replay_aliased_children(std::vector<RegionTreePath> &paths) const;
       void end_trace_execution(FenceOp *fence_op);
     public:
@@ -94,6 +97,8 @@ namespace Legion {
       // aliased but non-interfering region requirements. This should
       // be pretty sparse so we'll make it a map
       std::map<unsigned,LegionVector<AliasChildren>::aligned> aliased_children;
+      // Pointer to a physical trace
+      PhysicalTrace *physical_trace;
 #ifdef LEGION_SPY
     protected:
       std::vector<UniqueID> current_uids;
@@ -232,8 +237,7 @@ namespace Legion {
      * is finished so the DynamicTrace object can compute the
      * dependences data structure.
      */
-    class TraceCaptureOp : public Operation,
-                           public LegionHeapify<TraceCaptureOp> {
+    class TraceCaptureOp : public FenceOp {
     public:
       static const AllocationType alloc_type = TRACE_CAPTURE_OP_ALLOC;
     public:
@@ -250,6 +254,7 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
+      virtual void deferred_execute(void);
     protected:
       DynamicTrace *local_trace;
     };
@@ -281,6 +286,36 @@ namespace Legion {
       virtual void trigger_dependence_analysis(void);
     protected:
       LegionTrace *local_trace;
+    };
+
+    class PhysicalTrace {
+    public:
+      PhysicalTrace(void);
+      PhysicalTrace(const PhysicalTrace &rhs);
+      ~PhysicalTrace(void);
+    public:
+      PhysicalTrace& operator=(const PhysicalTrace &rhs);
+    public:
+      void record_trace_local_id(Operation* op, unsigned local_id);
+      unsigned get_trace_local_id(Operation* op);
+      void record_target_views(PhysicalTraceInfo *trace_info,
+                               unsigned idx,
+                               const std::vector<InstanceView*>& target_views);
+      void get_target_views(PhysicalTraceInfo *trace_info,
+                            unsigned idx,
+                            std::vector<InstanceView*>& target_views) const;
+    public:
+      void fix_trace(void);
+      bool is_fixed(void) const { return fixed; }
+    private:
+      bool fixed;
+      Reservation trace_lock;
+      LegionMap<UniqueID, unsigned>::aligned trace_local_ids;
+      typedef LegionVector<LegionVector<InstanceView*>::aligned >::aligned
+        CachedViews;
+      typedef LegionMap<std::pair<unsigned, DomainPoint>, CachedViews>::aligned
+        CachedViewsMap;
+      CachedViewsMap cached_views_map;
     };
 
   }; // namespace Internal 
