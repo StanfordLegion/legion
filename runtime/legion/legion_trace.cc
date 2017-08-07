@@ -462,7 +462,7 @@ namespace Legion {
           operations.push_back(key);
           op_map[key] = index;
           // Add a new vector for storing dependences onto the back
-          dependences.push_back(LegionVector<DependenceRecord>::aligned());
+          dependences.push_back(DependenceMap());
           // Record meta-data about the trace for verifying that
           // it is being replayed correctly
           op_info.push_back(OperationInfo(op));
@@ -471,8 +471,7 @@ namespace Legion {
         {
           std::pair<InternalOp*,GenerationID> 
             local_key(static_cast<InternalOp*>(op),gen);
-          internal_dependences[local_key] = 
-            LegionVector<DependenceRecord>::aligned();
+          internal_dependences[local_key] = DependenceMap();
         }
       }
       else
@@ -528,8 +527,7 @@ namespace Legion {
             exit(ERROR_TRACE_VIOLATION);
           }
           // If we make it here, everything is good
-          const LegionVector<DependenceRecord>::aligned &deps = 
-                                                          dependences[index];
+          const DependenceMap &deps = dependences[index];
           operations.push_back(key);
 #ifdef LEGION_SPY
           current_uids.push_back(op->get_unique_op_id());
@@ -540,40 +538,45 @@ namespace Legion {
           op->add_mapping_reference(gen);  
           // Then compute all the dependences on this operation from
           // our previous recording of the trace
-          for (LegionVector<DependenceRecord>::aligned::const_iterator it = 
-                deps.begin(); it != deps.end(); it++)
+          for (DependenceMap::const_iterator it = deps.begin();
+               it != deps.end(); it++)
           {
+            const DependentPair &r = it->first;
+            for (LegionVector<FieldMask>::aligned::const_iterator fit = 
+                 it->second.begin(); fit != it->second.end(); fit++)
+            {
 #ifdef DEBUG_LEGION
-            assert((it->operation_idx >= 0) &&
-                   ((size_t)it->operation_idx < operations.size()));
+              assert((r.operation_idx >= 0) &&
+                     ((size_t)r.operation_idx < operations.size()));
 #endif
-            const std::pair<Operation*,GenerationID> &target = 
-                                                  operations[it->operation_idx];
+              const std::pair<Operation*,GenerationID> &target = 
+                                                    operations[r.operation_idx];
 
-            if ((it->prev_idx == -1) || (it->next_idx == -1))
-            {
-              op->register_dependence(target.first, target.second);
+              if ((r.prev_idx == -1) || (r.next_idx == -1))
+              {
+                op->register_dependence(target.first, target.second);
 #ifdef LEGION_SPY
-              LegionSpy::log_mapping_dependence(
-                  op->get_context()->get_unique_id(),
-                  current_uids[it->operation_idx], 
-                  (it->prev_idx == -1) ? 0 : it->prev_idx,
-                  op->get_unique_op_id(), 
-                  (it->next_idx == -1) ? 0 : it->next_idx, TRUE_DEPENDENCE);
+                LegionSpy::log_mapping_dependence(
+                    op->get_context()->get_unique_id(),
+                    current_uids[r.operation_idx], 
+                    (r.prev_idx == -1) ? 0 : r.prev_idx,
+                    op->get_unique_op_id(), 
+                    (r.next_idx == -1) ? 0 : r.next_idx, TRUE_DEPENDENCE);
 #endif
-            }
-            else
-            {
-              op->register_region_dependence(it->next_idx, target.first,
-                                             target.second, it->prev_idx,
-                                             it->dtype, it->validates,
-                                             it->dependent_mask);
+              }
+              else
+              {
+                op->register_region_dependence(r.next_idx, target.first,
+                                               target.second, r.prev_idx,
+                                               r.dtype, r.validates,
+                                               *fit);
 #ifdef LEGION_SPY
-              LegionSpy::log_mapping_dependence(
-                  op->get_context()->get_unique_id(),
-                  current_uids[it->operation_idx], it->prev_idx,
-                  op->get_unique_op_id(), it->next_idx, it->dtype);
+                LegionSpy::log_mapping_dependence(
+                    op->get_context()->get_unique_id(),
+                    current_uids[r.operation_idx], r.prev_idx,
+                    op->get_unique_op_id(), r.next_idx, r.dtype);
 #endif
+              }
             }
           }
         }
@@ -584,8 +587,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(index > 0);
 #endif
-          const LegionVector<DependenceRecord>::aligned &deps = 
-                                                        dependences[index-1];
+          const DependenceMap &deps = dependences[index-1];
           // Special case for internal operations
           // Internal operations need to register transitive dependences
           // on all the other operations with which it interferes.
@@ -597,43 +599,47 @@ namespace Legion {
           assert(internal_op == dynamic_cast<InternalOp*>(op));
 #endif
           int internal_index = internal_op->get_internal_index();
-          for (LegionVector<DependenceRecord>::aligned::const_iterator it = 
-                deps.begin(); it != deps.end(); it++)
+          for (DependenceMap::const_iterator it = deps.begin();
+               it != deps.end(); it++)
           {
-            // We only record dependences for this internal operation on
-            // the indexes for which this internal operation is being done
-            if (internal_index != it->next_idx)
-              continue;
+            const DependentPair &r = it->first;
+            for (LegionVector<FieldMask>::aligned::const_iterator fit = 
+                 it->second.begin(); fit != it->second.end(); fit++)
+            {
+              // We only record dependences for this internal operation on
+              // the indexes for which this internal operation is being done
+              if (internal_index != r.next_idx)
+                continue;
 #ifdef DEBUG_LEGION
-            assert((it->operation_idx >= 0) &&
-                   ((size_t)it->operation_idx < operations.size()));
+              assert((r.operation_idx >= 0) &&
+                     ((size_t)r.operation_idx < operations.size()));
 #endif
-            const std::pair<Operation*,GenerationID> &target = 
-                                                  operations[it->operation_idx];
-            // If this is the case we can do the normal registration
-            if ((it->prev_idx == -1) || (it->next_idx == -1))
-            {
-              internal_op->register_dependence(target.first, target.second);
+              const std::pair<Operation*,GenerationID> &target = 
+                                                    operations[r.operation_idx];
+              // If this is the case we can do the normal registration
+              if ((r.prev_idx == -1) || (r.next_idx == -1))
+              {
+                internal_op->register_dependence(target.first, target.second);
 #ifdef LEGION_SPY
-              LegionSpy::log_mapping_dependence(
-                  op->get_context()->get_unique_id(),
-                  current_uids[it->operation_idx], 
-                  (it->prev_idx == -1) ? 0 : it->prev_idx,
-                  op->get_unique_op_id(), 
-                  (it->next_idx == -1) ? 0 : it->next_idx, TRUE_DEPENDENCE);
+                LegionSpy::log_mapping_dependence(
+                    op->get_context()->get_unique_id(),
+                    current_uids[r.operation_idx], 
+                    (r.prev_idx == -1) ? 0 : r.prev_idx,
+                    op->get_unique_op_id(), 
+                    (r.next_idx == -1) ? 0 : r.next_idx, TRUE_DEPENDENCE);
 #endif
-            }
-            else
-            {
-              internal_op->record_trace_dependence(target.first, target.second,
-                                                 it->prev_idx, it->next_idx,
-                                                 it->dtype, it->dependent_mask);
+              }
+              else
+              {
+                internal_op->record_trace_dependence(target.first,
+                    target.second, r.prev_idx, r.next_idx, r.dtype, *fit);
 #ifdef LEGION_SPY
-              LegionSpy::log_mapping_dependence(
-                  internal_op->get_context()->get_unique_id(),
-                  current_uids[it->operation_idx], it->prev_idx,
-                  internal_op->get_unique_op_id(), 0, it->dtype);
+                LegionSpy::log_mapping_dependence(
+                    internal_op->get_context()->get_unique_id(),
+                    current_uids[r.operation_idx], r.prev_idx,
+                    internal_op->get_unique_op_id(), 0, r.dtype);
 #endif
+              }
             }
           }
         }
@@ -663,7 +669,9 @@ namespace Legion {
         if (!source->is_internal_op())
         {
           // Normal case
-          dependences.back().push_back(DependenceRecord(finder->second));
+          DependentPair r(finder->second);
+          if (dependences.back().find(r) == dependences.back().end())
+            dependences.back()[r].push_back(FieldMask());
         }
         else
         {
@@ -677,8 +685,10 @@ namespace Legion {
             assert(internal_dependences.find(src_key) != 
                    internal_dependences.end());
 #endif
-            internal_dependences[src_key].push_back(
-                DependenceRecord(finder->second));
+            DependenceMap &internal_deps = internal_dependences[src_key];
+            DependentPair r(finder->second);
+            if (internal_deps.find(r) == internal_deps.end())
+              internal_deps[r].push_back(FieldMask());
           }
         }
       }
@@ -694,18 +704,23 @@ namespace Legion {
         std::pair<InternalOp*,GenerationID> 
           local_key(static_cast<InternalOp*>(target),tar_gen);
         std::map<std::pair<InternalOp*,GenerationID>,
-                LegionVector<DependenceRecord>::aligned>::const_iterator
+                DependenceMap, CmpDepRec>::const_iterator
           internal_finder = internal_dependences.find(local_key);
         if (internal_finder != internal_dependences.end())
         {
-          LegionVector<DependenceRecord>::aligned &target_deps = 
-                                                        dependences.back();
-          const LegionVector<DependenceRecord>::aligned &internal_deps = 
-                                                        internal_finder->second;
-          for (LegionVector<DependenceRecord>::aligned::const_iterator it = 
-                internal_deps.begin(); it != internal_deps.end(); it++)
+          DependenceMap &target_deps = dependences.back();
+          const DependenceMap &internal_deps = internal_finder->second;
+
+          for (DependenceMap::const_iterator it = internal_deps.begin();
+               it != internal_deps.end(); it++)
           {
-            target_deps.push_back(DependenceRecord(it->operation_idx)); 
+            for (LegionVector<FieldMask>::aligned::const_iterator fit =
+                 it->second.begin(); fit != it->second.end(); fit++)
+            {
+              DependentPair r(it->first.operation_idx);
+              if (target_deps.find(r) == target_deps.end())
+                target_deps[r].push_back(*fit);
+            }
           }
         }
       }
@@ -740,10 +755,34 @@ namespace Legion {
         // Two cases here, 
         if (!source->is_internal_op())
         {
+          DependentPair r(finder->second, target_idx, source_idx, validates,
+              dtype);
           // Normal case
-          dependences.back().push_back(
-              DependenceRecord(finder->second, target_idx, source_idx,
-                               validates, dtype, dep_mask));
+          DependenceMap::iterator finder = dependences.back().find(r);
+          if (finder == dependences.back().end())
+            dependences.back()[r].push_back(dep_mask);
+          else
+          {
+            bool dominated = false;
+            for (LegionVector<FieldMask>::aligned::iterator fit =
+                 finder->second.begin(); fit != finder->second.end(); fit++)
+            {
+              if (!(dep_mask - *fit))
+              {
+                dominated = true;
+                break;
+              }
+              FieldMask overlap = dep_mask & *fit;
+              if (!!overlap)
+              {
+                dominated = true;
+                *fit |= dep_mask;
+                break;
+              }
+            }
+            if (!dominated)
+              finder->second.push_back(dep_mask);
+          }
         }
         else
         {
@@ -757,9 +796,9 @@ namespace Legion {
             assert(internal_dependences.find(src_key) != 
                    internal_dependences.end());
 #endif
-            internal_dependences[src_key].push_back(
-                DependenceRecord(finder->second, target_idx, source_idx,
-                                 validates, dtype, dep_mask));
+            DependentPair r(finder->second, target_idx, source_idx,
+                validates, dtype);
+            internal_dependences[src_key][r].push_back(dep_mask);
           }
         }
       }
@@ -769,7 +808,7 @@ namespace Legion {
         std::pair<InternalOp*,GenerationID> 
           local_key(static_cast<InternalOp*>(target), tar_gen);
         std::map<std::pair<InternalOp*,GenerationID>,
-                 LegionVector<DependenceRecord>::aligned>::const_iterator
+                DependenceMap, CmpDepRec>::const_iterator
           internal_finder = internal_dependences.find(local_key);
         if (internal_finder != internal_dependences.end())
         {
@@ -778,16 +817,20 @@ namespace Legion {
           {
             // Iterate over the internal operation dependences and 
             // translate them to our dependences
-            for (LegionVector<DependenceRecord>::aligned::const_iterator
-                  it = internal_finder->second.begin(); 
-                  it != internal_finder->second.end(); it++)
+            for (DependenceMap::const_iterator it =
+                 internal_finder->second.begin(); it !=
+                 internal_finder->second.end(); it++)
             {
-              FieldMask overlap = it->dependent_mask & dep_mask;
-              if (!overlap)
-                continue;
-              dependences.back().push_back(
-                  DependenceRecord(it->operation_idx, it->prev_idx,
-                     source_idx, it->validates, it->dtype, overlap));
+              const DependentPair &r = it->first;
+              for (LegionVector<FieldMask>::aligned::const_iterator fit =
+                   it->second.begin(); fit !=
+                   it->second.end(); fit++)
+              {
+                FieldMask overlap = *fit & dep_mask;
+                if (!overlap)
+                  continue;
+                dependences.back()[r].push_back(overlap);
+              }
             }
           }
           else
@@ -800,18 +843,45 @@ namespace Legion {
             assert(internal_dependences.find(src_key) != 
                    internal_dependences.end());
 #endif
-            LegionVector<DependenceRecord>::aligned &internal_deps = 
-                                              internal_dependences[src_key];
-            for (LegionVector<DependenceRecord>::aligned::const_iterator
-                  it = internal_finder->second.begin(); 
-                  it != internal_finder->second.end(); it++)
+            DependenceMap &internal_deps = internal_dependences[src_key];
+            for (DependenceMap::const_iterator it =
+                 internal_finder->second.begin(); it !=
+                 internal_finder->second.end(); it++)
             {
-              FieldMask overlap = it->dependent_mask & dep_mask;
-              if (!overlap)
-                continue;
-              internal_deps.push_back(
-                  DependenceRecord(it->operation_idx, it->prev_idx,
-                    source_idx, it->validates, it->dtype, overlap));
+              const DependentPair &r = it->first;
+              for (LegionVector<FieldMask>::aligned::const_iterator fit =
+                   it->second.begin(); fit != it->second.end(); fit++)
+              {
+                FieldMask target_overlap = *fit & dep_mask;
+                if (!target_overlap)
+                  continue;
+
+                DependenceMap::iterator finder = internal_deps.find(r);
+                if (finder == internal_deps.end())
+                  internal_deps[r].push_back(target_overlap);
+                else
+                {
+                  bool dominated = false;
+                  for (LegionVector<FieldMask>::aligned::iterator fit =
+                       finder->second.begin(); fit != finder->second.end(); fit++)
+                  {
+                    if (!(target_overlap - *fit))
+                    {
+                      dominated = true;
+                      break;
+                    }
+                    FieldMask source_overlap = target_overlap & *fit;
+                    if (!!source_overlap)
+                    {
+                      dominated = true;
+                      *fit |= target_overlap;
+                      break;
+                    }
+                  }
+                  if (!dominated)
+                    finder->second.push_back(target_overlap);
+                }
+              }
             }
           }
         }

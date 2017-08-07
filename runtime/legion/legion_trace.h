@@ -215,13 +215,67 @@ namespace Legion {
       // record transitive dependences on the other operations in the
       // trace that we would have interfered with had the internal operations
       // not been necessary.
+      struct DependentPair {
+      public:
+        DependentPair(int idx)
+          : operation_idx(idx), prev_idx(-1), next_idx(-1),
+            validates(false), dtype(TRUE_DEPENDENCE) { }
+        DependentPair(int op_idx, int pidx, int nidx,
+                      bool val, DependenceType d)
+          : operation_idx(op_idx), prev_idx(pidx),
+            next_idx(nidx), validates(val), dtype(d)
+            { }
+        DependentPair(const DependentPair &rhs)
+          : operation_idx(rhs.operation_idx), prev_idx(rhs.prev_idx),
+            next_idx(rhs.next_idx), validates(rhs.validates), dtype(rhs.dtype)
+            { }
+      public:
+        int operation_idx;
+        int prev_idx;
+        int next_idx;
+        bool validates;
+        DependenceType dtype;
+      };
+
+      class CmpDepRec {
+      public:
+        inline bool operator()(const DependentPair &lhs,
+                               const DependentPair &rhs) const
+        {
+          if (lhs.operation_idx == rhs.operation_idx)
+          {
+            if (lhs.prev_idx == rhs.prev_idx)
+            {
+              if (lhs.next_idx == rhs.next_idx)
+              {
+                if (lhs.dtype == rhs.dtype)
+                {
+                  if (lhs.validates >= rhs.validates) return false;
+                  else return true;
+                }
+                else if (lhs.dtype < rhs.dtype)  return true;
+                else /* lhs.dtype > rhs.dtype */ return false;
+              }
+              else if (lhs.next_idx < rhs.next_idx)  return true;
+              else /* lhs.next_idx > rhs.next_idx */ return false;
+            }
+            else if (lhs.prev_idx < rhs.prev_idx)  return true;
+            else /* lhs.prev_idx > rhs.prev_idx */ return false;
+          }
+          else if (lhs.operation_idx < rhs.operation_idx)  return true;
+          else /* lhs.operation_idx > rhs.operation_idx */ return false;
+        }
+      };
+      typedef std::map<DependentPair,
+                       LegionVector<FieldMask>::aligned,
+                       CmpDepRec> DependenceMap;
       std::map<std::pair<InternalOp*,GenerationID>,
-               LegionVector<DependenceRecord>::aligned> internal_dependences;
+               DependenceMap> internal_dependences;
     protected: 
       // This is the generalized form of the dependences
       // For each operation, we remember a list of operations that
       // it dependens on and whether it is a validates the region
-      std::deque<LegionVector<DependenceRecord>::aligned> dependences;
+      std::deque<DependenceMap> dependences;
       // Metadata for checking the validity of a trace when it is replayed
       std::vector<OperationInfo> op_info;
     protected:
@@ -288,6 +342,9 @@ namespace Legion {
       LegionTrace *local_trace;
     };
 
+    /**
+     * \class TraceCompleteOp
+     */
     class PhysicalTrace {
     public:
       PhysicalTrace(void);
