@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- runs-with:
--- [[], ["-ll:rsize", "10", "-fopenmp", "1", "-ll:ocpu", "1"]]
+-- [["-ll:rsize", "10", "-fopenmp", "1", "-ll:ocpu", "1"]]
 
 import "regent"
 import "bishop"
