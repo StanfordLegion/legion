@@ -5534,7 +5534,7 @@ namespace Legion {
       trace_info.memoizing = memoizing;
       trace_info.is_point_task = false;
       trace_info.trace = trace->get_physical_trace();
-      trace_info.trace_local_id = trace_info.trace->get_trace_local_id(this);
+      trace_info.trace_local_id = trace_local_id;
     }
 
     //--------------------------------------------------------------------------
@@ -6505,8 +6505,7 @@ namespace Legion {
       // TODO: This chain of deferences is unsafe on multi-node
       IndexTask* index_owner = slice_owner->index_owner;
       trace_info.trace = index_owner->get_trace()->get_physical_trace();
-      trace_info.trace_local_id =
-        trace_info.trace->get_trace_local_id(index_owner);
+      trace_info.trace_local_id = trace_local_id;
       trace_info.color = index_point;
     }
 
@@ -7478,6 +7477,7 @@ namespace Legion {
       result->index_owner = this;
       result->remote_owner_uid = parent_ctx->get_unique_id();
       result->memoizing = memoizing;
+      result->trace_local_id = trace_local_id;
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_index_slice(get_unique_id(), 
                                    result->get_unique_id());
@@ -8413,6 +8413,7 @@ namespace Legion {
       result->index_owner = this->index_owner;
       result->remote_owner_uid = this->remote_owner_uid;
       result->memoizing = memoizing;
+      result->trace_local_id = trace_local_id;
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_slice_slice(get_unique_id(), 
                                    result->get_unique_id());
@@ -8493,6 +8494,7 @@ namespace Legion {
       result->must_epoch_task = this->must_epoch_task;
       result->index_domain = this->index_domain;
       result->memoizing = memoizing;
+      result->trace_local_id = trace_local_id;
       // Now figure out our local point information
       result->initialize_point(this, point, point_arguments);
       if (Runtime::legion_spy_enabled)

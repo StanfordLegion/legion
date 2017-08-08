@@ -451,7 +451,7 @@ namespace Legion {
       {
         if (physical_trace == NULL)
           physical_trace = new PhysicalTrace();
-        physical_trace->record_trace_local_id(op, index);
+        op->set_trace_local_id(index);
       }
       // Only need to save this in the map if we are not done tracing
       if (tracing)

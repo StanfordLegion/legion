@@ -94,6 +94,7 @@ namespace Legion {
       trace = NULL;
       tracing = false;
       memoizing = false;
+      trace_local_id = (unsigned)-1;
       must_epoch = NULL;
 #ifdef DEBUG_LEGION
       assert(mapped_event.exists());
@@ -220,6 +221,16 @@ namespace Legion {
       trace->add_reference();
       tracing = is_tracing;
       trace->record_static_dependences(this, dependences);
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::set_trace_local_id(unsigned id)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(memoizing);
+#endif
+      trace_local_id = id;
     }
 
     //--------------------------------------------------------------------------

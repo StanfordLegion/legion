@@ -220,6 +220,7 @@ namespace Legion {
       inline bool already_traced(void) const 
         { return ((trace != NULL) && !tracing); }
       inline LegionTrace* get_trace(void) const { return trace; }
+      inline unsigned get_trace_local_id() const { return trace_local_id; }
       inline unsigned get_ctx_index(void) const { return context_index; }
     public:
       // Be careful using this call as it is only valid when the operation
@@ -239,6 +240,7 @@ namespace Legion {
                                    LogicalPartition start_node);
       void set_trace(LegionTrace *trace, bool is_tracing,
                      const std::vector<StaticDependence> *dependences);
+      void set_trace_local_id(unsigned id);
       void set_must_epoch(MustEpochOp *epoch, bool do_registration);
     public:
       // Localize a region requirement to its parent context
@@ -542,6 +544,8 @@ namespace Legion {
       bool tracing;
       // Track whether we are memoizing physical analysis for this operation
       bool memoizing;
+      // The id local to a trace
+      unsigned trace_local_id;
       // Our must epoch if we have one
       MustEpochOp *must_epoch;
       // A set list or recorded dependences during logical traversal
