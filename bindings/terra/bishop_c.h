@@ -103,6 +103,10 @@ bishop_processor_list_t
 bishop_filter_processors_by_isa(bishop_processor_list_t,
                                 bishop_isa_t);
 
+bishop_processor_list_t
+bishop_filter_processors_by_kind(bishop_processor_list_t,
+                                 legion_processor_kind_t);
+
 bishop_memory_list_t
 bishop_filter_memories_by_visibility(legion_processor_t);
 

@@ -105,7 +105,7 @@ bishop_all_processors()
   {
     // FIXME: need to change this if we add more processors useful for
     // mapping purporses
-    if (it->kind() == Processor::LOC_PROC || it->kind() == Processor::TOC_PROC)
+    if (it->kind() != Processor::UTIL_PROC)
       procs_.list[idx++] = CObjectWrapper::wrap(*it);
   }
   procs_.size = idx;
@@ -167,6 +167,26 @@ bishop_filter_processors_by_isa(bishop_processor_list_t source,
           break;
         }
     }
+  }
+
+  bishop_processor_list_t result_ = bishop_create_processor_list(result.size());
+  for (unsigned i = 0; i < result.size(); ++i)
+    result_.list[i] = result[i];
+  return result_;
+}
+
+bishop_processor_list_t
+bishop_filter_processors_by_kind(bishop_processor_list_t source,
+                                 legion_processor_kind_t kind_)
+{
+  vector<legion_processor_t> result;
+
+  Processor::Kind kind = CObjectWrapper::unwrap(kind_);
+  for (unsigned i = 0; i < source.size; ++i)
+  {
+    legion_processor_t proc_ = source.list[i];
+    Processor proc = CObjectWrapper::unwrap(proc_);
+    if (proc.kind() == kind) result.push_back(proc_);
   }
 
   bishop_processor_list_t result_ = bishop_create_processor_list(result.size());
