@@ -355,12 +355,21 @@ namespace Legion {
     public:
       void record_trace_local_id(Operation* op, unsigned local_id);
       unsigned get_trace_local_id(Operation* op);
-      void record_target_views(PhysicalTraceInfo *trace_info,
+      void record_target_views(PhysicalTraceInfo &trace_info,
                                unsigned idx,
-                               const std::vector<InstanceView*>& target_views);
-      void get_target_views(PhysicalTraceInfo *trace_info,
+                               const std::vector<InstanceView*> &target_views);
+      void get_target_views(PhysicalTraceInfo &trace_info,
                             unsigned idx,
-                            std::vector<InstanceView*>& target_views) const;
+                            std::vector<InstanceView*> &target_views) const;
+      void record_mapper_output(PhysicalTraceInfo &trace_info,
+                                const Mapper::MapTaskOutput &output,
+                             const std::deque<InstanceSet> &physical_instances);
+      void get_mapper_output(PhysicalTraceInfo &trace_info,
+                             VariantID &chosen_variant,
+                             TaskPriority &task_priority,
+                             bool &postmap_task,
+                             std::vector<Processor> &target_proc,
+                             std::deque<InstanceSet> &physical_instances) const;
     public:
       void fix_trace(void);
       bool is_fixed(void) const { return fixed; }
@@ -368,11 +377,25 @@ namespace Legion {
       bool fixed;
       Reservation trace_lock;
       LegionMap<UniqueID, unsigned>::aligned trace_local_ids;
+
       typedef LegionVector<LegionVector<InstanceView*>::aligned >::aligned
         CachedViews;
-      typedef LegionMap<std::pair<unsigned, DomainPoint>, CachedViews>::aligned
-        CachedViewsMap;
-      CachedViewsMap cached_views_map;
+
+      struct CachedMapping
+      {
+        VariantID               chosen_variant;
+        TaskPriority            task_priority;
+        bool                    postmap_task;
+        std::vector<Processor>  target_procs;
+        std::deque<InstanceSet> physical_instances;
+        CachedViews             target_views;
+      };
+
+      typedef
+        LegionMap<std::pair<unsigned, DomainPoint>, CachedMapping>::aligned
+        CachedMappings;
+
+      CachedMappings cached_mappings;
     };
 
   }; // namespace Internal 

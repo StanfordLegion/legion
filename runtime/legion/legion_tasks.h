@@ -407,12 +407,14 @@ namespace Legion {
                                     Mapper::MapTaskOutput &output,
                                     MustEpochOp *must_epoch_owner,
                                     std::vector<InstanceSet> &valid_instances); 
+      void replay_map_task_output(PhysicalTraceInfo &trace_info); 
     protected: // mapper helper calls
       void validate_target_processors(const std::vector<Processor> &prcs) const;
       void validate_variant_selection(MapperManager *local_mapper,
                     VariantImpl *impl, const char *call_name) const;
     protected:
-      void invoke_mapper(MustEpochOp *must_epoch_owner);
+      void invoke_mapper(MustEpochOp *must_epoch_owner,
+                         PhysicalTraceInfo &trace_info);
       void map_all_regions(ApEvent user_event,
                            MustEpochOp *must_epoch_owner = NULL); 
       void perform_post_mapping(void);

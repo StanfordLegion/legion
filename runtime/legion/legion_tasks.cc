@@ -3266,6 +3266,45 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void SingleTask::replay_map_task_output(PhysicalTraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<Processor> procs;
+      trace_info.trace->get_mapper_output(trace_info, selected_variant,
+          task_priority, perform_postmap, procs, physical_instances);
+
+      if (Runtime::separate_runtime_instances)
+      {
+        target_processors.resize(1);
+        target_processors[0] = this->target_proc;
+      }
+      else // the common case
+        target_processors = procs;
+
+      virtual_mapped.resize(regions.size(), false);
+      std::map<PhysicalManager*,std::pair<unsigned,bool> > *acquired =
+        get_acquired_instances_ref();
+      std::vector<PhysicalManager*> unacquired;
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        InstanceSet &instances = physical_instances[idx];
+        if (instances.is_virtual_mapping())
+          virtual_mapped[idx] = true;
+        else
+        {
+          size_t num_instances = instances.size();
+          for (unsigned iidx = 0; iidx < num_instances; ++iidx)
+          {
+            PhysicalManager *manager = instances[iidx].get_manager();
+            if (acquired->find(manager) == acquired->end())
+              unacquired.push_back(manager);
+          }
+        }
+      }
+      runtime->forest->perform_missing_acquires(this, *acquired, unacquired);
+    }
+
+    //--------------------------------------------------------------------------
     void SingleTask::validate_target_processors(
                                  const std::vector<Processor> &processors) const
     //--------------------------------------------------------------------------
@@ -3466,9 +3505,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::invoke_mapper(MustEpochOp *must_epoch_owner)
+    void SingleTask::invoke_mapper(MustEpochOp *must_epoch_owner,
+                                   PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
+      if (trace_info.trace != NULL && trace_info.trace->is_fixed())
+      {
+        // TODO: Do not support must epoch tasks yet
+        assert (must_epoch_owner == NULL);
+        replay_map_task_output(trace_info);
+        return;
+      }
       Mapper::MapTaskInput input;
       Mapper::MapTaskOutput output;
       // Initialize the mapping input which also does all the traversal
@@ -3543,6 +3590,10 @@ namespace Legion {
       // Now we can convert the mapper output into our physical instances
       finalize_map_task_output(input, output, must_epoch_owner, 
                                valid_instances);
+
+      if (trace_info.trace != NULL && !trace_info.trace->is_fixed())
+        trace_info.trace->record_mapper_output(trace_info, output,
+                                               physical_instances);
     }
 
     //--------------------------------------------------------------------------
@@ -3566,7 +3617,7 @@ namespace Legion {
         get_physical_trace_info(trace_info);
 
       // Now do the mapping call
-      invoke_mapper(must_epoch_op);
+      invoke_mapper(must_epoch_op, trace_info);
       const bool multiple_requirements = (regions.size() > 1);
       std::set<Reservation> read_only_reservations;
       // This is the price of allowing read-only requirements to
@@ -6505,6 +6556,9 @@ namespace Legion {
       // TODO: This chain of deferences is unsafe on multi-node
       IndexTask* index_owner = slice_owner->index_owner;
       trace_info.trace = index_owner->get_trace()->get_physical_trace();
+#ifdef DEBUG_LEGION
+      assert(trace_info.trace != NULL);
+#endif
       trace_info.trace_local_id = trace_local_id;
       trace_info.color = index_point;
     }

@@ -42,6 +42,8 @@ namespace Legion {
     LegionTrace::~LegionTrace(void)
     //--------------------------------------------------------------------------
     {
+      if (physical_trace != NULL)
+        delete physical_trace;
     }
 
     //--------------------------------------------------------------------------
@@ -1131,6 +1133,18 @@ namespace Legion {
     {
       trace_lock.destroy_reservation();
       trace_lock = Reservation::NO_RESERVATION;
+      // Relesae references to instances
+      for (CachedMappings::iterator it = cached_mappings.begin();
+           it != cached_mappings.end(); ++it)
+      {
+        for (std::deque<InstanceSet>::iterator pit =
+              it->second.physical_instances.begin(); pit !=
+              it->second.physical_instances.end(); pit++)
+        {
+          pit->remove_valid_references(PHYSICAL_TRACE_REF);
+          pit->clear();
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1168,15 +1182,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTrace::record_target_views(PhysicalTraceInfo *trace_info,
+    void PhysicalTrace::record_target_views(PhysicalTraceInfo &trace_info,
                                             unsigned idx,
-                                 const std::vector<InstanceView*>& target_views)
+                                 const std::vector<InstanceView*> &target_views)
     //--------------------------------------------------------------------------
     {
       AutoLock t_lock(trace_lock);
 
-      CachedViews &cached_views = cached_views_map[
-        std::make_pair(trace_info->trace_local_id, trace_info->color)];
+      CachedViews &cached_views = cached_mappings[
+        std::make_pair(trace_info.trace_local_id, trace_info.color)]
+          .target_views;
       cached_views.resize(idx + 1);
       LegionVector<InstanceView*>::aligned &cache = cached_views[idx];
       cache.resize(target_views.size());
@@ -1185,19 +1200,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTrace::get_target_views(PhysicalTraceInfo *trace_info,
+    void PhysicalTrace::get_target_views(PhysicalTraceInfo &trace_info,
                                          unsigned idx,
-                                 std::vector<InstanceView*>& target_views) const
+                                 std::vector<InstanceView*> &target_views) const
     //--------------------------------------------------------------------------
     {
       AutoLock t_lock(trace_lock, 1, false/*exclusive*/);
 
-      CachedViewsMap::const_iterator finder = cached_views_map.find(
-          std::make_pair(trace_info->trace_local_id, trace_info->color));
+      CachedMappings::const_iterator finder = cached_mappings.find(
+          std::make_pair(trace_info.trace_local_id, trace_info.color));
 #ifdef DEBUG_LEGION
-      assert(finder != cached_views_map.end());
+      assert(finder != cached_mappings.end());
 #endif
-      const CachedViews &cached_views = finder->second;
+      const CachedViews &cached_views = finder->second.target_views;
       const LegionVector<InstanceView*>::aligned &cache = cached_views[idx];
       for (unsigned i = 0; i < target_views.size(); ++i)
         target_views[i] = cache[i];
@@ -1213,6 +1228,50 @@ namespace Legion {
       fixed = true;
     }
 
+    //--------------------------------------------------------------------------
+    void PhysicalTrace::record_mapper_output(PhysicalTraceInfo &trace_info,
+                                            const Mapper::MapTaskOutput &output,
+                              const std::deque<InstanceSet> &physical_instances)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(trace_lock);
+
+      CachedMapping &mapping = cached_mappings[
+        std::make_pair(trace_info.trace_local_id, trace_info.color)];
+      mapping.target_procs = output.target_procs;
+      mapping.chosen_variant = output.chosen_variant;
+      mapping.task_priority = output.task_priority;
+      mapping.postmap_task = output.postmap_task;
+      mapping.physical_instances = physical_instances;
+      // Hold the reference to each instance to prevent it from being collected
+      for (std::deque<InstanceSet>::iterator it =
+            mapping.physical_instances.begin(); it !=
+            mapping.physical_instances.end(); it++)
+        it->add_valid_references(PHYSICAL_TRACE_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTrace::get_mapper_output(PhysicalTraceInfo &trace_info,
+                                          VariantID &chosen_variant,
+                                          TaskPriority &task_priority,
+                                          bool &postmap_task,
+                                          std::vector<Processor> &target_procs,
+                              std::deque<InstanceSet> &physical_instances) const
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(trace_lock, 1, false/*exclusive*/);
+
+      CachedMappings::const_iterator finder = cached_mappings.find(
+          std::make_pair(trace_info.trace_local_id, trace_info.color));
+#ifdef DEBUG_LEGION
+      assert(finder != cached_mappings.end());
+#endif
+      chosen_variant = finder->second.chosen_variant;
+      task_priority = finder->second.task_priority;
+      postmap_task = finder->second.postmap_task;
+      target_procs = finder->second.target_procs;
+      physical_instances = finder->second.physical_instances;
+    }
     /////////////////////////////////////////////////////////////
     // PhysicalTraceInfo
     /////////////////////////////////////////////////////////////

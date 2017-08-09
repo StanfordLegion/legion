@@ -16392,22 +16392,36 @@ namespace Legion {
                                restricted_views);
         }
         std::vector<InstanceView*> new_views;
-        if (!defer_add_users && (targets.size() > 1))
-          new_views.resize(targets.size());
+        new_views.resize(targets.size());
+        if (trace_info.memoizing && trace_info.trace != NULL &&
+            trace_info.trace->is_fixed())
+        {
+          trace_info.trace->get_target_views(trace_info, info.index,
+              new_views);
+        }
+        else
+        {
+          for (unsigned idx = 0; idx < targets.size(); idx++)
+          {
+            InstanceRef &ref = targets[idx];
+#ifdef DEBUG_LEGION
+            assert(!ref.is_virtual_ref());
+#endif
+            LogicalView *view = convert_reference(ref, context);
+#ifdef DEBUG_LEGION
+            assert(view->is_instance_view());
+            assert(view->as_instance_view()->is_reduction_view());
+#endif
+            new_views[idx] = view->as_instance_view();
+          }
+          trace_info.trace->record_target_views(trace_info, info.index,
+              new_views);
+        }
         LegionMap<ReductionView*,FieldMask>::aligned reduce_out_views;
         for (unsigned idx = 0; idx < targets.size(); idx++)
         {
           InstanceRef &ref = targets[idx];
-#ifdef DEBUG_LEGION
-          assert(!ref.is_virtual_ref());
-#endif
-          LogicalView *view = convert_reference(ref, context);
-#ifdef DEBUG_LEGION
-          assert(view->is_instance_view());
-          assert(view->as_instance_view()->is_reduction_view());
-#endif
-          ReductionView *new_view = 
-            view->as_instance_view()->as_reduction_view();
+          ReductionView *new_view = new_views[idx]->as_reduction_view();
           const FieldMask &user_mask = ref.get_valid_fields(); 
           // Only add reductions which are not restricted
           if (!!restricted_fields)
@@ -16507,11 +16521,11 @@ namespace Legion {
           if (!trace_info.trace->is_fixed())
           {
             convert_target_views(targets, context, new_views);
-            trace_info.trace->record_target_views(&trace_info, info.index,
+            trace_info.trace->record_target_views(trace_info, info.index,
                 new_views);
           }
           else
-            trace_info.trace->get_target_views(&trace_info, info.index,
+            trace_info.trace->get_target_views(trace_info, info.index,
                 new_views);
         }
         else
