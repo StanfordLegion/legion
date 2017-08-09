@@ -323,7 +323,6 @@ void PerfMapper::map_task(const MapperContext  ctx,
             .add_constraint(OrderingConstraint(dimension_ordering, false));
           runtime->create_physical_instance(ctx, target_memory,
                 constraints, target_region, inst);
-          runtime->set_garbage_collection_priority(ctx, inst, GC_NEVER_PRIORITY);
           runtime->set_garbage_collection_priority(ctx, inst,
               cache_mapping ? GC_NEVER_PRIORITY : GC_FIRST_PRIORITY);
           cached_mapping[idx].push_back(inst);
@@ -945,7 +944,8 @@ void top_level_task(const Task *task,
   {
     for (unsigned l = 0; l < num_loops; ++l)
     {
-      if (tracing) runtime->begin_trace(ctx, 0);
+      if (tracing && (!alternate_loop || l % pattern.size() == 0))
+        runtime->begin_trace(ctx, 0);
       for (unsigned p = 0; p < num_partitions; ++p)
       {
         IndexTaskLauncher launcher(DO_NOTHING_TASK_ID, launch_domain,
@@ -994,7 +994,8 @@ void top_level_task(const Task *task,
         }
         runtime->execute_index_space(ctx, launcher);
       }
-      if (tracing) runtime->end_trace(ctx, 0);
+      if (tracing && (!alternate_loop || (l + 1) % pattern.size() == 0))
+        runtime->end_trace(ctx, 0);
     }
   }
   barrier_for_block.arrive(1);
