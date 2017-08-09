@@ -122,8 +122,6 @@ namespace Legion {
         delete dependence_tracker.commit;
         dependence_tracker.commit = NULL;
       }
-      if ((trace != NULL) && (trace->remove_reference()))
-        delete trace;
       if (!mapped_event.has_triggered())
         Runtime::trigger_event(mapped_event);
       if (!resolved_event.has_triggered())
@@ -218,7 +216,6 @@ namespace Legion {
       assert(t != NULL);
 #endif
       trace = t; 
-      trace->add_reference();
       tracing = is_tracing;
       trace->record_static_dependences(this, dependences);
     }
