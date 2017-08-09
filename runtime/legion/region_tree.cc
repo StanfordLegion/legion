@@ -16393,8 +16393,10 @@ namespace Legion {
         }
         std::vector<InstanceView*> new_views;
         new_views.resize(targets.size());
-        if (trace_info.memoizing && trace_info.trace != NULL &&
-            trace_info.trace->is_fixed())
+#ifdef DEBUG_LEGION
+        assert(!trace_info.memoizing || trace_info.trace != NULL);
+#endif
+        if (trace_info.memoizing && trace_info.trace->is_fixed())
         {
           trace_info.trace->get_target_views(trace_info, info.index,
               new_views);
@@ -16414,8 +16416,9 @@ namespace Legion {
 #endif
             new_views[idx] = view->as_instance_view();
           }
-          trace_info.trace->record_target_views(trace_info, info.index,
-              new_views);
+          if (trace_info.memoizing && !trace_info.trace->is_fixed())
+            trace_info.trace->record_target_views(trace_info, info.index,
+                new_views);
         }
         LegionMap<ReductionView*,FieldMask>::aligned reduce_out_views;
         for (unsigned idx = 0; idx < targets.size(); idx++)
