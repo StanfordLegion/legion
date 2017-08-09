@@ -1898,6 +1898,8 @@ namespace Legion {
       inline void attach_hdf5(const char *file_name,
                               const std::map<FieldID,const char*> &field_map,
                               LegionFileMode mode);
+      inline void attach_array(const std::map<FieldID,void*> &field_pointer_map,
+                              LegionFileMode mode);
     public:
       inline void add_field_pointer(FieldID fid, void *ptr);
       inline void set_pitch(unsigned dim, size_t pitch);
@@ -5208,6 +5210,20 @@ namespace Legion {
       LEGION_DEPRECATED("Detaching generic file type is deprecated "
                         "in favor of generic detach interface.")
       void detach_file(Context ctx, PhysicalRegion region);
+      
+      PhysicalRegion attach_fortran_array(Context ctx,
+                                          LogicalRegion handle, LogicalRegion parent,
+                                          const std::map<FieldID,void*> &field_pointer_map,
+                                          LegionFileMode mode);
+      
+      void detach_fortran_array(Context ctx, PhysicalRegion region);                                       
+      
+      PhysicalRegion attach_c_array(Context ctx,
+                                    LogicalRegion handle, LogicalRegion parent,
+                                    const std::map<FieldID,void*> &field_pointer_map,
+                                    LegionFileMode mode);
+      
+      void detach_c_array(Context ctx, PhysicalRegion region);
     public:
       //------------------------------------------------------------------------
       // Copy Operations

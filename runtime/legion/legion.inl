@@ -3565,6 +3565,16 @@ namespace Legion {
       mode = m;
       field_files = field_map;
     }
+    
+    //--------------------------------------------------------------------------
+    inline void AttachLauncher::attach_array(const std::map<FieldID,void*> &field_pointer_map,
+                                LegionFileMode m)
+    //--------------------------------------------------------------------------
+    {
+      file_name = "ARRAY";
+      mode = m;
+      field_pointers = field_pointer_map;
+    }
 
     //--------------------------------------------------------------------------
     inline void AttachLauncher::add_field_pointer(FieldID fid, void *ptr)

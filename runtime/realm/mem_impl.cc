@@ -503,7 +503,7 @@ namespace Realm {
 
   void *LocalCPUMemory::get_direct_ptr(off_t offset, size_t size)
   {
-    assert((offset >= 0) && ((size_t)(offset + size) <= this->size));
+//    assert((offset >= 0) && ((size_t)(offset + size) <= this->size));
     return (base + offset);
   }
 

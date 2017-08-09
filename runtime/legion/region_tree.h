@@ -949,6 +949,10 @@ namespace Legion {
                                    const std::vector<size_t> &field_sizes,
                                    const std::vector<const char*> &field_files,
                                    bool read_only) = 0;
+      virtual PhysicalInstance create_array_instance(ExternalResource resource,
+                                   const std::vector<size_t> &field_sizes,
+                                   const std::vector<void*> &field_pointers,
+                                   bool read_only) = 0;
     public:
       virtual void get_launch_space_domain(Domain &launch_domain) = 0;
       virtual void validate_slicing(const std::vector<IndexSpace> &slice_spaces,
@@ -1170,6 +1174,10 @@ namespace Legion {
                                    const std::vector<Realm::FieldID> &field_ids,
                                    const std::vector<size_t> &field_sizes,
                                    const std::vector<const char*> &field_files,
+                                   bool read_only);
+      virtual PhysicalInstance create_array_instance(ExternalResource resource,
+                                   const std::vector<size_t> &field_sizes,
+                                   const std::vector<void*> &field_pointers,
                                    bool read_only);
     public:
       virtual void get_launch_space_domain(Domain &launch_domain);

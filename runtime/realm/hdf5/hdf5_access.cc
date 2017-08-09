@@ -14,6 +14,9 @@
  */
 
 // HDF5-specific instance layouts and accessors
+#include "inst_impl.h"
+#include "runtime_impl.h"
+#include "mem_impl.h"
 
 #include "realm/hdf5/hdf5_access.h"
 #include "realm/deppart/inst_helper.h"
@@ -80,5 +83,51 @@ namespace Realm {
 							      const ProfilingRequestSet&, \
 							      Event);
   FOREACH_NT(DOIT)
+    
+  
+  template <int N, typename T>
+  /*static*/ Event RegionInstance::create_array_instance(RegionInstance& inst,
+							  const ZIndexSpace<N,T>& space,
+							  const std::vector<size_t> &field_sizes,
+                const std::vector<void*> &field_pointers,
+							  size_t block_size,
+							  const ProfilingRequestSet& reqs,
+							  Event wait_on /*= Event::NO_EVENT*/)
+  {
+    Memory memory = Machine::MemoryQuery(Machine::get_machine())
+      .local_address_space()
+      .only_kind(Memory::SYSTEM_MEM)
+      .first();
+    assert(memory.exists());
+      
+    // smoosh hybrid block sizes back to SOA for now
+    if(block_size > 1)
+      block_size = 0;
+
+    InstanceLayoutConstraints ilc(field_sizes, block_size);
+    InstanceLayoutGeneric *layout = InstanceLayoutGeneric::choose_instance_layout(space, ilc);
+    //InstanceLayout<N,T> *layout = new InstanceLayout<N,T>;
+    layout->bytes_used = 0;
+    layout->alignment_reqd = 0;  // no allocation being made
+  //  layout->space = space;
+//    layout->piece_lists.resize(field_sizes.size());
+    Event e = create_instance(inst, memory, layout, reqs, wait_on);
+    RegionInstanceImpl *inst_impl = get_runtime()->get_instance_impl(inst);
+    LocalCPUMemory *m_impl = (LocalCPUMemory *)get_runtime()->get_memory_impl(memory);
+    unsigned char* ptr = (unsigned char*)field_pointers[0];
+    unsigned char* base = (unsigned char*)m_impl->base;
+    inst_impl->metadata.inst_offset = ptr - base;
+    return e;
+  }
+
+#define DOIT_ARRAY(N,T) \
+  template Event RegionInstance::create_array_instance<N,T>(RegionInstance&, \
+							      const ZIndexSpace<N,T>&, \
+							      const std::vector<size_t>&, \
+							      const std::vector<void *>&, \
+							      size_t, \
+							      const ProfilingRequestSet&, \
+							      Event);
+  FOREACH_NT(DOIT_ARRAY)  
 
 }; // namespace Realm

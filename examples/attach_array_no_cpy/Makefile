@@ -27,9 +27,9 @@ USE_HDF         ?= 1		# Include HDF5 support (requires HDF5)
 ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
 
 # Put the binary file name here
-OUTFILE		?= attach_file 
+OUTFILE		?= attach_array 
 # List all the application source files here
-GEN_SRC		?= attach_file.cc	# .cc files
+GEN_SRC		?= attach_array.cc	# .cc files
 GEN_GPU_SRC	?=				# .cu files
 
 # You can modify these variables, some will be appended to by the runtime makefile
@@ -38,6 +38,8 @@ CC_FLAGS	?=
 NVCC_FLAGS	?=
 GASNET_FLAGS	?=
 LD_FLAGS	?=
+# For Point and Rect typedefs
+CC_FLAGS	+= -std=c++11
 
 ###########################################################################
 #

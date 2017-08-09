@@ -175,6 +175,15 @@ namespace Realm {
 				      const ProfilingRequestSet& prs,
 				      Event wait_on = Event::NO_EVENT);
 #endif
+              
+    template <int N, typename T>
+    static Event create_array_instance(RegionInstance& inst,
+				      const ZIndexSpace<N,T>& space,
+				      const std::vector<size_t> &field_sizes,
+				      const std::vector<void*> &field_pointers,
+				      size_t block_size,
+				      const ProfilingRequestSet& prs,
+				      Event wait_on = Event::NO_EVENT);
 
     void destroy(Event wait_on = Event::NO_EVENT) const;
 

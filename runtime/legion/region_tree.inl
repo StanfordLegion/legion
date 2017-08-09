@@ -2765,6 +2765,35 @@ namespace Legion {
 #endif
       return result;
     }
+    
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    PhysicalInstance IndexSpaceNodeT<DIM,T>::create_array_instance(
+                                    ExternalResource resource,
+                                    const std::vector<size_t> &field_sizes,
+                                    const std::vector<void*> &field_pointers,
+                                    bool read_only)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(context->runtime, REALM_CREATE_INSTANCE_CALL);
+      // Have to wait for the index space to be ready if necessary
+      Realm::ZIndexSpace<DIM,T> local_space;
+      get_realm_index_space(local_space, true/*tight*/);
+      // No profiling for these kinds of instances currently
+      Realm::ProfilingRequestSet requests;
+      PhysicalInstance result;
+      LgEvent ready(PhysicalInstance::create_array_instance(result, 
+							   local_space,
+							   field_sizes,
+							   field_pointers,
+							   0,
+							   requests));
+      // TODO
+      ready.lg_wait();
+     // assert(0 && "no HDF5 support");
+    //  result = PhysicalInstance::NO_INST;
+      return result;
+    }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>

@@ -5837,6 +5837,46 @@ namespace Legion {
     {
       runtime->detach_external_resource(ctx, region);
     }
+    
+    //--------------------------------------------------------------------------
+    PhysicalRegion Runtime::attach_fortran_array(Context ctx,
+                                                 LogicalRegion handle,
+                                                 LogicalRegion parent,
+                                 const std::map<FieldID,void*> &field_pointer_map,
+                                                 LegionFileMode mode)
+    //--------------------------------------------------------------------------
+    {
+      AttachLauncher launcher(EXTERNAL_FORTRAN_ARRAY, handle, parent);
+      launcher.attach_array(field_pointer_map, mode);
+      return runtime->attach_external_resource(ctx, launcher);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::detach_fortran_array(Context ctx, PhysicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+      runtime->detach_external_resource(ctx, region);
+    }
+    
+    //--------------------------------------------------------------------------
+    PhysicalRegion Runtime::attach_c_array(Context ctx,
+                                                 LogicalRegion handle,
+                                                 LogicalRegion parent,
+                                 const std::map<FieldID,void*> &field_pointer_map,
+                                                 LegionFileMode mode)
+    //--------------------------------------------------------------------------
+    {
+      AttachLauncher launcher(EXTERNAL_C_ARRAY, handle, parent);
+      launcher.attach_array(field_pointer_map, mode);
+      return runtime->attach_external_resource(ctx, launcher);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::detach_c_array(Context ctx, PhysicalRegion region)
+    //--------------------------------------------------------------------------
+    {
+      runtime->detach_external_resource(ctx, region);
+    }
 
     //--------------------------------------------------------------------------
     void Runtime::issue_copy_operation(Context ctx,const CopyLauncher &launcher)

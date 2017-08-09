@@ -8443,7 +8443,7 @@ namespace Legion {
       }
 #ifdef DEBUG_LEGION
       assert(layout != NULL);
-      assert(layout->constraints->specialized_constraint.is_file());
+   //   assert(layout->constraints->specialized_constraint.is_file());
 #endif
       DistributedID did = context->runtime->get_available_distributed_id(false);
       MemoryManager *memory = 

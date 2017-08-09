@@ -19,11 +19,14 @@
 #include <cstdlib>
 #include <unistd.h>
 #include <sys/types.h>
-#include <fcntl.h>
-#include "legion.h"
 #ifdef USE_HDF
 #include <hdf5.h>
 #endif
+#include "legion.h"
+#include <realm/machine.h>
+#include "mem_impl.h"
+#include "inst_impl.h"
+#include "runtime_impl.h"
 using namespace Legion;
 
 /*
@@ -50,63 +53,7 @@ enum FieldIDs {
   FID_CP
 };
 
-bool generate_disk_file(const char *file_name, int num_elements)
-{
-  // create the file if needed
-  int fd = open(file_name, O_CREAT | O_WRONLY, 0666);
-  if(fd < 0) {
-    perror("open");
-    return false;
-  }
-
-  // make it large enough to hold 'num_elements' doubles
-  int res = ftruncate(fd, num_elements * sizeof(double));
-  if(res < 0) {
-    perror("ftruncate");
-    close(fd);
-    return false;
-  }
-
-  // now close the file - the Legion runtime will reopen it on the attach
-  close(fd);
-  return true;
-}
-
-#ifdef USE_HDF
-bool generate_hdf_file(const char *file_name, const char *dataset_name, int num_elements)
-{
-  hid_t file_id = H5Fcreate(file_name, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
-  if(file_id < 0) {
-    printf("H5Fcreate failed: %lld\n", (long long)file_id);
-    return false;
-  }
-
-  hsize_t dims[1];
-  dims[0] = num_elements;
-  hid_t dataspace_id = H5Screate_simple(1, dims, NULL);
-  if(dataspace_id < 0) {
-    printf("H5Screate_simple failed: %lld\n", (long long)dataspace_id);
-    H5Fclose(file_id);
-    return false;
-  }
-
-  hid_t dataset = H5Dcreate2(file_id, dataset_name,
-			     H5T_IEEE_F64LE, dataspace_id,
-			     H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-  if(dataset < 0) {
-    printf("H5Dcreate2 failed: %lld\n", (long long)dataset);
-    H5Sclose(dataspace_id);
-    H5Fclose(file_id);
-    return false;
-  }
-
-  // close things up - attach will reopen later
-  H5Dclose(dataset);
-  H5Sclose(dataspace_id);
-  H5Fclose(file_id);
-  return true;
-}
-#endif
+double *my_ptr= NULL;
 
 void top_level_task(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
@@ -114,14 +61,7 @@ void top_level_task(const Task *task,
 {
   int num_elements = 1024;
   int num_subregions = 4;
-  char disk_file_name[256];
-  strcpy(disk_file_name, "checkpoint.dat");
-#ifdef USE_HDF
-  char hdf5_file_name[256];
-  char hdf5_dataset_name[256];
-  hdf5_file_name[0] = 0;
-  strcpy(hdf5_dataset_name, "FID_CP");
-#endif
+
   // Check for any command line arguments
   {
       const InputArgs &command_args = Runtime::get_input_args();
@@ -131,14 +71,6 @@ void top_level_task(const Task *task,
         num_elements = atoi(command_args.argv[++i]);
       if (!strcmp(command_args.argv[i],"-b"))
         num_subregions = atoi(command_args.argv[++i]);
-      if (!strcmp(command_args.argv[i],"-f"))
-	strcpy(disk_file_name, command_args.argv[++i]);
-#ifdef USE_HDF
-      if (!strcmp(command_args.argv[i],"-h"))
-	strcpy(hdf5_file_name, command_args.argv[++i]);
-      if (!strcmp(command_args.argv[i],"-d"))
-	strcpy(hdf5_dataset_name, command_args.argv[++i]);
-#endif
     }
   }
   printf("Running stencil computation for %d elements...\n", num_elements);
@@ -154,22 +86,34 @@ void top_level_task(const Task *task,
     allocator.allocate_field(sizeof(double),FID_DERIV);
   }
   LogicalRegion stencil_lr = runtime->create_logical_region(ctx, is, fs);
-
-  FieldSpace cp_fs = runtime->create_field_space(ctx);
-  {
-    FieldAllocator allocator = 
-      runtime->create_field_allocator(ctx, cp_fs);
-    allocator.allocate_field(sizeof(double), FID_CP);
-  }
-  LogicalRegion cp_lr = runtime->create_logical_region(ctx, is, cp_fs);
   
+  PhysicalRegion stencil_val_pr;
+  double *val_ptr = (double*)malloc(sizeof(double)*(num_elements));
+  for (int i = 0; i < num_elements; i++) {
+    val_ptr[i] = drand48();
+  }
+  std::map<FieldID,void*> field_pointer_map_val;
+  field_pointer_map_val[FID_VAL] = val_ptr;
+  printf("Attach array fid %d, ptr %p\n", FID_VAL, val_ptr);  
+  stencil_val_pr = runtime->attach_fortran_array(ctx, stencil_lr, stencil_lr, field_pointer_map_val,
+		 LEGION_FILE_READ_WRITE); 
+     
+  PhysicalRegion stencil_deriv_pr;
+  double *deriv_ptr = (double*)malloc(sizeof(double)*(num_elements));
+  std::map<FieldID,void*> field_pointer_map_deriv;
+  field_pointer_map_deriv[FID_DERIV] = deriv_ptr;
+  printf("Attach arrray fid %d, ptr %p\n", FID_DERIV, deriv_ptr);  
+  stencil_deriv_pr = runtime->attach_fortran_array(ctx, stencil_lr, stencil_lr, field_pointer_map_deriv,
+	  LEGION_FILE_READ_WRITE); 
+  my_ptr = deriv_ptr;
+       
   Rect<1> color_bounds(0,num_subregions-1);
   IndexSpaceT<1> color_is = runtime->create_index_space(ctx, color_bounds);
 
   IndexPartition disjoint_ip = 
     runtime->create_equal_partition(ctx, is, color_is);
   const int block_size = (num_elements + num_subregions - 1) / num_subregions;
-  Transform<1,1> transform;
+  Matrix<1,1> transform;
   transform[0][0] = block_size;
   Rect<1> extent(-2, block_size + 1);
   IndexPartition ghost_ip = 
@@ -181,7 +125,8 @@ void top_level_task(const Task *task,
     runtime->get_logical_partition(ctx, stencil_lr, ghost_ip);
 
   ArgumentMap arg_map;
-
+  
+#if 0
   IndexLauncher init_launcher(INIT_FIELD_TASK_ID, color_is,
                               TaskArgument(NULL, 0), arg_map);
   init_launcher.add_region_requirement(
@@ -189,6 +134,7 @@ void top_level_task(const Task *task,
                         WRITE_DISCARD, EXCLUSIVE, stencil_lr));
   init_launcher.add_field(0, FID_VAL);
   runtime->execute_index_space(ctx, init_launcher);
+#endif
 
   IndexLauncher stencil_launcher(STENCIL_TASK_ID, color_is,
        TaskArgument(&num_elements, sizeof(num_elements)), arg_map);
@@ -202,65 +148,6 @@ void top_level_task(const Task *task,
   stencil_launcher.add_field(1, FID_DERIV);
   runtime->execute_index_space(ctx, stencil_launcher);
 
-  // Launcher a copy operation that performs checkpoint
-  //struct timespec ts_start, ts_mid, ts_end;
-  //clock_gettime(CLOCK_MONOTONIC, &ts_start);
-  double ts_start, ts_mid, ts_end;
-  ts_start = Realm::Clock::current_time_in_microseconds();
-  PhysicalRegion cp_pr;
-#ifdef USE_HDF
-  if(*hdf5_file_name) {
-    // create the HDF5 file first - attach wants it to already exist
-    bool ok = generate_hdf_file(hdf5_file_name, hdf5_dataset_name, num_elements);
-    assert(ok);
-    std::map<FieldID,const char*> field_map;
-    field_map[FID_CP] = hdf5_dataset_name;
-    printf("Checkpointing data to HDF5 file '%s' (dataset='%s')\n",
-	   hdf5_file_name, hdf5_dataset_name);
-    cp_pr = runtime->attach_hdf5(ctx, hdf5_file_name, cp_lr, cp_lr, field_map,
-				 LEGION_FILE_READ_WRITE);
-  } else
-#endif
-  {
-    // create the disk file first - attach wants it to already exist
-    bool ok = generate_disk_file(disk_file_name, num_elements);
-    assert(ok);
-    std::vector<FieldID> field_vec;
-    field_vec.push_back(FID_CP);
-    printf("Checkpointing data to disk file '%s'\n",
-	   disk_file_name);
-    cp_pr = runtime->attach_file(ctx, disk_file_name, cp_lr, cp_lr, field_vec,
-				 LEGION_FILE_READ_WRITE);
-  }
-  //cp_pr.wait_until_valid();
-  CopyLauncher copy_launcher;
-  copy_launcher.add_copy_requirements(
-      RegionRequirement(stencil_lr, READ_ONLY, EXCLUSIVE, stencil_lr),
-      RegionRequirement(cp_lr, WRITE_DISCARD, EXCLUSIVE, cp_lr));
-  copy_launcher.add_src_field(0, FID_DERIV);
-  copy_launcher.add_dst_field(0, FID_CP);
-  runtime->issue_copy_operation(ctx, copy_launcher);
-  
-  //clock_gettime(CLOCK_MONOTONIC, &ts_mid);
-  ts_mid = Realm::Clock::current_time_in_microseconds();
-#ifdef USE_HDF
-  if(*hdf5_file_name) {
-    runtime->detach_hdf5(ctx, cp_pr);
-  } else
-#endif
-  {
-    runtime->detach_file(ctx, cp_pr);
-  }
-  //clock_gettime(CLOCK_MONOTONIC, &ts_end);
-  ts_end = Realm::Clock::current_time_in_microseconds();
-  //double attach_time = ((1.0 * (ts_mid.tv_sec - ts_start.tv_sec)) +
-  //                   (1e-9 * (ts_mid.tv_nsec - ts_start.tv_nsec)));
-  //double detach_time = ((1.0 * (ts_end.tv_sec - ts_mid.tv_sec)) +
-  //                   (1e-9 * (ts_end.tv_nsec - ts_mid.tv_nsec)));
-  double attach_time = 1e-6 * (ts_mid - ts_start);
-  double detach_time = 1e-6 * (ts_end - ts_mid);
-  printf("ELAPSED TIME (ATTACH) = %7.3f s\n", attach_time);
-  printf("ELAPSED TIME (DETACH) = %7.3f s\n", detach_time);
 
   // Finally, we launch a single task to check the results.
   TaskLauncher check_launcher(CHECK_TASK_ID, 
@@ -275,11 +162,9 @@ void top_level_task(const Task *task,
 
   // Clean up our region, index space, and field space
   runtime->destroy_logical_region(ctx, stencil_lr);
-  runtime->destroy_logical_region(ctx, cp_lr);
-  runtime->destroy_field_space(ctx, cp_fs);
   runtime->destroy_field_space(ctx, fs);
   runtime->destroy_index_space(ctx, is);
-  printf("End of TOP_LEVEL_TASK\n");
+  printf("End of TOP_LEVEL_TASK, %f, %f\n", my_ptr[0], my_ptr[num_elements]);
 }
 
 // The standard initialize field task from earlier examples
@@ -297,10 +182,13 @@ void init_field_task(const Task *task,
 
   const FieldAccessor<WRITE_DISCARD,double,1> acc(regions[0], fid);
 
+  int i = point;
   Rect<1> rect = runtime->get_index_space_domain(ctx,
                   task->regions[0].region.get_index_space());
-  for (PointInRectIterator<1> pir(rect); pir(); pir++)
+  for (PointInRectIterator<1> pir(rect); pir(); pir++) {
     acc[*pir] = drand48();
+    i++;
+  }
 }
 
 // Our stencil tasks is interesting because it
@@ -399,6 +287,7 @@ void check_task(const Task *task,
 
   // This is the checking task so we can just do the slow path
   bool all_passed = true;
+  int i = 0;
   for (PointInRectIterator<1> pir(rect); pir(); pir++)
   {
     double l2, l1, r1, r2;
@@ -421,12 +310,18 @@ void check_task(const Task *task,
     
     double expected = (-l2 + 8.0*l1 - 8.0*r1 + r2) / 12.0;
     double received = dst_acc[*pir];
+    if (i == 0 || i == max_elements-1) printf("result %d, %f, ptr %p, src %p\n", i, received, dst_acc.ptr(rect.lo), src_acc.ptr(rect.lo));
+    if (my_ptr[i] != received) {
+        printf("transfer error %d, %f\n", i, my_ptr[i]);
+    }
+    i++;
     // Probably shouldn't bitwise compare floating point
     // numbers but the order of operations are the same so they
     // should be bitwise equal.
     if (expected != received)
       all_passed = false;
   }
+  printf("CHECK, %f, %f\n", my_ptr[0], my_ptr[max_elements-1]);
   if (all_passed)
     printf("SUCCESS!\n");
   else

@@ -13758,7 +13758,24 @@ namespace Legion {
           }
         case EXTERNAL_FORTRAN_ARRAY:
           {
-            assert(false); // TODO implement this
+            if (launcher.field_pointers.empty()) 
+            {
+              REPORT_LEGION_WARNING(LEGION_WARNING_HDF5_ATTACH_OPERATION,
+                            "ARRAY ATTACH OPERATION ISSUED WITH NO "
+                            "FIELD MAPPINGS IN TASK %s (ID %lld)! DID YOU "
+                            "FORGET THEM?!?", parent_ctx->get_task_name(),
+                            parent_ctx->get_unique_id());
+            }
+            // Construct the region requirement for this task
+            requirement = RegionRequirement(launcher.handle, WRITE_DISCARD, 
+                                            EXCLUSIVE, launcher.parent);
+            for (std::map<FieldID,void*>::const_iterator it = 
+                  launcher.field_pointers.begin(); it != 
+                  launcher.field_pointers.end(); it++)
+            {
+              requirement.add_field(it->first);
+              field_pointers_map[it->first] = it->second;
+            }
             break;
           }
         default:
@@ -14001,7 +14018,19 @@ namespace Legion {
           }
         case EXTERNAL_FORTRAN_ARRAY:
           {
-            assert(false);
+            // First build the set of field paths
+            std::vector<void*> field_pointers(field_pointers_map.size());
+            unsigned idx = 0;
+            for (std::map<FieldID,void*>::const_iterator it = 
+                  field_pointers_map.begin(); it != field_pointers_map.end(); it++, idx++)
+            {
+              field_pointers[idx] = it->second;
+            }
+            // Now ask the low-level runtime to create the instance
+            result = node->create_array_instance(EXTERNAL_FORTRAN_ARRAY, sizes, field_pointers,
+                                        (file_mode == LEGION_FILE_READ_ONLY));
+            constraints.specialized_constraint = 
+              SpecializedConstraint(NORMAL_SPECIALIZE);
             break;
           }
         default:
@@ -14352,10 +14381,10 @@ namespace Legion {
       assert(!manager->is_reduction_manager()); 
 #endif
       InstanceManager *inst_manager = manager->as_instance_manager(); 
-      if (!inst_manager->is_attached_file())
+      /*if (!inst_manager->is_attached_file())
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_OPERATION,
                       "Illegal detach operation on a physical region which "
-                      "was not attached!")
+                      "was not attached!") */
       std::set<RtEvent> applied_conditions;
       ApEvent detach_event = 
         runtime->forest->detach_file(requirement, this, 0/*idx*/, 
