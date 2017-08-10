@@ -41,6 +41,79 @@ enum
 };
 
 //------------------------------------------------------------------------------
+// Command-line Parser
+//------------------------------------------------------------------------------
+#define expect(q, c) \
+{ \
+  const char* __p = (q); \
+  if (*__p != (c)) { \
+    fprintf(stderr, "Ill-formed pattern\n"); \
+    exit(-1); \
+  } \
+} \
+
+static void parse_arguments(char** argv, int argc, unsigned& num_tasks,
+                            unsigned& num_loops, unsigned& num_regions,
+                            unsigned& num_partitions, unsigned& num_slices,
+                            unsigned& tree_depth, unsigned& num_fields,
+                            unsigned& dims, unsigned& blast, bool& alternate,
+                            bool& alternate_loop, bool& single_launch,
+                            bool& block, bool& cache_mapping,
+                            bool& tracing, vector<int>& pattern)
+{
+  int i = 1;
+  while (i < argc)
+  {
+    if (strcmp(argv[i], "-n") == 0) num_tasks = atoi(argv[++i]);
+    else if (strcmp(argv[i], "-l") == 0) num_loops = atoi(argv[++i]);
+    else if (strcmp(argv[i], "-r") == 0) num_regions = atoi(argv[++i]);
+    else if (strcmp(argv[i], "-p") == 0) num_partitions = atoi(argv[++i]);
+    else if (strcmp(argv[i], "-S") == 0) num_slices = atoi(argv[++i]);
+    else if (strcmp(argv[i], "-d") == 0) tree_depth = atoi(argv[++i]);
+    else if (strcmp(argv[i], "-f") == 0) num_fields = atoi(argv[++i]);
+    else if (strcmp(argv[i], "-D") == 0) dims = atoi(argv[++i]);
+    else if (strcmp(argv[i], "-B") == 0) blast = atoi(argv[++i]);
+    else if (strcmp(argv[i], "-a") == 0) alternate = true;
+    else if (strcmp(argv[i], "-A") == 0) alternate_loop = true;
+    else if (strcmp(argv[i], "-s") == 0) single_launch = true;
+    else if (strcmp(argv[i], "-b") == 0) block = true;
+    else if (strcmp(argv[i], "-F") == 0) cache_mapping = false;
+    else if (strcmp(argv[i], "-T") == 0) tracing = true;
+    else if (strcmp(argv[i], "-P") == 0)
+    {
+      const char* p = argv[++i];
+      while (*p != '\0')
+      {
+        if (*p == 'w')
+        {
+          expect(++p, 'o');
+          pattern.push_back(WO);
+        }
+        else if(*p++ == 'r')
+        {
+          if (*p == 'd') pattern.push_back(RD);
+          else if (*p == 'w') pattern.push_back(RW);
+          else if (*p == 'o') pattern.push_back(RO);
+          else
+          {
+            fprintf(stderr, "Ill-formed pattern\n");
+            exit(-1);
+          }
+        }
+
+        if (*++p != '\0') expect(p++, '-');
+      }
+      if (pattern.empty())
+      {
+        fprintf(stderr, "ERROR: Empty alternation pattern.\n");
+        exit(-1);
+      }
+    }
+    ++i;
+  }
+}
+
+//------------------------------------------------------------------------------
 // Reduction Operator
 //------------------------------------------------------------------------------
 enum
@@ -154,18 +227,29 @@ PerfMapper::PerfMapper(MapperRuntime *rt, Machine machine, Processor local,
     proc_sysmems(*_proc_sysmems),
     variant_id(0)
 {
-  const InputArgs &command_args = Runtime::get_input_args();
+  unsigned num_tasks = 1;
+  unsigned num_loops = 10;
+  unsigned num_regions = 1;
+  unsigned num_partitions = 1;
+  unsigned tree_depth = 1;
+  unsigned num_fields = 1;
+  unsigned dims = 1;
+  unsigned blast = 1;
+  bool alternate = false;
+  bool alternate_loop = false;
+  bool single_launch = false;
+  bool block = false;
+  vector<int> pattern;
 
+  const InputArgs &command_args = Runtime::get_input_args();
   char **argv = command_args.argv;
   int argc = command_args.argc;
-  int i = 1;
-  while (i < argc)
-  {
-    if (strcmp(argv[i], "-S") == 0) num_slices = atoi(argv[++i]);
-    else if (strcmp(argv[i], "-F") == 0) cache_mapping = false;
-    else if (strcmp(argv[i], "-T") == 0) tracing = true;
-    ++i;
-  }
+
+  parse_arguments(argv, argc, num_tasks, num_loops, num_regions,
+      num_partitions, num_slices, tree_depth, num_fields, dims, blast,
+      alternate, alternate_loop, single_launch, block, cache_mapping,
+      tracing, pattern);
+
   if (tracing && !cache_mapping)
   {
     fprintf(stderr,
@@ -467,76 +551,6 @@ void do_nothing(const Task *task,
                 const vector<PhysicalRegion> &regions,
                 Context ctx, Runtime *runtime)
 {
-}
-
-#define expect(q, c) \
-{ \
-  const char* __p = (q); \
-  if (*__p != (c)) { \
-    fprintf(stderr, "Ill-formed pattern\n"); \
-    exit(-1); \
-  } \
-} \
-
-static void parse_arguments(char** argv, int argc, unsigned& num_tasks,
-                            unsigned& num_loops, unsigned& num_regions,
-                            unsigned& num_partitions, unsigned& num_slices,
-                            unsigned& tree_depth, unsigned& num_fields,
-                            unsigned& dims, unsigned& blast, bool& alternate,
-                            bool& alternate_loop, bool& single_launch,
-                            bool& block, bool& cache_mapping,
-                            bool& tracing, vector<int>& pattern)
-{
-  int i = 1;
-  while (i < argc)
-  {
-    if (strcmp(argv[i], "-n") == 0) num_tasks = atoi(argv[++i]);
-    else if (strcmp(argv[i], "-l") == 0) num_loops = atoi(argv[++i]);
-    else if (strcmp(argv[i], "-r") == 0) num_regions = atoi(argv[++i]);
-    else if (strcmp(argv[i], "-p") == 0) num_partitions = atoi(argv[++i]);
-    else if (strcmp(argv[i], "-S") == 0) num_slices = atoi(argv[++i]);
-    else if (strcmp(argv[i], "-d") == 0) tree_depth = atoi(argv[++i]);
-    else if (strcmp(argv[i], "-f") == 0) num_fields = atoi(argv[++i]);
-    else if (strcmp(argv[i], "-D") == 0) dims = atoi(argv[++i]);
-    else if (strcmp(argv[i], "-B") == 0) blast = atoi(argv[++i]);
-    else if (strcmp(argv[i], "-a") == 0) alternate = true;
-    else if (strcmp(argv[i], "-A") == 0) alternate_loop = true;
-    else if (strcmp(argv[i], "-s") == 0) single_launch = true;
-    else if (strcmp(argv[i], "-b") == 0) block = true;
-    else if (strcmp(argv[i], "-F") == 0) cache_mapping = false;
-    else if (strcmp(argv[i], "-T") == 0) tracing = true;
-    else if (strcmp(argv[i], "-P") == 0)
-    {
-      const char* p = argv[++i];
-      while (*p != '\0')
-      {
-        if (*p == 'w')
-        {
-          expect(++p, 'o');
-          pattern.push_back(WO);
-        }
-        else if(*p++ == 'r')
-        {
-          if (*p == 'd') pattern.push_back(RD);
-          else if (*p == 'w') pattern.push_back(RW);
-          else if (*p == 'o') pattern.push_back(RO);
-          else
-          {
-            fprintf(stderr, "Ill-formed pattern\n");
-            exit(-1);
-          }
-        }
-
-        if (*++p != '\0') expect(p++, '-');
-      }
-      if (pattern.empty())
-      {
-        fprintf(stderr, "ERROR: Empty alternation pattern.\n");
-        exit(-1);
-      }
-    }
-    ++i;
-  }
 }
 
 template<int DIM>
