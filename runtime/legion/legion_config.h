@@ -378,6 +378,7 @@ typedef enum legion_error_t {
   ERROR_ILLEGAL_REMAP_IN_STATIC_TRACE = 163,
   ERROR_MISSING_LOCAL_VARIABLE = 164,
   ERROR_INVALID_PHYSICAL_TRACING = 165,
+  ERROR_INCOMPLETE_PHYSICAL_TRACING = 166,
 }  legion_error_t;
 
 // enum and namepsaces don't really get along well

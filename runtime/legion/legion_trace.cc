@@ -178,9 +178,36 @@ namespace Legion {
       if (op->is_memoizing())
       {
         if (physical_trace == NULL)
+        {
+          if (index != 0)
+          {
+            MessageDescriptor INCOMPLETE_PHYSICAL_TRACING(3801, "undefined");
+            log_run.error(INCOMPLETE_PHYSICAL_TRACING.id(),
+                "Invalid memoization request. A trace cannot be partially "
+                "memoized. Please change the mapper to request memoization "
+                "for all the tasks in your trace");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_INCOMPLETE_PHYSICAL_TRACING);
+          }
           physical_trace = new PhysicalTrace();
+        }
         physical_trace->record_trace_local_id(op, index);
       }
+      else if (!op->is_internal_op() && physical_trace != NULL)
+      {
+        MessageDescriptor INCOMPLETE_PHYSICAL_TRACING(3802, "undefined");
+        log_run.error(INCOMPLETE_PHYSICAL_TRACING.id(),
+            "Invalid memoization request. A trace cannot be partially "
+            "memoized. Please change the mapper to request memoization "
+            "for all the tasks in your trace");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INCOMPLETE_PHYSICAL_TRACING);
+      }
+
       if (!op->is_internal_op())
       {
         const LegionVector<DependenceRecord>::aligned &deps = 
@@ -452,9 +479,36 @@ namespace Legion {
       if (op->is_memoizing())
       {
         if (physical_trace == NULL)
+        {
+          if (index != 0)
+          {
+            MessageDescriptor INCOMPLETE_PHYSICAL_TRACING(3801, "undefined");
+            log_run.error(INCOMPLETE_PHYSICAL_TRACING.id(),
+                "Invalid memoization request. A trace cannot be partially "
+                "memoized. Please change the mapper to request memoization "
+                "for all the tasks in your trace");
+#ifdef DEBUG_LEGION
+            assert(false);
+#endif
+            exit(ERROR_INCOMPLETE_PHYSICAL_TRACING);
+          }
           physical_trace = new PhysicalTrace();
+        }
         op->set_trace_local_id(index);
       }
+      else if (!op->is_internal_op() && physical_trace != NULL)
+      {
+        MessageDescriptor INCOMPLETE_PHYSICAL_TRACING(3802, "undefined");
+        log_run.error(INCOMPLETE_PHYSICAL_TRACING.id(),
+            "Invalid memoization request. A trace cannot be partially "
+            "memoized. Please change the mapper to request memoization "
+            "for all the tasks in your trace");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_INCOMPLETE_PHYSICAL_TRACING);
+      }
+
       // Only need to save this in the map if we are not done tracing
       if (tracing)
       {
