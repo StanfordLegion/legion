@@ -1002,7 +1002,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Now finish capturing the physical trace
-      if (local_trace->has_physical_trace())
+      if (local_trace->has_physical_trace() &&
+          !local_trace->get_physical_trace()->is_empty())
         local_trace->get_physical_trace()->fix_trace();
       FenceOp::deferred_execute();
     }
@@ -1106,6 +1107,17 @@ namespace Legion {
         if (static_trace->remove_reference())
           delete static_trace;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceCompleteOp::deferred_execute(void)
+    //--------------------------------------------------------------------------
+    {
+      // Now finish capturing the physical trace
+      if (local_trace->has_physical_trace() &&
+          !local_trace->get_physical_trace()->is_fixed())
+        local_trace->get_physical_trace()->fix_trace();
+      FenceOp::deferred_execute();
     }
 
     /////////////////////////////////////////////////////////////
