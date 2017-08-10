@@ -52,6 +52,38 @@ enum
   } \
 } \
 
+
+static void parse_pattern(const char* pattern_string, vector<int>& pattern)
+{
+  const char* p = pattern_string;
+  while (*p != '\0')
+  {
+    if (*p == 'w')
+    {
+      expect(++p, 'o');
+      pattern.push_back(WO);
+    }
+    else if(*p++ == 'r')
+    {
+      if (*p == 'd') pattern.push_back(RD);
+      else if (*p == 'w') pattern.push_back(RW);
+      else if (*p == 'o') pattern.push_back(RO);
+      else
+      {
+        fprintf(stderr, "Ill-formed pattern\n");
+        exit(-1);
+      }
+    }
+
+    if (*++p != '\0') expect(p++, '-');
+  }
+  if (pattern.empty())
+  {
+    fprintf(stderr, "ERROR: Empty alternation pattern.\n");
+    exit(-1);
+  }
+}
+
 static void parse_arguments(char** argv, int argc, unsigned& num_tasks,
                             unsigned& num_loops, unsigned& num_regions,
                             unsigned& num_partitions, unsigned& num_slices,
@@ -79,38 +111,11 @@ static void parse_arguments(char** argv, int argc, unsigned& num_tasks,
     else if (strcmp(argv[i], "-b") == 0) block = true;
     else if (strcmp(argv[i], "-F") == 0) cache_mapping = false;
     else if (strcmp(argv[i], "-T") == 0) tracing = true;
-    else if (strcmp(argv[i], "-P") == 0)
-    {
-      const char* p = argv[++i];
-      while (*p != '\0')
-      {
-        if (*p == 'w')
-        {
-          expect(++p, 'o');
-          pattern.push_back(WO);
-        }
-        else if(*p++ == 'r')
-        {
-          if (*p == 'd') pattern.push_back(RD);
-          else if (*p == 'w') pattern.push_back(RW);
-          else if (*p == 'o') pattern.push_back(RO);
-          else
-          {
-            fprintf(stderr, "Ill-formed pattern\n");
-            exit(-1);
-          }
-        }
-
-        if (*++p != '\0') expect(p++, '-');
-      }
-      if (pattern.empty())
-      {
-        fprintf(stderr, "ERROR: Empty alternation pattern.\n");
-        exit(-1);
-      }
-    }
+    else if (strcmp(argv[i], "-P") == 0) parse_pattern(argv[++i], pattern);
     ++i;
   }
+  if (pattern.size() == 0)
+    parse_pattern("rw-rd-rd-ro-rd-ro-rw-rd-ro", pattern);
 }
 
 //------------------------------------------------------------------------------
@@ -704,13 +709,6 @@ void top_level_task(const Task *task,
       fprintf(stderr, "ERROR: Tracing cannot be used in the blocking mode.\n");
       exit(-1);
     }
-  }
-
-  if (pattern.empty())
-  {
-    const int default_pattern[] = {RW, RD, RD, RO, RD, RO, RW, RD, RO};
-    for (unsigned idx = 0; idx < 8; ++idx)
-      pattern.push_back(default_pattern[idx]);
   }
 
   if (tracing && alternate_loop && num_loops % pattern.size() != 0)
