@@ -205,7 +205,6 @@ class PerfMapper : public DefaultMapper
     unsigned num_slices;
     bool cache_mapping;
     bool tracing;
-    bool alternate_loop;
     vector<Processor>& procs_list;
     //vector<Memory>& sysmems_list;
     //map<Memory, vector<Processor> >& sysmem_local_procs;
@@ -216,8 +215,6 @@ class PerfMapper : public DefaultMapper
     vector<VariantID> variant_id;
     vector<TaskSlice> slice_cache;
     unsigned skip_count;
-    typedef pair<pair<LogicalPartition, DomainPoint>, unsigned> TaskLabel;
-    map<TaskLabel, unsigned> launch_counts;
 };
 
 PerfMapper::PerfMapper(MapperRuntime *rt, Machine machine, Processor local,
@@ -230,7 +227,6 @@ PerfMapper::PerfMapper(MapperRuntime *rt, Machine machine, Processor local,
     num_slices(1),
     cache_mapping(true),
     tracing(false),
-    alternate_loop(false),
     procs_list(*_procs_list),
     //sysmems_list(*_sysmems_list),
     //sysmem_local_procs(*_sysmem_local_procs),
@@ -246,6 +242,7 @@ PerfMapper::PerfMapper(MapperRuntime *rt, Machine machine, Processor local,
   unsigned dims = 1;
   unsigned blast = 1;
   bool alternate = false;
+  bool alternate_loop = false;
   bool single_launch = false;
   bool block = false;
   vector<int> pattern;
@@ -287,26 +284,7 @@ void PerfMapper::select_task_options(const MapperContext ctx,
   output.stealable = false;
   output.map_locally = false;
   if (task.task_id == DO_NOTHING_TASK_ID)
-  {
-    DomainPoint dp;
-    LogicalPartition lp;
-    unsigned loop_count = alternate_loop ? task.regions[0].tag : 0;
-    if (task.regions[0].handle_type == SINGULAR)
-    {
-      LogicalRegion lr = task.regions[0].region;
-      lp = runtime->get_parent_logical_partition(ctx, lr);
-      dp = runtime->get_logical_region_color_point(ctx, lr);
-    }
-    else
-      lp = task.regions[0].partition;
-    TaskLabel label = make_pair(make_pair(lp, dp), loop_count);
-
-    unsigned count = 0;
-    map<TaskLabel, unsigned>::iterator finder = launch_counts.find(label);
-    if (finder != launch_counts.end()) count = finder->second;
-    launch_counts[label] = count + 1;
-    output.memoize = tracing && count > 0;
-  }
+    output.memoize = tracing && task.regions[0].tag > skip_count;
 }
 
 void PerfMapper::default_policy_select_target_processors(MapperContext ctx,
@@ -938,7 +916,7 @@ void top_level_task(const Task *task,
               for (unsigned k = 0; k < num_fields; ++k)
               {
                 RegionRequirement req(lr, REDUCE_ID, SIMULTANEOUS, lrs[r]);
-                req.tag = l % pattern.size();
+                req.tag = l / (alternate_loop ? pattern.size() : 1);
                 req.add_field(100 + k);
                 launcher.add_region_requirement(req);
               }
@@ -961,7 +939,7 @@ void top_level_task(const Task *task,
                   else if (pattern[l % pattern.size()] == WO) priv = WRITE_ONLY;
                 }
                 RegionRequirement req(lr, priv, EXCLUSIVE, lrs[r]);
-                req.tag = l % pattern.size();
+                req.tag = l / (alternate_loop ? pattern.size() : 1);
                 for (unsigned k = 0; k < fid_block; ++k)
                 {
                   req.add_field(fid + k);
@@ -998,7 +976,7 @@ void top_level_task(const Task *task,
             {
               RegionRequirement req(lps[r][p], pid, REDUCE_ID, SIMULTANEOUS,
                   lrs[r]);
-              req.tag = l % pattern.size();
+              req.tag = l / (alternate_loop ? pattern.size() : 1);
               req.add_field(100 + k);
               launcher.add_region_requirement(req);
             }
@@ -1022,7 +1000,7 @@ void top_level_task(const Task *task,
               }
               RegionRequirement req(lps[r][p], pid, priv, EXCLUSIVE,
                   lrs[r]);
-              req.tag = l % pattern.size();
+              req.tag = l / (alternate_loop ? pattern.size() : 1);
               for (unsigned k = 0; k < fid_block; ++k)
               {
                 req.add_field(fid + k);
