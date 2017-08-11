@@ -3966,7 +3966,7 @@ namespace Legion {
                                   local_completion, this, idx,
                                   idx + src_requirements.size(),
                                   local_sync_precondition, predication_guard, 
-                                  map_applied_conditions);
+                                  map_applied_conditions, trace_info);
           Runtime::trigger_event(local_completion, across_done);
         }
         else
@@ -3979,7 +3979,8 @@ namespace Legion {
             runtime->forest->reduce_across(
                                   src_requirements[idx], dst_requirements[idx],
                                   src_targets, dst_targets, this, 
-                                  local_sync_precondition, predication_guard);
+                                  local_sync_precondition, predication_guard,
+                                  trace_info);
           Runtime::trigger_event(local_completion, across_done);
         }
         // Apply our changes to the version states
@@ -12295,11 +12296,11 @@ namespace Legion {
         assert(value != NULL);
 #endif
         InstanceSet mapped_instances;
+        // TODO: Implement physical tracing for fill operation
+        PhysicalTraceInfo trace_info;
         if (restrict_info.has_restrictions())
         {
           mapped_instances = restrict_info.get_instances();
-          // TODO: Implement physical tracing for fill operation
-          PhysicalTraceInfo trace_info;
           runtime->forest->physical_register_only(requirement,
                                                   version_info, restrict_info,
                                                   this, 0/*idx*/,
@@ -12323,7 +12324,8 @@ namespace Legion {
                                        version_info, restrict_info, 
                                        mapped_instances, sync_precondition,
                                        map_applied_conditions, 
-                                       true_guard, false_guard);
+                                       true_guard, false_guard,
+                                       trace_info);
         if (!mapped_instances.empty() && Runtime::legion_spy_enabled)
         {
           runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
@@ -12389,11 +12391,11 @@ namespace Legion {
       void *result = malloc(result_size);
       memcpy(result, future.impl->get_untyped_result(), result_size);
       InstanceSet mapped_instances;
+      // TODO: Implement physical tracing for fill operation
+      PhysicalTraceInfo trace_info;
       if (restrict_info.has_restrictions())
       {
         mapped_instances = restrict_info.get_instances();
-        // TODO: Implement physical tracing for fill operation
-        PhysicalTraceInfo trace_info;
         runtime->forest->physical_register_only(requirement,
                                                 version_info, restrict_info,
                                                 this, 0/*idx*/,
@@ -12417,7 +12419,8 @@ namespace Legion {
                                        version_info, restrict_info, 
                                        mapped_instances, sync_precondition,
                                        map_applied_conditions,
-                                       true_guard, false_guard);
+                                       true_guard, false_guard,
+                                       trace_info);
       if (!mapped_instances.empty() && Runtime::legion_spy_enabled)
       {
         runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,

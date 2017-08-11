@@ -1694,7 +1694,8 @@ namespace Legion {
         const std::vector<Domain::CopySrcDstField> &src_fields,
         const std::vector<Domain::CopySrcDstField> &dst_fields,
         RegionTreeNode *dst, ApEvent precondition, PredEvent guard,
-        bool reduction_fold, bool precise, RegionTreeNode *intersect)
+        bool reduction_fold, bool precise, PhysicalTraceInfo &trace_info,
+        RegionTreeNode *intersect)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1856,7 +1857,8 @@ namespace Legion {
         const std::vector<Domain::CopySrcDstField> &src_fields,
         const std::vector<Domain::CopySrcDstField> &dst_fields,
         RegionTreeNode *dst, ApEvent precondition, PredEvent guard,
-        bool reduction_fold, bool precise, RegionTreeNode *intersect)
+        bool reduction_fold, bool precise,
+        PhysicalTraceInfo &trace_info, RegionTreeNode *intersect)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1864,7 +1866,8 @@ namespace Legion {
 #endif
       // Doesn't matter if this one is precise or not
       return dst->issue_copy(op, src_fields, dst_fields, precondition,
-                             guard, intersect, redop, reduction_fold);
+                             guard, trace_info, intersect, redop,
+                             reduction_fold);
     }
 
     //--------------------------------------------------------------------------

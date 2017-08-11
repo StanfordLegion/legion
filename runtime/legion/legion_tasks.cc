@@ -3695,7 +3695,8 @@ namespace Legion {
             local_termination_event, regions, virtual_mapped, 
             *const_cast<std::vector<VersionInfo>*>(get_version_infos()),
             *const_cast<std::vector<RestrictInfo>*>(get_restrict_infos()), 
-            physical_instances, map_applied_conditions);
+            physical_instances, map_applied_conditions,
+            trace_info);
         // Release any read-only reservations that we're holding
         if (!read_only_reservations.empty())
         {

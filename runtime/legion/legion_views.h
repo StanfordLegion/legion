@@ -754,13 +754,16 @@ namespace Legion {
                              VersionTracker *version_tracker, 
                              Operation *op, unsigned index,
                              std::set<RtEvent> &map_applied_events,
-                             PredEvent pred_guard, bool restrict_out = false);
+                             PredEvent pred_guard,
+                             PhysicalTraceInfo &trace_info,
+                             bool restrict_out = false);
       ApEvent perform_deferred_reduction(MaterializedView *target,
                                         const FieldMask &copy_mask,
                                         VersionTracker *version_tracker,
                                         const std::set<ApEvent> &preconditions,
                                         Operation *op, unsigned index,
                                         PredEvent predicate_guard,
+                                        PhysicalTraceInfo &trace_info,
                                         CopyAcrossHelper *helper,
                                         RegionTreeNode *intersect,
                                         std::set<RtEvent> &map_applied_events);
@@ -773,7 +776,8 @@ namespace Legion {
                                        Operation *op, unsigned index,
                                        PredEvent predicate_guard,
                                        RegionTreeNode *intersect,
-                                       std::set<RtEvent> &map_applied_events);
+                                       std::set<RtEvent> &map_applied_events,
+                                       PhysicalTraceInfo &trace_info);
     public:
       virtual bool has_manager(void) const { return true; } 
       virtual PhysicalManager* get_manager(void) const;
@@ -934,7 +938,8 @@ namespace Legion {
                                   const std::vector<unsigned> &src_indexes,
                                   const std::vector<unsigned> &dst_indexes,
                                         ApEvent precondition, PredEvent guard,
-                                        std::set<ApEvent> &postconditions);
+                                        std::set<ApEvent> &postconditions,
+                                        PhysicalTraceInfo &trace_info);
       void find_field_descriptors(ApEvent term_event,
                                   const RegionUsage &usage,
                                   const FieldMask &user_mask,
@@ -947,14 +952,16 @@ namespace Legion {
                                          MaterializedView *dst,
                                          FieldMask copy_mask,
                                          const RestrictInfo &restrict_info,
-                                         bool restrict_out) = 0;
+                                         bool restrict_out,
+                                         PhysicalTraceInfo &trace_info) = 0;
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          FieldMask copy_mask,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                                          PredEvent pred_guard,
-                                         CopyAcrossHelper *helper = NULL) = 0; 
+                                         PhysicalTraceInfo &trace_info,
+                                         CopyAcrossHelper *helper = NULL) = 0;
     };
 
     /**
@@ -1003,40 +1010,45 @@ namespace Legion {
             const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                   LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                   LegionMap<ApEvent,FieldMask>::aligned &postreductions,
-                  PredEvent pred_guard, CopyAcrossHelper *helper) const;
+                  PredEvent pred_guard, PhysicalTraceInfo &trace_info,
+                  CopyAcrossHelper *helper) const;
       void copy_to_temporary(const TraversalInfo &traversal_info,
                         MaterializedView *dst, const FieldMask &copy_mask,
                         VersionTracker *src_version_tracker,
             const LegionMap<ApEvent,FieldMask>::aligned &dst_preconditions,
                   LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                   PredEvent pred_guard, AddressSpaceID local_space, 
-                  bool restrict_out);
+                  bool restrict_out, PhysicalTraceInfo &trace_info);
     protected:
       void issue_nested_copies(const TraversalInfo &traversal_info,
                         MaterializedView *dst, const FieldMask &copy_mask,
                         VersionTracker *src_version_tracker,
             const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                   LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                  PredEvent pred_guard, CopyAcrossHelper *helper) const;
+                  PredEvent pred_guard, PhysicalTraceInfo &trace_info,
+                  CopyAcrossHelper *helper) const;
       void issue_local_copies(const TraversalInfo &traversal_info,
                         MaterializedView *dst, FieldMask copy_mask,
                         VersionTracker *src_version_tracker,
             const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                   LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                  PredEvent pred_guard, CopyAcrossHelper *helper) const;
+                  PredEvent pred_guard, PhysicalTraceInfo &trace_info,
+                  CopyAcrossHelper *helper) const;
       void issue_child_copies(const TraversalInfo &traversal_info,
                         MaterializedView *dst, const FieldMask &copy_mask,
                         VersionTracker *src_version_tracker,
             const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                   LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                   LegionMap<ApEvent,FieldMask>::aligned &postreductions,
-                  PredEvent pred_guard, CopyAcrossHelper *helper) const;
+                  PredEvent pred_guard, PhysicalTraceInfo &trace_info,
+                  CopyAcrossHelper *helper) const;
       void issue_reductions(const TraversalInfo &traversal_info,
                         MaterializedView *dst, const FieldMask &copy_mask,
                         VersionTracker *src_version_tracker,
             const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                   LegionMap<ApEvent,FieldMask>::aligned &postreductions,
-                  PredEvent pred_guard, CopyAcrossHelper *helper) const;
+                  PredEvent pred_guard, PhysicalTraceInfo &trace_info,
+                  CopyAcrossHelper *helper) const;
     public:
       RegionTreeNode *const logical_node;
       // Only valid at roots of copy trees
@@ -1211,13 +1223,15 @@ namespace Legion {
                                          MaterializedView *dst,
                                          FieldMask copy_mask,
                                          const RestrictInfo &restrict_info,
-                                         bool restrict_out);
+                                         bool restrict_out,
+                                         PhysicalTraceInfo &trace_info);
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          FieldMask copy_mask,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                                          PredEvent pred_guard,
+                                         PhysicalTraceInfo &trace_info,
                                          CopyAcrossHelper *helper = NULL);
     public:
       // From VersionTracker
@@ -1423,13 +1437,15 @@ namespace Legion {
                                          MaterializedView *dst,
                                          FieldMask copy_mask,
                                          const RestrictInfo &restrict_info,
-                                         bool restrict_out);
+                                         bool restrict_out,
+                                         PhysicalTraceInfo &trace_info);
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          FieldMask copy_mask,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                                          PredEvent pred_guard,
+                                         PhysicalTraceInfo &trace_info,
                                          CopyAcrossHelper *helper = NULL);
     public:
       static void handle_send_fill_view(Runtime *runtime, Deserializer &derez,
@@ -1513,13 +1529,15 @@ namespace Legion {
                                          MaterializedView *dst,
                                          FieldMask copy_mask,
                                          const RestrictInfo &restrict_info,
-                                         bool restrict_out);
+                                         bool restrict_out,
+                                         PhysicalTraceInfo &trace_info);
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          FieldMask copy_mask,
                     const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                           LegionMap<ApEvent,FieldMask>::aligned &postconditions,
                                          PredEvent pred_guard,
+                                         PhysicalTraceInfo &trace_info,
                                          CopyAcrossHelper *helper = NULL);
     protected:
       void issue_guarded_update_copies(const TraversalInfo &info,
@@ -1531,6 +1549,7 @@ namespace Legion {
                                        bool restrict_out,
                   const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                         LegionMap<ApEvent,FieldMask>::aligned &postconditions,
+                                       PhysicalTraceInfo &trace_info,
                                        CopyAcrossHelper *helper = NULL);
     public:
       void record_true_view(LogicalView *view, const FieldMask &view_mask);
