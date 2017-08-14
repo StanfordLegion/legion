@@ -289,6 +289,11 @@ namespace Legion {
       LegionTrace *local_trace;
     };
 
+    /**
+     * \class PhysicalTrace
+     * This class is used for memoizing the dynamic physical dependence
+     * analysis for series of operations in a given task's context.
+     */
     class PhysicalTrace {
     public:
       PhysicalTrace(void);
