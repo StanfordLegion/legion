@@ -42,6 +42,7 @@ local property_type_assignment = {
   task = {
     inline = { std.compile_option_type },
     isa = { std.isa_type },
+    kind = { std.processor_kind_type },
     priority = { int },
     target = { std.processor_type, std.processor_list_type },
     vectorize = { std.compile_option_type },
@@ -62,6 +63,8 @@ keyword_type_assignment:assign_type({ "x86", "cuda", "arm", "ptx", "lua",
                                       "sse3", "sse4", "avx", "avx2", "fma",
                                       "mic", "sm10", "sm20", "sm30", "sm35",
                                       "neon" }, std.isa_type)
+keyword_type_assignment:assign_type({ "loc", "toc", "io", "openmp", "util",
+                                       "group", "set" }, std.processor_kind_type)
 keyword_type_assignment:assign_type({ "global", "sysmem", "regmem", "fbmem",
                                       "zcmem", "disk", "hdf", "file",
                                       "l1cache", "l2cache", "l3cache" },
@@ -112,6 +115,10 @@ function type_check.filter_constraint(value_type, type_env, constraint)
   if std.is_processor_list_type(value_type) then
     if constraint.field == "isa" then
       if not std.is_isa_type(value.expr_type) then
+        log.error(constraint.value, type_error_msg)
+      end
+    elseif constraint.field == "kind" then
+      if not std.is_processor_kind_type(value.expr_type) then
         log.error(constraint.value, type_error_msg)
       end
     else

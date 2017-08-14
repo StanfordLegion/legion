@@ -43,9 +43,22 @@ namespace Legion {
             next_idx(nidx), validates(val), shard_only(shard),
             dtype(d), dependent_mask(m) { }
       public:
+        inline bool merge(const DependenceRecord &record)
+        {
+          if ((operation_idx != record.operation_idx) ||
+              (prev_idx != record.prev_idx) ||
+              (next_idx != record.next_idx) ||
+              (validates != record.validates) ||
+              (shard_only != record.shard_only) ||
+              (dtype != record.dtype))
+            return false;
+          dependent_mask |= record.dependent_mask;
+          return true;
+        }
+      public:
         int operation_idx;
-        int prev_idx;
-        int next_idx;
+        int prev_idx; // previous region requirement index
+        int next_idx; // next region requirement index
         bool validates;
         bool shard_only;
         DependenceType dtype;
@@ -207,6 +220,12 @@ namespace Legion {
                                     bool shard_only_dependence);
       virtual void record_aliased_children(unsigned req_index, unsigned depth,
                                            const FieldMask &aliased_mask);
+    protected:
+      // Insert a normal dependence for the current operation
+      void insert_dependence(const DependenceRecord &record);
+      // Insert an internal dependence for given key
+      void insert_dependence(const std::pair<InternalOp*,GenerationID> &key,
+                             const DependenceRecord &record);
     protected:
       // Only need this backwards lookup for recording dependences
       std::map<std::pair<Operation*,GenerationID>,unsigned> op_map;

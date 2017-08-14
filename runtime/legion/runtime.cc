@@ -1814,8 +1814,12 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    PhysicalInstance PhysicalRegionImpl::get_instance_info(PrivilegeMode mode,
-        FieldID fid, ptrdiff_t &field_offset, void *realm_is, TypeTag type_tag, 
+    PhysicalInstance PhysicalRegionImpl::get_instance_info(
+                                    PrivilegeMode mode, FieldID fid, 
+#ifndef REALM_USE_FIELD_IDS
+                                    ptrdiff_t &field_offset, 
+#endif
+                                    void *realm_is, TypeTag type_tag, 
                                     bool silence_warnings, ReductionOpID redop)
     //--------------------------------------------------------------------------
     {
@@ -1943,7 +1947,9 @@ namespace Legion {
         if (ref.is_field_set(fid))
         {
           PhysicalManager *manager = ref.get_manager();
+#ifndef REALM_USE_FIELD_IDS
           field_offset = manager->layout->find_field_info(fid).offset;
+#endif
           return manager->get_instance();
         }
       }
@@ -5226,7 +5232,7 @@ namespace Legion {
       assert(is_owner);
 #endif
       // First, just try to make the instance as is, if it works we are done 
-      InstanceBuilder builder(regions, constraints, this, creator_id);
+      InstanceBuilder builder(regions, constraints, runtime, this, creator_id);
       PhysicalManager *manager = 
                               builder.create_physical_instance(runtime->forest);
       if (manager != NULL)
@@ -20416,6 +20422,21 @@ namespace Legion {
             case Processor::IO_PROC:
               {
                 LegionSpy::log_processor_kind(kind, "IO");
+                break;
+              }
+            case Processor::PROC_GROUP:
+              {
+                LegionSpy::log_processor_kind(kind, "ProcGroup");
+                break;
+              }
+            case Processor::PROC_SET:
+              {
+                LegionSpy::log_processor_kind(kind, "ProcSet");
+                break;
+              }
+            case Processor::OMP_PROC:
+              {
+                LegionSpy::log_processor_kind(kind, "OpenMP");
                 break;
               }
             default:

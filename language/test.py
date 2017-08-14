@@ -214,7 +214,7 @@ class Counter:
         self.passed = 0
         self.failed = 0
 
-def get_test_specs(use_run, use_spy, use_hdf5, extra_flags):
+def get_test_specs(use_run, use_spy, use_hdf5, use_openmp, extra_flags):
     base = [
         # FIXME: Move this flag into a per-test parameter so we don't use it everywhere.
         # Don't include backtraces on those expected to fail
@@ -254,6 +254,11 @@ def get_test_specs(use_run, use_spy, use_hdf5, extra_flags):
          (os.path.join('tests', 'hdf5', 'run_pass'),
          )),
     ]
+    openmp = [
+        ('run_pass', (test_run_pass, ([] + extra_flags, {})),
+         (os.path.join('tests', 'openmp', 'run_pass'),
+         )),
+    ]
 
     result = []
     if not use_run and not use_spy and not use_hdf5:
@@ -265,15 +270,17 @@ def get_test_specs(use_run, use_spy, use_hdf5, extra_flags):
         result.extend(spy)
     if use_hdf5:
         result.extend(hdf5)
+    if use_openmp:
+        result.extend(openmp)
     return result
 
-def run_all_tests(thread_count, debug, run, spy, hdf5, extra_flags, verbose, quiet,
+def run_all_tests(thread_count, debug, run, spy, hdf5, openmp, extra_flags, verbose, quiet,
                   only_patterns, skip_patterns, timelimit):
     thread_pool = multiprocessing.Pool(thread_count)
     results = []
 
     # Run tests asynchronously.
-    tests = get_test_specs(run, spy, hdf5, extra_flags)
+    tests = get_test_specs(run, spy, hdf5, openmp, extra_flags)
     for test_name, test_fn, test_dirs in tests:
         test_paths = []
         for test_dir in test_dirs:
@@ -395,6 +402,10 @@ def test_driver(argv):
                         action='store_true',
                         help='run HDF5 tests',
                         dest='hdf5')
+    parser.add_argument('--openmp',
+                        action='store_true',
+                        help='run OpenMP tests',
+                        dest='openmp')
     parser.add_argument('--extra',
                         action='append',
                         required=False,
@@ -432,6 +443,7 @@ def test_driver(argv):
         args.run_pass,
         args.spy,
         args.hdf5,
+        args.openmp,
         args.extra_flags,
         args.verbose,
         args.quiet,

@@ -31,6 +31,7 @@ namespace Realm {
 
   class InstanceLayoutConstraints {
   public:
+    InstanceLayoutConstraints(void) { }
     InstanceLayoutConstraints(const std::vector<size_t>& field_sizes,
 			      size_t block_size);
 #ifdef REALM_USE_LEGION_LAYOUT_CONSTRAINTS

@@ -2468,6 +2468,17 @@ namespace Legion {
       impl->get_bounds(realm_is, type_tag);
     }
 
+#ifdef REALM_USE_FIELD_IDS
+    //--------------------------------------------------------------------------
+    Realm::RegionInstance PhysicalRegion::get_instance_info(PrivilegeMode mode,
+                              FieldID fid, void *realm_is, TypeTag type_tag, 
+                              bool silence_warnings, ReductionOpID redop) const
+    //--------------------------------------------------------------------------
+    {
+      return impl->get_instance_info(mode, fid, realm_is, type_tag, 
+                                     silence_warnings, redop);
+    }
+#else
     //--------------------------------------------------------------------------
     Realm::RegionInstance PhysicalRegion::get_instance_info(PrivilegeMode mode,
         FieldID fid, ptrdiff_t &field_offset, void *realm_is, TypeTag type_tag, 
@@ -2477,6 +2488,7 @@ namespace Legion {
       return impl->get_instance_info(mode, fid, field_offset, realm_is, 
                                      type_tag, silence_warnings,redop);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void PhysicalRegion::fail_bounds_check(DomainPoint p, FieldID fid,

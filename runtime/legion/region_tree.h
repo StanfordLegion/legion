@@ -847,6 +847,7 @@ namespace Legion {
           IndexSpace initial, const std::vector<IndexSpace> &handles) = 0;
       virtual void get_index_space_domain(void *realm_is, TypeTag type_tag) = 0;
       virtual size_t get_volume(void) = 0;
+      virtual size_t get_num_dims(void) const = 0;
       virtual bool contains_point(const void *realm_point,TypeTag type_tag) = 0;
       virtual void destroy_node(AddressSpaceID source) = 0;
     public:
@@ -964,11 +965,9 @@ namespace Legion {
                   ApEvent precondition, PredEvent predicate_guard,
                   IndexTreeNode *intersect = NULL) = 0;
     public:
-#ifdef NEW_INSTANCE_CREATION
-      virtual ApEvent create_instance(Memory target,
-                            const std::vector<std::pair<FieldID,size_t> > &fids,
-                            PhysicalInstance &instance,
-                            LegionConstraintSet &constraints) = 0;
+#ifdef REALM_USE_FIELD_IDS
+      virtual Realm::InstanceLayoutGeneric* create_layout(
+                           const Realm::InstanceLayoutConstraints &ilc) = 0;
 #else
       virtual PhysicalInstance create_instance(Memory target,
                                        const std::vector<size_t> &field_sizes,
@@ -1065,6 +1064,7 @@ namespace Legion {
           IndexSpace initial, const std::vector<IndexSpace> &handles);
       virtual void get_index_space_domain(void *realm_is, TypeTag type_tag);
       virtual size_t get_volume(void);
+      virtual size_t get_num_dims(void) const;
       virtual bool contains_point(const void *realm_point, TypeTag type_tag);
       virtual void destroy_node(AddressSpaceID source);
     public:
@@ -1223,11 +1223,9 @@ namespace Legion {
                   ApEvent precondition, PredEvent predicate_guard,
                   IndexTreeNode *intersect = NULL);
     public:
-#ifdef NEW_INSTANCE_CREATION
-      virtual ApEvent create_instance(Memory target,
-                            const std::vector<std::pair<FieldID,size_t> > &fids,
-                            PhysicalInstance &instance,
-                            LegionConstraintSet &constraints);
+#ifdef REALM_USE_FIELD_IDS
+      virtual Realm::InstanceLayoutGeneric* create_layout(
+                           const Realm::InstanceLayoutConstraints &ilc);
 #else
       virtual PhysicalInstance create_instance(Memory target,
                                        const std::vector<size_t> &field_sizes,
@@ -1863,11 +1861,19 @@ namespace Legion {
       void get_field_indexes(const std::vector<FieldID> &fields,
                              std::vector<unsigned> &indexes) const;
     public:
+#ifdef REALM_USE_FIELD_IDS
+      void compute_field_layout(const std::vector<FieldID> &create_fields,
+                                std::vector<size_t> &field_sizes,
+                                std::vector<unsigned> &mask_index_map,
+                                std::vector<CustomSerdezID> &serdez,
+                                FieldMask &instance_mask);
+#else
       void compute_create_offsets(const std::vector<FieldID> &create_fields,
                       std::vector<std::pair<FieldID,size_t> > &fields_sizes,
                                   std::vector<unsigned> &mask_index_map,
                                   std::vector<CustomSerdezID> &serdez,
                                   FieldMask &instance_mask);
+#endif
     public:
       InstanceManager* create_file_instance(const std::set<FieldID> &fields,
                                             RegionNode *node, AttachOp *op);
@@ -1876,11 +1882,20 @@ namespace Legion {
                                         const LayoutConstraintSet &constraints);
       LayoutDescription* find_layout_description(const FieldMask &field_mask,
                                                 LayoutConstraints *constraints);
+#ifdef REALM_USE_FIELD_IDS
+      LayoutDescription* create_layout_description(const FieldMask &layout_mask,
+                                                 LayoutConstraints *constraints,
+                                           const std::vector<unsigned> &indexes,
+                                           const std::vector<FieldID> &fids,
+                                           const std::vector<size_t> &sizes,
+                                     const std::vector<CustomSerdezID> &serdez);
+#else
       LayoutDescription* create_layout_description(const FieldMask &layout_mask,
                                                  LayoutConstraints *constraints,
                                            const std::vector<unsigned> &indexes,
                                      const std::vector<CustomSerdezID> &serdez,
                     const std::vector<std::pair<FieldID,size_t> > &field_sizes);
+#endif
       LayoutDescription* register_layout_description(LayoutDescription *desc);
     public:
       void send_node(AddressSpaceID target);
