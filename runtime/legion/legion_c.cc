@@ -744,21 +744,19 @@ legion_index_partition_create_domain_point_coloring(
       switch (c.p.get_dim()) {
         case 1:
           {
-            (*coloring)[c.p] = Domain::from_rect<1>(Rect<1>(0, -1));
+            (*coloring)[c.p] = Domain(Rect<1>(0, -1)); 
             break;
           }
       case 2:
           {
             (*coloring)[c.p] =
-              Domain::from_rect<2>(Rect<2>(make_point(0, 0),
-                                           make_point(-1, -1)));
+              Domain(Rect<2>(Point<2>(0, 0), Point<2>(-1, -1)));
             break;
           }
       case 3:
           {
             (*coloring)[c.p] =
-              Domain::from_rect<3>(Rect<3>(make_point(0, 0, 0),
-                                           make_point(-1, -1, -1)));
+              Domain(Rect<3>(Point<3>(0, 0, 0), Point<3>(-1, -1, -1)));
             break;
           }
       default:
@@ -795,21 +793,19 @@ legion_index_partition_create_multi_domain_point_coloring(
       switch (c.p.get_dim()) {
         case 1:
           {
-            (*coloring)[c.p].insert(Domain::from_rect<1>(Rect<1>(0, -1)));
+            (*coloring)[c.p].insert(Domain(Rect<1>(0, -1)));
             break;
           }
       case 2:
           {
             (*coloring)[c.p].insert(
-              Domain::from_rect<2>(Rect<2>(make_point(0, 0),
-                                           make_point(-1, -1))));
+                Domain(Rect<2>(Point<2>(0, 0), Point<2>(-1, -1))));
             break;
           }
       case 3:
           {
             (*coloring)[c.p].insert(
-              Domain::from_rect<3>(Rect<3>(make_point(0, 0, 0),
-                                           make_point(-1, -1, -1))));
+                Domain(Rect<3>(Point<3>(0, 0, 0), Point<3>(-1, -1, -1))));
             break;
           }
       default:
