@@ -6853,10 +6853,10 @@ namespace Legion {
         // is different than our logical node
         ApEvent fill_post = dst->logical_node->issue_fill(info.op, dst_fields,
                         value->value, value->value_size, fill_pre, pred_guard, 
-                        trace_info,
 #ifdef LEGION_SPY
                         fill_op_uid,
 #endif
+                        trace_info,
                   (logical_node == dst->logical_node) ? NULL : logical_node);
         if (fill_post.exists())
           postconditions[fill_post] = pre_set.set_mask;
