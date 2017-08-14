@@ -2334,7 +2334,7 @@ namespace Legion {
                   ord.ordering.push_back(dim);
               }
             }
-            else if (field_idx == (ord.ordering.size()-1))
+            else if (field_idx == int(ord.ordering.size()-1))
             {
               // Add them to the front
               for (int idx = (num_dims-1); idx >= 0; idx--)
