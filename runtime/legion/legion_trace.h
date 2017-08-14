@@ -354,8 +354,6 @@ namespace Legion {
     public:
       PhysicalTrace& operator=(const PhysicalTrace &rhs);
     public:
-      void record_trace_local_id(Operation* op, unsigned local_id);
-      unsigned get_trace_local_id(Operation* op);
       void record_target_views(PhysicalTraceInfo &trace_info,
                                unsigned idx,
                                const std::vector<InstanceView*> &target_views);
@@ -378,7 +376,6 @@ namespace Legion {
     private:
       bool fixed;
       Reservation trace_lock;
-      LegionMap<UniqueID, unsigned>::aligned trace_local_ids;
 
       typedef LegionVector<LegionVector<InstanceView*>::aligned >::aligned
         CachedViews;

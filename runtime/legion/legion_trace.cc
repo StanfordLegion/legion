@@ -193,7 +193,7 @@ namespace Legion {
           }
           physical_trace = new PhysicalTrace();
         }
-        physical_trace->record_trace_local_id(op, index);
+        op->set_trace_local_id(index);
       }
       else if (!op->is_internal_op() && physical_trace != NULL)
       {
@@ -1219,32 +1219,6 @@ namespace Legion {
     {
       // should never be called
       assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTrace::record_trace_local_id(Operation* op, unsigned local_id)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock t_lock(trace_lock);
-
-#ifdef DEBUG_LEGION
-      assert(trace_local_ids.find(op->get_unique_op_id()) ==
-          trace_local_ids.end());
-#endif
-      trace_local_ids[op->get_unique_op_id()] = local_id;
-    }
-
-    //--------------------------------------------------------------------------
-    unsigned PhysicalTrace::get_trace_local_id(Operation* op)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock t_lock(trace_lock, 1, false/*exclusive*/);
-
-#ifdef DEBUG_LEGION
-      assert(trace_local_ids.find(op->get_unique_op_id()) !=
-          trace_local_ids.end());
-#endif
-      return trace_local_ids[op->get_unique_op_id()];
     }
 
     //--------------------------------------------------------------------------
