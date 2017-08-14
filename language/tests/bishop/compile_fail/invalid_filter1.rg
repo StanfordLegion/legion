@@ -13,9 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- invalid_filter1.rg:25: invalid filter constraint on field 'kind' for processor_list_type
+-- invalid_filter1.rg:25: expression of type 'isa_type' is invalid for filtering on field 'kind'
 --   target : processors[kind=x86];
---                          ^
+--                             ^
 
 import "bishop"
 

@@ -44,25 +44,25 @@ task main()
   var LR = partition(equal, grid, ispace(int2d, { 2, 1 }))
   var TB = partition(equal, grid, ispace(int2d, { 1, 2 }))
 
-  var L = LR[x0y0]
-  var R = LR[x1y0]
-  var T = TB[x0y0]
-  var B = TB[x0y1]
+  var L_all = LR[x0y0]
+  var R_all = LR[x1y0]
+  var T_all = TB[x0y0]
+  var B_all = TB[x0y1]
 
   var colors = ispace(int2d, { 2, 1 }) -- These have to use uniform colors for now.
-  var L_leaf = partition(equal, L, colors)
-  var R_leaf = partition(equal, R, colors)
-  var T_leaf = partition(equal, T, colors)
-  var B_leaf = partition(equal, B, colors)
+  var L = partition(equal, L_all, colors)
+  var R = partition(equal, R_all, colors)
+  var T = partition(equal, T_all, colors)
+  var B = partition(equal, B_all, colors)
 
   __demand(__spmd)
   for t = 0, 3 do
     for i in colors do
-      f(L_leaf[i], R_leaf[i])
+      f(L[i], R[i])
     end
     for i in colors do
-      g(T_leaf[i])
-      -- f(T_leaf[i], B_leaf[i]) -- This version needs the workaround for previous consumers. But either version hits the barrier index out of bounds issue.
+      g(T[i])
+      -- f(T[i], B[i]) -- This version needs the workaround for previous consumers. But either version hits the barrier index out of bounds issue.
     end
   end
 end

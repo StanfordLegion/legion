@@ -17,7 +17,7 @@ import "regent"
 task main()
   var x = phase_barrier(2)
   arrive(x)
-  adjust(x, 1) -- Add one more arriver.
+  x = adjust(x, 1) -- Add one more arriver.
   arrive(x)
   arrive(x)
   x = advance(x)

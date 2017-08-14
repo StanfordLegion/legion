@@ -14,8 +14,10 @@
 
 -- runs-with:
 -- [
---   ["-ll:cpu", "2", "-fflow-spmd", "1"]
 -- ]
+
+-- FIXME: Breaks SPMD transformation
+--   ["-ll:cpu", "4", "-fflow-spmd", "1"]
 
 import "regent"
 
@@ -24,7 +26,7 @@ import "regent"
 --   * multi-level region tree
 
 task f(r0 : region(int), r1 : region(int))
-where reads writes(r0, r1) do
+where reads writes(r0), reads(r1) do
   var a = 0
   for x in r0 do
     a += @x
@@ -36,11 +38,7 @@ where reads writes(r0, r1) do
   end
 
   for x in r0 do
-    @x = (@x + b) % 1549
-  end
-
-  for y in r0 do
-    @y = (@y + a) % 1487
+    @x = (@x + a + b) % 1549
   end
 end
 
@@ -52,7 +50,7 @@ where reads writes(r0) do
 end
 
 task main()
-  var grid = region(ispace(ptr, 24), int)
+  var grid = region(ispace(ptr, 48), int)
 
   var LR = partition(equal, grid, ispace(int1d, 2))
   var TB = partition(equal, grid, ispace(int1d, 3))
@@ -62,7 +60,8 @@ task main()
   var T_all = TB[0]
   var B_all = TB[1]
 
-  var colors = ispace(int1d, 2)
+  var colors = ispace(int1d, 4)
+  var C = partition(equal, grid, colors)
   var L = partition(equal, L_all, colors)
   var R = partition(equal, R_all, colors)
   var T = partition(equal, T_all, colors)
@@ -72,35 +71,39 @@ task main()
     @x = 1000 + int(x)+1 * int(x)+2
   end
 
-  for x in grid do
-    regentlib.c.printf("x %2d %4d\n", int(x), @x)
+  for i = 0, 8 do
+    regentlib.c.printf("x %2d %5d\n", i, grid[i])
   end
-
 
   __demand(__spmd)
   for t = 0, 3 do
     for i in colors do
+      g(C[i])
+    end
+    for i in colors do
       f(L[i], R[i])
     end
     for i in colors do
-      g(T[i])
-      -- f(T[i], B[i]) -- This version needs the workaround for previous consumers.
+      f(T[i], B[i])
+    end
+    for i in colors do
+      g(C[i])
     end
   end
 
   regentlib.c.printf("\n")
-  for x in grid do
-    regentlib.c.printf("x %2d %5d\n", int(x), @x)
+  for i = 0, 8 do
+    regentlib.c.printf("x %2d %5d\n", i, grid[i])
   end
 
-  regentlib.assert(grid[0] ==  7420, "test failed")
-  regentlib.assert(grid[1] ==  8106, "test failed")
-  regentlib.assert(grid[2] ==  8792, "test failed")
-  regentlib.assert(grid[3] ==  9478, "test failed")
-  regentlib.assert(grid[4] == 10164, "test failed")
-  regentlib.assert(grid[5] ==   441, "test failed")
-  regentlib.assert(grid[6] ==  2779, "test failed")
-  regentlib.assert(grid[7] ==  3465, "test failed")
-  regentlib.assert(grid[8] ==   328, "test failed")
+  regentlib.assert(grid[0] ==  9534, "test failed")
+  regentlib.assert(grid[1] ==  6286, "test failed")
+  regentlib.assert(grid[2] ==  3038, "test failed")
+  regentlib.assert(grid[3] == 10633, "test failed")
+  regentlib.assert(grid[4] ==  7903, "test failed")
+  regentlib.assert(grid[5] ==  4655, "test failed")
+  regentlib.assert(grid[6] ==  2520, "test failed")
+  regentlib.assert(grid[7] == 10115, "test failed")
+  regentlib.assert(grid[8] == 10395, "test failed")
 end
 regentlib.start(main)

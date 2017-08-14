@@ -178,7 +178,8 @@ if __name__ == '__main__':
     use_cuda = 'USE_CUDA' in os.environ and os.environ['USE_CUDA'] == '1'
     use_openmp = 'USE_OPENMP' in os.environ and os.environ['USE_OPENMP'] == '1'
     use_hdf = 'USE_HDF' in os.environ and os.environ['USE_HDF'] == '1'
+    debug = 'DEBUG' in os.environ and os.environ['DEBUG'] == '1'
     install.install(
         gasnet=True, cuda=use_cuda, openmp=use_openmp, hdf=use_hdf,
         external_terra_dir=terra_dir, gasnet_dir=gasnet_release_dir, conduit=conduit,
-        debug=False, thread_count=thread_count)
+        debug=debug, thread_count=thread_count)

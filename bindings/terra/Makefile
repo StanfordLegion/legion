@@ -65,7 +65,7 @@ else
 endif
 
 ifeq ($(shell uname), Darwin)
-	LD_FLAGS += -Wl,-force_load,liblegion.a
+	LD_FLAGS += -Wl,-force_load,liblegion.a -Wl,-force_load,librealm.a
 else
 	LD_FLAGS += -Wl,--whole-archive -llegion -lrealm -Wl,--no-whole-archive
 endif

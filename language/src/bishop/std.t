@@ -77,6 +77,7 @@ local function register_opaque_type(keyword)
 end
 
 register_opaque_type("isa_type")
+register_opaque_type("processor_kind_type")
 register_opaque_type("compile_option_type")
 register_opaque_type("processor_type")
 register_opaque_type("processor_list_type")
