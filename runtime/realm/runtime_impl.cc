@@ -1216,11 +1216,6 @@ namespace Realm {
 	  it++)
 	(*it)->create_memories(this);
 
-      for(std::vector<Module *>::const_iterator it = modules.begin();
-	  it != modules.end();
-	  it++)
-	(*it)->create_processors(this);
-
       LocalCPUMemory *regmem;
       if(reg_mem_size_in_mb > 0) {
 	gasnet_seginfo_t *seginfos = new gasnet_seginfo_t[gasnet_nodes()];
@@ -1235,6 +1230,11 @@ namespace Realm {
 	get_runtime()->add_memory(regmem);
       } else
 	regmem = 0;
+
+      for(std::vector<Module *>::const_iterator it = modules.begin();
+	  it != modules.end();
+	  it++)
+	(*it)->create_processors(this);
 
       LocalCPUMemory *reg_ib_mem;
       if(reg_ib_mem_size_in_mb > 0) {

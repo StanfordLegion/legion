@@ -37,6 +37,16 @@ local processor_isa = {
   cuda = c.CUDA_ISA,
 }
 
+local processor_kind = {
+  loc = c.LOC_PROC,
+  toc = c.TOC_PROC,
+  io = c.IO_PROC,
+  openmp = c.OMP_PROC,
+  util = c.UTIL_PROC,
+  group = c.PROC_GROUP,
+  set = c.PROC_SET,
+}
+
 local memory_kind = {
   global = c.GLOBAL_MEM,
   sysmem = c.SYSTEM_MEM,
@@ -63,6 +73,8 @@ function codegen.type(ty)
   elseif std.is_memory_list_type(ty) then
     return c.bishop_memory_list_t
   elseif std.is_isa_type(ty) then
+    return c.legion_processor_kind_t
+  elseif std.is_processor_kind_type(ty) then
     return c.legion_processor_kind_t
   elseif std.is_memory_kind_type(ty) then
     return c.legion_memory_kind_t
@@ -100,6 +112,11 @@ function codegen.expr(binders, state_var, node)
       actions = quote
         [actions]
         [value] = [ processor_isa[keyword] ]
+      end
+    elseif std.is_processor_kind_type(node.expr_type) then
+      actions = quote
+        [actions]
+        [value] = [ processor_kind[keyword] ]
       end
     elseif std.is_memory_kind_type(node.expr_type) then
       actions = quote
@@ -169,17 +186,32 @@ function codegen.expr(binders, state_var, node)
         end
 
       elseif constraint.field == "kind" then
-        assert(std.is_memory_list_type(node.value.expr_type))
-        assert(std.is_memory_kind_type(constraint.value.expr_type))
-        actions = quote
-          [actions]
-          [v.actions]
-          [value] = c.bishop_filter_memories_by_kind([value], [v.value])
-          if [value].size == 0 then
-            c.bishop_logger_debug("expression '%s' yields an empty list",
-              [node:unparse()])
+        if std.is_processor_list_type(node.value.expr_type) then
+          assert(std.is_processor_kind_type(constraint.value.expr_type))
+          actions = quote
+            [actions]
+            [v.actions]
+            [value] = c.bishop_filter_processors_by_kind([value], [v.value])
+            if [value].size == 0 then
+              c.bishop_logger_debug("expression '%s' yields an empty list",
+                [node:unparse()])
+            end
+            c.bishop_delete_processor_list([base.value])
           end
-          c.bishop_delete_memory_list([base.value])
+        elseif std.is_memory_list_type(node.value.expr_type) then
+          assert(std.is_memory_kind_type(constraint.value.expr_type))
+          actions = quote
+            [actions]
+            [v.actions]
+            [value] = c.bishop_filter_memories_by_kind([value], [v.value])
+            if [value].size == 0 then
+              c.bishop_logger_debug("expression '%s' yields an empty list",
+                [node:unparse()])
+            end
+            c.bishop_delete_memory_list([base.value])
+          end
+        else
+          assert(false, "unsupported")
         end
 
       else

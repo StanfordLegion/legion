@@ -3755,8 +3755,12 @@ local function make_reduction_layout(op_id)
   end
 end
 
-function std.setup(main_task, extra_setup_thunk)
-  assert(std.is_task(main_task))
+function std.setup(main_task, extra_setup_thunk, registration_name)
+  assert(not main_task or std.is_task(main_task))
+
+  if not registration_name then
+    registration_name = "main"
+  end
 
   local reduction_registrations = terralib.newlist()
   for _, op in ipairs(reduction_ops) do
@@ -3923,23 +3927,35 @@ function std.setup(main_task, extra_setup_thunk)
     end
   end
 
-  local terra main(argc : int, argv : &rawstring)
+  local argc = terralib.newsymbol(int, "argc")
+  local argv = terralib.newsymbol(&rawstring, "argv")
+
+  local main_setup = quote end
+  if main_task then
+    main_setup = quote
+      c.legion_runtime_set_top_level_task_id([main_task:get_task_id()])
+      return c.legion_runtime_start([argc], [argv], false)
+    end
+  end
+
+  local terra main([argc], [argv])
     [reduction_registrations];
     [layout_registrations];
     [task_registrations];
     [cuda_setup];
     [extra_setup];
-    c.legion_runtime_set_top_level_task_id([main_task:get_task_id()])
-    return c.legion_runtime_start(argc, argv, false)
+    [main_setup]
   end
+  main:setname(registration_name)
 
-  local names = {main = main}
+  local names = {[registration_name] = main}
   return main, names
 end
 
 function std.start(main_task, extra_setup_thunk)
   if std.config["pretty"] then os.exit() end
 
+  assert(std.is_task(main_task))
   local main = std.setup(main_task, extra_setup_thunk)
 
   local args = std.args
@@ -3960,6 +3976,7 @@ function std.start(main_task, extra_setup_thunk)
 end
 
 function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flags)
+  assert(std.is_task(main_task))
   local main, names = std.setup(main_task, extra_setup_thunk)
   local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/terra"
 
@@ -3971,6 +3988,62 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
   else
     terralib.saveobj(filename, names, flags)
   end
+end
+
+local function normalize_name(name)
+  return string.gsub(
+    string.gsub(name, ".*/", ""),
+    "[^A-Za-z0-9]", "_")
+end
+
+local function generate_header(header_filename, registration_name)
+  local header_basename = normalize_name(header_filename)
+  return string.format(
+[[
+#ifndef __%s__
+#define __%s__
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+void %s(void);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif // __%s__
+]],
+  header_basename,
+  header_basename,
+  registration_name,
+  header_basename)
+end
+
+local function write_header(header_filename, registration_name)
+  local header = io.open(header_filename, "w")
+  assert(header)
+  header:write(generate_header(header_filename, registration_name))
+  header:close()
+end
+
+function std.save_tasks(header_filename, filename, filetype,
+                       extra_setup_thunk, link_flags)
+  assert(header_filename and filename)
+  local registration_name = normalize_name(header_filename) .. "_register"
+  local _, names = std.setup(nil, extra_setup_thunk, registration_name)
+  local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/terra"
+
+  local flags = terralib.newlist()
+  if link_flags then flags:insertall(link_flags) end
+  flags:insertall({"-L" .. lib_dir, "-llegion_terra"})
+  if filetype ~= nil then
+    terralib.saveobj(filename, filetype, names, flags)
+  else
+    terralib.saveobj(filename, names, flags)
+  end
+  write_header(header_filename, registration_name)
 end
 
 -- #####################################

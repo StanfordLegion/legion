@@ -25,6 +25,7 @@ local optimize_index_launches = require("regent/optimize_index_launches")
 local optimize_mapping = require("regent/optimize_mapping")
 local optimize_traces = require("regent/optimize_traces")
 local parallelize_tasks = require("regent/parallelize_tasks")
+local skip_empty_tasks = require("regent/skip_empty_tasks")
 local vectorize_loops = require("regent/vectorize_loops")
 
 if std.config["flow"] then
@@ -36,6 +37,7 @@ end
 if std.config["inline"] then passes_hooks.add_optimization(1, inline_tasks) end
 if std.config["parallelize"] then passes_hooks.add_optimization(10, parallelize_tasks) end
 if std.config["index-launch"] then passes_hooks.add_optimization(25, optimize_index_launches) end
+if std.config["skip-empty-tasks"] then passes_hooks.add_optimization(28, skip_empty_tasks) end
 if std.config["future"] then passes_hooks.add_optimization(30, optimize_futures) end
 if std.config["leaf"] or std.config["inner"] then passes_hooks.add_optimization(40, optimize_config_options) end
 if std.config["mapping"] then passes_hooks.add_optimization(50, optimize_mapping) end
