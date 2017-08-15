@@ -102,7 +102,6 @@ namespace Legion {
     // Layout Description 
     /////////////////////////////////////////////////////////////
 
-#ifdef REALM_USE_FIELD_IDS
     //--------------------------------------------------------------------------
     LayoutDescription::LayoutDescription(FieldSpaceNode *own,
                                          const FieldMask &mask,
@@ -135,43 +134,6 @@ namespace Legion {
         info.serdez_id = serdez[index];
       }
     }
-#else
-    //--------------------------------------------------------------------------
-    LayoutDescription::LayoutDescription(FieldSpaceNode *own,
-                                         const FieldMask &mask,
-                                         LayoutConstraints *con,
-                                   const std::vector<unsigned> &mask_index_map,
-                                     const std::vector<CustomSerdezID> &serdez,
-                    const std::vector<std::pair<FieldID,size_t> > &field_sizes)
-      : allocated_fields(mask), constraints(con), owner(own) 
-    //--------------------------------------------------------------------------
-    {
-      constraints->add_reference();
-      layout_lock = Reservation::create_reservation();
-      field_infos.resize(field_sizes.size());
-      // Switch data structures from layout by field order to order
-      // of field locations in the bit mask
-#ifdef DEBUG_LEGION
-      assert(mask_index_map.size() == 
-                size_t(FieldMask::pop_count(allocated_fields)));
-#endif
-      std::vector<size_t> offsets(field_sizes.size(),0);
-      for (unsigned idx = 1; idx < field_sizes.size(); idx++)
-        offsets[idx] = offsets[idx-1] + field_sizes[idx-1].second;
-      for (unsigned idx = 0; idx < mask_index_map.size(); idx++)
-      {
-        // This gives us the index in the field ordered data structures
-        unsigned index = mask_index_map[idx];
-        FieldID fid = field_sizes[index].first;
-        field_indexes[fid] = idx;
-        CopySrcDstField &info = field_infos[idx];
-        info.offset = offsets[index];
-        info.size = field_sizes[index].second;
-        info.field_id = fid;
-        info.serdez_id = serdez[index];
-      }
-    }
-#endif
 
     //--------------------------------------------------------------------------
     LayoutDescription::LayoutDescription(const FieldMask &mask,
@@ -484,7 +446,6 @@ namespace Legion {
       FieldMask instance_mask;
       const std::vector<FieldID> &field_set = 
         constraints->field_constraint.get_field_set(); 
-#ifdef REALM_USE_FIELD_IDS
       std::vector<size_t> field_sizes(field_set.size());
       std::vector<unsigned> mask_index_map(field_set.size());
       std::vector<CustomSerdezID> serdez(field_set.size());
@@ -493,16 +454,6 @@ namespace Legion {
       LayoutDescription *result = 
         field_space_node->create_layout_description(instance_mask, constraints,
                                 mask_index_map, field_set, field_sizes, serdez);
-#else
-      std::vector<std::pair<FieldID,size_t> > field_sizes(field_set.size());
-      std::vector<unsigned> mask_index_map(field_set.size());
-      std::vector<CustomSerdezID> serdez(field_set.size());
-      field_space_node->compute_create_offsets(field_set, field_sizes,
-                                         mask_index_map, serdez, instance_mask);
-      LayoutDescription *result = 
-        field_space_node->create_layout_description(instance_mask, constraints,
-                                       mask_index_map, serdez, field_sizes);
-#endif
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
@@ -1943,7 +1894,6 @@ namespace Legion {
     // Instance Builder
     /////////////////////////////////////////////////////////////
 
-#ifdef REALM_USE_FIELD_IDS
     //--------------------------------------------------------------------------
     InstanceBuilder::~InstanceBuilder(void)
     //--------------------------------------------------------------------------
@@ -1952,7 +1902,6 @@ namespace Legion {
       if (own_realm_layout && (realm_layout != NULL))
         delete realm_layout;
     }
-#endif
 
     //--------------------------------------------------------------------------
     size_t InstanceBuilder::compute_needed_size(RegionTreeForest *forest)
@@ -1961,13 +1910,8 @@ namespace Legion {
       if (!valid)
         initialize(forest);
       size_t total_field_bytes = 0;
-#ifdef REALM_USE_FIELD_IDS
       for (unsigned idx = 0; idx < field_sizes.size(); idx++)
         total_field_bytes += field_sizes[idx];
-#else
-      for (unsigned idx = 0; idx < field_sizes.size(); idx++)
-        total_field_bytes += field_sizes[idx].second;
-#endif
       return (total_field_bytes * instance_domain->get_volume());
     }
 
@@ -1987,7 +1931,6 @@ namespace Legion {
         return NULL;
       }
       // If there are no fields then we are done
-#ifdef REALM_USE_FIELD_IDS 
 #ifdef DEBUG_LEGION
       assert(realm_layout != NULL);
 #endif
@@ -2010,20 +1953,12 @@ namespace Legion {
       else
         ready = ApEvent(PhysicalInstance::create_instance(instance,
                   memory_manager->memory, realm_layout, requests));
-#else
-      PhysicalInstance instance = instance_domain->create_instance(
-                                       memory_manager->memory, sizes_only, 
-                                       block_size, creator_id);
-      ApEvent ready = ApEvent::NO_AP_EVENT;
-#endif
       // If we couldn't make it then we are done
       if (!instance.exists())
         return NULL;
-#ifdef REALM_USE_FIELD_IDS
       // If we successfully made the instance then Realm 
       // took over ownership of the layout
       own_realm_layout = false;
-#endif
       PhysicalManager *result = NULL;
       DistributedID did = forest->runtime->get_available_distributed_id(false);
       AddressSpaceID local_space = forest->runtime->address_space;
@@ -2053,15 +1988,10 @@ namespace Legion {
         LayoutConstraints *layout_constraints = 
          forest->runtime->register_layout(field_node->handle,constraints);
         // Then make our description
-#ifdef REALM_USE_FIELD_IDS
         layout = field_node->create_layout_description(instance_mask,
                                   layout_constraints, mask_index_map,
                                   constraints.field_constraint.get_field_set(),
                                   field_sizes, serdez);
-#else
-        layout = field_node->create_layout_description(instance_mask,
-                 layout_constraints, mask_index_map, serdez, field_sizes);
-#endif
       }
       // Figure out what kind of instance we just made
       switch (constraints.specialized_constraint.get_kind())
@@ -2244,7 +2174,6 @@ namespace Legion {
       return one;
     }
 
-#ifdef REALM_USE_FIELD_IDS
     //--------------------------------------------------------------------------
     void InstanceBuilder::compute_layout_parameters(void)
     //--------------------------------------------------------------------------
@@ -2475,97 +2404,6 @@ namespace Legion {
 #endif
       realm_layout = instance_domain->create_layout(realm_constraints);
     }
-#else
-    //--------------------------------------------------------------------------
-    void InstanceBuilder::compute_layout_parameters(void)
-    //--------------------------------------------------------------------------
-    {
-      FieldSpaceNode *field_node = ancestor->column_source;      
-      const std::vector<FieldID> &field_set = 
-        constraints.field_constraint.get_field_set(); 
-      field_sizes.resize(field_set.size());
-      mask_index_map.resize(field_set.size());
-      serdez.resize(field_set.size());
-      field_node->compute_create_offsets(field_set, field_sizes,
-                                         mask_index_map, serdez, instance_mask);
-      sizes_only.resize(field_sizes.size());
-      for (unsigned idx = 0; idx < field_sizes.size(); idx++)
-        sizes_only[idx] = field_sizes[idx].second;
-      // Now figure out what kind of instance we're going to make, look at
-      // the constraints and see if we recognize any of them
-      switch (constraints.specialized_constraint.get_kind())
-      {
-        case REDUCTION_FOLD_SPECIALIZE:
-          {
-            // Reduction folds are a special case of normal specialize
-            redop_id = constraints.specialized_constraint.get_reduction_op();
-            reduction_op = Runtime::get_reduction_op(redop_id);
-            // Update the field sizes to be the RHS of the reduction operator
-            for (std::vector<std::pair<FieldID,size_t> >::iterator it =
-                  field_sizes.begin(); it != field_sizes.end(); it++)
-            {
-#ifdef DEBUG_LEGION
-              // This is an application bug meaning the reduction
-              // operator doesn't match field size, but we've caught
-              // it really late
-              assert(it->second == reduction_op->sizeof_lhs);
-#endif
-              it->second = reduction_op->sizeof_rhs;
-            }
-            for (unsigned idx = 0; idx < field_sizes.size(); idx++)
-              sizes_only[idx] = reduction_op->sizeof_rhs;
-            // Then we fall through and do the normal layout routine
-          }
-        case NO_SPECIALIZE:
-        case NORMAL_SPECIALIZE:
-          {
-            const std::vector<DimensionKind> &ordering = 
-                                      constraints.ordering_constraint.ordering;
-            size_t max_block_size = instance_domain->get_volume();
-            // See if we are making an AOS or SOA instance
-            if (!ordering.empty())
-            {
-              // If fields are first, it is AOS if the fields
-              // are last it is SOA, otherwise, see if we can find
-              // fields in which case we can't support it yet
-              if (ordering.front() == DIM_F)
-                block_size = 1;
-              else if (ordering.back() == DIM_F)
-                block_size = max_block_size;
-              else
-              {
-                for (unsigned idx = 0; idx < ordering.size(); idx++)
-                {
-                  if (ordering[idx] == DIM_F)
-                    assert(false); // need to handle this case
-                }
-                block_size = max_block_size;
-              }
-            }
-            else
-              block_size = max_block_size;
-            // redop id is already zero
-            break;
-          }
-        case REDUCTION_LIST_SPECIALIZE:
-          {
-            // TODO: implement list reduction instances
-            assert(false);
-            redop_id = constraints.specialized_constraint.get_reduction_op();
-            reduction_op = Runtime::get_reduction_op(redop_id);
-            break;
-          }
-        case VIRTUAL_SPECIALIZE:
-          {
-            REPORT_LEGION_ERROR(ERROR_ILLEGAL_REQUEST_VIRTUAL_INSTANCE,
-                          "Illegal request to create a virtual instance");
-            assert(false);
-          }
-        default:
-          assert(false); // unknown kind
-      }
-    }
-#endif
     
   }; // namespace Internal
 }; // namespace Legion

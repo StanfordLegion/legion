@@ -371,19 +371,11 @@ namespace Legion {
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
       {
-#ifdef REALM_USE_FIELD_IDS
         Realm::ZIndexSpace<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
         accessor = A(instance, fid, is.bounds);
-#else
-        ptrdiff_t field_offset; Realm::ZIndexSpace<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, field_offset, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
-        accessor = A(instance, field_offset, is.bounds);
-#endif
       }
     public:
       __CUDA_HD__
@@ -427,19 +419,11 @@ namespace Legion {
           bounds(region.template get_bounds<N,T>()),
           gpu_warning(!silence_warnings)
       {
-#ifdef REALM_USE_FIELD_IDS
         Realm::ZIndexSpace<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
         accessor = A(instance, fid, is.bounds);
-#else
-        ptrdiff_t field_offset; Realm::ZIndexSpace<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, field_offset, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
-        accessor = A(instance, field_offset, is.bounds);
-#endif
       }
     public:
       __CUDA_HD__
@@ -520,19 +504,11 @@ namespace Legion {
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
       {
-#ifdef REALM_USE_FIELD_IDS
         Realm::ZIndexSpace<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
         accessor = A(instance, fid, is.bounds);
-#else
-        ptrdiff_t field_offset; Realm::ZIndexSpace<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, field_offset, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
-        accessor = A(instance, field_offset, is.bounds);
-#endif
       }
     public:
       __CUDA_HD__
@@ -567,19 +543,11 @@ namespace Legion {
           bounds(region.template get_bounds<1,T>()), 
           gpu_warning(!silence_warnings)
       {
-#ifdef REALM_USE_FIELD_IDS
         Realm::ZIndexSpace<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
         accessor = A(instance, fid, is.bounds);
-#else
-        ptrdiff_t field_offset; Realm::ZIndexSpace<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_ONLY, fid, field_offset, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
-        accessor = A(instance, field_offset, is.bounds);
-#endif
       }
     public:
       __CUDA_HD__
@@ -650,19 +618,11 @@ namespace Legion {
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
       {
-#ifdef REALM_USE_FIELD_IDS
         Realm::ZIndexSpace<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
         accessor = A(instance, fid, is.bounds);
-#else
-        ptrdiff_t field_offset; Realm::ZIndexSpace<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, field_offset, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
-        accessor = A(instance, field_offset, is.bounds);
-#endif
       }
     public:
       __CUDA_HD__
@@ -717,19 +677,11 @@ namespace Legion {
           bounds(region.template get_bounds<N,T>()),
           gpu_warning(!silence_warnings)
       {
-#ifdef REALM_USE_FIELD_IDS
         Realm::ZIndexSpace<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
         accessor = A(instance, fid, is.bounds);
-#else
-        ptrdiff_t field_offset; Realm::ZIndexSpace<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, field_offset, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
-        accessor = A(instance, field_offset, is.bounds);
-#endif
       }
     public:
       __CUDA_HD__
@@ -845,19 +797,11 @@ namespace Legion {
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
       {
-#ifdef REALM_USE_FIELD_IDS
         Realm::ZIndexSpace<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
         accessor = A(instance, fid, is.bounds);
-#else
-        ptrdiff_t field_offset; Realm::ZIndexSpace<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, field_offset, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
-        accessor = A(instance, field_offset, is.bounds);
-#endif
       }
     public:
       __CUDA_HD__
@@ -903,19 +847,11 @@ namespace Legion {
           bounds(region.template get_bounds<1,T>()),
           gpu_warning(!silence_warnings)
       {
-#ifdef REALM_USE_FIELD_IDS
         Realm::ZIndexSpace<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
         accessor = A(instance, fid, is.bounds);
-#else
-        ptrdiff_t field_offset; Realm::ZIndexSpace<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(READ_WRITE, fid, field_offset, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
-        accessor = A(instance, field_offset, is.bounds);
-#endif
       }
     public:
       __CUDA_HD__
@@ -1021,19 +957,11 @@ namespace Legion {
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
       {
-#ifdef REALM_USE_FIELD_IDS
         Realm::ZIndexSpace<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
         accessor = A(instance, fid, is.bounds);
-#else
-        ptrdiff_t field_offset; Realm::ZIndexSpace<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, field_offset, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
-        accessor = A(instance, field_offset, is.bounds);
-#endif
       }
     public:
       __CUDA_HD__
@@ -1082,19 +1010,11 @@ namespace Legion {
           bounds(region.template get_bounds<N,T>()),
           gpu_warning(!silence_warnings)
       {
-#ifdef REALM_USE_FIELD_IDS
         Realm::ZIndexSpace<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
         accessor = A(instance, fid, is.bounds);
-#else
-        ptrdiff_t field_offset; Realm::ZIndexSpace<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, field_offset, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
-        accessor = A(instance, field_offset, is.bounds);
-#endif
       }
     public:
       __CUDA_HD__
@@ -1192,19 +1112,11 @@ namespace Legion {
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
       {
-#ifdef REALM_USE_FIELD_IDS
         Realm::ZIndexSpace<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
         accessor = A(instance, fid, is.bounds);
-#else
-        ptrdiff_t field_offset; Realm::ZIndexSpace<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, field_offset, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
-        accessor = A(instance, field_offset, is.bounds);
-#endif
       }
     public:
       __CUDA_HD__
@@ -1244,19 +1156,11 @@ namespace Legion {
           bounds(region.template get_bounds<1,T>()),
           gpu_warning(!silence_warnings)
       {
-#ifdef REALM_USE_FIELD_IDS
         Realm::ZIndexSpace<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
         accessor = A(instance, fid, is.bounds);
-#else
-        ptrdiff_t field_offset; Realm::ZIndexSpace<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(WRITE_DISCARD, fid, field_offset, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
-        accessor = A(instance, field_offset, is.bounds);
-#endif
       }
     public:
       __CUDA_HD__
@@ -1344,21 +1248,12 @@ namespace Legion {
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     ReductionOpID redop, bool silence_warnings = false)
       {
-#ifdef REALM_USE_FIELD_IDS
         Realm::ZIndexSpace<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(REDUCE, fid, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               silence_warnings, redop);
         accessor = A(instance, fid, is.bounds);
-#else
-        ptrdiff_t field_offset; Realm::ZIndexSpace<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(REDUCE, fid, field_offset, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
-              silence_warnings, redop);
-        accessor = A(instance, field_offset, is.bounds);
-#endif
       }
     public:
       template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
@@ -1383,21 +1278,12 @@ namespace Legion {
           bounds(region.template get_bounds<N,T>()),
           gpu_warning(!silence_warnings)
       {
-#ifdef REALM_USE_FIELD_IDS
         Realm::ZIndexSpace<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(REDUCE, fid, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
               silence_warnings, redop);
         accessor = A(instance, fid, is.bounds);
-#else
-        ptrdiff_t field_offset; Realm::ZIndexSpace<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(REDUCE, fid, field_offset, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
-              silence_warnings, redop);
-        accessor = A(instance, field_offset, is.bounds);
-#endif
       }
     public:
       template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__ 
@@ -1442,19 +1328,11 @@ namespace Legion {
       UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
                           bool silence_warnings = false)
       {
-#ifdef REALM_USE_FIELD_IDS
         Realm::ZIndexSpace<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(NO_ACCESS, fid, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
         accessor = A(instance, fid, is.bounds);
-#else
-        ptrdiff_t field_offset; Realm::ZIndexSpace<N,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(NO_ACCESS, fid, field_offset, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
-        accessor = A(instance, field_offset, is.bounds);
-#endif
       }
     public:
       __CUDA_HD__
@@ -1497,19 +1375,11 @@ namespace Legion {
       UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
                           bool silence_warnings = false)
       {
-#ifdef REALM_USE_FIELD_IDS
         Realm::ZIndexSpace<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(NO_ACCESS, fid, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
         accessor = A(instance, fid, is.bounds);
-#else
-        ptrdiff_t field_offset; Realm::ZIndexSpace<1,T> is;
-        const Realm::RegionInstance instance = 
-          region.get_instance_info(NO_ACCESS, fid, field_offset, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
-        accessor = A(instance, field_offset, is.bounds);
-#endif
       }
     public:
       __CUDA_HD__

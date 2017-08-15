@@ -2660,7 +2660,6 @@ namespace Legion {
       return result;
     }
 
-#ifdef REALM_USE_FIELD_IDS
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     Realm::InstanceLayoutGeneric* IndexSpaceNodeT<DIM,T>::create_layout(
@@ -2671,54 +2670,6 @@ namespace Legion {
       get_realm_index_space(local_is, true/*tight*/);
       return Realm::InstanceLayoutGeneric::choose_instance_layout(local_is,ilc);
     }
-#else
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    PhysicalInstance IndexSpaceNodeT<DIM,T>::create_instance(Memory target,
-                                       const std::vector<size_t> &field_sizes,
-                                       size_t blocking_factor, UniqueID op_id)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(context->runtime, REALM_CREATE_INSTANCE_CALL);
-      Realm::ZIndexSpace<DIM,T> local_space;
-      get_realm_index_space(local_space, true/*tight*/);
-      Realm::ProfilingRequestSet requests;
-      if (context->runtime->profiler != NULL)
-      {
-        context->runtime->profiler->add_inst_request(requests, op_id);
-        PhysicalInstance result;
-	LgEvent ready(PhysicalInstance::create_instance(result, target,
-							local_space,
-							field_sizes,
-							blocking_factor,
-							requests));
-	// TODO
-	ready.lg_wait();
-        // If the result exists tell the profiler about it in case
-        // it never gets deleted and we never see the profiling feedback
-        if (result.exists())
-        {
-          unsigned long long creation_time = 
-            Realm::Clock::current_time_in_nanoseconds();
-          context->runtime->profiler->record_instance_creation(result, target, 
-                                                        op_id, creation_time);
-        }
-        return result;
-      }
-      else
-      {
-        PhysicalInstance result;
-	LgEvent ready(PhysicalInstance::create_instance(result, target,
-							local_space,
-							field_sizes,
-							blocking_factor,
-							requests));
-	// TODO
-	ready.lg_wait();
-	return result;
-      }
-    }
-#endif
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>

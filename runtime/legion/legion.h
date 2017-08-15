@@ -2087,17 +2087,10 @@ namespace Legion {
       friend class FieldAccessor;
       template<typename, int, typename, typename>
       friend class UnsafeFieldAccessor;
-#ifdef REALM_USE_FIELD_IDS
       Realm::RegionInstance get_instance_info(PrivilegeMode mode, FieldID fid,
                                               void *realm_is, TypeTag type_tag,
                                               bool silence_warnings,
                                               ReductionOpID redop = 0) const;
-#else
-      Realm::RegionInstance get_instance_info(PrivilegeMode mode, FieldID fid,
-                                      ptrdiff_t &field_offset, void *realm_is,
-                                      TypeTag type_tag, bool silence_warnings,
-                                      ReductionOpID redop = 0) const;
-#endif
       void fail_bounds_check(DomainPoint p, FieldID fid,
                              PrivilegeMode mode) const;
     protected:
