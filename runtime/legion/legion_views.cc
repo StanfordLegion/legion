@@ -6628,6 +6628,10 @@ namespace Legion {
         // Issue the fill command
         // Only apply an intersection if the destination logical node
         // is different than our logical node
+        // If the intersection is empty we can skip the fill all together
+        if ((logical_node != dst->logical_node) && 
+            (!logical_node->intersects_with(dst->logical_node)))
+          continue;
         ApEvent fill_post = dst->logical_node->issue_fill(info.op, dst_fields,
                         value->value, value->value_size, fill_pre, pred_guard, 
 #ifdef LEGION_SPY
