@@ -53,7 +53,12 @@ enum FieldIDs {
   FID_CP
 };
 
-double *my_ptr= NULL;
+typedef struct {
+  double check;
+  double deriv;
+}deriv_t;
+
+deriv_t *my_ptr= NULL;
 
 void top_level_task(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
@@ -83,7 +88,7 @@ void top_level_task(const Task *task,
     FieldAllocator allocator = 
       runtime->create_field_allocator(ctx, fs);
     allocator.allocate_field(sizeof(double),FID_VAL);
-    allocator.allocate_field(sizeof(double),FID_DERIV);
+    allocator.allocate_field(sizeof(deriv_t),FID_DERIV);
   }
   LogicalRegion stencil_lr = runtime->create_logical_region(ctx, is, fs);
   
@@ -99,7 +104,7 @@ void top_level_task(const Task *task,
 		 LEGION_FILE_READ_WRITE); 
      
   PhysicalRegion stencil_deriv_pr;
-  double *deriv_ptr = (double*)malloc(sizeof(double)*(num_elements));
+  deriv_t *deriv_ptr = (deriv_t*)malloc(sizeof(deriv_t)*(num_elements));
   std::map<FieldID,void*> field_pointer_map_deriv;
   field_pointer_map_deriv[FID_DERIV] = deriv_ptr;
   printf("Attach arrray fid %d, ptr %p\n", FID_DERIV, deriv_ptr);  
@@ -164,7 +169,7 @@ void top_level_task(const Task *task,
   runtime->destroy_logical_region(ctx, stencil_lr);
   runtime->destroy_field_space(ctx, fs);
   runtime->destroy_index_space(ctx, is);
-  printf("End of TOP_LEVEL_TASK, %f, %f\n", my_ptr[0], my_ptr[num_elements]);
+  printf("End of TOP_LEVEL_TASK, %f, %f\n", my_ptr[0].deriv, my_ptr[num_elements].deriv);
 }
 
 // The standard initialize field task from earlier examples
@@ -210,7 +215,7 @@ void stencil_task(const Task *task,
   FieldID write_fid = *(task->regions[1].privilege_fields.begin());
 
   const FieldAccessor<READ_ONLY,double,1> read_acc(regions[0], read_fid);
-  const FieldAccessor<WRITE_DISCARD,double,1> write_acc(regions[1], write_fid);
+  const FieldAccessor<WRITE_DISCARD,deriv_t,1> write_acc(regions[1], write_fid);
 
   Rect<1> rect = runtime->get_index_space_domain(ctx,
                   task->regions[1].region.get_index_space());
@@ -219,6 +224,7 @@ void stencil_task(const Task *task,
   // path which checks for clamping when necessary.
   // If not, then we can do the fast path without
   // any checks.
+  deriv_t deriv;
   if ((rect.lo[0] < 2) || (rect.hi[0] > (max_elements-3)))
   {
     printf("Running slow stencil path for point %d...\n", point);
@@ -245,7 +251,9 @@ void stencil_task(const Task *task,
         r2 = read_acc[*pir + 2];
       
       double result = (-l2 + 8.0*l1 - 8.0*r1 + r2) / 12.0;
-      write_acc[*pir] = result;
+      deriv.deriv = result;
+      deriv.check = 1.0;
+      write_acc[*pir] = deriv;
     }
   }
   else
@@ -260,7 +268,9 @@ void stencil_task(const Task *task,
       double r2 = read_acc[*pir + 2];
 
       double result = (-l2 + 8.0*l1 - 8.0*r1 + r2) / 12.0;
-      write_acc[*pir] = result;
+      deriv.deriv = result;
+      deriv.check = 1.0;
+      write_acc[*pir] = deriv;
     }
   }
 }
@@ -280,7 +290,7 @@ void check_task(const Task *task,
   FieldID dst_fid = *(task->regions[1].privilege_fields.begin());
 
   const FieldAccessor<READ_ONLY,double,1> src_acc(regions[0], src_fid);
-  const FieldAccessor<READ_ONLY,double,1> dst_acc(regions[1], dst_fid);
+  const FieldAccessor<READ_ONLY,deriv_t,1> dst_acc(regions[1], dst_fid);
 
   Rect<1> rect = runtime->get_index_space_domain(ctx,
                   task->regions[1].region.get_index_space());
@@ -309,19 +319,19 @@ void check_task(const Task *task,
       r2 = src_acc[*pir + 2];
     
     double expected = (-l2 + 8.0*l1 - 8.0*r1 + r2) / 12.0;
-    double received = dst_acc[*pir];
-    if (i == 0 || i == max_elements-1) printf("result %d, %f, ptr %p, src %p\n", i, received, dst_acc.ptr(rect.lo), src_acc.ptr(rect.lo));
-    if (my_ptr[i] != received) {
-        printf("transfer error %d, %f\n", i, my_ptr[i]);
+    deriv_t received = dst_acc[*pir];
+    if (i == 0 || i == max_elements-1) printf("result %d, %f, %f, ptr %p, src %p\n", i, received.deriv, received.check, dst_acc.ptr(rect.lo), src_acc.ptr(rect.lo));
+    if (my_ptr[i].deriv != received.deriv) {
+        printf("transfer error %d, %f\n", i, my_ptr[i].deriv);
     }
     i++;
     // Probably shouldn't bitwise compare floating point
     // numbers but the order of operations are the same so they
     // should be bitwise equal.
-    if (expected != received)
+    if (expected != received.deriv)
       all_passed = false;
   }
-  printf("CHECK, %f, %f\n", my_ptr[0], my_ptr[max_elements-1]);
+  printf("CHECK, %f, %f\n", my_ptr[0].deriv, my_ptr[max_elements-1].deriv);
   if (all_passed)
     printf("SUCCESS!\n");
   else

@@ -5224,6 +5224,12 @@ namespace Legion {
                                     LegionFileMode mode);
       
       void detach_c_array(Context ctx, PhysicalRegion region);
+      
+      std::vector<PhysicalRegion> attach_fortran_array_aos(Context ctx,
+                                                   std::map<FieldID, LogicalRegion> &handle,
+                                                   std::map<FieldID, LogicalRegion> &parent,
+                                                   const void* array_ptr,
+                                                   const std::map<FieldID, size_t> &field_offset);
     public:
       //------------------------------------------------------------------------
       // Copy Operations
