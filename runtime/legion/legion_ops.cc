@@ -11668,7 +11668,7 @@ namespace Legion {
           desc.index_space = handle;
           desc.inst = manager->get_instance();
           desc.field_offset = manager->layout->find_field_info(
-                        *(requirement.privilege_fields.begin())).offset;
+                        *(requirement.privilege_fields.begin())).field_id;
           index_preconditions.insert(ref.get_ready_event());
 #ifdef DEBUG_LEGION
           assert(!points.empty());
@@ -11697,7 +11697,7 @@ namespace Legion {
         desc.index_space = handle;
         desc.inst = manager->get_instance();
         desc.field_offset = manager->layout->find_field_info(
-                      *(requirement.privilege_fields.begin())).offset;
+                      *(requirement.privilege_fields.begin())).field_id;
         ApEvent ready_event = ref.get_ready_event();
         return thunk->perform(this, runtime->forest, 
                               ready_event, instances);

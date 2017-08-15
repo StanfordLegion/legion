@@ -369,17 +369,7 @@ namespace Legion {
     void LayoutDescription::get_fields(std::vector<FieldID>& fields) const
     //--------------------------------------------------------------------------
     {
-      // order field ids by their offsets by inserting them to std::map
-      std::map<unsigned, FieldID> offsets;
-      for (std::map<FieldID,unsigned>::const_iterator it = 
-            field_indexes.begin(); it != field_indexes.end(); it++)
-      {
-        const CopySrcDstField &info = field_infos[it->second];
-        offsets[info.offset] = it->first;
-      }
-      for (std::map<unsigned, FieldID>::const_iterator it = offsets.begin();
-           it != offsets.end(); ++it)
-        fields.push_back(it->second);
+      fields = constraints->field_constraint.get_field_set();
     }
 
     //--------------------------------------------------------------------------
@@ -392,7 +382,7 @@ namespace Legion {
             field_infos.begin(); it != field_infos.end(); it++)
       {
         if (it->serdez_id > 0)
-          serdez_fields.push_back(PhysicalInstance::DestroyedField(it->offset, 
+          serdez_fields.push_back(PhysicalInstance::DestroyedField(it->field_id, 
                                                     it->size, it->serdez_id));
       }
     }
@@ -994,7 +984,7 @@ namespace Legion {
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic> temp = 
                                                     instance.get_accessor();
-      return temp.get_untyped_field_accessor(info.offset, info.size);
+      return temp.get_untyped_field_accessor(info.field_id, info.size);
     }
 
     //--------------------------------------------------------------------------
@@ -1712,7 +1702,7 @@ namespace Legion {
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic> temp = 
                                                     instance.get_accessor();
-      return temp.get_untyped_field_accessor(info.offset, info.size);
+      return temp.get_untyped_field_accessor(info.field_id, info.size);
     }
 
     //--------------------------------------------------------------------------

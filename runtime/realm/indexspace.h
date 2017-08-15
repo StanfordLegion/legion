@@ -614,21 +614,14 @@ namespace Realm {
     struct CopySrcDstField {
     public:
       CopySrcDstField(void) 
-        : inst(RegionInstance::NO_INST), offset(0), size(0), 
-          field_id(0), serdez_id(0) { }
-      CopySrcDstField(RegionInstance i, coord_t o, size_t s)
-        : inst(i), offset(o), size(s), field_id(0), serdez_id(0) { }
-      CopySrcDstField(RegionInstance i, coord_t o, size_t s, unsigned f)
-        : inst(i), offset(o), size(s), field_id(f), serdez_id(0) { }
-      CopySrcDstField(RegionInstance i, coord_t o, size_t s, 
-                      unsigned f, CustomSerdezID sid)
-        : inst(i), offset(o), size(s), field_id(f), serdez_id(sid) { }
+        : inst(RegionInstance::NO_INST), field_id((FieldID)-1), size(0), 
+	  serdez_id(0), subfield_offset(0) { }
     public:
       RegionInstance inst;
-      coord_t offset;
+      FieldID field_id;
       size_t size;
-      unsigned field_id;
       CustomSerdezID serdez_id;
+      size_t subfield_offset;
     };
 
     class Domain {

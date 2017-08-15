@@ -63,6 +63,7 @@ namespace Realm {
 
   using namespace LegionRuntime::Arrays;
 
+#if 0
   class TransferIteratorIndexSpace : public TransferIterator {
   protected:
     TransferIteratorIndexSpace(void); // used by deserializer
@@ -400,6 +401,7 @@ namespace Realm {
 	    (serializer << field_sizes) &&
 	    (serializer << extra_elems));
   }
+#endif
 
 
   ////////////////////////////////////////////////////////////////////////
@@ -407,6 +409,7 @@ namespace Realm {
   // class TransferIteratorRect<DIM>
   //
 
+#if 0
   template <unsigned DIM>
   class TransferIteratorRect : public TransferIterator {
   protected:
@@ -710,6 +713,7 @@ namespace Realm {
   template class TransferIteratorRect<1>;
   template class TransferIteratorRect<2>;
   template class TransferIteratorRect<3>;
+#endif
 
 
 #ifdef USE_HDF_OLD
@@ -914,7 +918,7 @@ namespace Realm {
   public:
     TransferIteratorZIndexSpace(const ZIndexSpace<N,T> &_is,
 				RegionInstance inst,
-				const std::vector<unsigned>& _fields,
+				const std::vector<FieldID>& _fields,
 				size_t _extra_elems);
 
     template <typename S>
@@ -946,7 +950,7 @@ namespace Realm {
     bool carry;
     RegionInstanceImpl *inst_impl;
     const InstanceLayout<N,T> *inst_layout;
-    std::vector<unsigned> fields;
+    std::vector<FieldID> fields;
     size_t field_idx;
     size_t extra_elems;
     bool tentative_valid;
@@ -955,7 +959,7 @@ namespace Realm {
   template <int N, typename T>
   TransferIteratorZIndexSpace<N,T>::TransferIteratorZIndexSpace(const ZIndexSpace<N,T>& _is,
 								RegionInstance inst,
-								const std::vector<unsigned>& _fields,
+								const std::vector<FieldID>& _fields,
 								size_t _extra_elems)
     : iter(_is), field_idx(0), extra_elems(_extra_elems), tentative_valid(false)
   {
@@ -984,7 +988,7 @@ namespace Realm {
   {
     ZIndexSpace<N,T> is;
     RegionInstance inst;
-    std::vector<unsigned> fields;
+    std::vector<FieldID> fields;
     size_t extra_elems;
 
     if(!((deserializer >> is) &&
@@ -1329,6 +1333,7 @@ namespace Realm {
   TransferDomain::~TransferDomain(void)
   {}
 
+#if 0
   class TransferDomainIndexSpace : public TransferDomain {
   public:
     TransferDomainIndexSpace(IndexSpace _is);
@@ -1344,7 +1349,7 @@ namespace Realm {
 
     virtual TransferIterator *create_iterator(RegionInstance inst,
 					      RegionInstance peer,
-					      const std::vector<unsigned/*FieldID*/>& fields,
+					      const std::vector<FieldID>& fields,
 					      unsigned option_flags) const;
 
     virtual void print(std::ostream& os) const;
@@ -1415,7 +1420,7 @@ namespace Realm {
 
   TransferIterator *TransferDomainIndexSpace::create_iterator(RegionInstance inst,
 							      RegionInstance peer,
-							      const std::vector<unsigned/*FieldID*/>& fields,
+							      const std::vector<FieldID>& fields,
 							      unsigned option_flags) const
   {
     size_t extra_elems = 0;
@@ -1434,8 +1439,10 @@ namespace Realm {
   {
     return (serializer << is);
   }
+#endif
 
 
+#if 0
   template <unsigned DIM>
   class TransferDomainRect : public TransferDomain {
   public:
@@ -1452,7 +1459,7 @@ namespace Realm {
 
     virtual TransferIterator *create_iterator(RegionInstance inst,
 					      RegionInstance peer,
-					      const std::vector<unsigned/*FieldID*/>& fields,
+					      const std::vector<FieldID>& fields,
 					      unsigned option_flags) const;
 
     virtual void print(std::ostream& os) const;
@@ -1504,7 +1511,7 @@ namespace Realm {
   template <unsigned DIM>
   TransferIterator *TransferDomainRect<DIM>::create_iterator(RegionInstance inst,
 							      RegionInstance peer,
-							      const std::vector<unsigned/*FieldID*/>& fields,
+							      const std::vector<FieldID>& fields,
 							      unsigned option_flags) const
   {
 #ifdef USE_HDF_OLD
@@ -1547,6 +1554,7 @@ namespace Realm {
     assert(0);
     return 0;
   }
+#endif
 
 
   ////////////////////////////////////////////////////////////////////////
@@ -1570,7 +1578,7 @@ namespace Realm {
 
     virtual TransferIterator *create_iterator(RegionInstance inst,
 					      RegionInstance peer,
-					      const std::vector<unsigned/*FieldID*/>& fields,
+					      const std::vector<FieldID>& fields,
 					      unsigned option_flags) const;
 
     virtual void print(std::ostream& os) const;
@@ -1624,7 +1632,7 @@ namespace Realm {
   template <int N, typename T>
   TransferIterator *TransferDomainZIndexSpace<N,T>::create_iterator(RegionInstance inst,
 								    RegionInstance peer,
-								    const std::vector<unsigned/*FieldID*/>& fields,
+								    const std::vector<FieldID>& fields,
 								    unsigned option_flags) const
   {
 #ifdef USE_HDF_OLD
@@ -1865,7 +1873,7 @@ namespace Realm {
   class TransferPlanFill : public TransferPlan {
   public:
     TransferPlanFill(const void *_data, size_t _size,
-		     RegionInstance _inst, unsigned _offset);
+		     RegionInstance _inst, FieldID _field_id);
 
     virtual Event execute_plan(const TransferDomain *td,
 			       const ProfilingRequestSet& requests,
@@ -1874,14 +1882,14 @@ namespace Realm {
   protected:
     ByteArray data;
     RegionInstance inst;
-    unsigned offset;
+    FieldID field_id;
   };
 
   TransferPlanFill::TransferPlanFill(const void *_data, size_t _size,
-				     RegionInstance _inst, unsigned _offset)
+				     RegionInstance _inst, FieldID _field_id)
     : data(_data, _size)
     , inst(_inst)
-    , offset(_offset)
+    , field_id(_field_id)
   {}
 
   Event TransferPlanFill::execute_plan(const TransferDomain *td,
@@ -1890,7 +1898,8 @@ namespace Realm {
   {
     CopySrcDstField f;
     f.inst = inst;
-    f.offset = offset;
+    f.field_id = field_id;
+    f.subfield_offset = 0;
     f.size = data.size();
 
     Event ev = GenEventImpl::create_genevent()->current_event();
@@ -1943,8 +1952,8 @@ namespace Realm {
 
       std::vector<CopySrcDstField>::const_iterator src_it = srcs.begin();
       std::vector<CopySrcDstField>::const_iterator dst_it = dsts.begin();
-      unsigned src_suboffset = 0;
-      unsigned dst_suboffset = 0;
+      unsigned src_subfield_offset = (src_it != srcs.end()) ? src_it->subfield_offset : 0;
+      unsigned dst_subfield_offset = (dst_it != dsts.end()) ? dst_it->subfield_offset : 0;
 
       while((src_it != srcs.end()) && (dst_it != dsts.end())) {
 	InstPair ip(src_it->inst, dst_it->inst);
@@ -1958,9 +1967,14 @@ namespace Realm {
 	//        dst_it->offset, dst_it->size);
 
 	OffsetsAndSize oas;
-	oas.src_offset = src_it->offset + src_suboffset;
-	oas.dst_offset = dst_it->offset + dst_suboffset;
-	oas.size = min(src_it->size - src_suboffset, dst_it->size - dst_suboffset);
+	oas.src_field_id = src_it->field_id;
+	assert(src_it->field_id != (FieldID)-1);
+	oas.dst_field_id = dst_it->field_id;
+	assert(dst_it->field_id != (FieldID)-1);
+	oas.src_subfield_offset = src_subfield_offset;
+	oas.dst_subfield_offset = dst_subfield_offset;
+	oas.size = min(src_it->size - src_subfield_offset,
+		       dst_it->size - dst_subfield_offset);
 	oas.serdez_id = src_it->serdez_id;
 
 	// This is a little bit of hack: if serdez_id != 0 we directly create a
@@ -1982,17 +1996,19 @@ namespace Realm {
 	  }
 	  (*oas_by_inst)[ip].push_back(oas);
 	}
-	src_suboffset += oas.size;
-	assert(src_suboffset <= src_it->size);
-	if(src_suboffset == src_it->size) {
+	src_subfield_offset += oas.size;
+	assert(src_subfield_offset <= src_it->size);
+	if(src_subfield_offset == src_it->size) {
 	  src_it++;
-	  src_suboffset = 0;
+	  if(src_it != srcs.end())
+	    src_subfield_offset = src_it->subfield_offset;
 	}
-	dst_suboffset += oas.size;
-	assert(dst_suboffset <= dst_it->size);
-	if(dst_suboffset == dst_it->size) {
+	dst_subfield_offset += oas.size;
+	assert(dst_subfield_offset <= dst_it->size);
+	if(dst_subfield_offset == dst_it->size) {
 	  dst_it++;
-	  dst_suboffset = 0;
+	  if(dst_it != dsts.end())
+	    dst_subfield_offset = dst_it->subfield_offset;
 	}
       }
       // make sure we used up both
@@ -2050,10 +2066,11 @@ namespace Realm {
 			<< (fill_ofs + it->size) << " bytes, but have only " << fill_value_size;
 	assert(0);
       }
+      assert(it->subfield_offset == 0);
       TransferPlan *p = new TransferPlanFill(((const char *)fill_value) + fill_ofs,
 					     it->size,
 					     it->inst,
-					     it->offset);
+					     it->field_id);
       plans.push_back(p);
 
       // special case: if a field uses all of the fill value, the next
@@ -2086,6 +2103,9 @@ namespace Realm {
 		     Event wait_on,
 		     ReductionOpID redop_id, bool red_fold) const
   {
+    assert(0); // DEAD CODE
+    return wait_on;
+#if 0
     TransferDomain *td = TransferDomain::construct(*this);
     std::vector<TransferPlan *> plans;
     bool ok = TransferPlan::plan_copy(plans, srcs, dsts, redop_id, red_fold);
@@ -2100,6 +2120,7 @@ namespace Realm {
     }
     delete td;
     return Event::merge_events(finish_events);
+#endif
   }
 
   Event Domain::fill(const std::vector<CopySrcDstField> &dsts,
@@ -2115,6 +2136,9 @@ namespace Realm {
 		     const void *fill_value, size_t fill_value_size,
 		     Event wait_on /*= Event::NO_EVENT*/) const
   {
+    assert(0); // DEAD CODE
+    return wait_on;
+#if 0
     TransferDomain *td = TransferDomain::construct(*this);
     std::vector<TransferPlan *> plans;
     bool ok = TransferPlan::plan_fill(plans, dsts, fill_value, fill_value_size);
@@ -2129,6 +2153,7 @@ namespace Realm {
     }
     delete td;
     return Event::merge_events(finish_events);
+#endif
   }
 
   template <int N, typename T>

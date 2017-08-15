@@ -104,8 +104,6 @@ namespace Realm {
   public:
     template <typename S>
     static TransferDomain *deserialize_new(S& deserializer);
-
-    static TransferDomain *construct(Domain d);
     
     template <int N, typename T>
     static TransferDomain *construct(const ZIndexSpace<N,T>& is);
@@ -120,7 +118,7 @@ namespace Realm {
 
     virtual TransferIterator *create_iterator(RegionInstance inst,
 					      RegionInstance peer,
-					      const std::vector<unsigned/*FieldID*/>& fields,
+					      const std::vector<FieldID>& fields,
 					      unsigned option_flags) const = 0;
 
     virtual void print(std::ostream& os) const = 0;

@@ -37,6 +37,8 @@ typedef ptrdiff_t intptr_t;
 
 namespace Realm {
 
+  typedef int FieldID;
+
   template <int N, typename T> struct ZIndexSpace;
   class LinearizedIndexSpaceIntfc;
   class InstanceLayoutGeneric;
@@ -150,9 +152,10 @@ namespace Realm {
     struct DestroyedField {
     public:
       DestroyedField(void);
-      DestroyedField(unsigned o, unsigned s, CustomSerdezID sid);
+      DestroyedField(FieldID fid, unsigned s, CustomSerdezID sid);
     public:
-      unsigned offset, size;
+      FieldID field_id;
+      unsigned size;
       CustomSerdezID serdez_id;
     };
 

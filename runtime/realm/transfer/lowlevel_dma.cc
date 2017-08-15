@@ -461,8 +461,8 @@ namespace Realm {
 	    it2 != it->second.end();
 	    it2++)
 	  log_dma.info() << "dma request " << (void *)this << " field: " <<
-	    it->first.first << "[" << it2->src_offset << "]->" <<
-	    it->first.second << "[" << it2->dst_offset << "] size=" << it2->size <<
+	    it->first.first << "[" << it2->src_field_id << "+" << it2->src_subfield_offset << "]->" <<
+	    it->first.second << "[" << it2->dst_field_id << "+" << it2->dst_subfield_offset << "] size=" << it2->size <<
 	    " serdez=" << it2->serdez_id;
     }
 
@@ -492,8 +492,8 @@ namespace Realm {
 	    it2 != it->second.end();
 	    it2++)
 	  log_dma.info() << "dma request " << (void *)this << " field: " <<
-	    it->first.first << "[" << it2->src_offset << "]->" <<
-	    it->first.second << "[" << it2->dst_offset << "] size=" << it2->size <<
+	    it->first.first << "[" << it2->src_field_id << "+" << it2->src_subfield_offset << "]->" <<
+	    it->first.second << "[" << it2->dst_field_id << "+" << it2->dst_subfield_offset << "] size=" << it2->size <<
 	    " serdez=" << it2->serdez_id;
     }
  
@@ -1450,6 +1450,8 @@ namespace Realm {
       virtual void copy_field(off_t src_index, off_t dst_index, off_t elem_count,
                               unsigned offset_index)
       {
+	assert(0); // DEAD CODE
+#if 0
         off_t src_offset = oas_vec[offset_index].src_offset;
         off_t dst_offset = oas_vec[offset_index].dst_offset;
         unsigned bytes = oas_vec[offset_index].size;
@@ -1467,6 +1469,7 @@ namespace Realm {
           }
 	  dst_acc.write_untyped(ptr_t(dst_index + i), buffer, bytes, dst_offset);
 	}
+#endif
       }
 
       virtual void flush(void) {}
@@ -3177,7 +3180,9 @@ namespace Realm {
     }
 #endif
 
+#if 0
     bool oas_sort_by_dst(OffsetsAndSize a, OffsetsAndSize b) {return a.dst_offset < b.dst_offset; }
+#endif
 
     DomainLinearization create_ib_linearization(const Domain& dm)
     {
@@ -3239,6 +3244,7 @@ namespace Realm {
       return DomainLinearization();
     }
 
+#if 0
     Buffer simple_create_intermediate_buffer(const IBInfo& ib_info,
 					     //const Domain& domain,
                                              OASVec oasvec, OASVec& oasvec_src, OASVec& oasvec_dst,
@@ -3280,6 +3286,7 @@ namespace Realm {
 		    0/*domain.get_volume()*/, ib_elmnt_size, ib_info.size, ib_info.memory);
       return ib_buf;
     }
+#endif
 
     inline bool is_cpu_mem(Memory::Kind kind)
     {
@@ -3551,12 +3558,14 @@ namespace Realm {
 	//  know about each other so they can potentially conspire about
 	//  iteration order
 	unsigned iter_flags = 0;  // most conservative for now
-	std::vector<unsigned/*FieldID*/> src_fields, dst_fields;
+	std::vector<FieldID> src_fields, dst_fields;
 	for(OASVec::const_iterator it2 = it->second.begin();
 	    it2 != it->second.end();
 	    ++it2) {
-	  src_fields.push_back(it2->src_offset);
-	  dst_fields.push_back(it2->dst_offset);
+	  src_fields.push_back(it2->src_field_id);
+	  dst_fields.push_back(it2->dst_field_id);
+	  assert(it2->src_subfield_offset == 0);
+	  assert(it2->dst_subfield_offset == 0);
 	}
 	TransferIterator *src_iter = domain->create_iterator(src_inst,
 							     dst_inst,
@@ -4288,9 +4297,9 @@ namespace Realm {
 		     << " " << (red_fold ? "fold" : "apply") << " " << redop_id
 		     << " before=" << before_copy << " after=" << get_finish_event();
       log_dma.info() << "dma request " << (void *)this << " field: "
-		     << srcs[0].inst << "[" << srcs[0].offset << "]"
+		     << srcs[0].inst << "[" << srcs[0].field_id << "+" << srcs[0].subfield_offset << "]"
 		     << "+" << (srcs.size()-1) << "->"
-		     << dst.inst << "[" << dst.offset << "] size=" << dst.size;
+		     << dst.inst << "[" << dst.field_id << "+" << dst.subfield_offset << "] size=" << dst.size;
     }
 
     ReduceRequest::ReduceRequest(const TransferDomain *_domain, //const Domain& _domain,
@@ -4317,9 +4326,9 @@ namespace Realm {
 		     << " " << (red_fold ? "fold" : "apply") << " " << redop_id
 		     << " before=" << before_copy << " after=" << get_finish_event();
       log_dma.info() << "dma request " << (void *)this << " field: "
-		     << srcs[0].inst << "[" << srcs[0].offset << "]"
+		     << srcs[0].inst << "[" << srcs[0].field_id << "+" << srcs[0].subfield_offset << "]"
 		     << "+" << (srcs.size()-1) << "->"
-		     << dst.inst << "[" << dst.offset << "] size=" << dst.size;
+		     << dst.inst << "[" << dst.field_id << "+" << dst.subfield_offset << "] size=" << dst.size;
     }
 
     ReduceRequest::~ReduceRequest(void)
@@ -4355,13 +4364,15 @@ namespace Realm {
 	  it != srcs.end();
 	  it++) {
 	*msgptr++ = it->inst.id;
-	*msgptr++ = it->offset;
+	*msgptr++ = it->field_id;
+	*msgptr++ = it->subfield_offset;
 	*msgptr++ = it->size;
       }
 
       // and the dest field
       *msgptr++ = dst.inst.id;
-      *msgptr++ = dst.offset;
+      *msgptr++ = dst.field_id;
+      *msgptr++ = dst.subfield_offset;
       *msgptr++ = dst.size;
 
       *msgptr++ = inst_lock_needed;
@@ -4695,8 +4706,10 @@ namespace Realm {
 				     0);
       unsigned rdma_count = 0;
 
-      std::vector<unsigned/*FieldID*/> src_field(1, srcs[0].offset);
-      std::vector<unsigned/*FieldID*/> dst_field(1, dst.offset);
+      std::vector<FieldID> src_field(1, srcs[0].field_id);
+      std::vector<FieldID> dst_field(1, dst.field_id);
+      assert(srcs[0].subfield_offset == 0);
+      assert(dst.subfield_offset == 0);
       unsigned iter_flags = 0;
       TransferIterator *src_iter = domain->create_iterator(srcs[0].inst,
 							   dst.inst,
@@ -5078,13 +5091,14 @@ namespace Realm {
 
     FillRequest::FillRequest(const void *data, size_t datalen,
                              RegionInstance inst,
-                             unsigned offset, unsigned size,
+                             FieldID field_id, unsigned size,
                              Event _before_fill, Event _after_fill,
                              int _priority)
       : DmaRequest(_priority, _after_fill), before_fill(_before_fill)
     {
       dst.inst = inst;
-      dst.offset = offset;
+      dst.field_id = field_id;
+      dst.subfield_offset = 0;
       dst.size = size;
 
       FixedBufferDeserializer deserializer(data, datalen);
@@ -5097,6 +5111,8 @@ namespace Realm {
 
       fill_size = ba.size();
       fill_buffer = ba.detach();
+
+      assert(fill_size == size);
 #if 0
       const ID::IDType *idata = (const ID::IDType *)data;
 
@@ -5125,7 +5141,7 @@ namespace Realm {
       Realm::Operation::reconstruct_measurements();
 
       log_dma.info() << "dma request " << (void *)this << " deserialized - is="
-		     << *domain << " fill dst=" << dst.inst << "[" << dst.offset << "+" << dst.size << "] size="
+		     << *domain << " fill dst=" << dst.inst << "[" << dst.field_id << "+" << dst.subfield_offset << "] size="
 		     << fill_size << " before=" << _before_fill << " after=" << _after_fill;
     }
 
@@ -5143,8 +5159,10 @@ namespace Realm {
       fill_buffer = malloc(fill_size);
       memcpy(fill_buffer, _fill_value, fill_size);
 
+      assert(dst.size == fill_size);
+
       log_dma.info() << "dma request " << (void *)this << " created - is="
-		     << *domain << " fill dst=" << dst.inst << "[" << dst.offset << "+" << dst.size << "] size="
+		     << *domain << " fill dst=" << dst.inst << "[" << dst.field_id << "+" << dst.subfield_offset << "] size="
 		     << fill_size << " before=" << _before_fill << " after=" << _after_fill;
       {
 	Realm::LoggerMessage msg(log_dma.debug());
@@ -5210,7 +5228,8 @@ namespace Realm {
     {
       RemoteFillArgs args;
       args.inst = dst.inst;
-      args.offset = dst.offset;
+      args.field_id = dst.field_id;
+      assert(dst.subfield_offset == 0);
       args.size = fill_size; // redundant!
       args.before_fill = before_fill;
       args.after_fill = finish_event;
@@ -5351,7 +5370,8 @@ namespace Realm {
 
       MemoryImpl *mem_impl = get_runtime()->get_memory_impl(dst.inst.get_location());
 
-      std::vector<unsigned/*FieldID*/> dst_field(1, dst.offset);
+      std::vector<FieldID> dst_field(1, dst.field_id);
+      assert(dst.subfield_offset == 0);
       unsigned iter_flags = 0;
       TransferIterator *iter = domain->create_iterator(dst.inst,
 						       RegionInstance::NO_INST,
@@ -5731,7 +5751,8 @@ namespace Realm {
         } else {
           RemoteFillArgs args;
           args.inst = it->inst;
-          args.offset = it->offset;
+	  args.field_id = it->field_id;
+	  assert(it->subfield_offset == 0);
           args.size = it->size;
           args.before_fill = wait_on;
           args.after_fill = ev;
@@ -5818,7 +5839,7 @@ namespace Realm {
     {
       FillRequest *r = new FillRequest(data, msglen,
                                        args.inst,
-                                       args.offset,
+                                       args.field_id,
                                        args.size,
                                        args.before_fill,
                                        args.after_fill,

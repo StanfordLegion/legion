@@ -585,10 +585,12 @@ namespace Realm {
 
   // implicitly tries to cover the entire instance's domain
   template <typename FT, int N, typename T>
-  inline AffineAccessor<FT,N,T>::AffineAccessor(RegionInstance inst, ptrdiff_t field_offset)
+  inline AffineAccessor<FT,N,T>::AffineAccessor(RegionInstance inst,
+						FieldID field_id,
+						size_t subfield_offset /*= 0*/)
   {
     const InstanceLayout<N,T> *layout = dynamic_cast<const InstanceLayout<N,T> *>(inst.get_layout());
-    std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(field_offset);
+    std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(field_id);
     assert(it != layout->fields.end());
     const InstancePieceList<N,T>& ipl = layout->piece_lists[it->second.list_idx];
     
@@ -607,7 +609,7 @@ namespace Realm {
     base = reinterpret_cast<intptr_t>(inst.pointer_untyped(0,
 							   layout->bytes_used));
     assert(base != 0);
-    base += alp->offset + it->second.rel_offset;
+    base += alp->offset + it->second.rel_offset + subfield_offset;
     strides = alp->strides;
 #ifdef REALM_ACCESSOR_DEBUG
     dbg_inst = inst;
@@ -617,7 +619,9 @@ namespace Realm {
 
   // limits domain to a subrectangle
   template <typename FT, int N, typename T>
-  AffineAccessor<FT,N,T>::AffineAccessor(RegionInstance inst, ptrdiff_t field_offset, const ZRect<N,T>& subrect)
+  AffineAccessor<FT,N,T>::AffineAccessor(RegionInstance inst,
+					 FieldID field_id, const ZRect<N,T>& subrect,
+					 size_t subfield_offset /*= 0*/)
   {
     // Special case for empty regions
     if(subrect.empty()) {
@@ -626,7 +630,7 @@ namespace Realm {
       return;
     }
     const InstanceLayout<N,T> *layout = dynamic_cast<const InstanceLayout<N,T> *>(inst.get_layout());
-    std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(field_offset);
+    std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(field_id);
     assert(it != layout->fields.end());
     const InstancePieceList<N,T>& ipl = layout->piece_lists[it->second.list_idx];
     
@@ -639,7 +643,7 @@ namespace Realm {
     base = reinterpret_cast<intptr_t>(inst.pointer_untyped(0,
 							   layout->bytes_used));
     assert(base != 0);
-    base += alp->offset + it->second.rel_offset;
+    base += alp->offset + it->second.rel_offset + subfield_offset;
     strides = alp->strides;
 #ifdef REALM_ACCESSOR_DEBUG
     dbg_inst = inst;

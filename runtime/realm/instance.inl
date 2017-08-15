@@ -148,11 +148,11 @@ namespace Realm {
 
 
   inline RegionInstance::DestroyedField::DestroyedField(void) 
-    : offset(0), size(0), serdez_id(0)
+    : field_id((FieldID)-1), size(0), serdez_id(0)
   { }
 
-  inline RegionInstance::DestroyedField::DestroyedField(unsigned o, unsigned s, CustomSerdezID sid)
-    : offset(o), size(s), serdez_id(sid)
+  inline RegionInstance::DestroyedField::DestroyedField(FieldID fid, unsigned s, CustomSerdezID sid)
+    : field_id(fid), size(s), serdez_id(sid)
   { }
 
 
