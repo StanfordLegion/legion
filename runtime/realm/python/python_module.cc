@@ -126,7 +126,7 @@ namespace Realm {
       dlmproxy_filename = "dlmproxy_libpthread.so.0";
     dlmproxy_handle = dlmopen(LM_ID_NEWLM,
 			      dlmproxy_filename,
-			      RTLD_DEEPBIND | RTLD_LOCAL | RTLD_LAZY);
+			      RTLD_DEEPBIND | RTLD_GLOBAL | RTLD_LAZY);
     if(!dlmproxy_handle) {
       const char *error = dlerror();
       log_py.fatal() << "HELP!  Use of dlmopen for python requires dlmproxy for pthreads!  Failed to\n"
@@ -148,7 +148,7 @@ namespace Realm {
     int ret = dlinfo(dlmproxy_handle, RTLD_DI_LMID, &lmid);
     assert(ret == 0);
 
-    handle = dlmopen(lmid, python_lib, RTLD_DEEPBIND | RTLD_LOCAL | RTLD_NOW);
+    handle = dlmopen(lmid, python_lib, RTLD_DEEPBIND | RTLD_GLOBAL | RTLD_NOW);
 #else
     // life is so much easier if we use dlopen (but we only get one copy then)
     handle = dlopen(python_lib, RTLD_GLOBAL | RTLD_LAZY);
