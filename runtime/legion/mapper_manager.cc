@@ -1509,7 +1509,7 @@ namespace Legion {
                       "ID is invalid.", mapper->get_mapper_name(), 
                       (c1 == NULL) ? source : target, 
                       get_mapper_call_name(ctx->kind))
-      bool result = c1->entails(c2);
+      bool result = c1->entails(c2, 0/*don't care about dimensions*/);
       resume_mapper_call(ctx);
       return result;
     }

@@ -8074,7 +8074,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool LayoutConstraints::entails(LayoutConstraints *constraints)
+    bool LayoutConstraints::entails(LayoutConstraints *constraints,
+                                    unsigned total_dims)
     //--------------------------------------------------------------------------
     {
       // Check to see if the result is in the cache
@@ -8086,7 +8087,7 @@ namespace Legion {
           return finder->second;
       }
       // Didn't find it, so do the test for real
-      bool result = entails(*constraints);
+      bool result = entails(*constraints, total_dims);
       // Save the result in the cache
       AutoLock lay(layout_lock);
       entailment_cache[constraints->layout_id] = result;
@@ -8094,10 +8095,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool LayoutConstraints::entails(const LayoutConstraintSet &other) const
+    bool LayoutConstraints::entails(const LayoutConstraintSet &other,
+                                    unsigned total_dims) const
     //--------------------------------------------------------------------------
     {
-      return LayoutConstraintSet::entails(other);
+      return LayoutConstraintSet::entails(other, total_dims);
     }
 
     //--------------------------------------------------------------------------
@@ -8129,7 +8131,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool LayoutConstraints::entails_without_pointer(
-                                                 LayoutConstraints *constraints)
+                            LayoutConstraints *constraints, unsigned total_dims)
     //--------------------------------------------------------------------------
     {
       // See if we have it in the cache
@@ -8141,7 +8143,7 @@ namespace Legion {
           return finder->second;
       }
       // Didn't find it so do the test for real
-      bool result = entails_without_pointer(*constraints);
+      bool result = entails_without_pointer(*constraints, total_dims);
       // Save the result in the cache
       AutoLock lay(layout_lock);
       no_pointer_entailment_cache[constraints->layout_id] = result;
@@ -8150,7 +8152,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool LayoutConstraints::entails_without_pointer(
-                                         const LayoutConstraintSet &other) const
+                    const LayoutConstraintSet &other, unsigned total_dims) const
     //--------------------------------------------------------------------------
     {
       // Do all the normal entailment but don't check the pointer constraint 
@@ -8160,7 +8162,7 @@ namespace Legion {
         return false;
       if (!memory_constraint.entails(other.memory_constraint))
         return false;
-      if (!ordering_constraint.entails(other.ordering_constraint))
+      if (!ordering_constraint.entails(other.ordering_constraint, total_dims))
         return false;
       for (std::vector<SplittingConstraint>::const_iterator it = 
             other.splitting_constraints.begin(); it !=

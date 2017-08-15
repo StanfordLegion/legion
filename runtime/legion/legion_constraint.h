@@ -329,7 +329,7 @@ namespace Legion {
       OrderingConstraint(const std::vector<DimensionKind> &ordering,
                          bool contiguous);
     public:
-      bool entails(const OrderingConstraint &other) const;
+      bool entails(const OrderingConstraint &other, unsigned total_dims) const;
       bool conflicts(const OrderingConstraint &other) const;
     public:
       void serialize(Serializer &rez) const;
@@ -493,7 +493,7 @@ namespace Legion {
       LayoutConstraintSet&
         add_constraint(const PointerConstraint &constraint);
     public:
-      bool entails(const LayoutConstraintSet &other) const;
+      bool entails(const LayoutConstraintSet &other, unsigned total_dims) const;
       bool conflicts(const LayoutConstraintSet &other) const;
     public:
       void serialize(Serializer &rez) const;

@@ -862,7 +862,8 @@ namespace Legion {
       // Always test the pointer constraint locally
       if (!pointer_constraint.entails(constraints->pointer_constraint))
         return false;
-      return layout->constraints->entails_without_pointer(constraints);
+      return layout->constraints->entails_without_pointer(constraints,
+                                      instance_domain->get_num_dims());
     }
 
     //--------------------------------------------------------------------------
@@ -872,7 +873,8 @@ namespace Legion {
       // Always test the pointer constraint locally
       if (!pointer_constraint.entails(constraints.pointer_constraint))
         return false;
-      return layout->constraints->entails_without_pointer(constraints);
+      return layout->constraints->entails_without_pointer(constraints,
+                                      instance_domain->get_num_dims());
     }
 
     //--------------------------------------------------------------------------

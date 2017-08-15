@@ -1330,12 +1330,14 @@ namespace Legion {
       void update_constraints(Deserializer &derez);
       void release_remote_instances(void);
     public:
-      bool entails(LayoutConstraints *other_constraints);
-      bool entails(const LayoutConstraintSet &other) const;
+      bool entails(LayoutConstraints *other_constraints, unsigned total_dims);
+      bool entails(const LayoutConstraintSet &other, unsigned total_dims) const;
       bool conflicts(LayoutConstraints *other_constraints);
       bool conflicts(const LayoutConstraintSet &other) const;
-      bool entails_without_pointer(LayoutConstraints *other);
-      bool entails_without_pointer(const LayoutConstraintSet &other) const;
+      bool entails_without_pointer(LayoutConstraints *other,
+                                   unsigned total_dims);
+      bool entails_without_pointer(const LayoutConstraintSet &other,
+                                   unsigned total_dims) const;
     public:
       static AddressSpaceID get_owner_space(LayoutConstraintID layout_id,
                                             Runtime *runtime);

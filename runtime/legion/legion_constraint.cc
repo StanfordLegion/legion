@@ -922,20 +922,36 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool OrderingConstraint::entails(const OrderingConstraint &other) const
+    bool OrderingConstraint::entails(const OrderingConstraint &other, 
+                                     unsigned total_dims) const
     //--------------------------------------------------------------------------
     {
       if (other.ordering.empty())
         return true;
-      // We don't even have enough fields so no way we can entail
-      if (ordering.size() < other.ordering.size())
-        return false;
       // See if we have all the dimensions
-      std::vector<unsigned> dim_indexes(other.ordering.size());
+      std::vector<unsigned> dim_indexes(ordering.size());
       unsigned local_idx = 0;
       for (std::vector<DimensionKind>::const_iterator it = 
-           other.ordering.begin(); it != other.ordering.end(); it++,local_idx++)
+           other.ordering.begin(); it != other.ordering.end(); it++)
       {
+        // See if this is a dimension we are still considering
+        if ((total_dims > 0) // we have a total dim upper bound
+            && (*it != DIM_F)) // can't be the field dimension
+        {
+          if (*it < DIM_F)
+          {
+            // Normal dimension
+            if (*it >= total_dims)
+              continue;
+          }
+          else
+          {
+            // Split dimension
+            const unsigned actual_dim = ((*it) - (DIM_F + 1)) / 2;
+            if (actual_dim >= total_dims)
+              continue;
+          }
+        }
         bool found = false;
         for (unsigned idx = 0; idx < ordering.size(); idx++)
         {
@@ -946,12 +962,16 @@ namespace Legion {
             if ((local_idx > 0) && (dim_indexes[local_idx-1] > idx))
               return false;
             found = true;
+            // Update the local index
+            local_idx++;
             break;
           }
         }
         if (!found)
           return false; // if we don't have the dimension can't entail
       }
+      // We don't even have enough fields so no way we can entail
+
       if (other.contiguous)
       {
         // If we're not contiguous we can't entail the other
@@ -985,7 +1005,7 @@ namespace Legion {
     bool OrderingConstraint::conflicts(const OrderingConstraint &other) const
     //--------------------------------------------------------------------------
     {
-      // If they both must be contiguous there is a slightly different check      
+      // If they both must be contiguous there is a slightly different check
       if (contiguous && other.contiguous)
       {
         int previous_idx = -1;
@@ -1466,7 +1486,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool LayoutConstraintSet::entails(const LayoutConstraintSet &other) const
+    bool LayoutConstraintSet::entails(const LayoutConstraintSet &other,
+                                      unsigned total_dims) const
     //--------------------------------------------------------------------------
     {
       if (!specialized_constraint.entails(other.specialized_constraint))
@@ -1477,7 +1498,7 @@ namespace Legion {
         return false;
       if (!pointer_constraint.entails(other.pointer_constraint))
         return false;
-      if (!ordering_constraint.entails(other.ordering_constraint))
+      if (!ordering_constraint.entails(other.ordering_constraint, total_dims))
         return false;
       for (std::vector<SplittingConstraint>::const_iterator it = 
             other.splitting_constraints.begin(); it !=
