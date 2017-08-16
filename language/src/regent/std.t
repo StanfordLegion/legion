@@ -3684,18 +3684,35 @@ local function make_task_wrapper(task_body)
   end
 end
 
-local function make_normal_layout()
+local max_dim = 3 -- Maximum dimension of an index space supported in Regent
+
+local function make_ordering_constraint(layout, dim)
+  -- This code would need to be taught about higher dimensions if the
+  -- maximum dimension were ever increased.
+  assert(max_dim == 3)
+  assert(dim >= 1 and dim <= max_dim)
+
+  local result = terralib.newlist()
+
+  -- SOA, Fortran array order
+  local dims = terralib.newsymbol(c.legion_dimension_kind_t[dim+1], "dims")
+  result:insert(quote var [dims] end)
+  result:insert(quote dims[0] = c.DIM_X end)
+  if dim >= 2 then result:insert(quote dims[1] = c.DIM_Y end) end
+  if dim >= 3 then result:insert(quote dims[2] = c.DIM_Z end) end
+  result:insert(quote dims[ [dim] ] = c.DIM_F end)
+  result:insert(quote c.legion_layout_constraint_set_add_ordering_constraint([layout], [dims], [dim+1], true) end)
+
+  return result
+end
+
+local function make_normal_layout(dim)
   local layout_id = terralib.newsymbol(c.legion_layout_constraint_id_t, "layout_id")
   return layout_id, quote
     var layout = c.legion_layout_constraint_set_create()
 
     -- SOA, Fortran array order
-    var dims : c.legion_dimension_kind_t[4]
-    dims[0] = c.DIM_X
-    dims[1] = c.DIM_Y
-    dims[2] = c.DIM_Z
-    dims[3] = c.DIM_F
-    c.legion_layout_constraint_set_add_ordering_constraint(layout, dims, 4, true)
+    [make_ordering_constraint(layout, dim)]
 
     -- Normal instance
     c.legion_layout_constraint_set_add_specialized_constraint(
@@ -3733,18 +3750,13 @@ local function make_unconstrained_layout()
   end
 end
 
-local function make_reduction_layout(op_id)
+local function make_reduction_layout(dim, op_id)
   local layout_id = terralib.newsymbol(c.legion_layout_constraint_id_t, "layout_id")
   return layout_id, quote
     var layout = c.legion_layout_constraint_set_create()
 
     -- SOA, Fortran array order
-    var dims : c.legion_dimension_kind_t[4]
-    dims[0] = c.DIM_X
-    dims[1] = c.DIM_Y
-    dims[2] = c.DIM_Z
-    dims[3] = c.DIM_F
-    c.legion_layout_constraint_set_add_ordering_constraint(layout, dims, 4, true)
+    [make_ordering_constraint(layout, dim)]
 
     -- Reduction fold instance
     c.legion_layout_constraint_set_add_specialized_constraint(
@@ -3775,11 +3787,13 @@ function std.setup(main_task, extra_setup_thunk, registration_name)
   end
 
   local layout_registrations = terralib.newlist()
-  local layout_normal
+  local layout_normal = data.newmap()
   do
-    local layout_id, layout_actions = make_normal_layout()
-    layout_registrations:insert(layout_actions)
-    layout_normal = layout_id
+    for dim = 1, max_dim do
+      local layout_id, layout_actions = make_normal_layout(dim)
+      layout_registrations:insert(layout_actions)
+      layout_normal[dim] = layout_id
+    end
   end
 
   local layout_virtual
@@ -3796,13 +3810,15 @@ function std.setup(main_task, extra_setup_thunk, registration_name)
     layout_unconstrained = layout_id
   end
 
-  local layout_reduction = data.new_recursive_map(1)
-  for _, op in ipairs(reduction_ops) do
-    for _, op_type in ipairs(reduction_types) do
-      local op_id = std.reduction_op_ids[op.op][op_type]
-      local layout_id, layout_actions = make_reduction_layout(op_id)
-      layout_registrations:insert(layout_actions)
-      layout_reduction[op.op][op_type] = layout_id
+  local layout_reduction = data.new_recursive_map(2)
+  for dim = 1, max_dim do
+    for _, op in ipairs(reduction_ops) do
+      for _, op_type in ipairs(reduction_types) do
+        local op_id = std.reduction_op_ids[op.op][op_type]
+        local layout_id, layout_actions = make_reduction_layout(dim, op_id)
+        layout_registrations:insert(layout_actions)
+        layout_reduction[dim][op.op][op_type] = layout_id
+      end
     end
   end
 
@@ -3850,17 +3866,18 @@ function std.setup(main_task, extra_setup_thunk, registration_name)
         local region_i = 0
         for _, param_i in ipairs(std.fn_param_regions_by_index(fn_type)) do
           local param_type = param_types[param_i]
+          local dim = data.max(param_type:ispace().dim, 1)
           local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
             std.find_task_privileges(param_type, task)
           for i, privilege in ipairs(privileges) do
             local field_types = privilege_field_types[i]
 
-            local layout = layout_normal
+            local layout = layout_normal[dim]
             if std.is_reduction_op(privilege) then
               local op = std.get_reduction_op(privilege)
               assert(#field_types == 1)
               local field_type = field_types[1]
-              layout = layout_reduction[op][field_type]
+              layout = layout_reduction[dim][op][field_type]
             end
             if options.inner or variant:is_external() then
               -- No layout constraints for inner tasks

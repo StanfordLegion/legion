@@ -210,9 +210,6 @@ def install(gasnet=False, cuda=False, openmp=False, hdf=False,
     if spy and not debug:
         raise Exception('Debugging mode is required for detailed Legion Spy.')
 
-    if conduit is not None and not gasnet:
-        raise Exception('GASNet is required for conduit option.')
-
     thread_count = thread_count
     if thread_count is None:
         thread_count = multiprocessing.cpu_count()
