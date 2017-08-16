@@ -262,7 +262,7 @@ files to `legion_prof.py`.
 
 ```bash
 DEBUG=0 make
-./app -lg:prof kN> -lg:prof_logfile prof_%.gz
+./app -lg:prof <N> -lg:prof_logfile prof_%.gz
 $LG_RT_DIR/../tools/legion_prof.py prof_*.gz
 ```
 
