@@ -1247,9 +1247,12 @@ void PennantMapper::map_must_epoch(const MapperContext           ctx,
   for (size_t idx = 0; idx < num_tasks; ++idx) {
     size_t node_idx = idx / num_shards_per_node;
     size_t proc_idx = idx % num_shards_per_node;
+    assert(node_idx < sysmems_list.size());
 #if SPMD_SHARD_USE_IO_PROC
+    assert(proc_idx < sysmem_local_io_procs[sysmems_list[node_idx]].size());
     output.task_processors[idx] = sysmem_local_io_procs[sysmems_list[node_idx]][proc_idx];
 #else
+    assert(proc_idx < sysmem_local_procs[sysmems_list[node_idx]].size());
     output.task_processors[idx] = sysmem_local_procs[sysmems_list[node_idx]][proc_idx];
 #endif
 
