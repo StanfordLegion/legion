@@ -328,8 +328,14 @@ endif
 USE_HDF ?= 0
 HDF_LIBNAME ?= hdf5
 ifeq ($(strip $(USE_HDF)), 1)
-  CC_FLAGS      += -DUSE_HDF -I/usr/include/hdf5/serial
+  CC_FLAGS      += -DUSE_HDF
   LEGION_LD_FLAGS      += -l$(HDF_LIBNAME)
+  ifdef HDF_ROOT
+       CC_FLAGS    += -I$(HDF_ROOT)/include
+       LD_FLAGS    += -L$(HDF_ROOT)/lib
+  else
+    CC_FLAGS      += -I/usr/include/hdf5/serial
+  endif
 endif
 
 SKIP_MACHINES= titan% daint% excalibur% cori%

@@ -137,7 +137,7 @@ drive) it might be necessary to do this over.
  3. Set up the cronjob:
 
     ```
-    */2 * * * * git -C /home/gitlab-mirror/rdir.git fetch && git -C /home/gitlab-mirror/rdir.git push git@gitlab.com:StanfordLegion/rdir.git --mirror && git -C /home/gitlab-mirror/legion.git fetch && git -C /home/gitlab-mirror/legion.git push git@gitlab.com:StanfordLegion/legion.git --mirror
+    */2 * * * * git -C /home/gitlab-mirror/rdir.git fetch -p && git -C /home/gitlab-mirror/rdir.git push git@gitlab.com:StanfordLegion/rdir.git --mirror && git -C /home/gitlab-mirror/legion.git fetch -p && git -C /home/gitlab-mirror/legion.git push git@gitlab.com:StanfordLegion/legion.git --mirror
     ```
 
 ### Rebuilding the Docker Image

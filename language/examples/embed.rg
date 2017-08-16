@@ -43,7 +43,11 @@ do
   local binding_dir = root_dir .. "../../bindings/terra/"
 
   local embed_cc = root_dir .. "embed.cc"
-  exe = root_dir .. "embed.exe"
+  if os.getenv('SAVEOBJ') == '1' then
+    exe = root_dir .. "embed.exe"
+  else
+    exe = os.tmpname()
+  end
 
   local cxx = os.getenv('CXX') or 'c++'
 

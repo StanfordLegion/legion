@@ -349,8 +349,8 @@ function inline_tasks.expr(cx, node)
               local new_sym = std.newsymbol(new_ty)
               new_symbols:insert(new_sym)
               new_types:insert(new_ty)
+              expr_mapping[sym] = new_sym
               if std.is_region(new_ty) then
-                expr_mapping[sym] = new_sym
                 type_mapping[sym] = new_sym
               end
             else
