@@ -520,7 +520,7 @@ namespace Legion {
         std::string filename(prof_logfile);
         size_t pct = filename.find_first_of('%', 0);
         if (pct == std::string::npos) {
-          fprintf(stderr, "ERROR: The logfile name must contain '%' "
+          fprintf(stderr, "ERROR: The logfile name must contain '%%' "
                           "which will be replaced with the node id\n");
           exit(-1);
         }
