@@ -105,12 +105,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LayoutDescription::LayoutDescription(FieldSpaceNode *own,
                                          const FieldMask &mask,
+                                         const unsigned dims,
                                          LayoutConstraints *con,
                                    const std::vector<unsigned> &mask_index_map,
                                    const std::vector<FieldID> &field_ids,
                                    const std::vector<size_t> &field_sizes,
                                    const std::vector<CustomSerdezID> &serdez)
-      : allocated_fields(mask), constraints(con), owner(own) 
+      : allocated_fields(mask), constraints(con), owner(own), total_dims(dims)
     //--------------------------------------------------------------------------
     {
       constraints->add_reference();
@@ -138,15 +139,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LayoutDescription::LayoutDescription(const FieldMask &mask,
                                          LayoutConstraints *con)
-      : allocated_fields(mask), constraints(con), owner(NULL)
+      : allocated_fields(mask), constraints(con), owner(NULL), total_dims(0)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     LayoutDescription::LayoutDescription(const LayoutDescription &rhs)
-      : allocated_fields(rhs.allocated_fields), 
-        constraints(rhs.constraints), owner(rhs.owner)
+      : allocated_fields(rhs.allocated_fields), constraints(rhs.constraints), 
+        owner(rhs.owner), total_dims(rhs.total_dims)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -393,7 +394,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Layout descriptions are always complete, so just check for conflicts
-      if (constraints->conflicts(candidate_constraints))
+      if (constraints->conflicts(candidate_constraints, total_dims))
         return false;
       // If they don't conflict they have to be the same
       return true;
@@ -406,7 +407,7 @@ namespace Legion {
       if (layout->allocated_fields != allocated_fields)
         return false;
       // Layout descriptions are always complete so just check for conflicts
-      if (constraints->conflicts(layout->constraints))
+      if (constraints->conflicts(layout->constraints, total_dims))
         return false;
       // If they don't conflict they have to be the same
       return true;
@@ -441,9 +442,10 @@ namespace Legion {
       std::vector<CustomSerdezID> serdez(field_set.size());
       field_space_node->compute_field_layout(field_set, field_sizes,
                                mask_index_map, serdez, instance_mask);
+      const unsigned total_dims = region_node->row_source->get_num_dims();
       LayoutDescription *result = 
-        field_space_node->create_layout_description(instance_mask, constraints,
-                                mask_index_map, field_set, field_sizes, serdez);
+        field_space_node->create_layout_description(instance_mask, total_dims,
+                  constraints, mask_index_map, field_set, field_sizes, serdez);
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
@@ -826,7 +828,8 @@ namespace Legion {
       if (pointer_constraint.conflicts(constraints->pointer_constraint))
         return true;
       // We know our layouts don't have a pointer constraint so nothing special
-      return layout->constraints->conflicts(constraints);
+      return layout->constraints->conflicts(constraints,
+                        instance_domain->get_num_dims());
     }
 
     //--------------------------------------------------------------------------
@@ -837,7 +840,8 @@ namespace Legion {
       if (pointer_constraint.conflicts(constraints.pointer_constraint))
         return true;
       // We know our layouts don't have a pointer constraint so nothing special
-      return layout->constraints->conflicts(constraints);
+      return layout->constraints->conflicts(constraints,
+                        instance_domain->get_num_dims());
     }
 
     //--------------------------------------------------------------------------
@@ -1979,6 +1983,7 @@ namespace Legion {
          forest->runtime->register_layout(field_node->handle,constraints);
         // Then make our description
         layout = field_node->create_layout_description(instance_mask,
+                                  instance_domain->get_num_dims(),
                                   layout_constraints, mask_index_map,
                                   constraints.field_constraint.get_field_set(),
                                   field_sizes, serdez);

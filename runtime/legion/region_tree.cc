@@ -7934,7 +7934,9 @@ namespace Legion {
       {
         LayoutConstraints *layout_constraints = 
           context->runtime->register_layout(handle, constraints);
-        layout = create_layout_description(file_mask, layout_constraints,
+        const unsigned total_dims = node->row_source->get_num_dims();
+        layout = create_layout_description(file_mask, total_dims,
+                                           layout_constraints,
                                            mask_index_map, field_set,
                                            field_sizes, serdez);
       }
@@ -8024,6 +8026,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LayoutDescription* FieldSpaceNode::create_layout_description(
                                      const FieldMask &layout_mask,
+                                     const unsigned total_dims,
                                      LayoutConstraints *constraints,
                                    const std::vector<unsigned> &mask_index_map,
                                    const std::vector<FieldID> &fids,
@@ -8033,7 +8036,7 @@ namespace Legion {
     {
       // Make the new field description and then register it
       LayoutDescription *result = new LayoutDescription(this, layout_mask, 
-                        constraints, mask_index_map, fids, field_sizes, serdez);
+        total_dims, constraints, mask_index_map, fids, field_sizes, serdez);
       return register_layout_description(result);
     }
 

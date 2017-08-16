@@ -935,23 +935,8 @@ namespace Legion {
            other.ordering.begin(); it != other.ordering.end(); it++)
       {
         // See if this is a dimension we are still considering
-        if ((total_dims > 0) // we have a total dim upper bound
-            && (*it != DIM_F)) // can't be the field dimension
-        {
-          if (*it < DIM_F)
-          {
-            // Normal dimension
-            if (*it >= total_dims)
-              continue;
-          }
-          else
-          {
-            // Split dimension
-            const unsigned actual_dim = ((*it) - (DIM_F + 1)) / 2;
-            if (actual_dim >= total_dims)
-              continue;
-          }
-        }
+        if (is_skip_dimension(*it, total_dims))
+          continue;
         bool found = false;
         for (unsigned idx = 0; idx < ordering.size(); idx++)
         {
@@ -1002,7 +987,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool OrderingConstraint::conflicts(const OrderingConstraint &other) const
+    bool OrderingConstraint::conflicts(const OrderingConstraint &other,
+                                       unsigned total_dims) const
     //--------------------------------------------------------------------------
     {
       // If they both must be contiguous there is a slightly different check
@@ -1012,12 +998,23 @@ namespace Legion {
         for (std::vector<DimensionKind>::const_iterator it = ordering.begin();
               it != ordering.end(); it++)
         {
+          // See if we can skip this dimesion
+          if (is_skip_dimension(*it, total_dims))
+            continue;
           int next_idx = -1;
+          unsigned skipped_dims = 0;
           for (unsigned idx = 0; idx < other.ordering.size(); idx++)
           {
+            // See if we can skip this dimension
+            if (is_skip_dimension(other.ordering[idx], total_dims))
+            {
+              skipped_dims++;
+              continue;
+            }
             if ((*it) == other.ordering[idx])
             {
-              next_idx = idx;
+              // don't include skipped dimensions
+              next_idx = idx - skipped_dims;
               break;
             }
           }
@@ -1042,12 +1039,22 @@ namespace Legion {
         for (std::vector<DimensionKind>::const_iterator it = ordering.begin();
               it != ordering.end(); it++)
         {
+          // See if we can skip this dimension
+          if (is_skip_dimension(*it, total_dims))
+            continue;
           int next_idx = -1;
+          unsigned skipped_dims = 0;
           for (unsigned idx = 0; idx < other.ordering.size(); idx++)
           {
+            if (is_skip_dimension(other.ordering[idx], total_dims))
+            {
+              skipped_dims++;
+              continue;
+            }
             if ((*it) == other.ordering[idx])
             {
-              next_idx = idx;
+              // Don't include skipped dimensions
+              next_idx = idx - skipped_dims;
               break;
             }
           }
@@ -1086,6 +1093,31 @@ namespace Legion {
       for (std::vector<DimensionKind>::iterator it = ordering.begin();
             it != ordering.end(); it++)
         derez.deserialize(*it);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ bool OrderingConstraint::is_skip_dimension(DimensionKind dim,
+                                                          unsigned total_dims)
+    //--------------------------------------------------------------------------
+    {
+      if (total_dims == 0)
+        return false;
+      if (dim == DIM_F)
+        return false;
+      if (dim < DIM_F)
+      {
+        // Normal spatial dimension
+        if (dim >= total_dims)
+          return true;
+      }
+      else
+      {
+        // Split spatial dimension
+        const unsigned actual_dim = (dim - (DIM_F + 1)) / 2;
+        if (actual_dim >= total_dims)
+          return true;
+      }
+      return false;
     }
 
     /////////////////////////////////////////////////////////////
@@ -1568,7 +1600,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool LayoutConstraintSet::conflicts(const LayoutConstraintSet &other) const
+    bool LayoutConstraintSet::conflicts(const LayoutConstraintSet &other,
+                                        unsigned total_dims) const
     //--------------------------------------------------------------------------
     {
       // Do these in order
@@ -1580,7 +1613,7 @@ namespace Legion {
         return true;
       if (pointer_constraint.conflicts(other.pointer_constraint))
         return true;
-      if (ordering_constraint.conflicts(other.ordering_constraint))
+      if (ordering_constraint.conflicts(other.ordering_constraint, total_dims))
         return true;
       for (std::vector<SplittingConstraint>::const_iterator it = 
             splitting_constraints.begin(); it != 

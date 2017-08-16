@@ -41,6 +41,7 @@ namespace Legion {
     public:
       LayoutDescription(FieldSpaceNode *owner,
                         const FieldMask &mask,
+                        const unsigned total_dims,
                         LayoutConstraints *constraints,
                         const std::vector<unsigned> &mask_index_map,
                         const std::vector<FieldID> &fids,
@@ -85,6 +86,7 @@ namespace Legion {
       const FieldMask allocated_fields;
       LayoutConstraints *const constraints;
       FieldSpaceNode *const owner;
+      const unsigned total_dims;
     protected:
       // In order by index of bit mask
       std::vector<CopySrcDstField> field_infos;

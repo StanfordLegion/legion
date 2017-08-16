@@ -1326,8 +1326,9 @@ namespace Legion {
     public:
       bool entails(LayoutConstraints *other_constraints, unsigned total_dims);
       bool entails(const LayoutConstraintSet &other, unsigned total_dims) const;
-      bool conflicts(LayoutConstraints *other_constraints);
-      bool conflicts(const LayoutConstraintSet &other) const;
+      bool conflicts(LayoutConstraints *other_constraints, unsigned total_dims);
+      bool conflicts(const LayoutConstraintSet &other, 
+                     unsigned total_dims) const;
       bool entails_without_pointer(LayoutConstraints *other,
                                    unsigned total_dims);
       bool entails_without_pointer(const LayoutConstraintSet &other,

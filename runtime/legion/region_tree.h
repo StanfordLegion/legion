@@ -1767,6 +1767,7 @@ namespace Legion {
       LayoutDescription* find_layout_description(const FieldMask &field_mask,
                                                 LayoutConstraints *constraints);
       LayoutDescription* create_layout_description(const FieldMask &layout_mask,
+                                                   const unsigned total_dims,
                                                  LayoutConstraints *constraints,
                                            const std::vector<unsigned> &indexes,
                                            const std::vector<FieldID> &fids,

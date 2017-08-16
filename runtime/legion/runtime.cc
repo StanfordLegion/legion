@@ -8097,7 +8097,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool LayoutConstraints::conflicts(LayoutConstraints *constraints)
+    bool LayoutConstraints::conflicts(LayoutConstraints *constraints,
+                                      unsigned total_dims)
     //--------------------------------------------------------------------------
     {
       // Check to see if the result is in the cache
@@ -8109,7 +8110,7 @@ namespace Legion {
           return finder->second;
       }
       // Didn't find it, so do the test for real
-      bool result = conflicts(*constraints);
+      bool result = conflicts(*constraints, total_dims);
       // Save the result in the cache
       AutoLock lay(layout_lock);
       conflict_cache[constraints->layout_id] = result;
@@ -8117,10 +8118,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool LayoutConstraints::conflicts(const LayoutConstraintSet &other) const
+    bool LayoutConstraints::conflicts(const LayoutConstraintSet &other,
+                                      unsigned total_dims) const
     //--------------------------------------------------------------------------
     {
-      return LayoutConstraintSet::conflicts(other);
+      return LayoutConstraintSet::conflicts(other, total_dims);
     }
 
     //--------------------------------------------------------------------------
