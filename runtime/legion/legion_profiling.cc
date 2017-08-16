@@ -545,7 +545,7 @@ namespace Legion {
         size_t pct = filename.find_first_of('%', 0);
         if (pct == std::string::npos) {
           REPORT_LEGION_ERROR(ERROR_MISSING_PROFILER_OPTION,
-              "ERROR: The logfile name must contain '%' "
+              "ERROR: The logfile name must contain '%%' "
               "which will be replaced with the node id\n")
         // replace % with node number
         Processor current = Processor::get_executing_processor();
