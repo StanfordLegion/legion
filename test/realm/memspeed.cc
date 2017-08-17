@@ -228,7 +228,7 @@ void top_level_task(const void *args, size_t arglen,
     void *fill_value = 0;
     std::vector<Domain::CopySrcDstField> sdf(1);
     sdf[0].inst = inst;
-    sdf[0].offset = 0;
+    sdf[0].field_id = 0;
     sdf[0].size = sizeof(void *);
     d.fill(sdf, ProfilingRequestSet(), &fill_value, sizeof(fill_value)).wait();
 
