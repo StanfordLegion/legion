@@ -1282,6 +1282,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock t_lock(trace_lock);
+      // TODO: Multiple templates will be supported once the precondition check
+      //       is added.
+      if (templates.size() > 0) return;
       trace_info.template_id = templates.size();
       templates.push_back(new PhysicalTemplate());
     }
