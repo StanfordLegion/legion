@@ -57,15 +57,7 @@ namespace Legion {
           const Realm::ZPoint<1,coord_t> point = it->value;
           rez.serialize(point);
         }
-        rez.serialize<size_t>(cit->second.ranges.size());
-        for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it = 
-              cit->second.ranges.begin(); it != cit->second.ranges.end(); it++)
-        {
-          const Realm::ZPoint<1,coord_t> start = it->first.value;
-          const Realm::ZPoint<1,coord_t> stop = it->second.value;
-          rez.serialize(start);
-          rez.serialize(stop);
-        }
+        // No need to do ranges since we know that they are all empty
       }
       argument = TaskArgument(rez.get_buffer(), rez.get_used_bytes()); 
     }
@@ -95,15 +87,7 @@ namespace Legion {
           const Realm::ZPoint<1,coord_t> point = it->value;
           rez.serialize(point);
         }
-        rez.serialize<size_t>(cit->second.ranges.size());
-        for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it = 
-              cit->second.ranges.begin(); it != cit->second.ranges.end(); it++)
-        {
-          const Realm::ZPoint<1,coord_t> start = it->first.value;
-          const Realm::ZPoint<1,coord_t> stop = it->second.value;
-          rez.serialize(start);
-          rez.serialize(stop);
-        }
+        // No need to do any ranges since we know they are all empty
       }
       argument = TaskArgument(rez.get_buffer(), rez.get_used_bytes());
     }
@@ -149,21 +133,6 @@ namespace Legion {
           derez.deserialize(point);
           fa_color.write(next_entry, color);
           fa_point.write(next_entry, point);
-        }
-        size_t num_ranges;
-        derez.deserialize(num_ranges);
-        for (unsigned idx = 0; idx < num_ranges; idx++)
-        {
-          Realm::ZPoint<1,coord_t> start, stop;
-          derez.deserialize(start);
-          derez.deserialize(stop);
-          for (PointInRectIterator<1,coord_t> 
-                itr(Realm::ZRect<1,coord_t>(start, stop)); 
-                itr(); itr++, next_entry++)
-          {
-            fa_color.write(next_entry, color);
-            fa_point.write(next_entry, *itr);
-          }
         }
       }
     }
@@ -272,6 +241,106 @@ namespace Legion {
               it != cit->second.end(); it++)
         {
           const Realm::ZRect<RDIM,coord_t> rect = *it;
+          rez.serialize(rect);
+        }
+      }
+      argument = TaskArgument(rez.get_buffer(), rez.get_used_bytes());
+    }
+
+    //--------------------------------------------------------------------------
+    template<int CDIM, int RDIM>
+    ColorRects<CDIM,RDIM>::ColorRects(const Coloring &coloring, 
+                 LogicalRegion region, FieldID color_field, FieldID range_field)
+      : TaskLauncher(TASK_ID, TaskArgument())
+    //--------------------------------------------------------------------------
+    {
+      add_region_requirement(
+          RegionRequirement(region, WRITE_DISCARD, EXCLUSIVE, region));
+      add_field(0/*index*/, color_field);
+      add_field(0/*index*/, range_field);
+      rez.serialize<size_t>(coloring.size());
+      for (Coloring::const_iterator cit = coloring.begin(); 
+            cit != coloring.end(); cit++)
+      {
+        const Realm::ZPoint<CDIM,coord_t> color = DomainPoint(cit->first); 
+        rez.serialize(color);
+        // Count how many rectangles there will be
+        size_t total_rects = cit->second.points.size();
+        for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it = 
+              cit->second.ranges.begin(); it != cit->second.ranges.end(); it++)
+        {
+          // Skip empty ranges
+          if (it->first.value > it->second.value)
+            continue;
+          total_rects++;
+        }
+        rez.serialize(total_rects);
+        for (std::set<ptr_t>::const_iterator it = 
+              cit->second.points.begin(); it != cit->second.points.end(); it++)
+        {
+          const Realm::ZPoint<1,coord_t> point(*it);
+          const Realm::ZRect<1,coord_t> rect(point, point);
+          rez.serialize(rect);
+        }
+        for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it = 
+              cit->second.ranges.begin(); it != cit->second.ranges.end(); it++)
+        {
+          // Skip empty ranges
+          if (it->first.value > it->second.value)
+            continue;
+          const Realm::ZPoint<1,coord_t> lo(it->first.value);
+          const Realm::ZPoint<1,coord_t> hi(it->second.value);
+          const Realm::ZRect<1,coord_t> rect(lo, hi);
+          rez.serialize(rect);
+        }
+      }
+      argument = TaskArgument(rez.get_buffer(), rez.get_used_bytes());
+    }
+
+    //--------------------------------------------------------------------------
+    template<int CDIM, int RDIM>
+    ColorRects<CDIM,RDIM>::ColorRects(const PointColoring &coloring, 
+                 LogicalRegion region, FieldID color_field, FieldID range_field)
+      : TaskLauncher(TASK_ID, TaskArgument())
+    //--------------------------------------------------------------------------
+    {
+      add_region_requirement(
+          RegionRequirement(region, WRITE_DISCARD, EXCLUSIVE, region));
+      add_field(0/*index*/, color_field);
+      add_field(0/*index*/, range_field);
+      rez.serialize<size_t>(coloring.size());
+      for (PointColoring::const_iterator cit = coloring.begin();
+            cit != coloring.end(); cit++)
+      {
+        const Realm::ZPoint<CDIM,coord_t> color = cit->first; 
+        rez.serialize(color);
+        // Count how many rectangles there will be
+        size_t total_rects = cit->second.points.size();
+        for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it = 
+              cit->second.ranges.begin(); it != cit->second.ranges.end(); it++)
+        {
+          // Skip empty ranges
+          if (it->first.value > it->second.value)
+            continue;
+          total_rects++;
+        }
+        rez.serialize(total_rects);
+        for (std::set<ptr_t>::const_iterator it = 
+              cit->second.points.begin(); it != cit->second.points.end(); it++)
+        {
+          const Realm::ZPoint<1,coord_t> point(*it);
+          const Realm::ZRect<1,coord_t> rect(point, point);
+          rez.serialize(rect);
+        }
+        for (std::set<std::pair<ptr_t,ptr_t> >::const_iterator it = 
+              cit->second.ranges.begin(); it != cit->second.ranges.end(); it++)
+        {
+          // Skip empty ranges
+          if (it->first.value > it->second.value)
+            continue;
+          const Realm::ZPoint<1,coord_t> lo(it->first.value);
+          const Realm::ZPoint<1,coord_t> hi(it->second.value);
+          const Realm::ZRect<1,coord_t> rect(lo, hi);
           rez.serialize(rect);
         }
       }
@@ -3030,6 +3099,7 @@ namespace Legion {
                                   "no longer supported");
       // Count how many entries there are in the coloring
       coord_t num_entries = 0;
+      bool do_ranges = false;
       for (PointColoring::const_iterator cit = coloring.begin(); 
             cit != coloring.end(); cit++)
       {
@@ -3043,7 +3113,8 @@ namespace Legion {
           // Skip empty ranges
           if (it->first.value > it->second.value)
             continue;
-          num_entries += ((it->second - it->first).value + 1);
+          num_entries++;
+          do_ranges = true;
         }
       }
       // Now make a temporary logical region with two fields to handle
@@ -3079,7 +3150,12 @@ namespace Legion {
           default:
             assert(false);
         }
-        allocator.allocate_field(sizeof(Realm::ZPoint<1,coord_t>), pointer_fid);
+        if (do_ranges)
+          allocator.allocate_field(sizeof(Realm::ZRect<1,coord_t>), 
+                                   pointer_fid);
+        else
+          allocator.allocate_field(sizeof(Realm::ZPoint<1,coord_t>), 
+                                   pointer_fid);
       }
       LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
                                                   temp_is, temp_fs);
@@ -3089,23 +3165,50 @@ namespace Legion {
       {
         case 1:
           {
-            PartitionShim::ColorPoints<1> launcher(coloring, temp_lr,
-                                              color_fid, pointer_fid);
-            runtime->execute_task(ctx, launcher);
+            if (do_ranges)
+            {
+              PartitionShim::ColorRects<1,1> launcher(coloring, temp_lr,
+                                                color_fid, pointer_fid);
+              runtime->execute_task(ctx, launcher);
+            }
+            else
+            {
+              PartitionShim::ColorPoints<1> launcher(coloring, temp_lr,
+                                                color_fid, pointer_fid);
+              runtime->execute_task(ctx, launcher);
+            }
             break;
           }
         case 2:
           {
-            PartitionShim::ColorPoints<2> launcher(coloring, temp_lr,
-                                              color_fid, pointer_fid);
-            runtime->execute_task(ctx, launcher);
+            if (do_ranges)
+            {
+              PartitionShim::ColorRects<2,1> launcher(coloring, temp_lr,
+                                                color_fid, pointer_fid);
+              runtime->execute_task(ctx, launcher);
+            }
+            else
+            {
+              PartitionShim::ColorPoints<2> launcher(coloring, temp_lr,
+                                                color_fid, pointer_fid);
+              runtime->execute_task(ctx, launcher);
+            }
             break;
           }
         case 3:
           {
-            PartitionShim::ColorPoints<3> launcher(coloring, temp_lr,
-                                              color_fid, pointer_fid);
-            runtime->execute_task(ctx, launcher);
+            if (do_ranges)
+            {
+              PartitionShim::ColorRects<3,1> launcher(coloring, temp_lr,
+                                                color_fid, pointer_fid);
+              runtime->execute_task(ctx, launcher);
+            }
+            else
+            {
+              PartitionShim::ColorPoints<3> launcher(coloring, temp_lr,
+                                                color_fid, pointer_fid);
+              runtime->execute_task(ctx, launcher);
+            }
             break;
           }
         default:
@@ -3118,8 +3221,13 @@ namespace Legion {
                                       temp_lr, color_fid, index_color_space);
       // Then project the partition image through the pointer field
       LogicalPartition temp_lp = get_logical_partition(temp_lr, temp_ip);
-      IndexPartition result = create_partition_by_image(ctx, parent, temp_lp, 
-                  temp_lr, pointer_fid, index_color_space, part_kind, color);
+      IndexPartition result;
+      if (do_ranges)
+        result = create_partition_by_image_range(ctx, parent, temp_lp,
+                    temp_lr, pointer_fid, index_color_space, part_kind, color);
+      else
+        result = create_partition_by_image(ctx, parent, temp_lp, 
+                    temp_lr, pointer_fid, index_color_space, part_kind, color);
       // Clean everything up
       destroy_logical_region(ctx, temp_lr);
       destroy_field_space(ctx, temp_fs);
@@ -3143,6 +3251,7 @@ namespace Legion {
 #ifndef DISABLE_PARTITION_SHIM
       // Count how many entries there are in the coloring
       coord_t num_entries = 0;
+      bool do_ranges = false;
       Color lower_bound = UINT_MAX, upper_bound = 0;
       for (Coloring::const_iterator cit = coloring.begin(); 
             cit != coloring.end(); cit++)
@@ -3158,7 +3267,8 @@ namespace Legion {
           // Skip empty ranges
           if (it->first.value > it->second.value)
             continue;
-          num_entries += ((it->second - it->first).value + 1);
+          num_entries++;
+          do_ranges = true;
         }
       }
 #ifdef DEBUG_LEGION
@@ -3179,15 +3289,29 @@ namespace Legion {
       {
         FieldAllocator allocator = create_field_allocator(ctx,temp_fs);
         allocator.allocate_field(sizeof(Realm::ZPoint<1,coord_t>), color_fid);
-        allocator.allocate_field(sizeof(Realm::ZPoint<1,coord_t>), pointer_fid);
+        if (do_ranges)
+          allocator.allocate_field(sizeof(Realm::ZRect<1,coord_t>),
+                                   pointer_fid);
+        else
+          allocator.allocate_field(sizeof(Realm::ZPoint<1,coord_t>), 
+                                   pointer_fid);
       }
       LogicalRegionT<1,coord_t> temp_lr = create_logical_region(ctx,
                                                   temp_is, temp_fs);
       // Fill in the logical region with the data
       // Do this with a task launch to maintain deferred execution
-      PartitionShim::ColorPoints<1> launcher(coloring, temp_lr, 
-                                             color_fid, pointer_fid);
-      runtime->execute_task(ctx, launcher);
+      if (do_ranges)
+      {
+        PartitionShim::ColorRects<1,1> launcher(coloring, temp_lr, 
+                                              color_fid, pointer_fid);
+        runtime->execute_task(ctx, launcher);
+      }
+      else
+      {
+        PartitionShim::ColorPoints<1> launcher(coloring, temp_lr, 
+                                               color_fid, pointer_fid);
+        runtime->execute_task(ctx, launcher);
+      }
       
       // Make an index space for the color space, we'll leak it for now
       IndexSpaceT<1,coord_t> index_color_space = 
@@ -3198,10 +3322,17 @@ namespace Legion {
       // Then project the partition image through the pointer field
       LogicalPartitionT<1,coord_t> temp_lp = 
                                      get_logical_partition(temp_lr, temp_ip);
-      IndexPartitionT<1,coord_t> result = create_partition_by_image(ctx,
-          IndexSpaceT<1,coord_t>(parent), temp_lp, temp_lr, pointer_fid, 
-          index_color_space, (disjoint ? DISJOINT_KIND : ALIASED_KIND), 
-          part_color);
+      IndexPartitionT<1,coord_t> result;
+      if (do_ranges)
+        result = create_partition_by_image_range(ctx, 
+            IndexSpaceT<1,coord_t>(parent), temp_lp, temp_lr, pointer_fid,
+            index_color_space, (disjoint ? DISJOINT_KIND : ALIASED_KIND),
+            part_color);
+      else
+        result = create_partition_by_image(ctx,
+            IndexSpaceT<1,coord_t>(parent), temp_lp, temp_lr, pointer_fid, 
+            index_color_space, (disjoint ? DISJOINT_KIND : ALIASED_KIND), 
+            part_color);
       // Clean everything up
       destroy_logical_region(ctx, temp_lr);
       destroy_field_space(ctx, temp_fs);

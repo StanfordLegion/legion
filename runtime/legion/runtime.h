@@ -85,6 +85,11 @@ namespace Legion {
           LogicalRegion region, FieldID color_field, FieldID range_field);
       ColorRects(const MultiDomainPointColoring &coloring,
           LogicalRegion region, FieldID color_field, FieldID range_field);
+    public:
+      ColorRects(const Coloring &coloring, LogicalRegion region,
+                 FieldID color_field, FieldID range_field);
+      ColorRects(const PointColoring &coloring, LogicalRegion region,
+                 FieldID color_field, FieldID range_field);
     protected:
       Serializer rez;
     public:
