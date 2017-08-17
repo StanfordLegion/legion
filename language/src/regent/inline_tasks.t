@@ -63,10 +63,19 @@ local function expr_id(sym, node)
   }
 end
 
-local function make_block(stats, annotations, span)
-  return ast.typed.stat.Block {
+-- TODO: We wrap the inlined body with a repeat loop that runs only one iteration
+--       in order to prevent RDIR from reordering inlined blocks arbitrarily.
+--       Once we fix the issue in RDIR, we will use the normal do-end block back.
+local function make_dummy_repeat(stats, annotations, span)
+  return ast.typed.stat.Repeat {
     block = ast.typed.Block {
       stats = stats,
+      span = span,
+    },
+    until_cond = ast.typed.expr.Constant {
+      value = true,
+      expr_type = bool,
+      annotations = annotations,
       span = span,
     },
     annotations = annotations,
@@ -375,7 +384,7 @@ function inline_tasks.expr(cx, node)
         stats[num_stats] = stat_asgn(return_var_expr, return_stat.value, return_stat)
       end
       stats = ast.map_node_prepostorder(subst_pre, subst_post, stats)
-      new_block = make_block(stats, node.annotations, node.span)
+      new_block = make_dummy_repeat(stats, node.annotations, node.span)
     end
     stats:insert(stat_var(return_var, nil, node))
     stats:insert(new_block)
