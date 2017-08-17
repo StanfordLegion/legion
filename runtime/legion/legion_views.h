@@ -143,7 +143,8 @@ namespace Legion {
                                  const unsigned index, const FieldMask &mask, 
                                  bool reading, bool restrict_out,
                                  const AddressSpaceID source,
-                                 std::set<RtEvent> &applied_events) = 0;
+                                 std::set<RtEvent> &applied_events,
+                                 bool tracing) = 0;
       virtual ApEvent find_user_precondition(const RegionUsage &user,
                                            ApEvent term_event,
                                            const FieldMask &user_mask,
@@ -155,7 +156,8 @@ namespace Legion {
                             const FieldMask &user_mask, Operation *op,
                             const unsigned index, AddressSpaceID source,
                             VersionTracker *version_tracker,
-                            std::set<RtEvent> &applied_events) = 0;
+                            std::set<RtEvent> &applied_events,
+                            bool tracing) = 0;
       // This is a fused version of the above two methods
       virtual ApEvent add_user_fused(const RegionUsage &user,
                                    ApEvent term_event,
@@ -376,7 +378,8 @@ namespace Legion {
                                  const FieldMask &mask, 
                                  bool reading, bool restrict_out,
                                  const AddressSpaceID source,
-                                 std::set<RtEvent> &applied_events);
+                                 std::set<RtEvent> &applied_events,
+                                 bool tracing);
     protected:
       void add_copy_user_above(const RegionUsage &usage, ApEvent copy_term,
                                const ColorPoint &child_color,
@@ -386,7 +389,8 @@ namespace Legion {
                                const unsigned index, const bool restrict_out,
                                const FieldMask &copy_mask,
                                const AddressSpaceID source,
-                               std::set<RtEvent> &applied_events);
+                               std::set<RtEvent> &applied_events,
+                               bool tracing);
       void add_local_copy_user(const RegionUsage &usage, ApEvent copy_term,
                                bool base_user, bool restrict_out,
                                const ColorPoint &child_color,
@@ -396,7 +400,8 @@ namespace Legion {
                                const unsigned index,
                                const FieldMask &copy_mask,
                                const AddressSpaceID source,
-                               std::set<RtEvent> &applied_events);
+                               std::set<RtEvent> &applied_events,
+                               bool tracing);
     public:
       virtual ApEvent find_user_precondition(const RegionUsage &user,
                                            ApEvent term_event,
@@ -445,7 +450,8 @@ namespace Legion {
                             const FieldMask &user_mask, Operation *op,
                             const unsigned index, AddressSpaceID source,
                             VersionTracker *version_tracker,
-                            std::set<RtEvent> &applied_events);
+                            std::set<RtEvent> &applied_events,
+                            bool tracing);
     protected:
       void add_user_above(const RegionUsage &usage, ApEvent term_event,
                           const ColorPoint &child_color, 
@@ -455,7 +461,8 @@ namespace Legion {
                           const FieldMask &user_mask,
                           const bool need_version_update,
                           const AddressSpaceID source,
-                          std::set<RtEvent> &applied_events);
+                          std::set<RtEvent> &applied_events,
+                          bool tracing);
       bool add_local_user(const RegionUsage &usage, ApEvent term_event,
                           const ColorPoint &child_color, 
                           RegionNode *origin_node, const bool base_user,
@@ -463,7 +470,8 @@ namespace Legion {
                           const UniqueID op_id, const unsigned index,
                           const FieldMask &user_mask,
                           const AddressSpaceID source,
-                          std::set<RtEvent> &applied_events);
+                          std::set<RtEvent> &applied_events,
+                          bool tracing);
     public:
       // This is a fused version of the above two virtual methods
       virtual ApEvent add_user_fused(const RegionUsage &user, 
@@ -685,6 +693,10 @@ namespace Legion {
       // an event might be filtered out for some fields, so we can't rely
       // on it to detect when we have outstanding gc meta-tasks
       std::set<ApEvent> outstanding_gc_events;
+      // Separtely keep a set of outstanding GC events when a physical trace
+      // is being captured. This prevents them from being collected until
+      // the trace capture is done.
+      std::set<ApEvent> traced_outstanding_gc_events;
       // Keep track of the current version numbers for each field
       // This will allow us to detect when physical instances are no
       // longer valid from a particular view when doing rollbacks for
@@ -825,7 +837,8 @@ namespace Legion {
                                  const FieldMask &mask, 
                                  bool reading, bool restrict_out,
                                  const AddressSpaceID source,
-                                 std::set<RtEvent> &applied_events);
+                                 std::set<RtEvent> &applied_events,
+                                 bool tracing);
       virtual ApEvent find_user_precondition(const RegionUsage &user,
                                            ApEvent term_event,
                                            const FieldMask &user_mask,
@@ -837,7 +850,8 @@ namespace Legion {
                             const FieldMask &user_mask, Operation *op,
                             const unsigned index, AddressSpaceID source,
                             VersionTracker *version_tracker,
-                            std::set<RtEvent> &applied_events);
+                            std::set<RtEvent> &applied_events,
+                            bool tracing);
       // This is a fused version of the above two methods
       virtual ApEvent add_user_fused(const RegionUsage &user,ApEvent term_event,
                                    const FieldMask &user_mask, 
@@ -906,6 +920,7 @@ namespace Legion {
       LegionMap<ApEvent,EventUsers>::aligned reduction_users;
       LegionMap<ApEvent,EventUsers>::aligned reading_users;
       std::set<ApEvent> outstanding_gc_events;
+      std::set<ApEvent> traced_outstanding_gc_events;
     protected:
       std::set<ApEvent> initial_user_events; 
     protected:

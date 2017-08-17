@@ -2382,7 +2382,8 @@ namespace Legion {
           target_views[idx2]->add_user(usage, term_event, 
                                        ref.get_valid_fields(), 
                                        op, idx1, runtime->address_space,
-                                       &info, map_applied_events);
+                                       &info, map_applied_events,
+                                       trace_info.tracing);
           if (restricted_out)
           {
             FieldMask restricted = ref.get_valid_fields() & restricted_fields;
@@ -14158,7 +14159,8 @@ namespace Legion {
           dst->add_copy_user(0/*redop*/, it->first, &info.version_info, 
                              info.op->get_unique_op_id(), info.index,
                              it->second, false/*reading*/, restrict_out,
-                             local_space, info.map_applied_events);
+                             local_space, info.map_applied_events,
+                             trace_info.tracing);
         }
         if (restrict_out && restrict_info.has_restrictions())
         {
@@ -14480,7 +14482,8 @@ namespace Legion {
             it->first->add_copy_user(0/*redop*/, copy_post, src_versions,
                                      info.op->get_unique_op_id(), info.index,
                                      it->second, true/*reading*/, restrict_out,
-                                     local_space, info.map_applied_events);
+                                     local_space, info.map_applied_events,
+                                     trace_info.tracing);
           }
           postconditions[copy_post] = pre_set.set_mask;
         }
@@ -16510,7 +16513,8 @@ namespace Legion {
             InstanceRef &ref = targets[idx]; 
             new_views[idx]->add_user(usage, term_event, ref.get_valid_fields(),
                                    info.op, info.index, local_space,
-                                   &info.version_info, info.map_applied_events);
+                                   &info.version_info, info.map_applied_events,
+                                   trace_info.tracing);
           }
         }
         if (!reduce_out_views.empty())
@@ -16724,7 +16728,8 @@ namespace Legion {
               InstanceRef &ref = targets[idx];
               new_views[idx]->as_instance_view()->add_user(usage, term_event,
                        ref.get_valid_fields(), info.op, info.index, 
-                       local_space, &info.version_info,info.map_applied_events);
+                       local_space, &info.version_info,info.map_applied_events,
+                       trace_info.tracing);
               if (restricted_out)
               {
                 FieldMask restricted = 
@@ -17001,7 +17006,7 @@ namespace Legion {
                               &version_info, op->get_unique_op_id(), 
                               index, fill_mask, false/*reading*/,
                               true/*restrict out*/, local_space, 
-                              map_applied_events);
+                              map_applied_events, trace_info.tracing);
       }
       // Finally do the update to the physical state like a normal fill
       PhysicalState *state = get_physical_state(version_info);

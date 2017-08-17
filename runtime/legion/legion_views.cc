@@ -278,6 +278,13 @@ namespace Legion {
               it != initial_user_events.end(); it++)
           filter_local_users(*it);
       }
+      if (!traced_outstanding_gc_events.empty())
+      {
+        outstanding_gc_events.swap(traced_outstanding_gc_events);
+        collect_users(outstanding_gc_events);
+        outstanding_gc_events.swap(traced_outstanding_gc_events);
+        traced_outstanding_gc_events.clear();
+      }
 #if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE) && \
       defined(DEBUG_LEGION)
       // Don't forget to remove the initial user if there was one
@@ -285,6 +292,7 @@ namespace Legion {
       assert(current_epoch_users.empty());
       assert(previous_epoch_users.empty());
       assert(outstanding_gc_events.empty());
+      //assert(traced_outstanding_gc_events.empty());
 #endif
 #ifdef LEGION_GC
       log_garbage.info("GC Deletion %lld %d", 
@@ -834,7 +842,8 @@ namespace Legion {
                                          const FieldMask &copy_mask, 
                                          bool reading, bool restrict_out,
                                          const AddressSpaceID source,
-                                         std::set<RtEvent> &applied_events)
+                                         std::set<RtEvent> &applied_events,
+                                         bool tracing)
     //--------------------------------------------------------------------------
     {
       RegionUsage usage;
@@ -854,11 +863,12 @@ namespace Legion {
         const ColorPoint &local_color = logical_node->get_color();
         parent->add_copy_user_above(usage, copy_term, local_color,
                                origin_node, versions, creator_op_id, index,
-                               restrict_out, copy_mask, source, applied_events);
+                               restrict_out, copy_mask, source, applied_events,
+                               tracing);
       }
       add_local_copy_user(usage, copy_term, true/*base*/, restrict_out,
           ColorPoint(), origin_node, versions, creator_op_id, index, 
-          copy_mask, source, applied_events);
+          copy_mask, source, applied_events, tracing);
     }
 
     //--------------------------------------------------------------------------
@@ -872,7 +882,8 @@ namespace Legion {
                                                const bool restrict_out,
                                                const FieldMask &copy_mask,
                                                const AddressSpaceID source,
-                                              std::set<RtEvent> &applied_events)
+                                              std::set<RtEvent> &applied_events,
+                                               bool tracing)
     //--------------------------------------------------------------------------
     {
       if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
@@ -880,11 +891,11 @@ namespace Legion {
         const ColorPoint &local_color = logical_node->get_color();
         parent->add_copy_user_above(usage, copy_term, local_color, origin_node,
                                   versions, creator_op_id, index, restrict_out, 
-                                  copy_mask, source, applied_events);
+                                  copy_mask, source, applied_events, tracing);
       }
       add_local_copy_user(usage, copy_term, false/*base*/, restrict_out,
                       child_color, origin_node, versions, creator_op_id, 
-                      index, copy_mask, source, applied_events);
+                      index, copy_mask, source, applied_events, tracing);
     }
 
     //--------------------------------------------------------------------------
@@ -898,7 +909,8 @@ namespace Legion {
                                                const unsigned index,
                                                const FieldMask &copy_mask,
                                                const AddressSpaceID source,
-                                              std::set<RtEvent> &applied_events)
+                                              std::set<RtEvent> &applied_events,
+                                               bool tracing)
     //--------------------------------------------------------------------------
     {
       if (!is_logical_owner())
@@ -959,10 +971,17 @@ namespace Legion {
       {
         AutoLock v_lock(view_lock);
         add_current_user(user, copy_term, copy_mask); 
-        if (base_user)
-          issue_collect = (outstanding_gc_events.find(copy_term) ==
-                            outstanding_gc_events.end());
-        outstanding_gc_events.insert(copy_term);
+        if (tracing)
+        {
+          traced_outstanding_gc_events.insert(copy_term);
+        }
+        else
+        {
+          if (base_user)
+            issue_collect = (outstanding_gc_events.find(copy_term) ==
+                              outstanding_gc_events.end());
+          outstanding_gc_events.insert(copy_term);
+        }
         // See if we need to check for read only invalidates
         // Don't worry about writing copies, their invalidations
         // will be sent if they update the version number
@@ -1204,7 +1223,8 @@ namespace Legion {
                                     const FieldMask &user_mask, Operation *op,
                                     const unsigned index, AddressSpaceID source,
                                     VersionTracker *versions,
-                                    std::set<RtEvent> &applied_events)
+                                    std::set<RtEvent> &applied_events,
+                                    bool tracing)
     //--------------------------------------------------------------------------
     {
       UniqueID op_id = op->get_unique_op_id();
@@ -1226,12 +1246,13 @@ namespace Legion {
         const ColorPoint &local_color = logical_node->get_color();
         parent->add_user_above(usage, term_event, local_color, origin_node,
             versions, op_id, index, user_mask, need_version_update, 
-            source, applied_events);
+            source, applied_events, tracing);
       }
       // Add our local user
       const bool issue_collect = add_local_user(usage, term_event, 
                          ColorPoint(), origin_node, true/*base*/, versions, 
-                         op_id, index, user_mask, source, applied_events);
+                         op_id, index, user_mask, source, applied_events,
+                         tracing);
       // Launch the garbage collection task, if it doesn't exist
       // then the user wasn't registered anyway, see add_local_user
       if (issue_collect)
@@ -1254,7 +1275,8 @@ namespace Legion {
                                           const FieldMask &user_mask,
                                           const bool need_version_update,
                                           const AddressSpaceID source,
-                                          std::set<RtEvent> &applied_events)
+                                          std::set<RtEvent> &applied_events,
+                                          bool tracing)
     //--------------------------------------------------------------------------
     {
       bool need_update_above = false;
@@ -1272,10 +1294,11 @@ namespace Legion {
         const ColorPoint &local_color = logical_node->get_color();
         parent->add_user_above(usage, term_event, local_color, origin_node,
             versions, op_id, index, user_mask, need_update_above, 
-            source, applied_events);
+            source, applied_events, tracing);
       }
       add_local_user(usage, term_event, child_color, origin_node, false/*base*/,
-                     versions, op_id, index, user_mask, source, applied_events);
+                     versions, op_id, index, user_mask, source, applied_events,
+                     tracing);
     }
 
     //--------------------------------------------------------------------------
@@ -1289,7 +1312,8 @@ namespace Legion {
                                           const unsigned index,
                                           const FieldMask &user_mask,
                                           const AddressSpaceID source,
-                                          std::set<RtEvent> &applied_events)
+                                          std::set<RtEvent> &applied_events,
+                                          bool tracing)
     //--------------------------------------------------------------------------
     {
       if (!term_event.exists())
@@ -1361,8 +1385,13 @@ namespace Legion {
       // be sent automatically if the version number is advanced
       if (!valid_remote_instances.empty() && IS_READ_ONLY(usage))
         perform_read_invalidations(user_mask, versions, source, applied_events);
-      if (outstanding_gc_events.find(term_event) == 
-          outstanding_gc_events.end())
+      if (tracing)
+      {
+        traced_outstanding_gc_events.insert(term_event);
+        return false;
+      }
+      else if (outstanding_gc_events.find(term_event) == 
+               outstanding_gc_events.end())
       {
         outstanding_gc_events.insert(term_event);
         return !child_color.is_valid();
@@ -1416,7 +1445,8 @@ namespace Legion {
       // Add our local user
       const bool issue_collect = add_local_user(usage, term_event, 
                          ColorPoint(), origin_node, true/*base*/, versions,
-                         op_id, index, user_mask, source, applied_events);
+                         op_id, index, user_mask, source, applied_events,
+                         tracing);
       // Launch the garbage collection task, if it doesn't exist
       // then the user wasn't registered anyway, see add_local_user
       if (issue_collect)
@@ -1475,7 +1505,8 @@ namespace Legion {
       }
       // Add the user on the way back down
       add_local_user(usage, term_event, child_color, origin_node, false/*base*/,
-                     versions, op_id, index, user_mask, source, applied_events);
+                     versions, op_id, index, user_mask, source, applied_events,
+                     tracing);
       // No need to launch a collect user task, the child takes care of that
     }
 
@@ -3808,7 +3839,8 @@ namespace Legion {
         add_local_copy_user(usage, term_event, base_user, 
                             restrict_out, child_color, origin_node,
                             &dummy_version_info, op_id, index,
-                            user_mask, source, applied_conditions);
+                            user_mask, source, applied_conditions,
+                            false/*tracing*/);
       }
       else
       {
@@ -3831,7 +3863,8 @@ namespace Legion {
                                  source, applied_conditions);
         if (add_local_user(usage, term_event, child_color, origin_node, 
                            base_user, &dummy_version_info, op_id, index, 
-                           user_mask, source, applied_conditions))
+                           user_mask, source, applied_conditions,
+                           false/*tracing*/))
         {
           WrapperReferenceMutator mutator(applied_conditions);
           defer_collect_user(term_event, &mutator);
@@ -4239,7 +4272,7 @@ namespace Legion {
           temporary_dst->add_copy_user(0/*redop*/, copy_pre, 
               &info.version_info, info.op->get_unique_op_id(), info.index,
               it->set_mask, false/*reading*/, false/*restrict out*/, 
-              local_space, info.map_applied_events); 
+              local_space, info.map_applied_events, trace_info.tracing); 
         // Perform the copy
         std::vector<Domain::CopySrcDstField> src_fields;
         std::vector<Domain::CopySrcDstField> dst_fields;
@@ -4259,12 +4292,12 @@ namespace Legion {
                              info.op->get_unique_op_id(), info.index,
                              it->set_mask, false/*reading*/, 
                              false/*restrict out*/, local_space,
-                             info.map_applied_events);
+                             info.map_applied_events, trace_info.tracing);
           temporary_dst->add_copy_user(0/*redop*/, copy_post, 
                              &info.version_info, info.op->get_unique_op_id(),
                              info.index, it->set_mask, true/*reading*/,
                              false/*restrict out*/, local_space, 
-                             info.map_applied_events);
+                             info.map_applied_events, trace_info.tracing);
           postconditions[copy_post] = it->set_mask;
         }
       }
@@ -5515,7 +5548,8 @@ namespace Legion {
         dst->add_copy_user(0/*redop*/, done_event, &info.version_info,
                            info.op->get_unique_op_id(), info.index,
                            it->set_mask, false/*reading*/, restrict_out,
-                           local_space, info.map_applied_events);
+                           local_space, info.map_applied_events,
+                           trace_info.tracing);
       }
       if (restrict_out && restrict_info.has_restrictions())
       {
@@ -6836,7 +6870,8 @@ namespace Legion {
         dst->add_copy_user(0/*redop*/, it->first, &info.version_info, 
                            info.op->get_unique_op_id(), info.index,
                            it->second, false/*reading*/, restrict_out,
-                           local_space, info.map_applied_events);
+                           local_space, info.map_applied_events,
+                           trace_info.tracing);
       }
       if (restrict_out && restrict_info.has_restrictions())
       {
@@ -7104,7 +7139,8 @@ namespace Legion {
           dst->add_copy_user(0/*redop*/, post, &info.version_info,
                              info.op->get_unique_op_id(), info.index,
                              it->set_mask, false/*reading*/, restrict_out,
-                             local_space, info.map_applied_events);
+                             local_space, info.map_applied_events,
+                             trace_info.tracing);
         if (restrict_out && !(it->set_mask * restrict_mask))
           info.op->record_restrict_postcondition(post);
       }
@@ -7551,11 +7587,19 @@ namespace Legion {
               it != initial_user_events.end(); it++)
           filter_local_users(*it);
       }
+      if (!traced_outstanding_gc_events.empty())
+      {
+        outstanding_gc_events.swap(traced_outstanding_gc_events);
+        collect_users(outstanding_gc_events);
+        outstanding_gc_events.swap(traced_outstanding_gc_events);
+        traced_outstanding_gc_events.clear();
+      }
 #if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE) && \
       defined(DEBUG_LEGION)
       assert(reduction_users.empty());
       assert(reading_users.empty());
       assert(outstanding_gc_events.empty());
+      //assert(traced_outstanding_gc_events.empty());
 #endif
 #ifdef LEGION_GC
       log_garbage.info("GC Deletion %lld %d", 
@@ -7624,11 +7668,11 @@ namespace Legion {
       target->add_copy_user(manager->redop, reduce_post, versions,
                            op->get_unique_op_id(), index, reduce_mask, 
                            false/*reading*/, restrict_out, local_space, 
-                           map_applied_events);
+                           map_applied_events, trace_info.tracing);
       this->add_copy_user(manager->redop, reduce_post, versions,
                          op->get_unique_op_id(), index, reduce_mask, 
                          true/*reading*/, restrict_out, local_space, 
-                         map_applied_events);
+                         map_applied_events, trace_info.tracing);
       if (restrict_out)
         op->record_restrict_postcondition(reduce_post);
     } 
@@ -7685,7 +7729,7 @@ namespace Legion {
       add_copy_user(manager->redop, reduce_post, versions,
                     op->get_unique_op_id(), index, red_mask, 
                     true/*reading*/, false/*restrict out*/,
-                    local_space, map_applied_events);
+                    local_space, map_applied_events, trace_info.tracing);
       return reduce_post;
     }
 
@@ -7737,7 +7781,7 @@ namespace Legion {
       add_copy_user(manager->redop, reduce_post, versions,
                     op->get_unique_op_id(), index, red_mask, 
                     true/*reading*/, false/*restrict out*/,
-                    local_space, map_applied_events);
+                    local_space, map_applied_events, trace_info.tracing);
       return reduce_post;
     }
 
@@ -7882,7 +7926,8 @@ namespace Legion {
                                       const FieldMask &mask, 
                                       bool reading, bool restrict_out,
                                       const AddressSpaceID source,
-                                      std::set<RtEvent> &applied_events)
+                                      std::set<RtEvent> &applied_events,
+                                      bool tracing)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7932,12 +7977,19 @@ namespace Legion {
         }
         AutoLock v_lock(view_lock);
         add_physical_user(user, reading, copy_term, mask);
-        // Update the reference users
-        if (outstanding_gc_events.find(copy_term) ==
-            outstanding_gc_events.end())
+        if (tracing)
         {
-          outstanding_gc_events.insert(copy_term);
-          issue_collect = true;
+          traced_outstanding_gc_events.insert(copy_term);
+        }
+        else
+        {
+          // Update the reference users
+          if (outstanding_gc_events.find(copy_term) ==
+              outstanding_gc_events.end())
+          {
+            outstanding_gc_events.insert(copy_term);
+            issue_collect = true;
+          }
         }
       }
       // Launch the garbage collection task if necessary
@@ -7989,7 +8041,8 @@ namespace Legion {
                                  const FieldMask &user_mask, Operation *op,
                                  const unsigned index, AddressSpaceID source,
                                  VersionTracker *versions,
-                                 std::set<RtEvent> &applied_events)
+                                 std::set<RtEvent> &applied_events,
+                                 bool tracing)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8030,12 +8083,19 @@ namespace Legion {
       {
         AutoLock v_lock(view_lock);
         add_physical_user(new_user, reading, term_event, user_mask);
-        // Only need to do this if we actually have a term event
-        if (outstanding_gc_events.find(term_event) == 
-            outstanding_gc_events.end())
+        if (tracing)
         {
-          outstanding_gc_events.insert(term_event);
-          issue_collect = true;
+          traced_outstanding_gc_events.insert(term_event);
+        }
+        else
+        {
+          // Only need to do this if we actually have a term event
+          if (outstanding_gc_events.find(term_event) == 
+              outstanding_gc_events.end())
+          {
+            outstanding_gc_events.insert(term_event);
+            issue_collect = true;
+          }
         }
       }
       // Launch the garbage collection task if we need to
@@ -8109,11 +8169,18 @@ namespace Legion {
         if (term_event.exists())
         {
           add_physical_user(new_user, reading, term_event, user_mask);
-          if (outstanding_gc_events.find(term_event) ==
-              outstanding_gc_events.end())
+          if (tracing)
           {
-            outstanding_gc_events.insert(term_event);
-            issue_collect = true;
+            traced_outstanding_gc_events.insert(term_event);
+          }
+          else
+          {
+            if (outstanding_gc_events.find(term_event) ==
+                outstanding_gc_events.end())
+            {
+              outstanding_gc_events.insert(term_event);
+              issue_collect = true;
+            }
           }
         }
       }
