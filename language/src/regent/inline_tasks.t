@@ -376,10 +376,6 @@ function inline_tasks.expr(cx, node)
       end
       stats = ast.map_node_prepostorder(subst_pre, subst_post, stats)
       new_block = make_block(stats, node.annotations, node.span)
-      --- TODO: We wrap the inlined body twice with do-end blocks
-      ---       in order to prevent RDIR from reordering inlined blocks arbitrarily.
-      ---       Once we fix the issue in RDIR, we will remove this hack.
-      new_block = make_block(terralib.newlist{new_block}, node.annotations, node.span)
     end
     stats:insert(stat_var(return_var, nil, node))
     stats:insert(new_block)
