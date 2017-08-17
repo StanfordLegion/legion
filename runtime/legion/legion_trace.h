@@ -272,7 +272,7 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
-      virtual void deferred_execute(void);
+      virtual void trigger_mapping(void);
     protected:
       DynamicTrace *local_trace;
     };
@@ -302,7 +302,7 @@ namespace Legion {
       virtual const char* get_logging_name(void) const;
       virtual OpKind get_operation_kind(void) const;
       virtual void trigger_dependence_analysis(void);
-      virtual void deferred_execute(void);
+      virtual void trigger_mapping(void);
     protected:
       LegionTrace *local_trace;
     };
@@ -336,6 +336,28 @@ namespace Legion {
                              std::vector<Processor> &target_proc,
                              std::deque<InstanceSet> &physical_instances) const;
     public:
+      void start_recording_template(PhysicalTraceInfo &trace_info);
+    private:
+      PhysicalTemplate* get_template(PhysicalTraceInfo &trace_info);
+    public:
+      void record_get_term_event(PhysicalTraceInfo &trace_info,
+                                 ApEvent lhs,
+                                 SingleTask* task);
+      void record_merge_events(PhysicalTraceInfo &trace_info,
+                               ApEvent &lhs,
+                               const std::set<ApEvent>& rhs);
+      void record_issue_copy(PhysicalTraceInfo &trace_info,
+                             ApEvent lhs,
+                             RegionTreeNode* node,
+                             Operation* op,
+                         const std::vector<Domain::CopySrcDstField>& src_fields,
+                         const std::vector<Domain::CopySrcDstField>& dst_fields,
+                             ApEvent precondition,
+                             PredEvent predicate_guard,
+                             RegionTreeNode *intersect = NULL,
+                             ReductionOpID redop = 0,
+                             bool reduction_fold = true);
+    public:
       void fix_trace(void);
       bool is_fixed(void) const { return fixed; }
       bool is_empty(void) const { return cached_mappings.empty(); }
@@ -361,9 +383,126 @@ namespace Legion {
         CachedMappings;
 
       CachedMappings cached_mappings;
+      std::vector<PhysicalTemplate*> templates;
     };
 
-  }; // namespace Internal 
+    /**
+     * \class PhysicalTemplate
+     * This class represents a recipe to reconstruct a physical task graph.
+     * A template consists of a sequence of instructions, each of which is
+     * interpreted by the template engine. The template also maintains
+     * the interpreter state (operations and events). These are initialized
+     * before the template gets executed.
+     */
+    struct PhysicalTemplate {
+      PhysicalTemplate();
+      ~PhysicalTemplate();
+      PhysicalTemplate(const PhysicalTemplate &rhs);
+
+      void initialize();
+      void execute();
+      void clear();
+
+      Reservation template_lock;
+
+      std::vector<Operation*> operations;
+      std::vector<UniqueID> op_uids;
+      std::vector<ApEvent> events;
+      std::map<ApEvent, unsigned> event_map;
+      std::map<UniqueID, unsigned> op_map;
+      std::vector<Instruction*> instructions;
+    };
+
+    /**
+     * \class Instruction
+     * This class is an abstract parent class for all template instructions.
+     */
+    struct Instruction {
+      Instruction(PhysicalTemplate& tpl);
+      virtual ~Instruction() {};
+      virtual void execute();
+      virtual std::string to_string() = 0;
+
+    protected:
+      std::vector<Operation*>& operations;
+      std::vector<ApEvent>& events;
+    };
+
+    /**
+     * \class GetTermEvent
+     * This instruction has the following semantics:
+     *   events[lhs] = ops[rhs].get_task_completion()
+     */
+    struct GetTermEvent : public Instruction {
+      GetTermEvent(PhysicalTemplate& tpl, unsigned lhs, unsigned rhs);
+      virtual std::string to_string();
+
+    private:
+      unsigned lhs;
+      unsigned rhs;
+    };
+
+    /**
+     * \class MergeEvent
+     * This instruction has the following semantics:
+     *   events[lhs] = Runtime::merge_events(events[rhs])
+     */
+    struct MergeEvent : public Instruction {
+      MergeEvent(PhysicalTemplate& tpl, unsigned lhs,
+                 const std::set<unsigned>& rhs);
+      virtual std::string to_string();
+
+    private:
+      unsigned lhs;
+      std::set<unsigned> rhs;
+    };
+
+    /**
+     * \class CreateNoEvent
+     * This instruction has the following semantics:
+     *   events[lhs] = ApEvent(Realm::Event::NO_EVENT)
+     */
+    struct CreateNoEvent : public Instruction {
+      CreateNoEvent(PhysicalTemplate& tpl, unsigned lhs);
+      virtual std::string to_string();
+
+    private:
+      unsigned lhs;
+    };
+
+    /**
+     * \class IssueCopy
+     * This instruction has the following semantics:
+     *   events[lhs] = node->issue_copy(tasks[op_idx], src_fields, dst_fields,
+     *                                  events[precondition_idx],
+     *                                  predicate_guard, intersect,
+     *                                  redop, reduction_fold);
+     */
+    struct IssueCopy : public Instruction {
+      IssueCopy(PhysicalTemplate& tpl,
+                unsigned lhs, RegionTreeNode* node, unsigned op_idx,
+                const std::vector<Domain::CopySrcDstField>& src_fields,
+                const std::vector<Domain::CopySrcDstField>& dst_fields,
+                unsigned precondition_idx, PredEvent predicate_guard,
+                RegionTreeNode *intersect, ReductionOpID redop,
+                bool reduction_fold);
+      virtual std::string to_string();
+
+    private:
+      unsigned lhs;
+      RegionTreeNode* node;
+      unsigned op_idx;
+      std::vector<Domain::CopySrcDstField> src_fields;
+      std::vector<Domain::CopySrcDstField> dst_fields;
+      unsigned precondition_idx;
+      PredEvent predicate_guard;
+      RegionTreeNode *intersect;
+      ReductionOpID redop;
+      bool reduction_fold;
+    };
+
+
+  }; // namespace Internal
 }; // namespace Legion
 
 #endif // __LEGION_TRACE__

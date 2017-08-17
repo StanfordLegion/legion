@@ -2355,7 +2355,7 @@ namespace Legion {
 #endif
           ApEvent ready = target_views[idx2]->find_user_precondition(usage, 
                             term_event, ref.get_valid_fields(), op, idx1, 
-                            &info, map_applied_events);
+                            &info, map_applied_events, trace_info.tracing);
           ref.set_ready_event(ready);
         }
       }
@@ -2738,7 +2738,8 @@ namespace Legion {
                                                   valid_mask, op, src_index,
                                                   &src_version_info,
                                                   runtime->address_space,
-                                                  map_applied);
+                                                  map_applied,
+                                                  trace_info.tracing);
             src_targets.add_instance(
                 InstanceRef((*it)->get_manager(), valid_mask, ready));
             src_mask -= valid_mask;
@@ -14121,7 +14122,8 @@ namespace Legion {
                                              info.op->get_unique_op_id(),
                                              info.index, local_space, 
                                              preconditions,
-                                             info.map_applied_events);
+                                             info.map_applied_events,
+                                             trace_info.tracing);
           update_mask |= it->second;
         }
         // Now do the destination
@@ -14130,7 +14132,8 @@ namespace Legion {
                                      update_mask, &info.version_info,
                                      info.op->get_unique_op_id(),
                                      info.index, local_space, preconditions,
-                                     info.map_applied_events);
+                                     info.map_applied_events,
+                                     trace_info.tracing);
         // If we're restricted, get our restrict precondition
         if (restrict_info.has_restrictions())
         {
@@ -14454,6 +14457,14 @@ namespace Legion {
         // Now that we've got our offsets ready, we
         // can now issue the copy to the low-level runtime
         ApEvent copy_pre = Runtime::merge_events(pre_set.preconditions);
+        if (trace_info.tracing)
+        {
+#ifdef DEBUG_LEGION
+          assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+#endif
+          trace_info.trace->record_merge_events(trace_info, copy_pre,
+              pre_set.preconditions);
+        }
         ApEvent copy_post = issue_copy(info.op, src_fields, dst_fields, 
                                        copy_pre, predicate_guard, trace_info,
                                        intersect);
@@ -15872,6 +15883,10 @@ namespace Legion {
         }
       }
 #endif
+      if (trace_info.trace != NULL && !trace_info.trace->is_fixed())
+        trace_info.trace->record_issue_copy(trace_info, result, this,
+            op, src_fields, dst_fields, precondition, predicate_guard,
+            intersect, redop, reduction_fold);
       return result;
     }
 
@@ -16466,7 +16481,8 @@ namespace Legion {
             // Only find the preconditions now 
             ApEvent ready = new_view->find_user_precondition(usage, term_event,
                                    user_mask, info.op, info.index, 
-                                   &info.version_info, info.map_applied_events);
+                                   &info.version_info, info.map_applied_events,
+                                   trace_info.tracing);
             ref.set_ready_event(ready);
             new_views[idx] = new_view;
           }
@@ -16475,7 +16491,8 @@ namespace Legion {
             // Do the fused find preconditions and add user
             ApEvent ready = new_view->add_user_fused(usage,term_event,user_mask,
                                          info.op, info.index,&info.version_info,
-                                         local_space, info.map_applied_events);
+                                         local_space, info.map_applied_events,
+                                         trace_info.tracing);
             ref.set_ready_event(ready);
           }
           if (!defer_add_users && !!restricted_fields)
@@ -16673,7 +16690,8 @@ namespace Legion {
 #endif
             ApEvent ready = new_views[0]->as_instance_view()->add_user_fused(
                 usage, term_event, ref.get_valid_fields(), info.op, info.index,
-                &info.version_info, local_space, info.map_applied_events);
+                &info.version_info, local_space, info.map_applied_events,
+                trace_info.tracing);
             ref.set_ready_event(ready);
             if (!!restricted_fields && !IS_READ_ONLY(info.req))
             {
@@ -16695,7 +16713,8 @@ namespace Legion {
               ApEvent ready = 
                 new_views[idx]->as_instance_view()->find_user_precondition(
                     usage, term_event, ref.get_valid_fields(), info.op, 
-                    info.index, &info.version_info, info.map_applied_events);
+                    info.index, &info.version_info, info.map_applied_events,
+                    trace_info.tracing);
               ref.set_ready_event(ready);
             }
             const bool restricted_out = 
@@ -16805,7 +16824,8 @@ namespace Legion {
             view->set_descriptor(field_data.back(), field_id);
             // Register ourselves as user of this instance
             ApEvent ready_event = view->add_user_fused(usage, term_event, 
-              user_mask, op, index, &version_info, local_space, applied_events);
+              user_mask, op, index, &version_info, local_space, applied_events,
+              false/*tracing*/);
             if (ready_event.exists())
               preconditions.insert(ready_event);
             // We found an actual instance so we are done
@@ -16951,7 +16971,8 @@ namespace Legion {
         target->find_copy_preconditions(0/*redop*/, false/*reading*/, 
                           true/*single copy*/, true/*restrict out*/, fill_mask,
                           &version_info, op->get_unique_op_id(), index,
-                          local_space, preconditions, map_applied_events);
+                          local_space, preconditions, map_applied_events,
+                          trace_info.tracing);
         if (sync_precondition.exists())
           preconditions[sync_precondition] = fill_mask;
         // Sort the preconditions into event sets

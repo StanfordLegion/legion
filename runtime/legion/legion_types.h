@@ -1243,6 +1243,8 @@ namespace Legion {
     class TraceCaptureOp;
     class TraceCompleteOp;
     class PhysicalTrace;
+    class PhysicalTemplate;
+    class Instruction;
 
     // region_tree.h
     class RegionTreeForest;

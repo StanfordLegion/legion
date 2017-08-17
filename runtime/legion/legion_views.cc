@@ -24,6 +24,7 @@
 #include "legion_views.h"
 #include "legion_analysis.h"
 #include "legion_context.h"
+#include "legion_trace.h"
 
 namespace Legion {
   namespace Internal {
@@ -542,7 +543,9 @@ namespace Legion {
                                                    const unsigned index,
                                                    const AddressSpaceID source,
                            LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                             std::set<RtEvent> &applied_events, bool can_filter)
+                                              std::set<RtEvent> &applied_events,
+                                                   bool tracing,
+                                                   bool can_filter)
     //--------------------------------------------------------------------------
     {
       ApEvent start_use_event = manager->get_use_event();
@@ -564,19 +567,20 @@ namespace Legion {
         find_local_copy_preconditions(redop, reading, single_copy, restrict_out,
                                       copy_mask, ColorPoint(), origin_node, 
                                       versions, creator_op_id, index, source, 
-                                      preconditions, applied_events);
+                                      preconditions, applied_events, tracing);
       else
         find_local_copy_preconditions_above(redop, reading, single_copy, 
                                       restrict_out, copy_mask, ColorPoint(), 
                                       origin_node, versions,creator_op_id,index,
                                       source, preconditions, applied_events,
-                                      false/*actually above*/);
+                                      tracing, false/*actually above*/);
       if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_point = logical_node->get_color();
         parent->find_copy_preconditions_above(redop, reading, single_copy,
                    restrict_out, copy_mask, local_point, origin_node, versions, 
-                   creator_op_id, index, source, preconditions, applied_events);
+                   creator_op_id, index, source, preconditions, applied_events,
+                   tracing);
       }
     }
 
@@ -593,18 +597,21 @@ namespace Legion {
                                                   const unsigned index,
                                                   const AddressSpaceID source,
                            LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                                              std::set<RtEvent> &applied_events)
+                                              std::set<RtEvent> &applied_events,
+                                                  bool tracing)
     //--------------------------------------------------------------------------
     {
       find_local_copy_preconditions_above(redop, reading, single_copy, 
                   restrict_out, copy_mask, child_color, origin_node, versions, 
-                  creator_op_id, index, source, preconditions, applied_events);
+                  creator_op_id, index, source, preconditions, applied_events,
+                  tracing);
       if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_point = logical_node->get_color();
         parent->find_copy_preconditions_above(redop, reading, single_copy, 
                   restrict_out, copy_mask, local_point, origin_node, versions, 
-                  creator_op_id, index, source, preconditions, applied_events);
+                  creator_op_id, index, source, preconditions, applied_events,
+                  tracing);
       }
     }
     
@@ -621,7 +628,8 @@ namespace Legion {
                                                   const unsigned index,
                                                   const AddressSpaceID source,
                            LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                                              std::set<RtEvent> &applied_events)
+                                              std::set<RtEvent> &applied_events,
+                                                  bool tracing)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
@@ -645,7 +653,7 @@ namespace Legion {
         find_current_preconditions<true/*track*/>(copy_mask, usage, child_color,
                                origin_node, creator_op_id, index, preconditions,
                                dead_events, filter_current_users,
-                               observed, non_dominated);
+                               observed, non_dominated, tracing);
         const FieldMask dominated = observed - non_dominated;
         if (!!dominated)
           find_previous_filter_users(dominated, filter_previous_users);
@@ -653,7 +661,7 @@ namespace Legion {
         if (!!previous_mask)
           find_previous_preconditions(previous_mask, usage, child_color,
                                       origin_node, creator_op_id, index, 
-                                      preconditions, dead_events);
+                                      preconditions, dead_events, tracing);
       }
       else
       {
@@ -675,14 +683,14 @@ namespace Legion {
                                        child_color, origin_node, creator_op_id,
                                        index, preconditions, dead_events, 
                                        filter_current_users,
-                                       observed, non_dominated);
+                                       observed, non_dominated, tracing);
         }
         else // the normal case with no write-skip
           find_current_preconditions<true/*track*/>(copy_mask, usage, 
                                      child_color, origin_node, creator_op_id,
                                      index, preconditions, dead_events, 
                                      filter_current_users, 
-                                     observed, non_dominated);
+                                     observed, non_dominated, tracing);
         const FieldMask dominated = observed - non_dominated;
         if (!!dominated)
           find_previous_filter_users(dominated, filter_previous_users);
@@ -690,7 +698,7 @@ namespace Legion {
         if (!!previous_mask)
           find_previous_preconditions(previous_mask, usage, child_color,
                                       origin_node, creator_op_id, index, 
-                                      preconditions, dead_events);
+                                      preconditions, dead_events, tracing);
       }
       if (!dead_events.empty() || 
           !filter_previous_users.empty() || !filter_current_users.empty() ||
@@ -733,6 +741,7 @@ namespace Legion {
                                                   const AddressSpaceID source,
                            LegionMap<ApEvent,FieldMask>::aligned &preconditions,
                                               std::set<RtEvent> &applied_events,
+                                                  bool tracing,
                                                   const bool actually_above)
     //--------------------------------------------------------------------------
     {
@@ -759,11 +768,12 @@ namespace Legion {
         find_current_preconditions<false/*track*/>(copy_mask, usage, 
                                    child_color, origin_node, creator_op_id, 
                                    index, preconditions, dead_events, 
-                                   filter_current_users,observed,non_dominated);
+                                   filter_current_users,observed,non_dominated,
+                                   tracing);
         // No domination above
         find_previous_preconditions(copy_mask, usage, child_color,
                                     origin_node, creator_op_id, index, 
-                                    preconditions, dead_events);
+                                    preconditions, dead_events, tracing);
       }
       else
       {
@@ -785,18 +795,18 @@ namespace Legion {
                                        child_color, origin_node, creator_op_id,
                                        index, preconditions, dead_events, 
                                        filter_current_users,
-                                       observed, non_dominated);
+                                       observed, non_dominated, tracing);
         }
         else // the normal case with no write-skip
           find_current_preconditions<false/*track*/>(copy_mask, usage, 
                                      child_color, origin_node, creator_op_id,
                                      index, preconditions, dead_events, 
                                      filter_current_users, 
-                                     observed, non_dominated);
+                                     observed, non_dominated, tracing);
         // No domination above
         find_previous_preconditions(copy_mask, usage, child_color,
                                     origin_node, creator_op_id, index, 
-                                    preconditions, dead_events);
+                                    preconditions, dead_events, tracing);
       }
 #ifdef DEBUG_LEGION
       assert(filter_current_users.empty());
@@ -972,7 +982,7 @@ namespace Legion {
                           const RegionUsage &usage, ApEvent term_event,
                           const FieldMask &user_mask, Operation *op,
                           const unsigned index, VersionTracker *versions,
-                          std::set<RtEvent> &applied_events)
+                          std::set<RtEvent> &applied_events, bool tracing)
     //--------------------------------------------------------------------------
     {
       std::set<ApEvent> wait_on_events;
@@ -986,14 +996,14 @@ namespace Legion {
       // Find our local preconditions
       find_local_user_preconditions(usage, term_event, ColorPoint(), 
           origin_node, versions, op_id, index, user_mask, 
-          wait_on_events, applied_events);
+          wait_on_events, applied_events, tracing);
       // Go up the tree if we have to
       if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_color = logical_node->get_color();
         parent->find_user_preconditions_above(usage, term_event, local_color, 
                               origin_node, versions, op_id, index, user_mask, 
-                              wait_on_events, applied_events);
+                              wait_on_events, applied_events, tracing);
       }
       return Runtime::merge_events(wait_on_events); 
     }
@@ -1009,20 +1019,21 @@ namespace Legion {
                                                 const unsigned index,
                                                 const FieldMask &user_mask,
                                               std::set<ApEvent> &preconditions,
-                                              std::set<RtEvent> &applied_events)
+                                              std::set<RtEvent> &applied_events,
+                                                bool tracing)
     //--------------------------------------------------------------------------
     {
       // Do the precondition analysis on the way up
       find_local_user_preconditions_above(usage, term_event, child_color, 
                           origin_node, versions, op_id, index, user_mask, 
-                          preconditions, applied_events);
+                          preconditions, applied_events, tracing);
       // Go up the tree if we have to
       if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_color = logical_node->get_color();
         parent->find_user_preconditions_above(usage, term_event, local_color, 
                               origin_node, versions, op_id, index, user_mask, 
-                              preconditions, applied_events);
+                              preconditions, applied_events, tracing);
       }
     }
 
@@ -1037,7 +1048,8 @@ namespace Legion {
                                                 const unsigned index,
                                                 const FieldMask &user_mask,
                                               std::set<ApEvent> &preconditions,
-                                              std::set<RtEvent> &applied_events)
+                                              std::set<RtEvent> &applied_events,
+                                                bool tracing)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
@@ -1061,7 +1073,8 @@ namespace Legion {
         find_current_preconditions<true/*track*/>(user_mask, usage, child_color,
                                    origin_node, term_event, op_id, index, 
                                    preconditions, dead_events, 
-                                   filter_current_users,observed,non_dominated);
+                                   filter_current_users,observed,non_dominated,
+                                   tracing);
         const FieldMask dominated = observed - non_dominated;
         if (!!dominated)
           find_previous_filter_users(dominated, filter_previous_users);
@@ -1069,7 +1082,7 @@ namespace Legion {
         if (!!previous_mask)
           find_previous_preconditions(previous_mask, usage, child_color, 
                                       origin_node, term_event, op_id, index,
-                                      preconditions, dead_events);
+                                      preconditions, dead_events, tracing);
       }
       else
       {
@@ -1078,7 +1091,8 @@ namespace Legion {
         find_current_preconditions<true/*track*/>(user_mask, usage, child_color,
                                    origin_node, term_event, op_id, index, 
                                    preconditions, dead_events, 
-                                   filter_current_users,observed,non_dominated);
+                                   filter_current_users, observed,
+                                   non_dominated, tracing);
         const FieldMask dominated = observed - non_dominated;
         if (!!dominated)
           find_previous_filter_users(dominated, filter_previous_users);
@@ -1086,7 +1100,7 @@ namespace Legion {
         if (!!previous_mask)
           find_previous_preconditions(previous_mask, usage, child_color, 
                                       origin_node, term_event, op_id, index,
-                                      preconditions, dead_events);
+                                      preconditions, dead_events, tracing);
       }
       if (!dead_events.empty() || 
           !filter_previous_users.empty() || !filter_current_users.empty())
@@ -1122,6 +1136,7 @@ namespace Legion {
                                                 const FieldMask &user_mask,
                                               std::set<ApEvent> &preconditions,
                                               std::set<RtEvent> &applied_events,
+                                                bool tracing,
                                                 const bool actually_above)
     //--------------------------------------------------------------------------
     {
@@ -1150,11 +1165,11 @@ namespace Legion {
                                    child_color, origin_node,
                                    term_event, op_id, index, preconditions, 
                                    dead_events, filter_current_users, 
-                                   observed, non_dominated);
+                                   observed, non_dominated, tracing);
         // No domination above
         find_previous_preconditions(user_mask, usage, child_color, 
                                     origin_node, term_event, op_id, index,
-                                    preconditions, dead_events);
+                                    preconditions, dead_events, tracing);
       }
       else
       {
@@ -1164,11 +1179,11 @@ namespace Legion {
                                    child_color, origin_node,
                                    term_event, op_id, index, preconditions, 
                                    dead_events, filter_current_users, 
-                                   observed, non_dominated);
+                                   observed, non_dominated, tracing);
         // No domination above
         find_previous_preconditions(user_mask, usage, child_color, 
                                     origin_node, term_event, op_id, index,
-                                    preconditions, dead_events);
+                                    preconditions, dead_events, tracing);
       }
 #ifdef DEBUG_LEGION
       assert(filter_current_users.empty());
@@ -1363,6 +1378,7 @@ namespace Legion {
                                              VersionTracker *versions,
                                              const AddressSpaceID source,
                                              std::set<RtEvent> &applied_events,
+                                             bool tracing,
                                              bool update_versions/*=true*/)
     //--------------------------------------------------------------------------
     {
@@ -1377,7 +1393,7 @@ namespace Legion {
       // Find our local preconditions
       find_local_user_preconditions(usage, term_event, ColorPoint(), 
                      origin_node, versions, op_id, index, user_mask, 
-                     wait_on_events, applied_events);
+                     wait_on_events, applied_events, tracing);
       bool need_version_update = false;
       if (IS_WRITE(usage) && update_versions)
       {
@@ -1394,7 +1410,8 @@ namespace Legion {
         parent->add_user_above_fused(usage, term_event, local_color, 
                               origin_node, versions, op_id, index, 
                               user_mask, source, wait_on_events, 
-                              applied_events, need_version_update);
+                              applied_events, need_version_update,
+                              tracing);
       }
       // Add our local user
       const bool issue_collect = add_local_user(usage, term_event, 
@@ -1430,13 +1447,14 @@ namespace Legion {
                                                 const AddressSpaceID source,
                                               std::set<ApEvent> &preconditions,
                                               std::set<RtEvent> &applied_events,
+                                                bool tracing,
                                                 const bool need_version_update)
     //--------------------------------------------------------------------------
     {
       // Do the precondition analysis on the way up
       find_local_user_preconditions_above(usage, term_event, child_color, 
                           origin_node, versions, op_id, index, user_mask, 
-                          preconditions, applied_events);
+                          preconditions, applied_events, tracing);
       bool need_update_above = false;
       if (need_version_update)
       {
@@ -1452,7 +1470,8 @@ namespace Legion {
         const ColorPoint &local_color = logical_node->get_color();
         parent->add_user_above_fused(usage, term_event, local_color,origin_node,
                               versions, op_id, index, user_mask, source,
-                              preconditions, applied_events, need_update_above);
+                              preconditions, applied_events, need_update_above,
+                              tracing);
       }
       // Add the user on the way back down
       add_local_user(usage, term_event, child_color, origin_node, false/*base*/,
@@ -2532,7 +2551,8 @@ namespace Legion {
                                                std::set<ApEvent> &dead_events,
                            LegionMap<ApEvent,FieldMask>::aligned &filter_events,
                                                  FieldMask &observed,
-                                                 FieldMask &non_dominated)
+                                                 FieldMask &non_dominated,
+                                                 bool tracing)
     //--------------------------------------------------------------------------
     {
       // Caller must be holding the lock
@@ -2545,7 +2565,7 @@ namespace Legion {
         // We're about to do a bunch of expensive tests, 
         // so first do something cheap to see if we can 
         // skip all the tests.
-        if (cit->first.has_triggered_faultignorant())
+        if (!tracing && cit->first.has_triggered_faultignorant())
         {
           dead_events.insert(cit->first);
           continue;
@@ -2604,7 +2624,8 @@ namespace Legion {
                                                  const UniqueID op_id,
                                                  const unsigned index,
                                                std::set<ApEvent> &preconditions,
-                                               std::set<ApEvent> &dead_events)
+                                               std::set<ApEvent> &dead_events,
+                                                 bool tracing)
     //--------------------------------------------------------------------------
     {
       // Caller must be holding the lock
@@ -2618,7 +2639,7 @@ namespace Legion {
         // We're about to do a bunch of expensive tests, 
         // so first do something cheap to see if we can 
         // skip all the tests.
-        if (pit->first.has_triggered_faultignorant())
+        if (!tracing && pit->first.has_triggered_faultignorant())
         {
           dead_events.insert(pit->first);
           continue;
@@ -2664,7 +2685,8 @@ namespace Legion {
                                                  std::set<ApEvent> &dead_events,
                            LegionMap<ApEvent,FieldMask>::aligned &filter_events,
                                                  FieldMask &observed,
-                                                 FieldMask &non_dominated)
+                                                 FieldMask &non_dominated,
+                                                 bool tracing)
     //--------------------------------------------------------------------------
     {
       // Caller must be holding the lock
@@ -2675,7 +2697,7 @@ namespace Legion {
         // We're about to do a bunch of expensive tests, 
         // so first do something cheap to see if we can 
         // skip all the tests.
-        if (cit->first.has_triggered_faultignorant())
+        if (!tracing && cit->first.has_triggered_faultignorant())
         {
           dead_events.insert(cit->first);
           continue;
@@ -2747,7 +2769,8 @@ namespace Legion {
                                                  const UniqueID op_id,
                                                  const unsigned index,
                            LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                                                 std::set<ApEvent> &dead_events)
+                                                 std::set<ApEvent> &dead_events,
+                                                 bool tracing)
     //--------------------------------------------------------------------------
     {
       // Caller must be holding the lock
@@ -2759,7 +2782,7 @@ namespace Legion {
         // We're about to do a bunch of expensive tests, 
         // so first do something cheap to see if we can 
         // skip all the tests.
-        if (pit->first.has_triggered_faultignorant())
+        if (!tracing && pit->first.has_triggered_faultignorant())
         {
           dead_events.insert(pit->first);
           continue;
@@ -3773,13 +3796,15 @@ namespace Legion {
                                       true/*single copy*/, restrict_out,
                                       user_mask, child_color, origin_node,
                                       &dummy_version_info, op_id, index, source,
-                                      dummy_preconditions, applied_conditions);
+                                      dummy_preconditions, applied_conditions,
+                                      false/*tracing*/);
         else
           find_local_copy_preconditions_above(usage.redop, IS_READ_ONLY(usage),
                                       true/*single copy*/, restrict_out,
                                       user_mask, child_color, origin_node,
                                       &dummy_version_info, op_id, index, source,
-                                      dummy_preconditions, applied_conditions);
+                                      dummy_preconditions, applied_conditions,
+                                      false/*tracing*/);
         add_local_copy_user(usage, term_event, base_user, 
                             restrict_out, child_color, origin_node,
                             &dummy_version_info, op_id, index,
@@ -3795,12 +3820,12 @@ namespace Legion {
           find_local_user_preconditions(usage, term_event, child_color,
                                         origin_node, &dummy_version_info, op_id,
                                         index,user_mask, dummy_preconditions, 
-                                        applied_conditions);
+                                        applied_conditions, false/*tracing*/);
         else
           find_local_user_preconditions_above(usage, term_event, child_color,
                                         origin_node, &dummy_version_info, op_id,
                                         index,user_mask, dummy_preconditions, 
-                                        applied_conditions);
+                                        applied_conditions, false/*tracing*/);
         if (IS_WRITE(usage))
           update_version_numbers(user_mask, field_versions,
                                  source, applied_conditions);
@@ -4186,7 +4211,8 @@ namespace Legion {
                                    copy_mask, &info.version_info,
                                    info.op->get_unique_op_id(), info.index,
                                    local_space, local_pre, 
-                                   info.map_applied_events);
+                                   info.map_applied_events,
+                                   trace_info.tracing);
       // Merge the destination preconditions
       if (!dst_preconditions.empty())
         local_pre.insert(dst_preconditions.begin(), dst_preconditions.end());
@@ -4359,7 +4385,8 @@ namespace Legion {
                                              info.op->get_unique_op_id(),
                                              info.index, local_space, 
                                              src_preconditions,
-                                             info.map_applied_events);
+                                             info.map_applied_events,
+                                             trace_info.tracing);
           actual_copy_mask |= it->second;
         }
         // Move in any preconditions that overlap with our set of fields
@@ -5454,7 +5481,8 @@ namespace Legion {
                                      copy_mask, &info.version_info, 
                                      info.op->get_unique_op_id(), info.index,
                                      local_space, preconditions, 
-                                     info.map_applied_events);  
+                                     info.map_applied_events,
+                                     trace_info.tracing);  
         LegionMap<ApEvent,FieldMask>::aligned postreductions;
         // No temporary instance necessary here
         copy_tree->issue_copies(info, dst, copy_mask, this, 
@@ -6782,7 +6810,8 @@ namespace Legion {
                                    copy_mask, &info.version_info, 
                                    info.op->get_unique_op_id(),
                                    info.index, local_space, 
-                                   preconditions, info.map_applied_events);
+                                   preconditions, info.map_applied_events,
+                                   trace_info.tracing);
       if (restrict_info.has_restrictions())
       {
         FieldMask restrict_mask;
@@ -7038,7 +7067,8 @@ namespace Legion {
                                    copy_mask, &info.version_info, 
                                    info.op->get_unique_op_id(),
                                    info.index, local_space, 
-                                   preconditions, info.map_applied_events);
+                                   preconditions, info.map_applied_events,
+                                   trace_info.tracing);
       if (restrict_info.has_restrictions())
       {
         FieldMask restrict_mask;
@@ -7180,7 +7210,8 @@ namespace Legion {
                                              info.op->get_unique_op_id(),
                                              info.index, local_space, 
                                              src_preconditions,
-                                             info.map_applied_events);
+                                             info.map_applied_events,
+                                             trace_info.tracing);
           actual_copy_mask |= it->second;
         }
         // Move in any preconditions that overlap with our set of fields
@@ -7563,11 +7594,11 @@ namespace Legion {
       target->find_copy_preconditions(manager->redop, false/*reading*/, 
             false/*single copy*/, restrict_out, reduce_mask, versions, 
             op->get_unique_op_id(), index, local_space, preconditions, 
-            map_applied_events);
+            map_applied_events, trace_info.tracing);
       this->find_copy_preconditions(manager->redop, true/*reading*/, 
            true/*single copy*/, restrict_out, reduce_mask, versions, 
            op->get_unique_op_id(), index, local_space, preconditions, 
-           map_applied_events);
+           map_applied_events, trace_info.tracing);
       std::set<ApEvent> event_preconds;
       for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
             preconditions.begin(); it != preconditions.end(); it++)
@@ -7575,6 +7606,14 @@ namespace Legion {
         event_preconds.insert(it->first);
       }
       ApEvent reduce_pre = Runtime::merge_events(event_preconds); 
+      if (trace_info.tracing)
+      {
+#ifdef DEBUG_LEGION
+        assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+#endif
+        trace_info.trace->record_merge_events(trace_info, reduce_pre,
+            event_preconds);
+      }
       ApEvent reduce_post = manager->issue_reduction(op, 
                                                      src_fields, dst_fields,
                                                      target->logical_node,
@@ -7620,7 +7659,8 @@ namespace Legion {
       find_copy_preconditions(manager->redop, true/*reading*/, 
                               true/*single copy*/, false/*restrict out*/,
                               red_mask, versions, op->get_unique_op_id(), index,
-                              local_space, src_pre, map_applied_events);
+                              local_space, src_pre, map_applied_events,
+                              trace_info.tracing);
       std::set<ApEvent> preconditions = pre;
       for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it =
             src_pre.begin(); it != src_pre.end(); it++)
@@ -7628,6 +7668,14 @@ namespace Legion {
         preconditions.insert(it->first);
       }
       ApEvent reduce_pre = Runtime::merge_events(preconditions); 
+      if (trace_info.tracing)
+      {
+#ifdef DEBUG_LEGION
+        assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+#endif
+        trace_info.trace->record_merge_events(trace_info, reduce_pre,
+            preconditions);
+      }
       ApEvent reduce_post = target->logical_node->issue_copy(op, 
                              src_fields, dst_fields, reduce_pre, 
                              predicate_guard, trace_info, intersect,
@@ -7668,7 +7716,8 @@ namespace Legion {
       find_copy_preconditions(manager->redop, true/*reading*/, 
                               true/*singe copy*/, false/*restrict out*/,
                               red_mask, versions, op->get_unique_op_id(), index,
-                              local_space, src_pre, map_applied_events);
+                              local_space, src_pre, map_applied_events,
+                              trace_info.tracing);
       std::set<ApEvent> preconditions = preconds;
       for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
             src_pre.begin(); it != src_pre.end(); it++)
@@ -7718,7 +7767,9 @@ namespace Legion {
                                                 const unsigned index,
                                                 const AddressSpaceID source,
                            LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                             std::set<RtEvent> &applied_events, bool can_filter)
+                                              std::set<RtEvent> &applied_events,
+                                                bool tracing,
+                                                bool can_filter)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
@@ -7904,7 +7955,8 @@ namespace Legion {
                                                   Operation *op, 
                                                   const unsigned index,
                                                   VersionTracker *versions,
-                                              std::set<RtEvent> &applied_events)
+                                              std::set<RtEvent> &applied_events,
+                                                  bool tracing)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
@@ -8002,6 +8054,7 @@ namespace Legion {
                                           VersionTracker *versions,
                                           const AddressSpaceID source,
                                           std::set<RtEvent> &applied_events,
+                                          bool tracing,
                                           bool update_versions/*=true*/)
     //--------------------------------------------------------------------------
     {

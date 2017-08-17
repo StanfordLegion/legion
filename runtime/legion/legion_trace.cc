@@ -1004,14 +1004,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceCaptureOp::deferred_execute(void)
+    void TraceCaptureOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       // Now finish capturing the physical trace
       if (local_trace->has_physical_trace() &&
           !local_trace->get_physical_trace()->is_empty())
         local_trace->get_physical_trace()->fix_trace();
-      FenceOp::deferred_execute();
+      FenceOp::trigger_mapping();
     }
 
     /////////////////////////////////////////////////////////////
@@ -1116,14 +1116,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceCompleteOp::deferred_execute(void)
+    void TraceCompleteOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       // Now finish capturing the physical trace
       if (local_trace->has_physical_trace() &&
+          !local_trace->get_physical_trace()->is_empty() &&
           !local_trace->get_physical_trace()->is_fixed())
         local_trace->get_physical_trace()->fix_trace();
-      FenceOp::deferred_execute();
+      FenceOp::trigger_mapping();
     }
 
     /////////////////////////////////////////////////////////////
@@ -1163,6 +1164,10 @@ namespace Legion {
           pit->clear();
         }
       }
+      for (std::vector<PhysicalTemplate*>::iterator it = templates.begin();
+           it != templates.end(); ++it)
+        delete (*it);
+      templates.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -1218,6 +1223,13 @@ namespace Legion {
       assert(!fixed);
 #endif
       fixed = true;
+
+      for (unsigned idx = 0; idx < templates.size(); ++idx)
+      {
+        printf("[Template %u]\n", idx);
+        templates[idx]->execute();
+        templates[idx]->clear();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1264,6 +1276,397 @@ namespace Legion {
       target_procs = finder->second.target_procs;
       physical_instances = finder->second.physical_instances;
     }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTrace::start_recording_template(PhysicalTraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(trace_lock);
+      trace_info.template_id = templates.size();
+      templates.push_back(new PhysicalTemplate());
+    }
+
+    //--------------------------------------------------------------------------
+    inline PhysicalTemplate* PhysicalTrace::get_template(
+                                                  PhysicalTraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalTemplate* tpl = NULL;
+      {
+        AutoLock t_lock(trace_lock, 1, false/*exclusive*/);
+#ifdef DEBUG_LEGION
+        assert(0 <= trace_info.template_id);
+        assert(trace_info.template_id < templates.size());
+#endif
+        tpl = templates[trace_info.template_id];
+      }
+#ifdef DEBUG_LEGION
+      assert(tpl != NULL);
+#endif
+      return tpl;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTrace::record_get_term_event(PhysicalTraceInfo &trace_info,
+                                              ApEvent lhs,
+                                              SingleTask* task)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(task->is_memoizing());
+#endif
+      PhysicalTemplate *tpl = get_template(trace_info);
+      AutoLock tpl_lock(tpl->template_lock);
+
+      unsigned lhs_ = tpl->events.size();
+      tpl->events.push_back(lhs);
+#ifdef DEBUG_LEGION
+      assert(tpl->event_map.find(lhs) == tpl->event_map.end());
+#endif
+      tpl->event_map[lhs] = lhs_;
+
+      unsigned rhs_ = task->get_trace_local_id();
+      UniqueID rhs = task->get_unique_op_id();
+      if (rhs_ >= tpl->operations.size()) tpl->operations.resize(rhs_ + 1);
+      tpl->operations[rhs_] = dynamic_cast<Operation*>(task);
+#ifdef DEBUG_LEGION
+      assert(tpl->op_map.find(rhs) == tpl->op_map.end());
+#endif
+      tpl->op_map[rhs] = rhs_;
+      tpl->instructions.push_back(new GetTermEvent(*tpl, lhs_, rhs_));
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTrace::record_merge_events(PhysicalTraceInfo &trace_info,
+                                            ApEvent &lhs,
+                                            const std::set<ApEvent>& rhs)
+    //--------------------------------------------------------------------------
+    {
+      if (!lhs.exists() || (rhs.find(lhs) != rhs.end()))
+      {
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        if (rhs.find(lhs) != rhs.end())
+          rename.trigger(lhs);
+        else
+          rename.trigger();
+        lhs = ApEvent(rename);
+      }
+
+      PhysicalTemplate *tpl = get_template(trace_info);
+      AutoLock tpl_lock(tpl->template_lock);
+
+      unsigned lhs_ = tpl->events.size();
+      tpl->events.push_back(lhs);
+#ifdef DEBUG_LEGION
+      assert(tpl->event_map.find(lhs) == tpl->event_map.end());
+#endif
+      tpl->event_map[lhs] = lhs_;
+
+      std::set<unsigned> rhs_;
+      for (std::set<ApEvent>::const_iterator it = rhs.begin(); it != rhs.end();
+           it++)
+      {
+        std::map<ApEvent, unsigned>::iterator finder = tpl->event_map.find(*it);
+        if (finder != tpl->event_map.end())
+          rhs_.insert(finder->second);
+      }
+      if (rhs_.size() > 0)
+        tpl->instructions.push_back(new MergeEvent(*tpl, lhs_, rhs_));
+      else
+        tpl->instructions.push_back(new CreateNoEvent(*tpl, lhs_));
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTrace::record_issue_copy(PhysicalTraceInfo &trace_info,
+                                          ApEvent lhs,
+                                          RegionTreeNode* node,
+                                          Operation* op,
+                         const std::vector<Domain::CopySrcDstField>& src_fields,
+                         const std::vector<Domain::CopySrcDstField>& dst_fields,
+                                          ApEvent precondition,
+                                          PredEvent predicate_guard,
+                                          RegionTreeNode *intersect,
+                                          ReductionOpID redop,
+                                          bool reduction_fold)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalTemplate *tpl = get_template(trace_info);
+      AutoLock tpl_lock(tpl->template_lock);
+
+      unsigned lhs_ = tpl->events.size();
+      tpl->events.push_back(lhs);
+#ifdef DEBUG_LEGION
+      assert(tpl->event_map.find(lhs) == tpl->event_map.end());
+#endif
+      tpl->event_map[lhs] = lhs_;
+
+      std::map<UniqueID, unsigned>::iterator op_finder =
+        tpl->op_map.find(op->get_unique_op_id());
+#ifdef DEBUG_LEGION
+      assert(op_finder != tpl->op_map.end());
+#endif
+      unsigned op_idx = op_finder->second;
+
+      std::map<ApEvent, unsigned>::iterator pre_finder =
+        tpl->event_map.find(precondition);
+#ifdef DEBUG_LEGION
+      assert(pre_finder != tpl->event_map.end());
+#endif
+      unsigned precondition_idx = pre_finder->second;
+
+      tpl->instructions.push_back(new IssueCopy(
+            *tpl, lhs_, node, op_idx, src_fields, dst_fields, precondition_idx,
+            predicate_guard, intersect, redop, reduction_fold));
+    }
+
+    /////////////////////////////////////////////////////////////
+    // PhysicalTemplate
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    PhysicalTemplate::PhysicalTemplate()
+      : template_lock(Reservation::create_reservation())
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalTemplate::~PhysicalTemplate()
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock tpl_lock(template_lock);
+        for (std::vector<Instruction*>::iterator it = instructions.begin();
+             it != instructions.end(); ++it)
+          delete *it;
+      }
+      template_lock.destroy_reservation();
+      template_lock = Reservation::NO_RESERVATION;
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalTemplate::PhysicalTemplate(const PhysicalTemplate &rhs)
+      : template_lock(Reservation::NO_RESERVATION)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::initialize()
+    //--------------------------------------------------------------------------
+    {
+      operations.clear();
+      events.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::execute()
+    //--------------------------------------------------------------------------
+    {
+      AutoLock tpl_lock(template_lock, 1, false/*exclusive*/);
+
+      for (std::vector<Instruction*>::iterator it = instructions.begin();
+           it != instructions.end(); ++it)
+      {
+        (*it)->execute();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::clear()
+    //--------------------------------------------------------------------------
+    {
+      event_map.clear();
+      op_map.clear();
+      initialize();
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Instruction
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    Instruction::Instruction(PhysicalTemplate& tpl)
+      : operations(tpl.operations), events(tpl.events)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void Instruction::execute()
+    //--------------------------------------------------------------------------
+    {
+      std::cout << to_string();
+    }
+
+    /////////////////////////////////////////////////////////////
+    // GetTermEvent
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    GetTermEvent::GetTermEvent(PhysicalTemplate& tpl, unsigned l, unsigned r)
+      : Instruction(tpl), lhs(l), rhs(r)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(lhs < events.size());
+      assert(rhs < operations.size());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    std::string GetTermEvent::to_string()
+    //--------------------------------------------------------------------------
+    {
+      std::stringstream ss;
+      ss << "events[" << lhs << "] = tasks[" << rhs
+         << "].get_task_termination()" << std::endl;
+      return ss.str();
+    }
+
+    /////////////////////////////////////////////////////////////
+    // MergeEvent
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    MergeEvent::MergeEvent(PhysicalTemplate& tpl, unsigned l,
+                           const std::set<unsigned>& r)
+      : Instruction(tpl), lhs(l), rhs(r)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(lhs < events.size());
+      assert(rhs.size() > 0);
+      for (std::set<unsigned>::iterator it = rhs.begin(); it != rhs.end();
+           ++it)
+        assert(*it < events.size());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    std::string MergeEvent::to_string()
+    //--------------------------------------------------------------------------
+    {
+      std::stringstream ss;
+      ss << "events[" << lhs << "] = Runtime::merge_events(";
+      unsigned count = 0;
+      for (std::set<unsigned>::iterator it = rhs.begin(); it != rhs.end();
+           ++it)
+      {
+        if (count++ != 0) ss << ",";
+        ss << "events[" << *it << "]";
+      }
+      ss << ")" << std::endl;
+      return ss.str();
+    }
+
+    /////////////////////////////////////////////////////////////
+    // CreateNoEvent
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    CreateNoEvent::CreateNoEvent(PhysicalTemplate& tpl, unsigned l)
+      : Instruction(tpl), lhs(l)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(lhs < events.size());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    std::string CreateNoEvent::to_string()
+    //--------------------------------------------------------------------------
+    {
+      std::stringstream ss;
+      ss << "events[" << lhs << "] = ApEvent(Realm::Event::NO_EVENT)"
+         << std::endl;
+      return ss.str();
+    }
+    /////////////////////////////////////////////////////////////
+    // IssueCopy
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    IssueCopy::IssueCopy(PhysicalTemplate& tpl,
+                         unsigned l, RegionTreeNode* n, unsigned oi,
+                         const std::vector<Domain::CopySrcDstField>& s,
+                         const std::vector<Domain::CopySrcDstField>& d,
+                         unsigned pi, PredEvent pg,
+                         RegionTreeNode *i, ReductionOpID ro, bool rf)
+      : Instruction(tpl), lhs(l), node(n), op_idx(oi), src_fields(s),
+        dst_fields(d), precondition_idx(pi), predicate_guard(pg), intersect(i),
+        redop(ro), reduction_fold(rf)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(lhs < events.size());
+      assert(node->is_region());
+      assert(op_idx < operations.size());
+      assert(src_fields.size() > 0);
+      assert(dst_fields.size() > 0);
+      assert(precondition_idx < events.size());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    std::string IssueCopy::to_string()
+    //--------------------------------------------------------------------------
+    {
+      std::stringstream ss;
+      ss << "events[" << lhs << "] = ";
+      LogicalRegion handle = node->as_region_node()->handle;
+      ss << "(" << handle.get_index_space().get_id()
+         << "," << handle.get_field_space().get_id()
+         << "," << handle.get_tree_id()
+         << ")->issue_copy(tasks[" << op_idx << "], ";
+      ss << "{";
+      for (unsigned idx = 0; idx < src_fields.size(); ++idx)
+      {
+        ss << "(" << std::hex << src_fields[idx].inst.id
+           << "," << std::dec << src_fields[idx].offset
+           << "," << src_fields[idx].size
+           << "," << src_fields[idx].field_id
+           << "," << src_fields[idx].serdez_id << ")";
+        if (idx != src_fields.size() - 1) ss << ",";
+      }
+      ss << "}, {";
+      for (unsigned idx = 0; idx < dst_fields.size(); ++idx)
+      {
+        ss << "(" << std::hex << dst_fields[idx].inst.id
+           << "," << std::dec << dst_fields[idx].offset
+           << "," << dst_fields[idx].size
+           << "," << dst_fields[idx].field_id
+           << "," << dst_fields[idx].serdez_id << ")";
+        if (idx != dst_fields.size() - 1) ss << ",";
+      }
+      ss << "}, events[" << precondition_idx << "]";
+      if (intersect != NULL)
+      {
+        if (intersect->is_region())
+        {
+          LogicalRegion handle = node->as_region_node()->handle;
+          ss << ", lr(" << handle.get_index_space().get_id()
+             << "," << handle.get_field_space().get_id()
+             << "," << handle.get_tree_id() << ")";
+        }
+        else
+        {
+          LogicalPartition handle = node->as_partition_node()->handle;
+          ss << ", lp(" << handle.get_index_partition().get_id()
+             << "," << handle.get_field_space().get_id()
+             << "," << handle.get_tree_id() << ")";
+        }
+      }
+
+      if (redop != 0) ss << ", " << redop;
+      ss << ")\n";
+
+      return ss.str();
+    }
+
     /////////////////////////////////////////////////////////////
     // PhysicalTraceInfo
     /////////////////////////////////////////////////////////////
@@ -1271,8 +1674,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalTraceInfo::PhysicalTraceInfo()
     //--------------------------------------------------------------------------
-      : memoizing(false), is_point_task(false), trace_local_id(0), color(),
-        trace(NULL)
+      : memoizing(false), tracing(false), is_point_task(false),
+        trace_local_id(0), color(), trace(NULL)
     {
     }
 

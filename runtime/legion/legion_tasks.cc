@@ -3509,8 +3509,11 @@ namespace Legion {
                                    PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
-      if (trace_info.trace != NULL && trace_info.trace->is_fixed())
+      if (trace_info.memoizing && !trace_info.tracing)
       {
+#ifdef DEBUG_LEGION
+        assert(trace_info.trace != NULL && trace_info.trace->is_fixed());
+#endif
         // TODO: Do not support must epoch tasks yet
         assert (must_epoch_owner == NULL);
         replay_map_task_output(trace_info);
@@ -3591,9 +3594,14 @@ namespace Legion {
       finalize_map_task_output(input, output, must_epoch_owner, 
                                valid_instances);
 
-      if (trace_info.trace != NULL && !trace_info.trace->is_fixed())
+      if (trace_info.tracing)
+      {
+#ifdef DEBUG_LEGION
+        assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+#endif
         trace_info.trace->record_mapper_output(trace_info, output,
                                                physical_instances);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3614,7 +3622,19 @@ namespace Legion {
 #endif
       PhysicalTraceInfo trace_info;
       if (memoizing)
+      {
         get_physical_trace_info(trace_info);
+        if (trace_info.tracing)
+        {
+#ifdef DEBUG_LEGION
+          assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+#endif
+          if (trace_local_id == 0)
+            trace_info.trace->start_recording_template(trace_info);
+          trace_info.trace->record_get_term_event(
+              trace_info, get_task_completion(), this);
+        }
+      }
 
       // Now do the mapping call
       invoke_mapper(must_epoch_op, trace_info);
@@ -5582,11 +5602,16 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(memoizing);
       assert(trace != NULL);
+      assert(trace->get_physical_trace() != NULL);
 #endif
       trace_info.memoizing = memoizing;
       trace_info.is_point_task = false;
       trace_info.trace = trace->get_physical_trace();
       trace_info.trace_local_id = trace_local_id;
+      trace_info.tracing =
+        trace_info.trace != NULL && !trace_info.trace->is_fixed();
+      // TODO: This should be chosen by the memoization checker
+      trace_info.template_id = 0;
     }
 
     //--------------------------------------------------------------------------
@@ -6551,6 +6576,8 @@ namespace Legion {
       assert(slice_owner != NULL);
       assert(slice_owner->index_owner != NULL);
       assert(slice_owner->index_owner->get_trace() != NULL);
+      assert(
+          slice_owner->index_owner->get_trace()->get_physical_trace() != NULL);
 #endif
       trace_info.memoizing = memoizing;
       trace_info.is_point_task = true;
@@ -6562,6 +6589,10 @@ namespace Legion {
 #endif
       trace_info.trace_local_id = trace_local_id;
       trace_info.color = index_point;
+      trace_info.tracing =
+        trace_info.trace != NULL && !trace_info.trace->is_fixed();
+      // TODO: This should be chosen by the memoization checker
+      trace_info.template_id = 0;
     }
 
     //--------------------------------------------------------------------------
