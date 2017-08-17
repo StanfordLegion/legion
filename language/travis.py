@@ -65,7 +65,7 @@ if __name__ == '__main__':
     env = dict(os.environ.iteritems())
     env.update({
         'LG_RT_DIR': runtime_dir,
-        'LUAJIT_URL': 'http://legion.stanford.edu/~eslaught/mirror/LuaJIT-2.0.4.tar.gz',
+        # 'LUAJIT_URL': 'http://legion.stanford.edu/~eslaught/mirror/LuaJIT-2.0.4.tar.gz',
     })
 
     debug = env['DEBUG'] == '1'

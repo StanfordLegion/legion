@@ -36,14 +36,18 @@ end
 local exe
 do
   local root_dir = arg[0]:match(".*/") or "./"
-  local runtime_dir = root_dir .. "../../runtime/"
+  local runtime_dir = os.getenv("LG_RT_DIR") .. "/"
   local legion_dir = runtime_dir .. "legion/"
   local mapper_dir = runtime_dir .. "mappers/"
   local realm_dir = runtime_dir .. "realm/"
   local binding_dir = root_dir .. "../../bindings/terra/"
 
   local embed_cc = root_dir .. "embed.cc"
-  exe = root_dir .. "embed.exe"
+  if os.getenv('SAVEOBJ') == '1' then
+    exe = root_dir .. "embed.exe"
+  else
+    exe = os.tmpname()
+  end
 
   local cxx = os.getenv('CXX') or 'c++'
 

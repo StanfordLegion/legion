@@ -539,12 +539,17 @@ namespace Legion {
 	, physical_regions(_physical_regions.size())
       {
 	for (size_t i = 0; i < _physical_regions.size(); i++) {
-	  physical_regions[i] = CObjectWrapper::wrap_const(&_physical_regions[i]);
+	  physical_regions[i] =
+            CObjectWrapper::wrap(new PhysicalRegion(_physical_regions[i]));
 	}
       }
 
       ~CContext(void)
-      {}
+      {
+	for (size_t i = 0; i < physical_regions.size(); i++) {
+          delete CObjectWrapper::unwrap(physical_regions[i]);
+	}
+      }
 
       Context context(void) const
       {

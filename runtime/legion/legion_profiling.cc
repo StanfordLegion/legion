@@ -517,9 +517,19 @@ namespace Legion {
                           "when running with -lg:serializer binary\n");
           exit(-1);
         }
+        std::string filename(prof_logfile);
+        size_t pct = filename.find_first_of('%', 0);
+        if (pct == std::string::npos) {
+          fprintf(stderr, "ERROR: The logfile name must contain '%%' "
+                          "which will be replaced with the node id\n");
+          exit(-1);
+        }
+
+	      // replace % with node number
         Processor current = Processor::get_executing_processor();
         std::stringstream ss;
-        ss << prof_logfile << current.address_space();
+        ss << filename.substr(0, pct) << current.address_space() <<
+              filename.substr(pct + 1);
         serializer = new LegionProfBinarySerializer(ss.str());
       } else if (!strcmp(serializer_type, "ascii")) {
         if (prof_logfile != NULL) {
