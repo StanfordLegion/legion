@@ -205,6 +205,7 @@ class PerfMapper : public DefaultMapper
     unsigned num_slices;
     bool cache_mapping;
     bool tracing;
+    unsigned skip_count;
     vector<Processor>& procs_list;
     //vector<Memory>& sysmems_list;
     //map<Memory, vector<Processor> >& sysmem_local_procs;
@@ -214,7 +215,6 @@ class PerfMapper : public DefaultMapper
     vector<vector<CachedConstraints> > constraint_cache;
     vector<VariantID> variant_id;
     vector<TaskSlice> slice_cache;
-    unsigned skip_count;
 };
 
 PerfMapper::PerfMapper(MapperRuntime *rt, Machine machine, Processor local,
@@ -227,6 +227,7 @@ PerfMapper::PerfMapper(MapperRuntime *rt, Machine machine, Processor local,
     num_slices(1),
     cache_mapping(true),
     tracing(false),
+    skip_count(1),
     procs_list(*_procs_list),
     //sysmems_list(*_sysmems_list),
     //sysmem_local_procs(*_sysmem_local_procs),
@@ -284,7 +285,7 @@ void PerfMapper::select_task_options(const MapperContext ctx,
   output.stealable = false;
   output.map_locally = false;
   if (task.task_id == DO_NOTHING_TASK_ID)
-    output.memoize = tracing && task.regions[0].tag > skip_count;
+    output.memoize = tracing && task.regions[0].tag >= skip_count;
 }
 
 void PerfMapper::default_policy_select_target_processors(MapperContext ctx,
