@@ -379,6 +379,18 @@ function inline_tasks.expr(cx, node)
     end
     stats:insert(stat_var(return_var, nil, node))
     stats:insert(new_block)
+    --- TODO: We add a dummy variable declaration that behaves like a fence.
+    ---       This hack is to prevent RDIR from reordering inlined blocks arbitrarily.
+    ---       Once we fix the issue in RDIR, we will remove this hack.
+    stats:insert(stat_var(
+        regentlib.newsymbol(int, "dummy"),
+        ast.typed.expr.Constant {
+          value = 0,
+          expr_type = int,
+          annotations = node.annotations,
+          span = node.span,
+        },
+        node))
 
     return stats, return_var_expr
 
