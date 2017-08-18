@@ -1874,7 +1874,7 @@ namespace Legion {
                         "A field accessor should be requested instead.")
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic> 
-          get_accessor(bool silience_warnings = false) const;
+          get_accessor(bool silence_warnings = false) const;
       /**
        * Return a field accessor for a specific field within the region.
        * You can silence warnings regarding this blocking call with
