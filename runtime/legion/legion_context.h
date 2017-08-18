@@ -1125,6 +1125,7 @@ namespace Legion {
       virtual void find_parent_version_info(unsigned index, unsigned depth, 
                   const FieldMask &version_mask, VersionInfo &version_info);
       virtual InnerContext* find_parent_physical_context(unsigned index);
+      virtual void invalidate_region_tree_contexts(void);
     public:
       void unpack_local_field_update(Deserializer &derez);
       static void handle_local_field_update(Deserializer &derez);

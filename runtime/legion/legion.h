@@ -2033,7 +2033,7 @@ namespace Legion {
                         "from the Legion namespace should be used now.")
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic> 
-          get_accessor(bool silience_warnings = false) const;
+          get_accessor(bool silence_warnings = false) const;
       /**
        * @deprecated
        * You should be able to create accessors by passing this
