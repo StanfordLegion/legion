@@ -1368,6 +1368,7 @@ namespace Legion {
       tpl->event_map[lhs] = lhs_;
 
       std::set<unsigned> rhs_;
+      rhs_.insert(tpl->fence_completion_id);
       for (std::set<ApEvent>::const_iterator it = rhs.begin(); it != rhs.end();
            it++)
       {
@@ -1375,10 +1376,10 @@ namespace Legion {
         if (finder != tpl->event_map.end())
           rhs_.insert(finder->second);
       }
-      if (rhs_.size() > 0)
-        tpl->instructions.push_back(new MergeEvent(*tpl, lhs_, rhs_));
-      else
-        tpl->instructions.push_back(new CreateNoEvent(*tpl, lhs_));
+#ifdef DEBUG_LEGION
+      assert(rhs_.size() > 0)
+#endif
+      tpl->instructions.push_back(new MergeEvent(*tpl, lhs_, rhs_));
     }
 
     //--------------------------------------------------------------------------
@@ -1430,9 +1431,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTemplate::PhysicalTemplate()
-      : template_lock(Reservation::create_reservation())
+      : template_lock(Reservation::create_reservation()), fence_completion_id(0)
     //--------------------------------------------------------------------------
     {
+      events.push_back(ApEvent());
+      instructions.push_back(
+          new AssignFenceCompletion(*this, fence_completion_id));
     }
 
     //--------------------------------------------------------------------------
@@ -1568,12 +1572,13 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // CreateNoEvent
+    // AssignFenceCompletion
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    CreateNoEvent::CreateNoEvent(PhysicalTemplate& tpl, unsigned l)
-      : Instruction(tpl), lhs(l)
+    AssignFenceCompletion::AssignFenceCompletion(
+                                              PhysicalTemplate& tpl, unsigned l)
+      : Instruction(tpl), fence_completion(tpl.fence_completion), lhs(l)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1582,12 +1587,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::string CreateNoEvent::to_string()
+    std::string AssignFenceCompletion::to_string()
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
-      ss << "events[" << lhs << "] = ApEvent(Realm::Event::NO_EVENT)"
-         << std::endl;
+      ss << "events[" << lhs << "] = fence_completion" << std::endl;
       return ss.str();
     }
     /////////////////////////////////////////////////////////////

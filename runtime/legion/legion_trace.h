@@ -405,6 +405,8 @@ namespace Legion {
 
       Reservation template_lock;
 
+      ApEvent fence_completion;
+      unsigned fence_completion_id;
       std::vector<Operation*> operations;
       std::vector<UniqueID> op_uids;
       std::vector<ApEvent> events;
@@ -458,15 +460,16 @@ namespace Legion {
     };
 
     /**
-     * \class CreateNoEvent
+     * \class AssignFenceCompletion
      * This instruction has the following semantics:
-     *   events[lhs] = ApEvent(Realm::Event::NO_EVENT)
+     *   events[lhs] = fence_completion
      */
-    struct CreateNoEvent : public Instruction {
-      CreateNoEvent(PhysicalTemplate& tpl, unsigned lhs);
+    struct AssignFenceCompletion : public Instruction {
+      AssignFenceCompletion(PhysicalTemplate& tpl, unsigned lhs);
       virtual std::string to_string();
 
     private:
+      ApEvent &fence_completion;
       unsigned lhs;
     };
 
