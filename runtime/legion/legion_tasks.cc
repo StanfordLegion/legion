@@ -2625,15 +2625,13 @@ namespace Legion {
           restrict_info.populate_restrict_fields(restricted_mask);
           if (FieldMask::pop_count(restricted_mask) != 
               int(regions[idx].privilege_fields.size()))
-          {
-            log_run.fatal("Partially restricted region requirement %d with "
+            REPORT_LEGION_FATAL(LEGION_FATAL_RESTRICTED_SIMULTANEOUS,
+                          "Partially restricted region requirement %d with "
                           "simultaneous coherence for task %s (ID %lld) is "
                           "not currently supported by the Legion runtime. "
                           "Please report this use case to the Legion "
                           "developers mailing list.", idx, get_task_name(),
-                          get_unique_id());
-            assert(false);
-          }
+                          get_unique_id())
           input.premapped_regions.push_back(idx);
           // Still fill in the valid regions so that mappers can use
           // the instance names for constraints
