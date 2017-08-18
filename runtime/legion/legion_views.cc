@@ -4287,15 +4287,16 @@ namespace Legion {
         if (it->preconditions.size() == 1)
           copy_pre = *(it->preconditions.begin());
         else if (!it->preconditions.empty())
-          copy_pre = Runtime::merge_events(it->preconditions);
-
-        if (trace_info.tracing)
         {
+          copy_pre = Runtime::merge_events(it->preconditions);
+          if (trace_info.tracing)
+          {
 #ifdef DEBUG_LEGION
-          assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+            assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
 #endif
-          trace_info.trace->record_merge_events(trace_info, copy_pre,
-              it->preconditions);
+            trace_info.trace->record_merge_events(trace_info, copy_pre,
+                it->preconditions);
+          }
         }
 
         // Make a user for when the destination is up to date
@@ -4382,15 +4383,16 @@ namespace Legion {
           if (it->preconditions.size() == 1)
             post = *(it->preconditions.begin());
           else if (!it->preconditions.empty())
-            post = Runtime::merge_events(it->preconditions);
-
-          if (trace_info.tracing)
           {
+            post = Runtime::merge_events(it->preconditions);
+            if (trace_info.tracing)
+            {
 #ifdef DEBUG_LEGION
-            assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+              assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
 #endif
-            trace_info.trace->record_merge_events(trace_info, post,
-                it->preconditions);
+              trace_info.trace->record_merge_events(trace_info, post,
+                  it->preconditions);
+            }
           }
 
           if (post.exists())
@@ -4553,15 +4555,16 @@ namespace Legion {
           if (it->preconditions.size() == 1)
             post = *(it->preconditions.begin());
           else if (!it->preconditions.empty())
-            post = Runtime::merge_events(it->preconditions);
-
-          if (trace_info.tracing)
           {
+            post = Runtime::merge_events(it->preconditions);
+            if (trace_info.tracing)
+            {
 #ifdef DEBUG_LEGION
-            assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+              assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
 #endif
-            trace_info.trace->record_merge_events(trace_info, post,
-                it->preconditions);
+              trace_info.trace->record_merge_events(trace_info, post,
+                  it->preconditions);
+            }
           }
 
           if (post.exists())
@@ -5595,15 +5598,16 @@ namespace Legion {
         if (it->preconditions.size() == 1)
           done_event = *(it->preconditions.begin());
         else
-          done_event = Runtime::merge_events(it->preconditions);
-
-        if (trace_info.tracing)
         {
+          done_event = Runtime::merge_events(it->preconditions);
+          if (trace_info.tracing)
+          {
 #ifdef DEBUG_LEGION
-          assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+            assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
 #endif
-          trace_info.trace->record_merge_events(trace_info, done_event,
-              it->preconditions);
+            trace_info.trace->record_merge_events(trace_info, done_event,
+                it->preconditions);
+          }
         }
 
         dst->add_copy_user(0/*redop*/, done_event, &info.version_info,

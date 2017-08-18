@@ -1345,6 +1345,7 @@ namespace Legion {
                                             const std::set<ApEvent>& rhs)
     //--------------------------------------------------------------------------
     {
+#ifndef LEGION_SPY
       if (!lhs.exists() || (rhs.find(lhs) != rhs.end()))
       {
         Realm::UserEvent rename(Realm::UserEvent::create_user_event());
@@ -1354,6 +1355,7 @@ namespace Legion {
           rename.trigger();
         lhs = ApEvent(rename);
       }
+#endif
 
       PhysicalTemplate *tpl = get_template(trace_info);
       AutoLock tpl_lock(tpl->template_lock);
