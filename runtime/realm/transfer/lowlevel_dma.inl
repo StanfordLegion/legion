@@ -63,6 +63,8 @@ namespace Realm {
 	src_inst(get_runtime()->get_instance_impl(_src_inst)), 
 	dst_inst(get_runtime()->get_instance_impl(_dst_inst)), oas_vec(_oas_vec)
     {
+      assert(0); // DEAD CODE
+#if 0
       assert(src_inst->metadata.is_valid());
       assert(dst_inst->metadata.is_valid());
 
@@ -84,6 +86,7 @@ namespace Realm {
 			      (dst_start[idx] != oas_vec[idx].dst_offset) ||
 			      (dst_size[idx] != oas_vec[idx].size));
       }
+#endif
     }
 
     template <typename T>
@@ -97,6 +100,8 @@ namespace Realm {
     void SpanBasedInstPairCopier<T>::copy_field(off_t src_index, off_t dst_index,
 						off_t elem_count, unsigned offset_index)
     {
+      assert(0); // DEAD CODE
+#if 0
       off_t src_offset = oas_vec[offset_index].src_offset;
       off_t dst_offset = oas_vec[offset_index].dst_offset;
       int bytes = oas_vec[offset_index].size;
@@ -160,11 +165,14 @@ namespace Realm {
 	  span_copier->copy_span(src_start, dst_start, bytes);
 	}
       }
+#endif
     }
 
     template <typename T>
     void SpanBasedInstPairCopier<T>::copy_all_fields(off_t src_index, off_t dst_index, off_t elem_count)
     {
+      assert(0); // DEAD CODE
+#if 0
       // first check - if the span we're copying straddles a block boundary
       //  go back to old way - block size of 1 is ok only if both are
       assert(src_inst->metadata.is_valid());
@@ -277,12 +285,15 @@ namespace Realm {
 	// continue with the first field we couldn't take for this pass
 	field_idx = field_idx2;
       }
+#endif
     }
 
     template <typename T>
     void SpanBasedInstPairCopier<T>::copy_all_fields(off_t src_index, off_t dst_index, off_t count_per_line,
 						     off_t src_stride, off_t dst_stride, off_t lines)
     {
+      assert(0); // DEAD CODE
+#if 0
       // first check - if the span we're copying straddles a block boundary
       //  go back to old way - block size of 1 is ok only if both are
       assert(src_inst->metadata.is_valid());
@@ -407,6 +418,7 @@ namespace Realm {
 	// continue with the first field we couldn't take for this pass
 	field_idx = field_idx2;
       }
+#endif
     }
 
     template <typename T>

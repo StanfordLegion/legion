@@ -5666,6 +5666,19 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INVALIDATE_REGION_TREE_CONTEXTS_CALL);
+      // Send messages to invalidate any remote contexts
+      if (!remote_instances.empty())
+      {
+        UniqueID local_uid = get_unique_id();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(local_uid);
+        }
+        for (std::map<AddressSpaceID,RemoteContext*>::const_iterator it = 
+              remote_instances.begin(); it != remote_instances.end(); it++)
+          runtime->send_remote_context_release(it->first, rez);
+      }
       // Invalidate all our region contexts
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
@@ -10385,6 +10398,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RemoteContext::invalidate_region_tree_contexts(void)
+    //--------------------------------------------------------------------------
+    {
+      if (!top_level_context)
+      {
+#ifdef DEBUG_LEGION
+        assert(regions.size() == virtual_mapped.size());
+#endif
+        // Deactivate any region trees that we didn't virtually map
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+          if (!virtual_mapped[idx])
+            runtime->forest->invalidate_versions(tree_context, 
+                                                 regions[idx].region);
+      }
+      else
+        runtime->forest->invalidate_all_versions(tree_context);
+    }
+
+    //--------------------------------------------------------------------------
     ShardingFunction* RemoteContext::find_sharding_function(ShardingID sid)
     //--------------------------------------------------------------------------
     {
@@ -10424,7 +10456,7 @@ namespace Legion {
       // TODO: what happens if we get this and don't have a shard manager
       assert(false);
       return NULL;
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void RemoteContext::unpack_remote_context(Deserializer &derez,

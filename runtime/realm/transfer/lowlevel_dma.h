@@ -101,7 +101,8 @@ namespace Realm {
 
     struct RemoteFillArgs : public BaseMedium {
       RegionInstance inst;
-      unsigned offset, size;
+      FieldID field_id;
+      unsigned size;
       Event before_fill, after_fill;
       //int priority;
     };
@@ -235,7 +236,8 @@ namespace Realm {
     void free_intermediate_buffer(DmaRequest* req, Memory mem, off_t offset, size_t size);
 
     struct OffsetsAndSize {
-      off_t src_offset, dst_offset;
+      FieldID src_field_id, dst_field_id;
+      off_t src_subfield_offset, dst_subfield_offset;
       int size;
       CustomSerdezID serdez_id;
     };
@@ -409,7 +411,7 @@ namespace Realm {
     public:
       FillRequest(const void *data, size_t msglen,
                   RegionInstance inst,
-                  unsigned offset, unsigned size,
+                  FieldID field_id, unsigned size,
                   Event _before_fill, 
                   Event _after_fill,
                   int priority);

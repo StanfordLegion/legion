@@ -349,8 +349,8 @@ function inline_tasks.expr(cx, node)
               local new_sym = std.newsymbol(new_ty)
               new_symbols:insert(new_sym)
               new_types:insert(new_ty)
+              expr_mapping[sym] = new_sym
               if std.is_region(new_ty) then
-                expr_mapping[sym] = new_sym
                 type_mapping[sym] = new_sym
               end
             else
@@ -379,6 +379,18 @@ function inline_tasks.expr(cx, node)
     end
     stats:insert(stat_var(return_var, nil, node))
     stats:insert(new_block)
+    --- TODO: We add a dummy variable declaration that behaves like a fence.
+    ---       This hack is to prevent RDIR from reordering inlined blocks arbitrarily.
+    ---       Once we fix the issue in RDIR, we will remove this hack.
+    stats:insert(stat_var(
+        regentlib.newsymbol(int, "dummy"),
+        ast.typed.expr.Constant {
+          value = 0,
+          expr_type = int,
+          annotations = node.annotations,
+          span = node.span,
+        },
+        node))
 
     return stats, return_var_expr
 

@@ -2375,21 +2375,9 @@ namespace Legion {
         delete execution_context;
       if (shard_manager != NULL)
         delete shard_manager;
-      if (!remote_instances.empty())
-      {
-        UniqueID local_uid = get_unique_id();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(local_uid);
-        }
-        for (std::map<AddressSpaceID,RemoteTask*>::const_iterator it = 
-              remote_instances.begin(); it != remote_instances.end(); it++)
-        {
-          runtime->send_remote_context_free(it->first, rez);
-        }
-        remote_instances.clear();
-      }
+#ifdef DEBUG_LEGION
+      premapped_instances.clear();
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -2724,6 +2712,16 @@ namespace Legion {
           prepare_for_mapping(current_valid, visible_memories,
                               input.valid_instances[idx]);
       }
+#ifdef DEBUG_LEGION
+      // Save the inputs for premapped regions so we can check them later
+      if (!input.premapped_regions.empty())
+      {
+        for (std::vector<unsigned>::const_iterator it = 
+              input.premapped_regions.begin(); it !=
+              input.premapped_regions.end(); it++)
+          premapped_instances[*it] = output.chosen_instances[*it];
+      }
+#endif
       // Prepare the output too
       output.chosen_variant = 0;
       output.postmap_task = false;
@@ -2885,6 +2883,32 @@ namespace Legion {
       // Now that we know which variant to use, we can validate it
       if (!Runtime::unsafe_mapper)
         validate_variant_selection(mapper, variant_impl, "map_task");
+#ifdef DEBUG_LEGION
+      // Check to see if any premapped region mappings changed
+      if (!premapped_instances.empty())
+      {
+        for (std::map<unsigned,std::vector<Mapping::PhysicalInstance> >::
+              const_iterator it = premapped_instances.begin(); it !=
+              premapped_instances.end(); it++)
+        {
+          if (it->second.size() != output.chosen_instances[it->first].size())
+            REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of '%s' on "
+                        "mapper %s. Mapper modified the premapped output "
+                        "for region requirement %d of task %s (ID %lld).",
+                        "map_task", mapper->get_mapper_name(), it->first,
+                        get_task_name(), get_unique_id())
+          for (unsigned idx = 0; idx < it->second.size(); idx++)
+            if (it->second[idx] != output.chosen_instances[it->first][idx])
+              REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of '%s' on "
+                        "mapper %s. Mapper modified the premapped output "
+                        "for region requirement %d of task %s (ID %lld).",
+                        "map_task", mapper->get_mapper_name(), it->first,
+                        get_task_name(), get_unique_id())
+        }
+      }
+#endif
       // fill in virtual_mapped
       virtual_mapped.resize(regions.size(),false);
       // Convert all the outputs into our set of physical instances and

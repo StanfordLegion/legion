@@ -231,6 +231,44 @@ namespace Realm {
 	}
 	return;
       }
+
+      // maintain sorted order, even at the cost of copying stuff (for lists
+      //  that will get big and aren't sorted well (e.g. images), the HybridRectangleList
+      //  is a better choice)
+      // use a binary search to skip over all rectangles that are strictly
+      //  below the new rectangle (i.e. all r s.t. r.hi.x + 1 < _r.lo.x)
+      int lo = 0;
+      int hi = rects.size();
+      while(lo < hi) {
+	int mid = (lo + hi) >> 1;
+	if(rects[mid].hi.x + 1 < _r.lo.x)
+	  lo = mid + 1;
+	else
+	  hi = mid;
+      }
+      // because of the early out tests above, 'lo' should always point at a
+      //  valid index
+      assert(lo < (int)rects.size());
+      ZRect<N,T> &mr = rects[lo];
+
+      // if the new rect fits entirely below the existing one, insert the new
+      //  one here and we're done
+      if(_r.hi.x + 1 < mr.lo.x) {
+	rects.insert(rects.begin()+lo, _r);
+	return;
+      }
+
+      // last case: merge _r with mr and possibly rects above it
+      assert(can_merge(_r, mr));
+      mr = mr.union_bbox(_r);
+      int dlo = lo + 1;
+      int dhi = dlo;
+      while((dhi < (int)rects.size()) &&
+	    ((mr.hi.x + 1) >= rects[dhi].lo.x))
+	dhi++;
+      if(dhi > dlo)
+	rects.erase(rects.begin()+dlo, rects.begin()+dhi);
+      return;
     }
 
     //std::cout << "slow path!\n";

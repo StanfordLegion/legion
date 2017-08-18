@@ -1702,7 +1702,7 @@ namespace Legion {
                       "is invalid.", mapper->get_mapper_name(), 
                       (c1 == NULL) ? set1 : set2, 
                       get_mapper_call_name(ctx->kind))
-      bool result = c1->conflicts(c2);
+      bool result = c1->conflicts(c2, 0/*dont care about dimensions*/);
       resume_mapper_call(ctx);
       return result;
     }
@@ -1724,7 +1724,7 @@ namespace Legion {
                       "ID is invalid.", mapper->get_mapper_name(), 
                       (c1 == NULL) ? source : target, 
                       get_mapper_call_name(ctx->kind))
-      bool result = c1->entails(c2);
+      bool result = c1->entails(c2, 0/*don't care about dimensions*/);
       resume_mapper_call(ctx);
       return result;
     }

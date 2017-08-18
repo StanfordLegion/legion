@@ -1816,9 +1816,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalInstance PhysicalRegionImpl::get_instance_info(
                                     PrivilegeMode mode, FieldID fid, 
-#ifndef REALM_USE_FIELD_IDS
-                                    ptrdiff_t &field_offset, 
-#endif
                                     void *realm_is, TypeTag type_tag, 
                                     bool silence_warnings, ReductionOpID redop)
     //--------------------------------------------------------------------------
@@ -1947,9 +1944,6 @@ namespace Legion {
         if (ref.is_field_set(fid))
         {
           PhysicalManager *manager = ref.get_manager();
-#ifndef REALM_USE_FIELD_IDS
-          field_offset = manager->layout->find_field_info(fid).offset;
-#endif
           return manager->get_instance();
         }
       }
@@ -6459,6 +6453,11 @@ namespace Legion {
               runtime->handle_remote_context_response(derez);
               break;
             }
+          case SEND_REMOTE_CONTEXT_RELEASE:
+            {
+              runtime->handle_remote_context_release(derez);
+              break;
+            }
           case SEND_REMOTE_CONTEXT_FREE:
             {
               runtime->handle_remote_context_free(derez);
@@ -8391,7 +8390,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool LayoutConstraints::entails(LayoutConstraints *constraints)
+    bool LayoutConstraints::entails(LayoutConstraints *constraints,
+                                    unsigned total_dims)
     //--------------------------------------------------------------------------
     {
       // Check to see if the result is in the cache
@@ -8403,7 +8403,7 @@ namespace Legion {
           return finder->second;
       }
       // Didn't find it, so do the test for real
-      bool result = entails(*constraints);
+      bool result = entails(*constraints, total_dims);
       // Save the result in the cache
       AutoLock lay(layout_lock);
       entailment_cache[constraints->layout_id] = result;
@@ -8411,14 +8411,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool LayoutConstraints::entails(const LayoutConstraintSet &other) const
+    bool LayoutConstraints::entails(const LayoutConstraintSet &other,
+                                    unsigned total_dims) const
     //--------------------------------------------------------------------------
     {
-      return LayoutConstraintSet::entails(other);
+      return LayoutConstraintSet::entails(other, total_dims);
     }
 
     //--------------------------------------------------------------------------
-    bool LayoutConstraints::conflicts(LayoutConstraints *constraints)
+    bool LayoutConstraints::conflicts(LayoutConstraints *constraints,
+                                      unsigned total_dims)
     //--------------------------------------------------------------------------
     {
       // Check to see if the result is in the cache
@@ -8430,7 +8432,7 @@ namespace Legion {
           return finder->second;
       }
       // Didn't find it, so do the test for real
-      bool result = conflicts(*constraints);
+      bool result = conflicts(*constraints, total_dims);
       // Save the result in the cache
       AutoLock lay(layout_lock);
       conflict_cache[constraints->layout_id] = result;
@@ -8438,15 +8440,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool LayoutConstraints::conflicts(const LayoutConstraintSet &other) const
+    bool LayoutConstraints::conflicts(const LayoutConstraintSet &other,
+                                      unsigned total_dims) const
     //--------------------------------------------------------------------------
     {
-      return LayoutConstraintSet::conflicts(other);
+      return LayoutConstraintSet::conflicts(other, total_dims);
     }
 
     //--------------------------------------------------------------------------
     bool LayoutConstraints::entails_without_pointer(
-                                                 LayoutConstraints *constraints)
+                            LayoutConstraints *constraints, unsigned total_dims)
     //--------------------------------------------------------------------------
     {
       // See if we have it in the cache
@@ -8458,7 +8461,7 @@ namespace Legion {
           return finder->second;
       }
       // Didn't find it so do the test for real
-      bool result = entails_without_pointer(*constraints);
+      bool result = entails_without_pointer(*constraints, total_dims);
       // Save the result in the cache
       AutoLock lay(layout_lock);
       no_pointer_entailment_cache[constraints->layout_id] = result;
@@ -8467,7 +8470,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool LayoutConstraints::entails_without_pointer(
-                                         const LayoutConstraintSet &other) const
+                    const LayoutConstraintSet &other, unsigned total_dims) const
     //--------------------------------------------------------------------------
     {
       // Do all the normal entailment but don't check the pointer constraint 
@@ -8477,7 +8480,7 @@ namespace Legion {
         return false;
       if (!memory_constraint.entails(other.memory_constraint))
         return false;
-      if (!ordering_constraint.entails(other.ordering_constraint))
+      if (!ordering_constraint.entails(other.ordering_constraint, total_dims))
         return false;
       for (std::vector<SplittingConstraint>::const_iterator it = 
             other.splitting_constraints.begin(); it !=
@@ -14222,6 +14225,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_remote_context_release(AddressSpaceID target,
+                                              Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_REMOTE_CONTEXT_RELEASE,
+                                     CONTEXT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+    
+    //--------------------------------------------------------------------------
     void Runtime::send_remote_context_free(AddressSpaceID target, 
                                            Serializer &rez)
     //--------------------------------------------------------------------------
@@ -15435,6 +15447,17 @@ namespace Legion {
       register_remote_context(context_uid, context, preconditions);
     }
 
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_context_release(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      UniqueID context_uid;
+      derez.deserialize(context_uid);
+      InnerContext *context = find_context(context_uid);
+      context->invalidate_region_tree_contexts();
+    }
+    
     //--------------------------------------------------------------------------
     void Runtime::handle_remote_context_free(Deserializer &derez)
     //--------------------------------------------------------------------------
@@ -18260,8 +18283,6 @@ namespace Legion {
         context = finder->second;
         remote_contexts.erase(finder);
       }
-      // Invalidate the region tree context
-      context->invalidate_region_tree_contexts();
       // Remove our reference and delete it if we're done with it
       if (context->remove_reference())
         delete context;
@@ -20917,8 +20938,9 @@ namespace Legion {
         case LG_TOP_FINISH_TASK_ID:
           {
             TopFinishArgs *fargs = (TopFinishArgs*)args; 
-            fargs->ctx->invalidate_remote_contexts();
+            // Do this before deleting remote contexts
             fargs->ctx->invalidate_region_tree_contexts();
+            fargs->ctx->invalidate_remote_contexts();
             if (fargs->ctx->remove_reference())
               delete fargs->ctx;
             break;

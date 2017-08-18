@@ -49,6 +49,7 @@ namespace Legion {
     public:
       bool operator<(const PhysicalInstance &rhs) const;
       bool operator==(const PhysicalInstance &rhs) const;
+      bool operator!=(const PhysicalInstance &rhs) const;
     public:
       // Get the location of this physical instance
       Memory get_location(void) const;

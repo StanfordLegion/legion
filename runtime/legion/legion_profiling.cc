@@ -541,9 +541,17 @@ namespace Legion {
           REPORT_LEGION_ERROR(ERROR_UNKNOWN_PROFILER_OPTION,
               "ERROR: Please specify -lg:prof_logfile "
               "<logfile_name> when running with -lg:serializer binary")
+        std::string filename(prof_logfile);
+        size_t pct = filename.find_first_of('%', 0);
+        if (pct == std::string::npos)
+          REPORT_LEGION_ERROR(ERROR_MISSING_PROFILER_OPTION,
+              "ERROR: The logfile name must contain '%%' "
+              "which will be replaced with the node id\n")
+        // replace % with node number
         Processor current = Processor::get_executing_processor();
         std::stringstream ss;
-        ss << prof_logfile << current.address_space();
+        ss << filename.substr(0, pct) << current.address_space() <<
+              filename.substr(pct + 1);
         serializer = new LegionProfBinarySerializer(ss.str());
       } else if (!strcmp(serializer_type, "ascii")) {
         if (prof_logfile != NULL)

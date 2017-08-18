@@ -1473,6 +1473,7 @@ namespace Legion {
       virtual InnerContext* find_parent_physical_context(unsigned index);
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source);
+      virtual void invalidate_region_tree_contexts(void);
     public:
       virtual ShardingFunction* find_sharding_function(ShardingID sid);
       virtual ShardManager* find_shard_manager(void) const;

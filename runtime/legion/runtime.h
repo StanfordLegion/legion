@@ -85,6 +85,11 @@ namespace Legion {
           LogicalRegion region, FieldID color_field, FieldID range_field);
       ColorRects(const MultiDomainPointColoring &coloring,
           LogicalRegion region, FieldID color_field, FieldID range_field);
+    public:
+      ColorRects(const Coloring &coloring, LogicalRegion region,
+                 FieldID color_field, FieldID range_field);
+      ColorRects(const PointColoring &coloring, LogicalRegion region,
+                 FieldID color_field, FieldID range_field);
     protected:
       Serializer rez;
     public:
@@ -425,16 +430,10 @@ namespace Legion {
 #endif
     public:
       void get_bounds(void *realm_is, TypeTag type_tag);
-#ifdef REALM_USE_FIELD_IDS
       PhysicalInstance get_instance_info(PrivilegeMode mode, FieldID fid, 
                                          void *realm_is, TypeTag type_tag,
                                          bool silence_warnings, 
                                          ReductionOpID redop);
-#else
-      PhysicalInstance get_instance_info(PrivilegeMode mode, FieldID fid, 
-                     ptrdiff_t &offset, void *realm_is, TypeTag type_tag,
-                     bool silence_warnings, ReductionOpID redop);
-#endif
       void fail_bounds_check(DomainPoint p, FieldID fid,
                              PrivilegeMode mode);
     public:
@@ -1371,12 +1370,15 @@ namespace Legion {
       void update_constraints(Deserializer &derez);
       void release_remote_instances(void);
     public:
-      bool entails(LayoutConstraints *other_constraints);
-      bool entails(const LayoutConstraintSet &other) const;
-      bool conflicts(LayoutConstraints *other_constraints);
-      bool conflicts(const LayoutConstraintSet &other) const;
-      bool entails_without_pointer(LayoutConstraints *other);
-      bool entails_without_pointer(const LayoutConstraintSet &other) const;
+      bool entails(LayoutConstraints *other_constraints, unsigned total_dims);
+      bool entails(const LayoutConstraintSet &other, unsigned total_dims) const;
+      bool conflicts(LayoutConstraints *other_constraints, unsigned total_dims);
+      bool conflicts(const LayoutConstraintSet &other, 
+                     unsigned total_dims) const;
+      bool entails_without_pointer(LayoutConstraints *other,
+                                   unsigned total_dims);
+      bool entails_without_pointer(const LayoutConstraintSet &other,
+                                   unsigned total_dims) const;
     public:
       static AddressSpaceID get_owner_space(LayoutConstraintID layout_id,
                                             Runtime *runtime);
@@ -2259,6 +2261,7 @@ namespace Legion {
                                                 Serializer &rez);
       void send_remote_context_request(AddressSpaceID target, Serializer &rez);
       void send_remote_context_response(AddressSpaceID target, Serializer &rez);
+      void send_remote_context_release(AddressSpaceID target, Serializer &rez);
       void send_remote_context_free(AddressSpaceID target, Serializer &rez);
       void send_remote_context_physical_request(AddressSpaceID target, 
                                                 Serializer &rez);
@@ -2457,6 +2460,7 @@ namespace Legion {
       void handle_remote_context_request(Deserializer &derez,
                                          AddressSpaceID source);
       void handle_remote_context_response(Deserializer &derez);
+      void handle_remote_context_release(Deserializer &derez);
       void handle_remote_context_free(Deserializer &derez);
       void handle_remote_context_physical_request(Deserializer &derez,
                                                   AddressSpaceID source);

@@ -27,8 +27,6 @@
 
 namespace Realm {
 
-  typedef int FieldID;
-
   class InstanceLayoutConstraints {
   public:
     InstanceLayoutConstraints(void) { }
@@ -211,10 +209,13 @@ namespace Realm {
     //  allowed - call is_compatible(...) first if you're not sure
 
     // implicitly tries to cover the entire instance's domain
-    AffineAccessor(RegionInstance inst, ptrdiff_t field_offset);
+    AffineAccessor(RegionInstance inst,
+		   FieldID field_id, size_t subfield_offset = 0);
 
     // limits domain to a subrectangle
-    AffineAccessor(RegionInstance inst, ptrdiff_t field_offset, const ZRect<N,T>& subrect);
+    AffineAccessor(RegionInstance inst,
+		   FieldID field_id, const ZRect<N,T>& subrect,
+		   size_t subfield_offset = 0);
 
     __CUDA_HD__
     ~AffineAccessor(void);

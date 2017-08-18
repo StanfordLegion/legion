@@ -253,16 +253,17 @@ to avoid any undesired performance issues.
 
 To profile an application, run with `-lg:prof <N>` where `N` is the
 number of nodes to be profiled. (`N` can be less than the total number
-of nodes---this profiles a subset of the nodes.) Use the 
+of nodes---this profiles a subset of the nodes.) Use the
 `-lg:prof_logfile <logfile>` flag to save the output from each node to
-a separate file. For example, data from node 0 will be saved in
-`<logfile>0.gz`, data from node 1 in `<logfile>1.gz`, etc. Finally, pass
-the resulting log files to `legion_prof.py`.
+a separate file. The argument to the `-lg:prof_logfile` flag follows
+the same format as for `-logfile`, except that a `%` (to be replaced
+by the node number) is mandatory. Finally, pass the resulting log
+files to `legion_prof.py`.
 
 ```bash
 DEBUG=0 make
-./app -lg:prof kN> -lg:prof_logfile prof_log
-$LG_RT_DIR/../tools/legion_prof.py prof_log*
+./app -lg:prof <N> -lg:prof_logfile prof_%.gz
+$LG_RT_DIR/../tools/legion_prof.py prof_*.gz
 ```
 
 This will generate a subdirectory called `legion_prof` under the

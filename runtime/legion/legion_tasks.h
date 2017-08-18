@@ -506,6 +506,12 @@ namespace Legion {
       std::vector<ProfilingMeasurementID> copy_profiling_requests;
       int                          outstanding_profiling_requests;
       RtUserEvent                              profiling_reported;
+#ifdef DEBUG_LEGION
+    protected:
+      // For checking that premapped instances didn't change during mapping
+      std::map<unsigned/*index*/,
+               std::vector<Mapping::PhysicalInstance> > premapped_instances;
+#endif
     };
 
     /**

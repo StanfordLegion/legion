@@ -22,7 +22,7 @@
 #ifdef USE_ZLIB
 #include "zlib.h"
 // lp_fopen expects filename to be a std::string
-#define lp_fopen(filename, mode)      gzopen((filename + ".gz").c_str(),mode)
+#define lp_fopen(filename, mode)      gzopen(filename.c_str(),mode)
 #define lp_fwrite(f, data, num_bytes) gzwrite(f,data,num_bytes)
 #define lp_fflush(f, mode)            gzflush(f,mode)
 #define lp_fclose(f)                  gzclose(f)

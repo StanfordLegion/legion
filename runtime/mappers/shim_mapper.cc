@@ -563,6 +563,8 @@ namespace Legion {
       current_ctx = ctx;
       // Call select variant first to get it over with
       select_task_variant(&local_task);
+      const std::set<unsigned> premapped_set(input.premapped_regions.begin(),
+                                             input.premapped_regions.end());
       // Do this in a while-true loop until we succeed in mapping
       while (true)
       {
@@ -572,6 +574,10 @@ namespace Legion {
         // Now find or make the physical instances asked for each region
         for (unsigned idx = 0; idx < local_task.regions.size(); idx++)
         {
+          // Check to see if this is a premapped region in which case 
+          // we can skip the conversion cause it doesn't matter
+          if (premapped_set.find(idx) != premapped_set.end())
+            continue;
           if (!convert_requirement_mapping(ctx, local_task.regions[idx],
                                            output.chosen_instances[idx]))
           {
