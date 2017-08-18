@@ -1001,7 +1001,8 @@ namespace Legion {
                           const RegionUsage &usage, ApEvent term_event,
                           const FieldMask &user_mask, Operation *op,
                           const unsigned index, VersionTracker *versions,
-                          std::set<RtEvent> &applied_events, bool tracing)
+                          std::set<RtEvent> &applied_events,
+                          PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
       std::set<ApEvent> wait_on_events;
@@ -1015,16 +1016,26 @@ namespace Legion {
       // Find our local preconditions
       find_local_user_preconditions(usage, term_event, ColorPoint(), 
           origin_node, versions, op_id, index, user_mask, 
-          wait_on_events, applied_events, tracing);
+          wait_on_events, applied_events, trace_info.tracing);
       // Go up the tree if we have to
       if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
       {
         const ColorPoint &local_color = logical_node->get_color();
         parent->find_user_preconditions_above(usage, term_event, local_color, 
                               origin_node, versions, op_id, index, user_mask, 
-                              wait_on_events, applied_events, tracing);
+                              wait_on_events, applied_events,
+                              trace_info.tracing);
       }
-      return Runtime::merge_events(wait_on_events); 
+      ApEvent result = Runtime::merge_events(wait_on_events);
+      if (trace_info.tracing)
+      {
+#ifdef DEBUG_LEGION
+        assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+#endif
+        trace_info.trace->record_merge_events(trace_info, result,
+            wait_on_events);
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -1407,7 +1418,7 @@ namespace Legion {
                                              VersionTracker *versions,
                                              const AddressSpaceID source,
                                              std::set<RtEvent> &applied_events,
-                                             bool tracing,
+                                             PhysicalTraceInfo &trace_info,
                                              bool update_versions/*=true*/)
     //--------------------------------------------------------------------------
     {
@@ -1422,7 +1433,7 @@ namespace Legion {
       // Find our local preconditions
       find_local_user_preconditions(usage, term_event, ColorPoint(), 
                      origin_node, versions, op_id, index, user_mask, 
-                     wait_on_events, applied_events, tracing);
+                     wait_on_events, applied_events, trace_info.tracing);
       bool need_version_update = false;
       if (IS_WRITE(usage) && update_versions)
       {
@@ -1440,13 +1451,13 @@ namespace Legion {
                               origin_node, versions, op_id, index, 
                               user_mask, source, wait_on_events, 
                               applied_events, need_version_update,
-                              tracing);
+                              trace_info.tracing);
       }
       // Add our local user
       const bool issue_collect = add_local_user(usage, term_event, 
                          ColorPoint(), origin_node, true/*base*/, versions,
                          op_id, index, user_mask, source, applied_events,
-                         tracing);
+                         trace_info.tracing);
       // Launch the garbage collection task, if it doesn't exist
       // then the user wasn't registered anyway, see add_local_user
       if (issue_collect)
@@ -1461,8 +1472,18 @@ namespace Legion {
 #endif
       if (IS_ATOMIC(usage))
         find_atomic_reservations(user_mask, op, IS_WRITE(usage));
+
+      ApEvent result = Runtime::merge_events(wait_on_events);
+      if (trace_info.tracing)
+      {
+#ifdef DEBUG_LEGION
+        assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+#endif
+        trace_info.trace->record_merge_events(trace_info, result,
+            wait_on_events);
+      }
       // Return the merge of the events
-      return Runtime::merge_events(wait_on_events);
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -4267,6 +4288,16 @@ namespace Legion {
           copy_pre = *(it->preconditions.begin());
         else if (!it->preconditions.empty())
           copy_pre = Runtime::merge_events(it->preconditions);
+
+        if (trace_info.tracing)
+        {
+#ifdef DEBUG_LEGION
+          assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+#endif
+          trace_info.trace->record_merge_events(trace_info, copy_pre,
+              it->preconditions);
+        }
+
         // Make a user for when the destination is up to date
         if (copy_pre.exists())
           temporary_dst->add_copy_user(0/*redop*/, copy_pre, 
@@ -4352,6 +4383,16 @@ namespace Legion {
             post = *(it->preconditions.begin());
           else if (!it->preconditions.empty())
             post = Runtime::merge_events(it->preconditions);
+
+          if (trace_info.tracing)
+          {
+#ifdef DEBUG_LEGION
+            assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+#endif
+            trace_info.trace->record_merge_events(trace_info, post,
+                it->preconditions);
+          }
+
           if (post.exists())
           {
             // post is not guaranteed to be unique!
@@ -4513,6 +4554,16 @@ namespace Legion {
             post = *(it->preconditions.begin());
           else if (!it->preconditions.empty())
             post = Runtime::merge_events(it->preconditions);
+
+          if (trace_info.tracing)
+          {
+#ifdef DEBUG_LEGION
+            assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+#endif
+            trace_info.trace->record_merge_events(trace_info, post,
+                it->preconditions);
+          }
+
           if (post.exists())
           {
             // post is not guaranteed to be unique!
@@ -5545,6 +5596,16 @@ namespace Legion {
           done_event = *(it->preconditions.begin());
         else
           done_event = Runtime::merge_events(it->preconditions);
+
+        if (trace_info.tracing)
+        {
+#ifdef DEBUG_LEGION
+          assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+#endif
+          trace_info.trace->record_merge_events(trace_info, done_event,
+              it->preconditions);
+        }
+
         dst->add_copy_user(0/*redop*/, done_event, &info.version_info,
                            info.op->get_unique_op_id(), info.index,
                            it->set_mask, false/*reading*/, restrict_out,
@@ -7769,6 +7830,14 @@ namespace Legion {
         preconditions.insert(it->first);
       }
       ApEvent reduce_pre = Runtime::merge_events(preconditions); 
+      if (trace_info.tracing)
+      {
+#ifdef DEBUG_LEGION
+        assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+#endif
+        trace_info.trace->record_merge_events(trace_info, reduce_pre,
+            preconditions);
+      }
       ApEvent reduce_post = manager->issue_reduction(op, 
                                              src_fields, dst_fields,
                                              intersect, reduce_pre,
@@ -8008,7 +8077,7 @@ namespace Legion {
                                                   const unsigned index,
                                                   VersionTracker *versions,
                                               std::set<RtEvent> &applied_events,
-                                                  bool tracing)
+                                                  PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, 
@@ -8033,7 +8102,16 @@ namespace Legion {
         else
           find_reading_preconditions(user_mask, term_event, wait_on);
       }
-      return Runtime::merge_events(wait_on);
+      ApEvent result = Runtime::merge_events(wait_on);
+      if (trace_info.tracing)
+      {
+#ifdef DEBUG_LEGION
+        assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+#endif
+        trace_info.trace->record_merge_events(trace_info, result,
+            wait_on);
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -8114,7 +8192,7 @@ namespace Legion {
                                           VersionTracker *versions,
                                           const AddressSpaceID source,
                                           std::set<RtEvent> &applied_events,
-                                          bool tracing,
+                                          PhysicalTraceInfo &trace_info,
                                           bool update_versions/*=true*/)
     //--------------------------------------------------------------------------
     {
@@ -8169,7 +8247,7 @@ namespace Legion {
         if (term_event.exists())
         {
           add_physical_user(new_user, reading, term_event, user_mask);
-          if (tracing)
+          if (trace_info.tracing)
           {
             traced_outstanding_gc_events.insert(term_event);
           }
@@ -8190,8 +8268,17 @@ namespace Legion {
         WrapperReferenceMutator mutator(applied_events);
         defer_collect_user(term_event, &mutator);
       }
+      ApEvent result = Runtime::merge_events(wait_on);
+      if (trace_info.tracing)
+      {
+#ifdef DEBUG_LEGION
+        assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+#endif
+        trace_info.trace->record_merge_events(trace_info, result,
+            wait_on);
+      }
       // Return our result
-      return Runtime::merge_events(wait_on);
+      return result;
     }
 
     //--------------------------------------------------------------------------

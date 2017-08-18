@@ -151,7 +151,7 @@ namespace Legion {
                                            Operation *op, const unsigned index,
                                            VersionTracker *version_tracker,
                                            std::set<RtEvent> &applied_events,
-                                           bool tracing) = 0;
+                                           PhysicalTraceInfo &trace_info) = 0;
       virtual void add_user(const RegionUsage &user, ApEvent term_event,
                             const FieldMask &user_mask, Operation *op,
                             const unsigned index, AddressSpaceID source,
@@ -166,7 +166,7 @@ namespace Legion {
                                    VersionTracker *version_tracker,
                                    const AddressSpaceID source,
                                    std::set<RtEvent> &applied_events,
-                                   bool tracing,
+                                   PhysicalTraceInfo &trace_info,
                                    bool update_versions = true) = 0;
       virtual void add_initial_user(ApEvent term_event,
                                     const RegionUsage &usage,
@@ -409,7 +409,7 @@ namespace Legion {
                                            Operation *op, const unsigned index,
                                            VersionTracker *version_tracker,
                                            std::set<RtEvent> &applied_events,
-                                           bool tracing);
+                                           PhysicalTraceInfo &trace_info);
     protected:
       void find_user_preconditions_above(const RegionUsage &usage,
                                          ApEvent term_event,
@@ -481,7 +481,7 @@ namespace Legion {
                                    VersionTracker *version_tracker,
                                    const AddressSpaceID source,
                                    std::set<RtEvent> &applied_events,
-                                   bool tracing,
+                                   PhysicalTraceInfo &trace_info,
                                    bool update_versions = true);
     protected:
       void add_user_above_fused(const RegionUsage &usage, ApEvent term_event,
@@ -845,7 +845,7 @@ namespace Legion {
                                            Operation *op, const unsigned index,
                                            VersionTracker *version_tracker,
                                            std::set<RtEvent> &applied_events,
-                                           bool tracing);
+                                           PhysicalTraceInfo &trace_info);
       virtual void add_user(const RegionUsage &user, ApEvent term_event,
                             const FieldMask &user_mask, Operation *op,
                             const unsigned index, AddressSpaceID source,
@@ -859,7 +859,7 @@ namespace Legion {
                                    VersionTracker *version_tracker,
                                    const AddressSpaceID source,
                                    std::set<RtEvent> &applied_events,
-                                   bool tracing,
+                                   PhysicalTraceInfo &trace_info,
                                    bool update_versions = true);
       virtual void add_initial_user(ApEvent term_event,
                                     const RegionUsage &usage,

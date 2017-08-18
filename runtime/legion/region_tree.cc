@@ -2355,7 +2355,7 @@ namespace Legion {
 #endif
           ApEvent ready = target_views[idx2]->find_user_precondition(usage, 
                             term_event, ref.get_valid_fields(), op, idx1, 
-                            &info, map_applied_events, trace_info.tracing);
+                            &info, map_applied_events, trace_info);
           ref.set_ready_event(ready);
         }
       }
@@ -2740,7 +2740,7 @@ namespace Legion {
                                                   &src_version_info,
                                                   runtime->address_space,
                                                   map_applied,
-                                                  trace_info.tracing);
+                                                  trace_info);
             src_targets.add_instance(
                 InstanceRef((*it)->get_manager(), valid_mask, ready));
             src_mask -= valid_mask;
@@ -16485,7 +16485,7 @@ namespace Legion {
             ApEvent ready = new_view->find_user_precondition(usage, term_event,
                                    user_mask, info.op, info.index, 
                                    &info.version_info, info.map_applied_events,
-                                   trace_info.tracing);
+                                   trace_info);
             ref.set_ready_event(ready);
             new_views[idx] = new_view;
           }
@@ -16495,7 +16495,7 @@ namespace Legion {
             ApEvent ready = new_view->add_user_fused(usage,term_event,user_mask,
                                          info.op, info.index,&info.version_info,
                                          local_space, info.map_applied_events,
-                                         trace_info.tracing);
+                                         trace_info);
             ref.set_ready_event(ready);
           }
           if (!defer_add_users && !!restricted_fields)
@@ -16695,7 +16695,7 @@ namespace Legion {
             ApEvent ready = new_views[0]->as_instance_view()->add_user_fused(
                 usage, term_event, ref.get_valid_fields(), info.op, info.index,
                 &info.version_info, local_space, info.map_applied_events,
-                trace_info.tracing);
+                trace_info);
             ref.set_ready_event(ready);
             if (!!restricted_fields && !IS_READ_ONLY(info.req))
             {
@@ -16718,7 +16718,7 @@ namespace Legion {
                 new_views[idx]->as_instance_view()->find_user_precondition(
                     usage, term_event, ref.get_valid_fields(), info.op, 
                     info.index, &info.version_info, info.map_applied_events,
-                    trace_info.tracing);
+                    trace_info);
               ref.set_ready_event(ready);
             }
             const bool restricted_out = 
@@ -16809,6 +16809,7 @@ namespace Legion {
       // one that satisfies the field that we need.
       DeferredView *deferred_view = NULL;
       const AddressSpaceID local_space = context->runtime->address_space;
+      PhysicalTraceInfo trace_info;
       for (LegionMap<LogicalView*,FieldMask>::track_aligned::const_iterator
             it = state->valid_views.begin(); 
             it != state->valid_views.end(); it++)
@@ -16830,7 +16831,7 @@ namespace Legion {
             // Register ourselves as user of this instance
             ApEvent ready_event = view->add_user_fused(usage, term_event, 
               user_mask, op, index, &version_info, local_space, applied_events,
-              false/*tracing*/);
+              trace_info);
             if (ready_event.exists())
               preconditions.insert(ready_event);
             // We found an actual instance so we are done
