@@ -2688,6 +2688,34 @@ namespace Legion {
         // Skip any NO_ACCESS or empty privilege field regions
         if (IS_NO_ACCESS(regions[idx]) || regions[idx].privilege_fields.empty())
           continue;
+        // Handle the case of restricted simultaneous coherence where if
+        // we are restricted and are requesting simultaneous coherence then
+        // we need to use the same instances as our parent instance
+        RestrictInfo &restrict_info = get_restrict_info(idx);
+        if (IS_SIMULT(regions[idx]) && restrict_info.has_restrictions())
+        {
+          // Check to see if we cover all the fields, if not we 
+          // have no way to handle this currently
+          FieldMask restricted_mask;
+          restrict_info.populate_restrict_fields(restricted_mask);
+          if (FieldMask::pop_count(restricted_mask) != 
+              int(regions[idx].privilege_fields.size()))
+            REPORT_LEGION_FATAL(LEGION_FATAL_RESTRICTED_SIMULTANEOUS,
+                          "Partially restricted region requirement %d with "
+                          "simultaneous coherence for task %s (ID %lld) is "
+                          "not currently supported by the Legion runtime. "
+                          "Please report this use case to the Legion "
+                          "developers mailing list.", idx, get_task_name(),
+                          get_unique_id())
+          input.premapped_regions.push_back(idx);
+          // Still fill in the valid regions so that mappers can use
+          // the instance names for constraints
+          prepare_for_mapping(restrict_info.get_instances(),
+                              input.valid_instances[idx]);
+          // We can also copy them over to the output too
+          output.chosen_instances[idx] = input.valid_instances[idx];
+          continue;
+        }
         // Always have to do the traversal at this point to mark open children
         InstanceSet &current_valid = valid[idx];
         perform_physical_traversal(idx, enclosing, current_valid);
@@ -2700,7 +2728,6 @@ namespace Legion {
           // We can skip this since we already know the result
           continue;
         }
-        RestrictInfo &restrict_info = get_restrict_info(idx);
         // Now we can prepare this for mapping,
         // filter for visible memories if necessary
         if (regions[idx].is_no_access())
