@@ -3300,6 +3300,10 @@ namespace Legion {
               unacquired.push_back(manager);
           }
         }
+        if (Runtime::legion_spy_enabled)
+          runtime->forest->log_mapping_decision(unique_op_id, idx,
+                                                regions[idx],
+                                                instances);
       }
       runtime->forest->perform_missing_acquires(this, *acquired, unacquired);
     }
