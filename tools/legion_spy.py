@@ -4996,6 +4996,9 @@ class Operation(object):
     def set_op_kind(self, kind):
         if self.kind == NO_OP_KIND:
             self.kind = kind
+        elif self.kind == FENCE_OP_KIND and \
+                kind == TRACE_OP_KIND:
+            self.kind = kind
         else:
             assert self.kind is kind
 
