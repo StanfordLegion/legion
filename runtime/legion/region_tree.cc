@@ -2357,6 +2357,14 @@ namespace Legion {
                             term_event, ref.get_valid_fields(), op, idx1, 
                             &info, map_applied_events, trace_info);
           ref.set_ready_event(ready);
+          if (trace_info.tracing)
+          {
+#ifdef DEBUG_LEGION
+            assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+#endif
+            trace_info.trace->record_set_ready_event(trace_info, op, idx1,
+                                                     idx2, ready);
+          }
         }
       }
       // Then do the registration pass
@@ -16487,6 +16495,14 @@ namespace Legion {
                                    &info.version_info, info.map_applied_events,
                                    trace_info);
             ref.set_ready_event(ready);
+            if (trace_info.tracing)
+            {
+#ifdef DEBUG_LEGION
+              assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+#endif
+              trace_info.trace->record_set_ready_event(trace_info, info.op,
+                                                       info.index, idx, ready);
+            }
             new_views[idx] = new_view;
           }
           else
@@ -16497,6 +16513,14 @@ namespace Legion {
                                          local_space, info.map_applied_events,
                                          trace_info);
             ref.set_ready_event(ready);
+            if (trace_info.tracing)
+            {
+#ifdef DEBUG_LEGION
+              assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+#endif
+              trace_info.trace->record_set_ready_event(trace_info, info.op,
+                                                       info.index, idx, ready);
+            }
           }
           if (!defer_add_users && !!restricted_fields)
           {
@@ -16601,38 +16625,42 @@ namespace Legion {
             const FieldMask &valid_fields = ref.get_valid_fields();
             MaterializedView *view = 
               new_views[idx]->as_instance_view()->as_materialized_view();
-            // See if this instance is valid already 
-            LegionMap<LogicalView*,FieldMask>::aligned::const_iterator
-              finder = state->valid_views.find(view);
-            if (finder != state->valid_views.end())
+
+            if (!trace_info.memoizing || trace_info.tracing)
             {
-              // See which fields if any we actually need to update
-              FieldMask needed_fields = valid_fields - finder->second;
-              if (!!needed_fields)
+              // See if this instance is valid already 
+              LegionMap<LogicalView*,FieldMask>::aligned::const_iterator
+                finder = state->valid_views.find(view);
+              if (finder != state->valid_views.end())
               {
+                // See which fields if any we actually need to update
+                FieldMask needed_fields = valid_fields - finder->second;
+                if (!!needed_fields)
+                {
+                  if (!has_valid_views)
+                  {
+                    find_valid_instance_views(info.ctx, state, 
+                        info.traversal_mask, info.traversal_mask, 
+                        info.version_info, false/*needs space*/, valid_views);
+                    has_valid_views = true;
+                  }
+                  issue_update_copies(info, view, needed_fields, 
+                                      valid_views, restrict_info, trace_info);
+                }
+              }
+              else
+              {
+                // Not valid for any fields, so bring it up to date for all fields
                 if (!has_valid_views)
                 {
-                  find_valid_instance_views(info.ctx, state, 
-                      info.traversal_mask, info.traversal_mask, 
+                  find_valid_instance_views(info.ctx, state,
+                      info.traversal_mask, info.traversal_mask,
                       info.version_info, false/*needs space*/, valid_views);
                   has_valid_views = true;
                 }
-                issue_update_copies(info, view, needed_fields, 
+                issue_update_copies(info, view, valid_fields, 
                                     valid_views, restrict_info, trace_info);
               }
-            }
-            else
-            {
-              // Not valid for any fields, so bring it up to date for all fields
-              if (!has_valid_views)
-              {
-                find_valid_instance_views(info.ctx, state,
-                    info.traversal_mask, info.traversal_mask,
-                    info.version_info, false/*needs space*/, valid_views);
-                has_valid_views = true;
-              }
-              issue_update_copies(info, view, valid_fields, 
-                                  valid_views, restrict_info, trace_info);
             }
             // Finally add this to the set of valid views for the state
             if (!!restricted_fields)
@@ -16679,7 +16707,7 @@ namespace Legion {
         }
         // Finally we have to update our instance references
         // to get the ready events
-        if (!defer_add_users)
+        if (!defer_add_users && (!trace_info.memoizing || trace_info.tracing))
         {
           // If there is exactly one instance, then we can do
           // the fused analysis and register user, otherwise we
@@ -16697,6 +16725,14 @@ namespace Legion {
                 &info.version_info, local_space, info.map_applied_events,
                 trace_info);
             ref.set_ready_event(ready);
+            if (trace_info.tracing)
+            {
+#ifdef DEBUG_LEGION
+              assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+#endif
+              trace_info.trace->record_set_ready_event(trace_info, info.op,
+                                                       info.index, 0, ready);
+            }
             if (!!restricted_fields && !IS_READ_ONLY(info.req))
             {
               FieldMask restricted = ref.get_valid_fields() & restricted_fields;
@@ -16720,6 +16756,16 @@ namespace Legion {
                     info.index, &info.version_info, info.map_applied_events,
                     trace_info);
               ref.set_ready_event(ready);
+              if (trace_info.tracing)
+              {
+#ifdef DEBUG_LEGION
+                assert(trace_info.trace != NULL &&
+                       !trace_info.trace->is_fixed());
+#endif
+                trace_info.trace->record_set_ready_event(trace_info, info.op,
+                                                         info.index, idx,
+                                                         ready);
+              }
             }
             const bool restricted_out = 
               !!restricted_fields && !IS_READ_ONLY(info.req);

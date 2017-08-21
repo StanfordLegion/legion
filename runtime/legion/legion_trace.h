@@ -357,6 +357,14 @@ namespace Legion {
                              RegionTreeNode *intersect = NULL,
                              ReductionOpID redop = 0,
                              bool reduction_fold = true);
+      void record_set_ready_event(PhysicalTraceInfo &trace_info,
+                                  Operation *op,
+                                  unsigned region_idx,
+                                  unsigned inst_idx,
+                                  ApEvent ready_event);
+    public:
+      void initialize_templates(ApEvent fence_completion);
+      void execute_template(PhysicalTraceInfo &trace_info, SingleTask *task);
     public:
       void fix_trace(void);
       bool is_fixed(void) const { return fixed; }
@@ -400,18 +408,21 @@ namespace Legion {
       PhysicalTemplate(const PhysicalTemplate &rhs);
 
       void initialize();
-      void execute();
-      void clear();
+      void execute(PhysicalTraceInfo &trace_info, SingleTask *task);
+      void dump_template();
+      void finalize();
 
       Reservation template_lock;
 
       ApEvent fence_completion;
       unsigned fence_completion_id;
-      std::vector<Operation*> operations;
-      std::vector<UniqueID> op_uids;
+      std::map<std::pair<unsigned, DomainPoint>, unsigned> task_entries;
+      std::vector<std::vector<unsigned> > consumers;
+      std::vector<unsigned> pending_producers;
+      std::vector<unsigned> max_producers;
+      std::map<std::pair<unsigned, DomainPoint>, SingleTask*> operations;
       std::vector<ApEvent> events;
       std::map<ApEvent, unsigned> event_map;
-      std::map<UniqueID, unsigned> op_map;
       std::vector<Instruction*> instructions;
     };
 
@@ -422,26 +433,28 @@ namespace Legion {
     struct Instruction {
       Instruction(PhysicalTemplate& tpl);
       virtual ~Instruction() {};
-      virtual void execute();
+      virtual void execute() = 0;
       virtual std::string to_string() = 0;
 
     protected:
-      std::vector<Operation*>& operations;
+      std::map<std::pair<unsigned, DomainPoint>, SingleTask*> &operations;
       std::vector<ApEvent>& events;
     };
 
     /**
      * \class GetTermEvent
      * This instruction has the following semantics:
-     *   events[lhs] = ops[rhs].get_task_completion()
+     *   events[lhs] = operations[rhs].get_task_completion()
      */
     struct GetTermEvent : public Instruction {
-      GetTermEvent(PhysicalTemplate& tpl, unsigned lhs, unsigned rhs);
+      GetTermEvent(PhysicalTemplate& tpl, unsigned lhs,
+                   const std::pair<unsigned, DomainPoint>& rhs);
+      virtual void execute();
       virtual std::string to_string();
 
     private:
       unsigned lhs;
-      unsigned rhs;
+      std::pair<unsigned, DomainPoint> rhs;
     };
 
     /**
@@ -452,6 +465,7 @@ namespace Legion {
     struct MergeEvent : public Instruction {
       MergeEvent(PhysicalTemplate& tpl, unsigned lhs,
                  const std::set<unsigned>& rhs);
+      virtual void execute();
       virtual std::string to_string();
 
     private:
@@ -466,6 +480,7 @@ namespace Legion {
      */
     struct AssignFenceCompletion : public Instruction {
       AssignFenceCompletion(PhysicalTemplate& tpl, unsigned lhs);
+      virtual void execute();
       virtual std::string to_string();
 
     private:
@@ -476,25 +491,28 @@ namespace Legion {
     /**
      * \class IssueCopy
      * This instruction has the following semantics:
-     *   events[lhs] = node->issue_copy(tasks[op_idx], src_fields, dst_fields,
+     *   events[lhs] = node->issue_copy(operations[op_key],
+     *                                  src_fields, dst_fields,
      *                                  events[precondition_idx],
      *                                  predicate_guard, intersect,
      *                                  redop, reduction_fold);
      */
     struct IssueCopy : public Instruction {
-      IssueCopy(PhysicalTemplate& tpl,
-                unsigned lhs, RegionTreeNode* node, unsigned op_idx,
-                const std::vector<Domain::CopySrcDstField>& src_fields,
-                const std::vector<Domain::CopySrcDstField>& dst_fields,
+      IssueCopy(PhysicalTemplate &tpl,
+                unsigned lhs, RegionTreeNode *node,
+                const std::pair<unsigned, DomainPoint> &op_key,
+                const std::vector<Domain::CopySrcDstField> &src_fields,
+                const std::vector<Domain::CopySrcDstField> &dst_fields,
                 unsigned precondition_idx, PredEvent predicate_guard,
                 RegionTreeNode *intersect, ReductionOpID redop,
                 bool reduction_fold);
+      virtual void execute();
       virtual std::string to_string();
 
     private:
       unsigned lhs;
       RegionTreeNode* node;
-      unsigned op_idx;
+      std::pair<unsigned, DomainPoint> op_key;
       std::vector<Domain::CopySrcDstField> src_fields;
       std::vector<Domain::CopySrcDstField> dst_fields;
       unsigned precondition_idx;
@@ -502,6 +520,28 @@ namespace Legion {
       RegionTreeNode *intersect;
       ReductionOpID redop;
       bool reduction_fold;
+    };
+
+    /**
+     * \class SetReadyEvent
+     * This instruction has the following semantics:
+     *   operations[op_key]->get_physical_instances()[region_idx][inst_idx]
+     *                      .set_ready_event(events[ready_event_idx])
+     */
+    struct SetReadyEvent : public Instruction {
+      SetReadyEvent(PhysicalTemplate& tpl,
+                    const std::pair<unsigned, DomainPoint>& op_key,
+                    unsigned region_idx,
+                    unsigned inst_idx,
+                    unsigned ready_event_idx);
+      virtual void execute();
+      virtual std::string to_string();
+
+    private:
+      std::pair<unsigned, DomainPoint> op_key;
+      unsigned region_idx;
+      unsigned inst_idx;
+      unsigned ready_event_idx;
     };
 
 

@@ -3676,6 +3676,15 @@ namespace Legion {
             precondition.lg_wait();
         }
       }
+
+      if (trace_info.memoizing && !trace_info.tracing)
+      {
+#ifdef DEBUG_LEGION
+        assert(trace_info.trace != NULL && trace_info.trace->is_fixed());
+#endif
+        trace_info.trace->execute_template(trace_info, this);
+      }
+
       // After we've got our results, apply the state to the region tree
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
@@ -3714,13 +3723,16 @@ namespace Legion {
       // record our users because we skipped that during traversal
       if (multiple_requirements)
       {
-        // This is really ugly, I hate C++ and its const awfulness
-        runtime->forest->physical_register_users(this,
-            local_termination_event, regions, virtual_mapped, 
-            *const_cast<std::vector<VersionInfo>*>(get_version_infos()),
-            *const_cast<std::vector<RestrictInfo>*>(get_restrict_infos()), 
-            physical_instances, map_applied_conditions,
-            trace_info);
+        if (!trace_info.memoizing || trace_info.tracing)
+        {
+          // This is really ugly, I hate C++ and its const awfulness
+          runtime->forest->physical_register_users(this,
+              local_termination_event, regions, virtual_mapped, 
+              *const_cast<std::vector<VersionInfo>*>(get_version_infos()),
+              *const_cast<std::vector<RestrictInfo>*>(get_restrict_infos()), 
+              physical_instances, map_applied_conditions,
+              trace_info);
+        }
         // Release any read-only reservations that we're holding
         if (!read_only_reservations.empty())
         {
