@@ -3438,7 +3438,24 @@ namespace Legion {
     {
       const std::set<Realm::Event> *realm_events = 
         reinterpret_cast<const std::set<Realm::Event>*>(&events);
-      return RtEvent(Realm::Event::merge_events_ignorefaults(*realm_events));
+      Realm::Event result =
+        Realm::Event::merge_events_ignorefaults(*realm_events);
+#ifdef LEGION_SPY
+      if (!result.exists() ||
+          (realm_events->find(result) != realm_events->end()))
+      {
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        if (realm_events->find(result) != realm_events->end())
+          rename.trigger(result);
+        else
+          rename.trigger();
+        result = rename;
+      }
+      for (std::set<ApEvent>::const_iterator it = events.begin();
+            it != events.end(); it++)
+        LegionSpy::log_event_dependence(*it, RtEvent(result));
+#endif
+      return RtEvent(result);
     }
 
     //--------------------------------------------------------------------------
