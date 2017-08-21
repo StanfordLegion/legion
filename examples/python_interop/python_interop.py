@@ -24,8 +24,8 @@ import numpy
 init = legion.extern_task(task_id=3, privileges=[legion.RW])
 
 @legion.task
-def hello(i):
-    print('hello %s' % i)
+def hello(i, j):
+    print('hello %s %s' % (i, j))
 
 # Define a Python task. This task takes two arguments: a region and a
 # number, and increments every element of the region by that number.
@@ -59,6 +59,7 @@ def main_task():
     print("child task returned", child_result.get())
     print("main_task done")
 
+    values = 'abc'
     for i in legion.IndexLaunch([3]):
         print('queue %s' % i)
-        hello(i)
+        hello(i, values[i])
