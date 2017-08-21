@@ -373,7 +373,7 @@ namespace Legion {
       if (IS_WRITE(usage))
         version_info.unpack_version_numbers(derez, runtime->forest);
       else
-        version_info.unpack_version_numbers(derez, runtime->forest);
+        version_info.unpack_upper_bound_node(derez, runtime->forest);
       RtUserEvent applied_event;
       derez.deserialize(applied_event);
       ApUserEvent result_event;
