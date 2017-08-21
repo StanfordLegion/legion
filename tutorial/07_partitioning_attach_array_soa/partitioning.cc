@@ -66,7 +66,7 @@ void top_level_task(const Task *task,
       runtime->create_field_allocator(ctx, input_fs);
     allocator.allocate_field(sizeof(double),FID_X);
     runtime->attach_name(input_fs, FID_X, "X");
-    allocator.allocate_field(sizeof(double),FID_Y);
+    allocator.allocate_field(sizeof(float),FID_Y);
     runtime->attach_name(input_fs, FID_Y, "Y");
   }
   FieldSpace output_fs = runtime->create_field_space(ctx);
@@ -82,26 +82,31 @@ void top_level_task(const Task *task,
   LogicalRegion output_lr = runtime->create_logical_region(ctx, is, output_fs);
   runtime->attach_name(output_lr, "output_lr");
 
-  double *x_ptr = (double*)malloc(sizeof(double)*(num_elements));
-  std::map<FieldID,void*> field_pointer_map_x;
-  field_pointer_map_x[FID_X] = x_ptr;
-  printf("Attach array fid %d, ptr %p\n", FID_X, x_ptr);  
-  PhysicalRegion x_pr = runtime->attach_fortran_array(ctx, input_lr, input_lr, field_pointer_map_x,
-                         LEGION_FILE_READ_WRITE); 
-  
-  double *y_ptr = (double*)malloc(sizeof(double)*(num_elements));
+  float *y_ptr = (float*)malloc(sizeof(float)*(num_elements));
+  for (int j = 0; j < num_elements; j++ ) {
+    y_ptr[j] = 1.1;
+  }
   std::map<FieldID,void*> field_pointer_map_y;
   field_pointer_map_y[FID_Y] = y_ptr;
-  printf("Attach array fid %d, ptr %p\n", FID_Y, y_ptr);    
-  PhysicalRegion y_pr = runtime->attach_fortran_array(ctx, input_lr, input_lr, field_pointer_map_y,
-                                           LEGION_FILE_READ_WRITE);
+  printf("Attach array fid %d, ptr %p\n", FID_Y, y_ptr);
+  //PhysicalRegion y_pr = runtime->attach_fortran_array(ctx, input_lr, input_lr, field_pointer_map_y, 0);
+  
+  double *x_ptr = (double*)malloc(sizeof(double)*(num_elements));
+  for (int j = 0; j < num_elements; j++ ) {
+      x_ptr[j] = 1.1;
+  }
+  std::map<FieldID,void*> field_pointer_map_x;
+  field_pointer_map_x[FID_X] = x_ptr;
+  field_pointer_map_x[FID_Y] = y_ptr;
+  printf("Attach array fid %d, ptr %p\n", FID_X, x_ptr);  
+  PhysicalRegion x_pr = runtime->attach_fortran_array(ctx, input_lr, input_lr, field_pointer_map_x, 0); 
+  
   
   double *z_ptr = (double*)malloc(sizeof(double)*(num_elements));
   std::map<FieldID,void*> field_pointer_map_z;
   field_pointer_map_z[FID_Z] = z_ptr;
   printf("Attach array fid %d, ptr %p\n", FID_Z, z_ptr);
-  PhysicalRegion z_pr = runtime->attach_fortran_array(ctx, output_lr, output_lr, field_pointer_map_z,
-                                                             LEGION_FILE_READ_WRITE);
+  PhysicalRegion z_pr = runtime->attach_fortran_array(ctx, output_lr, output_lr, field_pointer_map_z, 0);
   // In addition to using rectangles and domains for launching index spaces
   // of tasks (see example 02), Legion also uses them for performing 
   // operations on logical regions.  Here we create a rectangle and a
@@ -158,8 +163,8 @@ void top_level_task(const Task *task,
   // the logical subregions created by our partitioning.  To express this
   // we create an IndexLauncher for launching an index space of tasks
   // the same as example 02.
-  IndexLauncher init_launcher(INIT_FIELD_TASK_ID, color_is, 
-                              TaskArgument(NULL, 0), arg_map);
+  //IndexLauncher init_launcher(INIT_FIELD_TASK_ID, color_is, 
+    //                          TaskArgument(NULL, 0), arg_map);
   // For index space task launches we don't want to have to explicitly
   // enumerate separate region requirements for all points in our launch
   // domain.  Instead Legion allows applications to place an upper bound
@@ -184,11 +189,11 @@ void top_level_task(const Task *task,
   // projections functions via the 'register_region_projection' and
   // 'register_partition_projection' functions before starting 
   // the runtime similar to how tasks are registered.
-  init_launcher.add_region_requirement(
-      RegionRequirement(input_lp, 0/*projection ID*/, 
-                        WRITE_DISCARD, EXCLUSIVE, input_lr));
-  init_launcher.region_requirements[0].add_field(FID_X);
-  runtime->execute_index_space(ctx, init_launcher);
+ // init_launcher.add_region_requirement(
+   //   RegionRequirement(input_lp, 0/*projection ID*/, 
+    //                    WRITE_DISCARD, EXCLUSIVE, input_lr));
+  //init_launcher.region_requirements[0].add_field(FID_X);
+  //runtime->execute_index_space(ctx, init_launcher);
 
   // Modify our region requirement to initialize the other field
   // in the same way.  Note that after we do this we have exposed
@@ -198,12 +203,12 @@ void top_level_task(const Task *task,
   // The power of Legion is that it allows programmers to express
   // these data usage patterns and automatically extracts both
   // kinds of parallelism in a unified programming framework.
-  init_launcher.region_requirements[0].privilege_fields.clear();
-  init_launcher.region_requirements[0].instance_fields.clear();
-  init_launcher.region_requirements[0].add_field(FID_Y);
-  runtime->execute_index_space(ctx, init_launcher);
+  //init_launcher.region_requirements[0].privilege_fields.clear();
+  //init_launcher.region_requirements[0].instance_fields.clear();
+  //init_launcher.region_requirements[0].add_field(FID_Y);
+  //runtime->execute_index_space(ctx, init_launcher);
 
-  const double alpha = drand48();
+  const double alpha = 1.1;//drand48();
   // We launch the subtasks for performing the daxpy computation
   // in a similar way to the initialize field tasks.  Note we
   // again make use of two RegionRequirements which use a
@@ -265,7 +270,7 @@ void init_field_task(const Task *task,
   Rect<1> rect = runtime->get_index_space_domain(ctx,
                   task->regions[0].region.get_index_space());
   for (PointInRectIterator<1> pir(rect); pir(); pir++)
-    acc[*pir] = drand48();
+    acc[*pir] = 1.1;//drand48();
 }
 
 void daxpy_task(const Task *task,
@@ -279,7 +284,7 @@ void daxpy_task(const Task *task,
   const int point = task->index_point.point_data[0];
 
   const FieldAccessor<READ_ONLY,double,1> acc_x(regions[0], FID_X);
-  const FieldAccessor<READ_ONLY,double,1> acc_y(regions[0], FID_Y);
+  const FieldAccessor<READ_ONLY,float,1> acc_y(regions[0], FID_Y);
   const FieldAccessor<WRITE_DISCARD,double,1> acc_z(regions[1], FID_Z);
 
   Rect<1> rect = runtime->get_index_space_domain(ctx,
@@ -300,7 +305,7 @@ void check_task(const Task *task,
   const double alpha = *((const double*)task->args);
 
   const FieldAccessor<READ_ONLY,double,1> acc_x(regions[0], FID_X);
-  const FieldAccessor<READ_ONLY,double,1> acc_y(regions[0], FID_Y);
+  const FieldAccessor<READ_ONLY,float,1> acc_y(regions[0], FID_Y);
   const FieldAccessor<READ_ONLY,double,1> acc_z(regions[1], FID_Z);
 
   Rect<1> rect = runtime->get_index_space_domain(ctx,

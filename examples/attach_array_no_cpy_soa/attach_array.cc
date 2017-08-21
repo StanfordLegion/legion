@@ -100,16 +100,16 @@ void top_level_task(const Task *task,
   std::map<FieldID,void*> field_pointer_map_val;
   field_pointer_map_val[FID_VAL] = val_ptr;
   printf("Attach array fid %d, ptr %p\n", FID_VAL, val_ptr);  
-  stencil_val_pr = runtime->attach_fortran_array(ctx, stencil_lr, stencil_lr, field_pointer_map_val,
-		 LEGION_FILE_READ_WRITE); 
+ // stencil_val_pr = runtime->attach_fortran_array(ctx, stencil_lr, stencil_lr, field_pointer_map_val,
+	//	 LEGION_FILE_READ_WRITE); 
      
   PhysicalRegion stencil_deriv_pr;
   deriv_t *deriv_ptr = (deriv_t*)malloc(sizeof(deriv_t)*(num_elements));
   std::map<FieldID,void*> field_pointer_map_deriv;
   field_pointer_map_deriv[FID_DERIV] = deriv_ptr;
+  field_pointer_map_deriv[FID_VAL] = val_ptr;
   printf("Attach arrray fid %d, ptr %p\n", FID_DERIV, deriv_ptr);  
-  stencil_deriv_pr = runtime->attach_fortran_array(ctx, stencil_lr, stencil_lr, field_pointer_map_deriv,
-	  LEGION_FILE_READ_WRITE); 
+  stencil_deriv_pr = runtime->attach_fortran_array(ctx, stencil_lr, stencil_lr, field_pointer_map_deriv, 0); 
   my_ptr = deriv_ptr;
        
   Rect<1> color_bounds(0,num_subregions-1);

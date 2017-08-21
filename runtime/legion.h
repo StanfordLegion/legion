@@ -1899,7 +1899,7 @@ namespace Legion {
                               const std::map<FieldID,const char*> &field_map,
                               LegionFileMode mode);
       inline void attach_array(const std::map<FieldID,void*> &field_pointer_map,
-                              LegionFileMode mode);
+                              int layout_flag);
     public:
       inline void add_field_pointer(FieldID fid, void *ptr);
       inline void set_pitch(unsigned dim, size_t pitch);
@@ -1917,6 +1917,7 @@ namespace Legion {
       // Data for arrays
       std::map<FieldID,/*pointers*/void*>           field_pointers;
       std::vector<size_t/*bytes*/>                  pitches;
+      int                                           layout_flag; // SOA 0, AOS 1
     public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
@@ -5214,14 +5215,14 @@ namespace Legion {
       PhysicalRegion attach_fortran_array(Context ctx,
                                           LogicalRegion handle, LogicalRegion parent,
                                           const std::map<FieldID,void*> &field_pointer_map,
-                                          LegionFileMode mode);
+                                          int layout_flag);
       
       void detach_fortran_array(Context ctx, PhysicalRegion region);                                       
       
       PhysicalRegion attach_c_array(Context ctx,
                                     LogicalRegion handle, LogicalRegion parent,
                                     const std::map<FieldID,void*> &field_pointer_map,
-                                    LegionFileMode mode);
+                                    int layout_flag);
       
       void detach_c_array(Context ctx, PhysicalRegion region);
       

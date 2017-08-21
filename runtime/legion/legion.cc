@@ -5843,11 +5843,11 @@ namespace Legion {
                                                  LogicalRegion handle,
                                                  LogicalRegion parent,
                                  const std::map<FieldID,void*> &field_pointer_map,
-                                                 LegionFileMode mode)
+                                                 int layout_flag)
     //--------------------------------------------------------------------------
     {
       AttachLauncher launcher(EXTERNAL_FORTRAN_ARRAY, handle, parent);
-      launcher.attach_array(field_pointer_map, mode);
+      launcher.attach_array(field_pointer_map, layout_flag);
       return runtime->attach_external_resource(ctx, launcher);
     }
 
@@ -5863,11 +5863,11 @@ namespace Legion {
                                                  LogicalRegion handle,
                                                  LogicalRegion parent,
                                  const std::map<FieldID,void*> &field_pointer_map,
-                                                 LegionFileMode mode)
+                                                 int layout_flag)
     //--------------------------------------------------------------------------
     {
       AttachLauncher launcher(EXTERNAL_C_ARRAY, handle, parent);
-      launcher.attach_array(field_pointer_map, mode);
+      launcher.attach_array(field_pointer_map, layout_flag);
       return runtime->attach_external_resource(ctx, launcher);
     }
 
@@ -5899,7 +5899,7 @@ namespace Legion {
           unsigned char *ptr = base_ptr + offset;
           std::map<FieldID,void*> field_pointer_map;
           field_pointer_map[fid] = ptr;
-          PhysicalRegion pr = attach_fortran_array(ctx, it_handle->second, it_parent->second, field_pointer_map, LEGION_FILE_READ_WRITE);
+          PhysicalRegion pr = attach_fortran_array(ctx, it_handle->second, it_parent->second, field_pointer_map, 0);
           pr_set[i] = pr;
           it_offset ++;
           it_handle ++;

@@ -2772,7 +2772,7 @@ namespace Legion {
                                     ExternalResource resource,
                                     const std::vector<size_t> &field_sizes,
                                     const std::vector<void*> &field_pointers,
-                                    bool read_only)
+                                    int layout_flag)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REALM_CREATE_INSTANCE_CALL);
@@ -2782,14 +2782,23 @@ namespace Legion {
       // No profiling for these kinds of instances currently
       Realm::ProfilingRequestSet requests;
       PhysicalInstance result;
-      LgEvent ready(PhysicalInstance::create_array_instance(result, 
-							   local_space,
-							   field_sizes,
-							   field_pointers,
-							   0,
-							   requests));
-      // TODO
-      ready.lg_wait();
+      if (layout_flag == 0) {  // SOA
+        LgEvent ready(PhysicalInstance::create_array_instance_SOA(result, 
+				           local_space,
+							     field_sizes,
+							     field_pointers,
+							     0,
+							     requests));
+        ready.lg_wait();
+      } else {  // AOS
+        LgEvent ready(PhysicalInstance::create_array_instance_AOS(result, 
+				           local_space,
+							     field_sizes,
+							     field_pointers,
+							     0,
+							     requests));
+        ready.lg_wait();
+      }
      // assert(0 && "no HDF5 support");
     //  result = PhysicalInstance::NO_INST;
       return result;

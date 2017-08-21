@@ -177,7 +177,16 @@ namespace Realm {
 #endif
               
     template <int N, typename T>
-    static Event create_array_instance(RegionInstance& inst,
+    static Event create_array_instance_SOA(RegionInstance& inst,
+				      const ZIndexSpace<N,T>& space,
+				      const std::vector<size_t> &field_sizes,
+				      const std::vector<void*> &field_pointers,
+				      size_t block_size,
+				      const ProfilingRequestSet& prs,
+				      Event wait_on = Event::NO_EVENT);
+              
+    template <int N, typename T>
+    static Event create_array_instance_AOS(RegionInstance& inst,
 				      const ZIndexSpace<N,T>& space,
 				      const std::vector<size_t> &field_sizes,
 				      const std::vector<void*> &field_pointers,

@@ -156,8 +156,7 @@ void top_level_task(const Task *task,
   std::map<FieldID,void*> field_pointer_map;
   field_pointer_map[FID_CP] = cp_ptr;
   printf("Checkpointing data to arrray fid %d, ptr %p, base %p\n", FID_CP, cp_ptr, base);  
-  cp_pr = runtime->attach_fortran_array(ctx, cp_lr, cp_lr, field_pointer_map,
-			 LEGION_FILE_READ_WRITE);         
+  cp_pr = runtime->attach_fortran_array(ctx, cp_lr, cp_lr, field_pointer_map, 0);         
 
   //cp_pr.wait_until_valid();
   CopyLauncher copy_launcher;

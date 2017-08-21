@@ -2669,6 +2669,7 @@ namespace Legion {
       unsigned parent_req_index;
       std::set<RtEvent> map_applied_conditions;
       InstanceManager *file_instance;
+      int layout_flag;  // SOA 0, AOS 1
     };
 
     /**

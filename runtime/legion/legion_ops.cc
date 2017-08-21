@@ -13766,6 +13766,7 @@ namespace Legion {
                             "FORGET THEM?!?", parent_ctx->get_task_name(),
                             parent_ctx->get_unique_id());
             }
+            layout_flag = launcher.layout_flag;
             // Construct the region requirement for this task
             requirement = RegionRequirement(launcher.handle, WRITE_DISCARD, 
                                             EXCLUSIVE, launcher.parent);
@@ -14028,7 +14029,7 @@ namespace Legion {
             }
             // Now ask the low-level runtime to create the instance
             result = node->create_array_instance(EXTERNAL_FORTRAN_ARRAY, sizes, field_pointers,
-                                        (file_mode == LEGION_FILE_READ_ONLY));
+                                        layout_flag);
             constraints.specialized_constraint = 
               SpecializedConstraint(NORMAL_SPECIALIZE);
             break;

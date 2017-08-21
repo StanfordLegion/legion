@@ -35,7 +35,8 @@ enum FieldIDs {
 
 typedef struct{
     double x;
-    double y;
+    float y;
+    char pad[4];
     double z;
 }daxpy_t;
 
@@ -281,7 +282,15 @@ void init_field_task(const Task *task,
   const int point = task->index_point.point_data[0];
   printf("Initializing field %d for block %d...\n", fid, point);
 
-  const FieldAccessor<WRITE_DISCARD,double,1> acc(regions[0], fid);
+  if (fid == 0) {
+      const FieldAccessor<WRITE_DISCARD,double,1> acc(regions[0], fid);
+      Rect<1> rect = runtime->get_index_space_domain(ctx,
+                                task->regions[0].region.get_index_space());
+        for (PointInRectIterator<1> pir(rect); pir(); pir++)
+                acc[*pir] = drand48();
+  } else {
+      const FieldAccessor<WRITE_DISCARD,float,1> acc(regions[0], fid);
+  
   // Note here that we get the domain for the subregion for
   // this task from the runtime which makes it safe for running
   // both as a single task and as part of an index space of tasks.
@@ -289,6 +298,8 @@ void init_field_task(const Task *task,
                   task->regions[0].region.get_index_space());
   for (PointInRectIterator<1> pir(rect); pir(); pir++)
     acc[*pir] = drand48();
+
+  }
 }
 
 void daxpy_task(const Task *task,
@@ -301,7 +312,7 @@ void daxpy_task(const Task *task,
   const double alpha = *((const double*)task->args);
   const int point = task->index_point.point_data[0];
 
-  const FieldAccessor<READ_ONLY,double,1> acc_y(regions[0], FID_Y);
+  const FieldAccessor<READ_ONLY,float,1> acc_y(regions[0], FID_Y);
   const FieldAccessor<READ_ONLY,double,1> acc_x(regions[0], FID_X);
   const FieldAccessor<WRITE_DISCARD,double,1> acc_z(regions[1], FID_Z);
 
@@ -323,7 +334,7 @@ void check_task(const Task *task,
   const double alpha = *((const double*)task->args);
 
   const FieldAccessor<READ_ONLY,double,1> acc_x(regions[0], FID_X);
-  const FieldAccessor<READ_ONLY,double,1> acc_y(regions[0], FID_Y);
+  const FieldAccessor<READ_ONLY,float,1> acc_y(regions[0], FID_Y);
   const FieldAccessor<READ_ONLY,double,1> acc_z(regions[1], FID_Z);
 
   Rect<1> rect = runtime->get_index_space_domain(ctx,

@@ -86,7 +86,7 @@ namespace Realm {
     
   
   template <int N, typename T>
-  /*static*/ Event RegionInstance::create_array_instance(RegionInstance& inst,
+  /*static*/ Event RegionInstance::create_array_instance_SOA(RegionInstance& inst,
 							  const ZIndexSpace<N,T>& space,
 							  const std::vector<size_t> &field_sizes,
                 const std::vector<void*> &field_pointers,
@@ -103,7 +103,7 @@ namespace Realm {
     // smoosh hybrid block sizes back to SOA for now
     if(block_size > 1)
       block_size = 0;
-
+#if 0
     InstanceLayoutConstraints ilc(field_sizes, block_size);
     InstanceLayoutGeneric *layout = InstanceLayoutGeneric::choose_instance_layout(space, ilc);
     //InstanceLayout<N,T> *layout = new InstanceLayout<N,T>;
@@ -117,17 +117,136 @@ namespace Realm {
     unsigned char* ptr = (unsigned char*)field_pointers[0];
     unsigned char* base = (unsigned char*)m_impl->base;
     inst_impl->metadata.inst_offset = ptr - base;
+#else
+    InstanceLayout<N,T> *layout = new InstanceLayout<N,T>;
+    layout->bytes_used = 0;
+    layout->alignment_reqd = 0;  // no allocation being made
+    layout->space = space;
+    layout->piece_lists.resize(field_sizes.size());
+    
+    size_t field_ofs = 0;
+    LocalCPUMemory *m_impl = (LocalCPUMemory *)get_runtime()->get_memory_impl(memory);
+    unsigned char* base = (unsigned char*)m_impl->base;
+    unsigned char* ptr = NULL;
+    for(size_t i = 0; i < field_sizes.size(); i++) {
+      InstanceLayoutGeneric::FieldLayout& fl = layout->fields[field_ofs];
+      fl.list_idx = i;
+      fl.rel_offset = 0;
+      fl.size_in_bytes = field_sizes[i];
+      field_ofs += field_sizes[i];
+
+      // create a single piece (for non-empty index spaces)
+      if(!space.empty()) {
+	      AffineLayoutPiece<N,T> *alp = new AffineLayoutPiece<N,T>;
+	      alp->bounds = space.bounds;
+        ptr = (unsigned char*)field_pointers[i];
+	      alp->offset = (size_t)(ptr - base);
+	      size_t stride = field_sizes[i];
+	      for(int j = 0; j < N; j++) {
+	        alp->strides[j] = stride;
+	        stride *= (space.bounds.hi[j] - space.bounds.lo[j] + 1);
+	      }
+	      layout->piece_lists[i].pieces.push_back(alp);
+      }
+    }
+        
+    Event e = create_instance(inst, memory, layout, reqs, wait_on);
+    RegionInstanceImpl *inst_impl = get_runtime()->get_instance_impl(inst);
+    printf("inst offset %lu\n", inst_impl->metadata.inst_offset);
+#endif
     return e;
   }
 
-#define DOIT_ARRAY(N,T) \
-  template Event RegionInstance::create_array_instance<N,T>(RegionInstance&, \
+#define DOIT_ARRAY_SOA(N,T) \
+  template Event RegionInstance::create_array_instance_SOA<N,T>(RegionInstance&, \
 							      const ZIndexSpace<N,T>&, \
 							      const std::vector<size_t>&, \
 							      const std::vector<void *>&, \
 							      size_t, \
 							      const ProfilingRequestSet&, \
 							      Event);
-  FOREACH_NT(DOIT_ARRAY)  
+  FOREACH_NT(DOIT_ARRAY_SOA)  
+    
+  template <int N, typename T>
+  /*static*/ Event RegionInstance::create_array_instance_AOS(RegionInstance& inst,
+							  const ZIndexSpace<N,T>& space,
+							  const std::vector<size_t> &field_sizes,
+                const std::vector<void*> &field_pointers,
+							  size_t block_size,
+							  const ProfilingRequestSet& reqs,
+							  Event wait_on /*= Event::NO_EVENT*/)
+  {
+    Memory memory = Machine::MemoryQuery(Machine::get_machine())
+      .local_address_space()
+      .only_kind(Memory::SYSTEM_MEM)
+      .first();
+    assert(memory.exists());
+      
+    // smoosh hybrid block sizes back to SOA for now
+    if(block_size > 1)
+      block_size = 0;
+#if 0
+    InstanceLayoutConstraints ilc(field_sizes, block_size);
+    InstanceLayoutGeneric *layout = InstanceLayoutGeneric::choose_instance_layout(space, ilc);
+    //InstanceLayout<N,T> *layout = new InstanceLayout<N,T>;
+    layout->bytes_used = 0;
+    layout->alignment_reqd = 0;  // no allocation being made
+  //  layout->space = space;
+//    layout->piece_lists.resize(field_sizes.size());
+    Event e = create_instance(inst, memory, layout, reqs, wait_on);
+    RegionInstanceImpl *inst_impl = get_runtime()->get_instance_impl(inst);
+    LocalCPUMemory *m_impl = (LocalCPUMemory *)get_runtime()->get_memory_impl(memory);
+    unsigned char* ptr = (unsigned char*)field_pointers[0];
+    unsigned char* base = (unsigned char*)m_impl->base;
+    inst_impl->metadata.inst_offset = ptr - base;
+#else
+    InstanceLayout<N,T> *layout = new InstanceLayout<N,T>;
+    layout->bytes_used = 0;
+    layout->alignment_reqd = 0;  // no allocation being made
+    layout->space = space;
+    layout->piece_lists.resize(field_sizes.size());
+    
+    size_t field_ofs = 0;
+    LocalCPUMemory *m_impl = (LocalCPUMemory *)get_runtime()->get_memory_impl(memory);
+    unsigned char* base = (unsigned char*)m_impl->base;
+    unsigned char* ptr = NULL;
+    for(size_t i = 0; i < field_sizes.size(); i++) {
+      InstanceLayoutGeneric::FieldLayout& fl = layout->fields[field_ofs];
+      fl.list_idx = i;
+      fl.rel_offset = 0;
+      fl.size_in_bytes = field_sizes[i];
+      field_ofs += field_sizes[i];
+
+      // create a single piece (for non-empty index spaces)
+      if(!space.empty()) {
+	      AffineLayoutPiece<N,T> *alp = new AffineLayoutPiece<N,T>;
+	      alp->bounds = space.bounds;
+        ptr = (unsigned char*)field_pointers[i];
+	      alp->offset = (size_t)(ptr - base);
+	      size_t stride = field_sizes[i];
+	      for(int j = 0; j < N; j++) {
+	        alp->strides[j] = stride;
+	        stride *= (space.bounds.hi[j] - space.bounds.lo[j] + 1);
+	      }
+	      layout->piece_lists[i].pieces.push_back(alp);
+      }
+    }
+        
+    Event e = create_instance(inst, memory, layout, reqs, wait_on);
+    RegionInstanceImpl *inst_impl = get_runtime()->get_instance_impl(inst);
+    printf("inst offset %lu\n", inst_impl->metadata.inst_offset);
+#endif
+    return e;
+  }
+
+#define DOIT_ARRAY_AOS(N,T) \
+  template Event RegionInstance::create_array_instance_AOS<N,T>(RegionInstance&, \
+							      const ZIndexSpace<N,T>&, \
+							      const std::vector<size_t>&, \
+							      const std::vector<void *>&, \
+							      size_t, \
+							      const ProfilingRequestSet&, \
+							      Event);
+  FOREACH_NT(DOIT_ARRAY_AOS)  
 
 }; // namespace Realm

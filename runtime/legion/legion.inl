@@ -3568,11 +3568,11 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     inline void AttachLauncher::attach_array(const std::map<FieldID,void*> &field_pointer_map,
-                                LegionFileMode m)
+                                int layout_flag)
     //--------------------------------------------------------------------------
     {
       file_name = "ARRAY";
-      mode = m;
+      layout_flag = layout_flag;
       field_pointers = field_pointer_map;
     }
 
