@@ -87,18 +87,27 @@ void top_level_task(const Task *task,
   {
     FieldAllocator allocator = 
       runtime->create_field_allocator(ctx, fs);
-    allocator.allocate_field(sizeof(deriv_t),FID_VAL);
-    allocator.allocate_field(sizeof(deriv_t),FID_DERIV);
+    allocator.allocate_field(sizeof(double),FID_VAL);
+    allocator.allocate_field(sizeof(double),FID_DERIV);
   }
   LogicalRegion stencil_lr = runtime->create_logical_region(ctx, is, fs);
   
   deriv_t *deriv_struct_ptr = (deriv_t*)malloc(sizeof(deriv_t)*(num_elements));
+  printf("base array ptr %p\n", deriv_struct_ptr);
 
-  PhysicalRegion stencil_val_pr;
   //double *val_ptr = (double*)malloc(sizeof(double)*(num_elements));
   for (int i = 0; i < num_elements; i++) {
     deriv_struct_ptr[i].val = drand48();
   }
+  
+  
+  std::map<FieldID, size_t> offset;
+  offset[FID_VAL] = 0;
+  offset[FID_DERIV] = sizeof(double);
+  
+  PhysicalRegion stencil_pr = runtime->attach_fortran_array_aos(ctx, stencil_lr, stencil_lr, deriv_struct_ptr, sizeof(deriv_t), offset);
+
+/*  
   char *val_ptr = (char*)deriv_struct_ptr;
   std::map<FieldID,void*> field_pointer_map_val;
   field_pointer_map_val[FID_VAL] = val_ptr;
@@ -113,7 +122,7 @@ void top_level_task(const Task *task,
   field_pointer_map_deriv[FID_DERIV] = deriv_ptr;
   printf("Attach arrray fid %d, struct ptr %p, ptr %p\n", FID_DERIV, deriv_struct_ptr, deriv_ptr);  
   stencil_deriv_pr = runtime->attach_fortran_array(ctx, stencil_lr, stencil_lr, field_pointer_map_deriv,
-	  LEGION_FILE_READ_WRITE); 
+	  LEGION_FILE_READ_WRITE); */
   my_ptr = deriv_struct_ptr;
        
   Rect<1> color_bounds(0,num_subregions-1);

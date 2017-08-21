@@ -952,7 +952,7 @@ namespace Legion {
       virtual PhysicalInstance create_array_instance(ExternalResource resource,
                                    const std::vector<size_t> &field_sizes,
                                    const std::vector<void*> &field_pointers,
-                                   int layout_flag) = 0;
+                                   int layout_flag, unsigned char* aos_base_ptr, size_t aos_stride) = 0;
     public:
       virtual void get_launch_space_domain(Domain &launch_domain) = 0;
       virtual void validate_slicing(const std::vector<IndexSpace> &slice_spaces,
@@ -1178,7 +1178,7 @@ namespace Legion {
       virtual PhysicalInstance create_array_instance(ExternalResource resource,
                                    const std::vector<size_t> &field_sizes,
                                    const std::vector<void*> &field_pointers,
-                                   int layout_flag);
+                                   int layout_flag, unsigned char* aos_base_ptr, size_t aos_stride);
     public:
       virtual void get_launch_space_domain(Domain &launch_domain);
       virtual void validate_slicing(const std::vector<IndexSpace> &slice_spaces,

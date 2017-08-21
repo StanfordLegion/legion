@@ -13767,6 +13767,8 @@ namespace Legion {
                             parent_ctx->get_unique_id());
             }
             layout_flag = launcher.layout_flag;
+            aos_base_ptr = launcher.aos_base_ptr;
+            aos_stride = launcher.aos_stride;
             // Construct the region requirement for this task
             requirement = RegionRequirement(launcher.handle, WRITE_DISCARD, 
                                             EXCLUSIVE, launcher.parent);
@@ -14029,7 +14031,7 @@ namespace Legion {
             }
             // Now ask the low-level runtime to create the instance
             result = node->create_array_instance(EXTERNAL_FORTRAN_ARRAY, sizes, field_pointers,
-                                        layout_flag);
+                                        layout_flag, aos_base_ptr, aos_stride);
             constraints.specialized_constraint = 
               SpecializedConstraint(NORMAL_SPECIALIZE);
             break;

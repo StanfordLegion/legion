@@ -5848,6 +5848,8 @@ namespace Legion {
     {
       AttachLauncher launcher(EXTERNAL_FORTRAN_ARRAY, handle, parent);
       launcher.attach_array(field_pointer_map, layout_flag);
+      launcher.aos_base_ptr = NULL;
+      launcher.aos_stride = 0;
       return runtime->attach_external_resource(ctx, launcher);
     }
 
@@ -5868,6 +5870,8 @@ namespace Legion {
     {
       AttachLauncher launcher(EXTERNAL_C_ARRAY, handle, parent);
       launcher.attach_array(field_pointer_map, layout_flag);
+      launcher.aos_base_ptr = NULL;
+      launcher.aos_stride = 0;
       return runtime->attach_external_resource(ctx, launcher);
     }
 
@@ -5879,34 +5883,30 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    std::vector<PhysicalRegion> Runtime::attach_fortran_array_aos(Context ctx,
-                                                 std::map<FieldID, LogicalRegion> &handle,
-                                                 std::map<FieldID, LogicalRegion> &parent,
-                                                 const void* array_ptr,
-                                                 const std::map<FieldID, size_t> &field_offset)
+    PhysicalRegion Runtime::attach_fortran_array_aos(Context ctx,
+                                                LogicalRegion handle,
+                                                LogicalRegion parent,
+                                                const void* array_ptr,
+                                                size_t stride,
+                                                const std::map<FieldID, size_t> &field_offset)
     //--------------------------------------------------------------------------
     {
       unsigned char* base_ptr = (unsigned char*)array_ptr; 
-      std::map<FieldID, LogicalRegion>::const_iterator it_handle = handle.begin();
-      std::map<FieldID, LogicalRegion>::const_iterator it_parent = parent.begin();
       std::map<FieldID, size_t>::const_iterator it_offset = field_offset.begin();
-      std::vector<PhysicalRegion> pr_set(field_offset.size());
-      int i = 0;
+      std::map<FieldID,void*> field_pointer_map;
       while(it_offset != field_offset.end())
       {
           size_t offset = it_offset->second;
           FieldID fid = it_offset->first;
           unsigned char *ptr = base_ptr + offset;
-          std::map<FieldID,void*> field_pointer_map;
           field_pointer_map[fid] = ptr;
-          PhysicalRegion pr = attach_fortran_array(ctx, it_handle->second, it_parent->second, field_pointer_map, 0);
-          pr_set[i] = pr;
           it_offset ++;
-          it_handle ++;
-          it_parent ++;
-          i++;
       }
-      return pr_set;
+      AttachLauncher launcher(EXTERNAL_FORTRAN_ARRAY, handle, parent);
+      launcher.attach_array(field_pointer_map, 1);
+      launcher.aos_base_ptr = base_ptr;
+      launcher.aos_stride = stride;
+      return runtime->attach_external_resource(ctx, launcher);
     }
 
     //--------------------------------------------------------------------------

@@ -2772,7 +2772,7 @@ namespace Legion {
                                     ExternalResource resource,
                                     const std::vector<size_t> &field_sizes,
                                     const std::vector<void*> &field_pointers,
-                                    int layout_flag)
+                                    int layout_flag, unsigned char* aos_base_ptr, size_t aos_stride)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REALM_CREATE_INSTANCE_CALL);
@@ -2795,7 +2795,7 @@ namespace Legion {
 				           local_space,
 							     field_sizes,
 							     field_pointers,
-							     0,
+							     0, aos_base_ptr, aos_stride,
 							     requests));
         ready.lg_wait();
       }

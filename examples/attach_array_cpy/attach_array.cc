@@ -222,7 +222,7 @@ void init_field_task(const Task *task,
   Rect<1> rect = runtime->get_index_space_domain(ctx,
                   task->regions[0].region.get_index_space());
   for (PointInRectIterator<1> pir(rect); pir(); pir++) {
-    acc[*pir] = 1.1 + i;
+    acc[*pir] = 1.125 + i*1.12;
     i++;
   }
 }

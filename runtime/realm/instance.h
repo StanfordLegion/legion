@@ -190,7 +190,7 @@ namespace Realm {
 				      const ZIndexSpace<N,T>& space,
 				      const std::vector<size_t> &field_sizes,
 				      const std::vector<void*> &field_pointers,
-				      size_t block_size,
+				      size_t block_size, unsigned char* aos_base_ptr, size_t aos_stride,
 				      const ProfilingRequestSet& prs,
 				      Event wait_on = Event::NO_EVENT);
 

@@ -103,21 +103,7 @@ namespace Realm {
     // smoosh hybrid block sizes back to SOA for now
     if(block_size > 1)
       block_size = 0;
-#if 0
-    InstanceLayoutConstraints ilc(field_sizes, block_size);
-    InstanceLayoutGeneric *layout = InstanceLayoutGeneric::choose_instance_layout(space, ilc);
-    //InstanceLayout<N,T> *layout = new InstanceLayout<N,T>;
-    layout->bytes_used = 0;
-    layout->alignment_reqd = 0;  // no allocation being made
-  //  layout->space = space;
-//    layout->piece_lists.resize(field_sizes.size());
-    Event e = create_instance(inst, memory, layout, reqs, wait_on);
-    RegionInstanceImpl *inst_impl = get_runtime()->get_instance_impl(inst);
-    LocalCPUMemory *m_impl = (LocalCPUMemory *)get_runtime()->get_memory_impl(memory);
-    unsigned char* ptr = (unsigned char*)field_pointers[0];
-    unsigned char* base = (unsigned char*)m_impl->base;
-    inst_impl->metadata.inst_offset = ptr - base;
-#else
+
     InstanceLayout<N,T> *layout = new InstanceLayout<N,T>;
     layout->bytes_used = 0;
     layout->alignment_reqd = 0;  // no allocation being made
@@ -153,7 +139,6 @@ namespace Realm {
     Event e = create_instance(inst, memory, layout, reqs, wait_on);
     RegionInstanceImpl *inst_impl = get_runtime()->get_instance_impl(inst);
     printf("inst offset %lu\n", inst_impl->metadata.inst_offset);
-#endif
     return e;
   }
 
@@ -172,7 +157,7 @@ namespace Realm {
 							  const ZIndexSpace<N,T>& space,
 							  const std::vector<size_t> &field_sizes,
                 const std::vector<void*> &field_pointers,
-							  size_t block_size,
+							  size_t block_size, unsigned char* aos_base_ptr, size_t aos_stride,
 							  const ProfilingRequestSet& reqs,
 							  Event wait_on /*= Event::NO_EVENT*/)
   {
@@ -185,21 +170,7 @@ namespace Realm {
     // smoosh hybrid block sizes back to SOA for now
     if(block_size > 1)
       block_size = 0;
-#if 0
-    InstanceLayoutConstraints ilc(field_sizes, block_size);
-    InstanceLayoutGeneric *layout = InstanceLayoutGeneric::choose_instance_layout(space, ilc);
-    //InstanceLayout<N,T> *layout = new InstanceLayout<N,T>;
-    layout->bytes_used = 0;
-    layout->alignment_reqd = 0;  // no allocation being made
-  //  layout->space = space;
-//    layout->piece_lists.resize(field_sizes.size());
-    Event e = create_instance(inst, memory, layout, reqs, wait_on);
-    RegionInstanceImpl *inst_impl = get_runtime()->get_instance_impl(inst);
-    LocalCPUMemory *m_impl = (LocalCPUMemory *)get_runtime()->get_memory_impl(memory);
-    unsigned char* ptr = (unsigned char*)field_pointers[0];
-    unsigned char* base = (unsigned char*)m_impl->base;
-    inst_impl->metadata.inst_offset = ptr - base;
-#else
+
     InstanceLayout<N,T> *layout = new InstanceLayout<N,T>;
     layout->bytes_used = 0;
     layout->alignment_reqd = 0;  // no allocation being made
@@ -209,11 +180,14 @@ namespace Realm {
     size_t field_ofs = 0;
     LocalCPUMemory *m_impl = (LocalCPUMemory *)get_runtime()->get_memory_impl(memory);
     unsigned char* base = (unsigned char*)m_impl->base;
-    unsigned char* ptr = NULL;
     for(size_t i = 0; i < field_sizes.size(); i++) {
       InstanceLayoutGeneric::FieldLayout& fl = layout->fields[field_ofs];
       fl.list_idx = i;
-      fl.rel_offset = 0;
+      if (i > 0) {
+        fl.rel_offset = (size_t)(((unsigned char*)field_pointers[i]) - ((unsigned char*)field_pointers[i-1]));
+      } else {
+        fl.rel_offset = (size_t)(((unsigned char*)field_pointers[i]) - aos_base_ptr);
+      }
       fl.size_in_bytes = field_sizes[i];
       field_ofs += field_sizes[i];
 
@@ -221,12 +195,10 @@ namespace Realm {
       if(!space.empty()) {
 	      AffineLayoutPiece<N,T> *alp = new AffineLayoutPiece<N,T>;
 	      alp->bounds = space.bounds;
-        ptr = (unsigned char*)field_pointers[i];
-	      alp->offset = (size_t)(ptr - base);
-	      size_t stride = field_sizes[i];
+	      alp->offset = (size_t)(aos_base_ptr - base);
 	      for(int j = 0; j < N; j++) {
-	        alp->strides[j] = stride;
-	        stride *= (space.bounds.hi[j] - space.bounds.lo[j] + 1);
+	        alp->strides[j] = aos_stride;
+	       // stride *= (space.bounds.hi[j] - space.bounds.lo[j] + 1);
 	      }
 	      layout->piece_lists[i].pieces.push_back(alp);
       }
@@ -235,7 +207,6 @@ namespace Realm {
     Event e = create_instance(inst, memory, layout, reqs, wait_on);
     RegionInstanceImpl *inst_impl = get_runtime()->get_instance_impl(inst);
     printf("inst offset %lu\n", inst_impl->metadata.inst_offset);
-#endif
     return e;
   }
 
@@ -244,7 +215,7 @@ namespace Realm {
 							      const ZIndexSpace<N,T>&, \
 							      const std::vector<size_t>&, \
 							      const std::vector<void *>&, \
-							      size_t, \
+							      size_t, unsigned char*, size_t, \
 							      const ProfilingRequestSet&, \
 							      Event);
   FOREACH_NT(DOIT_ARRAY_AOS)  

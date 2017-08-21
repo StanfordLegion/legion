@@ -2670,6 +2670,8 @@ namespace Legion {
       std::set<RtEvent> map_applied_conditions;
       InstanceManager *file_instance;
       int layout_flag;  // SOA 0, AOS 1
+      unsigned char* aos_base_ptr;
+      size_t aos_stride;
     };
 
     /**

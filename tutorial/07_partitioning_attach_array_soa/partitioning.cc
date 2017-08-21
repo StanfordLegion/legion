@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cassert>
 #include <cstdlib>
+#include <sys/time.h>
 #include "legion.h"
 using namespace Legion;
 
@@ -32,6 +33,18 @@ enum FieldIDs {
   FID_Y,
   FID_Z,
 };
+
+double get_cur_time() {
+  struct timeval   tv;
+  struct timezone  tz;
+  double cur_time;
+
+  gettimeofday(&tv, &tz);
+  cur_time = tv.tv_sec + tv.tv_usec / 1000000.0;
+
+  return cur_time;
+}
+
 
 void top_level_task(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
@@ -66,7 +79,7 @@ void top_level_task(const Task *task,
       runtime->create_field_allocator(ctx, input_fs);
     allocator.allocate_field(sizeof(double),FID_X);
     runtime->attach_name(input_fs, FID_X, "X");
-    allocator.allocate_field(sizeof(float),FID_Y);
+    allocator.allocate_field(sizeof(double),FID_Y);
     runtime->attach_name(input_fs, FID_Y, "Y");
   }
   FieldSpace output_fs = runtime->create_field_space(ctx);
@@ -82,7 +95,7 @@ void top_level_task(const Task *task,
   LogicalRegion output_lr = runtime->create_logical_region(ctx, is, output_fs);
   runtime->attach_name(output_lr, "output_lr");
 
-  float *y_ptr = (float*)malloc(sizeof(float)*(num_elements));
+  float *y_ptr = (float*)malloc(sizeof(double)*(num_elements));
   for (int j = 0; j < num_elements; j++ ) {
     y_ptr[j] = 1.1;
   }
@@ -156,6 +169,8 @@ void top_level_task(const Task *task,
   // Create our launch domain.  Note that is the same as color domain
   // as we are going to launch one task for each subregion we created.
   ArgumentMap arg_map;
+  
+  double start_init = get_cur_time();
 
   // As in previous examples, we now want to launch tasks for initializing 
   // both the fields.  However, to increase the amount of parallelism
@@ -163,8 +178,8 @@ void top_level_task(const Task *task,
   // the logical subregions created by our partitioning.  To express this
   // we create an IndexLauncher for launching an index space of tasks
   // the same as example 02.
-  //IndexLauncher init_launcher(INIT_FIELD_TASK_ID, color_is, 
-    //                          TaskArgument(NULL, 0), arg_map);
+  IndexLauncher init_launcher(INIT_FIELD_TASK_ID, color_is, 
+                              TaskArgument(NULL, 0), arg_map);
   // For index space task launches we don't want to have to explicitly
   // enumerate separate region requirements for all points in our launch
   // domain.  Instead Legion allows applications to place an upper bound
@@ -189,11 +204,11 @@ void top_level_task(const Task *task,
   // projections functions via the 'register_region_projection' and
   // 'register_partition_projection' functions before starting 
   // the runtime similar to how tasks are registered.
- // init_launcher.add_region_requirement(
-   //   RegionRequirement(input_lp, 0/*projection ID*/, 
-    //                    WRITE_DISCARD, EXCLUSIVE, input_lr));
-  //init_launcher.region_requirements[0].add_field(FID_X);
-  //runtime->execute_index_space(ctx, init_launcher);
+  init_launcher.add_region_requirement(
+      RegionRequirement(input_lp, 0/*projection ID*/, 
+                    WRITE_DISCARD, EXCLUSIVE, input_lr));
+  init_launcher.region_requirements[0].add_field(FID_X);
+  FutureMap fmi0 = runtime->execute_index_space(ctx, init_launcher);
 
   // Modify our region requirement to initialize the other field
   // in the same way.  Note that after we do this we have exposed
@@ -203,12 +218,31 @@ void top_level_task(const Task *task,
   // The power of Legion is that it allows programmers to express
   // these data usage patterns and automatically extracts both
   // kinds of parallelism in a unified programming framework.
-  //init_launcher.region_requirements[0].privilege_fields.clear();
-  //init_launcher.region_requirements[0].instance_fields.clear();
-  //init_launcher.region_requirements[0].add_field(FID_Y);
-  //runtime->execute_index_space(ctx, init_launcher);
+  init_launcher.region_requirements[0].privilege_fields.clear();
+  init_launcher.region_requirements[0].instance_fields.clear();
+  init_launcher.region_requirements[0].add_field(FID_Y);
+  FutureMap fmi1 = runtime->execute_index_space(ctx, init_launcher);
+  fmi1.wait_all_results();
+  fmi0.wait_all_results();
+  double end_init = get_cur_time();
+  printf("init done, time %f\n", end_init - start_init);
+  
+  start_init = get_cur_time();
+  init_launcher.region_requirements[0].privilege_fields.clear();
+  init_launcher.region_requirements[0].instance_fields.clear();
+  init_launcher.region_requirements[0].add_field(FID_X);
+  fmi0 = runtime->execute_index_space(ctx, init_launcher);
+  init_launcher.region_requirements[0].privilege_fields.clear();
+  init_launcher.region_requirements[0].instance_fields.clear();
+  init_launcher.region_requirements[0].add_field(FID_Y);
+  fmi1 = runtime->execute_index_space(ctx, init_launcher);
+  fmi1.wait_all_results();
+  fmi0.wait_all_results();
+  end_init = get_cur_time();
+  printf("init done, time %f\n", end_init - start_init);
 
   const double alpha = 1.1;//drand48();
+  double start_t = get_cur_time();
   // We launch the subtasks for performing the daxpy computation
   // in a similar way to the initialize field tasks.  Note we
   // again make use of two RegionRequirements which use a
@@ -224,7 +258,10 @@ void top_level_task(const Task *task,
       RegionRequirement(output_lp, 0/*projection ID*/,
                         WRITE_DISCARD, EXCLUSIVE, output_lr));
   daxpy_launcher.region_requirements[1].add_field(FID_Z);
-  runtime->execute_index_space(ctx, daxpy_launcher);
+  FutureMap fm = runtime->execute_index_space(ctx, daxpy_launcher);
+  fm.wait_all_results();
+  double end_t = get_cur_time();
+  printf("Attach SOA done, time %f\n", end_t - start_t);
                     
   // While we could also issue parallel subtasks for the checking
   // task, we only issue a single task launch to illustrate an
@@ -242,7 +279,8 @@ void top_level_task(const Task *task,
   check_launcher.add_region_requirement(
       RegionRequirement(output_lr, READ_ONLY, EXCLUSIVE, output_lr));
   check_launcher.region_requirements[1].add_field(FID_Z);
-  runtime->execute_task(ctx, check_launcher);
+  Future fu = runtime->execute_task(ctx, check_launcher);
+  fu.wait();
 
   runtime->destroy_logical_region(ctx, input_lr);
   runtime->destroy_logical_region(ctx, output_lr);
@@ -262,7 +300,8 @@ void init_field_task(const Task *task,
   FieldID fid = *(task->regions[0].privilege_fields.begin());
   const int point = task->index_point.point_data[0];
   printf("Initializing field %d for block %d...\n", fid, point);
-
+  double start_init = get_cur_time();
+/*
   const FieldAccessor<WRITE_DISCARD,double,1> acc(regions[0], fid);
   // Note here that we get the domain for the subregion for
   // this task from the runtime which makes it safe for running
@@ -271,6 +310,27 @@ void init_field_task(const Task *task,
                   task->regions[0].region.get_index_space());
   for (PointInRectIterator<1> pir(rect); pir(); pir++)
     acc[*pir] = 1.1;//drand48();
+*/
+  if (fid == 0) {
+    const FieldAccessor<WRITE_DISCARD,double,1> acc(regions[0], fid);
+    Rect<1> rect = runtime->get_index_space_domain(ctx,
+                                                  task->regions[0].region.get_index_space());
+    for (PointInRectIterator<1> pir(rect); pir(); pir++)
+      acc[*pir] = drand48();
+  } else {
+    const FieldAccessor<WRITE_DISCARD,double,1> acc(regions[0], fid);
+                                
+    // Note here that we get the domain for the subregion for
+    //   // this task from the runtime which makes it safe for running
+    //     // both as a single task and as part of an index space of tasks.
+    Rect<1> rect = runtime->get_index_space_domain(ctx,
+         task->regions[0].region.get_index_space());
+      for (PointInRectIterator<1> pir(rect); pir(); pir++)
+        acc[*pir] = drand48();
+
+  }
+  double end_init = get_cur_time();
+  printf("Initializing field %d for block %d done %f\n", fid, point, end_init-start_init);
 }
 
 void daxpy_task(const Task *task,
@@ -282,9 +342,10 @@ void daxpy_task(const Task *task,
   assert(task->arglen == sizeof(double));
   const double alpha = *((const double*)task->args);
   const int point = task->index_point.point_data[0];
+  double start_task = get_cur_time();
 
   const FieldAccessor<READ_ONLY,double,1> acc_x(regions[0], FID_X);
-  const FieldAccessor<READ_ONLY,float,1> acc_y(regions[0], FID_Y);
+  const FieldAccessor<READ_ONLY,double,1> acc_y(regions[0], FID_Y);
   const FieldAccessor<WRITE_DISCARD,double,1> acc_z(regions[1], FID_Z);
 
   Rect<1> rect = runtime->get_index_space_domain(ctx,
@@ -293,6 +354,9 @@ void daxpy_task(const Task *task,
           alpha, point, acc_x.ptr(rect.lo), acc_y.ptr(rect.lo), acc_z.ptr(rect.lo));
   for (PointInRectIterator<1> pir(rect); pir(); pir++)
     acc_z[*pir] = alpha * acc_x[*pir] + acc_y[*pir];
+  double end_task = get_cur_time();
+  printf("Running daxpy computation with alpha %.8g for point %d, x_ptr %p, y_ptr %p, z_ptr %p done, %f\n", 
+          alpha, point, acc_x.ptr(rect.lo), acc_y.ptr(rect.lo), acc_z.ptr(rect.lo), end_task - start_task);
 }
 
 void check_task(const Task *task,
@@ -305,7 +369,7 @@ void check_task(const Task *task,
   const double alpha = *((const double*)task->args);
 
   const FieldAccessor<READ_ONLY,double,1> acc_x(regions[0], FID_X);
-  const FieldAccessor<READ_ONLY,float,1> acc_y(regions[0], FID_Y);
+  const FieldAccessor<READ_ONLY,double,1> acc_y(regions[0], FID_Y);
   const FieldAccessor<READ_ONLY,double,1> acc_z(regions[1], FID_Z);
 
   Rect<1> rect = runtime->get_index_space_domain(ctx,
