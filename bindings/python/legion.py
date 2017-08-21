@@ -20,6 +20,7 @@ from __future__ import print_function
 import cffi
 import cPickle
 import collections
+import itertools
 import numpy
 import os
 import re
@@ -59,8 +60,34 @@ class Context(object):
         assert self.current_launch == None
         self.current_launch = launch
     def end_launch(self, launch):
-        assert self.current_launch is not None
+        assert self.current_launch == launch
         self.current_launch = None
+
+class DomainPoint(object):
+    __slots__ = ['impl']
+    def __init__(self, value):
+        assert(isinstance(value, _IndexValue))
+        self.impl = ffi.new('legion_domain_point_t *')
+        self.impl[0].dim = 1
+        self.impl[0].point_data[0] = int(value)
+    def raw_value(self):
+        return self.impl[0]
+
+class Domain(object):
+    __slots__ = ['impl']
+    def __init__(self, extent, start=None):
+        if start is not None:
+            assert len(start) == len(extent)
+        else:
+            start = [0 for _ in extent]
+        assert 1 <= len(extent) <= 3
+        rect = ffi.new('legion_rect_{}d_t *'.format(len(extent)))
+        for i in xrange(len(extent)):
+            rect[0].lo.x[i] = start[i]
+            rect[0].hi.x[i] = start[i] + extent[i] - 1
+        self.impl = getattr(c, 'legion_domain_from_rect_{}d'.format(len(extent)))(rect[0])
+    def raw_value(self):
+        return self.impl
 
 class Future(object):
     __slots__ = ['handle']
@@ -168,16 +195,7 @@ class Ispace(object):
 
     @staticmethod
     def create(extent, start=None):
-        if start is not None:
-            assert len(start) == len(extent)
-        else:
-            start = [0 for _ in extent]
-        assert 1 <= len(extent) <= 3
-        rect = ffi.new('legion_rect_{}d_t *'.format(len(extent)))
-        for i in xrange(len(extent)):
-            rect[0].lo.x[i] = start[i]
-            rect[0].hi.x[i] = start[i] + extent[i] - 1
-        domain = getattr(c, 'legion_domain_from_rect_{}d'.format(len(extent)))(rect[0])
+        domain = Domain(extent, start=start).raw_value()
         handle = c.legion_index_space_create_domain(_my.ctx.runtime, _my.ctx.context, domain)
         return Ispace(handle)
 
@@ -389,13 +407,13 @@ class _RegionNdarray(object):
         }
 
 class ExternTask(object):
-    __slots__ = ['privileges', 'task_id']
+    __slots__ = ['privileges', 'calling_convention', 'task_id']
 
     def __init__(self, task_id, privileges=None):
         if privileges is not None:
             privileges = [(x if x is not None else N) for x in privileges]
         self.privileges = privileges
-
+        self.calling_convention = None
         assert isinstance(task_id, int)
         self.task_id = task_id
 
@@ -403,17 +421,15 @@ class ExternTask(object):
         return self.spawn_task(*args)
 
     def spawn_task(self, *args):
-        launcher = _TaskLauncher(
-            task_id=self.task_id,
-            privileges=self.privileges,
-            calling_convention=None)
-        return launcher.spawn_task(*args)
+        if _my.ctx.current_launch:
+            return _my.ctx.current_launch.spawn_task(self, *args)
+        return TaskLaunch().spawn_task(self, *args)
 
 def extern_task(**kwargs):
     return ExternTask(**kwargs)
 
 class Task (object):
-    __slots__ = ['body', 'privileges', 'leaf', 'inner', 'idempotent', 'task_id']
+    __slots__ = ['body', 'privileges', 'leaf', 'inner', 'idempotent', 'calling_convention', 'task_id']
 
     def __init__(self, body, privileges=None,
                  leaf=False, inner=False, idempotent=False,
@@ -425,6 +441,7 @@ class Task (object):
         self.leaf = bool(leaf)
         self.inner = bool(inner)
         self.idempotent = bool(idempotent)
+        self.calling_convention = 'python'
         self.task_id = None
         if register:
             self.register()
@@ -444,11 +461,9 @@ class Task (object):
             return self.spawn_task(*args)
 
     def spawn_task(self, *args):
-        launcher = _TaskLauncher(
-            task_id=self.task_id,
-            privileges=self.privileges,
-            calling_convention='python')
-        return launcher.spawn_task(*args)
+        if _my.ctx.current_launch:
+            return _my.ctx.current_launch.spawn_task(self, *args)
+        return TaskLaunch().spawn_task(self, *args)
 
     def execute_task(self, raw_args, user_data, proc):
         raw_arg_ptr = ffi.new('char[]', bytes(raw_args))
@@ -465,8 +480,13 @@ class Task (object):
             task, raw_regions, num_regions, context, runtime)
 
         # Decode arguments from Pickle format.
-        arg_ptr = ffi.cast('char *', c.legion_task_get_args(task[0]))
-        arg_size = c.legion_task_get_arglen(task[0])
+        if c.legion_task_get_is_index_space(task[0]):
+            arg_ptr = ffi.cast('char *', c.legion_task_get_local_args(task[0]))
+            arg_size = c.legion_task_get_local_arglen(task[0])
+        else:
+            arg_ptr = ffi.cast('char *', c.legion_task_get_args(task[0]))
+            arg_size = c.legion_task_get_arglen(task[0])
+
         if arg_size > 0:
             args = cPickle.loads(ffi.unpack(arg_ptr, arg_size))
         else:
@@ -573,17 +593,15 @@ class _TaskLauncher(object):
         self.privileges = privileges
         self.calling_convention = calling_convention
 
-    def spawn_task(self, *args):
-        assert(isinstance(_my.ctx, Context))
-
-        # Do any required preprocessing on arguments.
-        args = [
+    def preprocess_args(self, *args):
+        return [
             arg._legion_preprocess_task_argument()
             if hasattr(arg, '_legion_preprocess_task_argument') else arg
             for arg in args]
 
-        # Encode task arguments.
+    def encode_args(self, *args):
         task_args = ffi.new('legion_task_argument_t *')
+        task_args_buffer = None
         if self.calling_convention == 'python':
             arg_str = cPickle.dumps(args, protocol=_pickle_version)
             task_args_buffer = ffi.new('char[]', arg_str)
@@ -594,6 +612,14 @@ class _TaskLauncher(object):
             # convention to permit the passing of task arguments.
             task_args[0].args = ffi.NULL
             task_args[0].arglen = 0
+        # WARNING: Need to return the interior buffer or else it will be GC'd
+        return task_args, task_args_buffer
+
+    def spawn_task(self, *args):
+        assert(isinstance(_my.ctx, Context))
+
+        args = self.preprocess_args(*args)
+        task_args, _ = self.encode_args(*args)
 
         # Construct the task launcher.
         launcher = c.legion_task_launcher_create(
@@ -628,6 +654,55 @@ class _TaskLauncher(object):
         c.legion_future_destroy(result)
         return future
 
+class _IndexLauncher(_TaskLauncher):
+    __slots__ = ['task_id', 'privileges', 'calling_convention',
+                 'domain', 'local_args']
+
+    def __init__(self, task_id, privileges, calling_convention, domain):
+        super(_IndexLauncher, self).__init__(
+            task_id, privileges, calling_convention)
+        self.domain = domain
+        self.local_args = c.legion_argument_map_create()
+
+    def spawn_task(self, *args):
+        raise Exception('IndexLaunch does not support spawn_task')
+
+    def attach_local_args(self, index, *args):
+        point = DomainPoint(index)
+        args = self.preprocess_args(*args)
+        task_args, _ = self.encode_args(*args)
+        c.legion_argument_map_set_point(
+            self.local_args, point.raw_value(), task_args[0], False)
+
+    def launch(self):
+        # All arguments are passed as local, so global is NULL.
+        global_args = ffi.new('legion_task_argument_t *')
+        global_args[0].args = ffi.NULL
+        global_args[0].arglen = 0
+
+        # Construct the task launcher.
+        launcher = c.legion_index_launcher_create(
+            self.task_id, self.domain.raw_value(),
+            global_args[0], self.local_args,
+            c.legion_predicate_true(), False, 0, 0)
+
+        # Launch the task.
+        result = c.legion_index_launcher_execute(
+            _my.ctx.runtime, _my.ctx.context, launcher)
+        c.legion_index_launcher_destroy(launcher)
+
+        # TODO: Build future (map) of result.
+        c.legion_future_map_destroy(result)
+
+class TaskLaunch(object):
+    __slots__ = []
+    def spawn_task(self, task, *args):
+        launcher = _TaskLauncher(
+            task_id=task.task_id,
+            privileges=task.privileges,
+            calling_convention=task.calling_convention)
+        return launcher.spawn_task(*args)
+
 class _IndexValue(object):
     __slots__ = ['value']
     def __init__(self, value):
@@ -644,17 +719,62 @@ class _IndexValue(object):
         return self.value
 
 class IndexLaunch(object):
-    __slots__ = ['extent']
+    __slots__ = ['extent', 'domain', 'launcher', 'point',
+                 'saved_task', 'saved_args']
+
     def __init__(self, extent):
         assert len(extent) == 1
         self.extent = extent
+        self.domain = Domain(extent)
+        self.launcher = None
+        self.point = None
+        self.saved_task = None
+        self.saved_args = None
+
     def __iter__(self):
         _my.ctx.begin_launch(self)
-        point = _IndexValue(None)
+        self.point = _IndexValue(None)
         for i in xrange(self.extent[0]):
-            point.value = i
-            yield point
+            self.point.value = i
+            yield self.point
         _my.ctx.end_launch(self)
         self.launch()
+
+    def ensure_launcher(self, task):
+        if self.launcher is None:
+            self.launcher = _IndexLauncher(
+                task_id=task.task_id,
+                privileges=task.privileges,
+                calling_convention=task.calling_convention,
+                domain=self.domain)
+
+    def check_compatibility(self, task, *args):
+        # The tasks in a launch must conform to the following constraints:
+        #   * Only one task can be launched.
+        #   * The arguments must be compatible:
+        #       * At a given argument position, the value must always
+        #         be a region, or always not.
+        #       * If a region, the value must be symbolic (i.e. able
+        #         to be analyzed as a function of the index expression).
+
+        if self.saved_task is None:
+            self.saved_task = task
+        if task != self.saved_task:
+            raise Exception('An IndexLaunch may contain only one task launch')
+
+        if self.saved_args is None:
+            self.saved_args = args
+        for arg, saved_arg in itertools.izip_longest(args, self.saved_args):
+            # TODO: Add support for region arguments
+            if isinstance(arg, Region) or isinstance(arg, RegionField):
+                raise Exception('TODO: Support region arguments to an IndexLaunch')
+
+    def spawn_task(self, task, *args):
+        self.ensure_launcher(task)
+        self.check_compatibility(task, *args)
+        self.launcher.attach_local_args(self.point, *args)
+        # TODO: attach region args
+        # TODO: attach future args
+
     def launch(self):
-        print('TODO: launch')
+        self.launcher.launch()
