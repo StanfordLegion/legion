@@ -1087,7 +1087,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           // should still have some mapping references
           // if other operations are trying to register dependences
-          assert(outstanding_mapping_references > 0);
+          // This assertion no longer holds because of how we record
+          // fence dependences from context operation lists which 
+          // don't track mapping dependences
+          //assert(outstanding_mapping_references > 0);
 #endif
           // Check to see if we've already recorded this dependence
           std::map<Operation*,GenerationID>::const_iterator finder = 
@@ -5725,6 +5728,9 @@ namespace Legion {
     void FenceOp::initialize(TaskContext *ctx, FenceKind kind)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_SPY
+      execution_precondition = ctx->get_fence_precondition();
+#endif
       initialize_operation(ctx, true/*track*/);
       fence_kind = kind;
       if (Runtime::legion_spy_enabled)
@@ -5807,6 +5813,12 @@ namespace Legion {
               if (it->second == it->first->get_generation())
                 trigger_events.insert(complete);
             }
+#ifdef LEGION_SPY
+            // If we're doing Legion Spy verification, we also need to 
+            // validate that we have all the completion events from ALL
+            // the previous events in the context since the last fence
+            trigger_events.insert(execution_precondition);   
+#endif
             ApEvent done = Runtime::merge_events(trigger_events);
             // We can always trigger the completion event when these are done
             Runtime::trigger_event(completion_event, done);
@@ -5938,6 +5950,12 @@ namespace Legion {
         if (it->second == it->first->get_generation())
           trigger_events.insert(complete);
       }
+#ifdef LEGION_SPY
+      // If we're doing Legion Spy verification, we also need to 
+      // validate that we have all the completion events from ALL
+      // the previous events in the context since the last fence
+      trigger_events.insert(execution_precondition);   
+#endif
       ApEvent done = Runtime::merge_events(trigger_events);
       // We can always trigger the completion event when these are done
       Runtime::trigger_event(completion_event, done);
