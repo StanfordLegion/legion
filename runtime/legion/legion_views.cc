@@ -292,7 +292,7 @@ namespace Legion {
       assert(current_epoch_users.empty());
       assert(previous_epoch_users.empty());
       assert(outstanding_gc_events.empty());
-      //assert(traced_outstanding_gc_events.empty());
+      assert(traced_outstanding_gc_events.empty());
 #endif
 #ifdef LEGION_GC
       log_garbage.info("GC Deletion %lld %d", 
@@ -1450,8 +1450,8 @@ namespace Legion {
         parent->add_user_above_fused(usage, term_event, local_color, 
                               origin_node, versions, op_id, index, 
                               user_mask, source, wait_on_events, 
-                              applied_events, need_version_update,
-                              trace_info.tracing);
+                              applied_events, trace_info.tracing,
+                              need_version_update);
       }
       // Add our local user
       const bool issue_collect = add_local_user(usage, term_event, 
@@ -1521,8 +1521,8 @@ namespace Legion {
         const ColorPoint &local_color = logical_node->get_color();
         parent->add_user_above_fused(usage, term_event, local_color,origin_node,
                               versions, op_id, index, user_mask, source,
-                              preconditions, applied_events, need_update_above,
-                              tracing);
+                              preconditions, applied_events, tracing,
+                              need_update_above);
       }
       // Add the user on the way back down
       add_local_user(usage, term_event, child_color, origin_node, false/*base*/,
