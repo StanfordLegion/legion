@@ -46,6 +46,7 @@ local property_type_assignment = {
     priority = { int },
     target = { std.processor_type, std.processor_list_type },
     vectorize = { std.compile_option_type },
+    memoize = { bool },
   },
   region = {
     composite = { std.compile_option_type },
