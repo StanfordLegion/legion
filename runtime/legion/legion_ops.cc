@@ -5804,9 +5804,7 @@ namespace Legion {
                   incoming.begin(); it != incoming.end(); it++)
             {
               ApEvent complete = it->first->get_completion_event();
-#ifndef LEGION_SPY
               if (it->second == it->first->get_generation())
-#endif
                 trigger_events.insert(complete);
             }
             ApEvent done = Runtime::merge_events(trigger_events);
