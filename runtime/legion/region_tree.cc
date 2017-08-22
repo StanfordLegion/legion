@@ -16445,7 +16445,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(!trace_info.memoizing || trace_info.trace != NULL);
 #endif
-        if (trace_info.memoizing && trace_info.trace->is_fixed())
+        if (trace_info.memoizing && !trace_info.tracing)
         {
           trace_info.trace->get_target_views(trace_info, info.index,
               new_views);
@@ -16465,9 +16465,14 @@ namespace Legion {
 #endif
             new_views[idx] = view->as_instance_view();
           }
-          if (trace_info.memoizing && !trace_info.trace->is_fixed())
+          if (trace_info.tracing)
+          {
+#ifdef DEBUG_LEGION
+            assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+#endif
             trace_info.trace->record_target_views(trace_info, info.index,
                 new_views);
+          }
         }
         LegionMap<ReductionView*,FieldMask>::aligned reduce_out_views;
         for (unsigned idx = 0; idx < targets.size(); idx++)
@@ -16486,6 +16491,8 @@ namespace Legion {
             update_reduction_views(state, user_mask, new_view);
           // Skip adding the user if requested
           if (defer_add_users)
+            continue;
+          if (trace_info.memoizing && !trace_info.tracing)
             continue;
           if (targets.size() > 1)
           {
@@ -16529,22 +16536,29 @@ namespace Legion {
                 reduce_out_views[new_view] = restricted;
           }
         }
-        if (!defer_add_users && (targets.size() > 1))
+        if (!trace_info.memoizing || trace_info.tracing)
         {
-          // Second pass of the two pass approach, add our users
-          for (unsigned idx = 0; idx < targets.size(); idx++)
+          if (!defer_add_users && (targets.size() > 1))
           {
-            InstanceRef &ref = targets[idx]; 
-            new_views[idx]->add_user(usage, term_event, ref.get_valid_fields(),
-                                   info.op, info.index, local_space,
-                                   &info.version_info, info.map_applied_events,
-                                   trace_info.tracing);
+            // Second pass of the two pass approach, add our users
+            for (unsigned idx = 0; idx < targets.size(); idx++)
+            {
+              InstanceRef &ref = targets[idx]; 
+              new_views[idx]->add_user(usage, term_event,
+                                       ref.get_valid_fields(),
+                                       info.op, info.index, local_space,
+                                       &info.version_info,
+                                       info.map_applied_events,
+                                       trace_info.tracing);
+            }
           }
+          if (!reduce_out_views.empty())
+            issue_restricted_reductions(info, restrict_info,
+                                        restricted_instances,
+                                        restricted_views,
+                                        reduce_out_views,
+                                        trace_info);
         }
-        if (!reduce_out_views.empty())
-          issue_restricted_reductions(info, restrict_info, restricted_instances,
-                                      restricted_views, reduce_out_views,
-                                      trace_info);
         // If we have any restricted instances, we can now update the state
         // to reflect that they are going to be the valid instances
         if (!!restricted_fields)
@@ -16590,7 +16604,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(trace_info.trace != NULL);
 #endif
-          if (!trace_info.trace->is_fixed())
+          if (trace_info.tracing)
           {
             convert_target_views(targets, context, new_views);
             trace_info.trace->record_target_views(trace_info, info.index,
