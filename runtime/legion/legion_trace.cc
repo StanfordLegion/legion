@@ -1517,12 +1517,17 @@ namespace Legion {
           new SetReadyEvent(*tpl, op_key, region_idx, inst_idx,
                             ready_event_idx));
       tpl->consumers.push_back(std::vector<unsigned>());
-      tpl->max_producers.push_back(1);
+      tpl->max_producers.push_back(2);
 #ifdef DEBUG_LEGION
       assert(tpl->instructions.size() == tpl->events.size());
       assert(tpl->instructions.size() == tpl->consumers.size());
       assert(tpl->instructions.size() == tpl->max_producers.size());
 #endif
+
+#ifdef DEBUG_LEGION
+      assert(tpl->task_entries.find(op_key) != tpl->task_entries.end());
+#endif
+      tpl->consumers[tpl->task_entries[op_key]].push_back(inst_id);
 
 #ifdef DEBUG_LEGION
       assert(ready_event_idx < tpl->consumers.size());
@@ -1952,6 +1957,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(ready_event_idx < events.size());
+      assert(operations.find(op_key) != operations.end());
 #endif
       const std::deque<InstanceSet> &physical_instances =
         operations[op_key]->get_physical_instances();
