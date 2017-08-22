@@ -5072,7 +5072,7 @@ namespace Legion {
     PhysicalManager* MemoryManager::find_and_record(PhysicalManager *manager,
                               const LayoutConstraintSet &constraints,
                               const std::vector<LogicalRegion> &regions,
-                              const std::set<PhysicalManager*> &previous_cands,
+                              std::set<PhysicalManager*> &candidates,
                               bool acquire, MapperID mapper_id,
                               Processor proc, GCPriority priority, 
                               bool tight_region_bounds, bool remote)
@@ -5089,8 +5089,40 @@ namespace Legion {
       // Since we're going to put this in the table add a reference
       if (is_owner)
         manager->add_base_resource_ref(MEMORY_MANAGER_REF);
-      std::deque<PhysicalManager*> candidates;
+      PhysicalManager *alternate = NULL;
+      do
       {
+        // Check to see if we have an alternate candidate
+        if (alternate != NULL)
+        {
+          if (!alternate->meets_regions(regions, tight_region_bounds))
+          {
+            alternate = NULL;
+            continue; // Go back around the loop
+          }
+          if (!alternate->entails(constraints))
+          {
+            alternate = NULL;
+            continue; // Go back around the loop
+          }
+          if (acquire && !alternate->try_add_base_valid_ref(
+                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL,
+                                       false/*must already be valid*/))
+          {
+            alternate = NULL;
+            continue; // Go back around the loop
+          }
+          // If we make it here then we found a better candidate
+          // so we need to delete the instance that we initially made
+          if (manager->try_active_deletion())
+            manager->perform_deletion(RtEvent::NO_RT_EVENT);
+          if (manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
+            delete manager;
+          return alternate;
+        }
+#ifdef DEBUG_LEGION
+        assert(alternate == NULL);
+#endif
         AutoLock m_lock(manager_lock);
         // Find our candidates
         for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
@@ -5103,11 +5135,20 @@ namespace Legion {
           if (!it->first->meets_region_tree(regions))
             continue;
           // If we already considered it we don't have to do it again
-          if (previous_cands.find(it->first) != previous_cands.end())
+          if (candidates.find(it->first) != candidates.end())
             continue;
-          candidates.push_back(it->first);
+          // We found an alternate candidate so break out so we can test it
+          it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
+          candidates.insert(it->first);
+          alternate = it->first;
+          // We found an alternate so we can break out
+          break;
         }
-        // Now add our instance
+        // If we have an alternate we might have to acquire it
+        // while not holding the lock so go back around the loop
+        if (alternate != NULL)
+          continue;
+        // If we make it here then we are good to add our instance
 #ifdef DEBUG_LEGION
         assert(current_instances.find(manager) == current_instances.end());
 #endif
@@ -5118,43 +5159,9 @@ namespace Legion {
         info.instance_size = instance_size;
         info.mapper_priorities[
           std::pair<MapperID,Processor>(mapper_id,proc)] = priority;
-      }
-      // Now see if we can find a matching candidate
-      if (!candidates.empty())
-      {
-        for (std::deque<PhysicalManager*>::const_iterator it = 
-              candidates.begin(); it != candidates.end(); it++)
-        {
-          if (!(*it)->meets_regions(regions, tight_region_bounds))
-            continue;
-          if ((*it)->entails(constraints))
-          {
-            // Check to see if we need to acquire
-            if (acquire)
-            {
-              // If we fail to acquire then keep going
-              if (!(*it)->try_add_base_valid_ref(
-                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL,
-                                       false/*must already be valid*/))
-                continue;
-            }
-            // We successfully found another instance, if we initially
-            // made the instance we were registering valid then we
-            // need to mark it no longer valid
-            AutoLock m_lock(manager_lock);
-            std::map<PhysicalManager*,InstanceInfo>::iterator finder =
-              current_instances.find(manager);
-            if (finder != current_instances.end())
-            {
-              finder->second.current_state = COLLECTABLE_STATE;
-              finder->second.min_priority = 0;
-              finder->second.mapper_priorities[
-                std::pair<MapperID,Processor>(mapper_id,proc)] = 0;
-            }
-            return (*it);
-          }
-        }
-      }
+        // Break out because we are done
+        break;
+      } while (true);
       // If we make it here we've successfully added ourselves
       // and found no satisfying instances added in between
       // Now we can add any references that we need to
@@ -5175,7 +5182,7 @@ namespace Legion {
     PhysicalManager* MemoryManager::find_and_record(PhysicalManager *manager,
                               LayoutConstraints *constraints,
                               const std::vector<LogicalRegion> &regions,
-                              const std::set<PhysicalManager*> &previous_cands,
+                              std::set<PhysicalManager*> &candidates,
                               bool acquire, MapperID mapper_id,
                               Processor proc, GCPriority priority, 
                               bool tight_region_bounds, bool remote)
@@ -5192,8 +5199,40 @@ namespace Legion {
       // Since we're going to put this in the table add a reference
       if (is_owner)
         manager->add_base_resource_ref(MEMORY_MANAGER_REF);
-      std::deque<PhysicalManager*> candidates;
+      PhysicalManager *alternate = NULL;
+      do
       {
+        // Check to see if we have an alternate candidate
+        if (alternate != NULL)
+        {
+          if (!alternate->meets_regions(regions, tight_region_bounds))
+          {
+            alternate = NULL;
+            continue; // Go back around the loop
+          }
+          if (!alternate->entails(constraints))
+          {
+            alternate = NULL;
+            continue; // Go back around the loop
+          }
+          if (acquire && !alternate->try_add_base_valid_ref(
+                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL,
+                                       false/*must already be valid*/))
+          {
+            alternate = NULL;
+            continue; // Go back around the loop
+          }
+          // If we make it here then we found a better candidate
+          // so we need to delete the instance that we initially made
+          if (manager->try_active_deletion())
+            manager->perform_deletion(RtEvent::NO_RT_EVENT);
+          if (manager->remove_base_resource_ref(MEMORY_MANAGER_REF))
+            delete manager;
+          return alternate;
+        }
+#ifdef DEBUG_LEGION
+        assert(alternate == NULL);
+#endif
         AutoLock m_lock(manager_lock);
         // Find our candidates
         for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
@@ -5206,11 +5245,20 @@ namespace Legion {
           if (!it->first->meets_region_tree(regions))
             continue;
           // If we already considered it we don't have to do it again
-          if (previous_cands.find(it->first) != previous_cands.end())
+          if (candidates.find(it->first) != candidates.end())
             continue;
-          candidates.push_back(it->first);
+          // We found an alternate candidate so break out so we can test it
+          it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
+          candidates.insert(it->first);
+          alternate = it->first;
+          // We found an alternate so we can break out
+          break;
         }
-        // Now add our instance
+        // If we have an alternate we might have to acquire it
+        // while not holding the lock so go back around the loop
+        if (alternate != NULL)
+          continue;
+        // If we make it here then we are good to add our instance
 #ifdef DEBUG_LEGION
         assert(current_instances.find(manager) == current_instances.end());
 #endif
@@ -5221,43 +5269,9 @@ namespace Legion {
         info.instance_size = instance_size;
         info.mapper_priorities[
           std::pair<MapperID,Processor>(mapper_id,proc)] = priority;
-      }
-      // Now see if we can find a matching candidate
-      if (!candidates.empty())
-      {
-        for (std::deque<PhysicalManager*>::const_iterator it = 
-              candidates.begin(); it != candidates.end(); it++)
-        {
-          if (!(*it)->meets_regions(regions, tight_region_bounds))
-            continue;
-          if ((*it)->entails(constraints))
-          {
-            // Check to see if we need to acquire
-            if (acquire)
-            {
-              // If we fail to acquire then keep going
-              if (!(*it)->try_add_base_valid_ref(
-                    remote ? REMOTE_DID_REF : MAPPING_ACQUIRE_REF, NULL,
-                                       false/*must already be valid*/))
-                continue;
-            }
-            // We successfully found another instance, if we initially
-            // made the instance we were registering valid then we
-            // need to mark it no longer valid
-            AutoLock m_lock(manager_lock);
-            std::map<PhysicalManager*,InstanceInfo>::iterator finder =
-              current_instances.find(manager);
-            if (finder != current_instances.end())
-            {
-              finder->second.current_state = COLLECTABLE_STATE;
-              finder->second.min_priority = 0;
-              finder->second.mapper_priorities[
-                std::pair<MapperID,Processor>(mapper_id,proc)] = 0;
-            }
-            return (*it);
-          }
-        }
-      }
+        // Break out because we are done
+        break;
+      } while (true);
       // If we make it here we've successfully added ourselves
       // and found no satisfying instances added in between
       // Now we can add any references that we need to

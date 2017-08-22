@@ -830,14 +830,14 @@ namespace Legion {
       PhysicalManager* find_and_record(PhysicalManager *manager, 
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
-                                    const std::set<PhysicalManager*> &cands,
+                                    std::set<PhysicalManager*> &candidates,
                                     bool acquire, MapperID mapper_id, 
                                     Processor proc, GCPriority priority,
                                     bool tight_region_bounds, bool remote);
       PhysicalManager* find_and_record(PhysicalManager *manager, 
                                     LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
-                                    const std::set<PhysicalManager*> &cands,
+                                    std::set<PhysicalManager*> &candidates,
                                     bool acquire, MapperID mapper_id, 
                                     Processor proc, GCPriority priority,
                                     bool tight_region_bounds, bool remote);
