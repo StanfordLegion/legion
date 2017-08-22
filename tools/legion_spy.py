@@ -4996,9 +4996,6 @@ class Operation(object):
     def set_op_kind(self, kind):
         if self.kind == NO_OP_KIND:
             self.kind = kind
-        elif self.kind == FENCE_OP_KIND and \
-                kind == TRACE_OP_KIND:
-            self.kind = kind
         else:
             assert self.kind is kind
 
@@ -9196,10 +9193,7 @@ def parse_legion_spy_line(line, state):
     m = trace_pat.match(line)
     if m is not None:
         op = state.get_operation(int(m.group('uid')))
-        op.set_op_kind(TRACE_OP_KIND)
         op.set_name("Trace Op "+m.group('uid'))
-        context = state.get_task(int(m.group('ctx')))
-        op.set_context(context)
         return True
     m = copy_op_pat.match(line)
     if m is not None:
