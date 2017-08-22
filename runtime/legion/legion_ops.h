@@ -975,7 +975,6 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void);
-      virtual void deferred_execute(void);
     protected:
       FenceKind fence_kind;
     };

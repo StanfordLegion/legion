@@ -5755,47 +5755,36 @@ namespace Legion {
                   incoming.begin(); it != incoming.end(); it++)
             {
               ApEvent complete = it->first->get_completion_event();
+#ifndef LEGION_SPY
               if (it->second == it->first->get_generation())
+#endif
                 trigger_events.insert(complete);
             }
-            RtEvent wait_on = Runtime::protect_merge_events(trigger_events);
-            if (!wait_on.has_triggered())
+            ApEvent done = Runtime::merge_events(trigger_events);
+            // We can always trigger the completion event when these are done
+            Runtime::trigger_event(completion_event, done);
+            need_completion_trigger = false;
+            if (!done.has_triggered())
             {
-              DeferredExecuteArgs deferred_execute_args;
-              deferred_execute_args.proxy_this = this;
-              runtime->issue_runtime_meta_task(deferred_execute_args,
-                                               LG_LATENCY_PRIORITY,
-                                               this, wait_on);
+              RtEvent wait_on = Runtime::protect_event(done);
+              // Was already handled above
+              if (fence_kind != MIXED_FENCE)
+                complete_mapping(wait_on);
+              complete_execution(wait_on);
             }
             else
-              deferred_execute();
+            {
+              // Was already handled above
+              if (fence_kind != MIXED_FENCE)
+                complete_mapping();
+              complete_execution();
+            }
             break;
           }
         default:
           assert(false); // should never get here
       }
     }
-
-    //--------------------------------------------------------------------------
-    void FenceOp::deferred_execute(void)
-    //--------------------------------------------------------------------------
-    {
-      switch (fence_kind)
-      {
-        case EXECUTION_FENCE:
-          {
-            complete_mapping();
-            // Intentionally fall through
-          }
-        case MIXED_FENCE:
-          {
-            complete_execution();
-            break;
-          }
-        default:
-          assert(false); // should never get here
-      }
-    } 
 
     /////////////////////////////////////////////////////////////
     // Frame Operation 
@@ -5902,9 +5891,13 @@ namespace Legion {
         if (it->second == it->first->get_generation())
           trigger_events.insert(complete);
       }
-      RtEvent wait_on = Runtime::protect_merge_events(trigger_events);
-      if (!wait_on.has_triggered())
+      ApEvent done = Runtime::merge_events(trigger_events);
+      // We can always trigger the completion event when these are done
+      Runtime::trigger_event(completion_event, done);
+      need_completion_trigger = false;
+      if (!done.has_triggered())
       {
+        RtEvent wait_on = Runtime::protect_event(done);
         DeferredExecuteArgs deferred_execute_args;
         deferred_execute_args.proxy_this = this;
         runtime->issue_runtime_meta_task(deferred_execute_args,
