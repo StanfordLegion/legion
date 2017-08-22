@@ -7794,6 +7794,11 @@ namespace Legion {
         Runtime::trigger_event(completion_event, restrict_done);
       }
       complete_operation();
+#ifdef LEGION_SPY
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_operation_events(unique_op_id,
+            ApEvent(Realm::Event::NO_EVENT), completion_event);
+#endif
     }
 
     //--------------------------------------------------------------------------
