@@ -8673,6 +8673,9 @@ namespace Legion {
         forest->create_field_space(space);
         // Signal that we are done with our creation
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
+        // Also have to wait for creation to be done here to avoid 
+        // races with field allocations
+        creation_barrier.lg_wait();
       }
       Runtime::advance_barrier(creation_barrier);
       // Register the field space creation
