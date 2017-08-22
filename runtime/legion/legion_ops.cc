@@ -5804,15 +5804,10 @@ namespace Legion {
                   incoming.begin(); it != incoming.end(); it++)
             {
               ApEvent complete = it->first->get_completion_event();
-#ifndef LEGION_SPY
               if (it->second == it->first->get_generation())
-#endif
                 trigger_events.insert(complete);
             }
             RtEvent wait_on = Runtime::protect_merge_events(trigger_events);
-#ifdef LEGION_SPY
-            LegionSpy::log_event_dependence(wait_on, get_completion_event());
-#endif
             if (!wait_on.has_triggered())
             {
               DeferredExecuteArgs deferred_execute_args;
