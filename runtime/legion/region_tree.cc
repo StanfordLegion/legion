@@ -7927,14 +7927,14 @@ namespace Legion {
       // and not have it included in the layout constraints
       PointerConstraint pointer_constraint = constraints.pointer_constraint;
       constraints.pointer_constraint = PointerConstraint();
+      const unsigned total_dims = node->row_source->get_num_dims();
       // Get the layout
       LayoutDescription *layout = 
-        find_layout_description(file_mask, constraints);
+        find_layout_description(file_mask, total_dims, constraints);
       if (layout == NULL)
       {
         LayoutConstraints *layout_constraints = 
           context->runtime->register_layout(handle, constraints);
-        const unsigned total_dims = node->row_source->get_num_dims();
         layout = create_layout_description(file_mask, total_dims,
                                            layout_constraints,
                                            mask_index_map, field_set,
@@ -7963,7 +7963,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LayoutDescription* FieldSpaceNode::find_layout_description(
-                  const FieldMask &mask, const LayoutConstraintSet &constraints)
+                                      const FieldMask &mask, unsigned num_dims,
+                                      const LayoutConstraintSet &constraints)
     //--------------------------------------------------------------------------
     {
       std::deque<LayoutDescription*> candidates;
@@ -7979,6 +7980,8 @@ namespace Legion {
         for (std::list<LayoutDescription*>::const_iterator it = 
               finder->second.begin(); it != finder->second.end(); it++)
         {
+          if ((*it)->total_dims != num_dims)
+            continue;
           if ((*it)->allocated_fields == mask)
             candidates.push_back(*it);
         }
@@ -7990,7 +7993,7 @@ namespace Legion {
       for (std::deque<LayoutDescription*>::const_iterator it = 
             candidates.begin(); it != candidates.end(); it++)
       {
-        if ((*it)->match_layout(constraints))
+        if ((*it)->match_layout(constraints, num_dims))
           return (*it);
       }
       return NULL;
@@ -8054,7 +8057,7 @@ namespace Legion {
         for (LegionList<LayoutDescription*,LAYOUT_DESCRIPTION_ALLOC>::tracked
               ::const_iterator it = descs.begin(); it != descs.end(); it++)
         {
-          if (layout->match_layout(*it))
+          if (layout->match_layout(*it, layout->total_dims))
           {
             // Delete the layout we are trying to register
             // and return the matching one
