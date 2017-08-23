@@ -303,6 +303,9 @@ namespace Legion {
       virtual void register_child_commit(Operation *op) = 0; 
       virtual void unregister_child_operation(Operation *op) = 0;
       virtual void register_fence_dependence(Operation *op) = 0;
+#ifdef LEGION_SPY
+      virtual ApEvent get_fence_precondition(void) const = 0;
+#endif
     public:
       virtual void perform_fence_analysis(FenceOp *op) = 0;
       virtual void update_current_fence(FenceOp *op) = 0;
@@ -878,6 +881,9 @@ namespace Legion {
       virtual void register_child_commit(Operation *op); 
       virtual void unregister_child_operation(Operation *op);
       virtual void register_fence_dependence(Operation *op);
+#ifdef LEGION_SPY
+      virtual ApEvent get_fence_precondition(void) const;
+#endif
     public:
       virtual void perform_fence_analysis(FenceOp *op);
       virtual void update_current_fence(FenceOp *op);
@@ -1035,6 +1041,11 @@ namespace Legion {
     protected:
       // Track information for locally allocated fields
       std::map<FieldSpace,std::vector<LocalFieldInfo> > local_fields;
+#ifdef LEGION_SPY
+      // Some help for Legion Spy for validating execution fences
+    protected:
+      std::set<ApEvent> previous_completion_events;
+#endif
     };
 
     /**
@@ -1385,6 +1396,9 @@ namespace Legion {
       virtual void register_child_commit(Operation *op); 
       virtual void unregister_child_operation(Operation *op);
       virtual void register_fence_dependence(Operation *op);
+#ifdef LEGION_SPY
+      virtual ApEvent get_fence_precondition(void) const;
+#endif
     public:
       virtual void perform_fence_analysis(FenceOp *op);
       virtual void update_current_fence(FenceOp *op);
@@ -1687,6 +1701,9 @@ namespace Legion {
       virtual void register_child_commit(Operation *op); 
       virtual void unregister_child_operation(Operation *op);
       virtual void register_fence_dependence(Operation *op);
+#ifdef LEGION_SPY
+      virtual ApEvent get_fence_precondition(void) const;
+#endif
     public:
       virtual void perform_fence_analysis(FenceOp *op);
       virtual void update_current_fence(FenceOp *op);

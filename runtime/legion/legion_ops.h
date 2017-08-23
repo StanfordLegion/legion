@@ -477,6 +477,7 @@ namespace Legion {
       Reservation op_lock;
       GenerationID gen;
       UniqueID unique_op_id;
+      // The issue index of this operation in the context
       unsigned context_index;
       // Operations on which this operation depends
       std::map<Operation*,GenerationID> incoming;
@@ -982,6 +983,9 @@ namespace Legion {
       virtual void trigger_mapping(void);
     protected:
       FenceKind fence_kind;
+#ifdef LEGION_SPY
+      ApEvent execution_precondition;
+#endif
     };
 
     /**
