@@ -90,6 +90,7 @@ namespace Legion {
       virtual VariantImpl* select_inline_variant(TaskOp *child) const = 0;
       virtual bool is_leaf_context(void) const;
       virtual bool is_inner_context(void) const;
+      virtual bool is_replicate_context(void) const;
       virtual void print_once(FILE *f, const char *message) const;
       virtual void log_once(Realm::LoggerMessage &message) const;
     public:
@@ -1137,6 +1138,8 @@ namespace Legion {
         { return shard_collective_last_radix; }
       inline int get_shard_collective_last_log_radix(void) const
         { return shard_collective_last_log_radix; }
+    public:
+      virtual bool is_replicate_context(void) const;
     public:
       virtual void print_once(FILE *f, const char *message) const;
       virtual void log_once(Realm::LoggerMessage &message) const;

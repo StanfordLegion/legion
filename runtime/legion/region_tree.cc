@@ -11473,10 +11473,14 @@ namespace Legion {
       // data below and there are no reductions, this can happen
       // because the logical analysis over-approximates the closes
       // that need to be done in some cases (e.g. projections)
-      state->filter_composite_mask(composite_mask);
-      // If there is no need to do the close then we are done
-      if (!composite_mask)
-        return NULL;
+      // We can't do this though if it is a replicate context
+      if (!owner_ctx->is_replicate_context())
+      {
+        state->filter_composite_mask(composite_mask);
+        // If there is no need to do the close then we are done
+        if (!composite_mask)
+          return NULL;
+      }
       const AddressSpace local_space = context->runtime->address_space;
       // First we need to record the rest of our closed versions
       VersionManager &manager = get_current_version_manager(ctx_id);
