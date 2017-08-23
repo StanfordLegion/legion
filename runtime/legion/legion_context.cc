@@ -5021,7 +5021,7 @@ namespace Legion {
       // Now record the dependences
       for (std::map<Operation*,GenerationID>::const_iterator it = 
             previous_operations.begin(); it != previous_operations.end(); it++)
-        op->register_dependence(it->first, it->second);
+        op->register_dependence(it->first, it->second, false/*shard only*/);
 
 #ifdef LEGION_SPY
       // Legion Spy still requires region tree analysis for verification
