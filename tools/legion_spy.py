@@ -9817,7 +9817,6 @@ class State(object):
         # Remove index operations from the event graph
         for op in index_owners:
             op.finish_event.incoming_ops.remove(op)
-            op.finish_event = None
         # Check for any interfering index space launches
         for op in self.ops.itervalues():
             if op.kind == INDEX_TASK_KIND and op.is_interfering_index_space_launch():

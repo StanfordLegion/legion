@@ -4842,6 +4842,10 @@ namespace Legion {
         executed_preconditions.insert((*it)->get_completion_event());
         (*it)->launch(preconditions);
       }
+#ifdef LEGION_SPY
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+                                      completion_event);
+#endif
       // Record that we are mapped when all our points are mapped
       // and we are executed when all our points are executed
       complete_mapping(Runtime::merge_events(mapped_preconditions));
@@ -11515,6 +11519,9 @@ namespace Legion {
       launch_space = partition_node->color_space->handle;
       index_domain = partition_node->color_space->get_color_space_domain();
       is_index_space = true;
+#ifdef LEGION_SPY
+      intermediate_index_event = Runtime::create_ap_user_event();
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -11572,6 +11579,10 @@ namespace Legion {
           mapped_preconditions.insert((*it)->get_mapped_event());
           (*it)->launch(preconditions);
         }
+#ifdef LEGION_SPY
+        LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+                                        completion_event);
+#endif
         // We are mapped when all our points are mapped
         complete_mapping(Runtime::merge_events(mapped_preconditions));
       }
@@ -11690,9 +11701,16 @@ namespace Legion {
               Runtime::merge_events(index_preconditions), instances);
           Runtime::trigger_event(completion_event, done_event);
           need_completion_trigger = false;
+#ifdef LEGION_SPY
+          Runtime::trigger_event(intermediate_index_event, done_event);
+#endif
           complete_execution(Runtime::protect_event(done_event));
         }
+#ifdef LEGION_SPY
+        return intermediate_index_event;
+#else
         return completion_event;
+#endif
       }
       else
       {
@@ -12269,13 +12287,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PointDepPartOp::launch(const std::set<RtEvent> &index_preconditions)
+    void PointDepPartOp::launch(const std::set<RtEvent> &launch_preconditions)
     //--------------------------------------------------------------------------
     {
       // Copy over the version infos from our owner
       version_info = owner->version_info;
       // Perform the version analysis for our point
-      std::set<RtEvent> preconditions(index_preconditions);
+      std::set<RtEvent> preconditions(launch_preconditions);
       const UniqueID logical_context_uid = parent_ctx->get_context_uid();
       perform_projection_version_analysis(owner->projection_info,
           owner->requirement, requirement, 0/*idx*/, 
@@ -13258,6 +13276,10 @@ namespace Legion {
         executed_preconditions.insert((*it)->get_completion_event());
         (*it)->launch(preconditions);
       }
+#ifdef LEGION_SPY
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+                                      completion_event);
+#endif
       // Record that we are mapped when all our points are mapped
       // and we are executed when all our points are executed
       complete_mapping(Runtime::merge_events(mapped_preconditions));

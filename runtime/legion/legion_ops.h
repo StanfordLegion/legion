@@ -2414,6 +2414,10 @@ namespace Legion {
       unsigned                          points_committed;
       bool                              commit_request;
       std::set<RtEvent>                 commit_preconditions;
+#ifdef LEGION_SPY
+      // Special helper event to make things look right for Legion Spy
+      ApUserEvent                       intermediate_index_event;
+#endif
     protected:
       std::vector<ProfilingMeasurementID> profiling_requests;
       int                     outstanding_profiling_requests;

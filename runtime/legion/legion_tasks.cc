@@ -6974,9 +6974,8 @@ namespace Legion {
       }
       complete_operation();
 #ifdef LEGION_SPY
-      if (Runtime::legion_spy_enabled)
-        LegionSpy::log_operation_events(unique_op_id,
-            ApEvent(Realm::Event::NO_EVENT), completion_event);
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+                                      completion_event);
 #endif
     }
 
