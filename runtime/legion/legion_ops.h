@@ -481,6 +481,7 @@ namespace Legion {
       Reservation op_lock;
       GenerationID gen;
       UniqueID unique_op_id;
+      // The issue index of this operation in the context
       unsigned context_index;
       // Operations on which this operation depends
       std::map<Operation*,GenerationID> incoming;
@@ -996,6 +997,9 @@ namespace Legion {
       virtual void trigger_mapping(void);
     protected:
       FenceKind fence_kind;
+#ifdef LEGION_SPY
+      ApEvent execution_precondition;
+#endif
     };
 
     /**
@@ -2541,6 +2545,10 @@ namespace Legion {
       unsigned                          points_committed;
       bool                              commit_request;
       std::set<RtEvent>                 commit_preconditions;
+#ifdef LEGION_SPY
+      // Special helper event to make things look right for Legion Spy
+      ApUserEvent                       intermediate_index_event;
+#endif
     protected:
       std::vector<ProfilingMeasurementID> profiling_requests;
       int                     outstanding_profiling_requests;

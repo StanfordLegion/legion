@@ -4654,6 +4654,17 @@ namespace Legion {
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_child_operation_index(get_context_uid(), result, 
                                              op->get_unique_op_id()); 
+#ifdef LEGION_SPY
+      previous_completion_events.insert(op->get_completion_event());
+      // Periodically merge these to keep this data structure from exploding
+      // when we have a long-running task
+      if (previous_completion_events.size() == DEFAULT_MAX_TASK_WINDOW)
+      {
+        ApEvent merge = Runtime::merge_events(previous_completion_events);
+        previous_completion_events.clear();
+        previous_completion_events.insert(merge);
+      }
+#endif
       return result;
     }
 
@@ -4948,23 +4959,54 @@ namespace Legion {
       }
     }
 
+#ifdef LEGION_SPY
+    //--------------------------------------------------------------------------
+    ApEvent InnerContext::get_fence_precondition(void) const
+    //--------------------------------------------------------------------------
+    {
+      return Runtime::merge_events(previous_completion_events);
+    }
+#endif
+
     //--------------------------------------------------------------------------
     void InnerContext::perform_fence_analysis(FenceOp *op)
     //--------------------------------------------------------------------------
     {
-      RegionTreeContext ctx = get_context();
-      // Do our internal regions first
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-        runtime->forest->perform_fence_analysis(ctx, op, 
-                                        regions[idx].region, true/*dominate*/);
+      std::map<Operation*,GenerationID> previous_operations;
+#ifdef LEGION_SPY
       // Now see if we have any created regions
       // Track separately for the two possible contexts
       std::set<LogicalRegion> local_regions;
       std::set<LogicalRegion> outermost_regions;
+#endif
+      // Take the lock and iterate through our current pending
+      // operations and find all the ones with a context index
+      // that is less than the index for the fence operation
+      const unsigned fence_index = op->get_ctx_index();
       {
         AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
-        if (created_requirements.empty())
-          return;
+        for (LegionSet<Operation*,EXECUTING_CHILD_ALLOC>::tracked::
+              const_iterator it = executing_children.begin(); it !=
+              executing_children.end(); it++)
+        {
+          if ((*it)->get_ctx_index() < fence_index)
+            previous_operations[*it] = (*it)->get_generation();
+        }
+        for (LegionSet<Operation*,EXECUTED_CHILD_ALLOC>::tracked::
+              const_iterator it = executed_children.begin(); it != 
+              executed_children.end(); it++)
+        {
+          if ((*it)->get_ctx_index() < fence_index)
+            previous_operations[*it] = (*it)->get_generation();
+        }
+        for (LegionSet<Operation*,COMPLETE_CHILD_ALLOC>::tracked::
+              const_iterator it = complete_children.begin(); it !=
+              complete_children.end(); it++)
+        {
+          if ((*it)->get_ctx_index() < fence_index)
+            previous_operations[*it] = (*it)->get_generation();
+        }
+#ifdef LEGION_SPY
         for (unsigned idx = 0; idx < created_requirements.size(); idx++)
         {
           const LogicalRegion &handle = created_requirements[idx].region;
@@ -4973,7 +5015,21 @@ namespace Legion {
           else
             local_regions.insert(handle);
         }
+#endif
       }
+
+      // Now record the dependences
+      for (std::map<Operation*,GenerationID>::const_iterator it = 
+            previous_operations.begin(); it != previous_operations.end(); it++)
+        op->register_dependence(it->first, it->second);
+
+#ifdef LEGION_SPY
+      // Legion Spy still requires region tree analysis for verification
+      RegionTreeContext ctx = get_context();
+      // Do our internal regions first
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+        runtime->forest->perform_fence_analysis(ctx, op, 
+                                        regions[idx].region, true/*dominate*/);
       if (!local_regions.empty())
       {
         for (std::set<LogicalRegion>::const_iterator it = 
@@ -4988,6 +5044,7 @@ namespace Legion {
               outermost_regions.begin(); it != outermost_regions.end(); it++)
           runtime->forest->perform_fence_analysis(ctx,op,*it,true/*dominate*/);
       }
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -6451,7 +6508,7 @@ namespace Legion {
         }
       }
     }
-    
+
     /////////////////////////////////////////////////////////////
     // Top Level Context 
     /////////////////////////////////////////////////////////////
@@ -11485,6 +11542,16 @@ namespace Legion {
       assert(false);
     }
 
+#ifdef LEGION_SPY
+    //--------------------------------------------------------------------------
+    ApEvent LeafContext::get_fence_precondition(void) const
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return ApEvent::NO_AP_EVENT;
+    }
+#endif
+
     //--------------------------------------------------------------------------
     void LeafContext::perform_fence_analysis(FenceOp *op)
     //--------------------------------------------------------------------------
@@ -12640,6 +12707,15 @@ namespace Legion {
     {
       enclosing->register_fence_dependence(op);
     }
+
+#ifdef LEGION_SPY
+    //--------------------------------------------------------------------------
+    ApEvent InlineContext::get_fence_precondition(void) const
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->get_fence_precondition();
+    }
+#endif
 
     //--------------------------------------------------------------------------
     void InlineContext::perform_fence_analysis(FenceOp *op)

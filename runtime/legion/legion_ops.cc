@@ -1071,7 +1071,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           // should still have some mapping references
           // if other operations are trying to register dependences
-          assert(outstanding_mapping_references > 0);
+          // This assertion no longer holds because of how we record
+          // fence dependences from context operation lists which 
+          // don't track mapping dependences
+          //assert(outstanding_mapping_references > 0);
 #endif
           // Check to see if we've already recorded this dependence
           std::map<Operation*,GenerationID>::const_iterator finder = 
@@ -4888,6 +4891,10 @@ namespace Legion {
         executed_preconditions.insert((*it)->get_completion_event());
         (*it)->launch(preconditions);
       }
+#ifdef LEGION_SPY
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+                                      completion_event);
+#endif
       // Record that we are mapped when all our points are mapped
       // and we are executed when all our points are executed
       complete_mapping(Runtime::merge_events(mapped_preconditions));
@@ -5350,6 +5357,9 @@ namespace Legion {
     void FenceOp::initialize(TaskContext *ctx, FenceKind kind)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_SPY
+      execution_precondition = ctx->get_fence_precondition();
+#endif
       initialize_operation(ctx, true/*track*/);
       fence_kind = kind;
       if (Runtime::legion_spy_enabled)
@@ -5429,11 +5439,15 @@ namespace Legion {
                   incoming.begin(); it != incoming.end(); it++)
             {
               ApEvent complete = it->first->get_completion_event();
-#ifndef LEGION_SPY
               if (it->second == it->first->get_generation())
-#endif
                 trigger_events.insert(complete);
             }
+#ifdef LEGION_SPY
+            // If we're doing Legion Spy verification, we also need to 
+            // validate that we have all the completion events from ALL
+            // the previous events in the context since the last fence
+            trigger_events.insert(execution_precondition);   
+#endif
             ApEvent done = Runtime::merge_events(trigger_events);
             // We can always trigger the completion event when these are done
             Runtime::trigger_event(completion_event, done);
@@ -5565,6 +5579,12 @@ namespace Legion {
         if (it->second == it->first->get_generation())
           trigger_events.insert(complete);
       }
+#ifdef LEGION_SPY
+      // If we're doing Legion Spy verification, we also need to 
+      // validate that we have all the completion events from ALL
+      // the previous events in the context since the last fence
+      trigger_events.insert(execution_precondition);   
+#endif
       ApEvent done = Runtime::merge_events(trigger_events);
       // We can always trigger the completion event when these are done
       Runtime::trigger_event(completion_event, done);
@@ -11779,6 +11799,9 @@ namespace Legion {
       launch_space = partition_node->color_space->handle;
       index_domain = partition_node->color_space->get_color_space_domain();
       is_index_space = true;
+#ifdef LEGION_SPY
+      intermediate_index_event = Runtime::create_ap_user_event();
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -11836,6 +11859,10 @@ namespace Legion {
           mapped_preconditions.insert((*it)->get_mapped_event());
           (*it)->launch(preconditions);
         }
+#ifdef LEGION_SPY
+        LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+                                        completion_event);
+#endif
         // We are mapped when all our points are mapped
         complete_mapping(Runtime::merge_events(mapped_preconditions));
       }
@@ -11954,9 +11981,16 @@ namespace Legion {
               Runtime::merge_events(index_preconditions), instances);
           Runtime::trigger_event(completion_event, done_event);
           need_completion_trigger = false;
+#ifdef LEGION_SPY
+          Runtime::trigger_event(intermediate_index_event, done_event);
+#endif
           complete_execution(Runtime::protect_event(done_event));
         }
+#ifdef LEGION_SPY
+        return intermediate_index_event;
+#else
         return completion_event;
+#endif
       }
       else
       {
@@ -12536,13 +12570,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PointDepPartOp::launch(const std::set<RtEvent> &index_preconditions)
+    void PointDepPartOp::launch(const std::set<RtEvent> &launch_preconditions)
     //--------------------------------------------------------------------------
     {
       // Copy over the version infos from our owner
       version_info = owner->version_info;
       // Perform the version analysis for our point
-      std::set<RtEvent> preconditions(index_preconditions);
+      std::set<RtEvent> preconditions(launch_preconditions);
       const UniqueID logical_context_uid = parent_ctx->get_context_uid();
       perform_projection_version_analysis(owner->projection_info,
           owner->requirement, requirement, 0/*idx*/, 
@@ -13546,6 +13580,10 @@ namespace Legion {
         executed_preconditions.insert((*it)->get_completion_event());
         (*it)->launch(preconditions);
       }
+#ifdef LEGION_SPY
+      LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+                                      completion_event);
+#endif
       // Record that we are mapped when all our points are mapped
       // and we are executed when all our points are executed
       complete_mapping(Runtime::merge_events(mapped_preconditions));
