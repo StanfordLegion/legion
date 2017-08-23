@@ -1030,7 +1030,7 @@ namespace Legion {
       if (trace_info.tracing)
       {
 #ifdef DEBUG_LEGION
-        assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+        assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
 #endif
         trace_info.trace->record_merge_events(trace_info, result,
             wait_on_events);
@@ -1477,7 +1477,7 @@ namespace Legion {
       if (trace_info.tracing)
       {
 #ifdef DEBUG_LEGION
-        assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+        assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
 #endif
         trace_info.trace->record_merge_events(trace_info, result,
             wait_on_events);
@@ -4292,7 +4292,7 @@ namespace Legion {
           if (trace_info.tracing)
           {
 #ifdef DEBUG_LEGION
-            assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+            assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
 #endif
             trace_info.trace->record_merge_events(trace_info, copy_pre,
                 it->preconditions);
@@ -4388,7 +4388,8 @@ namespace Legion {
             if (trace_info.tracing)
             {
 #ifdef DEBUG_LEGION
-              assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+              assert(trace_info.trace != NULL &&
+                     trace_info.trace->is_tracing());
 #endif
               trace_info.trace->record_merge_events(trace_info, post,
                   it->preconditions);
@@ -4560,7 +4561,8 @@ namespace Legion {
             if (trace_info.tracing)
             {
 #ifdef DEBUG_LEGION
-              assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+              assert(trace_info.trace != NULL &&
+                     trace_info.trace->is_tracing());
 #endif
               trace_info.trace->record_merge_events(trace_info, post,
                   it->preconditions);
@@ -5603,7 +5605,7 @@ namespace Legion {
           if (trace_info.tracing)
           {
 #ifdef DEBUG_LEGION
-            assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+            assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
 #endif
             trace_info.trace->record_merge_events(trace_info, done_event,
                 it->preconditions);
@@ -7718,7 +7720,7 @@ namespace Legion {
       if (trace_info.tracing)
       {
 #ifdef DEBUG_LEGION
-        assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+        assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
 #endif
         trace_info.trace->record_merge_events(trace_info, reduce_pre,
             event_preconds);
@@ -7780,7 +7782,7 @@ namespace Legion {
       if (trace_info.tracing)
       {
 #ifdef DEBUG_LEGION
-        assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+        assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
 #endif
         trace_info.trace->record_merge_events(trace_info, reduce_pre,
             preconditions);
@@ -7837,7 +7839,7 @@ namespace Legion {
       if (trace_info.tracing)
       {
 #ifdef DEBUG_LEGION
-        assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+        assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
 #endif
         trace_info.trace->record_merge_events(trace_info, reduce_pre,
             preconditions);
@@ -8110,7 +8112,7 @@ namespace Legion {
       if (trace_info.tracing)
       {
 #ifdef DEBUG_LEGION
-        assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+        assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
 #endif
         trace_info.trace->record_merge_events(trace_info, result,
             wait_on);
@@ -8276,7 +8278,7 @@ namespace Legion {
       if (trace_info.tracing)
       {
 #ifdef DEBUG_LEGION
-        assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+        assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
 #endif
         trace_info.trace->record_merge_events(trace_info, result,
             wait_on);

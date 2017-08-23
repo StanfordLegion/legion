@@ -2360,7 +2360,7 @@ namespace Legion {
           if (trace_info.tracing)
           {
 #ifdef DEBUG_LEGION
-            assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+            assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
 #endif
             trace_info.trace->record_set_ready_event(trace_info, op, idx1,
                                                      idx2, ready);
@@ -14470,7 +14470,7 @@ namespace Legion {
         if (trace_info.tracing)
         {
 #ifdef DEBUG_LEGION
-          assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+          assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
 #endif
           trace_info.trace->record_merge_events(trace_info, copy_pre,
               pre_set.preconditions);
@@ -15894,10 +15894,15 @@ namespace Legion {
         }
       }
 #endif
-      if (trace_info.trace != NULL && !trace_info.trace->is_fixed())
+      if (trace_info.tracing)
+      {
+#ifdef DEBUG_LEGION
+        assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
+#endif
         trace_info.trace->record_issue_copy(trace_info, result, this,
             op, src_fields, dst_fields, precondition, predicate_guard,
             intersect, redop, reduction_fold);
+      }
       return result;
     }
 
@@ -16468,7 +16473,7 @@ namespace Legion {
           if (trace_info.tracing)
           {
 #ifdef DEBUG_LEGION
-            assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+            assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
 #endif
             trace_info.trace->record_target_views(trace_info, info.index,
                 new_views);
@@ -16505,7 +16510,8 @@ namespace Legion {
             if (trace_info.tracing)
             {
 #ifdef DEBUG_LEGION
-              assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+              assert(trace_info.trace != NULL &&
+                     trace_info.trace->is_tracing());
 #endif
               trace_info.trace->record_set_ready_event(trace_info, info.op,
                                                        info.index, idx, ready);
@@ -16523,7 +16529,8 @@ namespace Legion {
             if (trace_info.tracing)
             {
 #ifdef DEBUG_LEGION
-              assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+              assert(trace_info.trace != NULL &&
+                     trace_info.trace->is_tracing());
 #endif
               trace_info.trace->record_set_ready_event(trace_info, info.op,
                                                        info.index, idx, ready);
@@ -16742,7 +16749,8 @@ namespace Legion {
             if (trace_info.tracing)
             {
 #ifdef DEBUG_LEGION
-              assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+              assert(trace_info.trace != NULL &&
+                     trace_info.trace->is_tracing());
 #endif
               trace_info.trace->record_set_ready_event(trace_info, info.op,
                                                        info.index, 0, ready);
@@ -16774,7 +16782,7 @@ namespace Legion {
               {
 #ifdef DEBUG_LEGION
                 assert(trace_info.trace != NULL &&
-                       !trace_info.trace->is_fixed());
+                       trace_info.trace->is_tracing());
 #endif
                 trace_info.trace->record_set_ready_event(trace_info, info.op,
                                                          info.index, idx,

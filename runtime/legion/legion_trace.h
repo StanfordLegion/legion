@@ -335,8 +335,10 @@ namespace Legion {
                              bool &postmap_task,
                              std::vector<Processor> &target_proc,
                              std::deque<InstanceSet> &physical_instances) const;
+    private:
+      void set_current_template_id(PhysicalTraceInfo &trace_info);
     public:
-      void start_recording_template(PhysicalTraceInfo &trace_info);
+      void find_or_create_template(PhysicalTraceInfo &trace_info);
     private:
       PhysicalTemplate* get_template(PhysicalTraceInfo &trace_info);
     public:
@@ -367,11 +369,12 @@ namespace Legion {
       void execute_template(PhysicalTraceInfo &trace_info, SingleTask *task);
     public:
       void fix_trace(void);
-      bool is_fixed(void) const { return fixed; }
-      bool is_empty(void) const { return cached_mappings.empty(); }
+      bool is_tracing(void) const { return tracing; }
     private:
-      bool fixed;
+      bool tracing;
       Reservation trace_lock;
+      ApUserEvent check_complete_event;
+      unsigned current_template_id;
 
       typedef LegionVector<LegionVector<InstanceView*>::aligned >::aligned
         CachedViews;

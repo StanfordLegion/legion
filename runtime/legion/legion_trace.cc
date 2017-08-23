@@ -1011,7 +1011,7 @@ namespace Legion {
       if (local_trace->has_physical_trace())
       {
         PhysicalTrace *physical_trace = local_trace->get_physical_trace();
-        if (!physical_trace->is_empty())
+        if (physical_trace->is_tracing())
         {
           physical_trace->fix_trace();
           physical_trace->initialize_templates(get_completion_event());
@@ -1131,16 +1131,9 @@ namespace Legion {
       if (local_trace->has_physical_trace())
       {
         PhysicalTrace *physical_trace = local_trace->get_physical_trace();
-        if (!physical_trace->is_fixed())
-        {
-          if (!physical_trace->is_empty())
-          {
-            physical_trace->fix_trace();
-            physical_trace->initialize_templates(get_completion_event());
-          }
-        }
-        else
-          physical_trace->initialize_templates(get_completion_event());
+        if (physical_trace->is_tracing())
+          physical_trace->fix_trace();
+        physical_trace->initialize_templates(get_completion_event());
       }
       FenceOp::trigger_mapping();
     }
@@ -1151,7 +1144,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTrace::PhysicalTrace()
-      : fixed(false), trace_lock(Reservation::create_reservation())
+      : tracing(false), trace_lock(Reservation::create_reservation()),
+        check_complete_event(ApUserEvent()), current_template_id(-1U)
     //--------------------------------------------------------------------------
     {
     }
@@ -1238,9 +1232,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!fixed);
+      assert(tracing);
+      assert(check_complete_event.exists() &&
+             check_complete_event.has_triggered());
 #endif
-      fixed = true;
+      tracing = false;
+      check_complete_event = ApUserEvent();
+      current_template_id = -1U;
       for (std::vector<PhysicalTemplate*>::iterator it = templates.begin();
            it != templates.end(); ++it)
         (*it)->finalize();
@@ -1292,15 +1290,59 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTrace::start_recording_template(PhysicalTraceInfo &trace_info)
+    inline void PhysicalTrace::set_current_template_id(
+                                                  PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
-      AutoLock t_lock(trace_lock);
-      // TODO: Multiple templates will be supported once the precondition check
-      //       is added.
-      if (templates.size() > 0) return;
-      trace_info.template_id = templates.size();
-      templates.push_back(new PhysicalTemplate());
+      trace_info.template_id = current_template_id;
+      trace_info.tracing = tracing;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTrace::find_or_create_template(PhysicalTraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+      {
+        AutoLock t_lock(trace_lock, 1, false/*exclusive*/);
+        if (current_template_id != -1U)
+        {
+          set_current_template_id(trace_info);
+          return;
+        }
+      }
+
+      bool wait_on_checks = false;
+      {
+        AutoLock t_lock(trace_lock);
+        if (check_complete_event.exists())
+          wait_on_checks = true;
+        else
+          check_complete_event =
+            ApUserEvent(Realm::UserEvent::create_user_event());
+      }
+      if (wait_on_checks)
+      {
+#ifdef DEBUG_LEGION
+        assert(check_complete_event.exists());
+#endif
+        check_complete_event.wait();
+      }
+      else
+      {
+        if (templates.size() > 0)
+        {
+          current_template_id = templates.size() - 1;
+          tracing = false;
+        }
+        else
+        {
+          current_template_id = templates.size();
+          tracing = true;
+          templates.push_back(new PhysicalTemplate());
+        }
+        Runtime::trigger_event(check_complete_event);
+      }
+      set_current_template_id(trace_info);
     }
 
     //--------------------------------------------------------------------------
@@ -1312,8 +1354,8 @@ namespace Legion {
       {
         AutoLock t_lock(trace_lock, 1, false/*exclusive*/);
 #ifdef DEBUG_LEGION
-        assert(0 <= trace_info.template_id);
-        assert(trace_info.template_id < templates.size());
+        assert(0 <= trace_info.template_id &&
+               trace_info.template_id < templates.size());
 #endif
         tpl = templates[trace_info.template_id];
       }

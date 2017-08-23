@@ -3545,7 +3545,7 @@ namespace Legion {
       if (trace_info.memoizing && !trace_info.tracing)
       {
 #ifdef DEBUG_LEGION
-        assert(trace_info.trace != NULL && trace_info.trace->is_fixed());
+        assert(trace_info.trace != NULL && !trace_info.trace->is_tracing());
 #endif
         // TODO: Do not support must epoch tasks yet
         assert (must_epoch_owner == NULL);
@@ -3630,7 +3630,7 @@ namespace Legion {
       if (trace_info.tracing)
       {
 #ifdef DEBUG_LEGION
-        assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+        assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
 #endif
         trace_info.trace->record_mapper_output(trace_info, output,
                                                physical_instances);
@@ -3660,10 +3660,8 @@ namespace Legion {
         if (trace_info.tracing)
         {
 #ifdef DEBUG_LEGION
-          assert(trace_info.trace != NULL && !trace_info.trace->is_fixed());
+          assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
 #endif
-          if (trace_local_id == 0)
-            trace_info.trace->start_recording_template(trace_info);
           trace_info.trace->record_get_term_event(
               trace_info, get_task_completion(), this);
         }
@@ -3709,7 +3707,7 @@ namespace Legion {
       if (trace_info.memoizing && !trace_info.tracing)
       {
 #ifdef DEBUG_LEGION
-        assert(trace_info.trace != NULL && trace_info.trace->is_fixed());
+        assert(trace_info.trace != NULL && !trace_info.trace->is_tracing());
 #endif
         trace_info.trace->execute_template(trace_info, this);
       }
@@ -5653,10 +5651,7 @@ namespace Legion {
       trace_info.is_point_task = false;
       trace_info.trace = trace->get_physical_trace();
       trace_info.trace_local_id = trace_local_id;
-      trace_info.tracing =
-        trace_info.trace != NULL && !trace_info.trace->is_fixed();
-      // TODO: This should be chosen by the memoization checker
-      trace_info.template_id = 0;
+      trace_info.trace->find_or_create_template(trace_info);
     }
 
     //--------------------------------------------------------------------------
@@ -6634,10 +6629,7 @@ namespace Legion {
 #endif
       trace_info.trace_local_id = trace_local_id;
       trace_info.color = index_point;
-      trace_info.tracing =
-        trace_info.trace != NULL && !trace_info.trace->is_fixed();
-      // TODO: This should be chosen by the memoization checker
-      trace_info.template_id = 0;
+      trace_info.trace->find_or_create_template(trace_info);
     }
 
     //--------------------------------------------------------------------------
