@@ -1,7 +1,12 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version 17.05.0 (May 26, 2017
+Version 17.08.0 (August ??, 2017)
+  * Realm
+    - Fixes to support big-endian systems
+    - Several performance improvements to DMA subsystem
+
+Version 17.05.0 (May 26, 2017)
   * Build system
     - Finally removed long-obsolete SHARED_LOWLEVEL flag
   * Legion

@@ -5116,6 +5116,11 @@ class Operation(object):
             if field not in close_req.fields:
                 continue 
             if read_only and close.kind != READ_ONLY_CLOSE_OP_KIND:
+                if close.kind == INTER_CLOSE_OP_KIND:
+                    print(("WARNING: Runtime issued a full close operation "
+                          "when it could have only issued a read-only close "
+                          "for requirement %d of %s") % (req.index,str(self)))
+                    return close
                 continue
             if not read_only and close.kind != INTER_CLOSE_OP_KIND:
                 continue
