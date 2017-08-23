@@ -2,9 +2,27 @@ This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
 Version 17.08.0 (August ??, 2017)
+  * Build system
+    - Added HDF_ROOT variable to customize HDF5 install location
+  * Legion
+    - New error message format and online reference at
+        http://legion.stanford.edu/messages
+  * Legion Prof
+    - Added new compact binary format for profile logs
+    - Added flag: -hl:prof_logfile prof_%.gz
   * Realm
     - Fixes to support big-endian systems
     - Several performance improvements to DMA subsystem
+    - Added REALM_DEFAULT_ARGS environment variable
+        containing flags to be inserted at front of command line
+  * Regent
+    - Removed new operator. Unstructured regions are now
+        fully allocated by default
+    - Added optimization to automatically skip empty tasks
+    - Initial support for extern tasks that are defined elsewhere
+    - Tasks that use __demand(__openmp) are now constrained
+        to run on OpenMP processors by default
+    - RDIR: Better support for deeper nested region trees
 
 Version 17.05.0 (May 26, 2017)
   * Build system
