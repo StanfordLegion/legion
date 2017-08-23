@@ -1538,7 +1538,8 @@ namespace Legion {
       const ShardID max_shard;
     protected:
       Reservation sharding_lock;
-      std::map<ShardID,IndexSpace> shard_index_spaces; 
+      std::map<std::pair<IndexSpace/*full*/,ShardID>,
+               IndexSpace/*result*/> shard_index_spaces;
     };
 
     /**

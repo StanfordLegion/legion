@@ -9246,11 +9246,12 @@ namespace Legion {
                                                   IndexSpace full_space)
     //--------------------------------------------------------------------------
     {
+      const std::pair<IndexSpace,ShardID> key(full_space, shard);
       // Check to see if we already have it
       {
         AutoLock s_lock(sharding_lock,1,false/*exclusive*/);
-        std::map<ShardID,IndexSpace>::const_iterator finder = 
-          shard_index_spaces.find(shard);
+        std::map<std::pair<IndexSpace,ShardID>,IndexSpace>::const_iterator 
+          finder = shard_index_spaces.find(key);
         if (finder != shard_index_spaces.end())
           return finder->second;
       }
@@ -9258,7 +9259,7 @@ namespace Legion {
       IndexSpaceNode *node = forest->get_node(full_space);
       IndexSpace result = node->create_shard_space(this, shard);
       AutoLock s_lock(sharding_lock);
-      shard_index_spaces[shard] = result;
+      shard_index_spaces[key] = result;
       return result;
     }
 
