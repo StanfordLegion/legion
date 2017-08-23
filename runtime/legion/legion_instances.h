@@ -76,8 +76,10 @@ namespace Legion {
       void compute_destroyed_fields(
           std::vector<PhysicalInstance::DestroyedField> &serdez_fields) const;
     public:
-      bool match_layout(const LayoutConstraintSet &constraints) const;
-      bool match_layout(const LayoutDescription *layout) const;
+      bool match_layout(const LayoutConstraintSet &constraints,
+                        unsigned num_dims) const;
+      bool match_layout(const LayoutDescription *layout,
+                        unsigned num_dims) const;
     public:
       void pack_layout_description(Serializer &rez, AddressSpaceID target);
       static LayoutDescription* handle_unpack_layout_description(

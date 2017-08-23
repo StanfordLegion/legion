@@ -390,9 +390,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool LayoutDescription::match_layout(
-                         const LayoutConstraintSet &candidate_constraints) const
+      const LayoutConstraintSet &candidate_constraints, unsigned num_dims) const
     //--------------------------------------------------------------------------
     {
+      if (num_dims != total_dims)
+        return false;
       // Layout descriptions are always complete, so just check for conflicts
       if (constraints->conflicts(candidate_constraints, total_dims))
         return false;
@@ -401,9 +403,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool LayoutDescription::match_layout(const LayoutDescription *layout) const
+    bool LayoutDescription::match_layout(const LayoutDescription *layout,
+                                         unsigned num_dims) const
     //--------------------------------------------------------------------------
     {
+      if (num_dims != total_dims)
+        return false;
       if (layout->allocated_fields != allocated_fields)
         return false;
       // Layout descriptions are always complete so just check for conflicts
@@ -1972,9 +1977,10 @@ namespace Legion {
       constraints.ordering_constraint.contiguous = true;
       constraints.memory_constraint = MemoryConstraint(
                                         memory_manager->memory.kind());
+      const unsigned num_dims = instance_domain->get_num_dims();
       // Now let's find the layout constraints to use for this instance
       LayoutDescription *layout = 
-        field_node->find_layout_description(instance_mask, constraints);
+        field_node->find_layout_description(instance_mask,num_dims,constraints);
       // If we couldn't find one then we make one
       if (layout == NULL)
       {
@@ -1982,8 +1988,7 @@ namespace Legion {
         LayoutConstraints *layout_constraints = 
          forest->runtime->register_layout(field_node->handle,constraints);
         // Then make our description
-        layout = field_node->create_layout_description(instance_mask,
-                                  instance_domain->get_num_dims(),
+        layout = field_node->create_layout_description(instance_mask, num_dims,
                                   layout_constraints, mask_index_map,
                                   constraints.field_constraint.get_field_set(),
                                   field_sizes, serdez);

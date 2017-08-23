@@ -1858,7 +1858,7 @@ namespace Legion {
                                             RegionNode *node, AttachOp *op);
     public:
       LayoutDescription* find_layout_description(const FieldMask &field_mask,
-                                        const LayoutConstraintSet &constraints);
+                     unsigned num_dims, const LayoutConstraintSet &constraints);
       LayoutDescription* find_layout_description(const FieldMask &field_mask,
                                                 LayoutConstraints *constraints);
       LayoutDescription* create_layout_description(const FieldMask &layout_mask,
