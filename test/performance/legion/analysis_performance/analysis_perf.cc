@@ -84,14 +84,15 @@ static void parse_pattern(const char* pattern_string, vector<int>& pattern)
   }
 }
 
-static void parse_arguments(char** argv, int argc, unsigned& num_tasks,
-                            unsigned& num_loops, unsigned& num_regions,
-                            unsigned& num_partitions, unsigned& num_slices,
-                            unsigned& tree_depth, unsigned& num_fields,
-                            unsigned& dims, unsigned& blast, bool& alternate,
-                            bool& alternate_loop, bool& single_launch,
-                            bool& block, bool& cache_mapping,
-                            bool& tracing, vector<int>& pattern)
+static void parse_arguments(char** argv, int argc, unsigned &num_tasks,
+                            unsigned &num_loops, unsigned &num_regions,
+                            unsigned &num_partitions, unsigned &num_slices,
+                            unsigned &tree_depth, unsigned &num_fields,
+                            unsigned &dims, unsigned &blast, unsigned &slide,
+                            bool &alternate, bool &alternate_loop,
+                            bool &single_launch, bool &block,
+                            bool &cache_mapping, bool &tracing,
+                            vector<int> &pattern)
 {
   int i = 1;
   while (i < argc)
@@ -105,6 +106,7 @@ static void parse_arguments(char** argv, int argc, unsigned& num_tasks,
     else if (strcmp(argv[i], "-f") == 0) num_fields = atoi(argv[++i]);
     else if (strcmp(argv[i], "-D") == 0) dims = atoi(argv[++i]);
     else if (strcmp(argv[i], "-B") == 0) blast = atoi(argv[++i]);
+    else if (strcmp(argv[i], "-L") == 0) slide = atoi(argv[++i]);
     else if (strcmp(argv[i], "-a") == 0) alternate = true;
     else if (strcmp(argv[i], "-A") == 0) alternate_loop = true;
     else if (strcmp(argv[i], "-s") == 0) single_launch = true;
@@ -242,6 +244,7 @@ PerfMapper::PerfMapper(MapperRuntime *rt, Machine machine, Processor local,
   unsigned num_fields = 1;
   unsigned dims = 1;
   unsigned blast = 1;
+  unsigned slide = 0;
   bool alternate = false;
   bool alternate_loop = false;
   bool single_launch = false;
@@ -253,7 +256,7 @@ PerfMapper::PerfMapper(MapperRuntime *rt, Machine machine, Processor local,
   int argc = command_args.argc;
 
   parse_arguments(argv, argc, num_tasks, num_loops, num_regions,
-      num_partitions, num_slices, tree_depth, num_fields, dims, blast,
+      num_partitions, num_slices, tree_depth, num_fields, dims, blast, slide,
       alternate, alternate_loop, single_launch, block, cache_mapping,
       tracing, pattern);
 
@@ -655,6 +658,7 @@ void top_level_task(const Task *task,
   unsigned num_fields = 1;
   unsigned dims = 1;
   unsigned blast = 1;
+  unsigned slide = 0;
   bool alternate = false;
   bool alternate_loop = false;
   bool single_launch = false;
@@ -668,7 +672,7 @@ void top_level_task(const Task *task,
     char **argv = command_args.argv;
     int argc = command_args.argc;
     parse_arguments(argv, argc, num_tasks, num_loops, num_regions,
-        num_partitions, num_slices, tree_depth, num_fields, dims, blast,
+        num_partitions, num_slices, tree_depth, num_fields, dims, blast, slide,
         alternate, alternate_loop, single_launch, block, cache_mapping,
         tracing, pattern);
     if (num_regions == 0) num_partitions = 1;
@@ -747,10 +751,11 @@ void top_level_task(const Task *task,
   printf("* Cache Mapping         :         %s *\n",
       cache_mapping ? "yes" : " no");
   printf("* Block until Analyze   :         %s *\n", block ? "yes" : " no");
-  printf("* Logical Tracing       :         %s *\n", tracing ? "yes" : " no");
+  printf("* Tracing               :         %s *\n", tracing ? "yes" : " no");
   printf("* Number of Slices      :       %5u *\n", num_slices);
   printf("* Dimensionality        :       %5u *\n", dims);
   printf("* Blast Factor          :       %5u *\n", blast);
+  printf("* Sliding Factor        :       %5u *\n", slide);
   printf("***************************************\n");
 
   Domain launch_domain;
@@ -792,7 +797,8 @@ void top_level_task(const Task *task,
     FieldSpace fs = runtime->create_field_space(ctx);
     {
       FieldAllocator allocator = runtime->create_field_allocator(ctx, fs);
-      for (unsigned i = 0; i < num_fields; ++i)
+      unsigned fields_to_allocate = num_fields + (num_partitions - 1) * slide;
+      for (unsigned i = 0; i < fields_to_allocate; ++i)
         allocator.allocate_field(sizeof(int), 100 + i);
     }
 
@@ -917,11 +923,12 @@ void top_level_task(const Task *task,
             if ((alternate && pattern[j] == RD) ||
                 (alternate_loop && pattern[l % pattern.size()] == RD))
             {
+              unsigned offset = slide * p;
               for (unsigned k = 0; k < num_fields; ++k)
               {
                 RegionRequirement req(lr, REDUCE_ID, SIMULTANEOUS, lrs[r]);
                 req.tag = l / (alternate_loop ? pattern.size() : 1);
-                req.add_field(100 + k);
+                req.add_field(100 + k + offset);
                 launcher.add_region_requirement(req);
               }
             }
@@ -929,6 +936,7 @@ void top_level_task(const Task *task,
             {
               FieldID fid = 100;
               unsigned fid_block = num_fields / blast;
+              unsigned offset = slide * p;
               for (unsigned b = 0; b < blast; ++b)
               {
                 PrivilegeMode priv = READ_WRITE;
@@ -946,7 +954,7 @@ void top_level_task(const Task *task,
                 req.tag = l / (alternate_loop ? pattern.size() : 1);
                 for (unsigned k = 0; k < fid_block; ++k)
                 {
-                  req.add_field(fid + k);
+                  req.add_field(fid + k + offset);
                 }
                 launcher.add_region_requirement(req);
                 fid += fid_block;
@@ -978,12 +986,13 @@ void top_level_task(const Task *task,
           if ((alternate && pattern[j] == RD) ||
               (alternate_loop && pattern[l % pattern.size()] == RD))
           {
+            unsigned offset = slide * p;
             for (unsigned k = 0; k < num_fields; ++k)
             {
               RegionRequirement req(lps[r][p], pid, REDUCE_ID, SIMULTANEOUS,
                   lrs[r]);
               req.tag = l / (alternate_loop ? pattern.size() : 1);
-              req.add_field(100 + k);
+              req.add_field(100 + k + offset);
               launcher.add_region_requirement(req);
             }
           }
@@ -991,6 +1000,7 @@ void top_level_task(const Task *task,
           {
             FieldID fid = 100;
             unsigned fid_block = num_fields / blast;
+            unsigned offset = slide * p;
             for (unsigned b = 0; b < blast; ++b)
             {
               PrivilegeMode priv = READ_WRITE;
@@ -1009,7 +1019,7 @@ void top_level_task(const Task *task,
               req.tag = l / (alternate_loop ? pattern.size() : 1);
               for (unsigned k = 0; k < fid_block; ++k)
               {
-                req.add_field(fid + k);
+                req.add_field(fid + k + offset);
               }
               launcher.add_region_requirement(req);
               fid += fid_block;
