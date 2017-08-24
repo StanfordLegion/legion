@@ -5827,10 +5827,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (shard_invalid_barrier.exists() && 
-          !shard_invalid_barrier.has_triggered() && is_owner())
+          !shard_invalid_barrier.has_triggered())
       {
-        // Do our arrival for our shard
-        Runtime::phase_barrier_arrive(shard_invalid_barrier, 1/*count*/);
+        // Do our arrival for our shard if we're the owner
+        if (is_owner())
+          Runtime::phase_barrier_arrive(shard_invalid_barrier, 1/*count*/);
         // See if we've triggered yet and can actually do the arrival
         // or whether we still need to defer it
         if (!shard_invalid_barrier.has_triggered())
