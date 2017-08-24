@@ -8909,6 +8909,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void ProjectionFunction::find_interfering_points(RegionTreeForest *forest,
                                              RegionTreeNode *upper_bound,
+                                             IndexSpace launch_space,
                                              const Domain &launch_space_domain,
                                              RegionTreeNode *target,
                                              std::set<DomainPoint> &results)
@@ -8917,11 +8918,13 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_functional);
 #endif
+      const std::pair<RegionTreeNode*,IndexSpace> key(target, launch_space);
       {
         // Check to see if we already have the interfering points
         AutoLock p_lock(projection_reservation, 1, false/*exclusive*/);
-        std::map<RegionTreeNode*,std::set<DomainPoint> >::const_iterator
-          finder = interfering_points.find(target);
+        std::map<std::pair<RegionTreeNode*,IndexSpace>,
+                 std::set<DomainPoint> >::const_iterator
+          finder = interfering_points.find(key);
         if (finder != interfering_points.end())
         {
           results = finder->second;
@@ -8954,7 +8957,7 @@ namespace Legion {
       }
       // Safe the results in the cache
       AutoLock p_lock(projection_reservation);
-      interfering_points[target] = results;
+      interfering_points[key] = results;
     }
 
     //--------------------------------------------------------------------------
@@ -9236,6 +9239,9 @@ namespace Legion {
                                          const Domain &full_space)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(full_space.contains(point));
+#endif
       return functor->shard(point, full_space, max_shard);
     }
 

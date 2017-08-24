@@ -1463,9 +1463,10 @@ namespace Legion {
       // points given a specific target in the region tree
       void find_interfering_points(RegionTreeForest *forest,
                                    RegionTreeNode *upper_bound,
+                                   IndexSpace launch_space,
                                    const Domain &launch_space_domain,
                                    RegionTreeNode *target,
-                                   std::set<DomainPoint> &interfering_points);
+                                   std::set<DomainPoint> &results);
     protected:
       // Old checking code explicitly for tasks
       void check_projection_region_result(const RegionRequirement &req,
@@ -1489,7 +1490,8 @@ namespace Legion {
       ProjectionFunctor *const functor;
     protected:
       Reservation projection_reservation;
-      std::map<RegionTreeNode*,std::set<DomainPoint> > interfering_points;
+      std::map<std::pair<RegionTreeNode*,IndexSpace>,
+               std::set<DomainPoint> > interfering_points;
     }; 
 
     /**

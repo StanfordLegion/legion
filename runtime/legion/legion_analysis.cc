@@ -3194,7 +3194,7 @@ namespace Legion {
           // Invert the projection function to find the interfering points
           std::set<DomainPoint> interfering_points;
           pit->first.first->find_interfering_points(target->context, node, 
-                                    full_space, target, interfering_points);
+                it->first->handle, full_space, target, interfering_points);
           if (!interfering_points.empty())
           {
             for (std::set<DomainPoint>::const_iterator dit = 
