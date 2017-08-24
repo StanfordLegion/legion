@@ -1483,8 +1483,11 @@ namespace Legion {
 
       if (src->is_reduction_view())
       {
-        if (reduction_views.find(src) == reduction_views.end())
+        std::set<InstanceView*>::iterator finder = reduction_views.find(src);
+        if (finder == reduction_views.end())
           preconditions.insert(src);
+        else
+          reduction_views.erase(finder);
       }
       else
       {
