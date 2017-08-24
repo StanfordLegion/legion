@@ -1,7 +1,7 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version 17.08.0 (August ??, 2017)
+Version 17.08.0 (August 24, 2017)
   * Build system
     - Added HDF_ROOT variable to customize HDF5 install location
   * Legion
