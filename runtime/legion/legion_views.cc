@@ -5827,11 +5827,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (shard_invalid_barrier.exists() && 
-          !shard_invalid_barrier.has_triggered())
+          !shard_invalid_barrier.has_triggered() && is_owner())
       {
-#ifdef DEBUG_LEGION
-        assert(is_owner());
-#endif
         // Do our arrival for our shard
         Runtime::phase_barrier_arrive(shard_invalid_barrier, 1/*count*/);
         // See if we've triggered yet and can actually do the arrival
