@@ -890,8 +890,11 @@ void top_level_task(const Task *task,
     {
       if (tracing && (!alternate_loop || l % pattern.size() == 0))
         runtime->begin_trace(ctx, 0);
-      for (unsigned p = 0; p < num_partitions; ++p)
+
+      unsigned bounds = alternate ? pattern.size() : num_partitions;
+      for (unsigned j = 0; j < bounds; ++j)
       {
+        unsigned p = j % num_partitions;
         for (unsigned i = 0; i < num_tasks; ++i)
         {
           TaskLauncher launcher(DO_NOTHING_TASK_ID, TaskArgument());
@@ -911,7 +914,7 @@ void top_level_task(const Task *task,
                 lp = runtime->get_logical_partition_by_color(ctx, lr, p);
             }
 
-            if ((alternate && pattern[p % pattern.size()] == RD) ||
+            if ((alternate && pattern[j] == RD) ||
                 (alternate_loop && pattern[l % pattern.size()] == RD))
             {
               for (unsigned k = 0; k < num_fields; ++k)
@@ -931,8 +934,8 @@ void top_level_task(const Task *task,
                 PrivilegeMode priv = READ_WRITE;
                 if (alternate)
                 {
-                  if (pattern[p % pattern.size()] == RO) priv = READ_ONLY;
-                  else if (pattern[p % pattern.size()] == WO) priv = WRITE_ONLY;
+                  if (pattern[j] == RO) priv = READ_ONLY;
+                  else if (pattern[j] == WO) priv = WRITE_ONLY;
                 }
                 else if (alternate_loop)
                 {
@@ -963,14 +966,16 @@ void top_level_task(const Task *task,
     {
       if (tracing && (!alternate_loop || l % pattern.size() == 0))
         runtime->begin_trace(ctx, 0);
-      for (unsigned p = 0; p < num_partitions; ++p)
+      unsigned bounds = alternate ? pattern.size() : num_partitions;
+      for (unsigned j = 0; j < bounds; ++j)
       {
+        unsigned p = j % num_partitions;
         IndexTaskLauncher launcher(DO_NOTHING_TASK_ID, launch_domain,
                                    TaskArgument(), ArgumentMap());
         if (block && l == 0 && p == 0) launcher.add_wait_barrier(next_barrier);
         for (unsigned r = 0; r < num_regions; ++r)
         {
-          if ((alternate && pattern[p % pattern.size()] == RD) ||
+          if ((alternate && pattern[j] == RD) ||
               (alternate_loop && pattern[l % pattern.size()] == RD))
           {
             for (unsigned k = 0; k < num_fields; ++k)
@@ -991,8 +996,8 @@ void top_level_task(const Task *task,
               PrivilegeMode priv = READ_WRITE;
               if (alternate)
               {
-                if (pattern[p % pattern.size()] == RO) priv = READ_ONLY;
-                else if (pattern[p % pattern.size()] == WO) priv = WRITE_ONLY;
+                if (pattern[j] == RO) priv = READ_ONLY;
+                else if (pattern[j] == WO) priv = WRITE_ONLY;
               }
               else if (alternate_loop)
               {
