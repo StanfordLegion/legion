@@ -18957,6 +18957,7 @@ namespace Legion {
     /*static*/ std::vector<MPILegionHandshake>*
     Runtime::pending_handshakes = NULL;
     /*static*/ bool Runtime::program_order_execution = false;
+    /*static*/ bool Runtime::dump_physical_traces = false;
 #ifdef DEBUG_LEGION
     /*static*/ bool Runtime::logging_region_tree_state = false;
     /*static*/ bool Runtime::verbose_logging = false;
@@ -19063,6 +19064,7 @@ continue;					\
         gc_epoch_size = DEFAULT_GC_EPOCH_SIZE;
         max_local_fields = DEFAULT_LOCAL_FIELDS;
         program_order_execution = false;
+        dump_physical_traces = false;
         num_profiling_nodes = 0;
         serializer_type = "binary";
         prof_logfile = NULL;
@@ -19094,6 +19096,7 @@ continue;					\
           if (!strcmp(argv[i],"-lg:safe_mapper"))
             unsafe_mapper = false;
           BOOL_ARG("-lg:inorder",program_order_execution);
+          BOOL_ARG("-lg:dump_physical_traces",dump_physical_traces);
           INT_ARG("-lg:window", initial_task_window_size);
           INT_ARG("-lg:hysteresis", initial_task_window_hysteresis);
           INT_ARG("-lg:sched", initial_tasks_to_schedule);
@@ -19160,6 +19163,7 @@ continue;					\
           if (!strcmp(argv[i],"-hl:safe_mapper"))
             unsafe_mapper = false;
           BOOL_ARG("-hl:inorder",program_order_execution);
+          BOOL_ARG("-hl:dump_physical_traces",dump_physical_traces);
           INT_ARG("-hl:window", initial_task_window_size);
           INT_ARG("-hl:hysteresis", initial_task_window_hysteresis);
           INT_ARG("-hl:sched", initial_tasks_to_schedule);

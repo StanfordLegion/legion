@@ -1771,6 +1771,7 @@ namespace Legion {
       preconditions = conditions;
       valid_views = views;
       reduction_views = red_views;
+      if (Runtime::dump_physical_traces) dump_template();
 #ifdef DEBUG_LEGION
       sanity_check();
 #endif

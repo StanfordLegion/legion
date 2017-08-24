@@ -2943,6 +2943,7 @@ namespace Legion {
       static bool bit_mask_logging;
 #endif
       static bool program_order_execution;
+      static bool dump_physical_traces;
     public:
       static unsigned num_profiling_nodes;
       static const char* serializer_type;
