@@ -8908,10 +8908,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ProjectionFunction::find_interfering_points(RegionTreeForest *forest,
-                                                 RegionTreeNode *upper_bound,
-                                                 IndexSpaceNode *launch_space,
-                                                 RegionTreeNode *target,
-                                                 std::set<DomainPoint> &results)
+                                             RegionTreeNode *upper_bound,
+                                             const Domain &launch_space_domain,
+                                             RegionTreeNode *target,
+                                             std::set<DomainPoint> &results)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8930,8 +8930,6 @@ namespace Legion {
       }
       // Otherwise we fall through and compute the results directly
       // Iterate over the points and do the projection
-      Domain launch_space_domain;
-      launch_space->get_launch_space_domain(launch_space_domain);
       if (upper_bound->is_region())
       {
         const LogicalRegion upper = upper_bound->as_region_node()->handle;

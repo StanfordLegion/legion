@@ -3189,14 +3189,14 @@ namespace Legion {
         {
           if (it->second * mask)
             continue;
+          Domain full_space;
+          it->first->get_launch_space_domain(full_space);
           // Invert the projection function to find the interfering points
           std::set<DomainPoint> interfering_points;
           pit->first.first->find_interfering_points(target->context, node, 
-                                    it->first, target, interfering_points);
+                                    full_space, target, interfering_points);
           if (!interfering_points.empty())
           {
-            Domain full_space;
-            it->first->get_launch_space_domain(full_space);
             for (std::set<DomainPoint>::const_iterator dit = 
                   interfering_points.begin(); dit != 
                   interfering_points.end(); dit++)

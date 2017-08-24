@@ -1463,7 +1463,7 @@ namespace Legion {
       // points given a specific target in the region tree
       void find_interfering_points(RegionTreeForest *forest,
                                    RegionTreeNode *upper_bound,
-                                   IndexSpaceNode *launch_space,
+                                   const Domain &launch_space_domain,
                                    RegionTreeNode *target,
                                    std::set<DomainPoint> &interfering_points);
     protected:
