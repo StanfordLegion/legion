@@ -3334,6 +3334,7 @@ namespace Legion {
           dominated_fields -= overlap;
           if (!dominated_fields)
             return;
+          continue;
         }
         FieldMask child_non_dominated = overlap;
         finder->second->filter_dominated_fields(it->second,child_non_dominated);
