@@ -49,11 +49,15 @@ c = ffi.dlopen(None)
 _my = threading.local()
 
 class Context(object):
-    __slots__ = ['context', 'runtime', 'task', 'regions', 'current_launch']
-    def __init__(self, context, runtime, task, regions):
-        self.context = context
-        self.runtime = runtime
-        self.task = task
+    __slots__ = ['context_root', 'context', 'runtime_root', 'runtime',
+                 'task_root', 'task', 'regions', 'current_launch']
+    def __init__(self, context_root, runtime_root, task_root, regions):
+        self.context_root = context_root
+        self.context = self.context_root[0]
+        self.runtime_root = runtime_root
+        self.runtime = self.runtime_root[0]
+        self.task_root = task_root
+        self.task = self.task_root[0]
         self.regions = regions
         self.current_launch = None
     def begin_launch(self, launch):
@@ -515,7 +519,7 @@ class Task (object):
             assert req == num_regions[0]
 
         # Build context.
-        ctx = Context(context[0], runtime[0], task[0], regions)
+        ctx = Context(context, runtime, task, regions)
 
         # Ensure that we're not getting tangled up in another
         # thread. There should be exactly one thread per task.
