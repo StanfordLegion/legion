@@ -1825,11 +1825,10 @@ namespace Legion {
     void PhysicalTemplate::sanity_check()
     //--------------------------------------------------------------------------
     {
-      //// Reduction instances should not have been recycled in the trace
-      //for (std::set<InstanceView*>::iterator it = preconditions.begin();
-      //     it != preconditions.end(); ++it)
-      //  assert(!(*it)->is_reduction_view() ||
-      //         preconditions.find(*it) == preconditions.end());
+      // Reduction instances should not have been recycled in the trace
+      for (std::set<InstanceView*>::iterator it = preconditions.begin();
+           it != preconditions.end(); ++it)
+        assert(reduction_views.find(*it) == reduction_views.end());
     }
 
     /////////////////////////////////////////////////////////////
