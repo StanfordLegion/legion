@@ -2363,7 +2363,8 @@ namespace Legion {
             assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
 #endif
             trace_info.trace->record_set_ready_event(trace_info, op, idx1,
-                                                     idx2, ready);
+                                                     idx2, ready,
+                                                     req, target_views[idx2]);
           }
         }
       }
@@ -14457,6 +14458,14 @@ namespace Legion {
             it->first->copy_from(op_mask, src_fields);
             dst->copy_to(op_mask, dst_fields, helper);
             update_views[it->first] = op_mask;
+            if (trace_info.tracing)
+            {
+#ifdef DEBUG_LEGION
+              assert(trace_info.trace != NULL &&
+                     trace_info.trace->is_tracing());
+#endif
+              trace_info.trace->record_copy_views(trace_info, it->first, dst);
+            }
           }
         }
 #ifdef DEBUG_LEGION
@@ -16514,7 +16523,8 @@ namespace Legion {
                      trace_info.trace->is_tracing());
 #endif
               trace_info.trace->record_set_ready_event(trace_info, info.op,
-                                                       info.index, idx, ready);
+                                                       info.index, idx, ready,
+                                                       info.req, new_view);
             }
             new_views[idx] = new_view;
           }
@@ -16533,7 +16543,8 @@ namespace Legion {
                      trace_info.trace->is_tracing());
 #endif
               trace_info.trace->record_set_ready_event(trace_info, info.op,
-                                                       info.index, idx, ready);
+                                                       info.index, idx, ready,
+                                                       info.req, new_view);
             }
           }
           if (!defer_add_users && !!restricted_fields)
@@ -16753,7 +16764,8 @@ namespace Legion {
                      trace_info.trace->is_tracing());
 #endif
               trace_info.trace->record_set_ready_event(trace_info, info.op,
-                                                       info.index, 0, ready);
+                                                       info.index, 0, ready,
+                                                       info.req, new_views[0]);
             }
             if (!!restricted_fields && !IS_READ_ONLY(info.req))
             {
@@ -16786,7 +16798,8 @@ namespace Legion {
 #endif
                 trace_info.trace->record_set_ready_event(trace_info, info.op,
                                                          info.index, idx,
-                                                         ready);
+                                                         ready, info.req,
+                                                         new_views[idx]);
               }
             }
             const bool restricted_out = 

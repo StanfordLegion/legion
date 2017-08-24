@@ -348,6 +348,8 @@ namespace Legion {
       void record_merge_events(PhysicalTraceInfo &trace_info,
                                ApEvent &lhs,
                                const std::set<ApEvent>& rhs);
+      void record_copy_views(PhysicalTraceInfo &trace_info,
+                             InstanceView *src, InstanceView *dst);
       void record_issue_copy(PhysicalTraceInfo &trace_info,
                              ApEvent lhs,
                              RegionTreeNode* node,
@@ -363,7 +365,13 @@ namespace Legion {
                                   Operation *op,
                                   unsigned region_idx,
                                   unsigned inst_idx,
-                                  ApEvent ready_event);
+                                  ApEvent ready_event,
+                                  const RegionRequirement &req,
+                                  InstanceView *view);
+    private:
+      void record_ready_view(PhysicalTraceInfo &trace_info,
+                             const RegionRequirement &req,
+                             InstanceView *view);
     public:
       void initialize_templates(ApEvent fence_completion);
       void execute_template(PhysicalTraceInfo &trace_info, SingleTask *task);
@@ -395,6 +403,9 @@ namespace Legion {
 
       CachedMappings cached_mappings;
       std::vector<PhysicalTemplate*> templates;
+      std::set<InstanceView*> preconditions;
+      std::set<InstanceView*> valid_views;
+      std::set<InstanceView*> reduction_views;
     };
 
     /**
@@ -412,8 +423,12 @@ namespace Legion {
 
       void initialize();
       void execute(PhysicalTraceInfo &trace_info, SingleTask *task);
+      void finalize(const std::set<InstanceView*> &preconditions,
+                    const std::set<InstanceView*> &valid_views,
+                    const std::set<InstanceView*> &reduction_views);
       void dump_template();
-      void finalize();
+      static std::string view_to_string(const InstanceView *view);
+      void sanity_check();
 
       Reservation template_lock;
 
@@ -427,6 +442,9 @@ namespace Legion {
       std::vector<ApEvent> events;
       std::map<ApEvent, unsigned> event_map;
       std::vector<Instruction*> instructions;
+      std::set<InstanceView*> preconditions;
+      std::set<InstanceView*> valid_views;
+      std::set<InstanceView*> reduction_views;
     };
 
     /**

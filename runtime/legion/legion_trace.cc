@@ -20,6 +20,7 @@
 #include "legion_trace.h"
 #include "legion_tasks.h"
 #include "legion_context.h"
+#include "legion_views.h"
 #include "logger_message_descriptor.h"
 
 namespace Legion {
@@ -1235,13 +1236,18 @@ namespace Legion {
       assert(tracing);
       assert(check_complete_event.exists() &&
              check_complete_event.has_triggered());
+      assert(0 <= current_template_id &&
+             current_template_id < templates.size());
 #endif
+      templates[current_template_id]->finalize(preconditions, valid_views,
+          reduction_views);
+
       tracing = false;
       check_complete_event = ApUserEvent();
       current_template_id = -1U;
-      for (std::vector<PhysicalTemplate*>::iterator it = templates.begin();
-           it != templates.end(); ++it)
-        (*it)->finalize();
+      preconditions.clear();
+      valid_views.clear();
+      reduction_views.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -1469,6 +1475,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalTrace::record_copy_views(PhysicalTraceInfo &trace_info,
+                                          InstanceView *src, InstanceView *dst)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(trace_lock);
+
+      if (src->is_reduction_view())
+      {
+        if (reduction_views.find(src) == reduction_views.end())
+          preconditions.insert(src);
+      }
+      else
+      {
+        if (valid_views.find(src) == valid_views.end())
+          preconditions.insert(src);
+      }
+
+      if (valid_views.find(dst) == valid_views.end())
+        valid_views.insert(dst);
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalTrace::record_issue_copy(PhysicalTraceInfo &trace_info,
                                           ApEvent lhs,
                                           RegionTreeNode* node,
@@ -1529,11 +1557,34 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline void PhysicalTrace::record_ready_view(PhysicalTraceInfo &trace_info,
+                                                 const RegionRequirement &req,
+                                                 InstanceView *view)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(trace_lock);
+      if (view->is_reduction_view())
+      {
+#ifdef DEBUG_LEGION
+        assert(IS_REDUCE(req));
+#endif
+        reduction_views.insert(view);
+      }
+      else if (valid_views.find(view) == valid_views.end())
+      {
+        if (HAS_READ(req)) preconditions.insert(view);
+        valid_views.insert(view);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalTrace::record_set_ready_event(PhysicalTraceInfo &trace_info,
                                                Operation *op,
                                                unsigned region_idx,
                                                unsigned inst_idx,
-                                               ApEvent ready_event)
+                                               ApEvent ready_event,
+                                               const RegionRequirement &req,
+                                               InstanceView *view)
     //--------------------------------------------------------------------------
     {
       PhysicalTemplate *tpl = get_template(trace_info);
@@ -1575,6 +1626,8 @@ namespace Legion {
       assert(ready_event_idx < tpl->consumers.size());
 #endif
       tpl->consumers[ready_event_idx].push_back(inst_id);
+
+      record_ready_view(trace_info, req, view);
     }
 
     void PhysicalTrace::initialize_templates(ApEvent fence_completion)
@@ -1705,18 +1758,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::dump_template()
-    //--------------------------------------------------------------------------
-    {
-      for (size_t idx = 0; idx < instructions.size(); ++idx)
-        std::cout << instructions[idx]->to_string()
-                  << ", # consumers: " << consumers[idx].size()
-                  << ", # producers: " << max_producers[idx]
-                  << std::endl;
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTemplate::finalize()
+    void PhysicalTemplate::finalize(const std::set<InstanceView*> &conditions,
+                                    const std::set<InstanceView*> &views,
+                                    const std::set<InstanceView*> &red_views)
     //--------------------------------------------------------------------------
     {
       event_map.clear();
@@ -1724,7 +1768,67 @@ namespace Legion {
       assert(consumers.size() == instructions.size());
       assert(max_producers.size() == instructions.size());
 #endif
-      //dump_template();
+      preconditions = conditions;
+      valid_views = views;
+      reduction_views = red_views;
+#ifdef DEBUG_LEGION
+      sanity_check();
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline std::string PhysicalTemplate::view_to_string(
+                                                       const InstanceView *view)
+    //--------------------------------------------------------------------------
+    {
+      assert(view->logical_node->is_region());
+      std::stringstream ss;
+      LogicalRegion handle = view->logical_node->as_region_node()->handle;
+      ss << "pointer: " << std::hex << view
+         << ", instance: " << std::hex << view->get_manager()->get_instance().id
+         << ", kind: "<< (view->is_materialized_view() ? "   normal" : "reduction")
+         << ", region: " << "(" << handle.get_index_space().get_id()
+         << "," << handle.get_field_space().get_id()
+         << "," << handle.get_tree_id()
+         << ")";
+      return ss.str();
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::dump_template()
+    //--------------------------------------------------------------------------
+    {
+      std::cerr << "[Instructions]" << std::endl;
+      for (size_t idx = 0; idx < instructions.size(); ++idx)
+        std::cerr << "  " << instructions[idx]->to_string()
+                  << ", # consumers: " << consumers[idx].size()
+                  << ", # producers: " << max_producers[idx]
+                  << std::endl;
+      std::cerr << "[Preconditions]" << std::endl;
+      for (std::set<InstanceView*>::iterator it = preconditions.begin();
+           it != preconditions.end(); ++it)
+        std::cerr << "  " << view_to_string(*it) << std::endl;
+
+      std::cerr << "[Valid Views]" << std::endl;
+      for (std::set<InstanceView*>::iterator it = valid_views.begin();
+           it != valid_views.end(); ++it)
+        std::cerr << "  " << view_to_string(*it) << std::endl;
+
+      std::cerr << "[Reduction Views]" << std::endl;
+      for (std::set<InstanceView*>::iterator it = reduction_views.begin();
+           it != reduction_views.end(); ++it)
+        std::cerr << "  " << view_to_string(*it) << std::endl;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::sanity_check()
+    //--------------------------------------------------------------------------
+    {
+      //// Reduction instances should not have been recycled in the trace
+      //for (std::set<InstanceView*>::iterator it = preconditions.begin();
+      //     it != preconditions.end(); ++it)
+      //  assert(!(*it)->is_reduction_view() ||
+      //         preconditions.find(*it) == preconditions.end());
     }
 
     /////////////////////////////////////////////////////////////

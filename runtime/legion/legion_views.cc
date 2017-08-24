@@ -7724,6 +7724,7 @@ namespace Legion {
 #endif
         trace_info.trace->record_merge_events(trace_info, reduce_pre,
             event_preconds);
+        trace_info.trace->record_copy_views(trace_info, this, target);
       }
       ApEvent reduce_post = manager->issue_reduction(op, 
                                                      src_fields, dst_fields,
@@ -7786,6 +7787,7 @@ namespace Legion {
 #endif
         trace_info.trace->record_merge_events(trace_info, reduce_pre,
             preconditions);
+        trace_info.trace->record_copy_views(trace_info, this, target);
       }
       ApEvent reduce_post = target->logical_node->issue_copy(op, 
                              src_fields, dst_fields, reduce_pre, 
@@ -7843,6 +7845,7 @@ namespace Legion {
 #endif
         trace_info.trace->record_merge_events(trace_info, reduce_pre,
             preconditions);
+        trace_info.trace->record_copy_views(trace_info, this, target);
       }
       ApEvent reduce_post = manager->issue_reduction(op, 
                                              src_fields, dst_fields,
