@@ -3322,7 +3322,7 @@ namespace Legion {
 
           if (dominates(dit->first, color_space))
           {
-            non_dominated_mask -= dit->second;
+            non_dominated_mask -= overlap;
             if (!!non_dominated_mask) return;
           }
         }
