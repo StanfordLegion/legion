@@ -4320,9 +4320,11 @@ namespace Legion {
       {
         ShardID shard;
         derez.deserialize(shard);
-#ifdef DEBUG_LEGION
-        assert(results.find(shard) == results.end());
-#endif
+        if (results.find(shard) != results.end())
+        {
+          derez.advance_pointer(future_size);
+          continue;
+        }
         void *buffer = malloc(future_size);
         derez.deserialize(buffer, future_size);
         results[shard] = buffer;
