@@ -12434,7 +12434,7 @@ namespace Legion {
                   const FieldMask overlap = current_mask & it->valid_fields;
 #ifdef DEBUG_LEGION
                   assert(!!overlap);
-                  assert(!disjoint_close);
+                  //assert(!disjoint_close);
 #endif
                   closer.record_close_operation(overlap, true/*projection*/);
                   state.capture_close_epochs(overlap,
