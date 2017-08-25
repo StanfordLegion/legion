@@ -3370,32 +3370,38 @@ namespace Legion {
       for (std::map<RegionTreeNode*,ClosedNode*>::const_iterator it =
             new_children.begin(); it != new_children.end(); it++)
       {
-        if (it->first->is_region() || it->second->projections.empty()) continue;
+        if (it->first->is_region() || it->second->projections.empty()) 
+          continue;
         PartitionNode *node = it->first->as_partition_node();
-        if (!node->is_complete()) continue;
+        if (!node->is_complete()) 
+          continue;
         IndexSpaceNode *color_space = node->row_source->color_space;
-        std::map<ProjectionFunction*,
-                 LegionMap<IndexSpaceNode*,FieldMask>::aligned>::const_iterator 
-            finder = it->second->projections.find(identity);
-        if (finder == it->second->projections.end()) continue;
-
-        for (LegionMap<IndexSpaceNode*,FieldMask>::aligned::const_iterator dit =
-              finder->second.begin(); dit != finder->second.end(); dit++)
+        // Iterate over the projections and look for anything with an 
+        // identity projection function for which we can do something
+        for (std::map<std::pair<ProjectionFunction*,ShardingFunction*>,
+              LegionMap<IndexSpaceNode*,FieldMask>::aligned>::const_iterator
+              pit = it->second->projections.begin(); 
+              pit != it->second->projections.end(); pit++)
         {
-          FieldMask overlap = non_dominated_mask & dit->second;
-          if (!overlap)
+          if (pit->first.first != identity)
             continue;
-          if (color_space->get_num_dims() != dit->first->get_num_dims())
-            continue;
-
-          if (dit->first->dominates(color_space))
+          for (LegionMap<IndexSpaceNode*,FieldMask>::aligned::const_iterator 
+                dit = pit->second.begin(); dit != pit->second.end(); dit++)
           {
-            non_dominated_mask -= overlap;
-            if (!!non_dominated_mask) return;
-          }
+            FieldMask overlap = non_dominated_mask & dit->second;
+            if (!overlap)
+              continue;
+            if (color_space->get_num_dims() != dit->first->get_num_dims())
+              continue;
+            if (dit->first->dominates(color_space))
+            {
+              non_dominated_mask -= overlap;
+              if (!!non_dominated_mask) 
+                return;
+            }
+          }  
         }
       }
-
       // In order to remove a field, it has to be dominated in all our children
       FieldMask dominated_fields = non_dominated_mask;
       // If we have projections instead of explicitly closed children then we 
