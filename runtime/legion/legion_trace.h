@@ -349,7 +349,12 @@ namespace Legion {
                                ApEvent &lhs,
                                const std::set<ApEvent>& rhs);
       void record_copy_views(PhysicalTraceInfo &trace_info,
-                             InstanceView *src, InstanceView *dst);
+                             InstanceView *src,
+                             const FieldMask &src_mask,
+                             ContextID src_ctx,
+                             InstanceView *dst,
+                             const FieldMask &dst_mask,
+                             ContextID dst_ctx);
       void record_issue_copy(PhysicalTraceInfo &trace_info,
                              ApEvent lhs,
                              RegionTreeNode* node,
@@ -367,11 +372,15 @@ namespace Legion {
                                   unsigned inst_idx,
                                   ApEvent ready_event,
                                   const RegionRequirement &req,
-                                  InstanceView *view);
+                                  InstanceView *view,
+                                  const FieldMask &fields,
+                                  ContextID ctx);
     private:
       void record_ready_view(PhysicalTraceInfo &trace_info,
                              const RegionRequirement &req,
-                             InstanceView *view);
+                             InstanceView *view,
+                             const FieldMask &fields,
+                             ContextID ctx);
     public:
       void initialize_templates(ApEvent fence_completion);
       void execute_template(PhysicalTraceInfo &trace_info, SingleTask *task);
@@ -403,9 +412,10 @@ namespace Legion {
 
       CachedMappings cached_mappings;
       std::vector<PhysicalTemplate*> templates;
-      std::set<InstanceView*> preconditions;
-      std::set<InstanceView*> valid_views;
-      std::set<InstanceView*> reduction_views;
+      LegionMap<InstanceView*, FieldMask>::aligned preconditions;
+      LegionMap<InstanceView*, FieldMask>::aligned valid_views;
+      LegionMap<InstanceView*, FieldMask>::aligned reduction_views;
+      LegionMap<InstanceView*, ContextID>::aligned context_ids;
     };
 
     /**
@@ -423,9 +433,11 @@ namespace Legion {
 
       void initialize();
       void execute(PhysicalTraceInfo &trace_info, SingleTask *task);
-      void finalize(const std::set<InstanceView*> &preconditions,
-                    const std::set<InstanceView*> &valid_views,
-                    const std::set<InstanceView*> &reduction_views);
+      void finalize(
+            const LegionMap<InstanceView*, FieldMask>::aligned &preconditions,
+            const LegionMap<InstanceView*, FieldMask>::aligned &valid_views,
+            const LegionMap<InstanceView*, FieldMask>::aligned &reduction_views,
+            const LegionMap<InstanceView*, ContextID>::aligned &context_ids);
       void dump_template();
       static std::string view_to_string(const InstanceView *view);
       void sanity_check();
@@ -442,9 +454,10 @@ namespace Legion {
       std::vector<ApEvent> events;
       std::map<ApEvent, unsigned> event_map;
       std::vector<Instruction*> instructions;
-      std::set<InstanceView*> preconditions;
-      std::set<InstanceView*> valid_views;
-      std::set<InstanceView*> reduction_views;
+      LegionMap<InstanceView*, FieldMask>::aligned preconditions;
+      LegionMap<InstanceView*, FieldMask>::aligned valid_views;
+      LegionMap<InstanceView*, FieldMask>::aligned reduction_views;
+      LegionMap<InstanceView*, ContextID>::aligned context_ids;
     };
 
     /**

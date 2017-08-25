@@ -7724,7 +7724,10 @@ namespace Legion {
 #endif
         trace_info.trace->record_merge_events(trace_info, reduce_pre,
             event_preconds);
-        trace_info.trace->record_copy_views(trace_info, this, target);
+        InnerContext *context = op->find_physical_context(index);
+        ContextID ctx = context->get_context().get_id();
+        trace_info.trace->record_copy_views(trace_info, this, reduce_mask,
+            ctx, target, reduce_mask, ctx);
       }
       ApEvent reduce_post = manager->issue_reduction(op, 
                                                      src_fields, dst_fields,
@@ -7787,7 +7790,10 @@ namespace Legion {
 #endif
         trace_info.trace->record_merge_events(trace_info, reduce_pre,
             preconditions);
-        trace_info.trace->record_copy_views(trace_info, this, target);
+        InnerContext *context = op->find_physical_context(index);
+        ContextID ctx = context->get_context().get_id();
+        trace_info.trace->record_copy_views(trace_info, this, red_mask, ctx,
+            target, red_mask, ctx);
       }
       ApEvent reduce_post = target->logical_node->issue_copy(op, 
                              src_fields, dst_fields, reduce_pre, 
@@ -7841,11 +7847,8 @@ namespace Legion {
       if (trace_info.tracing)
       {
 #ifdef DEBUG_LEGION
-        assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
+        assert(false); // XXX: This seems to be a dead code
 #endif
-        trace_info.trace->record_merge_events(trace_info, reduce_pre,
-            preconditions);
-        trace_info.trace->record_copy_views(trace_info, this, target);
       }
       ApEvent reduce_post = manager->issue_reduction(op, 
                                              src_fields, dst_fields,

@@ -2362,9 +2362,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
 #endif
+            RegionTreeContext ctx = context->get_context();
             trace_info.trace->record_set_ready_event(trace_info, op, idx1,
                                                      idx2, ready,
-                                                     req, target_views[idx2]);
+                                                     req, target_views[idx2],
+                                                     ref.get_valid_fields(),
+                                                     ctx.get_id());
           }
         }
       }
@@ -14464,7 +14467,8 @@ namespace Legion {
               assert(trace_info.trace != NULL &&
                      trace_info.trace->is_tracing());
 #endif
-              trace_info.trace->record_copy_views(trace_info, it->first, dst);
+              trace_info.trace->record_copy_views(trace_info, it->first,
+                  op_mask, info.ctx, dst, op_mask, info.ctx);
             }
           }
         }
@@ -16524,7 +16528,8 @@ namespace Legion {
 #endif
               trace_info.trace->record_set_ready_event(trace_info, info.op,
                                                        info.index, idx, ready,
-                                                       info.req, new_view);
+                                                       info.req, new_view,
+                                                       user_mask, info.ctx);
             }
             new_views[idx] = new_view;
           }
@@ -16544,7 +16549,8 @@ namespace Legion {
 #endif
               trace_info.trace->record_set_ready_event(trace_info, info.op,
                                                        info.index, idx, ready,
-                                                       info.req, new_view);
+                                                       info.req, new_view,
+                                                       user_mask, info.ctx);
             }
           }
           if (!defer_add_users && !!restricted_fields)
@@ -16765,7 +16771,9 @@ namespace Legion {
 #endif
               trace_info.trace->record_set_ready_event(trace_info, info.op,
                                                        info.index, 0, ready,
-                                                       info.req, new_views[0]);
+                                                       info.req, new_views[0],
+                                                       ref.get_valid_fields(),
+                                                       info.ctx);
             }
             if (!!restricted_fields && !IS_READ_ONLY(info.req))
             {
@@ -16799,7 +16807,9 @@ namespace Legion {
                 trace_info.trace->record_set_ready_event(trace_info, info.op,
                                                          info.index, idx,
                                                          ready, info.req,
-                                                         new_views[idx]);
+                                                         new_views[idx],
+                                                         ref.get_valid_fields(),
+                                                         info.ctx);
               }
             }
             const bool restricted_out = 

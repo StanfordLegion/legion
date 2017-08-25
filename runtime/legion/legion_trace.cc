@@ -1240,7 +1240,7 @@ namespace Legion {
              current_template_id < templates.size());
 #endif
       templates[current_template_id]->finalize(preconditions, valid_views,
-          reduction_views);
+          reduction_views, context_ids);
 
       tracing = false;
       check_complete_event = ApUserEvent();
@@ -1476,27 +1476,72 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTrace::record_copy_views(PhysicalTraceInfo &trace_info,
-                                          InstanceView *src, InstanceView *dst)
+                                          InstanceView *src,
+                                          const FieldMask &src_mask,
+                                          ContextID src_ctx,
+                                          InstanceView *dst,
+                                          const FieldMask &dst_mask,
+                                          ContextID dst_ctx)
     //--------------------------------------------------------------------------
     {
       AutoLock t_lock(trace_lock);
 
       if (src->is_reduction_view())
       {
-        std::set<InstanceView*>::iterator finder = reduction_views.find(src);
+        LegionMap<InstanceView*, FieldMask>::aligned::iterator finder =
+          reduction_views.find(src);
         if (finder == reduction_views.end())
-          preconditions.insert(src);
+        {
+          LegionMap<InstanceView*, FieldMask>::aligned::iterator pfinder =
+            preconditions.find(src);
+          if (pfinder == preconditions.end())
+            preconditions[src] = src_mask;
+          else
+            pfinder->second |= src_mask;
+        }
         else
+        {
+#ifdef DEBUG_LEGION
+          assert(finder->second == src_mask);
+#endif
           reduction_views.erase(finder);
+        }
       }
       else
       {
-        if (valid_views.find(src) == valid_views.end())
-          preconditions.insert(src);
+        LegionMap<InstanceView*, FieldMask>::aligned::iterator finder =
+          valid_views.find(src);
+        if (finder == valid_views.end())
+        {
+          LegionMap<InstanceView*, FieldMask>::aligned::iterator pfinder =
+            preconditions.find(src);
+          if (pfinder == preconditions.end())
+            preconditions[src] = src_mask;
+          else
+            pfinder->second |= src_mask;
+        }
+        else
+          finder->second |= src_mask;
       }
 
-      if (valid_views.find(dst) == valid_views.end())
-        valid_views.insert(dst);
+#ifdef DEBUG_LEGION
+      assert(!dst->is_reduction_view());
+#endif
+      LegionMap<InstanceView*, FieldMask>::aligned::iterator finder =
+        valid_views.find(dst);
+      if (finder == valid_views.end())
+        valid_views[dst] = dst_mask;
+      else
+        finder->second |= dst_mask;
+
+#ifdef DEBUG_LEGION
+      assert(context_ids.find(src) == context_ids.end() ||
+             context_ids[src] == src_ctx);
+      assert(context_ids.find(dst) == context_ids.end() ||
+             context_ids[dst] == dst_ctx);
+#endif
+      context_ids[src] = src_ctx;
+      context_ids[dst] = dst_ctx;
     }
 
     //--------------------------------------------------------------------------
@@ -1562,7 +1607,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     inline void PhysicalTrace::record_ready_view(PhysicalTraceInfo &trace_info,
                                                  const RegionRequirement &req,
-                                                 InstanceView *view)
+                                                 InstanceView *view,
+                                                 const FieldMask &fields,
+                                                 ContextID ctx)
     //--------------------------------------------------------------------------
     {
       AutoLock t_lock(trace_lock);
@@ -1570,14 +1617,35 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(IS_REDUCE(req));
+        assert(reduction_views.find(view) == reduction_views.end());
 #endif
-        reduction_views.insert(view);
+        reduction_views[view] = fields;
       }
-      else if (valid_views.find(view) == valid_views.end())
+      else
       {
-        if (HAS_READ(req)) preconditions.insert(view);
-        valid_views.insert(view);
+        LegionMap<InstanceView*, FieldMask>::aligned::iterator finder =
+          valid_views.find(view);
+        if (finder == valid_views.end())
+        {
+          if (HAS_READ(req))
+          {
+            LegionMap<InstanceView*, FieldMask>::aligned::iterator pfinder =
+              preconditions.find(view);
+            if (pfinder == preconditions.end())
+              preconditions[view] = fields;
+            else
+              pfinder->second |= fields;
+          }
+          valid_views[view] = fields;
+        }
+        else
+          finder->second |= fields;
       }
+#ifdef DEBUG_LEGION
+      assert(context_ids.find(view) == context_ids.end() ||
+             context_ids[view] == ctx);
+#endif
+      context_ids[view] = ctx;
     }
 
     //--------------------------------------------------------------------------
@@ -1587,7 +1655,9 @@ namespace Legion {
                                                unsigned inst_idx,
                                                ApEvent ready_event,
                                                const RegionRequirement &req,
-                                               InstanceView *view)
+                                               InstanceView *view,
+                                               const FieldMask &fields,
+                                               ContextID ctx)
     //--------------------------------------------------------------------------
     {
       PhysicalTemplate *tpl = get_template(trace_info);
@@ -1630,7 +1700,7 @@ namespace Legion {
 #endif
       tpl->consumers[ready_event_idx].push_back(inst_id);
 
-      record_ready_view(trace_info, req, view);
+      record_ready_view(trace_info, req, view, fields, ctx);
     }
 
     void PhysicalTrace::initialize_templates(ApEvent fence_completion)
@@ -1761,9 +1831,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::finalize(const std::set<InstanceView*> &conditions,
-                                    const std::set<InstanceView*> &views,
-                                    const std::set<InstanceView*> &red_views)
+    void PhysicalTemplate::finalize(
+                 const LegionMap<InstanceView*, FieldMask>::aligned &conditions,
+                 const LegionMap<InstanceView*, FieldMask>::aligned &views,
+                 const LegionMap<InstanceView*, FieldMask>::aligned &red_views,
+                 const LegionMap<InstanceView*, ContextID>::aligned &ids)
     //--------------------------------------------------------------------------
     {
       event_map.clear();
@@ -1774,6 +1846,7 @@ namespace Legion {
       preconditions = conditions;
       valid_views = views;
       reduction_views = red_views;
+      context_ids = ids;
       if (Runtime::dump_physical_traces) dump_template();
 #ifdef DEBUG_LEGION
       sanity_check();
@@ -1809,19 +1882,37 @@ namespace Legion {
                   << ", # producers: " << max_producers[idx]
                   << std::endl;
       std::cerr << "[Preconditions]" << std::endl;
-      for (std::set<InstanceView*>::iterator it = preconditions.begin();
-           it != preconditions.end(); ++it)
-        std::cerr << "  " << view_to_string(*it) << std::endl;
+      for (LegionMap<InstanceView*, FieldMask>::aligned::iterator it =
+           preconditions.begin(); it != preconditions.end(); ++it)
+      {
+        char *mask = it->second.to_string();
+        std::cerr << "  " << view_to_string(it->first) << " "
+                  << mask << " context id: "
+                  << context_ids[it->first] << std::endl;
+        free(mask);
+      }
 
       std::cerr << "[Valid Views]" << std::endl;
-      for (std::set<InstanceView*>::iterator it = valid_views.begin();
-           it != valid_views.end(); ++it)
-        std::cerr << "  " << view_to_string(*it) << std::endl;
+      for (LegionMap<InstanceView*, FieldMask>::aligned::iterator it =
+           valid_views.begin(); it != valid_views.end(); ++it)
+      {
+        char *mask = it->second.to_string();
+        std::cerr << "  " << view_to_string(it->first) << " "
+                  << mask << " context id: "
+                  << context_ids[it->first] << std::endl;
+        free(mask);
+      }
 
       std::cerr << "[Reduction Views]" << std::endl;
-      for (std::set<InstanceView*>::iterator it = reduction_views.begin();
-           it != reduction_views.end(); ++it)
-        std::cerr << "  " << view_to_string(*it) << std::endl;
+      for (LegionMap<InstanceView*, FieldMask>::aligned::iterator it =
+           reduction_views.begin(); it != reduction_views.end(); ++it)
+      {
+        char *mask = it->second.to_string();
+        std::cerr << "  " << view_to_string(it->first) << " "
+                  << mask << " context id: "
+                  << context_ids[it->first] << std::endl;
+        free(mask);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1829,9 +1920,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Reduction instances should not have been recycled in the trace
-      for (std::set<InstanceView*>::iterator it = preconditions.begin();
-           it != preconditions.end(); ++it)
-        assert(reduction_views.find(*it) == reduction_views.end());
+      for (LegionMap<InstanceView*, FieldMask>::aligned::iterator it =
+           preconditions.begin(); it != preconditions.end(); ++it)
+        assert(reduction_views.find(it->first) == reduction_views.end());
     }
 
     /////////////////////////////////////////////////////////////
