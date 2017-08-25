@@ -3080,6 +3080,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ClosedNode::record_reduced_fields(const FieldMask &fields)
+    //--------------------------------------------------------------------------
+    {
+      reduced_fields |= fields;
+    }
+
+    //--------------------------------------------------------------------------
     void ClosedNode::record_projections(const ProjectionEpoch *epoch,
                                         const FieldMask &fields)
     //--------------------------------------------------------------------------
@@ -3307,17 +3314,19 @@ namespace Legion {
         // The disjointness check here is to prevent nested composite instances
         // from being pruned when the new composite instance consists of
         // reduction instances
-        if (!node->is_complete() || !node->row_source->is_disjoint()) continue;
+        if (!node->is_complete()) continue;
         const Domain &color_space = node->row_source->color_space;
         std::map<ProjectionFunction*,
                  LegionMap<Domain,FieldMask>::aligned>::const_iterator finder =
                    it->second->projections.find(identity);
         if (finder == it->second->projections.end()) continue;
 
+        FieldMask dominated_by_all =
+          non_dominated_mask - it->second->reduced_fields;
         for (LegionMap<Domain,FieldMask>::aligned::const_iterator dit =
               finder->second.begin(); dit != finder->second.end(); dit++)
         {
-          FieldMask overlap = non_dominated_mask & dit->second;
+          FieldMask overlap = dominated_by_all & dit->second;
           if (!overlap)
             continue;
           if (color_space.get_dim() != dit->first.get_dim())
@@ -3325,10 +3334,13 @@ namespace Legion {
 
           if (dominates(dit->first, color_space))
           {
-            non_dominated_mask -= overlap;
-            if (!!non_dominated_mask) return;
+            dominated_by_all &= overlap;
+            if (!dominated_by_all) break;
           }
         }
+        if (!!dominated_by_all)
+          non_dominated_mask -= dominated_by_all;
+        if (!!non_dominated_mask) return;
       }
 
       // In order to remove a field, it has to be dominated in all our children
