@@ -663,6 +663,8 @@ namespace Legion {
       void filter_dominated_fields(const ClosedNode *old_tree,
                                    FieldMask &non_dominated_mask) const;
     protected:
+      // Shortcut to compute lhs.dominates(rhs)
+      static bool dominates(const Domain &lhs, const Domain &rhs);
       void filter_dominated_projection_fields(FieldMask &non_dominated_mask,
           const std::map<ProjectionFunction*,
              LegionMap<Domain,FieldMask>::aligned> &new_projections) const;

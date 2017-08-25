@@ -3196,6 +3196,35 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ bool ClosedNode::dominates(const Domain &lhs, const Domain &rhs)
+    //--------------------------------------------------------------------------
+    {
+      switch (lhs.get_dim())
+      {
+        case 1:
+          {
+            LegionRuntime::Arrays::Rect<1> lhs_rect = lhs.get_rect<1>();
+            LegionRuntime::Arrays::Rect<1> rhs_rect = rhs.get_rect<1>();
+            return lhs_rect.dominates(rhs_rect);
+          }
+        case 2:
+          {
+            LegionRuntime::Arrays::Rect<2> lhs_rect = lhs.get_rect<2>();
+            LegionRuntime::Arrays::Rect<2> rhs_rect = rhs.get_rect<2>();
+            return lhs_rect.dominates(rhs_rect);
+          }
+        case 3:
+          {
+            LegionRuntime::Arrays::Rect<3> lhs_rect = lhs.get_rect<3>();
+            LegionRuntime::Arrays::Rect<3> rhs_rect = rhs.get_rect<3>();
+            return lhs_rect.dominates(rhs_rect);
+          }
+        default:
+          assert(false); // bad dimension size
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void ClosedNode::filter_dominated_projection_fields(
         FieldMask &non_dominated_mask,
         const std::map<ProjectionFunction*,
@@ -3236,43 +3265,12 @@ namespace Legion {
               if (it->first.get_dim() != dit->first.get_dim())
                 continue;
               // See if the domain dominates
-              switch (it->first.get_dim())
+              if (dominates(it->first, dit->first))
               {
-                case 1:
-                  {
-                    LegionRuntime::Arrays::Rect<1>
-		      prev_rect = dit->first.get_rect<1>();
-                    LegionRuntime::Arrays::Rect<1>
-		      next_rect = it->first.get_rect<1>();
-                    if (next_rect.dominates(prev_rect))
-                      overlap -= dom_overlap;
-                    break;
-                  }
-                case 2:
-                  {
-                    LegionRuntime::Arrays::Rect<2>
-		      prev_rect = dit->first.get_rect<2>();
-                    LegionRuntime::Arrays::Rect<2>
-		      next_rect = it->first.get_rect<2>();
-                    if (next_rect.dominates(prev_rect))
-                      overlap -= dom_overlap;
-                    break;
-                  }
-                case 3:
-                  {
-                    LegionRuntime::Arrays::Rect<3>
-		      prev_rect = dit->first.get_rect<3>();
-                    LegionRuntime::Arrays::Rect<3>
-		      next_rect = it->first.get_rect<3>();
-                    if (next_rect.dominates(prev_rect))
-                      overlap -= dom_overlap;
-                    break;
-                  }
-                default:
-                  assert(false); // bad dimension size
+                overlap -= dom_overlap;
+                if (!overlap)
+                  break;
               }
-              if (!overlap)
-                break;
             }
           }
           // Any fields still in overlap are not dominated
@@ -3296,6 +3294,40 @@ namespace Legion {
                const std::map<RegionTreeNode*,ClosedNode*> &new_children) const
     //--------------------------------------------------------------------------
     {
+      // If the child is created for a complete partition with an identity
+      // projection over the entire color space, we are dominated for its fields
+      // TODO: Any bijective projections can use this optimization
+      ProjectionFunction *identity =
+        node->context->runtime->find_projection_function(0);
+      for (std::map<RegionTreeNode*,ClosedNode*>::const_iterator it =
+            new_children.begin(); it != new_children.end(); it++)
+      {
+        if (it->first->is_region() || it->second->projections.empty()) continue;
+        PartitionNode *node = it->first->as_partition_node();
+        if (!node->is_complete()) continue;
+        const Domain &color_space = node->row_source->color_space;
+        std::map<ProjectionFunction*,
+                 LegionMap<Domain,FieldMask>::aligned>::const_iterator finder =
+                   it->second->projections.find(identity);
+        if (finder == it->second->projections.end()) continue;
+
+        for (LegionMap<Domain,FieldMask>::aligned::const_iterator dit =
+              finder->second.begin(); dit != finder->second.end(); dit++)
+        {
+          FieldMask overlap = non_dominated_mask & dit->second;
+          if (!overlap)
+            continue;
+          if (color_space.get_dim() != dit->first.get_dim())
+            continue;
+
+          if (dominates(dit->first, color_space))
+          {
+            non_dominated_mask -= dit->second;
+            if (!!non_dominated_mask) return;
+          }
+        }
+      }
+
       // In order to remove a field, it has to be dominated in all our children
       FieldMask dominated_fields = non_dominated_mask;
       // If we have projections instead of explicitly closed children then we 
