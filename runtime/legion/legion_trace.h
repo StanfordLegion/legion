@@ -415,6 +415,7 @@ namespace Legion {
       LegionMap<InstanceView*, FieldMask>::aligned preconditions;
       LegionMap<InstanceView*, FieldMask>::aligned valid_views;
       LegionMap<InstanceView*, FieldMask>::aligned reduction_views;
+      LegionMap<InstanceView*, bool>::aligned      initialized;
       LegionMap<InstanceView*, ContextID>::aligned context_ids;
     };
 
@@ -437,6 +438,7 @@ namespace Legion {
             const LegionMap<InstanceView*, FieldMask>::aligned &preconditions,
             const LegionMap<InstanceView*, FieldMask>::aligned &valid_views,
             const LegionMap<InstanceView*, FieldMask>::aligned &reduction_views,
+            const LegionMap<InstanceView*, bool>::aligned      &initialized,
             const LegionMap<InstanceView*, ContextID>::aligned &context_ids);
       void dump_template();
       static std::string view_to_string(const InstanceView *view);
@@ -457,6 +459,7 @@ namespace Legion {
       LegionMap<InstanceView*, FieldMask>::aligned preconditions;
       LegionMap<InstanceView*, FieldMask>::aligned valid_views;
       LegionMap<InstanceView*, FieldMask>::aligned reduction_views;
+      LegionMap<InstanceView*, bool>::aligned      initialized;
       LegionMap<InstanceView*, ContextID>::aligned context_ids;
     };
 
