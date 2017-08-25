@@ -3188,6 +3188,40 @@ namespace Legion {
                const std::map<RegionTreeNode*,ClosedNode*> &new_children) const
     //--------------------------------------------------------------------------
     {
+      // If the child is created for a complete partition with an identity
+      // projection over the entire color space, we are dominated for its fields
+      // TODO: Any bijective projections can use this optimization
+      ProjectionFunction *identity =
+        node->context->runtime->find_projection_function(0);
+      for (std::map<RegionTreeNode*,ClosedNode*>::const_iterator it =
+            new_children.begin(); it != new_children.end(); it++)
+      {
+        if (it->first->is_region() || it->second->projections.empty()) continue;
+        PartitionNode *node = it->first->as_partition_node();
+        if (!node->is_complete()) continue;
+        IndexSpaceNode *color_space = node->row_source->color_space;
+        std::map<ProjectionFunction*,
+                 LegionMap<IndexSpaceNode*,FieldMask>::aligned>::const_iterator 
+            finder = it->second->projections.find(identity);
+        if (finder == it->second->projections.end()) continue;
+
+        for (LegionMap<IndexSpaceNode*,FieldMask>::aligned::const_iterator dit =
+              finder->second.begin(); dit != finder->second.end(); dit++)
+        {
+          FieldMask overlap = non_dominated_mask & dit->second;
+          if (!overlap)
+            continue;
+          if (color_space->get_num_dims() != dit->first->get_num_dims())
+            continue;
+
+          if (dit->first->dominates(color_space))
+          {
+            non_dominated_mask -= overlap;
+            if (!!non_dominated_mask) return;
+          }
+        }
+      }
+
       // In order to remove a field, it has to be dominated in all our children
       FieldMask dominated_fields = non_dominated_mask;
       // If we have projections instead of explicitly closed children then we 
@@ -3226,6 +3260,7 @@ namespace Legion {
           dominated_fields -= overlap;
           if (!dominated_fields)
             return;
+          continue;
         }
         FieldMask child_non_dominated = overlap;
         finder->second->filter_dominated_fields(it->second,child_non_dominated);
