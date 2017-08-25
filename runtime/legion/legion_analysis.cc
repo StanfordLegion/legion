@@ -3304,7 +3304,10 @@ namespace Legion {
       {
         if (it->first->is_region() || it->second->projections.empty()) continue;
         PartitionNode *node = it->first->as_partition_node();
-        if (!node->is_complete()) continue;
+        // The disjointness check here is to prevent nested composite instances
+        // from being pruned when the new composite instance consists of
+        // reduction instances
+        if (!node->is_complete() || !node->row_source->is_disjoint()) continue;
         const Domain &color_space = node->row_source->color_space;
         std::map<ProjectionFunction*,
                  LegionMap<Domain,FieldMask>::aligned>::const_iterator finder =
