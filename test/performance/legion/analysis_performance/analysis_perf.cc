@@ -871,9 +871,12 @@ void top_level_task(const Task *task,
             runtime->get_logical_partition_by_color(ctx, lrs[i], p));
     }
 
-    pid = 1;
-    runtime->register_projection_functor(pid,
-        new TreeTraversingFunctor(runtime, tree_depth));
+    if (tree_depth > 1)
+    {
+      pid = 1;
+      runtime->register_projection_functor(pid,
+          new TreeTraversingFunctor(runtime, tree_depth));
+    }
   }
 
   PhaseBarrier barrier = runtime->create_phase_barrier(ctx, 1);
