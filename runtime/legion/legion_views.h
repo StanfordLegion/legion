@@ -1403,6 +1403,7 @@ namespace Legion {
       public:
         VersionState *state;
         DistributedID owner_did;
+        bool valid;
       };
       struct DeferCompositeNodeValidArgs : 
         public LgTaskArgs<DeferCompositeNodeValidArgs> {

@@ -7147,6 +7147,7 @@ namespace Legion {
           DeferCompositeNodeRefArgs args;
           args.state = state;
           args.owner_did = owner_did;
+          args.valid = false;
           RtEvent precondition = 
             runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
                                              NULL/*op*/, ready);
@@ -7200,6 +7201,7 @@ namespace Legion {
       size_t num_versions;
       derez.deserialize(num_versions);
       std::set<RtEvent> local_preconditions;
+      std::vector<VersionState*> new_states;
       for (unsigned idx = 0; idx < num_versions; idx++)
       {
         DistributedID did;
@@ -7207,24 +7209,50 @@ namespace Legion {
         RtEvent ready;
         VersionState *state = 
           runtime->find_or_request_version_state(did, ready); 
+#ifdef DEBUG_LEGION
+        assert(result->version_states.find(state) == 
+                result->version_states.end());
+#endif
         derez.deserialize(result->version_states[state]);
         if (ready.exists() && !ready.has_triggered())
         {
           DeferCompositeNodeRefArgs args;
           args.state = state;
           args.owner_did = owner_did;
+          args.valid = false;
           RtEvent precondition = 
             runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
                                              NULL/*op*/, ready);
           // If this is a precondition for a valid ref it will
           // ultimately also be a precondition for the result
-          if (created && currently_valid)
-            local_preconditions.insert(precondition);
+          if (currently_valid)
+          {
+            if (!created)
+            {
+              // If we didn't create it then we have to launch
+              // a task to add the valid reference after the 
+              // resource reference has been added
+              args.valid = true;
+              RtEvent valid_precondition = 
+                runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+                                                 NULL/*op*/, precondition);
+              preconditions.insert(valid_precondition);
+            }
+            else // We did create it so just record the precondition
+              local_preconditions.insert(precondition);
+          }
           else
             preconditions.insert(precondition);
         }
         else
+        {
           state->add_nested_resource_ref(owner_did);
+          // If we have to do add a valid ref and we're not going
+          // to do it later by marking the whole node valid then
+          // we have to add it now
+          if (!created && currently_valid)
+            state->add_nested_valid_ref(owner_did);
+        }
       }
       if (created && currently_valid)
       {
@@ -7258,7 +7286,10 @@ namespace Legion {
     {
       const DeferCompositeNodeRefArgs *nargs = 
         (const DeferCompositeNodeRefArgs*)args;
-      nargs->state->add_nested_resource_ref(nargs->owner_did);
+      if (nargs->valid)
+        nargs->state->add_nested_valid_ref(nargs->owner_did);
+      else
+        nargs->state->add_nested_resource_ref(nargs->owner_did);
     }
 
     //--------------------------------------------------------------------------
