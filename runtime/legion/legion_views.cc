@@ -5807,6 +5807,12 @@ namespace Legion {
     void CompositeView::notify_valid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
+      // If this composite view exists in a control replication
+      // context and we're not the owner then we have to send a remote
+      // valid reference back to the owner so that it only marks itself
+      // invalid when there are no longer any valid references
+      if (shard_invalid_barrier.exists() && !is_owner())
+        send_remote_valid_update(owner_space, mutator, 1/*count*/, true/*add*/);
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
             children.begin(); it != children.end(); it++)
         it->first->notify_valid(mutator, true/*root*/);
@@ -5826,26 +5832,31 @@ namespace Legion {
     void CompositeView::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      if (shard_invalid_barrier.exists() && 
-          !shard_invalid_barrier.has_triggered())
+      // If this composite view exists in a control replication 
+      // context then we have to do extra work to handle it properly
+      if (shard_invalid_barrier.exists())
       {
-        // Do our arrival for our shard if we're the owner
         if (is_owner())
-          Runtime::phase_barrier_arrive(shard_invalid_barrier, 1/*count*/);
-        // See if we've triggered yet and can actually do the arrival
-        // or whether we still need to defer it
-        if (!shard_invalid_barrier.has_triggered())
         {
-          DeferInvalidateArgs args;
-          args.view = this;
-          args.invalidated = Runtime::create_rt_user_event();
-          runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
-                                           NULL/*op*/, shard_invalid_barrier);
-          if (mutator != NULL)
-            mutator->record_reference_mutation_effect(args.invalidated);
-          return;
+          // This should only happen once so we can now trigger our
+          // phase barrier and then if necessary defer out invalidation
+          // until all the other contexts have invalidated themselves too
+          if (!shard_invalid_barrier.has_triggered())
+          {
+            DeferInvalidateArgs args;
+            args.view = this;
+            args.invalidated = Runtime::create_rt_user_event();
+            runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+                                             NULL/*op*/, shard_invalid_barrier);
+            if (mutator != NULL)
+              mutator->record_reference_mutation_effect(args.invalidated);
+            return;
+          }
+          // Otherwise we can fall through and do the rest of the invalidation
         }
-        // Otherwise we can fall through and do the rest of the invalidation
+        else // Not the owner so just remove our remote reference
+          send_remote_valid_update(owner_space, mutator, 
+                                   1/*count*/, false/*add*/);
       }
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
             children.begin(); it != children.end(); it++)
