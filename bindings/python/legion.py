@@ -28,7 +28,7 @@ import subprocess
 import sys
 import threading
 
-_pickle_version = 0 # Use latest Pickle protocol
+_pickle_version = cPickle.HIGHEST_PROTOCOL # Use latest Pickle protocol
 
 root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 runtime_dir = os.path.join(root_dir, 'runtime')
