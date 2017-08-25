@@ -7209,11 +7209,21 @@ namespace Legion {
         RtEvent ready;
         VersionState *state = 
           runtime->find_or_request_version_state(did, ready); 
+        std::map<VersionState*,FieldMask>::const_iterator finder = 
+          result->version_states.find(state);
+        if (finder != result->version_states.end())
+        {
 #ifdef DEBUG_LEGION
-        assert(result->version_states.find(state) == 
-                result->version_states.end());
+          assert(!created);
 #endif
-        derez.deserialize(result->version_states[state]);
+          FieldMask state_mask;
+          derez.deserialize(state_mask);
+          result->version_states[state] |= state_mask;
+          // No need to add any references since it was already captured
+          continue;
+        }
+        else // Can just unpack it directly
+          derez.deserialize(result->version_states[state]);
         if (ready.exists() && !ready.has_triggered())
         {
           DeferCompositeNodeRefArgs args;
