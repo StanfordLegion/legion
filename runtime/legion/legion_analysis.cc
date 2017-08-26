@@ -3321,23 +3321,27 @@ namespace Legion {
                    it->second->projections.find(identity);
         if (finder == it->second->projections.end()) continue;
 
-        FieldMask dominated_by_all =
-          non_dominated_mask - it->second->reduced_fields;
+        FieldMask non_dominated_by_any;
         for (LegionMap<Domain,FieldMask>::aligned::const_iterator dit =
               finder->second.begin(); dit != finder->second.end(); dit++)
         {
-          FieldMask overlap = dominated_by_all & dit->second;
+          FieldMask overlap = non_dominated_mask & dit->second;
           if (!overlap)
             continue;
-          if (color_space.get_dim() != dit->first.get_dim())
-            continue;
 
-          if (dominates(dit->first, color_space))
+          FieldMask reduction_mask = overlap & it->second->reduced_fields;
+          if (!!reduction_mask)
           {
-            dominated_by_all &= overlap;
-            if (!dominated_by_all) break;
+            non_dominated_by_any |= reduction_mask;
+            overlap -= reduction_mask;
           }
+
+          if (color_space.get_dim() != dit->first.get_dim() ||
+              !dominates(dit->first, color_space))
+            non_dominated_mask |= overlap;
         }
+
+        FieldMask dominated_by_all = non_dominated_mask - non_dominated_by_any;
         if (!!dominated_by_all)
           non_dominated_mask -= dominated_by_all;
         if (!!non_dominated_mask) return;
