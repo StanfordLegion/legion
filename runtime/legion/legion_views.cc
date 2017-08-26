@@ -6770,13 +6770,15 @@ namespace Legion {
                                                   bool original_shard)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!shard_invalid_barrier.exists());
+#endif
       shard_invalid_barrier = shard_invalid;
       original_shard_view = original_shard;
       if (original_shard_view)
       {
 #ifdef DEBUG_LEGION
         assert(is_owner());
-        assert(!shard_invalid_barrier.exists());
         ReplicateContext *ctx = dynamic_cast<ReplicateContext*>(owner_context);
         assert(ctx != NULL);
 #else
