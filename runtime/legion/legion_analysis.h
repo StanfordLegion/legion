@@ -670,6 +670,7 @@ namespace Legion {
     public:
       void add_child_node(ClosedNode *child);
       void record_closed_fields(const FieldMask &closed_fields);
+      void record_reduced_fields(const FieldMask &reduced_fields);
       void record_projections(const ProjectionEpoch *epoch,
                               const FieldMask &closed_fields);
       void record_projection(ProjectionFunction *function,
@@ -696,6 +697,7 @@ namespace Legion {
     protected:
       FieldMask valid_fields; // Fields that are summarized in this tree
       FieldMask covered_fields; // Fields totally written to at this node
+      FieldMask reduced_fields; // Fields purely reduced to at this node
       std::map<RegionTreeNode*,ClosedNode*> children;
       std::map<ProjectionFunction*,
                LegionMap<Domain,FieldMask>::aligned> projections;
