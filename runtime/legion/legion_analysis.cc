@@ -3341,9 +3341,7 @@ namespace Legion {
             non_dominated_mask |= overlap;
         }
 
-        FieldMask dominated_by_all = non_dominated_mask - non_dominated_by_any;
-        if (!!dominated_by_all)
-          non_dominated_mask -= dominated_by_all;
+        non_dominated_mask &= non_dominated_by_any;
         if (!!non_dominated_mask) return;
       }
 
