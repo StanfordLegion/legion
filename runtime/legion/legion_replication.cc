@@ -648,7 +648,7 @@ namespace Legion {
     void ReplInterCloseOp::post_process_composite_view(CompositeView *view)
     //--------------------------------------------------------------------------
     {
-      view->set_shard_invalid_barrier(close_barrier);
+      view->set_shard_invalid_barrier(close_barrier, true/*original view*/);
     }
 
     /////////////////////////////////////////////////////////////

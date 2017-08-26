@@ -1364,7 +1364,8 @@ namespace Legion {
       static void handle_deferred_view_ref(const void *args);
     public:
       // For control replication
-      void set_shard_invalid_barrier(RtBarrier shard_invalid_barrier);
+      void set_shard_invalid_barrier(RtBarrier shard_invalid_barrier,
+                                     bool original_shard_view);
     public:
       // The path version info for this composite instance
       DeferredVersionInfo *const version_info;
@@ -1383,6 +1384,7 @@ namespace Legion {
       // Used for composite instances created during control replication
       // to know when the whole composite view is invalid
       RtBarrier shard_invalid_barrier;
+      bool original_shard_view;
     };
 
     /**

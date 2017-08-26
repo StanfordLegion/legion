@@ -3310,8 +3310,9 @@ namespace Legion {
       static inline void phase_barrier_arrive(const PhaseBarrier &bar, 
                 unsigned cnt, ApEvent precondition = ApEvent::NO_AP_EVENT,
                 const void *reduce_value = NULL, size_t reduce_value_size = 0);
-      static inline ApBarrier get_previous_phase(const PhaseBarrier &bar);
       static inline void alter_arrival_count(PhaseBarrier &bar, int delta);
+    public:
+      static inline ApBarrier get_previous_phase(const PhaseBarrier &bar);
       static inline void advance_barrier(PhaseBarrier &bar);
       static inline void advance_barrier(ApBarrier &bar);
       static inline bool get_barrier_result(ApBarrier bar, void *result,
@@ -3324,6 +3325,7 @@ namespace Legion {
       static inline void advance_barrier(RtBarrier &bar);
       static inline bool get_barrier_result(RtBarrier bar, void *result,
                                             size_t result_size);
+      static inline void alter_arrival_count(RtBarrier &bar, int delta);
     public:
       static inline ApEvent acquire_ap_reservation(Reservation r,bool exclusive,
                                    ApEvent precondition = ApEvent::NO_AP_EVENT);
@@ -3873,6 +3875,14 @@ namespace Legion {
     {
       Realm::Barrier copy = bar;
       return copy.get_result(result, result_size);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline void Runtime::alter_arrival_count(RtBarrier &b, int delta)
+    //--------------------------------------------------------------------------
+    {
+      Realm::Barrier copy = b;
+      b = RtBarrier(copy.alter_arrival_count(delta));
     }
 
     //--------------------------------------------------------------------------

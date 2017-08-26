@@ -5653,7 +5653,8 @@ namespace Legion {
                               InnerContext *context, bool register_now)
       : DeferredView(ctx, encode_composite_did(did), owner_proc, 
                      node, register_now), CompositeBase(view_lock),
-        version_info(info), closed_tree(tree), owner_context(context)
+        version_info(info), closed_tree(tree), owner_context(context),
+        original_shard_view(false)
     {
       // Add our references
       version_info->add_reference();
@@ -5745,6 +5746,9 @@ namespace Legion {
       CompositeView *result = new CompositeView(context, result_did,
           runtime->address_space, logical_node, version_info, closed_tree, 
           owner_context, true/*register now*/);
+      if (shard_invalid_barrier.exists())
+        result->set_shard_invalid_barrier(shard_invalid_barrier, 
+                                          false/*original composite view*/);
       // Clone the children
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
             children.begin(); it != children.end(); it++)
@@ -5879,7 +5883,8 @@ namespace Legion {
 #else
         ReplicateContext *ctx = static_cast<ReplicateContext*>(owner_context);
 #endif
-        ctx->unregister_composite_view(this, shard_invalid_barrier);
+        if (original_shard_view)
+          ctx->unregister_composite_view(this, shard_invalid_barrier);
       }
     }
 
@@ -6761,19 +6766,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeView::set_shard_invalid_barrier(RtBarrier shard_invalid)
+    void CompositeView::set_shard_invalid_barrier(RtBarrier shard_invalid,
+                                                  bool original_shard)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-      assert(!shard_invalid_barrier.exists());
-      ReplicateContext *ctx = dynamic_cast<ReplicateContext*>(owner_context);
-      assert(ctx != NULL);
-#else
-      ReplicateContext *ctx = static_cast<ReplicateContext*>(owner_context);
-#endif
       shard_invalid_barrier = shard_invalid;
-      ctx->register_composite_view(this, shard_invalid_barrier);
+      original_shard_view = original_shard;
+      if (original_shard_view)
+      {
+#ifdef DEBUG_LEGION
+        assert(is_owner());
+        assert(!shard_invalid_barrier.exists());
+        ReplicateContext *ctx = dynamic_cast<ReplicateContext*>(owner_context);
+        assert(ctx != NULL);
+#else
+        ReplicateContext *ctx = static_cast<ReplicateContext*>(owner_context);
+#endif
+        ctx->register_composite_view(this, shard_invalid_barrier);
+      }
+      else // clone composite view, update the arrival count
+        Runtime::alter_arrival_count(shard_invalid_barrier, 1/*count*/);
     } 
 
     /////////////////////////////////////////////////////////////
