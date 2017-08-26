@@ -5845,6 +5845,7 @@ namespace Legion {
           // This should only happen once so we can now trigger our
           // phase barrier and then if necessary defer out invalidation
           // until all the other contexts have invalidated themselves too
+          Runtime::phase_barrier_arrive(shard_invalid_barrier, 1/*count*/);
           if (!shard_invalid_barrier.has_triggered())
           {
             DeferInvalidateArgs args;
