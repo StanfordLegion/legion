@@ -3542,16 +3542,6 @@ namespace Legion {
                                    PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
-      if (trace_info.memoizing && !trace_info.tracing)
-      {
-#ifdef DEBUG_LEGION
-        assert(trace_info.trace != NULL && !trace_info.trace->is_tracing());
-#endif
-        // TODO: Do not support must epoch tasks yet
-        assert (must_epoch_owner == NULL);
-        replay_map_task_output(trace_info);
-        return;
-      }
       Mapper::MapTaskInput input;
       Mapper::MapTaskOutput output;
       // Initialize the mapping input which also does all the traversal
@@ -3702,14 +3692,6 @@ namespace Legion {
           if (precondition.exists())
             precondition.lg_wait();
         }
-      }
-
-      if (trace_info.memoizing && !trace_info.tracing)
-      {
-#ifdef DEBUG_LEGION
-        assert(trace_info.trace != NULL && !trace_info.trace->is_tracing());
-#endif
-        trace_info.trace->execute_template(trace_info, this);
       }
 
       // After we've got our results, apply the state to the region tree

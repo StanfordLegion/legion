@@ -16490,34 +16490,27 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(!trace_info.memoizing || trace_info.trace != NULL);
 #endif
-        if (trace_info.memoizing && !trace_info.tracing)
+
+        for (unsigned idx = 0; idx < targets.size(); idx++)
         {
-          trace_info.trace->get_target_views(trace_info, info.index,
-              new_views);
+          InstanceRef &ref = targets[idx];
+#ifdef DEBUG_LEGION
+          assert(!ref.is_virtual_ref());
+#endif
+          LogicalView *view = convert_reference(ref, context);
+#ifdef DEBUG_LEGION
+          assert(view->is_instance_view());
+          assert(view->as_instance_view()->is_reduction_view());
+#endif
+          new_views[idx] = view->as_instance_view();
         }
-        else
+        if (trace_info.tracing)
         {
-          for (unsigned idx = 0; idx < targets.size(); idx++)
-          {
-            InstanceRef &ref = targets[idx];
 #ifdef DEBUG_LEGION
-            assert(!ref.is_virtual_ref());
+          assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
 #endif
-            LogicalView *view = convert_reference(ref, context);
-#ifdef DEBUG_LEGION
-            assert(view->is_instance_view());
-            assert(view->as_instance_view()->is_reduction_view());
-#endif
-            new_views[idx] = view->as_instance_view();
-          }
-          if (trace_info.tracing)
-          {
-#ifdef DEBUG_LEGION
-            assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
-#endif
-            trace_info.trace->record_target_views(trace_info, info.index,
-                new_views);
-          }
+          trace_info.trace->record_target_views(trace_info, info.index,
+              new_views);
         }
         LegionMap<ReductionView*,FieldMask>::aligned reduce_out_views;
         for (unsigned idx = 0; idx < targets.size(); idx++)
@@ -16593,29 +16586,26 @@ namespace Legion {
                 reduce_out_views[new_view] = restricted;
           }
         }
-        if (!trace_info.memoizing || trace_info.tracing)
+        if (!defer_add_users && (targets.size() > 1))
         {
-          if (!defer_add_users && (targets.size() > 1))
+          // Second pass of the two pass approach, add our users
+          for (unsigned idx = 0; idx < targets.size(); idx++)
           {
-            // Second pass of the two pass approach, add our users
-            for (unsigned idx = 0; idx < targets.size(); idx++)
-            {
-              InstanceRef &ref = targets[idx]; 
-              new_views[idx]->add_user(usage, term_event,
-                                       ref.get_valid_fields(),
-                                       info.op, info.index, local_space,
-                                       &info.version_info,
-                                       info.map_applied_events,
-                                       trace_info.tracing);
-            }
+            InstanceRef &ref = targets[idx]; 
+            new_views[idx]->add_user(usage, term_event,
+                                     ref.get_valid_fields(),
+                                     info.op, info.index, local_space,
+                                     &info.version_info,
+                                     info.map_applied_events,
+                                     trace_info.tracing);
           }
-          if (!reduce_out_views.empty())
-            issue_restricted_reductions(info, restrict_info,
-                                        restricted_instances,
-                                        restricted_views,
-                                        reduce_out_views,
-                                        trace_info);
         }
+        if (!reduce_out_views.empty())
+          issue_restricted_reductions(info, restrict_info,
+                                      restricted_instances,
+                                      restricted_views,
+                                      reduce_out_views,
+                                      trace_info);
         // If we have any restricted instances, we can now update the state
         // to reflect that they are going to be the valid instances
         if (!!restricted_fields)
@@ -16656,23 +16646,15 @@ namespace Legion {
           }
         }
         std::vector<InstanceView*> new_views(targets.size());
-        if (trace_info.memoizing)
+        convert_target_views(targets, context, new_views);
+        if (trace_info.tracing)
         {
 #ifdef DEBUG_LEGION
           assert(trace_info.trace != NULL);
 #endif
-          if (trace_info.tracing)
-          {
-            convert_target_views(targets, context, new_views);
-            trace_info.trace->record_target_views(trace_info, info.index,
-                new_views);
-          }
-          else
-            trace_info.trace->get_target_views(trace_info, info.index,
-                new_views);
+          trace_info.trace->record_target_views(trace_info, info.index,
+              new_views);
         }
-        else
-          convert_target_views(targets, context, new_views);
         if (!IS_WRITE_ONLY(info.req))
         {
           // Any case but write-only
@@ -16697,41 +16679,38 @@ namespace Legion {
             MaterializedView *view = 
               new_views[idx]->as_instance_view()->as_materialized_view();
 
-            if (!trace_info.memoizing || trace_info.tracing)
+            // See if this instance is valid already 
+            LegionMap<LogicalView*,FieldMask>::aligned::const_iterator
+              finder = state->valid_views.find(view);
+            if (finder != state->valid_views.end())
             {
-              // See if this instance is valid already 
-              LegionMap<LogicalView*,FieldMask>::aligned::const_iterator
-                finder = state->valid_views.find(view);
-              if (finder != state->valid_views.end())
+              // See which fields if any we actually need to update
+              FieldMask needed_fields = valid_fields - finder->second;
+              if (!!needed_fields)
               {
-                // See which fields if any we actually need to update
-                FieldMask needed_fields = valid_fields - finder->second;
-                if (!!needed_fields)
-                {
-                  if (!has_valid_views)
-                  {
-                    find_valid_instance_views(info.ctx, state, 
-                        info.traversal_mask, info.traversal_mask, 
-                        info.version_info, false/*needs space*/, valid_views);
-                    has_valid_views = true;
-                  }
-                  issue_update_copies(info, view, needed_fields, 
-                                      valid_views, restrict_info, trace_info);
-                }
-              }
-              else
-              {
-                // Not valid for any fields, so bring it up to date for all fields
                 if (!has_valid_views)
                 {
-                  find_valid_instance_views(info.ctx, state,
-                      info.traversal_mask, info.traversal_mask,
+                  find_valid_instance_views(info.ctx, state, 
+                      info.traversal_mask, info.traversal_mask, 
                       info.version_info, false/*needs space*/, valid_views);
                   has_valid_views = true;
                 }
-                issue_update_copies(info, view, valid_fields, 
+                issue_update_copies(info, view, needed_fields, 
                                     valid_views, restrict_info, trace_info);
               }
+            }
+            else
+            {
+              // Not valid for any fields, so bring it up to date for all fields
+              if (!has_valid_views)
+              {
+                find_valid_instance_views(info.ctx, state,
+                    info.traversal_mask, info.traversal_mask,
+                    info.version_info, false/*needs space*/, valid_views);
+                has_valid_views = true;
+              }
+              issue_update_copies(info, view, valid_fields, 
+                                  valid_views, restrict_info, trace_info);
             }
             // Finally add this to the set of valid views for the state
             if (!!restricted_fields)
@@ -16778,7 +16757,7 @@ namespace Legion {
         }
         // Finally we have to update our instance references
         // to get the ready events
-        if (!defer_add_users && (!trace_info.memoizing || trace_info.tracing))
+        if (!defer_add_users)
         {
           // If there is exactly one instance, then we can do
           // the fused analysis and register user, otherwise we
