@@ -966,6 +966,7 @@ namespace Legion {
       REDUCTION_VIEW_FIND_COPY_PRECONDITIONS_CALL,
       REDUCTION_VIEW_FIND_USER_PRECONDITIONS_CALL,
       REDUCTION_VIEW_FILTER_LOCAL_USERS_CALL,
+      PHYSICAL_TRACE_EXECUTE_CALL,
       LAST_RUNTIME_CALL_KIND, // This one must be last
     };
 
@@ -1124,6 +1125,7 @@ namespace Legion {
       "Reduction View Find Copy Preconditions",                       \
       "Reduction View Find User Preconditions",                       \
       "Reduction View Filter Local Users",                            \
+      "Physical Trace Execute",                                       \
     };
 
     enum SemanticInfoKind {

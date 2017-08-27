@@ -1967,6 +1967,7 @@ namespace Legion {
                                    SingleTask *task)
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(task->runtime, PHYSICAL_TRACE_EXECUTE_CALL);
       std::pair<unsigned, DomainPoint> key(task->get_trace_local_id(),
                                            trace_info.color);
       std::map<std::pair<unsigned, DomainPoint>, unsigned>::iterator finder =
