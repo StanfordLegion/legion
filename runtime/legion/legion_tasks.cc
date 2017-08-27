@@ -5102,6 +5102,13 @@ namespace Legion {
     RtEvent IndividualTask::perform_versioning_analysis(void)
     //--------------------------------------------------------------------------
     {
+      PhysicalTraceInfo trace_info;
+      if (memoizing)
+      {
+        get_physical_trace_info(trace_info);
+        if (!trace_info.tracing)
+          return RtEvent::NO_RT_EVENT;
+      }
 #ifdef DEBUG_LEGION
       assert(regions.size() == version_infos.size());
 #endif
@@ -5276,6 +5283,19 @@ namespace Legion {
                                          MustEpochOp *must_epoch_owner/*=NULL*/)
     //--------------------------------------------------------------------------
     {
+      PhysicalTraceInfo trace_info;
+      if (memoizing)
+      {
+        get_physical_trace_info(trace_info);
+        if (!trace_info.tracing)
+        {
+          replay_map_task_output(trace_info);
+          trace_info.trace->execute_template(trace_info, this);
+          if (is_leaf() && !has_virtual_instances())
+            complete_mapping();
+          return RtEvent::NO_RT_EVENT;
+        }
+      }
       DETAILED_PROFILER(runtime, INDIVIDUAL_PERFORM_MAPPING_CALL);
       // See if we need to do any versioning computations first
       RtEvent version_ready_event = perform_versioning_analysis();
@@ -6026,6 +6046,13 @@ namespace Legion {
     void PointTask::perform_versioning_analysis(std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
+      PhysicalTraceInfo trace_info;
+      if (memoizing)
+      {
+        get_physical_trace_info(trace_info);
+        if (!trace_info.tracing)
+          return;
+      }
 #ifdef DEBUG_LEGION
       assert(version_infos.empty());
 #endif
@@ -6252,6 +6279,29 @@ namespace Legion {
     RtEvent PointTask::perform_mapping(MustEpochOp *must_epoch_owner/*=NULL*/)
     //--------------------------------------------------------------------------
     {
+      PhysicalTraceInfo trace_info;
+      if (memoizing)
+      {
+        get_physical_trace_info(trace_info);
+        if (!trace_info.tracing)
+        {
+          replay_map_task_output(trace_info);
+          trace_info.trace->execute_template(trace_info, this);
+          slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT,
+                                           ApEvent::NO_AP_EVENT);
+          if (is_leaf() && !has_virtual_instances())
+            complete_mapping();
+#ifdef LEGION_SPY
+      {
+        ApEvent term_event = get_completion_event();
+        ApEvent point_term_event = get_task_completion();
+        assert(term_event != point_term_event);
+        LegionSpy::log_event_dependence(term_event, point_term_event);
+      }
+#endif
+          return RtEvent::NO_RT_EVENT;
+        }
+      }
       // Our versioning analysis was done with our slice
       
       // For point tasks we use the point termination event which as the
@@ -8119,6 +8169,22 @@ namespace Legion {
     RtEvent SliceTask::perform_versioning_analysis(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!memoizing ||
+             (index_owner->trace != NULL &&
+              index_owner->trace->has_physical_trace()));
+#endif
+      if (memoizing)
+      {
+        PhysicalTrace *trace = index_owner->get_trace()->get_physical_trace();
+        PhysicalTraceInfo trace_info;
+        trace->set_current_template_id(trace_info);
+        if (!trace_info.tracing)
+        {
+          need_versioning_analysis = false;
+          return RtEvent::NO_RT_EVENT;
+        }
+      }
 #ifdef DEBUG_LEGION
       assert(!points.empty());
       assert(need_versioning_analysis);

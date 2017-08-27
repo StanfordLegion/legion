@@ -305,6 +305,19 @@ namespace Legion {
     {
       // Always wrap this call with calls to begin/end dependence analysis
       begin_dependence_analysis();
+#ifdef DEBUG_LEGION
+      assert(!memoizing || trace != NULL);
+#endif
+      if (memoizing)
+      {
+        PhysicalTraceInfo trace_info;
+        trace->get_physical_trace()->set_current_template_id(trace_info);
+        if (!trace_info.tracing)
+        {
+          end_dependence_analysis();
+          return;
+        }
+      }
       trigger_dependence_analysis();
       end_dependence_analysis();
     }

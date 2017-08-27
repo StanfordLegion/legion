@@ -543,6 +543,8 @@ namespace Legion {
       RtUserEvent commit_event;
       // The trace for this operation if any
       LegionTrace *trace;
+      // The physical trace for this operation if any
+      PhysicalTrace *physical_trace;
       // Track whether we are tracing this operation
       bool tracing;
       // Track whether we are memoizing physical analysis for this operation
