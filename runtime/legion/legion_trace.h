@@ -348,12 +348,6 @@ namespace Legion {
     public:
       PhysicalTrace& operator=(const PhysicalTrace &rhs);
     public:
-      void record_target_views(PhysicalTraceInfo &trace_info,
-                               unsigned idx,
-                               const std::vector<InstanceView*> &target_views);
-      void get_target_views(PhysicalTraceInfo &trace_info,
-                            unsigned idx,
-                            std::vector<InstanceView*> &target_views) const;
       void record_mapper_output(PhysicalTraceInfo &trace_info,
                                 const Mapper::MapTaskOutput &output,
                              const std::deque<InstanceSet> &physical_instances);
@@ -423,9 +417,6 @@ namespace Legion {
       unsigned current_template_id;
       Reservation trace_lock;
 
-      typedef LegionVector<LegionVector<InstanceView*>::aligned >::aligned
-        CachedViews;
-
       struct CachedMapping
       {
         VariantID               chosen_variant;
@@ -433,7 +424,6 @@ namespace Legion {
         bool                    postmap_task;
         std::vector<Processor>  target_procs;
         std::deque<InstanceSet> physical_instances;
-        CachedViews             target_views;
       };
 
       typedef

@@ -1302,43 +1302,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTrace::record_target_views(PhysicalTraceInfo &trace_info,
-                                            unsigned idx,
-                                 const std::vector<InstanceView*> &target_views)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock t_lock(trace_lock);
-
-      CachedViews &cached_views = cached_mappings[
-        std::make_pair(trace_info.trace_local_id, trace_info.color)]
-          .target_views;
-      cached_views.resize(idx + 1);
-      LegionVector<InstanceView*>::aligned &cache = cached_views[idx];
-      cache.resize(target_views.size());
-      for (unsigned i = 0; i < target_views.size(); ++i)
-        cache[i] = target_views[i];
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTrace::get_target_views(PhysicalTraceInfo &trace_info,
-                                         unsigned idx,
-                                 std::vector<InstanceView*> &target_views) const
-    //--------------------------------------------------------------------------
-    {
-      AutoLock t_lock(trace_lock, 1, false/*exclusive*/);
-
-      CachedMappings::const_iterator finder = cached_mappings.find(
-          std::make_pair(trace_info.trace_local_id, trace_info.color));
-#ifdef DEBUG_LEGION
-      assert(finder != cached_mappings.end());
-#endif
-      const CachedViews &cached_views = finder->second.target_views;
-      const LegionVector<InstanceView*>::aligned &cache = cached_views[idx];
-      for (unsigned i = 0; i < target_views.size(); ++i)
-        target_views[i] = cache[i];
-    }
-
-    //--------------------------------------------------------------------------
     void PhysicalTrace::fix_trace()
     //--------------------------------------------------------------------------
     {

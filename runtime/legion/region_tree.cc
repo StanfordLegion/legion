@@ -16504,14 +16504,6 @@ namespace Legion {
 #endif
           new_views[idx] = view->as_instance_view();
         }
-        if (trace_info.tracing)
-        {
-#ifdef DEBUG_LEGION
-          assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
-#endif
-          trace_info.trace->record_target_views(trace_info, info.index,
-              new_views);
-        }
         LegionMap<ReductionView*,FieldMask>::aligned reduce_out_views;
         for (unsigned idx = 0; idx < targets.size(); idx++)
         {
@@ -16647,14 +16639,6 @@ namespace Legion {
         }
         std::vector<InstanceView*> new_views(targets.size());
         convert_target_views(targets, context, new_views);
-        if (trace_info.tracing)
-        {
-#ifdef DEBUG_LEGION
-          assert(trace_info.trace != NULL);
-#endif
-          trace_info.trace->record_target_views(trace_info, info.index,
-              new_views);
-        }
         if (!IS_WRITE_ONLY(info.req))
         {
           // Any case but write-only
