@@ -303,6 +303,7 @@ namespace Legion {
     public:
       virtual void perform_fence_analysis(FenceOp *op) = 0;
       virtual void update_current_fence(FenceOp *op) = 0;
+      virtual FenceOp* get_current_fence() = 0;
     public:
       virtual void begin_trace(TraceID tid) = 0;
       virtual void end_trace(TraceID tid) = 0;
@@ -876,6 +877,7 @@ namespace Legion {
     public:
       virtual void perform_fence_analysis(FenceOp *op);
       virtual void update_current_fence(FenceOp *op);
+      virtual FenceOp* get_current_fence();
     public:
       virtual void begin_trace(TraceID tid);
       virtual void end_trace(TraceID tid);
@@ -1379,6 +1381,7 @@ namespace Legion {
     public:
       virtual void perform_fence_analysis(FenceOp *op);
       virtual void update_current_fence(FenceOp *op);
+      virtual FenceOp* get_current_fence();
     public:
       virtual void begin_trace(TraceID tid);
       virtual void end_trace(TraceID tid);
@@ -1678,6 +1681,7 @@ namespace Legion {
     public:
       virtual void perform_fence_analysis(FenceOp *op);
       virtual void update_current_fence(FenceOp *op);
+      virtual FenceOp* get_current_fence();
     public:
       virtual void begin_trace(TraceID tid);
       virtual void end_trace(TraceID tid);

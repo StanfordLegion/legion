@@ -5413,6 +5413,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    FenceOp* InnerContext::get_current_fence()
+    //--------------------------------------------------------------------------
+    {
+      return current_fence;
+    }
+
+    //--------------------------------------------------------------------------
     void InnerContext::begin_trace(TraceID tid)
     //--------------------------------------------------------------------------
     {
@@ -5434,21 +5441,29 @@ namespace Legion {
         exit(ERROR_ILLEGAL_NESTED_TRACE);
       }
       std::map<TraceID,DynamicTrace*>::const_iterator finder = traces.find(tid);
+      DynamicTrace* dynamic_trace = NULL;
       if (finder == traces.end())
       {
         // Trace does not exist yet, so make one and record it
-        DynamicTrace *dynamic_trace = new DynamicTrace(tid, this);
+        dynamic_trace = new DynamicTrace(tid, this);
         dynamic_trace->add_reference();
         traces[tid] = dynamic_trace;
-        current_trace = dynamic_trace;
       }
       else
-      {
-        // Issue the mapping fence first
-        runtime->issue_mapping_fence(this);
-        // Now mark that we are starting a trace
-        current_trace = finder->second;
-      }
+        dynamic_trace = finder->second;
+
+#ifdef DEBUG_LEGION
+      assert(dynamic_trace != NULL);
+#endif
+
+      // Issue a replay op
+      TraceReplayOp *replay =
+        runtime->get_available_replay_op(true);
+      replay->initialize_replay(this, dynamic_trace);
+      runtime->add_to_dependence_queue(this, executing_processor, replay);
+
+      // Now mark that we are starting a trace
+      current_trace = dynamic_trace;
     }
 
     //--------------------------------------------------------------------------
@@ -8667,6 +8682,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    FenceOp* LeafContext::get_current_fence()
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return NULL;
+    }
+
+
+    //--------------------------------------------------------------------------
     void LeafContext::begin_trace(TraceID tid)
     //--------------------------------------------------------------------------
     {
@@ -9831,6 +9855,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       enclosing->update_current_fence(op);
+    }
+
+    //--------------------------------------------------------------------------
+    FenceOp* InlineContext::get_current_fence()
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->get_current_fence();
     }
 
     //--------------------------------------------------------------------------

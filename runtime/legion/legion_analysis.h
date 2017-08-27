@@ -500,6 +500,7 @@ namespace Legion {
       const FieldMask traversal_mask;
       const UniqueID context_uid;
       std::set<RtEvent> &map_applied_events;
+      ContextID logical_ctx;
     };
 
     /**
@@ -977,6 +978,8 @@ namespace Legion {
       void print_physical_state(RegionTreeNode *node,
                                 const FieldMask &capture_mask,
                                 TreeStateLogger *logger);
+    public:
+      void update_physical_state(PhysicalState *state);
     protected:
       VersionState* create_new_version_state(VersionID vid);
     public:

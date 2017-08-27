@@ -308,6 +308,34 @@ namespace Legion {
     };
 
     /**
+     * \class TraceReplayOp
+     * This class represents trace operations which we inject
+     * into the operation stream to replay a physical trace
+     * if there is one that satisfies its preconditions.
+     */
+    class TraceReplayOp : public FenceOp {
+    public:
+      static const AllocationType alloc_type = TRACE_REPLAY_OP_ALLOC;
+    public:
+      TraceReplayOp(Runtime *rt);
+      TraceReplayOp(const TraceReplayOp &rhs);
+      virtual ~TraceReplayOp(void);
+    public:
+      TraceReplayOp& operator=(const TraceReplayOp &rhs);
+    public:
+      void initialize_replay(TaskContext *ctx, LegionTrace *trace);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual void trigger_dependence_analysis(void);
+      virtual void trigger_mapping(void);
+    protected:
+      LegionTrace *local_trace;
+    };
+
+    /**
      * \class PhysicalTrace
      * This class is used for memoizing the dynamic physical dependence
      * analysis for series of operations in a given task's context.
@@ -335,10 +363,9 @@ namespace Legion {
                              bool &postmap_task,
                              std::vector<Processor> &target_proc,
                              std::deque<InstanceSet> &physical_instances) const;
-    private:
-      void set_current_template_id(PhysicalTraceInfo &trace_info);
     public:
-      void find_or_create_template(PhysicalTraceInfo &trace_info);
+      void check_template_preconditions();
+      void set_current_template_id(PhysicalTraceInfo &trace_info);
     private:
       PhysicalTemplate* get_template(PhysicalTraceInfo &trace_info);
     public:
@@ -351,10 +378,12 @@ namespace Legion {
       void record_copy_views(PhysicalTraceInfo &trace_info,
                              InstanceView *src,
                              const FieldMask &src_mask,
-                             ContextID src_ctx,
+                             ContextID src_logical_ctx,
+                             ContextID src_physucal_ctx,
                              InstanceView *dst,
                              const FieldMask &dst_mask,
-                             ContextID dst_ctx);
+                             ContextID dst_logical_ctx,
+                             ContextID dst_physical_ctx);
       void record_issue_copy(PhysicalTraceInfo &trace_info,
                              ApEvent lhs,
                              RegionTreeNode* node,
@@ -374,13 +403,15 @@ namespace Legion {
                                   const RegionRequirement &req,
                                   InstanceView *view,
                                   const FieldMask &fields,
-                                  ContextID ctx);
+                                  ContextID logical_ctx,
+                                  ContextID physical_ctx);
     private:
       void record_ready_view(PhysicalTraceInfo &trace_info,
                              const RegionRequirement &req,
                              InstanceView *view,
                              const FieldMask &fields,
-                             ContextID ctx);
+                             ContextID logical_ctx,
+                             ContextID physical_ctx);
     public:
       void initialize_templates(ApEvent fence_completion);
       void execute_template(PhysicalTraceInfo &trace_info, SingleTask *task);
@@ -389,9 +420,8 @@ namespace Legion {
       bool is_tracing(void) const { return tracing; }
     private:
       bool tracing;
-      Reservation trace_lock;
-      ApUserEvent check_complete_event;
       unsigned current_template_id;
+      Reservation trace_lock;
 
       typedef LegionVector<LegionVector<InstanceView*>::aligned >::aligned
         CachedViews;
@@ -416,7 +446,8 @@ namespace Legion {
       LegionMap<InstanceView*, FieldMask>::aligned valid_views;
       LegionMap<InstanceView*, FieldMask>::aligned reduction_views;
       LegionMap<InstanceView*, bool>::aligned      initialized;
-      LegionMap<InstanceView*, ContextID>::aligned context_ids;
+      LegionMap<InstanceView*, ContextID>::aligned logical_contexts;
+      LegionMap<InstanceView*, ContextID>::aligned physical_contexts;
     };
 
     /**
@@ -433,13 +464,15 @@ namespace Legion {
       PhysicalTemplate(const PhysicalTemplate &rhs);
 
       void initialize();
+      bool check_preconditions();
       void execute(PhysicalTraceInfo &trace_info, SingleTask *task);
       void finalize(
-            const LegionMap<InstanceView*, FieldMask>::aligned &preconditions,
-            const LegionMap<InstanceView*, FieldMask>::aligned &valid_views,
-            const LegionMap<InstanceView*, FieldMask>::aligned &reduction_views,
-            const LegionMap<InstanceView*, bool>::aligned      &initialized,
-            const LegionMap<InstanceView*, ContextID>::aligned &context_ids);
+         const LegionMap<InstanceView*, FieldMask>::aligned &preconditions,
+         const LegionMap<InstanceView*, FieldMask>::aligned &valid_views,
+         const LegionMap<InstanceView*, FieldMask>::aligned &reduction_views,
+         const LegionMap<InstanceView*, bool>::aligned      &initialized,
+         const LegionMap<InstanceView*, ContextID>::aligned &logical_contexts,
+         const LegionMap<InstanceView*, ContextID>::aligned &physical_contexts);
       void dump_template();
       static std::string view_to_string(const InstanceView *view);
       void sanity_check();
@@ -460,7 +493,8 @@ namespace Legion {
       LegionMap<InstanceView*, FieldMask>::aligned valid_views;
       LegionMap<InstanceView*, FieldMask>::aligned reduction_views;
       LegionMap<InstanceView*, bool>::aligned      initialized;
-      LegionMap<InstanceView*, ContextID>::aligned context_ids;
+      LegionMap<InstanceView*, ContextID>::aligned logical_contexts;
+      LegionMap<InstanceView*, ContextID>::aligned physical_contexts;
     };
 
     /**

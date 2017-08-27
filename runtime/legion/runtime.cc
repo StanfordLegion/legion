@@ -8770,6 +8770,7 @@ namespace Legion {
         release_op_lock(Reservation::create_reservation()),
         capture_op_lock(Reservation::create_reservation()),
         trace_op_lock(Reservation::create_reservation()),
+        replay_op_lock(Reservation::create_reservation()),
         epoch_op_lock(Reservation::create_reservation()),
         pending_partition_op_lock(Reservation::create_reservation()),
         dependent_partition_op_lock(Reservation::create_reservation()),
@@ -17255,6 +17256,24 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
+    TraceReplayOp* Runtime::get_available_replay_op(bool need_cont,
+                                                    bool has_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_cont)
+      {
+#ifdef DEBUG_LEGION
+        assert(!has_lock);
+#endif
+        GetAvailableContinuation<TraceReplayOp*,
+        &Runtime::get_available_replay_op>
+        continuation(this, replay_op_lock);
+        return continuation.get_result();
+      }
+      return get_available(replay_op_lock, available_replay_ops, has_lock);
+    }
+    
+    //--------------------------------------------------------------------------
     MustEpochOp* Runtime::get_available_epoch_op(bool need_cont, bool has_lock)
     //--------------------------------------------------------------------------
     {
@@ -17652,6 +17671,14 @@ namespace Legion {
       release_operation<false>(available_trace_ops, op);
     }
     
+    //--------------------------------------------------------------------------
+    void Runtime::free_replay_op(TraceReplayOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(trace_op_lock);
+      release_operation<false>(available_replay_ops, op);
+    }
+
     //--------------------------------------------------------------------------
     void Runtime::free_epoch_op(MustEpochOp *op)
     //--------------------------------------------------------------------------

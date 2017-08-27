@@ -5651,7 +5651,7 @@ namespace Legion {
       trace_info.is_point_task = false;
       trace_info.trace = trace->get_physical_trace();
       trace_info.trace_local_id = trace_local_id;
-      trace_info.trace->find_or_create_template(trace_info);
+      trace_info.trace->set_current_template_id(trace_info);
     }
 
     //--------------------------------------------------------------------------
@@ -6629,7 +6629,7 @@ namespace Legion {
 #endif
       trace_info.trace_local_id = trace_local_id;
       trace_info.color = index_point;
-      trace_info.trace->find_or_create_template(trace_info);
+      trace_info.trace->set_current_template_id(trace_info);
     }
 
     //--------------------------------------------------------------------------

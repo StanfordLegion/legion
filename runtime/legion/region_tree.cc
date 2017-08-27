@@ -2268,6 +2268,11 @@ namespace Legion {
         // Construct the traversal info
         TraversalInfo info(ctx.get_id(), op, index, req, version_info, 
                            user_mask, local_applied);
+        if (trace_info.tracing)
+        {
+          TaskContext *context = op->find_logical_context(index);
+          info.logical_ctx = context->get_context().get_id();
+        }
         child_node->register_region(info, logical_ctx_uid, context, 
                                     restrict_info, term_event, usage, 
                                     defer_add_users, targets, proj_info,
@@ -2297,6 +2302,11 @@ namespace Legion {
         // Construct the traversal info
         TraversalInfo info(ctx.get_id(), op, index, req, version_info, 
                            user_mask, map_applied);
+        if (trace_info.tracing)
+        {
+          TaskContext *context = op->find_logical_context(index);
+          info.logical_ctx = context->get_context().get_id();
+        }
         child_node->register_region(info, logical_ctx_uid, context, 
                                     restrict_info, term_event, usage, 
                                     defer_add_users, targets, proj_info,
@@ -2347,6 +2357,13 @@ namespace Legion {
         target_views.resize(targets.size());
         region_node->convert_target_views(targets, context, target_views);
         RegionUsage usage(req);
+
+        ContextID logical_ctx = -1U;
+        if (trace_info.tracing)
+        {
+          TaskContext *context = op->find_logical_context(idx1);
+          logical_ctx = context->get_context().get_id();
+        }
         for (unsigned idx2 = 0; idx2 < targets.size(); idx2++)
         {
           InstanceRef &ref = targets[idx2];
@@ -2361,13 +2378,15 @@ namespace Legion {
           {
 #ifdef DEBUG_LEGION
             assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
+            assert(logical_ctx != -1U);
 #endif
-            RegionTreeContext ctx = context->get_context();
+            ContextID physical_ctx = context->get_context().get_id();
             trace_info.trace->record_set_ready_event(trace_info, op, idx1,
                                                      idx2, ready,
                                                      req, target_views[idx2],
                                                      ref.get_valid_fields(),
-                                                     ctx.get_id());
+                                                     logical_ctx,
+                                                     physical_ctx);
           }
         }
       }
@@ -14472,9 +14491,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
               assert(trace_info.trace != NULL &&
                      trace_info.trace->is_tracing());
+              assert(info.logical_ctx != -1U);
 #endif
-              trace_info.trace->record_copy_views(trace_info, it->first,
-                  op_mask, info.ctx, dst, op_mask, info.ctx);
+              trace_info.trace->record_copy_views(trace_info,
+                  it->first, op_mask, info.logical_ctx, info.ctx,
+                  dst, op_mask, info.logical_ctx, info.ctx);
             }
           }
         }
@@ -16531,11 +16552,14 @@ namespace Legion {
 #ifdef DEBUG_LEGION
               assert(trace_info.trace != NULL &&
                      trace_info.trace->is_tracing());
+              assert(info.logical_ctx != -1U);
 #endif
               trace_info.trace->record_set_ready_event(trace_info, info.op,
                                                        info.index, idx, ready,
                                                        info.req, new_view,
-                                                       user_mask, info.ctx);
+                                                       user_mask,
+                                                       info.logical_ctx,
+                                                       info.ctx);
             }
             new_views[idx] = new_view;
           }
@@ -16552,11 +16576,14 @@ namespace Legion {
 #ifdef DEBUG_LEGION
               assert(trace_info.trace != NULL &&
                      trace_info.trace->is_tracing());
+              assert(info.logical_ctx != -1U);
 #endif
               trace_info.trace->record_set_ready_event(trace_info, info.op,
                                                        info.index, idx, ready,
                                                        info.req, new_view,
-                                                       user_mask, info.ctx);
+                                                       user_mask,
+                                                       info.logical_ctx,
+                                                       info.ctx);
             }
           }
           if (!defer_add_users && !!restricted_fields)
@@ -16774,11 +16801,13 @@ namespace Legion {
 #ifdef DEBUG_LEGION
               assert(trace_info.trace != NULL &&
                      trace_info.trace->is_tracing());
+              assert(info.logical_ctx != -1U);
 #endif
               trace_info.trace->record_set_ready_event(trace_info, info.op,
                                                        info.index, 0, ready,
                                                        info.req, new_views[0],
                                                        ref.get_valid_fields(),
+                                                       info.logical_ctx,
                                                        info.ctx);
             }
             if (!!restricted_fields && !IS_READ_ONLY(info.req))
@@ -16809,12 +16838,14 @@ namespace Legion {
 #ifdef DEBUG_LEGION
                 assert(trace_info.trace != NULL &&
                        trace_info.trace->is_tracing());
+                assert(info.logical_ctx != -1U);
 #endif
                 trace_info.trace->record_set_ready_event(trace_info, info.op,
                                                          info.index, idx,
                                                          ready, info.req,
                                                          new_views[idx],
                                                          ref.get_valid_fields(),
+                                                         info.logical_ctx,
                                                          info.ctx);
               }
             }

@@ -1140,13 +1140,123 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // TraceReplayOp
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    TraceReplayOp::TraceReplayOp(Runtime *rt)
+      : FenceOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    TraceReplayOp::TraceReplayOp(const TraceReplayOp &rhs)
+      : FenceOp(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    TraceReplayOp::~TraceReplayOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    TraceReplayOp& TraceReplayOp::operator=(const TraceReplayOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceReplayOp::initialize_replay(TaskContext *ctx, LegionTrace *trace)
+    //--------------------------------------------------------------------------
+    {
+      initialize(ctx, MIXED_FENCE);
+#ifdef DEBUG_LEGION
+      assert(trace != NULL);
+#endif
+      local_trace = trace;
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceReplayOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_operation();
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceReplayOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_operation();
+      runtime->free_replay_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* TraceReplayOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[TRACE_REPLAY_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind TraceReplayOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return TRACE_REPLAY_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceReplayOp::trigger_dependence_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(trace == NULL);
+      assert(local_trace != NULL);
+#endif
+      if (local_trace->has_physical_trace())
+      {
+        // Wait for the previous traces to be mapped before checking
+        // template preconditions because no template would exist
+        // until they are mapped.
+        FenceOp *fence_op = parent_ctx->get_current_fence();
+        if (fence_op != NULL)
+          fence_op->get_mapped_event().wait();
+        local_trace->get_physical_trace()->check_template_preconditions();
+      }
+      // Register this fence with all previous users in the parent's context
+      parent_ctx->perform_fence_analysis(this);
+      // Now update the parent context with this fence before we can complete
+      // the dependence analysis and possibly be deactivated
+      parent_ctx->update_current_fence(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void TraceReplayOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      if (local_trace->has_physical_trace())
+        local_trace->get_physical_trace()->initialize_templates(
+            get_completion_event());
+      FenceOp::trigger_mapping();
+    }
+
+    /////////////////////////////////////////////////////////////
     // PhysicalTrace
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
     PhysicalTrace::PhysicalTrace()
-      : tracing(false), trace_lock(Reservation::create_reservation()),
-        check_complete_event(ApUserEvent()), current_template_id(-1U)
+      : tracing(false), current_template_id(-1U),
+        trace_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
     }
@@ -1234,22 +1344,16 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(tracing);
-      assert(check_complete_event.exists() &&
-             check_complete_event.has_triggered());
-      assert(0 <= current_template_id &&
-             current_template_id < templates.size());
 #endif
       templates[current_template_id]->finalize(preconditions, valid_views,
-          reduction_views, initialized, context_ids);
+          reduction_views, initialized, logical_contexts, physical_contexts);
 
-      tracing = false;
-      check_complete_event = ApUserEvent();
-      current_template_id = -1U;
       preconditions.clear();
       valid_views.clear();
       reduction_views.clear();
       initialized.clear();
-      context_ids.clear();
+      logical_contexts.clear();
+      physical_contexts.clear();
     }
 
     //--------------------------------------------------------------------------
@@ -1298,59 +1402,44 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    inline void PhysicalTrace::set_current_template_id(
-                                                  PhysicalTraceInfo &trace_info)
+    void PhysicalTrace::set_current_template_id(PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
+      {
+        AutoLock t_lock(trace_lock, 1, false/*exclusive*/);
+
+        if (current_template_id != -1U)
+        {
+          trace_info.template_id = current_template_id;
+          trace_info.tracing = tracing;
+          return;
+        }
+      }
+      AutoLock t_lock(trace_lock);
+      if (current_template_id == -1U)
+        check_template_preconditions();
+#ifdef DEBUG_LEGION
+      assert(current_template_id != -1U);
+#endif
       trace_info.template_id = current_template_id;
       trace_info.tracing = tracing;
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTrace::find_or_create_template(PhysicalTraceInfo &trace_info)
+    void PhysicalTrace::check_template_preconditions()
     //--------------------------------------------------------------------------
     {
-      {
-        AutoLock t_lock(trace_lock, 1, false/*exclusive*/);
-        if (current_template_id != -1U)
+      for (int idx = templates.size() - 1; idx >= 0; --idx)
+        if (templates[idx]->check_preconditions())
         {
-          set_current_template_id(trace_info);
+          tracing = false;
+          current_template_id = idx;
           return;
         }
-      }
 
-      bool wait_on_checks = false;
-      {
-        AutoLock t_lock(trace_lock);
-        if (check_complete_event.exists())
-          wait_on_checks = true;
-        else
-          check_complete_event =
-            ApUserEvent(Realm::UserEvent::create_user_event());
-      }
-      if (wait_on_checks)
-      {
-#ifdef DEBUG_LEGION
-        assert(check_complete_event.exists());
-#endif
-        check_complete_event.wait();
-      }
-      else
-      {
-        if (templates.size() > 0)
-        {
-          current_template_id = templates.size() - 1;
-          tracing = false;
-        }
-        else
-        {
-          current_template_id = templates.size();
-          tracing = true;
-          templates.push_back(new PhysicalTemplate());
-        }
-        Runtime::trigger_event(check_complete_event);
-      }
-      set_current_template_id(trace_info);
+      current_template_id = templates.size();
+      tracing = true;
+      templates.push_back(new PhysicalTemplate());
     }
 
     //--------------------------------------------------------------------------
@@ -1480,10 +1569,12 @@ namespace Legion {
     void PhysicalTrace::record_copy_views(PhysicalTraceInfo &trace_info,
                                           InstanceView *src,
                                           const FieldMask &src_mask,
-                                          ContextID src_ctx,
+                                          ContextID src_logical_ctx,
+                                          ContextID src_physical_ctx,
                                           InstanceView *dst,
                                           const FieldMask &dst_mask,
-                                          ContextID dst_ctx)
+                                          ContextID dst_logical_ctx,
+                                          ContextID dst_physical_ctx)
     //--------------------------------------------------------------------------
     {
       AutoLock t_lock(trace_lock);
@@ -1538,13 +1629,19 @@ namespace Legion {
         finder->second |= dst_mask;
 
 #ifdef DEBUG_LEGION
-      assert(context_ids.find(src) == context_ids.end() ||
-             context_ids[src] == src_ctx);
-      assert(context_ids.find(dst) == context_ids.end() ||
-             context_ids[dst] == dst_ctx);
+      assert(logical_contexts.find(src) == logical_contexts.end() ||
+             logical_contexts[src] == src_logical_ctx);
+      assert(logical_contexts.find(dst) == logical_contexts.end() ||
+             logical_contexts[dst] == dst_logical_ctx);
+      assert(physical_contexts.find(src) == physical_contexts.end() ||
+             physical_contexts[src] == src_physical_ctx);
+      assert(physical_contexts.find(dst) == physical_contexts.end() ||
+             physical_contexts[dst] == dst_physical_ctx);
 #endif
-      context_ids[src] = src_ctx;
-      context_ids[dst] = dst_ctx;
+      logical_contexts[src] = src_logical_ctx;
+      logical_contexts[dst] = dst_logical_ctx;
+      physical_contexts[src] = src_physical_ctx;
+      physical_contexts[dst] = dst_physical_ctx;
     }
 
     //--------------------------------------------------------------------------
@@ -1612,7 +1709,8 @@ namespace Legion {
                                                  const RegionRequirement &req,
                                                  InstanceView *view,
                                                  const FieldMask &fields,
-                                                 ContextID ctx)
+                                                 ContextID logical_ctx,
+                                                 ContextID physical_ctx)
     //--------------------------------------------------------------------------
     {
       AutoLock t_lock(trace_lock);
@@ -1647,10 +1745,13 @@ namespace Legion {
           finder->second |= fields;
       }
 #ifdef DEBUG_LEGION
-      assert(context_ids.find(view) == context_ids.end() ||
-             context_ids[view] == ctx);
+      assert(logical_contexts.find(view) == logical_contexts.end() ||
+             logical_contexts[view] == logical_ctx);
+      assert(physical_contexts.find(view) == physical_contexts.end() ||
+             physical_contexts[view] == physical_ctx);
 #endif
-      context_ids[view] = ctx;
+      logical_contexts[view] = logical_ctx;
+      physical_contexts[view] = physical_ctx;
     }
 
     //--------------------------------------------------------------------------
@@ -1662,7 +1763,8 @@ namespace Legion {
                                                const RegionRequirement &req,
                                                InstanceView *view,
                                                const FieldMask &fields,
-                                               ContextID ctx)
+                                               ContextID logical_ctx,
+                                               ContextID physical_ctx)
     //--------------------------------------------------------------------------
     {
       PhysicalTemplate *tpl = get_template(trace_info);
@@ -1705,7 +1807,8 @@ namespace Legion {
 #endif
       tpl->consumers[ready_event_idx].push_back(inst_id);
 
-      record_ready_view(trace_info, req, view, fields, ctx);
+      record_ready_view(trace_info, req, view, fields, logical_ctx,
+          physical_ctx);
     }
 
     void PhysicalTrace::initialize_templates(ApEvent fence_completion)
@@ -1777,6 +1880,89 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool PhysicalTemplate::check_preconditions()
+    //--------------------------------------------------------------------------
+    {
+      for (LegionMap<InstanceView*, FieldMask>::aligned::iterator it =
+           preconditions.begin(); it != preconditions.end(); ++it)
+      {
+#ifdef DEBUG_LEGION
+        assert(logical_contexts.find(it->first) != logical_contexts.end());
+        assert(physical_contexts.find(it->first) != physical_contexts.end());
+#endif
+        RegionTreeNode *logical_node = it->first->logical_node;
+        RegionTreeNode *parent_node = logical_node->get_parent();
+        if (parent_node != NULL)
+        {
+#ifdef DEBUG_LEGION
+          assert(!parent_node->is_region());
+#endif
+          ContextID logical_ctx = logical_contexts[it->first];
+          const LogicalState &state =
+            parent_node->get_logical_state(logical_ctx);
+          FieldMask unopened = it->second;
+#ifdef DEBUG_LEGION
+          assert(!!unopened);
+#endif
+          for (LegionList<FieldState>::aligned::const_iterator fit =
+               state.field_states.begin(); fit !=
+               state.field_states.end(); ++fit)
+          {
+            FieldMask overlap = fit->valid_fields & unopened;
+            if (!overlap)
+              continue;
+            unopened -= overlap;
+          }
+          if (!!unopened)
+            return false;
+        }
+
+        ContextID physical_ctx = physical_contexts[it->first];
+        PhysicalState *state = new PhysicalState(logical_node, false);
+        VersionManager &manager =
+          logical_node->get_current_version_manager(physical_ctx);
+        manager.update_physical_state(state);
+        state->capture_state();
+
+        bool found = false;
+        if (it->first->is_materialized_view())
+        {
+          for (LegionMap<LogicalView*, FieldMask,
+                         VALID_VIEW_ALLOC>::track_aligned::iterator vit =
+               state->valid_views.begin(); vit !=
+               state->valid_views.end(); ++vit)
+          {
+            if (vit->first->is_materialized_view() &&
+                it->first == vit->first && !(it->second - vit->second))
+            {
+              found = true;
+              break;
+            }
+          }
+        }
+        else
+        {
+#ifdef DEBUG_LEGION
+          assert(it->first->is_reduction_view());
+#endif
+          for (LegionMap<ReductionView*, FieldMask,
+                         VALID_VIEW_ALLOC>::track_aligned::iterator vit =
+               state->reduction_views.begin(); vit !=
+               state->reduction_views.end(); ++vit)
+          {
+            if (it->first == vit->first && !(it->second - vit->second))
+            {
+              found = true;
+              break;
+            }
+          }
+        }
+        if (!found) return false;
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalTemplate::execute(PhysicalTraceInfo &trace_info,
                                    SingleTask *task)
     //--------------------------------------------------------------------------
@@ -1837,11 +2023,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::finalize(
-                 const LegionMap<InstanceView*, FieldMask>::aligned &conditions,
-                 const LegionMap<InstanceView*, FieldMask>::aligned &views,
-                 const LegionMap<InstanceView*, FieldMask>::aligned &red_views,
-                 const LegionMap<InstanceView*, bool>::aligned      &init,
-                 const LegionMap<InstanceView*, ContextID>::aligned &ids)
+              const LegionMap<InstanceView*, FieldMask>::aligned &conditions,
+              const LegionMap<InstanceView*, FieldMask>::aligned &views,
+              const LegionMap<InstanceView*, FieldMask>::aligned &red_views,
+              const LegionMap<InstanceView*, bool>::aligned      &init,
+              const LegionMap<InstanceView*, ContextID>::aligned &logical_ctxs,
+              const LegionMap<InstanceView*, ContextID>::aligned &physical_ctxs)
     //--------------------------------------------------------------------------
     {
       event_map.clear();
@@ -1853,7 +2040,8 @@ namespace Legion {
       valid_views = views;
       reduction_views = red_views;
       initialized = init;
-      context_ids = ids;
+      logical_contexts = logical_ctxs;
+      physical_contexts = physical_ctxs;
       if (Runtime::dump_physical_traces) dump_template();
 #ifdef DEBUG_LEGION
       sanity_check();
@@ -1894,7 +2082,8 @@ namespace Legion {
       {
         char *mask = it->second.to_string();
         std::cerr << "  " << view_to_string(it->first) << " " << mask
-                  << " context id: " << context_ids[it->first];
+                  << " logical ctx: " << logical_contexts[it->first]
+                  << " physical ctx: " << physical_contexts[it->first];
         if (it->first->is_reduction_view())
           std::cerr << " initialized: " << initialized[it->first];
         std::cerr << std::endl;
@@ -1907,8 +2096,9 @@ namespace Legion {
       {
         char *mask = it->second.to_string();
         std::cerr << "  " << view_to_string(it->first) << " "
-                  << mask << " context id: "
-                  << context_ids[it->first] << std::endl;
+                  << " logical ctx: " << logical_contexts[it->first]
+                  << " physical ctx: " << physical_contexts[it->first]
+                  << std::endl;
         free(mask);
       }
 
@@ -1918,7 +2108,8 @@ namespace Legion {
       {
         char *mask = it->second.to_string();
         std::cerr << "  " << view_to_string(it->first) << " " << mask
-                  << " context id: " << context_ids[it->first]
+                  << " logical ctx: " << logical_contexts[it->first]
+                  << " physical ctx: " << physical_contexts[it->first]
                   << " initialized: " << initialized[it->first] << std::endl;
         free(mask);
       }

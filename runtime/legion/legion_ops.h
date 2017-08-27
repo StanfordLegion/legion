@@ -69,6 +69,7 @@ namespace Legion {
         TIMING_OP_KIND,
         TRACE_CAPTURE_OP_KIND,
         TRACE_COMPLETE_OP_KIND,
+        TRACE_REPLAY_OP_KIND,
         TASK_OP_KIND,
         LAST_OP_KIND,
       };
@@ -102,6 +103,7 @@ namespace Legion {
         "Timing",                   \
         "Trace Capture",            \
         "Trace Complete",           \
+        "Trace Replay",             \
         "Task",                     \
       }
     public:

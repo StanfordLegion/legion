@@ -1244,6 +1244,7 @@ namespace Legion {
     class DynamicTrace;
     class TraceCaptureOp;
     class TraceCompleteOp;
+    class TraceReplayOp;
     class PhysicalTrace;
     struct PhysicalTemplate;
     struct Instruction;

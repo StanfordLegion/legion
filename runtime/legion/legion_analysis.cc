@@ -149,7 +149,7 @@ namespace Legion {
                                  const FieldMask &k, std::set<RtEvent> &e)
       : ctx(c), op(o), index(idx), req(r), version_info(info),
         traversal_mask(k), context_uid(o->get_context()->get_context_uid()),
-        map_applied_events(e)
+        map_applied_events(e), logical_ctx(-1U)
     //--------------------------------------------------------------------------
     {
     }
@@ -5632,6 +5632,23 @@ namespace Legion {
       }
       logger->up();
       temp_state.print_physical_state(capture_mask, logger);
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionManager::update_physical_state(PhysicalState *state)
+    //--------------------------------------------------------------------------
+    {
+      for (LegionMap<VersionID,ManagerVersions>::aligned::const_iterator vit =
+           current_version_infos.begin(); vit !=
+           current_version_infos.end(); vit++)
+      {
+        for (ManagerVersions::iterator it = vit->second.begin();
+             it != vit->second.end(); it++)
+        {
+          VersionState *vs = dynamic_cast<VersionState*>(it->first);
+          vs->update_physical_state(state, it->second);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------

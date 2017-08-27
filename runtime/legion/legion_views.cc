@@ -7724,10 +7724,13 @@ namespace Legion {
 #endif
         trace_info.trace->record_merge_events(trace_info, reduce_pre,
             event_preconds);
-        InnerContext *context = op->find_physical_context(index);
-        ContextID ctx = context->get_context().get_id();
+        ContextID logical_ctx =
+          op->find_logical_context(index)->get_context().get_id();
+        ContextID physical_ctx =
+          op->find_physical_context(index)->get_context().get_id();
         trace_info.trace->record_copy_views(trace_info, this, reduce_mask,
-            ctx, target, reduce_mask, ctx);
+            logical_ctx, physical_ctx, target, reduce_mask,
+            logical_ctx, physical_ctx);
       }
       ApEvent reduce_post = manager->issue_reduction(op, 
                                                      src_fields, dst_fields,
@@ -7790,10 +7793,13 @@ namespace Legion {
 #endif
         trace_info.trace->record_merge_events(trace_info, reduce_pre,
             preconditions);
-        InnerContext *context = op->find_physical_context(index);
-        ContextID ctx = context->get_context().get_id();
-        trace_info.trace->record_copy_views(trace_info, this, red_mask, ctx,
-            target, red_mask, ctx);
+        ContextID logical_ctx =
+          op->find_logical_context(index)->get_context().get_id();
+        ContextID physical_ctx =
+          op->find_physical_context(index)->get_context().get_id();
+        trace_info.trace->record_copy_views(trace_info, this, red_mask,
+            logical_ctx, physical_ctx, target, red_mask,
+            logical_ctx, physical_ctx);
       }
       ApEvent reduce_post = target->logical_node->issue_copy(op, 
                              src_fields, dst_fields, reduce_pre, 
