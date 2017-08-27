@@ -201,7 +201,7 @@ class PerfMapper : public DefaultMapper
 
   private:
     typedef vector<vector<PhysicalInstance> > CachedMapping;
-    typedef vector<LayoutConstraintSet> CachedConstraints;
+    typedef vector<vector<LayoutConstraintSet> > CachedConstraints;
 
   private:
     unsigned num_slices;
@@ -371,24 +371,34 @@ void PerfMapper::map_task(const MapperContext  ctx,
       {
         for (size_t idx = 0; idx < task.regions.size(); ++idx)
         {
-          LayoutConstraintSet constraints;
-          constraints.add_constraint(SpecializedConstraint(
-                REDUCTION_FOLD_SPECIALIZE, task.regions[idx].redop))
-            .add_constraint(FieldConstraint(task.regions[idx].instance_fields,
-                  false, false))
-            .add_constraint(MemoryConstraint(target_memory.kind()));
-          cons_for_task.push_back(constraints);
+          cons_for_task.push_back(vector<LayoutConstraintSet>());
+          size_t num_fields = task.regions[idx].instance_fields.size();
+          for (size_t fidx = 0; fidx < num_fields; ++fidx)
+          {
+            LayoutConstraintSet constraints;
+            std::vector<FieldID> fields(1,
+                task.regions[idx].instance_fields[fidx]);
+            constraints.add_constraint(SpecializedConstraint(
+                  REDUCTION_FOLD_SPECIALIZE, task.regions[idx].redop))
+              .add_constraint(FieldConstraint(fields, false, false))
+              .add_constraint(MemoryConstraint(target_memory.kind()));
+            cons_for_task.back().push_back(constraints);
+          }
         }
       }
       for (size_t idx = 0; idx < task.regions.size(); ++idx)
       {
-        PhysicalInstance inst;
-        vector<LogicalRegion> target_region;
-        target_region.push_back(task.regions[idx].region);
-        runtime->create_physical_instance(ctx, target_memory,
-            cons_for_task[idx], target_region, inst);
-        runtime->set_garbage_collection_priority(ctx, inst, GC_FIRST_PRIORITY);
-        output.chosen_instances[idx].push_back(inst);
+        size_t num_constraints = cons_for_task[idx].size();
+        for (size_t cidx = 0; cidx < num_constraints; ++cidx)
+        {
+          PhysicalInstance inst;
+          vector<LogicalRegion> target_region;
+          target_region.push_back(task.regions[idx].region);
+          runtime->create_physical_instance(ctx, target_memory,
+              cons_for_task[idx][cidx], target_region, inst);
+          runtime->set_garbage_collection_priority(ctx, inst, GC_FIRST_PRIORITY);
+          output.chosen_instances[idx].push_back(inst);
+        }
       }
     }
     else
@@ -927,13 +937,13 @@ void top_level_task(const Task *task,
                 (alternate_loop && pattern[l % pattern.size()] == RD))
             {
               unsigned offset = slide * p;
+              RegionRequirement req(lr, REDUCE_ID, SIMULTANEOUS, lrs[r]);
               for (unsigned k = 0; k < num_fields; ++k)
               {
-                RegionRequirement req(lr, REDUCE_ID, SIMULTANEOUS, lrs[r]);
                 req.tag = l / (alternate_loop ? pattern.size() : 1);
                 req.add_field(100 + k + offset);
-                launcher.add_region_requirement(req);
               }
+              launcher.add_region_requirement(req);
             }
             else
             {
@@ -990,14 +1000,14 @@ void top_level_task(const Task *task,
               (alternate_loop && pattern[l % pattern.size()] == RD))
           {
             unsigned offset = slide * p;
-            for (unsigned k = 0; k < num_fields; ++k)
-            {
               RegionRequirement req(lps[r][p], pid, REDUCE_ID, SIMULTANEOUS,
                   lrs[r]);
+            for (unsigned k = 0; k < num_fields; ++k)
+            {
               req.tag = l / (alternate_loop ? pattern.size() : 1);
               req.add_field(100 + k + offset);
-              launcher.add_region_requirement(req);
             }
+              launcher.add_region_requirement(req);
           }
           else
           {
