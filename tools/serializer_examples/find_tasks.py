@@ -101,11 +101,8 @@ def main():
     parser = argparse.ArgumentParser()
 
     # usage: python span_example.py <task0> <task1> <logfile0> <logfile1>
-    parser.add_argument("-t", "--tasks", nargs=2, type=str,
-                        help="The two task names you want to find the span between. These are interpreted as regexes")
-    parser.add_argument("-s", "--skip", nargs=2, type=int,
-                        default=(0, 0),
-                        help="The number of task occurrences you want to prune in the span.")
+    parser.add_argument("-t", "--task", nargs=1, type=str,
+                        help="The task name you want to find. These are interpreted as regexes")
     parser.add_argument("-a", "--ascii", action="store_true",
                         dest="ascii_parser",
                         help="Use ASCII parser.")
@@ -122,7 +119,7 @@ def main():
     if args.filenames is None:
         print("You must pass in a logfile!")
         exit(-1)
-    has_matches = False 
+    has_matches = False
     for file_name in args.filenames:
         matches = deserializer.parse(file_name, True)
         has_matches = has_matches or matches > 0
@@ -133,47 +130,24 @@ def main():
 
     # now search through the spans
 
-    task0 = args.tasks[0]
-    task1 = args.tasks[1]
-    skip0 = args.skip[0]
-    skip1 = args.skip[1]
+    task = args.task[0]
+    matching_tasks = []
 
-    matching_tasks0 = []
-    matching_tasks1 = []
-    
     for task_name in task_spans.iterkeys():
-        if re.search(task0, task_name):
-            matching_tasks0.append(task_name)
-        if re.search(task1, task_name):
-            matching_tasks1.append(task_name)
+        if re.search(task, task_name):
+            matching_tasks.append(task_name)
 
     err = False
-    for (task, matches) in [(task0, matching_tasks0), (task1, matching_tasks1)]:
-        if len(matches) == 0:
-            print("No matching tasks for " + task + " found!")
-            err = True
-        
-        if len(matches) > 1:
-            print("Task " + task + " had disambiguous matches. Pick the task name you want from the following list:")
-            print(matches)
-            err = True
-
-    if err:
+    if len(matching_tasks) == 0:
+        print("No matching tasks for " + task + " found!")
         exit(-1)
 
-    match0 = matching_tasks0[0]
-    match1 = matching_tasks1[0]
-    span0 = task_spans[match0][skip0:]
-    span1 = task_spans[match1]
-    if skip1 > 0:
-        span1 = span1[0:-skip1]
-
-    start = min([s[0] for s in span0])
-    stop = max([s[1] for s in span1])
-    task_span = (start, stop)
-    print("Range between " + task0 + " and " + task1 + " was " + \
-            str(task_span[1] - task_span[0]) + "us (start: " + \
-            str(task_span[0]) + "us, stop: " + str(task_span[1]) + "us)")
+    for task_name in matching_tasks:
+        spans = task_spans[task_name]
+        print("Task " + task_name + ":")
+        for span in spans:
+            print(str(span[1] - span[0]) + "us (start: " + \
+                    str(span[0]) + "us, stop: " + str(span[1]) + "us)")
 
 if __name__ == "__main__":
     main()
