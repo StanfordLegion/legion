@@ -3225,15 +3225,14 @@ namespace Legion {
           FieldMask overlap = non_dominated_mask & dit->second;
           if (!overlap)
             continue;
-          if (color_space->get_num_dims() != dit->first->get_num_dims())
-            continue;
           FieldMask reduction_mask = overlap & it->second->reduced_fields;
           if (!!reduction_mask)
           {
             non_dominated_by_any |= reduction_mask;
             overlap -= reduction_mask;
           }
-          if (dit->first->dominates(color_space))
+          if (color_space->get_num_dims() != dit->first->get_num_dims() ||
+              !dit->first->dominates(color_space))
             non_dominated_mask |= overlap;
         }
 
