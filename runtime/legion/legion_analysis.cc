@@ -3109,6 +3109,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ClosedNode::record_reduced_fields(const FieldMask &fields)
+    //--------------------------------------------------------------------------
+    {
+      reduced_fields |= fields;
+    }
+
+    //--------------------------------------------------------------------------
     void ClosedNode::record_projections(const ProjectionEpoch *epoch,
                                         const FieldMask &fields)
     //--------------------------------------------------------------------------
@@ -3378,6 +3385,7 @@ namespace Legion {
         IndexSpaceNode *color_space = node->row_source->color_space;
         // Iterate over the projections and look for anything with an 
         // identity projection function for which we can do something
+        FieldMask non_dominated_by_any;
         for (std::map<std::pair<ProjectionFunction*,ShardingFunction*>,
               LegionMap<IndexSpaceNode*,FieldMask>::aligned>::const_iterator
               pit = it->second->projections.begin(); 
@@ -3393,14 +3401,20 @@ namespace Legion {
               continue;
             if (color_space->get_num_dims() != dit->first->get_num_dims())
               continue;
-            if (dit->first->dominates(color_space))
+            FieldMask reduction_mask = overlap & it->second->reduced_fields;
+            if (!!reduction_mask)
             {
-              non_dominated_mask -= overlap;
-              if (!!non_dominated_mask) 
-                return;
+              non_dominated_by_any |= reduction_mask;
+              overlap -= reduction_mask;
             }
-          }  
+            if (dit->first->dominates(color_space))
+              non_dominated_mask |= overlap;
+          }
         }
+
+        non_dominated_mask &= non_dominated_by_any;
+        if (!!non_dominated_mask) 
+          return;
       }
       // In order to remove a field, it has to be dominated in all our children
       FieldMask dominated_fields = non_dominated_mask;

@@ -10110,7 +10110,7 @@ namespace Legion {
                   const FieldMask overlap = current_mask & it->valid_fields;
 #ifdef DEBUG_LEGION
                   assert(!!overlap);
-                  assert(!disjoint_close);
+                  //assert(!disjoint_close);
 #endif
                   closer.record_close_operation(overlap, true/*projection*/);
                   state.capture_close_epochs(overlap,
@@ -10506,6 +10506,12 @@ namespace Legion {
             RegionTreeNode *child_node = get_tree_child(it->first);
             child_node->close_logical_node(closer, child_close, 
                                            false/*read only close*/);
+            if (state.open_state == OPEN_SINGLE_REDUCE ||
+                state.open_state == OPEN_MULTI_REDUCE)
+            {
+              ClosedNode *closed_tree = closer.find_closed_node(child_node);
+              closed_tree->record_reduced_fields(child_close);
+            }
             // Remove the close fields
             it->second -= child_close;
             removed_fields = true;
