@@ -48,7 +48,7 @@ ENV LD_LIBRARY_PATH /usr/local/cuda/extras/CUPTI/lib64:/usr/local/cuda/lib64:$LD
 ENV CUDA /usr/local/cuda
 
 # Install Regent.
-COPY . /usr/local/legion
+RUN git clone -b master https://github.com/StanfordLegion/legion.git /usr/local/legion
 RUN LLVM_CONFIG=llvm-config /usr/local/legion/language/install.py --rdir=auto --cuda && \
     ln -s /usr/local/legion/language/regent.py /usr/local/bin/regent
 

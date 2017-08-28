@@ -8708,8 +8708,11 @@ namespace Legion {
     ProjectionFunction::~ProjectionFunction(void)
     //--------------------------------------------------------------------------
     {
-      delete functor;
-      projection_reservation.destroy_reservation();
+      // These can be shared in the case of multiple runtime instances
+      if (!Runtime::separate_runtime_instances)
+        delete functor;
+      if (projection_reservation.exists())
+        projection_reservation.destroy_reservation();
       projection_reservation = Reservation::NO_RESERVATION;
     }
 

@@ -35,7 +35,7 @@ namespace Legion {
                              const std::vector<RegionRequirement> &reqs)
       : runtime(rt), owner_task(owner), regions(reqs),
         executing_processor(Processor::NO_PROC), total_tunable_count(0), 
-        overhead_tracker(NULL), task_executed(false),
+        overhead_tracker(NULL), task_executed(false),has_inline_accessor(false),
         children_complete_invoked(false), children_commit_invoked(false)
     //--------------------------------------------------------------------------
     {
@@ -149,7 +149,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void TaskContext::add_physical_region(const RegionRequirement &req,
                                    bool mapped, MapperID mid, MappingTagID tag,
-                                   ApUserEvent unmap_event, bool virtual_mapped, 
+                                   ApUserEvent unmap_event, bool virtual_mapped,
                                    const InstanceSet &physical_instances)
     //--------------------------------------------------------------------------
     {
@@ -1551,6 +1551,8 @@ namespace Legion {
       {
         if (it->impl == region.impl)
         {
+          if (Runtime::runtime_warnings && !has_inline_accessor)
+            has_inline_accessor = it->impl->created_accessor();
           inline_regions.erase(it);
           return;
         }
@@ -6066,13 +6068,17 @@ namespace Legion {
         {
           // If this task had sub operations and wasn't marked as inner
           // and made no accessors warn about missing 'inner' annotation
-          bool has_accessor = false;
-          for (unsigned idx = 0; idx < physical_regions.size(); idx++)
+          // First check for any inline accessors that were made
+          bool has_accessor = has_inline_accessor;
+          if (!has_accessor)
           {
-            if (!physical_regions[idx].impl->created_accessor())
-              continue;
-            has_accessor = true;
-            break;
+            for (unsigned idx = 0; idx < physical_regions.size(); idx++)
+            {
+              if (!physical_regions[idx].impl->created_accessor())
+                continue;
+              has_accessor = true;
+              break;
+            }
           }
           if (!has_accessor)
           {
