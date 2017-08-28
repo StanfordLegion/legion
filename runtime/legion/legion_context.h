@@ -558,6 +558,7 @@ namespace Legion {
     protected:
       RtEvent pending_done;
       bool task_executed;
+      bool has_inline_accessor;
     protected: 
       bool children_complete_invoked;
       bool children_commit_invoked;
