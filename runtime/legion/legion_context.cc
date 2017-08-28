@@ -4744,7 +4744,7 @@ namespace Legion {
         assert(complete_children.find(op) == complete_children.end());
         outstanding_children[op->get_ctx_index()] = op;
 #endif       
-        executing_children.insert(op);
+        executing_children[op] = op->get_generation();
       }
       // Issue the next dependence analysis task
       DeferredDependenceArgs args;
@@ -4784,20 +4784,20 @@ namespace Legion {
       RtUserEvent to_trigger;
       {
         AutoLock ctx_lock(context_lock);
-        std::set<Operation*>::iterator finder = executing_children.find(op);
+        std::map<Operation*,GenerationID>::iterator 
+          finder = executing_children.find(op);
 #ifdef DEBUG_LEGION
         assert(finder != executing_children.end());
         assert(executed_children.find(op) == executed_children.end());
         assert(complete_children.find(op) == complete_children.end());
 #endif
-        executing_children.erase(finder);
         // Now put it in the list of executing operations
         // Note this doesn't change the number of active children
         // so there's no need to trigger any window waits
-        //
+        executed_children.insert(*finder);
+        executing_children.erase(finder);
         // Add some hysteresis here so that we have some runway for when
         // the paused task resumes it can run for a little while.
-        executed_children.insert(op);
         int outstanding_count = 
           __sync_add_and_fetch(&outstanding_children_count,-1);
 #ifdef DEBUG_LEGION
@@ -4823,15 +4823,16 @@ namespace Legion {
       bool needs_trigger = false;
       {
         AutoLock ctx_lock(context_lock);
-        std::set<Operation*>::iterator finder = executed_children.find(op);
+        std::map<Operation*,GenerationID>::iterator finder = 
+          executed_children.find(op);
 #ifdef DEBUG_LEGION
         assert(finder != executed_children.end());
         assert(complete_children.find(op) == complete_children.end());
         assert(executing_children.find(op) == executing_children.end());
 #endif
-        executed_children.erase(finder);
         // Put it on the list of complete children to complete
-        complete_children.insert(op);
+        complete_children.insert(*finder);
+        executed_children.erase(finder);
         // See if we need to trigger the all children complete call
         if (task_executed && executing_children.empty() && 
             executed_children.empty() && !children_complete_invoked)
@@ -4851,7 +4852,8 @@ namespace Legion {
       bool needs_trigger = false;
       {
         AutoLock ctx_lock(context_lock);
-        std::set<Operation*>::iterator finder = complete_children.find(op);
+        std::map<Operation*,GenerationID>::iterator finder = 
+          complete_children.find(op);
 #ifdef DEBUG_LEGION
         assert(finder != complete_children.end());
         assert(executing_children.find(op) == executing_children.end());
@@ -4911,22 +4913,22 @@ namespace Legion {
     {
       // Don't both taking the lock since this is for debugging
       // and isn't actually called anywhere
-      for (std::set<Operation*>::const_iterator it =
+      for (std::map<Operation*,GenerationID>::const_iterator it =
             executing_children.begin(); it != executing_children.end(); it++)
       {
-        Operation *op = *it;
+        Operation *op = it->first;
         printf("Executing Child %p\n",op);
       }
-      for (std::set<Operation*>::const_iterator it =
+      for (std::map<Operation*,GenerationID>::const_iterator it =
             executed_children.begin(); it != executed_children.end(); it++)
       {
-        Operation *op = *it;
+        Operation *op = it->first;
         printf("Executed Child %p\n",op);
       }
-      for (std::set<Operation*>::const_iterator it =
+      for (std::map<Operation*,GenerationID>::const_iterator it =
             complete_children.begin(); it != complete_children.end(); it++)
       {
-        Operation *op = *it;
+        Operation *op = it->first;
         printf("Complete Child %p\n",op);
       }
     }
@@ -4992,26 +4994,26 @@ namespace Legion {
       const unsigned fence_index = op->get_ctx_index();
       {
         AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
-        for (LegionSet<Operation*,EXECUTING_CHILD_ALLOC>::tracked::
-              const_iterator it = executing_children.begin(); it !=
-              executing_children.end(); it++)
+        for (std::map<Operation*,GenerationID>::const_iterator it = 
+              executing_children.begin(); it != executing_children.end(); it++)
         {
-          if ((*it)->get_ctx_index() < fence_index)
-            previous_operations[*it] = (*it)->get_generation();
+          if ((it->first->get_generation() == it->second) &&
+              (it->first->get_ctx_index() < fence_index))
+            previous_operations.insert(*it);
         }
-        for (LegionSet<Operation*,EXECUTED_CHILD_ALLOC>::tracked::
-              const_iterator it = executed_children.begin(); it != 
-              executed_children.end(); it++)
+        for (std::map<Operation*,GenerationID>::const_iterator it = 
+              executed_children.begin(); it != executed_children.end(); it++)
         {
-          if ((*it)->get_ctx_index() < fence_index)
-            previous_operations[*it] = (*it)->get_generation();
+          if ((it->first->get_generation() == it->second) &&
+              (it->first->get_ctx_index() < fence_index))
+            previous_operations.insert(*it);
         }
-        for (LegionSet<Operation*,COMPLETE_CHILD_ALLOC>::tracked::
-              const_iterator it = complete_children.begin(); it !=
-              complete_children.end(); it++)
+        for (std::map<Operation*,GenerationID>::const_iterator it = 
+              complete_children.begin(); it != complete_children.end(); it++)
         {
-          if ((*it)->get_ctx_index() < fence_index)
-            previous_operations[*it] = (*it)->get_generation();
+          if ((it->first->get_generation() == it->second) &&
+              (it->first->get_ctx_index() < fence_index))
+            previous_operations.insert(*it);
         }
 #ifdef LEGION_SPY
         for (unsigned idx = 0; idx < created_requirements.size(); idx++)
@@ -6189,16 +6191,16 @@ namespace Legion {
           AutoLock ctx_lock(context_lock);
           // Only need to do this for executing and executed children
           // We know that any complete children are done
-          for (std::set<Operation*>::const_iterator it = 
+          for (std::map<Operation*,GenerationID>::const_iterator it = 
                 executing_children.begin(); it != 
                 executing_children.end(); it++)
           {
-            preconditions.insert((*it)->get_mapped_event());
+            preconditions.insert(it->first->get_mapped_event());
           }
-          for (std::set<Operation*>::const_iterator it = 
+          for (std::map<Operation*,GenerationID>::const_iterator it = 
                 executed_children.begin(); it != executed_children.end(); it++)
           {
-            preconditions.insert((*it)->get_mapped_event());
+            preconditions.insert(it->first->get_mapped_event());
           }
 #ifdef DEBUG_LEGION
           assert(!task_executed);
