@@ -127,7 +127,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void TaskContext::add_physical_region(const RegionRequirement &req,
                                    bool mapped, MapperID mid, MappingTagID tag,
-                                   ApUserEvent unmap_event, bool virtual_mapped, 
+                                   ApUserEvent unmap_event, bool virtual_mapped,
                                    const InstanceSet &physical_instances)
     //--------------------------------------------------------------------------
     {
@@ -6428,6 +6428,18 @@ namespace Legion {
               continue;
             has_accessor = true;
             break;
+          }
+          // Check for inline mappings too
+          if (!has_accessor && !inline_regions.empty())
+          {
+            for (std::list<PhysicalRegion>::const_iterator it = 
+                  inline_regions.begin(); it != inline_regions.end(); it++)
+            {
+              if (!it->impl->created_accessor())
+                continue;
+              has_accessor = true;
+              break;
+            }
           }
           if (!has_accessor)
           {
