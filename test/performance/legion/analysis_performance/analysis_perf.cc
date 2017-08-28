@@ -274,7 +274,7 @@ PerfMapper::~PerfMapper()
 
 Mapper::MapperSyncModel PerfMapper::get_mapper_sync_model(void) const
 {
-  return CONCURRENT_MAPPER_MODEL;
+  return SERIALIZED_REENTRANT_MAPPER_MODEL;
 }
 
 void PerfMapper::select_task_options(const MapperContext ctx,
@@ -342,9 +342,15 @@ void PerfMapper::map_task(const MapperContext  ctx,
   {
     if (variant_id.size() == 0)
     {
+      std::vector<VariantID> local_variant_id;
       runtime->find_valid_variants(ctx, DO_NOTHING_TASK_ID,
-          variant_id, Processor::LOC_PROC);
-      assert(variant_id.size() == 1);
+          local_variant_id, Processor::LOC_PROC);
+      if (variant_id.size() == 0)
+        variant_id = local_variant_id;
+#ifdef DEBUG_LEGION
+      else
+        assert(variant_id == local_variant_id);
+#endif
     }
     output.task_priority = 0;
     output.chosen_variant = variant_id[0];
@@ -365,7 +371,7 @@ void PerfMapper::map_task(const MapperContext  ctx,
         constraint_cache[part_id];
       if (cons_for_partition.size() <= point)
         cons_for_partition.resize(point + 1);
-      CachedConstraints& cons_for_task = cons_for_partition[point];
+      CachedConstraints cons_for_task = cons_for_partition[point];
       Memory target_memory = proc_sysmems[procs_list[0]];
       if (cons_for_task.size() == 0)
       {
@@ -406,7 +412,7 @@ void PerfMapper::map_task(const MapperContext  ctx,
       if (mapping_cache.size() <= part_id) mapping_cache.resize(part_id + 1);
       vector<CachedMapping>& mappings = mapping_cache[part_id];
       if (mappings.size() <= point) mappings.resize(point + 1);
-      CachedMapping& cached_mapping = mappings[point];
+      CachedMapping cached_mapping = mappings[point];
       if (cached_mapping.size() == 0)
       {
         cached_mapping.resize(task.regions.size());
@@ -432,6 +438,7 @@ void PerfMapper::map_task(const MapperContext  ctx,
               cache_mapping ? GC_NEVER_PRIORITY : GC_FIRST_PRIORITY);
           cached_mapping[idx].push_back(inst);
         }
+        if (cache_mapping) mapping_cache[part_id][point] = cached_mapping;
       }
       else
       {
@@ -444,7 +451,6 @@ void PerfMapper::map_task(const MapperContext  ctx,
 #endif
       }
       output.chosen_instances = cached_mapping;
-      if (!cache_mapping) cached_mapping.clear();
     }
   }
   else
