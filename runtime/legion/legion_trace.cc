@@ -1255,8 +1255,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTrace::PhysicalTrace()
-      : tracing(false), current_template_id(-1U),
-        trace_lock(Reservation::create_reservation())
+      : tracing(false), trace_lock(Reservation::create_reservation()),
+        current_template(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -1275,18 +1275,6 @@ namespace Legion {
     {
       trace_lock.destroy_reservation();
       trace_lock = Reservation::NO_RESERVATION;
-      // Relesae references to instances
-      for (CachedMappings::iterator it = cached_mappings.begin();
-           it != cached_mappings.end(); ++it)
-      {
-        for (std::deque<InstanceSet>::iterator pit =
-              it->second.physical_instances.begin(); pit !=
-              it->second.physical_instances.end(); pit++)
-        {
-          pit->remove_valid_references(PHYSICAL_TRACE_REF);
-          pit->clear();
-        }
-      }
       for (std::vector<PhysicalTemplate*>::iterator it = templates.begin();
            it != templates.end(); ++it)
         delete (*it);
@@ -1308,83 +1296,39 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(tracing);
 #endif
-      templates[current_template_id]->finalize(preconditions, valid_views,
-          reduction_views, initialized, logical_contexts, physical_contexts);
-
-      preconditions.clear();
-      valid_views.clear();
-      reduction_views.clear();
-      initialized.clear();
-      logical_contexts.clear();
-      physical_contexts.clear();
+      current_template->finalize();
+      current_template = NULL;
+      tracing = false;
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTrace::record_mapper_output(PhysicalTraceInfo &trace_info,
-                                            const Mapper::MapTaskOutput &output,
-                              const std::deque<InstanceSet> &physical_instances)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock t_lock(trace_lock);
-
-      CachedMapping &mapping = cached_mappings[
-        std::make_pair(trace_info.trace_local_id, trace_info.color)];
-      mapping.target_procs = output.target_procs;
-      mapping.chosen_variant = output.chosen_variant;
-      mapping.task_priority = output.task_priority;
-      mapping.postmap_task = output.postmap_task;
-      mapping.physical_instances = physical_instances;
-      // Hold the reference to each instance to prevent it from being collected
-      for (std::deque<InstanceSet>::iterator it =
-            mapping.physical_instances.begin(); it !=
-            mapping.physical_instances.end(); it++)
-        it->add_valid_references(PHYSICAL_TRACE_REF);
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTrace::get_mapper_output(PhysicalTraceInfo &trace_info,
-                                          VariantID &chosen_variant,
-                                          TaskPriority &task_priority,
-                                          bool &postmap_task,
-                                          std::vector<Processor> &target_procs,
-                              std::deque<InstanceSet> &physical_instances) const
-    //--------------------------------------------------------------------------
-    {
-      AutoLock t_lock(trace_lock, 1, false/*exclusive*/);
-
-      CachedMappings::const_iterator finder = cached_mappings.find(
-          std::make_pair(trace_info.trace_local_id, trace_info.color));
-#ifdef DEBUG_LEGION
-      assert(finder != cached_mappings.end());
-#endif
-      chosen_variant = finder->second.chosen_variant;
-      task_priority = finder->second.task_priority;
-      postmap_task = finder->second.postmap_task;
-      target_procs = finder->second.target_procs;
-      physical_instances = finder->second.physical_instances;
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTrace::set_current_template_id(PhysicalTraceInfo &trace_info)
+    void PhysicalTrace::get_current_template(PhysicalTraceInfo &trace_info,
+                                             bool allow_create /*true*/)
     //--------------------------------------------------------------------------
     {
       {
         AutoLock t_lock(trace_lock, 1, false/*exclusive*/);
 
-        if (current_template_id != -1U)
+        if (current_template != NULL)
         {
-          trace_info.template_id = current_template_id;
+          trace_info.tpl = current_template;
           trace_info.tracing = tracing;
+          return;
+        }
+        else if (!allow_create)
+        {
+          trace_info.tracing = true;
+          trace_info.tpl = NULL;
           return;
         }
       }
       AutoLock t_lock(trace_lock);
-      if (current_template_id == -1U)
-        check_template_preconditions();
+      if (current_template == NULL)
+        start_new_template();
 #ifdef DEBUG_LEGION
-      assert(current_template_id != -1U);
+      assert(current_template != NULL);
 #endif
-      trace_info.template_id = current_template_id;
+      trace_info.tpl = current_template;
       trace_info.tracing = tracing;
     }
 
@@ -1392,404 +1336,32 @@ namespace Legion {
     void PhysicalTrace::check_template_preconditions()
     //--------------------------------------------------------------------------
     {
-      for (int idx = templates.size() - 1; idx >= 0; --idx)
-        if (templates[idx]->check_preconditions())
+      for (std::vector<PhysicalTemplate*>::reverse_iterator it =
+           templates.rbegin(); it !=
+           templates.rend(); ++it)
+        if ((*it)->check_preconditions())
         {
+          current_template = *it;
           tracing = false;
-          current_template_id = idx;
           return;
         }
+      start_new_template();
+    }
 
-      current_template_id = templates.size();
-      tracing = true;
+    //--------------------------------------------------------------------------
+    inline void PhysicalTrace::start_new_template()
+    //--------------------------------------------------------------------------
+    {
       templates.push_back(new PhysicalTemplate());
-    }
-
-    //--------------------------------------------------------------------------
-    inline PhysicalTemplate* PhysicalTrace::get_template(
-                                                  PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      PhysicalTemplate* tpl = NULL;
-      {
-        AutoLock t_lock(trace_lock, 1, false/*exclusive*/);
-#ifdef DEBUG_LEGION
-        assert(0 <= trace_info.template_id &&
-               trace_info.template_id < templates.size());
-#endif
-        tpl = templates[trace_info.template_id];
-      }
-#ifdef DEBUG_LEGION
-      assert(tpl != NULL);
-#endif
-      return tpl;
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTrace::record_get_term_event(PhysicalTraceInfo &trace_info,
-                                              ApEvent lhs,
-                                              SingleTask* task)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(task->is_memoizing());
-#endif
-      PhysicalTemplate *tpl = get_template(trace_info);
-      AutoLock tpl_lock(tpl->template_lock);
-
-      unsigned lhs_ = tpl->events.size();
-      tpl->events.push_back(lhs);
-#ifdef DEBUG_LEGION
-      assert(tpl->event_map.find(lhs) == tpl->event_map.end());
-#endif
-      tpl->event_map[lhs] = lhs_;
-
-      std::pair<unsigned, DomainPoint> key(
-          task->get_trace_local_id(), trace_info.color);
-#ifdef DEBUG_LEGION
-      assert(tpl->operations.find(key) == tpl->operations.end());
-#endif
-      tpl->operations[key] = task;
-
-      unsigned inst_id = tpl->instructions.size();
-      tpl->instructions.push_back(new GetTermEvent(*tpl, lhs_, key));
-      tpl->consumers.push_back(std::vector<unsigned>());
-      tpl->max_producers.push_back(1);
-#ifdef DEBUG_LEGION
-      assert(tpl->instructions.size() == tpl->events.size());
-      assert(tpl->instructions.size() == tpl->consumers.size());
-      assert(tpl->instructions.size() == tpl->max_producers.size());
-#endif
-
-#ifdef DEBUG_LEGION
-      assert(tpl->task_entries.find(key) == tpl->task_entries.end());
-#endif
-      tpl->task_entries[key] = inst_id;
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTrace::record_merge_events(PhysicalTraceInfo &trace_info,
-                                            ApEvent &lhs,
-                                            const std::set<ApEvent>& rhs)
-    //--------------------------------------------------------------------------
-    {
-#ifndef LEGION_SPY
-      if (!lhs.exists() || (rhs.find(lhs) != rhs.end()))
-      {
-        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
-        if (rhs.find(lhs) != rhs.end())
-          rename.trigger(lhs);
-        else
-          rename.trigger();
-        lhs = ApEvent(rename);
-      }
-#endif
-
-      PhysicalTemplate *tpl = get_template(trace_info);
-      AutoLock tpl_lock(tpl->template_lock);
-
-      unsigned lhs_ = tpl->events.size();
-      tpl->events.push_back(lhs);
-#ifdef DEBUG_LEGION
-      assert(tpl->event_map.find(lhs) == tpl->event_map.end());
-#endif
-      tpl->event_map[lhs] = lhs_;
-
-      std::set<unsigned> rhs_;
-      rhs_.insert(tpl->fence_completion_id);
-      for (std::set<ApEvent>::const_iterator it = rhs.begin(); it != rhs.end();
-           it++)
-      {
-        std::map<ApEvent, unsigned>::iterator finder = tpl->event_map.find(*it);
-        if (finder != tpl->event_map.end())
-          rhs_.insert(finder->second);
-      }
-#ifdef DEBUG_LEGION
-      assert(rhs_.size() > 0);
-#endif
-
-      unsigned inst_id = tpl->instructions.size();
-      tpl->instructions.push_back(new MergeEvent(*tpl, lhs_, rhs_));
-      tpl->consumers.push_back(std::vector<unsigned>());
-      tpl->max_producers.push_back(rhs_.size());
-#ifdef DEBUG_LEGION
-      assert(tpl->instructions.size() == tpl->events.size());
-      assert(tpl->instructions.size() == tpl->consumers.size());
-      assert(tpl->instructions.size() == tpl->max_producers.size());
-#endif
-
-      for (std::set<unsigned>::iterator it = rhs_.begin(); it != rhs_.end();
-           it++)
-      {
-#ifdef DEBUG_LEGION
-        assert(*it < tpl->consumers.size());
-#endif
-        tpl->consumers[*it].push_back(inst_id);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTrace::record_copy_views(PhysicalTraceInfo &trace_info,
-                                          InstanceView *src,
-                                          const FieldMask &src_mask,
-                                          ContextID src_logical_ctx,
-                                          ContextID src_physical_ctx,
-                                          InstanceView *dst,
-                                          const FieldMask &dst_mask,
-                                          ContextID dst_logical_ctx,
-                                          ContextID dst_physical_ctx)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock t_lock(trace_lock);
-
-      if (src->is_reduction_view())
-      {
-        LegionMap<InstanceView*, FieldMask>::aligned::iterator finder =
-          reduction_views.find(src);
-        if (finder == reduction_views.end())
-        {
-          LegionMap<InstanceView*, FieldMask>::aligned::iterator pfinder =
-            preconditions.find(src);
-          if (pfinder == preconditions.end())
-            preconditions[src] = src_mask;
-          else
-            pfinder->second |= src_mask;
-          initialized[src] = true;
-        }
-#ifdef DEBUG_LEGION
-        else
-        {
-          assert(finder->second == src_mask);
-          assert(initialized.find(src) != initialized.end());
-        }
-#endif
-      }
-      else
-      {
-        LegionMap<InstanceView*, FieldMask>::aligned::iterator finder =
-          valid_views.find(src);
-        if (finder == valid_views.end())
-        {
-          LegionMap<InstanceView*, FieldMask>::aligned::iterator pfinder =
-            preconditions.find(src);
-          if (pfinder == preconditions.end())
-            preconditions[src] = src_mask;
-          else
-            pfinder->second |= src_mask;
-        }
-        else
-          finder->second |= src_mask;
-      }
-
-#ifdef DEBUG_LEGION
-      assert(!dst->is_reduction_view());
-#endif
-      LegionMap<InstanceView*, FieldMask>::aligned::iterator finder =
-        valid_views.find(dst);
-      if (finder == valid_views.end())
-        valid_views[dst] = dst_mask;
-      else
-        finder->second |= dst_mask;
-
-#ifdef DEBUG_LEGION
-      assert(logical_contexts.find(src) == logical_contexts.end() ||
-             logical_contexts[src] == src_logical_ctx);
-      assert(logical_contexts.find(dst) == logical_contexts.end() ||
-             logical_contexts[dst] == dst_logical_ctx);
-      assert(physical_contexts.find(src) == physical_contexts.end() ||
-             physical_contexts[src] == src_physical_ctx);
-      assert(physical_contexts.find(dst) == physical_contexts.end() ||
-             physical_contexts[dst] == dst_physical_ctx);
-#endif
-      logical_contexts[src] = src_logical_ctx;
-      logical_contexts[dst] = dst_logical_ctx;
-      physical_contexts[src] = src_physical_ctx;
-      physical_contexts[dst] = dst_physical_ctx;
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTrace::record_issue_copy(PhysicalTraceInfo &trace_info,
-                                          ApEvent lhs,
-                                          RegionTreeNode* node,
-                                          Operation* op,
-                         const std::vector<Domain::CopySrcDstField>& src_fields,
-                         const std::vector<Domain::CopySrcDstField>& dst_fields,
-                                          ApEvent precondition,
-                                          PredEvent predicate_guard,
-                                          RegionTreeNode *intersect,
-                                          ReductionOpID redop,
-                                          bool reduction_fold)
-    //--------------------------------------------------------------------------
-    {
-      PhysicalTemplate *tpl = get_template(trace_info);
-      AutoLock tpl_lock(tpl->template_lock);
-
-      unsigned lhs_ = tpl->events.size();
-      tpl->events.push_back(lhs);
-#ifdef DEBUG_LEGION
-      assert(tpl->event_map.find(lhs) == tpl->event_map.end());
-#endif
-      tpl->event_map[lhs] = lhs_;
-
-      std::pair<unsigned, DomainPoint> op_key(op->get_trace_local_id(),
-                                              trace_info.color);
-#ifdef DEBUG_LEGION
-      assert(tpl->operations.find(op_key) != tpl->operations.end());
-#endif
-
-      std::map<ApEvent, unsigned>::iterator pre_finder =
-        tpl->event_map.find(precondition);
-#ifdef DEBUG_LEGION
-      assert(pre_finder != tpl->event_map.end());
-#endif
-      unsigned precondition_idx = pre_finder->second;
-
-      unsigned inst_id = tpl->instructions.size();
-      tpl->instructions.push_back(new IssueCopy(
-            *tpl, lhs_, node, op_key, src_fields, dst_fields, precondition_idx,
-            predicate_guard, intersect, redop, reduction_fold));
-      tpl->consumers.push_back(std::vector<unsigned>());
-      tpl->max_producers.push_back(2);
-#ifdef DEBUG_LEGION
-      assert(tpl->instructions.size() == tpl->events.size());
-      assert(tpl->instructions.size() == tpl->consumers.size());
-      assert(tpl->instructions.size() == tpl->max_producers.size());
-#endif
-
-#ifdef DEBUG_LEGION
-      assert(tpl->task_entries.find(op_key) != tpl->task_entries.end());
-#endif
-      tpl->consumers[tpl->task_entries[op_key]].push_back(inst_id);
-
-#ifdef DEBUG_LEGION
-      assert(precondition_idx < tpl->consumers.size());
-#endif
-      tpl->consumers[precondition_idx].push_back(inst_id);
-    }
-
-    //--------------------------------------------------------------------------
-    inline void PhysicalTrace::record_ready_view(PhysicalTraceInfo &trace_info,
-                                                 const RegionRequirement &req,
-                                                 InstanceView *view,
-                                                 const FieldMask &fields,
-                                                 ContextID logical_ctx,
-                                                 ContextID physical_ctx)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock t_lock(trace_lock);
-      if (view->is_reduction_view())
-      {
-#ifdef DEBUG_LEGION
-        assert(IS_REDUCE(req));
-        assert(reduction_views.find(view) == reduction_views.end());
-        assert(initialized.find(view) == initialized.end());
-#endif
-        reduction_views[view] = fields;
-        initialized[view] = false;
-      }
-      else
-      {
-        LegionMap<InstanceView*, FieldMask>::aligned::iterator finder =
-          valid_views.find(view);
-        if (finder == valid_views.end())
-        {
-          if (HAS_READ(req))
-          {
-            LegionMap<InstanceView*, FieldMask>::aligned::iterator pfinder =
-              preconditions.find(view);
-            if (pfinder == preconditions.end())
-              preconditions[view] = fields;
-            else
-              pfinder->second |= fields;
-          }
-          valid_views[view] = fields;
-        }
-        else
-          finder->second |= fields;
-      }
-#ifdef DEBUG_LEGION
-      assert(logical_contexts.find(view) == logical_contexts.end() ||
-             logical_contexts[view] == logical_ctx);
-      assert(physical_contexts.find(view) == physical_contexts.end() ||
-             physical_contexts[view] == physical_ctx);
-#endif
-      logical_contexts[view] = logical_ctx;
-      physical_contexts[view] = physical_ctx;
-    }
-
-    //--------------------------------------------------------------------------
-    void PhysicalTrace::record_set_ready_event(PhysicalTraceInfo &trace_info,
-                                               Operation *op,
-                                               unsigned region_idx,
-                                               unsigned inst_idx,
-                                               ApEvent ready_event,
-                                               const RegionRequirement &req,
-                                               InstanceView *view,
-                                               const FieldMask &fields,
-                                               ContextID logical_ctx,
-                                               ContextID physical_ctx)
-    //--------------------------------------------------------------------------
-    {
-      PhysicalTemplate *tpl = get_template(trace_info);
-      AutoLock tpl_lock(tpl->template_lock);
-
-      tpl->events.push_back(ApEvent());
-
-      std::pair<unsigned, DomainPoint> op_key(op->get_trace_local_id(),
-                                              trace_info.color);
-#ifdef DEBUG_LEGION
-      assert(tpl->operations.find(op_key) != tpl->operations.end());
-#endif
-
-      std::map<ApEvent, unsigned>::iterator ready_finder =
-        tpl->event_map.find(ready_event);
-#ifdef DEBUG_LEGION
-      assert(ready_finder != tpl->event_map.end());
-#endif
-      unsigned ready_event_idx = ready_finder->second;
-
-      unsigned inst_id = tpl->instructions.size();
-      tpl->instructions.push_back(
-          new SetReadyEvent(*tpl, op_key, region_idx, inst_idx,
-                            ready_event_idx));
-      tpl->consumers.push_back(std::vector<unsigned>());
-      tpl->max_producers.push_back(2);
-#ifdef DEBUG_LEGION
-      assert(tpl->instructions.size() == tpl->events.size());
-      assert(tpl->instructions.size() == tpl->consumers.size());
-      assert(tpl->instructions.size() == tpl->max_producers.size());
-#endif
-
-#ifdef DEBUG_LEGION
-      assert(tpl->task_entries.find(op_key) != tpl->task_entries.end());
-#endif
-      tpl->consumers[tpl->task_entries[op_key]].push_back(inst_id);
-
-#ifdef DEBUG_LEGION
-      assert(ready_event_idx < tpl->consumers.size());
-#endif
-      tpl->consumers[ready_event_idx].push_back(inst_id);
-
-      record_ready_view(trace_info, req, view, fields, logical_ctx,
-          physical_ctx);
+      current_template = templates.back();
+      tracing = true;
     }
 
     void PhysicalTrace::initialize_templates(ApEvent fence_completion)
     {
       for (std::vector<PhysicalTemplate*>::iterator it = templates.begin();
            it != templates.end(); ++it)
-      {
-        PhysicalTemplate *tpl = *it;
-        tpl->fence_completion = fence_completion;
-        tpl->initialize();
-      }
-    }
-
-    void PhysicalTrace::execute_template(PhysicalTraceInfo &trace_info,
-                                         SingleTask *task)
-    {
-      PhysicalTemplate *tpl = get_template(trace_info);
-      tpl->execute(trace_info, task);
+        (*it)->initialize(fence_completion);
     }
 
     /////////////////////////////////////////////////////////////
@@ -1798,7 +1370,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTemplate::PhysicalTemplate()
-      : template_lock(Reservation::create_reservation()), fence_completion_id(0)
+      : tracing(true), template_lock(Reservation::create_reservation()),
+        fence_completion_id(0)
     //--------------------------------------------------------------------------
     {
       events.push_back(ApEvent());
@@ -1817,6 +1390,19 @@ namespace Legion {
         for (std::vector<Instruction*>::iterator it = instructions.begin();
              it != instructions.end(); ++it)
           delete *it;
+        // Relesae references to instances
+        for (CachedMappings::iterator it = cached_mappings.begin();
+            it != cached_mappings.end(); ++it)
+        {
+          for (std::deque<InstanceSet>::iterator pit =
+              it->second.physical_instances.begin(); pit !=
+              it->second.physical_instances.end(); pit++)
+          {
+            pit->remove_valid_references(PHYSICAL_TRACE_REF);
+            pit->clear();
+          }
+        }
+        cached_mappings.clear();
       }
       template_lock.destroy_reservation();
       template_lock = Reservation::NO_RESERVATION;
@@ -1832,9 +1418,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::initialize()
+    void PhysicalTemplate::initialize(ApEvent completion)
     //--------------------------------------------------------------------------
     {
+      fence_completion = completion;
       operations.clear();
       size_t num_events = events.size();
       events.clear();
@@ -1986,26 +1573,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTemplate::finalize(
-              const LegionMap<InstanceView*, FieldMask>::aligned &conditions,
-              const LegionMap<InstanceView*, FieldMask>::aligned &views,
-              const LegionMap<InstanceView*, FieldMask>::aligned &red_views,
-              const LegionMap<InstanceView*, bool>::aligned      &init,
-              const LegionMap<InstanceView*, ContextID>::aligned &logical_ctxs,
-              const LegionMap<InstanceView*, ContextID>::aligned &physical_ctxs)
+    void PhysicalTemplate::finalize()
     //--------------------------------------------------------------------------
     {
+      tracing = false;
       event_map.clear();
 #ifdef DEBUG_LEGION
       assert(consumers.size() == instructions.size());
       assert(max_producers.size() == instructions.size());
 #endif
-      preconditions = conditions;
-      valid_views = views;
-      reduction_views = red_views;
-      initialized = init;
-      logical_contexts = logical_ctxs;
-      physical_contexts = physical_ctxs;
       if (Runtime::dump_physical_traces) dump_template();
 #ifdef DEBUG_LEGION
       sanity_check();
@@ -2089,6 +1665,401 @@ namespace Legion {
         if (it->first->is_reduction_view())
           assert(initialized.find(it->first) != initialized.end() &&
                  initialized[it->first]);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_mapper_output(PhysicalTraceInfo &trace_info,
+                                            const Mapper::MapTaskOutput &output,
+                              const std::deque<InstanceSet> &physical_instances)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(template_lock);
+
+      std::pair<unsigned, DomainPoint> op_key(trace_info.trace_local_id,
+          trace_info.color);
+#ifdef DEBUG_LEGION
+      assert(cached_mappings.find(op_key) == cached_mappings.end());
+#endif
+      CachedMapping &mapping = cached_mappings[op_key];
+      mapping.target_procs = output.target_procs;
+      mapping.chosen_variant = output.chosen_variant;
+      mapping.task_priority = output.task_priority;
+      mapping.postmap_task = output.postmap_task;
+      mapping.physical_instances = physical_instances;
+
+      // Hold a reference to each instance to prevent it from being collected
+      for (std::deque<InstanceSet>::iterator it =
+            mapping.physical_instances.begin(); it !=
+            mapping.physical_instances.end(); it++)
+        it->add_valid_references(PHYSICAL_TRACE_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::get_mapper_output(PhysicalTraceInfo &trace_info,
+                                             VariantID &chosen_variant,
+                                             TaskPriority &task_priority,
+                                             bool &postmap_task,
+                              std::vector<Processor> &target_procs,
+                              std::deque<InstanceSet> &physical_instances) const
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(template_lock, 1, false/*exclusive*/);
+
+      std::pair<unsigned, DomainPoint> op_key(trace_info.trace_local_id,
+          trace_info.color);
+      CachedMappings::const_iterator finder = cached_mappings.find(op_key);
+#ifdef DEBUG_LEGION
+      assert(finder != cached_mappings.end());
+#endif
+      chosen_variant = finder->second.chosen_variant;
+      task_priority = finder->second.task_priority;
+      postmap_task = finder->second.postmap_task;
+      target_procs = finder->second.target_procs;
+      physical_instances = finder->second.physical_instances;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_get_term_event(PhysicalTraceInfo &trace_info,
+                                                 ApEvent lhs,
+                                                 SingleTask* task)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(task->is_memoizing());
+#endif
+      AutoLock tpl_lock(template_lock);
+
+      unsigned lhs_ = events.size();
+      events.push_back(lhs);
+#ifdef DEBUG_LEGION
+      assert(event_map.find(lhs) == event_map.end());
+#endif
+      event_map[lhs] = lhs_;
+
+      std::pair<unsigned, DomainPoint> key(
+          task->get_trace_local_id(), trace_info.color);
+#ifdef DEBUG_LEGION
+      assert(operations.find(key) == operations.end());
+#endif
+      operations[key] = task;
+
+      unsigned inst_id = instructions.size();
+      instructions.push_back(new GetTermEvent(*this, lhs_, key));
+      consumers.push_back(std::vector<unsigned>());
+      max_producers.push_back(1);
+#ifdef DEBUG_LEGION
+      assert(instructions.size() == events.size());
+      assert(instructions.size() == consumers.size());
+      assert(instructions.size() == max_producers.size());
+#endif
+
+#ifdef DEBUG_LEGION
+      assert(task_entries.find(key) == task_entries.end());
+#endif
+      task_entries[key] = inst_id;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_merge_events(PhysicalTraceInfo &trace_info,
+                                               ApEvent &lhs,
+                                               const std::set<ApEvent>& rhs)
+    //--------------------------------------------------------------------------
+    {
+#ifndef LEGION_SPY
+      if (!lhs.exists() || (rhs.find(lhs) != rhs.end()))
+      {
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        if (rhs.find(lhs) != rhs.end())
+          rename.trigger(lhs);
+        else
+          rename.trigger();
+        lhs = ApEvent(rename);
+      }
+#endif
+
+      AutoLock tpl_lock(template_lock);
+
+      unsigned lhs_ = events.size();
+      events.push_back(lhs);
+#ifdef DEBUG_LEGION
+      assert(event_map.find(lhs) == event_map.end());
+#endif
+      event_map[lhs] = lhs_;
+
+      std::set<unsigned> rhs_;
+      rhs_.insert(fence_completion_id);
+      for (std::set<ApEvent>::const_iterator it = rhs.begin(); it != rhs.end();
+           it++)
+      {
+        std::map<ApEvent, unsigned>::iterator finder = event_map.find(*it);
+        if (finder != event_map.end())
+          rhs_.insert(finder->second);
+      }
+#ifdef DEBUG_LEGION
+      assert(rhs_.size() > 0);
+#endif
+
+      unsigned inst_id = instructions.size();
+      instructions.push_back(new MergeEvent(*this, lhs_, rhs_));
+      consumers.push_back(std::vector<unsigned>());
+      max_producers.push_back(rhs_.size());
+#ifdef DEBUG_LEGION
+      assert(instructions.size() == events.size());
+      assert(instructions.size() == consumers.size());
+      assert(instructions.size() == max_producers.size());
+#endif
+
+      for (std::set<unsigned>::iterator it = rhs_.begin(); it != rhs_.end();
+           it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(*it < consumers.size());
+#endif
+        consumers[*it].push_back(inst_id);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_copy_views(PhysicalTraceInfo &trace_info,
+                                             InstanceView *src,
+                                             const FieldMask &src_mask,
+                                             ContextID src_logical_ctx,
+                                             ContextID src_physical_ctx,
+                                             InstanceView *dst,
+                                             const FieldMask &dst_mask,
+                                             ContextID dst_logical_ctx,
+                                             ContextID dst_physical_ctx)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock t_lock(template_lock);
+
+      if (src->is_reduction_view())
+      {
+        LegionMap<InstanceView*, FieldMask>::aligned::iterator finder =
+          reduction_views.find(src);
+        if (finder == reduction_views.end())
+        {
+          LegionMap<InstanceView*, FieldMask>::aligned::iterator pfinder =
+            preconditions.find(src);
+          if (pfinder == preconditions.end())
+            preconditions[src] = src_mask;
+          else
+            pfinder->second |= src_mask;
+          initialized[src] = true;
+        }
+#ifdef DEBUG_LEGION
+        else
+        {
+          assert(finder->second == src_mask);
+          assert(initialized.find(src) != initialized.end());
+        }
+#endif
+      }
+      else
+      {
+        LegionMap<InstanceView*, FieldMask>::aligned::iterator finder =
+          valid_views.find(src);
+        if (finder == valid_views.end())
+        {
+          LegionMap<InstanceView*, FieldMask>::aligned::iterator pfinder =
+            preconditions.find(src);
+          if (pfinder == preconditions.end())
+            preconditions[src] = src_mask;
+          else
+            pfinder->second |= src_mask;
+        }
+        else
+          finder->second |= src_mask;
+      }
+
+#ifdef DEBUG_LEGION
+      assert(!dst->is_reduction_view());
+#endif
+      LegionMap<InstanceView*, FieldMask>::aligned::iterator finder =
+        valid_views.find(dst);
+      if (finder == valid_views.end())
+        valid_views[dst] = dst_mask;
+      else
+        finder->second |= dst_mask;
+
+#ifdef DEBUG_LEGION
+      assert(logical_contexts.find(src) == logical_contexts.end() ||
+             logical_contexts[src] == src_logical_ctx);
+      assert(logical_contexts.find(dst) == logical_contexts.end() ||
+             logical_contexts[dst] == dst_logical_ctx);
+      assert(physical_contexts.find(src) == physical_contexts.end() ||
+             physical_contexts[src] == src_physical_ctx);
+      assert(physical_contexts.find(dst) == physical_contexts.end() ||
+             physical_contexts[dst] == dst_physical_ctx);
+#endif
+      logical_contexts[src] = src_logical_ctx;
+      logical_contexts[dst] = dst_logical_ctx;
+      physical_contexts[src] = src_physical_ctx;
+      physical_contexts[dst] = dst_physical_ctx;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_issue_copy(PhysicalTraceInfo &trace_info,
+                                             ApEvent lhs,
+                                             RegionTreeNode* node,
+                                             Operation* op,
+                         const std::vector<Domain::CopySrcDstField>& src_fields,
+                         const std::vector<Domain::CopySrcDstField>& dst_fields,
+                                             ApEvent precondition,
+                                             PredEvent predicate_guard,
+                                             RegionTreeNode *intersect,
+                                             ReductionOpID redop,
+                                             bool reduction_fold)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock tpl_lock(template_lock);
+
+      unsigned lhs_ = events.size();
+      events.push_back(lhs);
+#ifdef DEBUG_LEGION
+      assert(event_map.find(lhs) == event_map.end());
+#endif
+      event_map[lhs] = lhs_;
+
+      std::pair<unsigned, DomainPoint> op_key(op->get_trace_local_id(),
+                                              trace_info.color);
+#ifdef DEBUG_LEGION
+      assert(operations.find(op_key) != operations.end());
+#endif
+
+      std::map<ApEvent, unsigned>::iterator pre_finder =
+        event_map.find(precondition);
+#ifdef DEBUG_LEGION
+      assert(pre_finder != event_map.end());
+#endif
+      unsigned precondition_idx = pre_finder->second;
+
+      unsigned inst_id = instructions.size();
+      instructions.push_back(new IssueCopy(
+            *this, lhs_, node, op_key, src_fields, dst_fields, precondition_idx,
+            predicate_guard, intersect, redop, reduction_fold));
+      consumers.push_back(std::vector<unsigned>());
+      max_producers.push_back(2);
+#ifdef DEBUG_LEGION
+      assert(instructions.size() == events.size());
+      assert(instructions.size() == consumers.size());
+      assert(instructions.size() == max_producers.size());
+#endif
+
+#ifdef DEBUG_LEGION
+      assert(task_entries.find(op_key) != task_entries.end());
+#endif
+      consumers[task_entries[op_key]].push_back(inst_id);
+
+#ifdef DEBUG_LEGION
+      assert(precondition_idx < consumers.size());
+#endif
+      consumers[precondition_idx].push_back(inst_id);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void PhysicalTemplate::record_ready_view(PhysicalTraceInfo &trace_info,
+                                                    const RegionRequirement &req,
+                                                    InstanceView *view,
+                                                    const FieldMask &fields,
+                                                    ContextID logical_ctx,
+                                                    ContextID physical_ctx)
+    //--------------------------------------------------------------------------
+    {
+      if (view->is_reduction_view())
+      {
+#ifdef DEBUG_LEGION
+        assert(IS_REDUCE(req));
+        assert(reduction_views.find(view) == reduction_views.end());
+        assert(initialized.find(view) == initialized.end());
+#endif
+        reduction_views[view] = fields;
+        initialized[view] = false;
+      }
+      else
+      {
+        LegionMap<InstanceView*, FieldMask>::aligned::iterator finder =
+          valid_views.find(view);
+        if (finder == valid_views.end())
+        {
+          if (HAS_READ(req))
+          {
+            LegionMap<InstanceView*, FieldMask>::aligned::iterator pfinder =
+              preconditions.find(view);
+            if (pfinder == preconditions.end())
+              preconditions[view] = fields;
+            else
+              pfinder->second |= fields;
+          }
+          valid_views[view] = fields;
+        }
+        else
+          finder->second |= fields;
+      }
+#ifdef DEBUG_LEGION
+      assert(logical_contexts.find(view) == logical_contexts.end() ||
+             logical_contexts[view] == logical_ctx);
+      assert(physical_contexts.find(view) == physical_contexts.end() ||
+             physical_contexts[view] == physical_ctx);
+#endif
+      logical_contexts[view] = logical_ctx;
+      physical_contexts[view] = physical_ctx;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_set_ready_event(PhysicalTraceInfo &trace_info,
+                                                  Operation *op,
+                                                  unsigned region_idx,
+                                                  unsigned inst_idx,
+                                                  ApEvent ready_event,
+                                                  const RegionRequirement &req,
+                                                  InstanceView *view,
+                                                  const FieldMask &fields,
+                                                  ContextID logical_ctx,
+                                                  ContextID physical_ctx)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock tpl_lock(template_lock);
+
+      events.push_back(ApEvent());
+
+      std::pair<unsigned, DomainPoint> op_key(op->get_trace_local_id(),
+                                              trace_info.color);
+#ifdef DEBUG_LEGION
+      assert(operations.find(op_key) != operations.end());
+#endif
+
+      std::map<ApEvent, unsigned>::iterator ready_finder =
+        event_map.find(ready_event);
+#ifdef DEBUG_LEGION
+      assert(ready_finder != event_map.end());
+#endif
+      unsigned ready_event_idx = ready_finder->second;
+
+      unsigned inst_id = instructions.size();
+      instructions.push_back(
+          new SetReadyEvent(*this, op_key, region_idx, inst_idx,
+                            ready_event_idx));
+      consumers.push_back(std::vector<unsigned>());
+      max_producers.push_back(2);
+#ifdef DEBUG_LEGION
+      assert(instructions.size() == events.size());
+      assert(instructions.size() == consumers.size());
+      assert(instructions.size() == max_producers.size());
+#endif
+
+#ifdef DEBUG_LEGION
+      assert(task_entries.find(op_key) != task_entries.end());
+#endif
+      consumers[task_entries[op_key]].push_back(inst_id);
+
+#ifdef DEBUG_LEGION
+      assert(ready_event_idx < consumers.size());
+#endif
+      consumers[ready_event_idx].push_back(inst_id);
+
+      record_ready_view(trace_info, req, view, fields, logical_ctx,
+          physical_ctx);
     }
 
     /////////////////////////////////////////////////////////////
@@ -2399,8 +2370,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalTraceInfo::PhysicalTraceInfo()
     //--------------------------------------------------------------------------
-      : memoizing(false), tracing(false), is_point_task(false),
-        trace_local_id(0), color(), trace(NULL)
+      : memoizing(false), tracing(false), trace_local_id(0), color(), tpl(NULL)
     {
     }
 

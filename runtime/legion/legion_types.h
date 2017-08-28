@@ -1248,7 +1248,7 @@ namespace Legion {
     class TraceCompleteOp;
     class TraceReplayOp;
     class PhysicalTrace;
-    struct PhysicalTemplate;
+    class PhysicalTemplate;
     struct Instruction;
 
     // region_tree.h

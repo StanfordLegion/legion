@@ -335,6 +335,19 @@ namespace Legion {
       LegionTrace *local_trace;
     };
 
+    struct CachedMapping
+    {
+      VariantID               chosen_variant;
+      TaskPriority            task_priority;
+      bool                    postmap_task;
+      std::vector<Processor>  target_procs;
+      std::deque<InstanceSet> physical_instances;
+    };
+
+    typedef
+      LegionMap<std::pair<unsigned, DomainPoint>, CachedMapping>::aligned
+      CachedMappings;
+
     /**
      * \class PhysicalTrace
      * This class is used for memoizing the dynamic physical dependence
@@ -348,6 +361,53 @@ namespace Legion {
     public:
       PhysicalTrace& operator=(const PhysicalTrace &rhs);
     public:
+      void check_template_preconditions();
+      void get_current_template(PhysicalTraceInfo &trace_info,
+                                bool allow_create = true);
+    private:
+      void start_new_template();
+    private:
+      PhysicalTemplate* get_template(PhysicalTraceInfo &trace_info);
+    public:
+      void initialize_templates(ApEvent fence_completion);
+    public:
+      void fix_trace(void);
+      inline bool is_tracing(void) const { return tracing; }
+    private:
+      bool tracing;
+      Reservation trace_lock;
+      PhysicalTemplate* current_template;
+      std::vector<PhysicalTemplate*> templates;
+    };
+
+    /**
+     * \class PhysicalTemplate
+     * This class represents a recipe to reconstruct a physical task graph.
+     * A template consists of a sequence of instructions, each of which is
+     * interpreted by the template engine. The template also maintains
+     * the interpreter state (operations and events). These are initialized
+     * before the template gets executed.
+     */
+    struct PhysicalTemplate {
+    public:
+      PhysicalTemplate();
+      PhysicalTemplate(const PhysicalTemplate &rhs);
+    private:
+      friend PhysicalTrace;
+      ~PhysicalTemplate();
+    public:
+      void initialize(ApEvent fence_completion);
+      bool check_preconditions();
+      void execute(PhysicalTraceInfo &trace_info, SingleTask *task);
+      void finalize();
+      void dump_template();
+    public:
+      inline bool is_tracing() const { return tracing; }
+      inline bool is_replaying() const { return !tracing; }
+    protected:
+      static std::string view_to_string(const InstanceView *view);
+      void sanity_check();
+    public:
       void record_mapper_output(PhysicalTraceInfo &trace_info,
                                 const Mapper::MapTaskOutput &output,
                              const std::deque<InstanceSet> &physical_instances);
@@ -357,11 +417,6 @@ namespace Legion {
                              bool &postmap_task,
                              std::vector<Processor> &target_proc,
                              std::deque<InstanceSet> &physical_instances) const;
-    public:
-      void check_template_preconditions();
-      void set_current_template_id(PhysicalTraceInfo &trace_info);
-    private:
-      PhysicalTemplate* get_template(PhysicalTraceInfo &trace_info);
     public:
       void record_get_term_event(PhysicalTraceInfo &trace_info,
                                  ApEvent lhs,
@@ -406,79 +461,23 @@ namespace Legion {
                              const FieldMask &fields,
                              ContextID logical_ctx,
                              ContextID physical_ctx);
-    public:
-      void initialize_templates(ApEvent fence_completion);
-      void execute_template(PhysicalTraceInfo &trace_info, SingleTask *task);
-    public:
-      void fix_trace(void);
-      bool is_tracing(void) const { return tracing; }
     private:
       bool tracing;
-      unsigned current_template_id;
-      Reservation trace_lock;
-
-      struct CachedMapping
-      {
-        VariantID               chosen_variant;
-        TaskPriority            task_priority;
-        bool                    postmap_task;
-        std::vector<Processor>  target_procs;
-        std::deque<InstanceSet> physical_instances;
-      };
-
-      typedef
-        LegionMap<std::pair<unsigned, DomainPoint>, CachedMapping>::aligned
-        CachedMappings;
-
-      CachedMappings cached_mappings;
-      std::vector<PhysicalTemplate*> templates;
-      LegionMap<InstanceView*, FieldMask>::aligned preconditions;
-      LegionMap<InstanceView*, FieldMask>::aligned valid_views;
-      LegionMap<InstanceView*, FieldMask>::aligned reduction_views;
-      LegionMap<InstanceView*, bool>::aligned      initialized;
-      LegionMap<InstanceView*, ContextID>::aligned logical_contexts;
-      LegionMap<InstanceView*, ContextID>::aligned physical_contexts;
-    };
-
-    /**
-     * \class PhysicalTemplate
-     * This class represents a recipe to reconstruct a physical task graph.
-     * A template consists of a sequence of instructions, each of which is
-     * interpreted by the template engine. The template also maintains
-     * the interpreter state (operations and events). These are initialized
-     * before the template gets executed.
-     */
-    struct PhysicalTemplate {
-      PhysicalTemplate();
-      ~PhysicalTemplate();
-      PhysicalTemplate(const PhysicalTemplate &rhs);
-
-      void initialize();
-      bool check_preconditions();
-      void execute(PhysicalTraceInfo &trace_info, SingleTask *task);
-      void finalize(
-         const LegionMap<InstanceView*, FieldMask>::aligned &preconditions,
-         const LegionMap<InstanceView*, FieldMask>::aligned &valid_views,
-         const LegionMap<InstanceView*, FieldMask>::aligned &reduction_views,
-         const LegionMap<InstanceView*, bool>::aligned      &initialized,
-         const LegionMap<InstanceView*, ContextID>::aligned &logical_contexts,
-         const LegionMap<InstanceView*, ContextID>::aligned &physical_contexts);
-      void dump_template();
-      static std::string view_to_string(const InstanceView *view);
-      void sanity_check();
-
       Reservation template_lock;
-
-      ApEvent fence_completion;
+    private:
       unsigned fence_completion_id;
       std::map<std::pair<unsigned, DomainPoint>, unsigned> task_entries;
       std::vector<std::vector<unsigned> > consumers;
       std::vector<unsigned> pending_producers;
       std::vector<unsigned> max_producers;
-      std::map<std::pair<unsigned, DomainPoint>, SingleTask*> operations;
-      std::vector<ApEvent> events;
       std::map<ApEvent, unsigned> event_map;
       std::vector<Instruction*> instructions;
+    public:
+      ApEvent fence_completion;
+      std::map<std::pair<unsigned, DomainPoint>, SingleTask*> operations;
+      std::vector<ApEvent> events;
+    private:
+      CachedMappings                               cached_mappings;
       LegionMap<InstanceView*, FieldMask>::aligned preconditions;
       LegionMap<InstanceView*, FieldMask>::aligned valid_views;
       LegionMap<InstanceView*, FieldMask>::aligned reduction_views;

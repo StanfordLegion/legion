@@ -311,7 +311,7 @@ namespace Legion {
       if (memoizing)
       {
         PhysicalTraceInfo trace_info;
-        trace->get_physical_trace()->set_current_template_id(trace_info);
+        trace->get_physical_trace()->get_current_template(trace_info, false);
         if (!trace_info.tracing)
         {
           end_dependence_analysis();

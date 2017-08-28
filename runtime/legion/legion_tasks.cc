@@ -3299,7 +3299,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::vector<Processor> procs;
-      trace_info.trace->get_mapper_output(trace_info, selected_variant,
+      trace_info.tpl->get_mapper_output(trace_info, selected_variant,
           task_priority, perform_postmap, procs, physical_instances);
 
       if (Runtime::separate_runtime_instances)
@@ -3620,10 +3620,10 @@ namespace Legion {
       if (trace_info.tracing)
       {
 #ifdef DEBUG_LEGION
-        assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
+        assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
 #endif
-        trace_info.trace->record_mapper_output(trace_info, output,
-                                               physical_instances);
+        trace_info.tpl->record_mapper_output(trace_info, output,
+                                             physical_instances);
       }
     }
 
@@ -3650,10 +3650,10 @@ namespace Legion {
         if (trace_info.tracing)
         {
 #ifdef DEBUG_LEGION
-          assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
+          assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
 #endif
-          trace_info.trace->record_get_term_event(
-              trace_info, get_task_completion(), this);
+          trace_info.tpl->record_get_term_event(trace_info,
+              get_task_completion(), this);
         }
       }
 
@@ -3732,16 +3732,14 @@ namespace Legion {
       // record our users because we skipped that during traversal
       if (multiple_requirements)
       {
-        if (!trace_info.memoizing || trace_info.tracing)
-        {
-          // This is really ugly, I hate C++ and its const awfulness
-          runtime->forest->physical_register_users(this,
-              local_termination_event, regions, virtual_mapped, 
-              *const_cast<std::vector<VersionInfo>*>(get_version_infos()),
-              *const_cast<std::vector<RestrictInfo>*>(get_restrict_infos()), 
-              physical_instances, map_applied_conditions,
-              trace_info);
-        }
+        // This is really ugly, I hate C++ and its const awfulness
+        runtime->forest->physical_register_users(this,
+            local_termination_event, regions, virtual_mapped, 
+            *const_cast<std::vector<VersionInfo>*>(get_version_infos()),
+            *const_cast<std::vector<RestrictInfo>*>(get_restrict_infos()), 
+            physical_instances, map_applied_conditions,
+            trace_info);
+
         // Release any read-only reservations that we're holding
         if (!read_only_reservations.empty())
         {
@@ -5084,9 +5082,9 @@ namespace Legion {
     RtEvent IndividualTask::perform_versioning_analysis(void)
     //--------------------------------------------------------------------------
     {
-      PhysicalTraceInfo trace_info;
       if (memoizing)
       {
+        PhysicalTraceInfo trace_info;
         get_physical_trace_info(trace_info);
         if (!trace_info.tracing)
           return RtEvent::NO_RT_EVENT;
@@ -5265,14 +5263,14 @@ namespace Legion {
                                          MustEpochOp *must_epoch_owner/*=NULL*/)
     //--------------------------------------------------------------------------
     {
-      PhysicalTraceInfo trace_info;
       if (memoizing)
       {
+        PhysicalTraceInfo trace_info;
         get_physical_trace_info(trace_info);
         if (!trace_info.tracing)
         {
           replay_map_task_output(trace_info);
-          trace_info.trace->execute_template(trace_info, this);
+          trace_info.tpl->execute(trace_info, this);
           if (is_leaf() && !has_virtual_instances())
             complete_mapping();
           return RtEvent::NO_RT_EVENT;
@@ -5650,10 +5648,8 @@ namespace Legion {
       assert(trace->get_physical_trace() != NULL);
 #endif
       trace_info.memoizing = memoizing;
-      trace_info.is_point_task = false;
-      trace_info.trace = trace->get_physical_trace();
       trace_info.trace_local_id = trace_local_id;
-      trace_info.trace->set_current_template_id(trace_info);
+      trace->get_physical_trace()->get_current_template(trace_info);
     }
 
     //--------------------------------------------------------------------------
@@ -6028,9 +6024,9 @@ namespace Legion {
     void PointTask::perform_versioning_analysis(std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
-      PhysicalTraceInfo trace_info;
       if (memoizing)
       {
+        PhysicalTraceInfo trace_info;
         get_physical_trace_info(trace_info);
         if (!trace_info.tracing)
           return;
@@ -6261,14 +6257,14 @@ namespace Legion {
     RtEvent PointTask::perform_mapping(MustEpochOp *must_epoch_owner/*=NULL*/)
     //--------------------------------------------------------------------------
     {
-      PhysicalTraceInfo trace_info;
       if (memoizing)
       {
+        PhysicalTraceInfo trace_info;
         get_physical_trace_info(trace_info);
         if (!trace_info.tracing)
         {
           replay_map_task_output(trace_info);
-          trace_info.trace->execute_template(trace_info, this);
+          trace_info.tpl->execute(trace_info, this);
           slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT,
                                            ApEvent::NO_AP_EVENT);
           if (is_leaf() && !has_virtual_instances())
@@ -6652,16 +6648,12 @@ namespace Legion {
           slice_owner->index_owner->get_trace()->get_physical_trace() != NULL);
 #endif
       trace_info.memoizing = memoizing;
-      trace_info.is_point_task = true;
       // TODO: This chain of deferences is unsafe on multi-node
       IndexTask* index_owner = slice_owner->index_owner;
-      trace_info.trace = index_owner->get_trace()->get_physical_trace();
-#ifdef DEBUG_LEGION
-      assert(trace_info.trace != NULL);
-#endif
+      PhysicalTrace *trace = index_owner->get_trace()->get_physical_trace();
       trace_info.trace_local_id = trace_local_id;
       trace_info.color = index_point;
-      trace_info.trace->set_current_template_id(trace_info);
+      trace->get_current_template(trace_info);
     }
 
     //--------------------------------------------------------------------------
@@ -8160,8 +8152,8 @@ namespace Legion {
       {
         PhysicalTrace *trace = index_owner->get_trace()->get_physical_trace();
         PhysicalTraceInfo trace_info;
-        trace->set_current_template_id(trace_info);
-        if (!trace_info.tracing)
+        trace->get_current_template(trace_info);
+        if (trace_info.tpl->is_replaying())
         {
           need_versioning_analysis = false;
           return RtEvent::NO_RT_EVENT;

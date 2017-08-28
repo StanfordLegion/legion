@@ -2377,16 +2377,15 @@ namespace Legion {
           if (trace_info.tracing)
           {
 #ifdef DEBUG_LEGION
-            assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
+            assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
             assert(logical_ctx != -1U);
 #endif
             ContextID physical_ctx = context->get_context().get_id();
-            trace_info.trace->record_set_ready_event(trace_info, op, idx1,
-                                                     idx2, ready,
-                                                     req, target_views[idx2],
-                                                     ref.get_valid_fields(),
-                                                     logical_ctx,
-                                                     physical_ctx);
+            trace_info.tpl->record_set_ready_event(trace_info, op, idx1,
+                                                   idx2, ready, req,
+                                                   target_views[idx2],
+                                                   ref.get_valid_fields(),
+                                                   logical_ctx, physical_ctx);
           }
         }
       }
@@ -14489,11 +14488,10 @@ namespace Legion {
             if (trace_info.tracing)
             {
 #ifdef DEBUG_LEGION
-              assert(trace_info.trace != NULL &&
-                     trace_info.trace->is_tracing());
+              assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
               assert(info.logical_ctx != -1U);
 #endif
-              trace_info.trace->record_copy_views(trace_info,
+              trace_info.tpl->record_copy_views(trace_info,
                   it->first, op_mask, info.logical_ctx, info.ctx,
                   dst, op_mask, info.logical_ctx, info.ctx);
             }
@@ -14510,9 +14508,9 @@ namespace Legion {
         if (trace_info.tracing)
         {
 #ifdef DEBUG_LEGION
-          assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
+          assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
 #endif
-          trace_info.trace->record_merge_events(trace_info, copy_pre,
+          trace_info.tpl->record_merge_events(trace_info, copy_pre,
               pre_set.preconditions);
         }
         ApEvent copy_post = issue_copy(info.op, src_fields, dst_fields, 
@@ -15937,11 +15935,11 @@ namespace Legion {
       if (trace_info.tracing)
       {
 #ifdef DEBUG_LEGION
-        assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
+        assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
 #endif
-        trace_info.trace->record_issue_copy(trace_info, result, this,
-            op, src_fields, dst_fields, precondition, predicate_guard,
-            intersect, redop, reduction_fold);
+        trace_info.tpl->record_issue_copy(trace_info, result, this, op,
+            src_fields, dst_fields, precondition, predicate_guard, intersect,
+            redop, reduction_fold);
       }
       return result;
     }
@@ -16488,7 +16486,7 @@ namespace Legion {
         std::vector<InstanceView*> new_views;
         new_views.resize(targets.size());
 #ifdef DEBUG_LEGION
-        assert(!trace_info.memoizing || trace_info.trace != NULL);
+        assert(!trace_info.memoizing || trace_info.tpl != NULL);
 #endif
 
         for (unsigned idx = 0; idx < targets.size(); idx++)
@@ -16535,16 +16533,15 @@ namespace Legion {
             if (trace_info.tracing)
             {
 #ifdef DEBUG_LEGION
-              assert(trace_info.trace != NULL &&
-                     trace_info.trace->is_tracing());
+              assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
               assert(info.logical_ctx != -1U);
 #endif
-              trace_info.trace->record_set_ready_event(trace_info, info.op,
-                                                       info.index, idx, ready,
-                                                       info.req, new_view,
-                                                       user_mask,
-                                                       info.logical_ctx,
-                                                       info.ctx);
+              trace_info.tpl->record_set_ready_event(trace_info, info.op,
+                                                     info.index, idx, ready,
+                                                     info.req, new_view,
+                                                     user_mask,
+                                                     info.logical_ctx,
+                                                     info.ctx);
             }
             new_views[idx] = new_view;
           }
@@ -16559,16 +16556,15 @@ namespace Legion {
             if (trace_info.tracing)
             {
 #ifdef DEBUG_LEGION
-              assert(trace_info.trace != NULL &&
-                     trace_info.trace->is_tracing());
+              assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
               assert(info.logical_ctx != -1U);
 #endif
-              trace_info.trace->record_set_ready_event(trace_info, info.op,
-                                                       info.index, idx, ready,
-                                                       info.req, new_view,
-                                                       user_mask,
-                                                       info.logical_ctx,
-                                                       info.ctx);
+              trace_info.tpl->record_set_ready_event(trace_info, info.op,
+                                                     info.index, idx, ready,
+                                                     info.req, new_view,
+                                                     user_mask,
+                                                     info.logical_ctx,
+                                                     info.ctx);
             }
           }
           if (!defer_add_users && !!restricted_fields)
@@ -16762,16 +16758,15 @@ namespace Legion {
             if (trace_info.tracing)
             {
 #ifdef DEBUG_LEGION
-              assert(trace_info.trace != NULL &&
-                     trace_info.trace->is_tracing());
+              assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
               assert(info.logical_ctx != -1U);
 #endif
-              trace_info.trace->record_set_ready_event(trace_info, info.op,
-                                                       info.index, 0, ready,
-                                                       info.req, new_views[0],
-                                                       ref.get_valid_fields(),
-                                                       info.logical_ctx,
-                                                       info.ctx);
+              trace_info.tpl->record_set_ready_event(trace_info, info.op,
+                                                     info.index, 0, ready,
+                                                     info.req, new_views[0],
+                                                     ref.get_valid_fields(),
+                                                     info.logical_ctx,
+                                                     info.ctx);
             }
             if (!!restricted_fields && !IS_READ_ONLY(info.req))
             {
@@ -16799,17 +16794,16 @@ namespace Legion {
               if (trace_info.tracing)
               {
 #ifdef DEBUG_LEGION
-                assert(trace_info.trace != NULL &&
-                       trace_info.trace->is_tracing());
+                assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
                 assert(info.logical_ctx != -1U);
 #endif
-                trace_info.trace->record_set_ready_event(trace_info, info.op,
-                                                         info.index, idx,
-                                                         ready, info.req,
-                                                         new_views[idx],
-                                                         ref.get_valid_fields(),
-                                                         info.logical_ctx,
-                                                         info.ctx);
+                trace_info.tpl->record_set_ready_event(trace_info, info.op,
+                                                       info.index, idx,
+                                                       ready, info.req,
+                                                       new_views[idx],
+                                                       ref.get_valid_fields(),
+                                                       info.logical_ctx,
+                                                       info.ctx);
               }
             }
             const bool restricted_out = 

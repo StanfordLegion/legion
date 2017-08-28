@@ -475,11 +475,9 @@ namespace Legion {
     public:
       bool memoizing;
       bool tracing;
-      bool is_point_task;
       unsigned trace_local_id;
       DomainPoint color;
-      PhysicalTrace *trace;
-      unsigned template_id;
+      PhysicalTemplate *tpl;
     };
 
     /**

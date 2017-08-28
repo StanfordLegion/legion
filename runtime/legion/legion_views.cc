@@ -1030,9 +1030,9 @@ namespace Legion {
       if (trace_info.tracing)
       {
 #ifdef DEBUG_LEGION
-        assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
+        assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
 #endif
-        trace_info.trace->record_merge_events(trace_info, result,
+        trace_info.tpl->record_merge_events(trace_info, result,
             wait_on_events);
       }
       return result;
@@ -1477,9 +1477,9 @@ namespace Legion {
       if (trace_info.tracing)
       {
 #ifdef DEBUG_LEGION
-        assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
+        assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
 #endif
-        trace_info.trace->record_merge_events(trace_info, result,
+        trace_info.tpl->record_merge_events(trace_info, result,
             wait_on_events);
       }
       // Return the merge of the events
@@ -4292,9 +4292,9 @@ namespace Legion {
           if (trace_info.tracing)
           {
 #ifdef DEBUG_LEGION
-            assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
+            assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
 #endif
-            trace_info.trace->record_merge_events(trace_info, copy_pre,
+            trace_info.tpl->record_merge_events(trace_info, copy_pre,
                 it->preconditions);
           }
         }
@@ -4388,10 +4388,9 @@ namespace Legion {
             if (trace_info.tracing)
             {
 #ifdef DEBUG_LEGION
-              assert(trace_info.trace != NULL &&
-                     trace_info.trace->is_tracing());
+              assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
 #endif
-              trace_info.trace->record_merge_events(trace_info, post,
+              trace_info.tpl->record_merge_events(trace_info, post,
                   it->preconditions);
             }
           }
@@ -4561,10 +4560,9 @@ namespace Legion {
             if (trace_info.tracing)
             {
 #ifdef DEBUG_LEGION
-              assert(trace_info.trace != NULL &&
-                     trace_info.trace->is_tracing());
+              assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
 #endif
-              trace_info.trace->record_merge_events(trace_info, post,
+              trace_info.tpl->record_merge_events(trace_info, post,
                   it->preconditions);
             }
           }
@@ -5605,9 +5603,9 @@ namespace Legion {
           if (trace_info.tracing)
           {
 #ifdef DEBUG_LEGION
-            assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
+            assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
 #endif
-            trace_info.trace->record_merge_events(trace_info, done_event,
+            trace_info.tpl->record_merge_events(trace_info, done_event,
                 it->preconditions);
           }
         }
@@ -7720,15 +7718,15 @@ namespace Legion {
       if (trace_info.tracing)
       {
 #ifdef DEBUG_LEGION
-        assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
+        assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
 #endif
-        trace_info.trace->record_merge_events(trace_info, reduce_pre,
+        trace_info.tpl->record_merge_events(trace_info, reduce_pre,
             event_preconds);
         ContextID logical_ctx =
           op->find_logical_context(index)->get_context().get_id();
         ContextID physical_ctx =
           op->find_physical_context(index)->get_context().get_id();
-        trace_info.trace->record_copy_views(trace_info, this, reduce_mask,
+        trace_info.tpl->record_copy_views(trace_info, this, reduce_mask,
             logical_ctx, physical_ctx, target, reduce_mask,
             logical_ctx, physical_ctx);
       }
@@ -7789,15 +7787,15 @@ namespace Legion {
       if (trace_info.tracing)
       {
 #ifdef DEBUG_LEGION
-        assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
+        assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
 #endif
-        trace_info.trace->record_merge_events(trace_info, reduce_pre,
+        trace_info.tpl->record_merge_events(trace_info, reduce_pre,
             preconditions);
         ContextID logical_ctx =
           op->find_logical_context(index)->get_context().get_id();
         ContextID physical_ctx =
           op->find_physical_context(index)->get_context().get_id();
-        trace_info.trace->record_copy_views(trace_info, this, red_mask,
+        trace_info.tpl->record_copy_views(trace_info, this, red_mask,
             logical_ctx, physical_ctx, target, red_mask,
             logical_ctx, physical_ctx);
       }
@@ -8124,9 +8122,9 @@ namespace Legion {
       if (trace_info.tracing)
       {
 #ifdef DEBUG_LEGION
-        assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
+        assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
 #endif
-        trace_info.trace->record_merge_events(trace_info, result,
+        trace_info.tpl->record_merge_events(trace_info, result,
             wait_on);
       }
       return result;
@@ -8290,9 +8288,9 @@ namespace Legion {
       if (trace_info.tracing)
       {
 #ifdef DEBUG_LEGION
-        assert(trace_info.trace != NULL && trace_info.trace->is_tracing());
+        assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
 #endif
-        trace_info.trace->record_merge_events(trace_info, result,
+        trace_info.tpl->record_merge_events(trace_info, result,
             wait_on);
       }
       // Return our result
