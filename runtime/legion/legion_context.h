@@ -975,9 +975,12 @@ namespace Legion {
       unsigned total_children_count; // total number of sub-operations
       unsigned total_close_count; 
       unsigned outstanding_children_count;
-      LegionSet<Operation*,EXECUTING_CHILD_ALLOC>::tracked executing_children;
-      LegionSet<Operation*,EXECUTED_CHILD_ALLOC>::tracked executed_children;
-      LegionSet<Operation*,COMPLETE_CHILD_ALLOC>::tracked complete_children; 
+      LegionMap<Operation*,GenerationID,
+                EXECUTING_CHILD_ALLOC>::tracked executing_children;
+      LegionMap<Operation*,GenerationID,
+                EXECUTED_CHILD_ALLOC>::tracked executed_children;
+      LegionMap<Operation*,GenerationID,
+                COMPLETE_CHILD_ALLOC>::tracked complete_children; 
 #ifdef DEBUG_LEGION
       // In debug mode also keep track of them in context order so
       // we can see what the longest outstanding operation is which
