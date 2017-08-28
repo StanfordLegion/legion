@@ -33,9 +33,6 @@ task_kinds = {}
 task_spans = {}
 
 
-def read_time(string):
-    return long(round(float(string)/1000))
-
 def log_kind(task_id, name, overwrite):
     if (task_id not in task_kinds) or (overwrite == 1):
         task_kinds[task_id] = name
@@ -52,7 +49,7 @@ def log_variant(task_id, variant_id, name):
 def log_task_info(op_id, variant_id, proc_id, create, ready, start, stop):
     assert variant_id in task_names
     task_name = task_names[variant_id]
-    time_range = (read_time(start), read_time(stop))
+    time_range = (start, stop)
     if task_name not in task_spans:
         task_spans[task_name] = []
     task_spans[task_name].append(time_range)
@@ -60,7 +57,7 @@ def log_task_info(op_id, variant_id, proc_id, create, ready, start, stop):
 def log_meta_info(op_id, lg_id, proc_id, create, ready, start, stop):
     assert lg_id in meta_task_names
     task_name = meta_task_names[lg_id]
-    time_range = (read_time(start), read_time(stop))
+    time_range = (start, stop)
     if task_name not in task_spans:
         task_spans[task_name] = []
     task_spans[task_name].append(time_range)
