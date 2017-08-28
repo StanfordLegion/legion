@@ -19,6 +19,7 @@ import sys, os, re, argparse, itertools
 scriptPath = os.path.dirname(os.path.realpath(__file__)) + "/"
 sys.path.append(scriptPath + '../')
 from legion_serializer import LegionProfBinaryDeserializer
+from legion_serializer import LegionProfASCIIDeserializer
 
 noop = lambda **kwargs: None
 
@@ -33,7 +34,7 @@ task_spans = {}
 
 
 def read_time(string):
-    return long(string)/1000
+    return long(round(float(string)/1000))
 
 def log_kind(task_id, name, overwrite):
     if (task_id not in task_kinds) or (overwrite == 1):
@@ -52,19 +53,17 @@ def log_task_info(op_id, variant_id, proc_id, create, ready, start, stop):
     assert variant_id in task_names
     task_name = task_names[variant_id]
     time_range = (read_time(start), read_time(stop))
-    if task_name in task_spans:
-        prev_start, prev_stop = task_spans[task_name]
-        time_range = (min(start, prev_start), max(stop, prev_stop))
-    task_spans[task_name] = time_range
+    if task_name not in task_spans:
+        task_spans[task_name] = []
+    task_spans[task_name].append(time_range)
 
 def log_meta_info(op_id, lg_id, proc_id, create, ready, start, stop):
     assert lg_id in meta_task_names
     task_name = meta_task_names[lg_id]
-    time_range = (start, stop)
-    if task_name in task_spans:
-        prev_start, prev_stop = task_spans[task_name]
-        time_range = (min(start, prev_start), max(stop, prev_stop))
-    task_spans[task_name] = time_range
+    time_range = (read_time(start), read_time(stop))
+    if task_name not in task_spans:
+        task_spans[task_name] = []
+    task_spans[task_name].append(time_range)
 
 callbacks = {
     "MessageDesc": noop,
@@ -94,18 +93,31 @@ callbacks = {
     "ProfTaskInfo": noop
 }
 
+class Dummy(object):
+    def __init__(self):
+        self.has_spy_data = False
+
 def main():
     parser = argparse.ArgumentParser()
 
     # usage: python span_example.py <task0> <task1> <logfile0> <logfile1>
     parser.add_argument("-t", "--tasks", nargs=2, type=str,
                         help="The two task names you want to find the span between. These are interpreted as regexes")
+    parser.add_argument("-s", "--skip", nargs=2, type=int,
+                        default=(0, 0),
+                        help="The number of task occurrences you want to prune in the span.")
+    parser.add_argument("-a", "--ascii", action="store_true",
+                        dest="ascii_parser",
+                        help="Use ASCII parser.")
     parser.add_argument(dest='filenames', nargs='+',
                         help='input Legion Prof log filenames')
 
     args = parser.parse_args()
 
-    deserializer = LegionProfBinaryDeserializer(None, callbacks)
+    if args.ascii_parser:
+        deserializer = LegionProfASCIIDeserializer(Dummy(), callbacks)
+    else:
+        deserializer = LegionProfBinaryDeserializer(None, callbacks)
 
     if args.filenames is None:
         print("You must pass in a logfile!")
@@ -123,6 +135,8 @@ def main():
 
     task0 = args.tasks[0]
     task1 = args.tasks[1]
+    skip0 = args.skip[0]
+    skip1 = args.skip[1]
 
     matching_tasks0 = []
     matching_tasks1 = []
@@ -149,14 +163,17 @@ def main():
 
     match0 = matching_tasks0[0]
     match1 = matching_tasks1[0]
-    span0 = task_spans[match0]
+    span0 = task_spans[match0][skip0:]
     span1 = task_spans[match1]
+    if skip1 > 0:
+        span1 = span1[0:-skip1]
 
-    task_span = (min(span0[0], span1[0]), max(span0[1], span1[1]))
-    print("Range between " + task0 + " and " + task1 + " was " + str(task_span))
-
-    if span0[0] < span1[1] or span1[0] < span0[1]:
-        print("Warning: Task Spans overlap!")
+    start = min([s[0] for s in span0])
+    stop = max([s[1] for s in span1])
+    task_span = (start, stop)
+    print("Range between " + task0 + " and " + task1 + " was " + \
+            str(task_span[1] - task_span[0]) + "us (start: " + \
+            str(task_span[0]) + "us, stop: " + str(task_span[1]) + "us)")
 
 if __name__ == "__main__":
     main()
