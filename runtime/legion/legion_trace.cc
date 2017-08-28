@@ -2321,10 +2321,10 @@ namespace Legion {
                                  unsigned ri, unsigned ii, unsigned rei,
                                  InstanceView *v)
       : Instruction(tpl), op_key(key), region_idx(ri), inst_idx(ii),
-        ready_event_idx(rei), view(v),
+        ready_event_idx(rei), view(v)
 #ifdef DEBUG_LEGION
-        reduction_views(tpl.reduction_views),
-        initialized(tpl.initialized)
+        , reduction_views(tpl.reduction_views)
+        , initialized(tpl.initialized)
 #endif
     //--------------------------------------------------------------------------
     {
