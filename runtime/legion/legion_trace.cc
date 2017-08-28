@@ -2043,7 +2043,7 @@ namespace Legion {
       unsigned inst_id = instructions.size();
       instructions.push_back(
           new SetReadyEvent(*this, op_key, region_idx, inst_idx,
-                            ready_event_idx));
+                            ready_event_idx, view));
       consumers.push_back(std::vector<unsigned>());
       max_producers.push_back(2);
 #ifdef DEBUG_LEGION
@@ -2318,9 +2318,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     SetReadyEvent::SetReadyEvent(PhysicalTemplate& tpl,
                                  const std::pair<unsigned, DomainPoint>& key,
-                                 unsigned ri, unsigned ii, unsigned rei)
+                                 unsigned ri, unsigned ii, unsigned rei,
+                                 InstanceView *v)
       : Instruction(tpl), op_key(key), region_idx(ri), inst_idx(ii),
-        ready_event_idx(rei)
+        ready_event_idx(rei), view(v),
+#ifdef DEBUG_LEGION
+        reduction_views(tpl.reduction_views),
+        initialized(tpl.initialized)
+#endif
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2344,11 +2349,46 @@ namespace Legion {
       assert(operations.find(op_key) != operations.end());
       assert(operations.find(op_key)->second != NULL);
 #endif
+      SingleTask *task = operations[op_key];
       const std::deque<InstanceSet> &physical_instances =
-        operations[op_key]->get_physical_instances();
+        task->get_physical_instances();
       InstanceRef &ref =
         const_cast<InstanceRef&>(physical_instances[region_idx][inst_idx]);
-      ref.set_ready_event(events[ready_event_idx]);
+      ApEvent ready_event = events[ready_event_idx];
+      if (view->is_reduction_view())
+      {
+#ifdef DEBUG_LEGION
+        assert(reduction_views.find(view) != reduction_views.end());
+        assert(initialized.find(view) != initialized.end() &&
+               !initialized.find(view)->second);
+#endif
+        ReductionView *reduction_view = view->as_reduction_view();
+        PhysicalManager *manager = reduction_view->get_manager();
+        LayoutDescription *const layout = manager->layout;
+
+        const ReductionOp *reduction_op =
+          Runtime::get_reduction_op(reduction_view->get_redop());
+        void *fill_buffer = malloc(reduction_op->sizeof_rhs);
+        reduction_op->init(fill_buffer, 1);
+
+        std::vector<Domain::CopySrcDstField> dsts;
+        {
+          std::vector<FieldID> fill_fields;
+          layout->get_fields(fill_fields);
+          layout->compute_copy_offsets(fill_fields, manager->get_instance(),
+              dsts);
+        }
+
+        Realm::ProfilingRequestSet requests;
+        if (task->runtime->profiler != NULL)
+          task->runtime->profiler->add_fill_request(requests,
+              task->get_unique_op_id());
+
+        ready_event = ApEvent(manager->instance_domain.fill(dsts, requests,
+              fill_buffer, reduction_op->sizeof_rhs, ready_event));
+      }
+
+      ref.set_ready_event(ready_event);
     }
 
     //--------------------------------------------------------------------------

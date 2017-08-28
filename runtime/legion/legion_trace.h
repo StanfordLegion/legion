@@ -476,7 +476,6 @@ namespace Legion {
       ApEvent fence_completion;
       std::map<std::pair<unsigned, DomainPoint>, SingleTask*> operations;
       std::vector<ApEvent> events;
-    private:
       CachedMappings                               cached_mappings;
       LegionMap<InstanceView*, FieldMask>::aligned preconditions;
       LegionMap<InstanceView*, FieldMask>::aligned valid_views;
@@ -593,7 +592,8 @@ namespace Legion {
                     const std::pair<unsigned, DomainPoint>& op_key,
                     unsigned region_idx,
                     unsigned inst_idx,
-                    unsigned ready_event_idx);
+                    unsigned ready_event_idx,
+                    InstanceView *view);
       virtual void execute();
       virtual std::string to_string();
 
@@ -602,6 +602,11 @@ namespace Legion {
       unsigned region_idx;
       unsigned inst_idx;
       unsigned ready_event_idx;
+      InstanceView* view;
+#ifdef DEBUG_LEGION
+      LegionMap<InstanceView*, FieldMask>::aligned &reduction_views;
+      LegionMap<InstanceView*, bool>::aligned      &initialized;
+#endif
     };
 
 
