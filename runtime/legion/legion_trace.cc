@@ -1422,7 +1422,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       fence_completion = completion;
-      operations.clear();
+      for (std::map<std::pair<unsigned, DomainPoint>,
+                    SingleTask*>::iterator it = operations.begin();
+                    it != operations.end(); ++it)
+        it->second = NULL;
       size_t num_events = events.size();
       events.clear();
       events.resize(num_events);
@@ -1543,7 +1546,8 @@ namespace Legion {
         }
 
 #ifdef DEBUG_LEGION
-        assert(operations.find(key) == operations.end());
+        assert(operations.find(key) != operations.end());
+        assert(operations.find(key)->second == NULL);
 #endif
         operations[key] = task;
 
@@ -2094,7 +2098,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-        assert(operations.find(rhs) != operations.end());
+      assert(operations.find(rhs) != operations.end());
+      assert(operations.find(rhs)->second != NULL);
 #endif
       events[lhs] = operations[rhs]->get_task_completion();
     }
@@ -2234,6 +2239,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(operations.find(op_key) != operations.end());
+      assert(operations.find(op_key)->second != NULL);
 #endif
       Operation *op = dynamic_cast<Operation*>(operations[op_key]);
       ApEvent precondition = events[precondition_idx];
@@ -2318,6 +2324,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(operations.find(op_key) != operations.end());
       {
         const std::deque<InstanceSet> &physical_instances =
           operations[op_key]->get_physical_instances();
@@ -2335,6 +2342,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(ready_event_idx < events.size());
       assert(operations.find(op_key) != operations.end());
+      assert(operations.find(op_key)->second != NULL);
 #endif
       const std::deque<InstanceSet> &physical_instances =
         operations[op_key]->get_physical_instances();
