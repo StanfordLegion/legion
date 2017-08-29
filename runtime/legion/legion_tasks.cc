@@ -3317,6 +3317,8 @@ namespace Legion {
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         InstanceSet &instances = physical_instances[idx];
+        if (IS_NO_ACCESS(regions[idx]))
+          continue;
         if (instances.is_virtual_mapping())
           virtual_mapped[idx] = true;
         else
