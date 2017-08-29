@@ -3218,25 +3218,32 @@ namespace Legion {
         if (finder == it->second->projections.end()) 
           continue;
 
-        FieldMask non_dominated_by_any;
+        FieldMask new_child_dominated;
         for (LegionMap<IndexSpaceNode*,FieldMask>::aligned::const_iterator dit =
               finder->second.begin(); dit != finder->second.end(); dit++)
         {
-          FieldMask overlap = non_dominated_mask & dit->second;
+          const FieldMask overlap = non_dominated_mask & dit->second;
           if (!overlap)
             continue;
-          FieldMask reduction_mask = overlap & it->second->reduced_fields;
-          if (!!reduction_mask)
-          {
-            non_dominated_by_any |= reduction_mask;
-            overlap -= reduction_mask;
-          }
-          if (color_space->get_num_dims() != dit->first->get_num_dims() ||
-              !dit->first->dominates(color_space))
-            non_dominated_mask |= overlap;
+          // Make sure they are the same dimension then see if we
+          // dominate the color space in which case we know we cover
+          // the entire partition
+          if ((color_space->get_num_dims() == dit->first->get_num_dims()) &&
+              dit->first->dominates(color_space))
+            new_child_dominated |= overlap;
         }
-
-        non_dominated_mask &= non_dominated_by_any;
+        // See if we have any dominated fields
+        if (!new_child_dominated)
+          continue;
+        // If there are any reduction fields they can't be dominated
+        if (!!it->second->reduced_fields)
+        {
+          new_child_dominated -= it->second->reduced_fields;
+          if (!new_child_dominated)
+            continue;
+        }
+        // Remove the fields dominated by this new child
+        non_dominated_mask -= new_child_dominated;
         if (!!non_dominated_mask) 
           return;
       }
