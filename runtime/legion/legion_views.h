@@ -184,6 +184,7 @@ namespace Legion {
     public:
       // Instance recycling
       virtual void collect_users(const std::set<ApEvent> &term_events) = 0;
+      virtual void collect_traced_users() = 0;
     public:
       // Getting field information for performing copies
       virtual void copy_to(const FieldMask &copy_mask, 
@@ -508,6 +509,7 @@ namespace Legion {
       virtual void notify_valid(ReferenceMutator *mutator);
       virtual void notify_invalid(ReferenceMutator *mutator);
       virtual void collect_users(const std::set<ApEvent> &term_users);
+      virtual void collect_traced_users();
     public:
       virtual void send_view(AddressSpaceID target); 
       void update_gc_events(const std::deque<ApEvent> &gc_events);
@@ -891,6 +893,7 @@ namespace Legion {
       virtual void notify_valid(ReferenceMutator *mutator);
       virtual void notify_invalid(ReferenceMutator *mutator);
       virtual void collect_users(const std::set<ApEvent> &term_events);
+      virtual void collect_traced_users();
     public:
       virtual void send_view(AddressSpaceID target); 
     protected:

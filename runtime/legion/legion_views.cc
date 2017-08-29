@@ -279,12 +279,7 @@ namespace Legion {
           filter_local_users(*it);
       }
       if (!traced_outstanding_gc_events.empty())
-      {
-        outstanding_gc_events.swap(traced_outstanding_gc_events);
-        collect_users(outstanding_gc_events);
-        outstanding_gc_events.swap(traced_outstanding_gc_events);
-        traced_outstanding_gc_events.clear();
-      }
+        collect_traced_users();
 #if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE) && \
       defined(DEBUG_LEGION)
       // Don't forget to remove the initial user if there was one
@@ -1618,7 +1613,65 @@ namespace Legion {
       }
       if (parent != NULL)
         parent->collect_users(term_events);
-    } 
+    }
+
+    //--------------------------------------------------------------------------
+    void MaterializedView::collect_traced_users()
+    //--------------------------------------------------------------------------
+    {
+      for (std::set<ApEvent>::iterator eit =
+           traced_outstanding_gc_events.begin(); eit !=
+           traced_outstanding_gc_events.end(); ++eit)
+      {
+        LegionMap<ApEvent,EventUsers>::aligned::iterator current_finder =
+          current_epoch_users.find(*eit);
+        if (current_finder != current_epoch_users.end())
+        {
+          EventUsers &event_users = current_finder->second;
+          if (event_users.single)
+          {
+            if (event_users.users.single_user->remove_reference())
+              delete (event_users.users.single_user);
+          }
+          else
+          {
+            for (LegionMap<PhysicalUser*,FieldMask>::aligned::iterator
+                  it = event_users.users.multi_users->begin(); it !=
+                  event_users.users.multi_users->end(); it++)
+            {
+              if (it->first->remove_reference())
+                delete (it->first);
+            }
+            delete event_users.users.multi_users;
+          }
+          current_epoch_users.erase(current_finder);
+        }
+        LegionMap<ApEvent,EventUsers>::aligned::iterator previous_finder =
+          previous_epoch_users.find(*eit);
+        if (previous_finder != previous_epoch_users.end())
+        {
+          EventUsers &event_users = previous_finder->second;
+          if (event_users.single)
+          {
+            if (event_users.users.single_user->remove_reference())
+              delete (event_users.users.single_user);
+          }
+          else
+          {
+            for (LegionMap<PhysicalUser*,FieldMask>::aligned::iterator
+                  it = event_users.users.multi_users->begin(); it !=
+                  event_users.users.multi_users->end(); it++)
+            {
+              if (it->first->remove_reference())
+                delete (it->first);
+            }
+            delete event_users.users.multi_users;
+          }
+          previous_epoch_users.erase(previous_finder);
+        }
+      }
+      traced_outstanding_gc_events.clear();
+    }
 
     //--------------------------------------------------------------------------
     void MaterializedView::send_view(AddressSpaceID target)
@@ -7653,12 +7706,7 @@ namespace Legion {
           filter_local_users(*it);
       }
       if (!traced_outstanding_gc_events.empty())
-      {
-        outstanding_gc_events.swap(traced_outstanding_gc_events);
-        collect_users(outstanding_gc_events);
-        outstanding_gc_events.swap(traced_outstanding_gc_events);
-        traced_outstanding_gc_events.clear();
-      }
+        collect_traced_users();
 #if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE) && \
       defined(DEBUG_LEGION)
       assert(reduction_users.empty());
@@ -8596,6 +8644,60 @@ namespace Legion {
       }
 #endif
     }
+
+    //--------------------------------------------------------------------------
+    void ReductionView::collect_traced_users()
+    //--------------------------------------------------------------------------
+    {
+      for (std::set<ApEvent>::iterator eit =
+           traced_outstanding_gc_events.begin(); eit !=
+           traced_outstanding_gc_events.end(); ++eit)
+      {
+        LegionMap<ApEvent,EventUsers>::aligned::iterator finder = 
+          reduction_users.find(*eit);
+        if (finder != reduction_users.end())
+        {
+          EventUsers &event_users = finder->second;
+          if (event_users.single)
+          {
+            delete (event_users.users.single_user);
+          }
+          else
+          {
+            for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator it
+                  = event_users.users.multi_users->begin(); it !=
+                  event_users.users.multi_users->end(); it++)
+            {
+              delete (it->first);
+            }
+            delete event_users.users.multi_users;
+          }
+          reduction_users.erase(finder);
+        }
+        finder = reading_users.find(*eit);
+        if (finder != reading_users.end())
+        {
+          EventUsers &event_users = finder->second;
+          if (event_users.single)
+          {
+            delete (event_users.users.single_user);
+          }
+          else
+          {
+            for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
+                  it = event_users.users.multi_users->begin(); it !=
+                  event_users.users.multi_users->end(); it++)
+            {
+              delete (it->first);
+            }
+            delete event_users.users.multi_users;
+          }
+          reading_users.erase(finder);
+        }
+      }
+      traced_outstanding_gc_events.clear();
+    }
+
 
     //--------------------------------------------------------------------------
     void ReductionView::send_view(AddressSpaceID target)
