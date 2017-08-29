@@ -1433,42 +1433,119 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ bool PhysicalTemplate::check_logical_open(RegionTreeNode *node,
+                                                         ContextID ctx,
+                                                         FieldMask fields)
+    //--------------------------------------------------------------------------
+    {
+      RegionTreeNode *parent_node = node->get_parent();
+      if (parent_node != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(!parent_node->is_region());
+#endif
+        const LogicalState &state = parent_node->get_logical_state(ctx);
+#ifdef DEBUG_LEGION
+        assert(!!fields);
+#endif
+        for (LegionList<FieldState>::aligned::const_iterator fit =
+             state.field_states.begin(); fit !=
+             state.field_states.end(); ++fit)
+        {
+          if (fit->open_state == NOT_OPEN)
+            continue;
+          FieldMask overlap = fit->valid_fields & fields;
+          if (!overlap)
+            continue;
+          // FIXME: This code will not work as expected if the projection
+          //        goes deeper than one level
+          const ColorPoint &color = node->get_row_source()->color;
+          if ((fit->projection != 0 &&
+               fit->projection_domain.contains(color.get_point())) ||
+              fit->open_children.find(color) != fit->open_children.end())
+            fields -= overlap;
+        }
+      }
+
+      const LogicalState &state = node->get_logical_state(ctx);
+      for (LegionList<FieldState>::aligned::const_iterator fit =
+           state.field_states.begin(); fit !=
+           state.field_states.end(); ++fit)
+      {
+        if (fit->open_state == NOT_OPEN)
+          continue;
+        FieldMask overlap = fit->valid_fields & fields;
+        if (!overlap)
+          continue;
+        fields -= overlap;
+      }
+      return !fields;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ bool PhysicalTemplate::check_logical_open(RegionTreeNode *node,
+                                                         ContextID ctx,
+                                    LegionMap<Domain, FieldMask>::aligned projs)
+    //--------------------------------------------------------------------------
+    {
+      const LogicalState &state = node->get_logical_state(ctx);
+      for (LegionList<FieldState>::aligned::const_iterator fit =
+           state.field_states.begin(); fit !=
+           state.field_states.end(); ++fit)
+      {
+        if (fit->open_state == NOT_OPEN)
+          continue;
+        if (fit->projection != 0)
+        {
+          LegionMap<Domain, FieldMask>::aligned::iterator finder =
+            projs.find(fit->projection_domain);
+          if (finder != projs.end())
+          {
+            FieldMask overlap = finder->second & fit->valid_fields;
+            if (!overlap)
+              continue;
+            finder->second -= overlap;
+            if (!finder->second)
+              projs.erase(finder);
+          }
+        }
+      }
+      return projs.size() == 0;
+    }
+
+    //--------------------------------------------------------------------------
     bool PhysicalTemplate::check_preconditions()
     //--------------------------------------------------------------------------
     {
+      for (LegionMap<std::pair<RegionTreeNode*, ContextID>,
+                     FieldMask>::aligned::iterator it =
+           previous_open_nodes.begin(); it !=
+           previous_open_nodes.end(); ++it)
+        if (!check_logical_open(it->first.first, it->first.second, it->second))
+          return false;
+
+      for (std::map<std::pair<RegionTreeNode*, ContextID>,
+                    LegionMap<Domain, FieldMask>::aligned>::iterator it =
+           previous_projections.begin(); it !=
+           previous_projections.end(); ++it)
+        if (!check_logical_open(it->first.first, it->first.second, it->second))
+          return false;
+
       for (LegionMap<InstanceView*, FieldMask>::aligned::iterator it =
-           preconditions.begin(); it != preconditions.end(); ++it)
+           previous_valid_views.begin(); it !=
+           previous_valid_views.end(); ++it)
       {
 #ifdef DEBUG_LEGION
         assert(logical_contexts.find(it->first) != logical_contexts.end());
         assert(physical_contexts.find(it->first) != physical_contexts.end());
 #endif
         RegionTreeNode *logical_node = it->first->logical_node;
-        RegionTreeNode *parent_node = logical_node->get_parent();
-        if (parent_node != NULL)
-        {
-#ifdef DEBUG_LEGION
-          assert(!parent_node->is_region());
-#endif
-          ContextID logical_ctx = logical_contexts[it->first];
-          const LogicalState &state =
-            parent_node->get_logical_state(logical_ctx);
-          FieldMask unopened = it->second;
-#ifdef DEBUG_LEGION
-          assert(!!unopened);
-#endif
-          for (LegionList<FieldState>::aligned::const_iterator fit =
-               state.field_states.begin(); fit !=
-               state.field_states.end(); ++fit)
-          {
-            FieldMask overlap = fit->valid_fields & unopened;
-            if (!overlap)
-              continue;
-            unopened -= overlap;
-          }
-          if (!!unopened)
-            return false;
-        }
+        ContextID logical_ctx = logical_contexts[it->first];
+        std::pair<RegionTreeNode*, ContextID> key(logical_node, logical_ctx);
+
+        if (previous_open_nodes.find(key) == previous_open_nodes.end() &&
+            !check_logical_open(logical_node, logical_ctx, it->second))
+          return false;
 
         ContextID physical_ctx = physical_contexts[it->first];
         PhysicalState *state = new PhysicalState(logical_node, false);
@@ -1512,6 +1589,7 @@ namespace Legion {
         }
         if (!found) return false;
       }
+
       return true;
     }
 
@@ -1620,9 +1698,10 @@ namespace Legion {
                   << ", # consumers: " << consumers[idx].size()
                   << ", # producers: " << max_producers[idx]
                   << std::endl;
-      std::cerr << "[Preconditions]" << std::endl;
+      std::cerr << "[Previous Valid Views]" << std::endl;
       for (LegionMap<InstanceView*, FieldMask>::aligned::iterator it =
-           preconditions.begin(); it != preconditions.end(); ++it)
+           previous_valid_views.begin(); it !=
+           previous_valid_views.end(); ++it)
       {
         char *mask = it->second.to_string();
         std::cerr << "  " << view_to_string(it->first) << " " << mask
@@ -1665,7 +1744,8 @@ namespace Legion {
     {
       // Reduction instances should not have been recycled in the trace
       for (LegionMap<InstanceView*, FieldMask>::aligned::iterator it =
-           preconditions.begin(); it != preconditions.end(); ++it)
+           previous_valid_views.begin(); it !=
+           previous_valid_views.end(); ++it)
         if (it->first->is_reduction_view())
           assert(initialized.find(it->first) != initialized.end() &&
                  initialized[it->first]);
@@ -1844,9 +1924,9 @@ namespace Legion {
         if (finder == reduction_views.end())
         {
           LegionMap<InstanceView*, FieldMask>::aligned::iterator pfinder =
-            preconditions.find(src);
-          if (pfinder == preconditions.end())
-            preconditions[src] = src_mask;
+            previous_valid_views.find(src);
+          if (pfinder == previous_valid_views.end())
+            previous_valid_views[src] = src_mask;
           else
             pfinder->second |= src_mask;
           initialized[src] = true;
@@ -1866,9 +1946,9 @@ namespace Legion {
         if (finder == valid_views.end())
         {
           LegionMap<InstanceView*, FieldMask>::aligned::iterator pfinder =
-            preconditions.find(src);
-          if (pfinder == preconditions.end())
-            preconditions[src] = src_mask;
+            previous_valid_views.find(src);
+          if (pfinder == previous_valid_views.end())
+            previous_valid_views[src] = src_mask;
           else
             pfinder->second |= src_mask;
         }
@@ -1962,6 +2042,35 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_empty_copy(CompositeView *src,
+                                             const FieldMask &src_mask,
+                                             MaterializedView *dst,
+                                             const FieldMask &dst_mask,
+                                             ContextID logical_ctx)
+    //--------------------------------------------------------------------------
+    {
+      // FIXME: Nested composite views potentially make the check expensive.
+      //        Here we simply handle the case we know can be done efficiently.
+      if (!src->has_nested_views())
+      {
+        bool already_valid = false;
+        LegionMap<InstanceView*, FieldMask>::aligned::iterator finder =
+          valid_views.find(dst);
+        if (finder == valid_views.end())
+          valid_views[dst] = dst_mask;
+        else
+        {
+          already_valid = !(dst_mask - finder->second);
+          finder->second |= dst_mask;
+        }
+        if (already_valid) return;
+
+        src->closed_tree->record_closed_tree(src_mask, logical_ctx,
+            previous_open_nodes, previous_projections);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     inline void PhysicalTemplate::record_ready_view(PhysicalTraceInfo &trace_info,
                                                     const RegionRequirement &req,
                                                     InstanceView *view,
@@ -1989,9 +2098,9 @@ namespace Legion {
           if (HAS_READ(req))
           {
             LegionMap<InstanceView*, FieldMask>::aligned::iterator pfinder =
-              preconditions.find(view);
-            if (pfinder == preconditions.end())
-              preconditions[view] = fields;
+              previous_valid_views.find(view);
+            if (pfinder == previous_valid_views.end())
+              previous_valid_views[view] = fields;
             else
               pfinder->second |= fields;
           }
@@ -2407,7 +2516,8 @@ namespace Legion {
       ss << ")].get_physical_instances()["
          << region_idx << "]["
          << inst_idx << "].set_ready_event(events["
-         << ready_event_idx << "])";
+         << ready_event_idx << "])  (instance id : "
+         << std::hex << view->get_manager()->get_instance().id << ")";
       return ss.str();
     }
 

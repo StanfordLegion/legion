@@ -3490,6 +3490,55 @@ namespace Legion {
       return result;
     }
 
+    void ClosedNode::record_closed_tree(const FieldMask &fields,
+                                        ContextID logical_ctx,
+                         LegionMap<std::pair<RegionTreeNode*,ContextID>,
+                                   FieldMask>::aligned &nodes,
+                         std::map<std::pair<RegionTreeNode*,ContextID>,
+                                  LegionMap<Domain,FieldMask>::aligned> &projs)
+    //--------------------------------------------------------------------------
+    {
+      std::pair<RegionTreeNode*,ContextID> key(node, logical_ctx);
+      if (children.size() == 0 && projections.size() == 0)
+      {
+        LegionMap<std::pair<RegionTreeNode*,ContextID>,
+                  FieldMask>::aligned::iterator finder = nodes.find(key);
+        if (finder == nodes.end())
+            nodes[key] = fields;
+        else
+          finder->second |= fields;
+        return;
+      }
+      std::map<std::pair<RegionTreeNode*,ContextID>,
+               LegionMap<Domain,FieldMask>::aligned>::iterator finder =
+                 projs.find(key);
+      for (std::map<ProjectionFunction*,
+                    LegionMap<Domain,FieldMask>::aligned>::const_iterator pit =
+            projections.begin(); pit != projections.end(); pit++)
+      {
+        for (LegionMap<Domain,FieldMask>::aligned::const_iterator it =
+              pit->second.begin(); it != pit->second.end(); it++)
+        {
+          FieldMask overlap = it->second & fields;
+          if (!overlap) continue;
+          if (finder == projs.end())
+          {
+            projs[key] = LegionMap<Domain,FieldMask>::aligned();
+            finder = projs.find(key);
+          }
+          LegionMap<Domain,FieldMask>::aligned::iterator finder2 =
+            finder->second.find(it->first);
+          if (finder2 == finder->second.end())
+            finder->second[it->first] = overlap;
+          else
+            finder2->second |= overlap;
+        }
+      }
+      for (std::map<RegionTreeNode*,ClosedNode*>::const_iterator it =
+            children.begin(); it != children.end(); it++)
+        it->second->record_closed_tree(fields, logical_ctx, nodes, projs);
+    }
+
     /////////////////////////////////////////////////////////////
     // Logical Closer 
     /////////////////////////////////////////////////////////////

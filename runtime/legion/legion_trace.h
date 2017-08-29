@@ -397,6 +397,12 @@ namespace Legion {
       ~PhysicalTemplate();
     public:
       void initialize(ApEvent fence_completion);
+    private:
+      static bool check_logical_open(RegionTreeNode *node, ContextID ctx,
+                                     FieldMask fields);
+      static bool check_logical_open(RegionTreeNode *node, ContextID ctx,
+                                   LegionMap<Domain, FieldMask>::aligned projs);
+    public:
       bool check_preconditions();
       void execute(PhysicalTraceInfo &trace_info, SingleTask *task);
       void finalize();
@@ -444,6 +450,11 @@ namespace Legion {
                              RegionTreeNode *intersect = NULL,
                              ReductionOpID redop = 0,
                              bool reduction_fold = true);
+      void record_empty_copy(CompositeView *src,
+                             const FieldMask &src_mask,
+                             MaterializedView *dst,
+                             const FieldMask &dst_mask,
+                             ContextID logical_ctx);
       void record_set_ready_event(PhysicalTraceInfo &trace_info,
                                   Operation *op,
                                   unsigned region_idx,
@@ -476,13 +487,17 @@ namespace Legion {
       ApEvent fence_completion;
       std::map<std::pair<unsigned, DomainPoint>, SingleTask*> operations;
       std::vector<ApEvent> events;
-      CachedMappings                               cached_mappings;
-      LegionMap<InstanceView*, FieldMask>::aligned preconditions;
-      LegionMap<InstanceView*, FieldMask>::aligned valid_views;
-      LegionMap<InstanceView*, FieldMask>::aligned reduction_views;
-      LegionMap<InstanceView*, bool>::aligned      initialized;
-      LegionMap<InstanceView*, ContextID>::aligned logical_contexts;
-      LegionMap<InstanceView*, ContextID>::aligned physical_contexts;
+      CachedMappings                                  cached_mappings;
+      LegionMap<InstanceView*, FieldMask>::aligned    previous_valid_views;
+      LegionMap<std::pair<RegionTreeNode*, ContextID>,
+                FieldMask>::aligned                   previous_open_nodes;
+      std::map<std::pair<RegionTreeNode*, ContextID>,
+               LegionMap<Domain, FieldMask>::aligned> previous_projections;
+      LegionMap<InstanceView*, FieldMask>::aligned    valid_views;
+      LegionMap<InstanceView*, FieldMask>::aligned    reduction_views;
+      LegionMap<InstanceView*, bool>::aligned         initialized;
+      LegionMap<InstanceView*, ContextID>::aligned    logical_contexts;
+      LegionMap<InstanceView*, ContextID>::aligned    physical_contexts;
     };
 
     /**

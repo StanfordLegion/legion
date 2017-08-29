@@ -1088,6 +1088,8 @@ namespace Legion {
                   PredEvent pred_guard, PhysicalTraceInfo &trace_info,
                   CopyAcrossHelper *helper) const;
     public:
+      bool empty();
+    public:
       RegionTreeNode *const logical_node;
       // Only valid at roots of copy trees
       CompositeView *const view_node;
@@ -1318,6 +1320,8 @@ namespace Legion {
                                     TreeStateLogger* logger,
                                     int current_nesting,
                                     int max_nesting);
+    public:
+      bool has_nested_views() { return nested_composite_views.size() > 0; }
     public:
       // The path version info for this composite instance
       DeferredVersionInfo *const version_info;

@@ -692,6 +692,13 @@ namespace Legion {
       static ClosedNode* unpack_closed_node(Deserializer &derez, 
                                             Runtime *runtime, bool is_region);
     public:
+      void record_closed_tree(
+          const FieldMask &fields, ContextID logical_ctx,
+          LegionMap<std::pair<RegionTreeNode*,ContextID>,
+                    FieldMask>::aligned &closed_nodes,
+          std::map<std::pair<RegionTreeNode*,ContextID>,
+                   LegionMap<Domain,FieldMask>::aligned> &closed_projections);
+    public:
       RegionTreeNode *const node;
     protected:
       FieldMask valid_fields; // Fields that are summarized in this tree

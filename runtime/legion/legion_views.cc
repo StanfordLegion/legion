@@ -4671,6 +4671,20 @@ namespace Legion {
       }
     }
 
+    //--------------------------------------------------------------------------
+    bool CompositeCopyNode::empty()
+    //--------------------------------------------------------------------------
+    {
+      if (source_views.size() > 0 || reduction_views.size() > 0) return false;
+      for (LegionMap<CompositeCopyNode*,FieldMask>::aligned::const_iterator it =
+            nested_nodes.begin(); it != nested_nodes.end(); it++)
+        if (!it->first->empty()) return false;
+      for (LegionMap<CompositeCopyNode*,FieldMask>::aligned::const_iterator it =
+            child_nodes.begin(); it != child_nodes.end(); it++)
+        if (!it->first->empty()) return false;
+      return true;
+    }
+
     /////////////////////////////////////////////////////////////
     // CompositeCopier 
     /////////////////////////////////////////////////////////////
@@ -5575,6 +5589,20 @@ namespace Legion {
       FieldMask dominate_capture(copy_mask);
       CompositeCopyNode *copy_tree = construct_copy_tree(dst, logical_node,
           copy_mask, top_locally_complete, dominate_capture, copier, this);
+      if (trace_info.tracing)
+      {
+#ifdef DEBUG_LEGION
+        assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
+#endif
+        if (copy_tree->empty())
+        {
+          ContextID logical_ctx =
+            info.op->find_logical_context(info.index)->get_context().get_id();
+          trace_info.tpl->record_empty_copy(this, copy_mask, dst, copy_mask,
+              logical_ctx);
+        }
+      }
+
 #ifdef DEBUG_LEGION
       assert(copy_tree != NULL);
 #endif
