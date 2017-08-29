@@ -3385,7 +3385,6 @@ namespace Legion {
         IndexSpaceNode *color_space = node->row_source->color_space;
         // Iterate over the projections and look for anything with an 
         // identity projection function for which we can do something
-        FieldMask non_dominated_by_any;
         for (std::map<std::pair<ProjectionFunction*,ShardingFunction*>,
               LegionMap<IndexSpaceNode*,FieldMask>::aligned>::const_iterator
               pit = it->second->projections.begin(); 
@@ -3393,27 +3392,32 @@ namespace Legion {
         {
           if (pit->first.first != identity)
             continue;
+          FieldMask new_child_dominated;
           for (LegionMap<IndexSpaceNode*,FieldMask>::aligned::const_iterator 
                 dit = pit->second.begin(); dit != pit->second.end(); dit++)
           {
             FieldMask overlap = non_dominated_mask & dit->second;
             if (!overlap)
               continue;
-            FieldMask reduction_mask = overlap & it->second->reduced_fields;
-            if (!!reduction_mask)
-            {
-              non_dominated_by_any |= reduction_mask;
-              overlap -= reduction_mask;
-            }
-            if ((color_space->get_num_dims() != dit->first->get_num_dims()) ||
-                !dit->first->dominates(color_space))
-              non_dominated_mask |= overlap;
+            if ((color_space->get_num_dims() == dit->first->get_num_dims()) &&
+                dit->first->dominates(color_space))
+              new_child_dominated |= overlap;
           }
+          // See if we have any dominated fields
+          if (!new_child_dominated)
+            continue;
+          // If there are any reduction fields they can't be dominated
+          if (!!it->second->reduced_fields)
+          {
+            new_child_dominated -= it->second->reduced_fields;
+            if (!new_child_dominated)
+              continue;
+          }
+          // Remove the fields dominated by this new child
+          non_dominated_mask -= new_child_dominated;
+          if (!!non_dominated_mask) 
+            return;
         }
-
-        non_dominated_mask &= non_dominated_by_any;
-        if (!!non_dominated_mask) 
-          return;
       }
       // In order to remove a field, it has to be dominated in all our children
       FieldMask dominated_fields = non_dominated_mask;
