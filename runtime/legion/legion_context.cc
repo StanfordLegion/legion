@@ -5422,7 +5422,10 @@ namespace Legion {
       current_fence = op;
       fence_gen = op->get_generation();
       current_fence->add_mapping_reference(fence_gen);
-      current_fence_event = current_fence->get_execution_fence_precondition();
+      // Only update the current fence event if we're actually an
+      // execution fence, otherwise by definition we need the previous event
+      if (current_fence->is_execution_fence())
+        current_fence_event = current_fence->get_completion_event();
 #ifdef LEGION_SPY
       current_fence_uid = op->get_unique_op_id();
 #endif
