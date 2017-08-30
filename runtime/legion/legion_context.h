@@ -296,7 +296,7 @@ namespace Legion {
       virtual void register_child_complete(Operation *op) = 0;
       virtual void register_child_commit(Operation *op) = 0; 
       virtual void unregister_child_operation(Operation *op) = 0;
-      virtual void register_fence_dependence(Operation *op) = 0;
+      virtual ApEvent register_fence_dependence(Operation *op) = 0;
 #ifdef LEGION_SPY
       virtual ApEvent get_fence_precondition(void) const = 0;
 #endif
@@ -559,6 +559,7 @@ namespace Legion {
     protected:
       RtEvent pending_done;
       bool task_executed;
+      bool has_inline_accessor;
     protected: 
       bool children_complete_invoked;
       bool children_commit_invoked;
@@ -870,7 +871,7 @@ namespace Legion {
       virtual void register_child_complete(Operation *op);
       virtual void register_child_commit(Operation *op); 
       virtual void unregister_child_operation(Operation *op);
-      virtual void register_fence_dependence(Operation *op);
+      virtual ApEvent register_fence_dependence(Operation *op);
 #ifdef LEGION_SPY
       virtual ApEvent get_fence_precondition(void) const;
 #endif
@@ -1013,6 +1014,7 @@ namespace Legion {
     protected:
       FenceOp *current_fence;
       GenerationID fence_gen;
+      ApEvent current_fence_event;
     protected:
       // For tracking restricted coherence
       std::list<Restriction*> coherence_restrictions;
@@ -1377,7 +1379,7 @@ namespace Legion {
       virtual void register_child_complete(Operation *op);
       virtual void register_child_commit(Operation *op); 
       virtual void unregister_child_operation(Operation *op);
-      virtual void register_fence_dependence(Operation *op);
+      virtual ApEvent register_fence_dependence(Operation *op);
 #ifdef LEGION_SPY
       virtual ApEvent get_fence_precondition(void) const;
 #endif
@@ -1677,7 +1679,7 @@ namespace Legion {
       virtual void register_child_complete(Operation *op);
       virtual void register_child_commit(Operation *op); 
       virtual void unregister_child_operation(Operation *op);
-      virtual void register_fence_dependence(Operation *op);
+      virtual ApEvent register_fence_dependence(Operation *op);
 #ifdef LEGION_SPY
       virtual ApEvent get_fence_precondition(void) const;
 #endif
