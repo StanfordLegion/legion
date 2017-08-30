@@ -808,6 +808,7 @@ namespace Legion {
           rez.serialize(it->second);
         }
       }
+      rez.serialize(execution_fence_event);
       rez.serialize(replicate);
       rez.serialize(true_guard);
       rez.serialize(false_guard);
@@ -845,6 +846,7 @@ namespace Legion {
           derez.deserialize(atomic_locks[lock]);
         }
       }
+      derez.deserialize(execution_fence_event);
       derez.deserialize(replicate);
       derez.deserialize(true_guard);
       derez.deserialize(false_guard);
@@ -1777,6 +1779,7 @@ namespace Legion {
       // From Operation
       this->parent_ctx = rhs->parent_ctx;
       this->context_index = rhs->context_index;
+      this->execution_fence_event = rhs->get_execution_fence_event();
       // Don't register this an operation when setting the must epoch info
       if (rhs->must_epoch != NULL)
         this->set_must_epoch(rhs->must_epoch, rhs->must_epoch_index,
@@ -3972,6 +3975,8 @@ namespace Legion {
         runtime->find_variant_impl(task_id, selected_variant);
       // STEP 1: Compute the precondition for the task launch
       std::set<ApEvent> wait_on_events;
+      if (execution_fence_event.exists())
+        wait_on_events.insert(execution_fence_event);
       // Get the event to wait on unless we are 
       // doing the inner task optimization
       const bool do_inner_task_optimization = variant->is_inner();

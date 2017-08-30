@@ -213,6 +213,10 @@ namespace Legion {
       inline RtEvent get_resolved_event(void) const { return resolved_event; }
       inline ApEvent get_completion_event(void) const {return completion_event;}
       inline RtEvent get_commit_event(void) const { return commit_event; }
+      inline ApEvent get_execution_fence_event(void) const 
+        { return execution_fence_event; }
+      inline bool has_execution_fence_event(void) const 
+        { return execution_fence_event.exists(); }
       inline TaskContext* get_context(void) const { return parent_ctx; }
       inline UniqueID get_unique_op_id(void) const { return unique_op_id; } 
       inline bool is_tracing(void) const { return tracing; }
@@ -540,6 +544,8 @@ namespace Legion {
       ApUserEvent completion_event;
       // The commit event for this operation
       RtUserEvent commit_event;
+      // Previous execution fence if there was one
+      ApEvent execution_fence_event;
       // The trace for this operation if any
       LegionTrace *trace;
       // Track whether we are tracing this operation
@@ -987,6 +993,7 @@ namespace Legion {
       FenceOp& operator=(const FenceOp &rhs);
     public:
       void initialize(TaskContext *ctx, FenceKind kind);
+      ApEvent get_execution_fence_precondition(void) const;
     public:
       virtual void activate(void);
       virtual void deactivate(void);
