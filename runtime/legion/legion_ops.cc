@@ -91,6 +91,7 @@ namespace Legion {
       completion_event = Runtime::create_ap_user_event();
       if (Runtime::resilient_mode)
         commit_event = Runtime::create_rt_user_event(); 
+      execution_fence_event = ApEvent::NO_AP_EVENT;
       trace = NULL;
       tracing = false;
       must_epoch = NULL;
@@ -907,7 +908,7 @@ namespace Legion {
       if (trace != NULL)
         trace->register_operation(this, gen);
       // See if we have any fence dependences
-      parent_ctx->register_fence_dependence(this);
+      execution_fence_event = parent_ctx->register_fence_dependence(this);
     }
 
     //--------------------------------------------------------------------------
@@ -5437,6 +5438,7 @@ namespace Legion {
           own->src_requirements.size() + own->dst_requirements.size());
       index_point = p;
       owner = own;
+      execution_fence_event = own->get_execution_fence_event();
       // From Copy
       src_requirements   = owner->src_requirements;
       dst_requirements   = owner->dst_requirements;
@@ -5687,6 +5689,24 @@ namespace Legion {
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_fence_operation(parent_ctx->get_unique_id(),
                                        unique_op_id);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent FenceOp::get_execution_fence_precondition(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (fence_kind != MAPPING_FENCE)
+      {
+#ifdef LEGION_SPY
+        // Always return this for legion spy verification
+        return completion_event;
+#else
+        if (!completion_event.has_triggered())
+          return completion_event;
+#endif
+      }
+      // Default case
+      return ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -13059,6 +13079,7 @@ namespace Legion {
       initialize_operation(own->get_context(), false/*track*/, 1/*regions*/); 
       index_point = p;
       owner = own;
+      execution_fence_event = own->get_execution_fence_event();
       // From Fill
       requirement        = owner->get_requirement();
       grants             = owner->grants;

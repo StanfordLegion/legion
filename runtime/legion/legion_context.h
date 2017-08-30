@@ -296,7 +296,7 @@ namespace Legion {
       virtual void register_child_complete(Operation *op) = 0;
       virtual void register_child_commit(Operation *op) = 0; 
       virtual void unregister_child_operation(Operation *op) = 0;
-      virtual void register_fence_dependence(Operation *op) = 0;
+      virtual ApEvent register_fence_dependence(Operation *op) = 0;
 #ifdef LEGION_SPY
       virtual ApEvent get_fence_precondition(void) const = 0;
 #endif
@@ -870,7 +870,7 @@ namespace Legion {
       virtual void register_child_complete(Operation *op);
       virtual void register_child_commit(Operation *op); 
       virtual void unregister_child_operation(Operation *op);
-      virtual void register_fence_dependence(Operation *op);
+      virtual ApEvent register_fence_dependence(Operation *op);
 #ifdef LEGION_SPY
       virtual ApEvent get_fence_precondition(void) const;
 #endif
@@ -1376,7 +1376,7 @@ namespace Legion {
       virtual void register_child_complete(Operation *op);
       virtual void register_child_commit(Operation *op); 
       virtual void unregister_child_operation(Operation *op);
-      virtual void register_fence_dependence(Operation *op);
+      virtual ApEvent register_fence_dependence(Operation *op);
 #ifdef LEGION_SPY
       virtual ApEvent get_fence_precondition(void) const;
 #endif
@@ -1675,7 +1675,7 @@ namespace Legion {
       virtual void register_child_complete(Operation *op);
       virtual void register_child_commit(Operation *op); 
       virtual void unregister_child_operation(Operation *op);
-      virtual void register_fence_dependence(Operation *op);
+      virtual ApEvent register_fence_dependence(Operation *op);
 #ifdef LEGION_SPY
       virtual ApEvent get_fence_precondition(void) const;
 #endif
