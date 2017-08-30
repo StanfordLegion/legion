@@ -5692,21 +5692,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent FenceOp::get_execution_fence_precondition(void) const
+    bool FenceOp::is_execution_fence(void) const
     //--------------------------------------------------------------------------
     {
-      if (fence_kind != MAPPING_FENCE)
-      {
-#ifdef LEGION_SPY
-        // Always return this for legion spy verification
-        return completion_event;
-#else
-        if (!completion_event.has_triggered())
-          return completion_event;
-#endif
-      }
-      // Default case
-      return ApEvent::NO_AP_EVENT;
+      return (fence_kind != MAPPING_FENCE);
     }
 
     //--------------------------------------------------------------------------
