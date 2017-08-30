@@ -1029,6 +1029,7 @@ namespace Legion {
     protected:
       FenceOp *current_fence;
       GenerationID fence_gen;
+      ApEvent current_fence_event;
     protected:
       // For tracking restricted coherence
       std::list<Restriction*> coherence_restrictions;
