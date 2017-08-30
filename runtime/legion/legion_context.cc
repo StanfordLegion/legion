@@ -5287,7 +5287,6 @@ namespace Legion {
     {
       if (current_fence != NULL)
       {
-        ApEvent result = current_fence->get_execution_fence_precondition();
 #ifdef LEGION_SPY
         // Can't prune when doing legion spy
         op->register_dependence(current_fence, fence_gen);
@@ -5312,10 +5311,18 @@ namespace Legion {
         if (op->register_dependence(current_fence, fence_gen))
           current_fence = NULL;
 #endif
-        return result;
       }
-      else
-        return ApEvent::NO_AP_EVENT;
+#ifdef LEGION_SPY
+      return execution_fence_event;
+#else
+      if (current_fence_event.exists())
+      {
+        if (current_fence_event.has_triggered())
+          current_fence_event = ApEvent::NO_AP_EVENT;
+        return current_fence_event;
+      }
+      return ApEvent::NO_AP_EVENT;
+#endif
     }
 
 #ifdef LEGION_SPY
@@ -5415,6 +5422,7 @@ namespace Legion {
       current_fence = op;
       fence_gen = op->get_generation();
       current_fence->add_mapping_reference(fence_gen);
+      current_fence_event = current_fence->get_execution_fence_precondition();
 #ifdef LEGION_SPY
       current_fence_uid = op->get_unique_op_id();
 #endif
