@@ -5313,7 +5313,7 @@ namespace Legion {
 #endif
       }
 #ifdef LEGION_SPY
-      return execution_fence_event;
+      return current_fence_event;
 #else
       if (current_fence_event.exists())
       {
