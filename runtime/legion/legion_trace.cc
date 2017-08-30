@@ -1013,10 +1013,7 @@ namespace Legion {
       {
         PhysicalTrace *physical_trace = local_trace->get_physical_trace();
         if (physical_trace->is_tracing())
-        {
           physical_trace->fix_trace();
-          physical_trace->initialize_templates(get_completion_event());
-        }
       }
       FenceOp::trigger_mapping();
     }
@@ -1134,7 +1131,6 @@ namespace Legion {
         PhysicalTrace *physical_trace = local_trace->get_physical_trace();
         if (physical_trace->is_tracing())
           physical_trace->fix_trace();
-        physical_trace->initialize_templates(get_completion_event());
       }
       FenceOp::trigger_mapping();
     }
@@ -1587,7 +1583,8 @@ namespace Legion {
             }
           }
         }
-        if (!found) return false;
+        if (!found)
+          return false;
       }
 
       return true;
@@ -1841,6 +1838,18 @@ namespace Legion {
       assert(task_entries.find(key) == task_entries.end());
 #endif
       task_entries[key] = inst_id;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_merge_events(PhysicalTraceInfo &trace_info,
+                                               ApEvent &lhs,
+                                               ApEvent e1, ApEvent e2)
+    //--------------------------------------------------------------------------
+    {
+      std::set<ApEvent> rhs;
+      rhs.insert(e1);
+      rhs.insert(e2);
+      record_merge_events(trace_info, lhs, rhs);
     }
 
     //--------------------------------------------------------------------------
@@ -2516,7 +2525,8 @@ namespace Legion {
       ss << ")].get_physical_instances()["
          << region_idx << "]["
          << inst_idx << "].set_ready_event(events["
-         << ready_event_idx << "])  (instance id : "
+         << ready_event_idx << "])  (pointer: "
+         << std::hex << view << ", instance id: "
          << std::hex << view->get_manager()->get_instance().id << ")";
       return ss.str();
     }

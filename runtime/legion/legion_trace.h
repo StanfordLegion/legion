@@ -427,6 +427,8 @@ namespace Legion {
       void record_get_term_event(PhysicalTraceInfo &trace_info,
                                  ApEvent lhs,
                                  SingleTask* task);
+      void record_merge_events(PhysicalTraceInfo &trace_info, ApEvent &lhs,
+                                                 ApEvent e1, ApEvent e2);
       void record_merge_events(PhysicalTraceInfo &trace_info,
                                ApEvent &lhs,
                                const std::set<ApEvent>& rhs);
