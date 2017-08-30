@@ -4913,11 +4913,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::register_fence_dependence(Operation *op)
+    ApEvent InnerContext::register_fence_dependence(Operation *op)
     //--------------------------------------------------------------------------
     {
       if (current_fence != NULL)
       {
+        ApEvent result = current_fence->get_execution_fence_precondition();
 #ifdef LEGION_SPY
         // Can't prune when doing legion spy
         op->register_dependence(current_fence, fence_gen);
@@ -4942,7 +4943,10 @@ namespace Legion {
         if (op->register_dependence(current_fence, fence_gen))
           current_fence = NULL;
 #endif
+        return result;
       }
+      else
+        return ApEvent::NO_AP_EVENT;
     }
 
 #ifdef LEGION_SPY
@@ -8020,10 +8024,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::register_fence_dependence(Operation *op)
+    ApEvent LeafContext::register_fence_dependence(Operation *op)
     //--------------------------------------------------------------------------
     {
       assert(false);
+      return ApEvent::NO_AP_EVENT;
     }
 
 #ifdef LEGION_SPY
@@ -9155,10 +9160,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::register_fence_dependence(Operation *op)
+    ApEvent InlineContext::register_fence_dependence(Operation *op)
     //--------------------------------------------------------------------------
     {
-      enclosing->register_fence_dependence(op);
+      return enclosing->register_fence_dependence(op);
     }
 
 #ifdef LEGION_SPY

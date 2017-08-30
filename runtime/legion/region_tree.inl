@@ -2467,6 +2467,9 @@ namespace Legion {
         op->add_copy_profiling_request(requests);
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_copy_request(requests, op);
+      if (op->has_execution_fence_event())
+        precondition = Runtime::merge_events(precondition,
+                        op->get_execution_fence_event());
       ApEvent result;
       if ((intersect == NULL) || (intersect == this))
       {
@@ -2577,6 +2580,9 @@ namespace Legion {
         op->add_copy_profiling_request(requests);
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_fill_request(requests, op);
+      if (op->has_execution_fence_event())
+        precondition = Runtime::merge_events(precondition,
+                        op->get_execution_fence_event());
       ApEvent result;
       if ((intersect == NULL) || (intersect == this))
       {
