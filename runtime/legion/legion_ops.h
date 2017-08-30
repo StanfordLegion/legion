@@ -993,7 +993,7 @@ namespace Legion {
       FenceOp& operator=(const FenceOp &rhs);
     public:
       void initialize(TaskContext *ctx, FenceKind kind);
-      ApEvent get_execution_fence_precondition(void) const;
+      bool is_execution_fence(void) const;
     public:
       virtual void activate(void);
       virtual void deactivate(void);
