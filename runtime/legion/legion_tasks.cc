@@ -808,8 +808,7 @@ namespace Legion {
           rez.serialize(it->second);
         }
       }
-      else
-        rez.serialize(execution_fence_event);
+      rez.serialize(execution_fence_event);
       rez.serialize(true_guard);
       rez.serialize(false_guard);
       rez.serialize(early_mapped_regions.size());
@@ -846,8 +845,7 @@ namespace Legion {
           derez.deserialize(atomic_locks[lock]);
         }
       }
-      else
-        derez.deserialize(execution_fence_event);
+      derez.deserialize(execution_fence_event);
       derez.deserialize(true_guard);
       derez.deserialize(false_guard);
       size_t num_early;
