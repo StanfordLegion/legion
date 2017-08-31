@@ -662,6 +662,8 @@ namespace Legion {
       SEND_VERSION_MANAGER_INVALIDATE,
       SEND_VERSION_MANAGER_REQUEST,
       SEND_VERSION_MANAGER_RESPONSE,
+      SEND_VERSION_MANAGER_UNVERSIONED_REQUEST,
+      SEND_VERSION_MANAGER_UNVERSIONED_RESPONSE,
       SEND_INSTANCE_REQUEST,
       SEND_INSTANCE_RESPONSE,
       SEND_GC_PRIORITY_UPDATE,
@@ -792,6 +794,8 @@ namespace Legion {
         "Send Version Manager Invalidate",                            \
         "Send Version Manager Request",                               \
         "Send Version Manager Response",                              \
+        "Send Version Manager Unversioned Request",                   \
+        "Send Version Manager Unversioned Response",                  \
         "Send Instance Request",                                      \
         "Send Instance Response",                                     \
         "Send GC Priority Update",                                    \

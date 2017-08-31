@@ -215,7 +215,7 @@ namespace Realm {
 
   class ProfilingRequest {
   public:
-    ProfilingRequest(Processor _response_proc, Processor::TaskFuncID _response_task_id);
+    ProfilingRequest(Processor _response_proc, Processor::TaskFuncID _response_task_id, int _priority = 0);
     ProfilingRequest(const ProfilingRequest& to_copy);
 
     ~ProfilingRequest(void);
@@ -239,6 +239,7 @@ namespace Realm {
 
     Processor response_proc;
     Processor::TaskFuncID response_task_id;
+    int priority;
     ByteArray user_data;
     std::set<ProfilingMeasurementID> requested_measurements;
   };
@@ -255,7 +256,8 @@ namespace Realm {
 
     ProfilingRequest& add_request(Processor response_proc, 
 				  Processor::TaskFuncID response_task_id,
-				  const void *payload = 0, size_t payload_size = 0);
+				  const void *payload = 0, size_t payload_size = 0,
+				  int priority = 0);
 
     size_t request_count(void) const;
     bool empty(void) const;

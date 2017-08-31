@@ -1009,6 +1009,14 @@ namespace Legion {
           const LegionMap<VersionState*,FieldMask>::aligned &source_infos);
       static void handle_response(Deserializer &derez);
     public:
+      void find_or_create_unversioned_states(FieldMask unversioned,
+          LegionMap<VersionState*,FieldMask>::aligned &unversioned_states,
+                                             ReferenceMutator *mutator);
+      static void handle_unversioned_request(Deserializer &derez,
+                          Runtime *runtime, AddressSpaceID source);
+      static void handle_unversioned_response(Deserializer &derez,
+                                              Runtime *runtime);
+    public:
       static void process_capture_dirty(const void *args);
     protected:
       void sanity_check(void);

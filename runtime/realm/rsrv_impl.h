@@ -24,7 +24,7 @@
 #include "activemsg.h"
 #include "nodeset.h"
 
-//define REALM_RSRV_USE_CIRCQUEUE
+#define REALM_RSRV_USE_CIRCQUEUE
 #ifdef REALM_RSRV_USE_CIRCQUEUE
 #include "circ_queue.h"
 #endif
