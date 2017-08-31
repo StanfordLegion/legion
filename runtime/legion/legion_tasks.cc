@@ -6276,14 +6276,6 @@ namespace Legion {
                                            ApEvent::NO_AP_EVENT);
           if (is_leaf() && !has_virtual_instances())
             complete_mapping();
-#ifdef LEGION_SPY
-      {
-        ApEvent term_event = get_completion_event();
-        ApEvent point_term_event = get_task_completion();
-        assert(term_event != point_term_event);
-        LegionSpy::log_event_dependence(term_event, point_term_event);
-      }
-#endif
           return RtEvent::NO_RT_EVENT;
         }
       }
