@@ -873,7 +873,8 @@ namespace Legion {
       void return_slice_mapped(unsigned points, long long denom,
                                RtEvent applied_condition, 
                                ApEvent restrict_postcondition);
-      void return_slice_complete(unsigned points);
+      void return_slice_complete(unsigned points,
+                                 ApEvent slice_postcondition);
       void return_slice_commit(unsigned points);
     public:
       void unpack_slice_mapped(Deserializer &derez, AddressSpaceID source);
@@ -903,7 +904,7 @@ namespace Legion {
       std::deque<SliceTask*> locally_mapped_slices;
     protected:
       std::set<RtEvent> map_applied_conditions;
-      std::set<ApEvent> restrict_postconditions;
+      std::set<ApEvent> completion_preconditions;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
     protected:
       // Whether we have to do intra-task alias analysis
@@ -999,7 +1000,7 @@ namespace Legion {
       void trigger_slice_commit(void);
     protected:
       void pack_remote_mapped(Serializer &rez, RtEvent applied_condition);
-      void pack_remote_complete(Serializer &rez); 
+      void pack_remote_complete(Serializer &rez, ApEvent slice_postcondition); 
       void pack_remote_commit(Serializer &rez);
     public:
       RtEvent defer_map_and_launch(RtEvent precondition);
