@@ -25,12 +25,16 @@ namespace Realm {
   //
 
   ProfilingRequest::ProfilingRequest(Processor _response_proc, 
-				     Processor::TaskFuncID _response_task_id)
+				     Processor::TaskFuncID _response_task_id,
+				     int _priority /*= 0*/)
     : response_proc(_response_proc), response_task_id(_response_task_id)
+    , priority(_priority)
   {}
 
   ProfilingRequest::ProfilingRequest(const ProfilingRequest& to_copy)
-    : response_proc(to_copy.response_proc), response_task_id(to_copy.response_task_id)
+    : response_proc(to_copy.response_proc)
+    , response_task_id(to_copy.response_task_id)
+    , priority(to_copy.priority)
     , user_data(to_copy.user_data)
     , requested_measurements(to_copy.requested_measurements)
   {
@@ -44,6 +48,7 @@ namespace Realm {
   {
     response_proc = rhs.response_proc;
     response_task_id = rhs.response_task_id;
+    priority = rhs.priority;
     requested_measurements = rhs.requested_measurements;
     user_data = rhs.user_data;
     return *this;
@@ -99,9 +104,12 @@ namespace Realm {
 
   ProfilingRequest& ProfilingRequestSet::add_request(Processor response_proc, 
 						     Processor::TaskFuncID response_task_id,
-						     const void *payload /*= 0*/, size_t payload_size /*= 0*/)
+						     const void *payload /*= 0*/,
+						     size_t payload_size /*= 0*/,
+						     int priority /*= 0*/)
   {
-    ProfilingRequest *pr = new ProfilingRequest(response_proc, response_task_id);
+    ProfilingRequest *pr = new ProfilingRequest(response_proc, response_task_id,
+						priority);
 
     if(payload)
       pr->add_user_data(payload, payload_size);
@@ -223,7 +231,8 @@ namespace Realm {
 
     assert((size_t)(data - payload) == bytes_needed);
     
-    pr.response_proc.spawn(pr.response_task_id, payload, bytes_needed);
+    pr.response_proc.spawn(pr.response_task_id, payload, bytes_needed,
+			   Event::NO_EVENT, pr.priority);
       
     free(payload);
   }
