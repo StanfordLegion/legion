@@ -192,7 +192,7 @@ namespace Legion {
 #endif
             exit(ERROR_INCOMPLETE_PHYSICAL_TRACING);
           }
-          physical_trace = new PhysicalTrace();
+          physical_trace = new PhysicalTrace(op->runtime);
         }
         op->set_trace_local_id(index);
       }
@@ -493,7 +493,7 @@ namespace Legion {
 #endif
             exit(ERROR_INCOMPLETE_PHYSICAL_TRACING);
           }
-          physical_trace = new PhysicalTrace();
+          physical_trace = new PhysicalTrace(op->runtime);
         }
         op->set_trace_local_id(index);
       }
@@ -1250,9 +1250,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PhysicalTrace::PhysicalTrace()
-      : tracing(false), trace_lock(Reservation::create_reservation()),
-        current_template(NULL)
+    PhysicalTrace::PhysicalTrace(Runtime *rt)
+      : runtime(rt), tracing(false),
+        trace_lock(Reservation::create_reservation()), current_template(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -1348,7 +1348,7 @@ namespace Legion {
     inline void PhysicalTrace::start_new_template()
     //--------------------------------------------------------------------------
     {
-      templates.push_back(new PhysicalTemplate());
+      templates.push_back(new PhysicalTemplate(this));
       current_template = templates.back();
       tracing = true;
     }
@@ -1365,9 +1365,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    PhysicalTemplate::PhysicalTemplate()
-      : tracing(true), template_lock(Reservation::create_reservation()),
-        fence_completion_id(0)
+    PhysicalTemplate::PhysicalTemplate(PhysicalTrace *pt)
+      : trace(pt), tracing(true),
+        template_lock(Reservation::create_reservation()), fence_completion_id(0)
     //--------------------------------------------------------------------------
     {
       events.push_back(ApEvent());
@@ -1513,6 +1513,7 @@ namespace Legion {
     bool PhysicalTemplate::check_preconditions()
     //--------------------------------------------------------------------------
     {
+      DETAILED_PROFILER(trace->runtime, PHYSICAL_TRACE_PRECONDITION_CHECK_CALL);
       for (LegionMap<std::pair<RegionTreeNode*, ContextID>,
                      FieldMask>::aligned::iterator it =
            previous_open_nodes.begin(); it !=

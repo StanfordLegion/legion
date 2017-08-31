@@ -355,7 +355,7 @@ namespace Legion {
      */
     class PhysicalTrace {
     public:
-      PhysicalTrace(void);
+      PhysicalTrace(Runtime *runtime);
       PhysicalTrace(const PhysicalTrace &rhs);
       ~PhysicalTrace(void);
     public:
@@ -373,6 +373,8 @@ namespace Legion {
     public:
       void fix_trace(void);
       inline bool is_tracing(void) const { return tracing; }
+    public:
+      Runtime *runtime;
     private:
       bool tracing;
       Reservation trace_lock;
@@ -390,7 +392,7 @@ namespace Legion {
      */
     struct PhysicalTemplate {
     public:
-      PhysicalTemplate();
+      PhysicalTemplate(PhysicalTrace *runtime);
       PhysicalTemplate(const PhysicalTemplate &rhs);
     private:
       friend PhysicalTrace;
@@ -475,6 +477,7 @@ namespace Legion {
                              ContextID logical_ctx,
                              ContextID physical_ctx);
     private:
+      PhysicalTrace *trace;
       bool tracing;
       Reservation template_lock;
     private:
