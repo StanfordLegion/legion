@@ -624,7 +624,12 @@ namespace Legion {
     // SSE Bit Mask  
     /////////////////////////////////////////////////////////////
     template<unsigned int MAX>
-    class SSEBitMask : public Internal::LegionHeapify<SSEBitMask<MAX> > {
+#if __cplusplus >= 201103L
+    class alignas(16) SSEBitMask 
+#else
+    class SSEBitMask // alignment handled below
+#endif
+      : public Internal::LegionHeapify<SSEBitMask<MAX> > {
     public:
       explicit SSEBitMask(uint64_t init = 0);
       SSEBitMask(const SSEBitMask &rhs);
@@ -689,13 +694,22 @@ namespace Legion {
     public:
       static const unsigned ELEMENT_SIZE = 64;
       static const unsigned ELEMENTS = MAX/ELEMENT_SIZE;
+#if __cplusplus >= 201103L
+    }; // alignment handled above
+#else
     } __attribute__((aligned(16)));
+#endif
 
     /////////////////////////////////////////////////////////////
     // SSE Two-Level Bit Mask  
     /////////////////////////////////////////////////////////////
     template<unsigned int MAX>
-    class SSETLBitMask : public Internal::LegionHeapify<SSETLBitMask<MAX> > {
+#if __cplusplus >= 201103L
+    class alignas(16) SSETLBitMask
+#else
+    class SSETLBitMask 
+#endif
+      : public Internal::LegionHeapify<SSETLBitMask<MAX> > {
     public:
       explicit SSETLBitMask(uint64_t init = 0);
       SSETLBitMask(const SSETLBitMask &rhs);
@@ -762,7 +776,11 @@ namespace Legion {
     public:
       static const unsigned ELEMENT_SIZE = 64;
       static const unsigned ELEMENTS = MAX/ELEMENT_SIZE;
+#if __cplusplus >= 201103L
+    };
+#else
     } __attribute__((aligned(16)));
+#endif
 #endif // __SSE2__
 
 #ifdef __AVX__
@@ -770,7 +788,12 @@ namespace Legion {
     // AVX Bit Mask  
     /////////////////////////////////////////////////////////////
     template<unsigned int MAX>
-    class AVXBitMask : public Internal::LegionHeapify<AVXBitMask<MAX> > {
+#if __cplusplus >= 201103L
+    class alignas(32) AVXBitMask 
+#else
+    class AVXBitMask // alignment handled below
+#endif
+      : public Internal::LegionHeapify<AVXBitMask<MAX> > {
     public:
       explicit AVXBitMask(uint64_t init = 0);
       AVXBitMask(const AVXBitMask &rhs);
@@ -838,13 +861,22 @@ namespace Legion {
     public:
       static const unsigned ELEMENT_SIZE = 64;
       static const unsigned ELEMENTS = MAX/ELEMENT_SIZE;
+#if __cplusplus >= 201103L
+    }; // alignment handled above
+#else
     } __attribute__((aligned(32)));
+#endif
     
     /////////////////////////////////////////////////////////////
     // AVX Two-Level Bit Mask  
     /////////////////////////////////////////////////////////////
     template<unsigned int MAX>
-    class AVXTLBitMask : public Internal::LegionHeapify<AVXTLBitMask<MAX> > {
+#if __cplusplus >= 201103L
+    class alignas(32) AVXTLBitMask
+#else
+    class AVXTLBitMask // alignment handled below
+#endif
+      : public Internal::LegionHeapify<AVXTLBitMask<MAX> > {
     public:
       explicit AVXTLBitMask(uint64_t init = 0);
       AVXTLBitMask(const AVXTLBitMask &rhs);
@@ -915,7 +947,11 @@ namespace Legion {
     public:
       static const unsigned ELEMENT_SIZE = 64;
       static const unsigned ELEMENTS = MAX/ELEMENT_SIZE;
+#if __cplusplus >= 201103L
+    }; // alignment handled above
+#else
     } __attribute__((aligned(32)));
+#endif
 #endif // __AVX__
 
     template<typename BITMASK, unsigned int MAX, unsigned int WORDS>
