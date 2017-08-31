@@ -6623,7 +6623,7 @@ namespace Legion {
       // Remove our reference to the reduction future
       reduction_future = Future();
       map_applied_conditions.clear();
-      restrict_postconditions.clear();
+      completion_preconditions.clear();
 #ifdef DEBUG_LEGION
       interfering_requirements.clear();
       assert(acquired_instances.empty());
@@ -7276,11 +7276,11 @@ namespace Legion {
         future_map.impl->complete_all_futures();
       if (must_epoch != NULL)
         must_epoch->notify_subop_complete(this);
-      if (!restrict_postconditions.empty())
+      if (!completion_preconditions.empty())
       {
-        ApEvent restrict_done = Runtime::merge_events(restrict_postconditions);
+        ApEvent done = Runtime::merge_events(completion_preconditions);
         need_completion_trigger = false;
-        Runtime::trigger_event(completion_event, restrict_done);
+        Runtime::trigger_event(completion_event, done);
       }
       complete_operation();
 #ifdef LEGION_SPY
@@ -7519,7 +7519,7 @@ namespace Legion {
         if (applied_condition.exists())
           map_applied_conditions.insert(applied_condition);
         if (restrict_post.exists())
-          restrict_postconditions.insert(restrict_post);
+          completion_preconditions.insert(restrict_post);
         // Already know that mapped points is the same as total points
         if (slice_fraction.is_whole())
         {
@@ -7558,7 +7558,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::return_slice_complete(unsigned points)
+    void IndexTask::return_slice_complete(unsigned points, 
+                                          ApEvent slice_postcondition)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_RETURN_SLICE_COMPLETE_CALL);
@@ -7567,6 +7568,11 @@ namespace Legion {
       {
         AutoLock o_lock(op_lock);
         complete_points += points;
+        // Always add it if we're doing legion spy validation
+#ifndef LEGION_SPY
+        if (!slice_postcondition.has_triggered())
+#endif
+          completion_preconditions.insert(slice_postcondition);
 #ifdef DEBUG_LEGION
         assert(!complete_received);
         assert(complete_points <= total_points);
@@ -7665,6 +7671,8 @@ namespace Legion {
       DerezCheck z(derez);
       size_t points;
       derez.deserialize(points);
+      ApEvent slice_postcondition;
+      derez.deserialize(slice_postcondition);
       ResourceTracker::unpack_privilege_state(derez, parent_ctx);
       if (redop != 0)
       {
@@ -7693,7 +7701,7 @@ namespace Legion {
             must_epoch->unpack_future(p, derez);
         }
       }
-      return_slice_complete(points);
+      return_slice_complete(points, slice_postcondition);
     }
 
     //--------------------------------------------------------------------------
@@ -8705,6 +8713,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_COMPLETE_CALL);
+      // Compute the merge of all our point task completions 
+      std::set<ApEvent> slice_postconditions;
+      for (unsigned idx = 0; idx < points.size(); idx++)
+      {
+        ApEvent point_completion = points[idx]->get_task_completion();
+#ifndef LEGION_SPY
+        if (point_completion.has_triggered())
+          continue;
+#endif
+        slice_postconditions.insert(point_completion);
+      }
+      ApEvent slice_postcondition = Runtime::merge_events(slice_postconditions);
       // For remote cases we have to keep track of the events for
       // returning any created logical state, we can't commit until
       // it is returned or we might prematurely release the references
@@ -8713,12 +8733,13 @@ namespace Legion {
       {
         // Send back the message saying that this slice is complete
         Serializer rez;
-        pack_remote_complete(rez);
+        pack_remote_complete(rez, slice_postcondition);
         runtime->send_slice_remote_complete(orig_proc, rez);
       }
       else
       {
-        index_owner->return_slice_complete(points.size());
+        std::set<ApEvent> slice_postconditions;
+        index_owner->return_slice_complete(points.size(), slice_postcondition);
       }
       complete_operation();
     }
@@ -8787,7 +8808,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::pack_remote_complete(Serializer &rez)
+    void SliceTask::pack_remote_complete(Serializer &rez, 
+                                         ApEvent slice_postcondition)
     //--------------------------------------------------------------------------
     {
       // Send back any created state that our point tasks made
@@ -8798,6 +8820,7 @@ namespace Legion {
       rez.serialize(index_owner);
       RezCheck z(rez);
       rez.serialize<size_t>(points.size());
+      rez.serialize(slice_postcondition);
       // Serialize the privilege state
       pack_privilege_state(rez, target, true/*returning*/); 
       // Now pack up the future results
