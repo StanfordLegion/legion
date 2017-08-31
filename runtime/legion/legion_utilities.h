@@ -8294,9 +8294,8 @@ namespace Legion {
           set_ptr.sparse = 0;
 	  sparse = true;
         }
-        else
-	  if (set_ptr.sparse)
-	    set_ptr.sparse->clear();
+        else if (set_ptr.sparse)
+	  set_ptr.sparse->clear();
 	// if rhs has any contents, copy them over, creating set if needed
 	if (rhs.set_ptr.sparse && !rhs.set_ptr.sparse->empty())
 	{
@@ -8526,9 +8525,8 @@ namespace Legion {
           set_ptr.sparse = 0;
 	  sparse = true;
         }
-        else
-	  if (set_ptr.sparse)
-	    set_ptr.sparse->clear();
+        else if (set_ptr.sparse)
+	  set_ptr.sparse->clear();
         size_t num_elements;
         derez.deserialize<size_t>(num_elements);
 	if (num_elements > 0) {
@@ -8707,7 +8705,8 @@ namespace Legion {
 	delete set_ptr.dense;
 	set_ptr.sparse = 0;
 	sparse = true;
-      } else
+      } 
+      else if (set_ptr.sparse)
 	set_ptr.sparse->clear();
     }
 
