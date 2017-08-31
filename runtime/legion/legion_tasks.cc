@@ -4189,33 +4189,25 @@ namespace Legion {
             profiling_reported = Runtime::create_rt_user_event();
         }
       }
+      if (Runtime::legion_spy_enabled)
+      {
+        LegionSpy::log_variant_decision(unique_op_id, selected_variant);
 #ifdef LEGION_SPY
-      if (Runtime::legion_spy_enabled)
-      {
-        LegionSpy::log_variant_decision(unique_op_id, selected_variant);
-        LegionSpy::log_operation_events(unique_op_id, start_condition, 
-                                        completion_event);
-        LegionSpy::log_task_priority(unique_op_id, task_priority);
-        for (unsigned idx = 0; idx < futures.size(); idx++)
-        {
-          FutureImpl *impl = futures[idx].impl;
-          if (impl->get_ready_event().exists())
-            LegionSpy::log_future_use(unique_op_id, impl->get_ready_event());
-        }
-      }
-#else
-      if (Runtime::legion_spy_enabled)
-      {
-        LegionSpy::log_variant_decision(unique_op_id, selected_variant);
-        LegionSpy::log_task_priority(unique_op_id, task_priority);
-        for (unsigned idx = 0; idx < futures.size(); idx++)
-        {
-          FutureImpl *impl = futures[idx].impl;
-          if (impl->get_ready_event().exists())
-            LegionSpy::log_future_use(unique_op_id, impl->get_ready_event());
-        }
-      }
+        if (perform_chaining_optimization)
+          LegionSpy::log_operation_events(unique_op_id, start_condition, 
+                                          chain_complete_event);
+        else
+          LegionSpy::log_operation_events(unique_op_id, start_condition, 
+                                          get_task_completion());
 #endif
+        LegionSpy::log_task_priority(unique_op_id, task_priority);
+        for (unsigned idx = 0; idx < futures.size(); idx++)
+        {
+          FutureImpl *impl = futures[idx].impl;
+          if (impl->get_ready_event().exists())
+            LegionSpy::log_future_use(unique_op_id, impl->get_ready_event());
+        }
+      }
       ApEvent task_launch_event = variant->dispatch_task(launch_processor, this,
                                  execution_context, start_condition, true_guard, 
                                  task_priority, profiling_requests);
