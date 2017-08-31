@@ -4899,8 +4899,10 @@ namespace Legion {
       // Record that we are mapped when all our points are mapped
       // and we are executed when all our points are executed
       complete_mapping(Runtime::merge_events(mapped_preconditions));
-      complete_execution(Runtime::protect_event(
-                          Runtime::merge_events(executed_preconditions)));
+      ApEvent done = Runtime::merge_events(executed_preconditions);
+      Runtime::trigger_event(completion_event, done); 
+      need_completion_trigger = false;
+      complete_execution(Runtime::protect_event(done));
     }
 
     //--------------------------------------------------------------------------
@@ -13596,8 +13598,10 @@ namespace Legion {
       // Record that we are mapped when all our points are mapped
       // and we are executed when all our points are executed
       complete_mapping(Runtime::merge_events(mapped_preconditions));
-      complete_execution(Runtime::protect_event(
-                          Runtime::merge_events(executed_preconditions)));
+      ApEvent done = Runtime::merge_events(executed_preconditions);
+      Runtime::trigger_event(completion_event, done);
+      need_completion_trigger = false;
+      complete_execution(Runtime::protect_event(done));
     }
 
     //--------------------------------------------------------------------------
