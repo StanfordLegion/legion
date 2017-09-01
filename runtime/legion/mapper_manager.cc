@@ -3147,6 +3147,68 @@ namespace Legion {
       free(margs->message);
     }
 
+    //--------------------------------------------------------------------------
+    void MapperManager::process_advertisement(Processor advertiser)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(mapper_lock);
+#ifdef DEBUG_LEGION
+      assert(steal_blacklist.find(advertiser) !=
+             steal_blacklist.end());
+#endif
+      steal_blacklist.erase(advertiser);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::perform_stealing(
+                                     std::multimap<Processor,MapperID> &targets)
+    //--------------------------------------------------------------------------
+    {
+      Mapper::SelectStealingInput steal_input;
+      Mapper::SelectStealingOutput steal_output;
+      {
+        AutoLock m_lock(mapper_lock, 1, false/*exclusive*/);
+        steal_input.blacklist = steal_blacklist; 
+      }
+      invoke_select_steal_targets(&steal_input, &steal_output);
+      if (steal_output.targets.empty())
+        return;
+      // Retake the lock and process the results
+      AutoLock m_lock(mapper_lock);
+      for (std::set<Processor>::const_iterator it = 
+            steal_output.targets.begin(); it != 
+            steal_output.targets.end(); it++)
+      {
+        if (it->exists() && ((*it) != processor) &&
+            (steal_blacklist.find(*it) == steal_blacklist.end()))
+        {
+          targets.insert(std::pair<Processor,MapperID>(*it,mapper_id));
+          steal_blacklist.insert(*it);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::process_failed_steal(Processor thief)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(mapper_lock);
+#ifdef DEBUG_LEGION
+      assert(failed_thiefs.find(thief) == failed_thiefs.end());
+#endif
+      failed_thiefs.insert(thief);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::perform_advertisements(
+                                            std::set<Processor> &failed_waiters)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(mapper_lock);
+      failed_waiters = failed_thiefs;
+      failed_thiefs.clear();
+    }
+
     /////////////////////////////////////////////////////////////
     // Serializing Manager 
     /////////////////////////////////////////////////////////////

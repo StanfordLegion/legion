@@ -2440,19 +2440,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ProcessorManager::ProcessorManager(Processor proc, Processor::Kind kind,
                                        Runtime *rt, unsigned def_mappers,
-                                       unsigned max_steals,
                                        bool no_steal, bool replay)
       : runtime(rt), local_proc(proc), proc_kind(kind), 
-        max_outstanding_steals(max_steals), stealing_disabled(no_steal), 
-        replay_execution(replay), next_local_index(0),
-        task_scheduler_enabled(false), total_active_contexts(0)
+        stealing_disabled(no_steal), replay_execution(replay), 
+        next_local_index(0), task_scheduler_enabled(false), 
+        total_active_contexts(0)
     //--------------------------------------------------------------------------
     {
       this->local_queue_lock = Reservation::create_reservation();
       this->queue_lock = Reservation::create_reservation();
       this->mapper_lock = Reservation::create_reservation();
-      this->stealing_lock = Reservation::create_reservation();
-      this->thieving_lock = Reservation::create_reservation();
       context_states.resize(DEFAULT_CONTEXTS);
       // Find our set of visible memories
       Machine::MemoryQuery vis_mems(runtime->machine);
@@ -2465,8 +2462,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ProcessorManager::ProcessorManager(const ProcessorManager &rhs)
       : runtime(NULL), local_proc(Processor::NO_PROC),
-        proc_kind(Processor::LOC_PROC), max_outstanding_steals(0),
-        stealing_disabled(false), replay_execution(false), next_local_index(0),
+        proc_kind(Processor::LOC_PROC), stealing_disabled(false), 
+        replay_execution(false), next_local_index(0),
         task_scheduler_enabled(false), total_active_contexts(0)
     //--------------------------------------------------------------------------
     {
@@ -2485,10 +2482,6 @@ namespace Legion {
       queue_lock = Reservation::NO_RESERVATION;
       mapper_lock.destroy_reservation();
       mapper_lock = Reservation::NO_RESERVATION;
-      stealing_lock.destroy_reservation();
-      stealing_lock = Reservation::NO_RESERVATION;
-      thieving_lock.destroy_reservation();
-      thieving_lock = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
@@ -2511,6 +2504,21 @@ namespace Legion {
           delete it->second.first;
       }
       mappers.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    void ProcessorManager::startup_mappers(void)
+    //--------------------------------------------------------------------------
+    {
+      // No one can be modifying the mapper set here so 
+      // there is no to hold the lock
+      std::multimap<Processor,MapperID> stealing_targets;
+      // See what if any stealing we should perform
+      for (std::map<MapperID,std::pair<MapperManager*,bool> >::const_iterator
+            it = mappers.begin(); it != mappers.end(); it++)
+        it->second.first->perform_stealing(stealing_targets);
+      if (!stealing_targets.empty())
+        runtime->send_steal_request(stealing_targets, local_proc);
     }
 
     //--------------------------------------------------------------------------
@@ -2801,10 +2809,7 @@ namespace Legion {
         }
 
         if (!successful_steal) 
-        {
-          AutoLock thief_lock(thieving_lock);
-          failed_thiefs.insert(std::pair<MapperID,Processor>(stealer,thief));
-        }
+          mapper->process_failed_steal(thief);
       }
       if (!stolen.empty())
       {
@@ -2826,14 +2831,8 @@ namespace Legion {
                                                  MapperID mid)
     //--------------------------------------------------------------------------
     {
-      {
-        AutoLock steal_lock(stealing_lock);
-#ifdef DEBUG_LEGION
-        assert(outstanding_steal_requests.find(mid) !=
-                outstanding_steal_requests.end());
-#endif
-        outstanding_steal_requests[mid].erase(advertiser);
-      }
+      MapperManager *mapper = find_mapper(mid);
+      mapper->process_advertisement(advertiser);
       // Do a one time enabling of the scheduler so we can try
       // asking any of the mappers if they would like to try stealing again
       AutoLock q_lock(queue_lock);
@@ -2926,32 +2925,7 @@ namespace Legion {
         if (!visible_tasks.empty())
           mapper->invoke_select_tasks_to_map(&input, &output);
         if (!stealing_disabled)
-        {
-          Mapper::SelectStealingInput steal_input;
-          std::set<Processor> &black_copy = steal_input.blacklist;
-          // Make a local copy of our blacklist
-          {
-            AutoLock steal_lock(stealing_lock,1,false/*exclusive*/);
-            black_copy = outstanding_steal_requests[map_id];
-          }
-          Mapper::SelectStealingOutput steal_output;
-          std::set<Processor> &steal_targets = steal_output.targets;
-          // Invoke the mapper
-          mapper->invoke_select_steal_targets(&steal_input, &steal_output);
-          AutoLock steal_lock(stealing_lock);
-          std::set<Processor> &blacklist = outstanding_steal_requests[map_id];
-          for (std::set<Processor>::const_iterator it = 
-                steal_targets.begin(); it != steal_targets.end(); it++)
-          {
-            if (it->exists() && ((*it) != local_proc) &&
-                (blacklist.find(*it) == blacklist.end()))
-            {
-              stealing_targets.insert(std::pair<Processor,MapperID>(
-                                                        *it,map_id));
-              blacklist.insert(*it);
-            }
-          }
-        }
+          mapper->perform_stealing(stealing_targets); 
         // Process the results first remove the operations that were
         // selected to be mapped from the queue.  Note its possible
         // that we can't actually find the task because it has been
@@ -3069,23 +3043,8 @@ namespace Legion {
       // Create a clone of the processors we want to advertise so that
       // we don't call into the high level runtime holding a lock
       std::set<Processor> failed_waiters;
-      // Check to see if we have any failed thieves with the mapper id
-      {
-        AutoLock theif_lock(thieving_lock);
-        if (failed_thiefs.lower_bound(map_id) != 
-            failed_thiefs.upper_bound(map_id))
-        {
-          for (std::multimap<MapperID,Processor>::iterator it = 
-                failed_thiefs.lower_bound(map_id); it != 
-                failed_thiefs.upper_bound(map_id); it++)
-          {
-            failed_waiters.insert(it->second);
-          } 
-          // Erase all the failed theives
-          failed_thiefs.erase(failed_thiefs.lower_bound(map_id),
-                              failed_thiefs.upper_bound(map_id));
-        }
-      }
+      MapperManager *mapper = find_mapper(map_id);
+      mapper->perform_advertisements(failed_waiters);
       if (!failed_waiters.empty())
         runtime->send_advertisements(failed_waiters, map_id, local_proc);
     }
@@ -8836,7 +8795,6 @@ namespace Legion {
         ProcessorManager *manager = new ProcessorManager(*it,
 				    (*it).kind(), this,
                                     DEFAULT_MAPPER_SLOTS, 
-				    all_procs.count()-1,
                                     stealing_disabled,
                                     (replay_file != NULL));
         proc_managers[*it] = manager;
@@ -9465,6 +9423,15 @@ namespace Legion {
           }
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::startup_mappers(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<Processor,ProcessorManager*>::const_iterator it = 
+            proc_managers.begin(); it != proc_managers.end(); it++)
+        it->second->startup_mappers();
     }
 
     //--------------------------------------------------------------------------
@@ -18476,13 +18443,34 @@ namespace Legion {
 	  // Another (dummy) collective task launch to ensure that
 	  // all ranks have initialized their handshakes before
 	  // the top-level task is started
-	  RtEvent mpi_sync_event(realm.collective_spawn_by_kind(
-                Processor::LOC_PROC, LG_MPI_SYNC_ID, NULL, 0,
+	  RtEvent startup_sync_event(realm.collective_spawn_by_kind(
+                Processor::LOC_PROC, LG_STARTUP_SYNC_ID, NULL, 0,
                 true/*one per node*/, runtime_startup_event));
-	  // The mpi init event then becomes the new runtime startup event
-	  runtime_startup_event = mpi_sync_event;
+	  // The startup sync event then becomes the new runtime startup event
+	  runtime_startup_event = startup_sync_event;
+        }
+        else if (!stealing_disabled)
+        {
+          // Even if we don't have any pending handshakes we have to 
+          // do a startup sync if stealing is enabled
+          RtEvent startup_sync_event(realm.collective_spawn_by_kind(
+                Processor::LOC_PROC, LG_STARTUP_SYNC_ID, NULL, 0,
+                true/*one per node*/, runtime_startup_event));
+          // The startup sync event then becomes the new runtime startup event
+	  runtime_startup_event = startup_sync_event;
         }
       } 
+      else if (!stealing_disabled)
+      {
+        // If there is no MPI interop, we still need a startup sync
+        // to have the mappers kick off any stealing they are going to do
+        RtEvent startup_sync_event(realm.collective_spawn_by_kind(
+              (separate_runtime_instances ? Processor::NO_KIND : 
+               Processor::LOC_PROC), LG_STARTUP_SYNC_ID, NULL, 0,
+              !separate_runtime_instances, runtime_startup_event));
+        // The startup sync event then becomes the new runtime startup event
+        runtime_startup_event = startup_sync_event;
+      }
       // See if we are supposed to start the top-level task
       if (top_level_proc.exists())
       {
@@ -18860,7 +18848,7 @@ namespace Legion {
       CodeDescriptor map_profiling_task(Runtime::profiling_mapper_task);
       CodeDescriptor launch_top_level_task(Runtime::launch_top_level);
       CodeDescriptor mpi_interop_task(Runtime::init_mpi_interop);
-      CodeDescriptor mpi_sync_task(Runtime::init_mpi_sync);
+      CodeDescriptor startup_sync_task(Runtime::startup_sync);
       Realm::ProfilingRequestSet no_requests;
       // We'll just register these on all the processor kinds
       std::set<RtEvent> registered_events;
@@ -18892,7 +18880,7 @@ namespace Legion {
                           LG_MPI_INTEROP_ID, mpi_interop_task, no_requests)));
         registered_events.insert(RtEvent(
             Processor::register_task_by_kind(kinds[idx], false/*global*/,
-                          LG_MPI_SYNC_ID, mpi_sync_task, no_requests)));
+                          LG_STARTUP_SYNC_ID, startup_sync_task, no_requests)));
       }
       if (record_registration)
       {
@@ -19868,13 +19856,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::init_mpi_sync(
+    /*static*/ void Runtime::startup_sync(
                                    const void *args, size_t arglen, 
 				   const void *userdata, size_t userlen,
 				   Processor p)
     //--------------------------------------------------------------------------
     {
-      log_run.debug() << "MPI sync task";
+      log_run.debug() << "startup sync task";
+      if (stealing_disabled)
+        return;
+      Runtime *rt = Runtime::get_runtime(p);
+      rt->startup_mappers();
     }
 
     //--------------------------------------------------------------------------

@@ -266,7 +266,7 @@ namespace Legion {
       LG_MAPPER_PROFILING_ID  = Realm::Processor::TASK_ID_FIRST_AVAILABLE+2,
       LG_LAUNCH_TOP_LEVEL_ID  = Realm::Processor::TASK_ID_FIRST_AVAILABLE+3,
       LG_MPI_INTEROP_ID       = Realm::Processor::TASK_ID_FIRST_AVAILABLE+4,
-      LG_MPI_SYNC_ID          = Realm::Processor::TASK_ID_FIRST_AVAILABLE+5,
+      LG_STARTUP_SYNC_ID      = Realm::Processor::TASK_ID_FIRST_AVAILABLE+5,
       TASK_ID_AVAILABLE       = Realm::Processor::TASK_ID_FIRST_AVAILABLE+6,
     };
 
