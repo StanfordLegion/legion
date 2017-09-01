@@ -6269,6 +6269,17 @@ namespace Legion {
               runtime->handle_version_manager_response(derez);
               break;
             }
+          case SEND_VERSION_MANAGER_UNVERSIONED_REQUEST:
+            {
+              runtime->handle_version_manager_unversioned_request(derez,
+                                                  remote_address_space);
+              break;
+            }
+          case SEND_VERSION_MANAGER_UNVERSIONED_RESPONSE:
+            {
+              runtime->handle_version_manager_unversioned_response(derez);
+              break;
+            }
           case SEND_INSTANCE_REQUEST:
             {
               runtime->handle_instance_request(derez, remote_address_space);
@@ -13478,6 +13489,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_version_manager_unversioned_request(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_VERSION_MANAGER_UNVERSIONED_REQUEST, 
+          VERSION_MANAGER_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_version_manager_unversioned_response(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_VERSION_MANAGER_UNVERSIONED_RESPONSE, 
+          VERSION_MANAGER_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+    
+    //--------------------------------------------------------------------------
     void Runtime::send_instance_request(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -14504,6 +14535,22 @@ namespace Legion {
       VersionManager::handle_response(derez);
     }
 
+    //--------------------------------------------------------------------------
+    void Runtime::handle_version_manager_unversioned_request(
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      VersionManager::handle_unversioned_request(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_version_manager_unversioned_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      VersionManager::handle_unversioned_response(derez, this);
+    }
+    
     //--------------------------------------------------------------------------
     void Runtime::handle_instance_request(Deserializer &derez, 
                                           AddressSpaceID source)

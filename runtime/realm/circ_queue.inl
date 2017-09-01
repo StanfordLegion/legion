@@ -271,7 +271,7 @@ namespace Realm {
 	assert(0);
       } else {
 	// copy items from *this to swap_with
-	int p = head;
+	size_t p = head;
 	while(true) {
 	  // copy construct and then destroy old instance
 	  T *to_ptr = swap_with.item_ptr(swap_with.internal_buffer, p);
@@ -286,7 +286,7 @@ namespace Realm {
     } else {
       if((swap_with.current_size > 0) && (swap_with.external_buffer == 0)) {
 	// copy items from swap_with to *this
-	int p = swap_with.head;
+	size_t p = swap_with.head;
 	while(true) {
 	  // copy construct and then destroy old instance
 	  T *to_ptr = item_ptr(internal_buffer, p);
