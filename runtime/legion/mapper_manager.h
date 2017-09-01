@@ -598,6 +598,14 @@ namespace Legion {
       void defer_message(Mapper::MapperMessage *message);
       static void handle_deferred_message(const void *args);
     public:
+      // For stealing
+      void process_advertisement(Processor advertiser); 
+      void perform_stealing(std::multimap<Processor,MapperID> &targets);
+    public:
+      // For advertising
+      void process_failed_steal(Processor thief);
+      void perform_advertisements(std::set<Processor> &failed_waiters);
+    public:
       Runtime *const runtime;
       Mapping::Mapper *const mapper;
       const MapperID mapper_id;
@@ -609,6 +617,12 @@ namespace Legion {
     protected:
       unsigned next_mapper_event;
       std::map<unsigned,RtUserEvent> mapper_events;
+    protected: // Steal request information
+      // Mappers on other processors that we've tried to steal from and failed
+      std::set<Processor> steal_blacklist;
+      // Mappers that have tried to steal from us and which we
+      // should advertise work when we have it
+      std::set<Processor> failed_thiefs;
     };
 
     /**

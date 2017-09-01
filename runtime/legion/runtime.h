@@ -622,7 +622,7 @@ namespace Legion {
     public:
       ProcessorManager(Processor proc, Processor::Kind proc_kind,
                        Runtime *rt, unsigned default_mappers,  
-                       unsigned max_steals, bool no_steal, bool replay);
+                       bool no_steal, bool replay);
       ProcessorManager(const ProcessorManager &rhs);
       ~ProcessorManager(void);
     public:
@@ -630,6 +630,7 @@ namespace Legion {
     public:
       void prepare_for_shutdown(void);
     public:
+      void startup_mappers(void);
       void add_mapper(MapperID mid, MapperManager *m, 
                       bool check, bool own, bool skip_replay = false);
       void replace_default_mapper(MapperManager *m, bool own);
@@ -662,8 +663,6 @@ namespace Legion {
       Runtime *const runtime;
       const Processor local_proc;
       const Processor::Kind proc_kind;
-      // Maximum number of outstanding steals permitted by any mapper
-      const unsigned max_outstanding_steals;
       // Is stealing disabled 
       const bool stealing_disabled;
       // are we doing replay execution
@@ -691,16 +690,8 @@ namespace Legion {
       std::map<MapperID,std::list<TaskOp*> > ready_queues;
       // Mapper objects
       std::map<MapperID,std::pair<MapperManager*,bool/*own*/> > mappers;
-      // For each mapper, the set of processors to which it
-      // has outstanding steal requests
-      std::map<MapperID,std::set<Processor> > outstanding_steal_requests;
-      // Failed thiefs to notify when tasks become available
-      std::multimap<MapperID,Processor> failed_thiefs;
       // Reservations for accessing mappers
       Reservation mapper_lock;
-      // Reservations for stealing and thieving
-      Reservation stealing_lock;
-      Reservation thieving_lock;
       // The set of visible memories from this processor
       std::set<Memory> visible_memories;
     };
@@ -1641,6 +1632,7 @@ namespace Legion {
       void register_static_sharding_functors(void);
       void initialize_legion_prof(void);
       void initialize_mappers(void);
+      void startup_mappers(void);
       void launch_top_level_task(Processor target);
       ApEvent launch_mapper_task(Mapper *mapper, Processor proc, 
                                  Processor::TaskFuncID tid,
@@ -2284,6 +2276,10 @@ namespace Legion {
                                            Serializer &rez);
       void send_version_manager_request(AddressSpaceID target, Serializer &rez);
       void send_version_manager_response(AddressSpaceID target,Serializer &rez);
+      void send_version_manager_unversioned_request(AddressSpaceID target,
+                                                    Serializer &rez);
+      void send_version_manager_unversioned_response(AddressSpaceID target,
+                                                     Serializer &rez);
       void send_instance_request(AddressSpaceID target, Serializer &rez);
       void send_instance_response(AddressSpaceID target, Serializer &rez);
       void send_gc_priority_update(AddressSpaceID target, Serializer &rez);
@@ -2485,6 +2481,9 @@ namespace Legion {
       void handle_version_manager_request(Deserializer &derez, 
                                           AddressSpaceID source);
       void handle_version_manager_response(Deserializer &derez);
+      void handle_version_manager_unversioned_request(Deserializer &derez,
+                                                      AddressSpaceID source);
+      void handle_version_manager_unversioned_response(Deserializer &derez);
       void handle_instance_request(Deserializer &derez, AddressSpaceID source);
       void handle_instance_response(Deserializer &derez,AddressSpaceID source);
       void handle_gc_priority_update(Deserializer &derez,AddressSpaceID source);
@@ -2876,7 +2875,7 @@ namespace Legion {
       static void init_mpi_interop(const void *args, size_t arglen, 
 			  const void *userdata, size_t userlen,
 			  Processor p);
-      static void init_mpi_sync(const void *args, size_t arglen, 
+      static void startup_sync(const void *args, size_t arglen, 
 			  const void *userdata, size_t userlen,
 			  Processor p);
       static void dummy_barrier(const void *args, size_t arglen,

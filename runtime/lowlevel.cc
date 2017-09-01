@@ -1673,16 +1673,65 @@ namespace LegionRuntime {
     template <int DIM>
     void *AccessorType::Generic::Untyped::raw_rect_ptr(ByteOffset *offsets) const
     {
-      // caller didn't give us a rectangle, so ask for something really big...
-      Arrays::Point<DIM> lo = Arrays::Point<DIM>::ZEROES();
-      Arrays::Point<DIM> hi;
+      using namespace Realm;
+      RegionInstanceImpl *impl = (RegionInstanceImpl *) internal;
+
+      MemoryImpl *mem = get_runtime()->get_memory_impl(impl->memory);
+
+      // this exists for compatibility and assumes N=DIM, T=coord_t
+      const InstanceLayout<DIM,coord_t> *inst_layout = dynamic_cast<const InstanceLayout<DIM,coord_t> *>(impl->metadata.layout);
+      assert(inst_layout != 0);
+
+      // look up the right field
+      std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = inst_layout->fields.find(field_offset);
+      assert(it != inst_layout->fields.end());
+
+      size_t pieces = inst_layout->piece_lists[it->second.list_idx].pieces.size();
+
+      // if the instance is empty, hand back a pointer to dummy data
+      //  (we can't just use a null pointer because that will be interpreted as
+      //  failure)
+      if(pieces == 0) {
+	log_accessor.info() << "empty instance raw_rect_ptr request: inst=" << impl->me;
+	// set all offsets to zero so that any addressing computations stay in our
+	//  dummy data
+	for(int i = 0; i < DIM; i++)
+	  offsets[i].offset = 0;
+	return (void *)(&dummy_data);
+      }
+
+      // since we didn't get bounds from the caller, we can't handle the
+      //  instance being broken up into more than one piece
+      if(pieces > 1) {
+	log_accessor.fatal() << "bound-less raw_rect_ptr request cannot be satisfied for multi-piece instance " << impl->me << ": " << inst_layout->piece_lists[it->second.list_idx];
+	assert(0);
+      }
+
+      const InstanceLayoutPiece<DIM,coord_t> *piece = inst_layout->piece_lists[it->second.list_idx].pieces[0];
+      assert((piece->layout_type == InstanceLayoutPiece<DIM,coord_t>::AffineLayoutType));
+      const AffineLayoutPiece<DIM,coord_t> *affine = static_cast<const AffineLayoutPiece<DIM,coord_t> *>(piece);
+
+      // ask for a direct pointer to the instance's storage
+      void *direct_base = mem->get_direct_ptr(impl->metadata.inst_offset,
+					      inst_layout->bytes_used);
+      if(!direct_base)
+	return 0;
+
+      // calculate effective offset of the "zero" element, since the caller
+      //  will be doing absolute addressing
+      ZPoint<DIM,coord_t> p;
       for(unsigned i = 0; i < DIM; i++)
-	hi.x[i] = INT_MAX;
-      Arrays::Rect<DIM> r(lo, hi);
-      Arrays::Rect<DIM> subrect;
-      void *ptr = raw_rect_ptr<DIM>(r, subrect, offsets);
-      assert(r == subrect);
-      return ptr;
+        p[i] = 0;
+      char *dst = ((char *)direct_base +
+		   (affine->offset +
+		    affine->strides.dot(p) +
+		    it->second.rel_offset));
+
+      // and copy the strides into the byte offsets
+      for(unsigned i = 0; i < DIM; i++)
+        offsets[i].offset = affine->strides[i];
+
+      return dst;
     }
 
     template <int DIM>

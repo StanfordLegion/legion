@@ -889,6 +889,7 @@ public:
 };
 
 template <class T> struct HandlerReplyFuture {
+  HandlerReplyFuture(void) : val() {}
   void wait(void) {}
   void set(T newval) { val = newval; }
   T get(void) const { return val; }

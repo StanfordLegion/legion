@@ -2262,6 +2262,7 @@ namespace Legion {
       layout_constraint_id = 0;
       outstanding_profiling_requests = 1; // start at 1 to guard
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
+      profiling_priority = LG_THROUGHPUT_PRIORITY;
     }
 
     //--------------------------------------------------------------------------
@@ -2835,6 +2836,7 @@ namespace Legion {
     {
       Mapper::MapInlineInput input;
       Mapper::MapInlineOutput output;
+      output.profiling_priority = LG_THROUGHPUT_PRIORITY;
       if (restrict_info.has_restrictions())
       {
         prepare_for_mapping(restrict_info.get_instances(), 
@@ -2858,9 +2860,12 @@ namespace Legion {
       }
       mapper->invoke_map_inline(this, &input, &output);
       if (!output.profiling_requests.empty())
+      {
         filter_copy_request_kinds(mapper,
             output.profiling_requests.requested_measurements,
             profiling_requests, true/*warn*/);
+        profiling_priority = output.profiling_priority;
+      }
       // Now we have to validate the output
       // Go through the instances and make sure we got one for every field
       // Also check to make sure that none of them are composite instances
@@ -3057,7 +3062,7 @@ namespace Legion {
       Operation *proxy_this = this;
       Realm::ProfilingRequest &request = requests.add_request( 
           runtime->find_utility_group(), LG_MAPPER_PROFILING_ID, 
-          &proxy_this, sizeof(proxy_this));
+          &proxy_this, sizeof(proxy_this), profiling_priority);
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
@@ -3299,6 +3304,7 @@ namespace Legion {
       mapper = NULL;
       outstanding_profiling_requests = 1; // start at 1 to guard
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
+      profiling_priority = LG_THROUGHPUT_PRIORITY;
       predication_guard = PredEvent::NO_PRED_EVENT;
     }
 
@@ -3592,6 +3598,7 @@ namespace Legion {
       input.dst_instances.resize(dst_requirements.size());
       output.src_instances.resize(src_requirements.size());
       output.dst_instances.resize(dst_requirements.size());
+      output.profiling_priority = LG_THROUGHPUT_PRIORITY;
       // First go through and do the traversals to find the valid instances
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
@@ -3633,9 +3640,12 @@ namespace Legion {
       }
       mapper->invoke_map_copy(this, &input, &output);
       if (!output.profiling_requests.empty())
+      {
         filter_copy_request_kinds(mapper,
             output.profiling_requests.requested_measurements,
             profiling_requests, true/*warn*/);
+        profiling_priority = output.profiling_priority;
+      }
       // Now we can carry out the mapping requested by the mapper
       // and issue the across copies, first set up the sync precondition
       ApEvent sync_precondition;
@@ -4405,7 +4415,7 @@ namespace Legion {
       Operation *proxy_this = this;
       Realm::ProfilingRequest &request = requests.add_request( 
           runtime->find_utility_group(), LG_MAPPER_PROFILING_ID, 
-          &proxy_this, sizeof(proxy_this));
+          &proxy_this, sizeof(proxy_this), profiling_priority);
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
@@ -6658,6 +6668,7 @@ namespace Legion {
       mapper = NULL;
       outstanding_profiling_requests = 1; // start at 1 to guard
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
+      profiling_priority = LG_THROUGHPUT_PRIORITY;
     }
 
     //--------------------------------------------------------------------------
@@ -6895,6 +6906,7 @@ namespace Legion {
     {
       Mapper::MapCloseInput input;
       Mapper::MapCloseOutput output;
+      output.profiling_priority = LG_THROUGHPUT_PRIORITY;
       // No need to filter for close operations
       if (restrict_info.has_restrictions())
         prepare_for_mapping(restrict_info.get_instances(), 
@@ -6922,9 +6934,12 @@ namespace Legion {
       else // This is the common case
         mapper->invoke_map_close(this, &input, &output);
       if (!output.profiling_requests.empty())
+      {
         filter_copy_request_kinds(mapper,
             output.profiling_requests.requested_measurements,
             profiling_requests, true/*warn*/);
+        profiling_priority = output.profiling_priority;
+      }
       // Now we have to validate the output
       // Make sure we have at least one instance for every field
       RegionTreeID bad_tree = 0;
@@ -7542,6 +7557,7 @@ namespace Legion {
       mapper = NULL;
       outstanding_profiling_requests = 1; // start at 1 to guard
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
+      profiling_priority = LG_THROUGHPUT_PRIORITY;
     }
 
     //--------------------------------------------------------------------------
@@ -7755,7 +7771,7 @@ namespace Legion {
       Operation *proxy_this = this;
       Realm::ProfilingRequest &request = requests.add_request( 
           runtime->find_utility_group(), LG_MAPPER_PROFILING_ID, 
-          &proxy_this, sizeof(proxy_this));
+          &proxy_this, sizeof(proxy_this), profiling_priority);
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
@@ -7996,6 +8012,7 @@ namespace Legion {
       mapper = NULL;
       outstanding_profiling_requests = 1; // start at 1 to guard
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
+      profiling_priority = LG_THROUGHPUT_PRIORITY;
     }
 
     //--------------------------------------------------------------------------
@@ -8453,6 +8470,7 @@ namespace Legion {
     {
       Mapper::MapAcquireInput input;
       Mapper::MapAcquireOutput output;
+      output.profiling_priority = LG_THROUGHPUT_PRIORITY;
       if (mapper == NULL)
       {
         Processor exec_proc = parent_ctx->get_executing_processor();
@@ -8460,9 +8478,12 @@ namespace Legion {
       }
       mapper->invoke_map_acquire(this, &input, &output);
       if (!output.profiling_requests.empty())
+      {
         filter_copy_request_kinds(mapper,
             output.profiling_requests.requested_measurements,
             profiling_requests, true/*warn*/);
+        profiling_priority = output.profiling_priority;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -8476,7 +8497,7 @@ namespace Legion {
       Operation *proxy_this = this;
       Realm::ProfilingRequest &request = requests.add_request( 
           runtime->find_utility_group(), LG_MAPPER_PROFILING_ID, 
-          &proxy_this, sizeof(proxy_this));
+          &proxy_this, sizeof(proxy_this), profiling_priority);
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
@@ -8603,6 +8624,7 @@ namespace Legion {
       mapper = NULL;
       outstanding_profiling_requests = 1; // start at 1 to guard
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
+      profiling_priority = LG_THROUGHPUT_PRIORITY;
     }
 
     //--------------------------------------------------------------------------
@@ -9117,6 +9139,7 @@ namespace Legion {
     {
       Mapper::MapReleaseInput input;
       Mapper::MapReleaseOutput output;
+      output.profiling_priority = LG_THROUGHPUT_PRIORITY;
       if (mapper == NULL)
       {
         Processor exec_proc = parent_ctx->get_executing_processor();
@@ -9124,9 +9147,12 @@ namespace Legion {
       }
       mapper->invoke_map_release(this, &input, &output);
       if (!output.profiling_requests.empty())
+      {
         filter_copy_request_kinds(mapper,
             output.profiling_requests.requested_measurements,
             profiling_requests, true/*warn*/);
+        profiling_priority = output.profiling_priority;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -9140,7 +9166,7 @@ namespace Legion {
       Operation *proxy_this = this;
       Realm::ProfilingRequest &request = requests.add_request( 
           runtime->find_utility_group(), LG_MAPPER_PROFILING_ID, 
-          &proxy_this, sizeof(proxy_this));
+          &proxy_this, sizeof(proxy_this), profiling_priority);
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));

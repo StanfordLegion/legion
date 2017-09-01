@@ -476,6 +476,7 @@ namespace Legion {
         ProfilingRequest                            task_prof_requests;
         ProfilingRequest                            copy_prof_requests;
         TaskPriority                                task_priority;  // = 0
+        TaskPriority                                profiling_priority; // = 0
         bool                                        postmap_task; // = false
         std::map<ShardID,Processor>                 control_replication_map;
       };
@@ -738,6 +739,7 @@ namespace Legion {
       struct MapInlineOutput {
         std::vector<PhysicalInstance>           chosen_instances;
         ProfilingRequest                        profiling_requests;
+        TaskPriority                            profiling_priority;
       };
       //------------------------------------------------------------------------
       virtual void map_inline(const MapperContext        ctx,
@@ -844,6 +846,7 @@ namespace Legion {
         std::vector<std::vector<PhysicalInstance> >       src_instances;
         std::vector<std::vector<PhysicalInstance> >       dst_instances;
         ProfilingRequest                                  profiling_requests;
+        TaskPriority                                      profiling_priority;
       };
       //------------------------------------------------------------------------
       virtual void map_copy(const MapperContext      ctx,
@@ -1000,6 +1003,7 @@ namespace Legion {
       struct MapCloseOutput {
         std::vector<PhysicalInstance>               chosen_instances;
         ProfilingRequest                            profiling_requests;
+        TaskPriority                                profiling_priority;
       };
       //------------------------------------------------------------------------
       virtual void map_close(const MapperContext       ctx,
@@ -1116,6 +1120,7 @@ namespace Legion {
       };
       struct MapAcquireOutput {
         ProfilingRequest                            profiling_requests;
+        TaskPriority                                profiling_priority;
       };
       //------------------------------------------------------------------------
       virtual void map_acquire(const MapperContext         ctx,
@@ -1191,6 +1196,7 @@ namespace Legion {
       };
       struct MapReleaseOutput {
         ProfilingRequest                            profiling_requests;
+        TaskPriority                                profiling_priority;
       };
       //------------------------------------------------------------------------
       virtual void map_release(const MapperContext         ctx,

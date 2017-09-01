@@ -268,7 +268,7 @@ namespace Legion {
       LG_MAPPER_PROFILING_ID  = Realm::Processor::TASK_ID_FIRST_AVAILABLE+2,
       LG_LAUNCH_TOP_LEVEL_ID  = Realm::Processor::TASK_ID_FIRST_AVAILABLE+3,
       LG_MPI_INTEROP_ID       = Realm::Processor::TASK_ID_FIRST_AVAILABLE+4,
-      LG_MPI_SYNC_ID          = Realm::Processor::TASK_ID_FIRST_AVAILABLE+5,
+      LG_STARTUP_SYNC_ID      = Realm::Processor::TASK_ID_FIRST_AVAILABLE+5,
       TASK_ID_AVAILABLE       = Realm::Processor::TASK_ID_FIRST_AVAILABLE+6,
     };
 
@@ -608,6 +608,7 @@ namespace Legion {
     // Realm resource (e.g. reservation) and therefore 
     // shouldn't be stuck behind anything.
     enum LgPriority {
+      LG_LOW_PRIORITY = -1,
       LG_THROUGHPUT_PRIORITY = 0,
       LG_DEFERRED_THROUGHPUT_PRIORITY = 1,
       LG_LATENCY_PRIORITY = 2,
@@ -754,6 +755,8 @@ namespace Legion {
       SEND_VERSION_MANAGER_INVALIDATE,
       SEND_VERSION_MANAGER_REQUEST,
       SEND_VERSION_MANAGER_RESPONSE,
+      SEND_VERSION_MANAGER_UNVERSIONED_REQUEST,
+      SEND_VERSION_MANAGER_UNVERSIONED_RESPONSE,
       SEND_INSTANCE_REQUEST,
       SEND_INSTANCE_RESPONSE,
       SEND_GC_PRIORITY_UPDATE,
@@ -900,6 +903,8 @@ namespace Legion {
         "Send Version Manager Invalidate",                            \
         "Send Version Manager Request",                               \
         "Send Version Manager Response",                              \
+        "Send Version Manager Unversioned Request",                   \
+        "Send Version Manager Unversioned Response",                  \
         "Send Instance Request",                                      \
         "Send Instance Response",                                     \
         "Send GC Priority Update",                                    \
