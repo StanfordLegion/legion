@@ -2824,12 +2824,21 @@ namespace Legion {
         runtime->find_visible_memories(target_proc, visible_memories);
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        // If it was early mapped, that was easy
+        // If it was early mapped or is restricted, then it is easy
         std::map<unsigned,InstanceSet>::const_iterator finder = 
           early_mapped_regions.find(idx);
-        if (finder != early_mapped_regions.end())
+        if ((finder != early_mapped_regions.end()) ||
+            (IS_SIMULT(regions[idx]) && 
+             get_restrict_info(idx).has_restrictions()))
         {
-          physical_instances[idx] = finder->second;
+          if (finder == early_mapped_regions.end())
+          {
+            RestrictInfo &restrict_info = get_restrict_info(idx);
+            // Must cover given the assertion in initialize_map_task_input
+            physical_instances[idx] = restrict_info.get_instances();
+          }
+          else
+            physical_instances[idx] = finder->second;
           // Check to see if it is visible or not from the target processors
           if (!Runtime::unsafe_mapper && !regions[idx].is_no_access())
           {
