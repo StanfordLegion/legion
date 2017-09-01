@@ -3228,6 +3228,7 @@ namespace Legion {
           }
         default:
           assert(false); // bad dimension size
+	  return false;
       }
     }
 

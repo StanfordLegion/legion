@@ -3378,6 +3378,7 @@ namespace LegionRuntime {
         oasvec_src.push_back(oas_src);
         oasvec_dst.push_back(oas_dst);
       }
+#ifndef NDEBUG
       size_t ib_size; /*size of ib (bytes)*/
       if (domain.get_volume() * ib_elmnt_size < IB_MAX_SIZE)
         ib_size = domain.get_volume() * ib_elmnt_size;
@@ -3385,6 +3386,7 @@ namespace LegionRuntime {
         ib_size = IB_MAX_SIZE;
       // Make sure the size we want here matches our previous allocation
       assert(ib_size == ib_info.size);
+#endif
       //off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes(ib_size);
       //assert(ib_offset >= 0);
       // Create a new linearization order x->y in Domain
