@@ -71,4 +71,8 @@ before_install:
       popd
     fi
 script:
+  - |
+    if [[ "$(uname)" = "Darwin" ]]; then
+      export SHORT=1 # FIXME: macOS tests take too long, workaround by running short tests
+    fi
   - ./test.py -j2

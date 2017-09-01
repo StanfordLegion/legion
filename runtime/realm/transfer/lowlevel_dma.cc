@@ -3745,8 +3745,6 @@ namespace Realm {
           }
         }
       }
-
-      mark_finished(true/*successful*/);
     }
 
 #if 0
@@ -3899,8 +3897,12 @@ namespace Realm {
       }
 #endif
 
+      // make sure logging precedes the call to mark_finished below
       log_dma.info() << "dma request " << (void *)this << " finished - is="
                      << *domain << " before=" << before_copy << " after=" << get_finish_event();
+
+      mark_finished(true/*successful*/);
+
       return;
       // </NEWDMA>
 #ifdef OLD_DMA_CODE
