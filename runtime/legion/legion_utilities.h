@@ -8238,7 +8238,7 @@ namespace Legion {
       : sparse(true)
     //-------------------------------------------------------------------------
     {
-      set_ptr.sparse = new typename std::set<IT>();
+      set_ptr.sparse = 0;
     }
 
     //-------------------------------------------------------------------------
@@ -8249,8 +8249,10 @@ namespace Legion {
     {
       if (rhs.sparse)
       {
-        set_ptr.sparse = new typename std::set<IT>();
-        *(set_ptr.sparse) = *(rhs.set_ptr.sparse);
+	if (rhs.set_ptr.sparse && !rhs.set_ptr.sparse->empty())
+	  set_ptr.sparse = new typename std::set<IT>(*rhs.set_ptr.sparse);
+	else
+	  set_ptr.sparse = 0;
       }
       else
       {
@@ -8264,13 +8266,18 @@ namespace Legion {
     IntegerSet<IT,DT,BIDIR>::~IntegerSet(void)
     //-------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(set_ptr.sparse != NULL);
-#endif
       if (sparse)
+      {
+	// this may be a null pointer, but delete does the right thing
         delete set_ptr.sparse;
+      }
       else
+      {
+#ifdef DEBUG_LEGION
+	assert(set_ptr.dense != NULL);
+#endif
         delete set_ptr.dense;
+      }
     }
     
     //-------------------------------------------------------------------------
@@ -8284,11 +8291,19 @@ namespace Legion {
         if (!sparse)
         {
           delete set_ptr.dense;
-          set_ptr.sparse = new typename std::set<IT>();
+          set_ptr.sparse = 0;
+	  sparse = true;
         }
-        else
-          set_ptr.sparse->clear();
-        *(set_ptr.sparse) = *(rhs.set_ptr.sparse);
+        else if (set_ptr.sparse)
+	  set_ptr.sparse->clear();
+	// if rhs has any contents, copy them over, creating set if needed
+	if (rhs.set_ptr.sparse && !rhs.set_ptr.sparse->empty())
+	{
+	  if (!set_ptr.sparse)
+	    set_ptr.sparse = new typename std::set<IT>(*rhs.set_ptr.sparse);
+	  else
+	    *(set_ptr.sparse) = *(rhs.set_ptr.sparse);
+	}
       }
       else
       {
@@ -8296,12 +8311,12 @@ namespace Legion {
         {
           delete set_ptr.sparse;
           set_ptr.dense = new DenseSet();
+	  sparse = false;
         }
         else
           set_ptr.dense->set.clear();
         set_ptr.dense->set = rhs.set_ptr.dense->set;
       }
-      sparse = rhs.sparse;
       return *this;
     }
 
@@ -8311,7 +8326,8 @@ namespace Legion {
     //-------------------------------------------------------------------------
     {
       if (sparse)
-        return (set_ptr.sparse->find(index) != set_ptr.sparse->end());
+        return (set_ptr.sparse &&
+		(set_ptr.sparse->find(index) != set_ptr.sparse->end()));
       else
         return set_ptr.dense->set.is_set(index);
     }
@@ -8323,6 +8339,10 @@ namespace Legion {
     {
       if (sparse)
       {
+	// Create set if this is the first addition
+	if (!set_ptr.sparse)
+	  set_ptr.sparse = new typename std::set<IT>;
+
         // Add it and see if it is too big
         set_ptr.sparse->insert(index);
         if (sizeof(DT) < (set_ptr.sparse->size() * 
@@ -8379,7 +8399,8 @@ namespace Legion {
         }
       }
       else
-        set_ptr.sparse->erase(index);
+	if (set_ptr.sparse)
+	  set_ptr.sparse->erase(index);
     }
 
     //-------------------------------------------------------------------------
@@ -8390,7 +8411,7 @@ namespace Legion {
       if (sparse)
       {
 #ifdef DEBUG_LEGION
-        assert(!set_ptr.sparse->empty());
+        assert(set_ptr.sparse && !set_ptr.sparse->empty());
 #endif
         return *(set_ptr.sparse->begin());
       }
@@ -8416,6 +8437,9 @@ namespace Legion {
         return find_first_set();
       if (sparse)
       {
+#ifdef DEBUG_LEGION
+	assert(set_ptr.sparse);
+#endif
         typename std::set<IT>::const_iterator it = set_ptr.sparse->begin();
         while (index > 0)
         {
@@ -8435,10 +8459,13 @@ namespace Legion {
     {
       if (sparse)
       {
-        for (typename std::set<IT>::const_iterator it = 
-              set_ptr.sparse->begin(); it != set_ptr.sparse->end(); it++)
-        {
-          functor.apply(*it);
+	if (set_ptr.sparse)
+	{
+	  for (typename std::set<IT>::const_iterator it = 
+                set_ptr.sparse->begin(); it != set_ptr.sparse->end(); it++)
+          {
+	    functor.apply(*it);
+          }
         }
       }
       else
@@ -8466,12 +8493,17 @@ namespace Legion {
       rez.serialize<bool>(sparse);
       if (sparse)
       {
-        rez.serialize<size_t>(set_ptr.sparse->size());
-        for (typename std::set<IT>::const_iterator it = 
-              set_ptr.sparse->begin(); it != set_ptr.sparse->end(); it++)
-        {
-          rez.serialize(*it);
+	if (set_ptr.sparse)
+	{
+          rez.serialize<size_t>(set_ptr.sparse->size());
+          for (typename std::set<IT>::const_iterator it = 
+                set_ptr.sparse->begin(); it != set_ptr.sparse->end(); it++)
+          {
+            rez.serialize(*it);
+          }
         }
+	else
+          rez.serialize<size_t>(0);
       }
       else
         rez.serialize(set_ptr.dense->set);
@@ -8490,17 +8522,22 @@ namespace Legion {
         if (!sparse)
         {
           delete set_ptr.dense;
-          set_ptr.sparse = new typename std::set<IT>();
+          set_ptr.sparse = 0;
+	  sparse = true;
         }
-        else
-          set_ptr.sparse->clear();
+        else if (set_ptr.sparse)
+	  set_ptr.sparse->clear();
         size_t num_elements;
         derez.deserialize<size_t>(num_elements);
-        for (unsigned idx = 0; idx < num_elements; idx++)
-        {
-          IT element;
-          derez.deserialize(element);
-          set_ptr.sparse->insert(element);
+	if (num_elements > 0) {
+	  if (!set_ptr.sparse)
+	    set_ptr.sparse = new typename std::set<IT>;
+          for (unsigned idx = 0; idx < num_elements; idx++)
+          {
+	    IT element;
+            derez.deserialize(element);
+            set_ptr.sparse->insert(element);
+          }
         }
       }
       else
@@ -8510,12 +8547,12 @@ namespace Legion {
         {
           delete set_ptr.sparse;
           set_ptr.dense = new DenseSet();
+	  sparse = false;
         }
         else
           set_ptr.dense->set.clear();
         derez.deserialize(set_ptr.dense->set);
       }
-      sparse = is_sparse;
     }
 
     //-------------------------------------------------------------------------
@@ -8641,7 +8678,7 @@ namespace Legion {
     //-------------------------------------------------------------------------
     {
       if (sparse)
-        return set_ptr.sparse->empty();
+        return (!set_ptr.sparse || set_ptr.sparse->empty());
       else
         return !(set_ptr.dense->set);
     }
@@ -8652,7 +8689,7 @@ namespace Legion {
     //-------------------------------------------------------------------------
     {
       if (sparse)
-        return set_ptr.sparse->size();
+        return (set_ptr.sparse ? set_ptr.sparse->size() : 0);
       else
         return set_ptr.dense->set.pop_count(set_ptr.dense->set);
     }
@@ -8666,9 +8703,10 @@ namespace Legion {
       if (!sparse)
       {
 	delete set_ptr.dense;
-	set_ptr.sparse = new typename std::set<IT>();
+	set_ptr.sparse = 0;
 	sparse = true;
-      } else
+      } 
+      else if (set_ptr.sparse)
 	set_ptr.sparse->clear();
     }
 

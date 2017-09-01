@@ -2449,7 +2449,7 @@ namespace LegionRuntime {
           log_new_dma.info("Create local XferDes: id(" IDFMT "), pre(" IDFMT
                            "), next(" IDFMT "), type(%d)",
                            _guid, _pre_xd_guid, _next_xd_guid, _kind);
-          XferDes* xd;
+          XferDes* xd = 0;
           switch (_kind) {
           case XferDes::XFER_MEM_CPY:
             xd = new MemcpyXferDes(_dma_request, _launch_node,

@@ -238,6 +238,11 @@ namespace Realm {
   {
     if(finish_event.exists())
       GenEventImpl::trigger(finish_event, poisoned);
+#ifndef REALM_USE_OPERATION_TABLE
+    // no operation table to decrement the refcount, so do it ourselves
+    // SJT: should this always be done for operations without finish events?
+    remove_reference();
+#endif
   }
 
   void Operation::clear_profiling(void)
@@ -315,7 +320,9 @@ namespace Realm {
   //
 
   OperationTable::OperationTable(void)
+#ifdef REALM_USE_OPERATION_TABLE
     : cleaner(this)
+#endif
   {}
 
   OperationTable::~OperationTable(void)
@@ -325,6 +332,7 @@ namespace Realm {
   //  gets the completion event for it
   void OperationTable::add_local_operation(Event finish_event, Operation *local_op)
   {
+#ifdef REALM_USE_OPERATION_TABLE
     // cast local_op to void * to avoid pretty-printing
     log_optable.info() << "event " << finish_event << " added: local_op=" << (void *)local_op;
 
@@ -379,10 +387,12 @@ namespace Realm {
       log_optable.info() << "event " << finish_event << " - operation " << (void *)local_op << " cancelled=" << did_cancel;
       local_op->remove_reference();
     }
+#endif
   }
 
   void OperationTable::add_remote_operation(Event finish_event, int remote_node)
   {
+#ifdef REALM_USE_OPERATION_TABLE
     log_optable.info() << "event " << finish_event << " added: remote_node=" << remote_node;
 
     // "hash" the id to figure out which subtable to use
@@ -407,10 +417,12 @@ namespace Realm {
 
     // we can remove this entry once we know the operation is complete
     EventImpl::add_waiter(finish_event, &cleaner);
+#endif
   }
 
   void OperationTable::event_triggered(Event finish_event)
   {
+#ifdef REALM_USE_OPERATION_TABLE
     // "hash" the id to figure out which subtable to use
     int subtable = finish_event.id % NUM_TABLES;
     GASNetHSL& mutex = mutexes[subtable];
@@ -434,11 +446,15 @@ namespace Realm {
 
     if(local_op)
       local_op->remove_reference();
+#else
+    assert(0);
+#endif
   }
     
   void OperationTable::request_cancellation(Event finish_event,
 					    const void *reason_data, size_t reason_size)
   {
+#ifdef REALM_USE_OPERATION_TABLE
     // "hash" the id to figure out which subtable to use
     int subtable = finish_event.id % NUM_TABLES;
     GASNetHSL& mutex = mutexes[subtable];
@@ -491,6 +507,9 @@ namespace Realm {
       log_optable.info() << "event " << finish_event << " - operation " << (void *)local_op << " cancelled=" << did_cancel;
       local_op->remove_reference();
     }
+#else
+    assert(0);
+#endif
   }
     
   /*static*/ int OperationTable::register_handlers(gasnet_handlerentry_t *handlers)

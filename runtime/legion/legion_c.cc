@@ -1762,10 +1762,10 @@ PartitionByImageShim::launch(HighLevelRuntime *runtime,
       Future f = fmap.get_future(c.p);
       const long long* buffer =
         reinterpret_cast<const long long*>(f.get_untyped_pointer());
+      Domain domain; domain.dim = args.target_dim;
       long long size = *buffer++;
       assert(size == 2 * args.target_dim);
-      Domain domain; domain.dim = args.target_dim;
-      memcpy(domain.rect_data, buffer, 2 * args.target_dim * sizeof(long long));
+      memcpy(domain.rect_data, buffer, size * sizeof(long long));
       coloring[upgrade_point(c.p)] = domain;
     }
 
@@ -2043,10 +2043,10 @@ PartitionByPreimageShim::launch(HighLevelRuntime *runtime,
       Future f = fmap.get_future(c.p);
       const long long* buffer =
         reinterpret_cast<const long long*>(f.get_untyped_pointer());
+      Domain domain; domain.dim = args.source_dim;
       long long size = *buffer++;
       assert(size == 2 * args.source_dim);
-      Domain domain; domain.dim = args.source_dim;
-      memcpy(domain.rect_data, buffer, 2 * args.source_dim * sizeof(long long));
+      memcpy(domain.rect_data, buffer, size * sizeof(long long));
       coloring[upgrade_point(c.p)] = domain;
     }
     ip =
