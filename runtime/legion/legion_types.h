@@ -527,6 +527,7 @@ namespace Legion {
     // Realm resource (e.g. reservation) and therefore 
     // shouldn't be stuck behind anything.
     enum LgPriority {
+      LG_LOW_PRIORITY = -1,
       LG_THROUGHPUT_PRIORITY = 0,
       LG_DEFERRED_THROUGHPUT_PRIORITY = 1,
       LG_LATENCY_PRIORITY = 2,

@@ -675,8 +675,8 @@ namespace Legion {
       info.id = tid;
       info.op_id = task->get_unique_id();
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
-                        ? target_proc : Processor::get_executing_processor(),
-                        LG_LEGION_PROFILING_ID, &info, sizeof(info));
+                ? target_proc : Processor::get_executing_processor(),
+                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_LOW_PRIORITY);
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -695,8 +695,8 @@ namespace Legion {
       info.id = tid;
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
-                        ? target_proc : Processor::get_executing_processor(),
-                        LG_LEGION_PROFILING_ID, &info, sizeof(info));
+                ? target_proc : Processor::get_executing_processor(),
+                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_LOW_PRIORITY);
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -714,7 +714,7 @@ namespace Legion {
       // that is where we know the profiler is going to handle the results
       ProfilingInfo info(LEGION_PROF_MESSAGE);
       Realm::ProfilingRequest &req = requests.add_request(remote_target,
-                        LG_LEGION_PROFILING_ID, &info, sizeof(info));
+                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_LOW_PRIORITY);
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -732,8 +732,8 @@ namespace Legion {
       // No ID here
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
-                        ? target_proc : Processor::get_executing_processor(),
-                        LG_LEGION_PROFILING_ID, &info, sizeof(info));
+                ? target_proc : Processor::get_executing_processor(),
+                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_LOW_PRIORITY);
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -752,8 +752,8 @@ namespace Legion {
       // No ID here
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
-                        ? target_proc : Processor::get_executing_processor(),
-                        LG_LEGION_PROFILING_ID, &info, sizeof(info));
+                ? target_proc : Processor::get_executing_processor(),
+                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_LOW_PRIORITY);
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -769,8 +769,8 @@ namespace Legion {
       // No ID here
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
-                        ? target_proc : Processor::get_executing_processor(),
-                        LG_LEGION_PROFILING_ID, &info, sizeof(info));
+                ? target_proc : Processor::get_executing_processor(),
+                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_LOW_PRIORITY);
       req.add_measurement<
                 Realm::ProfilingMeasurements::InstanceTimeline>();
       req.add_measurement<
@@ -787,8 +787,8 @@ namespace Legion {
       info.id = tid;
       info.op_id = uid;
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
-                        ? target_proc : Processor::get_executing_processor(),
-                        LG_LEGION_PROFILING_ID, &info, sizeof(info));
+                ? target_proc : Processor::get_executing_processor(),
+                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_LOW_PRIORITY);
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -807,8 +807,8 @@ namespace Legion {
       info.id = tid;
       info.op_id = uid;
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
-                        ? target_proc : Processor::get_executing_processor(),
-                        LG_LEGION_PROFILING_ID, &info, sizeof(info));
+                ? target_proc : Processor::get_executing_processor(),
+                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_LOW_PRIORITY);
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -826,8 +826,8 @@ namespace Legion {
       // No ID here
       info.op_id = uid;
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
-                        ? target_proc : Processor::get_executing_processor(),
-                        LG_LEGION_PROFILING_ID, &info, sizeof(info));
+                ? target_proc : Processor::get_executing_processor(),
+                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_LOW_PRIORITY);
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -846,8 +846,8 @@ namespace Legion {
       // No ID here
       info.op_id = uid;
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
-                        ? target_proc : Processor::get_executing_processor(),
-                        LG_LEGION_PROFILING_ID, &info, sizeof(info));
+                ? target_proc : Processor::get_executing_processor(),
+                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_LOW_PRIORITY);
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationTimeline>();
       req.add_measurement<
@@ -867,11 +867,11 @@ namespace Legion {
       Processor p = (target_proc.exists() 
                         ? target_proc : Processor::get_executing_processor());
       Realm::ProfilingRequest &req1 = requests.add_request(p,
-                        LG_LEGION_PROFILING_ID, &info, sizeof(info));
+                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_LOW_PRIORITY);
       req1.add_measurement<
                  Realm::ProfilingMeasurements::InstanceMemoryUsage>();
       Realm::ProfilingRequest &req2 = requests.add_request(p,
-                        LG_LEGION_PROFILING_ID, &info, sizeof(info));
+                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_LOW_PRIORITY);
       req2.add_measurement<
                  Realm::ProfilingMeasurements::InstanceTimeline>();
     }

@@ -489,6 +489,7 @@ namespace Legion {
       // Profiling information
       std::vector<ProfilingMeasurementID> task_profiling_requests;
       std::vector<ProfilingMeasurementID> copy_profiling_requests;
+      int                                      profiling_priority;
       int                          outstanding_profiling_requests;
       RtUserEvent                              profiling_reported;
     };
