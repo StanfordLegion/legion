@@ -40,6 +40,11 @@
 // can Realm use exceptions to propagate errors back to the profiling interace?
 #define REALM_USE_EXCEPTIONS
 
+// the Realm operation table is needed if you want to be able to cancel operations
+#ifndef REALM_NO_USE_OPERATION_TABLE
+#define REALM_USE_OPERATION_TABLE
+#endif
+
 // runtime configuration settings
 namespace Realm {
   namespace Config {
