@@ -5116,7 +5116,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CompositeCopyNode* CompositeBase::construct_copy_tree(MaterializedView *dst,
-                                                   ClosedNode *closed_node,
                                                    RegionTreeNode *logical_node,
                                                    FieldMask &copy_mask,
                                                    FieldMask &locally_complete,
@@ -5136,7 +5135,7 @@ namespace Legion {
       // If we get here, we're going to return something
       CompositeCopyNode *result = new CompositeCopyNode(logical_node, owner);
       // Do the ready check first
-      perform_ready_check(copy_mask, closed_node, dst->logical_node);
+      perform_ready_check(copy_mask, dst->logical_node);
       // Figure out which children we need to traverse because they intersect
       // with the dst instance and any reductions that will need to be applied
       LegionMap<CompositeNode*,FieldMask>::aligned children_to_traverse;
@@ -5167,12 +5166,9 @@ namespace Legion {
               children_to_traverse.begin(); it != 
               children_to_traverse.end(); it++)
         {
-          ClosedNode *child_closed = NULL;
-          if (closed_node != NULL)
-            child_closed = closed_node->get_child_node(it->first->logical_node);
           CompositeCopyNode *child = it->first->construct_copy_tree(dst,
-              child_closed, it->first->logical_node, it->second, 
-              complete_child, dominate_capture, copier);
+                              it->first->logical_node, it->second, 
+                              complete_child, dominate_capture, copier);
           if (child != NULL)
           {
             result->add_child_node(child, it->second);
@@ -5262,7 +5258,6 @@ namespace Legion {
             FieldMask dummy_complete_below;
             FieldMask dominate = overlap;
             CompositeCopyNode *nested = it->first->construct_copy_tree(dst,
-                                    it->first->closed_tree, 
                                     it->first->logical_node, overlap, 
                                     dummy_complete_below, dominate, 
                                     copier, it->first); 
@@ -5448,183 +5443,7 @@ namespace Legion {
         }
       }
       return tested_all_children;
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeBase::perform_sharding_check(FieldMask check_mask,
-                                               ClosedNode *closed_local_node,
-                                               RegionTreeNode *target)
-    //--------------------------------------------------------------------------
-    {
-      // If we have no target then we're doing this traversal for
-      // a composite view update so we don't need to any sharding analysis
-      if (target == NULL)
-        return;
-      // Ask the closed node to find the sets of interfering points
-      {
-        AutoLock b_lock(base_lock,1,false/*exclusive*/);
-        LegionMap<RegionTreeNode*,FieldMask>::aligned::const_iterator finder = 
-          shard_checks.find(target);
-        if (finder != shard_checks.end())
-        {
-          check_mask -= finder->second;
-          if (!check_mask)
-            return;
-        }
-      }
-      // Compute the set of shards that we need to ask for their meta-data
-      LegionMap<ShardID,FieldMask>::aligned needed_shards;
-      closed_local_node->compute_needed_shards(check_mask,target,needed_shards);
-      if (!needed_shards.empty())
-      {
-        // Compute the path to this node and get the RtEvent that 
-        // uniquely identifies the composite view 
-        RtEvent composite_name;
-        std::vector<LegionColor> path;
-        ShardManager *manager = prepare_sharding_request(composite_name, path);
-        // Send the request for the update to this node from the remote shards
-        std::set<RtEvent> wait_on;
-        for (LegionMap<ShardID,FieldMask>::aligned::const_iterator it = 
-              needed_shards.begin(); it != needed_shards.end(); it++)
-        {
-          RtUserEvent shard_ready; 
-          // See if we already sent the request for this shard
-          {
-            AutoLock b_lock(base_lock);
-            std::map<ShardID,RtEvent>::const_iterator finder = 
-              requested_shards.find(it->first);
-            if (finder != requested_shards.end())
-            {
-              // Already sent the request
-              wait_on.insert(finder->second);
-              continue;
-            }
-            else
-            {
-              shard_ready = Runtime::create_rt_user_event(); 
-              requested_shards[it->first] = shard_ready;
-            }
-          } 
-          Serializer rez;
-          rez.serialize(manager->repl_id);
-          rez.serialize(it->first);
-          rez.serialize(composite_name);
-          rez.serialize(it->second);
-          rez.serialize<size_t>(path.size());
-          for (unsigned idx = 0; idx < path.size(); idx++)
-            rez.serialize(path[idx]);
-          rez.serialize(shard_ready); 
-          rez.serialize(this);
-          rez.serialize(target->context->runtime->address_space);
-          manager->send_composite_view_request(it->first, rez);
-          wait_on.insert(shard_ready);
-        }
-        // Wait for the result to be valid
-        RtEvent wait_for = Runtime::merge_events(wait_on);
-        wait_for.lg_wait();
-      }
-      // Once we're done then we can add this to the set of checks
-      AutoLock b_lock(base_lock);
-      shard_checks[target] |= check_mask;
-    }
-
-    //--------------------------------------------------------------------------
-    void CompositeBase::handle_sharding_update_request(const FieldMask &mask,
-                                                       RegionTreeNode *node,
-                                                       size_t remaining_depth,
-                                                       Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      // We don't need to do the sharding check when doing the ready
-      // check because we are only being asked to provide data about
-      // our local composite view in this case 
-      perform_ready_check(mask, NULL, NULL);
-      // Perform the ready check on the way down the tree
-      if (remaining_depth == 0)
-      {
-        RtUserEvent done_event;
-        derez.deserialize(done_event);
-        CompositeBase *target;
-        derez.deserialize(target);
-        AddressSpaceID source;
-        derez.deserialize(source);
-        // We've arrived at our destination, send the information about
-        // the version states for each each of the children
-        LegionMap<CompositeNode*,FieldMask>::aligned children_to_send;    
-        {
-          AutoLock b_lock(base_lock);
-          for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
-                children.begin(); it != children.end(); it++)
-          {
-            const FieldMask overlap = it->second & mask;
-            if (!overlap)
-              continue;
-            children_to_send[it->first] = overlap;
-          }
-        }
-#ifdef DEBUG_LEGION
-        // If we fail this is assertion it is because there is
-        // a bug in our projection analysis
-        assert(!children_to_send.empty());
-#endif
-        Serializer rez;
-        Runtime *runtime = node->context->runtime;
-        if (runtime->address_space != source)
-        {
-          RezCheck z(rez);
-          rez.serialize(target);
-          rez.serialize<size_t>(children_to_send.size());
-          for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
-                children_to_send.begin(); it != children_to_send.end(); it++)
-          {
-            it->first->pack_composite_node(rez);
-            rez.serialize(it->second);
-          }
-          rez.serialize(done_event); 
-        }
-        else
-        {
-          // No check or target here since we know where we're going
-          rez.serialize<size_t>(children_to_send.size());
-          for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
-                children_to_send.begin(); it != children_to_send.end(); it++)
-          {
-            it->first->pack_composite_node(rez);
-            rez.serialize(it->second);
-          }
-          rez.serialize(done_event);
-        }
-        if (runtime->address_space == source)
-        {
-          // same node so can send it directly
-          Deserializer local_derez(rez.get_buffer(), rez.get_used_bytes());
-          target->unpack_composite_view_response(local_derez, runtime);
-        }
-        else
-          runtime->send_control_replicate_composite_view_response(source, rez);
-      }
-      else
-      {
-        // Continue traversing
-        LegionColor child_color;
-        derez.deserialize(child_color);
-        RegionTreeNode *child_node = node->get_tree_child(child_color); 
-        CompositeNode *child = find_child_node(child_node);
-        child->handle_sharding_update_request(mask, child_node, 
-                                              remaining_depth-1, derez);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void CompositeBase::handle_composite_view_response(
-                                          Deserializer &derez, Runtime *runtime)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      CompositeBase *base;
-      derez.deserialize(base);
-      base->unpack_composite_view_response(derez, runtime);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     CompositeNode* CompositeBase::find_child_node(RegionTreeNode *child)
@@ -6015,9 +5834,8 @@ namespace Legion {
       CompositeCopier copier(copy_mask);
       FieldMask top_locally_complete;
       FieldMask dominate_capture(copy_mask);
-      CompositeCopyNode *copy_tree = construct_copy_tree(dst, closed_tree, 
-                            logical_node, copy_mask, top_locally_complete, 
-                            dominate_capture, copier, this);
+      CompositeCopyNode *copy_tree = construct_copy_tree(dst, logical_node, 
+          copy_mask, top_locally_complete, dominate_capture, copier, this);
 #ifdef DEBUG_LEGION
       assert(copy_tree != NULL);
 #endif
@@ -6127,9 +5945,8 @@ namespace Legion {
       CompositeCopier copier(copy_mask);
       FieldMask dummy_locally_complete;
       FieldMask dominate_capture(copy_mask);
-      CompositeCopyNode *copy_tree = construct_copy_tree(dst, closed_tree,
-                          logical_node, copy_mask, dummy_locally_complete, 
-                          dominate_capture, copier, this);
+      CompositeCopyNode *copy_tree = construct_copy_tree(dst, logical_node, 
+          copy_mask, dummy_locally_complete, dominate_capture, copier, this);
 #ifdef DEBUG_LEGION
       assert(copy_tree != NULL);
 #endif
@@ -6185,9 +6002,7 @@ namespace Legion {
         else
           still_needed = needed_fields; // we still need all the fields
       }
-      ClosedNode *dummy_closed_node;
-      CompositeNode *capture_node = capture_above(node, still_needed,
-                                                  node, dummy_closed_node);
+      CompositeNode *capture_node = capture_above(node, still_needed, node);
       // Result wasn't cached, retake the lock in exclusive mode and compute it
       AutoLock v_lock(view_lock);
       NodeVersionInfo &result = node_versions[node];
@@ -6238,8 +6053,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CompositeNode* CompositeView::capture_above(RegionTreeNode *node,
                                                 const FieldMask &needed_fields,
-                                                RegionTreeNode *target,
-                                                ClosedNode *&child_closed)
+                                                RegionTreeNode *target)
     //--------------------------------------------------------------------------
     {
       // Recurse up the tree to get the parent version state
@@ -6249,33 +6063,15 @@ namespace Legion {
 #endif
       if (parent == logical_node)
       {
-        perform_ready_check(needed_fields, closed_tree, target);
-        child_closed = closed_tree->get_child_node(node);
+        perform_ready_check(needed_fields, target);
         return find_child_node(node);
       }
-      ClosedNode *local_closed = NULL;
       // Otherwise continue up the tree 
-      CompositeNode *parent_node = capture_above(parent, needed_fields,
-                                                 target, local_closed);
+      CompositeNode *parent_node = capture_above(parent, needed_fields, target);
       // Now make sure that this node has captured for all subregions
       // Do this on the way back down to know that the parent node is good
-      parent_node->perform_ready_check(needed_fields, local_closed, target);
+      parent_node->perform_ready_check(needed_fields, target);
       return parent_node->find_child_node(node);
-    }
-
-    //--------------------------------------------------------------------------
-    ShardManager* CompositeView::prepare_sharding_request(RtEvent &name,
-                                                std::vector<LegionColor> &path,
-                                                LegionColor child_color)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(shard_invalid_barrier.exists());
-#endif
-      name = shard_invalid_barrier;
-      if (child_color != INVALID_COLOR)
-        path.push_back(child_color);
-      return owner_context->find_shard_manager();
     }
 
     //--------------------------------------------------------------------------
@@ -6316,19 +6112,70 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CompositeView::perform_ready_check(FieldMask mask, 
-                                            ClosedNode *closed_local_node,
+    void CompositeView::perform_ready_check(FieldMask check_mask, 
                                             RegionTreeNode *target)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      if (closed_local_node != NULL)
-        assert(closed_local_node == closed_tree);
-#endif
       // See if we need to do a sharding test for control replication
-      if ((closed_local_node != NULL) && 
-          closed_local_node->has_sharded_projection(mask))
-        perform_sharding_check(mask, closed_local_node, target);
+      if (shard_invalid_barrier.exists() && (target != NULL))
+      {
+        // First check to see if we've already done a check for this target
+        {
+          AutoLock v_lock(view_lock,1,false/*exclusive*/);
+          LegionMap<RegionTreeNode*,FieldMask>::aligned::const_iterator finder =
+            shard_checks.find(target);
+          if (finder != shard_checks.end())
+          {
+            check_mask -= finder->second;
+            if (!check_mask)
+              return;
+          }
+        }
+        // Compute the set of shards that we need locally 
+        std::set<ShardID> needed_shards;
+        closed_tree->find_needed_shards(check_mask, target, needed_shards);
+        if (!needed_shards.empty())
+        {
+          ShardManager *manager = owner_context->find_shard_manager();
+          std::set<RtEvent> wait_on;
+          for (std::set<ShardID>::const_iterator it = needed_shards.begin();
+                it != needed_shards.end(); it++)
+          {
+            RtUserEvent shard_ready;
+            {
+              AutoLock v_lock(view_lock);
+              std::map<ShardID,RtEvent>::const_iterator finder = 
+                requested_shards.find(*it);
+              if (finder != requested_shards.end())
+              {
+                // Already sent the request
+                wait_on.insert(finder->second);
+                continue;
+              }
+              else
+              {
+                shard_ready = Runtime::create_rt_user_event();
+                requested_shards[*it] = shard_ready;
+              }
+            }
+            Serializer rez;
+            rez.serialize(manager->repl_id);
+            rez.serialize(*it);
+            rez.serialize<RtEvent>(shard_invalid_barrier);
+            rez.serialize(shard_ready);
+            rez.serialize(this);
+            rez.serialize(context->runtime->address_space);
+            manager->send_composite_view_request(*it, rez);
+            wait_on.insert(shard_ready);
+          }
+          // Wait for the result to be valid
+          RtEvent wait_for = Runtime::merge_events(wait_on);
+          wait_for.lg_wait();
+        }
+        // Now we can add this to the set of checks that we've performed
+        AutoLock v_lock(view_lock);
+        shard_checks[target] |= check_mask;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -6785,11 +6632,75 @@ namespace Legion {
 #else
         ReplicateContext *ctx = static_cast<ReplicateContext*>(owner_context);
 #endif
+        // Make a copy of our original children before registering ourselves so
+        // we know what children to use when handling requests from other shards
         ctx->register_composite_view(this, shard_invalid_barrier);
       }
       else // clone composite view, update the arrival count
         Runtime::alter_arrival_count(shard_invalid_barrier, 1/*count*/);
     } 
+
+    //--------------------------------------------------------------------------
+    void CompositeView::handle_sharding_update_request(Deserializer &derez,
+                                                       Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+#endif
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      CompositeView *target;
+      derez.deserialize(target);
+      AddressSpaceID source;
+      derez.deserialize(source);
+
+      Serializer rez;
+      if (runtime->address_space != source)
+      {
+        RezCheck z(rez);
+        rez.serialize(target);
+        rez.serialize<size_t>(original_children.size());
+        for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
+              original_children.begin(); it != original_children.end(); it++)
+        {
+          it->first->pack_composite_node(rez);
+          rez.serialize(it->second);
+        }
+        rez.serialize(done_event); 
+      }
+      else
+      {
+        // No check or target here since we know where we're going
+        rez.serialize<size_t>(original_children.size());
+        for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it =
+              original_children.begin(); it != original_children.end(); it++)
+        {
+          it->first->pack_composite_node(rez);
+          rez.serialize(it->second);
+        }
+        rez.serialize(done_event);
+      }
+      if (runtime->address_space == source)
+      {
+        // same node so can send it directly
+        Deserializer local_derez(rez.get_buffer(), rez.get_used_bytes());
+        target->unpack_composite_view_response(local_derez, runtime);
+      }
+      else
+        runtime->send_control_replicate_composite_view_response(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CompositeView::handle_composite_view_response(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      CompositeView *view;
+      derez.deserialize(view);
+      view->unpack_composite_view_response(derez, runtime);
+    }
 
     /////////////////////////////////////////////////////////////
     // CompositeNode 
@@ -6860,21 +6771,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ShardManager* CompositeNode::prepare_sharding_request(RtEvent &name,
-                                                std::vector<LegionColor> &path,
-                                                LegionColor child_color)
-    //--------------------------------------------------------------------------
-    {
-      // Go up the tree
-      ShardManager *result = parent->prepare_sharding_request(name, path,
-                                              logical_node->get_color());
-      // Then add our child color if it exists
-      if (child_color != INVALID_COLOR)
-        path.push_back(child_color);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
     void CompositeNode::unpack_composite_view_response(Deserializer &derez,
                                                        Runtime *runtime)
     //--------------------------------------------------------------------------
@@ -6913,15 +6809,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CompositeNode::perform_ready_check(FieldMask mask,
-                                            ClosedNode *closed_local_node,
                                             RegionTreeNode *target)
     //--------------------------------------------------------------------------
     {
-      // See if we need to do a sharding test for control replication
-      // This has to come even before doing our local test
-      if ((closed_local_node != NULL) && 
-          closed_local_node->has_sharded_projection(mask))
-        perform_sharding_check(mask, closed_local_node, target);
       // Do a quick test with read-only lock first
       {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);

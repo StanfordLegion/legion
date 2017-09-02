@@ -3155,64 +3155,54 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool ClosedNode::has_sharded_projection(const FieldMask &mask) const
+    void ClosedNode::find_needed_shards(FieldMask mask, RegionTreeNode *target,
+                                        std::set<ShardID> &needed_shards) const
     //--------------------------------------------------------------------------
     {
-      if (projections.empty())
-        return false;
-      for (std::map<std::pair<ProjectionFunction*,ShardingFunction*>,
-               LegionMap<IndexSpaceNode*,FieldMask>::aligned>::const_iterator
-            pit = projections.begin(); pit != projections.end(); pit++)
-      {
-        if (pit->first.second == NULL)
-          continue;
-        for (LegionMap<IndexSpaceNode*,FieldMask>::aligned::const_iterator it =
-              pit->second.begin(); it != pit->second.end(); it++)
-        {
-          if (it->second * mask)
-            continue;
-          return true;
-        }
-      }
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    void ClosedNode::compute_needed_shards(const FieldMask &mask,
-                                           RegionTreeNode *target,
-                     LegionMap<ShardID,FieldMask>::aligned &needed_shards) const
-    //--------------------------------------------------------------------------
-    {
-      if (projections.empty())
+      // See if we have valid fields that overlap
+      mask &= valid_fields;
+      if (!mask)
         return;
-      for (std::map<std::pair<ProjectionFunction*,ShardingFunction*>,
-               LegionMap<IndexSpaceNode*,FieldMask>::aligned>::const_iterator
-            pit = projections.begin(); pit != projections.end(); pit++)
+      // See if we have any projections that we need to find other shards for
+      if (!projections.empty())
       {
-        if (pit->first.second == NULL)
-          continue;
-        for (LegionMap<IndexSpaceNode*,FieldMask>::aligned::const_iterator it =
-              pit->second.begin(); it != pit->second.end(); it++)
+        for (std::map<std::pair<ProjectionFunction*,ShardingFunction*>,
+                 LegionMap<IndexSpaceNode*,FieldMask>::aligned>::const_iterator
+              pit = projections.begin(); pit != projections.end(); pit++)
         {
-          if (it->second * mask)
+          if (pit->first.second == NULL)
             continue;
-          Domain full_space;
-          it->first->get_launch_space_domain(full_space);
-          // Invert the projection function to find the interfering points
-          std::set<DomainPoint> interfering_points;
-          pit->first.first->find_interfering_points(target->context, node, 
-                it->first->handle, full_space, target, interfering_points);
-          if (!interfering_points.empty())
+          for (LegionMap<IndexSpaceNode*,FieldMask>::aligned::const_iterator 
+                it = pit->second.begin(); it != pit->second.end(); it++)
           {
-            for (std::set<DomainPoint>::const_iterator dit = 
-                  interfering_points.begin(); dit != 
-                  interfering_points.end(); dit++)
+            if (it->second * mask)
+              continue;
+            Domain full_space;
+            it->first->get_launch_space_domain(full_space);
+            // Invert the projection function to find the interfering points
+            std::set<DomainPoint> interfering_points;
+            pit->first.first->find_interfering_points(target->context, node, 
+                  it->first->handle, full_space, target, interfering_points);
+            if (!interfering_points.empty())
             {
-              ShardID shard = pit->first.second->find_owner(*dit, full_space);
-              needed_shards[shard] |= it->second; 
+              for (std::set<DomainPoint>::const_iterator dit = 
+                    interfering_points.begin(); dit != 
+                    interfering_points.end(); dit++)
+              {
+                ShardID shard = pit->first.second->find_owner(*dit, full_space);
+                needed_shards.insert(shard);
+              }
             }
           }
         }
+      }
+      // Now traverse any children that intersect with our target
+      for (std::map<RegionTreeNode*,ClosedNode*>::const_iterator it = 
+            children.begin(); it != children.end(); it++)
+      {
+        if (!it->first->intersects_with(target, false/*compute*/))
+          continue;
+        it->second->find_needed_shards(mask, target, needed_shards);
       }
     }
 

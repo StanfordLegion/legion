@@ -9798,12 +9798,7 @@ namespace Legion {
       CompositeView *view = find_or_buffer_composite_view_request(derez);
       if (view == NULL)
         return;
-      FieldMask request_mask;
-      derez.deserialize(request_mask);
-      size_t depth;
-      derez.deserialize(depth);
-      view->handle_sharding_update_request(request_mask, 
-                        view->logical_node, depth, derez);
+      view->handle_sharding_update_request(derez, runtime);
     }
 
     //--------------------------------------------------------------------------
@@ -10026,12 +10021,7 @@ namespace Legion {
               to_perform.begin(); it != to_perform.end(); it++)
         {
           Deserializer derez(it->first, it->second);
-          FieldMask request_mask;
-          derez.deserialize(request_mask);
-          size_t depth;
-          derez.deserialize(depth);
-          view->handle_sharding_update_request(request_mask, 
-                            view->logical_node, depth, derez);
+          view->handle_sharding_update_request(derez, runtime);
           free(it->first);
         }
       }

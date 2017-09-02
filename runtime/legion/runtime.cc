@@ -15263,7 +15263,7 @@ namespace Legion {
                                                             Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      CompositeBase::handle_composite_view_response(derez, this); 
+      CompositeView::handle_composite_view_response(derez, this); 
     }
 
     //--------------------------------------------------------------------------
