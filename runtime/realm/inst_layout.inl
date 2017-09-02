@@ -359,6 +359,12 @@ namespace Realm {
   }
 
   template <int N, typename T>
+  inline size_t AffineLayoutPiece<N,T>::calculate_offset(const ZPoint<N,T>& p) const
+  {
+    return offset + strides.dot(p);
+  }
+
+  template <int N, typename T>
   inline void AffineLayoutPiece<N,T>::relocate(size_t base_offset)
   {
     offset += base_offset;
@@ -550,17 +556,9 @@ namespace Realm {
 
     const InstanceLayoutPiece<N,T> *ilp = piece_lists[it->second.list_idx].find_piece(p);
     assert(ilp != 0);
-    size_t offset = 0;
-    switch(ilp->layout_type) {
-    case InstanceLayoutPiece<1,coord_t>::AffineLayoutType:
-      {
-	const AffineLayoutPiece<N,T> *alp = static_cast<const AffineLayoutPiece<N,T> *>(ilp);
-	offset = alp->offset + alp->strides.dot(p) + it->second.rel_offset;
-	break;
-      }
-    default:
-      assert(0);
-    }
+    size_t offset = ilp->calculate_offset(p);
+    // add in field's offset
+    offset += it->second.rel_offset;
     return offset;
   }
 
@@ -578,7 +576,179 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class AccessorRefHelper<FT>
+
+  template <typename FT>
+  inline AccessorRefHelper<FT>::AccessorRefHelper(RegionInstance _inst,
+						  size_t _offset)
+    : inst(_inst)
+    , offset(_offset)
+  {}
+
+  // "read"
+  template <typename FT>
+  inline AccessorRefHelper<FT>::operator FT(void) const
+  {
+    FT val;
+    inst.read_untyped(offset, &val, sizeof(FT));
+    return val;
+  }
+
+  // "write"
+  template <typename FT>
+  inline AccessorRefHelper<FT>& AccessorRefHelper<FT>::operator=(const FT& newval)
+  {
+    inst.write_untyped(offset, &newval, sizeof(FT));
+    return *this;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class GenericAccessor<FT,N,T>
+
+  template <typename FT, int N, typename T>
+  inline GenericAccessor<FT,N,T>::GenericAccessor(void)
+    : inst(RegionInstance::NO_INST)
+    , piece_list(0)
+    , rel_offset(0)
+    , prev_piece(0)
+  {}
+
+  // GenericAccessor constructors always work, but the is_compatible(...)
+  //  calls are still available for templated code
+
+  // implicitly tries to cover the entire instance's domain
+  template <typename FT, int N, typename T>
+  inline GenericAccessor<FT,N,T>::GenericAccessor(RegionInstance inst,
+						  FieldID field_id,
+						  size_t subfield_offset /*= 0*/)
+  {
+    this->inst = inst;
+
+    // find the right piece list for our field
+    const InstanceLayout<N,T> *layout = dynamic_cast<const InstanceLayout<N,T> *>(inst.get_layout());
+    std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(field_id);
+    assert(it != layout->fields.end());
+
+    this->piece_list = &layout->piece_lists[it->second.list_idx];
+    this->rel_offset = it->second.rel_offset + subfield_offset;
+    this->prev_piece = 0;
+  }
+
+  // limits domain to a subrectangle (doesn't matter for generic accessor)
+  template <typename FT, int N, typename T>
+  inline GenericAccessor<FT,N,T>::GenericAccessor(RegionInstance inst,
+						  FieldID field_id,
+						  const ZRect<N,T>& subrect,
+						  size_t subfield_offset /*= 0*/)
+  {
+    this->inst = inst;
+
+    // find the right piece list for our field
+    const InstanceLayout<N,T> *layout = dynamic_cast<const InstanceLayout<N,T> *>(inst.get_layout());
+    std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(field_id);
+    assert(it != layout->fields.end());
+
+    this->piece_list = &layout->piece_lists[it->second.list_idx];
+    this->rel_offset = it->second.rel_offset + subfield_offset;
+    this->prev_piece = 0;
+  }
+
+  template <typename FT, int N, typename T>
+  inline GenericAccessor<FT,N,T>::~GenericAccessor(void)
+  {}
+
+  template <typename FT, int N, typename T>
+  inline /*static*/ bool GenericAccessor<FT,N,T>::is_compatible(RegionInstance inst,
+								ptrdiff_t field_offset)
+  {
+    return true;
+  }
+
+  template <typename FT, int N, typename T>
+  inline /*static*/ bool GenericAccessor<FT,N,T>::is_compatible(RegionInstance inst,
+								ptrdiff_t field_offset,
+								const ZRect<N,T>& subrect)
+  {
+    return true;
+  }
+
+  template <typename FT, int N, typename T>
+  template <typename INST>
+  inline /*static*/ bool GenericAccessor<FT,N,T>::is_compatible(const INST &instance,
+								unsigned field_id)
+  {
+    return true;
+  }
+
+  template <typename FT, int N, typename T>
+  template <typename INST>
+  inline /*static*/ bool GenericAccessor<FT,N,T>::is_compatible(const INST &instance,
+								unsigned field_id,
+								const ZRect<N,T>& subrect)
+  {
+    return true;
+  }
+
+  template <typename FT, int N, typename T>
+  inline FT GenericAccessor<FT,N,T>::read(const ZPoint<N,T>& p)
+  {
+    size_t offset = this->get_offset(p);
+    FT val;
+    inst.read_untyped(offset, &val, sizeof(FT));
+    return val;
+  }
+
+  template <typename FT, int N, typename T>
+  inline void GenericAccessor<FT,N,T>::write(const ZPoint<N,T>& p, FT newval)
+  {
+    size_t offset = this->get_offset(p);
+    inst.write_untyped(offset, &newval, sizeof(FT));
+  }
+
+  // this returns a "reference" that knows how to do a read via operator FT
+  //  or a write via operator=
+  template <typename FT, int N, typename T>
+  inline AccessorRefHelper<FT> GenericAccessor<FT,N,T>::operator[](const ZPoint<N,T>& p)
+  {
+    size_t offset = this->get_offset(p);
+    return AccessorRefHelper<FT>(inst, offset);
+  }
+
+  // not a const method because of the piece caching
+  template <typename FT, int N, typename T>
+  inline size_t GenericAccessor<FT,N,T>::get_offset(const ZPoint<N,T>& p)
+  {
+    const InstanceLayoutPiece<N,T> *mypiece = prev_piece;
+    if(!mypiece || !mypiece->bounds.contains(p)) {
+      mypiece = piece_list->find_piece(p);
+      assert(mypiece);
+      prev_piece = mypiece;
+    }
+    size_t offset = mypiece->calculate_offset(p);
+    // add in field (or subfield) adjustment
+    offset += rel_offset;
+    return offset;
+  }
+
+  template <typename FT, int N, typename T>
+  inline std::ostream& operator<<(std::ostream& os, const GenericAccessor<FT,N,T>& a)
+  {
+    os << "GenericAccessor{ offset=" << a.rel_offset << " list=" << *a.piece_list << " }";
+    return os;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class AffineAccessor<FT,N,T>
+
+  template <typename FT, int N, typename T>
+  __CUDA_HD__
+  inline AffineAccessor<FT,N,T>::AffineAccessor(void)
+    : base(0)
+  {}  
 
   // NOTE: these constructors will die horribly if the conversion is not
   //  allowed - call is_compatible(...) first if you're not sure
