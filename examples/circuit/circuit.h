@@ -82,6 +82,15 @@ enum LocatorFields {
   FID_LOCATOR,
 };
 
+template<typename FT, int N = 1, typename T = coord_t>
+using AccessorRO = FieldAccessor<READ_ONLY,FT,N,T,Realm::AffineAccessor<FT,N,T> >;
+template<typename FT, int N = 1, typename T = coord_t>
+using AccessorRW = FieldAccessor<READ_WRITE,FT,N,T,Realm::AffineAccessor<FT,N,T> >;
+template<typename FT, int N = 1, typename T = coord_t>
+using AccessorWO = FieldAccessor<WRITE_ONLY,FT,N,T,Realm::AffineAccessor<FT,N,T> >;
+template<typename FT, int N = 1, typename T = coord_t>
+using AccessorRD = FieldAccessor<REDUCE,FT,N,T,Realm::AffineAccessor<FT,N,T> >;
+
 struct Circuit {
   LogicalRegion all_nodes;
   LogicalRegion all_wires;

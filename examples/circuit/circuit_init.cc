@@ -41,11 +41,11 @@ void InitNodesTask::cpu_base_impl(const Task *task,
                                   const std::vector<PhysicalRegion> &regions,
                                   Context ctx, Runtime *runtime)
 {
-  const FieldAccessor<WRITE_DISCARD,float,1> fa_node_cap(regions[0], FID_NODE_CAP);
-  const FieldAccessor<WRITE_DISCARD,float,1> fa_node_leakage(regions[0], FID_LEAKAGE);
-  const FieldAccessor<WRITE_DISCARD,float,1> fa_node_charge(regions[0], FID_CHARGE);
-  const FieldAccessor<WRITE_DISCARD,float,1> fa_node_voltage(regions[0], FID_NODE_VOLTAGE);
-  const FieldAccessor<WRITE_DISCARD,Point<1>,1> fa_node_color(regions[0], FID_PIECE_COLOR); 
+  const AccessorWO<float> fa_node_cap(regions[0], FID_NODE_CAP);
+  const AccessorWO<float> fa_node_leakage(regions[0], FID_LEAKAGE);
+  const AccessorWO<float> fa_node_charge(regions[0], FID_CHARGE);
+  const AccessorWO<float> fa_node_voltage(regions[0], FID_NODE_VOLTAGE);
+  const AccessorWO<Point<1> > fa_node_color(regions[0], FID_PIECE_COLOR); 
 
   DomainT<1> dom = runtime->get_index_space_domain(ctx,
       IndexSpaceT<1>(task->regions[0].region.get_index_space()));
@@ -110,17 +110,17 @@ void InitWiresTask::cpu_base_impl(const Task *task,
   const int nodes_per_piece = args->nodes_per_piece;
   const int pct_wire_in_piece = args->pct_wire_in_piece;
   const PhysicalRegion wires = regions[0];
-  FieldAccessor<WRITE_DISCARD,float,1> fa_wire_currents[WIRE_SEGMENTS];
+  AccessorWO<float> fa_wire_currents[WIRE_SEGMENTS];
   for (int i = 0; i < WIRE_SEGMENTS; i++)
-    fa_wire_currents[i] = FieldAccessor<WRITE_DISCARD,float,1>(wires, FID_CURRENT+i);
-  FieldAccessor<WRITE_DISCARD,float,1> fa_wire_voltages[WIRE_SEGMENTS-1];
+    fa_wire_currents[i] = AccessorWO<float>(wires, FID_CURRENT+i);
+  AccessorWO<float> fa_wire_voltages[WIRE_SEGMENTS-1];
   for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
-    fa_wire_voltages[i] = FieldAccessor<WRITE_DISCARD,float,1>(wires, FID_WIRE_VOLTAGE+i);
-  const FieldAccessor<WRITE_DISCARD,Point<1>,1> fa_wire_in_ptr(wires, FID_IN_PTR);
-  const FieldAccessor<WRITE_DISCARD,Point<1>,1> fa_wire_out_ptr(wires, FID_OUT_PTR);
-  const FieldAccessor<WRITE_DISCARD,float,1> fa_wire_inductance(wires, FID_INDUCTANCE);
-  const FieldAccessor<WRITE_DISCARD,float,1> fa_wire_resistance(wires, FID_RESISTANCE);
-  const FieldAccessor<WRITE_DISCARD,float,1> fa_wire_cap(wires, FID_WIRE_CAP);
+    fa_wire_voltages[i] = AccessorWO<float>(wires, FID_WIRE_VOLTAGE+i);
+  const AccessorWO<Point<1> > fa_wire_in_ptr(wires, FID_IN_PTR);
+  const AccessorWO<Point<1> > fa_wire_out_ptr(wires, FID_OUT_PTR);
+  const AccessorWO<float> fa_wire_inductance(wires, FID_INDUCTANCE);
+  const AccessorWO<float> fa_wire_resistance(wires, FID_RESISTANCE);
+  const AccessorWO<float> fa_wire_cap(wires, FID_WIRE_CAP);
 
   DomainT<1> dom = runtime->get_index_space_domain(ctx,
       IndexSpaceT<1>(task->regions[0].region.get_index_space()));
@@ -217,7 +217,7 @@ void InitLocationTask::cpu_base_impl(const Task *task,
       runtime->get_logical_subregion_by_color(lp_shared, task->index_point));
 
   // Update the node locations first
-  const FieldAccessor<WRITE_DISCARD,PointerLocation,1> locator_acc(regions[0], FID_LOCATOR);
+  const AccessorWO<PointerLocation> locator_acc(regions[0], FID_LOCATOR);
   DomainT<1> node_dom = runtime->get_index_space_domain(ctx,
       IndexSpaceT<1>(task->regions[0].region.get_index_space()));
   for (PointInDomainIterator<1> itr(node_dom); itr(); itr++)
@@ -231,10 +231,10 @@ void InitLocationTask::cpu_base_impl(const Task *task,
   }
 
   // Then do the wire locations
-  const FieldAccessor<WRITE_DISCARD,PointerLocation,1> fa_wire_in_loc(regions[1], FID_IN_LOC);
-  const FieldAccessor<WRITE_DISCARD,PointerLocation,1> fa_wire_out_loc(regions[1], FID_OUT_LOC);
-  const FieldAccessor<READ_ONLY,Point<1>,1> fa_wire_in_ptr(regions[2], FID_IN_PTR);
-  const FieldAccessor<READ_ONLY,Point<1>,1> fa_wire_out_ptr(regions[2], FID_OUT_PTR);
+  const AccessorWO<PointerLocation> fa_wire_in_loc(regions[1], FID_IN_LOC);
+  const AccessorWO<PointerLocation> fa_wire_out_loc(regions[1], FID_OUT_LOC);
+  const AccessorRO<Point<1> > fa_wire_in_ptr(regions[2], FID_IN_PTR);
+  const AccessorRO<Point<1> > fa_wire_out_ptr(regions[2], FID_OUT_PTR);
   DomainT<1> wire_dom = runtime->get_index_space_domain(ctx,
       IndexSpaceT<1>(task->regions[1].region.get_index_space()));
   for (PointInDomainIterator<1> itr(wire_dom); itr(); itr++)
@@ -343,11 +343,11 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
   srand48(random_seed);
 
   nodes.wait_until_valid();
-  const FieldAccessor<READ_WRITE,float,1> fa_node_cap(nodes, FID_NODE_CAP);
-  const FieldAccessor<READ_WRITE,float,1> fa_node_leakage(nodes, FID_LEAKAGE);
-  const FieldAccessor<READ_WRITE,float,1> fa_node_charge(nodes, FID_CHARGE);
-  const FieldAccessor<READ_WRITE,float,1> fa_node_voltage(nodes, FID_NODE_VOLTAGE);
-  const FieldAccessor<READ_WRITE,Point<1>,1> fa_node_color(nodes, FID_PIECE_COLOR); 
+  const AccessorRW<float> fa_node_cap(nodes, FID_NODE_CAP);
+  const AccessorRW<float> fa_node_leakage(nodes, FID_LEAKAGE);
+  const AccessorRW<float> fa_node_charge(nodes, FID_CHARGE);
+  const AccessorRW<float> fa_node_voltage(nodes, FID_NODE_VOLTAGE);
+  const AccessorRW<Point<1> > fa_node_color(nodes, FID_PIECE_COLOR); 
   {
     for (int n = 0; n < num_pieces; n++)
     {
@@ -367,19 +367,19 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
   }
 
   wires.wait_until_valid();
-  FieldAccessor<READ_WRITE,float,1> fa_wire_currents[WIRE_SEGMENTS];
+  AccessorRW<float> fa_wire_currents[WIRE_SEGMENTS];
   for (int i = 0; i < WIRE_SEGMENTS; i++)
-    fa_wire_currents[i] = FieldAccessor<READ_WRITE,float,1>(wires, FID_CURRENT+i);
-  FieldAccessor<READ_WRITE,float,1> fa_wire_voltages[WIRE_SEGMENTS-1];
+    fa_wire_currents[i] = AccessorRW<float>(wires, FID_CURRENT+i);
+  AccessorRW<float> fa_wire_voltages[WIRE_SEGMENTS-1];
   for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
-    fa_wire_voltages[i] = FieldAccessor<READ_WRITE,float,1>(wires, FID_WIRE_VOLTAGE+i);
-  const FieldAccessor<READ_WRITE,Point<1>,1> fa_wire_in_ptr(wires, FID_IN_PTR);
-  const FieldAccessor<READ_WRITE,Point<1>,1> fa_wire_out_ptr(wires, FID_OUT_PTR);
-  const FieldAccessor<READ_WRITE,PointerLocation,1> fa_wire_in_loc(wires, FID_IN_LOC);
-  const FieldAccessor<READ_WRITE,PointerLocation,1> fa_wire_out_loc(wires, FID_OUT_LOC);
-  const FieldAccessor<READ_WRITE,float,1> fa_wire_inductance(wires, FID_INDUCTANCE);
-  const FieldAccessor<READ_WRITE,float,1> fa_wire_resistance(wires, FID_RESISTANCE);
-  const FieldAccessor<READ_WRITE,float,1> fa_wire_cap(wires, FID_WIRE_CAP);
+    fa_wire_voltages[i] = AccessorRW<float>(wires, FID_WIRE_VOLTAGE+i);
+  const AccessorRW<Point<1> > fa_wire_in_ptr(wires, FID_IN_PTR);
+  const AccessorRW<Point<1> > fa_wire_out_ptr(wires, FID_OUT_PTR);
+  const AccessorRW<PointerLocation> fa_wire_in_loc(wires, FID_IN_LOC);
+  const AccessorRW<PointerLocation> fa_wire_out_loc(wires, FID_OUT_LOC);
+  const AccessorRW<float> fa_wire_inductance(wires, FID_INDUCTANCE);
+  const AccessorRw<float> fa_wire_resistance(wires, FID_RESISTANCE);
+  const AccessorRW<float> fa_wire_cap(wires, FID_WIRE_CAP);
   {
     for (int n = 0; n < num_pieces; n++)
     {
@@ -548,7 +548,7 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
   // Finally we need to figure out where everything ended up
 #ifdef SEQUENTIAL_LOAD_CIRCUIT
   locator.wait_until_valid();
-  const FieldAccessor<READ_WRITE,PointerLocation,1> locator_acc(locator, FID_LOCATOR);
+  const AccessorRW<PointerLocation> locator_acc(locator, FID_LOCATOR);
   for (int n = 0; n < num_pieces; n++)
   {
     LogicalRegionT<1> private_lr( 
