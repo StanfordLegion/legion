@@ -2126,7 +2126,7 @@ namespace Legion {
      *  - template<typename REDOP> void reduce(const Point<N,T>&, REDOP::RHS)
      */
     template<PrivilegeMode M, typename FT, int N, typename COORD_T = coord_t,
-             typename A = Realm::AffineAccessor<FT,N,COORD_T>,
+             typename A = Realm::GenericAccessor<FT,N,COORD_T>,
 #ifdef BOUNDS_CHECKS
              bool CHECK_BOUNDS = true>
 #else
