@@ -1600,9 +1600,11 @@ namespace Legion {
     PhysicalInstance PhysicalRegionImpl::get_instance_info(
                                     PrivilegeMode mode, FieldID fid, 
                                     void *realm_is, TypeTag type_tag, 
-                                    bool silence_warnings, ReductionOpID redop)
+                                    bool silence_warnings, 
+                                    bool generic_accessor,
+                                    ReductionOpID redop)
     //--------------------------------------------------------------------------
-    {
+    { 
       // Check the privilege mode first
       switch (mode)
       {
@@ -1714,6 +1716,14 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_INVALID_FIELD_PRIVILEGES, 
                        "Accessor construction for field %d in task %s "
                        "without privileges!", fid, context->get_task_name())
+      if (generic_accessor && Runtime::runtime_warnings && !silence_warnings)
+        REPORT_LEGION_WARNING(LEGION_WARNING_GENERIC_ACCESSOR,
+                              "Using a generic accessor for accessing a "
+                              "physical instance of task %s (UID %lld). "
+                              "Generic accessors are very slow and are "
+                              "strongly discouraged for use in high "
+                              "performance code.", context->get_task_name(),
+                              context->get_unique_id())
       // Get the index space to use for the accessor
       runtime->get_index_space_domain(req.region.get_index_space(),
                                       realm_is, type_tag);

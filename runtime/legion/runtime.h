@@ -394,6 +394,7 @@ namespace Legion {
       PhysicalInstance get_instance_info(PrivilegeMode mode, FieldID fid, 
                                          void *realm_is, TypeTag type_tag,
                                          bool silence_warnings, 
+                                         bool generic_accessor,
                                          ReductionOpID redop);
       void fail_bounds_check(DomainPoint p, FieldID fid,
                              PrivilegeMode mode);

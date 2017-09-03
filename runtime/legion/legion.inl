@@ -441,7 +441,8 @@ namespace Legion {
         Realm::ZIndexSpace<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              silence_warnings, true/*generic accessor*/);
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
     public:
@@ -481,7 +482,8 @@ namespace Legion {
         Realm::ZIndexSpace<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              silence_warnings, true/*generic accessor*/);
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
     public:
@@ -526,7 +528,8 @@ namespace Legion {
         Realm::ZIndexSpace<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              silence_warnings, true/*generic accessor*/);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
     public:
@@ -559,7 +562,8 @@ namespace Legion {
         Realm::ZIndexSpace<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              silence_warnings, true/*generic accessor*/);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
     public:
@@ -595,7 +599,8 @@ namespace Legion {
         Realm::ZIndexSpace<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              silence_warnings, true/*generic accessor*/);
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
     public:
@@ -640,7 +645,8 @@ namespace Legion {
         Realm::ZIndexSpace<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              silence_warnings, true/*generic accessor*/);
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
     public:
@@ -692,7 +698,8 @@ namespace Legion {
         Realm::ZIndexSpace<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              silence_warnings, true/*generic accessor*/);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
     public:
@@ -729,7 +736,8 @@ namespace Legion {
         Realm::ZIndexSpace<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              silence_warnings, true/*generic accessor*/);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
     public:
@@ -772,7 +780,8 @@ namespace Legion {
         Realm::ZIndexSpace<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              silence_warnings, true/*generic accessor*/);
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
     public:
@@ -817,7 +826,8 @@ namespace Legion {
         Realm::ZIndexSpace<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              silence_warnings, true/*generic accessor*/);
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
     public:
@@ -868,7 +878,8 @@ namespace Legion {
         Realm::ZIndexSpace<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              silence_warnings, true/*generic accessor*/);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
     public:
@@ -904,7 +915,8 @@ namespace Legion {
         Realm::ZIndexSpace<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              silence_warnings, true/*generic accessor*/);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
     public:
@@ -1841,7 +1853,7 @@ namespace Legion {
         const Realm::RegionInstance instance = 
           region.get_instance_info(REDUCE, fid, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
-              silence_warnings, redop);
+              silence_warnings, false/*generic accessor*/, redop);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
       }
     public:
@@ -1872,7 +1884,7 @@ namespace Legion {
         const Realm::RegionInstance instance = 
           region.get_instance_info(REDUCE, fid, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
-              silence_warnings, redop);
+              silence_warnings, false/*generic accessor*/, redop);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
       }
     public:
@@ -1921,7 +1933,8 @@ namespace Legion {
         Realm::ZIndexSpace<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(NO_ACCESS, fid, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              silence_warnings, true/*generic accessor*/);
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
     public:
@@ -1960,7 +1973,8 @@ namespace Legion {
         Realm::ZIndexSpace<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(NO_ACCESS, fid, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              silence_warnings, true/*generic accessor*/);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
     public:

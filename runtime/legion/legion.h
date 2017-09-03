@@ -2090,6 +2090,7 @@ namespace Legion {
       Realm::RegionInstance get_instance_info(PrivilegeMode mode, FieldID fid,
                                               void *realm_is, TypeTag type_tag,
                                               bool silence_warnings,
+                                              bool generic_accessor = false,
                                               ReductionOpID redop = 0) const;
       void fail_bounds_check(DomainPoint p, FieldID fid,
                              PrivilegeMode mode) const;
