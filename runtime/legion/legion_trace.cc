@@ -1373,8 +1373,6 @@ namespace Legion {
       events.push_back(ApEvent());
       instructions.push_back(
           new AssignFenceCompletion(*this, fence_completion_id));
-      max_producers.push_back(1);
-      consumers.push_back(std::vector<unsigned>());
     }
 
     //--------------------------------------------------------------------------
@@ -1658,14 +1656,250 @@ namespace Legion {
     {
       tracing = false;
       event_map.clear();
+      optimize();
+      if (Runtime::dump_physical_traces) dump_template();
 #ifdef DEBUG_LEGION
       assert(consumers.size() == instructions.size());
       assert(max_producers.size() == instructions.size());
-#endif
-      if (Runtime::dump_physical_traces) dump_template();
-#ifdef DEBUG_LEGION
       sanity_check();
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::optimize()
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(trace->runtime, PHYSICAL_TRACE_OPTIMIZE_CALL);
+      std::vector<unsigned> generate;
+      std::vector<std::set<unsigned> > preconditions;
+      std::vector<std::set<unsigned> > simplified;
+      generate.resize(instructions.size());
+      preconditions.resize(instructions.size());
+      simplified.resize(instructions.size());
+
+      for (unsigned idx = 0; idx < instructions.size(); ++idx)
+      {
+        std::set<unsigned> &pre = preconditions[idx];
+        switch (instructions[idx]->get_kind())
+        {
+          case ASSIGN_FENCE_COMPLETION:
+          case GET_TERM_EVENT:
+            {
+              generate[idx] = idx;
+              break;
+            }
+          case MERGE_EVENT:
+            {
+              MergeEvent *inst = instructions[idx]->as_merge_event();
+              for (std::set<unsigned>::iterator it = inst->rhs.begin();
+                   it != inst->rhs.end(); ++it)
+              {
+                pre.insert(preconditions[*it].begin(),
+                           preconditions[*it].end());
+                unsigned rhs_gen = generate[*it];
+                pre.insert(preconditions[rhs_gen].begin(),
+                           preconditions[rhs_gen].end());
+              }
+              std::set<unsigned> gen;
+              for (std::set<unsigned>::iterator it = inst->rhs.begin();
+                   it != inst->rhs.end(); ++it)
+                if (pre.find(*it) == pre.end()) gen.insert(generate[*it]);
+              if (gen.size() > 1)
+              {
+                pre.insert(gen.begin(), gen.end());
+                generate[idx] = idx;
+
+                std::set<unsigned> &simpl = simplified[idx];
+                std::set<unsigned> pre_pre;
+                for (std::set<unsigned>::iterator it = pre.begin(); it != pre.end();
+                    ++it)
+                  pre_pre.insert(preconditions[*it].begin(),
+                                 preconditions[*it].end());
+                for (std::set<unsigned>::iterator it = pre.begin(); it != pre.end();
+                    ++it)
+                  if (pre_pre.find(*it) == pre_pre.end())
+                    simpl.insert(*it);
+              }
+              else
+              {
+#ifdef DEBUG_LEGION
+                assert(gen.size() == 1);
+#endif
+                generate[idx] = *gen.begin();
+              }
+              break;
+            }
+          case ISSUE_COPY:
+            {
+              generate[idx] = idx;
+              IssueCopy *inst = instructions[idx]->as_issue_copy();
+              std::set<unsigned> &pre_pre = preconditions[inst->precondition_idx];
+              pre.insert(generate[inst->precondition_idx]);
+              pre.insert(pre_pre.begin(), pre_pre.end());
+              break;
+            }
+          case SET_READY_EVENT:
+            {
+              SetReadyEvent *inst = instructions[idx]->as_set_ready_event();
+              std::set<unsigned> &ready_pre = preconditions[inst->ready_event_idx];
+              std::map<std::pair<unsigned, DomainPoint>, unsigned>::iterator
+                finder = task_entries.find(inst->op_key);
+#ifdef DEBUG_LEGION
+              assert(finder != task_entries.end());
+#endif
+              std::set<unsigned> &task_pre = preconditions[finder->second];
+              task_pre.insert(generate[inst->ready_event_idx]);
+              task_pre.insert(ready_pre.begin(), ready_pre.end());
+              break;
+            }
+#ifdef DEBUG_LEGION
+          default:
+            {
+              assert(false);
+              break;
+            }
+#endif
+        }
+      }
+
+      std::vector<Instruction*> new_instructions;
+      unsigned count = 0;
+      std::map<unsigned, unsigned> rewrite;
+      for (unsigned idx = 0; idx < instructions.size(); ++idx)
+      {
+#ifdef DEBUG_LEGION
+        assert(rewrite.find(idx) == rewrite.end());
+        assert(rewrite.size() == idx);
+#endif
+        switch (instructions[idx]->get_kind())
+        {
+          case ASSIGN_FENCE_COMPLETION:
+          case GET_TERM_EVENT:
+          case ISSUE_COPY:
+          case SET_READY_EVENT:
+            {
+#ifdef DEBUG_LEGION
+              assert(instructions[idx]->get_kind() == SET_READY_EVENT ||
+                     generate[idx] == idx);
+#endif
+              rewrite[idx] = count;
+              new_instructions.push_back(
+                  instructions[idx]->clone(*this, rewrite));
+              ++count;
+              break;
+            }
+          case MERGE_EVENT:
+            {
+              if (generate[idx] == idx)
+              {
+#ifdef DEBUG_LEGION
+                assert(simplified[idx].size() > 1);
+#endif
+                std::set<unsigned> rhs;
+                for (std::set<unsigned>::iterator it = simplified[idx].begin();
+                     it != simplified[idx].end(); ++it)
+                {
+#ifdef DEBUG_LEGION
+                  assert(rewrite.find(*it) != rewrite.end());
+#endif
+                  rhs.insert(rewrite[*it]);
+                }
+                rewrite[idx] = count;
+                new_instructions.push_back(new MergeEvent(*this, count, rhs));
+                ++count;
+              }
+              else
+              {
+                rewrite[idx] = rewrite[generate[idx]];
+              }
+              break;
+            }
+#ifdef DEBUG_LEGION
+          default:
+            {
+              assert(false);
+              break;
+            }
+#endif
+        }
+      }
+
+      instructions.swap(new_instructions);
+      task_entries.clear();
+      for (unsigned idx = 0; idx < instructions.size(); ++idx)
+        switch (instructions[idx]->get_kind())
+        {
+          case GET_TERM_EVENT:
+            {
+              GetTermEvent *inst = instructions[idx]->as_get_term_event();
+#ifdef DEBUG_LEGION
+              assert(task_entries.find(inst->rhs) == task_entries.end());
+#endif
+              task_entries[inst->rhs] = idx;
+            }
+          case ASSIGN_FENCE_COMPLETION:
+            {
+              max_producers.push_back(1);
+              consumers.push_back(std::vector<unsigned>());
+              break;
+            }
+          case MERGE_EVENT:
+            {
+              MergeEvent *inst = instructions[idx]->as_merge_event();
+              max_producers.push_back(inst->rhs.size());
+              consumers.push_back(std::vector<unsigned>());
+              for (std::set<unsigned>::iterator it = inst->rhs.begin();
+                   it != inst->rhs.end(); it++)
+              {
+#ifdef DEBUG_LEGION
+                assert(*it < consumers.size());
+#endif
+                consumers[*it].push_back(idx);
+              }
+              break;
+            }
+          case ISSUE_COPY:
+            {
+              IssueCopy *inst = instructions[idx]->as_issue_copy();
+              consumers.push_back(std::vector<unsigned>());
+              max_producers.push_back(2);
+              std::map<std::pair<unsigned, DomainPoint>, unsigned>::iterator
+                finder = task_entries.find(inst->op_key);
+#ifdef DEBUG_LEGION
+              assert(finder != task_entries.end());
+              assert(inst->precondition_idx < consumers.size());
+#endif
+              consumers[finder->second].push_back(idx);
+              consumers[inst->precondition_idx].push_back(idx);
+              break;
+            }
+          case SET_READY_EVENT:
+            {
+              SetReadyEvent *inst = instructions[idx]->as_set_ready_event();
+              consumers.push_back(std::vector<unsigned>());
+              max_producers.push_back(2);
+              std::map<std::pair<unsigned, DomainPoint>, unsigned>::iterator
+                finder = task_entries.find(inst->op_key);
+#ifdef DEBUG_LEGION
+              assert(finder != task_entries.end());
+              assert(inst->ready_event_idx < consumers.size());
+#endif
+              consumers[finder->second].push_back(idx);
+              consumers[inst->ready_event_idx].push_back(idx);
+              break;
+            }
+#ifdef DEBUG_LEGION
+          default:
+            {
+              assert(false);
+              break;
+            }
+#endif
+        }
+
+      for (std::vector<Instruction*>::iterator it = new_instructions.begin();
+           it != new_instructions.end(); ++it)
+        delete (*it);
     }
 
     //--------------------------------------------------------------------------
@@ -1822,23 +2056,15 @@ namespace Legion {
           task->get_trace_local_id(), trace_info.color);
 #ifdef DEBUG_LEGION
       assert(operations.find(key) == operations.end());
-#endif
-      operations[key] = task;
-
-      unsigned inst_id = instructions.size();
-      instructions.push_back(new GetTermEvent(*this, lhs_, key));
-      consumers.push_back(std::vector<unsigned>());
-      max_producers.push_back(1);
-#ifdef DEBUG_LEGION
-      assert(instructions.size() == events.size());
-      assert(instructions.size() == consumers.size());
-      assert(instructions.size() == max_producers.size());
-#endif
-
-#ifdef DEBUG_LEGION
       assert(task_entries.find(key) == task_entries.end());
 #endif
-      task_entries[key] = inst_id;
+      operations[key] = task;
+      task_entries[key] = instructions.size();
+
+      instructions.push_back(new GetTermEvent(*this, lhs_, key));
+#ifdef DEBUG_LEGION
+      assert(instructions.size() == events.size());
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1893,24 +2119,10 @@ namespace Legion {
       assert(rhs_.size() > 0);
 #endif
 
-      unsigned inst_id = instructions.size();
       instructions.push_back(new MergeEvent(*this, lhs_, rhs_));
-      consumers.push_back(std::vector<unsigned>());
-      max_producers.push_back(rhs_.size());
 #ifdef DEBUG_LEGION
       assert(instructions.size() == events.size());
-      assert(instructions.size() == consumers.size());
-      assert(instructions.size() == max_producers.size());
 #endif
-
-      for (std::set<unsigned>::iterator it = rhs_.begin(); it != rhs_.end();
-           it++)
-      {
-#ifdef DEBUG_LEGION
-        assert(*it < consumers.size());
-#endif
-        consumers[*it].push_back(inst_id);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -2026,29 +2238,14 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(pre_finder != event_map.end());
 #endif
-      unsigned precondition_idx = pre_finder->second;
 
-      unsigned inst_id = instructions.size();
+      unsigned precondition_idx = pre_finder->second;
       instructions.push_back(new IssueCopy(
             *this, lhs_, node, op_key, src_fields, dst_fields, precondition_idx,
             predicate_guard, intersect, redop, reduction_fold));
-      consumers.push_back(std::vector<unsigned>());
-      max_producers.push_back(2);
 #ifdef DEBUG_LEGION
       assert(instructions.size() == events.size());
-      assert(instructions.size() == consumers.size());
-      assert(instructions.size() == max_producers.size());
 #endif
-
-#ifdef DEBUG_LEGION
-      assert(task_entries.find(op_key) != task_entries.end());
-#endif
-      consumers[task_entries[op_key]].push_back(inst_id);
-
-#ifdef DEBUG_LEGION
-      assert(precondition_idx < consumers.size());
-#endif
-      consumers[precondition_idx].push_back(inst_id);
     }
 
     //--------------------------------------------------------------------------
@@ -2159,27 +2356,12 @@ namespace Legion {
 #endif
       unsigned ready_event_idx = ready_finder->second;
 
-      unsigned inst_id = instructions.size();
       instructions.push_back(
           new SetReadyEvent(*this, op_key, region_idx, inst_idx,
                             ready_event_idx, view));
-      consumers.push_back(std::vector<unsigned>());
-      max_producers.push_back(2);
 #ifdef DEBUG_LEGION
       assert(instructions.size() == events.size());
-      assert(instructions.size() == consumers.size());
-      assert(instructions.size() == max_producers.size());
 #endif
-
-#ifdef DEBUG_LEGION
-      assert(task_entries.find(op_key) != task_entries.end());
-#endif
-      consumers[task_entries[op_key]].push_back(inst_id);
-
-#ifdef DEBUG_LEGION
-      assert(ready_event_idx < consumers.size());
-#endif
-      consumers[ready_event_idx].push_back(inst_id);
 
       record_ready_view(trace_info, req, view, fields, logical_ctx,
           physical_ctx);
@@ -2240,6 +2422,18 @@ namespace Legion {
       return ss.str();
     }
 
+    //--------------------------------------------------------------------------
+    Instruction* GetTermEvent::clone(PhysicalTemplate& tpl,
+                                  const std::map<unsigned, unsigned> &rewrite)
+    //--------------------------------------------------------------------------
+    {
+      std::map<unsigned, unsigned>::const_iterator finder = rewrite.find(lhs);
+#ifdef DEBUG_LEGION
+      assert(finder != rewrite.end());
+#endif
+      return new GetTermEvent(tpl, finder->second, rhs);
+    }
+
     /////////////////////////////////////////////////////////////
     // MergeEvent
     /////////////////////////////////////////////////////////////
@@ -2295,6 +2489,15 @@ namespace Legion {
       return ss.str();
     }
 
+    //--------------------------------------------------------------------------
+    Instruction* MergeEvent::clone(PhysicalTemplate& tpl,
+                                   const std::map<unsigned, unsigned> &rewrite)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return NULL;
+    }
+
     /////////////////////////////////////////////////////////////
     // AssignFenceCompletion
     /////////////////////////////////////////////////////////////
@@ -2325,6 +2528,19 @@ namespace Legion {
       ss << "events[" << lhs << "] = fence_completion";
       return ss.str();
     }
+
+    //--------------------------------------------------------------------------
+    Instruction* AssignFenceCompletion::clone(PhysicalTemplate& tpl,
+                                  const std::map<unsigned, unsigned> &rewrite)
+    //--------------------------------------------------------------------------
+    {
+      std::map<unsigned, unsigned>::const_iterator finder = rewrite.find(lhs);
+#ifdef DEBUG_LEGION
+      assert(finder != rewrite.end());
+#endif
+      return new AssignFenceCompletion(tpl, finder->second);
+    }
+
     /////////////////////////////////////////////////////////////
     // IssueCopy
     /////////////////////////////////////////////////////////////
@@ -2429,6 +2645,23 @@ namespace Legion {
 
       return ss.str();
     }
+    
+    //--------------------------------------------------------------------------
+    Instruction* IssueCopy::clone(PhysicalTemplate& tpl,
+                                  const std::map<unsigned, unsigned> &rewrite)
+    //--------------------------------------------------------------------------
+    {
+      std::map<unsigned, unsigned>::const_iterator lfinder = rewrite.find(lhs);
+      std::map<unsigned, unsigned>::const_iterator pfinder =
+        rewrite.find(precondition_idx);
+#ifdef DEBUG_LEGION
+      assert(lfinder != rewrite.end());
+      assert(pfinder != rewrite.end());
+#endif
+      return new IssueCopy(tpl, lfinder->second, node, op_key, src_fields,
+        dst_fields, pfinder->second, predicate_guard, intersect, redop,
+        reduction_fold);
+    }
 
     /////////////////////////////////////////////////////////////
     // SetReadyEvent
@@ -2449,12 +2682,6 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(operations.find(op_key) != operations.end());
-      {
-        const std::deque<InstanceSet> &physical_instances =
-          operations[op_key]->get_physical_instances();
-        assert(region_idx < physical_instances.size());
-        assert(inst_idx < physical_instances[region_idx].size());
-      }
       assert(ready_event_idx < events.size());
 #endif
     }
@@ -2530,6 +2757,20 @@ namespace Legion {
          << std::hex << view << ", instance id: "
          << std::hex << view->get_manager()->get_instance().id << ")";
       return ss.str();
+    }
+
+    //--------------------------------------------------------------------------
+    Instruction* SetReadyEvent::clone(PhysicalTemplate& tpl,
+                                    const std::map<unsigned, unsigned> &rewrite)
+    //--------------------------------------------------------------------------
+    {
+      std::map<unsigned, unsigned>::const_iterator finder =
+        rewrite.find(ready_event_idx);
+#ifdef DEBUG_LEGION
+      assert(finder != rewrite.end());
+#endif
+      return new SetReadyEvent(tpl, op_key, region_idx, inst_idx,
+        finder->second, view);
     }
 
     /////////////////////////////////////////////////////////////

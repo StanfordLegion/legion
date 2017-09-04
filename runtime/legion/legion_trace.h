@@ -395,7 +395,7 @@ namespace Legion {
       PhysicalTemplate(PhysicalTrace *runtime);
       PhysicalTemplate(const PhysicalTemplate &rhs);
     private:
-      friend PhysicalTrace;
+      friend class PhysicalTrace;
       ~PhysicalTemplate();
     public:
       void initialize(ApEvent fence_completion);
@@ -408,6 +408,7 @@ namespace Legion {
       bool check_preconditions();
       void execute(PhysicalTraceInfo &trace_info, SingleTask *task);
       void finalize();
+      void optimize();
       void dump_template();
     public:
       inline bool is_tracing() const { return tracing; }
@@ -480,8 +481,8 @@ namespace Legion {
       PhysicalTrace *trace;
       bool tracing;
       Reservation template_lock;
-    private:
       unsigned fence_completion_id;
+    private:
       std::map<std::pair<unsigned, DomainPoint>, unsigned> task_entries;
       std::vector<std::vector<unsigned> > consumers;
       std::vector<unsigned> pending_producers;
@@ -505,6 +506,15 @@ namespace Legion {
       LegionMap<InstanceView*, ContextID>::aligned    physical_contexts;
     };
 
+    enum InstructionKind
+    {
+      GET_TERM_EVENT,
+      MERGE_EVENT,
+      ASSIGN_FENCE_COMPLETION,
+      ISSUE_COPY,
+      SET_READY_EVENT,
+    };
+
     /**
      * \class Instruction
      * This class is an abstract parent class for all template instructions.
@@ -515,6 +525,15 @@ namespace Legion {
       virtual void execute() = 0;
       virtual std::string to_string() = 0;
 
+      virtual InstructionKind get_kind() = 0;
+      virtual GetTermEvent* as_get_term_event() = 0;
+      virtual MergeEvent* as_merge_event() = 0;
+      virtual AssignFenceCompletion* as_assignment_fence_completion() = 0;
+      virtual IssueCopy* as_issue_copy() = 0;
+      virtual SetReadyEvent* as_set_ready_event() = 0;
+
+      virtual Instruction* clone(PhysicalTemplate& tpl,
+                               const std::map<unsigned, unsigned> &rewrite) = 0;
     protected:
       std::map<std::pair<unsigned, DomainPoint>, SingleTask*> &operations;
       std::vector<ApEvent>& events;
@@ -531,7 +550,23 @@ namespace Legion {
       virtual void execute();
       virtual std::string to_string();
 
+      virtual InstructionKind get_kind()
+        { return GET_TERM_EVENT; }
+      virtual GetTermEvent* as_get_term_event()
+        { return this; }
+      virtual MergeEvent* as_merge_event()
+        { return NULL; }
+      virtual AssignFenceCompletion* as_assignment_fence_completion()
+        { return NULL; }
+      virtual IssueCopy* as_issue_copy()
+        { return NULL; }
+      virtual SetReadyEvent* as_set_ready_event()
+        { return NULL; }
+
+      virtual Instruction* clone(PhysicalTemplate& tpl,
+                                 const std::map<unsigned, unsigned> &rewrite);
     private:
+      friend struct PhysicalTemplate;
       unsigned lhs;
       std::pair<unsigned, DomainPoint> rhs;
     };
@@ -547,7 +582,23 @@ namespace Legion {
       virtual void execute();
       virtual std::string to_string();
 
+      virtual InstructionKind get_kind()
+        { return MERGE_EVENT; }
+      virtual GetTermEvent* as_get_term_event()
+        { return NULL; }
+      virtual MergeEvent* as_merge_event()
+        { return this; }
+      virtual AssignFenceCompletion* as_assignment_fence_completion()
+        { return NULL; }
+      virtual IssueCopy* as_issue_copy()
+        { return NULL; }
+      virtual SetReadyEvent* as_set_ready_event()
+        { return NULL; }
+
+      virtual Instruction* clone(PhysicalTemplate& tpl,
+                                 const std::map<unsigned, unsigned> &rewrite);
     private:
+      friend struct PhysicalTemplate;
       unsigned lhs;
       std::set<unsigned> rhs;
     };
@@ -562,7 +613,24 @@ namespace Legion {
       virtual void execute();
       virtual std::string to_string();
 
+      virtual InstructionKind get_kind()
+        { return ASSIGN_FENCE_COMPLETION; }
+      virtual GetTermEvent* as_get_term_event()
+        { return NULL; }
+      virtual MergeEvent* as_merge_event()
+        { return NULL; }
+      virtual AssignFenceCompletion* as_assignment_fence_completion()
+        { return this; }
+      virtual IssueCopy* as_issue_copy()
+        { return NULL; }
+      virtual SetReadyEvent* as_set_ready_event()
+        { return NULL; }
+
+      virtual Instruction* clone(PhysicalTemplate& tpl,
+                                 const std::map<unsigned, unsigned> &rewrite);
+
     private:
+      friend struct PhysicalTemplate;
       ApEvent &fence_completion;
       unsigned lhs;
     };
@@ -588,7 +656,23 @@ namespace Legion {
       virtual void execute();
       virtual std::string to_string();
 
+      virtual InstructionKind get_kind()
+        { return ISSUE_COPY; }
+      virtual GetTermEvent* as_get_term_event()
+        { return NULL; }
+      virtual MergeEvent* as_merge_event()
+        { return NULL; }
+      virtual AssignFenceCompletion* as_assignment_fence_completion()
+        { return NULL; }
+      virtual IssueCopy* as_issue_copy()
+        { return this; }
+      virtual SetReadyEvent* as_set_ready_event()
+        { return NULL; }
+
+      virtual Instruction* clone(PhysicalTemplate& tpl,
+                                 const std::map<unsigned, unsigned> &rewrite);
     private:
+      friend struct PhysicalTemplate;
       unsigned lhs;
       RegionTreeNode* node;
       std::pair<unsigned, DomainPoint> op_key;
@@ -617,7 +701,23 @@ namespace Legion {
       virtual void execute();
       virtual std::string to_string();
 
+      virtual InstructionKind get_kind()
+        { return SET_READY_EVENT; }
+      virtual GetTermEvent* as_get_term_event()
+        { return NULL; }
+      virtual MergeEvent* as_merge_event()
+        { return NULL; }
+      virtual AssignFenceCompletion* as_assignment_fence_completion()
+        { return NULL; }
+      virtual IssueCopy* as_issue_copy()
+        { return NULL; }
+      virtual SetReadyEvent* as_set_ready_event()
+        { return this; }
+
+      virtual Instruction* clone(PhysicalTemplate& tpl,
+                                 const std::map<unsigned, unsigned> &rewrite);
     private:
+      friend struct PhysicalTemplate;
       std::pair<unsigned, DomainPoint> op_key;
       unsigned region_idx;
       unsigned inst_idx;

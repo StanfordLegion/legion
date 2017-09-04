@@ -968,6 +968,7 @@ namespace Legion {
       REDUCTION_VIEW_FILTER_LOCAL_USERS_CALL,
       PHYSICAL_TRACE_EXECUTE_CALL,
       PHYSICAL_TRACE_PRECONDITION_CHECK_CALL,
+      PHYSICAL_TRACE_OPTIMIZE_CALL,
       LAST_RUNTIME_CALL_KIND, // This one must be last
     };
 
@@ -1128,6 +1129,7 @@ namespace Legion {
       "Reduction View Filter Local Users",                            \
       "Physical Trace Execute",                                       \
       "Physical Trace Precondition Check",                            \
+      "Physical Trace Optimize",                                      \
     };
 
     enum SemanticInfoKind {
@@ -1250,8 +1252,13 @@ namespace Legion {
     class TraceCompleteOp;
     class TraceReplayOp;
     class PhysicalTrace;
-    class PhysicalTemplate;
+    struct PhysicalTemplate;
     struct Instruction;
+    struct GetTermEvent;
+    struct MergeEvent;
+    struct AssignFenceCompletion;
+    struct IssueCopy;
+    struct SetReadyEvent;
 
     // region_tree.h
     class RegionTreeForest;
