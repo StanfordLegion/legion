@@ -6574,7 +6574,7 @@ namespace Legion {
           args.phase = (ShutdownPhase)(phase-1);
         else
           args.phase = phase;
-        runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_PRIORITY,
+        runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY,
                                          NULL, precondition);
       }
     }
@@ -16616,7 +16616,7 @@ namespace Legion {
       args.phase = ShutdownManager::CHECK_TERMINATION;
       // Issue this with a low priority so that other meta-tasks
       // have an opportunity to run
-      issue_runtime_meta_task(args, LG_THROUGHPUT_PRIORITY);
+      issue_runtime_meta_task(args, LG_LOW_PRIORITY);
     }
     
     //--------------------------------------------------------------------------
