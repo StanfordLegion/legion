@@ -2460,6 +2460,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, ACTIVATE_SINGLE_CALL);
       activate_task();
       outstanding_profiling_requests = 1; // start at 1 as a guard
+      profiling_priority = LG_THROUGHPUT_PRIORITY;
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
       selected_variant = 0;
       task_priority = 0;
@@ -2578,6 +2579,8 @@ namespace Legion {
       rez.serialize<size_t>(task_profiling_requests.size());
       for (unsigned idx = 0; idx < task_profiling_requests.size(); idx++)
         rez.serialize(task_profiling_requests[idx]);
+      if (!task_profiling_requests.empty() || !copy_profiling_requests.empty())
+        rez.serialize(profiling_priority);
     }
 
     //--------------------------------------------------------------------------
@@ -2630,6 +2633,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < num_task_requests; idx++)
           derez.deserialize(task_profiling_requests[idx]);
       }
+      if (!task_profiling_requests.empty() || !copy_profiling_requests.empty())
+        derez.deserialize(profiling_priority);
     } 
 
     //--------------------------------------------------------------------------
@@ -2941,12 +2946,21 @@ namespace Legion {
         runtime->find_visible_memories(target_proc, visible_memories);
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        // If it was early mapped, that was easy
+        // If it was early mapped or is restricted, then it is easy
         std::map<unsigned,InstanceSet>::const_iterator finder = 
           early_mapped_regions.find(idx);
-        if (finder != early_mapped_regions.end())
+        if ((finder != early_mapped_regions.end()) ||
+            (IS_SIMULT(regions[idx]) && 
+             get_restrict_info(idx).has_restrictions()))
         {
-          physical_instances[idx] = finder->second;
+          if (finder == early_mapped_regions.end())
+          {
+            RestrictInfo &restrict_info = get_restrict_info(idx);
+            // Must cover given the assertion in initialize_map_task_input
+            physical_instances[idx] = restrict_info.get_instances();
+          }
+          else
+            physical_instances[idx] = finder->second;
           // Check to see if it is visible or not from the target processors
           if (!Runtime::unsafe_mapper && !regions[idx].is_no_access())
           {
@@ -3549,6 +3563,7 @@ namespace Legion {
     {
       Mapper::MapTaskInput input;
       Mapper::MapTaskOutput output;
+      output.profiling_priority = LG_THROUGHPUT_PRIORITY;
       // Initialize the mapping input which also does all the traversal
       // down to the target nodes
       std::vector<InstanceSet> valid_instances(regions.size());
@@ -3561,6 +3576,7 @@ namespace Legion {
       // Sort out any profiling requests that we need to perform
       if (!output.task_prof_requests.empty())
       {
+        profiling_priority = output.profiling_priority;
         // If we do any legion specific checks, make sure we ask
         // Realm for the proc profiling info so that we can get
         // a callback to report our profiling information
@@ -3615,9 +3631,12 @@ namespace Legion {
         }
       }
       if (!output.copy_prof_requests.empty())
+      {
         filter_copy_request_kinds(mapper, 
             output.copy_prof_requests.requested_measurements,
             copy_profiling_requests, true/*warn*/);
+        profiling_priority = output.profiling_priority;
+      }
       // Now we can convert the mapper output into our physical instances
       finalize_map_task_output(input, output, must_epoch_owner, 
                                valid_instances);

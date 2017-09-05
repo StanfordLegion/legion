@@ -3240,6 +3240,7 @@ namespace Legion {
           }
         default:
           assert(false); // bad dimension size
+	  return false;
       }
     }
 
@@ -4515,50 +4516,57 @@ namespace Legion {
       // version state object(s) for those fields
       if (!!unversioned)
       {
-#ifdef DEBUG_LEGION
-        assert(is_owner); // should only get here on the owner
-#endif
-        // Retake the lock in exclusive mode and see if we lost any races
-        AutoLock m_lock(manager_lock);
-        for (LegionMap<VersionID,ManagerVersions>::aligned::const_iterator
-              vit = current_version_infos.begin(); vit != 
-              current_version_infos.end(); vit++)
+        // Only keep fields that are still unversioned
+        unversioned_mask &= unversioned;
+        // This is a nasty case: if we're unversioned it means we
+        // have no protection from the mapping dependences to know
+        // that we are the only one creating any new VersionState
+        // objects, so we need a point of serialization (the owner)
+        // to handle the creation of any unversioned fields, if we're 
+        // on a remote node then we need to send a message to the owner
+        LegionMap<VersionState*,FieldMask>::aligned unversioned_states;
+        if (!is_owner)
         {
-          // Only need to check against unversioned this time
-          FieldMask local_overlap = vit->second.get_valid_mask() & unversioned;
-          if (!local_overlap)
-            continue;
-          for (ManagerVersions::iterator it = vit->second.begin();
-                it != vit->second.end(); it++)
+          RtUserEvent wait_on = Runtime::create_rt_user_event();
+          // Send a message to the owner to do the update
+          Serializer rez;
           {
-            FieldMask overlap = it->second & local_overlap;
-            if (!overlap)
-              continue;
-            unversioned -= local_overlap;
-            version_info.add_current_version(it->first, overlap,
-                                             false/*path only*/);
-            it->first->request_initial_version_state(context, overlap, 
-                                                     ready_events);
+            RezCheck z(rez);
+            rez.serialize(current_context->get_context_uid());
+            if (node->is_region())
+            {
+              rez.serialize<bool>(true);
+              rez.serialize(node->as_region_node()->handle);
+            }
+            else
+            {
+              rez.serialize<bool>(false);
+              rez.serialize(node->as_partition_node()->handle);
+            }
+            rez.serialize(unversioned);
+            rez.serialize(&unversioned_states);
+            rez.serialize(wait_on);
           }
-          if (!unversioned)
-            break;
+          runtime->send_version_manager_unversioned_request(owner_space, rez);
+          wait_on.lg_wait();
         }
-        if (!!unversioned)
+        else
         {
-          VersionState *new_state = create_new_version_state(init_version);
-          version_info.add_current_version(new_state, unversioned,
-                                           false/*path only*/);
-          version_info.add_advance_version(new_state, unversioned,
-                                           false/*path only*/);
-          // No need to query for initial state since we know there is none
           WrapperReferenceMutator mutator(ready_events);
-          current_version_infos[init_version].insert(new_state, 
-                                                     unversioned, &mutator);
-          // Keep any unversioned fields
-          unversioned_mask &= unversioned;
+          find_or_create_unversioned_states(unversioned, 
+                                            unversioned_states, &mutator);
         }
-        else if (!!unversioned_mask)
-          unversioned_mask.clear();
+        // Now we can record the results
+        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it =
+              unversioned_states.begin(); it != unversioned_states.end(); it++)
+        {
+          version_info.add_current_version(it->first, it->second,
+                                           false/*path only*/);
+          version_info.add_advance_version(it->first, it->second, 
+                                           false/*path only*/);
+          it->first->request_initial_version_state(context, it->second, 
+                                                   ready_events);
+        }
       }
       else if (!!unversioned_mask)
         unversioned_mask.clear();
@@ -5510,6 +5518,139 @@ namespace Legion {
         parent_manager.update_child_versions(physical_context, color, 
                                              new_states, applied_events);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionManager::find_or_create_unversioned_states(
+                FieldMask unversioned,
+                LegionMap<VersionState*,FieldMask>::aligned &unversioned_states,
+                ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner);
+#endif
+      // Retake the lock in exclusive mode and see if we lost any races
+      AutoLock m_lock(manager_lock);
+      for (LegionMap<VersionID,ManagerVersions>::aligned::const_iterator
+            vit = current_version_infos.begin(); vit != 
+            current_version_infos.end(); vit++)
+      {
+        // Only need to check against unversioned this time
+        FieldMask local_overlap = vit->second.get_valid_mask() & unversioned;
+        if (!local_overlap)
+          continue;
+        for (ManagerVersions::iterator it = vit->second.begin();
+              it != vit->second.end(); it++)
+        {
+          FieldMask overlap = it->second & local_overlap;
+          if (!overlap)
+            continue;
+          unversioned_states[it->first] = overlap;
+          unversioned -= overlap;
+          if (!unversioned)
+            return;
+        }
+      }
+      // If we get here then we actually need to make a new state
+      VersionState *new_state = create_new_version_state(init_version);
+      current_version_infos[init_version].insert(new_state, 
+                                                 unversioned, mutator);
+      unversioned_states[new_state] = unversioned;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void VersionManager::handle_unversioned_request(
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      UniqueID context_uid;
+      derez.deserialize(context_uid);
+      bool is_region;
+      derez.deserialize(is_region);
+      RegionTreeNode *node;
+      if (is_region)
+      {
+        LogicalRegion handle;
+        derez.deserialize(handle);
+        node = runtime->forest->get_node(handle);
+      }
+      else
+      {
+        LogicalPartition handle;
+        derez.deserialize(handle);
+        node = runtime->forest->get_node(handle);
+      }
+      FieldMask unversioned;
+      derez.deserialize(unversioned);
+      void *target;
+      derez.deserialize(target);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      InnerContext *context = runtime->find_context(context_uid);
+      ContextID ctx = context->get_context_id();
+      VersionManager &manager = node->get_current_version_manager(ctx);
+      
+      std::set<RtEvent> done_preconditions;
+      WrapperReferenceMutator mutator(done_preconditions);
+      LegionMap<VersionState*,FieldMask>::aligned unversioned_states;
+
+      manager.find_or_create_unversioned_states(unversioned,
+                                                unversioned_states, &mutator);
+      // Now send the results back to the source
+      Serializer rez;
+      {
+        RezCheck z2(rez);
+        rez.serialize(target);
+        rez.serialize<size_t>(unversioned_states.size());
+        for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
+              unversioned_states.begin(); it != unversioned_states.end(); it++)
+        {
+          rez.serialize(it->first->did);
+          rez.serialize(it->second);
+        }
+        if (!done_preconditions.empty())
+          rez.serialize(Runtime::merge_events(done_preconditions));
+        else
+          rez.serialize(RtEvent::NO_RT_EVENT);
+        rez.serialize(done);
+      }
+      runtime->send_version_manager_unversioned_response(source, rez);
+    }
+    
+    //--------------------------------------------------------------------------
+    /*static*/ void VersionManager::handle_unversioned_response(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      LegionMap<VersionState*,FieldMask>::aligned *unversioned_states;
+      derez.deserialize(unversioned_states);
+      size_t num_states;
+      derez.deserialize(num_states);
+      std::set<RtEvent> preconditions;
+      for (unsigned idx = 0; idx < num_states; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        VersionState *state = runtime->find_or_request_version_state(did,ready);
+        if (ready.exists())
+          preconditions.insert(ready);
+        derez.deserialize((*unversioned_states)[state]);
+      }
+      RtEvent precondition;
+      derez.deserialize(precondition);
+      if (precondition.exists())
+        preconditions.insert(precondition);
+      RtUserEvent done;
+      derez.deserialize(done);
+      if (!preconditions.empty())
+        Runtime::trigger_event(done, Runtime::merge_events(preconditions));
+      else
+        Runtime::trigger_event(done);
     }
 
     //--------------------------------------------------------------------------

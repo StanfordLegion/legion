@@ -772,6 +772,7 @@ namespace Legion {
       MapperManager *mapper;
     protected:
       std::vector<ProfilingMeasurementID> profiling_requests;
+      int                                 profiling_priority;
       int                     outstanding_profiling_requests;
       RtUserEvent                         profiling_reported;
     };
@@ -874,6 +875,7 @@ namespace Legion {
       PredEvent                   predication_guard;
     protected:
       std::vector<ProfilingMeasurementID> profiling_requests;
+      int                                 profiling_priority;
       int                     outstanding_profiling_requests;
       RtUserEvent                         profiling_reported;
     };
@@ -1348,6 +1350,7 @@ namespace Legion {
       MapperManager *mapper;
     protected:
       std::vector<ProfilingMeasurementID> profiling_requests;
+      int                                 profiling_priority;
       int                     outstanding_profiling_requests;
       RtUserEvent                         profiling_reported;
     };
@@ -1438,6 +1441,7 @@ namespace Legion {
       MapperManager *mapper;
     protected:
       std::vector<ProfilingMeasurementID> profiling_requests;
+      int                                 profiling_priority;
       int                     outstanding_profiling_requests;
       RtUserEvent                         profiling_reported;
     };
@@ -1540,6 +1544,7 @@ namespace Legion {
       MapperManager*    mapper;
     protected:
       std::vector<ProfilingMeasurementID> profiling_requests;
+      int                                 profiling_priority;
       int                     outstanding_profiling_requests;
       RtUserEvent                         profiling_reported;
     };
@@ -1618,6 +1623,7 @@ namespace Legion {
       MapperManager*    mapper;
     protected:
       std::vector<ProfilingMeasurementID> profiling_requests;
+      int                                 profiling_priority;
       int                     outstanding_profiling_requests;
       RtUserEvent                         profiling_reported;
     };

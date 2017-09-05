@@ -158,6 +158,7 @@ namespace Realm {
     };
     typedef std::map<Event, TableEntry> Table;
 
+#ifdef REALM_USE_OPERATION_TABLE
     // event table is protected by a mutex
     // try to avoid a serial bottleneck by splitting events over 4 different tables
     static const int NUM_TABLES = 4;
@@ -165,6 +166,7 @@ namespace Realm {
     GASNetHSL mutexes[NUM_TABLES];
     Table tables[NUM_TABLES];
     TableCleaner cleaner;
+#endif
   };
 
 };

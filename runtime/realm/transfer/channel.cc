@@ -1731,7 +1731,7 @@ namespace LegionRuntime {
                            "total_field_size(%zu)",
                            _guid, _pre_xd_guid, _next_xd_guid, _kind,
                            _domain.get_volume(), total_field_size);
-          XferDes* xd;
+          XferDes* xd = 0;
           switch (_kind) {
           case XferDes::XFER_MEM_CPY:
             xd = new MemcpyXferDes<DIM>(_dma_request, _launch_node,
