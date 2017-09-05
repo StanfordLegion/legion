@@ -244,10 +244,12 @@ ifeq ($(strip $(USE_PYTHON)),1)
   endif
 
   ifneq ($(strip $(PYTHON_LIB)),)
-    ifeq ($(wildcard $(PYTHON_LIB)),)
-      $(error cannot find libpython2.7.so - PYTHON_LIB set but file does not exist)
-    else
-      CC_FLAGS += -DREALM_PYTHON_LIB="\"$(PYTHON_LIB)\""
+    ifndef FORCE_PYTHON
+      ifeq ($(wildcard $(PYTHON_LIB)),)
+        $(error cannot find libpython2.7.so - PYTHON_LIB set but file does not exist)
+      else
+        CC_FLAGS += -DREALM_PYTHON_LIB="\"$(PYTHON_LIB)\""
+      endif
     endif
   endif
 
