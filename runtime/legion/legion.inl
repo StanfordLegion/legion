@@ -5385,9 +5385,9 @@ namespace LegionRuntime {
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Realm::Machine Machine;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Realm::Domain Domain;
+    typedef Legion::Domain Domain;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Realm::DomainPoint DomainPoint;
+    typedef Legion::DomainPoint DomainPoint;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Realm::IndexSpaceAllocator IndexSpaceAllocator;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
