@@ -10994,6 +10994,7 @@ namespace Legion {
                 fit != (*pit)->projections.end(); fit++)
           {
             rez.serialize(fit->first->projection_id);
+            rez.serialize<size_t>(fit->second.size());
             for (std::set<IndexSpaceNode*>::const_iterator it = 
                   fit->second.begin(); it != fit->second.end(); it++)
               rez.serialize((*it)->handle);
