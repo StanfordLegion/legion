@@ -4615,11 +4615,15 @@ namespace Legion {
     /*static*/ inline uint64_t SSETLBitMask<MAX>::extract_mask(__m128i value)
     //-------------------------------------------------------------------------
     {
-#ifdef __SSE4_1__
+#if !defined(__LP64__) // handle the case for when we don't have 64-bit support
+      uint64_t left = _mm_cvtsi128_si32(value);
+      left |= uint64_t(_mm_cvtsi128_si32(_mm_shuffle_epi32(value, 1))) << 32;
+      uint64_t right = _mm_cvtsi128_si32(_mm_shuffle_epi32(value, 2));
+      right |= uint64_t(_mm_cvtsi128_si32(_mm_shuffle_epi32(value, 3))) << 32;
+#elif defined(__SSE4_1__) // see if we have sse 4.1
       uint64_t left = _mm_extract_epi64(value, 0);
       uint64_t right = _mm_extract_epi64(value, 1);
-#else
-      // Assume we have sse 2
+#else // Assume we have sse 2
       uint64_t left = _mm_cvtsi128_si64(value);
       uint64_t right = _mm_cvtsi128_si64(_mm_shuffle_epi32(value, 7));
 #endif
@@ -6127,10 +6131,26 @@ namespace Legion {
       __m128i left, right;
       right = _mm256_extractf128_si256(value, 0);
       left = _mm256_extractf128_si256(value, 1);
+#if !defined(__LP64__) // handle 32-bit support
+      uint64_t result = _mm_cvtsi128_si32(right);
+      result |= uint64_t(_mm_cvtsi128_si32(_mm_shuffle_epi32(right,1))) << 32;
+      result |= _mm_cvtsi128_si32(_mm_shuffle_epi32(right,2));
+      result |= int64_t(_mm_cvtsi128_si32(_mm_shuffle_epi32(right,3))) << 32;
+      result |= _mm_cvtsi128_si32(left);
+      result |= uint64_t(_mm_cvtsi128_si32(_mm_shuffle_epi32(left,1))) << 32;
+      result |= _mm_cvtsi128_si32(_mm_shuffle_epi32(left,2));
+      result |= int64_t(_mm_cvtsi128_si32(_mm_shuffle_epi32(left,3))) << 32;
+#elif defined(__SSE4_1__) // case we have sse 4.1
       uint64_t result = _mm_extract_epi64(right, 0);
       result |= _mm_extract_epi64(right, 1);
       result |= _mm_extract_epi64(left, 0);
       result |= _mm_extract_epi64(left, 1);
+#else // Assume we have sse 2
+      uint64_t result = _mm_cvtsi128_si64(right);
+      result |= _mm_cvtsi128_si64(_mm_shuffle_epi32(right, 7));
+      result |= _mm_cvtsi128_si64(left);
+      result |= _mm_cvtsi128_si64(_mm_shuffle_epi32(left, 7));
+#endif
       return result;
     }
 
