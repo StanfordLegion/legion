@@ -430,6 +430,14 @@ namespace Legion {
                             const Realm::ZPoint<DIM,coord_t> &blocking, 
                             bool recurse, bool stealable,
                             std::vector<TaskSlice> &slices);
+      // For some backwards compatibility with the old interface
+      template<int DIM>
+      static void default_decompose_points(
+                            const LegionRuntime::Arrays::Rect<DIM> &rect, 
+                            const std::vector<Processor> &targets,
+                            const LegionRuntime::Arrays::Point<DIM> &blocking,
+                            bool recurse, bool stealable,
+                            std::vector<TaskSlice> &slices);
       template<int DIM>
       static Realm::ZPoint<DIM,coord_t> default_select_num_blocks(
                             long long int factor, 
