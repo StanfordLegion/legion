@@ -23,6 +23,11 @@
 using namespace Legion;
 using namespace Legion::Mapping;
 
+template<typename FT, int N, typename T = coord_t>
+using AccessorRO = FieldAccessor<READ_ONLY,FT,N,T,Realm::AffineAccessor<FT,N,T> >;
+template<typename FT, int N, typename T = coord_t>
+using AccessorRW = FieldAccessor<READ_WRITE,FT,N,T,Realm::AffineAccessor<FT,N,T> >;
+
 enum TaskID
 {
   TOP_LEVEL_TASK_ID,
@@ -220,7 +225,7 @@ void make_data_task(const Task *task,
   pr.wait_until_valid();
 
   {
-    const FieldAccessor<READ_WRITE,int,1> ra(pr, FID_DATA);
+    const AccessorRW<int,1> ra(pr, FID_DATA);
 
     for(coord_t i = 0; i < output_size; i++)
       ra[bounds_lo + i] = (subregion_index * 10000) + i;
@@ -288,7 +293,7 @@ void use_data_task(const Task *task,
   // check that the data is what we expect
   int errors = 0;
   {
-    const FieldAccessor<READ_ONLY,int,1> ra(pr, FID_DATA);
+    const AccessorRO<int,1> ra(pr, FID_DATA);
 
     for(coord_t i = 0; i < input_size; i++) {
       int exp = (subregion_index * 10000) + i;
