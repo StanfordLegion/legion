@@ -1335,7 +1335,7 @@ namespace Legion {
       for (std::vector<PhysicalTemplate*>::reverse_iterator it =
            templates.rbegin(); it !=
            templates.rend(); ++it)
-        if ((*it)->check_preconditions())
+        if ((*it)->is_replayable() && (*it)->check_preconditions())
         {
           current_template = *it;
           tracing = false;
@@ -1366,7 +1366,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalTemplate::PhysicalTemplate(PhysicalTrace *pt)
-      : trace(pt), tracing(true),
+      : trace(pt), tracing(true), replayable(true),
         template_lock(Reservation::create_reservation()), fence_completion_id(0)
     //--------------------------------------------------------------------------
     {
@@ -1657,6 +1657,7 @@ namespace Legion {
       tracing = false;
       event_map.clear();
       optimize();
+      replayable = check_preconditions();
       if (Runtime::dump_physical_traces) dump_template();
 #ifdef DEBUG_LEGION
       assert(consumers.size() == instructions.size());

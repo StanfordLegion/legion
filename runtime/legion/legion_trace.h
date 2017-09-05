@@ -413,6 +413,7 @@ namespace Legion {
     public:
       inline bool is_tracing() const { return tracing; }
       inline bool is_replaying() const { return !tracing; }
+      inline bool is_replayable() const { return replayable; }
     protected:
       static std::string view_to_string(const InstanceView *view);
       void sanity_check();
@@ -480,6 +481,7 @@ namespace Legion {
     private:
       PhysicalTrace *trace;
       bool tracing;
+      bool replayable;
       Reservation template_lock;
       unsigned fence_completion_id;
     private:
