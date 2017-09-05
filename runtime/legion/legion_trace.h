@@ -369,7 +369,7 @@ namespace Legion {
     private:
       PhysicalTemplate* get_template(PhysicalTraceInfo &trace_info);
     public:
-      void initialize_templates(ApEvent fence_completion);
+      void initialize_template(ApEvent fence_completion);
     public:
       void fix_trace(void);
       inline bool is_tracing(void) const { return tracing; }
@@ -411,6 +411,7 @@ namespace Legion {
       void execute(PhysicalTraceInfo &trace_info, SingleTask *task);
       void finalize();
       void optimize();
+      void schedule();
       void dump_template();
     public:
       inline bool is_tracing() const { return tracing; }
@@ -487,12 +488,10 @@ namespace Legion {
       Reservation template_lock;
       unsigned fence_completion_id;
     private:
-      std::map<TraceLocalId, unsigned> task_entries;
-      std::vector<std::vector<unsigned> > consumers;
-      std::vector<unsigned> pending_producers;
-      std::vector<unsigned> max_producers;
       std::map<ApEvent, unsigned> event_map;
       std::vector<Instruction*> instructions;
+      std::map<TraceLocalId, std::vector<Instruction*> > inst_map;
+      std::map<TraceLocalId, unsigned> task_entries;
     public:
       ApEvent fence_completion;
       std::map<TraceLocalId, SingleTask*> operations;

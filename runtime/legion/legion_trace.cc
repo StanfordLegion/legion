@@ -1240,7 +1240,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (local_trace->has_physical_trace())
-        local_trace->get_physical_trace()->initialize_templates(
+        local_trace->get_physical_trace()->initialize_template(
             get_completion_event());
       FenceOp::trigger_mapping();
     }
@@ -1353,11 +1353,10 @@ namespace Legion {
       tracing = true;
     }
 
-    void PhysicalTrace::initialize_templates(ApEvent fence_completion)
+    void PhysicalTrace::initialize_template(ApEvent fence_completion)
     {
-      for (std::vector<PhysicalTemplate*>::iterator it = templates.begin();
-           it != templates.end(); ++it)
-        (*it)->initialize(fence_completion);
+      if (current_template != NULL)
+        current_template->initialize(fence_completion);
     }
 
     /////////////////////////////////////////////////////////////
@@ -1416,14 +1415,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       fence_completion = completion;
-      for (std::map<std::pair<unsigned, DomainPoint>,
-                    SingleTask*>::iterator it = operations.begin();
-                    it != operations.end(); ++it)
-        it->second = NULL;
       size_t num_events = events.size();
       events.clear();
       events.resize(num_events);
-      pending_producers = max_producers;
+      events[fence_completion_id] = fence_completion;
+#ifdef DEBUG_LEGION
+      for (std::map<TraceLocalId, SingleTask*>::iterator it =
+           operations.begin(); it != operations.end(); ++it)
+        it->second = NULL;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1596,57 +1596,26 @@ namespace Legion {
     {
       DETAILED_PROFILER(task->runtime, PHYSICAL_TRACE_EXECUTE_CALL);
       TraceLocalId key(task->get_trace_local_id(), trace_info.color);
-      std::map<TraceLocalId, unsigned>::iterator finder =
-        task_entries.find(key);
-#ifdef DEBUG_LEGION
-      assert(finder != task_entries.end());
-#endif
-      unsigned inst_id = finder->second;
-      std::vector<unsigned> worklist(1, inst_id);
-      unsigned pos = 0;
       {
-        AutoLock tpl_lock(template_lock);
-
+        std::map<TraceLocalId, SingleTask*>::iterator op_finder =
+          operations.find(key);
 #ifdef DEBUG_LEGION
-        assert(inst_id < pending_producers.size());
+        assert(op_finder != operations.end());
+        assert(op_finder->second == NULL);
 #endif
-        --pending_producers[inst_id];
-
-        if (pending_producers[fence_completion_id] > 0)
-        {
-          --pending_producers[fence_completion_id];
-          worklist.push_back(fence_completion_id);
-        }
-
-#ifdef DEBUG_LEGION
-        assert(operations.find(key) != operations.end());
-        assert(operations.find(key)->second == NULL);
-#endif
-        operations[key] = task;
-
-        while (pos < worklist.size())
-        {
-          unsigned work = worklist[pos++];
-#ifdef DEBUG_LEGION
-          assert(work < consumers.size());
-#endif
-          const std::vector<unsigned>& to_propagate = consumers[work];
-          for (std::vector<unsigned>::const_iterator it = to_propagate.begin();
-              it != to_propagate.end(); ++it)
-          {
-#ifndef DEBUG_LEGION
-            assert(*it < pending_producers.size());
-            assert(pending_producers[*it] > 0);
-#endif
-            if (--pending_producers[*it] == 0)
-              worklist.push_back(*it);
-          }
-        }
+        op_finder->second = task;
       }
-
-      for (std::vector<unsigned>::iterator it = worklist.begin();
-           it != worklist.end(); ++it)
-        instructions[*it]->execute();
+      {
+        std::map<TraceLocalId, std::vector<Instruction*> >::iterator
+          inst_finder = inst_map.find(key);
+#ifdef DEBUG_LEGION
+        assert(inst_finder != inst_map.end());
+#endif
+        const std::vector<Instruction*> &insts = inst_finder->second;
+        for (std::vector<Instruction*>::const_iterator it = insts.begin();
+             it != insts.end(); ++it)
+          (*it)->execute();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1654,13 +1623,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       tracing = false;
-      event_map.clear();
       optimize();
       replayable = check_preconditions();
+      schedule();
       if (Runtime::dump_physical_traces) dump_template();
+      event_map.clear();
 #ifdef DEBUG_LEGION
-      assert(consumers.size() == instructions.size());
-      assert(max_producers.size() == instructions.size());
       sanity_check();
 #endif
     }
@@ -1825,6 +1793,17 @@ namespace Legion {
       }
 
       instructions.swap(new_instructions);
+      for (std::vector<Instruction*>::iterator it = new_instructions.begin();
+           it != new_instructions.end(); ++it)
+        delete (*it);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::schedule()
+    //--------------------------------------------------------------------------
+    {
+      std::vector<std::vector<unsigned> > consumers;
+      std::vector<unsigned> producers;
       task_entries.clear();
       for (unsigned idx = 0; idx < instructions.size(); ++idx)
         switch (instructions[idx]->get_kind())
@@ -1836,56 +1815,82 @@ namespace Legion {
               assert(task_entries.find(inst->rhs) == task_entries.end());
 #endif
               task_entries[inst->rhs] = idx;
+              producers.push_back(1);
+              consumers.push_back(std::vector<unsigned>());
+              break;
             }
           case ASSIGN_FENCE_COMPLETION:
             {
-              max_producers.push_back(1);
+              producers.push_back(0);
               consumers.push_back(std::vector<unsigned>());
               break;
             }
           case MERGE_EVENT:
             {
               MergeEvent *inst = instructions[idx]->as_merge_event();
-              max_producers.push_back(inst->rhs.size());
               consumers.push_back(std::vector<unsigned>());
+              unsigned count = 0;
               for (std::set<unsigned>::iterator it = inst->rhs.begin();
                    it != inst->rhs.end(); it++)
               {
 #ifdef DEBUG_LEGION
                 assert(*it < consumers.size());
 #endif
-                consumers[*it].push_back(idx);
+                if (*it != fence_completion_id)
+                {
+                  consumers[*it].push_back(idx);
+                  ++count;
+                }
               }
+              producers.push_back(count);
               break;
             }
           case ISSUE_COPY:
             {
               IssueCopy *inst = instructions[idx]->as_issue_copy();
               consumers.push_back(std::vector<unsigned>());
-              max_producers.push_back(2);
               std::map<TraceLocalId, unsigned>::iterator finder =
                 task_entries.find(inst->op_key);
 #ifdef DEBUG_LEGION
               assert(finder != task_entries.end());
               assert(inst->precondition_idx < consumers.size());
 #endif
-              consumers[finder->second].push_back(idx);
-              consumers[inst->precondition_idx].push_back(idx);
+              unsigned count = 0;
+              if (finder->second != fence_completion_id)
+              {
+                consumers[finder->second].push_back(idx);
+                ++count;
+              }
+              if (inst->precondition_idx != fence_completion_id)
+              {
+                consumers[inst->precondition_idx].push_back(idx);
+                ++count;
+              }
+              producers.push_back(count);
               break;
             }
           case SET_READY_EVENT:
             {
               SetReadyEvent *inst = instructions[idx]->as_set_ready_event();
               consumers.push_back(std::vector<unsigned>());
-              max_producers.push_back(2);
               std::map<TraceLocalId, unsigned>::iterator finder =
                 task_entries.find(inst->op_key);
 #ifdef DEBUG_LEGION
               assert(finder != task_entries.end());
               assert(inst->ready_event_idx < consumers.size());
 #endif
-              consumers[finder->second].push_back(idx);
-              consumers[inst->ready_event_idx].push_back(idx);
+              unsigned count = 0;
+              if (finder->second != fence_completion_id)
+              {
+                consumers[finder->second].push_back(idx);
+                ++count;
+              }
+              if (inst->ready_event_idx != fence_completion_id)
+              {
+                consumers[inst->ready_event_idx].push_back(idx);
+                ++count;
+              }
+              producers.push_back(count);
               break;
             }
 #ifdef DEBUG_LEGION
@@ -1897,9 +1902,51 @@ namespace Legion {
 #endif
         }
 
-      for (std::vector<Instruction*>::iterator it = new_instructions.begin();
-           it != new_instructions.end(); ++it)
-        delete (*it);
+      for (std::map<TraceLocalId, SingleTask*>::iterator it =
+           operations.begin(); it != operations.end(); ++it)
+      {
+        const TraceLocalId &key = it->first;
+#ifdef DEBUG_LEGION
+        assert(inst_map.find(key) == inst_map.end());
+#endif
+        std::vector<Instruction*> &insts = inst_map[key];
+
+        std::map<TraceLocalId, unsigned>::iterator finder =
+          task_entries.find(it->first);
+#ifdef DEBUG_LEGION
+        assert(finder != task_entries.end());
+#endif
+
+        std::vector<unsigned> worklist(1, finder->second);
+#ifdef DEBUG_LEGION
+        assert(finder->second < producers.size());
+#endif
+        --producers[finder->second];
+        unsigned pos = 0;
+        while (pos < worklist.size())
+        {
+          unsigned work = worklist[pos++];
+#ifdef DEBUG_LEGION
+          assert(work < consumers.size());
+#endif
+          const std::vector<unsigned>& to_propagate = consumers[work];
+          for (std::vector<unsigned>::const_iterator it = to_propagate.begin();
+              it != to_propagate.end(); ++it)
+          {
+#ifndef DEBUG_LEGION
+            assert(*it < producers.size());
+            assert(producers[*it] > 0);
+#endif
+            if (--producers[*it] == 0)
+              worklist.push_back(*it);
+          }
+        }
+
+        for (std::vector<unsigned>::iterator it = worklist.begin();
+            it != worklist.end(); ++it)
+          if (*it != fence_completion_id)
+            insts.push_back(instructions[*it]);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1925,11 +1972,23 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::cerr << "[Instructions]" << std::endl;
-      for (size_t idx = 0; idx < instructions.size(); ++idx)
-        std::cerr << "  " << instructions[idx]->to_string()
-                  << ", # consumers: " << consumers[idx].size()
-                  << ", # producers: " << max_producers[idx]
-                  << std::endl;
+      for (std::map<TraceLocalId, std::vector<Instruction*> >::iterator it =
+           inst_map.begin(); it != inst_map.end(); ++it)
+      {
+        std::cerr << "  Operation (" << it->first.first << ",";
+        if (it->first.second.dim > 1) std::cerr << "(";
+        for (int dim = 0; dim < it->first.second.dim; ++dim)
+        {
+          if (dim > 0) std::cerr << ",";
+          std::cerr << it->first.second[dim];
+        }
+        if (it->first.second.dim > 1) std::cerr << ")";
+        std::cerr << ")" << std::endl;
+
+        const std::vector<Instruction*> &insts = it->second;
+        for (size_t idx = 0; idx < insts.size(); ++idx)
+          std::cerr << "    " << insts[idx]->to_string() << std::endl;
+      }
       std::cerr << "[Previous Valid Views]" << std::endl;
       for (LegionMap<InstanceView*, FieldMask>::aligned::iterator it =
            previous_valid_views.begin(); it !=
