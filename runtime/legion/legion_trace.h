@@ -382,6 +382,8 @@ namespace Legion {
       std::vector<PhysicalTemplate*> templates;
     };
 
+    typedef std::pair<unsigned, DomainPoint> TraceLocalId;
+
     /**
      * \class PhysicalTemplate
      * This class represents a recipe to reconstruct a physical task graph.
@@ -485,7 +487,7 @@ namespace Legion {
       Reservation template_lock;
       unsigned fence_completion_id;
     private:
-      std::map<std::pair<unsigned, DomainPoint>, unsigned> task_entries;
+      std::map<TraceLocalId, unsigned> task_entries;
       std::vector<std::vector<unsigned> > consumers;
       std::vector<unsigned> pending_producers;
       std::vector<unsigned> max_producers;
@@ -493,7 +495,7 @@ namespace Legion {
       std::vector<Instruction*> instructions;
     public:
       ApEvent fence_completion;
-      std::map<std::pair<unsigned, DomainPoint>, SingleTask*> operations;
+      std::map<TraceLocalId, SingleTask*> operations;
       std::vector<ApEvent> events;
       CachedMappings                                  cached_mappings;
       LegionMap<InstanceView*, FieldMask>::aligned    previous_valid_views;
@@ -537,7 +539,7 @@ namespace Legion {
       virtual Instruction* clone(PhysicalTemplate& tpl,
                                const std::map<unsigned, unsigned> &rewrite) = 0;
     protected:
-      std::map<std::pair<unsigned, DomainPoint>, SingleTask*> &operations;
+      std::map<TraceLocalId, SingleTask*> &operations;
       std::vector<ApEvent>& events;
     };
 
@@ -548,7 +550,7 @@ namespace Legion {
      */
     struct GetTermEvent : public Instruction {
       GetTermEvent(PhysicalTemplate& tpl, unsigned lhs,
-                   const std::pair<unsigned, DomainPoint>& rhs);
+                   const TraceLocalId& rhs);
       virtual void execute();
       virtual std::string to_string();
 
@@ -570,7 +572,7 @@ namespace Legion {
     private:
       friend struct PhysicalTemplate;
       unsigned lhs;
-      std::pair<unsigned, DomainPoint> rhs;
+      TraceLocalId rhs;
     };
 
     /**
@@ -649,7 +651,7 @@ namespace Legion {
     struct IssueCopy : public Instruction {
       IssueCopy(PhysicalTemplate &tpl,
                 unsigned lhs, RegionTreeNode *node,
-                const std::pair<unsigned, DomainPoint> &op_key,
+                const TraceLocalId &op_key,
                 const std::vector<Domain::CopySrcDstField> &src_fields,
                 const std::vector<Domain::CopySrcDstField> &dst_fields,
                 unsigned precondition_idx, PredEvent predicate_guard,
@@ -677,7 +679,7 @@ namespace Legion {
       friend struct PhysicalTemplate;
       unsigned lhs;
       RegionTreeNode* node;
-      std::pair<unsigned, DomainPoint> op_key;
+      TraceLocalId op_key;
       std::vector<Domain::CopySrcDstField> src_fields;
       std::vector<Domain::CopySrcDstField> dst_fields;
       unsigned precondition_idx;
@@ -695,7 +697,7 @@ namespace Legion {
      */
     struct SetReadyEvent : public Instruction {
       SetReadyEvent(PhysicalTemplate& tpl,
-                    const std::pair<unsigned, DomainPoint>& op_key,
+                    const TraceLocalId& op_key,
                     unsigned region_idx,
                     unsigned inst_idx,
                     unsigned ready_event_idx,
@@ -720,7 +722,7 @@ namespace Legion {
                                  const std::map<unsigned, unsigned> &rewrite);
     private:
       friend struct PhysicalTemplate;
-      std::pair<unsigned, DomainPoint> op_key;
+      TraceLocalId op_key;
       unsigned region_idx;
       unsigned inst_idx;
       unsigned ready_event_idx;

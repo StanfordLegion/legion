@@ -1595,9 +1595,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(task->runtime, PHYSICAL_TRACE_EXECUTE_CALL);
-      std::pair<unsigned, DomainPoint> key(task->get_trace_local_id(),
-                                           trace_info.color);
-      std::map<std::pair<unsigned, DomainPoint>, unsigned>::iterator finder =
+      TraceLocalId key(task->get_trace_local_id(), trace_info.color);
+      std::map<TraceLocalId, unsigned>::iterator finder =
         task_entries.find(key);
 #ifdef DEBUG_LEGION
       assert(finder != task_entries.end());
@@ -1743,8 +1742,8 @@ namespace Legion {
             {
               SetReadyEvent *inst = instructions[idx]->as_set_ready_event();
               std::set<unsigned> &ready_pre = preconditions[inst->ready_event_idx];
-              std::map<std::pair<unsigned, DomainPoint>, unsigned>::iterator
-                finder = task_entries.find(inst->op_key);
+              std::map<TraceLocalId, unsigned>::iterator finder =
+                task_entries.find(inst->op_key);
 #ifdef DEBUG_LEGION
               assert(finder != task_entries.end());
 #endif
@@ -1864,8 +1863,8 @@ namespace Legion {
               IssueCopy *inst = instructions[idx]->as_issue_copy();
               consumers.push_back(std::vector<unsigned>());
               max_producers.push_back(2);
-              std::map<std::pair<unsigned, DomainPoint>, unsigned>::iterator
-                finder = task_entries.find(inst->op_key);
+              std::map<TraceLocalId, unsigned>::iterator finder =
+                task_entries.find(inst->op_key);
 #ifdef DEBUG_LEGION
               assert(finder != task_entries.end());
               assert(inst->precondition_idx < consumers.size());
@@ -1879,8 +1878,8 @@ namespace Legion {
               SetReadyEvent *inst = instructions[idx]->as_set_ready_event();
               consumers.push_back(std::vector<unsigned>());
               max_producers.push_back(2);
-              std::map<std::pair<unsigned, DomainPoint>, unsigned>::iterator
-                finder = task_entries.find(inst->op_key);
+              std::map<TraceLocalId, unsigned>::iterator finder =
+                task_entries.find(inst->op_key);
 #ifdef DEBUG_LEGION
               assert(finder != task_entries.end());
               assert(inst->ready_event_idx < consumers.size());
@@ -1992,8 +1991,7 @@ namespace Legion {
     {
       AutoLock t_lock(template_lock);
 
-      std::pair<unsigned, DomainPoint> op_key(trace_info.trace_local_id,
-          trace_info.color);
+      TraceLocalId op_key(trace_info.trace_local_id, trace_info.color);
 #ifdef DEBUG_LEGION
       assert(cached_mappings.find(op_key) == cached_mappings.end());
 #endif
@@ -2022,8 +2020,7 @@ namespace Legion {
     {
       AutoLock t_lock(template_lock, 1, false/*exclusive*/);
 
-      std::pair<unsigned, DomainPoint> op_key(trace_info.trace_local_id,
-          trace_info.color);
+      TraceLocalId op_key(trace_info.trace_local_id, trace_info.color);
       CachedMappings::const_iterator finder = cached_mappings.find(op_key);
 #ifdef DEBUG_LEGION
       assert(finder != cached_mappings.end());
@@ -2053,8 +2050,7 @@ namespace Legion {
 #endif
       event_map[lhs] = lhs_;
 
-      std::pair<unsigned, DomainPoint> key(
-          task->get_trace_local_id(), trace_info.color);
+      TraceLocalId key(task->get_trace_local_id(), trace_info.color);
 #ifdef DEBUG_LEGION
       assert(operations.find(key) == operations.end());
       assert(task_entries.find(key) == task_entries.end());
@@ -2228,8 +2224,7 @@ namespace Legion {
 #endif
       event_map[lhs] = lhs_;
 
-      std::pair<unsigned, DomainPoint> op_key(op->get_trace_local_id(),
-                                              trace_info.color);
+      TraceLocalId op_key(op->get_trace_local_id(), trace_info.color);
 #ifdef DEBUG_LEGION
       assert(operations.find(op_key) != operations.end());
 #endif
@@ -2344,8 +2339,7 @@ namespace Legion {
 
       events.push_back(ApEvent());
 
-      std::pair<unsigned, DomainPoint> op_key(op->get_trace_local_id(),
-                                              trace_info.color);
+      TraceLocalId op_key(op->get_trace_local_id(), trace_info.color);
 #ifdef DEBUG_LEGION
       assert(operations.find(op_key) != operations.end());
 #endif
@@ -2385,7 +2379,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     GetTermEvent::GetTermEvent(PhysicalTemplate& tpl, unsigned l,
-        const std::pair<unsigned, DomainPoint>& r)
+                               const TraceLocalId& r)
       : Instruction(tpl), lhs(l), rhs(r)
     //--------------------------------------------------------------------------
     {
@@ -2549,7 +2543,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IssueCopy::IssueCopy(PhysicalTemplate& tpl,
                          unsigned l, RegionTreeNode* n,
-                         const std::pair<unsigned, DomainPoint>& key,
+                         const TraceLocalId& key,
                          const std::vector<Domain::CopySrcDstField>& s,
                          const std::vector<Domain::CopySrcDstField>& d,
                          unsigned pi, PredEvent pg,
@@ -2670,9 +2664,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     SetReadyEvent::SetReadyEvent(PhysicalTemplate& tpl,
-                                 const std::pair<unsigned, DomainPoint>& key,
-                                 unsigned ri, unsigned ii, unsigned rei,
-                                 InstanceView *v)
+                                 const TraceLocalId& key, unsigned ri,
+                                 unsigned ii, unsigned rei, InstanceView *v)
       : Instruction(tpl), op_key(key), region_idx(ri), inst_idx(ii),
         ready_event_idx(rei), view(v)
 #ifdef DEBUG_LEGION
