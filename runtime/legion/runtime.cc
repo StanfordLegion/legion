@@ -2751,7 +2751,6 @@ namespace Legion {
       assert(op != NULL);
 #endif
       TriggerOpArgs args;
-      args.manager = this;
       args.op = op;
       AutoLock l_lock(local_queue_lock);
       RtEvent next = runtime->issue_runtime_meta_task(args,
@@ -2909,7 +2908,6 @@ namespace Legion {
         // Now that we've removed them from the queue, issue the
         // mapping analysis calls
         TriggerTaskArgs trigger_args;
-        trigger_args.manager = this;
         for (std::list<const Task*>::iterator vis_it = visible_tasks.begin();
              vis_it != visible_tasks.end(); vis_it++)
         {
@@ -20431,11 +20429,6 @@ continue;					\
           (const DeferredRecycleArgs*)args;
           Runtime::get_runtime(p)->free_distributed_id(
                                                        deferred_recycle_args->did);
-          break;
-        }
-        case LG_DEFERRED_SLICE_ID:
-        {
-          DeferredSlicer::handle_slice(args);
           break;
         }
         case LG_MUST_INDIV_ID:

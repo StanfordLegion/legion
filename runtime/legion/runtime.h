@@ -468,7 +468,6 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_TRIGGER_OP_ID;
       public:
         Operation *op;
-        ProcessorManager *manager;
       };
       struct SchedulerArgs : public LgTaskArgs<SchedulerArgs> {
       public:
@@ -481,7 +480,6 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_TRIGGER_TASK_ID;
       public:
         TaskOp *op;
-        ProcessorManager *manager;
       };
       struct MapperMessage {
       public:

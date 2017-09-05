@@ -1050,36 +1050,6 @@ namespace Legion {
       std::set<ApEvent> restrict_postconditions;
     };
 
-    /**
-     * \class DeferredSlicer
-     * A class for helping with parallelizing the triggering
-     * of slice tasks from within MultiTasks
-     */
-    class DeferredSlicer {
-    public:
-      struct DeferredSliceArgs : public LgTaskArgs<DeferredSliceArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFERRED_SLICE_ID;
-      public:
-        DeferredSlicer *slicer;
-        SliceTask *slice;
-      };
-    public:
-      DeferredSlicer(MultiTask *owner);
-      DeferredSlicer(const DeferredSlicer &rhs);
-      ~DeferredSlicer(void);
-    public:
-      DeferredSlicer& operator=(const DeferredSlicer &rhs);
-    public:
-      void trigger_slices(std::list<SliceTask*> &slices);
-      void perform_slice(SliceTask *slice);
-    public:
-      static void handle_slice(const void *args);
-    private:
-      Reservation slice_lock;
-      MultiTask *const owner;
-    };
-
   }; // namespace Internal 
 }; // namespace Legion
 
