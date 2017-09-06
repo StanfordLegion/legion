@@ -780,6 +780,7 @@ namespace Realm {
     virtual void reset(void);
     virtual bool done(void) const;
     virtual size_t step(size_t max_bytes, AddressInfo& info,
+			unsigned flags,
 			bool tentative = false);
     virtual size_t step(size_t max_bytes, AddressInfoHDF5& info,
 			bool tentative = false);
@@ -840,6 +841,7 @@ namespace Realm {
   
   template <unsigned DIM>
   size_t TransferIteratorHDF5<DIM>::step(size_t max_bytes, AddressInfo& info,
+					 unsigned flags,
 					 bool tentative /*= false*/)
   {
     // normal address infos not allowed

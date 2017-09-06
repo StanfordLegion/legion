@@ -76,7 +76,7 @@ namespace Realm {
     virtual size_t step(size_t max_bytes, AddressInfo& info, unsigned flags,
 			bool tentative = false) = 0;
 #ifdef USE_HDF
-    virtual size_t step(size_t max_bytes, AddressInfoHDF5& info, unsigned flags,
+    virtual size_t step(size_t max_bytes, AddressInfoHDF5& info,
 			bool tentative = false);
 #endif
     virtual void confirm_step(void) = 0;

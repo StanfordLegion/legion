@@ -1440,7 +1440,8 @@ namespace LegionRuntime {
 	  // always ask the HDF5 size for a step first
 	  size_t hdf5_bytes = hdf5_iter->step(max_bytes, hdf5_info,
 					      true /*tentative*/);
-	  size_t mem_bytes = mem_iter->step(hdf5_bytes, mem_info);
+	  // TODO: support 2D/3D for memory side of an HDF transfer?
+	  size_t mem_bytes = mem_iter->step(hdf5_bytes, mem_info, 0);
 	  if(mem_bytes == hdf5_bytes) {
 	    // looks good - confirm the hdf5 step
 	    hdf5_iter->confirm_step();
