@@ -309,7 +309,8 @@ namespace LegionRuntime {
                req->nbytes, req->nlines);
       }
 
-      long XferDes::default_get_requests(Request** reqs, long nr)
+    long XferDes::default_get_requests(Request** reqs, long nr,
+				       unsigned flags)
       {
         long idx = 0;
 	
@@ -367,7 +368,9 @@ namespace LegionRuntime {
 	  }
 
 	  TransferIterator::AddressInfo src_info, dst_info;
+
 	  size_t src_bytes = src_iter->step(max_bytes, src_info,
+					    flags,
 					    true /*tentative*/);
 	  size_t src_bytes_avail;
 	  if(pre_xd_guid == XFERDES_NO_GUID) {
@@ -382,14 +385,19 @@ namespace LegionRuntime {
 	      src_iter->cancel_step();
 	      break;
 	    }
-
+	      
 	    // if src_bytes_avail < src_bytes, we'll need to redo the src_iter
 	    //  step, but wait until we see if we need to shrink even more due
 	    //  to the destination side
 	  }
 
-	  bool dst_step_tentative = (next_xd_guid != XFERDES_NO_GUID);
+	  // destination step must be tentative for an IB that might be full
+	  //  or a non-IB target that might collapse dimensions differently
+	  bool dst_step_tentative = ((next_xd_guid != XFERDES_NO_GUID) ||
+				     ((flags & TransferIterator::LINES_OK) != 0));
+
 	  size_t dst_bytes = dst_iter->step(src_bytes_avail, dst_info,
+					    flags,
 					    dst_step_tentative);
 	  if(next_xd_guid != XFERDES_NO_GUID) {
 	    // if we're writing to an intermediate buffer, make sure the
@@ -406,40 +414,134 @@ namespace LegionRuntime {
 
 	    // if dst_bytes_avail < dst_bytes, we'll need to redo the dst_iter
 	    // step
-	    if(dst_bytes_avail == dst_bytes) {
-	      dst_iter->confirm_step();
-	    } else {
+	    if(dst_bytes_avail < dst_bytes) {
 	      // cancel and request what we have room to write
 	      dst_iter->cancel_step();
-	      dst_bytes = dst_iter->step(dst_bytes_avail, dst_info);
+	      dst_bytes = dst_iter->step(dst_bytes_avail, dst_info, flags);
 	      assert(dst_bytes == dst_bytes_avail);
 	    }
 	  }
 
-	  // this check can fail either if the destination step size is smaller
-	  //  or if one/both of the intermediate buffers were near capacity
-	  if(dst_bytes == src_bytes) {
-	    // looks good - confirm the src step
-	    src_iter->confirm_step();
-	  } else {
+	  // does source now need to be shrunk?
+	  if(dst_bytes < src_bytes) {
 	    // cancel the src step and try to just step by dst_bytes
 	    assert(dst_bytes < src_bytes);  // should never be larger
 	    src_iter->cancel_step();
-	    src_bytes = src_iter->step(dst_bytes, src_info);
+	    src_bytes = src_iter->step(dst_bytes, src_info, flags);
 	    // now must match
 	    assert(src_bytes == dst_bytes);
 	  }
 
+	  // when 2D transfers are allowed, it is possible that the
+	  // bytes_per_chunk don't match, and we need to add an extra
+	  //  dimension to one side or the other
+	  // NOTE: this transformation can cause the dimensionality of the
+	  //  transfer to grow.  Allow this to happen and detect it at the
+	  //  end.
+	  if((flags & TransferIterator::LINES_OK) == 0) {
+	    assert(src_info.bytes_per_chunk == dst_info.bytes_per_chunk);
+	    assert(src_info.num_lines == 1);
+	    assert(src_info.num_planes == 1);
+	    assert(dst_info.num_lines == 1);
+	    assert(dst_info.num_planes == 1);
+
+	    src_iter->confirm_step();
+	    if(dst_step_tentative)
+	      dst_iter->confirm_step();
+	  } else {
+	    if(src_info.bytes_per_chunk < dst_info.bytes_per_chunk) {
+	      size_t ratio = dst_info.bytes_per_chunk / src_info.bytes_per_chunk;
+	      assert((src_info.bytes_per_chunk * ratio) == dst_info.bytes_per_chunk);
+	      dst_info.num_planes = dst_info.num_lines;
+	      dst_info.plane_stride = dst_info.line_stride;
+	      dst_info.num_lines = ratio;
+	      dst_info.line_stride = src_info.bytes_per_chunk;
+	      dst_info.bytes_per_chunk = src_info.bytes_per_chunk;
+	    }
+	    if(dst_info.bytes_per_chunk < src_info.bytes_per_chunk) {
+	      size_t ratio = src_info.bytes_per_chunk / dst_info.bytes_per_chunk;
+	      assert((dst_info.bytes_per_chunk * ratio) == src_info.bytes_per_chunk);
+	      src_info.num_planes = src_info.num_lines;
+	      src_info.plane_stride = src_info.line_stride;
+	      src_info.num_lines = ratio;
+	      src_info.line_stride = dst_info.bytes_per_chunk;
+	      src_info.bytes_per_chunk = dst_info.bytes_per_chunk;
+	    }
+	  
+	    // similarly, if the number of lines doesn't match, we need to promote
+	    //  one of the requests from 2D to 3D
+	    if(src_info.num_lines < dst_info.num_lines) {
+	      size_t ratio = dst_info.num_lines / src_info.num_lines;
+	      assert((src_info.num_lines * ratio) == dst_info.num_lines);
+	      dst_info.num_planes = ratio;
+	      dst_info.plane_stride = dst_info.line_stride * src_info.num_lines;
+	      dst_info.num_lines = src_info.num_lines;
+	    }
+	    if(dst_info.num_lines < src_info.num_lines) {
+	      size_t ratio = src_info.num_lines / dst_info.num_lines;
+	      assert((dst_info.num_lines * ratio) == src_info.num_lines);
+	      src_info.num_planes = ratio;
+	      src_info.plane_stride = src_info.line_stride * dst_info.num_lines;
+	      src_info.num_lines = dst_info.num_lines;
+	    }
+
+	    // sanity-checks: src/dst should match on lines/planes and we
+	    //  shouldn't have multiple planes if we don't have multiple lines
+	    assert(src_info.num_lines == dst_info.num_lines);
+	    assert(src_info.num_planes == dst_info.num_planes);
+	    assert((src_info.num_lines > 1) || (src_info.num_planes == 1));
+
+	    // if 3D isn't allowed, set num_planes back to 1
+	    if((flags & TransferIterator::PLANES_OK) == 0) {
+	      src_info.num_planes = 1;
+	      dst_info.num_planes = 1;
+	    }
+
+	    // now figure out how many bytes we're actually able to move and
+	    //  if it's less than what we got from the iterators, try again
+	    size_t act_bytes = (src_info.bytes_per_chunk *
+				src_info.num_lines *
+				src_info.num_planes);
+	    if(act_bytes == src_bytes) {
+	      // things match up - confirm the steps
+	      src_iter->confirm_step();
+	      dst_iter->confirm_step();
+	    } else {
+	      //log_request.info() << "dimension mismatch! " << act_bytes << " < " << src_bytes << " (" << bytes_total << ")";
+	      TransferIterator::AddressInfo dummy_info;
+	      src_iter->cancel_step();
+	      src_bytes = src_iter->step(act_bytes, dummy_info, flags,
+					 false /*!tentative*/);
+	      assert(src_bytes == act_bytes);
+	      dst_iter->cancel_step();
+	      dst_bytes = dst_iter->step(act_bytes, dummy_info, flags,
+					 false /*!tentative*/);
+	      assert(dst_bytes == act_bytes);
+	    }
+	  }
+
+	  size_t act_bytes = (src_info.bytes_per_chunk *
+			      src_info.num_lines *
+			      src_info.num_planes);
+
 	  Request* new_req = dequeue_request();
 	  new_req->seq_pos = bytes_total;
-	  new_req->seq_count = src_bytes;
-	  new_req->dim = Request::DIM_1D;
+	  new_req->seq_count = act_bytes;
+	  new_req->dim = ((src_info.num_planes == 1) ?
+			  ((src_info.num_lines == 1) ? Request::DIM_1D :
+			                               Request::DIM_2D) :
+			                              Request::DIM_3D);
 	  new_req->src_off = src_info.base_offset;
 	  new_req->dst_off = dst_info.base_offset;
 	  new_req->nbytes = src_info.bytes_per_chunk;
-	  new_req->nlines = 1;
+	  new_req->nlines = src_info.num_lines;
+	  new_req->src_str = src_info.line_stride;
+	  new_req->dst_str = dst_info.line_stride;
+	  new_req->nplanes = src_info.num_planes;
+	  new_req->src_pstr = src_info.plane_stride;
+	  new_req->dst_pstr = dst_info.plane_stride;
 
-	  bytes_total += src_bytes;
+	  bytes_total += act_bytes;
 
 	  // is our iterator done?
 	  if(src_iter->done() || dst_iter->done() ||
@@ -454,10 +556,32 @@ namespace LegionRuntime {
 	    assert((pre_xd_guid == XFERDES_NO_GUID) || (pre_bytes_total == bytes_total));
 	  }
 
-	  log_request.info() << "[1D] guid(" << guid
-			     << ") src_off(" << new_req->src_off
-			     << ") dst_off(" << new_req->dst_off
-			     << ") nbytes(" << new_req->nbytes << ")";
+	  switch(new_req->dim) {
+	  case Request::DIM_1D:
+	    {
+	      log_request.info() << "request: guid=" << std::hex << guid << std::dec
+				 << " ofs=" << new_req->src_off << "->" << new_req->dst_off
+				 << " len=" << new_req->nbytes;
+	      break;
+	    }
+	  case Request::DIM_2D:
+	    {
+	      log_request.info() << "request: guid=" << std::hex << guid << std::dec
+				 << " ofs=" << new_req->src_off << "->" << new_req->dst_off
+				 << " len=" << new_req->nbytes
+				 << " lines=" << new_req->nlines << "(" << new_req->src_str << "," << new_req->dst_str << ")";
+	      break;
+	    }
+	  case Request::DIM_3D:
+	    {
+	      log_request.info() << "request: guid=" << std::hex << guid << std::dec
+				 << " ofs=" << new_req->src_off << "->" << new_req->dst_off
+				 << " len=" << new_req->nbytes
+				 << " lines=" << new_req->nlines << "(" << new_req->src_str << "," << new_req->dst_str << ")"
+				 << " planes=" << new_req->nplanes << "(" << new_req->src_pstr << "," << new_req->dst_pstr << ")";
+	      break;
+	    }
+	  }
 	  reqs[idx++] = new_req;
 	}
 #if 0
@@ -804,7 +928,10 @@ namespace LegionRuntime {
       long MemcpyXferDes::get_requests(Request** requests, long nr)
       {
         MemcpyRequest** reqs = (MemcpyRequest**) requests;
-        long new_nr = default_get_requests(requests, nr);
+	// allow 2D and 3D copies
+	unsigned flags = (TransferIterator::LINES_OK |
+			  TransferIterator::PLANES_OK);
+        long new_nr = default_get_requests(requests, nr, flags);
         for (long i = 0; i < new_nr; i++)
         {
           //reqs[i]->src_base = (char*)(src_buf_base + reqs[i]->src_off);
@@ -1014,7 +1141,10 @@ namespace LegionRuntime {
       {
         pthread_mutex_lock(&xd_lock);
         RemoteWriteRequest** reqs = (RemoteWriteRequest**) requests;
-        long new_nr = default_get_requests(requests, nr);
+	// remote writes allow 2D on source, but not destination - figure
+	//  out how to communicate that to the iterators?
+	unsigned flags = TransferIterator::LINES_OK;
+        long new_nr = default_get_requests(requests, nr, flags);
         for (long i = 0; i < new_nr; i++)
         {
           //reqs[i]->src_base = (char*)(src_buf_base + reqs[i]->src_off);
@@ -1138,7 +1268,9 @@ namespace LegionRuntime {
       long GPUXferDes::get_requests(Request** requests, long nr)
       {
         GPURequest** reqs = (GPURequest**) requests;
-        long new_nr = default_get_requests(requests, nr);
+	// TODO: add support for 3D CUDA copies (just 1D and 2D for now)
+	unsigned flags = TransferIterator::LINES_OK;
+        long new_nr = default_get_requests(requests, nr, flags);
         for (long i = 0; i < new_nr; i++) {
           reqs[i]->event.reset();
           switch (kind) {
@@ -1589,18 +1721,43 @@ namespace LegionRuntime {
         MemcpyRequest** mem_cpy_reqs = (MemcpyRequest**) requests;
         for (long i = 0; i < nr; i++) {
           MemcpyRequest* req = mem_cpy_reqs[i];
-          if (req->dim == Request::DIM_1D) {
-            memcpy(req->dst_base, req->src_base, req->nbytes);
-          } else {
-            assert(req->dim == Request::DIM_2D);
-            const char *src = (const char *)(req->src_base);
-	    char *dst = (char *)(req->dst_base);
-            for (size_t i = 0; i < req->nlines; i++) {
-              memcpy(dst, src, req->nbytes);
-              src += req->src_str;
-              dst += req->dst_str;
-            }
-          }
+	  switch(req->dim) {
+	  case Request::DIM_1D :
+	    {
+	      memcpy(req->dst_base, req->src_base, req->nbytes);
+	      break;
+	    }
+	  case Request::DIM_2D :
+	    {
+	      const char *src = (const char *)(req->src_base);
+	      char *dst = (char *)(req->dst_base);
+	      for (size_t i = 0; i < req->nlines; i++) {
+		memcpy(dst, src, req->nbytes);
+		src += req->src_str;
+		dst += req->dst_str;
+	      }
+	      break;
+	    }
+	  case Request::DIM_3D :
+	    {
+	      const char *src_p = (const char *)(req->src_base);
+	      char *dst_p = (char *)(req->dst_base);
+	      for (size_t j = 0; j < req->nplanes; j++) {
+		const char *src = src_p;
+		char *dst = dst_p;
+		for (size_t i = 0; i < req->nlines; i++) {
+		  memcpy(dst, src, req->nbytes);
+		  src += req->src_str;
+		  dst += req->dst_str;
+		}
+		src_p += req->src_pstr;
+		dst_p += req->dst_pstr;
+	      }
+	      break;
+	    }
+	  default:
+	    assert(0);
+	  }
           req->xd->notify_request_read_done(req);
           req->xd->notify_request_write_done(req);
         }
