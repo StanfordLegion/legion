@@ -1817,9 +1817,11 @@ namespace Legion {
     PhysicalInstance PhysicalRegionImpl::get_instance_info(
                                     PrivilegeMode mode, FieldID fid, 
                                     void *realm_is, TypeTag type_tag, 
-                                    bool silence_warnings, ReductionOpID redop)
+                                    bool silence_warnings, 
+                                    bool generic_accessor,
+                                    ReductionOpID redop)
     //--------------------------------------------------------------------------
-    {
+    { 
       // Check the privilege mode first
       switch (mode)
       {
@@ -1931,6 +1933,14 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_INVALID_FIELD_PRIVILEGES, 
                        "Accessor construction for field %d in task %s "
                        "without privileges!", fid, context->get_task_name())
+      if (generic_accessor && Runtime::runtime_warnings && !silence_warnings)
+        REPORT_LEGION_WARNING(LEGION_WARNING_GENERIC_ACCESSOR,
+                              "Using a generic accessor for accessing a "
+                              "physical instance of task %s (UID %lld). "
+                              "Generic accessors are very slow and are "
+                              "strongly discouraged for use in high "
+                              "performance code.", context->get_task_name(),
+                              context->get_unique_id())
       // Get the index space to use for the accessor
       runtime->get_index_space_domain(req.region.get_index_space(),
                                       realm_is, type_tag);
@@ -2173,12 +2183,12 @@ namespace Legion {
       // Whoever is waiting first, we have to advance their arrive barriers
       if (init_in_MPI)
       {
-        Runtime::phase_barrier_arrive(legion_arrive_barrier, 1);
+        Runtime::phase_barrier_arrive(legion_arrive_barrier, legion_participants);
         Runtime::advance_barrier(mpi_wait_barrier);
       }
       else
       {
-        Runtime::phase_barrier_arrive(mpi_arrive_barrier, 1);
+        Runtime::phase_barrier_arrive(mpi_arrive_barrier, mpi_participants);
         Runtime::advance_barrier(legion_wait_barrier);
       }
     }
@@ -3092,7 +3102,6 @@ namespace Legion {
       assert(op != NULL);
 #endif
       TriggerOpArgs args;
-      args.manager = this;
       args.op = op;
       runtime->issue_runtime_meta_task(args, priority, op); 
     }
@@ -3219,7 +3228,6 @@ namespace Legion {
         // Now that we've removed them from the queue, issue the
         // mapping analysis calls
         TriggerTaskArgs trigger_args;
-        trigger_args.manager = this;
         for (std::list<const Task*>::iterator vis_it = visible_tasks.begin();
               vis_it != visible_tasks.end(); vis_it++)
         {
@@ -3349,6 +3357,19 @@ namespace Legion {
       }
     }
 
+    //--------------------------------------------------------------------------
+    void MemoryManager::finalize(void)
+    //--------------------------------------------------------------------------
+    {
+      if (!is_owner)
+        return;
+      assert(!current_instances.empty());
+      // No need for the lock, no one should be doing anything at this point
+      for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
+            current_instances.begin(); it != current_instances.end(); it++)
+        it->first->force_deletion();
+    }
+    
     //--------------------------------------------------------------------------
     void MemoryManager::register_remote_instance(PhysicalManager *manager)
     //--------------------------------------------------------------------------
@@ -5800,7 +5821,12 @@ namespace Legion {
     {
       // If we have a profiler we need to increment our requests count
       if (profiler != NULL)
+#ifdef DEBUG_LEGION
+        profiler->increment_total_outstanding_requests(
+                    LegionProfiler::LEGION_PROF_MESSAGE);
+#else
         profiler->increment_total_outstanding_requests();
+#endif
       // Strip off our header and the number of messages, the 
       // processor part was already stipped off by the Legion runtime
       const char *buffer = (const char*)args;
@@ -6633,7 +6659,12 @@ namespace Legion {
               // outstanding profiling count because we don't actually
               // do profiling requests on shutdown messages
               if (profiler != NULL)
+#ifdef DEBUG_LEGION
+                profiler->decrement_total_outstanding_requests(
+                            LegionProfiler::LEGION_PROF_MESSAGE);
+#else
                 profiler->decrement_total_outstanding_requests();
+#endif
               runtime->handle_shutdown_notification(derez,remote_address_space);
               break;
             }
@@ -6643,7 +6674,12 @@ namespace Legion {
               // outstanding profiling count because we don't actually
               // do profiling requests on shutdown messages
               if (profiler != NULL)
+#ifdef DEBUG_LEGION
+                profiler->decrement_total_outstanding_requests(
+                            LegionProfiler::LEGION_PROF_MESSAGE);
+#else
                 profiler->decrement_total_outstanding_requests();
+#endif
               runtime->handle_shutdown_response(derez);
               break;
             }
@@ -6970,7 +7006,7 @@ namespace Legion {
           args.phase = (ShutdownPhase)(phase-1);
         else
           args.phase = phase;
-        runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_PRIORITY, 
+        runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY,
                                          NULL, precondition);
       }
     }
@@ -7016,16 +7052,6 @@ namespace Legion {
       // Instant death
       result = false;
       log_shutdown.info("Outstanding tasks on node %d", runtime->address_space);
-    }
-
-    //--------------------------------------------------------------------------
-    void ShutdownManager::record_outstanding_profiling_requests(void)
-    //--------------------------------------------------------------------------
-    {
-      // Instant death
-      result = false;
-      log_shutdown.info("Outstanding profiling requests on node %d", 
-                        runtime->address_space);
     }
 
     //--------------------------------------------------------------------------
@@ -9467,7 +9493,6 @@ namespace Legion {
       }
       if (profiler != NULL)
       {
-        profiler->finalize();
         delete profiler;
         profiler = NULL;
       }
@@ -10110,6 +10135,20 @@ namespace Legion {
         it->second->startup_mappers();
     }
 
+    //--------------------------------------------------------------------------
+    void Runtime::finalize_runtime(void)
+    //--------------------------------------------------------------------------
+    {
+      if (profiler != NULL)
+      {
+        // Have the memory managers for deletion of all their instances
+        for (std::map<Memory,MemoryManager*>::const_iterator it =
+             memory_managers.begin(); it != memory_managers.end(); it++)
+          it->second->finalize();
+        profiler->finalize();
+      }
+    }
+    
     //--------------------------------------------------------------------------
     void Runtime::launch_top_level_task(Processor target)
     //--------------------------------------------------------------------------
@@ -16668,7 +16707,7 @@ namespace Legion {
       args.phase = ShutdownManager::CHECK_TERMINATION;
       // Issue this with a low priority so that other meta-tasks
       // have an opportunity to run
-      issue_runtime_meta_task(args, LG_THROUGHPUT_PRIORITY);
+      issue_runtime_meta_task(args, LG_LOW_PRIORITY);
     }
 
     //--------------------------------------------------------------------------
@@ -16735,10 +16774,7 @@ namespace Legion {
         }
 #endif
       }
-      // Record if we have any outstanding profiling requests
-      if (profiler != NULL && profiler->has_outstanding_requests())
-        shutdown_manager->record_outstanding_profiling_requests();
-      // Check all our message managers for outstanding messages 
+      // Check all our message managers for outstanding messages
       for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
       {
         if (message_managers[idx] != NULL)
@@ -20762,8 +20798,10 @@ namespace Legion {
                               const void *userdata, size_t userlen, Processor p)
     //--------------------------------------------------------------------------
     {
-      // All we need to is delete our runtime instance
-      delete get_runtime(p);
+      // Finalize the runtime and then delete it
+      Runtime *runtime = get_runtime(p);
+      runtime->finalize_runtime();
+      delete runtime;
     }
 
     //--------------------------------------------------------------------------
@@ -20910,11 +20948,6 @@ namespace Legion {
               (const DeferredRecycleArgs*)args;
             Runtime::get_runtime(p)->free_distributed_id(
                                         deferred_recycle_args->did);
-            break;
-          }
-        case LG_DEFERRED_SLICE_ID:
-          {
-            DeferredSlicer::handle_slice(args); 
             break;
           }
         case LG_MUST_INDIV_ID:

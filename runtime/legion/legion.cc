@@ -2540,11 +2540,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     Realm::RegionInstance PhysicalRegion::get_instance_info(PrivilegeMode mode,
                               FieldID fid, void *realm_is, TypeTag type_tag, 
-                              bool silence_warnings, ReductionOpID redop) const
+                              bool silence_warnings, bool generic_accessor,
+                              ReductionOpID redop) const
     //--------------------------------------------------------------------------
     {
       return impl->get_instance_info(mode, fid, realm_is, type_tag, 
-                                     silence_warnings, redop);
+                                     silence_warnings, generic_accessor, redop);
     }
 
     //--------------------------------------------------------------------------

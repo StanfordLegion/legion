@@ -2103,6 +2103,7 @@ namespace Legion {
       Realm::RegionInstance get_instance_info(PrivilegeMode mode, FieldID fid,
                                               void *realm_is, TypeTag type_tag,
                                               bool silence_warnings,
+                                              bool generic_accessor = false,
                                               ReductionOpID redop = 0) const;
       void fail_bounds_check(DomainPoint p, FieldID fid,
                              PrivilegeMode mode) const;
@@ -2139,7 +2140,7 @@ namespace Legion {
      *  - template<typename REDOP> void reduce(const Point<N,T>&, REDOP::RHS)
      */
     template<PrivilegeMode M, typename FT, int N, typename COORD_T = coord_t,
-             typename A = Realm::AffineAccessor<FT,N,COORD_T>,
+             typename A = Realm::GenericAccessor<FT,N,COORD_T>,
 #ifdef BOUNDS_CHECKS
              bool CHECK_BOUNDS = true>
 #else

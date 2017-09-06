@@ -39,7 +39,7 @@ NVCC_FLAGS	?=
 GASNET_FLAGS	?=
 LD_FLAGS	?=
 # For Point and Rect typedefs
-CC_FLAGS	= -std=c++11
+CC_FLAGS	+= -std=c++11
 
 ###########################################################################
 #

@@ -563,6 +563,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalManager::force_deletion(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+#endif
+      log_garbage.spew("Force deleting physical instance " IDFMT " in memory "
+                       IDFMT "", instance.id, memory_manager->memory.id);
+#ifndef DISABLE_GC
+      std::vector<PhysicalInstance::DestroyedField> serdez_fields;
+      layout->compute_destroyed_fields(serdez_fields); 
+      if (!serdez_fields.empty())
+        instance.destroy(serdez_fields);
+      else
+        instance.destroy();
+#endif
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalManager::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
@@ -2337,9 +2356,9 @@ namespace Legion {
               if (field_sizes[idx] != reduction_op->sizeof_lhs)
                 REPORT_LEGION_ERROR(ERROR_UNSUPPORTED_LAYOUT_CONSTRAINT,
                     "Illegal reduction instance request with field %d "
-                    "which has size %ld but the LHS type of reduction "
-                    "operator %d is %ld", field_set[idx], field_sizes[idx],
-                    redop_id, reduction_op->sizeof_lhs)
+                    "which has size %d but the LHS type of reduction "
+                    "operator %d is %d", field_set[idx], int(field_sizes[idx]),
+                    redop_id, int(reduction_op->sizeof_lhs))
               // Update the field sizes to the rhs of the reduction op
               field_sizes[idx] = reduction_op->sizeof_rhs;
             }

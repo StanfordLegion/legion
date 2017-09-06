@@ -291,26 +291,24 @@ namespace Legion {
 
     // Special namespace for providing multi-dimensional 
     // array syntax on accessors 
-    namespace AccessorHelp {
+    namespace ArraySyntax {
       // A small helper class that helps provide some syntactic sugar for
-      // indexing accessors like a multi-dimensional array 
+      // indexing accessors like a multi-dimensional array for generic accessors
       template<typename A, typename FT, int N, typename T, 
                 int M, bool READ_ONLY>
-      class ArraySyntaxHelper {
+      class GenericSyntaxHelper {
       public:
-        __CUDA_HD__
-        ArraySyntaxHelper(const A &acc, const Realm::ZPoint<M-1,T> &p)
+        GenericSyntaxHelper(const A &acc, const Realm::ZPoint<M-1,T> &p)
           : accessor(acc)
         {
           for (int i = 0; i < (M-1); i++)
             point[i] = p[i];
         }
       public:
-        __CUDA_HD__
-        inline ArraySyntaxHelper<A,FT,N,T,M+1,READ_ONLY> operator[](T val)
+        inline GenericSyntaxHelper<A,FT,N,T,M+1,READ_ONLY> operator[](T val)
         {
           point[M-1] = val;
-          return ArraySyntaxHelper<A,FT,N,T,M+1,READ_ONLY>(accessor, point);
+          return GenericSyntaxHelper<A,FT,N,T,M+1,READ_ONLY>(accessor, point);
         }
       public:
         const A &accessor;
@@ -318,10 +316,75 @@ namespace Legion {
       };
       // Specialization for M = N
       template<typename A, typename FT, int N, typename T, bool RO>
-      class ArraySyntaxHelper<A,FT,N,T,N,RO> {
+      class GenericSyntaxHelper<A,FT,N,T,N,RO> {
+      public:
+        GenericSyntaxHelper(const A &acc, const Realm::ZPoint<N-1,T> &p)
+          : accessor(acc)
+        {
+          for (int i = 0; i < (N-1); i++)
+            point[i] = p[i];
+        }
+      public:
+        inline Realm::AccessorRefHelper<FT> operator[](T val)
+        {
+          point[N-1] = val;
+          return accessor[point];
+        }
+      public:
+        const A &accessor;
+        Realm::ZPoint<N,T> point;
+      };
+      // Further specialization for M = N and read-only
+      template<typename A, typename FT, int N, typename T>
+      class GenericSyntaxHelper<A,FT,N,T,N,true> {
+      public:
+        GenericSyntaxHelper(const A &acc, const Realm::ZPoint<N-1,T> &p)
+          : accessor(acc)
+        {
+          for (int i = 0; i < (N-1); i++)
+            point[i] = p[i];
+        }
+      public:
+        inline const Realm::AccessorRefHelper<FT> operator[](T val)
+        {
+          point[N-1] = val;
+          return accessor[point];
+        }
+      public:
+        const A &accessor;
+        Realm::ZPoint<N,T> point;
+      };
+
+      // A small helper class that helps provide some syntactic sugar for
+      // indexing accessors like a multi-dimensional array for affine accessors
+      template<typename A, typename FT, int N, typename T, 
+                int M, bool READ_ONLY>
+      class AffineSyntaxHelper {
       public:
         __CUDA_HD__
-        ArraySyntaxHelper(const A &acc, const Realm::ZPoint<N-1,T> &p)
+        AffineSyntaxHelper(const A &acc, const Realm::ZPoint<M-1,T> &p)
+          : accessor(acc)
+        {
+          for (int i = 0; i < (M-1); i++)
+            point[i] = p[i];
+        }
+      public:
+        __CUDA_HD__
+        inline AffineSyntaxHelper<A,FT,N,T,M+1,READ_ONLY> operator[](T val)
+        {
+          point[M-1] = val;
+          return AffineSyntaxHelper<A,FT,N,T,M+1,READ_ONLY>(accessor, point);
+        }
+      public:
+        const A &accessor;
+        Realm::ZPoint<M,T> point;
+      };
+      // Specialization for M = N
+      template<typename A, typename FT, int N, typename T, bool RO>
+      class AffineSyntaxHelper<A,FT,N,T,N,RO> {
+      public:
+        __CUDA_HD__
+        AffineSyntaxHelper(const A &acc, const Realm::ZPoint<N-1,T> &p)
           : accessor(acc)
         {
           for (int i = 0; i < (N-1); i++)
@@ -340,10 +403,10 @@ namespace Legion {
       };
       // Further specialization for M = N and read-only
       template<typename A, typename FT, int N, typename T>
-      class ArraySyntaxHelper<A,FT,N,T,N,true> {
+      class AffineSyntaxHelper<A,FT,N,T,N,true> {
       public:
         __CUDA_HD__
-        ArraySyntaxHelper(const A &acc, const Realm::ZPoint<N-1,T> &p)
+        AffineSyntaxHelper(const A &acc, const Realm::ZPoint<N-1,T> &p)
           : accessor(acc)
         {
           for (int i = 0; i < (N-1); i++)
@@ -362,9 +425,535 @@ namespace Legion {
       };
     };
 
+    ////////////////////////////////////////////////////////////
+    // Specializations for Generic Accessors
+    ////////////////////////////////////////////////////////////
+
     // Read-only FieldAccessor specialization
-    template<typename FT, int N, typename T, typename A, bool CB>
-    class FieldAccessor<READ_ONLY,FT,N,T,A,CB> {
+    template<typename FT, int N, typename T, bool CB>
+    class FieldAccessor<READ_ONLY,FT,N,T,
+                        Realm::GenericAccessor<FT,N,T>,CB> {
+    public:
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    bool silence_warnings = false)
+      {
+        Realm::ZIndexSpace<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_ONLY, fid, &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              silence_warnings, true/*generic accessor*/);
+        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
+      }
+    public:
+      inline FT read(const Realm::ZPoint<N,T>& p) const 
+        { 
+          return accessor.read(p); 
+        }
+      inline const Realm::AccessorRefHelper<FT> 
+          operator[](const Realm::ZPoint<N,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+      inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_ONLY,FT,N,T,
+            Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,true/*read only*/>
+          operator[](T index) const
+      {
+        return ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_ONLY,FT,N,T,
+               Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,true/*read only*/>(
+              *this, Realm::ZPoint<1,T>(index));
+      }
+    public:
+      mutable Realm::GenericAccessor<FT,N,T> accessor;
+    };
+
+    // Read-only FieldAccessor specialization
+    // with bounds checks
+    template<typename FT, int N, typename T>
+    class FieldAccessor<READ_ONLY,FT,N,T,
+                        Realm::GenericAccessor<FT,N,T>,true> {
+    public:
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    bool silence_warnings = false)
+        : field(fid), field_region(region), 
+          bounds(region.template get_bounds<N,T>())
+      {
+        Realm::ZIndexSpace<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_ONLY, fid, &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              silence_warnings, true/*generic accessor*/);
+        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
+      }
+    public:
+      inline FT read(const Realm::ZPoint<N,T>& p) const 
+        { 
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+          return accessor.read(p); 
+        }
+      inline const Realm::AccessorRefHelper<FT> 
+          operator[](const Realm::ZPoint<N,T>& p) const
+        { 
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+          return accessor[p]; 
+        }
+      inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_ONLY,FT,N,T,
+             Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,true/*read only*/>
+          operator[](T index) const
+      {
+        return ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_ONLY,FT,N,T,
+              Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,true/*read only*/>(
+              *this, Realm::ZPoint<1,T>(index));
+      }
+    public:
+      mutable Realm::GenericAccessor<FT,N,T> accessor;
+      FieldID field;
+      PhysicalRegion field_region;
+      Realm::ZIndexSpace<N,T> bounds;
+    };
+
+    // Read-only FieldAccessor specialization 
+    // with N==1 to avoid array ambiguity
+    template<typename FT, typename T, bool CB>
+    class FieldAccessor<READ_ONLY,FT,1,T,
+                        Realm::GenericAccessor<FT,1,T>,CB> {
+    public:
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    bool silence_warnings = false)
+      {
+        Realm::ZIndexSpace<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_ONLY, fid, &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              silence_warnings, true/*generic accessor*/);
+        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
+      }
+    public:
+      inline FT read(const Realm::ZPoint<1,T>& p) const 
+        { 
+          return accessor.read(p); 
+        }
+      inline const Realm::AccessorRefHelper<FT>
+          operator[](const Realm::ZPoint<1,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+    public:
+      mutable Realm::GenericAccessor<FT,1,T> accessor;
+    };
+
+    // Read-only FieldAccessor specialization 
+    // with N==1 to avoid array ambiguity and bounds checks
+    template<typename FT, typename T>
+    class FieldAccessor<READ_ONLY,FT,1,T,
+                        Realm::GenericAccessor<FT,1,T>,true> {
+    public:
+      // No CUDA support due to PhysicalRegion constructor
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    bool silence_warnings = false)
+        : field(fid), field_region(region), 
+          bounds(region.template get_bounds<1,T>()) 
+      {
+        Realm::ZIndexSpace<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_ONLY, fid, &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              silence_warnings, true/*generic accessor*/);
+        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
+      }
+    public:
+      inline FT read(const Realm::ZPoint<1,T>& p) const 
+        { 
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+          return accessor.read(p); 
+        }
+      inline const Realm::AccessorRefHelper<FT> 
+          operator[](const Realm::ZPoint<1,T>& p) const
+        { 
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+          return accessor[p]; 
+        }
+    public:
+      mutable Realm::GenericAccessor<FT,1,T> accessor;
+      FieldID field;
+      PhysicalRegion field_region;
+      Realm::ZIndexSpace<1,T> bounds;
+    };
+
+    // Read-write FieldAccessor specialization
+    template<typename FT, int N, typename T, bool CB>
+    class FieldAccessor<READ_WRITE,FT,N,T,
+                        Realm::GenericAccessor<FT,N,T>,CB> {
+    public:
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    bool silence_warnings = false)
+      {
+        Realm::ZIndexSpace<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_WRITE, fid, &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              silence_warnings, true/*generic accessor*/);
+        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
+      }
+    public:
+      inline FT read(const Realm::ZPoint<N,T>& p) const
+        { 
+          return accessor.read(p); 
+        }
+      inline void write(const Realm::ZPoint<N,T>& p, FT val) const
+        { 
+          accessor.write(p, val); 
+        }
+      inline Realm::AccessorRefHelper<FT> 
+          operator[](const Realm::ZPoint<N,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+      inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_WRITE,FT,N,T,
+             Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,false/*read only*/>
+          operator[](T index) const
+      {
+        return ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_WRITE,FT,N,T,
+              Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,false/*read only*/>(
+              *this, Realm::ZPoint<1,T>(index));
+      }
+      // No reductions since we can't handle atomicity correctly
+    public:
+      mutable Realm::GenericAccessor<FT,N,T> accessor;
+    };
+
+    // Read-write FieldAccessor specialization
+    // with bounds checks
+    template<typename FT, int N, typename T>
+    class FieldAccessor<READ_WRITE,FT,N,T,
+                        Realm::GenericAccessor<FT,N,T>,true> {
+    public:
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    bool silence_warnings = false)
+        : field(fid), field_region(region), 
+          bounds(region.template get_bounds<N,T>())
+      {
+        Realm::ZIndexSpace<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_WRITE, fid, &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              silence_warnings, true/*generic accessor*/);
+        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
+      }
+    public:
+      inline FT read(const Realm::ZPoint<N,T>& p) const
+        { 
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+          return accessor.read(p); 
+        }
+      inline void write(const Realm::ZPoint<N,T>& p, FT val) const
+        { 
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field,WRITE_DISCARD);
+          accessor.write(p, val); 
+        }
+      inline Realm::AccessorRefHelper<FT> 
+          operator[](const Realm::ZPoint<N,T>& p) const
+        { 
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+          return accessor[p]; 
+        }
+      inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_WRITE,FT,N,T,
+              Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,false/*read only*/>
+          operator[](T index) const
+      {
+        return ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_WRITE,FT,N,T,
+              Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,false/*read only*/>(
+              *this, Realm::ZPoint<1,T>(index));
+      }
+      // No reductions since we can't handle atomicity correctly
+    public:
+      mutable Realm::GenericAccessor<FT,N,T> accessor;
+      FieldID field;
+      PhysicalRegion field_region;
+      Realm::ZIndexSpace<N,T> bounds;
+    };
+
+    // Read-write FieldAccessor specialization 
+    // with N==1 to avoid array ambiguity
+    template<typename FT, typename T, bool CB>
+    class FieldAccessor<READ_WRITE,FT,1,T,
+                        Realm::GenericAccessor<FT,1,T>,CB> {
+    public:
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    bool silence_warnings = false)
+      {
+        Realm::ZIndexSpace<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_WRITE, fid, &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              silence_warnings, true/*generic accessor*/);
+        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
+      }
+    public:
+      inline FT read(const Realm::ZPoint<1,T>& p) const
+        { 
+          return accessor.read(p); 
+        }
+      inline void write(const Realm::ZPoint<1,T>& p, FT val) const
+        { 
+          accessor.write(p, val); 
+        }
+      inline Realm::AccessorRefHelper<FT> 
+          operator[](const Realm::ZPoint<1,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+      // No reductions since we can't handle atomicity correctly
+    public:
+      mutable Realm::GenericAccessor<FT,1,T> accessor;
+    };
+
+    // Read-write FieldAccessor specialization 
+    // with N==1 to avoid array ambiguity and bounds checks
+    template<typename FT, typename T>
+    class FieldAccessor<READ_WRITE,FT,1,T,
+                        Realm::GenericAccessor<FT,1,T>,true> {
+    public:
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    bool silence_warnings = false)
+        : field(fid), field_region(region), 
+          bounds(region.template get_bounds<1,T>())
+      {
+        Realm::ZIndexSpace<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(READ_WRITE, fid, &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              silence_warnings, true/*generic accessor*/);
+        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
+      }
+    public:
+      inline FT read(const Realm::ZPoint<1,T>& p) const
+        { 
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+          return accessor.read(p); 
+        }
+      inline void write(const Realm::ZPoint<1,T>& p, FT val) const
+        { 
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field,WRITE_DISCARD);
+          accessor.write(p, val); 
+        }
+      inline Realm::AccessorRefHelper<FT> 
+          operator[](const Realm::ZPoint<1,T>& p) const
+        { 
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+          return accessor[p]; 
+        }
+      // No reduction since we can't handle atomicity correctly
+    public:
+      mutable Realm::GenericAccessor<FT,1,T> accessor;
+      FieldID field;
+      PhysicalRegion field_region;
+      Realm::ZIndexSpace<1,T> bounds;
+    };
+
+    // Write-discard FieldAccessor specialization
+    template<typename FT, int N, typename T, bool CB>
+    class FieldAccessor<WRITE_DISCARD,FT,N,T,
+                        Realm::GenericAccessor<FT,N,T>,CB> {
+    public:
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    bool silence_warnings = false)
+      {
+        Realm::ZIndexSpace<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(WRITE_DISCARD, fid, &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              silence_warnings, true/*generic accessor*/);
+        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
+      }
+    public:
+      inline FT read(const Realm::ZPoint<N,T>& p) const
+        { 
+          return accessor.read(p); 
+        }
+      inline void write(const Realm::ZPoint<N,T>& p, FT val) const
+        { 
+          accessor.write(p, val); 
+        }
+      inline Realm::AccessorRefHelper<FT> 
+          operator[](const Realm::ZPoint<N,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+      inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,N,
+           T,Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,false/*read only*/>
+          operator[](T index) const
+      {
+        return ArraySyntax::GenericSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,
+          N,T,Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,false/*read only*/>(
+              *this, Realm::ZPoint<1,T>(index));
+      }
+    public:
+      mutable Realm::GenericAccessor<FT,N,T> accessor;
+    };
+
+    // Write-discard FieldAccessor specialization
+    // with bounds checks
+    template<typename FT, int N, typename T>
+    class FieldAccessor<WRITE_DISCARD,FT,N,T,
+                        Realm::GenericAccessor<FT,N,T>,true> {
+    public:
+      // No CUDA support due to PhysicalRegion constructor
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    bool silence_warnings = false)
+        : field(fid), field_region(region), 
+          bounds(region.template get_bounds<N,T>())
+      {
+        Realm::ZIndexSpace<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(WRITE_DISCARD, fid, &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              silence_warnings, true/*generic accessor*/);
+        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
+      }
+    public:
+      inline FT read(const Realm::ZPoint<N,T>& p) const
+        { 
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+          return accessor.read(p); 
+        }
+      inline void write(const Realm::ZPoint<N,T>& p, FT val) const
+        { 
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field,WRITE_DISCARD);
+          accessor.write(p, val); 
+        }
+      inline Realm::AccessorRefHelper<FT> 
+          operator[](const Realm::ZPoint<N,T>& p) const
+        { 
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+          return accessor[p]; 
+        }
+      inline ArraySyntax::GenericSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,N,
+           T,Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,false/*read only*/>
+          operator[](T index) const
+      {
+        return ArraySyntax::GenericSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,
+         N,T,Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,false/*read only*/>(
+              *this, Realm::ZPoint<1,T>(index));
+      }
+    public:
+      mutable Realm::GenericAccessor<FT,N,T> accessor;
+      FieldID field;
+      PhysicalRegion field_region;
+      Realm::ZIndexSpace<N,T> bounds;
+    };
+
+    // Write-discard FieldAccessor specialization with
+    // N == 1 to avoid array ambiguity
+    template<typename FT, typename T, bool CB>
+    class FieldAccessor<WRITE_DISCARD,FT,1,T,
+                        Realm::GenericAccessor<FT,1,T>,CB> {
+    public:
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    bool silence_warnings = false)
+      {
+        Realm::ZIndexSpace<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(WRITE_DISCARD, fid, &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              silence_warnings, true/*generic accessor*/);
+        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
+      }
+    public:
+      inline FT read(const Realm::ZPoint<1,T>& p) const
+        { 
+          return accessor.read(p); 
+        }
+      inline void write(const Realm::ZPoint<1,T>& p, FT val) const
+        { 
+          accessor.write(p, val); 
+        }
+      inline Realm::AccessorRefHelper<FT> 
+          operator[](const Realm::ZPoint<1,T>& p) const
+        { 
+          return accessor[p]; 
+        }
+    public:
+      mutable Realm::GenericAccessor<FT,1,T> accessor;
+    };
+
+    // Write-discard FieldAccessor specialization with
+    // N == 1 to avoid array ambiguity and bounds checks
+    template<typename FT, typename T>
+    class FieldAccessor<WRITE_DISCARD,FT,1,T,
+                        Realm::GenericAccessor<FT,1,T>,true> {
+    public:
+      FieldAccessor(void) { }
+      FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    bool silence_warnings = false)
+        : field(fid), field_region(region), 
+          bounds(region.template get_bounds<1,T>())
+      {
+        Realm::ZIndexSpace<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(WRITE_DISCARD, fid, &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              silence_warnings, true/*generic accessor*/);
+        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
+      }
+    public:
+      inline FT read(const Realm::ZPoint<1,T>& p) const
+        { 
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
+          return accessor.read(p); 
+        }
+      inline void write(const Realm::ZPoint<1,T>& p, FT val) const
+        { 
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field,WRITE_DISCARD);
+          accessor.write(p, val); 
+        }
+      inline Realm::AccessorRefHelper<FT> 
+          operator[](const Realm::ZPoint<1,T>& p) const
+        { 
+          if (!bounds.contains(p)) 
+            field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
+          return accessor[p]; 
+        }
+    public:
+      mutable Realm::GenericAccessor<FT,1,T> accessor;
+      FieldID field;
+      PhysicalRegion field_region;
+      Realm::ZIndexSpace<1,T> bounds;
+    };
+
+    ////////////////////////////////////////////////////////////
+    // Specializations for Affine Accessors
+    ////////////////////////////////////////////////////////////
+
+    // Read-only FieldAccessor specialization
+    template<typename FT, int N, typename T, bool CB>
+    class FieldAccessor<READ_ONLY,FT,N,T,
+                        Realm::AffineAccessor<FT,N,T>,CB> {
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
@@ -375,7 +964,7 @@ namespace Legion {
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
-        accessor = A(instance, fid, is.bounds);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
       }
     public:
       __CUDA_HD__
@@ -394,22 +983,23 @@ namespace Legion {
           return accessor[p]; 
         }
       __CUDA_HD__
-      inline AccessorHelp::ArraySyntaxHelper<
-        FieldAccessor<READ_ONLY,FT,N,T,A>,FT,N,T,2,true/*read only*/>
+      inline ArraySyntax::AffineSyntaxHelper<FieldAccessor<READ_ONLY,FT,N,T,
+            Realm::AffineAccessor<FT,N,T>,CB>,FT,N,T,2,true/*read only*/>
           operator[](T index) const
       {
-        return AccessorHelp::ArraySyntaxHelper<
-          FieldAccessor<READ_ONLY,FT,N,T,A>,FT,N,T,2,true/*read only*/>(
+        return ArraySyntax::AffineSyntaxHelper<FieldAccessor<READ_ONLY,FT,N,T,
+               Realm::AffineAccessor<FT,N,T>,CB>,FT,N,T,2,true/*read only*/>(
               *this, Realm::ZPoint<1,T>(index));
       }
     public:
-      A accessor;
+      Realm::AffineAccessor<FT,N,T> accessor;
     };
 
     // Read-only FieldAccessor specialization
     // with bounds checks
-    template<typename FT, int N, typename T, typename A>
-    class FieldAccessor<READ_ONLY,FT,N,T,A,true> {
+    template<typename FT, int N, typename T>
+    class FieldAccessor<READ_ONLY,FT,N,T,
+                        Realm::AffineAccessor<FT,N,T>,true> {
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
@@ -423,7 +1013,7 @@ namespace Legion {
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
-        accessor = A(instance, fid, is.bounds);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
       }
     public:
       __CUDA_HD__
@@ -478,16 +1068,16 @@ namespace Legion {
           return accessor[p]; 
         }
       __CUDA_HD__
-      inline AccessorHelp::ArraySyntaxHelper<
-        FieldAccessor<READ_ONLY,FT,N,T,A>,FT,N,T,2,true/*read only*/>
+      inline ArraySyntax::AffineSyntaxHelper<FieldAccessor<READ_ONLY,FT,N,T,
+             Realm::AffineAccessor<FT,N,T>,true>,FT,N,T,2,true/*read only*/>
           operator[](T index) const
       {
-        return AccessorHelp::ArraySyntaxHelper<
-          FieldAccessor<READ_ONLY,FT,N,T,A>,FT,N,T,2,true/*read only*/>(
+        return ArraySyntax::AffineSyntaxHelper<FieldAccessor<READ_ONLY,FT,N,T,
+              Realm::AffineAccessor<FT,N,T>,true>,FT,N,T,2,true/*read only*/>(
               *this, Realm::ZPoint<1,T>(index));
       }
     public:
-      A accessor;
+      Realm::AffineAccessor<FT,N,T> accessor;
       FieldID field;
       PhysicalRegion field_region;
       Realm::ZIndexSpace<N,T> bounds;
@@ -496,8 +1086,9 @@ namespace Legion {
 
     // Read-only FieldAccessor specialization 
     // with N==1 to avoid array ambiguity
-    template<typename FT, typename T, typename A, bool CB>
-    class FieldAccessor<READ_ONLY,FT,1,T,A,CB> {
+    template<typename FT, typename T, bool CB>
+    class FieldAccessor<READ_ONLY,FT,1,T,
+                        Realm::AffineAccessor<FT,1,T>,CB> {
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
@@ -508,7 +1099,7 @@ namespace Legion {
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
-        accessor = A(instance, fid, is.bounds);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
       }
     public:
       __CUDA_HD__
@@ -527,13 +1118,14 @@ namespace Legion {
           return accessor[p]; 
         }
     public:
-      A accessor;
+      Realm::AffineAccessor<FT,1,T> accessor;
     };
 
     // Read-only FieldAccessor specialization 
     // with N==1 to avoid array ambiguity and bounds checks
-    template<typename FT, typename T, typename A>
-    class FieldAccessor<READ_ONLY,FT,1,T,A,true> {
+    template<typename FT, typename T>
+    class FieldAccessor<READ_ONLY,FT,1,T,
+                        Realm::AffineAccessor<FT,1,T>,true> {
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
@@ -547,7 +1139,7 @@ namespace Legion {
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
-        accessor = A(instance, fid, is.bounds);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
       }
     public:
       __CUDA_HD__
@@ -602,7 +1194,7 @@ namespace Legion {
           return accessor[p]; 
         }
     public:
-      A accessor;
+      Realm::AffineAccessor<FT,1,T> accessor;
       FieldID field;
       PhysicalRegion field_region;
       Realm::ZIndexSpace<1,T> bounds;
@@ -610,8 +1202,9 @@ namespace Legion {
     };
 
     // Read-write FieldAccessor specialization
-    template<typename FT, int N, typename T, typename A, bool CB>
-    class FieldAccessor<READ_WRITE,FT,N,T,A,CB> {
+    template<typename FT, int N, typename T, bool CB>
+    class FieldAccessor<READ_WRITE,FT,N,T,
+                        Realm::AffineAccessor<FT,N,T>,CB> {
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
@@ -622,7 +1215,7 @@ namespace Legion {
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
-        accessor = A(instance, fid, is.bounds);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
       }
     public:
       __CUDA_HD__
@@ -646,12 +1239,12 @@ namespace Legion {
           return accessor[p]; 
         }
       __CUDA_HD__
-      inline AccessorHelp::ArraySyntaxHelper<
-        FieldAccessor<READ_WRITE,FT,N,T,A>,FT,N,T,2,false/*read only*/>
+      inline ArraySyntax::AffineSyntaxHelper<FieldAccessor<READ_WRITE,FT,N,T,
+             Realm::AffineAccessor<FT,N,T>,CB>,FT,N,T,2,false/*read only*/>
           operator[](T index) const
       {
-        return AccessorHelp::ArraySyntaxHelper<
-          FieldAccessor<READ_WRITE,FT,N,T,A>,FT,N,T,2,false/*read only*/>(
+        return ArraySyntax::AffineSyntaxHelper<FieldAccessor<READ_WRITE,FT,N,T,
+              Realm::AffineAccessor<FT,N,T>,CB>,FT,N,T,2,false/*read only*/>(
               *this, Realm::ZPoint<1,T>(index));
       }
       template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
@@ -661,13 +1254,14 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      A accessor;
+      Realm::AffineAccessor<FT,N,T> accessor;
     };
 
     // Read-write FieldAccessor specialization
     // with bounds checks
-    template<typename FT, int N, typename T, typename A>
-    class FieldAccessor<READ_WRITE,FT,N,T,A,true> {
+    template<typename FT, int N, typename T>
+    class FieldAccessor<READ_WRITE,FT,N,T,
+                        Realm::AffineAccessor<FT,N,T>,true> {
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
@@ -681,7 +1275,7 @@ namespace Legion {
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
-        accessor = A(instance, fid, is.bounds);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
       }
     public:
       __CUDA_HD__
@@ -753,12 +1347,12 @@ namespace Legion {
           return accessor[p]; 
         }
       __CUDA_HD__
-      inline AccessorHelp::ArraySyntaxHelper<
-        FieldAccessor<READ_WRITE,FT,N,T,A>,FT,N,T,2,false/*read only*/>
+      inline ArraySyntax::AffineSyntaxHelper<FieldAccessor<READ_WRITE,FT,N,T,
+              Realm::AffineAccessor<FT,N,T>,true>,FT,N,T,2,false/*read only*/>
           operator[](T index) const
       {
-        return AccessorHelp::ArraySyntaxHelper<
-          FieldAccessor<READ_WRITE,FT,N,T,A>,FT,N,T,2,false/*read only*/>(
+        return ArraySyntax::AffineSyntaxHelper<FieldAccessor<READ_WRITE,FT,N,T,
+               Realm::AffineAccessor<FT,N,T>,true>,FT,N,T,2,false/*read only*/>(
               *this, Realm::ZPoint<1,T>(index));
       }
       template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__ 
@@ -780,7 +1374,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      A accessor;
+      Realm::AffineAccessor<FT,N,T> accessor;
       FieldID field;
       PhysicalRegion field_region;
       Realm::ZIndexSpace<N,T> bounds;
@@ -789,8 +1383,9 @@ namespace Legion {
 
     // Read-write FieldAccessor specialization 
     // with N==1 to avoid array ambiguity
-    template<typename FT, typename T, typename A, bool CB>
-    class FieldAccessor<READ_WRITE,FT,1,T,A,CB> {
+    template<typename FT, typename T, bool CB>
+    class FieldAccessor<READ_WRITE,FT,1,T,
+                        Realm::AffineAccessor<FT,1,T>,CB> {
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
@@ -801,7 +1396,7 @@ namespace Legion {
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
-        accessor = A(instance, fid, is.bounds);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
       }
     public:
       __CUDA_HD__
@@ -831,13 +1426,14 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      A accessor;
+      Realm::AffineAccessor<FT,1,T> accessor;
     };
 
     // Read-write FieldAccessor specialization 
     // with N==1 to avoid array ambiguity and bounds checks
-    template<typename FT, typename T, typename A>
-    class FieldAccessor<READ_WRITE,FT,1,T,A,true> {
+    template<typename FT, typename T>
+    class FieldAccessor<READ_WRITE,FT,1,T,
+                        Realm::AffineAccessor<FT,1,T>,true> {
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
@@ -851,7 +1447,7 @@ namespace Legion {
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
-        accessor = A(instance, fid, is.bounds);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
       }
     public:
       __CUDA_HD__
@@ -941,7 +1537,7 @@ namespace Legion {
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      A accessor;
+      Realm::AffineAccessor<FT,1,T> accessor;
       FieldID field;
       PhysicalRegion field_region;
       Realm::ZIndexSpace<1,T> bounds;
@@ -949,8 +1545,9 @@ namespace Legion {
     };
 
     // Write-discard FieldAccessor specialization
-    template<typename FT, int N, typename T, typename A, bool CB>
-    class FieldAccessor<WRITE_DISCARD,FT,N,T,A,CB> {
+    template<typename FT, int N, typename T, bool CB>
+    class FieldAccessor<WRITE_DISCARD,FT,N,T,
+                        Realm::AffineAccessor<FT,N,T>,CB> {
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
@@ -961,7 +1558,7 @@ namespace Legion {
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
-        accessor = A(instance, fid, is.bounds);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
       }
     public:
       __CUDA_HD__
@@ -985,22 +1582,23 @@ namespace Legion {
           return accessor[p]; 
         }
       __CUDA_HD__
-      inline AccessorHelp::ArraySyntaxHelper<
-        FieldAccessor<WRITE_DISCARD,FT,N,T,A>,FT,N,T,2,false/*read only*/>
+      inline ArraySyntax::AffineSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,N,T,
+             Realm::AffineAccessor<FT,N,T>,CB>,FT,N,T,2,false/*read only*/>
           operator[](T index) const
       {
-        return AccessorHelp::ArraySyntaxHelper<
-          FieldAccessor<WRITE_DISCARD,FT,N,T,A>,FT,N,T,2,false/*read only*/>(
+        return ArraySyntax::AffineSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,N,
+          T,Realm::AffineAccessor<FT,N,T>,CB>,FT,N,T,2,false/*read only*/>(
               *this, Realm::ZPoint<1,T>(index));
       }
     public:
-      A accessor;
+      Realm::AffineAccessor<FT,N,T> accessor;
     };
 
     // Write-discard FieldAccessor specialization
     // with bounds checks
-    template<typename FT, int N, typename T, typename A>
-    class FieldAccessor<WRITE_DISCARD,FT,N,T,A,true> {
+    template<typename FT, int N, typename T>
+    class FieldAccessor<WRITE_DISCARD,FT,N,T,
+                        Realm::AffineAccessor<FT,N,T>,true> {
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
@@ -1014,7 +1612,7 @@ namespace Legion {
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
-        accessor = A(instance, fid, is.bounds);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
       }
     public:
       __CUDA_HD__
@@ -1086,16 +1684,16 @@ namespace Legion {
           return accessor[p]; 
         }
       __CUDA_HD__
-      inline AccessorHelp::ArraySyntaxHelper<
-        FieldAccessor<WRITE_DISCARD,FT,N,T,A>,FT,N,T,2,false/*read only*/>
+      inline ArraySyntax::AffineSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,N,T,
+             Realm::AffineAccessor<FT,N,T>,true>,FT,N,T,2,false/*read only*/>
           operator[](T index) const
       {
-        return AccessorHelp::ArraySyntaxHelper<
-          FieldAccessor<WRITE_DISCARD,FT,N,T,A>,FT,N,T,2,false/*read only*/>(
+        return ArraySyntax::AffineSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,N,
+          T,Realm::AffineAccessor<FT,N,T>,true>,FT,N,T,2,false/*read only*/>(
               *this, Realm::ZPoint<1,T>(index));
       }
     public:
-      A accessor;
+      Realm::AffineAccessor<FT,N,T> accessor;
       FieldID field;
       PhysicalRegion field_region;
       Realm::ZIndexSpace<N,T> bounds;
@@ -1104,8 +1702,9 @@ namespace Legion {
 
     // Write-discard FieldAccessor specialization with
     // N == 1 to avoid array ambiguity
-    template<typename FT, typename T, typename A, bool CB>
-    class FieldAccessor<WRITE_DISCARD,FT,1,T,A,CB> {
+    template<typename FT, typename T, bool CB>
+    class FieldAccessor<WRITE_DISCARD,FT,1,T,
+                        Realm::AffineAccessor<FT,1,T>,CB> {
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
@@ -1116,7 +1715,7 @@ namespace Legion {
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
-        accessor = A(instance, fid, is.bounds);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
       }
     public:
       __CUDA_HD__
@@ -1140,13 +1739,14 @@ namespace Legion {
           return accessor[p]; 
         }
     public:
-      A accessor;
+      Realm::AffineAccessor<FT,1,T> accessor;
     };
 
     // Write-discard FieldAccessor specialization with
     // N == 1 to avoid array ambiguity and bounds checks
-    template<typename FT, typename T, typename A>
-    class FieldAccessor<WRITE_DISCARD,FT,1,T,A,true> {
+    template<typename FT, typename T>
+    class FieldAccessor<WRITE_DISCARD,FT,1,T,
+                        Realm::AffineAccessor<FT,1,T>,true> {
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
@@ -1160,7 +1760,7 @@ namespace Legion {
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
-        accessor = A(instance, fid, is.bounds);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
       }
     public:
       __CUDA_HD__
@@ -1232,7 +1832,7 @@ namespace Legion {
           return accessor[p]; 
         }
     public:
-      A accessor;
+      Realm::AffineAccessor<FT,1,T> accessor;
       FieldID field;
       PhysicalRegion field_region;
       Realm::ZIndexSpace<1,T> bounds;
@@ -1240,8 +1840,9 @@ namespace Legion {
     };
 
     // Reduce FieldAccessor specialization
-    template<typename FT, int N, typename T, typename A, bool CB>
-    class FieldAccessor<REDUCE,FT,N,T,A,CB> {
+    template<typename FT, int N, typename T, bool CB>
+    class FieldAccessor<REDUCE,FT,N,T,
+                        Realm::AffineAccessor<FT,N,T>,CB> {
     public:
       __CUDA_HD__
       FieldAccessor(void) { }
@@ -1252,8 +1853,8 @@ namespace Legion {
         const Realm::RegionInstance instance = 
           region.get_instance_info(REDUCE, fid, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
-              silence_warnings, redop);
-        accessor = A(instance, fid, is.bounds);
+              silence_warnings, false/*generic accessor*/, redop);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
       }
     public:
       template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
@@ -1263,12 +1864,13 @@ namespace Legion {
           REDOP::template fold<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      A accessor;
+      Realm::AffineAccessor<FT,N,T> accessor;
     };
 
     // Reduce FieldAccessor specialization with bounds checks
-    template<typename FT, int N, typename T, typename A>
-    class FieldAccessor<REDUCE,FT,N,T,A,true> {
+    template<typename FT, int N, typename T>
+    class FieldAccessor<REDUCE,FT,N,T,
+                        Realm::AffineAccessor<FT,N,T>,true> {
     public:
       // No CUDA support due to PhysicalRegion constructor
       FieldAccessor(void) { }
@@ -1282,8 +1884,8 @@ namespace Legion {
         const Realm::RegionInstance instance = 
           region.get_instance_info(REDUCE, fid, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
-              silence_warnings, redop);
-        accessor = A(instance, fid, is.bounds);
+              silence_warnings, false/*generic accessor*/, redop);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
       }
     public:
       template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__ 
@@ -1305,7 +1907,7 @@ namespace Legion {
           REDOP::template fold<EXCLUSIVE>(accessor[p], val);
         }
     public:
-      A accessor;
+      Realm::AffineAccessor<FT,N,T> accessor;
       FieldID field;
       PhysicalRegion field_region;
       Realm::ZIndexSpace<N,T> bounds;
@@ -1321,7 +1923,7 @@ namespace Legion {
      * have their privileges and bounds correct
      */
     template<typename FT, int N, typename T = coord_t,
-             typename A = Realm::AffineAccessor<FT,N,T> >
+             typename A = Realm::GenericAccessor<FT,N,T> >
     class UnsafeFieldAccessor {
     public:
       UnsafeFieldAccessor(void) { }
@@ -1331,8 +1933,80 @@ namespace Legion {
         Realm::ZIndexSpace<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(NO_ACCESS, fid, &is,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              silence_warnings, true/*generic accessor*/);
+        accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
+      }
+    public:
+      inline FT read(const Realm::ZPoint<N,T> &p) const
+        {
+          return accessor.read(p);
+        }
+      inline void write(const Realm::ZPoint<N,T> &p, FT val) const
+        {
+          accessor.write(p, val);
+        }
+      inline Realm::AccessorRefHelper<FT> 
+              operator[](const Realm::ZPoint<N,T> &p) const
+        {
+          return accessor[p];
+        }
+      inline ArraySyntax::GenericSyntaxHelper<UnsafeFieldAccessor<FT,N,T,
+              Realm::GenericAccessor<FT,N,T> >,FT,N,T,2,false/*read only*/>
+          operator[](T index) const
+        {
+          return ArraySyntax::GenericSyntaxHelper<UnsafeFieldAccessor<FT,N,T,
+              Realm::GenericAccessor<FT,N,T> >,FT,N,T,2,false/*read only*/>(
+                  *this, Realm::ZPoint<1,T>(index));
+        }
+    public:
+      mutable Realm::GenericAccessor<FT,N,T> accessor;
+    };
+
+    template<typename FT, typename T>
+    class UnsafeFieldAccessor<FT,1,T,Realm::GenericAccessor<FT,1,T> > {
+    public:
+      UnsafeFieldAccessor(void) { }
+      UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
+                          bool silence_warnings = false)
+      {
+        Realm::ZIndexSpace<1,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(NO_ACCESS, fid, &is,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              silence_warnings, true/*generic accessor*/);
+        accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
+      }
+    public:
+      inline FT read(const Realm::ZPoint<1,T> &p) const
+        {
+          return accessor.read(p);
+        }
+      inline void write(const Realm::ZPoint<1,T> &p, FT val) const
+        {
+          accessor.write(p, val);
+        }
+      inline Realm::AccessorRefHelper<FT> 
+              operator[](const Realm::ZPoint<1,T> &p) const
+        {
+          return accessor[p];
+        }
+    public:
+      mutable Realm::GenericAccessor<FT,1,T> accessor;
+    };
+
+    template<typename FT, int N, typename T>
+    class UnsafeFieldAccessor<FT, N, T, Realm::AffineAccessor<FT,N,T> > {
+    public:
+      UnsafeFieldAccessor(void) { }
+      UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
+                          bool silence_warnings = false)
+      {
+        Realm::ZIndexSpace<N,T> is;
+        const Realm::RegionInstance instance = 
+          region.get_instance_info(NO_ACCESS, fid, &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
-        accessor = A(instance, fid, is.bounds);
+        accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
       }
     public:
       __CUDA_HD__
@@ -1358,18 +2032,18 @@ namespace Legion {
       __CUDA_HD__
       inline FT& operator[](T index) const
         {
-          return AccessorHelp::ArraySyntaxHelper<
-            UnsafeFieldAccessor<FT,N,T,A>,FT,N,T,2,false/*read only*/>(
+          return ArraySyntax::AffineSyntaxHelper<UnsafeFieldAccessor<FT,N,T,
+                 Realm::AffineAccessor<FT,N,T> >,FT,N,T,2,false/*read only*/>(
                 *this, Realm::ZPoint<1,T>(index));
         }
     public:
-      A accessor;
+      Realm::AffineAccessor<FT,N,T> accessor;
     };
 
     // Specialization for UnsafeFieldAccessor for dimension 1 
     // to avoid ambiguity for array access
-    template<typename FT, typename T, typename A>
-    class UnsafeFieldAccessor<FT,1,T,A> {
+    template<typename FT, typename T>
+    class UnsafeFieldAccessor<FT,1,T,Realm::AffineAccessor<FT,1,T> > {
     public:
       UnsafeFieldAccessor(void) { }
       UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
@@ -1379,7 +2053,7 @@ namespace Legion {
         const Realm::RegionInstance instance = 
           region.get_instance_info(NO_ACCESS, fid, &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
-        accessor = A(instance, fid, is.bounds);
+        accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
       }
     public:
       __CUDA_HD__
@@ -1403,7 +2077,7 @@ namespace Legion {
           return accessor[p];
         }
     public:
-      A accessor;
+      Realm::AffineAccessor<FT,1,T> accessor;
     }; 
 
     //--------------------------------------------------------------------------
@@ -4729,9 +5403,9 @@ namespace LegionRuntime {
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Realm::Machine Machine;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Realm::Domain Domain;
+    typedef Legion::Domain Domain;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Realm::DomainPoint DomainPoint;
+    typedef Legion::DomainPoint DomainPoint;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Realm::IndexSpaceAllocator IndexSpaceAllocator;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")

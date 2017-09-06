@@ -111,6 +111,8 @@ namespace Realm {
 
     virtual ~InstanceLayoutPiece(void);
 
+    virtual size_t calculate_offset(const ZPoint<N,T>& p) const = 0;
+
     virtual void relocate(size_t base_offset) = 0;
 
     virtual void print(std::ostream& os) const = 0;
@@ -129,6 +131,8 @@ namespace Realm {
 
     template <typename S>
     static InstanceLayoutPiece<N,T> *deserialize_new(S& deserializer);
+
+    virtual size_t calculate_offset(const ZPoint<N,T>& p) const;
 
     virtual void relocate(size_t base_offset);
 
@@ -195,6 +199,77 @@ namespace Realm {
 
   // accessor stuff should eventually move to a different header file I think
 
+  template <typename FT>
+  class AccessorRefHelper {
+  public:
+    AccessorRefHelper(RegionInstance _inst, size_t _offset);
+
+    // "read"
+    operator FT(void) const;
+
+    // "write"
+    AccessorRefHelper<FT>& operator=(const FT& newval);
+
+  protected:
+    RegionInstance inst;
+    size_t offset;
+  };
+
+  // a generic accessor that works (slowly) for any instance layout
+  template <typename FT, int N, typename T = int>
+  class GenericAccessor {
+  public:
+    GenericAccessor(void);
+
+    // GenericAccessor constructors always work, but the is_compatible(...)
+    //  calls are still available for templated code
+
+    // implicitly tries to cover the entire instance's domain
+    GenericAccessor(RegionInstance inst,
+		   FieldID field_id, size_t subfield_offset = 0);
+
+    // limits domain to a subrectangle
+    GenericAccessor(RegionInstance inst,
+		   FieldID field_id, const ZRect<N,T>& subrect,
+		   size_t subfield_offset = 0);
+
+    ~GenericAccessor(void);
+
+    static bool is_compatible(RegionInstance inst, ptrdiff_t field_offset);
+    static bool is_compatible(RegionInstance inst, ptrdiff_t field_offset, const ZRect<N,T>& subrect);
+
+    template <typename INST>
+    static bool is_compatible(const INST &instance, unsigned field_id);
+    template <typename INST>
+    static bool is_compatible(const INST &instance, unsigned field_id, const ZRect<N,T>& subrect);
+
+    // GenericAccessor does not support returning a pointer to an element
+    //FT *ptr(const ZPoint<N,T>& p) const;
+
+    FT read(const ZPoint<N,T>& p);
+    void write(const ZPoint<N,T>& p, FT newval);
+
+    // this returns a "reference" that knows how to do a read via operator FT
+    //  or a write via operator=
+    AccessorRefHelper<FT> operator[](const ZPoint<N,T>& p);
+
+    // instead of storing the top-level layout - we narrow down to just the
+    //  piece list and relative offset of the field we're interested in
+    RegionInstance inst;
+    const InstancePieceList<N,T> *piece_list;
+    int rel_offset;
+    // cache the most recently-used piece
+    const InstanceLayoutPiece<N,T> *prev_piece;
+
+  protected:
+    // not a const method because of the piece caching
+    size_t get_offset(const ZPoint<N,T>& p);
+  };
+  
+  template <typename FT, int N, typename T>
+  std::ostream& operator<<(std::ostream& os, const GenericAccessor<FT,N,T>& a);
+
+
   // an instance accessor based on an affine linearization of an index space
   template <typename FT, int N, typename T = int>
   class AffineAccessor {
@@ -204,7 +279,7 @@ namespace Realm {
 
     // TODO: Sean check if this is safe for a default constructor
     __CUDA_HD__
-    AffineAccessor(void) : base(0) { }
+    AffineAccessor(void);
     // NOTE: these constructors will die horribly if the conversion is not
     //  allowed - call is_compatible(...) first if you're not sure
 

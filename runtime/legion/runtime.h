@@ -433,6 +433,7 @@ namespace Legion {
       PhysicalInstance get_instance_info(PrivilegeMode mode, FieldID fid, 
                                          void *realm_is, TypeTag type_tag,
                                          bool silence_warnings, 
+                                         bool generic_accessor,
                                          ReductionOpID redop);
       void fail_bounds_check(DomainPoint p, FieldID fid,
                              PrivilegeMode mode);
@@ -590,7 +591,6 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_TRIGGER_OP_ID;
       public:
         Operation *op;
-        ProcessorManager *manager;
       };
       struct SchedulerArgs : public LgTaskArgs<SchedulerArgs> {
       public:
@@ -603,7 +603,6 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_TRIGGER_TASK_ID;
       public:
         TaskOp *op;
-        ProcessorManager *manager;
       };
       struct MapperMessage {
       public:
@@ -760,6 +759,7 @@ namespace Legion {
       MemoryManager& operator=(const MemoryManager &rhs);
     public:
       void prepare_for_shutdown(void);
+      void finalize(void);
     public:
       void register_remote_instance(PhysicalManager *manager);
       void unregister_remote_instance(PhysicalManager *manager);
@@ -1043,7 +1043,6 @@ namespace Legion {
       static void handle_shutdown_response(Deserializer &derez);
     public:
       void record_outstanding_tasks(void);
-      void record_outstanding_profiling_requests(void);
       void record_recent_message(void);
       void record_pending_message(RtEvent pending_event);
     public:
@@ -1633,6 +1632,7 @@ namespace Legion {
       void initialize_legion_prof(void);
       void initialize_mappers(void);
       void startup_mappers(void);
+      void finalize_runtime(void);
       void launch_top_level_task(Processor target);
       ApEvent launch_mapper_task(Mapper *mapper, Processor proc, 
                                  Processor::TaskFuncID tid,
