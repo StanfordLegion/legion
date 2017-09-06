@@ -1822,12 +1822,12 @@ namespace Legion {
       // Whoever is waiting first, we have to advance their arrive barriers
       if (init_in_MPI)
       {
-        Runtime::phase_barrier_arrive(legion_arrive_barrier, 1);
+        Runtime::phase_barrier_arrive(legion_arrive_barrier, legion_participants);
         Runtime::advance_barrier(mpi_wait_barrier);
       }
       else
       {
-        Runtime::phase_barrier_arrive(mpi_arrive_barrier, 1);
+        Runtime::phase_barrier_arrive(mpi_arrive_barrier, mpi_participants);
         Runtime::advance_barrier(legion_wait_barrier);
       }
     }
@@ -2751,7 +2751,6 @@ namespace Legion {
       assert(op != NULL);
 #endif
       TriggerOpArgs args;
-      args.manager = this;
       args.op = op;
       AutoLock l_lock(local_queue_lock);
       RtEvent next = runtime->issue_runtime_meta_task(args,
@@ -2909,7 +2908,6 @@ namespace Legion {
         // Now that we've removed them from the queue, issue the
         // mapping analysis calls
         TriggerTaskArgs trigger_args;
-        trigger_args.manager = this;
         for (std::list<const Task*>::iterator vis_it = visible_tasks.begin();
              vis_it != visible_tasks.end(); vis_it++)
         {
@@ -3052,6 +3050,18 @@ namespace Legion {
           wait_on.lg_wait();
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::finalize(void)
+    //--------------------------------------------------------------------------
+    {
+      if (!is_owner)
+        return;
+      // No need for the lock, no one should be doing anything at this point
+      for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
+            current_instances.begin(); it != current_instances.end(); it++)
+        it->first->force_deletion();
     }
     
     //--------------------------------------------------------------------------
@@ -6625,16 +6635,6 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    void ShutdownManager::record_outstanding_profiling_requests(void)
-    //--------------------------------------------------------------------------
-    {
-      // Instant death
-      result = false;
-      log_shutdown.info("Outstanding profiling requests on node %d",
-                        runtime->address_space);
-    }
-    
-    //--------------------------------------------------------------------------
     void ShutdownManager::record_recent_message(void)
     //--------------------------------------------------------------------------
     {
@@ -8933,7 +8933,6 @@ namespace Legion {
       }
       if (profiler != NULL)
       {
-        profiler->finalize();
         delete profiler;
         profiler = NULL;
       }
@@ -9458,6 +9457,20 @@ namespace Legion {
                                    true/*skip replay*/);
           }
         }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::finalize_runtime(void)
+    //--------------------------------------------------------------------------
+    {
+      if (profiler != NULL)
+      {
+        // Have the memory managers for deletion of all their instances
+        for (std::map<Memory,MemoryManager*>::const_iterator it =
+             memory_managers.begin(); it != memory_managers.end(); it++)
+          it->second->finalize();
+        profiler->finalize();
       }
     }
     
@@ -16686,9 +16699,6 @@ namespace Legion {
         }
 #endif
       }
-      // Record if we have any outstanding profiling requests
-      if (profiler != NULL && profiler->has_outstanding_requests())
-        shutdown_manager->record_outstanding_profiling_requests();
       // Check all our message managers for outstanding messages
       for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
       {
@@ -20314,8 +20324,10 @@ continue;					\
                                               const void *userdata, size_t userlen, Processor p)
     //--------------------------------------------------------------------------
     {
-      // All we need to is delete our runtime instance
-      delete get_runtime(p);
+      // Finalize the runtime and then delete it
+      Runtime *runtime = get_runtime(p);
+      runtime->finalize_runtime();
+      delete runtime;
     }
     
     //--------------------------------------------------------------------------
@@ -20462,11 +20474,6 @@ continue;					\
           (const DeferredRecycleArgs*)args;
           Runtime::get_runtime(p)->free_distributed_id(
                                                        deferred_recycle_args->did);
-          break;
-        }
-        case LG_DEFERRED_SLICE_ID:
-        {
-          DeferredSlicer::handle_slice(args);
           break;
         }
         case LG_MUST_INDIV_ID:

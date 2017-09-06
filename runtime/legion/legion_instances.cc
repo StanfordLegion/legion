@@ -590,6 +590,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalManager::force_deletion(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+#endif
+      log_garbage.spew("Force deleting physical instance " IDFMT " in memory "
+                       IDFMT "", instance.id, memory_manager->memory.id);
+#ifndef DISABLE_GC
+      std::vector<PhysicalInstance::DestroyedField> serdez_fields;
+      layout->compute_destroyed_fields(serdez_fields); 
+      if (!serdez_fields.empty())
+        instance.destroy(serdez_fields);
+      else
+        instance.destroy();
+#endif
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalManager::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {

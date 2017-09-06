@@ -4507,8 +4507,51 @@ namespace Legion {
     void MultiTask::trigger_slices(void)
     //--------------------------------------------------------------------------
     {
-      DeferredSlicer slicer(this);
-      slicer.trigger_slices(slices);
+      // Add our slices back into the queue of things that are ready to map
+      // or send it to its remote node if necessary
+      // Watch out for the cleanup race with some acrobatics here
+      // to handle the case where the iterator is invalidated
+      std::set<RtEvent> wait_for;
+      std::list<SliceTask*>::const_iterator it = slices.begin();
+      while (true)
+      {
+        SliceTask *slice = *it;
+        // Have to update this before launching the task to avoid 
+        // the clean-up race
+        it++;
+        const bool done = (it == slices.end());
+        // Dumb case for must epoch operations, we need these to 
+        // be mapped immediately, mapper be damned
+        if (must_epoch != NULL)
+        {
+          ProcessorManager::TriggerTaskArgs trigger_args;
+          trigger_args.op = slice;
+          RtEvent done = runtime->issue_runtime_meta_task(trigger_args, 
+                                           LG_THROUGHPUT_PRIORITY, this);
+          wait_for.insert(done);
+        }
+        // Figure out whether this task is local or remote
+        else if (!runtime->is_local(slice->target_proc))
+        {
+          // We can only send it away if it is not locally mapped
+          // otherwise it has to stay here until it is fully mapped
+          if (!slice->is_locally_mapped())
+            runtime->send_task(slice);
+          else
+            runtime->add_to_ready_queue(slice->current_proc, slice);
+        }
+        else
+          runtime->add_to_ready_queue(slice->target_proc, slice); 
+        if (done)
+          break;
+      }
+      // Must-epoch operations are nasty little beasts and have
+      // to wait for the effects to finish before returning
+      if (!wait_for.empty())
+      {
+        RtEvent wait_on = Runtime::merge_events(wait_for);
+        wait_on.lg_wait();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -9223,97 +9266,6 @@ namespace Legion {
       for (std::set<IndexPartition>::const_iterator it = parts.begin();
             it != parts.end(); it++)
         deleted_index_partitions.insert(*it);
-    }
-
-    /////////////////////////////////////////////////////////////
-    // Deferred Slicer 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    DeferredSlicer::DeferredSlicer(MultiTask *own)
-      : owner(own)
-    //--------------------------------------------------------------------------
-    {
-      slice_lock = Reservation::create_reservation();
-    }
-
-    //--------------------------------------------------------------------------
-    DeferredSlicer::DeferredSlicer(const DeferredSlicer &rhs)
-      : owner(rhs.owner)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    DeferredSlicer::~DeferredSlicer(void)
-    //--------------------------------------------------------------------------
-    {
-      slice_lock.destroy_reservation();
-      slice_lock = Reservation::NO_RESERVATION;
-    }
-
-    //--------------------------------------------------------------------------
-    DeferredSlicer& DeferredSlicer::operator=(const DeferredSlicer &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void DeferredSlicer::trigger_slices(std::list<SliceTask*> &slices)
-    //--------------------------------------------------------------------------
-    {
-      // Watch out for the cleanup race with some acrobatics here
-      // to handle the case where the iterator is invalidated
-      std::set<RtEvent> wait_events;
-      {
-        std::list<SliceTask*>::const_iterator it = slices.begin();
-        DeferredSliceArgs args;
-        args.slicer = this;
-        while (true) 
-        {
-          args.slice = *it;
-          // Have to update this before launching the task to avoid 
-          // the clean-up race
-          it++;
-          bool done = (it == slices.end()); 
-          RtEvent wait = 
-            owner->runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY, 
-                                                    args.slice);
-          if (wait.exists())
-            wait_events.insert(wait);
-          if (done)
-            break;
-        }
-      }
-
-      // Now we wait for the slices to trigger, note we do not
-      // block on the event allowing the utility processor to 
-      // perform other operations
-      if (!wait_events.empty())
-      {
-        RtEvent sliced_event = Runtime::merge_events(wait_events);
-        sliced_event.lg_wait();
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void DeferredSlicer::perform_slice(SliceTask *slice)
-    //--------------------------------------------------------------------------
-    {
-      slice->trigger_mapping();
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void DeferredSlicer::handle_slice(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DeferredSliceArgs *slice_args = (const DeferredSliceArgs*)args;
-      slice_args->slicer->perform_slice(slice_args->slice);
     }
 
   }; // namespace Internal 
