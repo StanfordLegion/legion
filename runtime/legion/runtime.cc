@@ -16684,7 +16684,7 @@ namespace Legion {
 #endif
       }
       // Record if we have any outstanding profiling requests
-      if (profiler != NULL && profiler->has_outstanding_requests())
+      if ((profiler != NULL) && profiler->has_outstanding_requests())
         shutdown_manager->record_outstanding_profiling_requests();
       // Check all our message managers for outstanding messages
       for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
