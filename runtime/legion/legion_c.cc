@@ -20,6 +20,16 @@
 #include "realm/llvmjit/llvmjit.h"
 #endif
 
+// Disable deprecated warnings in this file since we are also
+// trying to maintain backwards compatibility support for older
+// interfaces here in the C API
+#ifdef __GNUC__
+#pragma GCC diagnostic ignored "-Wdeprecated"
+#endif
+#ifdef __clang__
+#pragma clang diagnostic ignored "-Wdeprecated"
+#endif
+
 using namespace Legion;
 using namespace Legion::Mapping;
 using namespace Legion::Mapping::Utilities;
