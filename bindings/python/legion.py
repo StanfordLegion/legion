@@ -782,3 +782,12 @@ class IndexLaunch(object):
 
     def launch(self):
         self.launcher.launch()
+
+@task(leaf=True)
+def _dummy_task():
+    return 1
+
+def execution_fence(block=False):
+    c.legion_runtime_issue_execution_fence(_my.ctx.runtime, _my.ctx.context)
+    if block:
+        _dummy_task().get()
