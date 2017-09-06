@@ -746,9 +746,7 @@ namespace Legion {
                                           Operation *op)
     //--------------------------------------------------------------------------
     {
-      // wonchan: don't track fill operations for the moment
-      // as their requests and responses do not exactly match
-      //increment_total_outstanding_requests();
+      increment_total_outstanding_requests();
       ProfilingInfo info(LEGION_PROF_FILL);
       // No ID here
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
@@ -840,9 +838,7 @@ namespace Legion {
                                           UniqueID uid)
     //--------------------------------------------------------------------------
     {
-      // wonchan: don't track fill operations for the moment
-      // as their requests and responses do not exactly match
-      //increment_total_outstanding_requests();
+      increment_total_outstanding_requests();
       ProfilingInfo info(LEGION_PROF_FILL);
       // No ID here
       info.op_id = uid;
@@ -1023,9 +1019,7 @@ namespace Legion {
               delete timeline;
             if (usage != NULL)
               delete usage;
-            // wonchan: don't track fill operations for the moment
-            // as their requests and responses do not exactly match
-            //decrement_total_outstanding_requests();
+            decrement_total_outstanding_requests();
             break;
           }
         case LEGION_PROF_INST:

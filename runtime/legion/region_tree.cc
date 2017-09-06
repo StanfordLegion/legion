@@ -15879,8 +15879,6 @@ namespace Legion {
       DETAILED_PROFILER(context->runtime, REALM_ISSUE_FILL_CALL);
       Realm::ProfilingRequestSet requests;
       op->add_copy_profiling_request(requests);
-      if (context->runtime->profiler != NULL)
-        context->runtime->profiler->add_fill_request(requests, op);
       if (op->has_execution_fence_event())
         precondition = Runtime::merge_events(precondition,
                         op->get_execution_fence_event());
@@ -15903,15 +15901,23 @@ namespace Legion {
             // Have to protect against misspeculation
             for (std::set<Domain>::const_iterator it = doms.begin();
                   it != doms.end(); it++)
+            {
+              if (context->runtime->profiler != NULL)
+                context->runtime->profiler->add_fill_request(requests, op);
               done_events.insert(Runtime::ignorefaults(it->fill(dst_fields, 
                       requests, fill_value, fill_size, pred_pre)));
+            }
           }
           else
           {
             for (std::set<Domain>::const_iterator it = doms.begin();
                   it != doms.end(); it++)
+            {
+              if (context->runtime->profiler != NULL)
+                context->runtime->profiler->add_fill_request(requests, op);
               done_events.insert(ApEvent(it->fill(dst_fields, requests, 
                                          fill_value, fill_size, precondition)));
+            }
           }
           result = Runtime::merge_events(done_events);
         }
@@ -15926,12 +15932,18 @@ namespace Legion {
           {
             ApEvent pred_pre = Runtime::merge_events(precondition, 
                                                      ApEvent(predicate_guard));
+            if (context->runtime->profiler != NULL)
+              context->runtime->profiler->add_fill_request(requests, op);
             result = ApEvent(Runtime::ignorefaults(dom.fill(dst_fields, 
                     requests, fill_value, fill_size, pred_pre)));
           }
           else
+          {
+            if (context->runtime->profiler != NULL)
+              context->runtime->profiler->add_fill_request(requests, op);
             result = ApEvent(dom.fill(dst_fields, requests, 
                                       fill_value, fill_size, precondition));
+          }
         }
       }
       else
@@ -15952,15 +15964,23 @@ namespace Legion {
           // Have to protect the against misspeculation
           for (std::set<Domain>::const_iterator it = intersection_doms->begin();
                 it != intersection_doms->end(); it++)
+          {
+            if (context->runtime->profiler != NULL)
+              context->runtime->profiler->add_fill_request(requests, op);
             done_events.insert(Runtime::ignorefaults(it->fill(dst_fields, 
                     requests, fill_value, fill_size, pred_pre)));
+          }
         }
         else
         {
           for (std::set<Domain>::const_iterator it = intersection_doms->begin();
                 it != intersection_doms->end(); it++)
+          {
+            if (context->runtime->profiler != NULL)
+              context->runtime->profiler->add_fill_request(requests, op);
             done_events.insert(ApEvent(it->fill(dst_fields, requests,
                                        fill_value, fill_size, precondition)));
+          }
         }
         result = Runtime::merge_events(done_events);
       }
