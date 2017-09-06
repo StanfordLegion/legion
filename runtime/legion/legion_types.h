@@ -308,7 +308,6 @@ namespace Legion {
       LG_TRIGGER_OP_ID,
       LG_TRIGGER_TASK_ID,
       LG_DEFERRED_RECYCLE_ID,
-      LG_DEFERRED_SLICE_ID,
       LG_MUST_INDIV_ID,
       LG_MUST_INDEX_ID,
       LG_MUST_MAP_ID,
@@ -405,7 +404,6 @@ namespace Legion {
         "Operation Physical Dependence Analysis",                 \
         "Task Physical Dependence Analysis",                      \
         "Deferred Recycle",                                       \
-        "Deferred Slice",                                         \
         "Must Individual Task Dependence Analysis",               \
         "Must Index Task Dependence Analysis",                    \
         "Must Task Physical Dependence Analysis",                 \

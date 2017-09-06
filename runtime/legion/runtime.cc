@@ -2885,7 +2885,6 @@ namespace Legion {
       assert(op != NULL);
 #endif
       TriggerOpArgs args;
-      args.manager = this;
       args.op = op;
       runtime->issue_runtime_meta_task(args, priority, op); 
     }
@@ -3012,7 +3011,6 @@ namespace Legion {
         // Now that we've removed them from the queue, issue the
         // mapping analysis calls
         TriggerTaskArgs trigger_args;
-        trigger_args.manager = this;
         for (std::list<const Task*>::iterator vis_it = visible_tasks.begin();
               vis_it != visible_tasks.end(); vis_it++)
         {
@@ -6672,7 +6670,7 @@ namespace Legion {
           args.phase = (ShutdownPhase)(phase-1);
         else
           args.phase = phase;
-        runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_PRIORITY, 
+        runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY,
                                          NULL, precondition);
       }
     }
@@ -15550,7 +15548,7 @@ namespace Legion {
       args.phase = ShutdownManager::CHECK_TERMINATION;
       // Issue this with a low priority so that other meta-tasks
       // have an opportunity to run
-      issue_runtime_meta_task(args, LG_THROUGHPUT_PRIORITY);
+      issue_runtime_meta_task(args, LG_LOW_PRIORITY);
     }
 
     //--------------------------------------------------------------------------
@@ -15618,7 +15616,7 @@ namespace Legion {
 #endif
       }
       // Record if we have any outstanding profiling requests
-      if (profiler != NULL && profiler->has_outstanding_requests())
+      if ((profiler != NULL) && profiler->has_outstanding_requests())
         shutdown_manager->record_outstanding_profiling_requests();
       // Check all our message managers for outstanding messages 
       for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
@@ -19360,11 +19358,6 @@ namespace Legion {
               (const DeferredRecycleArgs*)args;
             Runtime::get_runtime(p)->free_distributed_id(
                                         deferred_recycle_args->did);
-            break;
-          }
-        case LG_DEFERRED_SLICE_ID:
-          {
-            DeferredSlicer::handle_slice(args); 
             break;
           }
         case LG_MUST_INDIV_ID:
