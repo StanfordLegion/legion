@@ -125,6 +125,7 @@ namespace Legion {
     public:
       void log_instance_creation(UniqueID creator_id, Processor proc,
                      const std::vector<LogicalRegion> &regions) const;
+      void force_deletion(void);
     public:
       inline bool is_reduction_manager(void) const;
       inline bool is_instance_manager(void) const;

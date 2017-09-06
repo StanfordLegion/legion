@@ -392,13 +392,9 @@ namespace Legion {
                                timestamp_t stop);
     public:
       const Processor target_proc;
-      inline bool has_outstanding_requests(void)
-        { return total_outstanding_requests != 0; }
     public:
-      inline void increment_total_outstanding_requests(void)
-        { __sync_fetch_and_add(&total_outstanding_requests,1); }
-      inline void decrement_total_outstanding_requests(void)
-        { __sync_fetch_and_sub(&total_outstanding_requests,1); }
+      void increment_total_outstanding_requests(unsigned cnt = 1);
+      void decrement_total_outstanding_requests(unsigned cnt = 1);
     private:
       void create_thread_local_profiling_instance(void);
     private:
@@ -406,6 +402,7 @@ namespace Legion {
       Reservation profiler_lock;
       std::vector<LegionProfInstance*> instances;
       unsigned total_outstanding_requests;
+      const RtUserEvent done_event;
     };
 
     class DetailedProfiler {

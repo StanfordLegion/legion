@@ -649,6 +649,7 @@ namespace Legion {
       MemoryManager& operator=(const MemoryManager &rhs);
     public:
       void prepare_for_shutdown(void);
+      void finalize(void);
     public:
       void register_remote_instance(PhysicalManager *manager);
       void unregister_remote_instance(PhysicalManager *manager);
@@ -932,7 +933,6 @@ namespace Legion {
       static void handle_shutdown_response(Deserializer &derez);
     public:
       void record_outstanding_tasks(void);
-      void record_outstanding_profiling_requests(void);
       void record_recent_message(void);
       void record_pending_message(RtEvent pending_event);
     public:
@@ -1449,6 +1449,7 @@ namespace Legion {
       void register_static_projections(void);
       void initialize_legion_prof(void);
       void initialize_mappers(void);
+      void finalize_runtime(void);
       void launch_top_level_task(Processor target);
       ApEvent launch_mapper_task(Mapper *mapper, Processor proc, 
                                  Processor::TaskFuncID tid,
