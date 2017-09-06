@@ -393,8 +393,8 @@ namespace Legion {
     public:
       const Processor target_proc;
     public:
-      void increment_total_outstanding_requests(void);
-      void decrement_total_outstanding_requests(void);
+      void increment_total_outstanding_requests(unsigned cnt = 1);
+      void decrement_total_outstanding_requests(unsigned cnt = 1);
     private:
       void create_thread_local_profiling_instance(void);
     private:

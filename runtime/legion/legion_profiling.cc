@@ -598,7 +598,9 @@ namespace Legion {
     {
       profiler_lock.destroy_reservation();
       profiler_lock = Reservation::NO_RESERVATION;
+#ifdef DEBUG_LEGION
       assert(total_outstanding_requests == 0);
+#endif
       for (std::vector<LegionProfInstance*>::const_iterator it = 
             instances.begin(); it != instances.end(); it++)
         delete (*it);
@@ -729,6 +731,7 @@ namespace Legion {
                                           Operation *op)
     //--------------------------------------------------------------------------
     {
+      increment_total_outstanding_requests();
       ProfilingInfo info(LEGION_PROF_COPY); 
       // No ID here
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
@@ -764,16 +767,22 @@ namespace Legion {
                                           Operation *op)
     //--------------------------------------------------------------------------
     {
+      increment_total_outstanding_requests(2/*different requests*/);
       ProfilingInfo info(LEGION_PROF_INST); 
       // No ID here
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
-      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
-                ? target_proc : Processor::get_executing_processor(),
+      // Instances use two profiling requests so that we can get MemoryUsage
+      // right away - the Timeline doesn't come until we delete the instance
+      Processor p = (target_proc.exists() 
+                        ? target_proc : Processor::get_executing_processor());
+      Realm::ProfilingRequest &req1 = requests.add_request(p,
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_LOW_PRIORITY);
-      req.add_measurement<
-                Realm::ProfilingMeasurements::InstanceTimeline>();
-      req.add_measurement<
-                Realm::ProfilingMeasurements::InstanceMemoryUsage>();
+      req1.add_measurement<
+                 Realm::ProfilingMeasurements::InstanceMemoryUsage>();
+      Realm::ProfilingRequest &req2 = requests.add_request(p,
+                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_LOW_PRIORITY);
+      req2.add_measurement<
+                 Realm::ProfilingMeasurements::InstanceTimeline>();
     }
 
     //--------------------------------------------------------------------------
@@ -821,6 +830,7 @@ namespace Legion {
                                           UniqueID uid)
     //--------------------------------------------------------------------------
     {
+      increment_total_outstanding_requests();
       ProfilingInfo info(LEGION_PROF_COPY); 
       // No ID here
       info.op_id = uid;
@@ -856,6 +866,7 @@ namespace Legion {
                                           UniqueID uid)
     //--------------------------------------------------------------------------
     {
+      increment_total_outstanding_requests(2/*different requests*/);
       ProfilingInfo info(LEGION_PROF_INST); 
       // No ID here
       info.op_id = uid;
@@ -915,7 +926,6 @@ namespace Legion {
               delete timeline;
             if (timeline != NULL)
               delete usage;
-            decrement_total_outstanding_requests();
             break;
           }
         case LEGION_PROF_META:
@@ -943,7 +953,6 @@ namespace Legion {
               delete timeline;
             if (usage != NULL)
               delete usage;
-            decrement_total_outstanding_requests();
             break;
           }
         case LEGION_PROF_MESSAGE:
@@ -970,7 +979,6 @@ namespace Legion {
               delete timeline;
             if (usage != NULL)
               delete usage;
-            decrement_total_outstanding_requests();
             break;
           }
         case LEGION_PROF_COPY:
@@ -1019,7 +1027,6 @@ namespace Legion {
               delete timeline;
             if (usage != NULL)
               delete usage;
-            decrement_total_outstanding_requests();
             break;
           }
         case LEGION_PROF_INST:
@@ -1056,6 +1063,7 @@ namespace Legion {
       thread_local_profiling_instance->record_proftask(p, info->op_id, 
                                                        t_start, t_stop);
 #endif
+      decrement_total_outstanding_requests();
     }
 
     //--------------------------------------------------------------------------
@@ -1162,19 +1170,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LegionProfiler::increment_total_outstanding_requests(void)
+    void LegionProfiler::increment_total_outstanding_requests(unsigned cnt)
     //--------------------------------------------------------------------------
     {
-      __sync_fetch_and_add(&total_outstanding_requests,1);
+      __sync_fetch_and_add(&total_outstanding_requests,cnt);
     }
 
     //--------------------------------------------------------------------------
-    void LegionProfiler::decrement_total_outstanding_requests(void)
+    void LegionProfiler::decrement_total_outstanding_requests(unsigned cnt)
     //--------------------------------------------------------------------------
     {
-      const unsigned prev = __sync_fetch_and_sub(&total_outstanding_requests,1);
+      unsigned prev = __sync_fetch_and_sub(&total_outstanding_requests,cnt);
+#ifdef DEBUG_LEGION
+      assert(prev >= cnt);
+#endif
       // If we were the last outstanding event we can trigger the event
-      if (prev == 1)
+      if (prev == cnt)
       {
 #ifdef DEBUG_LEGION
         assert(!done_event.has_triggered());
