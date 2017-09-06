@@ -531,7 +531,11 @@ namespace Legion {
                                                   operation_kind_descriptions,
                                    const char *serializer_type,
                                    const char *prof_logfile)
-      : target_proc(target), total_outstanding_requests(0)
+      : target_proc(target), 
+#ifndef DEBUG_LEGION
+        total_outstanding_requests(1/*start with guard*/),
+#endif
+        done_event(Runtime::create_rt_user_event())
     //--------------------------------------------------------------------------
     {
       profiler_lock = Reservation::create_reservation();
@@ -602,11 +606,16 @@ namespace Legion {
         mem_desc.capacity = it->capacity();
         serializer->serialize(mem_desc);
       }
+#ifdef DEBUG_LEGION
+      for (unsigned idx = 0; idx < LEGION_PROF_LAST; idx++)
+        total_outstanding_requests[idx] = 0;
+      total_outstanding_requests[LEGION_PROF_META] = 1; // guard
+#endif
     }
 
     //--------------------------------------------------------------------------
     LegionProfiler::LegionProfiler(const LegionProfiler &rhs)
-      : target_proc(rhs.target_proc)
+      : target_proc(rhs.target_proc), done_event(RtUserEvent::NO_RT_USER_EVENT)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -619,7 +628,9 @@ namespace Legion {
     {
       profiler_lock.destroy_reservation();
       profiler_lock = Reservation::NO_RESERVATION;
+#ifdef DEBUG_LEGION
       assert(total_outstanding_requests == 0);
+#endif
       for (std::vector<LegionProfInstance*>::const_iterator it = 
             instances.begin(); it != instances.end(); it++)
         delete (*it);
@@ -692,7 +703,11 @@ namespace Legion {
                                           TaskID tid, SingleTask *task)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      increment_total_outstanding_requests(LEGION_PROF_TASK);
+#else
       increment_total_outstanding_requests();
+#endif
       ProfilingInfo info(LEGION_PROF_TASK); 
       info.id = tid;
       info.op_id = task->get_unique_id();
@@ -712,7 +727,11 @@ namespace Legion {
                                           LgTaskID tid, Operation *op)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      increment_total_outstanding_requests(LEGION_PROF_META);
+#else
       increment_total_outstanding_requests();
+#endif
       ProfilingInfo info(LEGION_PROF_META); 
       info.id = tid;
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
@@ -750,6 +769,11 @@ namespace Legion {
                                           Operation *op)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      increment_total_outstanding_requests(LEGION_PROF_COPY);
+#else
+      increment_total_outstanding_requests();
+#endif
       ProfilingInfo info(LEGION_PROF_COPY); 
       // No ID here
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
@@ -767,9 +791,11 @@ namespace Legion {
                                           Operation *op)
     //--------------------------------------------------------------------------
     {
-      // wonchan: don't track fill operations for the moment
-      // as their requests and responses do not exactly match
-      //increment_total_outstanding_requests();
+#ifdef DEBUG_LEGION
+      increment_total_outstanding_requests(LEGION_PROF_FILL);
+#else
+      increment_total_outstanding_requests();
+#endif
       ProfilingInfo info(LEGION_PROF_FILL);
       // No ID here
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
@@ -787,16 +813,27 @@ namespace Legion {
                                           Operation *op)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      increment_total_outstanding_requests(LEGION_PROF_INST, 
+                                           2/*different requests*/);
+#else
+      increment_total_outstanding_requests(2/*different requests*/);
+#endif
       ProfilingInfo info(LEGION_PROF_INST); 
       // No ID here
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
-      Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
-                ? target_proc : Processor::get_executing_processor(),
+      // Instances use two profiling requests so that we can get MemoryUsage
+      // right away - the Timeline doesn't come until we delete the instance
+      Processor p = (target_proc.exists() 
+                        ? target_proc : Processor::get_executing_processor());
+      Realm::ProfilingRequest &req1 = requests.add_request(p,
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_LOW_PRIORITY);
-      req.add_measurement<
-                Realm::ProfilingMeasurements::InstanceTimeline>();
-      req.add_measurement<
-                Realm::ProfilingMeasurements::InstanceMemoryUsage>();
+      req1.add_measurement<
+                 Realm::ProfilingMeasurements::InstanceMemoryUsage>();
+      Realm::ProfilingRequest &req2 = requests.add_request(p,
+                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_LOW_PRIORITY);
+      req2.add_measurement<
+                 Realm::ProfilingMeasurements::InstanceTimeline>();
     }
 
     //--------------------------------------------------------------------------
@@ -805,6 +842,11 @@ namespace Legion {
                                            Operation *op, DepPartOpKind part_op)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      increment_total_outstanding_requests(LEGION_PROF_PARTITION);
+#else
+      increment_total_outstanding_requests();
+#endif
       ProfilingInfo info(LEGION_PROF_PARTITION);
       // Pass the part_op as the ID
       info.id = part_op;
@@ -821,7 +863,11 @@ namespace Legion {
                                           TaskID tid, UniqueID uid)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      increment_total_outstanding_requests(LEGION_PROF_TASK);
+#else
       increment_total_outstanding_requests();
+#endif
       ProfilingInfo info(LEGION_PROF_TASK); 
       info.id = tid;
       info.op_id = uid;
@@ -841,7 +887,11 @@ namespace Legion {
                                           LgTaskID tid, UniqueID uid)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      increment_total_outstanding_requests(LEGION_PROF_META);
+#else
       increment_total_outstanding_requests();
+#endif
       ProfilingInfo info(LEGION_PROF_META); 
       info.id = tid;
       info.op_id = uid;
@@ -861,6 +911,11 @@ namespace Legion {
                                           UniqueID uid)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      increment_total_outstanding_requests(LEGION_PROF_COPY);
+#else
+      increment_total_outstanding_requests();
+#endif
       ProfilingInfo info(LEGION_PROF_COPY); 
       // No ID here
       info.op_id = uid;
@@ -878,9 +933,11 @@ namespace Legion {
                                           UniqueID uid)
     //--------------------------------------------------------------------------
     {
-      // wonchan: don't track fill operations for the moment
-      // as their requests and responses do not exactly match
-      //increment_total_outstanding_requests();
+#ifdef DEBUG_LEGION
+      increment_total_outstanding_requests(LEGION_PROF_FILL);
+#else
+      increment_total_outstanding_requests();
+#endif
       ProfilingInfo info(LEGION_PROF_FILL);
       // No ID here
       info.op_id = uid;
@@ -898,6 +955,12 @@ namespace Legion {
                                           UniqueID uid)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      increment_total_outstanding_requests(LEGION_PROF_INST,
+                                           2/*different requests*/);
+#else
+      increment_total_outstanding_requests(2/*different requests*/);
+#endif
       ProfilingInfo info(LEGION_PROF_INST); 
       // No ID here
       info.op_id = uid;
@@ -921,6 +984,11 @@ namespace Legion {
                                            UniqueID uid, DepPartOpKind part_op)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      increment_total_outstanding_requests(LEGION_PROF_PARTITION);
+#else
+      increment_total_outstanding_requests();
+#endif
       ProfilingInfo info(LEGION_PROF_PARTITION);
       // Pass the partition op kind as the ID
       info.id = part_op;
@@ -974,7 +1042,6 @@ namespace Legion {
               delete timeline;
             if (timeline != NULL)
               delete usage;
-            decrement_total_outstanding_requests();
             break;
           }
         case LEGION_PROF_META:
@@ -1002,7 +1069,6 @@ namespace Legion {
               delete timeline;
             if (usage != NULL)
               delete usage;
-            decrement_total_outstanding_requests();
             break;
           }
         case LEGION_PROF_MESSAGE:
@@ -1029,7 +1095,6 @@ namespace Legion {
               delete timeline;
             if (usage != NULL)
               delete usage;
-            decrement_total_outstanding_requests();
             break;
           }
         case LEGION_PROF_COPY:
@@ -1078,9 +1143,6 @@ namespace Legion {
               delete timeline;
             if (usage != NULL)
               delete usage;
-            // wonchan: don't track fill operations for the moment
-            // as their requests and responses do not exactly match
-            //decrement_total_outstanding_requests();
             break;
           }
         case LEGION_PROF_INST:
@@ -1132,12 +1194,25 @@ namespace Legion {
       thread_local_profiling_instance->record_proftask(p, info->op_id, 
                                                        t_start, t_stop);
 #endif
+#ifdef DEBUG_LEGION
+      decrement_total_outstanding_requests(info->kind);
+#else
+      decrement_total_outstanding_requests();
+#endif
     }
 
     //--------------------------------------------------------------------------
     void LegionProfiler::finalize(void)
     //--------------------------------------------------------------------------
     {
+      // Remove our guard outstanding request
+#ifdef DEBUG_LEGION
+      decrement_total_outstanding_requests(LEGION_PROF_META);
+#else
+      decrement_total_outstanding_requests();
+#endif
+      if (!done_event.has_triggered())
+        done_event.lg_wait();
       for (std::vector<LegionProfInstance*>::const_iterator it = 
             instances.begin(); it != instances.end(); it++) {
         (*it)->dump_state(serializer);
@@ -1232,6 +1307,63 @@ namespace Legion {
       thread_local_profiling_instance->record_runtime_call(current, kind, 
                                                            start, stop);
     }
+
+#ifdef DEBUG_LEGION
+    //--------------------------------------------------------------------------
+    void LegionProfiler::increment_total_outstanding_requests(
+                                               ProfilingKind kind, unsigned cnt)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock p_lock(profiler_lock);
+      total_outstanding_requests[kind] += cnt;
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::decrement_total_outstanding_requests(
+                                               ProfilingKind kind, unsigned cnt)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock p_lock(profiler_lock);
+      assert(total_outstanding_requests[kind] >= cnt);
+      total_outstanding_requests[kind] -= cnt;
+      if (total_outstanding_requests[kind] > 0)
+        return;
+      for (unsigned idx = 0; idx < LEGION_PROF_LAST; idx++)
+      {
+        if (idx == kind)
+          continue;
+        if (total_outstanding_requests[idx] > 0)
+          return;
+      }
+      assert(!done_event.has_triggered());
+      Runtime::trigger_event(done_event);
+    }
+#else
+    //--------------------------------------------------------------------------
+    void LegionProfiler::increment_total_outstanding_requests(unsigned cnt)
+    //--------------------------------------------------------------------------
+    {
+      __sync_fetch_and_add(&total_outstanding_requests,cnt);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::decrement_total_outstanding_requests(unsigned cnt)
+    //--------------------------------------------------------------------------
+    {
+      unsigned prev = __sync_fetch_and_sub(&total_outstanding_requests,cnt);
+#ifdef DEBUG_LEGION
+      assert(prev >= cnt);
+#endif
+      // If we were the last outstanding event we can trigger the event
+      if (prev == cnt)
+      {
+#ifdef DEBUG_LEGION
+        assert(!done_event.has_triggered());
+#endif
+        Runtime::trigger_event(done_event);
+      }
+    }
+#endif
 
     //--------------------------------------------------------------------------
     void LegionProfiler::create_thread_local_profiling_instance(void)

@@ -313,6 +313,7 @@ namespace Legion {
         LEGION_PROF_FILL,
         LEGION_PROF_INST,
         LEGION_PROF_PARTITION,
+        LEGION_PROF_LAST,
       };
       struct ProfilingInfo {
       public:
@@ -406,20 +407,28 @@ namespace Legion {
                                timestamp_t stop);
     public:
       const Processor target_proc;
-      inline bool has_outstanding_requests(void)
-        { return total_outstanding_requests != 0; }
     public:
-      inline void increment_total_outstanding_requests(void)
-        { __sync_fetch_and_add(&total_outstanding_requests,1); }
-      inline void decrement_total_outstanding_requests(void)
-        { __sync_fetch_and_sub(&total_outstanding_requests,1); }
+#ifdef DEBUG_LEGION
+      void increment_total_outstanding_requests(ProfilingKind kind,
+                                                unsigned cnt = 1);
+      void decrement_total_outstanding_requests(ProfilingKind kind,
+                                                unsigned cnt = 1);
+#else
+      void increment_total_outstanding_requests(unsigned cnt = 1);
+      void decrement_total_outstanding_requests(unsigned cnt = 1);
+#endif
     private:
       void create_thread_local_profiling_instance(void);
     private:
       LegionProfSerializer* serializer;
       Reservation profiler_lock;
       std::vector<LegionProfInstance*> instances;
+#ifdef DEBUG_LEGION
+      unsigned total_outstanding_requests[LEGION_PROF_LAST];
+#else
       unsigned total_outstanding_requests;
+#endif
+      const RtUserEvent done_event;
     };
 
     class DetailedProfiler {

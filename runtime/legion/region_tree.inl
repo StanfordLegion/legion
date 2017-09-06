@@ -2492,15 +2492,15 @@ namespace Legion {
       DETAILED_PROFILER(context->runtime, REALM_ISSUE_COPY_CALL);
       Realm::ProfilingRequestSet requests;
       if (op != NULL)
-        op->add_copy_profiling_request(requests);
-      if (context->runtime->profiler != NULL)
-        context->runtime->profiler->add_copy_request(requests, op);
+        op->add_copy_profiling_request(requests); 
       if (op->has_execution_fence_event())
         precondition = Runtime::merge_events(precondition,
                         op->get_execution_fence_event());
       ApEvent result;
       if ((intersect == NULL) || (intersect == this))
       {
+        if (context->runtime->profiler != NULL)
+          context->runtime->profiler->add_copy_request(requests, op);
         // Include our event precondition if necessary
         if (index_space_ready.exists())
           precondition = Runtime::merge_events(precondition, index_space_ready);
@@ -2570,6 +2570,8 @@ namespace Legion {
 #endif
           }
         }
+        if (context->runtime->profiler != NULL)
+          context->runtime->profiler->add_copy_request(requests, op);
         // Have to protect against misspeculation
         if (predicate_guard.exists())
         {
@@ -2605,15 +2607,15 @@ namespace Legion {
       DETAILED_PROFILER(context->runtime, REALM_ISSUE_FILL_CALL);
       Realm::ProfilingRequestSet requests;
       if (op != NULL)
-        op->add_copy_profiling_request(requests);
-      if (context->runtime->profiler != NULL)
-        context->runtime->profiler->add_fill_request(requests, op);
+        op->add_copy_profiling_request(requests); 
       if ((op != NULL) && op->has_execution_fence_event())
         precondition = Runtime::merge_events(precondition,
                         op->get_execution_fence_event());
       ApEvent result;
       if ((intersect == NULL) || (intersect == this))
       {
+        if (context->runtime->profiler != NULL)
+          context->runtime->profiler->add_fill_request(requests, op);
         // Include our event precondition if necessary
         if (index_space_ready.exists())
           precondition = Runtime::merge_events(precondition, index_space_ready);
@@ -2671,6 +2673,8 @@ namespace Legion {
             assert(false);
 #endif
         }
+        if (context->runtime->profiler != NULL)
+          context->runtime->profiler->add_fill_request(requests, op);
         // Have to protect against misspeculation
         if (predicate_guard.exists())
         {

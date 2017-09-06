@@ -1966,12 +1966,12 @@ namespace Legion {
       // Whoever is waiting first, we have to advance their arrive barriers
       if (init_in_MPI)
       {
-        Runtime::phase_barrier_arrive(legion_arrive_barrier, 1);
+        Runtime::phase_barrier_arrive(legion_arrive_barrier, legion_participants);
         Runtime::advance_barrier(mpi_wait_barrier);
       }
       else
       {
-        Runtime::phase_barrier_arrive(mpi_arrive_barrier, 1);
+        Runtime::phase_barrier_arrive(mpi_arrive_barrier, mpi_participants);
         Runtime::advance_barrier(legion_wait_barrier);
       }
     }
@@ -3140,6 +3140,19 @@ namespace Legion {
       }
     }
 
+    //--------------------------------------------------------------------------
+    void MemoryManager::finalize(void)
+    //--------------------------------------------------------------------------
+    {
+      if (!is_owner)
+        return;
+      assert(!current_instances.empty());
+      // No need for the lock, no one should be doing anything at this point
+      for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
+            current_instances.begin(); it != current_instances.end(); it++)
+        it->first->force_deletion();
+    }
+    
     //--------------------------------------------------------------------------
     void MemoryManager::register_remote_instance(PhysicalManager *manager)
     //--------------------------------------------------------------------------
@@ -5591,7 +5604,12 @@ namespace Legion {
     {
       // If we have a profiler we need to increment our requests count
       if (profiler != NULL)
+#ifdef DEBUG_LEGION
+        profiler->increment_total_outstanding_requests(
+                    LegionProfiler::LEGION_PROF_MESSAGE);
+#else
         profiler->increment_total_outstanding_requests();
+#endif
       // Strip off our header and the number of messages, the 
       // processor part was already stipped off by the Legion runtime
       const char *buffer = (const char*)args;
@@ -6333,7 +6351,12 @@ namespace Legion {
               // outstanding profiling count because we don't actually
               // do profiling requests on shutdown messages
               if (profiler != NULL)
+#ifdef DEBUG_LEGION
+                profiler->decrement_total_outstanding_requests(
+                            LegionProfiler::LEGION_PROF_MESSAGE);
+#else
                 profiler->decrement_total_outstanding_requests();
+#endif
               runtime->handle_shutdown_notification(derez,remote_address_space);
               break;
             }
@@ -6343,7 +6366,12 @@ namespace Legion {
               // outstanding profiling count because we don't actually
               // do profiling requests on shutdown messages
               if (profiler != NULL)
+#ifdef DEBUG_LEGION
+                profiler->decrement_total_outstanding_requests(
+                            LegionProfiler::LEGION_PROF_MESSAGE);
+#else
                 profiler->decrement_total_outstanding_requests();
+#endif
               runtime->handle_shutdown_response(derez);
               break;
             }
@@ -6716,16 +6744,6 @@ namespace Legion {
       // Instant death
       result = false;
       log_shutdown.info("Outstanding tasks on node %d", runtime->address_space);
-    }
-
-    //--------------------------------------------------------------------------
-    void ShutdownManager::record_outstanding_profiling_requests(void)
-    //--------------------------------------------------------------------------
-    {
-      // Instant death
-      result = false;
-      log_shutdown.info("Outstanding profiling requests on node %d", 
-                        runtime->address_space);
     }
 
     //--------------------------------------------------------------------------
@@ -8903,7 +8921,6 @@ namespace Legion {
       }
       if (profiler != NULL)
       {
-        profiler->finalize();
         delete profiler;
         profiler = NULL;
       }
@@ -9442,6 +9459,20 @@ namespace Legion {
         it->second->startup_mappers();
     }
 
+    //--------------------------------------------------------------------------
+    void Runtime::finalize_runtime(void)
+    //--------------------------------------------------------------------------
+    {
+      if (profiler != NULL)
+      {
+        // Have the memory managers for deletion of all their instances
+        for (std::map<Memory,MemoryManager*>::const_iterator it =
+             memory_managers.begin(); it != memory_managers.end(); it++)
+          it->second->finalize();
+        profiler->finalize();
+      }
+    }
+    
     //--------------------------------------------------------------------------
     void Runtime::launch_top_level_task(Processor target)
     //--------------------------------------------------------------------------
@@ -15615,10 +15646,7 @@ namespace Legion {
         }
 #endif
       }
-      // Record if we have any outstanding profiling requests
-      if ((profiler != NULL) && profiler->has_outstanding_requests())
-        shutdown_manager->record_outstanding_profiling_requests();
-      // Check all our message managers for outstanding messages 
+      // Check all our message managers for outstanding messages
       for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
       {
         if (message_managers[idx] != NULL)
@@ -19210,8 +19238,10 @@ namespace Legion {
                               const void *userdata, size_t userlen, Processor p)
     //--------------------------------------------------------------------------
     {
-      // All we need to is delete our runtime instance
-      delete get_runtime(p);
+      // Finalize the runtime and then delete it
+      Runtime *runtime = get_runtime(p);
+      runtime->finalize_runtime();
+      delete runtime;
     }
 
     //--------------------------------------------------------------------------
