@@ -506,7 +506,8 @@ namespace Legion {
                                                   operation_kind_descriptions,
                                    const char *serializer_type,
                                    const char *prof_logfile)
-      : target_proc(target), total_outstanding_requests(0)
+      : target_proc(target), total_outstanding_requests(1/*start with guard*/),
+        done_event(Runtime::create_rt_user_event())
     //--------------------------------------------------------------------------
     {
       profiler_lock = Reservation::create_reservation();
@@ -584,7 +585,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LegionProfiler::LegionProfiler(const LegionProfiler &rhs)
-      : target_proc(rhs.target_proc)
+      : target_proc(rhs.target_proc), done_event(RtUserEvent::NO_RT_USER_EVENT)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1067,6 +1068,10 @@ namespace Legion {
     void LegionProfiler::finalize(void)
     //--------------------------------------------------------------------------
     {
+      // Remove our guard outstanding request
+      decrement_total_outstanding_requests();
+      if (!done_event.has_triggered())
+        done_event.lg_wait();
       for (std::vector<LegionProfInstance*>::const_iterator it = 
             instances.begin(); it != instances.end(); it++) {
         (*it)->dump_state(serializer);
@@ -1160,6 +1165,28 @@ namespace Legion {
         create_thread_local_profiling_instance();
       thread_local_profiling_instance->record_runtime_call(current, kind, 
                                                            start, stop);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::increment_total_outstanding_requests(void)
+    //--------------------------------------------------------------------------
+    {
+      __sync_fetch_and_add(&total_outstanding_requests,1);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::decrement_total_outstanding_requests(void)
+    //--------------------------------------------------------------------------
+    {
+      const unsigned prev = __sync_fetch_and_sub(&total_outstanding_requests,1);
+      // If we were the last outstanding event we can trigger the event
+      if (prev == 1)
+      {
+#ifdef DEBUG_LEGION
+        assert(!done_event.has_triggered());
+#endif
+        Runtime::trigger_event(done_event);
+      }
     }
 
     //--------------------------------------------------------------------------

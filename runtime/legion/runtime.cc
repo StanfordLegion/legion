@@ -3051,6 +3051,18 @@ namespace Legion {
         }
       }
     }
+
+    //--------------------------------------------------------------------------
+    void MemoryManager::finalize(void)
+    //--------------------------------------------------------------------------
+    {
+      if (!is_owner)
+        return;
+      // No need for the lock, no one should be doing anything at this point
+      for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
+            current_instances.begin(); it != current_instances.end(); it++)
+        it->first->force_deletion();
+    }
     
     //--------------------------------------------------------------------------
     void MemoryManager::register_remote_instance(PhysicalManager *manager)
@@ -6623,16 +6635,6 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    void ShutdownManager::record_outstanding_profiling_requests(void)
-    //--------------------------------------------------------------------------
-    {
-      // Instant death
-      result = false;
-      log_shutdown.info("Outstanding profiling requests on node %d",
-                        runtime->address_space);
-    }
-    
-    //--------------------------------------------------------------------------
     void ShutdownManager::record_recent_message(void)
     //--------------------------------------------------------------------------
     {
@@ -8930,7 +8932,6 @@ namespace Legion {
       }
       if (profiler != NULL)
       {
-        profiler->finalize();
         delete profiler;
         profiler = NULL;
       }
@@ -9455,6 +9456,20 @@ namespace Legion {
                                    true/*skip replay*/);
           }
         }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::finalize_runtime(void)
+    //--------------------------------------------------------------------------
+    {
+      if (profiler != NULL)
+      {
+        // Have the memory managers for deletion of all their instances
+        for (std::map<Memory,MemoryManager*>::const_iterator it =
+             memory_managers.begin(); it != memory_managers.end(); it++)
+          it->second->finalize();
+        profiler->finalize();
       }
     }
     
@@ -16683,9 +16698,6 @@ namespace Legion {
         }
 #endif
       }
-      // Record if we have any outstanding profiling requests
-      if ((profiler != NULL) && profiler->has_outstanding_requests())
-        shutdown_manager->record_outstanding_profiling_requests();
       // Check all our message managers for outstanding messages
       for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
       {
@@ -20281,8 +20293,10 @@ continue;					\
                                               const void *userdata, size_t userlen, Processor p)
     //--------------------------------------------------------------------------
     {
-      // All we need to is delete our runtime instance
-      delete get_runtime(p);
+      // Finalize the runtime and then delete it
+      Runtime *runtime = get_runtime(p);
+      runtime->finalize_runtime();
+      delete runtime;
     }
     
     //--------------------------------------------------------------------------
