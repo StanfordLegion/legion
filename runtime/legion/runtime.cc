@@ -1822,12 +1822,12 @@ namespace Legion {
       // Whoever is waiting first, we have to advance their arrive barriers
       if (init_in_MPI)
       {
-        Runtime::phase_barrier_arrive(legion_arrive_barrier, 1);
+        Runtime::phase_barrier_arrive(legion_arrive_barrier, legion_participants);
         Runtime::advance_barrier(mpi_wait_barrier);
       }
       else
       {
-        Runtime::phase_barrier_arrive(mpi_arrive_barrier, 1);
+        Runtime::phase_barrier_arrive(mpi_arrive_barrier, mpi_participants);
         Runtime::advance_barrier(legion_wait_barrier);
       }
     }
