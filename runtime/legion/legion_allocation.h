@@ -170,15 +170,14 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert((alloc_size % ALIGNMENT) == 0);
 #endif
-      // memalign is faster than posix_memalign so use it if we have it
-#ifdef __MACH__
+#ifdef DEBUG_LEGION
 #ifndef NDEBUG
         int error = 
 #endif
+#endif
           posix_memalign(&result, ALIGNMENT, alloc_size);
+#ifdef DEBUG_LEGION
         assert(error == 0);
-#else
-        result = memalign(ALIGNMENT, alloc_size);
 #endif
       }
       else
