@@ -1129,6 +1129,7 @@ namespace Realm {
     const InstanceLayoutPiece<N,T> *layout_piece;
     int field_rel_offset;
     size_t field_size;
+    size_t total_bytes = 0;
     {
       std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = inst_layout->fields.find(fields[field_idx]);
       assert(it != inst_layout->fields.end());
@@ -1154,31 +1155,43 @@ namespace Realm {
       // using the current point, find the biggest subrectangle we want to try
       //  giving out, paying attention to the piece's bounds, where we've stopped,
       //  and piece strides
-      bool grow = true;
-      size_t exp_stride = field_size;
-      size_t cur_bytes = field_size;
+      int cur_dim = 0;
+      int max_dims = (((flags & LINES_OK) == 0)  ? 1 :
+		      ((flags & PLANES_OK) == 0) ? 2 :
+		                                   3);
+      ssize_t act_counts[3], act_strides[3];
+      act_counts[0] = field_size;
+      act_strides[0] = 1;
+      total_bytes = field_size;
+      for(int d = 1; d < 3; d++) {
+	act_counts[d] = 1;
+	act_strides[d] = 0;
+      }
       for(int d = 0; d < N; d++) {
-	if(grow) {
-	  size_t len;
-	  if(affine->strides[d] == exp_stride) {
-	    len = iter.rect.hi[d] - cur_point[d] + 1;
-	    exp_stride *= len;  // only matters if we keep growing anyway
-	    size_t piece_limit = affine->bounds.hi[d] - cur_point[d] + 1;
-	    if(piece_limit < len) {
-	      len = piece_limit;
-	      grow = false;
-	    }
-	    size_t byte_limit = max_bytes / cur_bytes;
-	    if(byte_limit < len) {
-	      len = byte_limit;
-	      grow = false;
-	    }
-	  } else {
-	    len = 1;
-	    grow = false;
+	if((cur_dim < max_dims) &&
+	   (affine->strides[d] != (act_counts[cur_dim] * act_strides[cur_dim]))) {
+	  cur_dim++;
+	  if(cur_dim < max_dims)
+	    act_strides[cur_dim] = affine->strides[d];
+	}
+	if(cur_dim < max_dims) {
+	  size_t len = iter.rect.hi[d] - cur_point[d] + 1;
+	  size_t piece_limit = affine->bounds.hi[d] - cur_point[d] + 1;
+	  bool cropped = false;
+	  if(piece_limit < len) {
+	    len = piece_limit;
+	    cropped = true;
+	  }
+	  size_t byte_limit = max_bytes / total_bytes;
+	  if(byte_limit < len) {
+	    len = byte_limit;
+	    cropped = true;
 	  }
 	  target_subrect.hi[d] = cur_point[d] + len - 1;
-	  cur_bytes *= len;
+	  total_bytes *= len;
+	  act_counts[cur_dim] *= len;
+	  if(cropped)
+	    cur_dim = max_dims;
 	} else
 	  target_subrect.hi[d] = cur_point[d];
       }
@@ -1188,11 +1201,11 @@ namespace Realm {
 			  affine->strides.dot(cur_point) +
 			  field_rel_offset);
       //log_dma.print() << "A " << inst_impl->metadata.inst_offset << " + " << affine->offset << " + (" << affine->strides << " . " << cur_point << ") + " << field_rel_offset << " = " << info.base_offset;
-      info.bytes_per_chunk = cur_bytes;
-      info.num_lines = 1;
-      info.line_stride = 0;
-      info.num_planes = 1;
-      info.plane_stride = 0;
+      info.bytes_per_chunk = act_counts[0];
+      info.num_lines = act_counts[1];
+      info.line_stride = act_strides[1];
+      info.num_planes = act_counts[2];
+      info.plane_stride = act_strides[2];
     } else {
       assert(0 && "no support for non-affine pieces yet");
     }
@@ -1232,7 +1245,7 @@ namespace Realm {
 	cur_point = next_point;
     }
 
-    return info.bytes_per_chunk;
+    return total_bytes;
   }
 
 #ifdef USE_HDF
