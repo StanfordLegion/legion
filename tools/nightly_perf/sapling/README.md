@@ -5,6 +5,7 @@
  3. ```
     git config --global user.name "Legion Testing Automation"
     git config --global user.email "legion-testing@googlegroups.com"
+    git config --global push.default simple
     ```
  4. ```
     git clone -b master https://github.com/StanfordLegion/legion.git
