@@ -584,7 +584,7 @@ namespace Realm {
 		                                  3);
     // these are strides in the mapping, which count in units of elements,
     //  not bytes
-    size_t exp_stride = 1;
+    coord_t exp_stride = 1;
     for(unsigned d = 0; d < DIM; d++) {
       // if the stride does not what we want, it can't be merged and costs us
       //  one of our copy dimensions to change it
