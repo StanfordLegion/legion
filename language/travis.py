@@ -35,7 +35,7 @@ def test(root_dir, install_only, debug, short, spy, gcov, hdf5, openmp, env):
         rdir = 'auto'
 
     subprocess.check_call(
-        ['time', './install.py', '--rdir=%s' % rdir] + threads + terra + debug_flag,
+        ['./install.py', '--rdir=%s' % rdir] + threads + terra + debug_flag,
         env = env,
         cwd = root_dir)
     if not install_only:
@@ -47,7 +47,7 @@ def test(root_dir, install_only, debug, short, spy, gcov, hdf5, openmp, env):
         if not spy and not gcov and not hdf5 and not openmp: extra_flags.append('--debug')
 
         subprocess.check_call(
-            ['time', './test.py', '-q'] + threads + short_flag + extra_flags + inner_flag,
+            ['./test.py', '-q'] + threads + short_flag + extra_flags + inner_flag,
             env = env,
             cwd = root_dir)
 
