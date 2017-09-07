@@ -1415,15 +1415,24 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       fence_completion = completion;
-      size_t num_events = events.size();
-      events.clear();
-      events.resize(num_events);
-      events[fence_completion_id] = fence_completion;
+      if (tracing)
+      {
+        events.resize(fence_completion_id + 1);
+        events[fence_completion_id] = fence_completion;
+      }
+      else
+      {
+        size_t num_events = events.size();
+        events.clear();
+        events.resize(num_events);
+        events[fence_completion_id] = fence_completion;
+        events.push_back(ApEvent::NO_AP_EVENT);
 #ifdef DEBUG_LEGION
-      for (std::map<TraceLocalId, SingleTask*>::iterator it =
-           operations.begin(); it != operations.end(); ++it)
-        it->second = NULL;
+        for (std::map<TraceLocalId, SingleTask*>::iterator it =
+             operations.begin(); it != operations.end(); ++it)
+          it->second = NULL;
 #endif
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1641,6 +1650,7 @@ namespace Legion {
       std::vector<unsigned> generate;
       std::vector<std::set<unsigned> > preconditions;
       std::vector<std::set<unsigned> > simplified;
+      std::map<TraceLocalId, std::set<unsigned> > ready_preconditions;
       generate.resize(instructions.size());
       preconditions.resize(instructions.size());
       simplified.resize(instructions.size());
@@ -1710,14 +1720,24 @@ namespace Legion {
             {
               SetReadyEvent *inst = instructions[idx]->as_set_ready_event();
               std::set<unsigned> &ready_pre = preconditions[inst->ready_event_idx];
-              std::map<TraceLocalId, unsigned>::iterator finder =
-                task_entries.find(inst->op_key);
+              {
+                std::map<TraceLocalId, unsigned>::iterator finder =
+                  task_entries.find(inst->op_key);
 #ifdef DEBUG_LEGION
-              assert(finder != task_entries.end());
+                assert(finder != task_entries.end());
 #endif
-              std::set<unsigned> &task_pre = preconditions[finder->second];
-              task_pre.insert(generate[inst->ready_event_idx]);
-              task_pre.insert(ready_pre.begin(), ready_pre.end());
+                std::set<unsigned> &task_pre = preconditions[finder->second];
+                task_pre.insert(generate[inst->ready_event_idx]);
+                task_pre.insert(ready_pre.begin(), ready_pre.end());
+              }
+              {
+                std::map<TraceLocalId, std::set<unsigned> >::iterator finder =
+                  ready_preconditions.find(inst->op_key);
+                if (finder == ready_preconditions.end())
+                  ready_preconditions[inst->op_key] = ready_pre;
+                else
+                  finder->second.insert(ready_pre.begin(), ready_pre.end());
+              }
               break;
             }
 #ifdef DEBUG_LEGION
@@ -1731,8 +1751,10 @@ namespace Legion {
       }
 
       std::vector<Instruction*> new_instructions;
+      std::vector<bool> suppressed;
       unsigned count = 0;
       std::map<unsigned, unsigned> rewrite;
+      std::map<TraceLocalId, unsigned> num_ready_events;
       for (unsigned idx = 0; idx < instructions.size(); ++idx)
       {
 #ifdef DEBUG_LEGION
@@ -1744,15 +1766,40 @@ namespace Legion {
           case ASSIGN_FENCE_COMPLETION:
           case GET_TERM_EVENT:
           case ISSUE_COPY:
-          case SET_READY_EVENT:
             {
 #ifdef DEBUG_LEGION
-              assert(instructions[idx]->get_kind() == SET_READY_EVENT ||
-                     generate[idx] == idx);
+              assert(generate[idx] == idx);
 #endif
               rewrite[idx] = count;
               new_instructions.push_back(
                   instructions[idx]->clone(*this, rewrite));
+              suppressed.push_back(false);
+              ++count;
+              break;
+            }
+          case SET_READY_EVENT:
+            {
+              SetReadyEvent *inst = instructions[idx]->as_set_ready_event();
+              {
+                std::map<TraceLocalId, unsigned>::iterator finder =
+                  num_ready_events.find(inst->op_key);
+                if (finder == num_ready_events.end())
+                  num_ready_events[inst->op_key] = 1;
+                else
+                  ++finder->second;
+              }
+              rewrite[idx] = count;
+              new_instructions.push_back(inst->clone(*this, rewrite));
+              {
+                std::map<TraceLocalId, std::set<unsigned> >::iterator finder =
+                  ready_preconditions.find(inst->op_key);
+#ifdef DEBUG_LEGION
+                assert(finder != ready_preconditions.end());
+#endif
+                suppressed.push_back(
+                    finder->second.find(generate[inst->ready_event_idx]) !=
+                    finder->second.end());
+              }
               ++count;
               break;
             }
@@ -1774,12 +1821,11 @@ namespace Legion {
                 }
                 rewrite[idx] = count;
                 new_instructions.push_back(new MergeEvent(*this, count, rhs));
+                suppressed.push_back(false);
                 ++count;
               }
               else
-              {
                 rewrite[idx] = rewrite[generate[idx]];
-              }
               break;
             }
 #ifdef DEBUG_LEGION
@@ -1793,6 +1839,19 @@ namespace Legion {
       }
 
       instructions.swap(new_instructions);
+      for (unsigned idx = 0; idx < instructions.size(); ++idx)
+        if (suppressed[idx])
+        {
+#ifdef DEBUG_LEGION
+          assert(instructions[idx]->get_kind() == SET_READY_EVENT);
+#endif
+          SetReadyEvent *inst = instructions[idx]->as_set_ready_event();
+          std::map<TraceLocalId, unsigned>::iterator finder =
+            num_ready_events.find(inst->op_key);
+          if (--finder->second > 0)
+            inst->ready_event_idx = instructions.size();
+        }
+
       for (std::vector<Instruction*>::iterator it = new_instructions.begin();
            it != new_instructions.end(); ++it)
         delete (*it);
@@ -1877,7 +1936,8 @@ namespace Legion {
                 task_entries.find(inst->op_key);
 #ifdef DEBUG_LEGION
               assert(finder != task_entries.end());
-              assert(inst->ready_event_idx < consumers.size());
+              assert(inst->ready_event_idx < consumers.size() ||
+                     inst->ready_event_idx == instructions.size());
 #endif
               unsigned count = 0;
               if (finder->second != fence_completion_id)
@@ -1885,7 +1945,8 @@ namespace Legion {
                 consumers[finder->second].push_back(idx);
                 ++count;
               }
-              if (inst->ready_event_idx != fence_completion_id)
+              if (inst->ready_event_idx != fence_completion_id &&
+                  inst->ready_event_idx != instructions.size())
               {
                 consumers[inst->ready_event_idx].push_back(idx);
                 ++count;
