@@ -34,6 +34,16 @@ function parser.value(p)
       value = token.value,
       position = pos,
     }
+  elseif p:nextif("true") then
+    value = ast.untyped.expr.Constant {
+      value = true,
+      position = pos,
+    }
+  elseif p:nextif("false") then
+    value = ast.untyped.expr.Constant {
+      value = false,
+      position = pos,
+    }
   elseif p:matches(p.name) then
     local token = p:next(p.name)
     value = ast.untyped.expr.Keyword {

@@ -513,6 +513,13 @@ function codegen.select_task_options(rules, automata, signature,
         [value.actions]
         [options_var].initial_proc = [value.value]
       end
+    elseif key == "memoize" then
+      local value = codegen.expr(binders, state_var, value_ast)
+      body = quote
+        [body]
+        [value.actions]
+        [options_var].memoize = [value.value]
+      end
     end
   end
 
