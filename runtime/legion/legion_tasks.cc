@@ -2964,9 +2964,10 @@ namespace Legion {
           // Check to see if it is visible or not from the target processors
           if (!Runtime::unsafe_mapper && !regions[idx].is_no_access())
           {
-            for (unsigned idx2 = 0; idx2 < finder->second.size(); idx2++)
+            InstanceSet &req_instances = physical_instances[idx];
+            for (unsigned idx2 = 0; idx2 < req_instances.size(); idx2++)
             {
-              Memory mem = finder->second[idx2].get_memory();
+              Memory mem = req_instances[idx2].get_memory();
               if (visible_memories.find(mem) == visible_memories.end())
               {
                 // Not visible from all target processors
