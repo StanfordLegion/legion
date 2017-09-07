@@ -1203,7 +1203,8 @@ namespace Legion {
       // implementations but in general it should be close
       static const size_t STL_SET_NODE_SIZE = 32;
     public:
-      struct DenseSet {
+      // Need to inherit form LegionHeapify for alignment
+      struct DenseSet : public Internal::LegionHeapify<DenseSet> {
       public:
         DT set;
       };
