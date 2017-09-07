@@ -5,7 +5,7 @@ set -e
 root_dir="$(dirname "${BASH_SOURCE[0]}")"
 cd "$root_dir"
 
-source env.sh
+source env.sh # defines PERF_ACCESS_TOKEN
 
 # Configure perf test
 export CC_FLAGS="-std=c++98"
