@@ -170,14 +170,28 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert((alloc_size % ALIGNMENT) == 0);
 #endif
-#ifdef DEBUG_LEGION
-#ifndef NDEBUG
+#if defined(DEBUG_LEGION) && !defined(NDEBUG)
         int error = 
+#else
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-result"
+#endif
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-result"
 #endif
 #endif
           posix_memalign(&result, ALIGNMENT, alloc_size);
-#ifdef DEBUG_LEGION
+#if defined(DEBUG_LEGION) && !defined(NDEBUG)
         assert(error == 0);
+#else
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 #endif
       }
       else
