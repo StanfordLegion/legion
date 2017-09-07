@@ -46,6 +46,13 @@ namespace Realm {
   }
 
   template <int N, typename T>
+  inline size_t HDF5LayoutPiece<N,T>::calculate_offset(const ZPoint<N,T>& p) const
+  {
+    assert(0);
+    return 0;
+  }
+
+  template <int N, typename T>
   inline void HDF5LayoutPiece<N,T>::relocate(size_t base_offset)
   {
   }

@@ -129,6 +129,10 @@ def run_cxx(tests, flags, launcher, root_dir, bin_dir, env, thread_count):
             test_path = os.path.join(root_dir, test_file)
             cmd(['make', '-C', test_dir, '-j', str(thread_count)], env=env)
         cmd(launcher + [test_path] + flags + test_flags, env=env, cwd=test_dir)
+        # after a successful run, clean up libraries/executables to keep disk
+        #  usage down
+        if not bin_dir:
+            cmd(['find', test_dir , '-type', 'f', '(', '-name', '*.a', '-o', '-perm', '-u+x', ')', '-exec', 'rm', '-v', '{}', ';'])
 
 def run_regent(tests, flags, launcher, root_dir, env, thread_count):
     for test_file, test_flags in tests:
@@ -349,12 +353,12 @@ def run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     # FIXME: PENNANT can't handle the -logfile flag coming first, so just skip it.
     run_regent(regent_perf_tests, [], [runner, regent_path], root_dir, regent_env, thread_count)
 
-    # FIXME: This is breaking because the payload is too large.
     # Render the final charts.
-    # subprocess.check_call(
-    #     [os.path.join(root_dir, 'tools', 'perf_chart.py'),
-    #      'https://github.com/StanfordLegion/perf-data.git'],
-    #     env=env)
+    subprocess.check_call(
+        [os.path.join(root_dir, 'tools', 'perf_chart.py'),
+         'git@github.com:StanfordLegion/perf-data.git',
+         'git@github.com:StanfordLegion/perf-data.git'],
+        env=env)
 
 def check_test_legion_cxx(root_dir):
     print('Checking that tests that SHOULD tested are ACTUALLY tested...')

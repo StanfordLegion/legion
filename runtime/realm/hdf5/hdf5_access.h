@@ -33,6 +33,8 @@ namespace Realm {
     template <typename S>
     static InstanceLayoutPiece<N,T> *deserialize_new(S& deserializer);
 
+    virtual size_t calculate_offset(const ZPoint<N,T>& p) const;
+
     virtual void relocate(size_t base_offset);
 
     virtual void print(std::ostream& os) const;

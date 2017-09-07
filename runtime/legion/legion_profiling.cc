@@ -628,9 +628,6 @@ namespace Legion {
     {
       profiler_lock.destroy_reservation();
       profiler_lock = Reservation::NO_RESERVATION;
-#ifdef DEBUG_LEGION
-      assert(total_outstanding_requests == 0);
-#endif
       for (std::vector<LegionProfInstance*>::const_iterator it = 
             instances.begin(); it != instances.end(); it++)
         delete (*it);

@@ -83,6 +83,7 @@ namespace Realm {
     virtual void reset(void);
     virtual bool done(void) const;
     virtual size_t step(size_t max_bytes, AddressInfo& info,
+			unsigned flags,
 			bool tentative = false);
     virtual void confirm_step(void);
     virtual void cancel_step(void);
@@ -241,6 +242,7 @@ namespace Realm {
   }
 
   size_t TransferIteratorIndexSpace::step(size_t max_bytes, AddressInfo& info,
+					  unsigned flags,
 					  bool tentative /*= false*/)
   {
     // if we don't have the valid mask (and we have any fields that we intend
@@ -425,6 +427,7 @@ namespace Realm {
     virtual void reset(void);
     virtual bool done(void) const;
     virtual size_t step(size_t max_bytes, AddressInfo& info,
+			unsigned flags,
 			bool tentative = false);
     virtual void confirm_step(void);
     virtual void cancel_step(void);
@@ -543,6 +546,7 @@ namespace Realm {
 
   template <unsigned DIM>
   size_t TransferIteratorRect<DIM>::step(size_t max_bytes, AddressInfo& info,
+					 unsigned flags,
 					 bool tentative /*= false*/)
   {
     assert(!done());
@@ -585,58 +589,88 @@ namespace Realm {
 	target_subrect.hi.x[d] = p[d];
     }
 
-    // map the target rectangle, and if we get a subrectangle, assume it's
-    //  compatible with the ordering rules above (e.g. Fortran layout)
+    // request a linear subrectangle and then knock out dimensions that are not
+    //  contiguous (allowing for 2D/3D copies if requested)
     Rect<DIM> act_subrect;
-    Rect<1> image = mapping->image_dense_subrect(target_subrect, act_subrect);
-    //assert(act_subrect == target_subrect);
+    Point<1> strides[DIM];
+    Point<1> image_lo = mapping->image_linear_subrect(target_subrect,
+						      act_subrect,
+						      strides);
+    int dims_left = (((flags & LINES_OK) == 0)  ? 1 :
+		     ((flags & PLANES_OK) == 0) ? 2 :
+		                                  3);
+    // these are strides in the mapping, which count in units of elements,
+    //  not bytes
+    coord_t exp_stride = 1;
+    for(unsigned d = 0; d < DIM; d++) {
+      // if the stride does not what we want, it can't be merged and costs us
+      //  one of our copy dimensions to change it
+      if((dims_left > 0) && ((coord_t)strides[d] != exp_stride)) {
+	exp_stride = strides[d];
+	dims_left--;
+      }
+      // if we're still merging, take the full subrect and update the expected
+      //  stride - if not, collapse this dimension of the act_subrect
+      if(dims_left > 0) {
+	exp_stride *= (act_subrect.hi[d] - act_subrect.lo[d] + 1);
+      } else {
+	act_subrect.hi.x[d] = act_subrect.lo[d];
+      }
+    }
+    // get the high bounds of our image (which might not be contiguous)
+    Point<1> image_hi = mapping->image(act_subrect.hi);
     size_t act_count = act_subrect.volume();
     
     coord_t first_block;
     coord_t block_ofs;
-    if(inst_impl->metadata.block_size > (size_t)image.hi[0]) {
+    if(inst_impl->metadata.block_size > (size_t)image_hi[0]) {
       // SOA is always a single block
       first_block = 0;
-      block_ofs = image.lo[0];
+      block_ofs = image_lo[0];
     } else {
       // handle AOS/hybrid cases
       // see which block the start and end are in
-      first_block = image.lo[0] / inst_impl->metadata.block_size;
-      block_ofs = image.lo[0] - (first_block *
+      first_block = image_lo[0] / inst_impl->metadata.block_size;
+      block_ofs = image_lo[0] - (first_block *
 				 inst_impl->metadata.block_size);
-      coord_t last_block = image.hi[0] / inst_impl->metadata.block_size;
+      coord_t last_block = image_hi[0] / inst_impl->metadata.block_size;
       if(first_block != last_block) {
 	// shrink rectangle to remain contiguous
 	coord_t max_len = (inst_impl->metadata.block_size -
-			   (image.lo[0] % inst_impl->metadata.block_size));
+			   (image_lo[0] % inst_impl->metadata.block_size));
 	if(max_len < (act_subrect.hi[0] - act_subrect.lo[0] + 1)) {
 	  // can't even get the first dimension done - collapse everything else
 	  act_subrect.hi = act_subrect.lo;
 	  act_subrect.hi.x[0] = act_subrect.lo[0] + max_len - 1;
 	  act_count = max_len;
 	} else {
-	  coord_t new_count = act_subrect.hi[0] - act_subrect.lo[0] + 1;
+	  // got the whole first dimension - keep track of how much we have
+	  //  left for subsequent dimensions
+	  max_len -= (act_subrect.hi[0] - act_subrect.lo[0] + 1);
 	  for(unsigned d = 1; d < DIM; d++) {
 	    // don't spend time on degenerate domains
 	    if(act_subrect.lo[d] == act_subrect.hi[d]) continue;
 
 	    // does this whole dimension fit?
-	    coord_t dim_len = act_subrect.hi[d] - act_subrect.lo[d] + 1;
-	    if((new_count * dim_len) <= max_len) {
-	      new_count *= dim_len;
+	    // we already have room for the first subspace in this dimension, so
+	    //  see how many more we can add (no +1 here because we want 1 less
+	    //  than the total extent)
+	    coord_t needed_len = ((coord_t)strides[d] *
+				  (act_subrect.hi[d] - act_subrect.lo[d]));
+	    if(needed_len <= max_len) {
+	      max_len -= needed_len;
 	      continue;
 	    }
 
 	    // nope, have to shorten it and then collapse higher dimensions
-	    coord_t new_len = max_len / new_count;
-	    assert((new_len > 0) && (new_len < dim_len));
-	    act_subrect.hi.x[d] = act_subrect.lo[d] + new_len - 1;
-	    new_count *= new_len;
+	    coord_t avail_len = max_len / strides[d];
+	    act_subrect.hi.x[d] = act_subrect.lo[d] + avail_len;
 	    while(++d < DIM)
 	      act_subrect.hi.x[d] = act_subrect.lo[d];
 	    break;
 	  }
-	  act_count = new_count;
+	  // update our count
+	  act_count = act_subrect.volume();
 	}
       }
     }
@@ -646,11 +680,45 @@ namespace Realm {
 			(first_block * inst_impl->metadata.block_size * inst_impl->metadata.elmt_size) +
 			(field_offsets[field_idx] * inst_impl->metadata.block_size) +
 			(block_ofs * field_sizes[field_idx]));
-    info.bytes_per_chunk = act_count * field_sizes[field_idx];
-    info.num_lines = 1;
-    info.line_stride = 0;
-    info.num_planes = 1;
-    info.plane_stride = 0;
+    // redo dimension collapsing now that we know exactly what rectangle we've
+    //  selected, and use bytes as the unit now
+    coord_t act_counts[3], act_strides[3];
+    int cur_dim = 0;
+    act_counts[0] = field_sizes[field_idx];
+    act_strides[0] = 1;
+    for(unsigned d = 0; d < DIM; d++) {
+      // only worry about non-degenerate dimensions
+      if(act_subrect.lo[d] == act_subrect.hi[d])
+	continue;
+      coord_t exp_stride = (coord_t)strides[d] * field_sizes[field_idx];
+      if(exp_stride != (act_strides[cur_dim] * act_counts[cur_dim])) {
+	cur_dim++;
+	assert(cur_dim < 3);
+	act_counts[cur_dim] = 1;
+	act_strides[cur_dim] = exp_stride;
+      }
+      act_counts[cur_dim] *= (act_subrect.hi[d] - act_subrect.lo[d] + 1);
+    }
+    info.bytes_per_chunk = act_counts[0];
+    if(cur_dim >= 1) {
+      assert((flags & LINES_OK) != 0);
+      info.num_lines = act_counts[1];
+      info.line_stride = act_strides[1];
+    } else {
+      info.num_lines = 1;
+      info.line_stride = 0;
+    }
+    if(cur_dim >= 2) {
+      assert((flags & PLANES_OK) != 0);
+      info.num_planes = act_counts[2];
+      info.plane_stride = act_strides[2];
+    } else {
+      info.num_planes = 1;
+      info.plane_stride = 0;
+    }
+
+    size_t total_bytes = act_count * field_sizes[field_idx];
+    assert(total_bytes == (info.bytes_per_chunk * info.num_lines * info.num_planes));
 
     // now set 'next_p' to the next point we want
     bool carry = true;
@@ -677,7 +745,7 @@ namespace Realm {
       field_idx = next_idx;
     }
 
-    return info.bytes_per_chunk;
+    return total_bytes;
   }
 
   template <unsigned DIM>
@@ -730,6 +798,7 @@ namespace Realm {
     virtual void reset(void);
     virtual bool done(void) const;
     virtual size_t step(size_t max_bytes, AddressInfo& info,
+			unsigned flags,
 			bool tentative = false);
     virtual size_t step(size_t max_bytes, AddressInfoHDF5& info,
 			bool tentative = false);
@@ -790,6 +859,7 @@ namespace Realm {
   
   template <unsigned DIM>
   size_t TransferIteratorHDF5<DIM>::step(size_t max_bytes, AddressInfo& info,
+					 unsigned flags,
 					 bool tentative /*= false*/)
   {
     // normal address infos not allowed
@@ -931,6 +1001,7 @@ namespace Realm {
     virtual void reset(void);
     virtual bool done(void) const;
     virtual size_t step(size_t max_bytes, AddressInfo& info,
+			unsigned flags,
 			bool tentative = false);
 #ifdef USE_HDF
     virtual size_t step(size_t max_bytes, AddressInfoHDF5& info,
@@ -1045,7 +1116,8 @@ namespace Realm {
 
   template <int N, typename T>
   size_t TransferIteratorZIndexSpace<N,T>::step(size_t max_bytes, AddressInfo& info,
-					   bool tentative /*= false*/)
+						unsigned flags,
+						bool tentative /*= false*/)
   {
     assert(!done());
     assert(!tentative_valid);
@@ -1057,6 +1129,7 @@ namespace Realm {
     const InstanceLayoutPiece<N,T> *layout_piece;
     int field_rel_offset;
     size_t field_size;
+    size_t total_bytes = 0;
     {
       std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = inst_layout->fields.find(fields[field_idx]);
       assert(it != inst_layout->fields.end());
@@ -1082,31 +1155,43 @@ namespace Realm {
       // using the current point, find the biggest subrectangle we want to try
       //  giving out, paying attention to the piece's bounds, where we've stopped,
       //  and piece strides
-      bool grow = true;
-      size_t exp_stride = field_size;
-      size_t cur_bytes = field_size;
+      int cur_dim = 0;
+      int max_dims = (((flags & LINES_OK) == 0)  ? 1 :
+		      ((flags & PLANES_OK) == 0) ? 2 :
+		                                   3);
+      ssize_t act_counts[3], act_strides[3];
+      act_counts[0] = field_size;
+      act_strides[0] = 1;
+      total_bytes = field_size;
+      for(int d = 1; d < 3; d++) {
+	act_counts[d] = 1;
+	act_strides[d] = 0;
+      }
       for(int d = 0; d < N; d++) {
-	if(grow) {
-	  size_t len;
-	  if(affine->strides[d] == exp_stride) {
-	    len = iter.rect.hi[d] - cur_point[d] + 1;
-	    exp_stride *= len;  // only matters if we keep growing anyway
-	    size_t piece_limit = affine->bounds.hi[d] - cur_point[d] + 1;
-	    if(piece_limit < len) {
-	      len = piece_limit;
-	      grow = false;
-	    }
-	    size_t byte_limit = max_bytes / cur_bytes;
-	    if(byte_limit < len) {
-	      len = byte_limit;
-	      grow = false;
-	    }
-	  } else {
-	    len = 1;
-	    grow = false;
+	if((cur_dim < max_dims) &&
+	   (affine->strides[d] != (act_counts[cur_dim] * act_strides[cur_dim]))) {
+	  cur_dim++;
+	  if(cur_dim < max_dims)
+	    act_strides[cur_dim] = affine->strides[d];
+	}
+	if(cur_dim < max_dims) {
+	  size_t len = iter.rect.hi[d] - cur_point[d] + 1;
+	  size_t piece_limit = affine->bounds.hi[d] - cur_point[d] + 1;
+	  bool cropped = false;
+	  if(piece_limit < len) {
+	    len = piece_limit;
+	    cropped = true;
+	  }
+	  size_t byte_limit = max_bytes / total_bytes;
+	  if(byte_limit < len) {
+	    len = byte_limit;
+	    cropped = true;
 	  }
 	  target_subrect.hi[d] = cur_point[d] + len - 1;
-	  cur_bytes *= len;
+	  total_bytes *= len;
+	  act_counts[cur_dim] *= len;
+	  if(cropped)
+	    cur_dim = max_dims;
 	} else
 	  target_subrect.hi[d] = cur_point[d];
       }
@@ -1116,11 +1201,11 @@ namespace Realm {
 			  affine->strides.dot(cur_point) +
 			  field_rel_offset);
       //log_dma.print() << "A " << inst_impl->metadata.inst_offset << " + " << affine->offset << " + (" << affine->strides << " . " << cur_point << ") + " << field_rel_offset << " = " << info.base_offset;
-      info.bytes_per_chunk = cur_bytes;
-      info.num_lines = 1;
-      info.line_stride = 0;
-      info.num_planes = 1;
-      info.plane_stride = 0;
+      info.bytes_per_chunk = act_counts[0];
+      info.num_lines = act_counts[1];
+      info.line_stride = act_strides[1];
+      info.num_planes = act_counts[2];
+      info.plane_stride = act_strides[2];
     } else {
       assert(0 && "no support for non-affine pieces yet");
     }
@@ -1160,7 +1245,7 @@ namespace Realm {
 	cur_point = next_point;
     }
 
-    return info.bytes_per_chunk;
+    return total_bytes;
   }
 
 #ifdef USE_HDF
@@ -1349,8 +1434,7 @@ namespace Realm {
 
     virtual TransferIterator *create_iterator(RegionInstance inst,
 					      RegionInstance peer,
-					      const std::vector<FieldID>& fields,
-					      unsigned option_flags) const;
+					      const std::vector<FieldID>& fields) const;
 
     virtual void print(std::ostream& os) const;
 
@@ -1420,8 +1504,7 @@ namespace Realm {
 
   TransferIterator *TransferDomainIndexSpace::create_iterator(RegionInstance inst,
 							      RegionInstance peer,
-							      const std::vector<FieldID>& fields,
-							      unsigned option_flags) const
+							      const std::vector<FieldID>& fields) const
   {
     size_t extra_elems = 0;
     return new TransferIteratorIndexSpace(is, inst, fields, extra_elems);
@@ -1459,8 +1542,7 @@ namespace Realm {
 
     virtual TransferIterator *create_iterator(RegionInstance inst,
 					      RegionInstance peer,
-					      const std::vector<FieldID>& fields,
-					      unsigned option_flags) const;
+					      const std::vector<FieldID>& fields) const;
 
     virtual void print(std::ostream& os) const;
 
@@ -1511,8 +1593,7 @@ namespace Realm {
   template <unsigned DIM>
   TransferIterator *TransferDomainRect<DIM>::create_iterator(RegionInstance inst,
 							      RegionInstance peer,
-							      const std::vector<FieldID>& fields,
-							      unsigned option_flags) const
+							      const std::vector<FieldID>& fields) const
   {
 #ifdef USE_HDF_OLD
     // HDF5 memories need special iterators
@@ -1578,8 +1659,7 @@ namespace Realm {
 
     virtual TransferIterator *create_iterator(RegionInstance inst,
 					      RegionInstance peer,
-					      const std::vector<FieldID>& fields,
-					      unsigned option_flags) const;
+					      const std::vector<FieldID>& fields) const;
 
     virtual void print(std::ostream& os) const;
 
@@ -1632,8 +1712,7 @@ namespace Realm {
   template <int N, typename T>
   TransferIterator *TransferDomainZIndexSpace<N,T>::create_iterator(RegionInstance inst,
 								    RegionInstance peer,
-								    const std::vector<FieldID>& fields,
-								    unsigned option_flags) const
+								    const std::vector<FieldID>& fields) const
   {
 #ifdef USE_HDF_OLD
     // HDF5 memories need special iterators

@@ -1321,11 +1321,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::enqueue_ready_task(RtEvent wait_on /*=RtEvent::NO_RT_EVENT*/)
+    void TaskOp::enqueue_ready_task(bool use_target_processor,
+                                    RtEvent wait_on /*=RtEvent::NO_RT_EVENT*/)
     //--------------------------------------------------------------------------
     {
-      Processor p = parent_ctx->get_executing_processor();
-      runtime->add_to_ready_queue(p, this, wait_on);
+      if (use_target_processor)
+        runtime->add_to_ready_queue(target_proc, this, wait_on);
+      else
+        runtime->add_to_ready_queue(current_proc, this, wait_on);
     }
 
     //--------------------------------------------------------------------------
@@ -2997,9 +3000,10 @@ namespace Legion {
           // Check to see if it is visible or not from the target processors
           if (!Runtime::unsafe_mapper && !regions[idx].is_no_access())
           {
-            for (unsigned idx2 = 0; idx2 < finder->second.size(); idx2++)
+            InstanceSet &req_instances = physical_instances[idx];
+            for (unsigned idx2 = 0; idx2 < req_instances.size(); idx2++)
             {
-              Memory mem = finder->second[idx2].get_memory();
+              Memory mem = req_instances[idx2].get_memory();
               if (visible_memories.find(mem) == visible_memories.end())
               {
                 // Not visible from all target processors
@@ -4529,10 +4533,10 @@ namespace Legion {
           if (!slice->is_locally_mapped())
             runtime->send_task(slice);
           else
-            runtime->add_to_ready_queue(slice->current_proc, slice);
+            slice->enqueue_ready_task(false/*use target*/);
         }
         else
-          runtime->add_to_ready_queue(slice->target_proc, slice); 
+          slice->enqueue_ready_task(true/*use target*/);
         if (done)
           break;
       }
@@ -5125,6 +5129,33 @@ namespace Legion {
       register_predicate_dependence();
       restrict_infos.resize(regions.size());
       version_infos.resize(regions.size());
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualTask::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      // Dumb case for must epoch operations, we need these to 
+      // be mapped immediately, mapper be damned
+      if (must_epoch != NULL)
+      {
+        ProcessorManager::TriggerTaskArgs trigger_args;
+        trigger_args.op = this;
+        runtime->issue_runtime_meta_task(trigger_args, 
+                                         LG_THROUGHPUT_PRIORITY, this);
+      }
+      // Figure out whether this task is local or remote
+      else if (!runtime->is_local(target_proc))
+      {
+        // We can only send it away if it is not locally mapped
+        // otherwise it has to stay here until it is fully mapped
+        if (!is_locally_mapped())
+          runtime->send_task(this);
+        else
+          enqueue_ready_task(false/*use target*/);
+      }
+      else
+        enqueue_ready_task(true/*use target*/);
     }
 
     //--------------------------------------------------------------------------

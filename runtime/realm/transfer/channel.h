@@ -193,17 +193,20 @@ namespace LegionRuntime{
     public:
       enum Dimension {
         DIM_1D,
-        DIM_2D
+        DIM_2D,
+	DIM_3D
       };
       // a pointer to the owning xfer descriptor
       // this should set at Request creation
       XferDes* xd;
       // src/dst offset in the src/dst instance
       off_t src_off, dst_off;
-      // src/dst strides
+      // src/dst (line) strides
       off_t src_str, dst_str;
+      // src/dst plane strides
+      off_t src_pstr, dst_pstr;
       // number of bytes being transferred
-      size_t nbytes, nlines;
+      size_t nbytes, nlines, nplanes;
       // a flag indicating whether this request read has been done
       bool is_read_done;
       // a flag indicating whether this request write has been done
@@ -583,7 +586,7 @@ namespace LegionRuntime{
 
       virtual void flush() = 0;
  
-      long default_get_requests(Request** requests, long nr);
+      long default_get_requests(Request** requests, long nr, unsigned flags = 0);
       void default_notify_request_read_done(Request* req);
       void default_notify_request_write_done(Request* req);
 
