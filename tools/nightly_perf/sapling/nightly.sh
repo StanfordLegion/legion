@@ -13,7 +13,7 @@ export DEBUG=0
 export CI_RUNNER_DESCRIPTION="n0002.sapling.stanford.edu"
 
 # Run perf test for each branch
-for branch in master; do
+for branch in master dma deppart; do
     if [[ -d _legion_$branch ]]; then
         git -C _legion_$branch pull --ff-only
         git -C _legion_$branch reset --hard HEAD
