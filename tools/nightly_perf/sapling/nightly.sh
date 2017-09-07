@@ -19,7 +19,7 @@ for branch in master; do
         git -C _legion_$branch reset --hard HEAD
         git -C _legion_$branch clean -fdx
     else
-        git clone -b $branch git@github.com:StanfordLegion/legion.git _legion_$branch
+        git clone -b $branch https://github.com/StanfordLegion/legion.git _legion_$branch
     fi
     pushd _legion_$branch
     ./test.py --test=perf
