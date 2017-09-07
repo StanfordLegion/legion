@@ -2,9 +2,6 @@
 
 set -e
 
-root_dir="$(dirname "${BASH_SOURCE[0]}")"
-cd "$root_dir"
-
 # Test suite configuration
 export CC_FLAGS="-std=c++98"
 export DEBUG=0
