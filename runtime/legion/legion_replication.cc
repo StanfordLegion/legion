@@ -488,6 +488,7 @@ namespace Legion {
         // We have no local points, so we can just trigger
         complete_mapping();
         complete_execution();
+        trigger_children_complete();
       }
       else // We have valid points, so it goes on the ready queue
         enqueue_ready_operation();
