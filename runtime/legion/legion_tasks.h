@@ -252,7 +252,8 @@ namespace Legion {
       RtEvent defer_perform_mapping(RtEvent precondition, MustEpochOp *op);
       RtEvent defer_launch_task(RtEvent precondition);
     protected:
-      void enqueue_ready_task(RtEvent wait_on = RtEvent::NO_RT_EVENT);
+      void enqueue_ready_task(bool use_target_processor,
+                              RtEvent wait_on = RtEvent::NO_RT_EVENT);
     protected:
       void pack_version_infos(Serializer &rez,
                               std::vector<VersionInfo> &infos,
@@ -614,6 +615,7 @@ namespace Legion {
       virtual bool has_prepipeline_stage(void) const { return true; }
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                                        get_acquired_instances_ref(void);

@@ -662,6 +662,11 @@ namespace Legion {
     void Operation::enqueue_ready_operation(RtEvent wait_on/*=Event::NO_EVENT*/)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      // Only index space tasks should come through this path
+      if (get_operation_kind() == TASK_OP_KIND)
+        assert(dynamic_cast<IndexTask*>(this) != NULL);
+#endif
       if (wait_on.exists() && !wait_on.has_triggered())
       {
         DeferredEnqueueArgs args;

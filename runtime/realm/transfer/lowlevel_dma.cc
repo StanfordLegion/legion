@@ -521,7 +521,6 @@ namespace Realm {
       //    }
       //  }
       }
-      delete ib_req;
       //</NEWDMA>
       delete oas_by_inst;
       delete domain;
@@ -954,6 +953,8 @@ namespace Realm {
         //  }
         //}
         ib_req->mark_finished(true);
+        // once we've marked the ib_req finished, we no longer own it - it will be deleted by the OperationTable
+        ib_req = 0;
         state = STATE_BEFORE_EVENT;
       }
 
