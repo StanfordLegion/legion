@@ -129,6 +129,10 @@ def run_cxx(tests, flags, launcher, root_dir, bin_dir, env, thread_count):
             test_path = os.path.join(root_dir, test_file)
             cmd(['make', '-C', test_dir, '-j', str(thread_count)], env=env)
         cmd(launcher + [test_path] + flags + test_flags, env=env, cwd=test_dir)
+        # after a successful run, clean up libraries/executables to keep disk
+        #  usage down
+        if not bin_dir:
+            cmd(['find', test_dir , '-type', 'f', '(', '-name', '*.a', '-o', '-perm', '-u+x', ')', '-exec', 'rm', '-v', '{}', ';'])
 
 def run_regent(tests, flags, launcher, root_dir, env, thread_count):
     for test_file, test_flags in tests:
