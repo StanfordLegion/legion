@@ -346,12 +346,12 @@ def run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     # FIXME: PENNANT can't handle the -logfile flag coming first, so just skip it.
     run_regent(regent_perf_tests, [], [runner, regent_path], root_dir, regent_env, thread_count)
 
-    # FIXME: This is breaking because the payload is too large.
     # Render the final charts.
-    # subprocess.check_call(
-    #     [os.path.join(root_dir, 'tools', 'perf_chart.py'),
-    #      'https://github.com/StanfordLegion/perf-data.git'],
-    #     env=env)
+    subprocess.check_call(
+        [os.path.join(root_dir, 'tools', 'perf_chart.py'),
+         'git@github.com:StanfordLegion/perf-data.git',
+         'git@github.com:StanfordLegion/perf-data.git'],
+        env=env)
 
 def check_test_legion_cxx(root_dir):
     print('Checking that tests that SHOULD tested are ACTUALLY tested...')
