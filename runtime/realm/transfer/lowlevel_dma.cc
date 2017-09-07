@@ -521,7 +521,6 @@ namespace Realm {
       //    }
       //  }
       }
-      delete ib_req;
       //</NEWDMA>
       delete oas_by_inst;
       delete domain;
@@ -954,6 +953,8 @@ namespace Realm {
         //  }
         //}
         ib_req->mark_finished(true);
+        // once we've marked the ib_req finished, we no longer own it - it will be deleted by the OperationTable
+        ib_req = 0;
         state = STATE_BEFORE_EVENT;
       }
 
@@ -3432,6 +3433,7 @@ namespace Realm {
     virtual bool done(void) const;
 
     virtual size_t step(size_t max_bytes, AddressInfo& info,
+			unsigned flags,
 			bool tentative = false);
     virtual void confirm_step(void);
     virtual void cancel_step(void);
@@ -3475,6 +3477,7 @@ namespace Realm {
   }
 
   size_t WrappingFIFOIterator::step(size_t max_bytes, AddressInfo &info,
+				    unsigned flags,
 				    bool tentative /*= false*/)
   {
     assert(!tentative_valid);
@@ -3559,7 +3562,6 @@ namespace Realm {
 	// construct the iterators for the source and dest instances - these
 	//  know about each other so they can potentially conspire about
 	//  iteration order
-	unsigned iter_flags = 0;  // most conservative for now
 	std::vector<FieldID> src_fields, dst_fields;
 	for(OASVec::const_iterator it2 = it->second.begin();
 	    it2 != it->second.end();
@@ -3571,12 +3573,10 @@ namespace Realm {
 	}
 	TransferIterator *src_iter = domain->create_iterator(src_inst,
 							     dst_inst,
-							     src_fields,
-							     iter_flags);
+							     src_fields);
 	TransferIterator *dst_iter = domain->create_iterator(dst_inst,
 							     src_inst,
-							     dst_fields,
-							     iter_flags);
+							     dst_fields);
 
         assert(mem_path.size() - 1 == sub_path.size());
 	//assert(ibvec.empty() || (0 && "SJT: intermediate buffer functionality temporarily disabled"));
@@ -4713,15 +4713,12 @@ namespace Realm {
       std::vector<FieldID> dst_field(1, dst.field_id);
       assert(srcs[0].subfield_offset == 0);
       assert(dst.subfield_offset == 0);
-      unsigned iter_flags = 0;
       TransferIterator *src_iter = domain->create_iterator(srcs[0].inst,
 							   dst.inst,
-							   src_field,
-							   iter_flags);
+							   src_field);
       TransferIterator *dst_iter = domain->create_iterator(dst.inst,
 							   srcs[0].inst,
-							   dst_field,
-							   iter_flags);
+							   dst_field);
 
       const ReductionOpUntyped *redop = get_runtime()->reduce_op_table[redop_id];
       size_t src_elem_size = red_fold ? redop->sizeof_rhs : redop->sizeof_lhs;
@@ -4737,12 +4734,12 @@ namespace Realm {
 	TransferIterator::AddressInfo src_info, dst_info;
 
 	size_t max_bytes = (size_t)-1;
-	size_t src_bytes = src_iter->step(max_bytes, src_info,
+	size_t src_bytes = src_iter->step(max_bytes, src_info, 0,
 					  true /*tentative*/);
 	assert(src_bytes >= 0);
 	size_t num_elems = src_bytes / src_elem_size;
 	size_t exp_dst_bytes = num_elems * redop->sizeof_rhs;
-	size_t dst_bytes = dst_iter->step(exp_dst_bytes, dst_info);
+	size_t dst_bytes = dst_iter->step(exp_dst_bytes, dst_info, 0);
 	if(dst_bytes == exp_dst_bytes) {
 	  // good, confirm the source step
 	  src_iter->confirm_step();
@@ -4751,7 +4748,7 @@ namespace Realm {
 	  src_iter->cancel_step();
 	  num_elems = dst_bytes / redop->sizeof_rhs;
 	  size_t exp_src_bytes = num_elems * src_elem_size;
-	  src_bytes = src_iter->step(exp_src_bytes, src_info);
+	  src_bytes = src_iter->step(exp_src_bytes, src_info, 0);
 	  assert(src_bytes == exp_src_bytes);
 	}
 
@@ -5375,17 +5372,18 @@ namespace Realm {
 
       std::vector<FieldID> dst_field(1, dst.field_id);
       assert(dst.subfield_offset == 0);
-      unsigned iter_flags = 0;
       TransferIterator *iter = domain->create_iterator(dst.inst,
 						       RegionInstance::NO_INST,
-						       dst_field,
-						       iter_flags);
+						       dst_field);
 
       while(!iter->done()) {
 	TransferIterator::AddressInfo info;
 
 	size_t max_bytes = (size_t)-1;
-	size_t act_bytes = iter->step(max_bytes, info);
+	// code below is 2D/3D-capable
+	unsigned flags = (TransferIterator::LINES_OK |
+			  TransferIterator::PLANES_OK);
+	size_t act_bytes = iter->step(max_bytes, info, flags);
 	assert(act_bytes >= 0);
 
 	// decide whether to use the original fill buffer or one that

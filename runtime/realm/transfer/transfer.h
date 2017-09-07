@@ -75,7 +75,7 @@ namespace Realm {
 
     // if a step is tentative, it must either be confirmed or cancelled before
     //  another one is possible
-    virtual size_t step(size_t max_bytes, AddressInfo& info,
+    virtual size_t step(size_t max_bytes, AddressInfo& info, unsigned flags,
 			bool tentative = false) = 0;
 #ifdef USE_HDF
     virtual size_t step(size_t max_bytes, AddressInfoHDF5& info,
@@ -118,8 +118,7 @@ namespace Realm {
 
     virtual TransferIterator *create_iterator(RegionInstance inst,
 					      RegionInstance peer,
-					      const std::vector<FieldID>& fields,
-					      unsigned option_flags) const = 0;
+					      const std::vector<FieldID>& fields) const = 0;
 
     virtual void print(std::ostream& os) const = 0;
   };
