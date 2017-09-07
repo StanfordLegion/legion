@@ -418,8 +418,14 @@ namespace LegionRuntime {
 	    if(dst_bytes_avail < dst_bytes) {
 	      // cancel and request what we have room to write
 	      dst_iter->cancel_step();
-	      dst_bytes = dst_iter->step(dst_bytes_avail, dst_info, flags);
+	      dst_bytes = dst_iter->step(dst_bytes_avail, dst_info, flags,
+					 dimension_mismatch_possible);
 	      assert(dst_bytes == dst_bytes_avail);
+	    } else {
+	      // in the absense of dimension mismatches, it's safe now to confirm
+	      //  the destination step
+	      if(!dimension_mismatch_possible)
+		dst_iter->confirm_step();
 	    }
 	  }
 
@@ -434,6 +440,11 @@ namespace LegionRuntime {
 				       dimension_mismatch_possible);
 	    // now must match
 	    assert(src_bytes == dst_bytes);
+	  } else {
+	    // in the absense of dimension mismatches, it's safe now to confirm
+	    //  the source step
+	    if(!dimension_mismatch_possible)
+	      src_iter->confirm_step();
 	  }
 
 	  // when 2D transfers are allowed, it is possible that the
@@ -442,16 +453,12 @@ namespace LegionRuntime {
 	  // NOTE: this transformation can cause the dimensionality of the
 	  //  transfer to grow.  Allow this to happen and detect it at the
 	  //  end.
-	  if(dimension_mismatch_possible) {
+	  if(!dimension_mismatch_possible) {
 	    assert(src_info.bytes_per_chunk == dst_info.bytes_per_chunk);
 	    assert(src_info.num_lines == 1);
 	    assert(src_info.num_planes == 1);
 	    assert(dst_info.num_lines == 1);
 	    assert(dst_info.num_planes == 1);
-
-	    src_iter->confirm_step();
-	    if(dst_step_tentative)
-	      dst_iter->confirm_step();
 	  } else {
 	    if(src_info.bytes_per_chunk < dst_info.bytes_per_chunk) {
 	      size_t ratio = dst_info.bytes_per_chunk / src_info.bytes_per_chunk;
