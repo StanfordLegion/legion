@@ -393,8 +393,9 @@ namespace LegionRuntime {
 
 	  // destination step must be tentative for an IB that might be full
 	  //  or a non-IB target that might collapse dimensions differently
+	  bool dimension_mismatch_possible = ((flags & TransferIterator::LINES_OK) != 0);
 	  bool dst_step_tentative = ((next_xd_guid != XFERDES_NO_GUID) ||
-				     ((flags & TransferIterator::LINES_OK) != 0));
+				     dimension_mismatch_possible);
 
 	  size_t dst_bytes = dst_iter->step(src_bytes_avail, dst_info,
 					    flags,
@@ -427,7 +428,10 @@ namespace LegionRuntime {
 	    // cancel the src step and try to just step by dst_bytes
 	    assert(dst_bytes < src_bytes);  // should never be larger
 	    src_iter->cancel_step();
-	    src_bytes = src_iter->step(dst_bytes, src_info, flags);
+	    // this step must still be tentative if a dimension mismatch is
+	    //  posisble
+	    src_bytes = src_iter->step(dst_bytes, src_info, flags,
+				       dimension_mismatch_possible);
 	    // now must match
 	    assert(src_bytes == dst_bytes);
 	  }
@@ -438,7 +442,7 @@ namespace LegionRuntime {
 	  // NOTE: this transformation can cause the dimensionality of the
 	  //  transfer to grow.  Allow this to happen and detect it at the
 	  //  end.
-	  if((flags & TransferIterator::LINES_OK) == 0) {
+	  if(dimension_mismatch_possible) {
 	    assert(src_info.bytes_per_chunk == dst_info.bytes_per_chunk);
 	    assert(src_info.num_lines == 1);
 	    assert(src_info.num_planes == 1);
