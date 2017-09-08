@@ -141,6 +141,27 @@ namespace Realm {
     return create_instance(inst, memory, layout, reqs, wait_on);
   }
 
+  // we'd like the method above to accept a ZRect<N,T> in place of the
+  //  ZIndexSpace<N,T>, but that doesn't work unless the method template
+  //  parameters are specified explicitly, so provide an overload that
+  //  takes a ZRect directly
+  template <int N, typename T>
+  inline /*static*/ Event RegionInstance::create_instance(RegionInstance& inst,
+							  Memory memory,
+							  const ZRect<N,T>& rect,
+							  const std::vector<size_t>& field_sizes,
+							  size_t block_size, // 0=SOA, 1=AOS, 2+=hybrid
+							  const ProfilingRequestSet& prs,
+							  Event wait_on /*= Event::NO_EVENT*/)
+  {
+    return RegionInstance::create_instance<N,T>(inst,
+						memory,
+						ZIndexSpace<N,T>(rect),
+						field_sizes,
+						block_size,
+						prs,
+						wait_on);
+  }
 
   ////////////////////////////////////////////////////////////////////////
   //

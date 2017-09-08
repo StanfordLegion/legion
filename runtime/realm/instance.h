@@ -39,6 +39,7 @@ namespace Realm {
 
   typedef int FieldID;
 
+  template <int N, typename T> struct ZRect;
   template <int N, typename T> struct ZIndexSpace;
   class LinearizedIndexSpaceIntfc;
   class InstanceLayoutGeneric;
@@ -105,6 +106,19 @@ namespace Realm {
     static Event create_instance(RegionInstance& inst,
 				 Memory memory,
 				 const ZIndexSpace<N,T>& space,
+				 const std::vector<size_t>& field_sizes,
+				 size_t block_size, // 0=SOA, 1=AOS, 2+=hybrid
+				 const ProfilingRequestSet& prs,
+				 Event wait_on = Event::NO_EVENT);
+
+    // we'd like the method above to accept a ZRect<N,T> in place of the
+    //  ZIndexSpace<N,T>, but that doesn't work unless the method template
+    //  parameters are specified explicitly, so provide an overload that
+    //  takes a ZRect directly
+    template <int N, typename T>
+    static Event create_instance(RegionInstance& inst,
+				 Memory memory,
+				 const ZRect<N,T>& rect,
 				 const std::vector<size_t>& field_sizes,
 				 size_t block_size, // 0=SOA, 1=AOS, 2+=hybrid
 				 const ProfilingRequestSet& prs,
