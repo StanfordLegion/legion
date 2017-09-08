@@ -17,9 +17,11 @@
 ifeq ($(shell uname -s),Darwin)
 DARWIN = 1
 CC_FLAGS += -DDARWIN
+FC_FLAGS += -DDARWIN
 else
 #use disk unless on DARWIN 
 CC_FLAGS += -DUSE_DISK 
+FC_FLAGS += -DUSE_DISK 
 endif
 
 ifndef LG_RT_DIR
@@ -77,7 +79,13 @@ CONDUIT ?= aries
 GPU_ARCH ?= pascal
 endif
 ifeq ($(findstring excalibur,$(shell uname -n)),excalibur)
-CONDUIT ?= aries
+CXX=CC
+F90=ftn
+# Cray's magic wrappers automatically provide LAPACK goodness?
+LAPACK_LIBS=
+CC_FLAGS += -DGASNETI_BUG1389_WORKAROUND=1
+FC_FLAGS += -DGASNETI_BUG1389_WORKAROUND=1
+CONDUIT=aries
 endif
 ifeq ($(findstring cori,$(shell uname -n)),cori)
 CONDUIT ?= aries
@@ -113,6 +121,9 @@ CXX=CC
 F90=ftn
 # Cray's magic wrappers automatically provide LAPACK goodness?
 LAPACK_LIBS ?=
+CC_FLAGS += -DGASNETI_BUG1389_WORKAROUND=1
+FC_FLAGS += -DGASNETI_BUG1389_WORKAROUND=1
+CONDUIT=aries
 LEGION_LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
 LEGION_LD_FLAGS += ${CRAY_UDREG_POST_LINK_OPTS}
 LEGION_LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
@@ -129,6 +140,7 @@ ifneq (${MARCH},)
   else
     CC_FLAGS += -march=${MARCH}
   endif
+  FC_FLAGS += -march=${MARCH}
 endif
 
 INC_FLAGS	+= -I$(LG_RT_DIR) -I$(LG_RT_DIR)/mappers
@@ -143,6 +155,7 @@ ifeq ($(strip $(USE_HWLOC)),1)
     $(error HWLOC variable is not defined, aborting build)
   endif
   CC_FLAGS        += -DREALM_USE_HWLOC
+	FC_FLAGS        += -DREALM_USE_HWLOC
   INC_FLAGS   += -I$(HWLOC)/include
   LEGION_LD_FLAGS += -L$(HWLOC)/lib -lhwloc
 endif
@@ -156,6 +169,7 @@ ifeq ($(strip $(USE_PAPI)),1)
     endif
   endif
   CC_FLAGS        += -DREALM_USE_PAPI
+	FC_FLAGS        += -DREALM_USE_PAPI
   INC_FLAGS   += -I$(PAPI_ROOT)/include
   LEGION_LD_FLAGS += -L$(PAPI_ROOT)/lib -lpapi
 endif
@@ -180,6 +194,7 @@ ifeq ($(strip $(USE_LLVM)),1)
   endif
   LLVM_VERSION_NUMBER := $(shell $(LLVM_CONFIG) --version | cut -c1,3)
   CC_FLAGS += -DREALM_USE_LLVM -DREALM_LLVM_VERSION=$(LLVM_VERSION_NUMBER)
+  FC_FLAGS += -DREALM_USE_LLVM -DREALM_LLVM_VERSION=$(LLVM_VERSION_NUMBER)
   # NOTE: do not use these for all source files - just the ones that include llvm include files
   LLVM_CXXFLAGS ?= -std=c++11 -I$(shell $(LLVM_CONFIG) --includedir)
   ifeq ($(LLVM_VERSION_NUMBER),35)
@@ -197,13 +212,16 @@ endif
 USE_OPENMP ?= 0
 ifeq ($(strip $(USE_OPENMP)),1)
   CC_FLAGS += -DREALM_USE_OPENMP
+	FC_FLAGS += -DREALM_USE_OPENMP
   REALM_OPENMP_GOMP_SUPPORT ?= 1
   ifeq ($(strip $(REALM_OPENMP_GOMP_SUPPORT)),1)
     CC_FLAGS += -DREALM_OPENMP_GOMP_SUPPORT
+		FC_FLAGS += -DREALM_OPENMP_GOMP_SUPPORT
   endif
   REALM_OPENMP_KMP_SUPPORT ?= 1	
   ifeq ($(strip $(REALM_OPENMP_KMP_SUPPORT)),1)
     CC_FLAGS += -DREALM_OPENMP_KMP_SUPPORT
+		FC_FLAGS += -DREALM_OPENMP_GOMP_SUPPORT
   endif
 endif
 
@@ -293,6 +311,7 @@ endif
 # General CUDA variables
 ifeq ($(strip $(USE_CUDA)),1)
 CC_FLAGS        += -DUSE_CUDA
+FC_FLAGS        += -DUSE_CUDA
 NVCC_FLAGS      += -DUSE_CUDA
 INC_FLAGS	+= -I$(CUDA)/include -I$(LG_RT_DIR)/realm/transfer
 ifeq ($(strip $(DEBUG)),1)
@@ -357,13 +376,16 @@ ifeq ($(strip $(USE_GASNET)),1)
     LEGION_LD_FLAGS	+= -L$(GASNET)/lib -lrt -lm
   endif
   CC_FLAGS	+= -DUSE_GASNET
+	FC_FLAGS	+= -DUSE_GASNET
   # newer versions of gasnet seem to need this
   CC_FLAGS	+= -DGASNETI_BUG1389_WORKAROUND=1
+	FC_FLAGS	+= -DGASNETI_BUG1389_WORKAROUND=1
 
   # GASNET conduit variables
   ifeq ($(strip $(CONDUIT)),ibv)
     INC_FLAGS 	+= -I$(GASNET)/include/ibv-conduit
     CC_FLAGS	+= -DGASNET_CONDUIT_IBV
+		FC_FLAGS	+= -DGASNET_CONDUIT_IBV
     LEGION_LD_FLAGS	+= -lgasnet-ibv-par -libverbs
     # GASNet needs MPI for interop support
     USE_MPI	= 1
@@ -371,6 +393,7 @@ ifeq ($(strip $(USE_GASNET)),1)
   ifeq ($(strip $(CONDUIT)),gemini)
     INC_FLAGS	+= -I$(GASNET)/include/gemini-conduit
     CC_FLAGS	+= -DGASNET_CONDUIT_GEMINI
+    FC_FLAGS    += -DGASNET_CONDUIT_GEMINI
     LEGION_LD_FLAGS	+= -lgasnet-gemini-par -lugni -ludreg -lpmi -lhugetlbfs
     # GASNet needs MPI for interop support
     USE_MPI	= 1
@@ -378,6 +401,7 @@ ifeq ($(strip $(USE_GASNET)),1)
   ifeq ($(strip $(CONDUIT)),aries)
     INC_FLAGS   += -I$(GASNET)/include/aries-conduit
     CC_FLAGS    += -DGASNET_CONDUIT_ARIES
+    FC_FLAGS    += -DGASNET_CONDUIT_ARIES
     LEGION_LD_FLAGS    += -lgasnet-aries-par -lugni -ludreg -lpmi -lhugetlbfs
     # GASNet needs MPI for interop support
     USE_MPI	= 1
@@ -385,6 +409,7 @@ ifeq ($(strip $(USE_GASNET)),1)
   ifeq ($(strip $(CONDUIT)),psm)
     INC_FLAGS 	+= -I$(GASNET)/include/psm-conduit
     CC_FLAGS	+= -DGASNET_CONDUIT_PSM
+    FC_FLAGS	+= -DGASNET_CONDUIT_PSM
     LEGION_LD_FLAGS	+= -lgasnet-psm-par -lpsm2 -lpmi2 # PMI2 is required for OpenMPI
     # GASNet needs MPI for interop support
     USE_MPI	= 1
@@ -392,12 +417,14 @@ ifeq ($(strip $(USE_GASNET)),1)
   ifeq ($(strip $(CONDUIT)),mpi)
     INC_FLAGS	+= -I$(GASNET)/include/mpi-conduit
     CC_FLAGS	+= -DGASNET_CONDUIT_MPI
+    FC_FLAGS	+= -DGASNET_CONDUIT_MPI
     LEGION_LD_FLAGS	+= -lgasnet-mpi-par -lammpi -lmpi
     USE_MPI	= 1
   endif
   ifeq ($(strip $(CONDUIT)),udp)
     INC_FLAGS	+= -I$(GASNET)/include/udp-conduit
     CC_FLAGS	+= -DGASNET_CONDUIT_UDP
+    FC_FLAGS	+= -DGASNET_CONDUIT_UDP
     LEGION_LD_FLAGS	+= -lgasnet-udp-par -lamudp
   endif
 
@@ -408,12 +435,15 @@ USE_HDF ?= 0
 HDF_LIBNAME ?= hdf5
 ifeq ($(strip $(USE_HDF)), 1)
   CC_FLAGS      += -DUSE_HDF
+	FC_FLAGS      += -DUSE_HDF
   LEGION_LD_FLAGS      += -l$(HDF_LIBNAME)
   ifdef HDF_ROOT
        CC_FLAGS    += -I$(HDF_ROOT)/include
+       FC_FLAGS    += -I$(HDF_ROOT)/include
        LD_FLAGS    += -L$(HDF_ROOT)/lib
   else
     CC_FLAGS      += -I/usr/include/hdf5/serial
+    FC_FLAGS      += -I/usr/include/hdf5/serial
   endif
 endif
 
@@ -440,24 +470,30 @@ USE_ZLIB ?= 1
 ZLIB_LIBNAME ?= z
 ifeq ($(strip $(USE_ZLIB)),1)
   CC_FLAGS      += -DUSE_ZLIB
+	FC_FLAGS      += -DUSE_ZLIB
   LEGION_LD_FLAGS += -l$(ZLIB_LIBNAME)
 endif
 
 
 ifeq ($(strip $(DEBUG)),1)
 CC_FLAGS	+= -DDEBUG_REALM -DDEBUG_LEGION -O0 -ggdb #-ggdb -Wall
+FC_FLAGS	+= -DDEBUG_REALM -DDEBUG_LEGION -O0 -ggdb #-ggdb -Wall
 else
 CC_FLAGS	+= -O2 -fno-strict-aliasing #-ggdb
+FC_FLAGS	+= -O2 -fno-strict-aliasing #-ggdb
 endif
 
 
 # Manage the output setting
 CC_FLAGS	+= -DCOMPILE_TIME_MIN_LEVEL=$(OUTPUT_LEVEL)
+FC_FLAGS	+= -DCOMPILE_TIME_MIN_LEVEL=$(OUTPUT_LEVEL)
 
 # demand warning-free compilation
 CC_FLAGS        += -Wall -Wno-strict-overflow
+FC_FLAGS        += -Wall -Wno-strict-overflow
 ifeq ($(strip $(WARN_AS_ERROR)),1)
 CC_FLAGS        += -Werror
+FC_FLAGS        += -Werror
 endif
 
 #CC_FLAGS += -DUSE_MASKED_COPIES
@@ -673,7 +709,7 @@ $(GPU_RUNTIME_OBJS): %.cu.o : %.cu
 	$(NVCC) -o $@ -c $< $(NVCC_FLAGS) $(INC_FLAGS)
 	
 $(LEGION_FORTRAN_API_OBJS) : %.o : %.f90
-	gfortran -cpp -J$(LG_RT_DIR)/legion -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
+	gfortran -cpp -J$(LG_RT_DIR)/legion -o $@ -c $< $(FC_FLAGS) $(INC_FLAGS)
 	
 $(GEN_OBJS) : %.o : %.cc
 	$(CXX) -o $@ -c $< $(CC_FLAGS) $(INC_FLAGS)
