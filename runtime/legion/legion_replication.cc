@@ -204,6 +204,9 @@ namespace Legion {
 #endif
       // Now we can do the normal prepipeline stage
       IndividualTask::trigger_prepipeline_stage();
+      // Replicate individual tasks must locally map so that we can know
+      // to broadcast the version state information to other copies
+      map_locally = true;
     }
 
     //--------------------------------------------------------------------------
