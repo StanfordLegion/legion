@@ -1797,6 +1797,7 @@ namespace Legion {
                 assert(finder != ready_preconditions.end());
 #endif
                 suppressed.push_back(
+                    generate[inst->ready_event_idx] == fence_completion_id ||
                     finder->second.find(generate[inst->ready_event_idx]) !=
                     finder->second.end());
               }

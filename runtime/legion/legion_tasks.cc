@@ -5331,6 +5331,8 @@ namespace Legion {
         get_physical_trace_info(trace_info);
         if (!trace_info.tracing)
         {
+          // Fence event will be added if necessary during replay
+          execution_fence_event = ApEvent::NO_AP_EVENT;
           replay_map_task_output(trace_info);
           trace_info.tpl->execute(trace_info, this);
           if (is_leaf() && !has_virtual_instances())
@@ -6325,6 +6327,8 @@ namespace Legion {
         get_physical_trace_info(trace_info);
         if (!trace_info.tracing)
         {
+          // Fence event will be added if necessary during replay
+          execution_fence_event = ApEvent::NO_AP_EVENT;
           replay_map_task_output(trace_info);
           trace_info.tpl->execute(trace_info, this);
           slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT,

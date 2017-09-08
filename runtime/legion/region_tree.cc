@@ -15991,8 +15991,19 @@ namespace Legion {
       Realm::ProfilingRequestSet requests;
       op->add_copy_profiling_request(requests);
       if (op->has_execution_fence_event())
+      {
+        ApEvent old_precondition = precondition;
         precondition = Runtime::merge_events(precondition,
                         op->get_execution_fence_event());
+        if (trace_info.tracing)
+        {
+#ifdef DEBUG_LEGION
+          assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
+#endif
+          trace_info.tpl->record_merge_events(trace_info, precondition,
+              old_precondition, op->get_execution_fence_event());
+        }
+      }
       LegionProfiler *profiler = context->runtime->profiler;
       ApEvent result;
       if (intersect == NULL)
