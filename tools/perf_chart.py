@@ -19,8 +19,6 @@ from __future__ import print_function
 
 import argparse, collections, datetime, json, os, shutil, subprocess, sys, tempfile
 
-import github3 # Requires: pip install github3.py
-
 _version = sys.version_info.major
 
 if _version == 2: # Python 2.x:
@@ -94,20 +92,29 @@ def extract_measurements(measurements):
 
     return branches, commits_by_branch_by_date, measurements_by_commit
 
-def get_repository(owner, repository, token):
-    session = github3.login(token=token)
-    return session.repository(owner=owner, repository=repository)
-
-def push_json_file(repo, path, value):
+def push_json_file(repo_url, path, value):
     # Try to produce JSON files will that will generate small diffs.
     content = json.dumps(value, indent=0, separators=(',', ':'), sort_keys=True)
-    previous = repo.contents(path)
-    if previous is not None:
-        repo.update_file(path, 'Update rendered chart.', content, previous.sha)
-    else:
-        repo.create_file(path, 'Update rendered chart.', content)
 
-def make_charts(owner, repository, access_token, measurement_url):
+    tmp_dir = tempfile.mkdtemp()
+    try:
+        print(tmp_dir)
+        subprocess.check_call(
+            ['git', 'clone', repo_url, 'perf'],
+            cwd=tmp_dir)
+        json_path = os.path.join(tmp_dir, 'perf', path)
+        with open(json_path, 'wb') as f:
+            f.write(content)
+        subprocess.check_call(
+            ['git', 'commit', '-a', '-m', 'Update rendered chart.'],
+            cwd=os.path.join(tmp_dir, 'perf'))
+        subprocess.check_call(
+            ['git', 'push'],
+            cwd=os.path.join(tmp_dir, 'perf'))
+    finally:
+        shutil.rmtree(tmp_dir)
+
+def make_charts(measurement_url, perf_url):
     measurements = get_measurements(measurement_url)
     print('Got %s measurements...' % len(measurements))
     branches, commits, measurements = extract_measurements(measurements)
@@ -118,27 +125,17 @@ def make_charts(owner, repository, access_token, measurement_url):
         'measurements': measurements,
     }
 
-    repo = get_repository(owner, repository, access_token)
-    push_json_file(repo, 'rendered/chart.json', result)
-
-def get_variable(name, description):
-    if name not in os.environ:
-        raise Exception(
-            'Please set environment variable %s to %s' % (name, description))
-    return os.environ[name]
+    push_json_file(perf_url, 'rendered/chart.json', result)
 
 def driver():
-    owner = get_variable('PERF_OWNER', 'Github respository owner')
-    repository = get_variable('PERF_REPOSITORY', 'Github respository name')
-    access_token = get_variable('PERF_ACCESS_TOKEN', 'Github access token')
-
     parser = argparse.ArgumentParser(
         description = 'Render Legion performance charts')
     parser.add_argument('measurement_url', help='measurement repository URL')
+    parser.add_argument('perf_url', help='perf repository URL')
 
     args = parser.parse_args()
 
-    make_charts(owner, repository, access_token, **vars(args))
+    make_charts(**vars(args))
 
 if __name__ == '__main__':
     driver()
