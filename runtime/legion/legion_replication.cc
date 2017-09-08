@@ -253,7 +253,7 @@ namespace Legion {
         trigger_children_complete();
       }
       else // We own it, so it goes on the ready queue
-        enqueue_ready_operation(); 
+        IndividualTask::trigger_ready();
     }
 
     //--------------------------------------------------------------------------
