@@ -179,6 +179,7 @@ namespace Realm {
     template <int N, typename T>
     static Event create_array_instance_SOA(RegionInstance& inst,
 				      const ZIndexSpace<N,T>& space,
+              const std::vector<FieldID> &field_ids,
 				      const std::vector<size_t> &field_sizes,
 				      const std::vector<void*> &field_pointers,
 				      size_t block_size,
@@ -188,6 +189,7 @@ namespace Realm {
     template <int N, typename T>
     static Event create_array_instance_AOS(RegionInstance& inst,
 				      const ZIndexSpace<N,T>& space,
+              const std::vector<FieldID> &field_ids,
 				      const std::vector<size_t> &field_sizes,
 				      const std::vector<void*> &field_pointers,
 				      size_t block_size, unsigned char* aos_base_ptr, size_t aos_stride,

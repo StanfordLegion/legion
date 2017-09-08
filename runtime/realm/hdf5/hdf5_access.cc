@@ -88,6 +88,7 @@ namespace Realm {
   template <int N, typename T>
   /*static*/ Event RegionInstance::create_array_instance_SOA(RegionInstance& inst,
 							  const ZIndexSpace<N,T>& space,
+                const std::vector<FieldID> &field_ids,
 							  const std::vector<size_t> &field_sizes,
                 const std::vector<void*> &field_pointers,
 							  size_t block_size,
@@ -110,16 +111,15 @@ namespace Realm {
     layout->space = space;
     layout->piece_lists.resize(field_sizes.size());
     
-    size_t field_ofs = 0;
     LocalCPUMemory *m_impl = (LocalCPUMemory *)get_runtime()->get_memory_impl(memory);
     unsigned char* base = (unsigned char*)m_impl->base;
     unsigned char* ptr = NULL;
     for(size_t i = 0; i < field_sizes.size(); i++) {
-      InstanceLayoutGeneric::FieldLayout& fl = layout->fields[field_ofs];
+      FieldID id = field_ids[i];
+      InstanceLayoutGeneric::FieldLayout& fl = layout->fields[id];
       fl.list_idx = i;
       fl.rel_offset = 0;
       fl.size_in_bytes = field_sizes[i];
-      field_ofs += field_sizes[i];
 
       // create a single piece (for non-empty index spaces)
       if(!space.empty()) {
@@ -145,6 +145,7 @@ namespace Realm {
 #define DOIT_ARRAY_SOA(N,T) \
   template Event RegionInstance::create_array_instance_SOA<N,T>(RegionInstance&, \
 							      const ZIndexSpace<N,T>&, \
+                    const std::vector<FieldID>&, \
 							      const std::vector<size_t>&, \
 							      const std::vector<void *>&, \
 							      size_t, \
@@ -155,6 +156,7 @@ namespace Realm {
   template <int N, typename T>
   /*static*/ Event RegionInstance::create_array_instance_AOS(RegionInstance& inst,
 							  const ZIndexSpace<N,T>& space,
+                const std::vector<FieldID> &field_ids,
 							  const std::vector<size_t> &field_sizes,
                 const std::vector<void*> &field_pointers,
 							  size_t block_size, unsigned char* aos_base_ptr, size_t aos_stride,
@@ -177,11 +179,11 @@ namespace Realm {
     layout->space = space;
     layout->piece_lists.resize(field_sizes.size());
     
-    size_t field_ofs = 0;
     LocalCPUMemory *m_impl = (LocalCPUMemory *)get_runtime()->get_memory_impl(memory);
     unsigned char* base = (unsigned char*)m_impl->base;
     for(size_t i = 0; i < field_sizes.size(); i++) {
-      InstanceLayoutGeneric::FieldLayout& fl = layout->fields[field_ofs];
+      FieldID id = field_ids[i];
+      InstanceLayoutGeneric::FieldLayout& fl = layout->fields[id];
       fl.list_idx = i;
       if (i > 0) {
         fl.rel_offset = (size_t)(((unsigned char*)field_pointers[i]) - ((unsigned char*)field_pointers[i-1]));
@@ -189,7 +191,6 @@ namespace Realm {
         fl.rel_offset = (size_t)(((unsigned char*)field_pointers[i]) - aos_base_ptr);
       }
       fl.size_in_bytes = field_sizes[i];
-      field_ofs += field_sizes[i];
 
       // create a single piece (for non-empty index spaces)
       if(!space.empty()) {
@@ -213,6 +214,7 @@ namespace Realm {
 #define DOIT_ARRAY_AOS(N,T) \
   template Event RegionInstance::create_array_instance_AOS<N,T>(RegionInstance&, \
 							      const ZIndexSpace<N,T>&, \
+                    const std::vector<FieldID>&, \
 							      const std::vector<size_t>&, \
 							      const std::vector<void *>&, \
 							      size_t, unsigned char*, size_t, \

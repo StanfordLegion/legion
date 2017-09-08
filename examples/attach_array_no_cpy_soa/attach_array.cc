@@ -29,6 +29,11 @@
 #include "runtime_impl.h"
 using namespace Legion;
 
+template<typename FT, int N, typename T = coord_t>
+using AccessorRO = FieldAccessor<READ_ONLY,FT,N,T,Realm::AffineAccessor<FT,N,T> >;
+template<typename FT, int N, typename T = coord_t>
+using AccessorWD = FieldAccessor<WRITE_DISCARD,FT,N,T,Realm::AffineAccessor<FT,N,T> >;
+
 /*
  * In this example we illustrate how the Legion
  * programming model supports multiple partitions
@@ -185,7 +190,7 @@ void init_field_task(const Task *task,
   const int point = task->index_point.point_data[0];
   printf("Initializing field %d for block %d...\n", fid, point);
 
-  const FieldAccessor<WRITE_DISCARD,double,1> acc(regions[0], fid);
+  const AccessorWD<double,1> acc(regions[0], fid);
 
   int i = point;
   Rect<1> rect = runtime->get_index_space_domain(ctx,
@@ -214,8 +219,8 @@ void stencil_task(const Task *task,
   FieldID read_fid = *(task->regions[0].privilege_fields.begin());
   FieldID write_fid = *(task->regions[1].privilege_fields.begin());
 
-  const FieldAccessor<READ_ONLY,double,1> read_acc(regions[0], read_fid);
-  const FieldAccessor<WRITE_DISCARD,deriv_t,1> write_acc(regions[1], write_fid);
+  const AccessorRO<double,1> read_acc(regions[0], read_fid);
+  const AccessorWD<deriv_t,1> write_acc(regions[1], write_fid);
 
   Rect<1> rect = runtime->get_index_space_domain(ctx,
                   task->regions[1].region.get_index_space());
@@ -289,8 +294,8 @@ void check_task(const Task *task,
   FieldID src_fid = *(task->regions[0].privilege_fields.begin());
   FieldID dst_fid = *(task->regions[1].privilege_fields.begin());
 
-  const FieldAccessor<READ_ONLY,double,1> src_acc(regions[0], src_fid);
-  const FieldAccessor<READ_ONLY,deriv_t,1> dst_acc(regions[1], dst_fid);
+  const AccessorRO<double,1> src_acc(regions[0], src_fid);
+  const AccessorRO<deriv_t,1> dst_acc(regions[1], dst_fid);
 
   Rect<1> rect = runtime->get_index_space_domain(ctx,
                   task->regions[1].region.get_index_space());

@@ -21,6 +21,11 @@
 #include "legion.h"
 using namespace Legion;
 
+template<typename FT, int N, typename T = coord_t>
+using AccessorRO = FieldAccessor<READ_ONLY,FT,N,T,Realm::AffineAccessor<FT,N,T> >;
+template<typename FT, int N, typename T = coord_t>
+using AccessorWD = FieldAccessor<WRITE_DISCARD,FT,N,T,Realm::AffineAccessor<FT,N,T> >;
+
 enum TaskIDs {
   TOP_LEVEL_TASK_ID,
   INIT_FIELD_TASK_ID,
@@ -306,13 +311,13 @@ void init_field_task(const Task *task,
   double start_init = get_cur_time();
   
   if (fid == 0) {
-      const FieldAccessor<WRITE_DISCARD,double,1> acc(regions[0], fid);
+      const AccessorWD<double,1> acc(regions[0], fid);
       Rect<1> rect = runtime->get_index_space_domain(ctx,
                                 task->regions[0].region.get_index_space());
         for (PointInRectIterator<1> pir(rect); pir(); pir++)
                 acc[*pir] = drand48();
   } else {
-      const FieldAccessor<WRITE_DISCARD,double,1> acc(regions[0], fid);
+      const AccessorWD<double,1> acc(regions[0], fid);
   
   // Note here that we get the domain for the subregion for
   // this task from the runtime which makes it safe for running
@@ -338,9 +343,9 @@ void daxpy_task(const Task *task,
   const int point = task->index_point.point_data[0];
   double start_task = get_cur_time();
 
-  const FieldAccessor<READ_ONLY,double,1> acc_y(regions[0], FID_Y);
-  const FieldAccessor<READ_ONLY,double,1> acc_x(regions[0], FID_X);
-  const FieldAccessor<WRITE_DISCARD,double,1> acc_z(regions[1], FID_Z);
+  const AccessorRO<double,1> acc_y(regions[0], FID_Y);
+  const AccessorRO<double,1> acc_x(regions[0], FID_X);
+  const AccessorWD<double,1> acc_z(regions[1], FID_Z);
 
   Rect<1> rect = runtime->get_index_space_domain(ctx,
                   task->regions[0].region.get_index_space());
@@ -362,9 +367,9 @@ void check_task(const Task *task,
   assert(task->arglen == sizeof(double));
   const double alpha = *((const double*)task->args);
 
-  const FieldAccessor<READ_ONLY,double,1> acc_x(regions[0], FID_X);
-  const FieldAccessor<READ_ONLY,double,1> acc_y(regions[0], FID_Y);
-  const FieldAccessor<READ_ONLY,double,1> acc_z(regions[1], FID_Z);
+  const AccessorRO<double,1> acc_x(regions[0], FID_X);
+  const AccessorRO<double,1> acc_y(regions[0], FID_Y);
+  const AccessorRO<double,1> acc_z(regions[1], FID_Z);
 
   Rect<1> rect = runtime->get_index_space_domain(ctx,
                   task->regions[0].region.get_index_space());
