@@ -129,6 +129,44 @@ bishop_physical_region_get_memories(legion_physical_region_t);
 bishop_field_list_t
 bishop_physical_region_get_fields(legion_physical_region_t);
 
+typedef struct bishop_instance_cache_t {
+  void *impl;
+} bishop_instance_cache_t;
+
+bishop_instance_cache_t
+bishop_instance_cache_create();
+
+bool
+bishop_instance_cache_has_cached_instances(bishop_instance_cache_t,
+                                           size_t,
+                                           legion_logical_region_t);
+
+legion_physical_instance_t*
+bishop_instance_cache_get_cached_instances(bishop_instance_cache_t,
+                                           size_t,
+                                           legion_logical_region_t);
+
+typedef struct bishop_slice_cache_t {
+  void *impl;
+} bishop_slice_cache_t;
+
+bishop_slice_cache_t
+bishop_slice_cache_create();
+
+bool
+bishop_slice_cache_has_cached_slices(bishop_slice_cache_t,
+                                     legion_domain_t);
+
+void
+bishop_slice_cache_copy_cached_slices(bishop_slice_cache_t,
+                                      legion_domain_t,
+                                      legion_slice_task_output_t);
+
+void
+bishop_slice_cache_add_entry(bishop_slice_cache_t,
+                             legion_domain_t,
+                             legion_slice_task_output_t);
+
 void
 bishop_logger_info(const char* msg, ...)
   __attribute__((format (printf, 1, 2)));
