@@ -61,7 +61,7 @@ legion_cxx_tests = [
 if platform.system() != 'Darwin':
     legion_cxx_tests = legion_cxx_tests + [
         # FIXME: Fails non-deterministically on Mac OS: https://github.com/StanfordLegion/legion/issues/213
-        # ['test/attach_file_mini/attach_file_mini', []],
+        ['test/attach_file_mini/attach_file_mini', []],
     ]
 
 legion_gasnet_cxx_tests = [

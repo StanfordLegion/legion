@@ -7913,7 +7913,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::vector<FieldID> field_set(create_fields.begin(),create_fields.end());
-      std::vector<size_t> field_sizes;
+      std::vector<size_t> field_sizes(create_fields.size());
       std::vector<unsigned> mask_index_map(create_fields.size());
       std::vector<CustomSerdezID> serdez(create_fields.size());
       FieldMask file_mask;
