@@ -131,7 +131,7 @@ def run_cxx(tests, flags, launcher, root_dir, bin_dir, env, thread_count):
         # after a successful run, clean up libraries/executables to keep disk
         #  usage down
         if not bin_dir:
-            cmd(['find', test_dir , '-type', 'f', '(', '-name', '*.a', '-o', '-perm', '-u+x', ')', '-exec', 'rm', '-v', '{}', ';'])
+            cmd(['find', test_dir , '-type', 'f', '(', '-name', '*.a', '-o', '-name', os.path.basename(test_file), ')', '-exec', 'rm', '-v', '{}', ';'])
 
 def run_regent(tests, flags, launcher, root_dir, env, thread_count):
     for test_file, test_flags in tests:
