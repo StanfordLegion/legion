@@ -1169,10 +1169,10 @@ namespace Realm {
       }
       for(int d = 0; d < N; d++) {
 	if((cur_dim < max_dims) &&
-	   (affine->strides[d] != (act_counts[cur_dim] * act_strides[cur_dim]))) {
+	   ((ssize_t)affine->strides[d] != (act_counts[cur_dim] * act_strides[cur_dim]))) {
 	  cur_dim++;
 	  if(cur_dim < max_dims)
-	    act_strides[cur_dim] = affine->strides[d];
+	    act_strides[cur_dim] = (ssize_t)affine->strides[d];
 	}
 	if(cur_dim < max_dims) {
 	  size_t len = iter.rect.hi[d] - cur_point[d] + 1;
