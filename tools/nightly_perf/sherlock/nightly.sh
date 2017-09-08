@@ -7,6 +7,6 @@ cd "$root_dir"
 
 source env.sh # defines PERF_ACCESS_TOKEN
 
-export CI_RUNNER_DESCRIPTION="n0002.sapling.stanford.edu"
+export CI_RUNNER_DESCRIPTION="sherlock.stanford.edu"
 
 ../common/nightly.sh

@@ -64,7 +64,14 @@ beefier hardware. Ideally these would also run via Gitlab, but proper
 cluster management would be required and is beyond the scope of this
 document.
 
-### How to Add New Tests
+## Nightly Performance Tests
+
+We conduct nightly performance tests on a variety of machines that are
+not practical to hook up to Gitlab. The configurations for these tests
+(along with installation instructions) are kept in the
+`tools/nightly_perf/MACHINE` directory for each machine.
+
+## How to Add New Tests
 
 Tests are in `test.py` under the `perf` test stage. The specific way in
 which you add a new test depends on the kind of test you're adding:
