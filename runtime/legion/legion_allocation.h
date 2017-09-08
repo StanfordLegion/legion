@@ -164,7 +164,7 @@ namespace Legion {
       size_t alloc_size = cnt;
       if (!BYTES)
         alloc_size *= SIZE;
-      void *result;
+      void *result = NULL;
       if (ALIGNMENT > LEGION_MAX_ALIGNMENT)
       {
 #ifdef DEBUG_LEGION
@@ -197,6 +197,9 @@ namespace Legion {
       else
         result = malloc(alloc_size);
 
+#ifdef DEBUG_LEGION
+      assert(result != NULL);
+#endif
       return result;
     }
 

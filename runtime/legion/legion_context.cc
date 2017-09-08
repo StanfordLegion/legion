@@ -2222,7 +2222,7 @@ namespace Legion {
         outstanding_children_count(0), current_trace(NULL), 
         valid_wait_event(false), outstanding_subtasks(0), pending_subtasks(0), 
         pending_frames(0), currently_active_context(false),
-        current_fence(NULL), fence_gen(0) 
+        current_fence(NULL), fence_gen(0), current_fence_index(0) 
     //--------------------------------------------------------------------------
     {
       // Set some of the default values for a context
@@ -5004,28 +5004,46 @@ namespace Legion {
       // Take the lock and iterate through our current pending
       // operations and find all the ones with a context index
       // that is less than the index for the fence operation
-      const unsigned fence_index = op->get_ctx_index();
+      const unsigned next_fence_index = op->get_ctx_index();
       {
         AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               executing_children.begin(); it != executing_children.end(); it++)
         {
-          if ((it->first->get_generation() == it->second) &&
-              (it->first->get_ctx_index() < fence_index))
+          if (it->first->get_generation() != it->second)
+            continue;
+          const unsigned op_index = it->first->get_ctx_index();
+          // If it's older than the previous fence then we don't care
+          if (op_index < current_fence_index)
+            continue;
+          // Record a dependence if it didn't come after our fence
+          if (op_index < next_fence_index)
             previous_operations.insert(*it);
         }
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               executed_children.begin(); it != executed_children.end(); it++)
         {
-          if ((it->first->get_generation() == it->second) &&
-              (it->first->get_ctx_index() < fence_index))
+          if (it->first->get_generation() != it->second)
+            continue;
+          const unsigned op_index = it->first->get_ctx_index();
+          // If it's older than the previous fence then we don't care
+          if (op_index < current_fence_index)
+            continue;
+          // Record a dependence if it didn't come after our fence
+          if (op_index < next_fence_index)
             previous_operations.insert(*it);
         }
         for (std::map<Operation*,GenerationID>::const_iterator it = 
               complete_children.begin(); it != complete_children.end(); it++)
         {
-          if ((it->first->get_generation() == it->second) &&
-              (it->first->get_ctx_index() < fence_index))
+          if (it->first->get_generation() != it->second)
+            continue;
+          const unsigned op_index = it->first->get_ctx_index();
+          // If it's older than the previous fence then we don't care
+          if (op_index < current_fence_index)
+            continue;
+          // Record a dependence if it didn't come after our fence
+          if (op_index < next_fence_index)
             previous_operations.insert(*it);
         }
 #ifdef LEGION_SPY
@@ -5077,6 +5095,7 @@ namespace Legion {
         current_fence->remove_mapping_reference(fence_gen);
       current_fence = op;
       fence_gen = op->get_generation();
+      current_fence_index = op->get_ctx_index();
       current_fence->add_mapping_reference(fence_gen);
       // Only update the current fence event if we're actually an
       // execution fence, otherwise by definition we need the previous event

@@ -1,0 +1,1 @@
+37 3 * * * git -C $HOME/legion pull --ff-only && ssh n0002 $HOME/legion/tools/nightly_perf/sapling/nightly.sh
