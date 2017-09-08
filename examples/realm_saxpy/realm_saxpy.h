@@ -22,14 +22,12 @@
 #include "realm.h"
 
 using namespace Realm;
-using namespace LegionRuntime::Arrays;
-using namespace LegionRuntime::Accessor;
 
 struct SaxpyArgs {
 public:
   RegionInstance x_inst, y_inst, z_inst;
   float alpha;
-  Rect<1> bounds;
+  ZRect<1> bounds;
 };
 
 #endif
