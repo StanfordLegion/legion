@@ -7922,7 +7922,8 @@ namespace Legion {
       // Now make the instance, this should always succeed
       LayoutConstraintSet constraints;
       PhysicalInstance inst = 
-        attach_op->create_instance(node->row_source, field_sizes, constraints);
+        attach_op->create_instance(node->row_source,
+				   field_set, field_sizes, constraints);
       // Pull out the pointer constraint so that we can use it separately
       // and not have it included in the layout constraints
       PointerConstraint pointer_constraint = constraints.pointer_constraint;

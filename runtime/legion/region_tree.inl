@@ -2713,6 +2713,7 @@ namespace Legion {
     template<int DIM, typename T>
     PhysicalInstance IndexSpaceNodeT<DIM,T>::create_file_instance(
                                          const char *file_name,
+                                         const std::vector<Realm::FieldID> &field_ids,
                                          const std::vector<size_t> &field_sizes,
                                          legion_lowlevel_file_mode_t file_mode)
     //--------------------------------------------------------------------------
@@ -2726,6 +2727,7 @@ namespace Legion {
       PhysicalInstance result;
       LgEvent ready(PhysicalInstance::create_file_instance(result, file_name, 
 							   local_space,
+							   field_ids,
 							   field_sizes,
 							   file_mode, requests));
       // TODO
@@ -2737,6 +2739,7 @@ namespace Legion {
     template<int DIM, typename T>
     PhysicalInstance IndexSpaceNodeT<DIM,T>::create_hdf5_instance(
                                     const char *file_name,
+				    const std::vector<Realm::FieldID> &field_ids,
                                     const std::vector<size_t> &field_sizes,
                                     const std::vector<const char*> &field_files,
                                     bool read_only)
@@ -2752,6 +2755,7 @@ namespace Legion {
 #ifdef USE_HDF
       LgEvent ready(PhysicalInstance::create_hdf5_instance(result, file_name, 
 							   local_space,
+							   field_ids,
 							   field_sizes,
 							   field_files,
 							   read_only,
