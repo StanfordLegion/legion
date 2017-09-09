@@ -297,17 +297,21 @@ namespace Legion {
                                            size_t res_size, bool owned)
     //--------------------------------------------------------------------------
     {
-      // We have to save the future for locally for when we broadcast it
-      if (owned)
+      // If we're not remote then we have to save the future locally 
+      // for when we go to broadcast it
+      if (!is_remote())
       {
-        future_store = const_cast<void*>(res);
-        future_size = res_size;
-      }
-      else
-      {
-        future_size = res_size;
-        future_store = legion_malloc(FUTURE_RESULT_ALLOC, future_size);
-        memcpy(future_store, res, future_size);
+        if (owned)
+        {
+          future_store = const_cast<void*>(res);
+          future_size = res_size;
+        }
+        else
+        {
+          future_size = res_size;
+          future_store = legion_malloc(FUTURE_RESULT_ALLOC, future_size);
+          memcpy(future_store, res, future_size);
+        }
       }
       IndividualTask::handle_future(future_store, future_size, false/*owned*/);
     }
