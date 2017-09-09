@@ -2782,6 +2782,7 @@ namespace Legion {
       virtual void record_reference_mutation_effect(RtEvent event);
     public:
       PhysicalInstance create_instance(IndexSpaceNode *node,
+	const std::vector<FieldID> &field_set,
         const std::vector<size_t> &field_sizes, LayoutConstraintSet &cons);
     protected:
       void check_privilege(void);

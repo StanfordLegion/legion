@@ -14196,6 +14196,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalInstance AttachOp::create_instance(IndexSpaceNode *node,
+  	     const std::vector<FieldID> &field_set,
              const std::vector<size_t> &sizes, LayoutConstraintSet &constraints)
     //--------------------------------------------------------------------------
     {
@@ -14204,7 +14205,15 @@ namespace Legion {
       {
         case EXTERNAL_POSIX_FILE:
           {
-            result = node->create_file_instance(file_name, sizes, file_mode);
+            std::vector<Realm::FieldID> field_ids(field_set.size());
+            unsigned idx = 0;
+            for (std::vector<FieldID>::const_iterator it = 
+                  field_set.begin(); it != field_set.end(); it++, idx++)
+            {
+	      field_ids[idx] = *it;
+            }
+            result = node->create_file_instance(file_name,
+					field_ids, sizes, file_mode);
             constraints.specialized_constraint = 
               SpecializedConstraint(GENERIC_FILE_SPECIALIZE);           
             break;
@@ -14212,15 +14221,18 @@ namespace Legion {
         case EXTERNAL_HDF5_FILE:
           {
             // First build the set of field paths
+            std::vector<Realm::FieldID> field_ids(field_map.size());
             std::vector<const char*> field_files(field_map.size());
             unsigned idx = 0;
             for (std::map<FieldID,const char*>::const_iterator it = 
                   field_map.begin(); it != field_map.end(); it++, idx++)
             {
+	      field_ids[idx] = it->first;
               field_files[idx] = it->second;
             }
             // Now ask the low-level runtime to create the instance
-            result = node->create_hdf5_instance(file_name, sizes, field_files,
+            result = node->create_hdf5_instance(file_name,
+					field_ids, sizes, field_files,
                                         (file_mode == LEGION_FILE_READ_ONLY));
             constraints.specialized_constraint = 
               SpecializedConstraint(HDF5_FILE_SPECIALIZE);

@@ -18,15 +18,15 @@
 __global__
 void gpu_saxpy(const float alpha,
 	       //const int num_elements,
-	       Rect<1> bounds,
-	       RegionAccessor<AccessorType::Affine<1>, float> ra_x,
-	       RegionAccessor<AccessorType::Affine<1>, float> ra_y,
-	       RegionAccessor<AccessorType::Affine<1>, float> ra_z)
+	       ZRect<1> bounds,
+	       AffineAccessor<float, 1> ra_x,
+	       AffineAccessor<float, 1> ra_y,
+	       AffineAccessor<float, 1> ra_z)
 	       
 	       //               const float *x, const float *y, float *z)
 {
-  Point<1> p = bounds.lo + make_point(blockIdx.x*blockDim.x+threadIdx.x);
-  if(bounds.contains(p))
+  int p = bounds.lo + (blockIdx.x * blockDim.x) + threadIdx.x;
+  if (p <= bounds.hi)
     ra_z[p] = alpha * ra_x[p] + ra_y[p];
 }
 
@@ -38,15 +38,13 @@ void gpu_saxpy_task(const void *args, size_t arglen,
   const SaxpyArgs *saxpy_args = (const SaxpyArgs*)args;
   printf("Running GPU Saxpy Task\n\n");
 
-  // get the generic accessors for each of our three instances
-  RegionAccessor<AccessorType::Generic> ra_xg = saxpy_args->x_inst.get_accessor();
-  RegionAccessor<AccessorType::Generic> ra_yg = saxpy_args->y_inst.get_accessor();
-  RegionAccessor<AccessorType::Generic> ra_zg = saxpy_args->z_inst.get_accessor();
-
-  // now convert them to typed, "affine" accessors that we can use like arrays
-  RegionAccessor<AccessorType::Affine<1>, float> ra_x = ra_xg.typeify<float>().convert<AccessorType::Affine<1> >();
-  RegionAccessor<AccessorType::Affine<1>, float> ra_y = ra_yg.typeify<float>().convert<AccessorType::Affine<1> >();
-  RegionAccessor<AccessorType::Affine<1>, float> ra_z = ra_zg.typeify<float>().convert<AccessorType::Affine<1> >();
+  // get affine accessors for each of our three instances
+  AffineAccessor<float, 1> ra_x = AffineAccessor<float, 1>(saxpy_args->x_inst,
+							   0 /*offset as ID*/);
+  AffineAccessor<float, 1> ra_y = AffineAccessor<float, 1>(saxpy_args->y_inst,
+							   0 /*offset as ID*/);
+  AffineAccessor<float, 1> ra_z = AffineAccessor<float, 1>(saxpy_args->z_inst,
+							   0 /*offset as ID*/);
 
   size_t num_elements = saxpy_args->bounds.volume();
 

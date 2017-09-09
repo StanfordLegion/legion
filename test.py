@@ -51,8 +51,7 @@ legion_cxx_tests = [
     ['examples/dynamic_registration/dynamic_registration', []],
     ['examples/ghost/ghost', ['-ll:cpu', '4']],
     ['examples/ghost_pull/ghost_pull', ['-ll:cpu', '4']],
-    # Temporarily disabled for now
-    # ['examples/realm_saxpy/realm_saxpy', []],
+    ['examples/realm_saxpy/realm_saxpy', []],
     ['examples/spmd_cgsolver/spmd_cgsolver', ['-ll:cpu', '4', '-perproc']],
     ['examples/virtual_map/virtual_map', []],
 
@@ -62,7 +61,7 @@ legion_cxx_tests = [
 if platform.system() != 'Darwin':
     legion_cxx_tests = legion_cxx_tests + [
         # FIXME: Fails non-deterministically on Mac OS: https://github.com/StanfordLegion/legion/issues/213
-        # ['test/attach_file_mini/attach_file_mini', []],
+        ['test/attach_file_mini/attach_file_mini', []],
     ]
 
 legion_gasnet_cxx_tests = [
@@ -132,7 +131,7 @@ def run_cxx(tests, flags, launcher, root_dir, bin_dir, env, thread_count):
         # after a successful run, clean up libraries/executables to keep disk
         #  usage down
         if not bin_dir:
-            cmd(['find', test_dir , '-type', 'f', '(', '-name', '*.a', '-o', '-perm', '-u+x', ')', '-exec', 'rm', '-v', '{}', ';'])
+            cmd(['find', test_dir , '-type', 'f', '(', '-name', '*.a', '-o', '-name', os.path.basename(test_file), ')', '-exec', 'rm', '-v', '{}', ';'])
 
 def run_regent(tests, flags, launcher, root_dir, env, thread_count):
     for test_file, test_flags in tests:

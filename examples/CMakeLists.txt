@@ -25,8 +25,7 @@ add_subdirectory(circuit)
 add_subdirectory(dynamic_registration)
 add_subdirectory(ghost)
 add_subdirectory(ghost_pull)
-# Temporarily disabled
-#add_subdirectory(realm_saxpy)
+add_subdirectory(realm_saxpy)
 add_subdirectory(spmd_cgsolver)
 add_subdirectory(virtual_map)
 

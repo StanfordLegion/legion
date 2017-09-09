@@ -457,6 +457,45 @@ namespace Realm {
     return out;
   };
 
+  // copy and fill operations (wrappers for ZIndexSpace versions)
+  template <int N, typename T>
+  inline Event ZRect<N,T>::fill(const std::vector<CopySrcDstField> &dsts,
+				const ProfilingRequestSet &requests,
+				const void *fill_value, size_t fill_value_size,
+				Event wait_on /*= Event::NO_EVENT*/) const
+  {
+    return ZIndexSpace<N,T>(*this).fill(dsts, requests,
+					fill_value, fill_value_size,
+					wait_on);
+  }
+
+  template <int N, typename T>
+  inline Event ZRect<N,T>::copy(const std::vector<CopySrcDstField> &srcs,
+				const std::vector<CopySrcDstField> &dsts,
+				const ProfilingRequestSet &requests,
+				Event wait_on /*= Event::NO_EVENT*/,
+				ReductionOpID redop_id /*= 0*/,
+				bool red_fold /*= false*/) const
+  {
+    return ZIndexSpace<N,T>(*this).copy(srcs, dsts,
+					requests, wait_on,
+					redop_id, red_fold);
+  }
+
+  template <int N, typename T>
+  inline Event ZRect<N,T>::copy(const std::vector<CopySrcDstField> &srcs,
+				const std::vector<CopySrcDstField> &dsts,
+				const ZIndexSpace<N,T> &mask,
+				const ProfilingRequestSet &requests,
+				Event wait_on /*= Event::NO_EVENT*/,
+				ReductionOpID redop_id /*= 0*/,
+				bool red_fold /*= false*/) const
+  {
+    return ZIndexSpace<N,T>(*this).copy(srcs, dsts, mask,
+					requests, wait_on,
+					redop_id, red_fold);
+  }
+
   template <int N, typename T>
   inline std::ostream& operator<<(std::ostream& os, const ZRect<N,T>& p)
   {

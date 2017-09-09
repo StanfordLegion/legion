@@ -1391,6 +1391,25 @@ namespace Realm {
     //  might not be a rectangle)
     __CUDA_HD__
     ZRect<N,T> union_bbox(const ZRect<N,T>& other) const;
+
+    // copy and fill operations (wrappers for ZIndexSpace versions)
+    Event fill(const std::vector<CopySrcDstField> &dsts,
+               const ProfilingRequestSet &requests,
+               const void *fill_value, size_t fill_value_size,
+               Event wait_on = Event::NO_EVENT) const;
+
+    Event copy(const std::vector<CopySrcDstField> &srcs,
+               const std::vector<CopySrcDstField> &dsts,
+               const ProfilingRequestSet &requests,
+               Event wait_on = Event::NO_EVENT,
+               ReductionOpID redop_id = 0, bool red_fold = false) const;
+
+    Event copy(const std::vector<CopySrcDstField> &srcs,
+               const std::vector<CopySrcDstField> &dsts,
+               const ZIndexSpace<N,T> &mask,
+               const ProfilingRequestSet &requests,
+               Event wait_on = Event::NO_EVENT,
+               ReductionOpID redop_id = 0, bool red_fold = false) const;
   };
 
   template <int N, typename T>

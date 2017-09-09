@@ -340,6 +340,7 @@ namespace Realm {
   /*static*/ Event RegionInstance::create_file_instance(RegionInstance& inst,
 							const char *file_name,
 							const ZIndexSpace<N,T>& space,
+							const std::vector<FieldID> &field_ids,
 							const std::vector<size_t> &field_sizes,
 							legion_lowlevel_file_mode_t file_mode,
 							const ProfilingRequestSet& prs,
@@ -361,14 +362,13 @@ namespace Realm {
     layout->space = space;
     layout->piece_lists.resize(field_sizes.size());
 
-    size_t field_ofs = 0;
     size_t file_ofs = 0;
     for(size_t i = 0; i < field_sizes.size(); i++) {
-      InstanceLayoutGeneric::FieldLayout& fl = layout->fields[field_ofs];
+      FieldID id = field_ids[i];
+      InstanceLayoutGeneric::FieldLayout& fl = layout->fields[id];
       fl.list_idx = i;
       fl.rel_offset = 0;
       fl.size_in_bytes = field_sizes[i];
-      field_ofs += field_sizes[i];
 
       // create a single piece (for non-empty index spaces)
       if(!space.empty()) {
@@ -411,6 +411,7 @@ namespace Realm {
   template Event RegionInstance::create_file_instance<N,T>(RegionInstance&, \
 							   const char *, \
 							   const ZIndexSpace<N,T>&, \
+							   const std::vector<FieldID>&, \
 							   const std::vector<size_t>&, \
                                                            legion_lowlevel_file_mode_t, \
 							   const ProfilingRequestSet&, \
