@@ -1261,6 +1261,7 @@ namespace Legion {
     struct MergeEvent;
     struct AssignFenceCompletion;
     struct IssueCopy;
+    struct IssueFillReduction;
     struct SetReadyEvent;
 
     // region_tree.h

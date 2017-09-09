@@ -515,6 +515,7 @@ namespace Legion {
       MERGE_EVENT,
       ASSIGN_FENCE_COMPLETION,
       ISSUE_COPY,
+      ISSUE_FILL_REDUCTION,
       SET_READY_EVENT,
     };
 
@@ -533,6 +534,7 @@ namespace Legion {
       virtual MergeEvent* as_merge_event() = 0;
       virtual AssignFenceCompletion* as_assignment_fence_completion() = 0;
       virtual IssueCopy* as_issue_copy() = 0;
+      virtual IssueFillReduction* as_issue_fill_reduction() = 0;
       virtual SetReadyEvent* as_set_ready_event() = 0;
 
       virtual Instruction* clone(PhysicalTemplate& tpl,
@@ -562,6 +564,8 @@ namespace Legion {
       virtual AssignFenceCompletion* as_assignment_fence_completion()
         { return NULL; }
       virtual IssueCopy* as_issue_copy()
+        { return NULL; }
+      virtual IssueFillReduction* as_issue_fill_reduction()
         { return NULL; }
       virtual SetReadyEvent* as_set_ready_event()
         { return NULL; }
@@ -595,6 +599,8 @@ namespace Legion {
         { return NULL; }
       virtual IssueCopy* as_issue_copy()
         { return NULL; }
+      virtual IssueFillReduction* as_issue_fill_reduction()
+        { return NULL; }
       virtual SetReadyEvent* as_set_ready_event()
         { return NULL; }
 
@@ -626,6 +632,8 @@ namespace Legion {
         { return this; }
       virtual IssueCopy* as_issue_copy()
         { return NULL; }
+      virtual IssueFillReduction* as_issue_fill_reduction()
+        { return NULL; }
       virtual SetReadyEvent* as_set_ready_event()
         { return NULL; }
 
@@ -636,6 +644,54 @@ namespace Legion {
       friend struct PhysicalTemplate;
       ApEvent &fence_completion;
       unsigned lhs;
+    };
+
+    /**
+     * \class IssueFillReduction
+     * This instruction has the following semantics:
+     *
+     *   events[lhs] = domain.fill(fields, requests,
+     *                             fill_buffer, fill_size,
+     *                             events[precondition_idx]);
+     */
+    struct IssueFillReduction : public Instruction {
+      IssueFillReduction(PhysicalTemplate &tpl,
+                         unsigned lhs, const Domain &domain,
+                         const TraceLocalId &op_key,
+                         const std::vector<Domain::CopySrcDstField> &fields,
+                         const ReductionOp *reduction_op,
+                         unsigned precondition_idx);
+      virtual ~IssueFillReduction();
+      virtual void execute();
+      virtual std::string to_string();
+
+      virtual InstructionKind get_kind()
+        { return ISSUE_FILL_REDUCTION; }
+      virtual GetTermEvent* as_get_term_event()
+        { return NULL; }
+      virtual MergeEvent* as_merge_event()
+        { return NULL; }
+      virtual AssignFenceCompletion* as_assignment_fence_completion()
+        { return NULL; }
+      virtual IssueCopy* as_issue_copy()
+        { return NULL; }
+      virtual IssueFillReduction* as_issue_fill_reduction()
+        { return this; }
+      virtual SetReadyEvent* as_set_ready_event()
+        { return NULL; }
+
+      virtual Instruction* clone(PhysicalTemplate& tpl,
+                                 const std::map<unsigned, unsigned> &rewrite);
+    private:
+      friend struct PhysicalTemplate;
+      unsigned lhs;
+      Domain domain;
+      TraceLocalId op_key;
+      std::vector<Domain::CopySrcDstField> fields;
+      const ReductionOp *reduction_op;
+      void *fill_buffer;
+      size_t fill_size;
+      unsigned precondition_idx;
     };
 
     /**
@@ -669,6 +725,8 @@ namespace Legion {
         { return NULL; }
       virtual IssueCopy* as_issue_copy()
         { return this; }
+      virtual IssueFillReduction* as_issue_fill_reduction()
+        { return NULL; }
       virtual SetReadyEvent* as_set_ready_event()
         { return NULL; }
 
@@ -713,6 +771,8 @@ namespace Legion {
       virtual AssignFenceCompletion* as_assignment_fence_completion()
         { return NULL; }
       virtual IssueCopy* as_issue_copy()
+        { return NULL; }
+      virtual IssueFillReduction* as_issue_fill_reduction()
         { return NULL; }
       virtual SetReadyEvent* as_set_ready_event()
         { return this; }
