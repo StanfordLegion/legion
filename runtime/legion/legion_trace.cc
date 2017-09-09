@@ -1635,6 +1635,7 @@ namespace Legion {
       optimize();
       replayable = check_preconditions();
       schedule();
+      if (Runtime::reduce_fanout) reduce_fanout();
       if (Runtime::dump_physical_traces) dump_template();
       event_map.clear();
 #ifdef DEBUG_LEGION
@@ -2025,6 +2026,78 @@ namespace Legion {
             it != worklist.end(); ++it)
           if (*it != fence_completion_id)
             insts.push_back(instructions[*it]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::reduce_fanout()
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<TraceLocalId, std::vector<Instruction*> >::iterator it =
+           inst_map.begin(); it != inst_map.end(); ++it)
+      {
+        std::vector<Instruction*> &insts = it->second;
+#ifdef DEBUG_LEGION
+        assert(insts.size() > 0);
+        assert(insts[0]->get_kind() == GET_TERM_EVENT);
+#endif
+        unsigned min_event_id = UINT_MAX;
+        std::set<unsigned> blocked_by_fence;
+
+        for (unsigned idx = 0; idx < insts.size(); ++idx)
+          switch (insts[idx]->get_kind())
+          {
+            case ISSUE_COPY:
+              {
+                IssueCopy *inst = insts[idx]->as_issue_copy();
+                if (inst->precondition_idx == fence_completion_id)
+                {
+                  blocked_by_fence.insert(idx);
+                  min_event_id = std::min(min_event_id, inst->lhs);
+                }
+                break;
+              }
+            case ISSUE_FILL_REDUCTION:
+              {
+                IssueFillReduction *inst =
+                  insts[idx]->as_issue_fill_reduction();
+                if (inst->precondition_idx == fence_completion_id)
+                {
+                  blocked_by_fence.insert(idx);
+                  min_event_id = std::min(min_event_id, inst->lhs);
+                }
+                break;
+              }
+            default:
+              {
+                break;
+              }
+          }
+
+        for (std::set<unsigned>::iterator it = blocked_by_fence.begin();
+             it != blocked_by_fence.end(); ++it)
+          switch (insts[*it]->get_kind())
+          {
+            case ISSUE_COPY:
+              {
+                IssueCopy *inst = insts[*it]->as_issue_copy();
+                if (inst->lhs != min_event_id)
+                  inst->precondition_idx = min_event_id;
+                break;
+              }
+            case ISSUE_FILL_REDUCTION:
+              {
+                IssueFillReduction *inst =
+                  insts[*it]->as_issue_fill_reduction();
+                if (inst->lhs != min_event_id)
+                  inst->precondition_idx = min_event_id;
+                break;
+              }
+            default:
+              {
+                break;
+              }
+          }
       }
     }
 

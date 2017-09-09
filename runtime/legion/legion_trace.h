@@ -412,6 +412,7 @@ namespace Legion {
       void finalize();
       void optimize();
       void schedule();
+      void reduce_fanout();
       void dump_template();
     public:
       inline bool is_tracing() const { return tracing; }
