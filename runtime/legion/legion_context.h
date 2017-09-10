@@ -1092,6 +1092,7 @@ namespace Legion {
       virtual void set_context_index(unsigned index);
       virtual int get_depth(void) const;
       virtual const char* get_task_name(void) const;
+      virtual bool has_trace(void) const;
     public:
       RemoteContext *const owner;
       unsigned context_index;
