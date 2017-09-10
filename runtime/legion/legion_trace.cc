@@ -2859,14 +2859,14 @@ namespace Legion {
       {
         if (intersect->is_region())
         {
-          LogicalRegion handle = node->as_region_node()->handle;
+          LogicalRegion handle = intersect->as_region_node()->handle;
           ss << ", lr(" << handle.get_index_space().get_id()
              << "," << handle.get_field_space().get_id()
              << "," << handle.get_tree_id() << ")";
         }
         else
         {
-          LogicalPartition handle = node->as_partition_node()->handle;
+          LogicalPartition handle = intersect->as_partition_node()->handle;
           ss << ", lp(" << handle.get_index_partition().get_id()
              << "," << handle.get_field_space().get_id()
              << "," << handle.get_tree_id() << ")";
