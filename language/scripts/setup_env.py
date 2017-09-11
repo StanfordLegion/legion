@@ -24,10 +24,13 @@ def check_sha1(file_path, sha1):
     with open(file_path, 'rb') as f:
         assert hashlib.sha1(f.read()).hexdigest() == sha1
 
-def download(dest_path, url, sha1):
+def download(dest_path, url, sha1, insecure=False):
     dest_dir = os.path.dirname(dest_path)
     dest_file = os.path.basename(dest_path)
-    subprocess.check_call(['wget', '-O', dest_path, url])
+    insecure_flag = []
+    if insecure:
+        insecure_flag = ['--no-check-certificate']
+    subprocess.check_call(['wget'] + insecure_flag + ['-O', dest_path, url])
     check_sha1(dest_path, sha1)
 
 def extract(dest_dir, archive_path, format):
@@ -60,6 +63,8 @@ def discover_conduit():
         return 'aries'
     elif platform.node().startswith('quartz'):
         return 'psm'
+    elif platform.node().startswith('titan'):
+        return 'gemini'
     else:
         raise Exception('Please set CONDUIT in your environment')
 
@@ -125,6 +130,9 @@ if __name__ == '__main__':
         if 'HOST_CXX' not in os.environ:
             raise Exception('Please set HOST_CXX in your environment')
 
+    # Hack: Some machines have out-of-date certificates
+    insecure = 'SKIP_TLS_CHECK' in os.environ
+
     root_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     legion_dir = os.path.dirname(root_dir)
 
@@ -144,7 +152,7 @@ if __name__ == '__main__':
         os.mkdir(cmake_dir)
 
         cmake_tarball = os.path.join(cmake_dir, 'cmake-3.7.2-Linux-x86_64.tar.gz')
-        download(cmake_tarball, 'https://cmake.org/files/v3.7/cmake-3.7.2-Linux-x86_64.tar.gz', '915bc981aab354821fb9fd28374a720fdb3aa180')
+        download(cmake_tarball, 'https://cmake.org/files/v3.7/cmake-3.7.2-Linux-x86_64.tar.gz', '915bc981aab354821fb9fd28374a720fdb3aa180', insecure=insecure)
         extract(cmake_dir, cmake_tarball, 'gz')
     assert os.path.exists(cmake_install_dir)
     cmake_exe = os.path.join(cmake_install_dir, 'bin', 'cmake')
@@ -158,8 +166,8 @@ if __name__ == '__main__':
         llvm_source_dir = os.path.join(llvm_dir, 'llvm-3.9.1.src')
         clang_tarball = os.path.join(llvm_dir, 'cfe-3.9.1.src.tar.xz')
         clang_source_dir = os.path.join(llvm_dir, 'cfe-3.9.1.src')
-        download(llvm_tarball, 'http://llvm.org/releases/3.9.1/llvm-3.9.1.src.tar.xz', 'ce801cf456b8dacd565ce8df8288b4d90e7317ff')
-        download(clang_tarball, 'http://llvm.org/releases/3.9.1/cfe-3.9.1.src.tar.xz', '95e4be54b70f32cf98a8de36821ea5495b84add8')
+        download(llvm_tarball, 'http://llvm.org/releases/3.9.1/llvm-3.9.1.src.tar.xz', 'ce801cf456b8dacd565ce8df8288b4d90e7317ff', insecure=insecure)
+        download(clang_tarball, 'http://llvm.org/releases/3.9.1/cfe-3.9.1.src.tar.xz', '95e4be54b70f32cf98a8de36821ea5495b84add8', insecure=insecure)
         extract(llvm_dir, llvm_tarball, 'xz')
         extract(llvm_dir, clang_tarball, 'xz')
         os.rename(clang_source_dir, os.path.join(llvm_source_dir, 'tools', 'clang'))
