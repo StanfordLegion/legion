@@ -5899,7 +5899,7 @@ namespace Realm {
 	  // <SERDEZ_DMA>
 	  // This is a little bit of hack: if serdez_id != 0 we directly create a
 	  // CopyRequest instead of inserting it into ''oasvec''
-	  if (oas.serdez_id != 0) {
+	  if (true) { //oas.serdez_id != 0) {
 	    OASByInst* oas_by_inst = new OASByInst;
 	    (*oas_by_inst)[ip].push_back(oas);
 	    Event ev = GenEventImpl::create_genevent()->current_event();

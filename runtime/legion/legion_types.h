@@ -365,6 +365,7 @@ namespace Legion {
       LG_DEFER_PHI_VIEW_REF_TASK_ID,
       LG_DEFER_PHI_VIEW_REGISTRATION_TASK_ID,
       LG_TIGHTEN_INDEX_SPACE_TASK_ID,
+      LG_PROF_OUTPUT_TASK_ID,
       LG_MESSAGE_ID, // These two must be the last two
       LG_RETRY_SHUTDOWN_TASK_ID,
       LG_LAST_TASK_ID, // This one should always be last
@@ -461,6 +462,7 @@ namespace Legion {
         "Defer Phi View Reference",                               \
         "Defer Phi View Registration",                            \
         "Tighten Index Space",                                    \
+        "Legion Prof Early Output",                               \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \
       };

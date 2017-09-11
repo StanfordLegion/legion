@@ -6255,6 +6255,22 @@ namespace Legion {
        *              all nodes are disabled. Zero will disable all
        *              profiling while each number greater than zero will
        *              profile on that number of nodes.
+       * -lg:serializer <string> Specify the kind of serializer to use:
+       *              'ascii' or 'binary'. The default is 'binary'.
+       * -lg:prof_logfile <filename> If using a binary serializer the
+       *              name of the output file to write to.
+       * -lg:prof_footprint <int> The maximum goal size of Legion Prof 
+       *              footprint during runtime in MBs. If the total data 
+       *              captured by the profiler exceeds this footprint, the 
+       *              runtime will begin dumping data out to the output file 
+       *              in a minimally invasive way while the application is 
+       *              still running. The default is 512 (MB).
+       * -lg:prof_latency <int> The goal latency in microseconds of 
+       *              intermediate profiling tasks to be writing to output
+       *              files if the maximum footprint size is exceeded.
+       *              This allows control over the granularity so they
+       *              can be made small enough to interleave with other
+       *              runtime work. The default is 100 (us).
        *
        * @param argc the number of input arguments
        * @param argv pointer to an array of string arguments of size argc
