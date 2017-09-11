@@ -422,6 +422,7 @@ namespace Legion {
       unsigned total_outstanding_requests;
     private:
       // For knowing when we need to start dumping early
+      Processor local_io_proc;
       size_t total_memory_footprint;
       bool output_pending; // not monotonic
       bool finalizing; // monotonic
