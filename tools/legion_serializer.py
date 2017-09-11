@@ -24,11 +24,9 @@ import io
 
 binary_filetype_pat = re.compile(r"FileType: BinaryLegionProf v: (?P<version>\d+(\.\d+)?)")
 
-def getFileObj(filename):
-    buffer_size = 32768
-    if filename.endswith(".gz"):
-        return io.BufferedReader(gzip.open(filename, mode='rb'), \
-                    buffer_size=buffer_size)
+def getFileObj(filename, compressed=False, buffer_size=32768):
+    if compressed:
+        return io.BufferedReader(gzip.open(filename, mode='rb'), buffer_size=buffer_size)
     else:
         return open(filename, mode='rb', buffering=buffer_size)
 
@@ -280,8 +278,8 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
 
     def parse(self, filename, verbose):
         print("parsing " + str(filename))
-        matches = 0
-        with getFileObj(filename) as log:
+        def parse_file(log):
+            matches = 0
             self.parse_preamble(log)
             _id_raw = log.read(4)
             while _id_raw:
@@ -294,12 +292,20 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
                     kwargs[param_name] = val
                 self.callbacks[_id](**kwargs)
                 _id_raw = log.read(4)
-        return matches
+            return matches
+        try:
+            # Try it as a gzip file first
+            with getFileObj(filename,compressed=True) as log:
+                return parse_file(log)    
+        except IOError:
+            # If its not a gzip file try a normal file
+            with getFileObj(filename,compressed=False) as log:
+                return parse_file(log)
 
 def GetFileTypeInfo(filename):
-    filetype = None
-    version = None
-    with getFileObj(filename) as log:
+    def parse_file(log):
+        filetype = None
+        version = None
         line = log.readline().rstrip()
         m = binary_filetype_pat.match(line)
         if m is not None:
@@ -307,4 +313,11 @@ def GetFileTypeInfo(filename):
             version = m.group("version")
         else:
             filetype = "ascii" # assume if not binary, it's ascii
-    return filetype, version
+        return filetype,version
+    try:
+        # Try it as a gzip file first
+        with getFileObj(filename,compressed=True) as log:
+            return parse_file(log)
+    except IOError:
+        with getFileObj(filename,compressed=False) as log:
+            return parse_file(log)
