@@ -15759,8 +15759,9 @@ namespace Legion {
           if (!doms.empty() && (profiler != NULL))
           {
             profiler->add_copy_request(requests, op);
-            if (doms.size() > 1)
-              profiler->increment_total_outstanding_requests(doms.size()-1);
+            if (doms.size() > 1 || src_fields.size() > 1)
+              profiler->increment_total_outstanding_requests(
+                  src_fields.size()*doms.size()-1);
           }
           if (dom_pre.exists() && !dom_pre.has_triggered())
             precondition = Runtime::merge_events(precondition, dom_pre);
@@ -15790,7 +15791,12 @@ namespace Legion {
         {
           // Profiler update
           if (profiler != NULL)
+          {
             profiler->add_copy_request(requests, op);
+            if (src_fields.size() > 1)
+              profiler->increment_total_outstanding_requests(
+                  src_fields.size()-1);
+          }
           ApEvent dom_pre;
           const Domain &dom = row_source->get_domain(dom_pre);
           if (dom_pre.exists() && !dom_pre.has_triggered())
@@ -15822,9 +15828,9 @@ namespace Legion {
         if (!intersection_doms->empty() && (profiler != NULL))
         {
           profiler->add_copy_request(requests, op);
-          if (intersection_doms->size() > 1)
+          if (intersection_doms->size() > 1 || src_fields.size() > 1)
             profiler->increment_total_outstanding_requests(
-                                              intersection_doms->size() - 1);
+                src_fields.size()*intersection_doms->size()-1);
         }
         std::set<ApEvent> done_events;
         if (predicate_guard.exists())
