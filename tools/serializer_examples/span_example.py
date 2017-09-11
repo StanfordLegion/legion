@@ -160,8 +160,10 @@ def main():
 
     match0 = matching_tasks0[0]
     match1 = matching_tasks1[0]
-    span0 = task_spans[match0][skip0:]
-    span1 = task_spans[match1]
+    span0 = sorted(task_spans[match0], key=lambda r: r[0])
+    span1 = sorted(task_spans[match1], key=lambda r: r[0])
+
+    span0 = span0[skip0:]
     if skip1 > 0:
         span1 = span1[0:-skip1]
 
