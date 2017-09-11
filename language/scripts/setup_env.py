@@ -60,6 +60,8 @@ def discover_conduit():
         return 'aries'
     elif platform.node().startswith('quartz'):
         return 'psm'
+    elif platform.node().startswith('titan'):
+        return 'gemini'
     else:
         raise Exception('Please set CONDUIT in your environment')
 
