@@ -25,9 +25,11 @@
 // interfaces here in the C API
 #ifdef __GNUC__
 #pragma GCC diagnostic ignored "-Wdeprecated"
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
 #ifdef __clang__
 #pragma clang diagnostic ignored "-Wdeprecated"
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #endif
 
 using namespace Legion;
@@ -4954,4 +4956,31 @@ legion_mapper_runtime_find_physical_instance_layout_constraint_id(
         acquire_, tight_region_bounds_);
   *result_ = CObjectWrapper::wrap(result);
   return ret;
+}
+
+bool
+legion_mapper_runtime_acquire_instance(
+    legion_mapper_runtime_t runtime_,
+    legion_mapper_context_t ctx_,
+    legion_physical_instance_t instance_)
+{
+  MapperRuntime* runtime = CObjectWrapper::unwrap(runtime_);
+  MapperContext ctx = CObjectWrapper::unwrap(ctx_);
+  PhysicalInstance* instance = CObjectWrapper::unwrap(instance_);
+  return runtime->acquire_instance(ctx, *instance);
+}
+
+bool
+legion_mapper_runtime_acquire_instances(
+    legion_mapper_runtime_t runtime_,
+    legion_mapper_context_t ctx_,
+    legion_physical_instance_t *instances_,
+    size_t instances_size)
+{
+  MapperRuntime* runtime = CObjectWrapper::unwrap(runtime_);
+  MapperContext ctx = CObjectWrapper::unwrap(ctx_);
+  std::vector<PhysicalInstance> instances;
+  for (size_t idx = 0; idx < instances_size; ++idx)
+    instances.push_back(*CObjectWrapper::unwrap(instances_[idx]));
+  return runtime->acquire_instances(ctx, instances);
 }

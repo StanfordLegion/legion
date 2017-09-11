@@ -37,11 +37,6 @@
 #define DETAILED_PROFILER(runtime, call) // Nothing
 #endif
 
-#ifdef SHARED_LOWLEVEL
-#define gasnet_mynode() 0
-#endif
-
-
 namespace Legion {
   namespace Internal { 
 
@@ -277,6 +272,7 @@ namespace Legion {
 #endif
     public:
       void dump_state(LegionProfSerializer *serializer);
+      size_t dump_inter(LegionProfSerializer *serializer);
     private:
       LegionProfiler *const owner;
       std::deque<TaskKind>          task_kinds;
@@ -324,16 +320,25 @@ namespace Legion {
         size_t id;
         UniqueID op_id;
       };
+      struct LgOutputTaskArgs : public LgTaskArgs<LgOutputTaskArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_PROF_OUTPUT_TASK_ID;
+      public:
+        LegionProfiler *profiler;
+      };
     public:
       // Statically known information passed through the constructor
       // so that it can be deduplicated
       LegionProfiler(Processor target_proc, const Machine &machine,
-                     unsigned num_meta_tasks,
+                     Runtime *rt, unsigned num_meta_tasks,
                      const char *const *const meta_task_descriptions,
                      unsigned num_operation_kinds,
                      const char *const *const operation_kind_descriptions,
                      const char *serializer_type,
-                     const char *prof_logname);
+                     const char *prof_logname,
+                     const size_t total_runtime_instances,
+                     const size_t footprint_threshold,
+                     const size_t target_latency);
       LegionProfiler(const LegionProfiler &rhs);
       ~LegionProfiler(void);
     public:
@@ -406,8 +411,6 @@ namespace Legion {
       void record_runtime_call(RuntimeCallKind kind, timestamp_t start,
                                timestamp_t stop);
     public:
-      const Processor target_proc;
-    public:
 #ifdef DEBUG_LEGION
       void increment_total_outstanding_requests(ProfilingKind kind,
                                                 unsigned cnt = 1);
@@ -417,8 +420,22 @@ namespace Legion {
       void increment_total_outstanding_requests(unsigned cnt = 1);
       void decrement_total_outstanding_requests(unsigned cnt = 1);
 #endif
+    public:
+      void increase_footprint(size_t diff);
+      bool decrease_footprint(size_t diff);
+      void perform_intermediate_output(void);
     private:
       void create_thread_local_profiling_instance(void);
+    public:
+      Runtime *const runtime;
+      // Event to trigger once the profiling is actually done
+      const RtUserEvent done_event;
+      // Size in bytes of the footprint before we start dumping
+      const size_t output_footprint_threshold;
+      // The goal size in microseconds of the output tasks
+      const long long output_target_latency;
+      // Target processor on which to launch jobs
+      const Processor target_proc;
     private:
       LegionProfSerializer* serializer;
       Reservation profiler_lock;
@@ -428,7 +445,11 @@ namespace Legion {
 #else
       unsigned total_outstanding_requests;
 #endif
-      const RtUserEvent done_event;
+    private:
+      // For knowing when we need to start dumping early
+      size_t total_memory_footprint;
+      bool output_pending; // not monotonic
+      bool finalizing; // monotonic
     };
 
     class DetailedProfiler {

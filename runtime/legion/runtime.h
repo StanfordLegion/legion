@@ -3278,6 +3278,8 @@ namespace Legion {
       static unsigned num_profiling_nodes;
       static const char* serializer_type;
       static const char* prof_logfile;
+      static size_t prof_footprint_threshold;
+      static size_t prof_target_latency;
     public:
       static inline ApEvent merge_events(ApEvent e1, ApEvent e2);
       static inline ApEvent merge_events(ApEvent e1, ApEvent e2, ApEvent e3);

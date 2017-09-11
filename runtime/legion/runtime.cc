@@ -10035,14 +10035,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       LG_TASK_DESCRIPTIONS(lg_task_descriptions);
-      profiler = new LegionProfiler((local_utils.empty() ? 
-                                    Processor::NO_PROC : utility_group), 
-                                    machine, LG_LAST_TASK_ID,
-                                    lg_task_descriptions, 
-                                    Operation::LAST_OP_KIND, 
+      profiler = new LegionProfiler((local_utils.empty() ?
+                                     Processor::NO_PROC : utility_group),
+                                    machine, this, LG_LAST_TASK_ID,
+                                    lg_task_descriptions,
+                                    Operation::LAST_OP_KIND,
                                     Operation::op_names,
                                     Runtime::serializer_type,
-                                    Runtime::prof_logfile); 
+                                    Runtime::prof_logfile,
+                                    total_address_spaces,
+                                    Runtime::prof_footprint_threshold,
+                                    Runtime::prof_target_latency);
       LG_MESSAGE_DESCRIPTIONS(lg_message_descriptions);
       profiler->record_message_kinds(lg_message_descriptions, LAST_SEND_KIND);
       MAPPER_CALL_NAMES(lg_mapper_calls);
@@ -19518,6 +19521,8 @@ namespace Legion {
     /*static*/ unsigned Runtime::num_profiling_nodes = 0;
     /*static*/ const char* Runtime::serializer_type = "binary";
     /*static*/ const char* Runtime::prof_logfile = NULL;
+    /*static*/ size_t Runtime::prof_footprint_threshold = 128 << 20;
+    /*static*/ size_t Runtime::prof_target_latency = 100;
 #ifdef TRACE_ALLOCATION
     /*static*/ std::map<AllocationType,Runtime::AllocationTracker>
                                         Runtime::allocation_manager;
@@ -19637,6 +19642,8 @@ namespace Legion {
         num_profiling_nodes = 0;
         serializer_type = "binary";
         prof_logfile = NULL;
+        prof_footprint_threshold = 128 << 20;
+        prof_target_latency = 100;
         legion_collective_radix = LEGION_COLLECTIVE_RADIX;
         legion_collective_log_radix = 0;
         legion_collective_stages = 0;
@@ -19720,7 +19727,13 @@ namespace Legion {
             prof_logfile = argv[++i];
             continue;
           }
-
+          if (!strcmp(argv[i],"-lg:prof_footprint"))
+          {
+            prof_footprint_threshold = atoi(argv[++i]) << 20;
+            continue;
+          }
+          INT_ARG("-lg:prof_latency",prof_target_latency);
+          
           // These are all the deprecated versions of these flag
           BOOL_ARG("-hl:separate",separate_runtime_instances);
           BOOL_ARG("-hl:registration",record_registration);
@@ -21379,6 +21392,13 @@ namespace Legion {
         case LG_TIGHTEN_INDEX_SPACE_TASK_ID:
           {
             IndexSpaceNode::handle_tighten_index_space(args);
+            break;
+          }
+        case LG_PROF_OUTPUT_TASK_ID:
+          {
+            const LegionProfiler::LgOutputTaskArgs *oargs = 
+              (const LegionProfiler::LgOutputTaskArgs*)args;
+            oargs->profiler->perform_intermediate_output();
             break;
           }
         case LG_RETRY_SHUTDOWN_TASK_ID:
