@@ -477,11 +477,32 @@ namespace Realm {
 	MetadataResponseMessage::broadcast_request(early_reqs, ID(me).id, data, datalen);
 	free(data);
       }
+
+      if (measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>()) {
+	timeline.record_ready_time();
+      }
+
+      // the InstanceMemoryUsage measurement is added at creation time for
+      //  profilers that want that before instance deletion occurs
+      if(measurements.wants_measurement<ProfilingMeasurements::InstanceMemoryUsage>()) {
+	ProfilingMeasurements::InstanceMemoryUsage usage;
+	usage.instance = me;
+	usage.memory = memory;
+	usage.bytes = metadata.size;
+	measurements.add_measurement(usage);
+      }
     }
 
     void RegionInstanceImpl::notify_deallocation(void)
     {
       log_inst.debug() << "deallocation completed: inst=" << me;
+
+      if (measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>()) {
+	timeline.record_delete_time();
+      }
+
+      // send any remaining incomplete profiling responses
+      measurements.send_responses(requests);
     }
 
     // helper function to figure out which field we're in
@@ -506,18 +527,6 @@ namespace Realm {
 	byte_offset -= (*it);
       }
       assert(0);
-    }
-
-    void RegionInstanceImpl::record_instance_usage(void)
-    {
-      // can't do this in the constructor because our ID isn't right yet...
-      if(measurements.wants_measurement<ProfilingMeasurements::InstanceMemoryUsage>()) {
-	ProfilingMeasurements::InstanceMemoryUsage usage;
-	usage.instance = me;
-	usage.memory = memory;
-	usage.bytes = metadata.size;
-	measurements.add_measurement(usage);
-      }
     }
 
     bool RegionInstanceImpl::get_strided_parameters(void *&base, size_t &stride,

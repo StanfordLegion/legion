@@ -1047,7 +1047,6 @@ namespace Legion {
                                           Operation *op)
     //--------------------------------------------------------------------------
     {
-#ifdef REALM_PROFILING_FIX
 #ifdef DEBUG_LEGION
       increment_total_outstanding_requests(LEGION_PROF_INST, 
                                            2/*different requests*/);
@@ -1069,7 +1068,6 @@ namespace Legion {
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_LOW_PRIORITY);
       req2.add_measurement<
                  Realm::ProfilingMeasurements::InstanceTimeline>();
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1193,7 +1191,6 @@ namespace Legion {
                                           UniqueID uid)
     //--------------------------------------------------------------------------
     {
-#ifdef REALM_PROFILING_FIX
 #ifdef DEBUG_LEGION
       increment_total_outstanding_requests(LEGION_PROF_INST,
                                            2/*different requests*/);
@@ -1215,7 +1212,6 @@ namespace Legion {
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_LOW_PRIORITY);
       req2.add_measurement<
                  Realm::ProfilingMeasurements::InstanceTimeline>();
-#endif
     }
 
     //--------------------------------------------------------------------------
