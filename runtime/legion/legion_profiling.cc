@@ -723,6 +723,7 @@ namespace Legion {
           exit(-1);
         }
         std::string filename(prof_logfile);
+#ifdef USE_ZLIB
         const size_t original_size = filename.size();
         if ((original_size < 3) || 
             ((filename[original_size-3] != '.') ||
@@ -735,6 +736,7 @@ namespace Legion {
                            filename.c_str());
           filename.append(".gz");
         }
+#endif
         size_t pct = filename.find_first_of('%', 0);
         if (pct == std::string::npos) 
         {
