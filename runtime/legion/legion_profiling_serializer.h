@@ -54,8 +54,10 @@ namespace Legion {
       virtual void serialize(const LegionProfInstance::OperationInstance&) = 0;
       virtual void serialize(const LegionProfInstance::MultiTask&) = 0;
       virtual void serialize(const LegionProfInstance::SliceOwner&) = 0;
-      virtual void serialize(const LegionProfInstance::WaitInfo, const LegionProfInstance::TaskInfo&) = 0;
-      virtual void serialize(const LegionProfInstance::WaitInfo, const LegionProfInstance::MetaInfo&) = 0;
+      virtual void serialize(const LegionProfInstance::WaitInfo, 
+                             const LegionProfInstance::TaskInfo&) = 0;
+      virtual void serialize(const LegionProfInstance::WaitInfo, 
+                             const LegionProfInstance::MetaInfo&) = 0;
       virtual void serialize(const LegionProfInstance::TaskInfo&) = 0;
       virtual void serialize(const LegionProfInstance::MetaInfo&) = 0;
       virtual void serialize(const LegionProfInstance::CopyInfo&) = 0;
@@ -92,8 +94,10 @@ namespace Legion {
       void serialize(const LegionProfInstance::OperationInstance&);
       void serialize(const LegionProfInstance::MultiTask&);
       void serialize(const LegionProfInstance::SliceOwner&);
-      void serialize(const LegionProfInstance::WaitInfo, const LegionProfInstance::TaskInfo&);
-      void serialize(const LegionProfInstance::WaitInfo, const LegionProfInstance::MetaInfo&);
+      void serialize(const LegionProfInstance::WaitInfo, 
+                     const LegionProfInstance::TaskInfo&);
+      void serialize(const LegionProfInstance::WaitInfo, 
+                     const LegionProfInstance::MetaInfo&);
       void serialize(const LegionProfInstance::TaskInfo&);
       void serialize(const LegionProfInstance::MetaInfo&);
       void serialize(const LegionProfInstance::CopyInfo&);
@@ -163,8 +167,10 @@ namespace Legion {
       void serialize(const LegionProfInstance::OperationInstance&);
       void serialize(const LegionProfInstance::MultiTask&);
       void serialize(const LegionProfInstance::SliceOwner&);
-      void serialize(const LegionProfInstance::WaitInfo, const LegionProfInstance::TaskInfo&);
-      void serialize(const LegionProfInstance::WaitInfo, const LegionProfInstance::MetaInfo&);
+      void serialize(const LegionProfInstance::WaitInfo, 
+                     const LegionProfInstance::TaskInfo&);
+      void serialize(const LegionProfInstance::WaitInfo, 
+                     const LegionProfInstance::MetaInfo&);
       void serialize(const LegionProfInstance::TaskInfo&);
       void serialize(const LegionProfInstance::MetaInfo&);
       void serialize(const LegionProfInstance::CopyInfo&);

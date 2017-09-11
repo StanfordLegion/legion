@@ -1,6 +1,11 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
+Version 17.??.?
+  * Legion Prof
+    - Added support for minimally invasive dumping of intermediate
+      profiling data while the application is still running for long runs
+
 Version 17.08.0 (August 24, 2017)
   * Build system
     - Added HDF_ROOT variable to customize HDF5 install location

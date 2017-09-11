@@ -100,6 +100,8 @@ namespace Legion {
       kind.task_id = task_id;
       kind.name = strdup(name);
       kind.overwrite = overwrite;
+      const size_t diff = sizeof(TaskKind) + strlen(name);
+      owner->increase_footprint(diff);
     }
 
     //--------------------------------------------------------------------------
@@ -113,6 +115,8 @@ namespace Legion {
       var.task_id = task_id;
       var.variant_id = variant_id;
       var.name = strdup(variant_name);
+      const size_t diff = sizeof(TaskVariant) + strlen(variant_name);
+      owner->increase_footprint(diff);
     }
 
     //--------------------------------------------------------------------------
@@ -123,6 +127,7 @@ namespace Legion {
       OperationInstance &inst = operation_instances.back();
       inst.op_id = op->get_unique_op_id();
       inst.kind = op->get_operation_kind();
+      owner->increase_footprint(sizeof(OperationInstance));
     }
 
     //--------------------------------------------------------------------------
@@ -133,6 +138,7 @@ namespace Legion {
       MultiTask &task = multi_tasks.back();
       task.op_id = op->get_unique_op_id();
       task.task_id = task_id;
+      owner->increase_footprint(sizeof(MultiTask));
     }
 
     //--------------------------------------------------------------------------
@@ -143,6 +149,7 @@ namespace Legion {
       SliceOwner &task = slice_owners.back();
       task.parent_id = pid;
       task.op_id = id;
+      owner->increase_footprint(sizeof(SliceOwner));
     }
 
     //--------------------------------------------------------------------------
@@ -177,6 +184,8 @@ namespace Legion {
           wait_info.wait_end = waits->intervals[idx].wait_end;
         }
       }
+      const size_t diff = sizeof(TaskInfo) + num_intervals * sizeof(WaitInfo);
+      owner->increase_footprint(diff);
     }
 
     //--------------------------------------------------------------------------
@@ -211,6 +220,8 @@ namespace Legion {
           wait_info.wait_end = waits->intervals[idx].wait_end;
         }
       }
+      const size_t diff = sizeof(MetaInfo) + num_intervals * sizeof(WaitInfo);
+      owner->increase_footprint(diff);
     }
 
     //--------------------------------------------------------------------------
@@ -245,6 +256,8 @@ namespace Legion {
           wait_info.wait_end = waits->intervals[idx].wait_end;
         }
       }
+      const size_t diff = sizeof(MetaInfo) + num_intervals * sizeof(WaitInfo);
+      owner->increase_footprint(diff);
     }
 
     //--------------------------------------------------------------------------
@@ -267,6 +280,7 @@ namespace Legion {
       info.start = timeline->start_time;
       // use complete_time instead of end_time to include async work
       info.stop = timeline->complete_time;
+      owner->increase_footprint(sizeof(CopyInfo));
     }
 
     //--------------------------------------------------------------------------
@@ -287,6 +301,7 @@ namespace Legion {
       info.start = timeline->start_time;
       // use complete_time instead of end_time to include async work
       info.stop = timeline->complete_time;
+      owner->increase_footprint(sizeof(FillInfo));
     }
 
     //--------------------------------------------------------------------------
@@ -299,6 +314,7 @@ namespace Legion {
       info.op_id = op_id;
       info.inst_id = inst.id;
       info.create = create;
+      owner->increase_footprint(sizeof(InstCreateInfo));
     }
 
     //--------------------------------------------------------------------------
@@ -312,6 +328,7 @@ namespace Legion {
       info.inst_id = usage->instance.id;
       info.mem_id = usage->memory.id;
       info.size = usage->bytes;
+      owner->increase_footprint(sizeof(InstUsageInfo));
     }
 
     //--------------------------------------------------------------------------
@@ -325,6 +342,7 @@ namespace Legion {
       info.inst_id = timeline->instance.id;
       info.create = timeline->create_time;
       info.destroy = timeline->delete_time;
+      owner->increase_footprint(sizeof(InstTimelineInfo));
     }
 
     //--------------------------------------------------------------------------
@@ -339,6 +357,7 @@ namespace Legion {
       info.start = start;
       info.stop = stop;
       info.proc_id = proc.id;
+      owner->increase_footprint(sizeof(MessageInfo));
     }
 
     //--------------------------------------------------------------------------
@@ -354,6 +373,7 @@ namespace Legion {
       info.start = start;
       info.stop = stop;
       info.proc_id = proc.id;
+      owner->increase_footprint(sizeof(MapperCallInfo));
     }
 
     //--------------------------------------------------------------------------
@@ -367,6 +387,7 @@ namespace Legion {
       info.start = start;
       info.stop = stop;
       info.proc_id = proc.id;
+      owner->increase_footprint(sizeof(RuntimeCallInfo));
     }
 
 #ifdef LEGION_PROF_SELF_PROFILE
@@ -382,6 +403,7 @@ namespace Legion {
       info.op_id = op_id;
       info.start = start;
       info.stop = stop;
+      owner->increase_footprint(sizeof(ProfTaskInfo));
     }
 #endif
 
@@ -498,51 +520,256 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    size_t LegionProfInstance::dump_inter(LegionProfSerializer *serializer)
+    //--------------------------------------------------------------------------
+    {
+      // Start the timing so we know how long we are taking
+      const long long t_start = Realm::Clock::current_time_in_microseconds();
+      size_t diff = 0; 
+      while (!task_kinds.empty())
+      {
+        TaskKind &front = task_kinds.front();
+        serializer->serialize(front);
+        diff += sizeof(front) + strlen(front.name);
+        free(const_cast<char*>(front.name));
+        task_kinds.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if ((t_curr - t_start) >= owner->output_target_latency)
+          return diff;
+      }
+      while (!task_variants.empty())
+      {
+        TaskVariant &front = task_variants.front();
+        serializer->serialize(front);
+        diff += sizeof(front) + strlen(front.name);
+        free(const_cast<char*>(front.name));
+        task_variants.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if ((t_curr - t_start) >= owner->output_target_latency)
+          return diff;
+      }
+      while (!operation_instances.empty())
+      {
+        OperationInstance &front = operation_instances.front();
+        serializer->serialize(front);
+        diff += sizeof(front);
+        operation_instances.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if ((t_curr - t_start) >= owner->output_target_latency)
+          return diff;
+      }
+      while (!multi_tasks.empty())
+      {
+        MultiTask &front = multi_tasks.front();
+        serializer->serialize(front);
+        diff += sizeof(front);
+        multi_tasks.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if ((t_curr - t_start) >= owner->output_target_latency)
+          return diff;
+      }
+      while (!slice_owners.empty())
+      {
+        SliceOwner &front = slice_owners.front();
+        serializer->serialize(front);
+        diff += sizeof(front);
+        slice_owners.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if ((t_curr - t_start) >= owner->output_target_latency)
+          return diff;
+      }
+      while (!task_infos.empty())
+      {
+        TaskInfo &front = task_infos.front();
+        serializer->serialize(front);
+        // Have to do all of these now
+        for (std::deque<WaitInfo>::const_iterator wit =
+              front.wait_intervals.begin(); wit != 
+              front.wait_intervals.end(); wit++)
+          serializer->serialize(*wit, front);
+        diff += sizeof(front) + front.wait_intervals.size() * sizeof(WaitInfo);
+        task_infos.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if ((t_curr - t_start) >= owner->output_target_latency)
+          return diff;
+      }
+      while (!meta_infos.empty())
+      {
+        MetaInfo &front = meta_infos.front();
+        serializer->serialize(front);
+        // Have to do all of these now
+        for (std::deque<WaitInfo>::const_iterator wit =
+              front.wait_intervals.begin(); wit != 
+              front.wait_intervals.end(); wit++)
+          serializer->serialize(*wit, front);
+        diff += sizeof(front) + front.wait_intervals.size() * sizeof(WaitInfo);
+        meta_infos.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if ((t_curr - t_start) >= owner->output_target_latency)
+          return diff;
+      }
+      while (!copy_infos.empty())
+      {
+        CopyInfo &front = copy_infos.front();
+        serializer->serialize(front);
+        diff += sizeof(front);
+        copy_infos.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if ((t_curr - t_start) >= owner->output_target_latency)
+          return diff;
+      }
+      while (!fill_infos.empty())
+      {
+        FillInfo &front = fill_infos.front();
+        serializer->serialize(front);
+        diff += sizeof(front);
+        fill_infos.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if ((t_curr - t_start) >= owner->output_target_latency)
+          return diff;
+      }
+      while (!inst_create_infos.empty())
+      {
+        InstCreateInfo &front = inst_create_infos.front();
+        serializer->serialize(front);
+        diff += sizeof(front);
+        inst_create_infos.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if ((t_curr - t_start) >= owner->output_target_latency)
+          return diff;
+      }
+      while (!inst_timeline_infos.empty())
+      {
+        InstTimelineInfo &front = inst_timeline_infos.front();
+        serializer->serialize(front);
+        diff += sizeof(front);
+        inst_timeline_infos.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if ((t_curr - t_start) >= owner->output_target_latency)
+          return diff;
+      }
+      while (!message_infos.empty())
+      {
+        MessageInfo &front = message_infos.front();
+        serializer->serialize(front);
+        diff += sizeof(front);
+        message_infos.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if ((t_curr - t_start) >= owner->output_target_latency)
+          return diff;
+      }
+      while (!mapper_call_infos.empty())
+      {
+        MapperCallInfo &front = mapper_call_infos.front();
+        serializer->serialize(front);
+        diff += sizeof(front);
+        mapper_call_infos.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if ((t_curr - t_start) >= owner->output_target_latency)
+          return diff;
+      }
+      while (!runtime_call_infos.empty())
+      {
+        RuntimeCallInfo &front = runtime_call_infos.front();
+        serializer->serialize(front);
+        diff += sizeof(front);
+        runtime_call_infos.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if ((t_curr - t_start) >= owner->output_target_latency)
+          return diff;
+      }
+#ifdef LEGION_PROF_SELF_PROFILE
+      while (!prof_task_infos.empty())
+      {
+        ProfTaskInfo &front = prof_task_infos.front();
+        serializer->serialize(front);
+        diff += sizeof(front);
+        prof_task_infos.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if ((t_curr - t_start) >= owner->output_target_latency)
+          return diff;
+      }
+#endif
+      return diff;
+    }
+
+    //--------------------------------------------------------------------------
     LegionProfiler::LegionProfiler(Processor target, const Machine &machine,
-                                   unsigned num_meta_tasks,
+                                   Runtime *rt, unsigned num_meta_tasks,
                                    const char *const *const task_descriptions,
                                    unsigned num_operation_kinds,
                                    const char *const *const 
                                                   operation_kind_descriptions,
                                    const char *serializer_type,
-                                   const char *prof_logfile)
-      : target_proc(target), total_outstanding_requests(1/*start with guard*/),
-        done_event(Runtime::create_rt_user_event())
+                                   const char *prof_logfile,
+                                   const size_t total_runtime_instances,
+                                   const size_t footprint_threshold,
+                                   const size_t target_latency)
+      : runtime(rt), done_event(Runtime::create_rt_user_event()), 
+        output_footprint_threshold(footprint_threshold), 
+        output_target_latency(target_latency), target_proc(target), 
+        total_outstanding_requests(1/*start with guard*/),
+        total_memory_footprint(0), finalizing(false)
     //--------------------------------------------------------------------------
     {
       profiler_lock = Reservation::create_reservation();
 
-      if (!strcmp(serializer_type, "binary")) {
-        if (prof_logfile == NULL) {
-          fprintf(stderr, "ERROR: Please specify -lg:prof_logfile <logfile_name> "
-                          "when running with -lg:serializer binary\n");
+      if (!strcmp(serializer_type, "binary")) 
+      {
+        if (prof_logfile == NULL) 
+        {
+          log_prof.error("ERROR: Please specify -lg:prof_logfile "
+                   "<logfile_name> when running with -lg:serializer binary");
           exit(-1);
         }
         std::string filename(prof_logfile);
+        const size_t original_size = filename.size();
+        if ((original_size < 3) || 
+            ((filename[original_size-3] != '.') ||
+             (filename[original_size-2] != 'g') ||
+             (filename[original_size-1] != 'z')))
+        {
+          log_prof.warning("WARNING: Binary file name %s specified with "
+                           "-lg:prof_logfile' does not end in '.gz' so we are "
+                           "appending the postfix '.gz' for you", 
+                           filename.c_str());
+          filename.append(".gz");
+        }
         size_t pct = filename.find_first_of('%', 0);
-        if (pct == std::string::npos) {
-          fprintf(stderr, "ERROR: The logfile name must contain '%%' "
-                          "which will be replaced with the node id\n");
-          exit(-1);
+        if (pct == std::string::npos) 
+        {
+          // This is only an error if we have multiple runtimes
+          if (total_runtime_instances > 1)
+          {
+            log_prof.error("ERROR: The logfile name must contain '%%' "
+                           "which will be replaced with the node id for "
+                           "runtimes with multiple nodes");
+            exit(-1);
+          }
+          serializer = new LegionProfBinarySerializer(filename.c_str());
         }
-
-	      // replace % with node number
-        Processor current = Processor::get_executing_processor();
-        std::stringstream ss;
-        ss << filename.substr(0, pct) << current.address_space() <<
-              filename.substr(pct + 1);
-        serializer = new LegionProfBinarySerializer(ss.str());
-      } else if (!strcmp(serializer_type, "ascii")) {
-        if (prof_logfile != NULL) {
-          fprintf(stderr, "ERROR: You should not specify -lg:prof_logfile "
-                          "<logfile_name> when running with -lg:serializer ascii\n"
-                          "       legion_prof output will be written to -logfile "
-                                  "<logfile_name> instead");
-          exit(-1);
+        else
+        {
+          // replace % with node number
+          Processor current = Processor::get_executing_processor();
+          std::stringstream ss;
+          ss << filename.substr(0, pct) << current.address_space() <<
+                filename.substr(pct + 1);
+          serializer = new LegionProfBinarySerializer(ss.str());
         }
+      } 
+      else if (!strcmp(serializer_type, "ascii")) 
+      {
+        if (prof_logfile != NULL) 
+          log_prof.warning("WARNING: You should not specify -lg:prof_logfile "
+                    "<logfile_name> when running with -lg:serializer ascii\n"
+                    "       legion_prof output will be written to '-logfile "
+                    "<logfile_name>' instead");
         serializer = new LegionProfASCIISerializer();
-      } else {
-        fprintf(stderr, "Invalid serializer (%s), must be 'binary' or 'ascii'\n", 
+      } 
+      else 
+      {
+        log_prof.error("Invalid serializer (%s), must be 'binary' or 'ascii'",
                         serializer_type);
         exit(-1);
       }
@@ -585,7 +812,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LegionProfiler::LegionProfiler(const LegionProfiler &rhs)
-      : target_proc(rhs.target_proc), done_event(RtUserEvent::NO_RT_USER_EVENT)
+      : runtime(NULL), done_event(RtUserEvent::NO_RT_USER_EVENT),
+        output_footprint_threshold(0), output_target_latency(0), 
+        target_proc(rhs.target_proc)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1070,6 +1299,11 @@ namespace Legion {
     void LegionProfiler::finalize(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!finalizing);
+#endif
+      // Set the flag indicating that we are finalizing
+      finalizing = true;
       // Remove our guard outstanding request
       decrement_total_outstanding_requests();
       if (!done_event.has_triggered())
@@ -1191,6 +1425,79 @@ namespace Legion {
         assert(!done_event.has_triggered());
 #endif
         Runtime::trigger_event(done_event);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::increase_footprint(size_t diff)
+    //--------------------------------------------------------------------------
+    {
+      size_t footprint = __sync_add_and_fetch(&total_memory_footprint, diff);
+      if (footprint > output_footprint_threshold)
+      {
+        bool launch_output = false;
+        if (!finalizing && !output_pending)
+        {
+          // Retake the lock to make sure we didn't loose the race
+          AutoLock p_lock(profiler_lock);
+          if (!output_pending)
+          {
+            launch_output = true;
+            output_pending = true;
+          }
+        }
+        if (launch_output)
+        {
+          // Launching this increments the total outstanding requests
+          // so we don't need to worry about early clean-up
+          LgOutputTaskArgs args;
+          args.profiler = this;
+          runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool LegionProfiler::decrease_footprint(size_t diff)
+    //--------------------------------------------------------------------------
+    {
+      // If we're finalizing don't keep doing the slow path
+      if (finalizing)
+        return false;
+      // Do this while holding the lock so we get atomicity correct
+      AutoLock p_lock(profiler_lock);
+#ifdef DEBUG_LEGION
+      assert(output_pending); // we are the pending output
+#endif
+      output_pending = false;
+      size_t footprint = __sync_sub_and_fetch(&total_memory_footprint, diff); 
+      // Keep going if we still have too much footprint
+      if (footprint > output_footprint_threshold)
+      {
+        output_pending = true;
+        return true;
+      }
+      else
+        return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::perform_intermediate_output(void)
+    //--------------------------------------------------------------------------
+    {
+      size_t diff = 0;
+      // See if we have a local profiler instance to decrease the footprint
+      if (thread_local_profiling_instance != NULL)
+        // No need for a lock since only one of these runs at a time
+        diff = thread_local_profiling_instance->dump_inter(serializer);
+      const bool launch_again = decrease_footprint(diff);
+      if (launch_again)
+      {
+        // Launching this increments the total outstanding requests
+        // so we don't need to worry about early clean-up
+        LgOutputTaskArgs args;
+        args.profiler = this;
+        runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY);
       }
     }
 
