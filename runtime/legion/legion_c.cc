@@ -25,9 +25,11 @@
 // interfaces here in the C API
 #ifdef __GNUC__
 #pragma GCC diagnostic ignored "-Wdeprecated"
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
 #ifdef __clang__
 #pragma clang diagnostic ignored "-Wdeprecated"
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #endif
 
 using namespace Legion;
