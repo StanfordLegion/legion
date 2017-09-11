@@ -723,20 +723,6 @@ namespace Legion {
           exit(-1);
         }
         std::string filename(prof_logfile);
-#ifdef USE_ZLIB
-        const size_t original_size = filename.size();
-        if ((original_size < 3) || 
-            ((filename[original_size-3] != '.') ||
-             (filename[original_size-2] != 'g') ||
-             (filename[original_size-1] != 'z')))
-        {
-          log_prof.warning("WARNING: Binary file name %s specified with "
-                           "-lg:prof_logfile' does not end in '.gz' so we are "
-                           "appending the postfix '.gz' for you", 
-                           filename.c_str());
-          filename.append(".gz");
-        }
-#endif
         size_t pct = filename.find_first_of('%', 0);
         if (pct == std::string::npos) 
         {
