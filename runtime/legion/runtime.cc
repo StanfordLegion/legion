@@ -3146,7 +3146,6 @@ namespace Legion {
     {
       if (!is_owner)
         return;
-      assert(!current_instances.empty());
       // No need for the lock, no one should be doing anything at this point
       for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
             current_instances.begin(); it != current_instances.end(); it++)
