@@ -6817,7 +6817,8 @@ local function collect_symbols(cx, node)
         undefined[cx:ispace(ispace_type).bounds] = true
       elseif node:is(ast.typed.expr.Deref) and
              std.is_ref(node.expr_type) and
-             node.expr_type:bounds() ~= node.value.expr_type:bounds() then
+             (not std.is_ref(node.value.expr_type) or
+              node.expr_type:bounds() ~= node.value.expr_type:bounds()) then
         accesses[node] = true
       elseif node:is(ast.typed.stat.Reduce) then
         local lh = node.lhs[1]

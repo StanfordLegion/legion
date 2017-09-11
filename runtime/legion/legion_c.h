@@ -3887,6 +3887,30 @@ extern "C" {
       bool acquire,
       bool tight_region_bounds);
 
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see Legion::Mapping::MapperRuntime::acquire_instance()
+   */
+  bool
+  legion_mapper_runtime_acquire_instance(
+      legion_mapper_runtime_t runtime,
+      legion_mapper_context_t ctx,
+      legion_physical_instance_t instance);
+
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
+   * @see Legion::Mapping::MapperRuntime::acquire_instances()
+   */
+  bool
+  legion_mapper_runtime_acquire_instances(
+      legion_mapper_runtime_t runtime,
+      legion_mapper_context_t ctx,
+      legion_physical_instance_t *instances,
+      size_t instances_size);
+
 #ifdef __cplusplus
 }
 #endif
