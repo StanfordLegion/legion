@@ -3659,7 +3659,6 @@ namespace Legion {
     inline ptr_t IndexIterator::next_span(size_t& act_count, size_t req_count)
     //--------------------------------------------------------------------------
     {
-#ifdef PERFECT_REALM_COALESCING
       if (rect_iterator.valid)
       {
         // If we have a rect iterator we just go to the end of the rectangle
@@ -3672,7 +3671,10 @@ namespace Legion {
           is_iterator.step();
         }
         else
+	{
           rect_iterator.p[0] = result.value + req_count;
+	  act_count = req_count;
+	}
         return result;
       }
       else
@@ -3686,6 +3688,7 @@ namespace Legion {
           rect_iterator = 
             Realm::ZPointInRectIterator<1,coord_t>(is_iterator.rect);
           rect_iterator.p[0] = result.value + req_count;
+	  act_count = req_count;
         }
         else
         {
@@ -3694,23 +3697,6 @@ namespace Legion {
         }
         return result;
       }
-#else
-      const ptr_t result = next();
-      act_count = 1;
-      while (has_next() && (act_count < req_count))
-      {
-        if (!rect_iterator.valid)
-          rect_iterator = 
-            Realm::ZPointInRectIterator<1,coord_t>(is_iterator.rect);
-        if (size_t(rect_iterator.p[0]) != (result.value + act_count))
-          break;
-        act_count++;
-        rect_iterator.step();
-        if (!rect_iterator.valid)
-          is_iterator.step();
-      }
-      return result;
-#endif
     }
 
     //--------------------------------------------------------------------------

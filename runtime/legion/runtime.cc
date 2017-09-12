@@ -17992,6 +17992,7 @@ namespace Legion {
     /*static*/ const char* Runtime::prof_logfile = NULL;
     /*static*/ size_t Runtime::prof_footprint_threshold = 128 << 20;
     /*static*/ size_t Runtime::prof_target_latency = 100;
+    /*static*/ bool Runtime::slow_debug_ok = false;
 #ifdef TRACE_ALLOCATION
     /*static*/ std::map<AllocationType,Runtime::AllocationTracker>
                                         Runtime::allocation_manager;
@@ -18105,6 +18106,7 @@ namespace Legion {
         prof_logfile = NULL;
         prof_footprint_threshold = 128 << 20;
         prof_target_latency = 100;
+	slow_debug_ok = false;
         legion_collective_radix = LEGION_COLLECTIVE_RADIX;
         legion_collective_log_radix = 0;
         legion_collective_stages = 0;
@@ -18194,6 +18196,8 @@ namespace Legion {
             continue;
           }
           INT_ARG("-lg:prof_latency",prof_target_latency);
+
+	  BOOL_ARG("-lg:debug_ok",slow_debug_ok);
           
           // These are all the deprecated versions of these flag
           BOOL_ARG("-hl:separate",separate_runtime_instances);
@@ -18273,7 +18277,7 @@ namespace Legion {
       if (legion_spy_enabled)
         LegionSpy::log_legion_spy_config();
 #ifdef DEBUG_LEGION
-      if (num_profiling_nodes > 0)
+      if ((num_profiling_nodes > 0) && !slow_debug_ok)
       {
         // Give a massive warning about profiling with Legion Spy enabled
         for (int i = 0; i < 2; i++)
@@ -18298,7 +18302,7 @@ namespace Legion {
       }
 #endif
 #ifdef LEGION_SPY
-      if (num_profiling_nodes > 0)
+      if ((num_profiling_nodes > 0) && !slow_debug_ok)
       {
         // Give a massive warning about profiling with Legion Spy enabled
         for (int i = 0; i < 2; i++)
@@ -18322,7 +18326,7 @@ namespace Legion {
         sleep(5);
       }
 #else
-      if (legion_spy_enabled && (num_profiling_nodes > 0))
+      if (legion_spy_enabled && (num_profiling_nodes > 0) && !slow_debug_ok)
       {
         // Give a massive warning about profiling with Legion Spy enabled
         for (int i = 0; i < 2; i++)
@@ -18347,7 +18351,7 @@ namespace Legion {
       }
 #endif
 #ifdef BOUNDS_CHECKS
-      if (num_profiling_nodes > 0)
+      if ((num_profiling_nodes > 0) && !slow_debug_ok)
       {
         // Give a massive warning about profiling with Legion Spy enabled
         for (int i = 0; i < 2; i++)
@@ -18372,7 +18376,7 @@ namespace Legion {
       }
 #endif
 #ifdef PRIVILEGE_CHECKS
-      if (num_profiling_nodes > 0)
+      if ((num_profiling_nodes > 0) && !slow_debug_ok)
       {
         // Give a massive warning about profiling with Legion Spy enabled
         for (int i = 0; i < 2; i++)

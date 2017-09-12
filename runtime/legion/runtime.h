@@ -3024,6 +3024,7 @@ namespace Legion {
       static const char* prof_logfile;
       static size_t prof_footprint_threshold;
       static size_t prof_target_latency;
+      static bool slow_debug_ok;
     public:
       static inline ApEvent merge_events(ApEvent e1, ApEvent e2);
       static inline ApEvent merge_events(ApEvent e1, ApEvent e2, ApEvent e3);

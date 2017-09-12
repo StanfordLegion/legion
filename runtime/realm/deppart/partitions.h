@@ -158,6 +158,11 @@ namespace Realm {
     virtual void set_overlap_tester(void *tester);
 
     void deferred_launch(Event wait_for);
+
+    // some partitioning operations are handled inline for simple cases
+    // these cases must still supply all the requested profiling responses
+    static void do_inline_profiling(const ProfilingRequestSet &reqs,
+				    long long inline_start_time);
   };
 
 
