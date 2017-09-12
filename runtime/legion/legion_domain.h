@@ -571,17 +571,15 @@ namespace Legion {
 	  case 1:
 	    {
               Realm::ZIndexSpaceIterator<1,coord_t> *is_itr = 
-                new Realm::ZIndexSpaceIterator<1,coord_t>(d);
-	      is_iterator = (void *)is_itr;
+                new (is_iterator) Realm::ZIndexSpaceIterator<1,coord_t>(d);
               is_valid = is_itr->valid;
               if (is_valid) {
                 Realm::ZPointInRectIterator<1,coord_t> *rect_itr = 
-                  new Realm::ZPointInRectIterator<1,coord_t>(is_itr->rect);
-                rect_iterator = (void *)rect_itr;
+                  new (rect_iterator) 
+                    Realm::ZPointInRectIterator<1,coord_t>(is_itr->rect);
                 rect_valid = rect_itr->valid;
                 p = rect_itr->p; 
               } else {
-                rect_iterator = NULL;
                 rect_valid = false;
               }
 	      break;
@@ -589,17 +587,15 @@ namespace Legion {
 	  case 2:
 	    {
               Realm::ZIndexSpaceIterator<2,coord_t> *is_itr = 
-                new Realm::ZIndexSpaceIterator<2,coord_t>(d);
-	      is_iterator = (void *)is_itr;
+                new (is_iterator) Realm::ZIndexSpaceIterator<2,coord_t>(d);
               is_valid = is_itr->valid;
               if (is_valid) {
                 Realm::ZPointInRectIterator<2,coord_t> *rect_itr = 
-                  new Realm::ZPointInRectIterator<2,coord_t>(is_itr->rect);
-                rect_iterator = (void *)rect_itr;
+                  new (rect_iterator)
+                    Realm::ZPointInRectIterator<2,coord_t>(is_itr->rect);
                 rect_valid = rect_itr->valid;
                 p = rect_itr->p; 
               } else {
-                rect_iterator = NULL;
                 rect_valid = false;
               }
 	      break;
@@ -607,17 +603,15 @@ namespace Legion {
 	  case 3:
 	    {
               Realm::ZIndexSpaceIterator<3,coord_t> *is_itr = 
-                new Realm::ZIndexSpaceIterator<3,coord_t>(d);
-	      is_iterator = (void *)is_itr;
+                new (is_iterator) Realm::ZIndexSpaceIterator<3,coord_t>(d);
               is_valid = is_itr->valid;
               if (is_valid) {
                 Realm::ZPointInRectIterator<3,coord_t> *rect_itr = 
-                  new Realm::ZPointInRectIterator<3,coord_t>(is_itr->rect);
-                rect_iterator = (void *)rect_itr;
+                  new (rect_iterator) 
+                    Realm::ZPointInRectIterator<3,coord_t>(is_itr->rect);
                 rect_valid = rect_itr->valid;
                 p = rect_itr->p; 
               } else {
-                rect_iterator = NULL;
                 rect_valid = false;
               }
 	      break;
@@ -625,50 +619,6 @@ namespace Legion {
 	  default:
 	    assert(0);
 	  };
-	}
-
-	~DomainPointIterator(void)
-	{
-	  switch(p.get_dim()) {
-	  case 1:
-	    {
-              Realm::ZIndexSpaceIterator<1,coord_t> *is_itr = 
-                (Realm::ZIndexSpaceIterator<1,coord_t>*)is_iterator;
-              delete is_itr;
-              if (rect_iterator) {
-                Realm::ZPointInRectIterator<1,coord_t> *rect_itr = 
-                  (Realm::ZPointInRectIterator<1,coord_t>*)rect_iterator;
-                delete rect_itr;
-              }
-              break;
-	    }
-	  case 2:
-	    {
-              Realm::ZIndexSpaceIterator<2,coord_t> *is_itr = 
-                (Realm::ZIndexSpaceIterator<2,coord_t>*)is_iterator;
-              delete is_itr;
-              if (rect_iterator) {
-                Realm::ZPointInRectIterator<2,coord_t> *rect_itr = 
-                  (Realm::ZPointInRectIterator<2,coord_t>*)rect_iterator;
-                delete rect_itr;
-              }
-              break;
-	    }
-	  case 3:
-	    {
-              Realm::ZIndexSpaceIterator<3,coord_t> *is_itr = 
-                (Realm::ZIndexSpaceIterator<3,coord_t>*)is_iterator;
-              delete is_itr;
-              if (rect_iterator) {
-                Realm::ZPointInRectIterator<3,coord_t> *rect_itr = 
-                  (Realm::ZPointInRectIterator<3,coord_t>*)rect_iterator;
-                delete rect_itr;
-              }
-              break;
-	    }
-	  default:
-	    assert(0);
-	  }
 	}
 
         bool step(void)
@@ -685,21 +635,19 @@ namespace Legion {
               if (!rect_valid) {
                 // If the rectangle iterator is not valid anymore
                 // then try to start the next rectangle
-                delete rect_itr;
                 Realm::ZIndexSpaceIterator<1,coord_t> *is_itr = 
                   (Realm::ZIndexSpaceIterator<1,coord_t>*)is_iterator;
                 is_itr->step();
                 is_valid = is_itr->valid;
                 if (is_valid) {
-                  rect_itr = 
-                    new Realm::ZPointInRectIterator<1,coord_t>(is_itr->rect);
+                  // Placement new on top of the old one
+                  new (rect_itr) 
+                    Realm::ZPointInRectIterator<1,coord_t>(is_itr->rect);
                   p = rect_itr->p;
                   rect_valid = rect_itr->valid;
                 } else {
-                  rect_itr = NULL;
                   rect_valid = false;
                 }
-                rect_iterator = (void *)rect_itr;
               } else {
                 p = rect_itr->p; 
               }
@@ -715,21 +663,19 @@ namespace Legion {
               if (!rect_valid) {
                 // If the rectangle iterator is not valid anymore
                 // then try to start the next rectangle
-                delete rect_itr;
                 Realm::ZIndexSpaceIterator<2,coord_t> *is_itr = 
                   (Realm::ZIndexSpaceIterator<2,coord_t>*)is_iterator;
                 is_itr->step();
                 is_valid = is_itr->valid;
                 if (is_valid) {
-                  rect_itr = 
-                    new Realm::ZPointInRectIterator<2,coord_t>(is_itr->rect);
+                  // Placement new on top of the old one
+                  new (rect_itr) 
+                    Realm::ZPointInRectIterator<2,coord_t>(is_itr->rect);
                   p = rect_itr->p;
                   rect_valid = rect_itr->valid;
                 } else {
-                  rect_itr = NULL;
                   rect_valid = false;
                 }
-                rect_iterator = (void *)rect_itr;
               } else {
                 p = rect_itr->p; 
               }
@@ -745,21 +691,19 @@ namespace Legion {
               if (!rect_valid) {
                 // If the rectangle iterator is not valid anymore
                 // then try to start the next rectangle
-                delete rect_itr;
                 Realm::ZIndexSpaceIterator<3,coord_t> *is_itr = 
                   (Realm::ZIndexSpaceIterator<3,coord_t>*)is_iterator;
                 is_itr->step();
                 is_valid = is_itr->valid;
                 if (is_valid) {
-                  rect_itr = 
-                    new Realm::ZPointInRectIterator<3,coord_t>(is_itr->rect);
+                  // Placement new on top of the old one
+                  new (rect_itr) 
+                    Realm::ZPointInRectIterator<3,coord_t>(is_itr->rect);
                   p = rect_itr->p;
                   rect_valid = rect_itr->valid;
                 } else {
-                  rect_itr = NULL;
                   rect_valid = false;
                 }
-                rect_iterator = (void *)rect_itr;
               } else {
                 p = rect_itr->p; 
               }
@@ -776,7 +720,12 @@ namespace Legion {
           { step(); return *this; }
       public:
         DomainPoint p;
-        void *is_iterator, *rect_iterator;
+        // Some buffers that we will do in-place new statements to in
+        // order to not have to call new/delete in our implementation
+        char is_iterator[
+                sizeof(Realm::ZIndexSpaceIterator<MAX_RECT_DIM,coord_t>)];
+        char rect_iterator[
+                sizeof(Realm::ZPointInRectIterator<MAX_RECT_DIM,coord_t>)];
         bool is_valid, rect_valid;
       };
     protected:
