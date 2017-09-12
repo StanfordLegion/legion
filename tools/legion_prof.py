@@ -1636,6 +1636,7 @@ class State(object):
             "InstCreateInfo": self.log_inst_create,
             "InstUsageInfo": self.log_inst_usage,
             "InstTimelineInfo": self.log_inst_timeline,
+            "PartitionInfo": self.log_partition_info,
             "MessageInfo": self.log_message_info,
             "MapperCallInfo": self.log_mapper_call_info,
             "RuntimeCallInfo": self.log_runtime_call_info,
@@ -1705,6 +1706,9 @@ class State(object):
         inst.stop = destroy
         if destroy > self.last_time:
             self.last_time = destroy 
+
+    def log_partition_info(self, op_id, dep_op, create, ready, start, stop):
+        pass
 
     def log_user_info(self, proc_id, start, stop, name):
         proc = self.find_processor(proc_id)
