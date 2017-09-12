@@ -1057,7 +1057,7 @@ namespace Legion {
     void TraceCompleteOp::initialize_complete(TaskContext *ctx)
     //--------------------------------------------------------------------------
     {
-      initialize(ctx, MAPPING_FENCE);
+      initialize(ctx, MIXED_FENCE);
 #ifdef DEBUG_LEGION
       assert(trace != NULL);
 #endif
