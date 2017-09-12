@@ -203,6 +203,7 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
         "MessageKind":        "i", # int (really an enum so this depends)
         "MappingCallKind":    "i", # int (really an enum so this depends)
         "RuntimeCallKind":    "i", # int (really an enum so this depends)
+        "DepPartOpKind":      "i", # int (really an enum so this depends)
     }
 
     def __init__(self, state, callbacks):
