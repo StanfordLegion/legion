@@ -79,10 +79,15 @@ namespace Realm {
     assert(wait_on.has_triggered());
     //assert(reqs.empty());
 
+    // record the start time of the potentially-inline operation if any
+    //  profiling has been requested
+    long long inline_start_time = reqs.empty() ? 0 : Clock::current_time_in_nanoseconds();
+
     // either an empty input or a count of 1 allow us to return the input
     //  verbatim
     if(empty() || (count == 1)) {
       subspace = *this;
+      PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
       return Event::NO_EVENT;
     }
 
@@ -106,6 +111,7 @@ namespace Realm {
       } else {
 	subspace = ZIndexSpace<N,T>::make_empty();
       }
+      PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
       return Event::NO_EVENT;
     }
 
@@ -127,6 +133,10 @@ namespace Realm {
     // output vector should start out empty
     assert(subspaces.empty());
 
+    // record the start time of the potentially-inline operation if any
+    //  profiling has been requested
+    long long inline_start_time = reqs.empty() ? 0 : Clock::current_time_in_nanoseconds();
+
     // dense case is easy(er)
     if(dense()) {
       // always split in x dimension for now
@@ -142,6 +152,7 @@ namespace Realm {
 	subspaces.push_back(ss);
 	px = nx;
       }
+      PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
       return Event::NO_EVENT;
     }
 
@@ -163,6 +174,10 @@ namespace Realm {
 
     // output vector should start out empty
     assert(subspaces.empty());
+
+    // record the start time of the potentially-inline operation if any
+    //  profiling has been requested
+    long long inline_start_time = reqs.empty() ? 0 : Clock::current_time_in_nanoseconds();
 
     // determine the total weight
     size_t total_weight = 0;
@@ -200,6 +215,7 @@ namespace Realm {
 	subspaces.push_back(ss);
 	px = nx;
       }
+      PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
       return Event::NO_EVENT;
     }
 
@@ -736,6 +752,30 @@ namespace Realm {
   {
     // should only be called for ImageOperation and PreimageOperation, which override this
     assert(0);
+  }
+
+  /*static*/ void PartitioningOperation::do_inline_profiling(const ProfilingRequestSet &reqs,
+							     long long inline_start_time)
+  {
+    if(!reqs.empty()) {
+      using namespace ProfilingMeasurements;
+      ProfilingMeasurementCollection pmc;
+      pmc.import_requests(reqs);
+      if(pmc.wants_measurement<OperationTimeline>()) {
+	OperationTimeline t;
+
+	// if we handled the request inline, we need to generate profiling responses
+	long long inline_finish_time = Clock::current_time_in_nanoseconds();
+
+	t.create_time = inline_start_time;
+	t.ready_time = inline_start_time;
+	t.start_time = inline_start_time;
+	t.end_time = inline_finish_time;
+	t.complete_time = inline_finish_time;
+	pmc.add_measurement(t);
+      }
+      pmc.send_responses(reqs);
+    }
   }
 
 

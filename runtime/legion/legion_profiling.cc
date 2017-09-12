@@ -1076,7 +1076,6 @@ namespace Legion {
                                            Operation *op, DepPartOpKind part_op)
     //--------------------------------------------------------------------------
     {
-#ifdef REALM_PROFILING_FIX
 #ifdef DEBUG_LEGION
       increment_total_outstanding_requests(LEGION_PROF_PARTITION);
 #else
@@ -1091,7 +1090,6 @@ namespace Legion {
                         LG_LEGION_PROFILING_ID, &info, sizeof(info));
       req.add_measurement<
                   Realm::ProfilingMeasurements::OperationTimeline>();
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1220,7 +1218,6 @@ namespace Legion {
                                            UniqueID uid, DepPartOpKind part_op)
     //--------------------------------------------------------------------------
     {
-#ifdef REALM_PROFILING_FIX
 #ifdef DEBUG_LEGION
       increment_total_outstanding_requests(LEGION_PROF_PARTITION);
 #else
@@ -1235,7 +1232,6 @@ namespace Legion {
                         LG_LEGION_PROFILING_ID, &info, sizeof(info));
       req.add_measurement<
                   Realm::ProfilingMeasurements::OperationTimeline>();
-#endif
     }
 
     //--------------------------------------------------------------------------
