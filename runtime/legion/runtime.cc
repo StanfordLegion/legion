@@ -2721,10 +2721,11 @@ namespace Legion {
       // Iterate over the task descriptions, asking the appropriate mapper
       // whether we can steal the task
       std::set<TaskOp*> stolen;
+      std::vector<MapperID> successful_thiefs;
       for (std::vector<MapperID>::const_iterator steal_it = thieves.begin();
             steal_it != thieves.end(); steal_it++)
       {
-        MapperID stealer = *steal_it;
+        const MapperID stealer = *steal_it;
         // Handle a race condition here where some processors can 
         // issue steal requests to another processor before the mappers 
         // have been initialized on that processor.  There's no 
@@ -2820,6 +2821,8 @@ namespace Legion {
 
         if (!successful_steal) 
           mapper->process_failed_steal(thief);
+        else
+          successful_thiefs.push_back(stealer);
       }
       if (!stolen.empty())
       {
@@ -2833,6 +2836,13 @@ namespace Legion {
         }
 #endif
         runtime->send_tasks(thief, stolen);
+        // Also have to send advertisements to the mappers that 
+        // successfully stole so they know that they can try again
+        std::set<Processor> thief_set;
+        thief_set.insert(thief);
+        for (std::vector<MapperID>::const_iterator it = 
+              successful_thiefs.begin(); it != successful_thiefs.end(); it++)
+          runtime->send_advertisements(thief_set, *it, local_proc);
       }
     }
 
@@ -2843,14 +2853,11 @@ namespace Legion {
     {
       MapperManager *mapper = find_mapper(mid);
       mapper->process_advertisement(advertiser);
-      // Do a one time enabling of the scheduler so we can try
-      // asking any of the mappers if they would like to try stealing again
-      AutoLock q_lock(queue_lock);
-      if (!task_scheduler_enabled)
-      {
-        task_scheduler_enabled = true;
-        launch_task_scheduler();
-      }
+      // See if this mapper would like to try stealing again
+      std::multimap<Processor,MapperID> stealing_targets;
+      mapper->perform_stealing(stealing_targets);
+      if (!stealing_targets.empty())
+        runtime->send_steal_request(stealing_targets, local_proc);
     }
 
     //--------------------------------------------------------------------------
@@ -12427,8 +12434,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_tasks(Processor target, 
-                                   const std::set<TaskOp*> &tasks)
+    void Runtime::send_tasks(Processor target, const std::set<TaskOp*> &tasks)
     //--------------------------------------------------------------------------
     {
       if (!target.exists())
@@ -12444,7 +12450,7 @@ namespace Legion {
               it != tasks.end(); it++)
         {
           // Update the current processor
-          (*it)->current_proc = target;
+          (*it)->set_current_proc(target);
           finder->second->add_to_ready_queue(*it);
         }
       }
