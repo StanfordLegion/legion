@@ -91,7 +91,7 @@ namespace Realm {
                 const std::vector<FieldID> &field_ids,
 							  const std::vector<size_t> &field_sizes,
                 const std::vector<void*> &field_pointers,
-							  size_t block_size,
+							  int resource,
 							  const ProfilingRequestSet& reqs,
 							  Event wait_on /*= Event::NO_EVENT*/)
   {
@@ -100,10 +100,6 @@ namespace Realm {
       .only_kind(Memory::SYSTEM_MEM)
       .first();
     assert(memory.exists());
-      
-    // smoosh hybrid block sizes back to SOA for now
-    if(block_size > 1)
-      block_size = 0;
 
     InstanceLayout<N,T> *layout = new InstanceLayout<N,T>;
     layout->bytes_used = 0;
@@ -128,10 +124,18 @@ namespace Realm {
         ptr = (unsigned char*)field_pointers[i];
 	      alp->offset = (size_t)(ptr - base);
 	      size_t stride = field_sizes[i];
-	      for(int j = 0; j < N; j++) {
-	        alp->strides[j] = stride;
-	        stride *= (space.bounds.hi[j] - space.bounds.lo[j] + 1);
-	      }
+        /* fortran layout */
+        if (resource == 0) {
+	        for(int j = 0; j < N; j++) {
+	          alp->strides[j] = stride;
+	          stride *= (space.bounds.hi[j] - space.bounds.lo[j] + 1);
+	        }
+        } else { /* C layout */
+	        for(int j = N - 1; j >= 0; j--) {
+	          alp->strides[j] = stride;
+	          stride *= (space.bounds.hi[j] - space.bounds.lo[j] + 1);
+	        }
+        }
 	      layout->piece_lists[i].pieces.push_back(alp);
       }
     }
@@ -148,7 +152,7 @@ namespace Realm {
                     const std::vector<FieldID>&, \
 							      const std::vector<size_t>&, \
 							      const std::vector<void *>&, \
-							      size_t, \
+							      int, \
 							      const ProfilingRequestSet&, \
 							      Event);
   FOREACH_NT(DOIT_ARRAY_SOA)  
@@ -159,7 +163,8 @@ namespace Realm {
                 const std::vector<FieldID> &field_ids,
 							  const std::vector<size_t> &field_sizes,
                 const std::vector<void*> &field_pointers,
-							  size_t block_size, unsigned char* aos_base_ptr, size_t aos_stride,
+							  unsigned char* aos_base_ptr, size_t aos_stride,
+                int resource,
 							  const ProfilingRequestSet& reqs,
 							  Event wait_on /*= Event::NO_EVENT*/)
   {
@@ -168,11 +173,7 @@ namespace Realm {
       .only_kind(Memory::SYSTEM_MEM)
       .first();
     assert(memory.exists());
-      
-    // smoosh hybrid block sizes back to SOA for now
-    if(block_size > 1)
-      block_size = 0;
-
+    
     InstanceLayout<N,T> *layout = new InstanceLayout<N,T>;
     layout->bytes_used = 0;
     layout->alignment_reqd = 0;  // no allocation being made
@@ -197,10 +198,19 @@ namespace Realm {
 	      AffineLayoutPiece<N,T> *alp = new AffineLayoutPiece<N,T>;
 	      alp->bounds = space.bounds;
 	      alp->offset = (size_t)(aos_base_ptr - base);
-	      for(int j = 0; j < N; j++) {
-	        alp->strides[j] = aos_stride;
-	       // stride *= (space.bounds.hi[j] - space.bounds.lo[j] + 1);
-	      }
+        size_t stride = aos_stride;
+        /* fortran layout */
+        if (resource == 0) {
+	        for(int j = 0; j < N; j++) {
+	          alp->strides[j] = stride;
+            stride *= (space.bounds.hi[j] - space.bounds.lo[j] + 1);
+	        }
+        } else { /* C layout */
+	        for(int j = N-1; j >= 0; j--) {
+	          alp->strides[j] = stride;
+            stride *= (space.bounds.hi[j] - space.bounds.lo[j] + 1);
+	        }
+        }
 	      layout->piece_lists[i].pieces.push_back(alp);
       }
     }
@@ -217,7 +227,8 @@ namespace Realm {
                     const std::vector<FieldID>&, \
 							      const std::vector<size_t>&, \
 							      const std::vector<void *>&, \
-							      size_t, unsigned char*, size_t, \
+							      unsigned char*, size_t, \
+                    int, \
 							      const ProfilingRequestSet&, \
 							      Event);
   FOREACH_NT(DOIT_ARRAY_AOS)  

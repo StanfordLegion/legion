@@ -5214,26 +5214,20 @@ namespace Legion {
                         "in favor of generic detach interface.")
       void detach_file(Context ctx, PhysicalRegion region);
       
-      PhysicalRegion attach_fortran_array(Context ctx,
-                                          LogicalRegion handle, LogicalRegion parent,
-                                          const std::map<FieldID,void*> &field_pointer_map,
-                                          int layout_flag);
+      PhysicalRegion attach_array_soa(Context ctx,
+                                      LogicalRegion handle, LogicalRegion parent,
+                                      const std::map<FieldID,void*> &field_pointer_map,
+                                      int c_f_layout_flag);
       
-      void detach_fortran_array(Context ctx, PhysicalRegion region);                                       
+      void detach_array(Context ctx, PhysicalRegion region);                                       
       
-      PhysicalRegion attach_c_array(Context ctx,
-                                    LogicalRegion handle, LogicalRegion parent,
-                                    const std::map<FieldID,void*> &field_pointer_map,
-                                    int layout_flag);
-      
-      void detach_c_array(Context ctx, PhysicalRegion region);
-      
-      PhysicalRegion attach_fortran_array_aos(Context ctx,
-                                              LogicalRegion handle,
-                                              LogicalRegion parent,
-                                              const void* array_ptr,
-                                              size_t stride, 
-                                              const std::map<FieldID, size_t> &field_offset);
+      PhysicalRegion attach_array_aos(Context ctx,
+                                      LogicalRegion handle,
+                                      LogicalRegion parent,
+                                      const void* array_ptr,
+                                      size_t stride, 
+                                      const std::map<FieldID, size_t> &field_offset, 
+                                      int c_f_layout_flag);
     public:
       //------------------------------------------------------------------------
       // Copy Operations

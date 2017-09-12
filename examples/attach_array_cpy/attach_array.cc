@@ -161,7 +161,7 @@ void top_level_task(const Task *task,
   std::map<FieldID,void*> field_pointer_map;
   field_pointer_map[FID_CP] = cp_ptr;
   printf("Checkpointing data to arrray fid %d, ptr %p, base %p\n", FID_CP, cp_ptr, base);  
-  cp_pr = runtime->attach_fortran_array(ctx, cp_lr, cp_lr, field_pointer_map, 0);         
+  cp_pr = runtime->attach_array_soa(ctx, cp_lr, cp_lr, field_pointer_map, 0);         
 
   //cp_pr.wait_until_valid();
   CopyLauncher copy_launcher;
@@ -175,7 +175,7 @@ void top_level_task(const Task *task,
   //clock_gettime(CLOCK_MONOTONIC, &ts_mid);
   ts_mid = Realm::Clock::current_time_in_microseconds();
 
-  runtime->detach_fortran_array(ctx, cp_pr);
+  runtime->detach_array(ctx, cp_pr);
 
   //clock_gettime(CLOCK_MONOTONIC, &ts_end);
   ts_end = Realm::Clock::current_time_in_microseconds();

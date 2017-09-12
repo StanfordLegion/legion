@@ -110,7 +110,7 @@ void top_level_task(const Task *task,
   offset[FID_VAL] = 0;
   offset[FID_DERIV] = sizeof(double);
   
-  PhysicalRegion stencil_pr = runtime->attach_fortran_array_aos(ctx, stencil_lr, stencil_lr, deriv_struct_ptr, sizeof(deriv_t), offset);
+  PhysicalRegion stencil_pr = runtime->attach_array_aos(ctx, stencil_lr, stencil_lr, deriv_struct_ptr, sizeof(deriv_t), offset, 0);
 
 /*  
   char *val_ptr = (char*)deriv_struct_ptr;

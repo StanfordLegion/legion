@@ -114,7 +114,7 @@ void top_level_task(const Task *task,
   field_pointer_map_deriv[FID_DERIV] = deriv_ptr;
   field_pointer_map_deriv[FID_VAL] = val_ptr;
   printf("Attach arrray fid %d, ptr %p\n", FID_DERIV, deriv_ptr);  
-  stencil_deriv_pr = runtime->attach_fortran_array(ctx, stencil_lr, stencil_lr, field_pointer_map_deriv, 0); 
+  stencil_deriv_pr = runtime->attach_array_soa(ctx, stencil_lr, stencil_lr, field_pointer_map_deriv, 0); 
   my_ptr = deriv_ptr;
        
   Rect<1> color_bounds(0,num_subregions-1);

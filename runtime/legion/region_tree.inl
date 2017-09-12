@@ -2782,6 +2782,10 @@ namespace Legion {
       get_realm_index_space(local_space, true/*tight*/);
       // No profiling for these kinds of instances currently
       Realm::ProfilingRequestSet requests;
+      int c_f_resource = 0;
+      if (resource == EXTERNAL_C_ARRAY) {
+        c_f_resource = 1;
+      }
       PhysicalInstance result;
       if (layout_flag == 0) {  // SOA
         LgEvent ready(PhysicalInstance::create_array_instance_SOA(result, 
@@ -2789,7 +2793,7 @@ namespace Legion {
                    field_ids,
 							     field_sizes,
 							     field_pointers,
-							     0,
+							     c_f_resource,
 							     requests));
         ready.lg_wait();
       } else {  // AOS
@@ -2798,7 +2802,8 @@ namespace Legion {
                    field_ids,
 							     field_sizes,
 							     field_pointers,
-							     0, aos_base_ptr, aos_stride,
+							     aos_base_ptr, aos_stride,
+                   c_f_resource,
 							     requests));
         ready.lg_wait();
       }
