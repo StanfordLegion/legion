@@ -1707,7 +1707,7 @@ class State(object):
         if destroy > self.last_time:
             self.last_time = destroy 
 
-    def log_partition_info(self, op_id, dep_op, create, ready, start, stop):
+    def log_partition_info(self, op_id, part_op, create, ready, start, stop):
         pass
 
     def log_user_info(self, proc_id, start, stop, name):
