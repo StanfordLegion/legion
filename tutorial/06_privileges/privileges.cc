@@ -33,11 +33,6 @@ enum FieldIDs {
   FID_Z,
 };
 
-typedef struct {
-    double z1;
-    double z2;
-}fidz_t;
-
 void top_level_task(const Task *task,
                     const std::vector<PhysicalRegion> &regions,
                     Context ctx, Runtime *runtime)
@@ -69,7 +64,7 @@ void top_level_task(const Task *task,
   {
     FieldAllocator allocator = 
       runtime->create_field_allocator(ctx, output_fs);
-    allocator.allocate_field(sizeof(fidz_t),FID_Z);
+    allocator.allocate_field(sizeof(double),FID_Z);
   }
   LogicalRegion input_lr = runtime->create_logical_region(ctx, is, input_fs);
   LogicalRegion output_lr = runtime->create_logical_region(ctx, is, output_fs);
@@ -215,7 +210,7 @@ void init_field_task(const Task *task,
   Rect<1> rect = runtime->get_index_space_domain(ctx, 
                   task->regions[0].region.get_index_space());
   for (PointInRectIterator<1> pir(rect); pir(); pir++)
-    acc[*pir] = 1.0;//drand48();
+    acc[*pir] = drand48();
 }
 
 void daxpy_task(const Task *task,

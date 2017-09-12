@@ -15,7 +15,7 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.1)
-project(LegionExample_attach_file)
+project(LegionExample_06_privileges)
 
 include(CheckCXXCompilerFlag)
 
@@ -32,11 +32,8 @@ if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_executable(attach_file attach_file.cc)
-target_link_libraries(attach_file Legion::Legion)
+add_executable(privileges privileges.cc)
+target_link_libraries(privileges Legion::Legion)
 if(Legion_ENABLE_TESTING)
-  add_test(NAME attach_file COMMAND $<TARGET_FILE:attach_file>) 
+  add_test(NAME privileges COMMAND $<TARGET_FILE:privileges>) 
 endif()
-
-
-
