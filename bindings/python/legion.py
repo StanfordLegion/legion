@@ -94,20 +94,30 @@ class Domain(object):
         return self.impl
 
 class Future(object):
-    __slots__ = ['handle']
-    def __init__(self, handle):
+    __slots__ = ['handle', 'value_type']
+    def __init__(self, handle, value_type=None):
         self.handle = c.legion_future_copy(handle)
+        self.value_type = value_type
 
     def __del__(self):
         c.legion_future_destroy(self.handle)
 
     def get(self):
-        value_ptr = c.legion_future_get_untyped_pointer(self.handle)
-        value_size = c.legion_future_get_untyped_size(self.handle)
-        assert value_size > 0
-        value_str = ffi.unpack(ffi.cast('char *',value_ptr), value_size)
-        value = cPickle.loads(value_str)
-        return value
+        if self.value_type is None:
+            value_ptr = c.legion_future_get_untyped_pointer(self.handle)
+            value_size = c.legion_future_get_untyped_size(self.handle)
+            assert value_size > 0
+            value_str = ffi.unpack(ffi.cast('char *', value_ptr), value_size)
+            value = cPickle.loads(value_str)
+            return value
+        else:
+            expected_size = ffi.sizeof(self.value_type)
+
+            value_ptr = c.legion_future_get_untyped_pointer(self.handle)
+            value_size = c.legion_future_get_untyped_size(self.handle)
+            assert value_size == expected_size
+            value = ffi.cast(ffi.getctype(self.value_type, '*'), value_ptr)[0]
+            return value
 
 class Type(object):
     __slots__ = ['numpy_type', 'size']
@@ -791,3 +801,25 @@ def execution_fence(block=False):
     c.legion_runtime_issue_execution_fence(_my.ctx.runtime, _my.ctx.context)
     if block:
         _dummy_task().get()
+
+class Tunable(object):
+    # FIXME: Deduplicate this with DefaultMapper::DefaultTunables
+    NODE_COUNT = 0
+    LOCAL_CPUS = 1
+    LOCAL_GPUS = 2
+    LOCAL_IOS = 3
+    LOCAL_OMPS = 4
+    LOCAL_PYS = 5
+    GLOBAL_CPUS = 6
+    GLOBAL_GPUS = 7
+    GLOBAL_IOS = 8
+    GLOBAL_OMPS = 9
+    GLOBAL_PYS = 10
+
+    @staticmethod
+    def select(tunable_id):
+        result = c.legion_runtime_select_tunable_value(
+            _my.ctx.runtime, _my.ctx.context, tunable_id, 0, 0)
+        future = Future(result, 'size_t')
+        c.legion_future_destroy(result)
+        return future
