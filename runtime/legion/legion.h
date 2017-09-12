@@ -2147,7 +2147,7 @@ namespace Legion {
      * It should never be copied and will assert fail if a copy is
      * made of it.
      */
-    class IndexIterator {
+    class LEGION_DEPRECATED("Use DomainPointIterator instead") IndexIterator {
     public:
       IndexIterator(const Domain &dom, ptr_t start = ptr_t());
       IndexIterator(Runtime *rt, Context ctx, 
@@ -2178,7 +2178,8 @@ namespace Legion {
     public:
       IndexIterator& operator=(const IndexIterator &rhs);
     private:
-      Domain::DomainPointIterator *iterator;
+      Realm::ZIndexSpaceIterator<1,coord_t> is_iterator;
+      Realm::ZPointInRectIterator<1,coord_t> rect_iterator;
     };
 
  

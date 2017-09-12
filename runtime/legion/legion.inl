@@ -3638,15 +3638,20 @@ namespace Legion {
     inline bool IndexIterator::has_next(void) const
     //--------------------------------------------------------------------------
     {
-      return *iterator;
+      return is_iterator.valid;
     }
     
     //--------------------------------------------------------------------------
     inline ptr_t IndexIterator::next(void)
     //--------------------------------------------------------------------------
     {
-      ptr_t result = iterator->p[0];
-      iterator->step();
+      if (!rect_iterator.valid)
+        rect_iterator = 
+          Realm::ZPointInRectIterator<1,coord_t>(is_iterator.rect);
+      const ptr_t result = rect_iterator.p[0];
+      rect_iterator.step();
+      if (!rect_iterator.valid)
+        is_iterator.step();
       return result;
     }
 
@@ -3654,18 +3659,58 @@ namespace Legion {
     inline ptr_t IndexIterator::next_span(size_t& act_count, size_t req_count)
     //--------------------------------------------------------------------------
     {
-      // This is slow for backwards compatability
-      ptr_t result = iterator->p[0];
+#ifdef PERFECT_REALM_COALESCING
+      if (rect_iterator.valid)
+      {
+        // If we have a rect iterator we just go to the end of the rectangle
+        const ptr_t result = rect_iterator.p[0];
+        const ptr_t last = is_iterator.rect.hi[0];
+        act_count = (last.value - result.value) + 1;
+        if (act_count <= req_count)
+        {
+          rect_iterator.valid = false;
+          is_iterator.step();
+        }
+        else
+          rect_iterator.p[0] = result.value + req_count;
+        return result;
+      }
+      else
+      {
+        // Consume the whole rectangle
+        const ptr_t result = is_iterator.rect.lo[0];
+        const ptr_t last = is_iterator.rect.hi[0];
+        act_count = (last.value - result.value) + 1;
+        if (act_count > req_count)
+        {
+          rect_iterator = 
+            Realm::ZPointInRectIterator<1,coord_t>(is_iterator.rect);
+          rect_iterator.p[0] = result.value + req_count;
+        }
+        else
+        {
+          rect_iterator.valid = false;
+          is_iterator.step();
+        }
+        return result;
+      }
+#else
+      const ptr_t result = next();
       act_count = 1;
-      iterator->step();
       while (has_next() && (act_count < req_count))
       {
-        if (size_t(iterator->p[0]) != (result.value + act_count))
+        if (!rect_iterator.valid)
+          rect_iterator = 
+            Realm::ZPointInRectIterator<1,coord_t>(is_iterator.rect);
+        if (size_t(rect_iterator.p[0]) != (result.value + act_count))
           break;
         act_count++;
-        iterator->step();
+        rect_iterator.step();
+        if (!rect_iterator.valid)
+          is_iterator.step();
       }
       return result;
+#endif
     }
 
     //--------------------------------------------------------------------------

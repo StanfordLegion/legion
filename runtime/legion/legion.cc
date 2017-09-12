@@ -2561,7 +2561,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(dom.get_dim() == 1);
 #endif
-      iterator = new Domain::DomainPointIterator(dom);
+      const Realm::ZIndexSpace<1,coord_t> is = dom;
+      is_iterator = Realm::ZIndexSpaceIterator<1,coord_t>(is);
     }
 
     //--------------------------------------------------------------------------
@@ -2573,7 +2574,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(dom.get_dim() == 1);
 #endif
-      iterator = new Domain::DomainPointIterator(dom);
+      const Realm::ZIndexSpace<1,coord_t> is = dom;
+      is_iterator = Realm::ZIndexSpaceIterator<1,coord_t>(is);
     }
 
     //--------------------------------------------------------------------------
@@ -2585,24 +2587,24 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(dom.get_dim() == 1);
 #endif
-      iterator = new Domain::DomainPointIterator(dom);
+      const Realm::ZIndexSpace<1,coord_t> is = dom;
+      is_iterator = Realm::ZIndexSpaceIterator<1,coord_t>(is);
     }
 
     //--------------------------------------------------------------------------
-    IndexIterator::IndexIterator(Runtime *rt,
-                                 IndexSpace space, ptr_t start)
+    IndexIterator::IndexIterator(Runtime *rt, IndexSpace space, ptr_t start)
     //--------------------------------------------------------------------------
     {
       Domain dom = rt->get_index_space_domain(space);
 #ifdef DEBUG_LEGION
       assert(dom.get_dim() == 1);
 #endif
-      iterator = new Domain::DomainPointIterator(dom);
+      const Realm::ZIndexSpace<1,coord_t> is = dom;
+      is_iterator = Realm::ZIndexSpaceIterator<1,coord_t>(is);
     }
 
     //--------------------------------------------------------------------------
     IndexIterator::IndexIterator(const IndexIterator &rhs)
-      : iterator(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2613,7 +2615,6 @@ namespace Legion {
     IndexIterator::~IndexIterator(void)
     //--------------------------------------------------------------------------
     {
-      delete iterator;
     }
 
     //--------------------------------------------------------------------------
