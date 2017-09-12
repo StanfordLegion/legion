@@ -52,16 +52,6 @@ local C = terralib.includecstring [[
 #include <string.h>
 ]]
 
-local terra assert(x : bool, message : rawstring)
-  if not x then
-    var stderr = C.fdopen(2, "w")
-    C.fprintf(stderr, "assertion failed: %s\n", message)
-    -- Just because it's stderr doesn't mean it's unbuffered...
-    C.fflush(stderr)
-    C.abort()
-  end
-end
-
 local struct CUctx_st
 local struct CUmod_st
 local struct CUlinkState_st
@@ -99,9 +89,10 @@ end
 
 do
   if has_symbol("cuInit") then
+    local r = DriverAPI.cuInit(0)
+    assert(r == 0)
     terra cudahelper.check_cuda_available()
-      var r = DriverAPI.cuInit(0)
-      return r == 0
+      return [r] == 0;
     end
   else
     terra cudahelper.check_cuda_available()
@@ -112,11 +103,21 @@ end
 
 -- copied and modified from cudalib.lua in Terra interpreter
 
+local c = terralib.includec("unistd.h")
+
+local terra assert(x : bool, message : rawstring)
+  if not x then
+    var stderr = C.fdopen(2, "w")
+    C.fprintf(stderr, "assertion failed: %s\n", message)
+    -- Just because it's stderr doesn't mean it's unbuffered...
+    C.fflush(stderr)
+    C.abort()
+  end
+end
+
 local terra init_cuda() : int32
-  var r = DriverAPI.cuInit(0)
-  assert(r == 0, "CUDA error in cuInit")
   var cx : &CUctx_st
-  r = DriverAPI.cuCtxGetCurrent(&cx)
+  var r = DriverAPI.cuCtxGetCurrent(&cx)
   assert(r == 0, "CUDA error in cuCtxGetCurrent")
   var d : int32
   if cx ~= nil then
