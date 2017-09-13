@@ -75,10 +75,6 @@ namespace Realm {
 						const ProfilingRequestSet &reqs,
 						Event wait_on /*= Event::NO_EVENT*/) const
   {
-    // no support for deferring yet
-    assert(wait_on.has_triggered());
-    //assert(reqs.empty());
-
     // record the start time of the potentially-inline operation if any
     //  profiling has been requested
     long long inline_start_time = reqs.empty() ? 0 : Clock::current_time_in_nanoseconds();
@@ -88,7 +84,7 @@ namespace Realm {
     if(empty() || (count == 1)) {
       subspace = *this;
       PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
-      return Event::NO_EVENT;
+      return wait_on;
     }
 
     // dense case is easy(er)
@@ -112,12 +108,12 @@ namespace Realm {
 	subspace = ZIndexSpace<N,T>::make_empty();
       }
       PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
-      return Event::NO_EVENT;
+      return wait_on;
     }
 
     // TODO: sparse case
     assert(0);
-    return Event::NO_EVENT;
+    return wait_on;
   }
 
   template <int N, typename T>
@@ -126,10 +122,6 @@ namespace Realm {
 						 const ProfilingRequestSet &reqs,
 						 Event wait_on /*= Event::NO_EVENT*/) const
   {
-    // no support for deferring yet
-    assert(wait_on.has_triggered());
-    //assert(reqs.empty());
-
     // output vector should start out empty
     assert(subspaces.empty());
 
@@ -153,12 +145,12 @@ namespace Realm {
 	px = nx;
       }
       PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
-      return Event::NO_EVENT;
+      return wait_on;
     }
 
     // TODO: sparse case
     assert(0);
-    return Event::NO_EVENT;
+    return wait_on;
   }
 
   template <int N, typename T>
@@ -168,10 +160,6 @@ namespace Realm {
 						    const ProfilingRequestSet &reqs,
 						    Event wait_on /*= Event::NO_EVENT*/) const
   {
-    // no support for deferring yet
-    assert(wait_on.has_triggered());
-    //assert(reqs.empty());
-
     // output vector should start out empty
     assert(subspaces.empty());
 
@@ -216,12 +204,12 @@ namespace Realm {
 	px = nx;
       }
       PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
-      return Event::NO_EVENT;
+      return wait_on;
     }
 
     // TODO: sparse case
     assert(0);
-    return Event::NO_EVENT;
+    return wait_on;
   }
 
   template <int N, typename T>
