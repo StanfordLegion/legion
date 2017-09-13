@@ -854,11 +854,18 @@ namespace Realm {
 	  if(!starts.empty()) {
 	    int new_argc = *argc + starts.size();
 	    char **new_argv = (char **)(malloc((new_argc + 1) * sizeof(char *)));
-	    // new args go after argv[0[]
-	    new_argv[0] = (*argv)[0];
+	    // new args go after argv[0] and anything that looks like a
+	    //  positional argument (i.e. doesn't start with -)
+	    int before_new = 0;
+	    while(before_new < *argc) {
+	      if((before_new > 0) && ((*argv)[before_new][0] == '-'))
+		break;
+	      new_argv[before_new] = (*argv)[before_new];
+	      before_new++;
+	    }
 	    for(size_t i = 0; i < starts.size(); i++)
-	      new_argv[i + 1] = strndup(starts[i], ends[i] - starts[i]);
-	    for(int i = 1; i < *argc; i++)
+	      new_argv[i + before_new] = strndup(starts[i], ends[i] - starts[i]);
+	    for(int i = before_new; i < *argc; i++)
 	      new_argv[i + starts.size()] = (*argv)[i];
 	    new_argv[new_argc] = 0;
 
