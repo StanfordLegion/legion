@@ -1745,8 +1745,8 @@ namespace Legion {
             if (actual_size != field_size)
               REPORT_LEGION_ERROR(ERROR_ACCESSOR_FIELD_SIZE_CHECK,
                             "Error creating accessor for field %d with a "
-                            "type of size %ld bytes when the field was "
-                            "originally allocated with a size of %ld bytes",
+                            "type of size %zd bytes when the field was "
+                            "originally allocated with a size of %zd bytes",
                             fid, field_size, actual_size)
           }
           return manager->get_instance();
