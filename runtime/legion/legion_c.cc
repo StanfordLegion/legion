@@ -4246,6 +4246,24 @@ legion_runtime_issue_execution_fence(legion_runtime_t runtime_,
 }
 
 // -----------------------------------------------------------------------
+// Tunable Variables
+// -----------------------------------------------------------------------
+
+legion_future_t
+legion_runtime_select_tunable_value(legion_runtime_t runtime_,
+				    legion_context_t ctx_,
+				    legion_tunable_id_t tid,
+				    legion_mapper_id_t mapper /* = 0 */,
+				    legion_mapping_tag_id_t tag /* = 0 */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+
+  Future f = runtime->select_tunable_value(ctx, tid, mapper, tag);
+  return CObjectWrapper::wrap(new Future(f));
+}
+
+// -----------------------------------------------------------------------
 // Miscellaneous Operations
 // -----------------------------------------------------------------------
 
