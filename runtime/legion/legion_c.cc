@@ -4906,17 +4906,7 @@ legion_runtime_start(int argc,
                      char **argv,
                      bool background /* = false */)
 {
-/*    int argc_tmp = 3;
-    char *argv1 = "/home/wwu/legion-up/tutorial-c/00_hello_world/./hello_world";
-    char *argv2 = "-ll:cpu";
-    char *argv3 = "7";
-    char **argv_tmp = (char**)malloc(sizeof(char*));
-    argv_tmp[0] = argv1;
-    argv_tmp[1] = argv2;
-    argv_tmp[2] = argv3;
-  return Runtime::start(argc_tmp, argv_tmp, background);
-    */
-    return Runtime::start(argc, argv, background);
+  return Runtime::start(argc, argv, background);
 }
 
 void
@@ -6263,7 +6253,6 @@ legion_mapper_runtime_find_physical_instance_layout_constraint_id(
   return ret;
 }
 
-<<<<<<< ee52a4e921fec38a9b540a0443422fceeb7905c7
 bool
 legion_mapper_runtime_acquire_instance(
     legion_mapper_runtime_t runtime_,
