@@ -83,7 +83,7 @@ def git_update(repo_dir):
 def build_gasnet(gasnet_dir, conduit):
     subprocess.check_call(['make', 'CONDUIT=%s' % conduit], cwd=gasnet_dir)
 
-def build_llvm(source_dir, build_dir, install_dir, use_cmake, cmake_exe, thread_count):
+def build_llvm(source_dir, build_dir, install_dir, use_cmake, cmake_exe, thread_count, is_cray):
     env = None
     if is_cray:
         env = dict(list(os.environ.items()) + [
@@ -173,6 +173,7 @@ def driver(llvm_version, skip_certificate_check):
         build_gasnet(gasnet_dir, conduit)
     assert os.path.exists(gasnet_release_dir)
 
+    cmake_exe = None
     if llvm_use_cmake:
         cmake_dir = os.path.realpath(os.path.join(root_dir, 'cmake'))
         cmake_install_dir = os.path.join(cmake_dir, 'cmake-3.7.2-Linux-x86_64')
@@ -211,7 +212,7 @@ def driver(llvm_version, skip_certificate_check):
         llvm_build_dir = os.path.join(llvm_dir, 'build')
         os.mkdir(llvm_build_dir)
         os.mkdir(llvm_install_dir)
-        build_llvm(llvm_source_dir, llvm_build_dir, llvm_install_dir, llvm_use_cmake, cmake_exe, thread_count)
+        build_llvm(llvm_source_dir, llvm_build_dir, llvm_install_dir, llvm_use_cmake, cmake_exe, thread_count, is_cray)
     assert os.path.exists(llvm_install_dir)
 
     terra_dir = os.path.join(root_dir, 'terra.build')
