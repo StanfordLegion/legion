@@ -794,6 +794,8 @@ namespace Realm {
       memory_stride = MEMORY_STRIDE;
       
       free_blocks[0] = size;
+      // tell new allocator about the available memory too
+      allocator.add_range(0, size);
     }
 
     GASNetMemory::~GASNetMemory(void)
