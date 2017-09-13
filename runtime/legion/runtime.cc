@@ -2901,7 +2901,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::multimap<Processor,MapperID> stealing_targets;
-      std::vector<MapperID> mappers_with_work;
+      std::vector<MapperID> mappers_with_stealable_work;
       std::vector<std::pair<MapperID,MapperManager*> > current_mappers;
       // Take a snapshot of our current mappers
       {
@@ -3012,8 +3012,18 @@ namespace Legion {
               vis_it++;
             }
           }
-          if (!rqueue.empty())
-            mappers_with_work.push_back(map_id);
+          if (!stealing_disabled)
+          {
+            for (std::list<TaskOp*>::const_iterator it =
+                  rqueue.begin(); it != rqueue.end(); it++)
+            {
+              if ((*it)->is_stealable())
+              {
+                mappers_with_stealable_work.push_back(map_id);
+                break;
+              }
+            }
+          }
         }
         // Now that we've removed them from the queue, issue the
         // mapping analysis calls
@@ -3037,13 +3047,12 @@ namespace Legion {
       }
 
       // Advertise any work that we have
-      if (!stealing_disabled && !mappers_with_work.empty())
+      if (!stealing_disabled && !mappers_with_stealable_work.empty())
       {
         for (std::vector<MapperID>::const_iterator it = 
-              mappers_with_work.begin(); it != mappers_with_work.end(); it++)
-        {
+              mappers_with_stealable_work.begin(); it !=
+              mappers_with_stealable_work.end(); it++)
           issue_advertisements(*it);
-        }
       }
 
       // Finally issue any steal requeusts
