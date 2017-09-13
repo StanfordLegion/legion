@@ -1597,12 +1597,13 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    PhysicalInstance PhysicalRegionImpl::get_instance_info(
-                                    PrivilegeMode mode, FieldID fid, 
-                                    void *realm_is, TypeTag type_tag, 
-                                    bool silence_warnings, 
-                                    bool generic_accessor,
-                                    ReductionOpID redop)
+    PhysicalInstance PhysicalRegionImpl::get_instance_info(PrivilegeMode mode, 
+                                              FieldID fid, size_t field_size, 
+                                              void *realm_is, TypeTag type_tag,
+                                              bool silence_warnings, 
+                                              bool generic_accessor,
+                                              bool check_field_size,
+                                              ReductionOpID redop)
     //--------------------------------------------------------------------------
     { 
       // Check the privilege mode first
@@ -1737,6 +1738,17 @@ namespace Legion {
         if (ref.is_field_set(fid))
         {
           PhysicalManager *manager = ref.get_manager();
+          if (check_field_size)
+          {
+            const size_t actual_size = 
+              manager->region_node->column_source->get_field_size(fid);
+            if (actual_size != field_size)
+              REPORT_LEGION_ERROR(ERROR_ACCESSOR_FIELD_SIZE_CHECK,
+                            "Error creating accessor for field %d with a "
+                            "type of size %ld bytes when the field was "
+                            "originally allocated with a size of %ld bytes",
+                            fid, field_size, actual_size)
+          }
           return manager->get_instance();
         }
       }

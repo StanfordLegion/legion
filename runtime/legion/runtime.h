@@ -391,10 +391,12 @@ namespace Legion {
 #endif
     public:
       void get_bounds(void *realm_is, TypeTag type_tag);
-      PhysicalInstance get_instance_info(PrivilegeMode mode, FieldID fid, 
+      PhysicalInstance get_instance_info(PrivilegeMode mode, 
+                                         FieldID fid, size_t field_size, 
                                          void *realm_is, TypeTag type_tag,
                                          bool silence_warnings, 
                                          bool generic_accessor,
+                                         bool check_field_size,
                                          ReductionOpID redop);
       void fail_bounds_check(DomainPoint p, FieldID fid,
                              PrivilegeMode mode);
