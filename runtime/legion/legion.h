@@ -2151,6 +2151,14 @@ namespace Legion {
      */
     class LEGION_DEPRECATED("Use DomainPointIterator instead") IndexIterator {
     public:
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
       IndexIterator(const Domain &dom, ptr_t start = ptr_t());
       IndexIterator(Runtime *rt, Context ctx, 
                     IndexSpace space, ptr_t start = ptr_t());
@@ -2182,6 +2190,12 @@ namespace Legion {
     private:
       Realm::ZIndexSpaceIterator<1,coord_t> is_iterator;
       Realm::ZPointInRectIterator<1,coord_t> rect_iterator;
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
     };
 
  

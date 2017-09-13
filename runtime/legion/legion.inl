@@ -3640,6 +3640,14 @@ namespace Legion {
       return result.bounds;
     }
 
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
     //--------------------------------------------------------------------------
     inline bool IndexIterator::has_next(void) const
     //--------------------------------------------------------------------------
@@ -3704,6 +3712,12 @@ namespace Legion {
         return result;
       }
     }
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
@@ -5333,8 +5347,22 @@ namespace LegionRuntime {
     typedef Legion::CopyLauncher CopyLauncher;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::PhysicalRegion PhysicalRegion;
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::IndexIterator IndexIterator;
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::AcquireLauncher AcquireLauncher;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")

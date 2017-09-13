@@ -2555,6 +2555,14 @@ namespace Legion {
     // Index Iterator  
     /////////////////////////////////////////////////////////////
 
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
     //--------------------------------------------------------------------------
     IndexIterator::IndexIterator(const Domain &dom, ptr_t start)
     //--------------------------------------------------------------------------
@@ -2626,6 +2634,12 @@ namespace Legion {
       assert(false);
       return *this;
     }
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 
     /////////////////////////////////////////////////////////////
     // Task Config Options 
