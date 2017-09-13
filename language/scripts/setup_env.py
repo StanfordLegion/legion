@@ -83,7 +83,7 @@ def git_update(repo_dir):
 def build_gasnet(gasnet_dir, conduit):
     subprocess.check_call(['make', 'CONDUIT=%s' % conduit], cwd=gasnet_dir)
 
-def build_llvm(source_dir, build_dir, install_dir, use_cmake, cmake_exe, thread_count):
+def build_llvm(source_dir, build_dir, install_dir, use_cmake, cmake_exe, thread_count, is_cray):
     env = None
     if is_cray:
         env = dict(list(os.environ.items()) + [
@@ -173,6 +173,7 @@ def driver(llvm_version, skip_certificate_check):
         build_gasnet(gasnet_dir, conduit)
     assert os.path.exists(gasnet_release_dir)
 
+    cmake_exe = None
     if llvm_use_cmake:
         cmake_dir = os.path.realpath(os.path.join(root_dir, 'cmake'))
         cmake_install_dir = os.path.join(cmake_dir, 'cmake-3.7.2-Linux-x86_64')
@@ -180,7 +181,7 @@ def driver(llvm_version, skip_certificate_check):
             os.mkdir(cmake_dir)
 
             cmake_tarball = os.path.join(cmake_dir, 'cmake-3.7.2-Linux-x86_64.tar.gz')
-            download(cmake_tarball, 'https://cmake.org/files/v3.7/cmake-3.7.2-Linux-x86_64.tar.gz', '915bc981aab354821fb9fd28374a720fdb3aa180', insecure=insecure)
+            download(cmake_tarball, 'https://cmake.org/files/v3.7/cmake-3.7.2-Linux-x86_64.tar.gz', '915bc981aab354821fb9fd28374a720fdb3aa180', insecure=True)
             extract(cmake_dir, cmake_tarball, 'gz')
         assert os.path.exists(cmake_install_dir)
         cmake_exe = os.path.join(cmake_install_dir, 'bin', 'cmake')
@@ -195,15 +196,15 @@ def driver(llvm_version, skip_certificate_check):
             llvm_source_dir = os.path.join(llvm_dir, 'llvm-3.8.1.src')
             clang_tarball = os.path.join(llvm_dir, 'cfe-3.8.1.src.tar.xz')
             clang_source_dir = os.path.join(llvm_dir, 'cfe-3.8.1.src')
-            download(llvm_tarball, 'http://llvm.org/releases/3.8.1/llvm-3.8.1.src.tar.xz', 'e0c48c4c182424b99999367d688cd8ce7876827b', insecure=insecure)
-            download(clang_tarball, 'http://llvm.org/releases/3.8.1/cfe-3.8.1.src.tar.xz', 'b5ff24dc6ad8f84654f4859389990bace1cfb6d5', insecure=insecure)
+            download(llvm_tarball, 'http://llvm.org/releases/3.8.1/llvm-3.8.1.src.tar.xz', 'e0c48c4c182424b99999367d688cd8ce7876827b', insecure=True)
+            download(clang_tarball, 'http://llvm.org/releases/3.8.1/cfe-3.8.1.src.tar.xz', 'b5ff24dc6ad8f84654f4859389990bace1cfb6d5', insecure=True)
         elif llvm_version == '39':
             llvm_tarball = os.path.join(llvm_dir, 'llvm-3.9.1.src.tar.xz')
             llvm_source_dir = os.path.join(llvm_dir, 'llvm-3.9.1.src')
             clang_tarball = os.path.join(llvm_dir, 'cfe-3.9.1.src.tar.xz')
             clang_source_dir = os.path.join(llvm_dir, 'cfe-3.9.1.src')
-            download(llvm_tarball, 'http://llvm.org/releases/3.9.1/llvm-3.9.1.src.tar.xz', 'ce801cf456b8dacd565ce8df8288b4d90e7317ff', insecure=insecure)
-            download(clang_tarball, 'http://llvm.org/releases/3.9.1/cfe-3.9.1.src.tar.xz', '95e4be54b70f32cf98a8de36821ea5495b84add8', insecure=insecure)
+            download(llvm_tarball, 'http://llvm.org/releases/3.9.1/llvm-3.9.1.src.tar.xz', 'ce801cf456b8dacd565ce8df8288b4d90e7317ff', insecure=True)
+            download(clang_tarball, 'http://llvm.org/releases/3.9.1/cfe-3.9.1.src.tar.xz', '95e4be54b70f32cf98a8de36821ea5495b84add8', insecure=True)
         extract(llvm_dir, llvm_tarball, 'xz')
         extract(llvm_dir, clang_tarball, 'xz')
         os.rename(clang_source_dir, os.path.join(llvm_source_dir, 'tools', 'clang'))
@@ -211,7 +212,7 @@ def driver(llvm_version, skip_certificate_check):
         llvm_build_dir = os.path.join(llvm_dir, 'build')
         os.mkdir(llvm_build_dir)
         os.mkdir(llvm_install_dir)
-        build_llvm(llvm_source_dir, llvm_build_dir, llvm_install_dir, llvm_use_cmake, cmake_exe, thread_count)
+        build_llvm(llvm_source_dir, llvm_build_dir, llvm_install_dir, llvm_use_cmake, cmake_exe, thread_count, is_cray)
     assert os.path.exists(llvm_install_dir)
 
     terra_dir = os.path.join(root_dir, 'terra.build')
