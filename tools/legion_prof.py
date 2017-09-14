@@ -55,6 +55,25 @@ memory_kinds = {
     11 : 'L1 Cache',
 }
 
+# Make sure this is up to date with legion_types.h
+dep_part_kinds = {
+    0 : 'Union',
+    1 : 'Unions',
+    2 : 'Union Reduction',
+    3 : 'Intersection',
+    4 : 'Intersections',
+    5 : 'Intersection Reduction',
+    6 : 'Difference',
+    7 : 'Differences',
+    8 : 'Equal Partition',
+    9 : 'Partition By Field',
+    10 : 'Partition by Image',
+    11 : 'Partition By Image Range',
+    12 : 'Partition by Preimage',
+    13 : 'Partition by Preimage Range',
+    14 : 'Create Association',
+}
+
 # Micro-seconds per pixel
 US_PER_PIXEL = 100
 # Pixels per level of the picture
@@ -561,10 +580,12 @@ class Channel(object):
         self.last_time = None
 
     def get_short_text(self):
-        if self.src is None:
+        if self.dst is not None:
+            return "Mem to Mem Channel"
+        elif self.src is not None:
             return "Fill Channel"
         else:
-            return "Mem to Mem Channel"
+            return "Dependent Partition Channel"
 
     def add_copy(self, copy):
         copy.chan = self
@@ -651,7 +672,16 @@ class Channel(object):
             return self.src.__repr__() + ' to ' + self.dst.__repr__() + ' Channel'
 
     def __cmp__(a, b):
-        return cmp(a.dst, b.dst)
+        if a.dst:
+            if b.dst:
+                return cmp(a.dst, b.dst)
+            else:
+                return 1
+        else:
+            if b.dst:
+                return -1
+            else:
+                return 0
 
 class WaitInterval(object):
     def __init__(self, start, ready, end):
@@ -1220,6 +1250,47 @@ class Fill(Base, TimeRange, HasInitiationDependencies):
                                 prof_uid = self.prof_uid)
         tsv_file.write(tsv_line)
 
+class DepPart(Base, TimeRange, HasInitiationDependencies):
+    def __init__(self, part_op, initiation_op, create, ready, start, stop):
+        Base.__init__(self)
+        HasInitiationDependencies.__init__(self, initiation_op)
+        TimeRange.__init__(self, create, ready, start, stop)
+        self.part_op = part_op
+        self.chan = None
+
+    def __repr__(self):
+        assert self.part_op in dep_part_kinds
+        return dep_part_kinds[self.part_op]
+
+    def get_owner(self):
+        return self.chan
+
+    def get_unique_tuple(self):
+        assert self.chan is not None
+        cur_level = self.chan.max_live_copies+1 - self.level
+        return (str(self.chan), self.prof_uid)
+        
+    def emit_tsv(self, tsv_file, base_level, max_levels, level):
+        deppart_name = repr(self)
+        _in = json.dumps(self.deps["in"]) if len(self.deps["in"]) > 0 else ""
+        out = json.dumps(self.deps["out"]) if len(self.deps["out"]) > 0 else ""
+        children = json.dumps(list(self.deps["children"])) if len(self.deps["children"]) > 0 else ""
+        parents = json.dumps(list(self.deps["parents"])) if len(self.deps["parents"]) > 0 else ""
+
+        tsv_line = data_tsv_str(level = base_level + (max_levels - level),
+                                start = self.start,
+                                end = self.stop,
+                                color = self.get_color(),
+                                opacity = "1.0",
+                                title = deppart_name,
+                                initiation = self.initiation,
+                                _in = _in,
+                                out = out,
+                                children = children,
+                                parents = parents,
+                                prof_uid = self.prof_uid)
+        tsv_file.write(tsv_line)
+
 class Instance(Base, TimeRange, HasInitiationDependencies):
     def __init__(self, inst_id, initiation_op):
         Base.__init__(self)
@@ -1708,7 +1779,12 @@ class State(object):
             self.last_time = destroy 
 
     def log_partition_info(self, op_id, part_op, create, ready, start, stop):
-        pass
+        op = self.find_op(op_id)
+        deppart = self.create_deppart(part_op, op, create, ready, start, stop)
+        if stop > self.last_time:
+            self.last_time = stop
+        channel = self.find_channel(None, None)
+        channel.add_copy(deppart)
 
     def log_user_info(self, proc_id, start, stop, name):
         proc = self.find_processor(proc_id)
@@ -1865,11 +1941,16 @@ class State(object):
             if key not in self.channels:
                 self.channels[key] = Channel(src,dst)
             return self.channels[key]
-        else:
+        elif dst is not None:
             # This is a fill channel
             if dst not in self.channels:
                 self.channels[dst] = Channel(None,dst)
             return self.channels[dst]
+        else:
+            # This is the dependent partitioning channel
+            if None not in self.channels:
+                self.channels[None] = Channel(None,None)
+            return self.channels[None]
 
     def find_variant(self, variant_id):
         if variant_id not in self.variants:
@@ -1924,6 +2005,12 @@ class State(object):
         # update prof_uid map
         self.prof_uid_map[fill.prof_uid] = fill
         return fill
+
+    def create_deppart(self, part_op, op, create, ready, start, stop):
+        deppart = DepPart(part_op, op, create, ready, start, stop)
+        # update the prof_uid map
+        self.prof_uid_map[deppart.prof_uid] = deppart
+        return deppart
 
     def create_instance(self, inst_id, op):
         # neither instance id nor op id are unique on their own
