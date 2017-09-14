@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University
+/* Copyright 2017 Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,11 +37,6 @@ enum FieldIDs {
   FID_B,
 };
 
-typedef struct {
-    double z1;
-    double z2;
-}fidz_t;
-
 typedef struct{
     double x;
     double y;
@@ -62,7 +57,7 @@ void top_level_task(const Task *task,
         num_elements = atoi(command_args.argv[++i]);
     }
   }
-  printf("Running daxpy for %d elements...\n", num_elements);
+  printf("Running attach array for %d 2D array dimension...\n", num_elements);
 
   // Create our logical regions using the same schema that
   // we used in the previous example.
@@ -139,7 +134,7 @@ void top_level_task(const Task *task,
   // sub-task only accesses the 'X' field of input_lr.  This property of
   // Legion is crucial for the implementation of Legion's hierarchical
   // scheduling algorithm which is described in detail in our two papers.
-  TaskLauncher read_launcher(READ_FIELD_TASK_ID, TaskArgument(NULL, 0));
+  TaskLauncher read_launcher(READ_FIELD_TASK_ID, TaskArgument(&num_elements, sizeof(num_elements)));
   read_launcher.add_region_requirement(
       RegionRequirement(input_lr, READ_ONLY, EXCLUSIVE, input_lr));
   read_launcher.add_field(0/*idx*/, FID_X);
@@ -208,23 +203,21 @@ void read_field_task(const Task *task,
   // This is a field polymorphic function so figure out
   // which field we are responsible for initializing.
   FieldID fid = *(task->regions[0].privilege_fields.begin());
+  const int num_elements = *((const int*)task->args);
+  int i = 0;
   
-  // Note that Legion's default mapper always map regions
-  // and the Legion runtime is smart enough not to start
-  // the task until all the regions contain valid data.  
-  // Therefore in this case we don't need to call 'wait_until_valid'
-  // on our physical regions and we know that getting this
-  // accessor will never block the task's execution.  If
-  // however we chose to unmap this physical region and then
-  // remap it then we would need to call 'wait_until_valid'
-  // again to ensure that we were accessing valid data.
   const AccessorRO<double,2> acc(regions[0], fid);
 
   Rect<2> rect = runtime->get_index_space_domain(ctx, 
                   task->regions[0].region.get_index_space());
   printf("READ field %d, addr %p\n", fid, acc.ptr(rect.lo));
   for (PointInRectIterator<2> pir(rect); pir(); pir++) {
-    printf("%.1f ", acc[*pir]);
+    printf("%.1f\t", acc[*pir]);
+    i ++;
+    if (i == num_elements) {
+      printf("\n");
+      i = 0;
+    }
   }
   printf("\n");
 }

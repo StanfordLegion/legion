@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University, NVIDIA Corporation
+/* Copyright 2017 Stanford University, NVIDIA Corporation, Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,7 +13,6 @@
  * limitations under the License.
  */
 
-// HDF5-specific instance layouts and accessors
 #include "inst_impl.h"
 #include "runtime_impl.h"
 #include "mem_impl.h"
@@ -79,8 +78,6 @@ namespace Realm {
     }
         
     Event e = create_instance(inst, memory, layout, reqs, wait_on);
-    RegionInstanceImpl *inst_impl = get_runtime()->get_instance_impl(inst);
-    printf("inst offset %lu\n", inst_impl->metadata.inst_offset);
     return e;
   }
 
@@ -154,8 +151,6 @@ namespace Realm {
     }
         
     Event e = create_instance(inst, memory, layout, reqs, wait_on);
-    RegionInstanceImpl *inst_impl = get_runtime()->get_instance_impl(inst);
-    printf("inst offset %lu\n", inst_impl->metadata.inst_offset);
     return e;
   }
 

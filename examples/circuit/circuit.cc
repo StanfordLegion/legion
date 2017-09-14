@@ -366,3 +366,4 @@ void allocate_locator_fields(Context ctx, Runtime *runtime, FieldSpace locator_s
   allocator.allocate_field(sizeof(PointerLocation), FID_LOCATOR);
   runtime->attach_name(locator_space, FID_LOCATOR, "locator");
 }
+

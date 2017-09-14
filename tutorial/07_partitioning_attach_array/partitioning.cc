@@ -1,4 +1,4 @@
-/* Copyright 2017 Stanford University
+/* Copyright 2017 Stanford University, Los Alamos National Laboratory
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -63,6 +63,7 @@ void top_level_task(const Task *task,
 {
   int num_elements = 1024; 
   int num_subregions = 4;
+  int soa_flag = 0;
   // See if we have any command line arguments to parse
   // Note we now have a new command line parameter which specifies
   // how many subregions we should make.
@@ -74,6 +75,8 @@ void top_level_task(const Task *task,
         num_elements = atoi(command_args.argv[++i]);
       if (!strcmp(command_args.argv[i],"-b"))
         num_subregions = atoi(command_args.argv[++i]);
+      if (!strcmp(command_args.argv[i],"-s"))
+        soa_flag = atoi(command_args.argv[++i]);
     }
   }
   printf("Running daxpy for %d elements...\n", num_elements);
@@ -105,20 +108,48 @@ void top_level_task(const Task *task,
   runtime->attach_name(input_lr, "input_lr");
   LogicalRegion output_lr = runtime->create_logical_region(ctx, is, output_fs);
   runtime->attach_name(output_lr, "output_lr");
-
-  daxpy_t *array_ptr = (daxpy_t*)malloc(sizeof(daxpy_t)*(num_elements));
-
   
-  std::map<FieldID, size_t> offset_input;
-  offset_input[FID_X] = 0;
-  offset_input[FID_Y] = sizeof(double);
+  PhysicalRegion xy_pr, z_pr;
+  double *x_ptr = NULL;
+  double *y_ptr = NULL;
+  double *z_ptr = NULL;
+  double *xyz_ptr = NULL;
 
-  PhysicalRegion pr_input = runtime->attach_array_aos(ctx, input_lr, input_lr, array_ptr, sizeof(daxpy_t), offset_input, 0);
+  if (soa_flag == 0) { // SOA
+    double *y_ptr = (double*)malloc(sizeof(double)*(num_elements));
+    double *x_ptr = (double*)malloc(sizeof(double)*(num_elements));
+    double *z_ptr = (double*)malloc(sizeof(double)*(num_elements));
+    for (int j = 0; j < num_elements; j++ ) {
+        x_ptr[j] = drand48();
+        y_ptr[j] = drand48();
+        z_ptr[j] = drand48();
+    }
+    std::map<FieldID,void*> field_pointer_map_xy;
+    field_pointer_map_xy[FID_X] = x_ptr;
+    field_pointer_map_xy[FID_Y] = y_ptr;
+    printf("Attach SOA array fid %d, ptr %p, fid %d, ptr %p\n", FID_X, x_ptr, FID_Y, y_ptr);  
+    xy_pr = runtime->attach_array_soa(ctx, input_lr, input_lr, field_pointer_map_xy, 0); 
   
-  std::map<FieldID, size_t> offset_output;
-  offset_output[FID_Z] = 2*sizeof(double);
+    std::map<FieldID,void*> field_pointer_map_z;
+    field_pointer_map_z[FID_Z] = z_ptr;
+    printf("Attach SOA array fid %d, ptr %p\n", FID_Z, z_ptr);
+    z_pr = runtime->attach_array_soa(ctx, output_lr, output_lr, field_pointer_map_z, 0);
+    
+  } else { // AOS
+    daxpy_t *xyz_ptr = (daxpy_t*)malloc(sizeof(daxpy_t)*(num_elements));
   
-  PhysicalRegion pr_output = runtime->attach_array_aos(ctx, output_lr, output_lr, array_ptr, sizeof(daxpy_t), offset_output, 0);
+    std::map<FieldID, size_t> offset_input;
+    offset_input[FID_X] = 0;
+    offset_input[FID_Y] = sizeof(double);
+
+    xy_pr = runtime->attach_array_aos(ctx, input_lr, input_lr, xyz_ptr, sizeof(daxpy_t), offset_input, 0);
+  
+    std::map<FieldID, size_t> offset_output;
+    offset_output[FID_Z] = 2*sizeof(double);
+  
+    z_pr = runtime->attach_array_aos(ctx, output_lr, output_lr, xyz_ptr, sizeof(daxpy_t), offset_output, 0);
+    printf("Attach AOS array ptr %p\n", xyz_ptr);  
+    }
   
   // In addition to using rectangles and domains for launching index spaces
   // of tasks (see example 02), Legion also uses them for performing 
@@ -224,7 +255,7 @@ void top_level_task(const Task *task,
   fmi1.wait_all_results();
   fmi0.wait_all_results();
   double end_init = get_cur_time();
-  printf("Attach AOS, init done, time %f\n", end_init - start_init);
+  printf("Attach array, init done, time %f\n", end_init - start_init);
 
   const double alpha = drand48();
   double start_t = get_cur_time();
@@ -246,7 +277,7 @@ void top_level_task(const Task *task,
   FutureMap fm = runtime->execute_index_space(ctx, daxpy_launcher);
   fm.wait_all_results();
   double end_t = get_cur_time();
-  printf("Attach AOS, daxpy done, time %f\n", end_t - start_t);
+  printf("Attach array, daxpy done, time %f\n", end_t - start_t);
                     
   // While we could also issue parallel subtasks for the checking
   // task, we only issue a single task launch to illustrate an
@@ -267,14 +298,17 @@ void top_level_task(const Task *task,
   Future fu = runtime->execute_task(ctx, check_launcher);
   fu.wait();
 
-  runtime->detach_array(ctx, pr_output);
-  runtime->detach_array(ctx, pr_input);
+  runtime->detach_array(ctx, xy_pr);
+  runtime->detach_array(ctx, z_pr);
   runtime->destroy_logical_region(ctx, input_lr);
   runtime->destroy_logical_region(ctx, output_lr);
   runtime->destroy_field_space(ctx, input_fs);
   runtime->destroy_field_space(ctx, output_fs);
   runtime->destroy_index_space(ctx, is);
-  free(array_ptr);
+  if (xyz_ptr == NULL) free(xyz_ptr);
+  if (x_ptr == NULL) free(x_ptr);
+  if (y_ptr == NULL) free(y_ptr);
+  if (z_ptr == NULL) free(z_ptr);
 }
 
 void init_field_task(const Task *task,
