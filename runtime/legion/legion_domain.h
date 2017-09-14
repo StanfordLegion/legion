@@ -172,7 +172,7 @@ namespace Legion {
 
       coord_t get_index(void) const
       {
-	assert(dim == 0);
+	assert(dim == 1);
 	return point_data[0];
       }
 
