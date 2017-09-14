@@ -87,7 +87,21 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_accessor_array_1d_t, ArrayAccessor1D *);
       NEW_OPAQUE_WRAPPER(legion_accessor_array_2d_t, ArrayAccessor2D *);
       NEW_OPAQUE_WRAPPER(legion_accessor_array_3d_t, ArrayAccessor3D *);
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
       NEW_OPAQUE_WRAPPER(legion_index_iterator_t, IndexIterator *);
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
       NEW_OPAQUE_WRAPPER(legion_task_t, Task *);
       NEW_OPAQUE_WRAPPER(legion_inline_t, InlineMapping *);
       NEW_OPAQUE_WRAPPER(legion_mappable_t, Mappable *);
