@@ -57,7 +57,7 @@ INC_FLAGS += -I$(TERRA_DIR)/release/include/terra -I$(TERRA_DIR)/include/terra
 endif
 LD_FLAGS ?=
 
-CC_FLAGS += -fPIC -DASSUME_UNALLOCABLE
+CC_FLAGS += -fPIC
 ifeq ($(shell uname), Darwin)
 	LD_FLAGS += -dynamiclib -single_module -undefined dynamic_lookup -fPIC
 else
