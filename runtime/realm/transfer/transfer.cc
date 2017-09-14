@@ -1168,7 +1168,10 @@ namespace Realm {
 	act_strides[d] = 0;
       }
       for(int d = 0; d < N; d++) {
+	// the stride for a degenerate dimensions does not matter - don't cause
+	//   a "break" if it mismatches
 	if((cur_dim < max_dims) &&
+	   (cur_point[d] < iter.rect.hi[d]) &&
 	   ((ssize_t)affine->strides[d] != (act_counts[cur_dim] * act_strides[cur_dim]))) {
 	  cur_dim++;
 	  if(cur_dim < max_dims)
