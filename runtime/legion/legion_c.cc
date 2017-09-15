@@ -35,12 +35,12 @@
 using namespace Legion;
 using namespace Legion::Mapping;
 using namespace Legion::Mapping::Utilities;
-typedef Realm::ZPoint<1,coord_t> Point1D;
-typedef Realm::ZPoint<2,coord_t> Point2D;
-typedef Realm::ZPoint<3,coord_t> Point3D;
-typedef Realm::ZRect<1,coord_t> Rect1D;
-typedef Realm::ZRect<2,coord_t> Rect2D;
-typedef Realm::ZRect<3,coord_t> Rect3D;
+typedef Point<1,coord_t> Point1D;
+typedef Point<2,coord_t> Point2D;
+typedef Point<3,coord_t> Point3D;
+typedef Rect<1,coord_t> Rect1D;
+typedef Rect<2,coord_t> Rect2D;
+typedef Rect<3,coord_t> Rect3D;
 
 // -----------------------------------------------------------------------
 // Pointer Operations
@@ -152,7 +152,7 @@ legion_rect_1d_t
 legion_domain_get_bounds_1d(legion_domain_t d_)
 {
   Domain d = CObjectWrapper::unwrap(d_);
-  Realm::ZIndexSpace<1,coord_t> space = d;
+  DomainT<1,coord_t> space = d;
 
   return CObjectWrapper::wrap(space.bounds);
 }
@@ -161,7 +161,7 @@ legion_rect_2d_t
 legion_domain_get_bounds_2d(legion_domain_t d_)
 {
   Domain d = CObjectWrapper::unwrap(d_);
-  Realm::ZIndexSpace<2,coord_t> space = d;
+  DomainT<2,coord_t> space = d;
 
   return CObjectWrapper::wrap(space.bounds);
 }
@@ -170,7 +170,7 @@ legion_rect_3d_t
 legion_domain_get_bounds_3d(legion_domain_t d_)
 {
   Domain d = CObjectWrapper::unwrap(d_);
-  Realm::ZIndexSpace<3,coord_t> space = d;
+  DomainT<3,coord_t> space = d;
 
   return CObjectWrapper::wrap(space.bounds);
 }

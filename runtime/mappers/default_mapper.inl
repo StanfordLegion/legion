@@ -19,34 +19,34 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM>
     /*static*/ void DefaultMapper::default_decompose_points(
-                           const Realm::ZIndexSpace<DIM,coord_t> &point_space,
+                           const DomainT<DIM,coord_t> &point_space,
                            const std::vector<Processor> &targets,
-                           const Realm::ZPoint<DIM,coord_t> &num_blocks,
+                           const Point<DIM,coord_t> &num_blocks,
                            bool recurse, bool stealable,
                            std::vector<TaskSlice> &slices)
     //--------------------------------------------------------------------------
     {
-      Realm::ZPoint<DIM,coord_t> zeroes;
+      Point<DIM,coord_t> zeroes;
       for (int i = 0; i < DIM; i++)
         zeroes[i] = 0;
-      Realm::ZPoint<DIM,coord_t> ones;
+      Point<DIM,coord_t> ones;
       for (int i = 0; i < DIM; i++)
         ones[i] = 1;
-      Realm::ZPoint<DIM,coord_t> num_points = 
+      Point<DIM,coord_t> num_points = 
         point_space.bounds.hi - point_space.bounds.lo + ones;
-      Realm::ZRect<DIM> blocks(zeroes, num_blocks - ones);
+      Rect<DIM,coord_t> blocks(zeroes, num_blocks - ones);
       size_t next_index = 0;
       slices.reserve(blocks.volume());
       for (PointInRectIterator<DIM> pir(blocks); pir(); pir++) {
-        Realm::ZPoint<DIM,coord_t> block_lo = *pir;
-        Realm::ZPoint<DIM,coord_t> block_hi = *pir + ones;
-        Realm::ZPoint<DIM,coord_t> slice_lo =
+        Point<DIM,coord_t> block_lo = *pir;
+        Point<DIM,coord_t> block_hi = *pir + ones;
+        Point<DIM,coord_t> slice_lo =
           num_points * block_lo / num_blocks + point_space.bounds.lo;
-        Realm::ZPoint<DIM,coord_t> slice_hi = 
+        Point<DIM,coord_t> slice_hi = 
           num_points * block_hi / num_blocks + point_space.bounds.lo - ones;
         // Construct a new slice space based on the new bounds 
         // and any existing sparsity map, tighten if necessary
-        Realm::ZIndexSpace<DIM,coord_t> slice_space;
+        DomainT<DIM,coord_t> slice_space;
         slice_space.bounds.lo = slice_lo;
         slice_space.bounds.hi = slice_hi;
         slice_space.sparsity = point_space.sparsity;
@@ -74,10 +74,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const Domain dom_rect = Domain::from_rect<DIM>(rect);
-      const Realm::ZIndexSpace<DIM,coord_t> point_space = dom_rect;
+      const DomainT<DIM,coord_t> point_space = dom_rect;
 
       const DomainPoint dom_point = DomainPoint::from_point<DIM>(blocks);
-      const Realm::ZPoint<DIM,coord_t> num_blocks = dom_point;
+      const Point<DIM,coord_t> num_blocks = dom_point;
 
       default_decompose_points(point_space, targets, num_blocks, 
                                recurse, stealable, slices);
@@ -85,15 +85,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM>
-    /*static*/ Realm::ZPoint<DIM,coord_t> 
-                DefaultMapper::default_select_num_blocks( 
-                             long long int factor, 
-                             const Realm::ZRect<DIM,coord_t> &to_factor)
+    /*static*/ Point<DIM,coord_t> DefaultMapper::default_select_num_blocks( 
+                                             long long int factor, 
+                                             const Rect<DIM,coord_t> &to_factor)
     //--------------------------------------------------------------------------
     {
       if (factor == 1)
       {
-        Realm::ZPoint<DIM,coord_t> ones;
+        Point<DIM,coord_t> ones;
         for (int i = 0; i < DIM; i++)
           ones[i] = 1;
         return ones;
@@ -152,7 +151,7 @@ namespace Legion {
         result[next_dim] *= next_prime;
         dim_chunks[next_dim] /= next_prime;
       }
-      return Realm::ZPoint<DIM,coord_t>(result);
+      return Point<DIM,coord_t>(result);
     }
 
     //--------------------------------------------------------------------------

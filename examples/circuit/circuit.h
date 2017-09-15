@@ -82,14 +82,20 @@ enum LocatorFields {
   FID_LOCATOR,
 };
 
-template<typename FT, int N = 1, typename T = coord_t>
-using AccessorRO = FieldAccessor<READ_ONLY,FT,N,T,Realm::AffineAccessor<FT,N,T> >;
-template<typename FT, int N = 1, typename T = coord_t>
-using AccessorRW = FieldAccessor<READ_WRITE,FT,N,T,Realm::AffineAccessor<FT,N,T> >;
-template<typename FT, int N = 1, typename T = coord_t>
-using AccessorWO = FieldAccessor<WRITE_ONLY,FT,N,T,Realm::AffineAccessor<FT,N,T> >;
-template<typename FT, int N = 1, typename T = coord_t>
-using AccessorRD = FieldAccessor<REDUCE,FT,N,T,Realm::AffineAccessor<FT,N,T> >;
+typedef FieldAccessor<READ_ONLY,float,1,coord_t,Realm::AffineAccessor<float,1,coord_t> > AccessorROfloat;
+typedef FieldAccessor<READ_WRITE,float,1,coord_t,Realm::AffineAccessor<float,1,coord_t> > AccessorRWfloat;
+typedef FieldAccessor<WRITE_ONLY,float,1,coord_t,Realm::AffineAccessor<float,1,coord_t> > AccessorWOfloat;
+typedef FieldAccessor<REDUCE,float,1,coord_t,Realm::AffineAccessor<float,1,coord_t> > AccessorRDfloat;
+
+typedef FieldAccessor<READ_ONLY,Point<1>,1,coord_t,Realm::AffineAccessor<Point<1>,1,coord_t> > AccessorROpoint;
+typedef FieldAccessor<READ_WRITE,Point<1>,1,coord_t,Realm::AffineAccessor<Point<1>,1,coord_t> > AccessorRWpoint;
+typedef FieldAccessor<WRITE_ONLY,Point<1>,1,coord_t,Realm::AffineAccessor<Point<1>,1,coord_t> > AccessorWOpoint;
+typedef FieldAccessor<REDUCE,Point<1>,1,coord_t,Realm::AffineAccessor<Point<1>,1,coord_t> > AccessorRDpoint;
+
+typedef FieldAccessor<READ_ONLY,PointerLocation,1,coord_t,Realm::AffineAccessor<PointerLocation,1,coord_t> > AccessorROloc;
+typedef FieldAccessor<READ_WRITE,PointerLocation,1,coord_t,Realm::AffineAccessor<PointerLocation,1,coord_t> > AccessorRWloc;
+typedef FieldAccessor<WRITE_ONLY,PointerLocation,1,coord_t,Realm::AffineAccessor<PointerLocation,1,coord_t> > AccessorWOloc;
+typedef FieldAccessor<REDUCE,PointerLocation,1,coord_t,Realm::AffineAccessor<PointerLocation,1,coord_t> > AccessorRDloc;
 
 struct Circuit {
   LogicalRegion all_nodes;

@@ -74,7 +74,7 @@ extern Logger log_app;
 		 << ", fid1=" << task->regions[0].instance_fields[0] << "(" << fname1 << ")"
 		 << ", proc=" << runtime->get_executing_processor(ctx);
 
-  const AccessorRO<double,3> fa1(regions[0], task->regions[0].instance_fields[0]);
+  const AccessorROdouble fa1(regions[0], task->regions[0].instance_fields[0]);
 
   log_app.info() << "&fid1[" << args.bounds.lo << "] = " << (void *)(&fa1[args.bounds.lo]) << "\n";
 
@@ -182,8 +182,8 @@ extern Logger log_app;
 		 << ", fid2=" << task->regions[1].instance_fields[0]
 		 << ", proc=" << runtime->get_executing_processor(ctx);
 
-  const AccessorRO<double,3> fa1(regions[0], task->regions[0].instance_fields[0]);
-  const AccessorRO<double,3> fa2(regions[1], task->regions[1].instance_fields[0]);
+  const AccessorROdouble fa1(regions[0], task->regions[0].instance_fields[0]);
+  const AccessorROdouble fa2(regions[1], task->regions[1].instance_fields[0]);
   double sum = 0.0;
   
   for(PointInRectIterator<3> pir(args.bounds); pir(); ++pir)
@@ -265,9 +265,9 @@ extern Logger log_app;
 		 << ", fid2=" << task->regions[2].instance_fields[0]
 		 << ", proc=" << runtime->get_executing_processor(ctx);
 
-  const AccessorWD<double,3> fa_sum(regions[0], task->regions[0].instance_fields[0]);
-  const AccessorRO<double,3> fa1(regions[1], task->regions[1].instance_fields[0]);
-  const AccessorRO<double,3> fa2(regions[2], task->regions[2].instance_fields[0]);
+  const AccessorWDdouble fa_sum(regions[0], task->regions[0].instance_fields[0]);
+  const AccessorROdouble fa1(regions[1], task->regions[1].instance_fields[0]);
+  const AccessorROdouble fa2(regions[2], task->regions[2].instance_fields[0]);
 
   for(PointInRectIterator<3> pir(args.bounds); pir(); ++pir)
     fa_sum[*pir] = args.alpha1 * fa1[*pir] + args.alpha2 * fa2[*pir];
@@ -349,8 +349,8 @@ extern Logger log_app;
 		 << ", in=" << task->regions[1].instance_fields[0] << "(" << fname2 << ")"
 		 << ", proc=" << runtime->get_executing_processor(ctx);
 
-  const AccessorRW<double,3> fa_acc(regions[0], task->regions[0].instance_fields[0]);
-  const AccessorRO<double,3> fa_in(regions[1], task->regions[1].instance_fields[0]);
+  const AccessorRWdouble fa_acc(regions[0], task->regions[0].instance_fields[0]);
+  const AccessorROdouble fa_in(regions[1], task->regions[1].instance_fields[0]);
 
   log_app.info() << "&acc[" << args.bounds.lo << "] = " << (void *)(&fa_acc[args.bounds.lo]) << "\n";
 

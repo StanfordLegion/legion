@@ -298,7 +298,7 @@ namespace Legion {
                 int M, bool READ_ONLY>
       class GenericSyntaxHelper {
       public:
-        GenericSyntaxHelper(const A &acc, const Realm::ZPoint<M-1,T> &p)
+        GenericSyntaxHelper(const A &acc, const Point<M-1,T> &p)
           : accessor(acc)
         {
           for (int i = 0; i < (M-1); i++)
@@ -312,13 +312,13 @@ namespace Legion {
         }
       public:
         const A &accessor;
-        Realm::ZPoint<M,T> point;
+        Point<M,T> point;
       };
       // Specialization for M = N
       template<typename A, typename FT, int N, typename T, bool RO>
       class GenericSyntaxHelper<A,FT,N,T,N,RO> {
       public:
-        GenericSyntaxHelper(const A &acc, const Realm::ZPoint<N-1,T> &p)
+        GenericSyntaxHelper(const A &acc, const Point<N-1,T> &p)
           : accessor(acc)
         {
           for (int i = 0; i < (N-1); i++)
@@ -332,13 +332,13 @@ namespace Legion {
         }
       public:
         const A &accessor;
-        Realm::ZPoint<N,T> point;
+        Point<N,T> point;
       };
       // Further specialization for M = N and read-only
       template<typename A, typename FT, int N, typename T>
       class GenericSyntaxHelper<A,FT,N,T,N,true> {
       public:
-        GenericSyntaxHelper(const A &acc, const Realm::ZPoint<N-1,T> &p)
+        GenericSyntaxHelper(const A &acc, const Point<N-1,T> &p)
           : accessor(acc)
         {
           for (int i = 0; i < (N-1); i++)
@@ -352,7 +352,7 @@ namespace Legion {
         }
       public:
         const A &accessor;
-        Realm::ZPoint<N,T> point;
+        Point<N,T> point;
       };
 
       // A small helper class that helps provide some syntactic sugar for
@@ -362,7 +362,7 @@ namespace Legion {
       class AffineSyntaxHelper {
       public:
         __CUDA_HD__
-        AffineSyntaxHelper(const A &acc, const Realm::ZPoint<M-1,T> &p)
+        AffineSyntaxHelper(const A &acc, const Point<M-1,T> &p)
           : accessor(acc)
         {
           for (int i = 0; i < (M-1); i++)
@@ -377,14 +377,14 @@ namespace Legion {
         }
       public:
         const A &accessor;
-        Realm::ZPoint<M,T> point;
+        Point<M,T> point;
       };
       // Specialization for M = N
       template<typename A, typename FT, int N, typename T, bool RO>
       class AffineSyntaxHelper<A,FT,N,T,N,RO> {
       public:
         __CUDA_HD__
-        AffineSyntaxHelper(const A &acc, const Realm::ZPoint<N-1,T> &p)
+        AffineSyntaxHelper(const A &acc, const Point<N-1,T> &p)
           : accessor(acc)
         {
           for (int i = 0; i < (N-1); i++)
@@ -399,14 +399,14 @@ namespace Legion {
         }
       public:
         const A &accessor;
-        Realm::ZPoint<N,T> point;
+        Point<N,T> point;
       };
       // Further specialization for M = N and read-only
       template<typename A, typename FT, int N, typename T>
       class AffineSyntaxHelper<A,FT,N,T,N,true> {
       public:
         __CUDA_HD__
-        AffineSyntaxHelper(const A &acc, const Realm::ZPoint<N-1,T> &p)
+        AffineSyntaxHelper(const A &acc, const Point<N-1,T> &p)
           : accessor(acc)
         {
           for (int i = 0; i < (N-1); i++)
@@ -421,7 +421,7 @@ namespace Legion {
         }
       public:
         const A &accessor;
-        Realm::ZPoint<N,T> point;
+        Point<N,T> point;
       };
     };
 
@@ -438,7 +438,7 @@ namespace Legion {
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
       {
-        Realm::ZIndexSpace<N,T> is;
+        DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
@@ -446,12 +446,12 @@ namespace Legion {
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
     public:
-      inline FT read(const Realm::ZPoint<N,T>& p) const 
+      inline FT read(const Point<N,T>& p) const 
         { 
           return accessor.read(p); 
         }
       inline const Realm::AccessorRefHelper<FT> 
-          operator[](const Realm::ZPoint<N,T>& p) const
+          operator[](const Point<N,T>& p) const
         { 
           return accessor[p]; 
         }
@@ -461,7 +461,7 @@ namespace Legion {
       {
         return ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_ONLY,FT,N,T,
                Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,true/*read only*/>(
-              *this, Realm::ZPoint<1,T>(index));
+              *this, Point<1,T>(index));
       }
     public:
       mutable Realm::GenericAccessor<FT,N,T> accessor;
@@ -479,7 +479,7 @@ namespace Legion {
         : field(fid), field_region(region), 
           bounds(region.template get_bounds<N,T>())
       {
-        Realm::ZIndexSpace<N,T> is;
+        DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
@@ -487,14 +487,14 @@ namespace Legion {
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
     public:
-      inline FT read(const Realm::ZPoint<N,T>& p) const 
+      inline FT read(const Point<N,T>& p) const 
         { 
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
           return accessor.read(p); 
         }
       inline const Realm::AccessorRefHelper<FT> 
-          operator[](const Realm::ZPoint<N,T>& p) const
+          operator[](const Point<N,T>& p) const
         { 
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
@@ -506,13 +506,13 @@ namespace Legion {
       {
         return ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_ONLY,FT,N,T,
               Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,true/*read only*/>(
-              *this, Realm::ZPoint<1,T>(index));
+              *this, Point<1,T>(index));
       }
     public:
       mutable Realm::GenericAccessor<FT,N,T> accessor;
       FieldID field;
       PhysicalRegion field_region;
-      Realm::ZIndexSpace<N,T> bounds;
+      DomainT<N,T> bounds;
     };
 
     // Read-only FieldAccessor specialization 
@@ -525,7 +525,7 @@ namespace Legion {
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
       {
-        Realm::ZIndexSpace<1,T> is;
+        DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), 
@@ -533,12 +533,12 @@ namespace Legion {
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
     public:
-      inline FT read(const Realm::ZPoint<1,T>& p) const 
+      inline FT read(const Point<1,T>& p) const 
         { 
           return accessor.read(p); 
         }
       inline const Realm::AccessorRefHelper<FT>
-          operator[](const Realm::ZPoint<1,T>& p) const
+          operator[](const Point<1,T>& p) const
         { 
           return accessor[p]; 
         }
@@ -559,7 +559,7 @@ namespace Legion {
         : field(fid), field_region(region), 
           bounds(region.template get_bounds<1,T>()) 
       {
-        Realm::ZIndexSpace<1,T> is;
+        DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), 
@@ -567,14 +567,14 @@ namespace Legion {
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
     public:
-      inline FT read(const Realm::ZPoint<1,T>& p) const 
+      inline FT read(const Point<1,T>& p) const 
         { 
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
           return accessor.read(p); 
         }
       inline const Realm::AccessorRefHelper<FT> 
-          operator[](const Realm::ZPoint<1,T>& p) const
+          operator[](const Point<1,T>& p) const
         { 
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
@@ -584,7 +584,7 @@ namespace Legion {
       mutable Realm::GenericAccessor<FT,1,T> accessor;
       FieldID field;
       PhysicalRegion field_region;
-      Realm::ZIndexSpace<1,T> bounds;
+      DomainT<1,T> bounds;
     };
 
     // Read-write FieldAccessor specialization
@@ -596,7 +596,7 @@ namespace Legion {
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
       {
-        Realm::ZIndexSpace<N,T> is;
+        DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
@@ -604,16 +604,16 @@ namespace Legion {
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
     public:
-      inline FT read(const Realm::ZPoint<N,T>& p) const
+      inline FT read(const Point<N,T>& p) const
         { 
           return accessor.read(p); 
         }
-      inline void write(const Realm::ZPoint<N,T>& p, FT val) const
+      inline void write(const Point<N,T>& p, FT val) const
         { 
           accessor.write(p, val); 
         }
       inline Realm::AccessorRefHelper<FT> 
-          operator[](const Realm::ZPoint<N,T>& p) const
+          operator[](const Point<N,T>& p) const
         { 
           return accessor[p]; 
         }
@@ -623,7 +623,7 @@ namespace Legion {
       {
         return ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_WRITE,FT,N,T,
               Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,false/*read only*/>(
-              *this, Realm::ZPoint<1,T>(index));
+              *this, Point<1,T>(index));
       }
       // No reductions since we can't handle atomicity correctly
     public:
@@ -642,7 +642,7 @@ namespace Legion {
         : field(fid), field_region(region), 
           bounds(region.template get_bounds<N,T>())
       {
-        Realm::ZIndexSpace<N,T> is;
+        DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
@@ -650,20 +650,20 @@ namespace Legion {
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
     public:
-      inline FT read(const Realm::ZPoint<N,T>& p) const
+      inline FT read(const Point<N,T>& p) const
         { 
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
           return accessor.read(p); 
         }
-      inline void write(const Realm::ZPoint<N,T>& p, FT val) const
+      inline void write(const Point<N,T>& p, FT val) const
         { 
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field,WRITE_DISCARD);
           accessor.write(p, val); 
         }
       inline Realm::AccessorRefHelper<FT> 
-          operator[](const Realm::ZPoint<N,T>& p) const
+          operator[](const Point<N,T>& p) const
         { 
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
@@ -675,14 +675,14 @@ namespace Legion {
       {
         return ArraySyntax::GenericSyntaxHelper<FieldAccessor<READ_WRITE,FT,N,T,
               Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,false/*read only*/>(
-              *this, Realm::ZPoint<1,T>(index));
+              *this, Point<1,T>(index));
       }
       // No reductions since we can't handle atomicity correctly
     public:
       mutable Realm::GenericAccessor<FT,N,T> accessor;
       FieldID field;
       PhysicalRegion field_region;
-      Realm::ZIndexSpace<N,T> bounds;
+      DomainT<N,T> bounds;
     };
 
     // Read-write FieldAccessor specialization 
@@ -695,7 +695,7 @@ namespace Legion {
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
       {
-        Realm::ZIndexSpace<1,T> is;
+        DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), 
@@ -703,16 +703,16 @@ namespace Legion {
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
     public:
-      inline FT read(const Realm::ZPoint<1,T>& p) const
+      inline FT read(const Point<1,T>& p) const
         { 
           return accessor.read(p); 
         }
-      inline void write(const Realm::ZPoint<1,T>& p, FT val) const
+      inline void write(const Point<1,T>& p, FT val) const
         { 
           accessor.write(p, val); 
         }
       inline Realm::AccessorRefHelper<FT> 
-          operator[](const Realm::ZPoint<1,T>& p) const
+          operator[](const Point<1,T>& p) const
         { 
           return accessor[p]; 
         }
@@ -733,7 +733,7 @@ namespace Legion {
         : field(fid), field_region(region), 
           bounds(region.template get_bounds<1,T>())
       {
-        Realm::ZIndexSpace<1,T> is;
+        DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), 
@@ -741,20 +741,20 @@ namespace Legion {
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
     public:
-      inline FT read(const Realm::ZPoint<1,T>& p) const
+      inline FT read(const Point<1,T>& p) const
         { 
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
           return accessor.read(p); 
         }
-      inline void write(const Realm::ZPoint<1,T>& p, FT val) const
+      inline void write(const Point<1,T>& p, FT val) const
         { 
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field,WRITE_DISCARD);
           accessor.write(p, val); 
         }
       inline Realm::AccessorRefHelper<FT> 
-          operator[](const Realm::ZPoint<1,T>& p) const
+          operator[](const Point<1,T>& p) const
         { 
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
@@ -765,7 +765,7 @@ namespace Legion {
       mutable Realm::GenericAccessor<FT,1,T> accessor;
       FieldID field;
       PhysicalRegion field_region;
-      Realm::ZIndexSpace<1,T> bounds;
+      DomainT<1,T> bounds;
     };
 
     // Write-discard FieldAccessor specialization
@@ -777,7 +777,7 @@ namespace Legion {
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
       {
-        Realm::ZIndexSpace<N,T> is;
+        DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
@@ -785,16 +785,16 @@ namespace Legion {
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
     public:
-      inline FT read(const Realm::ZPoint<N,T>& p) const
+      inline FT read(const Point<N,T>& p) const
         { 
           return accessor.read(p); 
         }
-      inline void write(const Realm::ZPoint<N,T>& p, FT val) const
+      inline void write(const Point<N,T>& p, FT val) const
         { 
           accessor.write(p, val); 
         }
       inline Realm::AccessorRefHelper<FT> 
-          operator[](const Realm::ZPoint<N,T>& p) const
+          operator[](const Point<N,T>& p) const
         { 
           return accessor[p]; 
         }
@@ -804,7 +804,7 @@ namespace Legion {
       {
         return ArraySyntax::GenericSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,
           N,T,Realm::GenericAccessor<FT,N,T>,CB>,FT,N,T,2,false/*read only*/>(
-              *this, Realm::ZPoint<1,T>(index));
+              *this, Point<1,T>(index));
       }
     public:
       mutable Realm::GenericAccessor<FT,N,T> accessor;
@@ -823,7 +823,7 @@ namespace Legion {
         : field(fid), field_region(region), 
           bounds(region.template get_bounds<N,T>())
       {
-        Realm::ZIndexSpace<N,T> is;
+        DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
@@ -831,20 +831,20 @@ namespace Legion {
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
     public:
-      inline FT read(const Realm::ZPoint<N,T>& p) const
+      inline FT read(const Point<N,T>& p) const
         { 
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
           return accessor.read(p); 
         }
-      inline void write(const Realm::ZPoint<N,T>& p, FT val) const
+      inline void write(const Point<N,T>& p, FT val) const
         { 
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field,WRITE_DISCARD);
           accessor.write(p, val); 
         }
       inline Realm::AccessorRefHelper<FT> 
-          operator[](const Realm::ZPoint<N,T>& p) const
+          operator[](const Point<N,T>& p) const
         { 
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
@@ -856,13 +856,13 @@ namespace Legion {
       {
         return ArraySyntax::GenericSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,
          N,T,Realm::GenericAccessor<FT,N,T>,true>,FT,N,T,2,false/*read only*/>(
-              *this, Realm::ZPoint<1,T>(index));
+              *this, Point<1,T>(index));
       }
     public:
       mutable Realm::GenericAccessor<FT,N,T> accessor;
       FieldID field;
       PhysicalRegion field_region;
-      Realm::ZIndexSpace<N,T> bounds;
+      DomainT<N,T> bounds;
     };
 
     // Write-discard FieldAccessor specialization with
@@ -875,7 +875,7 @@ namespace Legion {
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
       {
-        Realm::ZIndexSpace<1,T> is;
+        DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), 
@@ -883,16 +883,16 @@ namespace Legion {
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
     public:
-      inline FT read(const Realm::ZPoint<1,T>& p) const
+      inline FT read(const Point<1,T>& p) const
         { 
           return accessor.read(p); 
         }
-      inline void write(const Realm::ZPoint<1,T>& p, FT val) const
+      inline void write(const Point<1,T>& p, FT val) const
         { 
           accessor.write(p, val); 
         }
       inline Realm::AccessorRefHelper<FT> 
-          operator[](const Realm::ZPoint<1,T>& p) const
+          operator[](const Point<1,T>& p) const
         { 
           return accessor[p]; 
         }
@@ -912,7 +912,7 @@ namespace Legion {
         : field(fid), field_region(region), 
           bounds(region.template get_bounds<1,T>())
       {
-        Realm::ZIndexSpace<1,T> is;
+        DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), 
@@ -920,20 +920,20 @@ namespace Legion {
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
     public:
-      inline FT read(const Realm::ZPoint<1,T>& p) const
+      inline FT read(const Point<1,T>& p) const
         { 
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field, READ_ONLY);
           return accessor.read(p); 
         }
-      inline void write(const Realm::ZPoint<1,T>& p, FT val) const
+      inline void write(const Point<1,T>& p, FT val) const
         { 
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field,WRITE_DISCARD);
           accessor.write(p, val); 
         }
       inline Realm::AccessorRefHelper<FT> 
-          operator[](const Realm::ZPoint<1,T>& p) const
+          operator[](const Point<1,T>& p) const
         { 
           if (!bounds.contains(p)) 
             field_region.fail_bounds_check(DomainPoint(p), field, READ_WRITE);
@@ -943,7 +943,7 @@ namespace Legion {
       mutable Realm::GenericAccessor<FT,1,T> accessor;
       FieldID field;
       PhysicalRegion field_region;
-      Realm::ZIndexSpace<1,T> bounds;
+      DomainT<1,T> bounds;
     };
 
     ////////////////////////////////////////////////////////////
@@ -960,7 +960,7 @@ namespace Legion {
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
       {
-        Realm::ZIndexSpace<N,T> is;
+        DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
@@ -968,17 +968,17 @@ namespace Legion {
       }
     public:
       __CUDA_HD__
-      inline FT read(const Realm::ZPoint<N,T>& p) const 
+      inline FT read(const Point<N,T>& p) const 
         { 
           return accessor.read(p); 
         }
       __CUDA_HD__
-      inline const FT* ptr(const Realm::ZPoint<N,T>& p) const
+      inline const FT* ptr(const Point<N,T>& p) const
         { 
           return accessor.ptr(p); 
         }
       __CUDA_HD__
-      inline const FT& operator[](const Realm::ZPoint<N,T>& p) const
+      inline const FT& operator[](const Point<N,T>& p) const
         { 
           return accessor[p]; 
         }
@@ -989,7 +989,7 @@ namespace Legion {
       {
         return ArraySyntax::AffineSyntaxHelper<FieldAccessor<READ_ONLY,FT,N,T,
                Realm::AffineAccessor<FT,N,T>,CB>,FT,N,T,2,true/*read only*/>(
-              *this, Realm::ZPoint<1,T>(index));
+              *this, Point<1,T>(index));
       }
     public:
       Realm::AffineAccessor<FT,N,T> accessor;
@@ -1009,7 +1009,7 @@ namespace Legion {
           bounds(region.template get_bounds<N,T>()),
           gpu_warning(!silence_warnings)
       {
-        Realm::ZIndexSpace<N,T> is;
+        DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
@@ -1017,7 +1017,7 @@ namespace Legion {
       }
     public:
       __CUDA_HD__
-      inline FT read(const Realm::ZPoint<N,T>& p) const 
+      inline FT read(const Point<N,T>& p) const 
         { 
 #ifdef __CUDA_ARCH__
           if (gpu_warning)
@@ -1034,7 +1034,7 @@ namespace Legion {
           return accessor.read(p); 
         }
       __CUDA_HD__
-      inline const FT* ptr(const Realm::ZPoint<N,T>& p) const
+      inline const FT* ptr(const Point<N,T>& p) const
         { 
 #ifdef __CUDA_ARCH__
           if (gpu_warning)
@@ -1051,7 +1051,7 @@ namespace Legion {
           return accessor.ptr(p); 
         }
       __CUDA_HD__
-      inline const FT& operator[](const Realm::ZPoint<N,T>& p) const
+      inline const FT& operator[](const Point<N,T>& p) const
         { 
 #ifdef __CUDA_ARCH__
           if (gpu_warning)
@@ -1074,13 +1074,13 @@ namespace Legion {
       {
         return ArraySyntax::AffineSyntaxHelper<FieldAccessor<READ_ONLY,FT,N,T,
               Realm::AffineAccessor<FT,N,T>,true>,FT,N,T,2,true/*read only*/>(
-              *this, Realm::ZPoint<1,T>(index));
+              *this, Point<1,T>(index));
       }
     public:
       Realm::AffineAccessor<FT,N,T> accessor;
       FieldID field;
       PhysicalRegion field_region;
-      Realm::ZIndexSpace<N,T> bounds;
+      DomainT<N,T> bounds;
       mutable bool gpu_warning;
     };
 
@@ -1095,7 +1095,7 @@ namespace Legion {
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
       {
-        Realm::ZIndexSpace<1,T> is;
+        DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
@@ -1103,17 +1103,17 @@ namespace Legion {
       }
     public:
       __CUDA_HD__
-      inline FT read(const Realm::ZPoint<1,T>& p) const 
+      inline FT read(const Point<1,T>& p) const 
         { 
           return accessor.read(p); 
         }
       __CUDA_HD__
-      inline const FT* ptr(const Realm::ZPoint<1,T>& p) const
+      inline const FT* ptr(const Point<1,T>& p) const
         { 
           return accessor.ptr(p); 
         }
       __CUDA_HD__
-      inline const FT& operator[](const Realm::ZPoint<1,T>& p) const
+      inline const FT& operator[](const Point<1,T>& p) const
         { 
           return accessor[p]; 
         }
@@ -1135,7 +1135,7 @@ namespace Legion {
           bounds(region.template get_bounds<1,T>()), 
           gpu_warning(!silence_warnings)
       {
-        Realm::ZIndexSpace<1,T> is;
+        DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
@@ -1143,7 +1143,7 @@ namespace Legion {
       }
     public:
       __CUDA_HD__
-      inline FT read(const Realm::ZPoint<1,T>& p) const 
+      inline FT read(const Point<1,T>& p) const 
         { 
 #ifdef __CUDA_ARCH__
           if (gpu_warning)
@@ -1160,7 +1160,7 @@ namespace Legion {
           return accessor.read(p); 
         }
       __CUDA_HD__
-      inline const FT* ptr(const Realm::ZPoint<1,T>& p) const
+      inline const FT* ptr(const Point<1,T>& p) const
         { 
 #ifdef __CUDA_ARCH__
           if (gpu_warning)
@@ -1177,7 +1177,7 @@ namespace Legion {
           return accessor.ptr(p); 
         }
       __CUDA_HD__
-      inline const FT& operator[](const Realm::ZPoint<1,T>& p) const
+      inline const FT& operator[](const Point<1,T>& p) const
         { 
 #ifdef __CUDA_ARCH__
           if (gpu_warning)
@@ -1197,7 +1197,7 @@ namespace Legion {
       Realm::AffineAccessor<FT,1,T> accessor;
       FieldID field;
       PhysicalRegion field_region;
-      Realm::ZIndexSpace<1,T> bounds;
+      DomainT<1,T> bounds;
       mutable bool gpu_warning;
     };
 
@@ -1211,7 +1211,7 @@ namespace Legion {
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
       {
-        Realm::ZIndexSpace<N,T> is;
+        DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
@@ -1219,22 +1219,22 @@ namespace Legion {
       }
     public:
       __CUDA_HD__
-      inline FT read(const Realm::ZPoint<N,T>& p) const
+      inline FT read(const Point<N,T>& p) const
         { 
           return accessor.read(p); 
         }
       __CUDA_HD__
-      inline void write(const Realm::ZPoint<N,T>& p, FT val) const
+      inline void write(const Point<N,T>& p, FT val) const
         { 
           accessor.write(p, val); 
         }
       __CUDA_HD__
-      inline FT* ptr(const Realm::ZPoint<N,T>& p) const
+      inline FT* ptr(const Point<N,T>& p) const
         { 
           return accessor.ptr(p); 
         }
       __CUDA_HD__
-      inline FT& operator[](const Realm::ZPoint<N,T>& p) const
+      inline FT& operator[](const Point<N,T>& p) const
         { 
           return accessor[p]; 
         }
@@ -1245,10 +1245,10 @@ namespace Legion {
       {
         return ArraySyntax::AffineSyntaxHelper<FieldAccessor<READ_WRITE,FT,N,T,
               Realm::AffineAccessor<FT,N,T>,CB>,FT,N,T,2,false/*read only*/>(
-              *this, Realm::ZPoint<1,T>(index));
+              *this, Point<1,T>(index));
       }
       template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
-      inline void reduce(const Realm::ZPoint<N,T>& p, 
+      inline void reduce(const Point<N,T>& p, 
                          typename REDOP::RHS val) const
         { 
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
@@ -1271,7 +1271,7 @@ namespace Legion {
           bounds(region.template get_bounds<N,T>()),
           gpu_warning(!silence_warnings)
       {
-        Realm::ZIndexSpace<N,T> is;
+        DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
@@ -1279,7 +1279,7 @@ namespace Legion {
       }
     public:
       __CUDA_HD__
-      inline FT read(const Realm::ZPoint<N,T>& p) const
+      inline FT read(const Point<N,T>& p) const
         { 
 #ifdef __CUDA_ARCH__
           if (gpu_warning)
@@ -1296,7 +1296,7 @@ namespace Legion {
           return accessor.read(p); 
         }
       __CUDA_HD__
-      inline void write(const Realm::ZPoint<N,T>& p, FT val) const
+      inline void write(const Point<N,T>& p, FT val) const
         { 
 #ifdef __CUDA_ARCH__
           if (gpu_warning)
@@ -1313,7 +1313,7 @@ namespace Legion {
           accessor.write(p, val); 
         }
       __CUDA_HD__
-      inline FT* ptr(const Realm::ZPoint<N,T>& p) const
+      inline FT* ptr(const Point<N,T>& p) const
         { 
 #ifdef __CUDA_ARCH__
           if (gpu_warning)
@@ -1330,7 +1330,7 @@ namespace Legion {
           return accessor.ptr(p); 
         }
       __CUDA_HD__
-      inline FT& operator[](const Realm::ZPoint<N,T>& p) const
+      inline FT& operator[](const Point<N,T>& p) const
         { 
 #ifdef __CUDA_ARCH__
           if (gpu_warning)
@@ -1353,10 +1353,10 @@ namespace Legion {
       {
         return ArraySyntax::AffineSyntaxHelper<FieldAccessor<READ_WRITE,FT,N,T,
                Realm::AffineAccessor<FT,N,T>,true>,FT,N,T,2,false/*read only*/>(
-              *this, Realm::ZPoint<1,T>(index));
+              *this, Point<1,T>(index));
       }
       template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__ 
-      inline void reduce(const Realm::ZPoint<N,T>& p, 
+      inline void reduce(const Point<N,T>& p, 
                          typename REDOP::RHS val) const
         { 
 #ifdef __CUDA_ARCH__
@@ -1377,7 +1377,7 @@ namespace Legion {
       Realm::AffineAccessor<FT,N,T> accessor;
       FieldID field;
       PhysicalRegion field_region;
-      Realm::ZIndexSpace<N,T> bounds;
+      DomainT<N,T> bounds;
       mutable bool gpu_warning;
     };
 
@@ -1392,7 +1392,7 @@ namespace Legion {
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
       {
-        Realm::ZIndexSpace<1,T> is;
+        DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
@@ -1400,27 +1400,27 @@ namespace Legion {
       }
     public:
       __CUDA_HD__
-      inline FT read(const Realm::ZPoint<1,T>& p) const
+      inline FT read(const Point<1,T>& p) const
         { 
           return accessor.read(p); 
         }
       __CUDA_HD__
-      inline void write(const Realm::ZPoint<1,T>& p, FT val) const
+      inline void write(const Point<1,T>& p, FT val) const
         { 
           accessor.write(p, val); 
         }
       __CUDA_HD__
-      inline FT* ptr(const Realm::ZPoint<1,T>& p) const
+      inline FT* ptr(const Point<1,T>& p) const
         { 
           return accessor.ptr(p); 
         }
       __CUDA_HD__
-      inline FT& operator[](const Realm::ZPoint<1,T>& p) const
+      inline FT& operator[](const Point<1,T>& p) const
         { 
           return accessor[p]; 
         }
       template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
-      inline void reduce(const Realm::ZPoint<1,T>& p, 
+      inline void reduce(const Point<1,T>& p, 
                          typename REDOP::RHS val) const
         { 
           REDOP::template apply<EXCLUSIVE>(accessor[p], val);
@@ -1443,7 +1443,7 @@ namespace Legion {
           bounds(region.template get_bounds<1,T>()),
           gpu_warning(!silence_warnings)
       {
-        Realm::ZIndexSpace<1,T> is;
+        DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
@@ -1451,7 +1451,7 @@ namespace Legion {
       }
     public:
       __CUDA_HD__
-      inline FT read(const Realm::ZPoint<1,T>& p) const
+      inline FT read(const Point<1,T>& p) const
         { 
 #ifdef __CUDA_ARCH__
           if (gpu_warning)
@@ -1468,7 +1468,7 @@ namespace Legion {
           return accessor.read(p); 
         }
       __CUDA_HD__
-      inline void write(const Realm::ZPoint<1,T>& p, FT val) const
+      inline void write(const Point<1,T>& p, FT val) const
         { 
 #ifdef __CUDA_ARCH__
           if (gpu_warning)
@@ -1485,7 +1485,7 @@ namespace Legion {
           accessor.write(p, val); 
         }
       __CUDA_HD__
-      inline FT* ptr(const Realm::ZPoint<1,T>& p) const
+      inline FT* ptr(const Point<1,T>& p) const
         { 
 #ifdef __CUDA_ARCH__
           if (gpu_warning)
@@ -1502,7 +1502,7 @@ namespace Legion {
           return accessor.ptr(p); 
         }
       __CUDA_HD__
-      inline FT& operator[](const Realm::ZPoint<1,T>& p) const
+      inline FT& operator[](const Point<1,T>& p) const
         { 
 #ifdef __CUDA_ARCH__
           if (gpu_warning)
@@ -1519,7 +1519,7 @@ namespace Legion {
           return accessor[p]; 
         }
       template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
-      inline void reduce(const Realm::ZPoint<1,T>& p, 
+      inline void reduce(const Point<1,T>& p, 
                          typename REDOP::RHS val) const
         { 
 #ifdef __CUDA_ARCH__
@@ -1540,7 +1540,7 @@ namespace Legion {
       Realm::AffineAccessor<FT,1,T> accessor;
       FieldID field;
       PhysicalRegion field_region;
-      Realm::ZIndexSpace<1,T> bounds;
+      DomainT<1,T> bounds;
       mutable bool gpu_warning;
     };
 
@@ -1554,7 +1554,7 @@ namespace Legion {
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
       {
-        Realm::ZIndexSpace<N,T> is;
+        DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
@@ -1562,22 +1562,22 @@ namespace Legion {
       }
     public:
       __CUDA_HD__
-      inline FT read(const Realm::ZPoint<N,T>& p) const
+      inline FT read(const Point<N,T>& p) const
         { 
           return accessor.read(p); 
         }
       __CUDA_HD__
-      inline void write(const Realm::ZPoint<N,T>& p, FT val) const
+      inline void write(const Point<N,T>& p, FT val) const
         { 
           accessor.write(p, val); 
         }
       __CUDA_HD__
-      inline FT* ptr(const Realm::ZPoint<N,T>& p) const
+      inline FT* ptr(const Point<N,T>& p) const
         { 
           return accessor.ptr(p); 
         }
       __CUDA_HD__
-      inline FT& operator[](const Realm::ZPoint<N,T>& p) const
+      inline FT& operator[](const Point<N,T>& p) const
         { 
           return accessor[p]; 
         }
@@ -1588,7 +1588,7 @@ namespace Legion {
       {
         return ArraySyntax::AffineSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,N,
           T,Realm::AffineAccessor<FT,N,T>,CB>,FT,N,T,2,false/*read only*/>(
-              *this, Realm::ZPoint<1,T>(index));
+              *this, Point<1,T>(index));
       }
     public:
       Realm::AffineAccessor<FT,N,T> accessor;
@@ -1608,7 +1608,7 @@ namespace Legion {
           bounds(region.template get_bounds<N,T>()),
           gpu_warning(!silence_warnings)
       {
-        Realm::ZIndexSpace<N,T> is;
+        DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings);
@@ -1616,7 +1616,7 @@ namespace Legion {
       }
     public:
       __CUDA_HD__
-      inline FT read(const Realm::ZPoint<N,T>& p) const
+      inline FT read(const Point<N,T>& p) const
         { 
 #ifdef __CUDA_ARCH__
           if (gpu_warning)
@@ -1633,7 +1633,7 @@ namespace Legion {
           return accessor.read(p); 
         }
       __CUDA_HD__
-      inline void write(const Realm::ZPoint<N,T>& p, FT val) const
+      inline void write(const Point<N,T>& p, FT val) const
         { 
 #ifdef __CUDA_ARCH__
           if (gpu_warning)
@@ -1650,7 +1650,7 @@ namespace Legion {
           accessor.write(p, val); 
         }
       __CUDA_HD__
-      inline FT* ptr(const Realm::ZPoint<N,T>& p) const
+      inline FT* ptr(const Point<N,T>& p) const
         { 
 #ifdef __CUDA_ARCH__
           if (gpu_warning)
@@ -1667,7 +1667,7 @@ namespace Legion {
           return accessor.ptr(p); 
         }
       __CUDA_HD__
-      inline FT& operator[](const Realm::ZPoint<N,T>& p) const
+      inline FT& operator[](const Point<N,T>& p) const
         { 
 #ifdef __CUDA_ARCH__
           if (gpu_warning)
@@ -1690,13 +1690,13 @@ namespace Legion {
       {
         return ArraySyntax::AffineSyntaxHelper<FieldAccessor<WRITE_DISCARD,FT,N,
           T,Realm::AffineAccessor<FT,N,T>,true>,FT,N,T,2,false/*read only*/>(
-              *this, Realm::ZPoint<1,T>(index));
+              *this, Point<1,T>(index));
       }
     public:
       Realm::AffineAccessor<FT,N,T> accessor;
       FieldID field;
       PhysicalRegion field_region;
-      Realm::ZIndexSpace<N,T> bounds;
+      DomainT<N,T> bounds;
       mutable bool gpu_warning;
     };
 
@@ -1711,7 +1711,7 @@ namespace Legion {
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     bool silence_warnings = false)
       {
-        Realm::ZIndexSpace<1,T> is;
+        DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
@@ -1719,22 +1719,22 @@ namespace Legion {
       }
     public:
       __CUDA_HD__
-      inline FT read(const Realm::ZPoint<1,T>& p) const
+      inline FT read(const Point<1,T>& p) const
         { 
           return accessor.read(p); 
         }
       __CUDA_HD__
-      inline void write(const Realm::ZPoint<1,T>& p, FT val) const
+      inline void write(const Point<1,T>& p, FT val) const
         { 
           accessor.write(p, val); 
         }
       __CUDA_HD__
-      inline FT* ptr(const Realm::ZPoint<1,T>& p) const
+      inline FT* ptr(const Point<1,T>& p) const
         { 
           return accessor.ptr(p); 
         }
       __CUDA_HD__
-      inline FT& operator[](const Realm::ZPoint<1,T>& p) const
+      inline FT& operator[](const Point<1,T>& p) const
         { 
           return accessor[p]; 
         }
@@ -1756,7 +1756,7 @@ namespace Legion {
           bounds(region.template get_bounds<1,T>()),
           gpu_warning(!silence_warnings)
       {
-        Realm::ZIndexSpace<1,T> is;
+        DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings);
@@ -1764,7 +1764,7 @@ namespace Legion {
       }
     public:
       __CUDA_HD__
-      inline FT read(const Realm::ZPoint<1,T>& p) const
+      inline FT read(const Point<1,T>& p) const
         { 
 #ifdef __CUDA_ARCH__
           if (gpu_warning)
@@ -1781,7 +1781,7 @@ namespace Legion {
           return accessor.read(p); 
         }
       __CUDA_HD__
-      inline void write(const Realm::ZPoint<1,T>& p, FT val) const
+      inline void write(const Point<1,T>& p, FT val) const
         { 
 #ifdef __CUDA_ARCH__
           if (gpu_warning)
@@ -1798,7 +1798,7 @@ namespace Legion {
           accessor.write(p, val); 
         }
       __CUDA_HD__
-      inline FT* ptr(const Realm::ZPoint<1,T>& p) const
+      inline FT* ptr(const Point<1,T>& p) const
         { 
 #ifdef __CUDA_ARCH__
           if (gpu_warning)
@@ -1815,7 +1815,7 @@ namespace Legion {
           return accessor.ptr(p); 
         }
       __CUDA_HD__
-      inline FT& operator[](const Realm::ZPoint<1,T>& p) const
+      inline FT& operator[](const Point<1,T>& p) const
         { 
 #ifdef __CUDA_ARCH__
           if (gpu_warning)
@@ -1835,7 +1835,7 @@ namespace Legion {
       Realm::AffineAccessor<FT,1,T> accessor;
       FieldID field;
       PhysicalRegion field_region;
-      Realm::ZIndexSpace<1,T> bounds;
+      DomainT<1,T> bounds;
       mutable bool gpu_warning;
     };
 
@@ -1849,7 +1849,7 @@ namespace Legion {
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
                     ReductionOpID redop, bool silence_warnings = false)
       {
-        Realm::ZIndexSpace<N,T> is;
+        DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(REDUCE, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
@@ -1859,7 +1859,7 @@ namespace Legion {
       }
     public:
       template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__
-      inline void reduce(const Realm::ZPoint<N,T>& p, 
+      inline void reduce(const Point<N,T>& p, 
                          typename REDOP::RHS val) const
         { 
           REDOP::template fold<EXCLUSIVE>(accessor[p], val);
@@ -1881,7 +1881,7 @@ namespace Legion {
           bounds(region.template get_bounds<N,T>()),
           gpu_warning(!silence_warnings)
       {
-        Realm::ZIndexSpace<N,T> is;
+        DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(REDUCE, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
@@ -1891,7 +1891,7 @@ namespace Legion {
       }
     public:
       template<typename REDOP, bool EXCLUSIVE> __CUDA_HD__ 
-      inline void reduce(const Realm::ZPoint<N,T>& p, 
+      inline void reduce(const Point<N,T>& p, 
                          typename REDOP::RHS val) const
         { 
 #ifdef __CUDA_ARCH__
@@ -1912,7 +1912,7 @@ namespace Legion {
       Realm::AffineAccessor<FT,N,T> accessor;
       FieldID field;
       PhysicalRegion field_region;
-      Realm::ZIndexSpace<N,T> bounds;
+      DomainT<N,T> bounds;
       mutable bool gpu_warning;
     };
 
@@ -1932,7 +1932,7 @@ namespace Legion {
       UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
                           bool silence_warnings = false)
       {
-        Realm::ZIndexSpace<N,T> is;
+        DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(NO_ACCESS, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
@@ -1941,16 +1941,16 @@ namespace Legion {
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
     public:
-      inline FT read(const Realm::ZPoint<N,T> &p) const
+      inline FT read(const Point<N,T> &p) const
         {
           return accessor.read(p);
         }
-      inline void write(const Realm::ZPoint<N,T> &p, FT val) const
+      inline void write(const Point<N,T> &p, FT val) const
         {
           accessor.write(p, val);
         }
       inline Realm::AccessorRefHelper<FT> 
-              operator[](const Realm::ZPoint<N,T> &p) const
+              operator[](const Point<N,T> &p) const
         {
           return accessor[p];
         }
@@ -1960,7 +1960,7 @@ namespace Legion {
         {
           return ArraySyntax::GenericSyntaxHelper<UnsafeFieldAccessor<FT,N,T,
               Realm::GenericAccessor<FT,N,T> >,FT,N,T,2,false/*read only*/>(
-                  *this, Realm::ZPoint<1,T>(index));
+                  *this, Point<1,T>(index));
         }
     public:
       mutable Realm::GenericAccessor<FT,N,T> accessor;
@@ -1973,7 +1973,7 @@ namespace Legion {
       UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
                           bool silence_warnings = false)
       {
-        Realm::ZIndexSpace<1,T> is;
+        DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(NO_ACCESS, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), 
@@ -1982,16 +1982,16 @@ namespace Legion {
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
     public:
-      inline FT read(const Realm::ZPoint<1,T> &p) const
+      inline FT read(const Point<1,T> &p) const
         {
           return accessor.read(p);
         }
-      inline void write(const Realm::ZPoint<1,T> &p, FT val) const
+      inline void write(const Point<1,T> &p, FT val) const
         {
           accessor.write(p, val);
         }
       inline Realm::AccessorRefHelper<FT> 
-              operator[](const Realm::ZPoint<1,T> &p) const
+              operator[](const Point<1,T> &p) const
         {
           return accessor[p];
         }
@@ -2006,7 +2006,7 @@ namespace Legion {
       UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
                           bool silence_warnings = false)
       {
-        Realm::ZIndexSpace<N,T> is;
+        DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(NO_ACCESS, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings,
@@ -2015,22 +2015,22 @@ namespace Legion {
       }
     public:
       __CUDA_HD__
-      inline FT read(const Realm::ZPoint<N,T> &p) const
+      inline FT read(const Point<N,T> &p) const
         {
           return accessor.read(p);
         }
       __CUDA_HD__
-      inline void write(const Realm::ZPoint<N,T> &p, FT val) const
+      inline void write(const Point<N,T> &p, FT val) const
         {
           accessor.write(p, val);
         }
       __CUDA_HD__
-      inline FT* ptr(const Realm::ZPoint<N,T> &p) const
+      inline FT* ptr(const Point<N,T> &p) const
         {
           return accessor.ptr(p);
         }
       __CUDA_HD__
-      inline FT& operator[](const Realm::ZPoint<N,T> &p) const
+      inline FT& operator[](const Point<N,T> &p) const
         {
           return accessor[p];
         }
@@ -2039,7 +2039,7 @@ namespace Legion {
         {
           return ArraySyntax::AffineSyntaxHelper<UnsafeFieldAccessor<FT,N,T,
                  Realm::AffineAccessor<FT,N,T> >,FT,N,T,2,false/*read only*/>(
-                *this, Realm::ZPoint<1,T>(index));
+                *this, Point<1,T>(index));
         }
     public:
       Realm::AffineAccessor<FT,N,T> accessor;
@@ -2054,7 +2054,7 @@ namespace Legion {
       UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
                           bool silence_warnings = false)
       {
-        Realm::ZIndexSpace<1,T> is;
+        DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(NO_ACCESS, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings,
@@ -2063,22 +2063,22 @@ namespace Legion {
       }
     public:
       __CUDA_HD__
-      inline FT read(const Realm::ZPoint<1,T> &p) const
+      inline FT read(const Point<1,T> &p) const
         {
           return accessor.read(p); 
         }
       __CUDA_HD__
-      inline void write(const Realm::ZPoint<1,T> &p, FT val) const
+      inline void write(const Point<1,T> &p, FT val) const
         {
           accessor.write(p, val);
         }
       __CUDA_HD__
-      inline FT* ptr(const Realm::ZPoint<1,T> &p) const
+      inline FT* ptr(const Point<1,T> &p) const
         {
           return accessor.ptr(p);
         }
       __CUDA_HD__
-      inline FT& operator[](const Realm::ZPoint<1,T> &p) const
+      inline FT& operator[](const Point<1,T> &p) const
         {
           return accessor[p];
         }
@@ -3609,30 +3609,30 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    Realm::ZIndexSpace<DIM,T> PhysicalRegion::get_bounds(void) const
+    DomainT<DIM,T> PhysicalRegion::get_bounds(void) const
     //--------------------------------------------------------------------------
     {
-      Realm::ZIndexSpace<DIM,T> result;
+      DomainT<DIM,T> result;
       get_bounds(&result, Internal::NT_TemplateHelper::encode_tag<DIM,T>());
       return result;
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    PhysicalRegion::operator Realm::ZIndexSpace<DIM,T>(void) const
+    PhysicalRegion::operator DomainT<DIM,T>(void) const
     //--------------------------------------------------------------------------
     {
-      Realm::ZIndexSpace<DIM,T> result;
+      DomainT<DIM,T> result;
       get_bounds(&result, Internal::NT_TemplateHelper::encode_tag<DIM,T>());
       return result;
     }
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    PhysicalRegion::operator Realm::ZRect<DIM,T>(void) const
+    PhysicalRegion::operator Rect<DIM,T>(void) const
     //--------------------------------------------------------------------------
     {
-      Realm::ZIndexSpace<DIM,T> result;
+      DomainT<DIM,T> result;
       get_bounds(&result, Internal::NT_TemplateHelper::encode_tag<DIM,T>());
 #ifdef DEBUG_LEGION
       assert(result.dense());
@@ -3722,11 +3722,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceT<DIM,T> Runtime::create_index_space(Context ctx, 
-                                                   Realm::ZRect<DIM,T> bounds)
+                                                   Rect<DIM,T> bounds)
     //--------------------------------------------------------------------------
     {
       // Make a Realm index space
-      Realm::ZIndexSpace<DIM,T> realm_is(bounds);
+      DomainT<DIM,T> realm_is(bounds);
       return IndexSpaceT<DIM,T>(create_index_space_internal(ctx, &realm_is,
                 Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
     }
@@ -3734,10 +3734,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceT<DIM,T> Runtime::create_index_space(Context ctx,
-                               const std::vector<Realm::ZPoint<DIM,T> > &points)
+                                       const std::vector<Point<DIM,T> > &points)
     //--------------------------------------------------------------------------
     {
-      Realm::ZIndexSpace<DIM,T> realm_is(points);
+      // C++ type system is dumb
+      std::vector<Realm::ZPoint<DIM,T> > realm_points(points.size());
+      for (unsigned idx = 0; idx < points.size(); idx++)
+        realm_points[idx] = points[idx];
+      DomainT<DIM,T> realm_is((Realm::ZIndexSpace<DIM,T>(realm_points)));
       return IndexSpaceT<DIM,T>(create_index_space_internal(ctx, &realm_is,
                 Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
     }
@@ -3745,10 +3749,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceT<DIM,T> Runtime::create_index_space(Context ctx,
-                                 const std::vector<Realm::ZRect<DIM,T> > &rects)
+                                         const std::vector<Rect<DIM,T> > &rects)
     //--------------------------------------------------------------------------
     {
-      Realm::ZIndexSpace<DIM,T> realm_is(rects);
+      // C++ type system is dumb
+      std::vector<Realm::ZRect<DIM,T> > realm_rects(rects.size());
+      for (unsigned idx = 0; idx < rects.size(); idx++)
+        realm_rects[idx] = rects[idx];
+      DomainT<DIM,T> realm_is((Realm::ZIndexSpace<DIM,T>(realm_rects)));
       return IndexSpaceT<DIM,T>(create_index_space_internal(ctx, &realm_is,
                 Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
     }
@@ -3998,8 +4006,8 @@ namespace Legion {
     IndexPartitionT<DIM,T> Runtime::create_partition_by_restriction(Context ctx,
                                       IndexSpaceT<DIM,T> parent,
                                       IndexSpaceT<COLOR_DIM,T> color_space,
-                                      Realm::ZMatrix<DIM,COLOR_DIM,T> transform,
-                                      Realm::ZRect<DIM,T> extent,
+                                      Matrix<DIM,COLOR_DIM,T> transform,
+                                      Rect<DIM,T> extent,
                                       PartitionKind part_kind, Color color)
     //--------------------------------------------------------------------------
     {
@@ -4012,11 +4020,11 @@ namespace Legion {
     template<int DIM, typename T>
     IndexPartitionT<DIM,T> Runtime::create_partition_by_blockify(Context ctx,
                                       IndexSpaceT<DIM,T> parent,
-                                      Realm::ZPoint<DIM,T> blocking_factor,
+                                      Point<DIM,T> blocking_factor,
                                       Color color)
     //--------------------------------------------------------------------------
     {
-      Realm::ZPoint<DIM,T> origin; 
+      Point<DIM,T> origin; 
       for (int i = 0; i < DIM; i++)
         origin[i] = 0;
       return create_partition_by_blockify<DIM,T>(ctx, parent, blocking_factor,
@@ -4027,30 +4035,29 @@ namespace Legion {
     template<int DIM, typename T>
     IndexPartitionT<DIM,T> Runtime::create_partition_by_blockify(Context ctx,
                                       IndexSpaceT<DIM,T> parent,
-                                      Realm::ZPoint<DIM,T> blocking_factor,
-                                      Realm::ZPoint<DIM,T> origin,
+                                      Point<DIM,T> blocking_factor,
+                                      Point<DIM,T> origin,
                                       Color color)
     //--------------------------------------------------------------------------
     {
       // Get the domain of the color space to partition
-      const Realm::ZIndexSpace<DIM,T> parent_is = 
-        get_index_space_domain(parent);
-      const Realm::ZRect<DIM,T> &bounds = parent_is.bounds;
+      const DomainT<DIM,T> parent_is = get_index_space_domain(parent);
+      const Rect<DIM,T> &bounds = parent_is.bounds;
       if (bounds.empty())
         return IndexPartitionT<DIM,T>();
       // Compute the intended color space bounds
-      Realm::ZPoint<DIM,T> colors;
+      Point<DIM,T> colors;
       for (int i = 0; i < DIM; i++)
         colors[i] = (((bounds.hi[i] - bounds.lo[i]) + // -1 and +1 cancel out
             blocking_factor[i]) / blocking_factor[i]) - 1; 
-      Realm::ZPoint<DIM,T> zeroes; 
+      Point<DIM,T> zeroes; 
       for (int i = 0; i < DIM; i++)
         zeroes[i] = 0;
       // Make the color space
       IndexSpaceT<DIM,T> color_space = create_index_space(ctx, 
-                                    Realm::ZRect<DIM,T>(zeroes, colors));
+                                    Rect<DIM,T>(zeroes, colors));
       // Now make the transform matrix
-      Realm::ZMatrix<DIM,DIM,T> transform;
+      Matrix<DIM,DIM,T> transform;
       for (int i = 0; i < DIM; i++)
         for (int j = 0; j < DIM; j++)
           if (i == j)
@@ -4058,10 +4065,10 @@ namespace Legion {
           else
             transform[i][j] = 0;
       // And the extent
-      Realm::ZPoint<DIM,T> ones;
+      Point<DIM,T> ones;
       for (int i = 0; i < DIM; i++)
         ones[i] = 1;
-      const Realm::ZRect<DIM,T> extent(origin, origin + blocking_factor - ones);
+      const Rect<DIM,T> extent(origin, origin + blocking_factor - ones);
       // Then do the create partition by restriction call
       return create_partition_by_restriction(ctx, parent, color_space,
                                              transform, extent,
@@ -4177,7 +4184,7 @@ namespace Legion {
     template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
     IndexSpaceT<DIM,T> Runtime::create_index_space_union(Context ctx,
                                 IndexPartitionT<DIM,T> parent,
-                                Realm::ZPoint<COLOR_DIM,COLOR_T> color,
+                                Point<COLOR_DIM,COLOR_T> color,
                                 const typename std::vector<
                                   IndexSpaceT<DIM,T> > &handles)
     //--------------------------------------------------------------------------
@@ -4195,7 +4202,7 @@ namespace Legion {
     template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
     IndexSpaceT<DIM,T> Runtime::create_index_space_union(Context ctx,
                                 IndexPartitionT<DIM,T> parent,
-                                Realm::ZPoint<COLOR_DIM,COLOR_T> color,
+                                Point<COLOR_DIM,COLOR_T> color,
                                 IndexPartitionT<DIM,T> handle)
     //--------------------------------------------------------------------------
     {
@@ -4209,7 +4216,7 @@ namespace Legion {
     template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
     IndexSpaceT<DIM,T> Runtime::create_index_space_intersection(Context ctx,
                                 IndexPartitionT<DIM,T> parent,
-                                Realm::ZPoint<COLOR_DIM,COLOR_T> color,
+                                Point<COLOR_DIM,COLOR_T> color,
                                 const typename std::vector<
                                   IndexSpaceT<DIM,T> > &handles)
     //--------------------------------------------------------------------------
@@ -4227,7 +4234,7 @@ namespace Legion {
     template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
     IndexSpaceT<DIM,T> Runtime::create_index_space_intersection(Context ctx,
                                 IndexPartitionT<DIM,T> parent,
-                                Realm::ZPoint<COLOR_DIM,COLOR_T> color,
+                                Point<COLOR_DIM,COLOR_T> color,
                                 IndexPartitionT<DIM,T> handle)
     //--------------------------------------------------------------------------
     {
@@ -4241,7 +4248,7 @@ namespace Legion {
     template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
     IndexSpaceT<DIM,T> Runtime::create_index_space_difference(Context ctx,
                                 IndexPartitionT<DIM,T> parent,
-                                Realm::ZPoint<COLOR_DIM,COLOR_T> color,
+                                Point<COLOR_DIM,COLOR_T> color,
                                 IndexSpaceT<DIM,T> initial,
                                 const typename std::vector<
                                   IndexSpaceT<DIM,T> > &handles)
@@ -4277,7 +4284,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
     IndexSpaceT<DIM,T> Runtime::get_index_subspace(IndexPartitionT<DIM,T> p,
-                                         Realm::ZPoint<COLOR_DIM,COLOR_T> color)
+                                         Point<COLOR_DIM,COLOR_T> color)
     //--------------------------------------------------------------------------
     {
       return IndexSpaceT<DIM,T>(get_index_subspace_internal(IndexPartition(p), 
@@ -4287,7 +4294,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
     bool Runtime::has_index_subspace(IndexPartitionT<DIM,T> p, 
-                                     Realm::ZPoint<COLOR_DIM,COLOR_T> color)
+                                     Point<COLOR_DIM,COLOR_T> color)
     //--------------------------------------------------------------------------
     {
       return has_index_subspace_internal(IndexPartition(p), &color,
@@ -4296,11 +4303,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    Realm::ZIndexSpace<DIM,T> Runtime::get_index_space_domain(
-                                                      IndexSpaceT<DIM,T> handle)
+    DomainT<DIM,T> Runtime::get_index_space_domain(IndexSpaceT<DIM,T> handle)
     //--------------------------------------------------------------------------
     {
-      Realm::ZIndexSpace<DIM,T> realm_is;
+      DomainT<DIM,T> realm_is;
       get_index_space_domain_internal(handle, &realm_is, 
           Internal::NT_TemplateHelper::encode_tag<DIM,T>());
       return realm_is;
@@ -4308,11 +4314,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
-    Realm::ZIndexSpace<COLOR_DIM,COLOR_T> 
+    DomainT<COLOR_DIM,COLOR_T> 
               Runtime::get_index_partition_color_space(IndexPartitionT<DIM,T> p)
     //--------------------------------------------------------------------------
     {
-      Realm::ZIndexSpace<COLOR_DIM, COLOR_T> realm_is;
+      DomainT<COLOR_DIM, COLOR_T> realm_is;
       get_index_partition_color_space_internal(p, &realm_is, 
           Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>());
       return realm_is;
@@ -4340,11 +4346,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
-    Realm::ZPoint<COLOR_DIM,COLOR_T> Runtime::get_index_space_color(
+    Point<COLOR_DIM,COLOR_T> Runtime::get_index_space_color(
                                                       IndexSpaceT<DIM,T> handle)
     //--------------------------------------------------------------------------
     {
-      Realm::ZPoint<COLOR_DIM,COLOR_T> point;
+      Point<COLOR_DIM,COLOR_T> point;
       return get_index_space_color_internal(IndexSpace(handle), &point,
           Internal::NT_TemplateHelper::encode_tag<COLOR_DIM,COLOR_T>());
     }
@@ -4370,7 +4376,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool Runtime::safe_cast(Context ctx, Realm::ZPoint<DIM,T> point, 
+    bool Runtime::safe_cast(Context ctx, Point<DIM,T> point, 
                             LogicalRegionT<DIM,T> region)
     //--------------------------------------------------------------------------
     {
@@ -4431,7 +4437,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
     LogicalRegionT<DIM,T> Runtime::get_logical_subregion_by_color(
-        LogicalPartitionT<DIM,T> parent, Realm::ZPoint<COLOR_DIM,COLOR_T> color)
+        LogicalPartitionT<DIM,T> parent, Point<COLOR_DIM,COLOR_T> color)
     //--------------------------------------------------------------------------
     {
       return LogicalRegionT<DIM,T>(get_logical_subregion_by_color_internal(
@@ -4442,7 +4448,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
     bool Runtime::has_logical_subregion_by_color(
-        LogicalPartitionT<DIM,T> parent, Realm::ZPoint<COLOR_DIM,COLOR_T> color)
+        LogicalPartitionT<DIM,T> parent, Point<COLOR_DIM,COLOR_T> color)
     //--------------------------------------------------------------------------
     {
       return has_logical_subregion_by_color_internal(
@@ -4462,7 +4468,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
-    Realm::ZPoint<COLOR_DIM,COLOR_T> Runtime::get_logical_region_color_point(
+    Point<COLOR_DIM,COLOR_T> Runtime::get_logical_region_color_point(
                                                    LogicalRegionT<DIM,T> handle)
     //--------------------------------------------------------------------------
     {

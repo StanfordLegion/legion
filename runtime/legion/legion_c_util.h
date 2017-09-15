@@ -156,19 +156,19 @@ namespace Legion {
         return t;                                    \
       }
 
-      typedef Realm::ZPoint<1,coord_t> Point1D;
-      typedef Realm::ZPoint<2,coord_t> Point2D;
-      typedef Realm::ZPoint<3,coord_t> Point3D;
+      typedef Point<1,coord_t> Point1D;
+      typedef Point<2,coord_t> Point2D;
+      typedef Point<3,coord_t> Point3D;
       NEW_POINT_WRAPPER(legion_point_1d_t, Point1D, 1);
       NEW_POINT_WRAPPER(legion_point_2d_t, Point2D, 2);
       NEW_POINT_WRAPPER(legion_point_3d_t, Point3D, 3);
 #undef NEW_POINT_WRAPPER
 
-#define NEW_RECT_WRAPPER(T_, T)                         \
+#define NEW_RECT_WRAPPER(T_, T, PT)                     \
       static T_ wrap(T t) {                             \
         T_ t_;                                          \
-        t_.lo = wrap(t.lo);                             \
-        t_.hi = wrap(t.hi);                             \
+        t_.lo = wrap(PT(t.lo));                         \
+        t_.hi = wrap(PT(t.hi));                         \
         return t_;                                      \
       }                                                 \
       static T unwrap(T_ t_) {                          \
@@ -176,12 +176,12 @@ namespace Legion {
         return t;                                       \
       }
 
-      typedef Realm::ZRect<1,coord_t> Rect1D;
-      typedef Realm::ZRect<2,coord_t> Rect2D;
-      typedef Realm::ZRect<3,coord_t> Rect3D;
-      NEW_RECT_WRAPPER(legion_rect_1d_t, Rect1D);
-      NEW_RECT_WRAPPER(legion_rect_2d_t, Rect2D);
-      NEW_RECT_WRAPPER(legion_rect_3d_t, Rect3D);
+      typedef Rect<1,coord_t> Rect1D;
+      typedef Rect<2,coord_t> Rect2D;
+      typedef Rect<3,coord_t> Rect3D;
+      NEW_RECT_WRAPPER(legion_rect_1d_t, Rect1D, Point1D);
+      NEW_RECT_WRAPPER(legion_rect_2d_t, Rect2D, Point2D);
+      NEW_RECT_WRAPPER(legion_rect_3d_t, Rect3D, Point3D);
 #undef NEW_RECT_WRAPPER 
 
 #define NEW_BLOCKIFY_WRAPPER(T_, T)                     \
@@ -192,11 +192,11 @@ namespace Legion {
       template<int DIM>
       struct Blockify {
       public:
-        Blockify(Realm::ZPoint<DIM,coord_t> b, 
-                 Realm::ZPoint<DIM,coord_t> o)
+        Blockify(Point<DIM,coord_t> b, 
+                 Point<DIM,coord_t> o)
           : block_size(b), offset(o) { }
       public:
-        Realm::ZPoint<DIM,coord_t> block_size, offset;
+        Point<DIM,coord_t> block_size, offset;
       };
 
       NEW_BLOCKIFY_WRAPPER(legion_blockify_1d_t, Blockify<1>);

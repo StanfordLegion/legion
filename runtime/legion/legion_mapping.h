@@ -1763,36 +1763,21 @@ namespace Legion {
       // Template version
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space(MapperContext ctx,
-#if __cplusplus < 201103L
-                                            Realm::ZRect<DIM,COORD_T> bounds
-#else
-                                            Rect<DIM,COORD_T> bounds
-#endif
-                                            ) const;
+                                            Rect<DIM,COORD_T> bounds) const;
 
       IndexSpace create_index_space(MapperContext ctx, 
                                   const std::vector<DomainPoint> &points) const;
       // Template version
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space(MapperContext ctx,
-#if __cplusplus < 201103L
-                    const std::vector<Realm::ZPoint<DIM,COORD_T> > &points
-#else
-                    const std::vector<Point<DIM,COORD_T> > &points
-#endif
-                    ) const;
+                    const std::vector<Point<DIM,COORD_T> > &points) const;
 
       IndexSpace create_index_space(MapperContext ctx,
                                     const std::vector<Domain> &rects) const;
       // Template version
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space(MapperContext ctx,
-#if __cplusplus < 201103L
-                      const std::vector<Realm::ZRect<DIM,COORD_T> > &rects
-#else
-                      const std::vector<Rect<DIM,COORD_T> > &rects
-#endif
-                      ) const;
+                      const std::vector<Rect<DIM,COORD_T> > &rects) const;
     protected:
       IndexSpace create_index_space_internal(MapperContext ctx, const Domain &d,
                   const void *realm_is, TypeTag type_tag) const;

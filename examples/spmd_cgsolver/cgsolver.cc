@@ -475,9 +475,9 @@ void top_level_task(const Task *task,
     pr_blks.wait_until_valid();
 
     
-    const AccessorWD<int,3> fa_owner = 
+    const AccessorWDint fa_owner = 
       fid_owner_shard.accessor<WRITE_DISCARD>(pr_blks);
-    const AccessorWD<int,3> fa_neighbors =
+    const AccessorWDint fa_neighbors =
       fid_neighbor_count.accessor<WRITE_DISCARD>(pr_blks);
 
     int num_blks = volume(blocks);
@@ -518,7 +518,7 @@ void top_level_task(const Task *task,
   PhysicalRegion pr_blks = runtime->map_region(ctx, launcher);
   pr_blks.wait_until_valid();
 
-  const AccessorRO<int,3> fa_owner = fid_owner_shard.accessor<READ_ONLY>(pr_blks);
+  const AccessorROint fa_owner = fid_owner_shard.accessor<READ_ONLY>(pr_blks);
 
   runtime->fill_field(ctx, lr_blks, lr_blks, fid_ready_barrier, PhaseBarrier());
   runtime->fill_field(ctx, lr_blks, lr_blks, fid_done_barrier, PhaseBarrier());
@@ -677,11 +677,11 @@ void spmd_init_task(const Task *task,
 
   log_app.print() << "in spmd_init_task, shard=" << args.shard << ", proc=" << runtime->get_executing_processor(ctx) << ", regions=" << regions.size();
 
-  const AccessorRO<int,3> fa_owner = fid_owner_shard.accessor<READ_ONLY>(regions[0]);
-  const AccessorRO<int,3> fa_neighbors = fid_neighbor_count.accessor<READ_ONLY>(regions[0]);
+  const AccessorROint fa_owner = fid_owner_shard.accessor<READ_ONLY>(regions[0]);
+  const AccessorROint fa_neighbors = fid_neighbor_count.accessor<READ_ONLY>(regions[0]);
 
-  const AccessorRD<PhaseBarrier,3> fa_ready = fid_ready_barrier.fold_accessor(regions[1], BarrierCombineReductionOp::redop_id);
-  const AccessorRD<PhaseBarrier,3> fa_done = fid_done_barrier.fold_accessor(regions[2], BarrierCombineReductionOp::redop_id);
+  const AccessorRDpb fa_ready = fid_ready_barrier.fold_accessor(regions[1], BarrierCombineReductionOp::redop_id);
+  const AccessorRDpb fa_done = fid_done_barrier.fold_accessor(regions[2], BarrierCombineReductionOp::redop_id);
 
   for(PointInRectIterator<3> pir(Rect<3>(
           Point<3>(0,0,0), args.blocks - Point<3>(1,1,1))); pir(); ++pir) {
@@ -750,10 +750,10 @@ bool spmd_main_task(const Task *task,
   fid_sol_r.allocate(runtime, ctx, fs_private);
   fid_sol_Ap.allocate(runtime, ctx, fs_private);
 
-  const AccessorRO<int,3> fa_owner = fid_owner_shard.accessor<READ_ONLY>(regions[0]);
-  const AccessorRO<int,3> fa_neighbors = fid_neighbor_count.accessor<READ_ONLY>(regions[0]);
-  const AccessorRO<PhaseBarrier,3> fa_ready = fid_ready_barrier.accessor<READ_ONLY>(regions[0]);
-  const AccessorRO<PhaseBarrier,3> fa_done = fid_done_barrier.accessor<READ_ONLY>(regions[0]);
+  const AccessorROint fa_owner = fid_owner_shard.accessor<READ_ONLY>(regions[0]);
+  const AccessorROint fa_neighbors = fid_neighbor_count.accessor<READ_ONLY>(regions[0]);
+  const AccessorROpb fa_ready = fid_ready_barrier.accessor<READ_ONLY>(regions[0]);
+  const AccessorROpb fa_done = fid_done_barrier.accessor<READ_ONLY>(regions[0]);
 
   Rect<3> blk_space(Point<3>(0,0,0), args.blocks - Point<3>(1,1,1));
 
@@ -1233,7 +1233,7 @@ void init_field_task(const Task *task,
 
   log_app.info() << "init_field task - bounds=" << args.bounds << ", fid=" << task->regions[0].instance_fields[0] << ", proc=" << runtime->get_executing_processor(ctx);
 
-  const AccessorWD<double,3> fa(regions[0], task->regions[0].instance_fields[0]);
+  const AccessorWDdouble fa(regions[0], task->regions[0].instance_fields[0]);
   
   for(PointInRectIterator<3> pir(args.bounds); pir(); ++pir) {
 #if 0
@@ -1260,14 +1260,14 @@ void spmv_field_task(const Task *task,
 
   log_app.info() << "init_field task - bounds=" << args.bounds << ", fid=" << task->regions[0].instance_fields[0] << ", proc=" << runtime->get_executing_processor(ctx);
 
-  const AccessorRW<double,3> fa_out(regions[0], task->regions[0].instance_fields[0]);
-  const AccessorRO<double,3> fa_in(regions[1], task->regions[1].instance_fields[0]);
+  const AccessorRWdouble fa_out(regions[0], task->regions[0].instance_fields[0]);
+  const AccessorROdouble fa_in(regions[1], task->regions[1].instance_fields[0]);
   size_t pr_idx = 2;
-  AccessorRO<double,3> fa_ghost[3][2];
+  AccessorROdouble fa_ghost[3][2];
   for(int dir = DIR_X; dir <= DIR_Z; dir++)
     for(int side = SIDE_MINUS; side <= SIDE_PLUS; side++)
       if(args.gtypes[dir][side] != GhostInfo::GHOST_BOUNDARY) {
-        fa_ghost[dir][side] = AccessorRO<double,3>(regions[pr_idx],
+        fa_ghost[dir][side] = AccessorROdouble(regions[pr_idx],
             task->regions[pr_idx].instance_fields[0]);
 	pr_idx++;
       }

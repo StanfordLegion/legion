@@ -9820,19 +9820,19 @@ namespace Legion {
           {
             case 1:
               {
-                const Realm::ZPoint<1,coord_t> p(itr.p);
+                const Point<1,coord_t> p(itr.p);
                 subspace = get_index_subspace(handle1, &p, sizeof(p));
                 break;
               }
             case 2:
               {
-                const Realm::ZPoint<2,coord_t> p(itr.p);
+                const Point<2,coord_t> p(itr.p);
                 subspace = get_index_subspace(handle1, &p, sizeof(p));
                 break;
               }
             case 3:
               {
-                const Realm::ZPoint<3,coord_t> p(itr.p);
+                const Point<3,coord_t> p(itr.p);
                 subspace = get_index_subspace(handle1, &p, sizeof(p));
                 break;
               }
@@ -10248,21 +10248,21 @@ namespace Legion {
       {
         case 1:
           {
-            Realm::ZIndexSpace<1,coord_t> color_index_space;
+            DomainT<1,coord_t> color_index_space;
             forest->get_index_space_domain(color_space, &color_index_space,
                                            color_space.get_type_tag());
             return Domain(color_index_space);
           }
         case 2:
           {
-            Realm::ZIndexSpace<2,coord_t> color_index_space;
+            DomainT<2,coord_t> color_index_space;
             forest->get_index_space_domain(color_space, &color_index_space,
                                            color_space.get_type_tag());
             return Domain(color_index_space);
           }
         case 3:
           {
-            Realm::ZIndexSpace<3,coord_t> color_index_space;
+            DomainT<3,coord_t> color_index_space;
             forest->get_index_space_domain(color_space, &color_index_space,
                                            color_space.get_type_tag());
             return Domain(color_index_space);
@@ -15466,19 +15466,19 @@ namespace Legion {
       {
         case 1:
           {
-            Realm::ZIndexSpace<1,coord_t> is = dom;
+            DomainT<1,coord_t> is = dom;
             return find_or_create_index_launch_space(dom, &is,
                   NT_TemplateHelper::encode_tag<1,coord_t>());
           }
         case 2:
           {
-            Realm::ZIndexSpace<2,coord_t> is = dom;
+            DomainT<2,coord_t> is = dom;
             return find_or_create_index_launch_space(dom, &is,
                   NT_TemplateHelper::encode_tag<2,coord_t>());
           }
         case 3:
           {
-            Realm::ZIndexSpace<3,coord_t> is = dom;
+            DomainT<3,coord_t> is = dom;
             return find_or_create_index_launch_space(dom, &is,
                   NT_TemplateHelper::encode_tag<3,coord_t>());
           }

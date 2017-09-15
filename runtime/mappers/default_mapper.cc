@@ -1096,10 +1096,10 @@ namespace Legion {
 
           output.slices.resize(input.domain.get_volume());
           unsigned idx = 0;
-          Realm::ZRect<1> rect = input.domain;
+          Rect<1> rect = input.domain;
           for (PointInRectIterator<1> pir(rect); pir(); pir++, idx++)
           {
-            Realm::ZRect<1> slice(*pir, *pir);
+            Rect<1> slice(*pir, *pir);
             output.slices[idx] = TaskSlice(slice,
               remote_procsets[idx % remote_cpus.size()],
               false/*recurse*/, false/*stealable*/);
@@ -1181,8 +1181,8 @@ namespace Legion {
       {
         case 1:
           {
-            Realm::ZIndexSpace<1,coord_t> point_space = input.domain; 
-            Realm::ZPoint<1,coord_t> num_blocks(procs.size());
+            DomainT<1,coord_t> point_space = input.domain; 
+            Point<1,coord_t> num_blocks(procs.size());
             default_decompose_points<1>(point_space, procs,
                   num_blocks, false/*recurse*/,
                   stealing_enabled, output.slices);
@@ -1190,8 +1190,8 @@ namespace Legion {
           }
         case 2:
           {
-            Realm::ZIndexSpace<2,coord_t> point_space = input.domain;
-            Realm::ZPoint<2,coord_t> num_blocks =
+            DomainT<2,coord_t> point_space = input.domain;
+            Point<2,coord_t> num_blocks =
               default_select_num_blocks<2>(procs.size(), point_space.bounds);
             default_decompose_points<2>(point_space, procs,
                 num_blocks, false/*recurse*/,
@@ -1200,8 +1200,8 @@ namespace Legion {
           }
         case 3:
           {
-            Realm::ZIndexSpace<3,coord_t> point_space = input.domain;
-            Realm::ZPoint<3,coord_t> num_blocks =
+            DomainT<3,coord_t> point_space = input.domain;
+            Point<3,coord_t> num_blocks =
               default_select_num_blocks<3>(procs.size(), point_space.bounds);
             default_decompose_points<3>(point_space, procs,
                 num_blocks, false/*recurse*/,
@@ -1223,21 +1223,21 @@ namespace Legion {
       {
         case 1:
           {
-            Realm::ZIndexSpace<1,coord_t> point_space = input.domain;
+            DomainT<1,coord_t> point_space = input.domain;
             if (remote.size() > 1) {
               if (total_points <= local.size()) {
-                Realm::ZPoint<1,coord_t> num_blocks(local.size());
+                Point<1,coord_t> num_blocks(local.size());
                 default_decompose_points<1>(point_space, local,
                     num_blocks, false/*recurse*/,
                     stealing_enabled, output.slices);
               } else {
-                Realm::ZPoint<1,coord_t> num_blocks(remote.size());
+                Point<1,coord_t> num_blocks(remote.size());
                 default_decompose_points<1>(point_space, remote,
                     num_blocks, true/*recurse*/,
                     stealing_enabled, output.slices);
               }
             } else {
-              Realm::ZPoint<1,coord_t> num_blocks(local.size());
+              Point<1,coord_t> num_blocks(local.size());
               default_decompose_points<1>(point_space, local,
                   num_blocks, false/*recurse*/,
                   stealing_enabled, output.slices);
@@ -1246,23 +1246,23 @@ namespace Legion {
           }
         case 2:
           {
-            Realm::ZIndexSpace<2,coord_t> point_space = input.domain;
+            DomainT<2,coord_t> point_space = input.domain;
             if (remote.size() > 1) {
               if (total_points <= local.size()) {
-                Realm::ZPoint<2,coord_t> num_blocks =
+                Point<2,coord_t> num_blocks =
                   default_select_num_blocks<2>(local.size(),point_space.bounds);
                 default_decompose_points<2>(point_space, local,
                     num_blocks, false/*recurse*/,
                     stealing_enabled, output.slices);
               } else {
-                Realm::ZPoint<2,coord_t> num_blocks =
+                Point<2,coord_t> num_blocks =
                  default_select_num_blocks<2>(remote.size(),point_space.bounds);
                 default_decompose_points<2>(point_space, remote,
                     num_blocks, true/*recurse*/,
                     stealing_enabled, output.slices);
               }
             } else {
-              Realm::ZPoint<2,coord_t> num_blocks =
+              Point<2,coord_t> num_blocks =
                 default_select_num_blocks<2>(local.size(), point_space.bounds);
               default_decompose_points<2>(point_space, local,
                   num_blocks, false/*recurse*/,
@@ -1272,23 +1272,23 @@ namespace Legion {
           }
         case 3:
           {
-            Realm::ZIndexSpace<3,coord_t> point_space = input.domain;
+            DomainT<3,coord_t> point_space = input.domain;
             if (remote.size() > 1) {
               if (total_points <= local.size()) {
-                Realm::ZPoint<3,coord_t> num_blocks =
+                Point<3,coord_t> num_blocks =
                   default_select_num_blocks<3>(local.size(),point_space.bounds);
                 default_decompose_points<3>(point_space, local,
                     num_blocks, false/*recurse*/,
                     stealing_enabled, output.slices);
               } else {
-                Realm::ZPoint<3,coord_t> num_blocks =
+                Point<3,coord_t> num_blocks =
                  default_select_num_blocks<3>(remote.size(),point_space.bounds);
                 default_decompose_points<3>(point_space, remote,
                     num_blocks, true/*recurse*/,
                     stealing_enabled, output.slices);
               }
             } else {
-              Realm::ZPoint<3,coord_t> num_blocks =
+              Point<3,coord_t> num_blocks =
                 default_select_num_blocks<3>(local.size(), point_space.bounds);
               default_decompose_points<3>(point_space, local,
                   num_blocks, false/*recurse*/,

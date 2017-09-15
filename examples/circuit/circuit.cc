@@ -183,12 +183,12 @@ void top_level_task(const Task *task,
       wires_req.add_field(FID_WIRE_VOLTAGE+i);
     PhysicalRegion wires = runtime->map_region(ctx, wires_req);
     wires.wait_until_valid();
-    AccessorRO<float> fa_wire_currents[WIRE_SEGMENTS];
+    AccessorROfloat fa_wire_currents[WIRE_SEGMENTS];
     for (int i = 0; i < WIRE_SEGMENTS; i++)
-      fa_wire_currents[i] = AccessorRO<float>(wires, FID_CURRENT+i);
-    AccessorRO<float> fa_wire_voltages[WIRE_SEGMENTS-1];
+      fa_wire_currents[i] = AccessorROfloat(wires, FID_CURRENT+i);
+    AccessorROfloat fa_wire_voltages[WIRE_SEGMENTS-1];
     for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
-      fa_wire_voltages[i] = AccessorRO<float>(wires, FID_WIRE_VOLTAGE+i);
+      fa_wire_voltages[i] = AccessorROfloat(wires, FID_WIRE_VOLTAGE+i);
 
     for (int i = 0; i < (num_pieces * wires_per_piece); i++)
     {

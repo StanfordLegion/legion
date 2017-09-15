@@ -2427,7 +2427,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
-      Realm::ZPoint<1,coord_t> color(c);
+      Point<1,coord_t> color(c);
       IndexSpace result = runtime->get_index_subspace(p, &color,
                     NT_TemplateHelper::encode_tag<1,coord_t>());
       resume_mapper_call(ctx);
@@ -2446,21 +2446,21 @@ namespace Legion {
       {
         case 1:
           {
-            Realm::ZPoint<1,coord_t> point(color);
+            Point<1,coord_t> point(color);
             result = runtime->get_index_subspace(p, &point,
                 NT_TemplateHelper::encode_tag<1,coord_t>());
             break;
           }
         case 2:
           {
-            Realm::ZPoint<2,coord_t> point(color);
+            Point<2,coord_t> point(color);
             result = runtime->get_index_subspace(p, &point,
                 NT_TemplateHelper::encode_tag<2,coord_t>());
             break;
           }
         case 3:
           {
-            Realm::ZPoint<3,coord_t> point(color);
+            Point<3,coord_t> point(color);
             result = runtime->get_index_subspace(p, &point,
                 NT_TemplateHelper::encode_tag<3,coord_t>());
             break;
@@ -2493,21 +2493,21 @@ namespace Legion {
       {
         case 1:
           {
-            Realm::ZIndexSpace<1,coord_t> realm_is;
+            DomainT<1,coord_t> realm_is;
             runtime->get_index_space_domain(handle, &realm_is, type_tag);
             result = realm_is;
             break;
           }
         case 2:
           {
-            Realm::ZIndexSpace<2,coord_t> realm_is;
+            DomainT<2,coord_t> realm_is;
             runtime->get_index_space_domain(handle, &realm_is, type_tag);
             result = realm_is;
             break;
           }
         case 3:
           {
-            Realm::ZIndexSpace<3,coord_t> realm_is;
+            DomainT<3,coord_t> realm_is;
             runtime->get_index_space_domain(handle, &realm_is, type_tag);
             result = realm_is;
             break;
@@ -2566,7 +2566,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
-      Realm::ZPoint<1,coord_t> point;
+      Point<1,coord_t> point;
       runtime->get_index_space_color_point(handle, &point,
                 NT_TemplateHelper::encode_tag<1,coord_t>());
       resume_mapper_call(ctx);
@@ -2732,7 +2732,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
-      Realm::ZPoint<1,coord_t> point(color);
+      Point<1,coord_t> point(color);
       LogicalRegion result = runtime->get_logical_subregion_by_color(par,
                       &point, NT_TemplateHelper::encode_tag<1,coord_t>());
       resume_mapper_call(ctx);
@@ -2750,21 +2750,21 @@ namespace Legion {
       {
         case 1:
           {
-            Realm::ZPoint<1,coord_t> point(color);
+            Point<1,coord_t> point(color);
             result = runtime->get_logical_subregion_by_color(par, &point,
                               NT_TemplateHelper::encode_tag<1,coord_t>());
             break;
           }
         case 2:
           {
-            Realm::ZPoint<2,coord_t> point(color);
+            Point<2,coord_t> point(color);
             result = runtime->get_logical_subregion_by_color(par, &point,
                               NT_TemplateHelper::encode_tag<2,coord_t>());
             break;
           }
         case 3:
           {
-            Realm::ZPoint<3,coord_t> point(color);
+            Point<3,coord_t> point(color);
             result = runtime->get_logical_subregion_by_color(par, &point,
                               NT_TemplateHelper::encode_tag<3,coord_t>());
             break;
@@ -2795,7 +2795,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
-      Realm::ZPoint<1,coord_t> point;
+      Point<1,coord_t> point;
       runtime->get_logical_region_color(handle, &point, 
             NT_TemplateHelper::encode_tag<1,coord_t>());
       resume_mapper_call(ctx);

@@ -300,9 +300,11 @@ namespace Legion {
               itr.valid; itr.step())
         {
           if (itr.rect.volume() == 1)
-            LegionSpy::log_index_space_point(handle.get_id(), itr.rect.lo);
+            LegionSpy::log_index_space_point(handle.get_id(), 
+                                             Point<DIM,T>(itr.rect.lo));
           else
-            LegionSpy::log_index_space_rect(handle.get_id(), itr.rect);
+            LegionSpy::log_index_space_rect(handle.get_id(), 
+                                            Rect<DIM,T>(itr.rect));
         }
       }
       else
@@ -750,7 +752,7 @@ namespace Legion {
     {
       Realm::ZIndexSpace<DIM,T> space;
       get_realm_index_space(space, true/*tight*/);
-      return Domain(space);
+      return Domain(DomainT<DIM,T>(space));
     }
 
     //--------------------------------------------------------------------------
@@ -771,7 +773,7 @@ namespace Legion {
     {
       Realm::ZPoint<DIM,T> color_point;
       delinearize_color(c, &color_point, handle.get_type_tag());
-      return DomainPoint(color_point);
+      return DomainPoint(Point<DIM,T>(color_point));
     }
 
     //--------------------------------------------------------------------------
@@ -2774,7 +2776,7 @@ namespace Legion {
     void IndexSpaceNodeT<DIM,T>::get_launch_space_domain(Domain &launch_domain)
     //--------------------------------------------------------------------------
     {
-      Realm::ZIndexSpace<DIM,T> local_space;
+      DomainT<DIM,T> local_space;
       get_realm_index_space(local_space, true/*tight*/);
       launch_domain = local_space;
     }
@@ -2836,7 +2838,8 @@ namespace Legion {
       get_realm_index_space(local_space, true/*tight*/);
       for (Realm::ZIndexSpaceIterator<DIM,T> itr(local_space); 
             itr.valid; itr.step())
-        LegionSpy::log_launch_index_space_rect<DIM>(op_id, itr.rect);
+        LegionSpy::log_launch_index_space_rect<DIM>(op_id, 
+                                                    Rect<DIM,T>(itr.rect));
     }
 
     /////////////////////////////////////////////////////////////
