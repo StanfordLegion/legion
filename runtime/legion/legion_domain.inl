@@ -198,7 +198,7 @@ namespace Legion {
 
   //----------------------------------------------------------------------------
   template<int M, int N, typename T> __CUDA_HD__
-  inline Matrix<M,N,T>::Matrix(void)
+  inline Transform<M,N,T>::Transform(void)
     : Realm::ZMatrix<M,N,T>()
   //----------------------------------------------------------------------------
   {
@@ -206,7 +206,7 @@ namespace Legion {
 
   //----------------------------------------------------------------------------
   template<int M, int N, typename T> template<typename T2> __CUDA_HD__
-  inline Matrix<M,N,T>::Matrix(const Matrix<M,N,T2> &rhs)
+  inline Transform<M,N,T>::Transform(const Transform<M,N,T2> &rhs)
     : Realm::ZMatrix<M,N,T>(rhs)
   //----------------------------------------------------------------------------
   {
@@ -214,7 +214,7 @@ namespace Legion {
 
   //----------------------------------------------------------------------------
   template<int M, int N, typename T> template<typename T2> __CUDA_HD__
-  inline Matrix<M,N,T>::Matrix(const Realm::ZMatrix<M,N,T2> &rhs)
+  inline Transform<M,N,T>::Transform(const Realm::ZMatrix<M,N,T2> &rhs)
     : Realm::ZMatrix<M,N,T>(rhs)
   //----------------------------------------------------------------------------
   {
@@ -222,7 +222,8 @@ namespace Legion {
 
   //----------------------------------------------------------------------------
   template<int M, int N, typename T> template<typename T2> __CUDA_HD__
-  inline Matrix<M,N,T>& Matrix<M,N,T>::operator=(const Matrix<M,N,T2> &rhs)
+  inline Transform<M,N,T>& Transform<M,N,T>::operator=(
+                                                   const Transform<M,N,T2> &rhs)
   //----------------------------------------------------------------------------
   {
     for (int i = 0; i < M; i++)
@@ -232,7 +233,7 @@ namespace Legion {
 
   //----------------------------------------------------------------------------
   template<int M, int N, typename T> template<typename T2> __CUDA_HD__
-  inline Matrix<M,N,T>& Matrix<M,N,T>::operator=(
+  inline Transform<M,N,T>& Transform<M,N,T>::operator=(
                                               const Realm::ZMatrix<M,N,T2> &rhs)
   //----------------------------------------------------------------------------
   {

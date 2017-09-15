@@ -3475,7 +3475,7 @@ namespace Legion {
       IndexPartitionT<DIM,COORD_T> create_partition_by_restriction(Context ctx,
                                 IndexSpaceT<DIM,COORD_T> parent,
                                 IndexSpaceT<COLOR_DIM,COORD_T> color_space,
-                                Matrix<DIM,COLOR_DIM,COORD_T> transform,
+                                Transform<DIM,COLOR_DIM,COORD_T> transform,
                                 Rect<DIM,COORD_T> extent,
                                 PartitionKind part_kind = COMPUTE_KIND,
                                 Color color = AUTO_GENERATE_ID);

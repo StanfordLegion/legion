@@ -77,25 +77,25 @@ namespace Legion {
   };
 
   /**
-   * \class Matrix 
+   * \class Transform 
    * Our way of importing the templated Realm Rect class
    * into the Legion namespace without c++11 features
    */
   template<int M, int N, typename T = coord_t>
-  struct Matrix : public Realm::ZMatrix<M,N,T> {
+  struct Transform : public Realm::ZMatrix<M,N,T> {
   public:
     __CUDA_HD__
-    Matrix(void);
+    Transform(void);
     // copies allow type coercion (assuming the underlying type does)
     template<typename T2> __CUDA_HD__
-    Matrix(const Matrix<M,N,T2> &rhs);
+    Transform(const Transform<M,N,T2> &rhs);
     template<typename T2> __CUDA_HD__
-    Matrix(const Realm::ZMatrix<M,N,T2> &rhs);
+    Transform(const Realm::ZMatrix<M,N,T2> &rhs);
   public:
     template<typename T2> __CUDA_HD__
-    Matrix<M,N,T>& operator=(const Matrix<M,N,T2> &rhs);
+    Transform<M,N,T>& operator=(const Transform<M,N,T2> &rhs);
     template<typename T2> __CUDA_HD__
-    Matrix<M,N,T>& operator=(const Realm::ZMatrix<M,N,T2> &rhs);
+    Transform<M,N,T>& operator=(const Realm::ZMatrix<M,N,T2> &rhs);
   };
 
   /**

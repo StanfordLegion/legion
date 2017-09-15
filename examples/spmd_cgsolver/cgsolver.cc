@@ -817,7 +817,7 @@ bool spmd_main_task(const Task *task,
 	  else
 	    r_subset.hi[dir] = r_subset.lo[dir];  // just 1 plane
 	  //std::cout << "dir=" << dir << " side=" << side << " -> " << r_parent << " -> " << r_subset << "\n";
-          Matrix<3,1> transform;
+          Transform<3,1> transform;
           transform[0][0] = 0;
           transform[1][0] = 0;
           transform[2][0] = 0;

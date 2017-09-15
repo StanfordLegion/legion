@@ -139,7 +139,7 @@ void top_level_task(const Task *task,
     Rect<1> rect = dom; 
     // Make two sub-regions, one on the left, and one on the right
     Rect<1> extent(rect.lo, rect.lo[0]+(ORDER-1));
-    Matrix<1,1> transform;
+    Transform<1,1> transform;
     transform[0][0] = (rect.hi[0]-(ORDER-1)) - rect.lo[0];
     IndexPartition ghost_ip = runtime->create_partition_by_restriction(ctx,
         subspace, ghost_color_is, transform, extent, DISJOINT_KIND);

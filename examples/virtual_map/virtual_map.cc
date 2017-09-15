@@ -187,7 +187,7 @@ void make_data_task(const Task *task,
   // create a new partition with a known part_color so that other tasks can find
   // the color space will consist of the single color '0'
   IndexSpaceT<1> color_space = runtime->create_index_space(ctx, Rect<1>(0, 0));
-  Matrix<1,1> transform;
+  Transform<1,1> transform;
   transform[0][0] = 0;
   IndexPartition alloc_ip = runtime->create_partition_by_restriction(ctx, my_is,
                                                                      color_space,

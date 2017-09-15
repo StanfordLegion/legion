@@ -316,7 +316,7 @@ void spmd_task(const Task *task,
         Rect<1> rect = runtime->get_index_space_domain(ctx, neighbor_is);
         // now create the partitioning
         IndexPartition ghost_ip;
-        Matrix<1,1> transform;
+        Transform<1,1> transform;
         transform[0][0] = 0;
         // The left neighbor needs a right ghost and the right neighbor needs a left ghost
         if (neighbor == NEIGHBOR_LEFT) 

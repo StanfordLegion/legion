@@ -4006,7 +4006,7 @@ namespace Legion {
     IndexPartitionT<DIM,T> Runtime::create_partition_by_restriction(Context ctx,
                                       IndexSpaceT<DIM,T> parent,
                                       IndexSpaceT<COLOR_DIM,T> color_space,
-                                      Matrix<DIM,COLOR_DIM,T> transform,
+                                      Transform<DIM,COLOR_DIM,T> transform,
                                       Rect<DIM,T> extent,
                                       PartitionKind part_kind, Color color)
     //--------------------------------------------------------------------------
@@ -4057,7 +4057,7 @@ namespace Legion {
       IndexSpaceT<DIM,T> color_space = create_index_space(ctx, 
                                     Rect<DIM,T>(zeroes, colors));
       // Now make the transform matrix
-      Matrix<DIM,DIM,T> transform;
+      Transform<DIM,DIM,T> transform;
       for (int i = 0; i < DIM; i++)
         for (int j = 0; j < DIM; j++)
           if (i == j)
