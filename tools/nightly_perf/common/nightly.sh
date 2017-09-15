@@ -19,6 +19,9 @@ for branch in performance_test master dma deppart; do
         git clone -b $branch https://github.com/StanfordLegion/legion.git _legion_$branch
     fi
     pushd _legion_$branch
+    pushd language
+    ./scripts/setup_env_titan.bash
+    popd
     ./test.py --test=perf
     popd
 done
