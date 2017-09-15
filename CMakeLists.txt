@@ -80,7 +80,11 @@ endif()
 #OpenMP
 #------------------------------------------------------------------------------#
 option(REALM_USE_OPENMP "Use OpenMP" OFF)
-option (REALM_OPENMP_GOMP_SUPPORT "Gopenmp suppotr for OpenMP" OFF)
+if(REALM_USE_OPENMP)
+  option(REALM_OPENMP_GOMP_SUPPORT "Gopenmp suppotr for OpenMP" ON)
+  option(REALM_OPENMP_KMP_SUPPORT "KMP support for OpenMP" ON)
+message (warning "KMP_S = " ${REALM_OPENMP_KMP_SUPPORT})
+endif()
 #------------------------------------------------------------------------------#
 # GASNet configuration
 #------------------------------------------------------------------------------#

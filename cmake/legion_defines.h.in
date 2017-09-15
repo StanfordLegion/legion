@@ -50,7 +50,9 @@
 #ifndef REALM_OPENMP_GOMP_SUPPORT
 #cmakedefine REALM_OPENMP_GOMP_SUPPORT
 #endif
-
+#ifndef REALM_OPENMP_KMP_SUPPORT
+#cmakedefine REALM_OPENMP_KMP_SUPPORT
+#endif
 
 #include "legion.h"
 
