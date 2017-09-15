@@ -82,6 +82,15 @@ if(Legion_USE_GASNet)
   list(APPEND LOW_RUNTIME_SRC activemsg.h activemsg.cc)
 endif()
 
+if (REALM_USE_OPENMP)
+  list(APPEND LOW_RUNTIME_SRC
+    realm/openmp/openmp_module.h realm/openmp/openmp_module.cc
+    realm/openmp/openmp_threadpool.h realm/openmp/openmp_threadpool.cc
+    realm/openmp/openmp_api.cc 
+    realm/openmp/openmp_threadpool.inl
+  )
+endif()
+
 list(APPEND LOW_RUNTIME_SRC
   accessor.h
   arrays.h
