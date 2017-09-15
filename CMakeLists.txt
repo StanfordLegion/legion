@@ -76,7 +76,11 @@ if(Legion_USE_HWLOC)
     DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
   )
 endif()
-
+#-----------------------------------------------------------------------------#
+#OpenMP
+#------------------------------------------------------------------------------#
+option(REALM_USE_OPENMP "Use OpenMP" OFF)
+option (REALM_OPENMP_GOMP_SUPPORT "Gopenmp suppotr for OpenMP" OFF)
 #------------------------------------------------------------------------------#
 # GASNet configuration
 #------------------------------------------------------------------------------#
