@@ -29,7 +29,7 @@ elif platform.system() == 'Darwin':
 else:
     raise Exception('Unknown platform: %s' % platform.system())
 
-perf_cores_per_node = os.environ('PERF_CORES_PER_NODE')
+perf_cores_per_node = os.environ['PERF_CORES_PER_NODE']
 
 # Choose a reasonable number of application cores given the
 # available physical cores.
