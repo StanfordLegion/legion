@@ -910,7 +910,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionInfo::clone_to_depth(unsigned depth, const FieldMask &mask,
-                                     VersionInfo &target_info) const
+                               InnerContext *context, VersionInfo &target_info,
+                               std::set<RtEvent> &ready_events) const
     //--------------------------------------------------------------------------
     {
       // If the upper bound nodes are the same, we are done
@@ -929,11 +930,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(state != NULL);
 #endif
-        FieldMask split_overlap = split_masks[idx] & mask;
+        const FieldMask split_overlap = split_masks[idx] & mask;
         if (!!split_overlap)
           target_info.record_split_fields(state->node, split_overlap);
         // Also copy over the needed version states
-        state->clone_to(mask, target_info);
+        state->clone_to(mask, split_overlap, context, target_info,ready_events);
       }
     }
 
@@ -4067,8 +4068,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalState::clone_to(const FieldMask &mask, 
-                                 VersionInfo &target_info) const
+    void PhysicalState::clone_to(const FieldMask &version_mask, 
+                                 const FieldMask &split_mask,
+                                 InnerContext *context,
+                                 VersionInfo &target_info,
+                                 std::set<RtEvent> &ready_events) const
     //--------------------------------------------------------------------------
     {
       // Should only be calling this on path only nodes
@@ -4077,21 +4081,68 @@ namespace Legion {
 #endif
       if (!version_states.empty())
       {
-        for (PhysicalVersions::iterator it = version_states.begin();
-              it != version_states.end(); it++)
+        // Three different cases here depending on whether we have a split mask
+        if (!split_mask)
         {
-          FieldMask overlap = it->second & mask;
-          if (!overlap)
-            continue;
-          target_info.add_current_version(it->first, overlap, path_only);
+          // No split mask: just need initial versions of everything
+          for (PhysicalVersions::iterator it = version_states.begin();
+                it != version_states.end(); it++)
+          {
+            const FieldMask overlap = it->second & version_mask;
+            if (!overlap)
+              continue;
+            target_info.add_current_version(it->first, overlap, path_only);
+            it->first->request_initial_version_state(context, overlap,
+                                                     ready_events);
+          }
+        }
+        else if (split_mask == version_mask)
+        {
+          // All fields are split, need final versions of everything
+          for (PhysicalVersions::iterator it = version_states.begin();
+                it != version_states.end(); it++)
+          {
+            const FieldMask overlap = it->second & version_mask;
+            if (!overlap)
+              continue;
+            target_info.add_current_version(it->first, overlap, path_only);
+            it->first->request_final_version_state(context, overlap,
+                                                   ready_events);
+          }
+        }
+        else
+        {
+          // Mixed, need to figure out which ones we need initial/final versions
+          for (PhysicalVersions::iterator it = version_states.begin();
+                it != version_states.end(); it++)
+          {
+            FieldMask overlap = it->second & version_mask;
+            if (!overlap)
+              continue;
+            target_info.add_current_version(it->first, overlap, path_only);
+            const FieldMask split_overlap = overlap & split_mask; 
+            if (!!split_overlap)
+            {
+              it->first->request_final_version_state(context, split_overlap,
+                                                     ready_events);
+              const FieldMask non_split_overlap = version_mask - split_overlap;
+              if (!!non_split_overlap)
+                it->first->request_initial_version_state(context, 
+                                  non_split_overlap, ready_events);
+            }
+            else
+              it->first->request_initial_version_state(context, overlap,
+                                                       ready_events);
+          }
         }
       }
+      // For advance states we don't need to request any versions
       if (!advance_states.empty())
       {
         for (PhysicalVersions::iterator it = advance_states.begin();
               it != advance_states.end(); it++)
         {
-          FieldMask overlap = it->second & mask;
+          FieldMask overlap = it->second & version_mask;
           if (!overlap)
             continue;
           target_info.add_advance_version(it->first, overlap, path_only);

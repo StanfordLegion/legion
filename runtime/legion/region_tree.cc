@@ -1725,7 +1725,8 @@ namespace Legion {
         TaskContext *parent_ctx = op->get_context();
         unsigned parent_req_index = op->find_parent_index(idx);
         parent_ctx->find_parent_version_info(parent_req_index, depth, 
-                                             user_mask, version_info);
+                                             user_mask, context, 
+                                             version_info, ready_events);
       }
       // Keep track of any unversioned fields
       FieldMask unversioned_mask = user_mask;

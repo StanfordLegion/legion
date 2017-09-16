@@ -254,7 +254,8 @@ namespace Legion {
       void copy_to(VersionInfo &rhs);
       // Cloning information for virtual mappings
       void clone_to_depth(unsigned depth, const FieldMask &mask,
-                          VersionInfo &target_info) const;
+                          InnerContext *context, VersionInfo &target_info,
+                          std::set<RtEvent> &ready_events) const;
     public:
       PhysicalState* find_physical_state(RegionTreeNode *node); 
       const FieldMask& get_split_mask(unsigned depth) const;
@@ -820,7 +821,9 @@ namespace Legion {
                    InnerContext *context, const FieldMask &closing_mask);
     public:
       PhysicalState* clone(void) const;
-      void clone_to(const FieldMask &mask, VersionInfo &target_info) const;
+      void clone_to(const FieldMask &version_mask, const FieldMask &split_mask,
+                    InnerContext *context, VersionInfo &target_info,
+                    std::set<RtEvent> &ready_events) const;
     public:
       void print_physical_state(const FieldMask &capture_mask,
           LegionMap<ColorPoint,FieldMask>::aligned &to_traverse,

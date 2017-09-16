@@ -2477,7 +2477,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InnerContext::find_parent_version_info(unsigned index, unsigned depth,
-                       const FieldMask &version_mask, VersionInfo &version_info)
+                     const FieldMask &version_mask, InnerContext *context,
+                     VersionInfo &version_info, std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2491,7 +2492,8 @@ namespace Legion {
         return;
       // We now need to clone any version info from the parent into the child
       const VersionInfo &parent_info = owner_task->get_version_info(index);  
-      parent_info.clone_to_depth(depth, version_mask, version_info);
+      parent_info.clone_to_depth(depth, version_mask, context, 
+                                 version_info, ready_events);
     }
 
     //--------------------------------------------------------------------------
@@ -7353,7 +7355,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteContext::find_parent_version_info(unsigned index, unsigned depth,
-                       const FieldMask &version_mask, VersionInfo &version_info)
+                     const FieldMask &version_mask, InnerContext *context,
+                     VersionInfo &version_info, std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7367,7 +7370,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(index < version_infos.size());
 #endif
-      version_infos[index].clone_to_depth(depth, version_mask, version_info);
+      version_infos[index].clone_to_depth(depth, version_mask, context,
+                                          version_info, ready_events);
     }
 
     //--------------------------------------------------------------------------
@@ -8847,7 +8851,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LeafContext::find_parent_version_info(unsigned index, unsigned depth,
-                       const FieldMask &version_mask, VersionInfo &version_info)
+                     const FieldMask &version_mask, InnerContext *context,
+                     VersionInfo &version_info, std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
       assert(false);
@@ -9996,11 +10001,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void InlineContext::find_parent_version_info(unsigned index, unsigned depth,
-                       const FieldMask &version_mask, VersionInfo &version_info)
+                     const FieldMask &version_mask, InnerContext *context,
+                     VersionInfo &version_info, std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
-      enclosing->find_parent_version_info(index, depth, 
-                                          version_mask, version_info);
+      enclosing->find_parent_version_info(index, depth, version_mask, 
+                                          context, version_info, ready_events);
     }
 
     //--------------------------------------------------------------------------
