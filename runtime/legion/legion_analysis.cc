@@ -4876,6 +4876,9 @@ namespace Legion {
       // Check to see if we are the owner
       if (!is_owner)
       {
+        // First filter out any of our current version states that are
+        // no longer valid for the given fields so we're ready for the update
+        invalidate_version_infos(mask);
         // First send back the message to the owner to do the advance there
         RtEvent advanced = send_remote_advance(mask, update_parent_state,
                                                logical_context_uid,
@@ -4883,9 +4886,6 @@ namespace Legion {
                                                dedup_advances, advance_epoch,
                                                dirty_previous, proj_info);
         applied_events.insert(advanced); 
-        // Now filter out any of our current version states that are
-        // no longer valid for the given fields
-        invalidate_version_infos(mask);
         return;
       }
       // If we are deduplicating advances, do that now
