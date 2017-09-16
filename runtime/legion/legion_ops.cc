@@ -6655,6 +6655,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void InterCloseOp::perform_disjoint_close(RegionTreeNode *child_to_close,
                                               DisjointCloseInfo &close_info,
+                                              InnerContext *context,
                                               std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
@@ -6664,7 +6665,7 @@ namespace Legion {
       assert(child_depth > 0);
 #endif
       version_info.clone_to_depth(child_depth-1, close_info.close_mask,
-                                  close_info.version_info);
+                        context, close_info.version_info, ready_events);
       runtime->forest->physical_perform_close(requirement,
                                               close_info.version_info,
                                               this, 0/*idx*/, 
@@ -6838,6 +6839,7 @@ namespace Legion {
                 DisjointCloseArgs args;
                 args.proxy_this = this;
                 args.child_node = it->first;
+                args.context = find_physical_context(0/*idx*/);
                 RtEvent done_event = runtime->issue_runtime_meta_task(args,
                     LG_LATENCY_PRIORITY, this, ready_event);
                 // Add the done event to the map applied events
@@ -6846,7 +6848,8 @@ namespace Legion {
               }
             }
             // If we make it here, we can do the close of the child immediately
-            perform_disjoint_close(it->first,it->second,map_applied_conditions);
+            perform_disjoint_close(it->first, it->second,
+                     find_physical_context(0/*idx*/), map_applied_conditions);
           }
         }
       }
@@ -7164,7 +7167,7 @@ namespace Legion {
                                                    close_args->child_node);
       std::set<RtEvent> done_events;
       close_args->proxy_this->perform_disjoint_close(close_args->child_node,
-                                                     *close_info, done_events);
+                              *close_info, close_args->context, done_events);
       // We actually have to wait for these events to be done
       // since our completion event was put in the map_applied conditions
       if (!done_events.empty())
