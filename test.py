@@ -33,6 +33,9 @@ else:
 # available physical cores.
 app_cores = max(physical_cores - 2, 1)
 
+# for backward-compatibility, use app_cores if PERF_CORES_PER_NODE is not specified
+perf_cores_per_node = os.environ.get('PERF_CORES_PER_NODE', str(app_cores))
+
 legion_cxx_tests = [
     # Tutorial
     ['tutorial/00_hello_world/hello_world', []],
@@ -85,7 +88,7 @@ legion_hdf_cxx_tests = [
 legion_cxx_perf_tests = [
     # Circuit: Heavy Compute
     ['examples/circuit/circuit',
-     ['-l', '10', '-p', str(app_cores), '-npp', '2500', '-wpp', '10000', '-ll:cpu', str(app_cores)]],
+     ['-l', '10', '-p', perf_cores_per_node, '-npp', '2500', '-wpp', '10000', '-ll:cpu', perf_cores_per_node]],
 
     # Circuit: Light Compute
     ['examples/circuit/circuit',
@@ -95,8 +98,8 @@ legion_cxx_perf_tests = [
 regent_perf_tests = [
     # Circuit: Heavy Compute
     ['language/examples/circuit_sparse.rg',
-     ['-l', '10', '-p', str(app_cores), '-npp', '2500', '-wpp', '10000', '-ll:cpu', str(app_cores),
-      '-fflow-spmd-shardsize', str(app_cores)]],
+     ['-l', '10', '-p', perf_cores_per_node, '-npp', '2500', '-wpp', '10000', '-ll:cpu', perf_cores_per_node,
+      '-fflow-spmd-shardsize', perf_cores_per_node]],
 
     # Circuit: Light Compute
     ['language/examples/circuit_sparse.rg',
@@ -107,8 +110,8 @@ regent_perf_tests = [
     ['language/examples/pennant_fast.rg',
      ['pennant.tests/sedovbig3x30/sedovbig.pnt',
       '-seq_init', '0', '-par_init', '1', '-print_ts', '1', '-prune', '5',
-      '-npieces', str(app_cores), '-numpcx', '1', '-numpcy', str(app_cores),
-      '-ll:csize', '8192', '-ll:cpu', str(app_cores), '-fflow-spmd-shardsize', str(app_cores),
+      '-npieces', perf_cores_per_node, '-numpcx', '1', '-numpcy', perf_cores_per_node,
+      '-ll:csize', '8192', '-ll:cpu', perf_cores_per_node, '-fflow-spmd-shardsize', perf_cores_per_node,
       '-fvectorize-unsafe', '1']],
 ]
 
@@ -264,7 +267,12 @@ def git_branch_name(repo_dir):
     return None
 
 def run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
+    sys.stdout.flush()
     flags = ['-logfile', 'out_%.log']
+
+    if not 'PERF_CORES_PER_NODE' in env:
+      print('perf test requires defintion of env var PERF_CORES_PER_NODE')
+      return None
 
     # Performance test configuration:
     metadata = {
@@ -339,6 +347,7 @@ def run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     # Run Legion C++ performance tests.
     runner = os.path.join(root_dir, 'perf.py')
     launcher = [runner] # Note: LAUNCHER is still passed via the environment
+
     run_cxx(legion_cxx_perf_tests, flags, launcher, root_dir, bin_dir, cxx_env, thread_count)
 
     # Run Regent performance tests.
