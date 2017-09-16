@@ -29,11 +29,12 @@ elif platform.system() == 'Darwin':
 else:
     raise Exception('Unknown platform: %s' % platform.system())
 
-perf_cores_per_node = os.environ['PERF_CORES_PER_NODE']
-
 # Choose a reasonable number of application cores given the
 # available physical cores.
 app_cores = max(physical_cores - 2, 1)
+
+# for backward-compatibility, use app_cores if PERF_CORES_PER_NODE is not specified
+perf_cores_per_node = os.environ.get('PERF_CORES_PER_NODE', str(app_cores))
 
 legion_cxx_tests = [
     # Tutorial
