@@ -7512,12 +7512,6 @@ namespace Legion {
     idempotent_variant(registrar.idempotent_variant)
     //--------------------------------------------------------------------------
     { 
-#ifdef LEGION_SPY
-      // TODO: teach legion spy how to check the inner task optimization
-      // for now we'll just turn it off whenever we are going to be
-      // validating the runtime analysis
-      inner_variant = false;
-#endif
       if (udata != NULL)
       {
         user_data = malloc(user_data_size);
