@@ -129,9 +129,7 @@ def run_cxx(tests, flags, launcher, root_dir, bin_dir, env, thread_count):
             test_path = os.path.join(bin_dir, os.path.basename(test_file))
         else:
             test_path = os.path.join(root_dir, test_file)
-            print('make -C ', test_dir) #########
             cmd(['make', '-C', test_dir, '-j', str(thread_count)], env=env)
-        print(launcher, test_path, flags, test_flags) #########
         cmd(launcher + [test_path] + flags + test_flags, env=env, cwd=test_dir)
 
 def run_regent(tests, flags, launcher, root_dir, env, thread_count):
@@ -345,8 +343,6 @@ def run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
 
     # Build Regent first to avoid recompiling later.
     cmd([os.path.join(root_dir, 'language/travis.py'), '--install-only'], env=env)
-
-    sys.exit(-1)
 
     # Run Legion C++ performance tests.
     runner = os.path.join(root_dir, 'perf.py')
