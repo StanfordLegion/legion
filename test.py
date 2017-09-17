@@ -129,9 +129,7 @@ def run_cxx(tests, flags, launcher, root_dir, bin_dir, env, thread_count):
             test_path = os.path.join(bin_dir, os.path.basename(test_file))
         else:
             test_path = os.path.join(root_dir, test_file)
-            print('make -C ', test_dir) #########
             cmd(['make', '-C', test_dir, '-j', str(thread_count)], env=env)
-        print(launcher, test_path, flags, test_flags) #########
         cmd(launcher + [test_path] + flags + test_flags, env=env, cwd=test_dir)
 
 def run_regent(tests, flags, launcher, root_dir, env, thread_count):
@@ -269,12 +267,7 @@ def git_branch_name(repo_dir):
     return None
 
 def run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
-    sys.stdout.flush()
     flags = ['-logfile', 'out_%.log']
-
-    if not 'PERF_CORES_PER_NODE' in env:
-      print('perf test requires defintion of env var PERF_CORES_PER_NODE')
-      return None
 
     # Performance test configuration:
     metadata = {
@@ -346,12 +339,9 @@ def run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     # Build Regent first to avoid recompiling later.
     cmd([os.path.join(root_dir, 'language/travis.py'), '--install-only'], env=env)
 
-    sys.exit(-1)
-
     # Run Legion C++ performance tests.
     runner = os.path.join(root_dir, 'perf.py')
     launcher = [runner] # Note: LAUNCHER is still passed via the environment
-
     run_cxx(legion_cxx_perf_tests, flags, launcher, root_dir, bin_dir, cxx_env, thread_count)
 
     # Run Regent performance tests.
