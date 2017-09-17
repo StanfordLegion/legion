@@ -152,6 +152,9 @@ def symlink(from_path, to_path):
 def install_bindings(bindings_dir, runtime_dir, terra_dir, debug,
                      cuda, openmp, hdf, spy, gasnet, gasnet_dir, conduit,
                      clean_first, thread_count, extra_flags):
+
+    sys.exit(-1)
+
     env = dict(list(os.environ.items()) + [
         ('LG_RT_DIR', runtime_dir),
         ('TERRA_DIR', terra_dir),                           # for bindings
