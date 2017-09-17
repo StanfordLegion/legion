@@ -273,12 +273,7 @@ def git_branch_name(repo_dir):
     return None
 
 def run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
-    sys.stdout.flush()
     flags = ['-logfile', 'out_%.log']
-
-    if not 'PERF_CORES_PER_NODE' in env:
-      print('perf test requires defintion of env var PERF_CORES_PER_NODE')
-      return None
 
     # Performance test configuration:
     metadata = {
@@ -353,7 +348,6 @@ def run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     # Run Legion C++ performance tests.
     runner = os.path.join(root_dir, 'perf.py')
     launcher = [runner] # Note: LAUNCHER is still passed via the environment
-
     run_cxx(legion_cxx_perf_tests, flags, launcher, root_dir, bin_dir, cxx_env, thread_count)
 
     # Run Regent performance tests.
