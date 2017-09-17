@@ -126,7 +126,7 @@ namespace Realm {
     struct ValidMaskDataMessage {
       struct RequestArgs : public BaseMedium {
 	IndexSpace is;
-	unsigned block_id;
+	unsigned block_id, num_blocks;
 	coord_t first_element;
 	size_t num_elements;
 	coord_t first_enabled_elmt;
@@ -139,7 +139,8 @@ namespace Realm {
 				         RequestArgs,
 				         handle_request> Message;
       
-      static void send_request(gasnet_node_t target, IndexSpace is, unsigned block_id,
+      static void send_request(gasnet_node_t target, IndexSpace is,
+			       unsigned block_id, unsigned num_blocks,
 			       coord_t first_element, size_t num_elements,
 			       coord_t first_enabled_elmt, coord_t last_enabled_elmt,
 			       const void *data, size_t datalen, int payload_mode);

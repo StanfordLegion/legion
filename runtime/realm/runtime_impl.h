@@ -60,7 +60,8 @@ namespace Realm {
   class RegionInstanceImpl;
   class Module;
 
-  typedef LegionRuntime::LowLevel::MemPairCopierFactory DMAChannel;
+  class MemPairCopierFactory;
+  typedef MemPairCopierFactory DMAChannel;
 
     template <typename _ET, size_t _INNER_BITS, size_t _LEAF_BITS>
     class DynamicTableAllocator {

@@ -41,8 +41,8 @@
 // remote copy active messages from from lowlevel_dma.h for now
 #include <realm/transfer/lowlevel_dma.h>
 namespace Realm {
-  typedef LegionRuntime::LowLevel::RemoteCopyMessage RemoteCopyMessage;
-  typedef LegionRuntime::LowLevel::RemoteFillMessage RemoteFillMessage;
+  //typedef LegionRuntime::LowLevel::RemoteCopyMessage RemoteCopyMessage;
+  //typedef LegionRuntime::LowLevel::RemoteFillMessage RemoteFillMessage;
 };
 
 // create xd message and update bytes read/write messages
@@ -55,9 +55,9 @@ namespace Realm {
   typedef LegionRuntime::LowLevel::NotifyXferDesCompleteMessage NotifyXferDesCompleteMessage;
   typedef LegionRuntime::LowLevel::UpdateBytesWriteMessage UpdateBytesWriteMessage;
   typedef LegionRuntime::LowLevel::UpdateBytesReadMessage UpdateBytesReadMessage;
-  typedef LegionRuntime::LowLevel::RemoteIBAllocRequestAsync RemoteIBAllocRequestAsync;
-  typedef LegionRuntime::LowLevel::RemoteIBAllocResponseAsync RemoteIBAllocResponseAsync;
-  typedef LegionRuntime::LowLevel::RemoteIBFreeRequestAsync RemoteIBFreeRequestAsync;
+  //typedef LegionRuntime::LowLevel::RemoteIBAllocRequestAsync RemoteIBAllocRequestAsync;
+  //typedef LegionRuntime::LowLevel::RemoteIBAllocResponseAsync RemoteIBAllocResponseAsync;
+  //typedef LegionRuntime::LowLevel::RemoteIBFreeRequestAsync RemoteIBFreeRequestAsync;
 }
 
 #include <unistd.h>
@@ -993,10 +993,10 @@ namespace Realm {
       gasnet_coll_init(0, 0, 0, 0, 0);
 #endif
 
-      LegionRuntime::LowLevel::create_builtin_dma_channels(this);
+      create_builtin_dma_channels(this);
 
-      LegionRuntime::LowLevel::start_dma_worker_threads(dma_worker_threads,
-                                                        *core_reservations);
+      start_dma_worker_threads(dma_worker_threads,
+			       *core_reservations);
 
 #ifdef EVENT_TRACING
       // Always initialize even if we won't dump to file, otherwise segfaults happen
@@ -1099,9 +1099,9 @@ namespace Realm {
       
       // start dma system at the very ending of initialization
       // since we need list of local gpus to create channels
-      LegionRuntime::LowLevel::start_dma_system(dma_worker_threads,
-                                                pin_dma_threads, 100
-                                                ,*core_reservations);
+      start_dma_system(dma_worker_threads,
+		       pin_dma_threads, 100
+		       ,*core_reservations);
 
       // now that we've created all the processors/etc., we can try to come up with core
       //  allocations that satisfy everybody's requirements - this will also start up any
@@ -1766,8 +1766,8 @@ namespace Realm {
       // Shutdown all the threads
 
       // threads that cause inter-node communication have to stop first
-      LegionRuntime::LowLevel::stop_dma_worker_threads();
-      LegionRuntime::LowLevel::stop_dma_system();
+      stop_dma_worker_threads();
+      stop_dma_system();
       stop_activemsg_threads();
 
       sampling_profiler.shutdown();
@@ -1864,7 +1864,9 @@ namespace Realm {
 	return get_genevent_impl(e);
       if(id.is_barrier())
 	return get_barrier_impl(e);
-      assert(0);
+
+      log_runtime.fatal() << "invalid event handle: id=" << id;
+      assert(0 && "invalid event handle");
       return 0;
     }
 
@@ -1916,7 +1918,8 @@ namespace Realm {
       if(id.is_procgroup())
 	return &(get_procgroup_impl(id)->lock);
 
-      assert(0);
+      log_runtime.fatal() << "invalid reservation handle: id=" << id;
+      assert(0 && "invalid reservation handle");
       return 0;
     }
 
@@ -1956,7 +1959,9 @@ namespace Realm {
 	else
 	  return null_check(nodes[id.instance.owner_node].memories[id.instance.mem_idx]);
       }
-      assert(0);
+
+      log_runtime.fatal() << "invalid memory handle: id=" << id;
+      assert(0 && "invalid memory handle");
       return 0;
     }
 
@@ -1965,13 +1970,20 @@ namespace Realm {
       if(id.is_procgroup())
 	return get_procgroup_impl(id);
 
-      assert(id.is_processor());
+      if(!id.is_processor()) {
+	log_runtime.fatal() << "invalid processor handle: id=" << id;
+	assert(0 && "invalid processor handle");
+      }
+
       return null_check(nodes[id.proc.owner_node].processors[id.proc.proc_idx]);
     }
 
     ProcessorGroup *RuntimeImpl::get_procgroup_impl(ID id)
     {
-      assert(id.is_procgroup());
+      if(!id.is_procgroup()) {
+	log_runtime.fatal() << "invalid processor group handle: id=" << id;
+	assert(0 && "invalid processor group handle");
+      }
 
       Node *n = &nodes[id.pgroup.owner_node];
       ProcessorGroup *impl = n->proc_groups.lookup_entry(id.pgroup.pgroup_idx,
@@ -1982,7 +1994,10 @@ namespace Realm {
 
     IndexSpaceImpl *RuntimeImpl::get_index_space_impl(ID id)
     {
-      assert(id.is_idxspace());
+      if(!id.is_idxspace()) {
+	log_runtime.fatal() << "invalid index space handle: id=" << id;
+	assert(0 && "invalid index space handle");
+      }
 
       Node *n = &nodes[id.idxspace.owner_node];
       IndexSpaceImpl *impl = n->index_spaces.lookup_entry(id.idxspace.idxspace_idx,
@@ -1993,7 +2008,11 @@ namespace Realm {
 
     RegionInstanceImpl *RuntimeImpl::get_instance_impl(ID id)
     {
-      assert(id.is_instance());
+      if(!id.is_instance()) {
+	log_runtime.fatal() << "invalid instance handle: id=" << id;
+	assert(0 && "invalid instance handle");
+      }
+
       MemoryImpl *mem = get_memory_impl(id);
       
       AutoHSLLock al(mem->mutex);

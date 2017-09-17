@@ -1657,6 +1657,11 @@ namespace Realm {
       return ret;
     }
 
+    void ElementMask::Enumerator::set_pos(coord_t new_pos)
+    {
+      pos = new_pos;
+    }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -1739,22 +1744,31 @@ namespace Realm {
 
     Event IndexSpaceImpl::request_valid_mask(void)
     {
-      size_t num_elmts = StaticAccess<IndexSpaceImpl>(this)->num_elmts;
+      //size_t num_elmts = StaticAccess<IndexSpaceImpl>(this)->num_elmts;
       int valid_mask_owner = -1;
+
+      // we can test valid_mask_complete before taking the lock, but we have
+      //  to test it again inside
+      if(valid_mask_complete)
+	return Event::NO_EVENT;
       
       Event e;
       {
 	AutoHSLLock a(valid_mask_mutex);
 	
-	if(valid_mask != 0) {
-	  // if the mask exists, we've already requested it, so just provide
-	  //  the event that we have
+	// second (race-free) check now that we hold the lock
+	if(valid_mask_complete)
+	  return Event::NO_EVENT;
+
+	if(valid_mask_event.exists()) {
+	  // if the event exists, we've already requested the mask, so just
+	  //  provide the event that we have
           return valid_mask_event;
 	}
 	
-	valid_mask = new ElementMask(num_elmts);
+	valid_mask = 0; // deferred until we know num_elmts
 	valid_mask_owner = ID(me).idxspace.owner_node; // a good guess?
-	valid_mask_count = (valid_mask->raw_size() + 2047) >> 11;
+	valid_mask_count = 0; //(valid_mask->raw_size() + 2047) >> 11;
 	valid_mask_complete = false;
 	valid_mask_event = GenEventImpl::create_genevent()->current_event();
         e = valid_mask_event;
@@ -1838,9 +1852,11 @@ namespace Realm {
     size_t mask_len = r_impl->valid_mask->raw_size();
 
     // send data in 2KB blocks
+    unsigned num_blocks = (mask_len + ((1 << 11) - 1)) >> 11;
     unsigned block_id = 0;
     while(mask_len >= (1 << 11)) {
-      ValidMaskDataMessage::send_request(args.sender, args.is, block_id,
+      ValidMaskDataMessage::send_request(args.sender, args.is,
+					 block_id, num_blocks,
 					 mask->first_element,
 					 mask->num_elements,
 					 mask->first_enabled_elmt,
@@ -1853,7 +1869,8 @@ namespace Realm {
       block_id++;
     }
     if(mask_len) {
-      ValidMaskDataMessage::send_request(args.sender, args.is, block_id,
+      ValidMaskDataMessage::send_request(args.sender, args.is,
+					 block_id, num_blocks,
 					 mask->first_element,
 					 mask->num_elements,
 					 mask->first_enabled_elmt,
@@ -1890,26 +1907,40 @@ namespace Realm {
     Event to_trigger = Event::NO_EVENT;
     {
       AutoHSLLock a(r_impl->valid_mask_mutex);
-      log_meta.info() << "received valid mask data for " << args.is << ", " << datalen << " bytes (" << r_impl->valid_mask_count << " blocks expected)";
+      log_meta.info() << "received valid mask data for " << args.is << ", " << datalen << " bytes (" << args.num_blocks << " blocks expected)";
 
-      ElementMask *mask = r_impl->valid_mask;
-      assert(mask);
+      ElementMask *mask;
+      if(r_impl->valid_mask) {
+	mask = r_impl->valid_mask;
 
-      // make sure parameters match
-      if((mask->first_element != args.first_element) ||
-	 (mask->num_elements != args.num_elements) ||
-	 (mask->first_enabled_elmt != args.first_enabled_elmt) ||
-	 (mask->last_enabled_elmt != args.last_enabled_elmt)) {
-	log_meta.info() << "resizing valid mask for " << args.is << " (first=" << args.first_element << " num=" << args.num_elements << ")";
+	// make sure parameters match
+	if((mask->first_element != args.first_element) ||
+	   (mask->num_elements != args.num_elements) ||
+	   (mask->first_enabled_elmt != args.first_enabled_elmt) ||
+	   (mask->last_enabled_elmt != args.last_enabled_elmt)) {
+	  // SJT: should this actually happen any more?
+	  log_meta.warning() << "resizing valid mask for " << args.is << " (first=" << args.first_element << " num=" << args.num_elements << ")";
 
-	mask->first_element = args.first_element;
-	mask->num_elements = args.num_elements;
+	  mask->first_element = args.first_element;
+	  mask->num_elements = args.num_elements;
+	  mask->first_enabled_elmt = args.first_enabled_elmt;
+	  mask->last_enabled_elmt = args.last_enabled_elmt;
+	  free(mask->raw_data);
+	  size_t bytes_needed = ElementMaskImpl::bytes_needed(args.first_element, args.num_elements);
+	  mask->raw_data = (char *)calloc(1, bytes_needed);  // sets initial values to 0
+	  r_impl->valid_mask_count = (mask->raw_size() + 2047) >> 11;
+	}
+      } else {
+	// create the mask now that we know its parameters
+	mask = new ElementMask(args.num_elements, args.first_element);
 	mask->first_enabled_elmt = args.first_enabled_elmt;
 	mask->last_enabled_elmt = args.last_enabled_elmt;
-	free(mask->raw_data);
-	size_t bytes_needed = ElementMaskImpl::bytes_needed(args.first_element, args.num_elements);
-	mask->raw_data = (char *)calloc(1, bytes_needed);  // sets initial values to 0
-	r_impl->valid_mask_count = (mask->raw_size() + 2047) >> 11;
+	r_impl->valid_mask = mask;
+	r_impl->valid_mask_count = args.num_blocks;
+	// also update the IndexSpaceImpl's copies of this data
+	r_impl->locked_data.num_elmts = args.num_elements;
+	r_impl->locked_data.first_elmt = args.first_enabled_elmt;
+	r_impl->locked_data.last_elmt = args.last_enabled_elmt;
       }
 
       assert((args.block_id << 11) < mask->raw_size());
@@ -1934,7 +1965,9 @@ namespace Realm {
   }
 
   /*static*/ void ValidMaskDataMessage::send_request(gasnet_node_t target,
-						     IndexSpace is, unsigned block_id,
+						     IndexSpace is,
+						     unsigned block_id,
+						     unsigned num_blocks,
 						     coord_t first_element,
 						     size_t num_elements,
 						     coord_t first_enabled_elmt,
@@ -1947,6 +1980,7 @@ namespace Realm {
 
     args.is = is;
     args.block_id = block_id;
+    args.num_blocks = num_blocks;
     args.first_element = first_element;
     args.num_elements = num_elements;
     args.first_enabled_elmt = first_enabled_elmt;

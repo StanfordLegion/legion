@@ -30,6 +30,7 @@ list(APPEND LOW_RUNTIME_SRC
   realm/transfer/lowlevel_disk.cc
   realm/transfer/channel.h                 realm/transfer/channel.cc
   realm/transfer/channel_disk.h            realm/transfer/channel_disk.cc
+  realm/transfer/transfer.h                realm/transfer/transfer.cc
   realm/transfer/lowlevel_dma.h            realm/transfer/lowlevel_dma.cc
   realm/transfer/lowlevel_dma.inl
   lowlevel.h                lowlevel.cc
@@ -80,6 +81,15 @@ if(Legion_USE_HDF5)
 endif()
 if(Legion_USE_GASNet)
   list(APPEND LOW_RUNTIME_SRC activemsg.h activemsg.cc)
+endif()
+
+if (REALM_USE_OPENMP)
+  list(APPEND LOW_RUNTIME_SRC
+    realm/openmp/openmp_module.h realm/openmp/openmp_module.cc
+    realm/openmp/openmp_threadpool.h realm/openmp/openmp_threadpool.cc
+    realm/openmp/openmp_api.cc 
+    realm/openmp/openmp_threadpool.inl
+  )
 endif()
 
 list(APPEND LOW_RUNTIME_SRC

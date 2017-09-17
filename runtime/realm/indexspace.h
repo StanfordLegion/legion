@@ -88,6 +88,7 @@ namespace Realm {
 
 	bool get_next(coord_t &position, size_t &length);
 	bool peek_next(coord_t &position, size_t &length);
+	void set_pos(coord_t new_pos);
 
       protected:
 	const ElementMask& mask;

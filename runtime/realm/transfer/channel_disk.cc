@@ -18,50 +18,55 @@
 
 namespace LegionRuntime {
   namespace LowLevel {
-    template<unsigned DIM>
-    FileXferDes<DIM>::FileXferDes(DmaRequest* _dma_request,
-                                  gasnet_node_t _launch_node,
-                                  XferDesID _guid,
-                                  XferDesID _pre_xd_guid,
-                                  XferDesID _next_xd_guid,
-                                  bool mark_started,
-				  RegionInstance inst,
-                                  const Buffer& _src_buf,
-                                  const Buffer& _dst_buf,
-                                  const Domain& _domain,
-                                  const std::vector<OffsetsAndSize>& _oas_vec,
-                                  uint64_t _max_req_size,
-                                  long max_nr,
-                                  int _priority,
-                                  XferOrder::Type _order,
-                                  XferKind _kind,
-                                  XferDesFence* _complete_fence)
+    typedef Realm::AsyncFileIOContext AsyncFileIOContext;
+
+    FileXferDes::FileXferDes(DmaRequest* _dma_request,
+			     gasnet_node_t _launch_node,
+			     XferDesID _guid,
+			     XferDesID _pre_xd_guid,
+			     XferDesID _next_xd_guid,
+			     uint64_t next_max_rw_gap,
+			     size_t src_ib_offset, 
+			     size_t src_ib_size,
+			     bool mark_started,
+			     RegionInstance inst,
+			     Memory _src_mem, Memory _dst_mem,
+			     TransferIterator *_src_iter, TransferIterator *_dst_iter,
+			     uint64_t _max_req_size,
+			     long max_nr,
+			     int _priority,
+			     XferOrder::Type _order,
+			     XferKind _kind,
+			     XferDesFence* _complete_fence)
       : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid,
-                _next_xd_guid, mark_started, _src_buf, _dst_buf,
-                _domain, _oas_vec, _max_req_size, _priority,
+                _next_xd_guid, next_max_rw_gap, src_ib_offset, src_ib_size,
+		mark_started,
+		//_src_buf, _dst_buf, _domain, _oas_vec,
+		_src_mem, _dst_mem, _src_iter, _dst_iter,
+		_max_req_size, _priority,
                 _order, _kind, _complete_fence)
     {
-      MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
-      MemoryImpl* dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
+      //MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
+      //MemoryImpl* dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
       switch (kind) {
         case XferDes::XFER_FILE_READ:
         {
           ID src_id(inst);
           unsigned src_index = src_id.instance.inst_idx;
-          fd = ((FileMemory*)src_mem_impl)->get_file_des(src_index);
+          fd = ((FileMemory*)src_mem)->get_file_des(src_index);
           channel = get_channel_manager()->get_file_read_channel();
-          buf_base = (const char*) dst_mem_impl->get_direct_ptr(_dst_buf.alloc_offset, 0);
-          assert(src_mem_impl->kind == MemoryImpl::MKIND_FILE);
+          //buf_base = (const char*) dst_mem_impl->get_direct_ptr(_dst_buf.alloc_offset, 0);
+          assert(src_mem->kind == MemoryImpl::MKIND_FILE);
           break;
         }
         case XferDes::XFER_FILE_WRITE:
         {
           ID dst_id(inst);
           unsigned dst_index = dst_id.instance.inst_idx;
-          fd = ((FileMemory*)dst_mem_impl)->get_file_des(dst_index);
+          fd = ((FileMemory*)dst_mem)->get_file_des(dst_index);
           channel = get_channel_manager()->get_file_write_channel();
-          buf_base = (const char*) src_mem_impl->get_direct_ptr(_src_buf.alloc_offset, 0);
-          assert(dst_mem_impl->kind == MemoryImpl::MKIND_FILE);
+          //buf_base = (const char*) src_mem_impl->get_direct_ptr(_src_buf.alloc_offset, 0);
+          assert(dst_mem->kind == MemoryImpl::MKIND_FILE);
           break;
         }
         default:
@@ -75,24 +80,29 @@ namespace LegionRuntime {
       }
     }
 
-    template<unsigned DIM>
-    long FileXferDes<DIM>::get_requests(Request** requests, long nr)
+    long FileXferDes::get_requests(Request** requests, long nr)
     {
       FileRequest** reqs = (FileRequest**) requests;
-      long new_nr = default_get_requests<DIM>(requests, nr);
+      long new_nr = default_get_requests(requests, nr);
       switch (kind) {
         case XferDes::XFER_FILE_READ:
         {
           for (long i = 0; i < new_nr; i++) {
             reqs[i]->file_off = reqs[i]->src_off;
-            reqs[i]->mem_base = (char*)(buf_base + reqs[i]->dst_off);
+            //reqs[i]->mem_base = (char*)(buf_base + reqs[i]->dst_off);
+	    reqs[i]->mem_base = dst_mem->get_direct_ptr(reqs[i]->dst_off,
+							reqs[i]->nbytes);
+	    assert(reqs[i]->mem_base != 0);
           }
           break;
         }
         case XferDes::XFER_FILE_WRITE:
         {
           for (long i = 0; i < new_nr; i++) {
-            reqs[i]->mem_base = (char*)(buf_base + reqs[i]->src_off);
+            //reqs[i]->mem_base = (char*)(buf_base + reqs[i]->src_off);
+	    reqs[i]->mem_base = src_mem->get_direct_ptr(reqs[i]->src_off,
+							reqs[i]->nbytes);
+	    assert(reqs[i]->mem_base != 0);
             reqs[i]->file_off = reqs[i]->dst_off;
           }
           break;
@@ -103,63 +113,63 @@ namespace LegionRuntime {
       return new_nr;
     }
 
-    template<unsigned DIM>
-    void FileXferDes<DIM>::notify_request_read_done(Request* req)
+    void FileXferDes::notify_request_read_done(Request* req)
     {
       default_notify_request_read_done(req);
     }
 
-    template<unsigned DIM>
-    void FileXferDes<DIM>::notify_request_write_done(Request* req)
+    void FileXferDes::notify_request_write_done(Request* req)
     {
       default_notify_request_write_done(req);
     }
 
-    template<unsigned DIM>
-    void FileXferDes<DIM>::flush()
+    void FileXferDes::flush()
     {
       fsync(fd);
     }
 
-    template<unsigned DIM>
-    DiskXferDes<DIM>::DiskXferDes(DmaRequest* _dma_request,
-                                  gasnet_node_t _launch_node,
-                                  XferDesID _guid,
-                                  XferDesID _pre_xd_guid,
-                                  XferDesID _next_xd_guid,
-                                  bool mark_started,
-                                  const Buffer& _src_buf,
-                                  const Buffer& _dst_buf,
-                                  const Domain& _domain,
-                                  const std::vector<OffsetsAndSize>& _oas_vec,
-                                  uint64_t _max_req_size,
-                                  long max_nr,
-                                  int _priority,
-                                  XferOrder::Type _order,
-                                  XferKind _kind,
-                                  XferDesFence* _complete_fence)
+    DiskXferDes::DiskXferDes(DmaRequest* _dma_request,
+			     gasnet_node_t _launch_node,
+			     XferDesID _guid,
+			     XferDesID _pre_xd_guid,
+			     XferDesID _next_xd_guid,
+			     uint64_t next_max_rw_gap,
+			     size_t src_ib_offset, 
+			     size_t src_ib_size,
+			     bool mark_started,
+			     Memory _src_mem, Memory _dst_mem,
+			     TransferIterator *_src_iter, TransferIterator *_dst_iter,
+			     uint64_t _max_req_size,
+			     long max_nr,
+			     int _priority,
+			     XferOrder::Type _order,
+			     XferKind _kind,
+			     XferDesFence* _complete_fence)
       : XferDes(_dma_request, _launch_node, _guid, _pre_xd_guid,
-                _next_xd_guid, mark_started, _src_buf, _dst_buf,
-                _domain, _oas_vec, _max_req_size, _priority,
+                _next_xd_guid, next_max_rw_gap, src_ib_offset, src_ib_size,
+		mark_started,
+		//_src_buf, _dst_buf, _domain, _oas_vec,
+		_src_mem, _dst_mem, _src_iter, _dst_iter,
+		_max_req_size, _priority,
                 _order, _kind, _complete_fence)
     {
-      MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
-      MemoryImpl* dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
+      //MemoryImpl* src_mem_impl = get_runtime()->get_memory_impl(_src_buf.memory);
+      //MemoryImpl* dst_mem_impl = get_runtime()->get_memory_impl(_dst_buf.memory);
       switch (kind) {
         case XferDes::XFER_DISK_READ:
         {
           channel = get_channel_manager()->get_disk_read_channel();
-          fd = ((Realm::DiskMemory*)src_mem_impl)->fd;
-          buf_base = (const char*) dst_mem_impl->get_direct_ptr(_dst_buf.alloc_offset, 0);
-          assert(src_mem_impl->kind == MemoryImpl::MKIND_DISK);
+          fd = ((Realm::DiskMemory*)src_mem)->fd;
+          //buf_base = (const char*) dst_mem_impl->get_direct_ptr(_dst_buf.alloc_offset, 0);
+          assert(src_mem->kind == MemoryImpl::MKIND_DISK);
           break;
         }
         case XferDes::XFER_DISK_WRITE:
         {
           channel = get_channel_manager()->get_disk_write_channel();
-          fd = ((Realm::DiskMemory*)dst_mem_impl)->fd;
-          buf_base = (const char*) src_mem_impl->get_direct_ptr(_src_buf.alloc_offset, 0);
-          assert(dst_mem_impl->kind == MemoryImpl::MKIND_DISK);
+          fd = ((Realm::DiskMemory*)dst_mem)->fd;
+          //buf_base = (const char*) src_mem_impl->get_direct_ptr(_src_buf.alloc_offset, 0);
+          assert(dst_mem->kind == MemoryImpl::MKIND_DISK);
           break;
         }
         default:
@@ -173,25 +183,30 @@ namespace LegionRuntime {
       }
     }
 
-    template<unsigned DIM>
-    long DiskXferDes<DIM>::get_requests(Request** requests, long nr)
+    long DiskXferDes::get_requests(Request** requests, long nr)
     {
       DiskRequest** reqs = (DiskRequest**) requests;
-      long new_nr = default_get_requests<DIM>(requests, nr);
+      long new_nr = default_get_requests(requests, nr);
       switch (kind) {
         case XferDes::XFER_DISK_READ:
         {
           for (long i = 0; i < new_nr; i++) {
-            reqs[i]->disk_off = src_buf.alloc_offset + reqs[i]->src_off;
-            reqs[i]->mem_base = (char*)(buf_base + reqs[i]->dst_off);
+            reqs[i]->disk_off = /*src_buf.alloc_offset +*/ reqs[i]->src_off;
+            //reqs[i]->mem_base = (char*)(buf_base + reqs[i]->dst_off);
+	    reqs[i]->mem_base = dst_mem->get_direct_ptr(reqs[i]->dst_off,
+							reqs[i]->nbytes);
+	    assert(reqs[i]->mem_base != 0);
           }
           break;
         }
         case XferDes::XFER_DISK_WRITE:
         {
           for (long i = 0; i < new_nr; i++) {
-            reqs[i]->mem_base = (char*)(buf_base + reqs[i]->src_off);
-            reqs[i]->disk_off = dst_buf.alloc_offset + reqs[i]->dst_off;
+            //reqs[i]->mem_base = (char*)(buf_base + reqs[i]->src_off);
+	    reqs[i]->mem_base = src_mem->get_direct_ptr(reqs[i]->src_off,
+							reqs[i]->nbytes);
+	    assert(reqs[i]->mem_base != 0);
+            reqs[i]->disk_off = /*dst_buf.alloc_offset +*/ reqs[i]->dst_off;
           }
           break;
         }
@@ -201,20 +216,17 @@ namespace LegionRuntime {
       return new_nr;
     }
 
-    template<unsigned DIM>
-    void DiskXferDes<DIM>::notify_request_read_done(Request* req)
+    void DiskXferDes::notify_request_read_done(Request* req)
     {
       default_notify_request_read_done(req);
     }
 
-    template<unsigned DIM>
-    void DiskXferDes<DIM>::notify_request_write_done(Request* req)
+    void DiskXferDes::notify_request_write_done(Request* req)
     {
       default_notify_request_write_done(req);
     }
 
-    template<unsigned DIM>
-    void DiskXferDes<DIM>::flush()
+    void DiskXferDes::flush()
     {
       fsync(fd);
     }
@@ -299,6 +311,7 @@ namespace LegionRuntime {
       return AsyncFileIOContext::get_singleton()->available();
     }
 
+#if 0
     template class FileXferDes<0>;
     template class FileXferDes<1>;
     template class FileXferDes<2>;
@@ -307,5 +320,6 @@ namespace LegionRuntime {
     template class DiskXferDes<1>;
     template class DiskXferDes<2>;
     template class DiskXferDes<3>;
+#endif
   } // namespace LowLevel
 } // namespace LegionRuntime

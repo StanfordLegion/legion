@@ -1270,6 +1270,7 @@ namespace Legion {
       public:
         InterCloseOp *proxy_this;
         RegionTreeNode *child_node;
+        InnerContext *context;
       };
     public:
       InterCloseOp(Runtime *runtime);
@@ -1288,6 +1289,7 @@ namespace Legion {
                                                    RegionTreeNode *child);
       void perform_disjoint_close(RegionTreeNode *child_to_close, 
                                   DisjointCloseInfo &close_info,
+                                  InnerContext *context,
                                   std::set<RtEvent> &ready_events);
     public:
       virtual void activate(void);

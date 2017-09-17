@@ -16,15 +16,24 @@
 #ifndef LOWLEVEL_DMA_H
 #define LOWLEVEL_DMA_H
 
-#include "lowlevel_impl.h"
 #include "activemsg.h"
-
-namespace Realm {
-  class CoreReservationSet;
-};
+#include <realm/id.h>
+#include <realm/memory.h>
+#include <realm/redop.h>
+#include <realm/instance.h>
+#include <realm/event.h>
+#include <realm/runtime_impl.h>
+#include <realm/inst_impl.h>
 
 namespace LegionRuntime {
   namespace LowLevel {
+    class Request;
+  };
+};
+
+namespace Realm {
+  class CoreReservationSet;
+
     struct RemoteIBAllocRequestAsync {
       struct RequestArgs {
         int node;
@@ -148,6 +157,9 @@ namespace LegionRuntime {
 			  size_t size, off_t& field_start, int& field_size);
     
     class DmaRequestQueue;
+    // for now we use a single queue for all (local) dmas
+    extern DmaRequestQueue *dma_queue;
+    
     typedef unsigned long long XferDesID;
     class DmaRequest : public Realm::Operation {
     public:
@@ -228,6 +240,213 @@ namespace LegionRuntime {
       CustomSerdezID serdez_id;
     };
     typedef std::vector<OffsetsAndSize> OASVec;
+    typedef std::pair<Memory, Memory> MemPair;
+    typedef std::pair<RegionInstance, RegionInstance> InstPair;
+    typedef std::map<InstPair, OASVec> OASByInst;
+    typedef std::map<MemPair, OASByInst *> OASByMem;
+
+    class MemPairCopier;
+
+    struct PendingIBInfo {
+      Memory memory;
+      int idx;
+      InstPair ip;
+    };
+
+    class ComparePendingIBInfo {
+    public:
+      bool operator() (const PendingIBInfo& a, const PendingIBInfo& b) {
+        if (a.memory.id == b.memory.id) {
+          assert(a.idx != b.idx);
+          return a.idx < b.idx;
+        }
+        else
+          return a.memory.id < b.memory.id;
+      }
+    };
+
+    struct IBInfo {
+      enum Status {
+        INIT,
+        SENT,
+        COMPLETED
+      };
+      Memory memory;
+      off_t offset;
+      size_t size;
+      Status status;
+      //IBFence* fence;
+      Event event;
+    };
+
+    typedef std::set<PendingIBInfo, ComparePendingIBInfo> PriorityIBQueue;
+    typedef std::vector<IBInfo> IBVec;
+    typedef std::map<InstPair, IBVec> IBByInst;
+
+    class TransferDomain;
+    class TransferIterator;
+
+    // dma requests come in two flavors:
+    // 1) CopyRequests, which are per memory pair, and
+    // 2) ReduceRequests, which have to be handled monolithically
+
+    class CopyRequest : public DmaRequest {
+    public:
+      CopyRequest(const void *data, size_t datalen,
+		  Event _before_copy,
+		  Event _after_copy,
+		  int _priority);
+
+      CopyRequest(const TransferDomain *_domain, //const Domain& _domain,
+		  OASByInst *_oas_by_inst,
+		  Event _before_copy,
+		  Event _after_copy,
+		  int _priority,
+                  const Realm::ProfilingRequestSet &reqs);
+
+    protected:
+      // deletion performed when reference count goes to zero
+      virtual ~CopyRequest(void);
+
+    public:
+      void forward_request(gasnet_node_t target_node);
+
+      virtual bool check_readiness(bool just_check, DmaRequestQueue *rq);
+
+#if 0
+      void perform_dma_mask(MemPairCopier *mpc);
+
+      template <unsigned DIM>
+      void perform_dma_rect(MemPairCopier *mpc);
+#endif
+
+      void perform_new_dma(Memory src_mem, Memory dst_mem);
+
+      virtual void perform_dma(void);
+
+      virtual bool handler_safe(void) { return(false); }
+
+      TransferDomain *domain;
+      //Domain domain;
+      OASByInst *oas_by_inst;
+
+      // <NEW_DMA>
+      void alloc_intermediate_buffer(InstPair inst_pair, Memory tgt_mem, int idx);
+
+      void handle_ib_response(int idx, InstPair inst_pair, size_t ib_size, off_t ib_offset);
+
+      PriorityIBQueue priority_ib_queue;
+      // operations on ib_by_inst are protected by ib_mutex
+      IBByInst ib_by_inst;
+      GASNetHSL ib_mutex;
+      class IBAllocOp : public Realm::Operation {
+      public:
+        IBAllocOp(Event _completion) : Operation(_completion, Realm::ProfilingRequestSet()) {};
+        ~IBAllocOp() {};
+        void print(std::ostream& os) const {os << "IBAllocOp"; };
+      };
+
+      IBAllocOp* ib_req;
+      Event ib_completion;
+      std::vector<Memory> mem_path;
+      // </NEW_DMA>
+
+      Event before_copy;
+      Waiter waiter; // if we need to wait on events
+    };
+
+    class ReduceRequest : public DmaRequest {
+    public:
+      ReduceRequest(const void *data, size_t datalen,
+		    ReductionOpID _redop_id,
+		    bool _red_fold,
+		    Event _before_copy,
+		    Event _after_copy,
+		    int _priority);
+
+      ReduceRequest(const TransferDomain *_domain, //const Domain& _domain,
+		    const std::vector<Domain::CopySrcDstField>& _srcs,
+		    const Domain::CopySrcDstField& _dst,
+		    bool _inst_lock_needed,
+		    ReductionOpID _redop_id,
+		    bool _red_fold,
+		    Event _before_copy,
+		    Event _after_copy,
+		    int _priority,
+                    const Realm::ProfilingRequestSet &reqs);
+
+    protected:
+      // deletion performed when reference count goes to zero
+      virtual ~ReduceRequest(void);
+
+    public:
+      void forward_request(gasnet_node_t target_node);
+
+      virtual bool check_readiness(bool just_check, DmaRequestQueue *rq);
+
+      void perform_dma_mask(MemPairCopier *mpc);
+
+      template <unsigned DIM>
+      void perform_dma_rect(MemPairCopier *mpc);
+
+      virtual void perform_dma(void);
+
+      virtual bool handler_safe(void) { return(false); }
+
+      TransferDomain *domain;
+      //Domain domain;
+      std::vector<Domain::CopySrcDstField> srcs;
+      Domain::CopySrcDstField dst;
+      bool inst_lock_needed;
+      Event inst_lock_event;
+      ReductionOpID redop_id;
+      bool red_fold;
+      Event before_copy;
+      Waiter waiter; // if we need to wait on events
+    };
+
+    class FillRequest : public DmaRequest {
+    public:
+      FillRequest(const void *data, size_t msglen,
+                  RegionInstance inst,
+                  unsigned offset, unsigned size,
+                  Event _before_fill, 
+                  Event _after_fill,
+                  int priority);
+      FillRequest(const TransferDomain *_domain, //const Domain &_domain,
+                  const Domain::CopySrcDstField &_dst,
+                  const void *fill_value, size_t fill_size,
+                  Event _before_fill,
+                  Event _after_fill,
+                  int priority,
+                  const Realm::ProfilingRequestSet &reqs);
+
+    protected:
+      // deletion performed when reference count goes to zero
+      virtual ~FillRequest(void);
+
+    public:
+      void forward_request(gasnet_node_t target_node);
+
+      virtual bool check_readiness(bool just_check, DmaRequestQueue *rq);
+
+      virtual void perform_dma(void);
+
+      virtual bool handler_safe(void) { return(false); }
+
+      template<int DIM>
+      void perform_dma_rect(MemoryImpl *mem_impl);
+
+      size_t optimize_fill_buffer(RegionInstanceImpl *impl, int &fill_elmts);
+
+      TransferDomain *domain;
+      //Domain domain;
+      Domain::CopySrcDstField dst;
+      void *fill_buffer;
+      size_t fill_size;
+      Event before_fill;
+      Waiter waiter;
+    };
 
     // an interface for objects that are responsible for copying data from one instance to another
     //  these are generally created by MemPairCopier's
@@ -334,7 +553,7 @@ namespace LegionRuntime {
       std::string name;
     };
 
-    class Request;
+    typedef LegionRuntime::LowLevel::Request Request;
     class AsyncFileIOContext {
     public:
       AsyncFileIOContext(int _max_depth);
@@ -366,7 +585,6 @@ namespace LegionRuntime {
       aio_context_t aio_ctx;
 #endif
     };
-  };
 };
 
 // implementation of templated and inline methods
