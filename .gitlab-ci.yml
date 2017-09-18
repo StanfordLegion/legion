@@ -162,6 +162,7 @@ before_script:
 # For performance tests, run these commands:
 .perf_tests: &perf_tests
   script:
+    - ./tools/add_github_host_key.sh
     - ./test.py --test=perf
 
 ###
