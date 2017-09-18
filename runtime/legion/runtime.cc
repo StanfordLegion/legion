@@ -19512,6 +19512,9 @@ namespace Legion {
             fargs->ctx->invalidate_remote_contexts();
             if (fargs->ctx->remove_reference())
               delete fargs->ctx;
+            Runtime *runtime = Runtime::get_runtime(p);
+            // Finally tell the runtime that we have one less top level task
+            runtime->decrement_outstanding_top_level_tasks();
             break;
           }
         case LG_MAPPER_TASK_ID:
