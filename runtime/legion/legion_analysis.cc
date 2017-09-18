@@ -3628,6 +3628,53 @@ namespace Legion {
               LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned &pusers)
     //--------------------------------------------------------------------------
     {
+      // A slightly strange case that can occur is if we close two different
+      // children of the same node for the same field in different modes then
+      // we can get both a normal close operation and a read-only close 
+      // operation for the same field, in which case they need to share users
+      // This should be a very rare case
+      const FieldMask close_overlap = normal_close_mask & read_only_close_mask;
+      if (!!close_overlap)
+      {
+        LegionVector<LogicalUser>::aligned add_normal_closed_users;
+        for (std::list<LogicalUser>::const_iterator it = 
+              read_only_closed_users.begin(); it != 
+              read_only_closed_users.end(); it++)
+        {
+          const FieldMask overlap = it->field_mask & close_overlap;
+          if (!overlap)
+            continue;
+#ifdef LEGION_SPY
+          it->op->add_mapping_reference(it->gen);
+#else
+          if (!it->op->add_mapping_reference(it->gen))
+            continue;
+#endif
+          add_normal_closed_users.push_back(*it);
+          add_normal_closed_users.back().field_mask = overlap;
+        }
+        LegionVector<LogicalUser>::aligned add_read_only_closed_users;
+        for (std::list<LogicalUser>::const_iterator it = 
+              normal_closed_users.begin(); it != 
+              normal_closed_users.end(); it++)
+        {
+          const FieldMask overlap = it->field_mask & close_overlap;
+          if (!overlap)
+            continue;
+#ifdef LEGION_SPY
+          it->op->add_mapping_reference(it->gen);
+#else
+          if (!it->op->add_mapping_reference(it->gen))
+            continue;
+#endif
+          add_read_only_closed_users.push_back(*it);
+          add_read_only_closed_users.back().field_mask = overlap;
+        }
+        normal_closed_users.insert(normal_closed_users.end(),
+          add_normal_closed_users.begin(), add_normal_closed_users.end());
+        read_only_closed_users.insert(read_only_closed_users.end(),
+          add_read_only_closed_users.begin(), add_read_only_closed_users.end());
+      }
       // We also need to do dependence analysis against all the other operations
       // that this operation recorded dependences on above in the tree so we
       // don't run too early.
