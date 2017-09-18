@@ -14,7 +14,7 @@ fi
 export TERRA_DIR="${LG_RT_DIR}/../language/terra"
 
 source titan_setup.bash
-#source env.bash  # defines PERF_ACCESS_TOKEN
+source env.bash  # defines PERF_ACCESS_TOKEN, DO NOT CHECK env.bash INTO THE REPO
 
 export CI_RUNNER_DESCRIPTION="titan.ccs.ornl.gov"
 
