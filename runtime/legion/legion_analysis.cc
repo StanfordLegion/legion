@@ -5590,7 +5590,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionManager::invalidate_version_infos(const FieldMask &invalid_mask)
+    void VersionManager::invalidate_version_infos(FieldMask invalid_mask)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5599,10 +5599,20 @@ namespace Legion {
       AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
       sanity_check();
+#endif
+      // A strange case here, for some read-only cases we can have races
+      // on advances for opens from different points, so if we detect a
+      // pending request for a remote field then we don't need to do the
+      // invalidation
       for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator it = 
            outstanding_requests.begin(); it != outstanding_requests.end(); it++)
-        assert(it->second * invalid_mask);
-#endif
+      {
+        if (it->second * invalid_mask)
+          continue;
+        invalid_mask -= it->second;
+        if (!invalid_mask)
+          return;
+      }
       // This invalidates our local fields
       remote_valid_fields -= invalid_mask;
       filter_version_info(invalid_mask, current_version_infos);
