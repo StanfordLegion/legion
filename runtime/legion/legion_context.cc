@@ -6934,8 +6934,6 @@ namespace Legion {
     TopLevelContext::~TopLevelContext(void)
     //--------------------------------------------------------------------------
     { 
-      // Tell the runtime that another top level task is done
-      runtime->decrement_outstanding_top_level_tasks();
     }
 
     //--------------------------------------------------------------------------

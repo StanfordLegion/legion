@@ -957,7 +957,7 @@ namespace Legion {
                                  const ColorPoint &child_color,
                                  VersioningSet<> &new_states,
                                  std::set<RtEvent> &applied_events);
-      void invalidate_version_infos(const FieldMask &invalidate_mask);
+      void invalidate_version_infos(FieldMask invalidate_mask);
       static void filter_version_info(const FieldMask &invalidate_mask,
            LegionMap<VersionID,VersioningSet<VERSION_MANAGER_REF> >::aligned
                                                                 &to_filter);

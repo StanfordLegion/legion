@@ -7512,12 +7512,6 @@ namespace Legion {
     idempotent_variant(registrar.idempotent_variant)
     //--------------------------------------------------------------------------
     { 
-#ifdef LEGION_SPY
-      // TODO: teach legion spy how to check the inner task optimization
-      // for now we'll just turn it off whenever we are going to be
-      // validating the runtime analysis
-      inner_variant = false;
-#endif
       if (udata != NULL)
       {
         user_data = malloc(user_data_size);
@@ -20543,6 +20537,9 @@ continue;					\
           fargs->ctx->invalidate_remote_contexts();
           if (fargs->ctx->remove_reference())
             delete fargs->ctx;
+          Runtime *runtime = Runtime::get_runtime(p);
+          // Finally tell the runtime that we have one less top level task
+          runtime->decrement_outstanding_top_level_tasks();
           break;
         }
         case LG_MAPPER_TASK_ID:
