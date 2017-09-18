@@ -77,9 +77,11 @@ void top_level_task(const Task *task,
     int num_circuit_nodes = num_pieces * nodes_per_piece;
     int num_circuit_wires = num_pieces * wires_per_piece;
     // Make index spaces
-    IndexSpace node_index_space = runtime->create_index_space(ctx,num_circuit_nodes);
+    IndexSpace node_index_space = runtime->create_index_space(ctx,
+        Rect<1>(0, num_circuit_nodes-1));
     runtime->attach_name(node_index_space, "node_index_space");
-    IndexSpace wire_index_space = runtime->create_index_space(ctx,num_circuit_wires);
+    IndexSpace wire_index_space = runtime->create_index_space(ctx,
+        Rect<1>(0, num_circuit_wires-1));
     runtime->attach_name(wire_index_space, "wire_index_space");
     // Make field spaces
     FieldSpace node_field_space = runtime->create_field_space(ctx);
