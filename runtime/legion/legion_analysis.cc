@@ -9192,7 +9192,7 @@ namespace Legion {
       if (invalidate_all)
         node->invalidate_version_managers();
       else
-        return node->invalidate_version_state(ctx);
+        node->invalidate_version_state(ctx);
       return true;
     }
 
@@ -9203,7 +9203,7 @@ namespace Legion {
       if (invalidate_all)
         node->invalidate_version_managers();
       else
-        return node->invalidate_version_state(ctx);
+        node->invalidate_version_state(ctx);
       return true;
     }
 
