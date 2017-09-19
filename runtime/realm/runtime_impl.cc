@@ -72,12 +72,6 @@ namespace Realm {
   } \
 } while(0)
 
-namespace LegionRuntime {
-  namespace LowLevel {
-    extern void show_event_waiters(std::ostream& os);
-  };
-};
-
 namespace Realm {
 
   Logger log_runtime("realm");
@@ -107,9 +101,132 @@ namespace Realm {
         sleep(1);
     }
 
+  // not static so that it can be invoked manually from gdb
+  void show_event_waiters(std::ostream& os)
+  {
+    os << "PRINTING ALL PENDING EVENTS:\n";
+    for(unsigned i = 0; i < gasnet_nodes(); i++) {
+      Node *n = &get_runtime()->nodes[i];
+      // Iterate over all the events and get their implementations
+      for (unsigned long j = 0; j < n->events.max_entries(); j++) {
+	if (!n->events.has_entry(j))
+	  continue;
+	GenEventImpl *e = n->events.lookup_entry(j, i/*node*/);
+	AutoHSLLock a2(e->mutex);
+	
+	// print anything with either local or remote waiters
+	if(e->current_local_waiters.empty() &&
+	   e->future_local_waiters.empty() &&
+	   e->remote_waiters.empty())
+	  continue;
+
+	os << "Event " << e->me <<": gen=" << e->generation
+	   << " subscr=" << e->gen_subscribed
+	   << " local=" << e->current_local_waiters.size()
+	   << "+" << e->future_local_waiters.size()
+	   << " remote=" << e->remote_waiters.size() << "\n";
+	for(std::vector<EventWaiter *>::const_iterator it = e->current_local_waiters.begin();
+	    it != e->current_local_waiters.end();
+	    it++) {
+	  os << "  [" << (e->generation+1) << "] L:" << (*it) << " - ";
+	  (*it)->print(os);
+	  os << "\n";
+	}
+	for(std::map<EventImpl::gen_t, std::vector<EventWaiter *> >::const_iterator it = e->future_local_waiters.begin();
+	    it != e->future_local_waiters.end();
+	    it++) {
+	  for(std::vector<EventWaiter *>::const_iterator it2 = it->second.begin();
+	      it2 != it->second.end();
+	      it2++) {
+	    os << "  [" << (it->first) << "] L:" << (*it2) << " - ";
+	    (*it2)->print(os);
+	    os << "\n";
+	  }
+	}
+	// for(std::map<Event::gen_t, NodeMask>::const_iterator it = e->remote_waiters.begin();
+	//     it != e->remote_waiters.end();
+	//     it++) {
+	//   fprintf(f, "  [%d] R:", it->first);
+	//   for(int k = 0; k < MAX_NUM_NODES; k++)
+	//     if(it->second.is_set(k))
+	// 	fprintf(f, " %d", k);
+	//   fprintf(f, "\n");
+	// }
+      }
+      for (unsigned long j = 0; j < n->barriers.max_entries(); j++) {
+	if (!n->barriers.has_entry(j))
+	  continue;
+	BarrierImpl *b = n->barriers.lookup_entry(j, i/*node*/); 
+	AutoHSLLock a2(b->mutex);
+	// skip any barriers with no waiters
+	if (b->generations.empty())
+	  continue;
+
+	os << "Barrier " << b->me << ": gen=" << b->generation
+	   << " subscr=" << b->gen_subscribed << "\n";
+	for (std::map<EventImpl::gen_t, BarrierImpl::Generation*>::const_iterator git = 
+	       b->generations.begin(); git != b->generations.end(); git++) {
+	  const std::vector<EventWaiter*> &waiters = git->second->local_waiters;
+	  for (std::vector<EventWaiter*>::const_iterator it = 
+		 waiters.begin(); it != waiters.end(); it++) {
+	    os << "  [" << (git->first) << "] L:" << (*it) << " - ";
+	    (*it)->print(os);
+	    os << "\n";
+	  }
+	}
+      }
+    }
+
+    // TODO - pending barriers
+#if 0
+    // // convert from events to barriers
+    // fprintf(f,"PRINTING ALL PENDING EVENTS:\n");
+    // for(int i = 0; i < gasnet_nodes(); i++) {
+    // 	Node *n = &get_runtime()->nodes[i];
+    //   // Iterate over all the events and get their implementations
+    //   for (unsigned long j = 0; j < n->events.max_entries(); j++) {
+    //     if (!n->events.has_entry(j))
+    //       continue;
+    // 	  EventImpl *e = n->events.lookup_entry(j, i/*node*/);
+    // 	  AutoHSLLock a2(e->mutex);
+    
+    // 	  // print anything with either local or remote waiters
+    // 	  if(e->local_waiters.empty() && e->remote_waiters.empty())
+    // 	    continue;
+
+    //     fprintf(f,"Event " IDFMT ": gen=%d subscr=%d local=%zd remote=%zd\n",
+    // 		  e->me.id, e->generation, e->gen_subscribed, 
+    // 		  e->local_waiters.size(), e->remote_waiters.size());
+    // 	  for(std::map<Event::gen_t, std::vector<EventWaiter *> >::iterator it = e->local_waiters.begin();
+    // 	      it != e->local_waiters.end();
+    // 	      it++) {
+    // 	    for(std::vector<EventWaiter *>::iterator it2 = it->second.begin();
+    // 		it2 != it->second.end();
+    // 		it2++) {
+    // 	      fprintf(f, "  [%d] L:%p ", it->first, *it2);
+    // 	      (*it2)->print_info(f);
+    // 	    }
+    // 	  }
+    // 	  for(std::map<Event::gen_t, NodeMask>::const_iterator it = e->remote_waiters.begin();
+    // 	      it != e->remote_waiters.end();
+    // 	      it++) {
+    // 	    fprintf(f, "  [%d] R:", it->first);
+    // 	    for(int k = 0; k < MAX_NUM_NODES; k++)
+    // 	      if(it->second.is_set(k))
+    // 		fprintf(f, " %d", k);
+    // 	    fprintf(f, "\n");
+    // 	  }
+    // 	}
+    // }
+#endif
+
+    os << "DONE\n";
+    os.flush();
+  }
+
   static void realm_show_events(int signal)
   {
-    LegionRuntime::LowLevel::show_event_waiters(std::cout);
+    show_event_waiters(std::cout);
   }
 
   ////////////////////////////////////////////////////////////////////////
@@ -723,6 +840,7 @@ namespace Realm {
 
     bool RuntimeImpl::init(int *argc, char ***argv)
     {
+#if 0
       // have to register domain mappings too
       LegionRuntime::Arrays::Mapping<1,1>::register_mapping<LegionRuntime::Arrays::CArrayLinearization<1> >();
       LegionRuntime::Arrays::Mapping<2,1>::register_mapping<LegionRuntime::Arrays::CArrayLinearization<2> >();
@@ -735,7 +853,7 @@ namespace Realm {
       //LegionRuntime::Arrays::Mapping<1,1>::register_mapping<LegionRuntime::Layouts::SplitDimLinearization<1> >();
       //LegionRuntime::Arrays::Mapping<2,1>::register_mapping<LegionRuntime::Layouts::SplitDimLinearization<2> >();
       //LegionRuntime::Arrays::Mapping<3,1>::register_mapping<LegionRuntime::Layouts::SplitDimLinearization<3> >();
-
+#endif
 
       DetailedTimer::init_timers();
 

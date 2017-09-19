@@ -136,7 +136,7 @@ namespace LegionRuntime{
         *data64 = block_size; data64++;
         *data64 = elmt_size; data64++;
         *data64 = buf_size; data64++;
-        linearization.serialize((int*)data64);
+        //linearization.serialize((int*)data64);
       }
 
       void deserialize(const int* data)
@@ -147,7 +147,7 @@ namespace LegionRuntime{
         block_size = *cur; cur++;
         elmt_size = *cur; cur++;
         buf_size = *cur; cur++;
-        linearization.deserialize((int*)cur);
+        //linearization.deserialize((int*)cur);
       }
 
       enum DimensionKind {

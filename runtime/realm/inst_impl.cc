@@ -207,11 +207,12 @@ namespace Realm {
     {
       // request metadata (if needed), but don't block on it yet
       RegionInstanceImpl *i_impl = get_runtime()->get_instance_impl(*this);
-      Event e = i_impl->metadata.request_data(ID(id).instance.owner_node, id);
-      if(!e.has_triggered())
-	log_inst.info("requested metadata in accessor creation: " IDFMT, id);
+      // have to stall on metadata if it's not available...
+      if(!i_impl->metadata.is_valid())
+	i_impl->request_metadata().wait();
+      assert(i_impl->metadata.layout);
 	
-      return LegionRuntime::Accessor::RegionAccessor<LegionRuntime::Accessor::AccessorType::Generic>(LegionRuntime::Accessor::AccessorType::Generic::Untyped((void *)i_impl));
+      return LegionRuntime::Accessor::RegionAccessor<LegionRuntime::Accessor::AccessorType::Generic>(LegionRuntime::Accessor::AccessorType::Generic::Untyped(*this));
     }
 
 #if 0

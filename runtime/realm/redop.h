@@ -41,7 +41,6 @@ namespace Realm {
     };
 #endif
 
-    typedef int ReductionOpID;
     class ReductionOpUntyped {
     public:
       size_t sizeof_lhs;

@@ -3185,6 +3185,7 @@ namespace Realm {
     bool oas_sort_by_dst(OffsetsAndSize a, OffsetsAndSize b) {return a.dst_offset < b.dst_offset; }
 #endif
 
+#if 0
     DomainLinearization create_ib_linearization(const Domain& dm)
     {
       //std::vector<Layouts::DimKind> kind_vec;
@@ -3244,6 +3245,7 @@ namespace Realm {
       assert(0);
       return DomainLinearization();
     }
+#endif
 
 #if 0
     Buffer simple_create_intermediate_buffer(const IBInfo& ib_info,
