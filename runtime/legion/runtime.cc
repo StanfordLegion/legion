@@ -1747,8 +1747,10 @@ namespace Legion {
               REPORT_LEGION_ERROR(ERROR_ACCESSOR_FIELD_SIZE_CHECK,
                             "Error creating accessor for field %d with a "
                             "type of size %zd bytes when the field was "
-                            "originally allocated with a size of %zd bytes",
-                            fid, field_size, actual_size)
+                            "originally allocated with a size of %zd bytes "
+                            "in task %s (UID %lld)",
+                            fid, field_size, actual_size, 
+                            context->get_task_name(), context->get_unique_id())
           }
           return manager->get_instance();
         }
