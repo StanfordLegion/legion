@@ -163,6 +163,13 @@ before_script:
 .perf_tests: &perf_tests
   script:
     - ./tools/add_github_host_key.sh
+    - |
+      if [[ -n $GITLAB_DEPLOY_KEY ]]; then
+        eval $(ssh-agent -s)
+        ssh-add <(echo "$GITLAB_DEPLOY_KEY")
+      fi
+    - git config --global user.name "Legion Testing Automation"
+    - git config --global user.email "legion-testing@googlegroups.com"
     - ./test.py --test=perf
 
 ###
