@@ -23,7 +23,7 @@
 #include "event.h"
 #include "memory.h"
 
-#include "accessor.h"
+//include "accessor.h"
 #include "custom_serdez.h"
 
 #include <vector>
@@ -34,6 +34,16 @@
 #else
 typedef ptrdiff_t intptr_t;
 #endif
+
+namespace LegionRuntime {
+  namespace Accessor {
+    #define REGION_ACCESSOR_ALREADY_PROTOTYPED
+    template <typename AT, typename ET = void, typename PT = ET> struct RegionAccessor;
+    namespace AccessorType {
+      struct Generic;
+    };
+  };
+};
 
 namespace Realm {
 

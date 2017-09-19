@@ -537,6 +537,7 @@ namespace Realm {
 	return l;
       }
 
+#if 0
       void serialize(int *data) const
       {
 	data[0] = dim;
@@ -562,6 +563,7 @@ namespace Realm {
 	}
         add_local_reference();
       }
+#endif
 
       int get_dim(void) const { return dim; }
 

@@ -20,12 +20,12 @@
 
 #include "lowlevel_config.h"
 
-#include "redop.h"
-
 #include <set>
 #include <iostream>
 
 namespace Realm {
+
+  typedef int ReductionOpID;
 
     class Event {
     public:

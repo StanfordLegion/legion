@@ -1375,11 +1375,6 @@ namespace Legion {
         mapped(m), valid(false), trigger_on_unmap(false), made_accessor(false)
     //--------------------------------------------------------------------------
     {
-#ifdef BOUNDS_CHECKS
-      // A total hack just to keep old bounds checks working for now
-      bounds = runtime->forest->get_node(req.region.get_index_space())->
-        get_color_space_domain();
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1790,17 +1785,23 @@ namespace Legion {
 
 #ifdef BOUNDS_CHECKS 
     //--------------------------------------------------------------------------
-    bool PhysicalRegionImpl::contains_ptr(ptr_t ptr) const 
+    bool PhysicalRegionImpl::contains_ptr(ptr_t ptr)
     //--------------------------------------------------------------------------
     {
+      if (!bounds.exists())
+        bounds = runtime->forest->get_node(req.region.get_index_space())->
+                    get_color_space_domain();
       DomainPoint dp(ptr.value);
       return bounds.contains(dp);
     }
     
     //--------------------------------------------------------------------------
-    bool PhysicalRegionImpl::contains_point(const DomainPoint &dp) const
+    bool PhysicalRegionImpl::contains_point(const DomainPoint &dp)
     //--------------------------------------------------------------------------
     {
+      if (!bounds.exists())
+        bounds = runtime->forest->get_node(req.region.get_index_space())->
+                    get_color_space_domain();
       return bounds.contains(dp);
     }
 #endif
@@ -1963,8 +1964,10 @@ namespace Legion {
               REPORT_LEGION_ERROR(ERROR_ACCESSOR_FIELD_SIZE_CHECK,
                             "Error creating accessor for field %d with a "
                             "type of size %zd bytes when the field was "
-                            "originally allocated with a size of %zd bytes",
-                            fid, field_size, actual_size)
+                            "originally allocated with a size of %zd bytes "
+                            "in task %s (UID %lld)",
+                            fid, field_size, actual_size, 
+                            context->get_task_name(), context->get_unique_id())
           }
           return manager->get_instance();
         }

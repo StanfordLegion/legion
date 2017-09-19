@@ -2091,8 +2091,8 @@ namespace Legion {
                                               FieldID fid, size_t field_size,
                                               void *realm_is, TypeTag type_tag,
                                               bool silence_warnings,
-                                              bool generic_accessor = false,
-                                              bool check_field_size = true,
+                                              bool generic_accessor,
+                                              bool check_field_size,
                                               ReductionOpID redop = 0) const;
       void fail_bounds_check(DomainPoint p, FieldID fid,
                              PrivilegeMode mode) const;
@@ -2139,6 +2139,12 @@ namespace Legion {
     public:
       FieldAccessor(void) { }
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
+                    size_t element_count = 1,// number of FT elements in field
+#ifdef DEBUG_LEGION
+                    bool check_field_size = true,
+#else
+                    bool check_field_size = false,
+#endif
                     bool silence_warnings = false) { }
     };
  

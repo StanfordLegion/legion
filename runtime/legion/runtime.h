@@ -426,8 +426,8 @@ namespace Legion {
 #endif
 #ifdef BOUNDS_CHECKS
     public:
-      bool contains_ptr(ptr_t ptr) const;
-      bool contains_point(const DomainPoint &dp) const;
+      bool contains_ptr(ptr_t ptr);
+      bool contains_point(const DomainPoint &dp);
 #endif
     public:
       void get_bounds(void *realm_is, TypeTag type_tag);

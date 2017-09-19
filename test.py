@@ -209,7 +209,7 @@ def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     # SNAP
     # Contact: Mike Bauer <mbauer@nvidia.com>
     snap_dir = os.path.join(tmp_dir, 'snap')
-    cmd(['git', 'clone', '-b', 'ctrlrepl', 'https://github.com/StanfordLegion/Legion-SNAP.git', snap_dir])
+    cmd(['git', 'clone', '-b', 'deppart', 'https://github.com/StanfordLegion/Legion-SNAP.git', snap_dir])
     # This can't handle flags before application arguments, so place
     # them after.
     snap = [[os.path.join(snap_dir, 'src/snap'),
