@@ -483,7 +483,7 @@ namespace LegionRuntime {
 	    AT acc(inst, field_id, r);
 	    char *dst = acc.ptr(r.lo);
 	    act_count = req_count;
-	    stride = ByteOffset(acc.strides[0]);
+	    stride = ByteOffset(off_t(acc.strides[0]));
 	    return dst;
 	  }
 
@@ -497,7 +497,7 @@ namespace LegionRuntime {
 	      assert(AT::is_compatible(inst, field_id));
 	      AT acc(inst, field_id);
 	      char *dst = acc.ptr(Realm::ZPoint<1, Arrays::coord_t>(0));
-	      offsets[0] = ByteOffset(acc.strides[0]);
+	      offsets[0] = ByteOffset(off_t(acc.strides[0]));
 	      return dst;
 	    }
 	    case 2: {
@@ -505,8 +505,8 @@ namespace LegionRuntime {
 	      assert(AT::is_compatible(inst, field_id));
 	      AT acc(inst, field_id);
 	      char *dst = acc.ptr(Realm::ZPoint<2, Arrays::coord_t>(0, 0));
-	      offsets[0] = ByteOffset(acc.strides[0]);
-	      offsets[1] = ByteOffset(acc.strides[1]);
+	      offsets[0] = ByteOffset(off_t(acc.strides[0]));
+	      offsets[1] = ByteOffset(off_t(acc.strides[1]));
 	      return dst;
 	    }
 	    case 3: {
@@ -514,9 +514,9 @@ namespace LegionRuntime {
 	      assert(AT::is_compatible(inst, field_id));
 	      AT acc(inst, field_id);
 	      char *dst = acc.ptr(Realm::ZPoint<3, Arrays::coord_t>(0, 0, 0));
-	      offsets[0] = ByteOffset(acc.strides[0]);
-	      offsets[1] = ByteOffset(acc.strides[1]);
-	      offsets[2] = ByteOffset(acc.strides[2]);
+	      offsets[0] = ByteOffset(off_t(acc.strides[0]));
+	      offsets[1] = ByteOffset(off_t(acc.strides[1]));
+	      offsets[2] = ByteOffset(off_t(acc.strides[2]));
 	      return dst;
 	    }
 	    default: assert(0);
@@ -536,7 +536,7 @@ namespace LegionRuntime {
 	      assert(AT::is_compatible(inst, field_id, rr));
 	      AT acc(inst, field_id, rr);
 	      char *dst = acc.ptr(rr.lo);
-	      offsets[0] = ByteOffset(acc.strides[0]);
+	      offsets[0] = ByteOffset(off_t(acc.strides[0]));
 	      subrect = r;
 	      return dst;
 	    }
@@ -548,8 +548,8 @@ namespace LegionRuntime {
 	      assert(AT::is_compatible(inst, field_id, rr));
 	      AT acc(inst, field_id, rr);
 	      char *dst = acc.ptr(rr.lo);
-	      offsets[0] = ByteOffset(acc.strides[0]);
-	      offsets[1] = ByteOffset(acc.strides[1]);
+	      offsets[0] = ByteOffset(off_t(acc.strides[0]));
+	      offsets[1] = ByteOffset(off_t(acc.strides[1]));
 	      subrect = r;
 	      return dst;
 	    }
@@ -561,9 +561,9 @@ namespace LegionRuntime {
 	      assert(AT::is_compatible(inst, field_id, rr));
 	      AT acc(inst, field_id, rr);
 	      char *dst = acc.ptr(rr.lo);
-	      offsets[0] = ByteOffset(acc.strides[0]);
-	      offsets[1] = ByteOffset(acc.strides[1]);
-	      offsets[2] = ByteOffset(acc.strides[2]);
+	      offsets[0] = ByteOffset(off_t(acc.strides[0]));
+	      offsets[1] = ByteOffset(off_t(acc.strides[1]));
+	      offsets[2] = ByteOffset(off_t(acc.strides[2]));
 	      subrect = r;
 	      return dst;
 	    }
