@@ -168,6 +168,8 @@ before_script:
         eval $(ssh-agent -s)
         ssh-add <(echo "$GITLAB_DEPLOY_KEY")
       fi
+    - git config --global user.name "Legion Testing Automation"
+    - git config --global user.email "legion-testing@googlegroups.com"
     - ./test.py --test=perf
 
 ###
