@@ -1594,30 +1594,6 @@ namespace Realm {
 
     GPUFBMemory::~GPUFBMemory(void) {}
 
-#ifdef OLD_ALLOCATORS
-    RegionInstance GPUFBMemory::create_instance(IndexSpace is,
-						const int *linearization_bits,
-						size_t bytes_needed,
-						size_t block_size,
-						size_t element_size,
-						const std::vector<size_t>& field_sizes,
-						ReductionOpID redopid,
-						off_t list_size,
-						const Realm::ProfilingRequestSet &reqs,
-						RegionInstance parent_inst)
-    {
-      return create_instance_local(is, linearization_bits, bytes_needed,
-				   block_size, element_size, field_sizes, redopid,
-				   list_size, reqs, parent_inst);
-    }
-
-    void GPUFBMemory::destroy_instance(RegionInstance i, 
-				       bool local_destroy)
-    {
-      destroy_instance_local(i, local_destroy);
-    }
-#endif
-
     off_t GPUFBMemory::alloc_bytes(size_t size)
     {
       return alloc_bytes_local(size);
@@ -1669,30 +1645,6 @@ namespace Realm {
     }
 
     GPUZCMemory::~GPUZCMemory(void) {}
-
-#ifdef OLD_ALLOCATORS
-    RegionInstance GPUZCMemory::create_instance(IndexSpace is,
-						const int *linearization_bits,
-						size_t bytes_needed,
-						size_t block_size,
-						size_t element_size,
-						const std::vector<size_t>& field_sizes,
-						ReductionOpID redopid,
-						off_t list_size,
-						const Realm::ProfilingRequestSet &reqs,
-						RegionInstance parent_inst)
-    {
-      return create_instance_local(is, linearization_bits, bytes_needed,
-				   block_size, element_size, field_sizes, redopid,
-				   list_size, reqs, parent_inst);
-    }
-
-    void GPUZCMemory::destroy_instance(RegionInstance i, 
-				       bool local_destroy)
-    {
-      destroy_instance_local(i, local_destroy);
-    }
-#endif
 
     off_t GPUZCMemory::alloc_bytes(size_t size)
     {

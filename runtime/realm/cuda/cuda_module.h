@@ -605,22 +605,6 @@ namespace Realm {
 
       virtual ~GPUFBMemory(void);
 
-#ifdef OLD_ALLOCATORS
-      virtual RegionInstance create_instance(IndexSpace is,
-					     const int *linearization_bits,
-					     size_t bytes_needed,
-					     size_t block_size,
-					     size_t element_size,
-					     const std::vector<size_t>& field_sizes,
-					     ReductionOpID redopid,
-					     off_t list_size,
-                                             const Realm::ProfilingRequestSet &reqs,
-					     RegionInstance parent_inst);
-
-      virtual void destroy_instance(RegionInstance i, 
-				    bool local_destroy);
-#endif
-
       virtual off_t alloc_bytes(size_t size);
 
       virtual void free_bytes(off_t offset, size_t size);
@@ -643,22 +627,6 @@ namespace Realm {
       GPUZCMemory(Memory _me, CUdeviceptr _gpu_base, void *_cpu_base, size_t _size);
 
       virtual ~GPUZCMemory(void);
-
-#ifdef OLD_ALLOCATORS
-      virtual RegionInstance create_instance(IndexSpace is,
-					     const int *linearization_bits,
-					     size_t bytes_needed,
-					     size_t block_size,
-					     size_t element_size,
-					     const std::vector<size_t>& field_sizes,
-					     ReductionOpID redopid,
-					     off_t list_size,
-                                             const Realm::ProfilingRequestSet &reqs,
-					     RegionInstance parent_inst);
-
-      virtual void destroy_instance(RegionInstance i, 
-				    bool local_destroy);
-#endif
 
       virtual off_t alloc_bytes(size_t size);
 
