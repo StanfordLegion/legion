@@ -944,7 +944,6 @@ namespace Legion {
                             UniqueID logical_context_uid,
                             InnerContext *physical_context,
                             bool update_parent_state,
-                            AddressSpaceID source_space,
                             std::set<RtEvent> &applied_events,
                             bool dedup_opens = false,
                             ProjectionEpochID open_epoch = 0,
@@ -956,7 +955,7 @@ namespace Legion {
                                  LegionColor child_color,
                                  VersioningSet<> &new_states,
                                  std::set<RtEvent> &applied_events);
-      void invalidate_version_infos(FieldMask invalidate_mask);
+      void invalidate_version_infos(const FieldMask &invalidate_mask);
       static void filter_version_info(const FieldMask &invalidate_mask,
            LegionMap<VersionID,VersioningSet<VERSION_MANAGER_REF> >::aligned
                                                                 &to_filter);
@@ -977,8 +976,7 @@ namespace Legion {
                                   ProjectionEpochID advance_epoch,
                                   const FieldMask *dirty_previous,
                                   const ProjectionInfo *proj_info);
-      static void handle_remote_advance(Deserializer &derez, Runtime *runtime,
-                                        AddressSpaceID source_space);
+      static void handle_remote_advance(Deserializer &derez, Runtime *runtime);
     public:
       RtEvent send_remote_invalidate(AddressSpaceID target,
                                      const FieldMask &invalidate_mask);
@@ -1043,6 +1041,9 @@ namespace Legion {
       // remote copies. On remote nodes this is the set of fields which
       // are locally valid.
       FieldMask remote_valid_fields;
+      // Only used on remote nodes to track the set of pending advances
+      // which may indicate that remove_valid_fields is stale
+      FieldMask pending_remote_advances;
     protected:
       // Owner information about which nodes have remote copies
       LegionMap<AddressSpaceID,FieldMask>::aligned remote_valid;

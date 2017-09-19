@@ -2031,7 +2031,6 @@ namespace Legion {
                                    UniqueID logical_context_uid,
         const LegionMap<ProjectionEpochID,FieldMask>::aligned *advance_epochs);
       void advance_version_numbers(ContextID ctx,
-                                   AddressSpaceID local_space,
                                    const RegionTreePath &path,
                                    const FieldMask &advance_mask,
                                    InnerContext *parent_ctx,

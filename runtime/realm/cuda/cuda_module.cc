@@ -851,6 +851,9 @@ namespace Realm {
 	for(std::set<Memory>::const_iterator it = pinned_sysmems.begin();
 	    it != pinned_sysmems.end();
 	    ++it) {
+	  // don't create affinities for IB memories right now
+	  if(!ID(*it).is_memory()) continue;
+
 	  Machine::MemoryMemoryAffinity mma;
 	  mma.m1 = fbmem->me;
 	  mma.m2 = *it;

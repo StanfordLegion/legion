@@ -2308,8 +2308,7 @@ namespace Legion {
       void handle_version_state_update_response(Deserializer &derez);
       void handle_version_state_valid_notification(Deserializer &derez,
                                                    AddressSpaceID source);
-      void handle_version_manager_advance(Deserializer &derez,
-                                          AddressSpaceID source);
+      void handle_version_manager_advance(Deserializer &derez);
       void handle_version_manager_invalidate(Deserializer &derez);
       void handle_version_manager_request(Deserializer &derez, 
                                           AddressSpaceID source);
