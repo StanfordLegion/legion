@@ -1761,8 +1761,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
 #endif
-      const AddressSpaceID local = runtime->address_space;
-      parent->advance_version_numbers(ctx.get_id(), local, path, advance_mask,
+      parent->advance_version_numbers(ctx.get_id(), path, advance_mask,
                                       context, update_parent_state,
                                       parent_is_upper_bound, logical_ctx_uid,
                                       dedup_opens, dedup_advances, open_epoch, 
@@ -13738,7 +13737,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::advance_version_numbers(ContextID ctx,
-                                               AddressSpaceID local_space,
                                                const RegionTreePath &path,
                                                const FieldMask &advance_mask,
                                                InnerContext *parent_ctx, 
@@ -13772,7 +13770,7 @@ namespace Legion {
           if (!!dirty_prev)
           {
             manager.advance_versions(advance_mask, logical_context_uid,
-                          parent_ctx, local_update_parent, local_space, 
+                          parent_ctx, local_update_parent,
                           ready_events, dedup_opens, open_epoch, 
                           dedup_advances, advance_epoch, &dirty_prev);
             still_need_advance = false;
@@ -13781,14 +13779,14 @@ namespace Legion {
       }
       if (still_need_advance)
         manager.advance_versions(advance_mask, logical_context_uid,
-              parent_ctx, local_update_parent, local_space, ready_events, 
+              parent_ctx, local_update_parent, ready_events, 
               dedup_opens, open_epoch, dedup_advances, advance_epoch);
       // Continue the traversal, 
       // wonder if we get tail call recursion optimization
       if (!arrived)
       {
         RegionTreeNode *child = get_tree_child(path.get_child(depth));
-        child->advance_version_numbers(ctx, local_space, path, advance_mask, 
+        child->advance_version_numbers(ctx, path, advance_mask, 
                                        parent_ctx, update_parent_state, 
                                        false/*update*/, logical_context_uid,
                                        dedup_opens, dedup_advances, 
@@ -13811,7 +13809,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(version_info.is_upper_bound_set());
 #endif
-      const AddressSpace local_space = context->runtime->address_space;
       // First we need to record the rest of our closed versions
       VersionManager &manager = get_current_version_manager(ctx_id);
       // A close always advances the version numbers even if we 
@@ -13837,7 +13834,7 @@ namespace Legion {
           if (!overlap)
             continue;
           manager.advance_versions(overlap, logical_context_uid, owner_ctx, 
-                                   true/*update parent*/, local_space, 
+                                   true/*update parent*/,
                                    ready_events, true/*dedup opens*/,
                                    it->first, false/*dedup advances*/, 
                                    0/*epoch*/, NULL/*dirty previous*/, 
@@ -13846,7 +13843,7 @@ namespace Legion {
       }
       else // The common case
         manager.advance_versions(closing_mask, logical_context_uid, owner_ctx,
-                                 update_parent_state, local_space,ready_events);
+                                 update_parent_state, ready_events);
       // Now we can record our advance versions
       manager.record_advance_versions(closing_mask, owner_ctx, 
                                       version_info, ready_events);
@@ -13857,6 +13854,7 @@ namespace Legion {
       // Copy the version info that we need
       DeferredVersionInfo *view_info = new DeferredVersionInfo();
       version_info.copy_to(*view_info);
+      const AddressSpace local_space = context->runtime->address_space;
       // Make the view
       CompositeView *result = new CompositeView(context, did, 
                            local_space, this, view_info, 
@@ -16412,9 +16410,8 @@ namespace Legion {
         // We update the parent state if we are not the top-level node
         const bool update_parent_state = 
           !info.version_info.is_upper_bound_node(this);
-        const AddressSpaceID local_space = context->runtime->address_space;
         manager.advance_versions(info.traversal_mask, logical_ctx_uid, context,
-            update_parent_state, local_space, info.map_applied_events,
+            update_parent_state, info.map_applied_events,
             false/*dedup opens*/, 0/*epoch*/, false/*dedup advances*/, 
             0/*epoch*/, NULL/*dirty previous*/, proj_info);
       }
@@ -16424,7 +16421,6 @@ namespace Legion {
                                     info.version_info, info.map_applied_events);
       PhysicalState *state = get_physical_state(info.version_info);
       const AddressSpaceID local_space = context->runtime->address_space;
-      
 #ifdef DEBUG_LEGION
       for (unsigned idx = 0; idx < targets.size(); idx++)
       {
@@ -16855,7 +16851,7 @@ namespace Legion {
         !version_info.is_upper_bound_node(this);
       const AddressSpaceID local_space = context->runtime->address_space;
       manager.advance_versions(fill_mask, logical_ctx_uid, inner_context,
-          update_parent_state, local_space, map_applied_events);
+                               update_parent_state, map_applied_events);
       // Now record just the advanced versions
       manager.record_advance_versions(fill_mask, inner_context, 
                                       version_info, map_applied_events);
@@ -16931,7 +16927,7 @@ namespace Legion {
         !version_info.is_upper_bound_node(this);
       const AddressSpaceID local_space = context->runtime->address_space;
       manager.advance_versions(fill_mask, logical_ctx_uid, context,
-          update_parent_state, local_space, map_applied_events);
+                               update_parent_state, map_applied_events);
       // Now record just the advanced versions
       manager.record_advance_versions(fill_mask, context, 
                                       version_info, map_applied_events);
@@ -17002,9 +16998,8 @@ namespace Legion {
       // so we need to bump the version numbers
       VersionManager &manager = get_current_version_manager(ctx);
       const bool update_parent_state = !version_info.is_upper_bound_node(this);
-      const AddressSpaceID local_space = context->runtime->address_space;
       manager.advance_versions(attach_mask, logical_ctx_uid, parent_ctx,
-          update_parent_state, local_space, map_applied_events);
+                               update_parent_state, map_applied_events);
       // Wrap it in a view
       MaterializedView *view = 
         parent_ctx->create_instance_top_view(instance_manager, 
@@ -17040,9 +17035,8 @@ namespace Legion {
       // we are marking that the data in the logical region is no longer valid
       VersionManager &manager = get_current_version_manager(ctx);
       const bool update_parent_state = !version_info.is_upper_bound_node(this);
-      const AddressSpaceID local_space = context->runtime->address_space;
       manager.advance_versions(detach_mask, logical_ctx_uid, context,
-          update_parent_state, local_space, map_applied_events);
+                               update_parent_state, map_applied_events);
       // First remove this view from the set of valid views
       PhysicalState *state = get_physical_state(version_info);
       filter_valid_views(state, detach_view);
