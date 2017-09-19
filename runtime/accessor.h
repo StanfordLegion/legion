@@ -577,14 +577,14 @@ namespace LegionRuntime {
 			     const std::vector<off_t> &field_offsets, ByteOffset &field_stride) const
 	  {
 	    if(field_offsets.empty()) return 0;
-	    void *ptr = RegionAccessor<Generic, void, void>(inst, field_offsets[0]).raw_rect_ptr<DIM>(r, subrect, offsets);
+	    void *ptr = RegionAccessor<Generic, void, void>(Generic::Untyped(inst, field_offsets[0])).raw_rect_ptr<DIM>(r, subrect, offsets);
 	    if(field_offsets.size() == 1) {
 	      field_stride.offset = 0;
 	    } else {
 	      for(size_t i = 1; i < field_offsets.size(); i++) {
 		Arrays::Rect<DIM> subrect2;
 		ByteOffset offsets2[DIM];
-		void *ptr2 = RegionAccessor<Generic, void, void>(inst, field_offsets[i]).raw_rect_ptr<DIM>(r, subrect2, offsets2);
+		void *ptr2 = RegionAccessor<Generic, void, void>(Generic::Untyped(inst, field_offsets[i])).raw_rect_ptr<DIM>(r, subrect2, offsets2);
 		assert(ptr2 != 0);
 		assert(subrect2 == subrect);
 		for(int j = 0; j < DIM; j++)
