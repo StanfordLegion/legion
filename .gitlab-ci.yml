@@ -163,6 +163,11 @@ before_script:
 .perf_tests: &perf_tests
   script:
     - ./tools/add_github_host_key.sh
+    - |
+      if [[ -n $GITLAB_DEPLOY_KEY ]]; then
+        eval $(ssh-agent -s)
+        ssh-add <(echo "$GITLAB_DEPLOY_KEY")
+      fi
     - ./test.py --test=perf
 
 ###
