@@ -52,6 +52,7 @@ code, __FILE__, __LINE__, message);                       \
 
 namespace Legion {
 #ifndef DISABLE_PARTITION_SHIM
+#define PARTITION_SHIM_MAPPER_ID                      (1729)
   // An internal namespace with some classes for providing help
   // with backwards compatibility for partitioning operations
   namespace PartitionShim {

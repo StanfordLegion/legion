@@ -2556,6 +2556,12 @@ namespace Legion {
       if (check && (mid == 0))
         REPORT_LEGION_ERROR(ERROR_RESERVED_MAPPING_ID, 
                             "Invalid mapping ID. ID 0 is reserved.");
+#ifndef DISABLE_PARTITION_SHIM
+      if (check && (mid == PARTITION_SHIM_MAPPER_ID))
+        REPORT_LEGION_ERROR(ERROR_RESERVED_MAPPING_ID,
+                            "Invalid mapper ID. %d is reserved for the "
+                            "partition shim mapper", PARTITION_SHIM_MAPPER_ID)
+#endif
       AutoLock m_lock(mapper_lock);
       std::map<MapperID,std::pair<MapperManager*,bool> >::iterator finder = 
         mappers.find(mid);
@@ -9431,6 +9437,19 @@ namespace Legion {
             MapperManager *wrapper = wrap_mapper(this, mapper, 0, it->first);
             it->second->add_mapper(0, wrapper, false/*check*/, true/*owns*/);
           }
+#ifndef DISABLE_PARTITION_SHIM
+          // Make default mappers for the partition shim 
+          for (std::map<Processor,ProcessorManager*>::const_iterator it = 
+                proc_managers.begin(); it != proc_managers.end(); it++)
+          {
+            Mapper *mapper = 
+              new Mapping::DefaultMapper(mapper_runtime, machine, it->first);
+            MapperManager *wrapper = wrap_mapper(this, mapper, 
+                                        PARTITION_SHIM_MAPPER_ID, it->first);
+            it->second->add_mapper(PARTITION_SHIM_MAPPER_ID, wrapper, 
+                                   false/*check*/, true/*owns*/);
+          }
+#endif
           // Now ask the application what it wants to do
           if (!Runtime::registration_callbacks.empty())
           {

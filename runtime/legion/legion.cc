@@ -35,7 +35,8 @@ namespace Legion {
     template<int CDIM>
     ColorPoints<CDIM>::ColorPoints(const Coloring &coloring, 
         LogicalRegion region, FieldID color_field, FieldID pointer_field)
-      : TaskLauncher(TASK_ID, TaskArgument())
+      : TaskLauncher(TASK_ID, TaskArgument(), Predicate::TRUE_PRED,
+                     PARTITION_SHIM_MAPPER_ID)
     //--------------------------------------------------------------------------
     {
       add_region_requirement(
@@ -66,7 +67,8 @@ namespace Legion {
     template<int CDIM>
     ColorPoints<CDIM>::ColorPoints(const PointColoring &coloring, 
         LogicalRegion region, FieldID color_field, FieldID pointer_field)
-      : TaskLauncher(TASK_ID, TaskArgument())
+      : TaskLauncher(TASK_ID, TaskArgument(), Predicate::TRUE_PRED,
+                     PARTITION_SHIM_MAPPER_ID)
     //--------------------------------------------------------------------------
     {
       add_region_requirement(
@@ -141,7 +143,8 @@ namespace Legion {
     template<int CDIM, int RDIM>
     ColorRects<CDIM,RDIM>::ColorRects(const DomainColoring &coloring, 
         LogicalRegion region, FieldID color_field, FieldID range_field)
-      : TaskLauncher(TASK_ID, TaskArgument())
+      : TaskLauncher(TASK_ID, TaskArgument(), Predicate::TRUE_PRED,
+                     PARTITION_SHIM_MAPPER_ID)
     //--------------------------------------------------------------------------
     {
       add_region_requirement(
@@ -167,7 +170,8 @@ namespace Legion {
     template<int CDIM, int RDIM>
     ColorRects<CDIM,RDIM>::ColorRects(const MultiDomainColoring &coloring, 
         LogicalRegion region, FieldID color_field, FieldID range_field)
-      : TaskLauncher(TASK_ID, TaskArgument())
+      : TaskLauncher(TASK_ID, TaskArgument(), Predicate::TRUE_PRED,
+                     PARTITION_SHIM_MAPPER_ID)
     //--------------------------------------------------------------------------
     {
       add_region_requirement(
@@ -197,7 +201,8 @@ namespace Legion {
     template<int CDIM, int RDIM>
     ColorRects<CDIM,RDIM>::ColorRects(const DomainPointColoring &coloring, 
         LogicalRegion region, FieldID color_field, FieldID range_field)
-      : TaskLauncher(TASK_ID, TaskArgument())
+      : TaskLauncher(TASK_ID, TaskArgument(), Predicate::TRUE_PRED,
+                     PARTITION_SHIM_MAPPER_ID)
     //--------------------------------------------------------------------------
     {
       add_region_requirement(
@@ -222,7 +227,8 @@ namespace Legion {
     template<int CDIM, int RDIM>
     ColorRects<CDIM,RDIM>::ColorRects(const MultiDomainPointColoring &coloring,
         LogicalRegion region, FieldID color_field, FieldID range_field)
-      : TaskLauncher(TASK_ID, TaskArgument())
+      : TaskLauncher(TASK_ID, TaskArgument(), Predicate::TRUE_PRED,
+                     PARTITION_SHIM_MAPPER_ID)
     //--------------------------------------------------------------------------
     {
       add_region_requirement(
@@ -251,7 +257,8 @@ namespace Legion {
     template<int CDIM, int RDIM>
     ColorRects<CDIM,RDIM>::ColorRects(const Coloring &coloring, 
                  LogicalRegion region, FieldID color_field, FieldID range_field)
-      : TaskLauncher(TASK_ID, TaskArgument())
+      : TaskLauncher(TASK_ID, TaskArgument(), Predicate::TRUE_PRED,
+                     PARTITION_SHIM_MAPPER_ID)
     //--------------------------------------------------------------------------
     {
       add_region_requirement(
@@ -301,7 +308,8 @@ namespace Legion {
     template<int CDIM, int RDIM>
     ColorRects<CDIM,RDIM>::ColorRects(const PointColoring &coloring, 
                  LogicalRegion region, FieldID color_field, FieldID range_field)
-      : TaskLauncher(TASK_ID, TaskArgument())
+      : TaskLauncher(TASK_ID, TaskArgument(), Predicate::TRUE_PRED,
+                     PARTITION_SHIM_MAPPER_ID)
     //--------------------------------------------------------------------------
     {
       add_region_requirement(
@@ -3241,16 +3249,19 @@ namespace Legion {
       IndexSpace index_color_space = create_index_space(ctx, color_space);
       // Partition the logical region by the color field
       IndexPartition temp_ip = create_partition_by_field(ctx, temp_lr, 
-                                      temp_lr, color_fid, index_color_space);
+                                    temp_lr, color_fid, index_color_space,
+                                    AUTO_GENERATE_ID, PARTITION_SHIM_MAPPER_ID);
       // Then project the partition image through the pointer field
       LogicalPartition temp_lp = get_logical_partition(temp_lr, temp_ip);
       IndexPartition result;
       if (do_ranges)
         result = create_partition_by_image_range(ctx, parent, temp_lp,
-                    temp_lr, pointer_fid, index_color_space, part_kind, color);
+                    temp_lr, pointer_fid, index_color_space, part_kind, color,
+                    PARTITION_SHIM_MAPPER_ID);
       else
         result = create_partition_by_image(ctx, parent, temp_lp, 
-                    temp_lr, pointer_fid, index_color_space, part_kind, color);
+                    temp_lr, pointer_fid, index_color_space, part_kind, color,
+                    PARTITION_SHIM_MAPPER_ID);
       // Clean everything up
       destroy_logical_region(ctx, temp_lr);
       destroy_field_space(ctx, temp_fs);
@@ -3341,7 +3352,8 @@ namespace Legion {
                                   create_index_space(ctx, color_space);
       // Partition the logical region by the color field
       IndexPartitionT<1,coord_t> temp_ip = create_partition_by_field(ctx,
-                            temp_lr, temp_lr, color_fid, index_color_space);
+                            temp_lr, temp_lr, color_fid, index_color_space,
+                            AUTO_GENERATE_ID, PARTITION_SHIM_MAPPER_ID);
       // Then project the partition image through the pointer field
       LogicalPartitionT<1,coord_t> temp_lp = 
                                      get_logical_partition(temp_lr, temp_ip);
@@ -3350,12 +3362,12 @@ namespace Legion {
         result = create_partition_by_image_range(ctx, 
             IndexSpaceT<1,coord_t>(parent), temp_lp, temp_lr, pointer_fid,
             index_color_space, (disjoint ? DISJOINT_KIND : ALIASED_KIND),
-            part_color);
+            part_color, PARTITION_SHIM_MAPPER_ID);
       else
         result = create_partition_by_image(ctx,
             IndexSpaceT<1,coord_t>(parent), temp_lp, temp_lr, pointer_fid, 
             index_color_space, (disjoint ? DISJOINT_KIND : ALIASED_KIND), 
-            part_color);
+            part_color, PARTITION_SHIM_MAPPER_ID);
       // Clean everything up
       destroy_logical_region(ctx, temp_lr);
       destroy_field_space(ctx, temp_fs);
@@ -3541,11 +3553,13 @@ namespace Legion {
       IndexSpace index_color_space = create_index_space(ctx, color_space);
       // Partition the logical region by the color field
       IndexPartition temp_ip = create_partition_by_field(ctx, temp_lr, 
-                                temp_lr, color_fid, index_color_space);
+                                temp_lr, color_fid, index_color_space,
+                                AUTO_GENERATE_ID, PARTITION_SHIM_MAPPER_ID);
       // Then project the partition image through the range field
       LogicalPartition temp_lp = get_logical_partition(temp_lr, temp_ip);
       IndexPartition result = create_partition_by_image_range(ctx, parent, 
-            temp_lp, temp_lr, range_fid, index_color_space, part_kind, color);
+                           temp_lp, temp_lr, range_fid, index_color_space, 
+                           part_kind, color, PARTITION_SHIM_MAPPER_ID);
       // Clean everything up
       destroy_logical_region(ctx, temp_lr);
       destroy_field_space(ctx, temp_fs);
@@ -3640,12 +3654,14 @@ namespace Legion {
                             create_index_space<1,coord_t>(ctx, color_space);
       // Partition the logical region by the color field
       IndexPartition temp_ip = create_partition_by_field(ctx, temp_lr,
-                                      temp_lr, color_fid, index_color_space);
+                                    temp_lr, color_fid, index_color_space,
+                                    AUTO_GENERATE_ID, PARTITION_SHIM_MAPPER_ID);
       // Then project the partition image through the pointer field
       LogicalPartition temp_lp = get_logical_partition(temp_lr, temp_ip);
       IndexPartition result = create_partition_by_image_range(ctx,
           parent, temp_lp, temp_lr, range_fid, index_color_space, 
-          (disjoint ? DISJOINT_KIND : ALIASED_KIND), part_color);
+          (disjoint ? DISJOINT_KIND : ALIASED_KIND), part_color,
+          PARTITION_SHIM_MAPPER_ID);
       // Clean everything up
       destroy_logical_region(ctx, temp_lr);
       destroy_field_space(ctx, temp_fs);
@@ -3834,11 +3850,13 @@ namespace Legion {
       IndexSpace index_color_space = create_index_space(ctx, color_space);
       // Partition the logical region by the color field
       IndexPartition temp_ip = create_partition_by_field(ctx, temp_lr, 
-                                      temp_lr, color_fid, index_color_space);
+                                    temp_lr, color_fid, index_color_space,
+                                    AUTO_GENERATE_ID, PARTITION_SHIM_MAPPER_ID);
       // Then project the partition image through the range field
       LogicalPartition temp_lp = get_logical_partition(temp_lr, temp_ip);
       IndexPartition result = create_partition_by_image_range(ctx, parent, 
-            temp_lp, temp_lr, range_fid, index_color_space, part_kind, color);
+            temp_lp, temp_lr, range_fid, index_color_space, part_kind, color,
+            PARTITION_SHIM_MAPPER_ID);
       // Clean everything up
       destroy_logical_region(ctx, temp_lr);
       destroy_field_space(ctx, temp_fs);
@@ -3935,12 +3953,14 @@ namespace Legion {
                             create_index_space<1,coord_t>(ctx, color_space);
       // Partition the logical region by the color field
       IndexPartition temp_ip = create_partition_by_field(ctx, temp_lr,
-                                      temp_lr, color_fid, index_color_space);
+                                    temp_lr, color_fid, index_color_space,
+                                    AUTO_GENERATE_ID, PARTITION_SHIM_MAPPER_ID);
       // Then project the partition image through the pointer field
       LogicalPartition temp_lp = get_logical_partition(temp_lr, temp_ip);
       IndexPartition result = create_partition_by_image_range(ctx,
           parent, temp_lp, temp_lr, range_fid, index_color_space, 
-          (disjoint ? DISJOINT_KIND : ALIASED_KIND), part_color);
+          (disjoint ? DISJOINT_KIND : ALIASED_KIND), part_color,
+          PARTITION_SHIM_MAPPER_ID);
       // Clean everything up
       destroy_logical_region(ctx, temp_lr);
       destroy_field_space(ctx, temp_fs);
