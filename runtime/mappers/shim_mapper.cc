@@ -981,13 +981,13 @@ namespace Legion {
                                    std::vector<ShimMapper::DomainSplit> &slices)
     //--------------------------------------------------------------------------
     {
-      Realm::ZRect<DIM,coord_t> r = domain;
+      Rect<DIM,coord_t> r = domain;
 
       std::vector<Processor>::const_iterator target_it = targets.begin();
       for(PointInRectIterator<DIM> pir(r); pir(); pir++) 
       {
         // rect containing a single point
-        Realm::ZRect<DIM> subrect(*pir, *pir);
+        Rect<DIM> subrect(*pir, *pir);
 	ShimMapper::DomainSplit ds(subrect, 
             *target_it++, false /* recurse */, false /* stealable */);
 	slices.push_back(ds);
@@ -1023,7 +1023,7 @@ namespace Legion {
       {
         // Only works for one dimensional rectangles right now
         assert(domain.get_dim() == 1);
-        Realm::ZRect<1,coord_t> rect = domain;
+        Rect<1,coord_t> rect = domain;
         unsigned num_elmts = rect.volume();
         unsigned num_chunks = targets.size()*splitting_factor;
         if (num_chunks > num_elmts)
@@ -1037,10 +1037,10 @@ namespace Legion {
         for (unsigned idx = 0; idx < num_chunks; idx++)
         {
           unsigned elmts = (idx < number_small) ? lower_bound : upper_bound;
-          Realm::ZPoint<1,coord_t> lo(index);  
-          Realm::ZPoint<1,coord_t> hi(index+elmts-1);
+          Point<1,coord_t> lo(index);  
+          Point<1,coord_t> hi(index+elmts-1);
           index += elmts;
-          Realm::ZRect<1,coord_t> chunk(rect.lo+lo,rect.lo+hi);
+          Rect<1,coord_t> chunk(rect.lo+lo,rect.lo+hi);
           unsigned proc_idx = idx % targets.size();
           slices.push_back(DomainSplit(chunk, targets[proc_idx], false, false));
         }

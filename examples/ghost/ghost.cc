@@ -21,11 +21,6 @@
 #include "legion.h"
 using namespace Legion;
 
-template<typename FT, int N, typename T = coord_t>
-using AccessorRO = FieldAccessor<READ_ONLY,FT,N,T,Realm::AffineAccessor<FT,N,T> >;
-template<typename FT, int N, typename T = coord_t>
-using AccessorWD = FieldAccessor<WRITE_DISCARD,FT,N,T,Realm::AffineAccessor<FT,N,T> >;
-
 #define ORDER 2
 
 enum {
@@ -144,7 +139,7 @@ void top_level_task(const Task *task,
     Rect<1> rect = dom; 
     // Make two sub-regions, one on the left, and one on the right
     Rect<1> extent(rect.lo, rect.lo[0]+(ORDER-1));
-    Matrix<1,1> transform;
+    Transform<1,1> transform;
     transform[0][0] = (rect.hi[0]-(ORDER-1)) - rect.lo[0];
     IndexPartition ghost_ip = runtime->create_partition_by_restriction(ctx,
         subspace, ghost_color_is, transform, extent, DISJOINT_KIND);
@@ -455,7 +450,7 @@ void init_task(const Task *task,
 
   FieldID fid = *(task->regions[0].privilege_fields.begin());
 
-  const AccessorWD<double,1> acc(regions[0], fid);
+  const FieldAccessor<WRITE_DISCARD,double,1> acc(regions[0], fid);
 
   Rect<1> rect = runtime->get_index_space_domain(ctx, 
       task->regions[0].region.get_index_space());
@@ -482,10 +477,10 @@ void stencil_task(const Task *task,
   FieldID read_fid = *(task->regions[1].privilege_fields.begin());
   FieldID ghost_fid = *(task->regions[2].privilege_fields.begin());
 
-  const AccessorWD<double,1> write_acc(regions[0], write_fid);
-  const AccessorRO<double,1> read_acc(regions[1], read_fid);
-  const AccessorRO<double,1> left_ghost_acc(regions[2], ghost_fid);
-  const AccessorRO<double,1> right_ghost_acc(regions[3], ghost_fid);
+  const FieldAccessor<WRITE_DISCARD,double,1> write_acc(regions[0], write_fid);
+  const FieldAccessor<READ_ONLY,double,1> read_acc(regions[1], read_fid);
+  const FieldAccessor<READ_ONLY,double,1> left_ghost_acc(regions[2], ghost_fid);
+  const FieldAccessor<READ_ONLY,double,1> right_ghost_acc(regions[3], ghost_fid);
 
   Rect<1> main_rect = runtime->get_index_space_domain(ctx,
       task->regions[0].region.get_index_space());
@@ -571,7 +566,7 @@ int check_task(const Task *task,
 
   FieldID fid = *(task->regions[0].privilege_fields.begin());
 
-  const AccessorRO<double,1> acc(regions[0], fid);
+  const FieldAccessor<READ_ONLY,double,1> acc(regions[0], fid);
 
   Rect<1> rect = runtime->get_index_space_domain(ctx, 
       task->regions[0].region.get_index_space());

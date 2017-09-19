@@ -9953,19 +9953,20 @@ class State(object):
         for replicant in self.replicants.itervalues():
             replicant.update_shards()
         # Add implicit dependencies between point and index operations
-        index_owners = set()
-        for op in self.ops.itervalues():
-            if op.index_owner:
-                index_owners.add(op.index_owner)
-                point_termination = op.finish_event
-                index_termination = op.index_owner.finish_event
-                assert point_termination.exists()
-                assert index_termination.exists()
-                index_termination.add_incoming(point_termination)
-                point_termination.add_outgoing(index_termination)
-        # Remove index operations from the event graph
-        for op in index_owners:
-            op.finish_event.incoming_ops.remove(op)
+        if self.detailed_logging:
+            index_owners = set()
+            for op in self.ops.itervalues():
+                if op.index_owner:
+                    index_owners.add(op.index_owner)
+                    point_termination = op.finish_event
+                    index_termination = op.index_owner.finish_event
+                    assert point_termination.exists()
+                    assert index_termination.exists()
+                    index_termination.add_incoming(point_termination)
+                    point_termination.add_outgoing(index_termination)
+            # Remove index operations from the event graph
+            for op in index_owners:
+                op.finish_event.incoming_ops.remove(op)
         # Check for any interfering index space launches
         for op in self.ops.itervalues():
             if op.kind == INDEX_TASK_KIND and op.is_interfering_index_space_launch():

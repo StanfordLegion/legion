@@ -261,7 +261,9 @@ namespace Realm {
     const InstanceLayoutGeneric *RegionInstance::get_layout(void) const
     {
       RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
-      // TODO: wait for metadata to be valid?
+      // have to stall on metadata if it's not available...
+      if(!r_impl->metadata.is_valid())
+	r_impl->request_metadata().wait();
       assert(r_impl->metadata.layout);
       return r_impl->metadata.layout;
     }
@@ -269,7 +271,9 @@ namespace Realm {
     void RegionInstance::read_untyped(size_t offset, void *data, size_t datalen) const
     {
       RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
-      // TODO: wait for metadata to be valid?
+      // have to stall on metadata if it's not available...
+      if(!r_impl->metadata.is_valid())
+	r_impl->request_metadata().wait();
       assert(r_impl->metadata.layout);
       MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
       mem->get_bytes(r_impl->metadata.inst_offset + offset, data, datalen);
@@ -278,7 +282,9 @@ namespace Realm {
     void RegionInstance::write_untyped(size_t offset, const void *data, size_t datalen) const
     {
       RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
-      // TODO: wait for metadata to be valid?
+      // have to stall on metadata if it's not available...
+      if(!r_impl->metadata.is_valid())
+	r_impl->request_metadata().wait();
       assert(r_impl->metadata.layout);
       MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
       mem->put_bytes(r_impl->metadata.inst_offset + offset, data, datalen);
@@ -289,7 +295,9 @@ namespace Realm {
 					      bool exclusive /*= false*/) const
     {
       RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
-      // TODO: wait for metadata to be valid?
+      // have to stall on metadata if it's not available...
+      if(!r_impl->metadata.is_valid())
+	r_impl->request_metadata().wait();
       assert(r_impl->metadata.layout);
       MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
       const ReductionOpUntyped *redop = get_runtime()->reduce_op_table[redop_id];
@@ -319,7 +327,9 @@ namespace Realm {
 					     bool exclusive /*= false*/) const
     {
       RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
-      // TODO: wait for metadata to be valid?
+      // have to stall on metadata if it's not available...
+      if(!r_impl->metadata.is_valid())
+	r_impl->request_metadata().wait();
       assert(r_impl->metadata.layout);
       MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
       const ReductionOpUntyped *redop = get_runtime()->reduce_op_table[redop_id];
@@ -349,7 +359,9 @@ namespace Realm {
     void *RegionInstance::pointer_untyped(size_t offset, size_t datalen) const
     {
       RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
-      // TODO: wait for metadata to be valid?
+      // have to stall on metadata if it's not available...
+      if(!r_impl->metadata.is_valid())
+	r_impl->request_metadata().wait();
       assert(r_impl->metadata.layout);
       MemoryImpl *mem = get_runtime()->get_memory_impl(r_impl->memory);
       void *ptr = mem->get_direct_ptr(r_impl->metadata.inst_offset + offset,
@@ -477,11 +489,32 @@ namespace Realm {
 	MetadataResponseMessage::broadcast_request(early_reqs, ID(me).id, data, datalen);
 	free(data);
       }
+
+      if (measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>()) {
+	timeline.record_ready_time();
+      }
+
+      // the InstanceMemoryUsage measurement is added at creation time for
+      //  profilers that want that before instance deletion occurs
+      if(measurements.wants_measurement<ProfilingMeasurements::InstanceMemoryUsage>()) {
+	ProfilingMeasurements::InstanceMemoryUsage usage;
+	usage.instance = me;
+	usage.memory = memory;
+	usage.bytes = metadata.size;
+	measurements.add_measurement(usage);
+      }
     }
 
     void RegionInstanceImpl::notify_deallocation(void)
     {
       log_inst.debug() << "deallocation completed: inst=" << me;
+
+      if (measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>()) {
+	timeline.record_delete_time();
+      }
+
+      // send any remaining incomplete profiling responses
+      measurements.send_responses(requests);
     }
 
     // helper function to figure out which field we're in
@@ -506,18 +539,6 @@ namespace Realm {
 	byte_offset -= (*it);
       }
       assert(0);
-    }
-
-    void RegionInstanceImpl::record_instance_usage(void)
-    {
-      // can't do this in the constructor because our ID isn't right yet...
-      if(measurements.wants_measurement<ProfilingMeasurements::InstanceMemoryUsage>()) {
-	ProfilingMeasurements::InstanceMemoryUsage usage;
-	usage.instance = me;
-	usage.memory = memory;
-	usage.bytes = metadata.size;
-	measurements.add_measurement(usage);
-      }
     }
 
     bool RegionInstanceImpl::get_strided_parameters(void *&base, size_t &stride,

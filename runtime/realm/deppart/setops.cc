@@ -160,6 +160,10 @@ namespace Realm {
     Event e = wait_on;
     UnionOperation<N,T> *op = 0;
 
+    // record the start time of the potentially-inline operation if any
+    //  profiling has been requested
+    long long inline_start_time = reqs.empty() ? 0 : Clock::current_time_in_nanoseconds();
+
     size_t n = std::max(lhss.size(), rhss.size());
     assert((lhss.size() == rhss.size()) || (lhss.size() == 1) || (rhss.size() == 1));
     results.resize(n);
@@ -218,6 +222,8 @@ namespace Realm {
 
     if(op)
       op->deferred_launch(wait_on);
+    else
+      PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
     return e;
   }
 
@@ -234,6 +240,10 @@ namespace Realm {
 
     Event e = wait_on;
     IntersectionOperation<N,T> *op = 0;
+
+    // record the start time of the potentially-inline operation if any
+    //  profiling has been requested
+    long long inline_start_time = reqs.empty() ? 0 : Clock::current_time_in_nanoseconds();
 
     size_t n = std::max(lhss.size(), rhss.size());
     assert((lhss.size() == rhss.size()) || (lhss.size() == 1) || (rhss.size() == 1));
@@ -282,6 +292,8 @@ namespace Realm {
 
     if(op)
       op->deferred_launch(wait_on);
+    else
+      PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
     return e;
   }
 
@@ -298,6 +310,10 @@ namespace Realm {
 
     Event e = wait_on;
     DifferenceOperation<N,T> *op = 0;
+
+    // record the start time of the potentially-inline operation if any
+    //  profiling has been requested
+    long long inline_start_time = reqs.empty() ? 0 : Clock::current_time_in_nanoseconds();
 
     size_t n = std::max(lhss.size(), rhss.size());
     assert((lhss.size() == rhss.size()) || (lhss.size() == 1) || (rhss.size() == 1));
@@ -359,6 +375,8 @@ namespace Realm {
 
     if(op)
       op->deferred_launch(wait_on);
+    else
+      PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
     return e;
   }
 
@@ -369,6 +387,11 @@ namespace Realm {
 						   Event wait_on /*= Event::NO_EVENT*/)
   {
     Event e = wait_on;
+
+    // record the start time of the potentially-inline operation if any
+    //  profiling has been requested
+    long long inline_start_time = reqs.empty() ? 0 : Clock::current_time_in_nanoseconds();
+    bool was_inline = true;
 
     // various special cases
     if(subspaces.empty()) {
@@ -398,6 +421,7 @@ namespace Realm {
 
 	result = op->add_union(subspaces);
 	op->deferred_launch(wait_on);
+	was_inline = false;
 	break;
       }
     }
@@ -414,6 +438,9 @@ namespace Realm {
       }
     }
 
+    if(was_inline)
+      PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
+
     return e;
   }
 
@@ -424,6 +451,11 @@ namespace Realm {
 							  Event wait_on /*= Event::NO_EVENT*/)
   {
     Event e = wait_on;
+
+    // record the start time of the potentially-inline operation if any
+    //  profiling has been requested
+    long long inline_start_time = reqs.empty() ? 0 : Clock::current_time_in_nanoseconds();
+    bool was_inline = true;
 
     // various special cases
     if(subspaces.empty()) {
@@ -463,6 +495,7 @@ namespace Realm {
 
 	result = op->add_intersection(subspaces);
 	op->deferred_launch(wait_on);
+	was_inline = false;
 	break;
       }
     }
@@ -478,6 +511,9 @@ namespace Realm {
 	msg << " -> " << result << " (" << e << ")";
       }
     }
+
+    if(was_inline)
+      PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
 
     return e;
   }

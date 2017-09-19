@@ -2071,18 +2071,6 @@ namespace Legion {
        */
       void get_fields(std::vector<FieldID>& fields) const;
     public:
-#if __cplusplus < 201103L
-      template<int DIM, typename COORD_T>
-      Realm::ZIndexSpace<DIM,COORD_T> get_bounds(void) const;
-      // We'll also allow this to implicitly cast to a realm index space
-      // so that users can easily iterate over the points
-      template<int DIM, typename COORD_T>
-      operator Realm::ZIndexSpace<DIM,COORD_T>(void) const;
-      // They can implicitly cast to a rectangle if there is no
-      // sparsity map, runtime will check for this
-      template<int DIM, typename COORD_T>
-      operator Realm::ZRect<DIM,COORD_T>(void) const;
-#else
       template<int DIM, typename COORD_T>
       DomainT<DIM,COORD_T> get_bounds(void) const;
       // We'll also allow this to implicitly cast to a realm index space
@@ -2093,17 +2081,18 @@ namespace Legion {
       // sparsity map, runtime will check for this
       template<int DIM, typename COORD_T>
       operator Rect<DIM,COORD_T>(void) const;
-#endif
     protected:
       // These methods can only be accessed by the FieldAccessor class
       template<PrivilegeMode, typename, int, typename, typename, bool>
       friend class FieldAccessor;
       template<typename, int, typename, typename>
       friend class UnsafeFieldAccessor;
-      Realm::RegionInstance get_instance_info(PrivilegeMode mode, FieldID fid,
+      Realm::RegionInstance get_instance_info(PrivilegeMode mode, 
+                                              FieldID fid, size_t field_size,
                                               void *realm_is, TypeTag type_tag,
                                               bool silence_warnings,
                                               bool generic_accessor = false,
+                                              bool check_field_size = true,
                                               ReductionOpID redop = 0) const;
       void fail_bounds_check(DomainPoint p, FieldID fid,
                              PrivilegeMode mode) const;
@@ -2160,8 +2149,16 @@ namespace Legion {
      * It should never be copied and will assert fail if a copy is
      * made of it.
      */
-    class IndexIterator {
+    class LEGION_DEPRECATED("Use DomainPointIterator instead") IndexIterator {
     public:
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
       IndexIterator(const Domain &dom, ptr_t start = ptr_t());
       IndexIterator(Runtime *rt, Context ctx, 
                     IndexSpace space, ptr_t start = ptr_t());
@@ -2191,7 +2188,14 @@ namespace Legion {
     public:
       IndexIterator& operator=(const IndexIterator &rhs);
     private:
-      Domain::DomainPointIterator *iterator;
+      Realm::ZIndexSpaceIterator<1,coord_t> is_iterator;
+      Realm::ZPointInRectIterator<1,coord_t> rect_iterator;
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
     };
 
  
@@ -3006,12 +3010,7 @@ namespace Legion {
       // Template version
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx,
-#if __cplusplus < 201103L
-                                              Realm::ZRect<DIM,COORD_T> bounds
-#else
-                                                  Rect<DIM,COORD_T> bounds
-#endif
-                                                  );
+                                                  Rect<DIM,COORD_T> bounds);
       ///@}
       ///@{
       /**
@@ -3025,12 +3024,7 @@ namespace Legion {
       // Template version
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx,
-#if __cplusplus < 201103L
-                      const std::vector<Realm::ZPoint<DIM,COORD_T> > &points
-#else
-                      const std::vector<Point<DIM,COORD_T> > &points
-#endif
-                      );
+                      const std::vector<Point<DIM,COORD_T> > &points);
       ///@}
       ///@{
       /**
@@ -3044,12 +3038,7 @@ namespace Legion {
       // Template version
       template<int DIM, typename COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space(Context ctx,
-#if __cplusplus < 201103L
-                      const std::vector<Realm::ZRect<DIM,COORD_T> > &rects
-#else
-                      const std::vector<Rect<DIM,COORD_T> > &rects
-#endif
-                      );
+                      const std::vector<Rect<DIM,COORD_T> > &rects);
       ///@}
       ///@{
       /**
@@ -3557,13 +3546,8 @@ namespace Legion {
       IndexPartitionT<DIM,COORD_T> create_partition_by_restriction(Context ctx,
                                 IndexSpaceT<DIM,COORD_T> parent,
                                 IndexSpaceT<COLOR_DIM,COORD_T> color_space,
-#if __cplusplus < 201103L
-                                Realm::ZMatrix<DIM,COLOR_DIM,COORD_T> transform,
-                                Realm::ZRect<DIM,COORD_T> extent,
-#else
-                                Matrix<DIM,COLOR_DIM,COORD_T> transform,
+                                Transform<DIM,COLOR_DIM,COORD_T> transform,
                                 Rect<DIM,COORD_T> extent,
-#endif
                                 PartitionKind part_kind = COMPUTE_KIND,
                                 Color color = AUTO_GENERATE_ID);
 
@@ -3583,11 +3567,7 @@ namespace Legion {
       template<int DIM, typename COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_blockify(Context ctx,
                                     IndexSpaceT<DIM,COORD_T> parent,
-#if __cplusplus < 201103L
-                                    Realm::ZPoint<DIM,COORD_T> blocking_factor,
-#else
                                     Point<DIM,COORD_T> blocking_factor,
-#endif
                                     Color color = AUTO_GENERATE_ID);
       /**
        * An alternate version of create partition by blockify that also
@@ -3602,13 +3582,8 @@ namespace Legion {
       template<int DIM, typename COORD_T>
       IndexPartitionT<DIM,COORD_T> create_partition_by_blockify(Context ctx,
                                     IndexSpaceT<DIM,COORD_T> parent,
-#if __cplusplus < 201103L
-                                    Realm::ZPoint<DIM,COORD_T> blocking_factor,
-                                    Realm::ZPoint<DIM,COORD_T> origin,
-#else
                                     Point<DIM,COORD_T> blocking_factor,
                                     Point<DIM,COORD_T> origin,
-#endif
                                     Color color = AUTO_GENERATE_ID);
       ///@{
       /**
@@ -3865,11 +3840,7 @@ namespace Legion {
                int COLOR_DIM, typename COLOR_COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space_union(Context ctx,
                                 IndexPartitionT<DIM,COORD_T> parent,
-#if __cplusplus < 201103L
-                                Realm::ZPoint<COLOR_DIM,COLOR_COORD_T> color,
-#else
                                 Point<COLOR_DIM,COLOR_COORD_T> color,
-#endif
                                 const typename std::vector<
                                   IndexSpaceT<DIM,COORD_T> > &handles);
       ///@}
@@ -3892,11 +3863,7 @@ namespace Legion {
                int COLOR_DIM, typename COLOR_COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space_union(Context ctx,
                                 IndexPartitionT<DIM,COORD_T> parent,
-#if __cplusplus < 201103L
-                                Realm::ZPoint<COLOR_DIM,COLOR_COORD_T> color,
-#else
                                 Point<COLOR_DIM,COLOR_COORD_T> color,
-#endif
                                 IndexPartitionT<DIM,COORD_T> handle);
       ///@}
       ///@{
@@ -3922,11 +3889,7 @@ namespace Legion {
                int COLOR_DIM, typename COLOR_COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space_intersection(Context ctx,
                                 IndexPartitionT<DIM,COORD_T> parent,
-#if __cplusplus < 201103L
-                                Realm::ZPoint<COLOR_DIM,COLOR_COORD_T> color,
-#else
                                 Point<COLOR_DIM,COLOR_COORD_T> color,
-#endif
                                 const typename std::vector<
                                   IndexSpaceT<DIM,COORD_T> > &handles);
       ///@}
@@ -3950,11 +3913,7 @@ namespace Legion {
                int COLOR_DIM, typename COLOR_COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space_intersection(Context ctx,
                                 IndexPartitionT<DIM,COORD_T> parent,
-#if __cplusplus < 201103L
-                                Realm::ZPoint<COLOR_DIM,COLOR_COORD_T> color,
-#else
                                 Point<COLOR_DIM,COLOR_COORD_T> color,
-#endif
                                 IndexPartitionT<DIM,COORD_T> handle);
       ///@}
       ///@{
@@ -3986,11 +3945,7 @@ namespace Legion {
                int COLOR_DIM, typename COLOR_COORD_T>
       IndexSpaceT<DIM,COORD_T> create_index_space_difference(Context ctx,
                                 IndexPartitionT<DIM,COORD_T> parent,
-#if __cplusplus < 201103L
-                                Realm::ZPoint<COLOR_DIM,COLOR_COORD_T> color,
-#else
                                 Point<COLOR_DIM,COLOR_COORD_T> color,
-#endif
                                 IndexSpaceT<DIM,COORD_T> initial,
                                 const typename std::vector<
                                   IndexSpaceT<DIM,COORD_T> > &handles);
@@ -4066,12 +4021,7 @@ namespace Legion {
                int COLOR_DIM, typename COLOR_COORD_T>
       IndexSpaceT<DIM,COORD_T> get_index_subspace(
                                   IndexPartitionT<DIM,COORD_T> p,
-#if __cplusplus < 201103L
-                                  Realm::ZPoint<COLOR_DIM,COLOR_COORD_T> color
-#else
-                                  Point<COLOR_DIM,COLOR_COORD_T> color
-#endif
-                                  );
+                                  Point<COLOR_DIM,COLOR_COORD_T> color);
       ///@}
 
       ///@{
@@ -4092,12 +4042,7 @@ namespace Legion {
       template<int DIM, typename COORD_T,
                int COLOR_DIM, typename COLOR_COORD_T>
       bool has_index_subspace(IndexPartitionT<DIM,COORD_T> p,
-#if __cplusplus < 201103L
-                              Realm::ZPoint<COLOR_DIM,COLOR_COORD_T> color
-#else
-                              Point<COLOR_DIM,COLOR_COORD_T> color
-#endif
-                              );
+                              Point<COLOR_DIM,COLOR_COORD_T> color);
       ///@}
 
       ///@{
@@ -4131,13 +4076,8 @@ namespace Legion {
       Domain get_index_space_domain(IndexSpace handle);
       // Template version
       template<int DIM, typename COORD_T>
-#if __cplusplus < 201103L
-      Realm::ZIndexSpace<DIM,COORD_T> get_index_space_domain(
-                                        IndexSpaceT<DIM,COORD_T> handle);
-#else
       DomainT<DIM,COORD_T> get_index_space_domain(
                                         IndexSpaceT<DIM,COORD_T> handle);
-#endif
       ///@}
 
       ///@{
@@ -4174,11 +4114,7 @@ namespace Legion {
       // Template version
       template<int DIM, typename COORD_T,
                int COLOR_DIM, typename COLOR_COORD_T>
-#if __cplusplus < 201103L
-      Realm::ZIndexSpace<COLOR_DIM,COLOR_COORD_T>
-#else
       DomainT<COLOR_DIM,COLOR_COORD_T>
-#endif
              get_index_partition_color_space(IndexPartitionT<DIM,COORD_T> p);
       ///@}
 
@@ -4275,11 +4211,7 @@ namespace Legion {
       // Template version
       template<int DIM, typename COORD_T,
                int COLOR_DIM, typename COLOR_COORD_T>
-#if __cplusplus < 201103L
-      Realm::ZPoint<COLOR_DIM,COLOR_COORD_T>
-#else
       Point<COLOR_DIM,COLOR_COORD_T>
-#endif
             get_index_space_color(IndexSpaceT<DIM,COORD_T> handle);
       ///@}
 
@@ -4403,11 +4335,7 @@ namespace Legion {
        */
       template<int DIM, typename COORD_T>
       bool safe_cast(Context ctx, 
-#if __cplusplus < 201103L
-                     Realm::ZPoint<DIM,COORD_T> point,
-#else
                      Point<DIM,COORD_T> point,
-#endif
                      LogicalRegionT<DIM,COORD_T> region);
     public:
       //------------------------------------------------------------------------
@@ -4643,12 +4571,7 @@ namespace Legion {
                int COLOR_DIM, typename COLOR_COORD_T>
       LogicalRegionT<DIM,COORD_T> get_logical_subregion_by_color(
                                   LogicalPartitionT<DIM,COORD_T> parent,
-#if __cplusplus < 201103L
-                                  Realm::ZPoint<COLOR_DIM,COLOR_COORD_T> color
-#else
-                                  Point<COLOR_DIM,COLOR_COORD_T> color
-#endif
-                                  );
+                                  Point<COLOR_DIM,COLOR_COORD_T> color);
       ///@}
 
       ///@{
@@ -4670,12 +4593,7 @@ namespace Legion {
       template<int DIM, typename COORD_T,
                int COLOR_DIM, typename COLOR_COORD_T>
       bool has_logical_subregion_by_color(LogicalPartitionT<DIM,COORD_T> parent,
-#if __cplusplus < 201103L
-                                  Realm::ZPoint<COLOR_DIM,COLOR_COORD_T> color
-#else
-                                  Point<COLOR_DIM,COLOR_COORD_T> color
-#endif
-                                  );
+                                  Point<COLOR_DIM,COLOR_COORD_T> color);
       ///@}
 
       ///@{
@@ -4721,11 +4639,7 @@ namespace Legion {
       // Template version
       template<int DIM, typename COORD_T,
                int COLOR_DIM, typename COLOR_COORD_T>
-#if __cplusplus < 201103L
-      Realm::ZPoint<COLOR_DIM,COLOR_COORD_T> 
-#else
       Point<COLOR_DIM,COLOR_COORD_T>
-#endif
         get_logical_region_color_point(LogicalRegionT<DIM,COORD_T> handle);
       ///@}
 

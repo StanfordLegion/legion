@@ -7008,7 +7008,7 @@ function codegen.stat_for_list(cx, node)
           var end_idx = (thread_id + 1) * chunk + base
           if end_idx > base + count then end_idx = base + count end
           for i = start_idx, end_idx do
-            var [symbol] = [symbol.type]{ __ptr = c.legion_ptr_t { value = i } }
+            var [symbol] = [symbol.type]{ __ptr = ptr { __ptr = c.legion_ptr_t { value = i } } }
             do
               [block]
             end

@@ -341,7 +341,8 @@ namespace Legion {
       virtual InnerContext* find_parent_logical_context(unsigned index) = 0;
       virtual InnerContext* find_parent_physical_context(unsigned index) = 0;
       virtual void find_parent_version_info(unsigned index, unsigned depth, 
-                  const FieldMask &version_mask, VersionInfo &version_info) = 0;
+                const FieldMask &version_mask, InnerContext *context,
+                VersionInfo &version_info, std::set<RtEvent> &ready_events) = 0;
       // Override by RemoteTask and TopLevelTask
       virtual InnerContext* find_outermost_local_context(
                           InnerContext *previous = NULL) = 0;
@@ -927,7 +928,8 @@ namespace Legion {
       virtual InnerContext* find_parent_logical_context(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index);
       virtual void find_parent_version_info(unsigned index, unsigned depth, 
-                  const FieldMask &version_mask, VersionInfo &version_info);
+                  const FieldMask &version_mask, InnerContext *context,
+                  VersionInfo &version_info, std::set<RtEvent> &ready_events);
     public:
       // Override by RemoteTask and TopLevelTask
       virtual InnerContext* find_outermost_local_context(
@@ -1489,7 +1491,8 @@ namespace Legion {
       virtual AddressSpaceID get_version_owner(RegionTreeNode *node,
                                                AddressSpaceID source);
       virtual void find_parent_version_info(unsigned index, unsigned depth, 
-                  const FieldMask &version_mask, VersionInfo &version_info);
+                  const FieldMask &version_mask, InnerContext *context,
+                  VersionInfo &version_info, std::set<RtEvent> &ready_events);
       virtual InnerContext* find_parent_physical_context(unsigned index);
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source);
@@ -1795,7 +1798,8 @@ namespace Legion {
       virtual InnerContext* find_parent_logical_context(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index);
       virtual void find_parent_version_info(unsigned index, unsigned depth, 
-                  const FieldMask &version_mask, VersionInfo &version_info);
+                  const FieldMask &version_mask, InnerContext *context,
+                  VersionInfo &version_info, std::set<RtEvent> &ready_events);
       virtual InnerContext* find_outermost_local_context(
                           InnerContext *previous = NULL);
       virtual InnerContext* find_top_context(void);
@@ -2105,7 +2109,8 @@ namespace Legion {
       virtual InnerContext* find_parent_logical_context(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index);
       virtual void find_parent_version_info(unsigned index, unsigned depth, 
-                  const FieldMask &version_mask, VersionInfo &version_info);
+                  const FieldMask &version_mask, InnerContext *context,
+                  VersionInfo &version_info, std::set<RtEvent> &ready_events);
       // Override by RemoteTask and TopLevelTask
       virtual InnerContext* find_outermost_local_context(
                           InnerContext *previous = NULL);

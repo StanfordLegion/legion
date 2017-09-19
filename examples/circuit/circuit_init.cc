@@ -41,11 +41,11 @@ void InitNodesTask::cpu_base_impl(const Task *task,
                                   const std::vector<PhysicalRegion> &regions,
                                   Context ctx, Runtime *runtime)
 {
-  const AccessorWO<float> fa_node_cap(regions[0], FID_NODE_CAP);
-  const AccessorWO<float> fa_node_leakage(regions[0], FID_LEAKAGE);
-  const AccessorWO<float> fa_node_charge(regions[0], FID_CHARGE);
-  const AccessorWO<float> fa_node_voltage(regions[0], FID_NODE_VOLTAGE);
-  const AccessorWO<Point<1> > fa_node_color(regions[0], FID_PIECE_COLOR); 
+  const AccessorWOfloat fa_node_cap(regions[0], FID_NODE_CAP);
+  const AccessorWOfloat fa_node_leakage(regions[0], FID_LEAKAGE);
+  const AccessorWOfloat fa_node_charge(regions[0], FID_CHARGE);
+  const AccessorWOfloat fa_node_voltage(regions[0], FID_NODE_VOLTAGE);
+  const AccessorWOpoint fa_node_color(regions[0], FID_PIECE_COLOR); 
 
   DomainT<1> dom = runtime->get_index_space_domain(ctx,
       IndexSpaceT<1>(task->regions[0].region.get_index_space()));
@@ -110,17 +110,17 @@ void InitWiresTask::cpu_base_impl(const Task *task,
   const int nodes_per_piece = args->nodes_per_piece;
   const int pct_wire_in_piece = args->pct_wire_in_piece;
   const PhysicalRegion wires = regions[0];
-  AccessorWO<float> fa_wire_currents[WIRE_SEGMENTS];
+  AccessorWOfloat fa_wire_currents[WIRE_SEGMENTS];
   for (int i = 0; i < WIRE_SEGMENTS; i++)
-    fa_wire_currents[i] = AccessorWO<float>(wires, FID_CURRENT+i);
-  AccessorWO<float> fa_wire_voltages[WIRE_SEGMENTS-1];
+    fa_wire_currents[i] = AccessorWOfloat(wires, FID_CURRENT+i);
+  AccessorWOfloat fa_wire_voltages[WIRE_SEGMENTS-1];
   for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
-    fa_wire_voltages[i] = AccessorWO<float>(wires, FID_WIRE_VOLTAGE+i);
-  const AccessorWO<Point<1> > fa_wire_in_ptr(wires, FID_IN_PTR);
-  const AccessorWO<Point<1> > fa_wire_out_ptr(wires, FID_OUT_PTR);
-  const AccessorWO<float> fa_wire_inductance(wires, FID_INDUCTANCE);
-  const AccessorWO<float> fa_wire_resistance(wires, FID_RESISTANCE);
-  const AccessorWO<float> fa_wire_cap(wires, FID_WIRE_CAP);
+    fa_wire_voltages[i] = AccessorWOfloat(wires, FID_WIRE_VOLTAGE+i);
+  const AccessorWOpoint fa_wire_in_ptr(wires, FID_IN_PTR);
+  const AccessorWOpoint fa_wire_out_ptr(wires, FID_OUT_PTR);
+  const AccessorWOfloat fa_wire_inductance(wires, FID_INDUCTANCE);
+  const AccessorWOfloat fa_wire_resistance(wires, FID_RESISTANCE);
+  const AccessorWOfloat fa_wire_cap(wires, FID_WIRE_CAP);
 
   DomainT<1> dom = runtime->get_index_space_domain(ctx,
       IndexSpaceT<1>(task->regions[0].region.get_index_space()));
@@ -217,7 +217,7 @@ void InitLocationTask::cpu_base_impl(const Task *task,
       runtime->get_logical_subregion_by_color(lp_shared, task->index_point));
 
   // Update the node locations first
-  const AccessorWO<PointerLocation> locator_acc(regions[0], FID_LOCATOR);
+  const AccessorWOloc locator_acc(regions[0], FID_LOCATOR);
   DomainT<1> node_dom = runtime->get_index_space_domain(ctx,
       IndexSpaceT<1>(task->regions[0].region.get_index_space()));
   for (PointInDomainIterator<1> itr(node_dom); itr(); itr++)
@@ -231,10 +231,10 @@ void InitLocationTask::cpu_base_impl(const Task *task,
   }
 
   // Then do the wire locations
-  const AccessorWO<PointerLocation> fa_wire_in_loc(regions[1], FID_IN_LOC);
-  const AccessorWO<PointerLocation> fa_wire_out_loc(regions[1], FID_OUT_LOC);
-  const AccessorRO<Point<1> > fa_wire_in_ptr(regions[2], FID_IN_PTR);
-  const AccessorRO<Point<1> > fa_wire_out_ptr(regions[2], FID_OUT_PTR);
+  const AccessorWOloc fa_wire_in_loc(regions[1], FID_IN_LOC);
+  const AccessorWOloc fa_wire_out_loc(regions[1], FID_OUT_LOC);
+  const AccessorROpoint fa_wire_in_ptr(regions[2], FID_IN_PTR);
+  const AccessorROpoint fa_wire_out_ptr(regions[2], FID_OUT_PTR);
   DomainT<1> wire_dom = runtime->get_index_space_domain(ctx,
       IndexSpaceT<1>(task->regions[1].region.get_index_space()));
   for (PointInDomainIterator<1> itr(wire_dom); itr(); itr++)
@@ -343,11 +343,11 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
   srand48(random_seed);
 
   nodes.wait_until_valid();
-  const AccessorRW<float> fa_node_cap(nodes, FID_NODE_CAP);
-  const AccessorRW<float> fa_node_leakage(nodes, FID_LEAKAGE);
-  const AccessorRW<float> fa_node_charge(nodes, FID_CHARGE);
-  const AccessorRW<float> fa_node_voltage(nodes, FID_NODE_VOLTAGE);
-  const AccessorRW<Point<1> > fa_node_color(nodes, FID_PIECE_COLOR); 
+  const AccessorRWfloat fa_node_cap(nodes, FID_NODE_CAP);
+  const AccessorRWfloat fa_node_leakage(nodes, FID_LEAKAGE);
+  const AccessorRWfloat fa_node_charge(nodes, FID_CHARGE);
+  const AccessorRWfloat fa_node_voltage(nodes, FID_NODE_VOLTAGE);
+  const AccessorRWpoint fa_node_color(nodes, FID_PIECE_COLOR); 
   {
     for (int n = 0; n < num_pieces; n++)
     {
@@ -367,19 +367,19 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
   }
 
   wires.wait_until_valid();
-  AccessorRW<float> fa_wire_currents[WIRE_SEGMENTS];
+  AccessorRWfloat fa_wire_currents[WIRE_SEGMENTS];
   for (int i = 0; i < WIRE_SEGMENTS; i++)
-    fa_wire_currents[i] = AccessorRW<float>(wires, FID_CURRENT+i);
-  AccessorRW<float> fa_wire_voltages[WIRE_SEGMENTS-1];
+    fa_wire_currents[i] = AccessorRWfloat(wires, FID_CURRENT+i);
+  AccessorRWfloat fa_wire_voltages[WIRE_SEGMENTS-1];
   for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
-    fa_wire_voltages[i] = AccessorRW<float>(wires, FID_WIRE_VOLTAGE+i);
-  const AccessorRW<Point<1> > fa_wire_in_ptr(wires, FID_IN_PTR);
-  const AccessorRW<Point<1> > fa_wire_out_ptr(wires, FID_OUT_PTR);
-  const AccessorRW<PointerLocation> fa_wire_in_loc(wires, FID_IN_LOC);
-  const AccessorRW<PointerLocation> fa_wire_out_loc(wires, FID_OUT_LOC);
-  const AccessorRW<float> fa_wire_inductance(wires, FID_INDUCTANCE);
-  const AccessorRw<float> fa_wire_resistance(wires, FID_RESISTANCE);
-  const AccessorRW<float> fa_wire_cap(wires, FID_WIRE_CAP);
+    fa_wire_voltages[i] = AccessorRWfloat(wires, FID_WIRE_VOLTAGE+i);
+  const AccessorRWpoint fa_wire_in_ptr(wires, FID_IN_PTR);
+  const AccessorRWpoint fa_wire_out_ptr(wires, FID_OUT_PTR);
+  const AccessorRWloc fa_wire_in_loc(wires, FID_IN_LOC);
+  const AccessorRWloc fa_wire_out_loc(wires, FID_OUT_LOC);
+  const AccessorRWfloat fa_wire_inductance(wires, FID_INDUCTANCE);
+  const AccessorRwfloat fa_wire_resistance(wires, FID_RESISTANCE);
+  const AccessorRWfloat fa_wire_cap(wires, FID_WIRE_CAP);
   {
     for (int n = 0; n < num_pieces; n++)
     {
@@ -548,7 +548,7 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
   // Finally we need to figure out where everything ended up
 #ifdef SEQUENTIAL_LOAD_CIRCUIT
   locator.wait_until_valid();
-  const AccessorRW<PointerLocation> locator_acc(locator, FID_LOCATOR);
+  const AccessorRWloc locator_acc(locator, FID_LOCATOR);
   for (int n = 0; n < num_pieces; n++)
   {
     LogicalRegionT<1> private_lr( 

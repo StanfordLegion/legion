@@ -209,6 +209,16 @@ namespace Legion {
          << "destroy:timestamp_t:" << sizeof(timestamp_t)
          << "}" << std::endl;
 
+      ss << "PartitionInfo {"
+         << "id:" << PARTITION_INFO_ID                          << delim
+         << "op_id:UniqueID:"         << sizeof(UniqueID)       << delim
+         << "part_op:DepPartOpKind:"  << sizeof(DepPartOpKind)  << delim
+         << "create:timestamp_t:"     << sizeof(timestamp_t)    << delim
+         << "ready:timestamp_t:"      << sizeof(timestamp_t)    << delim
+         << "start:timestamp_t:"      << sizeof(timestamp_t)    << delim
+         << "stop:timestamp_t:"       << sizeof(timestamp_t)
+         << "}" << std::endl;
+
       ss << "MessageInfo {"
          << "id:" << MESSAGE_INFO_ID                           << delim
          << "kind:MessageKind:"  << sizeof(MessageKind)        << delim

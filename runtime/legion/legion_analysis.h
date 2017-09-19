@@ -259,7 +259,8 @@ namespace Legion {
       void copy_to(VersionInfo &rhs);
       // Cloning information for virtual mappings
       void clone_to_depth(unsigned depth, const FieldMask &mask,
-                          VersionInfo &target_info) const;
+                          InnerContext *context, VersionInfo &target_info,
+                          std::set<RtEvent> &ready_events) const;
     public:
       PhysicalState* find_physical_state(RegionTreeNode *node); 
       const FieldMask& get_split_mask(unsigned depth) const;
@@ -845,7 +846,9 @@ namespace Legion {
         const LegionMap<LogicalView*,FieldMask>::aligned &valid_above);
     public:
       PhysicalState* clone(void) const;
-      void clone_to(const FieldMask &mask, VersionInfo &target_info) const;
+      void clone_to(const FieldMask &version_mask, const FieldMask &split_mask,
+                    InnerContext *context, VersionInfo &target_info,
+                    std::set<RtEvent> &ready_events) const;
     public:
       void print_physical_state(const FieldMask &capture_mask,
           LegionMap<LegionColor,FieldMask>::aligned &to_traverse,
@@ -961,7 +964,6 @@ namespace Legion {
                             UniqueID logical_context_uid,
                             InnerContext *physical_context,
                             bool update_parent_state,
-                            AddressSpaceID source_space,
                             std::set<RtEvent> &applied_events,
                             bool dedup_opens = false,
                             ProjectionEpochID open_epoch = 0,
@@ -996,8 +998,7 @@ namespace Legion {
                                   const FieldMask *dirty_previous,
                                   const ProjectionInfo *proj_info,
                                   const VersioningSet<> *repl_states_to_user);
-      static void handle_remote_advance(Deserializer &derez, Runtime *runtime,
-                                        AddressSpaceID source_space);
+      static void handle_remote_advance(Deserializer &derez, Runtime *runtime);
     public:
       RtEvent send_remote_invalidate(AddressSpaceID target,
                                      const FieldMask &invalidate_mask);
@@ -1062,6 +1063,9 @@ namespace Legion {
       // remote copies. On remote nodes this is the set of fields which
       // are locally valid.
       FieldMask remote_valid_fields;
+      // Only used on remote nodes to track the set of pending advances
+      // which may indicate that remove_valid_fields is stale
+      FieldMask pending_remote_advances;
     protected:
       // Owner information about which nodes have remote copies
       LegionMap<AddressSpaceID,FieldMask>::aligned remote_valid;

@@ -213,10 +213,10 @@ namespace Legion {
       {
         case 1:
           {
-            Realm::ZRect<1,coord_t> rect = input.domain;
+            Rect<1,coord_t> rect = input.domain;
             for (PointInRectIterator<1> pir(rect); pir(); pir++, idx++)
             {
-              Realm::ZRect<1,coord_t> slice(*pir, *pir);
+              Rect<1,coord_t> slice(*pir, *pir);
               output.slices[idx] = TaskSlice(slice,
                   select_random_processor(task.target_proc.kind()),
                   false/*recurse*/, true/*stealable*/);
@@ -225,10 +225,10 @@ namespace Legion {
           }
         case 2:
           {
-            Realm::ZRect<2,coord_t> rect = input.domain;
+            Rect<2,coord_t> rect = input.domain;
             for (PointInRectIterator<2> pir(rect); pir(); pir++, idx++)
             {
-              Realm::ZRect<2,coord_t> slice(*pir, *pir);
+              Rect<2,coord_t> slice(*pir, *pir);
               output.slices[idx] = TaskSlice(slice,
                   select_random_processor(task.target_proc.kind()),
                   false/*recurse*/, true/*stealable*/);
@@ -237,10 +237,10 @@ namespace Legion {
           }
         case 3:
           {
-            Realm::ZRect<3,coord_t> rect = input.domain;
+            Rect<3,coord_t> rect = input.domain;
             for (PointInRectIterator<3> pir(rect); pir(); pir++, idx++)
             {
-              Realm::ZRect<3,coord_t> slice(*pir, *pir);
+              Rect<3,coord_t> slice(*pir, *pir);
               output.slices[idx] = TaskSlice(slice,
                   select_random_processor(task.target_proc.kind()),
                   false/*recurse*/, true/*stealable*/);

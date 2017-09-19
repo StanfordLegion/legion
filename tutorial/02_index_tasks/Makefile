@@ -38,8 +38,6 @@ CC_FLAGS	?=
 NVCC_FLAGS	?=
 GASNET_FLAGS	?=
 LD_FLAGS	?=
-# Get Legion Point and Rect template types
-CC_FLAGS	+= -std=c++11
 
 ###########################################################################
 #

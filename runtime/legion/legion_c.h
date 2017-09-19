@@ -2554,6 +2554,22 @@ extern "C" {
                            legion_trace_id_t tid);
 
   // -----------------------------------------------------------------------
+  // Tunable Variables
+  // -----------------------------------------------------------------------
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::Runtime::select_tunable_value()
+   */
+  legion_future_t
+  legion_runtime_select_tunable_value(legion_runtime_t runtime,
+				      legion_context_t ctx,
+				      legion_tunable_id_t tid,
+				      legion_mapper_id_t mapper /* = 0 */,
+				      legion_mapping_tag_id_t tag /* = 0 */);
+
+  // -----------------------------------------------------------------------
   // Miscellaneous Operations
   // -----------------------------------------------------------------------
 

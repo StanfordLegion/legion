@@ -31,6 +31,9 @@
 // for fprintf
 #include <stdio.h>
 
+// for off_t
+#include <sys/types.h>
+
 // Imported ptr_t definition from old common.h
 struct ptr_t
 {

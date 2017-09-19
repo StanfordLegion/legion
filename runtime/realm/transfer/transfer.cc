@@ -1168,7 +1168,10 @@ namespace Realm {
 	act_strides[d] = 0;
       }
       for(int d = 0; d < N; d++) {
+	// the stride for a degenerate dimensions does not matter - don't cause
+	//   a "break" if it mismatches
 	if((cur_dim < max_dims) &&
+	   (cur_point[d] < iter.rect.hi[d]) &&
 	   ((ssize_t)affine->strides[d] != (act_counts[cur_dim] * act_strides[cur_dim]))) {
 	  cur_dim++;
 	  if(cur_dim < max_dims)
@@ -2246,11 +2249,17 @@ namespace Realm {
     std::vector<TransferPlan *> plans;
     bool ok = TransferPlan::plan_copy(plans, srcs, dsts, redop_id, red_fold);
     assert(ok);
+    // hack to eliminate duplicate profiling responses
+    //assert(requests.empty() || (plans.size() == 1));
+    ProfilingRequestSet empty_prs;
+    const ProfilingRequestSet *prsptr = &requests;
     std::set<Event> finish_events;
     for(std::vector<TransferPlan *>::iterator it = plans.begin();
 	it != plans.end();
 	++it) {
-      Event e = (*it)->execute_plan(td, requests, wait_on, 0 /*priority*/);
+      //Event e = (*it)->execute_plan(td, requests, wait_on, 0 /*priority*/);
+      Event e = (*it)->execute_plan(td, *prsptr, wait_on, 0 /*priority*/);
+      prsptr = &empty_prs;
       finish_events.insert(e);
       delete *it;
     }
@@ -2268,11 +2277,17 @@ namespace Realm {
     std::vector<TransferPlan *> plans;
     bool ok = TransferPlan::plan_fill(plans, dsts, fill_value, fill_value_size);
     assert(ok);
+    // hack to eliminate duplicate profiling responses
+    //assert(requests.empty() || (plans.size() == 1));
+    ProfilingRequestSet empty_prs;
+    const ProfilingRequestSet *prsptr = &requests;
     std::set<Event> finish_events;
     for(std::vector<TransferPlan *>::iterator it = plans.begin();
 	it != plans.end();
 	++it) {
-      Event e = (*it)->execute_plan(td, requests, wait_on, 0 /*priority*/);
+      //Event e = (*it)->execute_plan(td, requests, wait_on, 0 /*priority*/);
+      Event e = (*it)->execute_plan(td, *prsptr, wait_on, 0 /*priority*/);
+      prsptr = &empty_prs;
       finish_events.insert(e);
       delete *it;
     }

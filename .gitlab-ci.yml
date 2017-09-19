@@ -162,6 +162,7 @@ before_script:
 # For performance tests, run these commands:
 .perf_tests: &perf_tests
   script:
+    - ./tools/add_github_host_key.sh
     - ./test.py --test=perf
 
 ###
@@ -182,7 +183,7 @@ gcc49_cxx98_release_legion:
   variables:
     <<: [*gcc49, *terra38, *release, *cxx98_normal, *legion]
 gcc49_cxx98_release_regent:
-  <<: [*linux, *image, *tests]
+  <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *release, *cxx98_normal, *regent]
 gcc49_cxx98_debug_checks_legion:
@@ -194,7 +195,7 @@ gcc49_cxx98_debug_spy_legion:
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx98_spy, *legion]
 gcc49_cxx98_debug_spy_regent:
-  <<: [*linux, *image, *tests]
+  <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx98_spy, *regent]
 gcc49_cxx11_release_legion:
@@ -206,7 +207,7 @@ gcc49_cxx98_debug_checks_openmp_legion:
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx98_checks, *openmp, *legion]
 gcc49_cxx98_debug_checks_openmp_regent:
-  <<: [*linux, *image, *tests]
+  <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx98_checks, *openmp, *regent]
 ###gcc49_cxx98_debug_checks_hdf5_cmake_legion:
@@ -214,7 +215,7 @@ gcc49_cxx98_debug_checks_openmp_regent:
 ###  variables:
 ###    <<: [*gcc49, *terra38, *debug, *cxx98_checks, *hdf5, *cmake, *legion]
 ###gcc49_cxx98_debug_checks_hdf5_regent:
-###  <<: [*linux, *image, *tests]
+###  <<: [*linux_compute, *image, *tests]
 ###  variables:
 ###    <<: [*gcc49, *terra38, *debug, *cxx98_checks, *hdf5, *regent]
 gcc49_cxx98_debug_checks_gasnet_cmake_legion:
@@ -245,7 +246,7 @@ clang38_cxx98_release_legion:
   variables:
     <<: [*clang38, *terra38, *release, *cxx98_normal, *legion]
 clang38_cxx98_release_regent:
-  <<: [*linux, *image, *tests]
+  <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*clang38, *terra38, *release, *cxx98_normal, *regent]
 clang38_cxx98_debug_checks_legion:
@@ -257,7 +258,7 @@ clang38_cxx98_debug_spy_legion:
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_spy, *legion]
 clang38_cxx98_debug_spy_regent:
-  <<: [*linux, *image, *tests]
+  <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_spy, *regent]
 clang38_cxx11_release_legion:
@@ -269,7 +270,7 @@ clang38_cxx98_debug_checks_openmp_legion:
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_checks, *openmp, *legion]
 clang38_cxx98_debug_checks_openmp_regent:
-  <<: [*linux, *image, *tests]
+  <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_checks, *openmp, *regent]
 ###clang38_cxx98_debug_checks_hdf5_cmake_legion:
@@ -277,7 +278,7 @@ clang38_cxx98_debug_checks_openmp_regent:
 ###  variables:
 ###    <<: [*clang38, *terra38, *debug, *cxx98_checks, *hdf5, *cmake, *legion]
 ###clang38_cxx98_debug_checks_hdf5_regent:
-###  <<: [*linux, *image, *tests]
+###  <<: [*linux_compute, *image, *tests]
 ###  variables:
 ###    <<: [*clang38, *terra38, *debug, *cxx98_checks, *hdf5, *regent]
 clang38_cxx98_debug_checks_gasnet_cmake_legion:
@@ -315,7 +316,7 @@ gcc48_cxx98_debug_checks_legion:
   variables:
     <<: [*gcc48, *terra38, *debug, *cxx98_checks, *legion]
 gcc48_cxx98_debug_regent:
-  <<: [*linux, *image, *tests]
+  <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*gcc48, *terra38, *debug, *cxx98_normal, *regent]
 gcc5_cxx98_debug_checks_legion:
@@ -323,7 +324,7 @@ gcc5_cxx98_debug_checks_legion:
   variables:
     <<: [*gcc5, *terra38, *debug, *cxx98_checks, *legion]
 gcc5_cxx98_debug_normal_regent:
-  <<: [*linux, *image, *tests]
+  <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*gcc5, *terra38, *debug, *cxx98_normal, *regent]
 gcc6_cxx98_debug_checks_legion:
@@ -331,7 +332,7 @@ gcc6_cxx98_debug_checks_legion:
   variables:
     <<: [*gcc6, *terra38, *debug, *cxx98_checks, *legion]
 gcc6_cxx98_debug_regent:
-  <<: [*linux, *image, *tests]
+  <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*gcc6, *terra38, *debug, *cxx98_normal, *regent]
 gcc6_cxx14_debug_checks_legion:
@@ -339,7 +340,7 @@ gcc6_cxx14_debug_checks_legion:
   variables:
     <<: [*gcc6, *terra38, *debug, *cxx14_checks, *legion]
 gcc6_cxx14_debug_regent:
-  <<: [*linux, *image, *tests]
+  <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*gcc6, *terra38, *debug, *cxx14_normal, *regent]
 
@@ -350,7 +351,7 @@ clang35_cxx98_debug_checks_legion:
     <<: [*clang35, *terra35, *debug, *cxx98_checks, *legion]
 # FIXME: Breaks on attempting to split vector-op
 # clang35_cxx98_debug_checks_regent:
-#   <<: [*linux, *image, *tests]
+#   <<: [*linux_compute, *image, *tests]
 #   variables:
 #     <<: [*clang35, *terra35, *debug, *cxx98_checks, *regent]
 

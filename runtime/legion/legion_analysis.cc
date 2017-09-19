@@ -913,7 +913,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionInfo::clone_to_depth(unsigned depth, const FieldMask &mask,
-                                     VersionInfo &target_info) const
+                               InnerContext *context, VersionInfo &target_info,
+                               std::set<RtEvent> &ready_events) const
     //--------------------------------------------------------------------------
     {
       // If the upper bound nodes are the same, we are done
@@ -932,11 +933,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(state != NULL);
 #endif
-        FieldMask split_overlap = split_masks[idx] & mask;
+        const FieldMask split_overlap = split_masks[idx] & mask;
         if (!!split_overlap)
           target_info.record_split_fields(state->node, split_overlap);
         // Also copy over the needed version states
-        state->clone_to(mask, target_info);
+        state->clone_to(mask, split_overlap, context, target_info,ready_events);
       }
     }
 
@@ -3816,6 +3817,53 @@ namespace Legion {
               LegionList<LogicalUser,PREV_LOGICAL_ALLOC>::track_aligned &pusers)
     //--------------------------------------------------------------------------
     {
+      // A slightly strange case that can occur is if we close two different
+      // children of the same node for the same field in different modes then
+      // we can get both a normal close operation and a read-only close 
+      // operation for the same field, in which case they need to share users
+      // This should be a very rare case
+      const FieldMask close_overlap = normal_close_mask & read_only_close_mask;
+      if (!!close_overlap)
+      {
+        LegionVector<LogicalUser>::aligned add_normal_closed_users;
+        for (std::list<LogicalUser>::const_iterator it = 
+              read_only_closed_users.begin(); it != 
+              read_only_closed_users.end(); it++)
+        {
+          const FieldMask overlap = it->field_mask & close_overlap;
+          if (!overlap)
+            continue;
+#ifdef LEGION_SPY
+          it->op->add_mapping_reference(it->gen);
+#else
+          if (!it->op->add_mapping_reference(it->gen))
+            continue;
+#endif
+          add_normal_closed_users.push_back(*it);
+          add_normal_closed_users.back().field_mask = overlap;
+        }
+        LegionVector<LogicalUser>::aligned add_read_only_closed_users;
+        for (std::list<LogicalUser>::const_iterator it = 
+              normal_closed_users.begin(); it != 
+              normal_closed_users.end(); it++)
+        {
+          const FieldMask overlap = it->field_mask & close_overlap;
+          if (!overlap)
+            continue;
+#ifdef LEGION_SPY
+          it->op->add_mapping_reference(it->gen);
+#else
+          if (!it->op->add_mapping_reference(it->gen))
+            continue;
+#endif
+          add_read_only_closed_users.push_back(*it);
+          add_read_only_closed_users.back().field_mask = overlap;
+        }
+        normal_closed_users.insert(normal_closed_users.end(),
+          add_normal_closed_users.begin(), add_normal_closed_users.end());
+        read_only_closed_users.insert(read_only_closed_users.end(),
+          add_read_only_closed_users.begin(), add_read_only_closed_users.end());
+      }
       // We also need to do dependence analysis against all the other operations
       // that this operation recorded dependences on above in the tree so we
       // don't run too early.
@@ -4169,8 +4217,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalState::clone_to(const FieldMask &mask, 
-                                 VersionInfo &target_info) const
+    void PhysicalState::clone_to(const FieldMask &version_mask, 
+                                 const FieldMask &split_mask,
+                                 InnerContext *context,
+                                 VersionInfo &target_info,
+                                 std::set<RtEvent> &ready_events) const
     //--------------------------------------------------------------------------
     {
       // Should only be calling this on path only nodes
@@ -4179,21 +4230,68 @@ namespace Legion {
 #endif
       if (!version_states.empty())
       {
-        for (PhysicalVersions::iterator it = version_states.begin();
-              it != version_states.end(); it++)
+        // Three different cases here depending on whether we have a split mask
+        if (!split_mask)
         {
-          FieldMask overlap = it->second & mask;
-          if (!overlap)
-            continue;
-          target_info.add_current_version(it->first, overlap, path_only);
+          // No split mask: just need initial versions of everything
+          for (PhysicalVersions::iterator it = version_states.begin();
+                it != version_states.end(); it++)
+          {
+            const FieldMask overlap = it->second & version_mask;
+            if (!overlap)
+              continue;
+            target_info.add_current_version(it->first, overlap, path_only);
+            it->first->request_initial_version_state(context, overlap,
+                                                     ready_events);
+          }
+        }
+        else if (split_mask == version_mask)
+        {
+          // All fields are split, need final versions of everything
+          for (PhysicalVersions::iterator it = version_states.begin();
+                it != version_states.end(); it++)
+          {
+            const FieldMask overlap = it->second & version_mask;
+            if (!overlap)
+              continue;
+            target_info.add_current_version(it->first, overlap, path_only);
+            it->first->request_final_version_state(context, overlap,
+                                                   ready_events);
+          }
+        }
+        else
+        {
+          // Mixed, need to figure out which ones we need initial/final versions
+          for (PhysicalVersions::iterator it = version_states.begin();
+                it != version_states.end(); it++)
+          {
+            FieldMask overlap = it->second & version_mask;
+            if (!overlap)
+              continue;
+            target_info.add_current_version(it->first, overlap, path_only);
+            const FieldMask split_overlap = overlap & split_mask; 
+            if (!!split_overlap)
+            {
+              it->first->request_final_version_state(context, split_overlap,
+                                                     ready_events);
+              const FieldMask non_split_overlap = version_mask - split_overlap;
+              if (!!non_split_overlap)
+                it->first->request_initial_version_state(context, 
+                                  non_split_overlap, ready_events);
+            }
+            else
+              it->first->request_initial_version_state(context, overlap,
+                                                       ready_events);
+          }
         }
       }
+      // For advance states we don't need to request any versions
       if (!advance_states.empty())
       {
         for (PhysicalVersions::iterator it = advance_states.begin();
               it != advance_states.end(); it++)
         {
-          FieldMask overlap = it->second & mask;
+          FieldMask overlap = it->second & version_mask;
           if (!overlap)
             continue;
           target_info.add_advance_version(it->first, overlap, path_only);
@@ -4328,6 +4426,7 @@ namespace Legion {
       is_owner = false;
       current_context = NULL;
       remote_valid_fields.clear();
+      pending_remote_advances.clear();
       remote_valid.clear();
       previous_opens.clear();
       previous_advancers.clear();
@@ -4419,6 +4518,9 @@ namespace Legion {
         if (!is_owner)
         {
           FieldMask request_mask = version_mask - remote_valid_fields;
+          // Handle the case where we have stale data from advances
+          if (!!pending_remote_advances)
+            request_mask |= (pending_remote_advances & version_mask);
           if (!!request_mask)
           {
             // Release the lock before sending the message
@@ -4479,6 +4581,9 @@ namespace Legion {
         if (!is_owner)
         {
           FieldMask request_mask = version_mask - remote_valid_fields;
+          // Handle the case where we have stale data from advances
+          if (!!pending_remote_advances)
+            request_mask |= (pending_remote_advances & version_mask);
           if (!!request_mask)
           {
             // Release the lock before sending the message
@@ -4607,6 +4712,9 @@ namespace Legion {
       if (!is_owner)
       {
         FieldMask request_mask = version_mask - remote_valid_fields;
+        // Handle the case where we have stale data from advances
+        if (!!pending_remote_advances)
+          request_mask |= (pending_remote_advances & version_mask);
         if (!!request_mask)
         {
           // Release the lock before sending the message
@@ -4666,6 +4774,9 @@ namespace Legion {
       if (!is_owner)
       {
         FieldMask request_mask = version_mask - remote_valid_fields;
+        // Handle the case where we have stale data from advances
+        if (!!pending_remote_advances)
+          request_mask |= (pending_remote_advances & version_mask);
         if (!!request_mask)
         {
           // Release the lock before sending the message
@@ -4727,6 +4838,9 @@ namespace Legion {
       if (!is_owner)
       {
         FieldMask request_mask = version_mask - remote_valid_fields;
+        // Handle the case where we have stale data from advances
+        if (!!pending_remote_advances)
+          request_mask |= (pending_remote_advances & version_mask);
         if (!!request_mask)
         {
           // Release the lock before sending the message
@@ -4935,7 +5049,6 @@ namespace Legion {
                                           UniqueID logical_context_uid,
                                           InnerContext *physical_context, 
                                           bool update_parent_state,
-                                          AddressSpaceID source_space,
                                           std::set<RtEvent> &applied_events,
                                           bool dedup_opens,
                                           ProjectionEpochID open_epoch,
@@ -4968,9 +5081,11 @@ namespace Legion {
                                                dirty_previous, proj_info,
                                                repl_states);
         applied_events.insert(advanced); 
-        // Now filter out any of our current version states that are
-        // no longer valid for the given fields
-        invalidate_version_infos(mask);
+        // Then record that we have an advance in flight, we can do 
+        // this afterwards as we know the advance will always come before
+        // any valid requests for a given task's region requirements
+        AutoLock m_lock(manager_lock);
+        pending_remote_advances |= mask;
         return;
       }
       // If we are deduplicating advances, do that now
@@ -5138,17 +5253,9 @@ namespace Legion {
         if (!remote_valid.empty() && !(remote_valid_fields * mask))
         {
           std::vector<AddressSpaceID> to_delete;
-          bool skipped_source = false;
           for (LegionMap<AddressSpaceID,FieldMask>::aligned::iterator it = 
                 remote_valid.begin(); it != remote_valid.end(); it++)
           {
-            // If this is the source, then we can skip it
-            // because it already knows to do its own invalidate
-            if (it->first == source_space)
-            {
-              skipped_source = true;
-              continue;
-            }
             FieldMask overlap = mask & it->second;
             if (!overlap)
               continue;
@@ -5165,10 +5272,6 @@ namespace Legion {
               remote_valid.erase(*it);
           }
           remote_valid_fields -= mask;
-          // If we skipped the source, then make sure to
-          // keep its remote valid fields in the remote valid mask
-          if (skipped_source)
-            remote_valid_fields |= remote_valid[source_space];
         }
         // Otherwise we are the owner node so we can do the update
 #ifdef DEBUG_LEGION
@@ -5675,6 +5778,10 @@ namespace Legion {
       {
         FieldMask request_mask = 
           new_states.get_valid_mask() - remote_valid_fields;
+        // Handle the case where we have stale data from advances
+        if (!!pending_remote_advances)
+          request_mask |= (pending_remote_advances & 
+                            new_states.get_valid_mask());
         if (!!request_mask)
         {
           // Release the lock before sending the message
@@ -5729,6 +5836,8 @@ namespace Legion {
 #endif
       // This invalidates our local fields
       remote_valid_fields -= invalid_mask;
+      // We can also remove this from the remote advances
+      pending_remote_advances -= invalid_mask;
       filter_version_info(invalid_mask, current_version_infos);
       filter_version_info(invalid_mask, previous_version_infos);
 #ifdef DEBUG_LEGION
@@ -5903,7 +6012,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void VersionManager::handle_remote_advance(Deserializer &derez,
-                                  Runtime *runtime, AddressSpaceID source_space)
+                                                          Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -5983,7 +6092,7 @@ namespace Legion {
       VersionManager &manager = node->get_current_version_manager(ctx);
       std::set<RtEvent> done_preconditions;
       manager.advance_versions(advance_mask, logical_context_uid, context, 
-                               update_parent, source_space, done_preconditions, 
+                               update_parent, done_preconditions, 
                                dedup_opens, open_epoch, 
                                dedup_advances, advance_epoch,
                                has_dirty_previous ? &dirty_previous : NULL,
@@ -6188,13 +6297,24 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         sanity_check();
 #endif
+        FieldMask send_mask = request_mask;
+        // We only need to send it if we know that it is not valid anymore
+        LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
+          finder = remote_valid.find(target);
+        // Remove any fields that we've already sent a response for
+        if (finder != remote_valid.end())
+          send_mask -= finder->second;
         LegionMap<VersionState*,FieldMask>::aligned send_infos;
         // Do the current infos first
-        find_send_infos(current_version_infos, request_mask, send_infos);
+        if (!!send_mask)
+          find_send_infos(current_version_infos, send_mask, send_infos);
         pack_send_infos(rez, send_infos);
-        send_infos.clear();
-        // Then do the previous infos
-        find_send_infos(previous_version_infos, request_mask, send_infos);
+        if (!!send_mask)
+        {
+          send_infos.clear();
+          // Then do the previous infos
+          find_send_infos(previous_version_infos, request_mask, send_infos);
+        }
         pack_send_infos(rez, send_infos);
       }
       // Need exclusive access at the end to update the remote information
@@ -6271,6 +6391,8 @@ namespace Legion {
         merge_send_infos(previous_version_infos, previous_update);
         // Update the remote valid fields
         remote_valid_fields |= update_mask;
+        // Any update that we get also filters the remote_valid_fields
+        pending_remote_advances -= update_mask;
         // Remove our outstanding request
 #ifdef DEBUG_LEGION
         assert(outstanding_requests.find(done) != outstanding_requests.end());
@@ -9245,7 +9367,7 @@ namespace Legion {
       if (invalidate_all)
         node->invalidate_version_managers();
       else
-        return node->invalidate_version_state(ctx);
+        node->invalidate_version_state(ctx);
       return true;
     }
 
@@ -9256,7 +9378,7 @@ namespace Legion {
       if (invalidate_all)
         node->invalidate_version_managers();
       else
-        return node->invalidate_version_state(ctx);
+        node->invalidate_version_state(ctx);
       return true;
     }
 

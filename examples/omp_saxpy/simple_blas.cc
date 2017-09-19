@@ -19,11 +19,6 @@
 int blas_thread_count = 0;
 bool blas_do_parallel = true;
 
-template<typename FT, int N, typename T = coord_t>
-using AccessorRO = FieldAccessor<READ_ONLY,FT,N,T,Realm::AffineAccessor<FT,N,T> >;
-template<typename FT, int N, typename T = coord_t>
-using AccessorRW = FieldAccessor<READ_WRITE,FT,N,T,Realm::AffineAccessor<FT,N,T> >;
-
 // single-precision float
 
 /*extern*/ BlasTaskImplementations<float> blas_impl_s;
@@ -39,8 +34,10 @@ void BlasTaskImplementations<float>::axpy_task_cpu(const Task *task,
 
   float alpha = *(const float *)(task->args);
 
-  const AccessorRO<float,1> fa_x(regions[0], task->regions[0].instance_fields[0]);
-  const AccessorRW<float,1> fa_y(regions[1], task->regions[1].instance_fields[0]);
+  const FieldAccessor<READ_ONLY,float,1,coord_t,
+          Realm::AffineAccessor<float,1,coord_t> > fa_x(regions[0], task->regions[0].instance_fields[0]);
+  const FieldAccessor<READ_WRITE,float,1,coord_t,
+          Realm::AffineAccessor<float,1,coord_t> > fa_y(regions[1], task->regions[1].instance_fields[0]);
 
 #pragma omp parallel for if(blas_do_parallel)
   for(int i = bounds.lo[0]; i <= bounds.hi[0]; i++)
@@ -56,8 +53,10 @@ float BlasTaskImplementations<float>::dot_task_cpu(const Task *task,
   Rect<1> bounds = runtime->get_index_space_domain(ctx, is);
   //printf("hi [%d, %d]\n", bounds.lo[0], bounds.hi[0]);
 
-  const AccessorRO<float,1> fa_x(regions[0], task->regions[0].instance_fields[0]);
-  const AccessorRO<float,1> fa_y(regions[1], task->regions[0].instance_fields[0]);
+  const FieldAccessor<READ_ONLY,float,1,coord_t,
+          Realm::AffineAccessor<float,1,coord_t> > fa_x(regions[0], task->regions[0].instance_fields[0]);
+  const FieldAccessor<READ_ONLY,float,1,coord_t,
+          Realm::AffineAccessor<float,1,coord_t> > fa_y(regions[1], task->regions[0].instance_fields[0]);
 
   float acc = 0;
 #pragma omp parallel for reduction(+:acc) if(blas_do_parallel)

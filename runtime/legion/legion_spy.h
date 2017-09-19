@@ -174,7 +174,7 @@ namespace Legion {
       // For capturing information about the shape of index spaces
       template<int DIM, typename T>
       static inline void log_index_space_point(IDType handle,
-                           const Realm::ZPoint<DIM,T> &point)
+                                    const Point<DIM,T> &point)
       {
         LEGION_STATIC_ASSERT(DIM <= 3);
         log_spy.print("Index Space Point " IDFMT " %d %lld %lld %lld", handle,
@@ -185,7 +185,7 @@ namespace Legion {
 
       template<int DIM, typename T>
       static inline void log_index_space_rect(IDType handle, 
-                                              const Realm::ZRect<DIM,T> &rect)
+                                              const Rect<DIM,T> &rect)
       {
         LEGION_STATIC_ASSERT(DIM <= 3);
         log_spy.print("Index Space Rect " IDFMT " %d "
@@ -504,7 +504,7 @@ namespace Legion {
 
       template<int DIM, typename T>
       static inline void log_launch_index_space_rect(UniqueID unique_id, 
-                                              const Realm::ZRect<DIM,T> &rect)
+                                                     const Rect<DIM,T> &rect)
       {
         LEGION_STATIC_ASSERT(DIM <= 3);
         log_spy.print() << "Index Launch Rect " << unique_id << " "

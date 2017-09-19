@@ -25,11 +25,6 @@
 #include "legion.h"
 using namespace Legion;
 
-template<typename FT, int N, typename T = coord_t>
-using AccessorRO = FieldAccessor<READ_ONLY,FT,N,T,Realm::AffineAccessor<FT,N,T> >;
-template<typename FT, int N, typename T = coord_t>
-using AccessorWD = FieldAccessor<WRITE_DISCARD,FT,N,T,Realm::AffineAccessor<FT,N,T> >;
-
 /*
  * In this example we illustrate how the Legion
  * programming model supports multiple partitions
@@ -173,7 +168,7 @@ void top_level_task(const Task *task,
   IndexPartition disjoint_ip = 
     runtime->create_equal_partition(ctx, is, color_is);
   const int block_size = (num_elements + num_subregions - 1) / num_subregions;
-  Matrix<1,1> transform;
+  Transform<1,1> transform;
   transform[0][0] = block_size;
   Rect<1> extent(-2, block_size + 1);
   IndexPartition ghost_ip = 
@@ -299,7 +294,7 @@ void init_field_task(const Task *task,
   const int point = task->index_point.point_data[0];
   printf("Initializing field %d for block %d...\n", fid, point);
 
-  const AccessorWD<double,1> acc(regions[0], fid);
+  const FieldAccessor<WRITE_DISCARD,double,1> acc(regions[0], fid);
 
   Rect<1> rect = runtime->get_index_space_domain(ctx,
                   task->regions[0].region.get_index_space());
@@ -325,8 +320,8 @@ void stencil_task(const Task *task,
   FieldID read_fid = *(task->regions[0].privilege_fields.begin());
   FieldID write_fid = *(task->regions[1].privilege_fields.begin());
 
-  const AccessorRO<double,1> read_acc(regions[0], read_fid);
-  const AccessorWD<double,1> write_acc(regions[1], write_fid);
+  const FieldAccessor<READ_ONLY,double,1> read_acc(regions[0], read_fid);
+  const FieldAccessor<WRITE_DISCARD,double,1> write_acc(regions[1], write_fid);
 
   Rect<1> rect = runtime->get_index_space_domain(ctx,
                   task->regions[1].region.get_index_space());
@@ -395,8 +390,8 @@ void check_task(const Task *task,
   FieldID src_fid = *(task->regions[0].privilege_fields.begin());
   FieldID dst_fid = *(task->regions[1].privilege_fields.begin());
 
-  const AccessorRO<double,1> src_acc(regions[0], src_fid);
-  const AccessorRO<double,1> dst_acc(regions[1], dst_fid);
+  const FieldAccessor<READ_ONLY,double,1> src_acc(regions[0], src_fid);
+  const FieldAccessor<READ_ONLY,double,1> dst_acc(regions[1], dst_fid);
 
   Rect<1> rect = runtime->get_index_space_domain(ctx,
                   task->regions[1].region.get_index_space());

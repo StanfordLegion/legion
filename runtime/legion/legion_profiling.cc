@@ -745,6 +745,7 @@ namespace Legion {
 #ifndef DEBUG_LEGION
         total_outstanding_requests(1/*start with guard*/),
 #endif
+        local_io_proc(Processor::NO_PROC),
         total_memory_footprint(0), finalizing(false)
     //--------------------------------------------------------------------------
     {
@@ -757,18 +758,6 @@ namespace Legion {
               "ERROR: Please specify -lg:prof_logfile "
               "<logfile_name> when running with -lg:serializer binary")
         std::string filename(prof_logfile);
-        const size_t original_size = filename.size();
-        if ((original_size < 3) || 
-            ((filename[original_size-3] != '.') ||
-             (filename[original_size-2] != 'g') ||
-             (filename[original_size-1] != 'z')))
-        {
-          log_prof.warning("WARNING: Binary file name %s specified with "
-                           "-lg:prof_logfile' does not end in '.gz' so we are "
-                           "appending the postfix '.gz' for you", 
-                           filename.c_str());
-          filename.append(".gz");
-        }
         size_t pct = filename.find_first_of('%', 0);
         if (pct == std::string::npos) 
         {
@@ -843,6 +832,20 @@ namespace Legion {
         total_outstanding_requests[idx] = 0;
       total_outstanding_requests[LEGION_PROF_META] = 1; // guard
 #endif
+      // Get a processor group for all the local I/O processors if we have any 
+      Machine::ProcessorQuery local_io_procs(machine);
+      local_io_procs.local_address_space();
+      local_io_procs.only_kind(Processor::IO_PROC);
+      if (local_io_procs.count() > 1)
+      {
+        std::vector<Processor> io_procs;
+        for (Machine::ProcessorQuery::iterator it = local_io_procs.begin();
+              it != local_io_procs.end(); it++)
+          io_procs.push_back(*it);
+        local_io_proc = Processor::create_group(io_procs);
+      }
+      else if (local_io_procs.count() == 1)
+        local_io_proc = local_io_procs.first();
     }
 
     //--------------------------------------------------------------------------
@@ -1625,7 +1628,8 @@ namespace Legion {
           // so we don't need to worry about early clean-up
           LgOutputTaskArgs args;
           args.profiler = this;
-          runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY);
+          runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY, NULL/*op*/,
+              RtEvent::NO_RT_EVENT, local_io_proc);
         }
       }
     }
@@ -1670,7 +1674,8 @@ namespace Legion {
         // so we don't need to worry about early clean-up
         LgOutputTaskArgs args;
         args.profiler = this;
-        runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY);
+        runtime->issue_runtime_meta_task(args, LG_LOW_PRIORITY, NULL/*op*/,
+            RtEvent::NO_RT_EVENT, local_io_proc);
       }
     }
 

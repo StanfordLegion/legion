@@ -52,6 +52,7 @@ code, __FILE__, __LINE__, message);                       \
 
 namespace Legion {
 #ifndef DISABLE_PARTITION_SHIM
+#define PARTITION_SHIM_MAPPER_ID                      (1729)
   // An internal namespace with some classes for providing help
   // with backwards compatibility for partitioning operations
   namespace PartitionShim {
@@ -430,10 +431,12 @@ namespace Legion {
 #endif
     public:
       void get_bounds(void *realm_is, TypeTag type_tag);
-      PhysicalInstance get_instance_info(PrivilegeMode mode, FieldID fid, 
+      PhysicalInstance get_instance_info(PrivilegeMode mode, 
+                                         FieldID fid, size_t field_size, 
                                          void *realm_is, TypeTag type_tag,
                                          bool silence_warnings, 
                                          bool generic_accessor,
+                                         bool check_field_size,
                                          ReductionOpID redop);
       void fail_bounds_check(DomainPoint p, FieldID fid,
                              PrivilegeMode mode);
@@ -2475,8 +2478,7 @@ namespace Legion {
       void handle_version_state_update_response(Deserializer &derez);
       void handle_version_state_valid_notification(Deserializer &derez,
                                                    AddressSpaceID source);
-      void handle_version_manager_advance(Deserializer &derez,
-                                          AddressSpaceID source);
+      void handle_version_manager_advance(Deserializer &derez);
       void handle_version_manager_invalidate(Deserializer &derez);
       void handle_version_manager_request(Deserializer &derez, 
                                           AddressSpaceID source);
@@ -3280,6 +3282,7 @@ namespace Legion {
       static const char* prof_logfile;
       static size_t prof_footprint_threshold;
       static size_t prof_target_latency;
+      static bool slow_debug_ok;
     public:
       static inline ApEvent merge_events(ApEvent e1, ApEvent e2);
       static inline ApEvent merge_events(ApEvent e1, ApEvent e2, ApEvent e3);

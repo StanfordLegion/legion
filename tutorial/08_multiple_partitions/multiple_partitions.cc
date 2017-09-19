@@ -96,7 +96,7 @@ void top_level_task(const Task *task,
   IndexPartition disjoint_ip = 
     runtime->create_equal_partition(ctx, is, color_is);
   const int block_size = (num_elements + num_subregions - 1) / num_subregions;
-  Matrix<1,1> transform;
+  Transform<1,1> transform;
   transform[0][0] = block_size;
   Rect<1> extent(-2, block_size + 1);
   IndexPartition ghost_ip = 

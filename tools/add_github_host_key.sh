@@ -9,4 +9,4 @@ GITHUB_HOST_KEY='github.com ssh-rsa AAAAB3NzaC1yc2EAAAABIwAAAQEAq2A7hRGmdnm9tUDb
 
 mkdir -p "$HOME/.ssh"
 chmod og-rwx "$HOME/.ssh"
-echo "$GITHUB_HOSTKEY" >> "$HOME/.ssh/authorized_keys"
+echo "$GITHUB_HOST_KEY" >> "$HOME/.ssh/known_hosts"

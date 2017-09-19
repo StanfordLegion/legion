@@ -121,9 +121,9 @@ bool CalcNewCurrentsTask::launch_check_fields(Context ctx, Runtime *runtime)
   return success;
 }
 
-static inline float get_node_voltage(const AccessorRO<float> &priv,
-                                     const AccessorRO<float> &shr,
-                                     const AccessorRO<float> &ghost,
+static inline float get_node_voltage(const AccessorROfloat &priv,
+                                     const AccessorROfloat &shr,
+                                     const AccessorROfloat &ghost,
                                      PointerLocation loc, Point<1> ptr)
 {
   switch (loc)
@@ -142,11 +142,11 @@ static inline float get_node_voltage(const AccessorRO<float> &priv,
 
 #if defined(__AVX512F__)
 static inline __m512 get_vec_node_voltage(Point<1> current_wire,
-                                          const AccessorRO<float> &priv,
-                                          const AccessorRO<float> &shr,
-                                          const AccessorRO<float> &ghost,
-                                          const AccessorRO<Point<1>> &ptrs,
-                                          const AccessorRO<PointerLocation> &locs)
+                                          const AccessorROfloat &priv,
+                                          const AccessorROfloat &shr,
+                                          const AccessorROfloat &ghost,
+                                          const AccessorROpoint &ptrs,
+                                          const AccessorROloc &locs)
 {
   float voltages[16];
   for (int i = 0; i < 16; i++)
@@ -176,11 +176,11 @@ static inline __m512 get_vec_node_voltage(Point<1> current_wire,
 
 #elif defined(__AVX__)
 static inline __m256 get_vec_node_voltage(Point<1> current_wire,
-                                          const AccessorRO<float> &priv,
-                                          const AccessorRO<float> &shr,
-                                          const AccessorRO<float> &ghost,
-                                          const AccessorRO<Point<1>> &ptrs,
-                                          const AccessorRO<PointerLocation> &locs)
+                                          const AccessorROfloat &priv,
+                                          const AccessorROfloat &shr,
+                                          const AccessorROfloat &ghost,
+                                          const AccessorROpoint &ptrs,
+                                          const AccessorROloc &locs)
 {
   float voltages[8];
   for (int i = 0; i < 8; i++)
@@ -208,11 +208,11 @@ static inline __m256 get_vec_node_voltage(Point<1> current_wire,
 
 #elif defined(__SSE__)
 static inline __m128 get_vec_node_voltage(Point<1> current_wire,
-                                          const AccessorRO<float> &priv,
-                                          const AccessorRO<float> &shr,
-                                          const AccessorRO<float> &ghost,
-                                          const AccessorRO<Point<1>> &ptrs,
-                                          const AccessorRO<PointerLocation> &locs)
+                                          const AccessorROfloat &priv,
+                                          const AccessorROfloat &shr,
+                                          const AccessorROfloat &ghost,
+                                          const AccessorROpoint &ptrs,
+                                          const AccessorROloc &locs)
 {
   float voltages[4];
   for (int i = 0; i < 4; i++)
@@ -244,24 +244,24 @@ void CalcNewCurrentsTask::cpu_base_impl(const CircuitPiece &piece,
                                         Context ctx, Runtime* rt)
 {
 #ifndef DISABLE_MATH
-  AccessorRW<float> fa_current[WIRE_SEGMENTS];
+  AccessorRWfloat fa_current[WIRE_SEGMENTS];
   for (int i = 0; i < WIRE_SEGMENTS; i++)
-    fa_current[i] = AccessorRW<float>(regions[0], FID_CURRENT+i);
-  AccessorRW<float> fa_voltage[WIRE_SEGMENTS-1];
+    fa_current[i] = AccessorRWfloat(regions[0], FID_CURRENT+i);
+  AccessorRWfloat fa_voltage[WIRE_SEGMENTS-1];
   for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
-    fa_voltage[i] = AccessorRW<float>(regions[0], FID_WIRE_VOLTAGE+i);
+    fa_voltage[i] = AccessorRWfloat(regions[0], FID_WIRE_VOLTAGE+i);
 
-  const AccessorRO<Point<1>> fa_in_ptr(regions[1], FID_IN_PTR);
-  const AccessorRO<Point<1>> fa_out_ptr(regions[1], FID_OUT_PTR);
-  const AccessorRO<PointerLocation> fa_in_loc(regions[1], FID_IN_LOC);
-  const AccessorRO<PointerLocation> fa_out_loc(regions[1], FID_OUT_LOC);
-  const AccessorRO<float> fa_inductance(regions[1], FID_INDUCTANCE);
-  const AccessorRO<float> fa_resistance(regions[1], FID_RESISTANCE);
-  const AccessorRO<float> fa_wire_cap(regions[1], FID_WIRE_CAP);
+  const AccessorROpoint fa_in_ptr(regions[1], FID_IN_PTR);
+  const AccessorROpoint fa_out_ptr(regions[1], FID_OUT_PTR);
+  const AccessorROloc fa_in_loc(regions[1], FID_IN_LOC);
+  const AccessorROloc fa_out_loc(regions[1], FID_OUT_LOC);
+  const AccessorROfloat fa_inductance(regions[1], FID_INDUCTANCE);
+  const AccessorROfloat fa_resistance(regions[1], FID_RESISTANCE);
+  const AccessorROfloat fa_wire_cap(regions[1], FID_WIRE_CAP);
 
-  const AccessorRO<float> fa_pvt_voltage(regions[2], FID_NODE_VOLTAGE);
-  const AccessorRO<float> fa_shr_voltage(regions[3], FID_NODE_VOLTAGE);
-  const AccessorRO<float> fa_ghost_voltage(regions[4], FID_NODE_VOLTAGE);
+  const AccessorROfloat fa_pvt_voltage(regions[2], FID_NODE_VOLTAGE);
+  const AccessorROfloat fa_shr_voltage(regions[3], FID_NODE_VOLTAGE);
+  const AccessorROfloat fa_ghost_voltage(regions[4], FID_NODE_VOLTAGE);
 
   unsigned index = 0;
   const int steps = piece.steps;
@@ -555,9 +555,9 @@ bool DistributeChargeTask::launch_check_fields(Context ctx, Runtime *runtime)
 }
 
 template<typename REDOP>
-static inline void reduce_node(const AccessorRW<float> &priv,
-                               const AccessorRD<float> &shr,
-                               const AccessorRD<float> &ghost,
+static inline void reduce_node(const AccessorRWfloat &priv,
+                               const AccessorRDfloat &shr,
+                               const AccessorRDfloat &ghost,
                                PointerLocation loc, Point<1> ptr, typename REDOP::RHS value)
 {
   switch (loc)
@@ -582,15 +582,15 @@ void DistributeChargeTask::cpu_base_impl(const CircuitPiece &p,
                                          Context ctx, Runtime* rt)
 {
 #ifndef DISABLE_MATH
-  const AccessorRO<Point<1>> fa_in_ptr(regions[0], FID_IN_PTR);
-  const AccessorRO<Point<1>> fa_out_ptr(regions[0], FID_OUT_PTR);
-  const AccessorRO<PointerLocation> fa_in_loc(regions[0], FID_IN_LOC);
-  const AccessorRO<PointerLocation> fa_out_loc(regions[0], FID_OUT_LOC);
-  const AccessorRO<float> fa_in_current(regions[0], FID_CURRENT);
-  const AccessorRO<float> fa_out_current(regions[0], FID_CURRENT+WIRE_SEGMENTS-1);
-  const AccessorRW<float> fa_pvt_charge(regions[1], FID_CHARGE);
-  const AccessorRD<float> fa_shr_charge(regions[2], FID_CHARGE, REDUCE_ID);
-  const AccessorRD<float> fa_ghost_charge(regions[3], FID_CHARGE, REDUCE_ID);
+  const AccessorROpoint fa_in_ptr(regions[0], FID_IN_PTR);
+  const AccessorROpoint fa_out_ptr(regions[0], FID_OUT_PTR);
+  const AccessorROloc fa_in_loc(regions[0], FID_IN_LOC);
+  const AccessorROloc fa_out_loc(regions[0], FID_OUT_LOC);
+  const AccessorROfloat fa_in_current(regions[0], FID_CURRENT);
+  const AccessorROfloat fa_out_current(regions[0], FID_CURRENT+WIRE_SEGMENTS-1);
+  const AccessorRWfloat fa_pvt_charge(regions[1], FID_CHARGE);
+  const AccessorRDfloat fa_shr_charge(regions[2], FID_CHARGE, REDUCE_ID);
+  const AccessorRDfloat fa_ghost_charge(regions[3], FID_CHARGE, REDUCE_ID);
 
   const float dt = p.dt;
   for (unsigned i = 0; i < p.num_wires; i++)
@@ -679,10 +679,10 @@ bool UpdateVoltagesTask::launch_check_fields(Context ctx, Runtime *runtime)
 }
 
 static inline void update_voltages(LogicalRegion lr,
-                                   const AccessorRW<float> &fa_voltage,
-                                   const AccessorRW<float> &fa_charge,
-                                   const AccessorRO<float> &fa_cap,
-                                   const AccessorRO<float> &fa_leakage,
+                                   const AccessorRWfloat &fa_voltage,
+                                   const AccessorRWfloat &fa_charge,
+                                   const AccessorROfloat &fa_cap,
+                                   const AccessorROfloat &fa_leakage,
                                    Context ctx, Runtime* rt)
 {
   for (PointInDomainIterator<1> itr(
@@ -706,19 +706,19 @@ void UpdateVoltagesTask::cpu_base_impl(const CircuitPiece &p,
                                        Context ctx, Runtime* rt)
 {
 #ifndef DISABLE_MATH
-  const AccessorRW<float> fa_pvt_voltage(regions[0], FID_NODE_VOLTAGE);
-  const AccessorRW<float> fa_pvt_charge(regions[0], FID_CHARGE);
+  const AccessorRWfloat fa_pvt_voltage(regions[0], FID_NODE_VOLTAGE);
+  const AccessorRWfloat fa_pvt_charge(regions[0], FID_CHARGE);
 
-  const AccessorRW<float> fa_shr_voltage(regions[1], FID_NODE_VOLTAGE);
-  const AccessorRW<float> fa_shr_charge(regions[1], FID_CHARGE);
+  const AccessorRWfloat fa_shr_voltage(regions[1], FID_NODE_VOLTAGE);
+  const AccessorRWfloat fa_shr_charge(regions[1], FID_CHARGE);
 
-  const AccessorRO<float> fa_pvt_cap(regions[2], FID_NODE_CAP);
-  const AccessorRO<float> fa_pvt_leakage(regions[2], FID_LEAKAGE);
+  const AccessorROfloat fa_pvt_cap(regions[2], FID_NODE_CAP);
+  const AccessorROfloat fa_pvt_leakage(regions[2], FID_LEAKAGE);
 
-  const AccessorRO<float> fa_shr_cap(regions[3], FID_NODE_CAP);
-  const AccessorRO<float> fa_shr_leakage(regions[3], FID_LEAKAGE);
+  const AccessorROfloat fa_shr_cap(regions[3], FID_NODE_CAP);
+  const AccessorROfloat fa_shr_leakage(regions[3], FID_LEAKAGE);
   // Don't need this for the CPU version
-  // const AccessorRO<PointerLocation> fa_location(regions[4], FID_LOCATOR);
+  // const AccessorROloc fa_location(regions[4], FID_LOCATOR);
 
   update_voltages(p.pvt_nodes, fa_pvt_voltage, fa_pvt_charge, 
                   fa_pvt_cap, fa_pvt_leakage, ctx, rt);
@@ -758,7 +758,7 @@ bool CheckTask::cpu_impl(const Task *task,
                          const std::vector<PhysicalRegion> &regions,
                          Context ctx, Runtime *runtime)
 {
-  const AccessorRO<float> fa_check(regions[0], task->regions[0].instance_fields[0]);
+  const AccessorROfloat fa_check(regions[0], task->regions[0].instance_fields[0]);
   LogicalRegion lr = task->regions[0].region;
   bool success = true;
   for (PointInDomainIterator<1> itr(

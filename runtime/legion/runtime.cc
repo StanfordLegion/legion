@@ -1814,12 +1814,13 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    PhysicalInstance PhysicalRegionImpl::get_instance_info(
-                                    PrivilegeMode mode, FieldID fid, 
-                                    void *realm_is, TypeTag type_tag, 
-                                    bool silence_warnings, 
-                                    bool generic_accessor,
-                                    ReductionOpID redop)
+    PhysicalInstance PhysicalRegionImpl::get_instance_info(PrivilegeMode mode, 
+                                              FieldID fid, size_t field_size, 
+                                              void *realm_is, TypeTag type_tag,
+                                              bool silence_warnings, 
+                                              bool generic_accessor,
+                                              bool check_field_size,
+                                              ReductionOpID redop)
     //--------------------------------------------------------------------------
     { 
       // Check the privilege mode first
@@ -1954,6 +1955,17 @@ namespace Legion {
         if (ref.is_field_set(fid))
         {
           PhysicalManager *manager = ref.get_manager();
+          if (check_field_size)
+          {
+            const size_t actual_size = 
+              manager->region_node->column_source->get_field_size(fid);
+            if (actual_size != field_size)
+              REPORT_LEGION_ERROR(ERROR_ACCESSOR_FIELD_SIZE_CHECK,
+                            "Error creating accessor for field %d with a "
+                            "type of size %zd bytes when the field was "
+                            "originally allocated with a size of %zd bytes",
+                            fid, field_size, actual_size)
+          }
           return manager->get_instance();
         }
       }
@@ -2761,6 +2773,12 @@ namespace Legion {
       if (check && (mid == 0))
         REPORT_LEGION_ERROR(ERROR_RESERVED_MAPPING_ID, 
                             "Invalid mapping ID. ID 0 is reserved.");
+#ifndef DISABLE_PARTITION_SHIM
+      if (check && (mid == PARTITION_SHIM_MAPPER_ID))
+        REPORT_LEGION_ERROR(ERROR_RESERVED_MAPPING_ID,
+                            "Invalid mapper ID. %d is reserved for the "
+                            "partition shim mapper", PARTITION_SHIM_MAPPER_ID)
+#endif
       AutoLock m_lock(mapper_lock);
       std::map<MapperID,std::pair<MapperManager*,bool> >::iterator finder = 
         mappers.find(mid);
@@ -2938,10 +2956,11 @@ namespace Legion {
       // Iterate over the task descriptions, asking the appropriate mapper
       // whether we can steal the task
       std::set<TaskOp*> stolen;
+      std::vector<MapperID> successful_thiefs;
       for (std::vector<MapperID>::const_iterator steal_it = thieves.begin();
             steal_it != thieves.end(); steal_it++)
       {
-        MapperID stealer = *steal_it;
+        const MapperID stealer = *steal_it;
         // Handle a race condition here where some processors can 
         // issue steal requests to another processor before the mappers 
         // have been initialized on that processor.  There's no 
@@ -3037,6 +3056,8 @@ namespace Legion {
 
         if (!successful_steal) 
           mapper->process_failed_steal(thief);
+        else
+          successful_thiefs.push_back(stealer);
       }
       if (!stolen.empty())
       {
@@ -3050,6 +3071,13 @@ namespace Legion {
         }
 #endif
         runtime->send_tasks(thief, stolen);
+        // Also have to send advertisements to the mappers that 
+        // successfully stole so they know that they can try again
+        std::set<Processor> thief_set;
+        thief_set.insert(thief);
+        for (std::vector<MapperID>::const_iterator it = 
+              successful_thiefs.begin(); it != successful_thiefs.end(); it++)
+          runtime->send_advertisements(thief_set, *it, local_proc);
       }
     }
 
@@ -3060,14 +3088,11 @@ namespace Legion {
     {
       MapperManager *mapper = find_mapper(mid);
       mapper->process_advertisement(advertiser);
-      // Do a one time enabling of the scheduler so we can try
-      // asking any of the mappers if they would like to try stealing again
-      AutoLock q_lock(queue_lock);
-      if (!task_scheduler_enabled)
-      {
-        task_scheduler_enabled = true;
-        launch_task_scheduler();
-      }
+      // See if this mapper would like to try stealing again
+      std::multimap<Processor,MapperID> stealing_targets;
+      mapper->perform_stealing(stealing_targets);
+      if (!stealing_targets.empty())
+        runtime->send_steal_request(stealing_targets, local_proc);
     }
 
     //--------------------------------------------------------------------------
@@ -3111,7 +3136,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::multimap<Processor,MapperID> stealing_targets;
-      std::vector<MapperID> mappers_with_work;
+      std::vector<MapperID> mappers_with_stealable_work;
       std::vector<std::pair<MapperID,MapperManager*> > current_mappers;
       // Take a snapshot of our current mappers
       {
@@ -3222,8 +3247,18 @@ namespace Legion {
               vis_it++;
             }
           }
-          if (!rqueue.empty())
-            mappers_with_work.push_back(map_id);
+          if (!stealing_disabled)
+          {
+            for (std::list<TaskOp*>::const_iterator it =
+                  rqueue.begin(); it != rqueue.end(); it++)
+            {
+              if ((*it)->is_stealable())
+              {
+                mappers_with_stealable_work.push_back(map_id);
+                break;
+              }
+            }
+          }
         }
         // Now that we've removed them from the queue, issue the
         // mapping analysis calls
@@ -3247,13 +3282,12 @@ namespace Legion {
       }
 
       // Advertise any work that we have
-      if (!stealing_disabled && !mappers_with_work.empty())
+      if (!stealing_disabled && !mappers_with_stealable_work.empty())
       {
         for (std::vector<MapperID>::const_iterator it = 
-              mappers_with_work.begin(); it != mappers_with_work.end(); it++)
-        {
+              mappers_with_stealable_work.begin(); it !=
+              mappers_with_stealable_work.end(); it++)
           issue_advertisements(*it);
-        }
       }
 
       // Finally issue any steal requeusts
@@ -3363,7 +3397,6 @@ namespace Legion {
     {
       if (!is_owner)
         return;
-      assert(!current_instances.empty());
       // No need for the lock, no one should be doing anything at this point
       for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
             current_instances.begin(); it != current_instances.end(); it++)
@@ -6512,8 +6545,7 @@ namespace Legion {
             }
           case SEND_VERSION_MANAGER_ADVANCE:
             {
-              runtime->handle_version_manager_advance(derez,
-                                                      remote_address_space);
+              runtime->handle_version_manager_advance(derez);
               break;
             }
           case SEND_VERSION_MANAGER_INVALIDATE:
@@ -7890,12 +7922,6 @@ namespace Legion {
         replicable_variant(registrar.replicable_variant)
     //--------------------------------------------------------------------------
     { 
-#ifdef LEGION_SPY
-      // TODO: teach legion spy how to check the inner task optimization
-      // for now we'll just turn it off whenever we are going to be 
-      // validating the runtime analysis
-      inner_variant = false;
-#endif
       if (udata != NULL)
       {
         user_data = malloc(user_data_size);
@@ -9172,20 +9198,20 @@ namespace Legion {
       {
         case 1:
           {
-            const Realm::ZIndexSpace<1,coord_t> is = full_space;  
-            const Realm::ZPoint<1,coord_t> p1 = point;
+            const DomainT<1,coord_t> is = full_space;  
+            const Point<1,coord_t> p1 = point;
             return (linearize_point<1>(is, p1) % (max_shard+1));
           }
         case 2:
           {
-            const Realm::ZIndexSpace<2,coord_t> is = full_space;  
-            const Realm::ZPoint<2,coord_t> p2 = point;
+            const DomainT<2,coord_t> is = full_space;  
+            const Point<2,coord_t> p2 = point;
             return (linearize_point<2>(is, p2) % (max_shard+1));
           }
         case 3:
           {
-            const Realm::ZIndexSpace<3,coord_t> is = full_space;  
-            const Realm::ZPoint<3,coord_t> p3 = point;
+            const DomainT<3,coord_t> is = full_space;  
+            const Point<3,coord_t> p3 = point;
             return (linearize_point<3>(is, p3) % (max_shard+1));
           }
         default:
@@ -10086,6 +10112,19 @@ namespace Legion {
             MapperManager *wrapper = wrap_mapper(this, mapper, 0, it->first);
             it->second->add_mapper(0, wrapper, false/*check*/, true/*owns*/);
           }
+#ifndef DISABLE_PARTITION_SHIM
+          // Make default mappers for the partition shim 
+          for (std::map<Processor,ProcessorManager*>::const_iterator it = 
+                proc_managers.begin(); it != proc_managers.end(); it++)
+          {
+            Mapper *mapper = 
+              new Mapping::DefaultMapper(mapper_runtime, machine, it->first);
+            MapperManager *wrapper = wrap_mapper(this, mapper, 
+                                        PARTITION_SHIM_MAPPER_ID, it->first);
+            it->second->add_mapper(PARTITION_SHIM_MAPPER_ID, wrapper, 
+                                   false/*check*/, true/*owns*/);
+          }
+#endif
           // Now ask the application what it wants to do
           if (!Runtime::registration_callbacks.empty())
           {
@@ -10469,19 +10508,19 @@ namespace Legion {
           {
             case 1:
               {
-                const Realm::ZPoint<1,coord_t> p(itr.p);
+                const Point<1,coord_t> p(itr.p);
                 subspace = get_index_subspace(handle1, &p, sizeof(p));
                 break;
               }
             case 2:
               {
-                const Realm::ZPoint<2,coord_t> p(itr.p);
+                const Point<2,coord_t> p(itr.p);
                 subspace = get_index_subspace(handle1, &p, sizeof(p));
                 break;
               }
             case 3:
               {
-                const Realm::ZPoint<3,coord_t> p(itr.p);
+                const Point<3,coord_t> p(itr.p);
                 subspace = get_index_subspace(handle1, &p, sizeof(p));
                 break;
               }
@@ -10897,21 +10936,21 @@ namespace Legion {
       {
         case 1:
           {
-            Realm::ZIndexSpace<1,coord_t> color_index_space;
+            DomainT<1,coord_t> color_index_space;
             forest->get_index_space_domain(color_space, &color_index_space,
                                            color_space.get_type_tag());
             return Domain(color_index_space);
           }
         case 2:
           {
-            Realm::ZIndexSpace<2,coord_t> color_index_space;
+            DomainT<2,coord_t> color_index_space;
             forest->get_index_space_domain(color_space, &color_index_space,
                                            color_space.get_type_tag());
             return Domain(color_index_space);
           }
         case 3:
           {
-            Realm::ZIndexSpace<3,coord_t> color_index_space;
+            DomainT<3,coord_t> color_index_space;
             forest->get_index_space_domain(color_space, &color_index_space,
                                            color_space.get_type_tag());
             return Domain(color_index_space);
@@ -13230,8 +13269,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_tasks(Processor target, 
-                                   const std::set<TaskOp*> &tasks)
+    void Runtime::send_tasks(Processor target, const std::set<TaskOp*> &tasks)
     //--------------------------------------------------------------------------
     {
       if (!target.exists())
@@ -13247,7 +13285,7 @@ namespace Legion {
               it != tasks.end(); it++)
         {
           // Update the current processor
-          (*it)->current_proc = target;
+          (*it)->set_current_proc(target);
           finder->second->add_to_ready_queue(*it);
         }
       }
@@ -14378,8 +14416,10 @@ namespace Legion {
                                                   Serializer &rez)
     //--------------------------------------------------------------------------
     {
+      // This comes back on the version manager channel so that it is 
+      // properly ordered with respect to the version manager responses
       find_messenger(target)->send_message(rez, SEND_VERSION_MANAGER_INVALIDATE,
-                                       ANALYSIS_VIRTUAL_CHANNEL, true/*flush*/);
+                                VERSION_MANAGER_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -15599,11 +15639,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_version_manager_advance(Deserializer &derez,
-                                                 AddressSpaceID source)
+    void Runtime::handle_version_manager_advance(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      VersionManager::handle_remote_advance(derez, this, source);
+      VersionManager::handle_remote_advance(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -16568,19 +16607,19 @@ namespace Legion {
       {
         case 1:
           {
-            Realm::ZIndexSpace<1,coord_t> is = dom;
+            DomainT<1,coord_t> is = dom;
             return find_or_create_index_launch_space(dom, &is,
                   NT_TemplateHelper::encode_tag<1,coord_t>());
           }
         case 2:
           {
-            Realm::ZIndexSpace<2,coord_t> is = dom;
+            DomainT<2,coord_t> is = dom;
             return find_or_create_index_launch_space(dom, &is,
                   NT_TemplateHelper::encode_tag<2,coord_t>());
           }
         case 3:
           {
-            Realm::ZIndexSpace<3,coord_t> is = dom;
+            DomainT<3,coord_t> is = dom;
             return find_or_create_index_launch_space(dom, &is,
                   NT_TemplateHelper::encode_tag<3,coord_t>());
           }
@@ -19523,6 +19562,7 @@ namespace Legion {
     /*static*/ const char* Runtime::prof_logfile = NULL;
     /*static*/ size_t Runtime::prof_footprint_threshold = 128 << 20;
     /*static*/ size_t Runtime::prof_target_latency = 100;
+    /*static*/ bool Runtime::slow_debug_ok = false;
 #ifdef TRACE_ALLOCATION
     /*static*/ std::map<AllocationType,Runtime::AllocationTracker>
                                         Runtime::allocation_manager;
@@ -19644,6 +19684,7 @@ namespace Legion {
         prof_logfile = NULL;
         prof_footprint_threshold = 128 << 20;
         prof_target_latency = 100;
+	slow_debug_ok = false;
         legion_collective_radix = LEGION_COLLECTIVE_RADIX;
         legion_collective_log_radix = 0;
         legion_collective_stages = 0;
@@ -19733,6 +19774,8 @@ namespace Legion {
             continue;
           }
           INT_ARG("-lg:prof_latency",prof_target_latency);
+
+	  BOOL_ARG("-lg:debug_ok",slow_debug_ok);
           
           // These are all the deprecated versions of these flag
           BOOL_ARG("-hl:separate",separate_runtime_instances);
@@ -19812,7 +19855,7 @@ namespace Legion {
       if (legion_spy_enabled)
         LegionSpy::log_legion_spy_config();
 #ifdef DEBUG_LEGION
-      if (num_profiling_nodes > 0)
+      if ((num_profiling_nodes > 0) && !slow_debug_ok)
       {
         // Give a massive warning about profiling with debug enabled
         for (int i = 0; i < 2; i++)
@@ -19837,7 +19880,7 @@ namespace Legion {
       }
 #endif
 #ifdef LEGION_SPY
-      if (num_profiling_nodes > 0)
+      if ((num_profiling_nodes > 0) && !slow_debug_ok)
       {
         // Give a massive warning about profiling with Legion Spy enabled
         for (int i = 0; i < 2; i++)
@@ -19861,7 +19904,7 @@ namespace Legion {
         sleep(5);
       }
 #else
-      if (legion_spy_enabled && (num_profiling_nodes > 0))
+      if (legion_spy_enabled && (num_profiling_nodes > 0) && !slow_debug_ok)
       {
         // Give a massive warning about profiling with Legion Spy enabled
         for (int i = 0; i < 2; i++)
@@ -19886,7 +19929,7 @@ namespace Legion {
       }
 #endif
 #ifdef BOUNDS_CHECKS
-      if (num_profiling_nodes > 0)
+      if ((num_profiling_nodes > 0) && !slow_debug_ok)
       {
         // Give a massive warning about profiling with bounds checks enabled
         for (int i = 0; i < 2; i++)
@@ -19911,7 +19954,7 @@ namespace Legion {
       }
 #endif
 #ifdef PRIVILEGE_CHECKS
-      if (num_profiling_nodes > 0)
+      if ((num_profiling_nodes > 0) && !slow_debug_ok)
       {
         // Give a massive warning about profiling with privilege checks enabled
         for (int i = 0; i < 2; i++)
@@ -21048,6 +21091,9 @@ namespace Legion {
             fargs->ctx->invalidate_remote_contexts();
             if (fargs->ctx->remove_reference())
               delete fargs->ctx;
+            Runtime *runtime = Runtime::get_runtime(p);
+            // Finally tell the runtime that we have one less top level task
+            runtime->decrement_outstanding_top_level_tasks();
             break;
           }
         case LG_MAPPER_TASK_ID:

@@ -21,11 +21,6 @@
 #include "legion_agency.h"
 using namespace Legion;
 
-template<typename FT, int N, typename T = coord_t>
-using AccessorRO = FieldAccessor<READ_ONLY,FT,N,T,Realm::AffineAccessor<FT,N,T> >;
-template<typename FT, int N, typename T = coord_t>
-using AccessorWD = FieldAccessor<WRITE_DISCARD,FT,N,T,Realm::AffineAccessor<FT,N,T> >;
-
 enum TaskIDs {
   TOP_LEVEL_TASK_ID,
   INIT_FIELD_TASK_ID,
@@ -157,7 +152,8 @@ void init_field_task(const Task *task,
   const int point = task->index_point.point_data[0];
   printf("Initializing field %d for block %d...\n", fid, point);
 
-  const AccessorWD<double,1> acc(regions[0], fid);
+  const FieldAccessor<WRITE_DISCARD,double,1,coord_t,
+          Realm::AffineAccessor<double,1,coord_t> > acc(regions[0], fid);
   Rect<1> rect = runtime->get_index_space_domain(ctx, 
       task->regions[0].region.get_index_space());
   double *ptr = acc.ptr(rect.lo);
@@ -183,9 +179,12 @@ void daxpy_task(const Task *task,
   const double alpha = *((const double*)task->args);
   const int point = task->index_point.point_data[0];
 
-  const AccessorRO<double,1> acc_x(regions[0], FID_X);
-  const AccessorRO<double,1> acc_y(regions[0], FID_Y);
-  const AccessorWD<double,1> acc_z(regions[1], FID_Z);
+  const FieldAccessor<READ_ONLY,double,1,coord_t,
+          Realm::AffineAccessor<double,1,coord_t> > acc_x(regions[0], FID_X);
+  const FieldAccessor<READ_ONLY,double,1,coord_t,
+          Realm::AffineAccessor<double,1,coord_t> > acc_y(regions[0], FID_Y);
+  const FieldAccessor<WRITE_DISCARD,double,1,coord_t,
+          Realm::AffineAccessor<double,1,coord_t> > acc_z(regions[1], FID_Z);
 
   // Get dense pointers for use with thrust
   Rect<1> rect = runtime->get_index_space_domain(ctx, 
@@ -217,9 +216,12 @@ void check_task(const Task *task,
   assert(task->arglen == sizeof(double));
   const double alpha = *((const double*)task->args);
 
-  const AccessorRO<double,1> acc_x(regions[0], FID_X);
-  const AccessorRO<double,1> acc_y(regions[0], FID_Y);
-  const AccessorRO<double,1> acc_z(regions[1], FID_Z);
+  const FieldAccessor<READ_ONLY,double,1,coord_t,
+          Realm::AffineAccessor<double,1,coord_t> > acc_x(regions[0], FID_X);
+  const FieldAccessor<READ_ONLY,double,1,coord_t,
+          Realm::AffineAccessor<double,1,coord_t> > acc_y(regions[0], FID_Y);
+  const FieldAccessor<READ_ONLY,double,1,coord_t,
+          Realm::AffineAccessor<double,1,coord_t> > acc_z(regions[1], FID_Z);
   printf("Checking results...");
   Rect<1> rect = runtime->get_index_space_domain(ctx, 
       task->regions[0].region.get_index_space());

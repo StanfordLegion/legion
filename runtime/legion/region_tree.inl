@@ -300,9 +300,11 @@ namespace Legion {
               itr.valid; itr.step())
         {
           if (itr.rect.volume() == 1)
-            LegionSpy::log_index_space_point(handle.get_id(), itr.rect.lo);
+            LegionSpy::log_index_space_point(handle.get_id(), 
+                                             Point<DIM,T>(itr.rect.lo));
           else
-            LegionSpy::log_index_space_rect(handle.get_id(), itr.rect);
+            LegionSpy::log_index_space_rect(handle.get_id(), 
+                                            Rect<DIM,T>(itr.rect));
         }
       }
       else
@@ -750,7 +752,7 @@ namespace Legion {
     {
       Realm::ZIndexSpace<DIM,T> space;
       get_realm_index_space(space, true/*tight*/);
-      return Domain(space);
+      return Domain(DomainT<DIM,T>(space));
     }
 
     //--------------------------------------------------------------------------
@@ -771,7 +773,7 @@ namespace Legion {
     {
       Realm::ZPoint<DIM,T> color_point;
       delinearize_color(c, &color_point, handle.get_type_tag());
-      return DomainPoint(color_point);
+      return DomainPoint(Point<DIM,T>(color_point));
     }
 
     //--------------------------------------------------------------------------
@@ -3150,7 +3152,7 @@ namespace Legion {
     void IndexSpaceNodeT<DIM,T>::get_launch_space_domain(Domain &launch_domain)
     //--------------------------------------------------------------------------
     {
-      Realm::ZIndexSpace<DIM,T> local_space;
+      DomainT<DIM,T> local_space;
       get_realm_index_space(local_space, true/*tight*/);
       launch_domain = local_space;
     }
@@ -3212,7 +3214,8 @@ namespace Legion {
       get_realm_index_space(local_space, true/*tight*/);
       for (Realm::ZIndexSpaceIterator<DIM,T> itr(local_space); 
             itr.valid; itr.step())
-        LegionSpy::log_launch_index_space_rect<DIM>(op_id, itr.rect);
+        LegionSpy::log_launch_index_space_rect<DIM>(op_id, 
+                                                    Rect<DIM,T>(itr.rect));
     }
 
     //--------------------------------------------------------------------------
@@ -3221,11 +3224,9 @@ namespace Legion {
                                           ShardingFunction *func, ShardID shard)
     //--------------------------------------------------------------------------
     {
-      if (!realm_index_space_set.has_triggered())
-        realm_index_space_set.lg_wait();
-      if (!index_space_ready.has_triggered())
-        index_space_ready.lg_wait();
-      const Domain full_space(realm_index_space);
+      DomainT<DIM,T> local_space;
+      get_realm_index_space(local_space, true/*tight*/);
+      const Domain full_space = local_space;
       std::vector<Realm::ZPoint<DIM,T> > shard_points; 
       for (Realm::ZIndexSpaceIterator<DIM,T> rect_itr(realm_index_space); 
             rect_itr.valid; rect_itr.step())
@@ -3233,7 +3234,8 @@ namespace Legion {
         for (Realm::ZPointInRectIterator<DIM,T> itr(rect_itr.rect);
               itr.valid; itr.step())
         {
-          ShardID point_shard = func->find_owner(DomainPoint(itr.p),full_space);
+          const ShardID point_shard = 
+            func->find_owner(DomainPoint(Point<DIM,T>(itr.p)), full_space);
           if (point_shard == shard)
             shard_points.push_back(itr.p);
         }
@@ -3241,7 +3243,7 @@ namespace Legion {
       if (shard_points.empty())
         return IndexSpace::NO_SPACE;
       Realm::ZIndexSpace<DIM,T> realm_is(shard_points);
-      const Domain domain(realm_is);
+      const Domain domain((DomainT<DIM,T>(realm_is)));
       return context->runtime->find_or_create_index_launch_space(domain, 
                                       &realm_is, handle.get_type_tag());
     }
@@ -3251,7 +3253,7 @@ namespace Legion {
     void IndexSpaceNodeT<DIM,T>::destroy_shard_domain(const Domain &domain)
     //--------------------------------------------------------------------------
     {
-      Realm::ZIndexSpace<DIM,T> to_destroy = domain;
+      DomainT<DIM,T> to_destroy = domain;
       to_destroy.destroy();
     }
 

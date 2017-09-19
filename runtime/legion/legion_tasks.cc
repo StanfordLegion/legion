@@ -4000,9 +4000,16 @@ namespace Legion {
       std::set<ApEvent> wait_on_events;
       if (execution_fence_event.exists())
         wait_on_events.insert(execution_fence_event);
+#ifdef LEGION_SPY
+      // TODO: teach legion spy how to check the inner task optimization
+      // for now we'll just turn it off whenever we are going to be
+      // validating the runtime analysis
+      const bool do_inner_task_optimization = false;
+#else
+      const bool do_inner_task_optimization = variant->is_inner();
+#endif
       // Get the event to wait on unless we are 
       // doing the inner task optimization
-      const bool do_inner_task_optimization = variant->is_inner();
       if (!do_inner_task_optimization)
       {
         for (unsigned idx = 0; idx < regions.size(); idx++)

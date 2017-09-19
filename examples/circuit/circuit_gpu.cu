@@ -60,9 +60,9 @@ public:
 };
 
 __device__ __forceinline__
-float find_node_voltage(const AccessorRO<float> &pvt,
-                        const AccessorRO<float> &shr,
-                        const AccessorRO<float> &ghost,
+float find_node_voltage(const AccessorROfloat &pvt,
+                        const AccessorROfloat &shr,
+                        const AccessorROfloat &ghost,
                         Point<1> ptr, PointerLocation loc)
 {
   switch (loc)
@@ -84,18 +84,18 @@ void calc_new_currents_kernel(Point<1> first,
                               int num_wires,
 			      float dt,
 			      int steps,
-                              const AccessorRO<Point<1>> fa_in_ptr,
-                              const AccessorRO<Point<1>> fa_out_ptr,
-                              const AccessorRO<PointerLocation> fa_in_loc,
-                              const AccessorRO<PointerLocation> fa_out_loc,
-                              const AccessorRO<float> fa_inductance,
-                              const AccessorRO<float> fa_resistance,
-                              const AccessorRO<float> fa_wire_cap,
-                              const AccessorRO<float> fa_pvt_voltage,
-                              const AccessorRO<float> fa_shr_voltage,
-                              const AccessorRO<float> fa_ghost_voltage,
-                              const SegmentAccessors<AccessorRW<float>,WIRE_SEGMENTS> fa_currents,
-                              const SegmentAccessors<AccessorRW<float>,WIRE_SEGMENTS-1> fa_voltages)
+                              const AccessorROpoint fa_in_ptr,
+                              const AccessorROpoint fa_out_ptr,
+                              const AccessorROloc fa_in_loc,
+                              const AccessorROloc fa_out_loc,
+                              const AccessorROfloat fa_inductance,
+                              const AccessorROfloat fa_resistance,
+                              const AccessorROfloat fa_wire_cap,
+                              const AccessorROfloat fa_pvt_voltage,
+                              const AccessorROfloat fa_shr_voltage,
+                              const AccessorROfloat fa_ghost_voltage,
+                              const SegmentAccessors<AccessorRWfloat,WIRE_SEGMENTS> fa_currents,
+                              const SegmentAccessors<AccessorRWfloat,WIRE_SEGMENTS-1> fa_voltages)
 {
   const int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -167,24 +167,24 @@ void CalcNewCurrentsTask::gpu_base_impl(const CircuitPiece &piece,
                                         const std::vector<PhysicalRegion> &regions)
 {
 #ifndef DISABLE_MATH
-  SegmentAccessors<AccessorRW<float>,WIRE_SEGMENTS> fa_currents;
+  SegmentAccessors<AccessorRWfloat,WIRE_SEGMENTS> fa_currents;
   for (int i = 0; i < WIRE_SEGMENTS; i++)
-    fa_currents[i] = AccessorRW<float>(regions[0], FID_CURRENT+i);
-  SegmentAccessors<AccessorRW<float>,WIRE_SEGMENTS-1> fa_voltages;
+    fa_currents[i] = AccessorRWfloat(regions[0], FID_CURRENT+i);
+  SegmentAccessors<AccessorRWfloat,WIRE_SEGMENTS-1> fa_voltages;
   for (int i = 0; i < (WIRE_SEGMENTS-1); i++)
-    fa_voltages[i] = AccessorRW<float>(regions[0], FID_WIRE_VOLTAGE+i);
+    fa_voltages[i] = AccessorRWfloat(regions[0], FID_WIRE_VOLTAGE+i);
 
-  const AccessorRO<Point<1> > fa_in_ptr(regions[1], FID_IN_PTR);
-  const AccessorRO<Point<1> > fa_out_ptr(regions[1], FID_OUT_PTR);
-  const AccessorRO<PointerLocation> fa_in_loc(regions[1], FID_IN_LOC);
-  const AccessorRO<PointerLocation> fa_out_loc(regions[1], FID_OUT_LOC);
-  const AccessorRO<float> fa_inductance(regions[1], FID_INDUCTANCE);
-  const AccessorRO<float> fa_resistance(regions[1], FID_RESISTANCE);
-  const AccessorRO<float> fa_wire_cap(regions[1], FID_WIRE_CAP);
+  const AccessorROpoint fa_in_ptr(regions[1], FID_IN_PTR);
+  const AccessorROpoint fa_out_ptr(regions[1], FID_OUT_PTR);
+  const AccessorROloc fa_in_loc(regions[1], FID_IN_LOC);
+  const AccessorROloc fa_out_loc(regions[1], FID_OUT_LOC);
+  const AccessorROfloat fa_inductance(regions[1], FID_INDUCTANCE);
+  const AccessorROfloat fa_resistance(regions[1], FID_RESISTANCE);
+  const AccessorROfloat fa_wire_cap(regions[1], FID_WIRE_CAP);
 
-  const AccessorRO<float> fa_pvt_voltage(regions[2], FID_NODE_VOLTAGE);
-  const AccessorRO<float> fa_shr_voltage(regions[3], FID_NODE_VOLTAGE);
-  const AccessorRO<float> fa_ghost_voltage(regions[4], FID_NODE_VOLTAGE);
+  const AccessorROfloat fa_pvt_voltage(regions[2], FID_NODE_VOLTAGE);
+  const AccessorROfloat fa_shr_voltage(regions[3], FID_NODE_VOLTAGE);
+  const AccessorROfloat fa_ghost_voltage(regions[4], FID_NODE_VOLTAGE);
 
   const int threads_per_block = 256;
   const int num_blocks = (piece.num_wires + (threads_per_block-1)) / threads_per_block;
@@ -210,9 +210,9 @@ void CalcNewCurrentsTask::gpu_base_impl(const CircuitPiece &piece,
 
 template<typename REDOP>
 __device__ __forceinline__
-void reduce_local(const AccessorRW<float> &pvt,
-                  const AccessorRD<float> &shr,
-                  const AccessorRD<float> &ghost,
+void reduce_local(const AccessorRWfloat &pvt,
+                  const AccessorRDfloat &shr,
+                  const AccessorRDfloat &ghost,
                   Point<1> ptr, PointerLocation loc, typename REDOP::RHS value)
 {
   switch (loc)
@@ -235,15 +235,15 @@ __global__
 void distribute_charge_kernel(Point<1> first,
                               const int num_wires,
 			      float dt,
-                              const AccessorRO<Point<1> > fa_in_ptr,
-                              const AccessorRO<Point<1> > fa_out_ptr,
-                              const AccessorRO<PointerLocation> fa_in_loc,
-                              const AccessorRO<PointerLocation> fa_out_loc,
-                              const AccessorRO<float> fa_in_current,
-                              const AccessorRO<float> fa_out_current,
-                              const AccessorRW<float> fa_pvt_charge,
-                              const AccessorRD<float> fa_shr_charge,
-                              const AccessorRD<float> fa_ghost_charge)
+                              const AccessorROpoint fa_in_ptr,
+                              const AccessorROpoint fa_out_ptr,
+                              const AccessorROloc fa_in_loc,
+                              const AccessorROloc fa_out_loc,
+                              const AccessorROfloat fa_in_current,
+                              const AccessorROfloat fa_out_current,
+                              const AccessorRWfloat fa_pvt_charge,
+                              const AccessorRDfloat fa_shr_charge,
+                              const AccessorRDfloat fa_ghost_charge)
 {
   const int tid = blockIdx.x * blockDim.x + threadIdx.x;
   
@@ -272,16 +272,16 @@ void DistributeChargeTask::gpu_base_impl(const CircuitPiece &piece,
                                          const std::vector<PhysicalRegion> &regions)
 {
 #ifndef DISABLE_MATH
-  const AccessorRO<Point<1> > fa_in_ptr(regions[0], FID_IN_PTR);
-  const AccessorRO<Point<1> > fa_out_ptr(regions[0], FID_OUT_PTR);
-  const AccessorRO<PointerLocation> fa_in_loc(regions[0], FID_IN_LOC);
-  const AccessorRO<PointerLocation> fa_out_loc(regions[0], FID_OUT_LOC);
-  const AccessorRO<float> fa_in_current(regions[0], FID_CURRENT);
-  const AccessorRO<float> fa_out_current(regions[0], FID_CURRENT+WIRE_SEGMENTS-1);
+  const AccessorROpoint fa_in_ptr(regions[0], FID_IN_PTR);
+  const AccessorROpoint fa_out_ptr(regions[0], FID_OUT_PTR);
+  const AccessorROloc fa_in_loc(regions[0], FID_IN_LOC);
+  const AccessorROloc fa_out_loc(regions[0], FID_OUT_LOC);
+  const AccessorROfloat fa_in_current(regions[0], FID_CURRENT);
+  const AccessorROfloat fa_out_current(regions[0], FID_CURRENT+WIRE_SEGMENTS-1);
 
-  const AccessorRW<float> fa_pvt_charge(regions[1], FID_CHARGE);
-  const AccessorRD<float> fa_shr_charge(regions[2], FID_CHARGE, REDUCE_ID);
-  const AccessorRD<float> fa_ghost_charge(regions[3], FID_CHARGE, REDUCE_ID);
+  const AccessorRWfloat fa_pvt_charge(regions[1], FID_CHARGE);
+  const AccessorRDfloat fa_shr_charge(regions[2], FID_CHARGE, REDUCE_ID);
+  const AccessorRDfloat fa_ghost_charge(regions[3], FID_CHARGE, REDUCE_ID);
 
   const int threads_per_block = 256;
   const int num_blocks = (piece.num_wires + (threads_per_block-1)) / threads_per_block;
@@ -304,15 +304,15 @@ void DistributeChargeTask::gpu_base_impl(const CircuitPiece &piece,
 __global__
 void update_voltages_kernel(Point<1> first,
                             const int num_nodes,
-                            const AccessorRW<float> fa_pvt_voltage,
-                            const AccessorRW<float> fa_shr_voltage,
-                            const AccessorRW<float> fa_pvt_charge,
-                            const AccessorRW<float> fa_shr_charge,
-                            const AccessorRO<float> fa_pvt_cap,
-                            const AccessorRO<float> fa_shr_cap,
-                            const AccessorRO<float> fa_pvt_leakage,
-                            const AccessorRO<float> fa_shr_leakage,
-                            const AccessorRO<PointerLocation> fa_ptr_loc)
+                            const AccessorRWfloat fa_pvt_voltage,
+                            const AccessorRWfloat fa_shr_voltage,
+                            const AccessorRWfloat fa_pvt_charge,
+                            const AccessorRWfloat fa_shr_charge,
+                            const AccessorROfloat fa_pvt_cap,
+                            const AccessorROfloat fa_shr_cap,
+                            const AccessorROfloat fa_pvt_leakage,
+                            const AccessorROfloat fa_shr_leakage,
+                            const AccessorROloc fa_ptr_loc)
 {
   const int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -351,19 +351,19 @@ void UpdateVoltagesTask::gpu_base_impl(const CircuitPiece &piece,
                                        const std::vector<PhysicalRegion> &regions)
 {
 #ifndef DISABLE_MATH
-  const AccessorRW<float> fa_pvt_voltage(regions[0], FID_NODE_VOLTAGE);
-  const AccessorRW<float> fa_pvt_charge(regions[0], FID_CHARGE);
+  const AccessorRWfloat fa_pvt_voltage(regions[0], FID_NODE_VOLTAGE);
+  const AccessorRWfloat fa_pvt_charge(regions[0], FID_CHARGE);
 
-  const AccessorRW<float> fa_shr_voltage(regions[1], FID_NODE_VOLTAGE);
-  const AccessorRW<float> fa_shr_charge(regions[1], FID_CHARGE);
+  const AccessorRWfloat fa_shr_voltage(regions[1], FID_NODE_VOLTAGE);
+  const AccessorRWfloat fa_shr_charge(regions[1], FID_CHARGE);
   
-  const AccessorRO<float> fa_pvt_cap(regions[2], FID_NODE_CAP);
-  const AccessorRO<float> fa_pvt_leakage(regions[2], FID_LEAKAGE);
+  const AccessorROfloat fa_pvt_cap(regions[2], FID_NODE_CAP);
+  const AccessorROfloat fa_pvt_leakage(regions[2], FID_LEAKAGE);
 
-  const AccessorRO<float> fa_shr_cap(regions[3], FID_NODE_CAP);
-  const AccessorRO<float> fa_shr_leakage(regions[3], FID_LEAKAGE);
+  const AccessorROfloat fa_shr_cap(regions[3], FID_NODE_CAP);
+  const AccessorROfloat fa_shr_leakage(regions[3], FID_LEAKAGE);
 
-  const AccessorRO<PointerLocation> fa_ptr_loc(regions[4], FID_LOCATOR);
+  const AccessorROloc fa_ptr_loc(regions[4], FID_LOCATOR);
 
   const int threads_per_block = 256;
   const int num_blocks = (piece.num_nodes + (threads_per_block-1)) / threads_per_block;

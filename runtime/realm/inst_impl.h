@@ -64,7 +64,6 @@ namespace Realm {
 
       Event request_metadata(void) { return metadata.request_data(ID(me).instance.owner_node, me.id); }
 
-      void record_instance_usage(void);
       void finalize_instance(void);
 
     public: //protected:

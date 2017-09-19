@@ -468,9 +468,9 @@ namespace Legion {
       static const char* create_default_name(Processor p);
       template<int DIM>
       static void default_decompose_points(
-                            const Realm::ZIndexSpace<DIM,coord_t> &point_space,
+                            const DomainT<DIM,coord_t> &point_space,
                             const std::vector<Processor> &targets,
-                            const Realm::ZPoint<DIM,coord_t> &blocking, 
+                            const Point<DIM,coord_t> &blocking, 
                             bool recurse, bool stealable,
                             std::vector<TaskSlice> &slices);
       // For some backwards compatibility with the old interface
@@ -482,9 +482,9 @@ namespace Legion {
                             bool recurse, bool stealable,
                             std::vector<TaskSlice> &slices);
       template<int DIM>
-      static Realm::ZPoint<DIM,coord_t> default_select_num_blocks(
+      static Point<DIM,coord_t> default_select_num_blocks(
                             long long int factor, 
-                            const Realm::ZRect<DIM,coord_t> &rect_to_factor);
+                            const Rect<DIM,coord_t> &rect_to_factor);
       static unsigned long long compute_task_hash(const Task &task);
       static inline bool physical_sort_func(
                          const std::pair<PhysicalInstance,unsigned> &left,
