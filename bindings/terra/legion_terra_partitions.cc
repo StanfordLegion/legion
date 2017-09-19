@@ -22,6 +22,18 @@
 #include "lowlevel.h"
 #include "utilities.h"
 
+// Disable deprecated warnings in this file since we are also
+// trying to maintain backwards compatibility support for older
+// interfaces here in the C API
+#ifdef __GNUC__
+#pragma GCC diagnostic ignored "-Wdeprecated"
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __clang__
+#pragma clang diagnostic ignored "-Wdeprecated"
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
 #ifndef USE_TLS
 // Mac OS X and GCC <= 4.7 do not support C++11 thread_local.
 #if __cplusplus < 201103L || defined(__MACH__) || (defined(__GNUC__) && (__GNUC__ < 4 || (__GNUC__ == 4 && __GNUC_MINOR__ <= 7)))
