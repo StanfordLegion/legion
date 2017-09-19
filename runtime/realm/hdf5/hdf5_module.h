@@ -23,14 +23,6 @@ namespace Realm {
 
   namespace HDF5 {
 
-    // temporary hack
-    RegionInstance create_hdf5_instance(Domain dom,
-					const ProfilingRequestSet& prs,
-					const char *file_name,
-					const std::vector<size_t> &field_sizes,
-					const std::vector<const char*> &field_files,
-					bool read_only);
-
     class HDF5Memory;
 
     // our interface to the rest of the runtime
