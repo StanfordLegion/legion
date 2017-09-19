@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2017 Kitware, Inc.
+# Copyright 2017 Los Alamos National Laboratory
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.1)
-project(LegionExample_06_privileges)
+project(LegionExample_10_attach_2darray_c_fortran_layout)
 
 include(CheckCXXCompilerFlag)
 
@@ -32,8 +32,8 @@ if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_executable(privileges privileges.cc)
-target_link_libraries(privileges Legion::Legion)
+add_executable(attach_2darray attach_2darray.cc)
+target_link_libraries(attach_2darray Legion::Legion)
 if(Legion_ENABLE_TESTING)
-  add_test(NAME privileges COMMAND $<TARGET_FILE:privileges>) 
+  add_test(NAME attach_2darray COMMAND $<TARGET_FILE:attach_2darray>) 
 endif()

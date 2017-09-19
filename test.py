@@ -46,8 +46,10 @@ legion_cxx_tests = [
     ['tutorial/05_physical_regions/physical_regions', []],
     ['tutorial/06_privileges/privileges', []],
     ['tutorial/07_partitioning/partitioning', []],
+    ['tutorial/07_partitioning_attach_array/partitioning', []],
     ['tutorial/08_multiple_partitions/multiple_partitions', []],
     ['tutorial/09_custom_mapper/custom_mapper', []],
+    ['tutorial/10_attach_2darray_c_fortran_layout/attach_2darray', []],
 
     # Examples
     ['examples/circuit/circuit', []],
