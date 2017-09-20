@@ -88,7 +88,7 @@ legion_hdf_cxx_tests = [
 legion_cxx_perf_tests = [
     # Circuit: Heavy Compute
     ['examples/circuit/circuit',
-     ['-l', '10', '-p', lambda nodes : nodes * int(perf_cores_per_node), '-npp', '2500', '-wpp', '10000', '-ll:cpu', perf_cores_per_node]],
+     ['-l', '10', '-p', perf_cores_per_node, '-npp', '2500', '-wpp', '10000', '-ll:cpu', perf_cores_per_node]],
 
     # Circuit: Light Compute
     ['examples/circuit/circuit',
@@ -98,7 +98,7 @@ legion_cxx_perf_tests = [
 regent_perf_tests = [
     # Circuit: Heavy Compute
     ['language/examples/circuit_sparse.rg',
-     ['-l', '10', '-p', lambda nodes : nodes * int(perf_cores_per_node), '-npp', '2500', '-wpp', '10000', '-ll:cpu', perf_cores_per_node,
+     ['-l', '10', '-p', perf_cores_per_node, '-npp', '2500', '-wpp', '10000', '-ll:cpu', perf_cores_per_node,
       '-fflow-spmd-shardsize', perf_cores_per_node]],
 
     # Circuit: Light Compute
@@ -122,80 +122,21 @@ def cmd(command, env=None, cwd=None):
 def run_test_regent(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     cmd([os.path.join(root_dir, 'language/travis.py')], env=env)
 
-def launcher_is_batch(launcher):
-    if 'aprun' in launcher:
-        return True
-    return False
-
-def launcher_with_nodes(perf_launcher, nodes):
-    if 'aprun' in perf_launcher:
-        return perf_launcher + ' -n ' + str(nodes)
-    else:
-        return perf_launcher
-
-def batch_execute(nodes, command, env, cwd, launcher_name, root_dir):
-    batch_dir = './batch'
-    cmd(['mkdir', '-p', batch_dir])
-    file_name = str(nodes) + '_nodes' + '_'.join(command[2:])
-    file_name = file_name.replace('/', '_')
-    file_name = file_name.replace(':', '_')
-    file_name = file_name[:200]
-    file_path = batch_dir + '/' + file_name
-
-    file = open(file_path, 'w')
-    file.write('#!/bin/bash\n')
-    account = 'csc103'
-    file.write('#PBS -A ' + account + '\n')    
-    file.write('#PBS -N ' + file_name + '\n')
-    file.write('#PBS -j oe\n')
-    file.write('#PBS -l walltime=0:10:00,nodes=' + str(nodes) + '\n')
-    file.write('#PBS -l gres=atlas1%atlas2\n')
-    for key in env.keys():
-        file.write('export ' + key.replace('()', '') + '="' + env[key].replace('()', '') + '"\n')
-    file.write('cd $MEMBERWORK/' + account + '\n')
-    file.write('date\n')
-    command_string = ' '.join(command)
-    file.write(launcher_with_nodes(env[launcher_name], nodes) + ' ' + command_string + '\n')
-    file.write(os.path.join(root_dir, 'tools', 'perf_chart.py') + ' https://github.com/StanfordLegion/perf-data.git'
-             + ' https://github.com/StanfordLegion/perf-data.git')
-    file.write('date\n')
-    file.close()
-    cmd(['qsub', file_name], cwd=batch_dir)
-
-def evaluate_lambda(test_flags, nodes):
-    result = []
-    for i in test_flags:
-        if type(i) == type('string'):
-            result = result + [i]
-        elif type(i) == type(0):
-            result = result + [str(i)]
-        else:
-            result = result + [str(i(nodes))]
-    return result
-
-def run_cxx(tests, flags, launcher, root_dir, bin_dir, env, thread_count, nodes=1):
+def run_cxx(tests, flags, launcher, root_dir, bin_dir, env, thread_count):
     for test_file, test_flags in tests:
-        test_flags = evaluate_lambda(test_flags, nodes)
         test_dir = os.path.dirname(os.path.join(root_dir, test_file))
         if bin_dir:
             test_path = os.path.join(bin_dir, os.path.basename(test_file))
         else:
             test_path = os.path.join(root_dir, test_file)
             cmd(['make', '-C', test_dir, '-j', str(thread_count)], env=env)
-        if launcher_is_batch(env['PERF_LAUNCHER']):
-            batch_execute(nodes, launcher + [test_path] + flags + test_flags, env=env, cwd=test_dir, launcher_name='PERF_LAUNCHER', root_dir=root_dir)
-        else:
-            cmd(launcher + [test_path] + flags + test_flags, env=env, cwd=test_dir)
+        cmd(launcher + [test_path] + flags + test_flags, env=env, cwd=test_dir)
 
-def run_regent(tests, flags, launcher, root_dir, env, thread_count, nodes=1):
+def run_regent(tests, flags, launcher, root_dir, env, thread_count):
     for test_file, test_flags in tests:
-        test_flags = evaluate_lambda(test_flags, nodes)
         test_dir = os.path.dirname(os.path.join(root_dir, test_file))
         test_path = os.path.join(root_dir, test_file)
-        if launcher_is_batch(env['LAUNCHER']):
-            batch_execute(nodes, launcher + [test_path] + flags + test_flags, env=env, cwd=test_dir, launcher_name='LAUNCHER', root_dir=root_dir)
-        else:
-            cmd(launcher + [test_path] + flags + test_flags, env=env, cwd=test_dir)
+        cmd(launcher + [test_path] + flags + test_flags, env=env, cwd=test_dir)
 
 def run_test_legion_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
@@ -325,16 +266,7 @@ def git_branch_name(repo_dir):
         return output.strip()
     return None
 
-
-
-
 def run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
-    nodes = 1
-    while nodes < int(env['PERF_MAX_NODES']):
-        run_test_perf_one_configuration(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, nodes)
-        nodes = nodes * 2
-
-def run_test_perf_one_configuration(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, nodes):
     flags = ['-logfile', 'out_%.log']
 
     # Performance test configuration:
@@ -409,20 +341,20 @@ def run_test_perf_one_configuration(launcher, root_dir, tmp_dir, bin_dir, env, t
 
     # Run Legion C++ performance tests.
     runner = os.path.join(root_dir, 'perf.py')
-    run_cxx(legion_cxx_perf_tests, flags, [runner], root_dir, bin_dir, cxx_env, thread_count, nodes)
+    launcher = [runner] # Note: LAUNCHER is still passed via the environment
+    run_cxx(legion_cxx_perf_tests, flags, launcher, root_dir, bin_dir, cxx_env, thread_count)
 
     # Run Regent performance tests.
     regent_path = os.path.join(root_dir, 'language/regent.py')
     # FIXME: PENNANT can't handle the -logfile flag coming first, so just skip it.
-    run_regent(regent_perf_tests, [], [runner, regent_path], root_dir, regent_env, thread_count, nodes)
+    run_regent(regent_perf_tests, [], [runner, regent_path], root_dir, regent_env, thread_count)
 
-    if not launcher_is_batch(launcher):
-        # Render the final charts.
-        subprocess.check_call(
-            [os.path.join(root_dir, 'tools', 'perf_chart.py'),
-             'https://github.com/StanfordLegion/perf-data.git',
-             'https://github.com/StanfordLegion/perf-data.git'],
-            env=env)
+    # Render the final charts.
+    subprocess.check_call(
+        [os.path.join(root_dir, 'tools', 'perf_chart.py'),
+         'git@github.com:StanfordLegion/perf-data.git',
+         'git@github.com:StanfordLegion/perf-data.git'],
+        env=env)
 
 def check_test_legion_cxx(root_dir):
     print('Checking that tests that SHOULD tested are ACTUALLY tested...')
@@ -572,13 +504,11 @@ def run_tests(test_modules=None,
               debug=True,
               use_features=None,
               launcher=None,
-              perf_max_nodes=1,
               thread_count=None,
               root_dir=None,
               check_ownership=False,
               keep_tmp_dir=False,
               verbose=False):
-
     if thread_count is None:
         thread_count = multiprocessing.cpu_count()
 
@@ -634,7 +564,6 @@ def run_tests(test_modules=None,
         ('TEST_SPY', '1' if use_spy else '0'),
         ('TEST_GCOV', '1' if use_gcov else '0'),
         ('USE_RDIR', '1' if use_rdir else '0'),
-        ('PERF_MAX_NODES', perf_max_nodes),
         ('LG_RT_DIR', os.path.join(root_dir, 'runtime'))] + (
 
         # Gcov doesn't get a USE_GCOV flag, but instead stuff the GCC
@@ -740,10 +669,6 @@ def driver():
         '--launcher', dest='launcher', action='store',
         default=os.environ['LAUNCHER'] if 'LAUNCHER' in os.environ else None,
         help='Launcher for Legion tests (also via LAUNCHER).')
-
-    parser.add_argument(
-        '--perf_max_nodes', dest='perf_max_nodes', action='store', default='1',
-        help='Max nodes for performance scaling runs')
 
     parser.add_argument(
         '-C', '--directory', dest='root_dir', metavar='DIR', action='store', required=False,
