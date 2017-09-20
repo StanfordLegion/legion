@@ -25,12 +25,6 @@
 #include <realm/runtime_impl.h>
 #include <realm/inst_impl.h>
 
-namespace LegionRuntime {
-  namespace LowLevel {
-    class Request;
-  };
-};
-
 namespace Realm {
   class CoreReservationSet;
 
@@ -464,7 +458,8 @@ namespace Realm {
       std::string name;
     };
 
-    typedef LegionRuntime::LowLevel::Request Request;
+    class Request;
+
     class AsyncFileIOContext {
     public:
       AsyncFileIOContext(int _max_depth);

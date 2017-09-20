@@ -41,25 +41,9 @@
 
 // remote copy active messages from from lowlevel_dma.h for now
 #include <realm/transfer/lowlevel_dma.h>
-namespace Realm {
-  //typedef LegionRuntime::LowLevel::RemoteCopyMessage RemoteCopyMessage;
-  //typedef LegionRuntime::LowLevel::RemoteFillMessage RemoteFillMessage;
-};
 
 // create xd message and update bytes read/write messages
 #include <realm/transfer/channel.h>
-namespace Realm {
-  typedef LegionRuntime::LowLevel::XferDesRemoteWriteMessage XferDesRemoteWriteMessage;
-  typedef LegionRuntime::LowLevel::XferDesRemoteWriteAckMessage XferDesRemoteWriteAckMessage;
-  typedef LegionRuntime::LowLevel::XferDesCreateMessage XferDesCreateMessage;
-  typedef LegionRuntime::LowLevel::XferDesDestroyMessage XferDesDestroyMessage;
-  typedef LegionRuntime::LowLevel::NotifyXferDesCompleteMessage NotifyXferDesCompleteMessage;
-  typedef LegionRuntime::LowLevel::UpdateBytesWriteMessage UpdateBytesWriteMessage;
-  typedef LegionRuntime::LowLevel::UpdateBytesReadMessage UpdateBytesReadMessage;
-  //typedef LegionRuntime::LowLevel::RemoteIBAllocRequestAsync RemoteIBAllocRequestAsync;
-  //typedef LegionRuntime::LowLevel::RemoteIBAllocResponseAsync RemoteIBAllocResponseAsync;
-  //typedef LegionRuntime::LowLevel::RemoteIBFreeRequestAsync RemoteIBFreeRequestAsync;
-}
 
 #include <unistd.h>
 #include <signal.h>
@@ -855,21 +839,6 @@ namespace Realm {
 
     bool RuntimeImpl::init(int *argc, char ***argv)
     {
-#if 0
-      // have to register domain mappings too
-      LegionRuntime::Arrays::Mapping<1,1>::register_mapping<LegionRuntime::Arrays::CArrayLinearization<1> >();
-      LegionRuntime::Arrays::Mapping<2,1>::register_mapping<LegionRuntime::Arrays::CArrayLinearization<2> >();
-      LegionRuntime::Arrays::Mapping<3,1>::register_mapping<LegionRuntime::Arrays::CArrayLinearization<3> >();
-      LegionRuntime::Arrays::Mapping<1,1>::register_mapping<LegionRuntime::Arrays::FortranArrayLinearization<1> >();
-      LegionRuntime::Arrays::Mapping<2,1>::register_mapping<LegionRuntime::Arrays::FortranArrayLinearization<2> >();
-      LegionRuntime::Arrays::Mapping<3,1>::register_mapping<LegionRuntime::Arrays::FortranArrayLinearization<3> >();
-      LegionRuntime::Arrays::Mapping<1,1>::register_mapping<LegionRuntime::Arrays::Translation<1> >();
-      // we also register split dim linearization
-      //LegionRuntime::Arrays::Mapping<1,1>::register_mapping<LegionRuntime::Layouts::SplitDimLinearization<1> >();
-      //LegionRuntime::Arrays::Mapping<2,1>::register_mapping<LegionRuntime::Layouts::SplitDimLinearization<2> >();
-      //LegionRuntime::Arrays::Mapping<3,1>::register_mapping<LegionRuntime::Layouts::SplitDimLinearization<3> >();
-#endif
-
       DetailedTimer::init_timers();
 
       // gasnet_init() must be called before parsing command line arguments, as some

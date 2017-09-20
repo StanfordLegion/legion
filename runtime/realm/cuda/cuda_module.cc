@@ -841,7 +841,7 @@ namespace Realm {
       // Not a good design choice
       // For now, channel_manager will creates all channels
       // for GPUs in dma_all_gpus
-      LegionRuntime::LowLevel::register_gpu_in_dma_systems(this);
+      register_gpu_in_dma_systems(this);
       // </NEW_DMA>
 
       // if we don't have any framebuffer memory, we can't do any DMAs

@@ -28,7 +28,6 @@
 #include <assert.h>
 #include <pthread.h>
 #include <string.h>
-#include "lowlevel.h"
 #include "lowlevel_dma.h"
 
 #include <realm/id.h>
@@ -44,38 +43,12 @@
 #include "realm/hdf5/hdf5_internal.h"
 #endif
 
-namespace LegionRuntime{
-  namespace LowLevel{
+namespace Realm {
+
     class XferDes;
     class Channel;
 
-    typedef Realm::ID ID;
-    typedef Realm::DmaRequest DmaRequest;
-    typedef Realm::OffsetsAndSize OffsetsAndSize;
-    typedef Realm::XferDesID XferDesID;
-    typedef Realm::TransferDomain TransferDomain;
-    typedef Realm::TransferIterator TransferIterator;
-
-    typedef Realm::MemoryImpl MemoryImpl;
-    typedef Realm::RegionInstanceImpl RegionInstanceImpl;
-    
-#ifdef USE_CUDA
-    typedef Realm::Cuda::GPU GPU;
-    typedef Realm::Cuda::GPUFBMemory GPUFBMemory;
-#endif
-
-#ifdef USE_HDF
-    typedef Realm::HDF5::HDF5Memory HDF5Memory;
-    typedef Realm::HDF5::HDF5Memory::HDFMetadata HDFMetadata;
-#endif
-    typedef Realm::FileMemory FileMemory;
-
-    inline Realm::RuntimeImpl *get_runtime(void)
-    {
-      return Realm::get_runtime();
-    }
-
-    extern Logger::Category log_new_dma;
+    extern Logger log_new_dma;
 
     class Buffer {
     public:
@@ -256,7 +229,7 @@ namespace LegionRuntime{
     };
 
 #ifdef USE_CUDA
-    class GPUCompletionEvent : public Realm::Cuda::GPUCompletionNotification {
+    class GPUCompletionEvent : public Cuda::GPUCompletionNotification {
     public:
       GPUCompletionEvent(void) {triggered = false;}
       void request_completed(void) {triggered = true;}
@@ -271,7 +244,7 @@ namespace LegionRuntime{
       const void *src_base;
       void *dst_base;
       off_t src_gpu_off, dst_gpu_off;
-      GPU* dst_gpu;
+      Cuda::GPU* dst_gpu;
       GPUCompletionEvent event;
     };
 #endif
@@ -550,7 +523,7 @@ namespace LegionRuntime{
       //GPURequest* gpu_reqs;
       //char *src_buf_base;
       //char *dst_buf_base;
-      GPU *dst_gpu, *src_gpu;
+      Cuda::GPU *dst_gpu, *src_gpu;
     };
 #endif
 
@@ -688,13 +661,13 @@ namespace LegionRuntime{
 #ifdef USE_CUDA
     class GPUChannel : public Channel {
     public:
-      GPUChannel(GPU* _src_gpu, long max_nr, XferDes::XferKind _kind);
+      GPUChannel(Cuda::GPU* _src_gpu, long max_nr, XferDes::XferKind _kind);
       ~GPUChannel();
       long submit(Request** requests, long nr);
       void pull();
       long available();
     private:
-      GPU* src_gpu;
+      Cuda::GPU* src_gpu;
       long capacity;
       std::deque<Request*> pending_copies;
     };
@@ -757,19 +730,19 @@ namespace LegionRuntime{
       FileChannel* create_file_read_channel(long max_nr);
       FileChannel* create_file_write_channel(long max_nr);
 #ifdef USE_CUDA
-      GPUChannel* create_gpu_to_fb_channel(long max_nr, GPU* src_gpu) {
+      GPUChannel* create_gpu_to_fb_channel(long max_nr, Cuda::GPU* src_gpu) {
         gpu_to_fb_channels[src_gpu] = new GPUChannel(src_gpu, max_nr, XferDes::XFER_GPU_TO_FB);
         return gpu_to_fb_channels[src_gpu];
       }
-      GPUChannel* create_gpu_from_fb_channel(long max_nr, GPU* src_gpu) {
+      GPUChannel* create_gpu_from_fb_channel(long max_nr, Cuda::GPU* src_gpu) {
         gpu_from_fb_channels[src_gpu] = new GPUChannel(src_gpu, max_nr, XferDes::XFER_GPU_FROM_FB);
         return gpu_from_fb_channels[src_gpu];
       }
-      GPUChannel* create_gpu_in_fb_channel(long max_nr, GPU* src_gpu) {
+      GPUChannel* create_gpu_in_fb_channel(long max_nr, Cuda::GPU* src_gpu) {
         gpu_in_fb_channels[src_gpu] = new GPUChannel(src_gpu, max_nr, XferDes::XFER_GPU_IN_FB);
         return gpu_in_fb_channels[src_gpu];
       }
-      GPUChannel* create_gpu_peer_fb_channel(long max_nr, GPU* src_gpu) {
+      GPUChannel* create_gpu_peer_fb_channel(long max_nr, Cuda::GPU* src_gpu) {
         gpu_peer_fb_channels[src_gpu] = new GPUChannel(src_gpu, max_nr, XferDes::XFER_GPU_PEER_FB);
         return gpu_peer_fb_channels[src_gpu];
       }
@@ -811,26 +784,26 @@ namespace LegionRuntime{
         return file_write_channel;
       }
 #ifdef USE_CUDA
-      GPUChannel* get_gpu_to_fb_channel(GPU* gpu) {
-        std::map<GPU*, GPUChannel*>::iterator it;
+      GPUChannel* get_gpu_to_fb_channel(Cuda::GPU* gpu) {
+        std::map<Cuda::GPU*, GPUChannel*>::iterator it;
         it = gpu_to_fb_channels.find(gpu);
         assert(it != gpu_to_fb_channels.end());
         return (it->second);
       }
-      GPUChannel* get_gpu_from_fb_channel(GPU* gpu) {
-        std::map<GPU*, GPUChannel*>::iterator it;
+      GPUChannel* get_gpu_from_fb_channel(Cuda::GPU* gpu) {
+        std::map<Cuda::GPU*, GPUChannel*>::iterator it;
         it = gpu_from_fb_channels.find(gpu);
         assert(it != gpu_from_fb_channels.end());
         return (it->second);
       }
-      GPUChannel* get_gpu_in_fb_channel(GPU* gpu) {
-        std::map<GPU*, GPUChannel*>::iterator it;
+      GPUChannel* get_gpu_in_fb_channel(Cuda::GPU* gpu) {
+        std::map<Cuda::GPU*, GPUChannel*>::iterator it;
         it = gpu_in_fb_channels.find(gpu);
         assert(it != gpu_in_fb_channels.end());
         return (it->second);
       }
-      GPUChannel* get_gpu_peer_fb_channel(GPU* gpu) {
-        std::map<GPU*, GPUChannel*>::iterator it;
+      GPUChannel* get_gpu_peer_fb_channel(Cuda::GPU* gpu) {
+        std::map<Cuda::GPU*, GPUChannel*>::iterator it;
         it = gpu_peer_fb_channels.find(gpu);
         assert(it != gpu_peer_fb_channels.end());
         return (it->second);
@@ -851,7 +824,7 @@ namespace LegionRuntime{
       DiskChannel *disk_read_channel, *disk_write_channel;
       FileChannel *file_read_channel, *file_write_channel;
 #ifdef USE_CUDA
-      std::map<GPU*, GPUChannel*> gpu_to_fb_channels, gpu_in_fb_channels, gpu_from_fb_channels, gpu_peer_fb_channels;
+      std::map<Cuda::GPU*, GPUChannel*> gpu_to_fb_channels, gpu_in_fb_channels, gpu_from_fb_channels, gpu_peer_fb_channels;
 #endif
 #ifdef USE_HDF
       HDFChannel *hdf_read_channel, *hdf_write_channel;
@@ -1152,18 +1125,18 @@ namespace LegionRuntime{
         NODE_BITS = 16,
         INDEX_BITS = 32
       };
-      XferDesQueue(int num_dma_threads, bool pinned, Realm::CoreReservationSet& crs)
-      //: core_rsrv("DMA request queue", crs, Realm::CoreReservationParameters())
+      XferDesQueue(int num_dma_threads, bool pinned, CoreReservationSet& crs)
+      //: core_rsrv("DMA request queue", crs, CoreReservationParameters())
       {
         if (pinned) {
-          Realm::CoreReservationParameters params;
+          CoreReservationParameters params;
           params.set_num_cores(num_dma_threads);
           params.set_alu_usage(params.CORE_USAGE_EXCLUSIVE);
           params.set_fpu_usage(params.CORE_USAGE_EXCLUSIVE);
           params.set_ldst_usage(params.CORE_USAGE_SHARED);
-          core_rsrv = new Realm::CoreReservation("DMA threads", crs, params);
+          core_rsrv = new CoreReservation("DMA threads", crs, params);
         } else {
-          core_rsrv = new Realm::CoreReservation("DMA threads", crs, Realm::CoreReservationParameters());
+          core_rsrv = new CoreReservation("DMA threads", crs, CoreReservationParameters());
         }
         pthread_mutex_init(&queues_lock, NULL);
         pthread_rwlock_init(&guid_lock, NULL);
@@ -1358,19 +1331,19 @@ namespace LegionRuntime{
       pthread_mutex_t queues_lock;
       pthread_rwlock_t guid_lock;
       XferDesID next_to_assign_idx;
-      Realm::CoreReservation* core_rsrv;
+      CoreReservation* core_rsrv;
       int num_threads, num_memcpy_threads;
       DMAThread** dma_threads;
       MemcpyThread** memcpy_threads;
-      std::vector<Realm::Thread*> worker_threads;
+      std::vector<Thread*> worker_threads;
     };
 
     XferDesQueue* get_xdq_singleton();
     ChannelManager* get_channel_manager();
 #ifdef USE_CUDA
-    void register_gpu_in_dma_systems(GPU* gpu);
+    void register_gpu_in_dma_systems(Cuda::GPU* gpu);
 #endif
-    void start_channel_manager(int count, bool pinned, int max_nr, Realm::CoreReservationSet& crs);
+    void start_channel_manager(int count, bool pinned, int max_nr, CoreReservationSet& crs);
     void stop_channel_manager();
 
     void create_xfer_des(DmaRequest* _dma_request,
@@ -1386,7 +1359,7 @@ namespace LegionRuntime{
                          XferDesFence* _complete_fence, RegionInstance inst = RegionInstance::NO_INST);
 
     void destroy_xfer_des(XferDesID _guid);
-  }  // namespace LowLevel
-} // namespace LegionRuntime
+}; // namespace Realm
+
 #endif
 

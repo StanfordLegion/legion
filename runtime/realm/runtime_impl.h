@@ -45,13 +45,6 @@
 #define typeof decltype
 #endif
 
-// dma channels are still in old namespace
-namespace LegionRuntime {
-  namespace LowLevel {
-    class MemPairCopierFactory;
-  };
-};
-
 namespace Realm {
 
   class ProcessorGroup;

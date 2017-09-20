@@ -122,22 +122,6 @@ namespace Realm {
       block_size = 0;
     InstanceLayoutConstraints ilc(field_sizes, block_size);
     InstanceLayoutGeneric *layout = InstanceLayoutGeneric::choose_instance_layout(space, ilc);
-#if 0
-    delete layout;
-
-    if(N == 1) {
-      assert(space.dense());
-      LegionRuntime::Arrays::Rect<1> r;
-      r.lo = space.bounds.lo.x;
-      r.hi = space.bounds.hi.x;
-      Domain d = Domain::from_rect<1>(r);
-      return d.create_instance(memory, field_sizes, space.bounds.volume(), reqs);
-    } else {
-      // TODO: all sorts of serialization fun...
-      assert(false);
-      return RegionInstance::NO_INST;
-    }
-#endif
     return create_instance(inst, memory, layout, reqs, wait_on);
   }
 

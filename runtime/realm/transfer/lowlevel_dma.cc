@@ -55,7 +55,6 @@ namespace Realm {
 
     Logger log_dma("dma");
     Logger log_ib_alloc("ib_alloc");
-    Logger& log_new_dma = LegionRuntime::LowLevel::log_new_dma;
     //extern Logger log_new_dma;
     Logger log_aio("aio");
 #ifdef EVENT_GRAPH_TRACE
@@ -63,14 +62,9 @@ namespace Realm {
     extern Event find_enclosing_termination_event(void);
 #endif
 
-  typedef LegionRuntime::LowLevel::XferDes XferDes;
-  typedef LegionRuntime::LowLevel::XferDesFence XferDesFence;
-  typedef LegionRuntime::LowLevel::XferOrder XferOrder;
-  typedef LegionRuntime::LowLevel::Buffer Buffer;
-
-    class IBFence : public Realm::Operation::AsyncWorkItem {
+    class IBFence : public Operation::AsyncWorkItem {
     public:
-      IBFence(Realm::Operation *op) : Realm::Operation::AsyncWorkItem(op) {}
+      IBFence(Operation *op) : Operation::AsyncWorkItem(op) {}
       virtual void request_cancellation(void) {
         // ignored for now
       }
@@ -110,7 +104,7 @@ namespace Realm {
 
     class DmaRequestQueue {
     public:
-      DmaRequestQueue(Realm::CoreReservationSet& crs);
+      DmaRequestQueue(CoreReservationSet& crs);
 
       void enqueue_request(DmaRequest *r);
 
@@ -138,7 +132,7 @@ namespace Realm {
   //
 
     DmaRequest::DmaRequest(int _priority, Event _after_copy) 
-      : Operation(_after_copy, Realm::ProfilingRequestSet()),
+      : Operation(_after_copy, ProfilingRequestSet()),
 	state(STATE_INIT), priority(_priority)
     {
       tgt_fetch_completion = Event::NO_EVENT;
@@ -146,8 +140,8 @@ namespace Realm {
     }
 
     DmaRequest::DmaRequest(int _priority, Event _after_copy,
-			   const Realm::ProfilingRequestSet &reqs)
-      : Realm::Operation(_after_copy, reqs), state(STATE_INIT),
+			   const ProfilingRequestSet &reqs)
+      : Operation(_after_copy, reqs), state(STATE_INIT),
 	priority(_priority)
     {
       tgt_fetch_completion = Event::NO_EVENT;
@@ -260,7 +254,7 @@ namespace Realm {
       }
     }
 
-    DmaRequestQueue::DmaRequestQueue(Realm::CoreReservationSet& crs)
+    DmaRequestQueue::DmaRequestQueue(CoreReservationSet& crs)
       : queue_condvar(queue_mutex)
       , core_rsrv("DMA request queue", crs, CoreReservationParameters())
     {
@@ -398,7 +392,7 @@ namespace Realm {
       priority_ib_queue.clear();
       // </NEW_DMA>
 
-      Realm::Operation::reconstruct_measurements();
+      Operation::reconstruct_measurements();
 
       log_dma.info() << "dma request " << (void *)this << " deserialized - is="
 		     << *domain << " before=" << before_copy << " after=" << get_finish_event();
@@ -419,7 +413,7 @@ namespace Realm {
 			     Event _before_copy,
 			     Event _after_copy,
 			     int _priority,
-                             const Realm::ProfilingRequestSet &reqs)
+                             const ProfilingRequestSet &reqs)
       : DmaRequest(_priority, _after_copy, reqs)
       , domain(_domain->clone())
       , oas_by_inst(_oas_by_inst)
@@ -451,7 +445,7 @@ namespace Realm {
       // destroy all xfer des
       std::vector<XferDesID>::iterator it;
       for (it = path.begin(); it != path.end(); it++) {
-        LegionRuntime::LowLevel::destroy_xfer_des(*it);
+        destroy_xfer_des(*it);
       }
       //</NEWDMA>
       delete oas_by_inst;
@@ -492,7 +486,7 @@ namespace Realm {
     bool DmaRequest::Waiter::event_triggered(Event e, bool poisoned)
     {
       if(poisoned) {
-	Realm::log_poison.info() << "cancelling poisoned dma operation - op=" << req << " after=" << req->get_finish_event();
+	log_poison.info() << "cancelling poisoned dma operation - op=" << req << " after=" << req->get_finish_event();
 	req->handle_poisoned_precondition(e);
 	return false;
       }
@@ -1071,9 +1065,9 @@ namespace Realm {
     }
 #endif
 
-    class AIOFence : public Realm::Operation::AsyncWorkItem {
+    class AIOFence : public Operation::AsyncWorkItem {
     public:
-      AIOFence(Realm::Operation *_op) : Realm::Operation::AsyncWorkItem(_op) {}
+      AIOFence(Operation *_op) : Operation::AsyncWorkItem(_op) {}
       virtual void request_cancellation(void) {}
       virtual void print(std::ostream& os) const { os << "AIOFence"; }
     };
@@ -1302,7 +1296,7 @@ namespace Realm {
     };
 
 
-    void create_builtin_dma_channels(Realm::RuntimeImpl *r)
+    void create_builtin_dma_channels(RuntimeImpl *r)
     {
       r->add_dma_channel(new MemcpyMemPairCopierFactory);
     }
@@ -1552,7 +1546,7 @@ namespace Realm {
       for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
         std::vector<XferDesID> sub_path;
         for (unsigned idx = 0; idx < mem_path.size() - 1; idx ++) {
-          XferDesID new_xdid = LegionRuntime::LowLevel::get_xdq_singleton()->get_guid(ID(mem_path[idx]).memory.owner_node);
+          XferDesID new_xdid = get_xdq_singleton()->get_guid(ID(mem_path[idx]).memory.owner_node);
           sub_path.push_back(new_xdid);
           path.push_back(new_xdid);
         }
@@ -1671,13 +1665,12 @@ namespace Realm {
             XferDesFence* complete_fence = new XferDesFence(this);
             add_async_work_item(complete_fence);
 
-	    LegionRuntime::LowLevel::
-	      create_xfer_des(this, gasnet_mynode(), xd_target_node,
-			      xd_guid, pre_xd_guid,
-			      next_xd_guid, next_max_rw_gap,
-			      ((idx == 1) ? 0 : ibvec[idx - 2].offset),
-			      ((idx == 1) ? 0 : ibvec[idx - 2].size),
-			      mark_started,
+	    create_xfer_des(this, gasnet_mynode(), xd_target_node,
+			    xd_guid, pre_xd_guid,
+			    next_xd_guid, next_max_rw_gap,
+			    ((idx == 1) ? 0 : ibvec[idx - 2].offset),
+			    ((idx == 1) ? 0 : ibvec[idx - 2].size),
+			    mark_started,
 			    //pre_buf, cur_buf, domain, oasvec_src,
 			    xd_src_mem, xd_dst_mem, xd_src_iter, xd_dst_iter,
 			    16 * 1024 * 1024/*max_req_size*/, 100/*max_nr*/,
@@ -1696,7 +1689,7 @@ namespace Realm {
       DetailedTimer::ScopedPush sp(TIME_COPY);
 
       // <NEWDMA>
-      if(measurements.wants_measurement<Realm::ProfilingMeasurements::OperationMemoryUsage>()) {
+      if(measurements.wants_measurement<ProfilingMeasurements::OperationMemoryUsage>()) {
         const InstPair &pair = oas_by_inst->begin()->first;
         size_t total_field_size = 0;
         for (OASByInst::iterator it = oas_by_inst->begin(); it != oas_by_inst->end(); it++) {
@@ -1705,7 +1698,7 @@ namespace Realm {
           }
         }
 
-        Realm::ProfilingMeasurements::OperationMemoryUsage usage;
+        ProfilingMeasurements::OperationMemoryUsage usage;
         usage.source = pair.first.get_location();
         usage.target = pair.second.get_location();
         usage.size = total_field_size * domain->volume();
@@ -1744,7 +1737,7 @@ namespace Realm {
 		 (deserializer >> requests));
       assert((domain != 0) && ok && (deserializer.bytes_left() == 0));
 
-      Realm::Operation::reconstruct_measurements();
+      Operation::reconstruct_measurements();
 
       log_dma.info() << "dma request " << (void *)this << " deserialized - is="
 		     << *domain
@@ -1757,15 +1750,15 @@ namespace Realm {
     }
 
     ReduceRequest::ReduceRequest(const TransferDomain *_domain, //const Domain& _domain,
-				 const std::vector<Realm::CopySrcDstField>& _srcs,
-				 const Realm::CopySrcDstField& _dst,
+				 const std::vector<CopySrcDstField>& _srcs,
+				 const CopySrcDstField& _dst,
 				 bool _inst_lock_needed,
 				 ReductionOpID _redop_id,
 				 bool _red_fold,
 				 Event _before_copy,
 				 Event _after_copy,
 				 int _priority, 
-                                 const Realm::ProfilingRequestSet &reqs)
+                                 const ProfilingRequestSet &reqs)
       : DmaRequest(_priority, _after_copy, reqs),
 	domain(_domain->clone()),
 	dst(_dst), 
@@ -1837,7 +1830,7 @@ namespace Realm {
 	}
 
 	// now go through all source instance pairs
-	for(std::vector<Realm::CopySrcDstField>::iterator it = srcs.begin();
+	for(std::vector<CopySrcDstField>::iterator it = srcs.begin();
 	    it != srcs.end();
 	    it++) {
 	  RegionInstanceImpl *src_impl = get_runtime()->get_instance_impl(it->inst);
@@ -2094,7 +2087,7 @@ namespace Realm {
 
       // if we did any actual reductions, send a fence, otherwise trigger here
       if(rdma_count > 0) {
-	Realm::RemoteWriteFence *fence = new Realm::RemoteWriteFence(this);
+	RemoteWriteFence *fence = new RemoteWriteFence(this);
 	this->add_async_work_item(fence);
 	do_remote_fence(dst_mem->me, rdma_sequence_id, rdma_count, fence);
       }
@@ -2106,8 +2099,8 @@ namespace Realm {
 		     << " " << (red_fold ? "fold" : "apply") << " " << redop_id
 		     << " before=" << before_copy << " after=" << get_finish_event();
 
-      if(measurements.wants_measurement<Realm::ProfilingMeasurements::OperationMemoryUsage>()) {
-        Realm::ProfilingMeasurements::OperationMemoryUsage usage;  
+      if(measurements.wants_measurement<ProfilingMeasurements::OperationMemoryUsage>()) {
+        ProfilingMeasurements::OperationMemoryUsage usage;  
         // Not precise, but close enough for now
         usage.source = srcs[0].inst.get_location();
         usage.target = dst.inst.get_location();
@@ -2141,7 +2134,7 @@ namespace Realm {
 
       assert(fill_size == size);
 
-      Realm::Operation::reconstruct_measurements();
+      Operation::reconstruct_measurements();
 
       log_dma.info() << "dma request " << (void *)this << " deserialized - is="
 		     << *domain << " fill dst=" << dst.inst << "[" << dst.field_id << "+" << dst.subfield_offset << "] size="
@@ -2149,10 +2142,10 @@ namespace Realm {
     }
 
     FillRequest::FillRequest(const TransferDomain *_domain, //const Domain &d, 
-                             const Realm::CopySrcDstField &_dst,
+                             const CopySrcDstField &_dst,
                              const void *_fill_value, size_t _fill_size,
                              Event _before_fill, Event _after_fill, int _priority,
-                             const Realm::ProfilingRequestSet &reqs)
+                             const ProfilingRequestSet &reqs)
       : DmaRequest(_priority, _after_fill, reqs)
       , domain(_domain->clone())
       , dst(_dst)
@@ -2168,7 +2161,7 @@ namespace Realm {
 		     << *domain << " fill dst=" << dst.inst << "[" << dst.field_id << "+" << dst.subfield_offset << "] size="
 		     << fill_size << " before=" << _before_fill << " after=" << _after_fill;
       {
-	Realm::LoggerMessage msg(log_dma.debug());
+	LoggerMessage msg(log_dma.debug());
 	if(msg.is_active()) {
 	  msg << "fill data =";
 	  msg << std::hex;
@@ -2361,8 +2354,8 @@ namespace Realm {
 	free(rep_buffer);
       delete iter;
 
-      if(measurements.wants_measurement<Realm::ProfilingMeasurements::OperationMemoryUsage>()) {
-        Realm::ProfilingMeasurements::OperationMemoryUsage usage;
+      if(measurements.wants_measurement<ProfilingMeasurements::OperationMemoryUsage>()) {
+        ProfilingMeasurements::OperationMemoryUsage usage;
         usage.source = Memory::NO_MEMORY;
         usage.target = dst.inst.get_location();
         measurements.add_measurement(usage);
@@ -2441,7 +2434,7 @@ namespace Realm {
       }
     }
     
-    void start_dma_worker_threads(int count, Realm::CoreReservationSet& crs)
+    void start_dma_worker_threads(int count, CoreReservationSet& crs)
     {
       dma_queue = new DmaRequestQueue(crs);
       dma_queue->start_workers(count);
@@ -2455,17 +2448,17 @@ namespace Realm {
     }
 
     void start_dma_system(int count, bool pinned, int max_nr,
-                          Realm::CoreReservationSet& crs)
+                          CoreReservationSet& crs)
     {
       //log_dma.add_stream(&std::cerr, Logger::LEVEL_DEBUG, false, false);
       aio_context = new AsyncFileIOContext(256);
-      LegionRuntime::LowLevel::start_channel_manager(count, pinned, max_nr, crs);
+      start_channel_manager(count, pinned, max_nr, crs);
       ib_req_queue = new PendingIBQueue();
     }
 
     void stop_dma_system(void)
     {
-      LegionRuntime::LowLevel::stop_channel_manager();
+      stop_channel_manager();
       delete ib_req_queue;
       ib_req_queue = 0;
       delete aio_context;
@@ -2483,7 +2476,7 @@ namespace Realm {
 					 args.before_copy,
 					 args.after_copy,
 					 args.priority);
-	Realm::get_runtime()->optable.add_local_operation(args.after_copy, r);
+	get_runtime()->optable.add_local_operation(args.after_copy, r);
 
 	r->check_readiness(false, dma_queue);
       } else {
@@ -2494,7 +2487,7 @@ namespace Realm {
 					     args.before_copy,
 					     args.after_copy,
 					     args.priority);
-	Realm::get_runtime()->optable.add_local_operation(args.after_copy, r);
+	get_runtime()->optable.add_local_operation(args.after_copy, r);
 
 	r->check_readiness(false, dma_queue);
       }
@@ -2509,7 +2502,7 @@ namespace Realm {
                                        args.before_fill,
                                        args.after_fill,
                                        0 /* no room for args.priority */);
-      Realm::get_runtime()->optable.add_local_operation(args.after_fill, r);
+      get_runtime()->optable.add_local_operation(args.after_fill, r);
 
       r->check_readiness(false, dma_queue);
     }
