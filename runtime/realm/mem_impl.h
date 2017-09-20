@@ -104,47 +104,6 @@ namespace Realm {
       virtual void release_instance_storage(RegionInstance i,
 					    Event precondition);
 
-#ifdef OLD_ALLOCATORS
-      RegionInstance create_instance_local(IndexSpace is,
-					   const int *linearization_bits,
-					   size_t bytes_needed,
-					   size_t block_size,
-					   size_t element_size,
-					   const std::vector<size_t>& field_sizes,
-					   ReductionOpID redopid,
-					   off_t list_size,
-                                           const ProfilingRequestSet &reqs,
-					   RegionInstance parent_inst);
-
-      RegionInstance create_instance_remote(IndexSpace is,
-					    const int *linearization_bits,
-					    size_t bytes_needed,
-					    size_t block_size,
-					    size_t element_size,
-					    const std::vector<size_t>& field_sizes,
-					    ReductionOpID redopid,
-					    off_t list_size,
-                                            const ProfilingRequestSet &reqs,
-					    RegionInstance parent_inst);
-
-      virtual RegionInstance create_instance(IndexSpace is,
-					     const int *linearization_bits,
-					     size_t bytes_needed,
-					     size_t block_size,
-					     size_t element_size,
-					     const std::vector<size_t>& field_sizes,
-					     ReductionOpID redopid,
-					     off_t list_size,
-                                             const ProfilingRequestSet &reqs,
-					     RegionInstance parent_inst) = 0;
-
-      void destroy_instance_local(RegionInstance i, bool local_destroy);
-      void destroy_instance_remote(RegionInstance i, bool local_destroy);
-
-      virtual void destroy_instance(RegionInstance i, 
-				    bool local_destroy) = 0;
-#endif
-
       off_t alloc_bytes_local(size_t size);
       void free_bytes_local(off_t offset, size_t size);
 
@@ -204,20 +163,6 @@ namespace Realm {
 
       virtual ~LocalCPUMemory(void);
 
-#ifdef OLD_ALLOCATORS
-      virtual RegionInstance create_instance(IndexSpace r,
-					     const int *linearization_bits,
-					     size_t bytes_needed,
-					     size_t block_size,
-					     size_t element_size,
-					     const std::vector<size_t>& field_sizes,
-					     ReductionOpID redopid,
-					     off_t list_size,
-                                             const ProfilingRequestSet &reqs,
-					     RegionInstance parent_inst);
-      virtual void destroy_instance(RegionInstance i, 
-				    bool local_destroy);
-#endif
       virtual off_t alloc_bytes(size_t size);
       virtual void free_bytes(off_t offset, size_t size);
       virtual void get_bytes(off_t offset, void *dst, size_t size);
@@ -238,22 +183,6 @@ namespace Realm {
       GASNetMemory(Memory _me, size_t size_per_node);
 
       virtual ~GASNetMemory(void);
-
-#ifdef OLD_ALLOCATORS
-      virtual RegionInstance create_instance(IndexSpace is,
-					     const int *linearization_bits,
-					     size_t bytes_needed,
-					     size_t block_size,
-					     size_t element_size,
-					     const std::vector<size_t>& field_sizes,
-					     ReductionOpID redopid,
-					     off_t list_size,
-                                             const ProfilingRequestSet &reqs,
-					     RegionInstance parent_inst);
-
-      virtual void destroy_instance(RegionInstance i, 
-				    bool local_destroy);
-#endif
 
       virtual off_t alloc_bytes(size_t size);
 
@@ -292,22 +221,6 @@ namespace Realm {
 
       virtual ~DiskMemory(void);
 
-#ifdef OLD_ALLOCATORS
-      virtual RegionInstance create_instance(IndexSpace is,
-                                            const int *linearization_bits,
-                                            size_t bytes_needed,
-                                            size_t block_size,
-                                            size_t element_size,
-                                            const std::vector<size_t>& field_sizes,
-                                            ReductionOpID redopid,
-                                            off_t list_size,
-                                            const ProfilingRequestSet &reqs,
-                                            RegionInstance parent_inst);
-
-      virtual void destroy_instance(RegionInstance i,
-                                    bool local_destroy);
-#endif
-
       virtual off_t alloc_bytes(size_t size);
 
       virtual void free_bytes(off_t offset, size_t size);
@@ -334,35 +247,6 @@ namespace Realm {
       FileMemory(Memory _me);
 
       virtual ~FileMemory(void);
-
-#ifdef OLD_ALLOCATORS
-      virtual RegionInstance create_instance(IndexSpace is,
-                                            const int *linearization_bits,
-                                            size_t bytes_needed,
-                                            size_t block_size,
-                                            size_t element_size,
-                                            const std::vector<size_t>& field_sizes,
-                                            ReductionOpID redopid,
-                                            off_t list_size,
-                                            const ProfilingRequestSet &reqs,
-                                            RegionInstance parent_inst);
-
-      RegionInstance create_instance(IndexSpace is,
-                                     const int *linearization_bits,
-                                     size_t bytes_needed,
-                                     size_t block_size,
-                                     size_t element_size,
-                                     const std::vector<size_t>& field_sizes,
-                                     ReductionOpID redopid,
-                                     off_t list_size,
-                                     const ProfilingRequestSet &reqs,
-                                     RegionInstance parent_inst,
-                                     const char *file_name,
-                                     Domain domain,
-                                     legion_lowlevel_file_mode_t file_mode);
-      virtual void destroy_instance(RegionInstance i,
-                                    bool local_destroy);
-#endif
 
       virtual off_t alloc_bytes(size_t size);
 
@@ -393,20 +277,6 @@ namespace Realm {
       RemoteMemory(Memory _me, size_t _size, Memory::Kind k, void *_regbase);
       virtual ~RemoteMemory(void);
 
-#ifdef OLD_ALLOCATORS
-      virtual RegionInstance create_instance(IndexSpace r,
-					     const int *linearization_bits,
-					     size_t bytes_needed,
-					     size_t block_size,
-					     size_t element_size,
-					     const std::vector<size_t>& field_sizes,
-					     ReductionOpID redopid,
-					     off_t list_size,
-                                             const ProfilingRequestSet &reqs,
-					     RegionInstance parent_inst);
-      virtual void destroy_instance(RegionInstance i, 
-				    bool local_destroy);
-#endif
       virtual off_t alloc_bytes(size_t size);
       virtual void free_bytes(off_t offset, size_t size);
       virtual void get_bytes(off_t offset, void *dst, size_t size);
@@ -447,81 +317,6 @@ namespace Realm {
 
       static off_t send_request(gasnet_node_t target, Memory memory, size_t size);
     };
-
-#ifdef OLD_ALLOCATORS
-    struct CreateInstanceRequest {
-      struct RequestArgs : public BaseMedium {
-	Memory m;
-	IndexSpace r;
-	RegionInstance parent_inst;
-	int sender;
-	void *resp_ptr;
-      };
-
-      struct ResponseArgs {
-	void *resp_ptr;
-	RegionInstance i;
-	off_t inst_offset;
-	off_t count_offset;
-      };
-
-      // TODO: replace with new serialization stuff
-      struct Payload {
-	size_t bytes_needed;
-	size_t block_size;
-	size_t element_size;
-	//off_t adjust;
-	off_t list_size;
-	ReductionOpID redopid;
-	int linearization_bits[32]; //RegionInstanceImpl::MAX_LINEARIZATION_LEN];
-	size_t num_fields; // as long as it needs to be
-	const size_t &field_size(int idx) const { return *((&num_fields)+idx+1); }
-	size_t &field_size(int idx) { return *((&num_fields)+idx+1); }
-      };
-
-      static void handle_request(RequestArgs args, const void *data, size_t datalen);
-      static void handle_response(ResponseArgs args);
-
-      typedef ActiveMessageMediumNoReply<CREATE_INST_MSGID,
- 	                                 RequestArgs,
-	                                 handle_request> Request;
-
-      typedef ActiveMessageShortNoReply<CREATE_INST_RPLID,
- 	                                ResponseArgs,
-	                                handle_response> Response;
-
-      struct Result {
-	RegionInstance i;
-	off_t inst_offset;
-	off_t count_offset;
-      };
-
-      static void send_request(Result *result,
-			       gasnet_node_t target, Memory memory, IndexSpace ispace,
-			       RegionInstance parent_inst, size_t bytes_needed,
-			       size_t block_size, size_t element_size,
-			       off_t list_size, ReductionOpID redopid,
-			       const int *linearization_bits,
-			       const std::vector<size_t>& field_sizes,
-			       const ProfilingRequestSet *prs);
-    };
-
-    struct DestroyInstanceMessage {
-      struct RequestArgs {
-	Memory m;
-	RegionInstance i;
-      };
-
-      static void handle_request(RequestArgs args);
-
-      typedef ActiveMessageShortNoReply<DESTROY_INST_MSGID,
- 	                                RequestArgs,
-	                                handle_request> Message;
-
-      static void send_request(gasnet_node_t target, Memory memory,
-			       RegionInstance inst);
-    };
-#endif
 
     struct RemoteWriteMessage {
       struct RequestArgs : public BaseMedium {

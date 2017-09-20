@@ -76,9 +76,6 @@ namespace Realm {
       ProfilingMeasurementCollection measurements;
       ProfilingMeasurements::InstanceTimeline timeline;
 
-      // TODO: make this part of the metadata so it gets moved around properly
-      //LinearizedIndexSpaceIntfc *lis;
-
       class Metadata : public MetadataBase {
       public:
 	void *serialize(size_t& out_size) const;
@@ -93,7 +90,6 @@ namespace Realm {
 	size_t block_size, elmt_size;
 	std::vector<size_t> field_sizes;
 	RegionInstance parent_inst;
-	DomainLinearization linearization_OLD; // do not use
 
 	size_t inst_offset;
 	Event ready_event;
@@ -104,8 +100,6 @@ namespace Realm {
       // used for atomic access to metadata
       GASNetHSL mutex;
       Metadata metadata;
-
-      static const unsigned MAX_LINEARIZATION_LEN = 32;
 
       // used for serialized application access to contents of instance
       ReservationImpl lock;

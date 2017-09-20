@@ -17,12 +17,7 @@
 
 #include "logging.h"
 
-#ifdef SHARED_LOWLEVEL
-#define gasnet_mynode() 0
-#define gasnet_nodes() 1
-#else
 #include "activemsg.h"
-#endif
 
 #include "cmdline.h"
 

@@ -160,18 +160,6 @@ namespace Realm {
       // this does the right thing even though we're using an instance ID
       MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
       mem_impl->release_instance_storage(*this, wait_on);
-#ifdef OLD_ALLOCATORS
-      RegionInstanceImpl *i_impl = get_runtime()->get_instance_impl(*this);
-      if (!wait_on.has_triggered())
-      {
-	EventImpl::add_waiter(wait_on, new DeferredInstDestroy(i_impl));
-        return;
-      }
-
-      log_inst.info("instance destroyed: space=" IDFMT " id=" IDFMT "",
-	       i_impl->metadata.is.id, this->id);
-      get_runtime()->get_memory_impl(i_impl->memory)->destroy_instance(*this, true);
-#endif
     }
 
     void RegionInstance::destroy(const std::vector<DestroyedField>& destroyed_fields,
@@ -398,53 +386,6 @@ namespace Realm {
   //
   // class RegionInstanceImpl
   //
-
-#ifdef OLD_ALLOCATORS
-    RegionInstanceImpl::RegionInstanceImpl(RegionInstance _me, IndexSpace _is, Memory _memory, 
-					   off_t _offset, size_t _size, ReductionOpID _redopid,
-					   const DomainLinearization& _linear, size_t _block_size,
-					   size_t _elmt_size, const std::vector<size_t>& _field_sizes,
-					   const ProfilingRequestSet &reqs,
-					   off_t _count_offset /*= 0*/, off_t _red_list_size /*= 0*/,
-					   RegionInstance _parent_inst /*= NO_INST*/)
-      : me(_me), memory(_memory), lis(0)
-    {
-      metadata.linearization = _linear;
-
-      metadata.block_size = _block_size;
-      metadata.elmt_size = _elmt_size;
-
-      metadata.field_sizes = _field_sizes;
-
-      metadata.is = _is;
-      metadata.alloc_offset = _offset;
-      //metadata.access_offset = _offset + _adjust;
-      metadata.size = _size;
-      
-      //StaticAccess<IndexSpaceImpl> rdata(_is.impl());
-      //locked_data.first_elmt = rdata->first_elmt;
-      //locked_data.last_elmt = rdata->last_elmt;
-
-      metadata.redopid = _redopid;
-      metadata.count_offset = _count_offset;
-      metadata.red_list_size = _red_list_size;
-      metadata.parent_inst = _parent_inst;
-
-      metadata.mark_valid();
-
-      lock.init(ID(me).convert<Reservation>(), ID(me).instance.owner_node);
-      lock.in_use = true;
-
-      if (!reqs.empty()) {
-        requests = reqs;
-        measurements.import_requests(requests);
-        if (measurements.wants_measurement<
-                          ProfilingMeasurements::InstanceTimeline>()) {
-          timeline.record_create_time();
-        }
-      }
-    }
-#endif
 
     RegionInstanceImpl::RegionInstanceImpl(RegionInstance _me, Memory _memory)
       : me(_me), memory(_memory) //, lis(0)

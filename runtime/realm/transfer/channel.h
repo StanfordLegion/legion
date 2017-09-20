@@ -89,25 +89,25 @@ namespace LegionRuntime{
       };
 
       enum {
-        MAX_SERIALIZATION_LEN = 5 * sizeof(int64_t) / sizeof(int) + RegionInstanceImpl::MAX_LINEARIZATION_LEN
+        MAX_SERIALIZATION_LEN = 5 * sizeof(int64_t) / sizeof(int)
       };
 
       Buffer(void)
             : alloc_offset(0), is_ib(false), block_size(0), elmt_size(0),
-              buf_size(0), linearization(), memory(Memory::NO_MEMORY) {}
+              buf_size(0), memory(Memory::NO_MEMORY) {}
 
       Buffer(RegionInstanceImpl::Metadata* metadata, Memory _memory)
             : alloc_offset(metadata->alloc_offset),
               is_ib(false), block_size(metadata->block_size), elmt_size(metadata->elmt_size),
-              buf_size(metadata->size), linearization(metadata->linearization_OLD),
+              buf_size(metadata->size),
               memory(_memory){}
 
       Buffer(off_t _alloc_offset, bool _is_ib,
              int _block_size, int _elmt_size, size_t _buf_size,
-             /*DomainLinearization _linearization,*/ Memory _memory)
+             Memory _memory)
             : alloc_offset(_alloc_offset),
               is_ib(_is_ib), block_size(_block_size), elmt_size(_elmt_size),
-              buf_size(_buf_size), linearization(/*_linearization*/),
+              buf_size(_buf_size),
               memory(_memory){}
 
       Buffer& operator=(const Buffer& other)
@@ -117,7 +117,6 @@ namespace LegionRuntime{
         block_size = other.block_size;
         elmt_size = other.elmt_size;
         buf_size = other.buf_size;
-        linearization = other.linearization;
         memory = other.memory;
         return *this;
       }
@@ -136,7 +135,6 @@ namespace LegionRuntime{
         *data64 = block_size; data64++;
         *data64 = elmt_size; data64++;
         *data64 = buf_size; data64++;
-        //linearization.serialize((int*)data64);
       }
 
       void deserialize(const int* data)
@@ -147,7 +145,6 @@ namespace LegionRuntime{
         block_size = *cur; cur++;
         elmt_size = *cur; cur++;
         buf_size = *cur; cur++;
-        //linearization.deserialize((int*)cur);
       }
 
       enum DimensionKind {
@@ -182,8 +179,6 @@ namespace LegionRuntime{
       // A number smaller than bytes_total means we need
       // to reuse the buffer.
       size_t buf_size;
-
-      DomainLinearization linearization;
 
       // The memory instance on which this buffer relies
       Memory memory;
@@ -365,6 +360,7 @@ namespace LegionRuntime{
       bool src_ib, dst_ib;
     };
 
+#if 0
     class LayoutIterator {
     public:
       LayoutIterator(const Domain& dm,
@@ -497,6 +493,7 @@ namespace LegionRuntime{
       coord_t cur_idx, rect_size;
       bool can_perform_2d;
     };
+#endif
 
     class XferDes {
     public:

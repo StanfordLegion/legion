@@ -58,7 +58,6 @@ namespace LegionRuntime {
     typedef Realm::ElementMask ElementMask;
     typedef Realm::Domain Domain;
     typedef Realm::DomainPoint DomainPoint;
-    typedef Realm::DomainLinearization DomainLinearization;
     typedef Realm::Machine Machine;
     typedef Realm::Runtime Runtime;
 

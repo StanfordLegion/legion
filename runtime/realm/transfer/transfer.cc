@@ -32,6 +32,8 @@ TYPE_IS_SERIALIZABLE(LegionRuntime::Arrays::Rect<3>);
 
 namespace Realm {
 
+  extern Logger log_dma;
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class TransferIterator
@@ -2055,8 +2057,8 @@ namespace Realm {
 	assert(dst_it->field_id != (FieldID)-1);
 	oas.src_subfield_offset = src_subfield_offset;
 	oas.dst_subfield_offset = dst_subfield_offset;
-	oas.size = min(src_it->size - src_subfield_offset,
-		       dst_it->size - dst_subfield_offset);
+	oas.size = std::min(src_it->size - src_subfield_offset,
+			    dst_it->size - dst_subfield_offset);
 	oas.serdez_id = src_it->serdez_id;
 
 	// This is a little bit of hack: if serdez_id != 0 we directly create a
