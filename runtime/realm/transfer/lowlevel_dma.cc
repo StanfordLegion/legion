@@ -2101,7 +2101,7 @@ namespace Realm {
 			   redop_id, red_fold,
 			   src_ptr, num_elems,
 			   src_elem_size, redop->sizeof_rhs,
-			   rdma_sequence_no,
+			   rdma_sequence_id,
 			   make_copy);
 	} else {
 	  // case 2: destination is directly accessible
