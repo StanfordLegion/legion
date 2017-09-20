@@ -74,8 +74,10 @@ namespace Realm {
       virtual bool can_perform_copy(Memory src_mem, Memory dst_mem,
 				    ReductionOpID redop_id, bool fold);
 
+#ifdef OLD_COPIERS
       virtual MemPairCopier *create_copier(Memory src_mem, Memory dst_mem,
 					   ReductionOpID redop_id, bool fold);
+#endif
 
     protected:
       HDF5Memory *mem;
@@ -88,13 +90,16 @@ namespace Realm {
       virtual bool can_perform_copy(Memory src_mem, Memory dst_mem,
 				    ReductionOpID redop_id, bool fold);
 
+#ifdef OLD_COPIERS
       virtual MemPairCopier *create_copier(Memory src_mem, Memory dst_mem,
 					   ReductionOpID redop_id, bool fold);
+#endif
 
     protected:
       HDF5Memory *mem;
     };
 
+#ifdef OLD_COPIERS
     class HDF5WriteCopier : public MemPairCopier {
     public:
       HDF5WriteCopier(MemoryImpl *_src_impl, HDF5Memory *_mem);
@@ -153,6 +158,7 @@ namespace Realm {
       HDF5Memory::HDFMetadata *md;
       OASVec& oas_vec;
     };
+#endif
 
   }; // namespace HDF5
 

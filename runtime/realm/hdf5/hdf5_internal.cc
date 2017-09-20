@@ -136,12 +136,14 @@ namespace Realm {
       return true;
     }
 
+#ifdef OLD_COPIERS
     MemPairCopier *HDF5WriteChannel::create_copier(Memory src_mem, Memory dst_mem,
 						   ReductionOpID redop_id, bool fold)
     {
       MemoryImpl *src_impl = get_runtime()->get_memory_impl(src_mem);
       return new HDF5WriteCopier(src_impl, mem);
     }
+#endif
 
 
     ////////////////////////////////////////////////////////////////////////
@@ -166,18 +168,21 @@ namespace Realm {
       return true;
     }
 
+#ifdef OLD_COPIERS
     MemPairCopier *HDF5ReadChannel::create_copier(Memory src_mem, Memory dst_mem,
 						   ReductionOpID redop_id, bool fold)
     {
       MemoryImpl *dst_impl = get_runtime()->get_memory_impl(dst_mem);
       return new HDF5ReadCopier(mem, dst_impl);
     }
+#endif
 
 
     ////////////////////////////////////////////////////////////////////////
     //
     // class HDF5WriteCopier
 
+#ifdef OLD_COPIERS
     HDF5WriteCopier::HDF5WriteCopier(MemoryImpl *_src_impl, HDF5Memory *_mem)
       : src_impl(_src_impl)
       , mem(_mem)
@@ -273,6 +278,7 @@ namespace Realm {
       hdf_ofs = oas.src_offset;
       local_ofs = oas.dst_offset;
     }
+#endif
 
 #if 0
     template <typename T, unsigned DIM>
@@ -393,6 +399,7 @@ namespace Realm {
     }
 #endif
 
+#ifdef OLD_COPIERS
     template <typename T>
     bool HDF5InstPairCopier<T>::copy_all_fields(Domain d)
     {
@@ -446,6 +453,7 @@ namespace Realm {
     {
       //log_hdf5.print() << "flush";
     }
+#endif
 
 
   }; // namespace HDF5

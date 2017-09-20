@@ -460,6 +460,7 @@ namespace Realm {
     //
     // mem pair copiers for DMA channels
 
+#ifdef OLD_COPIERS
     class GPUtoFBMemPairCopier : public MemPairCopier {
     public:
       GPUtoFBMemPairCopier(Memory _src_mem, GPU *_gpu)
@@ -634,6 +635,7 @@ namespace Realm {
     protected:
       GPU *src, *dst;
     };
+#endif
 
     class GPUDMAChannel_H2D : public MemPairCopierFactory {
     public:
@@ -642,8 +644,10 @@ namespace Realm {
       virtual bool can_perform_copy(Memory src_mem, Memory dst_mem,
 				    ReductionOpID redop_id, bool fold);
 
+#ifdef OLD_COPIERS
       virtual MemPairCopier *create_copier(Memory src_mem, Memory dst_mem,
 					   ReductionOpID redop_id, bool fold);
+#endif
 
     protected:
       GPU *gpu;
@@ -656,8 +660,10 @@ namespace Realm {
       virtual bool can_perform_copy(Memory src_mem, Memory dst_mem,
 				    ReductionOpID redop_id, bool fold);
 
+#ifdef OLD_COPIERS
       virtual MemPairCopier *create_copier(Memory src_mem, Memory dst_mem,
 					   ReductionOpID redop_id, bool fold);
+#endif
 
     protected:
       GPU *gpu;
@@ -670,8 +676,10 @@ namespace Realm {
       virtual bool can_perform_copy(Memory src_mem, Memory dst_mem,
 				    ReductionOpID redop_id, bool fold);
 
+#ifdef OLD_COPIERS
       virtual MemPairCopier *create_copier(Memory src_mem, Memory dst_mem,
 					   ReductionOpID redop_id, bool fold);
+#endif
 
     protected:
       GPU *gpu;
@@ -684,8 +692,10 @@ namespace Realm {
       virtual bool can_perform_copy(Memory src_mem, Memory dst_mem,
 				    ReductionOpID redop_id, bool fold);
 
+#ifdef OLD_COPIERS
       virtual MemPairCopier *create_copier(Memory src_mem, Memory dst_mem,
 					   ReductionOpID redop_id, bool fold);
+#endif
 
     protected:
       GPU *gpu;
@@ -718,11 +728,13 @@ namespace Realm {
       return true;
     }
 
+#ifdef OLD_COPIERS
     MemPairCopier *GPUDMAChannel_H2D::create_copier(Memory src_mem, Memory dst_mem,
 						    ReductionOpID redop_id, bool fold)
     {
       return new GPUtoFBMemPairCopier(src_mem, gpu);
     }
+#endif
 
 
     ////////////////////////////////////////////////////////////////////////
@@ -751,11 +763,13 @@ namespace Realm {
       return true;
     }
 
+#ifdef OLD_COPIERS
     MemPairCopier *GPUDMAChannel_D2H::create_copier(Memory src_mem, Memory dst_mem,
 						    ReductionOpID redop_id, bool fold)
     {
       return new GPUfromFBMemPairCopier(gpu, dst_mem);
     }
+#endif
 
 
     ////////////////////////////////////////////////////////////////////////
@@ -786,11 +800,13 @@ namespace Realm {
       return true;
     }
 
+#ifdef OLD_COPIERS
     MemPairCopier *GPUDMAChannel_D2D::create_copier(Memory src_mem, Memory dst_mem,
 						    ReductionOpID redop_id, bool fold)
     {
       return new GPUinFBMemPairCopier(gpu);
     }
+#endif
 
 
     ////////////////////////////////////////////////////////////////////////
@@ -819,6 +835,7 @@ namespace Realm {
       return true;
     }
 
+#ifdef OLD_COPIERS
     MemPairCopier *GPUDMAChannel_P2P::create_copier(Memory src_mem, Memory dst_mem,
 						    ReductionOpID redop_id, bool fold)
     {
@@ -828,6 +845,7 @@ namespace Realm {
 
       return new GPUPeerMemPairCopier(gpu, dst_gpu);
     }
+#endif
 
 
     void GPU::create_dma_channels(Realm::RuntimeImpl *r)
