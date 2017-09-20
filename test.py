@@ -88,7 +88,7 @@ legion_hdf_cxx_tests = [
 legion_cxx_perf_tests = [
     # Circuit: Heavy Compute
     ['examples/circuit/circuit',
-     ['-l', '10', '-p', lambda nodes : nodes * perf_cores_per_node, '-npp', '2500', '-wpp', '10000', '-ll:cpu', perf_cores_per_node]],
+     ['-l', '10', '-p', lambda nodes : nodes * int(perf_cores_per_node), '-npp', '2500', '-wpp', '10000', '-ll:cpu', perf_cores_per_node]],
 
     # Circuit: Light Compute
     ['examples/circuit/circuit',
@@ -98,7 +98,7 @@ legion_cxx_perf_tests = [
 regent_perf_tests = [
     # Circuit: Heavy Compute
     ['language/examples/circuit_sparse.rg',
-     ['-l', '10', '-p', lambda nodes : nodes * perf_cores_per_node, '-npp', '2500', '-wpp', '10000', '-ll:cpu', perf_cores_per_node,
+     ['-l', '10', '-p', lambda nodes : nodes * int(perf_cores_per_node), '-npp', '2500', '-wpp', '10000', '-ll:cpu', perf_cores_per_node,
       '-fflow-spmd-shardsize', perf_cores_per_node]],
 
     # Circuit: Light Compute
@@ -133,7 +133,7 @@ def launcher_with_nodes(perf_launcher, nodes):
     else:
         return perf_launcher
 
-def batch_execute(nodes, command, env, cwd, launcher_name):
+def batch_execute(nodes, command, env, cwd, launcher_name, root_dir):
     batch_dir = './batch'
     cmd(['mkdir', '-p', batch_dir])
     file_name = str(nodes) + '_nodes' + '_'.join(command[2:])
@@ -151,11 +151,13 @@ def batch_execute(nodes, command, env, cwd, launcher_name):
     file.write('#PBS -l walltime=0:10:00,nodes=' + str(nodes) + '\n')
     file.write('#PBS -l gres=atlas1%atlas2\n')
     for key in env.keys():
-        file.write('export ' + key + '="' + env[key] + '"\n')
+        file.write('export ' + key.replace('()', '') + '="' + env[key].replace('()', '') + '"\n')
     file.write('cd $MEMBERWORK/' + account + '\n')
     file.write('date\n')
     command_string = ' '.join(command)
     file.write(launcher_with_nodes(env[launcher_name], nodes) + ' ' + command_string + '\n')
+    file.write(os.path.join(root_dir, 'tools', 'perf_chart.py') + ' https://github.com/StanfordLegion/perf-data.git'
+             + ' https://github.com/StanfordLegion/perf-data.git')
     file.write('date\n')
     file.close()
     cmd(['qsub', file_name], cwd=batch_dir)
@@ -165,8 +167,10 @@ def evaluate_lambda(test_flags, nodes):
     for i in test_flags:
         if type(i) == type('string'):
             result = result + [i]
+        elif type(i) == type(0):
+            result = result + [str(i)]
         else:
-            result = result + [i(nodes)]
+            result = result + [str(i(nodes))]
     return result
 
 def run_cxx(tests, flags, launcher, root_dir, bin_dir, env, thread_count, nodes=1):
@@ -179,7 +183,7 @@ def run_cxx(tests, flags, launcher, root_dir, bin_dir, env, thread_count, nodes=
             test_path = os.path.join(root_dir, test_file)
             cmd(['make', '-C', test_dir, '-j', str(thread_count)], env=env)
         if launcher_is_batch(env['PERF_LAUNCHER']):
-            batch_execute(nodes, launcher + [test_path] + flags + test_flags, env=env, cwd=test_dir, launcher_name='PERF_LAUNCHER')
+            batch_execute(nodes, launcher + [test_path] + flags + test_flags, env=env, cwd=test_dir, launcher_name='PERF_LAUNCHER', root_dir=root_dir)
         else:
             cmd(launcher + [test_path] + flags + test_flags, env=env, cwd=test_dir)
 
@@ -189,7 +193,7 @@ def run_regent(tests, flags, launcher, root_dir, env, thread_count, nodes=1):
         test_dir = os.path.dirname(os.path.join(root_dir, test_file))
         test_path = os.path.join(root_dir, test_file)
         if launcher_is_batch(env['LAUNCHER']):
-            batch_execute(nodes, launcher + [test_path] + flags + test_flags, env=env, cwd=test_dir, launcher_name='LAUNCHER')
+            batch_execute(nodes, launcher + [test_path] + flags + test_flags, env=env, cwd=test_dir, launcher_name='LAUNCHER', root_dir=root_dir)
         else:
             cmd(launcher + [test_path] + flags + test_flags, env=env, cwd=test_dir)
 
@@ -326,7 +330,7 @@ def git_branch_name(repo_dir):
 
 def run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     nodes = 1
-    while nodes < env['PERF_MAX_NODES']:
+    while nodes < int(env['PERF_MAX_NODES']):
         run_test_perf_one_configuration(launcher, root_dir, tmp_dir, bin_dir, env, thread_count, nodes)
         nodes = nodes * 2
 
@@ -412,12 +416,13 @@ def run_test_perf_one_configuration(launcher, root_dir, tmp_dir, bin_dir, env, t
     # FIXME: PENNANT can't handle the -logfile flag coming first, so just skip it.
     run_regent(regent_perf_tests, [], [runner, regent_path], root_dir, regent_env, thread_count, nodes)
 
-    # Render the final charts.
-    subprocess.check_call(
-        [os.path.join(root_dir, 'tools', 'perf_chart.py'),
-         'git@github.com:StanfordLegion/perf-data.git',
-         'git@github.com:StanfordLegion/perf-data.git'],
-        env=env)
+    if not launcher_is_batch(launcher):
+        # Render the final charts.
+        subprocess.check_call(
+            [os.path.join(root_dir, 'tools', 'perf_chart.py'),
+             'https://github.com/StanfordLegion/perf-data.git',
+             'https://github.com/StanfordLegion/perf-data.git'],
+            env=env)
 
 def check_test_legion_cxx(root_dir):
     print('Checking that tests that SHOULD tested are ACTUALLY tested...')
@@ -573,6 +578,7 @@ def run_tests(test_modules=None,
               check_ownership=False,
               keep_tmp_dir=False,
               verbose=False):
+
     if thread_count is None:
         thread_count = multiprocessing.cpu_count()
 
