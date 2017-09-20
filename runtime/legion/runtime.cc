@@ -6132,8 +6132,7 @@ namespace Legion {
           }
           case SEND_VERSION_MANAGER_ADVANCE:
           {
-            runtime->handle_version_manager_advance(derez,
-                                                    remote_address_space);
+            runtime->handle_version_manager_advance(derez);
             break;
           }
           case SEND_VERSION_MANAGER_INVALIDATE:
@@ -14567,8 +14566,10 @@ namespace Legion {
                                                   Serializer &rez)
     //--------------------------------------------------------------------------
     {
+      // This comes back on the version manager channel so that it is 
+      // properly ordered with respect to the version manager responses
       find_messenger(target)->send_message(rez, SEND_VERSION_MANAGER_INVALIDATE,
-                                           ANALYSIS_VIRTUAL_CHANNEL, true/*flush*/);
+                                VERSION_MANAGER_VIRTUAL_CHANNEL, true/*flush*/);
     }
     
     //--------------------------------------------------------------------------
@@ -15618,11 +15619,10 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    void Runtime::handle_version_manager_advance(Deserializer &derez,
-                                                 AddressSpaceID source)
+    void Runtime::handle_version_manager_advance(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      VersionManager::handle_remote_advance(derez, this, source);
+      VersionManager::handle_remote_advance(derez, this);
     }
     
     //--------------------------------------------------------------------------

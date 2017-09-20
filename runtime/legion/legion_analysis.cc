@@ -4277,6 +4277,7 @@ namespace Legion {
       is_owner = false;
       current_context = NULL;
       remote_valid_fields.clear();
+      pending_remote_advances.clear();
       remote_valid.clear();
       previous_opens.clear();
       previous_advancers.clear();
@@ -4368,6 +4369,9 @@ namespace Legion {
         if (!is_owner)
         {
           FieldMask request_mask = version_mask - remote_valid_fields;
+          // Handle the case where we have stale data from advances
+          if (!!pending_remote_advances)
+            request_mask |= (pending_remote_advances & version_mask);
           if (!!request_mask)
           {
             // Release the lock before sending the message
@@ -4428,6 +4432,9 @@ namespace Legion {
         if (!is_owner)
         {
           FieldMask request_mask = version_mask - remote_valid_fields;
+          // Handle the case where we have stale data from advances
+          if (!!pending_remote_advances)
+            request_mask |= (pending_remote_advances & version_mask);
           if (!!request_mask)
           {
             // Release the lock before sending the message
@@ -4556,6 +4563,9 @@ namespace Legion {
       if (!is_owner)
       {
         FieldMask request_mask = version_mask - remote_valid_fields;
+        // Handle the case where we have stale data from advances
+        if (!!pending_remote_advances)
+          request_mask |= (pending_remote_advances & version_mask);
         if (!!request_mask)
         {
           // Release the lock before sending the message
@@ -4615,6 +4625,9 @@ namespace Legion {
       if (!is_owner)
       {
         FieldMask request_mask = version_mask - remote_valid_fields;
+        // Handle the case where we have stale data from advances
+        if (!!pending_remote_advances)
+          request_mask |= (pending_remote_advances & version_mask);
         if (!!request_mask)
         {
           // Release the lock before sending the message
@@ -4676,6 +4689,9 @@ namespace Legion {
       if (!is_owner)
       {
         FieldMask request_mask = version_mask - remote_valid_fields;
+        // Handle the case where we have stale data from advances
+        if (!!pending_remote_advances)
+          request_mask |= (pending_remote_advances & version_mask);
         if (!!request_mask)
         {
           // Release the lock before sending the message
@@ -4904,6 +4920,9 @@ namespace Legion {
       if (!is_owner)
       {
         FieldMask request_mask = version_mask - remote_valid_fields;
+        // Handle the case where we have stale data from advances
+        if (!!pending_remote_advances)
+          request_mask |= (pending_remote_advances & version_mask);
         if (!!request_mask)
         {
           // Release the lock before sending the message
@@ -4954,7 +4973,6 @@ namespace Legion {
                                           UniqueID logical_context_uid,
                                           InnerContext *physical_context, 
                                           bool update_parent_state,
-                                          AddressSpaceID source_space,
                                           std::set<RtEvent> &applied_events,
                                           bool dedup_opens,
                                           ProjectionEpochID open_epoch,
@@ -4985,9 +5003,11 @@ namespace Legion {
                                                dedup_advances, advance_epoch,
                                                dirty_previous, proj_info);
         applied_events.insert(advanced); 
-        // Now filter out any of our current version states that are no 
-        // longer valid for the given fields so we're ready for the update
-        invalidate_version_infos(mask);
+        // Then record that we have an advance in flight, we can do 
+        // this afterwards as we know the advance will always come before
+        // any valid requests for a given task's region requirements
+        AutoLock m_lock(manager_lock);
+        pending_remote_advances |= mask;
         return;
       }
       // If we are deduplicating advances, do that now
@@ -5155,17 +5175,9 @@ namespace Legion {
         if (!remote_valid.empty() && !(remote_valid_fields * mask))
         {
           std::vector<AddressSpaceID> to_delete;
-          bool skipped_source = false;
           for (LegionMap<AddressSpaceID,FieldMask>::aligned::iterator it = 
                 remote_valid.begin(); it != remote_valid.end(); it++)
           {
-            // If this is the source, then we can skip it
-            // because it already knows to do its own invalidate
-            if (it->first == source_space)
-            {
-              skipped_source = true;
-              continue;
-            }
             FieldMask overlap = mask & it->second;
             if (!overlap)
               continue;
@@ -5182,10 +5194,6 @@ namespace Legion {
               remote_valid.erase(*it);
           }
           remote_valid_fields -= mask;
-          // If we skipped the source, then make sure to
-          // keep its remote valid fields in the remote valid mask
-          if (skipped_source)
-            remote_valid_fields |= remote_valid[source_space];
         }
         // Otherwise we are the owner node so we can do the update
 #ifdef DEBUG_LEGION
@@ -5650,6 +5658,10 @@ namespace Legion {
       {
         FieldMask request_mask = 
           new_states.get_valid_mask() - remote_valid_fields;
+        // Handle the case where we have stale data from advances
+        if (!!pending_remote_advances)
+          request_mask |= (pending_remote_advances & 
+                            new_states.get_valid_mask());
         if (!!request_mask)
         {
           // Release the lock before sending the message
@@ -5692,7 +5704,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionManager::invalidate_version_infos(FieldMask invalid_mask)
+    void VersionManager::invalidate_version_infos(const FieldMask &invalid_mask)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5702,21 +5714,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       sanity_check();
 #endif
-      // A strange case here, for some read-only cases we can have races
-      // on advances for opens from different points, so if we detect a
-      // pending request for a remote field then we don't need to do the
-      // invalidation
-      for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator it = 
-           outstanding_requests.begin(); it != outstanding_requests.end(); it++)
-      {
-        if (it->second * invalid_mask)
-          continue;
-        invalid_mask -= it->second;
-        if (!invalid_mask)
-          return;
-      }
       // This invalidates our local fields
       remote_valid_fields -= invalid_mask;
+      // We can also remove this from the remote advances
+      pending_remote_advances -= invalid_mask;
       filter_version_info(invalid_mask, current_version_infos);
       filter_version_info(invalid_mask, previous_version_infos);
 #ifdef DEBUG_LEGION
@@ -5878,7 +5879,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void VersionManager::handle_remote_advance(Deserializer &derez,
-                                  Runtime *runtime, AddressSpaceID source_space)
+                                                          Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -5933,7 +5934,7 @@ namespace Legion {
       VersionManager &manager = node->get_current_version_manager(ctx);
       std::set<RtEvent> done_preconditions;
       manager.advance_versions(advance_mask, logical_context_uid, context, 
-                               update_parent, source_space, done_preconditions, 
+                               update_parent, done_preconditions, 
                                dedup_opens, open_epoch, 
                                dedup_advances, advance_epoch,
                                has_dirty_previous ? &dirty_previous : NULL,
@@ -6137,13 +6138,24 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         sanity_check();
 #endif
+        FieldMask send_mask = request_mask;
+        // We only need to send it if we know that it is not valid anymore
+        LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
+          finder = remote_valid.find(target);
+        // Remove any fields that we've already sent a response for
+        if (finder != remote_valid.end())
+          send_mask -= finder->second;
         LegionMap<VersionState*,FieldMask>::aligned send_infos;
         // Do the current infos first
-        find_send_infos(current_version_infos, request_mask, send_infos);
+        if (!!send_mask)
+          find_send_infos(current_version_infos, send_mask, send_infos);
         pack_send_infos(rez, send_infos);
-        send_infos.clear();
-        // Then do the previous infos
-        find_send_infos(previous_version_infos, request_mask, send_infos);
+        if (!!send_mask)
+        {
+          send_infos.clear();
+          // Then do the previous infos
+          find_send_infos(previous_version_infos, request_mask, send_infos);
+        }
         pack_send_infos(rez, send_infos);
       }
       // Need exclusive access at the end to update the remote information
@@ -6220,6 +6232,8 @@ namespace Legion {
         merge_send_infos(previous_version_infos, previous_update);
         // Update the remote valid fields
         remote_valid_fields |= update_mask;
+        // Any update that we get also filters the remote_valid_fields
+        pending_remote_advances -= update_mask;
         // Remove our outstanding request
 #ifdef DEBUG_LEGION
         assert(outstanding_requests.find(done) != outstanding_requests.end());
