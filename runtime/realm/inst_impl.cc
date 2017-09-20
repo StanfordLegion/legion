@@ -24,7 +24,6 @@
 #include <realm/hdf5/hdf5_access.h>
 #endif
 
-TYPE_IS_SERIALIZABLE(Realm::IndexSpace);
 TYPE_IS_SERIALIZABLE(Realm::InstanceLayoutGeneric::FieldLayout);
 
 namespace Realm {
@@ -202,50 +201,6 @@ namespace Realm {
 	
       return LegionRuntime::Accessor::RegionAccessor<LegionRuntime::Accessor::AccessorType::Generic>(LegionRuntime::Accessor::AccessorType::Generic::Untyped(*this));
     }
-
-#if 0
-    /*static*/ RegionInstance RegionInstance::create_instance(Memory memory,
-							      const LinearizedIndexSpaceIntfc& lis,
-							      const std::vector<size_t>& field_sizes,
-							      const ProfilingRequestSet& prs)
-    {
-      size_t num_elements = lis.size();
-      size_t element_size = 0;
-      for(std::vector<size_t>::const_iterator it = field_sizes.begin();
-	  it != field_sizes.end();
-	  it++)
-	element_size += *it;
-
-      MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
-
-      int dummy_bits[RegionInstanceImpl::MAX_LINEARIZATION_LEN];
-      for(size_t i = 0; i < RegionInstanceImpl::MAX_LINEARIZATION_LEN; i++)
-	dummy_bits[i] = 0;
-
-      RegionInstance r = m_impl->create_instance(IndexSpace::NO_SPACE,
-						 dummy_bits,
-						 num_elements * element_size,
-						 num_elements, // SOA
-						 element_size,
-						 field_sizes,
-						 0, -1, prs,
-						 RegionInstance::NO_INST);
-			
-      RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(r);
-      r_impl->lis = lis.clone();
-			 
-      return r;
-    }
-#endif
-
-#if 0
-    const LinearizedIndexSpaceIntfc& RegionInstance::get_lis(void) const
-    {
-      RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
-      assert(r_impl->lis);
-      return *(r_impl->lis);
-    }
-#endif
 
     const InstanceLayoutGeneric *RegionInstance::get_layout(void) const
     {
@@ -560,8 +515,7 @@ namespace Realm {
     {
       Serialization::DynamicBufferSerializer dbs(128);
 
-      bool ok = ((dbs << is) &&
-		 (dbs << alloc_offset) &&
+      bool ok = ((dbs << alloc_offset) &&
 		 (dbs << size) &&
 		 (dbs << redopid) &&
 		 (dbs << count_offset) &&
@@ -583,8 +537,7 @@ namespace Realm {
     {
       Serialization::FixedBufferDeserializer fbd(in_data, in_size);
 
-      bool ok = ((fbd >> is) &&
-		 (fbd >> alloc_offset) &&
+      bool ok = ((fbd >> alloc_offset) &&
 		 (fbd >> size) &&
 		 (fbd >> redopid) &&
 		 (fbd >> count_offset) &&

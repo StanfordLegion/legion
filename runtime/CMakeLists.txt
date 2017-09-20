@@ -49,7 +49,6 @@ list(APPEND LOW_RUNTIME_SRC
   realm/event_impl.inl
   realm/faults.h            realm/faults.cc
   realm/faults.inl
-  realm/idx_impl.h          realm/idx_impl.cc
   realm/inst_impl.h         realm/inst_impl.cc
   realm/inst_layout.h       realm/inst_layout.inl
   realm/interval_tree.h     realm/interval_tree.inl

@@ -80,7 +80,7 @@ namespace LegionRuntime {
       //  information for debug
 
       /*extern*/ void (*check_bounds_ptr)(void *region, ptr_t ptr) = 0;
-      /*extern*/ void (*check_bounds_dpoint)(void *region, const Realm::DomainPoint &dp) = 0;
+      /*extern*/ void (*check_bounds_dpoint)(void *region, const Legion::DomainPoint &dp) = 0;
 
       /*extern*/ const char *(*find_privilege_task_name)(void *region) = 0;
     };
@@ -703,7 +703,7 @@ namespace Realm {
 #endif
 	nodes(0), global_memory(0),
 	local_event_free_list(0), local_barrier_free_list(0),
-	local_reservation_free_list(0), local_index_space_free_list(0),
+	local_reservation_free_list(0),
 	local_proc_group_free_list(0),
 	//local_sparsity_map_free_list(0),
 	run_method_called(false),
@@ -1177,9 +1177,6 @@ namespace Realm {
       //hcount += CreateInstanceRequest::Response::add_handler_entries(&handlers[hcount], "Create Instance Response AM");
       hcount += RemoteCopyMessage::add_handler_entries(&handlers[hcount], "Remote Copy AM");
       hcount += RemoteFillMessage::add_handler_entries(&handlers[hcount], "Remote Fill AM");
-      hcount += ValidMaskRequestMessage::Message::add_handler_entries(&handlers[hcount], "Valid Mask Request AM");
-      hcount += ValidMaskDataMessage::Message::add_handler_entries(&handlers[hcount], "Valid Mask Data AM");
-      hcount += ValidMaskFetchMessage::Message::add_handler_entries(&handlers[hcount], "Valid Mask Fetch AM");
 #ifdef DETAILED_TIMING
       hcount += TimerDataRequestMessage::Message::add_handler_entries(&handlers[hcount], "Roll-up Request AM");
       hcount += TimerDataResponseMessage::Message::add_handler_entries(&handlers[hcount], "Roll-up Data AM");
@@ -1234,7 +1231,6 @@ namespace Realm {
 	local_event_free_list = new EventTableAllocator::FreeList(n.events, gasnet_mynode());
 	local_barrier_free_list = new BarrierTableAllocator::FreeList(n.barriers, gasnet_mynode());
 	local_reservation_free_list = new ReservationTableAllocator::FreeList(n.reservations, gasnet_mynode());
-	local_index_space_free_list = new IndexSpaceTableAllocator::FreeList(n.index_spaces, gasnet_mynode());
 	local_proc_group_free_list = new ProcessorGroupTableAllocator::FreeList(n.proc_groups, gasnet_mynode());
 
 	local_sparsity_map_free_lists.resize(gasnet_nodes());
@@ -2153,7 +2149,6 @@ namespace Realm {
 	delete local_event_free_list;
 	delete local_barrier_free_list;
 	delete local_reservation_free_list;
-	delete local_index_space_free_list;
 	delete local_proc_group_free_list;
 
 	// delete all the DMA channels that we were given
@@ -2266,9 +2261,6 @@ namespace Realm {
 	return impl;
       }
 
-      if(id.is_idxspace())
-	return &(get_index_space_impl(id)->lock);
-
       if(id.is_instance())
 	return &(get_instance_impl(id)->lock);
 
@@ -2346,20 +2338,6 @@ namespace Realm {
       ProcessorGroup *impl = n->proc_groups.lookup_entry(id.pgroup.pgroup_idx,
 							 id.pgroup.owner_node);
       assert(impl->me == id.convert<Processor>());
-      return impl;
-    }
-
-    IndexSpaceImpl *RuntimeImpl::get_index_space_impl(ID id)
-    {
-      if(!id.is_idxspace()) {
-	log_runtime.fatal() << "invalid index space handle: id=" << id;
-	assert(0 && "invalid index space handle");
-      }
-
-      Node *n = &nodes[id.idxspace.owner_node];
-      IndexSpaceImpl *impl = n->index_spaces.lookup_entry(id.idxspace.idxspace_idx,
-							  id.idxspace.owner_node);
-      assert(impl->me == id.convert<IndexSpace>());
       return impl;
     }
 

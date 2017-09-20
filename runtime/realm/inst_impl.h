@@ -81,7 +81,6 @@ namespace Realm {
 	void *serialize(size_t& out_size) const;
 	void deserialize(const void *in_data, size_t in_size);
 
-	IndexSpace is;
 	off_t alloc_offset;
 	size_t size;
 	ReductionOpID redopid;

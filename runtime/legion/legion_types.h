@@ -1492,7 +1492,6 @@ namespace Legion {
   }; // Internal namespace
 
   // Typedefs that are needed everywhere
-  typedef LegionRuntime::Accessor::ByteOffset ByteOffset;
   typedef Realm::Runtime RealmRuntime;
   typedef Realm::Machine Machine;
   typedef Realm::Memory Memory;
@@ -1549,12 +1548,6 @@ namespace Legion {
   typedef ::legion_task_id_t TaskID;
   typedef ::legion_layout_constraint_id_t LayoutConstraintID;
   typedef ::legion_internal_color_t LegionColor;
-  typedef std::map<Color,ColoredPoints<ptr_t> > Coloring;
-  typedef std::map<Color,Domain> DomainColoring;
-  typedef std::map<Color,std::set<Domain> > MultiDomainColoring;
-  typedef std::map<DomainPoint,ColoredPoints<ptr_t> > PointColoring;
-  typedef std::map<DomainPoint,Domain> DomainPointColoring;
-  typedef std::map<DomainPoint,std::set<Domain> > MultiDomainPointColoring;
   typedef void (*RegistrationCallbackFnptr)(Machine machine, 
                 Runtime *rt, const std::set<Processor> &local_procs);
   typedef LogicalRegion (*RegionProjectionFnptr)(LogicalRegion parent, 
@@ -1905,5 +1898,20 @@ namespace Legion {
   };
 
 }; // Legion namespace
+
+// now that we have things like LgEvent defined, we can include accessor.h to
+// pick up ptr_t, which is used for compatibility-mode Coloring and friends
+#include "accessor.h"
+
+namespace Legion {
+  typedef LegionRuntime::Accessor::ByteOffset ByteOffset;
+
+  typedef std::map<Color,ColoredPoints<ptr_t> > Coloring;
+  typedef std::map<Color,Domain> DomainColoring;
+  typedef std::map<Color,std::set<Domain> > MultiDomainColoring;
+  typedef std::map<DomainPoint,ColoredPoints<ptr_t> > PointColoring;
+  typedef std::map<DomainPoint,Domain> DomainPointColoring;
+  typedef std::map<DomainPoint,std::set<Domain> > MultiDomainPointColoring;
+};
 
 #endif // __LEGION_TYPES_H__

@@ -360,8 +360,8 @@ namespace Realm {
 		    int _priority);
 
       ReduceRequest(const TransferDomain *_domain, //const Domain& _domain,
-		    const std::vector<Domain::CopySrcDstField>& _srcs,
-		    const Domain::CopySrcDstField& _dst,
+		    const std::vector<CopySrcDstField>& _srcs,
+		    const CopySrcDstField& _dst,
 		    bool _inst_lock_needed,
 		    ReductionOpID _redop_id,
 		    bool _red_fold,
@@ -385,8 +385,8 @@ namespace Realm {
 
       TransferDomain *domain;
       //Domain domain;
-      std::vector<Domain::CopySrcDstField> srcs;
-      Domain::CopySrcDstField dst;
+      std::vector<CopySrcDstField> srcs;
+      CopySrcDstField dst;
       bool inst_lock_needed;
       Event inst_lock_event;
       ReductionOpID redop_id;
@@ -404,7 +404,7 @@ namespace Realm {
                   Event _after_fill,
                   int priority);
       FillRequest(const TransferDomain *_domain, //const Domain &_domain,
-                  const Domain::CopySrcDstField &_dst,
+                  const CopySrcDstField &_dst,
                   const void *fill_value, size_t fill_size,
                   Event _before_fill,
                   Event _after_fill,
@@ -431,7 +431,7 @@ namespace Realm {
 
       TransferDomain *domain;
       //Domain domain;
-      Domain::CopySrcDstField dst;
+      CopySrcDstField dst;
       void *fill_buffer;
       size_t fill_size;
       Event before_fill;

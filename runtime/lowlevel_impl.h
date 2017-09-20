@@ -63,7 +63,6 @@ namespace Realm {
 #include "realm/proc_impl.h"
 #include "realm/mem_impl.h"
 #include "realm/inst_impl.h"
-#include "realm/idx_impl.h"
 #include "realm/runtime_impl.h"
 
 // namespace importing for backwards compatibility
@@ -82,7 +81,6 @@ namespace LegionRuntime {
     typedef Realm::MemoryImpl MemoryImpl;
     typedef Realm::MetadataBase MetadataBase;
     typedef Realm::RegionInstanceImpl RegionInstanceImpl;
-    typedef Realm::IndexSpaceImpl IndexSpaceImpl;
     typedef Realm::Node Node;
     typedef Realm::DetailedTimer DetailedTimer;
 

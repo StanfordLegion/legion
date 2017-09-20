@@ -408,7 +408,6 @@ LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/runtime_impl.cc \
 		   $(LG_RT_DIR)/realm/proc_impl.cc \
 		   $(LG_RT_DIR)/realm/mem_impl.cc \
 		   $(LG_RT_DIR)/realm/inst_impl.cc \
-		   $(LG_RT_DIR)/realm/idx_impl.cc \
 		   $(LG_RT_DIR)/realm/machine_impl.cc \
 		   $(LG_RT_DIR)/realm/sampling_impl.cc \
                    $(LG_RT_DIR)/realm/transfer/lowlevel_disk.cc

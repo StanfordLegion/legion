@@ -107,7 +107,6 @@ namespace Legion {
   struct DomainT : public Realm::ZIndexSpace<DIM,T> {
   public:
     DomainT(void);
-    DomainT(const Domain &domain);
     // Support type conversions for rects, but not other spaces
     template<typename T2>
     DomainT(const Rect<DIM,T2> &bounds);
@@ -137,13 +136,11 @@ namespace Legion {
     DomainPoint(void);
     DomainPoint(coord_t index);
     DomainPoint(const DomainPoint &rhs);
-    DomainPoint(const Realm::DomainPoint &rhs);
     template<int DIM, typename T>
     DomainPoint(const Point<DIM,T> &rhs);
 
     template<unsigned DIM>
     operator LegionRuntime::Arrays::Point<DIM>(void) const;
-    operator Realm::DomainPoint(void) const;
     template<int DIM, typename T>
     operator Point<DIM,T>(void) const;
 
@@ -211,10 +208,6 @@ namespace Legion {
 
     template<int DIM, typename T>
     Domain(const DomainT<DIM,T> &other);
-
-    Domain(const Realm::Domain &other);
-
-    operator Realm::Domain(void) const;
 
     Domain& operator=(const Domain& other);
 

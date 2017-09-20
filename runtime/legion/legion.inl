@@ -5594,8 +5594,6 @@ namespace LegionRuntime {
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::DomainPoint DomainPoint;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Realm::IndexSpaceAllocator IndexSpaceAllocator;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Realm::RegionInstance PhysicalInstance;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Realm::Memory Memory;
@@ -5625,10 +5623,6 @@ namespace LegionRuntime {
     typedef Realm::Machine::ProcessorMemoryAffinity ProcessorMemoryAffinity;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Realm::Machine::MemoryMemoryAffinity MemoryMemoryAffinity;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Realm::ElementMask::Enumerator Enumerator;
-    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
-    typedef Realm::IndexSpace::FieldDataDescriptor FieldDataDescriptor;
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef std::map<Legion::CustomSerdezID, 
                      const Realm::CustomSerdezUntyped *> SerdezOpTable;

@@ -251,15 +251,6 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
-  template<int DIM, typename T>
-  inline DomainT<DIM,T>::DomainT(const Domain &domain)
-    : Realm::ZIndexSpace<DIM,T>(domain.bounds<DIM,T>())
-  //----------------------------------------------------------------------------
-  {
-    this->sparsity.id = domain.is_id;
-  }
-
-  //----------------------------------------------------------------------------
   template<int DIM, typename T> template<typename T2>
   inline DomainT<DIM,T>::DomainT(const Rect<DIM,T2> &_bounds)
     : Realm::ZIndexSpace<DIM,T>(Realm::ZRect<DIM,T>(_bounds))
@@ -362,15 +353,6 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
-  inline DomainPoint::DomainPoint(const Realm::DomainPoint &rhs)
-    : dim(rhs.dim)
-  //----------------------------------------------------------------------------
-  {
-    for (int i = 0; i < MAX_POINT_DIM; i++)
-      point_data[i] = rhs.point_data[i];
-  }
-
-  //----------------------------------------------------------------------------
   template<int DIM, typename T>
   inline DomainPoint::DomainPoint(const Point<DIM,T> &rhs)
     : dim(DIM)
@@ -388,17 +370,6 @@ namespace Legion {
     LegionRuntime::Arrays::Point<DIM> result;
     for (int i = 0; i < DIM; i++)
       result.x[i] = point_data[i];
-    return result;
-  }
-
-  //----------------------------------------------------------------------------
-  inline DomainPoint::operator Realm::DomainPoint(void) const
-  //----------------------------------------------------------------------------
-  {
-    Realm::DomainPoint result;
-    result.dim = dim;
-    for (int i = 0; i < MAX_POINT_DIM; i++)
-      result.point_data[i] = point_data[i];
     return result;
   }
 
@@ -599,27 +570,6 @@ namespace Legion {
       rect_data[i] = other.bounds.lo[i];
     for (int i = 0; i < DIM; i++)
       rect_data[DIM+i] = other.bounds.hi[i];
-  }
-
-  //----------------------------------------------------------------------------
-  inline Domain::Domain(const Realm::Domain &other)
-    : is_id(other.is_id), dim(other.dim)
-  //----------------------------------------------------------------------------
-  {
-    for(int i = 0; i < MAX_RECT_DIM*2; i++)
-      rect_data[i] = other.rect_data[i];
-  }
-
-  //----------------------------------------------------------------------------
-  inline Domain::operator Realm::Domain(void) const
-  //----------------------------------------------------------------------------
-  {
-    Realm::Domain result;
-    result.is_id = is_id;
-    result.dim = dim;
-    for(int i = 0; i < MAX_RECT_DIM*2; i++)
-      result.rect_data[i] = rect_data[i];
-    return result;
   }
 
   //----------------------------------------------------------------------------

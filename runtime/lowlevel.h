@@ -26,7 +26,6 @@
 ///////////////////////////////////////////////////////////////////////////////////
 
 #include "utilities.h"
-#include "accessor.h"
 #include "arrays.h"
 //#include "layouts.h"
 #include "lowlevel_config.h"
@@ -53,11 +52,6 @@ namespace LegionRuntime {
     typedef Realm::Processor Processor;
     typedef Realm::Memory Memory;
     typedef Realm::RegionInstance RegionInstance;
-    typedef Realm::IndexSpace IndexSpace;
-    typedef Realm::IndexSpaceAllocator IndexSpaceAllocator;
-    typedef Realm::ElementMask ElementMask;
-    typedef Realm::Domain Domain;
-    typedef Realm::DomainPoint DomainPoint;
     typedef Realm::Machine Machine;
     typedef Realm::Runtime Runtime;
 

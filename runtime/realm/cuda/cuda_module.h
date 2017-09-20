@@ -216,12 +216,6 @@ namespace Realm {
 		  void *_dst, const void *_src, size_t _bytes, GPUMemcpyKind _kind,
 		  GPUCompletionNotification *_notification);
 
-      GPUMemcpy1D(GPU *_gpu,
-		  void *_dst, const void *_src, 
-		  const ElementMask *_mask, size_t _elmt_size,
-		  GPUMemcpyKind _kind,
-		  GPUCompletionNotification *_notification);
-
       virtual ~GPUMemcpy1D(void);
 
     public:
@@ -230,7 +224,6 @@ namespace Realm {
     protected:
       void *dst;
       const void *src;
-      const ElementMask *mask;
       size_t elmt_size;
       GPUCompletionNotification *notification;
     private:
@@ -473,18 +466,6 @@ namespace Realm {
                            off_t dst_height, off_t src_height,
                            size_t bytes, size_t height, size_t depth,
 			   GPUCompletionNotification *notification = 0);
-
-      void copy_to_fb(off_t dst_offset, const void *src,
-		      const ElementMask *mask, size_t elmt_size,
-		      GPUCompletionNotification *notification = 0);
-
-      void copy_from_fb(void *dst, off_t src_offset,
-			const ElementMask *mask, size_t elmt_size,
-			GPUCompletionNotification *notification = 0);
-
-      void copy_within_fb(off_t dst_offset, off_t src_offset,
-			  const ElementMask *mask, size_t elmt_size,
-			  GPUCompletionNotification *notification = 0);
 
       void fence_to_fb(Realm::Operation *op);
       void fence_from_fb(Realm::Operation *op);

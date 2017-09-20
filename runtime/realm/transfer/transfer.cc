@@ -19,16 +19,10 @@
 
 #include <realm/transfer/lowlevel_dma.h>
 #include <realm/mem_impl.h>
-#include <realm/idx_impl.h>
 #include <realm/inst_layout.h>
 #ifdef USE_HDF
 #include <realm/hdf5/hdf5_access.h>
 #endif
-
-TYPE_IS_SERIALIZABLE(Realm::IndexSpace);
-TYPE_IS_SERIALIZABLE(LegionRuntime::Arrays::Rect<1>);
-TYPE_IS_SERIALIZABLE(LegionRuntime::Arrays::Rect<2>);
-TYPE_IS_SERIALIZABLE(LegionRuntime::Arrays::Rect<3>);
 
 namespace Realm {
 
@@ -2166,79 +2160,6 @@ namespace Realm {
     return true;
   }
 
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class Domain
-  //
-
-  Event Domain::copy(const std::vector<CopySrcDstField>& srcs,
-		     const std::vector<CopySrcDstField>& dsts,
-		     Event wait_on,
-		     ReductionOpID redop_id, bool red_fold) const
-  {
-    Realm::ProfilingRequestSet reqs;
-    return Domain::copy(srcs, dsts, reqs, wait_on, redop_id, red_fold);
-  }
-
-  Event Domain::copy(const std::vector<CopySrcDstField>& srcs,
-		     const std::vector<CopySrcDstField>& dsts,
-		     const Realm::ProfilingRequestSet &requests,
-		     Event wait_on,
-		     ReductionOpID redop_id, bool red_fold) const
-  {
-    assert(0); // DEAD CODE
-    return wait_on;
-#if 0
-    TransferDomain *td = TransferDomain::construct(*this);
-    std::vector<TransferPlan *> plans;
-    bool ok = TransferPlan::plan_copy(plans, srcs, dsts, redop_id, red_fold);
-    assert(ok);
-    std::set<Event> finish_events;
-    for(std::vector<TransferPlan *>::iterator it = plans.begin();
-	it != plans.end();
-	++it) {
-      Event e = (*it)->execute_plan(td, requests, wait_on, 0 /*priority*/);
-      finish_events.insert(e);
-      delete *it;
-    }
-    delete td;
-    return Event::merge_events(finish_events);
-#endif
-  }
-
-  Event Domain::fill(const std::vector<CopySrcDstField> &dsts,
-		     const void *fill_value, size_t fill_value_size,
-		     Event wait_on /*= Event::NO_EVENT*/) const
-  {
-    Realm::ProfilingRequestSet reqs;
-    return Domain::fill(dsts, reqs, fill_value, fill_value_size, wait_on);
-  }
-
-  Event Domain::fill(const std::vector<CopySrcDstField> &dsts,
-		     const Realm::ProfilingRequestSet &requests,
-		     const void *fill_value, size_t fill_value_size,
-		     Event wait_on /*= Event::NO_EVENT*/) const
-  {
-    assert(0); // DEAD CODE
-    return wait_on;
-#if 0
-    TransferDomain *td = TransferDomain::construct(*this);
-    std::vector<TransferPlan *> plans;
-    bool ok = TransferPlan::plan_fill(plans, dsts, fill_value, fill_value_size);
-    assert(ok);
-    std::set<Event> finish_events;
-    for(std::vector<TransferPlan *>::iterator it = plans.begin();
-	it != plans.end();
-	++it) {
-      Event e = (*it)->execute_plan(td, requests, wait_on, 0 /*priority*/);
-      finish_events.insert(e);
-      delete *it;
-    }
-    delete td;
-    return Event::merge_events(finish_events);
-#endif
-  }
 
   template <int N, typename T>
   Event ZIndexSpace<N,T>::copy(const std::vector<CopySrcDstField>& srcs,

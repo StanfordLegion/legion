@@ -206,23 +206,6 @@ namespace LegionRuntime {
 	//  locations can be freely written
 	if(next_xd_guid != XFERDES_NO_GUID)
 	  seq_next_read.add_span(0, _next_max_rw_gap);
-#if 0
-        if (domain.get_dim() == 0) {
-          li = NULL;
-          // index space instances use 1D linearizations for translation
-          me = new MaskEnumerator(domain.get_index_space(),
-                                  src_buf.linearization.get_mapping<1>(),
-                                  dst_buf.linearization.get_mapping<1>(),
-                                  order, src_buf.is_ib, dst_buf.is_ib);
-        } else {
-          li = new LayoutIterator(
-                       domain,
-                       src_buf.linearization,
-                       dst_buf.linearization,
-                       order);
-          me = NULL;
-        }
-#endif
         offset_idx = 0;
         pthread_mutex_init(&xd_lock, NULL);
         pthread_mutex_init(&update_read_lock, NULL);
@@ -236,8 +219,6 @@ namespace LegionRuntime {
         }
 	delete src_iter;
 	delete dst_iter;
-	//delete me;
-	//delete li;
         // If src_buf is intermediate buffer,
         // we need to free the buffer
         //if (src_buf.is_ib) {

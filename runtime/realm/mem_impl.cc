@@ -26,7 +26,7 @@
 namespace Realm {
 
   Logger log_malloc("malloc");
-  extern Logger log_copy; // in idx_impl.cc
+  Logger log_copy("copy");
   extern Logger log_inst; // in inst_impl.cc
 
 
@@ -612,6 +612,8 @@ namespace Realm {
     void GASNetMemory::apply_reduction_list(off_t offset, const ReductionOpUntyped *redop,
 					    size_t count, const void *entry_buffer)
     {
+      assert(0);
+#ifdef NEED_TO_FIX_REDUCTION_LISTS_FOR_DEPPART
       const char *entry = (const char *)entry_buffer;
       unsigned ptr;
 
@@ -628,6 +630,7 @@ namespace Realm {
 	redop->apply_list_entry(tgt_ptr, entry, 1, ptr);
 	entry += redop->sizeof_list_entry;
       }
+#endif
     }
 
     void *GASNetMemory::get_direct_ptr(off_t offset, size_t size)
