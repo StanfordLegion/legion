@@ -44,8 +44,6 @@
 #include "realm/hdf5/hdf5_internal.h"
 #endif
 
-using namespace LegionRuntime::Arrays;
-
 namespace LegionRuntime{
   namespace LowLevel{
     class XferDes;

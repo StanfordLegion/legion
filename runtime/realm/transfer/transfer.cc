@@ -57,8 +57,6 @@ namespace Realm {
   // class TransferIteratorIndexSpace
   //
 
-  using namespace LegionRuntime::Arrays;
-
 #if 0
   class TransferIteratorIndexSpace : public TransferIterator {
   protected:

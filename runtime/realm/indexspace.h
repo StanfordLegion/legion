@@ -26,7 +26,6 @@
 
 #include "lowlevel_config.h"
 #include "realm_config.h"
-#include "arrays.h"
 #include "sparsity.h"
 #include "dynamic_templates.h"
 

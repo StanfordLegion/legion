@@ -15,7 +15,6 @@
 
 #include "hdf5_internal.h"
 
-#include "arrays.h"
 #include "logging.h"
 
 namespace Realm {

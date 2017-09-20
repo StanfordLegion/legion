@@ -23,7 +23,6 @@
 #include "event.h"
 #include "memory.h"
 
-//include "accessor.h"
 #include "custom_serdez.h"
 
 #include <vector>

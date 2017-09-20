@@ -17,8 +17,6 @@
 #include "realm/realm_config.h"
 #include "lowlevel_dma.h"
 #include "channel.h"
-#include "arrays.h"
-#include "accessor.h"
 #include "realm/threads.h"
 #include <realm/transfer/transfer.h>
 #include <errno.h>
@@ -43,17 +41,12 @@
   } \
 } while(0)
 
-using namespace LegionRuntime::Accessor;
-using namespace LegionRuntime;
-
 #ifndef __GNUC__
 #include "atomics.h"
 #endif
 
 #include "realm/timers.h"
 #include "realm/serialize.h"
-
-using namespace Realm::Serialization;
 
 TYPE_IS_SERIALIZABLE(Realm::OffsetsAndSize);
 TYPE_IS_SERIALIZABLE(Realm::CopySrcDstField);
@@ -372,7 +365,7 @@ namespace Realm {
 	oas_by_inst(0),
 	before_copy(_before_copy)
     {
-      FixedBufferDeserializer deserializer(data, datalen);
+      Serialization::FixedBufferDeserializer deserializer(data, datalen);
 
       domain = TransferDomain::deserialize_new(deserializer);
       oas_by_inst = new OASByInst;
@@ -474,7 +467,7 @@ namespace Realm {
       args.after_copy = finish_event;
       args.priority = priority;
 
-      DynamicBufferSerializer dbs(128);
+      Serialization::DynamicBufferSerializer dbs(128);
       bool ok = ((dbs << *domain) &&
 		 (dbs << *oas_by_inst) &&
 		 (dbs << requests));
@@ -1314,53 +1307,6 @@ namespace Realm {
       r->add_dma_channel(new MemcpyMemPairCopierFactory);
     }
 
-    template <unsigned DIM>
-    static unsigned compress_strides(const Arrays::Rect<DIM> &r,
-				     const Arrays::Point<1> in1[DIM], const Arrays::Point<1> in2[DIM],
-				     Arrays::Point<DIM>& extents,
-				     Arrays::Point<1> out1[DIM], Arrays::Point<1> out2[DIM])
-    {
-      // sort the dimensions by the first set of strides for maximum gathering goodness
-      unsigned stride_order[DIM];
-      for(unsigned i = 0; i < DIM; i++) stride_order[i] = i;
-      // yay, bubble sort!
-      for(unsigned i = 0; i < DIM; i++)
-	for(unsigned j = 0; j < i; j++)
-	  if(in1[stride_order[j]] > in1[stride_order[j+1]]) {
-	    int t = stride_order[j];
-	    stride_order[j] = stride_order[j+1];
-	    stride_order[j+1] = t;
-	  }
-
-      int curdim = -1;
-      Arrays::coord_t exp1 = 0, exp2 = 0;
-
-      // now go through dimensions, collapsing each if it matches the expected stride for
-      //  both sets (can't collapse for first)
-      for(unsigned i = 0; i < DIM; i++) {
-	unsigned d = stride_order[i];
-	Arrays::coord_t e = r.dim_size(d);
-	if(i && (exp1 == in1[d][0]) && (exp2 == in2[d][0])) {
-	  // collapse and grow extent
-	  extents.x[curdim] *= e;
-	  exp1 *= e;
-	  exp2 *= e;
-	} else {
-	  // no match - create a new dimension
-	  curdim++;
-	  extents.x[curdim] = e;
-	  exp1 = in1[d][0] * e;
-	  exp2 = in2[d][0] * e;
-	  out1[curdim] = in1[d];
-	  out2[curdim] = in2[d];
-	}
-      }
-
-      return curdim+1;
-    }
-
-
-
 
     inline bool is_cpu_mem(Memory::Kind kind)
     {
@@ -1789,7 +1735,7 @@ namespace Realm {
 	redop_id(_redop_id), red_fold(_red_fold),
 	before_copy(_before_copy)
     {
-      FixedBufferDeserializer deserializer(data, datalen);
+      Serialization::FixedBufferDeserializer deserializer(data, datalen);
 
       domain = TransferDomain::deserialize_new(deserializer);
       bool ok = ((deserializer >> srcs) &&
@@ -1853,7 +1799,7 @@ namespace Realm {
       args.after_copy = finish_event;
       args.priority = priority;
 
-      DynamicBufferSerializer dbs(128);
+      Serialization::DynamicBufferSerializer dbs(128);
       bool ok = ((dbs << *domain) &&
 		 (dbs << srcs) &&
 		 (dbs << dst) &&
@@ -2182,7 +2128,7 @@ namespace Realm {
       dst.subfield_offset = 0;
       dst.size = size;
 
-      FixedBufferDeserializer deserializer(data, datalen);
+      Serialization::FixedBufferDeserializer deserializer(data, datalen);
 
       domain = TransferDomain::deserialize_new(deserializer);
       ByteArray ba; // TODO
@@ -2251,7 +2197,7 @@ namespace Realm {
       args.after_fill = finish_event;
       //args.priority = 0;
 
-      DynamicBufferSerializer dbs(128);
+      Serialization::DynamicBufferSerializer dbs(128);
       ByteArray ba(fill_buffer, fill_size); // TODO
       bool ok = ((dbs << *domain) &&
 		 (dbs << ba) &&
