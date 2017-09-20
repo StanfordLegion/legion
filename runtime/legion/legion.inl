@@ -5495,6 +5495,8 @@ namespace LegionRuntime {
 #endif
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::IndexIterator IndexIterator;
+    LEGION_DEPRECATED("Use the Legion namespace instance instead.")
+    typedef Legion::IndexAllocator IndexAllocator;
 #ifdef __GNUC__
 #pragma GCC diagnostic pop
 #endif
