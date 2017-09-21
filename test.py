@@ -221,17 +221,17 @@ def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
 
     # MiniAero
     # Contact: Wonchan Lee <wonchan@cs.stanford.edu>
-    miniaero_dir = os.path.join(tmp_dir, 'miniaero-spmd')
-    cmd(['git', 'clone', '-b', 'spmd_flattened_superblocks',
-         'git@github.com:magnatelee/miniaero-spmd.git', miniaero_dir])
-    cmd(['make', '-C', miniaero_dir, '-j', str(thread_count)], env=env,
-        cwd=miniaero_dir)
-    for test in ['3D_Sod', '3D_Sod_2nd_Order'
-                 # These tests take a long time so skip them by default.
-                 # , 'FlatPlate', 'Ramp'
-                ]:
-        test_dir = os.path.join(miniaero_dir, 'tests', test)
-        cmd([os.path.join(test_dir, 'test.sh')], env=env, cwd=test_dir)
+    #miniaero_dir = os.path.join(tmp_dir, 'miniaero-spmd')
+    #cmd(['git', 'clone', '-b', 'spmd_flattened_superblocks',
+    #     'git@github.com:magnatelee/miniaero-spmd.git', miniaero_dir])
+    #cmd(['make', '-C', miniaero_dir, '-j', str(thread_count)], env=env,
+    #    cwd=miniaero_dir)
+    #for test in ['3D_Sod', '3D_Sod_2nd_Order'
+    #             # These tests take a long time so skip them by default.
+    #             # , 'FlatPlate', 'Ramp'
+    #            ]:
+    #    test_dir = os.path.join(miniaero_dir, 'tests', test)
+    #    cmd([os.path.join(test_dir, 'test.sh')], env=env, cwd=test_dir)
 
     # PENNANT
     # Contact: Galen Shipman <gshipman@lanl.gov>
