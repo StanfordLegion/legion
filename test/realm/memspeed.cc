@@ -12,10 +12,6 @@
 #include <unistd.h>
 
 using namespace Realm;
-using namespace LegionRuntime::Accessor;
-
-// for Point<DIM> and Rect<DIM>
-using namespace LegionRuntime::Arrays;
 
 Logger log_app("app");
 
@@ -226,7 +222,7 @@ void top_level_task(const void *args, size_t arglen,
 
     // clear the instance first - this should also take care of faulting it in
     void *fill_value = 0;
-    std::vector<Domain::CopySrcDstField> sdf(1);
+    std::vector<CopySrcDstField> sdf(1);
     sdf[0].inst = inst;
     sdf[0].field_id = 0;
     sdf[0].size = sizeof(void *);
