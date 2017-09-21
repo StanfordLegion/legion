@@ -31,7 +31,7 @@ namespace Realm {
     }
   };
 
-  // we need an augmented field list that includes ZPoint<N,T> and ZRect<N,T>
+  // we need an augmented field list that includes Point<N,T> and Rect<N,T>
   //  for all DIMCOUNTS/DIMTYPES
   struct FLDTYPES_AUG {
     template <typename T>
@@ -40,7 +40,7 @@ namespace Realm {
     };
 
     template <int N, typename T>
-    struct TypePresent<ZPoint<N,T> > {
+    struct TypePresent<Point<N,T> > {
       static const bool value = false;
     };
 
@@ -50,7 +50,7 @@ namespace Realm {
     };
 
     template <int N, typename T>
-    struct TypeToIndex<ZPoint<N,T> > {
+    struct TypeToIndex<Point<N,T> > {
       static const int INDEX = ((N << 5) + 
 				(DIMTYPES::TypeToIndex<T>::INDEX << 2) +
 				1);
@@ -58,7 +58,7 @@ namespace Realm {
 
 #ifdef ZRECT_AS_FIELD_TYPE
     template <int N, typename T>
-    struct TypeToIndex<ZRect<N,T> > {
+    struct TypeToIndex<Rect<N,T> > {
       static const int INDEX = ((N << 5) +
 				(DIMTYPES::TypeToIndex<T>::INDEX << 2) +
 				3);
@@ -70,7 +70,7 @@ namespace Realm {
       template <typename NT, typename T>
       static void demux(T1 arg1)
       {
-	TARGET::template demux<ZPoint<NT::N, T> >(arg1);
+	TARGET::template demux<Point<NT::N, T> >(arg1);
       }
     };
 
@@ -79,7 +79,7 @@ namespace Realm {
       template <typename NT, typename T>
       static void demux(T1 arg1, T2 arg2)
       {
-	TARGET::template demux<ZPoint<NT::N, T> >(arg1, arg2);
+	TARGET::template demux<Point<NT::N, T> >(arg1, arg2);
       }
     };
 
@@ -88,7 +88,7 @@ namespace Realm {
       template <typename NT, typename T>
       static void demux(T1 arg1, T2 arg2, T3 arg3)
       {
-	TARGET::template demux<ZPoint<NT::N, T> >(arg1, arg2, arg3);
+	TARGET::template demux<Point<NT::N, T> >(arg1, arg2, arg3);
       }
     };
 
@@ -98,7 +98,7 @@ namespace Realm {
       template <typename NT, typename T>
       static void demux(T1 arg1)
       {
-	TARGET::template demux<ZRect<NT::N, T> >(arg1);
+	TARGET::template demux<Rect<NT::N, T> >(arg1);
       }
     };
 
@@ -107,7 +107,7 @@ namespace Realm {
       template <typename NT, typename T>
       static void demux(T1 arg1, T2 arg2)
       {
-	TARGET::template demux<ZRect<NT::N, T> >(arg1, arg2);
+	TARGET::template demux<Rect<NT::N, T> >(arg1, arg2);
       }
     };
 
@@ -116,7 +116,7 @@ namespace Realm {
       template <typename NT, typename T>
       static void demux(T1 arg1, T2 arg2, T3 arg3)
       {
-	TARGET::template demux<ZRect<NT::N, T> >(arg1, arg2, arg3);
+	TARGET::template demux<Rect<NT::N, T> >(arg1, arg2, arg3);
       }
     };
 #endif
@@ -131,7 +131,7 @@ namespace Realm {
 	  break;
 	}
 
-      case 1: // index encodes N,T for ZPoint<N,T>
+      case 1: // index encodes N,T for Point<N,T>
 	{
 	  // space the index back out into 8-bit fields
 	  int full_index = (((index & 0xe0) << 3) +
@@ -141,7 +141,7 @@ namespace Realm {
 	}
 
 #ifdef ZRECT_AS_FIELD_TYPE
-      case 3: // index encodes N,T for ZRect<N,T>
+      case 3: // index encodes N,T for Rect<N,T>
 	{
 	  // space the index back out into 8-bit fields
 	  int full_index = (((index & 0xe0) << 3) +
@@ -163,7 +163,7 @@ namespace Realm {
 	  break;
 	}
 
-      case 1: // index encodes N,T for ZPoint<N,T>
+      case 1: // index encodes N,T for Point<N,T>
 	{
 	  // space the index back out into 8-bit fields
 	  int full_index = (((index & 0xe0) << 3) +
@@ -173,7 +173,7 @@ namespace Realm {
 	}
 
 #ifdef ZRECT_AS_FIELD_TYPE
-      case 3: // index encodes N,T for ZRect<N,T>
+      case 3: // index encodes N,T for Rect<N,T>
 	{
 	  // space the index back out into 8-bit fields
 	  int full_index = (((index & 0xe0) << 3) +
@@ -195,7 +195,7 @@ namespace Realm {
 	  break;
 	}
 
-      case 1: // index encodes N,T for ZPoint<N,T>
+      case 1: // index encodes N,T for Point<N,T>
 	{
 	  // space the index back out into 8-bit fields
 	  int full_index = (((index & 0xe0) << 3) +
@@ -205,7 +205,7 @@ namespace Realm {
 	}
 
 #ifdef ZRECT_AS_FIELD_TYPE
-      case 3: // index encodes N,T for ZRect<N,T>
+      case 3: // index encodes N,T for Rect<N,T>
 	{
 	  // space the index back out into 8-bit fields
 	  int full_index = (((index & 0xe0) << 3) +

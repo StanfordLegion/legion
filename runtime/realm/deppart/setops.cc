@@ -32,7 +32,7 @@ namespace Realm {
   //  true of unions and differences
 
   template <int N, typename T>
-  static bool union_is_rect(const ZRect<N,T>& lhs, const ZRect<N,T>& rhs)
+  static bool union_is_rect(const Rect<N,T>& lhs, const Rect<N,T>& rhs)
   {
     if(N == 1) {
       // 1-D case is simple - no gap allowed
@@ -68,12 +68,12 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  static bool attempt_simple_diff(const ZRect<N,T>& lhs, const ZRect<N,T>& rhs,
-				  ZRect<N,T>& out)
+  static bool attempt_simple_diff(const Rect<N,T>& lhs, const Rect<N,T>& rhs,
+				  Rect<N,T>& out)
   {
     // rhs containing lhs always works
     if(rhs.contains(lhs)) {
-      out = ZRect<N,T>::make_empty();
+      out = Rect<N,T>::make_empty();
       return true;
     }
 
@@ -148,9 +148,9 @@ namespace Realm {
 
   template <int N, typename T>
   __attribute__ ((noinline))
-  /*static*/ Event ZIndexSpace<N,T>::compute_unions(const std::vector<ZIndexSpace<N,T> >& lhss,
-						    const std::vector<ZIndexSpace<N,T> >& rhss,
-						    std::vector<ZIndexSpace<N,T> >& results,
+  /*static*/ Event IndexSpace<N,T>::compute_unions(const std::vector<IndexSpace<N,T> >& lhss,
+						    const std::vector<IndexSpace<N,T> >& rhss,
+						    std::vector<IndexSpace<N,T> >& results,
 						    const ProfilingRequestSet &reqs,
 						    Event wait_on /*= Event::NO_EVENT*/)
   {
@@ -172,8 +172,8 @@ namespace Realm {
       size_t ri = (rhss.size() == 1) ? 0 : i;
 
       // handle a bunch of special cases
-      const ZIndexSpace<N,T> &l = lhss[li];
-      const ZIndexSpace<N,T> &r = rhss[ri];
+      const IndexSpace<N,T> &l = lhss[li];
+      const IndexSpace<N,T> &r = rhss[ri];
 
       // 1) empty lhs
       if(l.empty()) {
@@ -201,7 +201,7 @@ namespace Realm {
 
       // 5) same sparsity map (or none) and simple union for bbox
       if((l.sparsity == r.sparsity) && union_is_rect(l.bounds, r.bounds)) {
-	results[i] = ZIndexSpace<N,T>(l.bounds.union_bbox(r.bounds),
+	results[i] = IndexSpace<N,T>(l.bounds.union_bbox(r.bounds),
 				      l.sparsity);
 	continue;
       }
@@ -229,9 +229,9 @@ namespace Realm {
 
   template <int N, typename T>
   __attribute__ ((noinline))
-  /*static*/ Event ZIndexSpace<N,T>::compute_intersections(const std::vector<ZIndexSpace<N,T> >& lhss,
-							   const std::vector<ZIndexSpace<N,T> >& rhss,
-							   std::vector<ZIndexSpace<N,T> >& results,
+  /*static*/ Event IndexSpace<N,T>::compute_intersections(const std::vector<IndexSpace<N,T> >& lhss,
+							   const std::vector<IndexSpace<N,T> >& rhss,
+							   std::vector<IndexSpace<N,T> >& results,
 							   const ProfilingRequestSet &reqs,
 							   Event wait_on /*= Event::NO_EVENT*/)
   {
@@ -253,25 +253,25 @@ namespace Realm {
       size_t ri = (rhss.size() == 1) ? 0 : i;
 
       // handle a bunch of special cases
-      const ZIndexSpace<N,T> &l = lhss[li];
-      const ZIndexSpace<N,T> &r = rhss[ri];
+      const IndexSpace<N,T> &l = lhss[li];
+      const IndexSpace<N,T> &r = rhss[ri];
 
       // 1) either side empty or disjoint inputs
       if(l.empty() || r.empty() || !l.bounds.overlaps(r.bounds)) {
-	results[i] = ZIndexSpace<N,T>::make_empty();
+	results[i] = IndexSpace<N,T>::make_empty();
 	continue;
       }
 
       // 2) rhs is dense or has same sparsity map
       if(r.dense() || (r.sparsity == l.sparsity)) {
-	results[i] = ZIndexSpace<N,T>(l.bounds.intersection(r.bounds),
+	results[i] = IndexSpace<N,T>(l.bounds.intersection(r.bounds),
 				      l.sparsity);
 	continue;
       }
 
       // 3) lhs is dense
       if(l.dense()) {
-	results[i] = ZIndexSpace<N,T>(l.bounds.intersection(r.bounds),
+	results[i] = IndexSpace<N,T>(l.bounds.intersection(r.bounds),
 				      r.sparsity);
 	continue;
       }
@@ -299,9 +299,9 @@ namespace Realm {
 
   template <int N, typename T>
   __attribute__ ((noinline))
-  /*static*/ Event ZIndexSpace<N,T>::compute_differences(const std::vector<ZIndexSpace<N,T> >& lhss,
-							 const std::vector<ZIndexSpace<N,T> >& rhss,
-							 std::vector<ZIndexSpace<N,T> >& results,
+  /*static*/ Event IndexSpace<N,T>::compute_differences(const std::vector<IndexSpace<N,T> >& lhss,
+							 const std::vector<IndexSpace<N,T> >& rhss,
+							 std::vector<IndexSpace<N,T> >& results,
 							 const ProfilingRequestSet &reqs,
 							 Event wait_on /*= Event::NO_EVENT*/)
   {
@@ -323,12 +323,12 @@ namespace Realm {
       size_t ri = (rhss.size() == 1) ? 0 : i;
 
       // handle a bunch of special cases
-      const ZIndexSpace<N,T> &l = lhss[li];
-      const ZIndexSpace<N,T> &r = rhss[ri];
+      const IndexSpace<N,T> &l = lhss[li];
+      const IndexSpace<N,T> &r = rhss[ri];
 
       // 1) empty lhs
       if(l.empty()) {
-	results[i] = ZIndexSpace<N,T>::make_empty();
+	results[i] = IndexSpace<N,T>::make_empty();
 	continue;
       }
 
@@ -346,15 +346,15 @@ namespace Realm {
 
       // 4) dense rhs containing lhs' bounds -> empty
       if(r.dense() && r.bounds.contains(l.bounds)) {
-	results[i] = ZIndexSpace<N,T>::make_empty();
+	results[i] = IndexSpace<N,T>::make_empty();
 	continue;
       }
 
       // 5) same sparsity map (or none) and simple difference
       if(r.dense() || (l.sparsity == r.sparsity)) {
-	ZRect<N,T> sdiff;
+	Rect<N,T> sdiff;
 	if(attempt_simple_diff(l.bounds, r.bounds, sdiff)) {
-	  results[i] = ZIndexSpace<N,T>(sdiff, l.sparsity);
+	  results[i] = IndexSpace<N,T>(sdiff, l.sparsity);
 	  continue;
 	}
       }
@@ -381,8 +381,8 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  /*static*/ Event ZIndexSpace<N,T>::compute_union(const std::vector<ZIndexSpace<N,T> >& subspaces,
-						   ZIndexSpace<N,T>& result,
+  /*static*/ Event IndexSpace<N,T>::compute_union(const std::vector<IndexSpace<N,T> >& subspaces,
+						   IndexSpace<N,T>& result,
 						   const ProfilingRequestSet &reqs,
 						   Event wait_on /*= Event::NO_EVENT*/)
   {
@@ -395,7 +395,7 @@ namespace Realm {
 
     // various special cases
     if(subspaces.empty()) {
-      result = ZIndexSpace<N,T>::make_empty();
+      result = IndexSpace<N,T>::make_empty();
     } else {
       result = subspaces[0];
 
@@ -430,7 +430,7 @@ namespace Realm {
       LoggerMessage msg = log_dpops.info();
       if(msg.is_active()) {
 	msg << "union:";
-	for(typename std::vector<ZIndexSpace<N,T> >::const_iterator it = subspaces.begin();
+	for(typename std::vector<IndexSpace<N,T> >::const_iterator it = subspaces.begin();
 	    it != subspaces.end();
 	    ++it)
 	  msg << " " << *it;
@@ -445,8 +445,8 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  /*static*/ Event ZIndexSpace<N,T>::compute_intersection(const std::vector<ZIndexSpace<N,T> >& subspaces,
-							  ZIndexSpace<N,T>& result,
+  /*static*/ Event IndexSpace<N,T>::compute_intersection(const std::vector<IndexSpace<N,T> >& subspaces,
+							  IndexSpace<N,T>& result,
 							  const ProfilingRequestSet &reqs,
 							  Event wait_on /*= Event::NO_EVENT*/)
   {
@@ -459,7 +459,7 @@ namespace Realm {
 
     // various special cases
     if(subspaces.empty()) {
-      result = ZIndexSpace<N,T>::make_empty();
+      result = IndexSpace<N,T>::make_empty();
     } else {
       result = subspaces[0];
 
@@ -472,7 +472,7 @@ namespace Realm {
 
 	// empty rhs - result is empty
 	if(subspaces[i].empty()) {
-	  result = ZIndexSpace<N,T>::make_empty();
+	  result = IndexSpace<N,T>::make_empty();
 	  break;
 	}
 
@@ -504,7 +504,7 @@ namespace Realm {
       LoggerMessage msg = log_dpops.info();
       if(msg.is_active()) {
 	msg << "isect:";
-	for(typename std::vector<ZIndexSpace<N,T> >::const_iterator it = subspaces.begin();
+	for(typename std::vector<IndexSpace<N,T> >::const_iterator it = subspaces.begin();
 	    it != subspaces.end();
 	    ++it)
 	  msg << " " << *it;
@@ -530,15 +530,15 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  UnionMicroOp<N,T>::UnionMicroOp(const std::vector<ZIndexSpace<N,T> >& _inputs)
+  UnionMicroOp<N,T>::UnionMicroOp(const std::vector<IndexSpace<N,T> >& _inputs)
     : inputs(_inputs)
   {
     sparsity_output.id = 0;
   }
 
   template <int N, typename T>
-  UnionMicroOp<N,T>::UnionMicroOp(ZIndexSpace<N,T> _lhs,
-				  ZIndexSpace<N,T> _rhs)
+  UnionMicroOp<N,T>::UnionMicroOp(IndexSpace<N,T> _lhs,
+				  IndexSpace<N,T> _rhs)
     : inputs(2)
   {
     inputs[0] = _lhs;
@@ -559,10 +559,10 @@ namespace Realm {
   template <int N, typename T>
   class NWayMerge {
   public:
-    NWayMerge(const std::vector<ZIndexSpace<N,T> >& spaces);
+    NWayMerge(const std::vector<IndexSpace<N,T> >& spaces);
     ~NWayMerge(void);
 
-    const ZRect<N,T>& operator[](int idx) const;
+    const Rect<N,T>& operator[](int idx) const;
     size_t size(void) const;
 
     // steps an iterator - does not immediately update its position
@@ -575,12 +575,12 @@ namespace Realm {
 
   protected:
     int n;
-    std::vector<ZIndexSpaceIterator<N,T> > its;
+    std::vector<IndexSpaceIterator<N,T> > its;
     std::vector<int> order;
   };
 
   template <int N, typename T>
-  NWayMerge<N,T>::NWayMerge(const std::vector<ZIndexSpace<N,T> >& spaces)
+  NWayMerge<N,T>::NWayMerge(const std::vector<IndexSpace<N,T> >& spaces)
     : n(0)
   {
     its.resize(spaces.size());
@@ -605,7 +605,7 @@ namespace Realm {
   {}
 
   template <int N, typename T>
-  const ZRect<N,T>& NWayMerge<N,T>::operator[](int idx) const
+  const Rect<N,T>& NWayMerge<N,T>::operator[](int idx) const
   {
     assert(idx < n);
     return its[order[idx]].rect;
@@ -656,7 +656,7 @@ namespace Realm {
   class Fast1DUnion {
   public:
     template <typename BM>
-    static bool attempt_union(BM& bitmask, const std::vector<ZIndexSpace<N,T> >& spaces)
+    static bool attempt_union(BM& bitmask, const std::vector<IndexSpace<N,T> >& spaces)
     {
       assert(N != 1); // N==1 covered by case below
       return false;  // general case doesn't work
@@ -668,13 +668,13 @@ namespace Realm {
   public:
     static const int N = 1;
     template <typename BM>
-    static bool attempt_union(BM& bitmask, const std::vector<ZIndexSpace<N,T> >& inputs)
+    static bool attempt_union(BM& bitmask, const std::vector<IndexSpace<N,T> >& inputs)
     {
       // stuff
       // even more special case where inputs.size() == 2
       if(inputs.size() == 2) {
-	ZIndexSpaceIterator<N,T> it_lhs(inputs[0]);
-	ZIndexSpaceIterator<N,T> it_rhs(inputs[1]);
+	IndexSpaceIterator<N,T> it_lhs(inputs[0]);
+	IndexSpaceIterator<N,T> it_rhs(inputs[1]);
        
 	while(it_lhs.valid && it_rhs.valid) {
 	  // if either side comes completely before the other, emit it and continue
@@ -691,7 +691,7 @@ namespace Realm {
 	  }
 
 	  // new rectangle will be at least the union of these two
-	  ZRect<N,T> u = it_lhs.rect.union_bbox(it_rhs.rect);
+	  Rect<N,T> u = it_lhs.rect.union_bbox(it_rhs.rect);
 	  it_lhs.step();
 	  it_rhs.step();
 	  // try to consume even more
@@ -740,7 +740,7 @@ namespace Realm {
 	  }
 
 	  // at least a little overlap, so start accumulating a value
-	  ZRect<N,T> u = nwm[0];
+	  Rect<N,T> u = nwm[0];
 	  nwm.step(0); nwm.update(0);
 	  while((nwm.size() > 0) && (nwm[0].lo.x <= (u.hi.x + 1))) {
 	    u.hi.x = std::max(u.hi.x, nwm[0].hi.x);
@@ -756,7 +756,7 @@ namespace Realm {
 	    bitmask.add_rect(nwm[0]);
 	  } while(nwm.step(0));
 #if 0
-	std::vector<ZIndexSpaceIterator<N,T> > its(inputs.size());
+	std::vector<IndexSpaceIterator<N,T> > its(inputs.size());
 	std::vector<int> order(inputs.size());
 	size_t n = 0;
 	for(size_t i = 0; i < inputs.size(); i++) {
@@ -799,7 +799,7 @@ namespace Realm {
 	  }
 
 	  // at least some overlap, switch to consuming and appending to next guy
-	  ZRect<N,T> 
+	  Rect<N,T> 
 	  break;
 	}
 
@@ -827,8 +827,8 @@ namespace Realm {
     if(N == 1) {
       // even more special case where inputs.size() == 2
       if(inputs.size() == 2) {
-	ZIndexSpaceIterator<N,T> it_lhs(inputs[0]);
-	ZIndexSpaceIterator<N,T> it_rhs(inputs[1]);
+	IndexSpaceIterator<N,T> it_lhs(inputs[0]);
+	IndexSpaceIterator<N,T> it_rhs(inputs[1]);
        
 	while(it_lhs.valid && it_rhs.valid) {
 	  // if either side comes completely before the other, emit it and continue
@@ -845,7 +845,7 @@ namespace Realm {
 	  }
 
 	  // new rectangle will be at least the union of these two
-	  ZRect<N,T> u = it_lhs.rect.union_bbox(it_rhs.rect);
+	  Rect<N,T> u = it_lhs.rect.union_bbox(it_rhs.rect);
 	  it_lhs.step();
 	  it_rhs.step();
 	  // try to consume even more
@@ -894,7 +894,7 @@ namespace Realm {
 	  }
 
 	  // at least a little overlap, so start accumulating a value
-	  ZRect<N,T> u = nwm[0];
+	  Rect<N,T> u = nwm[0];
 	  nwm.step(0); nwm.update(0);
 	  while((nwm.size() > 0) && (nwm[0].lo.x <= (u.hi.x + 1))) {
 	    u.hi.x = std::max(u.hi.x, nwm[0].hi.x);
@@ -910,7 +910,7 @@ namespace Realm {
 	    bitmask.add_rect(nwm[0]);
 	  } while(nwm.step(0));
 #if 0
-	std::vector<ZIndexSpaceIterator<N,T> > its(inputs.size());
+	std::vector<IndexSpaceIterator<N,T> > its(inputs.size());
 	std::vector<int> order(inputs.size());
 	size_t n = 0;
 	for(size_t i = 0; i < inputs.size(); i++) {
@@ -953,7 +953,7 @@ namespace Realm {
 	  }
 
 	  // at least some overlap, switch to consuming and appending to next guy
-	  ZRect<N,T> 
+	  Rect<N,T> 
 	  break;
 	}
 
@@ -969,7 +969,7 @@ namespace Realm {
 #endif
 
     // iterate over all the inputs, adding dense (sub)rectangles first
-    for(typename std::vector<ZIndexSpace<N,T> >::const_iterator it = inputs.begin();
+    for(typename std::vector<IndexSpace<N,T> >::const_iterator it = inputs.begin();
 	it != inputs.end();
 	it++) {
       if(it->dense()) {
@@ -980,7 +980,7 @@ namespace Realm {
 	for(typename std::vector<SparsityMapEntry<N,T> >::const_iterator it2 = entries.begin();
 	    it2 != entries.end();
 	    it2++) {
-	  ZRect<N,T> isect = it->bounds.intersection(it2->bounds);
+	  Rect<N,T> isect = it->bounds.intersection(it2->bounds);
 	  if(isect.empty())
 	    continue;
 	  assert(!it2->sparsity.exists());
@@ -1027,7 +1027,7 @@ namespace Realm {
     }
 
     // need valid data for each input
-    for(typename std::vector<ZIndexSpace<N,T> >::const_iterator it = inputs.begin();
+    for(typename std::vector<IndexSpace<N,T> >::const_iterator it = inputs.begin();
 	it != inputs.end();
 	it++) {
       if(!it->dense()) {
@@ -1073,15 +1073,15 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  IntersectionMicroOp<N,T>::IntersectionMicroOp(const std::vector<ZIndexSpace<N,T> >& _inputs)
+  IntersectionMicroOp<N,T>::IntersectionMicroOp(const std::vector<IndexSpace<N,T> >& _inputs)
     : inputs(_inputs)
   {
     sparsity_output.id = 0;
   }
 
   template <int N, typename T>
-  IntersectionMicroOp<N,T>::IntersectionMicroOp(ZIndexSpace<N,T> _lhs,
-				  ZIndexSpace<N,T> _rhs)
+  IntersectionMicroOp<N,T>::IntersectionMicroOp(IndexSpace<N,T> _lhs,
+				  IndexSpace<N,T> _rhs)
     : inputs(2)
   {
     inputs[0] = _lhs;
@@ -1108,8 +1108,8 @@ namespace Realm {
     if(N == 1) {
       // even more special case where inputs.size() == 2
       if(inputs.size() == 2) {
-	ZIndexSpaceIterator<N,T> it_lhs(inputs[0]);
-	ZIndexSpaceIterator<N,T> it_rhs(inputs[1]);
+	IndexSpaceIterator<N,T> it_lhs(inputs[0]);
+	IndexSpaceIterator<N,T> it_rhs(inputs[1]);
        
 	// can only generate data while both sides have rectangles left
 	while(it_lhs.valid && it_rhs.valid) {
@@ -1141,7 +1141,7 @@ namespace Realm {
 
     // general version
     // first build the intersection of all the bounding boxes
-    ZRect<N,T> bounds = inputs[0].bounds;
+    Rect<N,T> bounds = inputs[0].bounds;
     for(size_t i = 1; i < inputs.size(); i++)
       bounds = bounds.intersection(inputs[i].bounds);
     if(bounds.empty()) {
@@ -1153,8 +1153,8 @@ namespace Realm {
     // handle 2 input case with simple double-iteration
     if(inputs.size() == 2) {
       // double iteration - use the instance's space first, since it's probably smaller
-      for(ZIndexSpaceIterator<N,T> it(inputs[0], bounds); it.valid; it.step())
-	for(ZIndexSpaceIterator<N,T> it2(inputs[1], it.rect); it2.valid; it2.step())
+      for(IndexSpaceIterator<N,T> it(inputs[0], bounds); it.valid; it.step())
+	for(IndexSpaceIterator<N,T> it2(inputs[1], it.rect); it2.valid; it2.step())
 	  bitmask.add_rect(it2.rect);
     } else {
       assert(0);
@@ -1197,7 +1197,7 @@ namespace Realm {
     }
 
     // need valid data for each input
-    for(typename std::vector<ZIndexSpace<N,T> >::const_iterator it = inputs.begin();
+    for(typename std::vector<IndexSpace<N,T> >::const_iterator it = inputs.begin();
 	it != inputs.end();
 	it++) {
       if(!it->dense()) {
@@ -1243,8 +1243,8 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  DifferenceMicroOp<N,T>::DifferenceMicroOp(ZIndexSpace<N,T> _lhs,
-					    ZIndexSpace<N,T> _rhs)
+  DifferenceMicroOp<N,T>::DifferenceMicroOp(IndexSpace<N,T> _lhs,
+					    IndexSpace<N,T> _rhs)
     : lhs(_lhs), rhs(_rhs)
   {
     sparsity_output.id = 0;
@@ -1261,12 +1261,12 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  void subtract_rects(const ZRect<N,T>& lhs, const ZRect<N,T>& rhs,
-		      std::vector<ZRect<N,T> >& pieces)
+  void subtract_rects(const Rect<N,T>& lhs, const Rect<N,T>& rhs,
+		      std::vector<Rect<N,T> >& pieces)
   {
     // should only be called if we have overlapping rectangles
     assert(!lhs.empty() && !rhs.empty() && lhs.overlaps(rhs));
-    ZRect<N,T> r = lhs;
+    Rect<N,T> r = lhs;
     for(int i = 0; i < N; i++) {
       if(lhs.lo[i] < rhs.lo[i]) {
 	// some coverage "below"
@@ -1293,8 +1293,8 @@ namespace Realm {
     // special case: in 1-D, we can count on the iterators being ordered and just do an O(N)
     //  merge-subtract of the two streams
     if(N == 1) {
-      ZIndexSpaceIterator<N,T> it_lhs(lhs);
-      ZIndexSpaceIterator<N,T> it_rhs(rhs);
+      IndexSpaceIterator<N,T> it_lhs(lhs);
+      IndexSpaceIterator<N,T> it_rhs(rhs);
 
       while(it_lhs.valid) {
 	// throw away any rhs rectangles that come before this one
@@ -1318,13 +1318,13 @@ namespace Realm {
 
 	// last case - partial overlap - subtract out rhs rect(s)
 	if(it_lhs.valid) {
-	  ZPoint<N,T> p = it_lhs.rect.lo;
+	  Point<N,T> p = it_lhs.rect.lo;
 	  while(it_rhs.valid) {
 	    if(p.x < it_rhs.rect.lo.x) {
 	      // add a partial rect below the rhs
-	      ZPoint<N,T> p2 = it_rhs.rect.lo;
+	      Point<N,T> p2 = it_rhs.rect.lo;
 	      p2.x -= 1;
-	      bitmask.add_rect(ZRect<N,T>(p, p2));
+	      bitmask.add_rect(Rect<N,T>(p, p2));
 	    }
 
 	    // if the rhs ends after the lhs, we're done
@@ -1336,7 +1336,7 @@ namespace Realm {
 	    p.x += 1;
 	    if(!it_rhs.step()) {
 	      // no rhs left - emit the rest and break out
-	      bitmask.add_rect(ZRect<N,T>(p, it_lhs.rect.hi));
+	      bitmask.add_rect(Rect<N,T>(p, it_lhs.rect.hi));
 	      break;
 	    }
 	  }
@@ -1348,7 +1348,7 @@ namespace Realm {
 
     // the basic idea here is to build a list of rectangles from the lhs and clip them
     //  based on the rhs until we're done
-    std::deque<ZRect<N,T> > todo;
+    std::deque<Rect<N,T> > todo;
 
     if(lhs.dense()) {
       todo.push_back(lhs.bounds);
@@ -1358,7 +1358,7 @@ namespace Realm {
       for(typename std::vector<SparsityMapEntry<N,T> >::const_iterator it = entries.begin();
 	  it != entries.end();
 	  it++) {
-	ZRect<N,T> isect = lhs.bounds.intersection(it->bounds);
+	Rect<N,T> isect = lhs.bounds.intersection(it->bounds);
 	if(isect.empty())
 	  continue;
 	assert(!it->sparsity.exists());
@@ -1368,13 +1368,13 @@ namespace Realm {
     }
 
     while(!todo.empty()) {
-      ZRect<N,T> r = todo.front();
+      Rect<N,T> r = todo.front();
       todo.pop_front();
 
       // iterate over all subrects in the rhs - any that contain it eliminate this rect,
       //  overlap chops it into pieces
       bool fully_covered = false;
-      for(ZIndexSpaceIterator<N,T> it(rhs); it.valid; it.step()) {
+      for(IndexSpaceIterator<N,T> it(rhs); it.valid; it.step()) {
 #ifdef DEBUG_PARTITIONING
 	std::cout << "check " << r << " -= " << it.rect << std::endl;
 #endif
@@ -1385,12 +1385,12 @@ namespace Realm {
 
 	if(it.rect.overlaps(r)) {
 	  // subtraction is nasty - can result in 2N subrectangles
-	  std::vector<ZRect<N,T> > pieces;
+	  std::vector<Rect<N,T> > pieces;
 	  subtract_rects(r, it.rect, pieces);
 	  assert(!pieces.empty());
 
 	  // continue on with the first piece, and stick the rest on the todo list
-	  typename std::vector<ZRect<N,T> >::iterator it2 = pieces.begin();
+	  typename std::vector<Rect<N,T> >::iterator it2 = pieces.begin();
 	  r = *(it2++);
 	  todo.insert(todo.end(), it2, pieces.end());
 	}
@@ -1493,12 +1493,12 @@ namespace Realm {
   {}
 
   template <int N, typename T>
-  ZIndexSpace<N,T> UnionOperation<N,T>::add_union(const ZIndexSpace<N,T>& lhs,
-						  const ZIndexSpace<N,T>& rhs)
+  IndexSpace<N,T> UnionOperation<N,T>::add_union(const IndexSpace<N,T>& lhs,
+						  const IndexSpace<N,T>& rhs)
   {
     // simple cases should all be handled before we get here, so
     // create a new index space whose bounds can fit both lhs and rhs
-    ZIndexSpace<N,T> output;
+    IndexSpace<N,T> output;
     output.bounds = lhs.bounds.union_bbox(rhs.bounds);
 
     // try to assign sparsity ID near one or both of the input sparsity maps (if present)
@@ -1526,7 +1526,7 @@ namespace Realm {
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
     output.sparsity = sparsity;
 
-    std::vector<ZIndexSpace<N,T> > ops(2);
+    std::vector<IndexSpace<N,T> > ops(2);
     ops[0] = lhs;
     ops[1] = rhs;
     inputs.push_back(ops);
@@ -1536,13 +1536,13 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  ZIndexSpace<N,T> UnionOperation<N,T>::add_union(const std::vector<ZIndexSpace<N,T> >& ops)
+  IndexSpace<N,T> UnionOperation<N,T>::add_union(const std::vector<IndexSpace<N,T> >& ops)
   {
     // simple cases should be handled before we get here
     assert(ops.size() > 1);
 
     // build a bounding box that can hold all the operands
-    ZIndexSpace<N,T> output(ops[0].bounds);
+    IndexSpace<N,T> output(ops[0].bounds);
     for(size_t i = 1; i < ops.size(); i++)
       output.bounds = output.bounds.union_bbox(ops[i].bounds);
 
@@ -1604,10 +1604,10 @@ namespace Realm {
   {}
 
   template <int N, typename T>
-  ZIndexSpace<N,T> IntersectionOperation<N,T>::add_intersection(const ZIndexSpace<N,T>& lhs,
-								const ZIndexSpace<N,T>& rhs)
+  IndexSpace<N,T> IntersectionOperation<N,T>::add_intersection(const IndexSpace<N,T>& lhs,
+								const IndexSpace<N,T>& rhs)
   {
-    ZIndexSpace<N,T> output;
+    IndexSpace<N,T> output;
     output.bounds = lhs.bounds.intersection(rhs.bounds);
     
     if(output.bounds.empty()) {
@@ -1642,7 +1642,7 @@ namespace Realm {
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
     output.sparsity = sparsity;
 
-    std::vector<ZIndexSpace<N,T> > ops(2);
+    std::vector<IndexSpace<N,T> > ops(2);
     ops[0] = lhs;
     ops[1] = rhs;
     inputs.push_back(ops);
@@ -1652,13 +1652,13 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  ZIndexSpace<N,T> IntersectionOperation<N,T>::add_intersection(const std::vector<ZIndexSpace<N,T> >& ops)
+  IndexSpace<N,T> IntersectionOperation<N,T>::add_intersection(const std::vector<IndexSpace<N,T> >& ops)
   {
     // simple cases should be handled before we get here
     assert(ops.size() > 1);
 
     // build the intersection of all bounding boxes
-    ZIndexSpace<N,T> output(ops[0].bounds);
+    IndexSpace<N,T> output(ops[0].bounds);
     for(size_t i = 1; i < ops.size(); i++)
       output.bounds = output.bounds.intersection(ops[i].bounds);
 
@@ -1723,17 +1723,17 @@ namespace Realm {
   {}
 
   template <int N, typename T>
-  ZIndexSpace<N,T> DifferenceOperation<N,T>::add_difference(const ZIndexSpace<N,T>& lhs,
-							    const ZIndexSpace<N,T>& rhs)
+  IndexSpace<N,T> DifferenceOperation<N,T>::add_difference(const IndexSpace<N,T>& lhs,
+							    const IndexSpace<N,T>& rhs)
   {
     if(lhs.empty() || (rhs.dense() && rhs.bounds.contains(lhs.bounds))) {
       // optimization should be handled above
       assert(0);
-      return ZIndexSpace<N,T>::make_empty();
+      return IndexSpace<N,T>::make_empty();
     }
 
     // the difference is no larger than the lhs
-    ZIndexSpace<N,T> output;
+    IndexSpace<N,T> output;
     output.bounds = lhs.bounds;
 
     // try to assign sparsity ID near one or both of the input sparsity maps (if present)
@@ -1797,27 +1797,27 @@ namespace Realm {
   template UnionMicroOp<N,T>::UnionMicroOp(gasnet_node_t, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \
   template IntersectionMicroOp<N,T>::IntersectionMicroOp(gasnet_node_t, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \
   template DifferenceMicroOp<N,T>::DifferenceMicroOp(gasnet_node_t, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \
-  template Event ZIndexSpace<N,T>::compute_unions(const std::vector<ZIndexSpace<N,T> >&, \
-						  const std::vector<ZIndexSpace<N,T> >&, \
-						  std::vector<ZIndexSpace<N,T> >&, \
+  template Event IndexSpace<N,T>::compute_unions(const std::vector<IndexSpace<N,T> >&, \
+						  const std::vector<IndexSpace<N,T> >&, \
+						  std::vector<IndexSpace<N,T> >&, \
 						  const ProfilingRequestSet &, \
 						  Event); \
-  template Event ZIndexSpace<N,T>::compute_intersections(const std::vector<ZIndexSpace<N,T> >&, \
-							 const std::vector<ZIndexSpace<N,T> >&, \
-							 std::vector<ZIndexSpace<N,T> >&, \
+  template Event IndexSpace<N,T>::compute_intersections(const std::vector<IndexSpace<N,T> >&, \
+							 const std::vector<IndexSpace<N,T> >&, \
+							 std::vector<IndexSpace<N,T> >&, \
 							 const ProfilingRequestSet &, \
 							 Event); \
-  template Event ZIndexSpace<N,T>::compute_differences(const std::vector<ZIndexSpace<N,T> >&, \
-						       const std::vector<ZIndexSpace<N,T> >&, \
-						       std::vector<ZIndexSpace<N,T> >&, \
+  template Event IndexSpace<N,T>::compute_differences(const std::vector<IndexSpace<N,T> >&, \
+						       const std::vector<IndexSpace<N,T> >&, \
+						       std::vector<IndexSpace<N,T> >&, \
 						       const ProfilingRequestSet &, \
 						       Event); \
-  template Event ZIndexSpace<N,T>::compute_union(const std::vector<ZIndexSpace<N,T> >&, \
-						 ZIndexSpace<N,T>&, \
+  template Event IndexSpace<N,T>::compute_union(const std::vector<IndexSpace<N,T> >&, \
+						 IndexSpace<N,T>&, \
 						 const ProfilingRequestSet &, \
 						 Event); \
-  template Event ZIndexSpace<N,T>::compute_intersection(const std::vector<ZIndexSpace<N,T> >&, \
-							ZIndexSpace<N,T>&, \
+  template Event IndexSpace<N,T>::compute_intersection(const std::vector<IndexSpace<N,T> >&, \
+							IndexSpace<N,T>&, \
 							const ProfilingRequestSet &, \
 							Event);
   FOREACH_NT(DOIT)

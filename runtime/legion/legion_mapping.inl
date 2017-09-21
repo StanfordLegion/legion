@@ -27,7 +27,7 @@ namespace Legion {
                                     MapperContext ctx, Rect<DIM,T> bounds) const
     //--------------------------------------------------------------------------
     {
-      DomainT<DIM,T> realm_is((Realm::ZIndexSpace<DIM,T>(bounds)));
+      DomainT<DIM,T> realm_is((Realm::IndexSpace<DIM,T>(bounds)));
       const Domain dom(realm_is);
       return IndexSpaceT<DIM,T>(create_index_space_internal(ctx, dom, &realm_is,
             Legion::Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
@@ -40,10 +40,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // C++ type system is dumb
-      std::vector<Realm::ZPoint<DIM,T> > realm_points(points.size());
+      std::vector<Realm::Point<DIM,T> > realm_points(points.size());
       for (unsigned idx = 0; idx < points.size(); idx++)
         realm_points[idx] = points[idx];
-      DomainT<DIM,T> realm_is((Realm::ZIndexSpace<DIM,T>(realm_points)));
+      DomainT<DIM,T> realm_is((Realm::IndexSpace<DIM,T>(realm_points)));
       const Domain dom(realm_is);
       return IndexSpaceT<DIM,T>(create_index_space_internal(ctx, dom, &realm_is,
                 Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
@@ -56,10 +56,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // C++ type system is dumb
-      std::vector<Realm::ZRect<DIM,T> > realm_rects(rects.size());
+      std::vector<Realm::Rect<DIM,T> > realm_rects(rects.size());
       for (unsigned idx = 0; idx < rects.size(); idx++)
         realm_rects[idx] = rects[idx];
-      DomainT<DIM,T> realm_is((Realm::ZIndexSpace<DIM,T>(realm_rects)));
+      DomainT<DIM,T> realm_is((Realm::IndexSpace<DIM,T>(realm_rects)));
       const Domain dom(realm_is);
       return IndexSpaceT<DIM,T>(create_index_space_internal(ctx, dom, &realm_is,
                 Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));

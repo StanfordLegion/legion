@@ -67,11 +67,11 @@ namespace Realm {
 
   // new stuff here - the "Z" prefix will go away once we delete the old stuff
 
-  template <int N, typename T = int> struct ZPoint;
-  template <int N, typename T = int> struct ZRect;
-  template <int M, int N, typename T = int> struct ZMatrix;
-  template <int N, typename T = int> struct ZIndexSpace;
-  template <int N, typename T = int> struct ZIndexSpaceIterator;
+  template <int N, typename T = int> struct Point;
+  template <int N, typename T = int> struct Rect;
+  template <int M, int N, typename T = int> struct Matrix;
+  template <int N, typename T = int> struct IndexSpace;
+  template <int N, typename T = int> struct IndexSpaceIterator;
   template <int N, typename T = int> class SparsityMap;
 
   // a Point is a tuple describing a point in an N-dimensional space - the default "base type"
@@ -86,18 +86,18 @@ namespace Realm {
 
   // specializations for N <= 4 defined in indexspace.inl
   template <int N, typename T>
-  struct ZPoint {
+  struct Point {
     T x, y, z, w;  T rest[N - 4];
 
     __CUDA_HD__
-    ZPoint(void);
+    Point(void);
     __CUDA_HD__
-    explicit ZPoint(const T vals[N]);
+    explicit Point(const T vals[N]);
     // copies allow type coercion (assuming the underlying type does)
     template <typename T2> __CUDA_HD__
-    ZPoint(const ZPoint<N, T2>& copy_from);
+    Point(const Point<N, T2>& copy_from);
     template <typename T2> __CUDA_HD__
-    ZPoint<N,T>& operator=(const ZPoint<N, T2>& copy_from);
+    Point<N,T>& operator=(const Point<N, T2>& copy_from);
 
     __CUDA_HD__
     T& operator[](int index);
@@ -105,58 +105,58 @@ namespace Realm {
     const T& operator[](int index) const;
 
     template <typename T2> __CUDA_HD__
-    T dot(const ZPoint<N, T2>& rhs) const;
+    T dot(const Point<N, T2>& rhs) const;
   };
 
   template <int N, typename T>
-  std::ostream& operator<<(std::ostream& os, const ZPoint<N,T>& p);
+  std::ostream& operator<<(std::ostream& os, const Point<N,T>& p);
 
   // component-wise operators defined on Point<N,T> (with optional coercion)
   template <int N, typename T, typename T2> __CUDA_HD__
-  bool operator==(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
+  bool operator==(const Point<N,T>& lhs, const Point<N,T2>& rhs);
   template <int N, typename T, typename T2> __CUDA_HD__
-  bool operator!=(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
+  bool operator!=(const Point<N,T>& lhs, const Point<N,T2>& rhs);
 
   template <int N, typename T, typename T2> __CUDA_HD__
-  ZPoint<N,T> operator+(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
+  Point<N,T> operator+(const Point<N,T>& lhs, const Point<N,T2>& rhs);
   template <int N, typename T, typename T2> __CUDA_HD__
-  ZPoint<N,T>& operator+=(ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
+  Point<N,T>& operator+=(Point<N,T>& lhs, const Point<N,T2>& rhs);
   template <int N, typename T, typename T2> __CUDA_HD__
-  ZPoint<N,T> operator-(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
+  Point<N,T> operator-(const Point<N,T>& lhs, const Point<N,T2>& rhs);
   template <int N, typename T, typename T2> __CUDA_HD__
-  ZPoint<N,T>& operator-=(ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
+  Point<N,T>& operator-=(Point<N,T>& lhs, const Point<N,T2>& rhs);
   template <int N, typename T, typename T2> __CUDA_HD__
-  ZPoint<N,T> operator*(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
+  Point<N,T> operator*(const Point<N,T>& lhs, const Point<N,T2>& rhs);
   template <int N, typename T, typename T2> __CUDA_HD__
-  ZPoint<N,T>& operator*=(ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
+  Point<N,T>& operator*=(Point<N,T>& lhs, const Point<N,T2>& rhs);
   template <int N, typename T, typename T2> __CUDA_HD__
-  ZPoint<N,T> operator/(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
+  Point<N,T> operator/(const Point<N,T>& lhs, const Point<N,T2>& rhs);
   template <int N, typename T, typename T2> __CUDA_HD__
-  ZPoint<N,T>& operator/=(ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
+  Point<N,T>& operator/=(Point<N,T>& lhs, const Point<N,T2>& rhs);
   template <int N, typename T, typename T2> __CUDA_HD__
-  ZPoint<N,T> operator%(const ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
+  Point<N,T> operator%(const Point<N,T>& lhs, const Point<N,T2>& rhs);
   template <int N, typename T, typename T2> __CUDA_HD__
-  ZPoint<N,T>& operator%=(ZPoint<N,T>& lhs, const ZPoint<N,T2>& rhs);
+  Point<N,T>& operator%=(Point<N,T>& lhs, const Point<N,T2>& rhs);
 
   // a Rect is a pair of points defining the lower and upper bounds of an N-D rectangle
   //  the bounds are INCLUSIVE
 
   template <int N, typename T>
-  struct ZRect {
-    ZPoint<N,T> lo, hi;
+  struct Rect {
+    Point<N,T> lo, hi;
 
     __CUDA_HD__
-    ZRect(void);
+    Rect(void);
     __CUDA_HD__
-    ZRect(const ZPoint<N,T>& _lo, const ZPoint<N,T>& _hi);
+    Rect(const Point<N,T>& _lo, const Point<N,T>& _hi);
     // copies allow type coercion (assuming the underlying type does)
     template <typename T2> __CUDA_HD__
-    ZRect(const ZRect<N, T2>& copy_from);
+    Rect(const Rect<N, T2>& copy_from);
     template <typename T2> __CUDA_HD__
-    ZRect<N,T>& operator=(const ZRect<N, T2>& copy_from);
+    Rect<N,T>& operator=(const Rect<N, T2>& copy_from);
 
     // constructs a guaranteed-empty rectangle
-    static ZRect<N,T> make_empty(void);
+    static Rect<N,T> make_empty(void);
 
     __CUDA_HD__
     bool empty(void) const;
@@ -164,27 +164,27 @@ namespace Realm {
     size_t volume(void) const;
 
     __CUDA_HD__
-    bool contains(const ZPoint<N,T>& p) const;
+    bool contains(const Point<N,T>& p) const;
 
     // true if all points in other are in this rectangle
     __CUDA_HD__
-    bool contains(const ZRect<N,T>& other) const;
+    bool contains(const Rect<N,T>& other) const;
     __CUDA_HD__
-    bool contains(const ZIndexSpace<N,T>& is) const;
+    bool contains(const IndexSpace<N,T>& is) const;
 
     // true if there are any points in the intersection of the two rectangles
     __CUDA_HD__
-    bool overlaps(const ZRect<N,T>& other) const;
+    bool overlaps(const Rect<N,T>& other) const;
 
     __CUDA_HD__
-    ZRect<N,T> intersection(const ZRect<N,T>& other) const;
+    Rect<N,T> intersection(const Rect<N,T>& other) const;
 
     // returns the _bounding box_ of the union of two rectangles (the actual union
     //  might not be a rectangle)
     __CUDA_HD__
-    ZRect<N,T> union_bbox(const ZRect<N,T>& other) const;
+    Rect<N,T> union_bbox(const Rect<N,T>& other) const;
 
-    // copy and fill operations (wrappers for ZIndexSpace versions)
+    // copy and fill operations (wrappers for IndexSpace versions)
     Event fill(const std::vector<CopySrcDstField> &dsts,
                const ProfilingRequestSet &requests,
                const void *fill_value, size_t fill_value_size,
@@ -198,63 +198,63 @@ namespace Realm {
 
     Event copy(const std::vector<CopySrcDstField> &srcs,
                const std::vector<CopySrcDstField> &dsts,
-               const ZIndexSpace<N,T> &mask,
+               const IndexSpace<N,T> &mask,
                const ProfilingRequestSet &requests,
                Event wait_on = Event::NO_EVENT,
                ReductionOpID redop_id = 0, bool red_fold = false) const;
   };
 
   template <int N, typename T>
-  std::ostream& operator<<(std::ostream& os, const ZRect<N,T>& p);
+  std::ostream& operator<<(std::ostream& os, const Rect<N,T>& p);
 
   template <int N, typename T, typename T2> __CUDA_HD__
-  bool operator==(const ZRect<N,T>& lhs, const ZRect<N,T2>& rhs);
+  bool operator==(const Rect<N,T>& lhs, const Rect<N,T2>& rhs);
   template <int N, typename T, typename T2> __CUDA_HD__
-  bool operator!=(const ZRect<N,T>& lhs, const ZRect<N,T2>& rhs);
+  bool operator!=(const Rect<N,T>& lhs, const Rect<N,T2>& rhs);
 
   // rectangles may be displaced by a vector (i.e. point)
   template <int N, typename T, typename T2> __CUDA_HD__
-  ZRect<N,T> operator+(const ZRect<N,T>& lhs, const ZPoint<N,T2>& rhs);
+  Rect<N,T> operator+(const Rect<N,T>& lhs, const Point<N,T2>& rhs);
   template <int N, typename T, typename T2> __CUDA_HD__
-  ZRect<N,T>& operator+=(ZRect<N,T>& lhs, const ZPoint<N,T2>& rhs);
+  Rect<N,T>& operator+=(Rect<N,T>& lhs, const Point<N,T2>& rhs);
   template <int N, typename T, typename T2> __CUDA_HD__
-  ZRect<N,T> operator-(const ZRect<N,T>& lhs, const ZPoint<N,T2>& rhs);
+  Rect<N,T> operator-(const Rect<N,T>& lhs, const Point<N,T2>& rhs);
   template <int N, typename T, typename T2> __CUDA_HD__
-  ZRect<N,T>& operator-=(ZRect<N,T>& lhs, const ZRect<N,T2>& rhs);
+  Rect<N,T>& operator-=(Rect<N,T>& lhs, const Rect<N,T2>& rhs);
 
   template <int M, int N, typename T>
-  struct ZMatrix {
-    ZPoint<N,T> rows[M];
+  struct Matrix {
+    Point<N,T> rows[M];
 
     __CUDA_HD__
-    ZMatrix(void);
+    Matrix(void);
     // copies allow type coercion (assuming the underlying type does)
     template <typename T2> __CUDA_HD__
-    ZMatrix(const ZMatrix<M, N, T2>& copy_from);
+    Matrix(const Matrix<M, N, T2>& copy_from);
     template <typename T2> __CUDA_HD__
-    ZMatrix<M, N, T>& operator=(const ZMatrix<M, N, T2>& copy_from);
+    Matrix<M, N, T>& operator=(const Matrix<M, N, T2>& copy_from);
 
     __CUDA_HD__
-    ZPoint<N,T>& operator[](int index);
+    Point<N,T>& operator[](int index);
     __CUDA_HD__
-    const ZPoint<N,T>& operator[](int index) const;
+    const Point<N,T>& operator[](int index) const;
   };
 
   template <int M, int N, typename T, typename T2> __CUDA_HD__
-  ZPoint<M, T> operator*(const ZMatrix<M, N, T>& m, const ZPoint<N, T2>& p);
+  Point<M, T> operator*(const Matrix<M, N, T>& m, const Point<N, T2>& p);
 
   template <int N, typename T>
-  class ZPointInRectIterator {
+  class PointInRectIterator {
   public:
-    ZPoint<N,T> p;
+    Point<N,T> p;
     bool valid;
-    ZRect<N,T> rect;
+    Rect<N,T> rect;
     bool fortran_order;
 
     __CUDA_HD__
-    ZPointInRectIterator(void);
+    PointInRectIterator(void);
     __CUDA_HD__
-    ZPointInRectIterator(const ZRect<N,T>& _r, bool _fortran_order = true);
+    PointInRectIterator(const Rect<N,T>& _r, bool _fortran_order = true);
     __CUDA_HD__
     bool step(void);
   };
@@ -276,20 +276,20 @@ namespace Realm {
   // application code may directly manipulate the bounding rectangle - this will be common for structured
   //  index spaces
   template <int N, typename T>
-  struct ZIndexSpace {
-    ZRect<N,T> bounds;
+  struct IndexSpace {
+    Rect<N,T> bounds;
     SparsityMap<N,T> sparsity;
 
-    ZIndexSpace(void);  // results in an empty index space
-    ZIndexSpace(const ZRect<N,T>& _bounds);
-    ZIndexSpace(const ZRect<N,T>& _bounds, SparsityMap<N,T> _sparsity);
+    IndexSpace(void);  // results in an empty index space
+    IndexSpace(const Rect<N,T>& _bounds);
+    IndexSpace(const Rect<N,T>& _bounds, SparsityMap<N,T> _sparsity);
 
     // construct an index space from a list of points or rects
-    ZIndexSpace(const std::vector<ZPoint<N,T> >& points);
-    ZIndexSpace(const std::vector<ZRect<N,T> >& rects);
+    IndexSpace(const std::vector<Point<N,T> >& points);
+    IndexSpace(const std::vector<Rect<N,T> >& rects);
 
     // constructs a guaranteed-empty index space
-    static ZIndexSpace<N,T> make_empty(void);
+    static IndexSpace<N,T> make_empty(void);
 
     // reclaim any physical resources associated with this index space
     //  will clear the sparsity map of this index space if it exists
@@ -311,25 +311,25 @@ namespace Realm {
     // returns the tightest description possible of the index space
     // if 'precise' is false, the sparsity map may be preserved even for dense
     //  spaces
-    ZIndexSpace<N,T> tighten(bool precise = true) const;
+    IndexSpace<N,T> tighten(bool precise = true) const;
 
     // queries for individual points or rectangles
-    bool contains(const ZPoint<N,T>& p) const;
-    bool contains_all(const ZRect<N,T>& r) const;
-    bool contains_any(const ZRect<N,T>& r) const;
+    bool contains(const Point<N,T>& p) const;
+    bool contains_all(const Rect<N,T>& r) const;
+    bool contains_any(const Rect<N,T>& r) const;
 
-    bool overlaps(const ZIndexSpace<N,T>& other) const;
+    bool overlaps(const IndexSpace<N,T>& other) const;
 
     // actual number of points in index space (may be less than volume of bounding box)
     size_t volume(void) const;
 
     // approximate versions of the above queries - the approximation is guaranteed to be a supserset,
     //  so if contains_approx returns false, contains would too
-    bool contains_approx(const ZPoint<N,T>& p) const;
-    bool contains_all_approx(const ZRect<N,T>& r) const;
-    bool contains_any_approx(const ZRect<N,T>& r) const;
+    bool contains_approx(const Point<N,T>& p) const;
+    bool contains_all_approx(const Rect<N,T>& r) const;
+    bool contains_any_approx(const Rect<N,T>& r) const;
 
-    bool overlaps_approx(const ZIndexSpace<N,T>& other) const;
+    bool overlaps_approx(const IndexSpace<N,T>& other) const;
 
     // approximage number of points in index space (may be less than volume of bounding box, but larger than
     //   actual volume)
@@ -341,7 +341,7 @@ namespace Realm {
     template <typename LAMBDA>
     void foreach_subrect(LAMBDA lambda);
     template <typename LAMBDA>
-    void foreach_subrect(LAMBDA lambda, const ZRect<N,T>& restriction);
+    void foreach_subrect(LAMBDA lambda, const Rect<N,T>& restriction);
 
     // instance creation
 #if 0
@@ -366,7 +366,7 @@ namespace Realm {
 
     Event copy(const std::vector<CopySrcDstField> &srcs,
                const std::vector<CopySrcDstField> &dsts,
-               const ZIndexSpace<N,T> &mask,
+               const IndexSpace<N,T> &mask,
                const ProfilingRequestSet &requests,
                Event wait_on = Event::NO_EVENT,
                ReductionOpID redop_id = 0, bool red_fold = false) const;
@@ -375,34 +375,34 @@ namespace Realm {
 
     // index-based:
     Event create_equal_subspace(size_t count, size_t granularity,
-                                unsigned index, ZIndexSpace<N,T> &subspace,
+                                unsigned index, IndexSpace<N,T> &subspace,
                                 const ProfilingRequestSet &reqs,
                                 Event wait_on = Event::NO_EVENT) const;
 
     Event create_equal_subspaces(size_t count, size_t granularity,
-				 std::vector<ZIndexSpace<N,T> >& subspaces,
+				 std::vector<IndexSpace<N,T> >& subspaces,
 				 const ProfilingRequestSet &reqs,
 				 Event wait_on = Event::NO_EVENT) const;
 
     Event create_weighted_subspaces(size_t count, size_t granularity,
 				    const std::vector<int>& weights,
-				    std::vector<ZIndexSpace<N,T> >& subspaces,
+				    std::vector<IndexSpace<N,T> >& subspaces,
 				    const ProfilingRequestSet &reqs,
 				    Event wait_on = Event::NO_EVENT) const;
 
     // field-based:
 
     template <typename FT>
-    Event create_subspace_by_field(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,FT> >& field_data,
+    Event create_subspace_by_field(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,FT> >& field_data,
 				   FT color,
-				   ZIndexSpace<N,T>& subspace,
+				   IndexSpace<N,T>& subspace,
 				   const ProfilingRequestSet &reqs,
 				   Event wait_on = Event::NO_EVENT) const;
 
     template <typename FT>
-    Event create_subspaces_by_field(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,FT> >& field_data,
+    Event create_subspaces_by_field(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,FT> >& field_data,
 				    const std::vector<FT>& colors,
-				    std::vector<ZIndexSpace<N,T> >& subspaces,
+				    std::vector<IndexSpace<N,T> >& subspaces,
 				    const ProfilingRequestSet &reqs,
 				    Event wait_on = Event::NO_EVENT) const;
 
@@ -410,18 +410,18 @@ namespace Realm {
     //  second (computable) function before matching the colors - the second function
     //  is provided via a CodeDescriptor object and should have the type FT->FT2
     template <typename FT, typename FT2>
-    Event create_subspace_by_field(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,FT> >& field_data,
+    Event create_subspace_by_field(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,FT> >& field_data,
 				   const CodeDescriptor& codedesc,
 				   FT2 color,
-				   ZIndexSpace<N,T>& subspace,
+				   IndexSpace<N,T>& subspace,
 				   const ProfilingRequestSet &reqs,
 				   Event wait_on = Event::NO_EVENT) const;
 
     template <typename FT, typename FT2>
-    Event create_subspaces_by_field(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,FT> >& field_data,
+    Event create_subspaces_by_field(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,FT> >& field_data,
 				    const CodeDescriptor& codedesc,
 				    const std::vector<FT2>& colors,
-				    std::vector<ZIndexSpace<N,T> >& subspaces,
+				    std::vector<IndexSpace<N,T> >& subspaces,
 				    const ProfilingRequestSet &reqs,
 				    Event wait_on = Event::NO_EVENT) const;
 
@@ -431,30 +431,30 @@ namespace Realm {
     //  for the finish event), the following invariant holds:
     //    images[i] = { y | exists x, x in sources[i] ^ field_data(x) = y }
     template <int N2, typename T2>
-    Event create_subspace_by_image(const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZPoint<N,T> > >& field_data,
-				   const ZIndexSpace<N2,T2>& source,
-				   ZIndexSpace<N,T>& image,
+    Event create_subspace_by_image(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Point<N,T> > >& field_data,
+				   const IndexSpace<N2,T2>& source,
+				   IndexSpace<N,T>& image,
 				   const ProfilingRequestSet &reqs,
 				   Event wait_on = Event::NO_EVENT) const;
 
     template <int N2, typename T2>
-    Event create_subspaces_by_image(const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZPoint<N,T> > >& field_data,
-				    const std::vector<ZIndexSpace<N2,T2> >& sources,
-				    std::vector<ZIndexSpace<N,T> >& images,
+    Event create_subspaces_by_image(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Point<N,T> > >& field_data,
+				    const std::vector<IndexSpace<N2,T2> >& sources,
+				    std::vector<IndexSpace<N,T> >& images,
 				    const ProfilingRequestSet &reqs,
 				    Event wait_on = Event::NO_EVENT) const;
     // range versions
     template <int N2, typename T2>
-    Event create_subspace_by_image(const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZRect<N,T> > >& field_data,
-				   const ZIndexSpace<N2,T2>& source,
-				   ZIndexSpace<N,T>& image,
+    Event create_subspace_by_image(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Rect<N,T> > >& field_data,
+				   const IndexSpace<N2,T2>& source,
+				   IndexSpace<N,T>& image,
 				   const ProfilingRequestSet &reqs,
 				   Event wait_on = Event::NO_EVENT) const;
 
     template <int N2, typename T2>
-    Event create_subspaces_by_image(const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZRect<N,T> > >& field_data,
-				    const std::vector<ZIndexSpace<N2,T2> >& sources,
-				    std::vector<ZIndexSpace<N,T> >& images,
+    Event create_subspaces_by_image(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Rect<N,T> > >& field_data,
+				    const std::vector<IndexSpace<N2,T2> >& sources,
+				    std::vector<IndexSpace<N,T> >& images,
 				    const ProfilingRequestSet &reqs,
 				    Event wait_on = Event::NO_EVENT) const;
 
@@ -464,10 +464,10 @@ namespace Realm {
     //  them into an index space
 
     template <int N2, typename T2>
-    Event create_subspaces_by_image_with_difference(const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZPoint<N,T> > >& field_data,
-				    const std::vector<ZIndexSpace<N2,T2> >& sources,
-				    const std::vector<ZIndexSpace<N,T> >& diff_rhs,
-				    std::vector<ZIndexSpace<N,T> >& images,
+    Event create_subspaces_by_image_with_difference(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Point<N,T> > >& field_data,
+				    const std::vector<IndexSpace<N2,T2> >& sources,
+				    const std::vector<IndexSpace<N,T> >& diff_rhs,
+				    std::vector<IndexSpace<N,T> >& images,
 				    const ProfilingRequestSet &reqs,
 				    Event wait_on = Event::NO_EVENT) const;
 
@@ -477,34 +477,34 @@ namespace Realm {
     //  for the finish event), the following invariant holds:
     //    preimages[i] = { x | field_data(x) in targets[i] }
     template <int N2, typename T2>
-    Event create_subspace_by_preimage(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,
-				                        ZPoint<N2,T2> > >& field_data,
-				      const ZIndexSpace<N2,T2>& target,
-				      ZIndexSpace<N,T>& preimage,
+    Event create_subspace_by_preimage(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,
+				                        Point<N2,T2> > >& field_data,
+				      const IndexSpace<N2,T2>& target,
+				      IndexSpace<N,T>& preimage,
 				      const ProfilingRequestSet &reqs,
 				      Event wait_on = Event::NO_EVENT) const;
 
     template <int N2, typename T2>
-    Event create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,
-				                         ZPoint<N2,T2> > >& field_data,
-				       const std::vector<ZIndexSpace<N2,T2> >& targets,
-				       std::vector<ZIndexSpace<N,T> >& preimages,
+    Event create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,
+				                         Point<N2,T2> > >& field_data,
+				       const std::vector<IndexSpace<N2,T2> >& targets,
+				       std::vector<IndexSpace<N,T> >& preimages,
 				       const ProfilingRequestSet &reqs,
 				       Event wait_on = Event::NO_EVENT) const;
     // range versions
     template <int N2, typename T2>
-    Event create_subspace_by_preimage(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,
-				                        ZRect<N2,T2> > >& field_data,
-				      const ZIndexSpace<N2,T2>& target,
-				      ZIndexSpace<N,T>& preimage,
+    Event create_subspace_by_preimage(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,
+				                        Rect<N2,T2> > >& field_data,
+				      const IndexSpace<N2,T2>& target,
+				      IndexSpace<N,T>& preimage,
 				      const ProfilingRequestSet &reqs,
 				      Event wait_on = Event::NO_EVENT) const;
 
     template <int N2, typename T2>
-    Event create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,
-				                         ZRect<N2,T2> > >& field_data,
-				       const std::vector<ZIndexSpace<N2,T2> >& targets,
-				       std::vector<ZIndexSpace<N,T> >& preimages,
+    Event create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,
+				                         Rect<N2,T2> > >& field_data,
+				       const std::vector<IndexSpace<N2,T2> >& targets,
+				       std::vector<IndexSpace<N,T> >& preimages,
 				       const ProfilingRequestSet &reqs,
 				       Event wait_on = Event::NO_EVENT) const;
 
@@ -512,9 +512,9 @@ namespace Realm {
     // fill in the instances described by 'field_data' with a mapping
     // from this index space to the 'range' index space
     template <int N2, typename T2>
-    Event create_association(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,
-                                                      ZPoint<N2,T2> > >& field_data,
-                             const ZIndexSpace<N2,T2> &range,
+    Event create_association(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,
+                                                      Point<N2,T2> > >& field_data,
+                             const IndexSpace<N2,T2> &range,
                              const ProfilingRequestSet &reqs,
                              Event wait_on = Event::NO_EVENT) const;
 
@@ -526,93 +526,93 @@ namespace Realm {
     //  IS op IS[]   -> result[] (first input applied to each element of second array)
     //  IS[] op IS   -> result[] (each element of first array applied to second input)
 
-    static Event compute_union(const ZIndexSpace<N,T>& lhs,
-				    const ZIndexSpace<N,T>& rhs,
-				    ZIndexSpace<N,T>& result,
+    static Event compute_union(const IndexSpace<N,T>& lhs,
+				    const IndexSpace<N,T>& rhs,
+				    IndexSpace<N,T>& result,
 				    const ProfilingRequestSet &reqs,
 				    Event wait_on = Event::NO_EVENT);
 
-    static Event compute_unions(const std::vector<ZIndexSpace<N,T> >& lhss,
-				     const std::vector<ZIndexSpace<N,T> >& rhss,
-				     std::vector<ZIndexSpace<N,T> >& results,
+    static Event compute_unions(const std::vector<IndexSpace<N,T> >& lhss,
+				     const std::vector<IndexSpace<N,T> >& rhss,
+				     std::vector<IndexSpace<N,T> >& results,
 				     const ProfilingRequestSet &reqs,
 				     Event wait_on = Event::NO_EVENT);
 
-    static Event compute_unions(const ZIndexSpace<N,T>& lhs,
-				     const std::vector<ZIndexSpace<N,T> >& rhss,
-				     std::vector<ZIndexSpace<N,T> >& results,
+    static Event compute_unions(const IndexSpace<N,T>& lhs,
+				     const std::vector<IndexSpace<N,T> >& rhss,
+				     std::vector<IndexSpace<N,T> >& results,
 				     const ProfilingRequestSet &reqs,
 				     Event wait_on = Event::NO_EVENT);
 
-    static Event compute_unions(const std::vector<ZIndexSpace<N,T> >& lhss,
-				     const ZIndexSpace<N,T>& rhs,
-				     std::vector<ZIndexSpace<N,T> >& results,
+    static Event compute_unions(const std::vector<IndexSpace<N,T> >& lhss,
+				     const IndexSpace<N,T>& rhs,
+				     std::vector<IndexSpace<N,T> >& results,
 				     const ProfilingRequestSet &reqs,
 				     Event wait_on = Event::NO_EVENT);
 
-    static Event compute_intersection(const ZIndexSpace<N,T>& lhs,
-				    const ZIndexSpace<N,T>& rhs,
-				    ZIndexSpace<N,T>& result,
+    static Event compute_intersection(const IndexSpace<N,T>& lhs,
+				    const IndexSpace<N,T>& rhs,
+				    IndexSpace<N,T>& result,
 				    const ProfilingRequestSet &reqs,
 				    Event wait_on = Event::NO_EVENT);
 
-    static Event compute_intersections(const std::vector<ZIndexSpace<N,T> >& lhss,
-				     const std::vector<ZIndexSpace<N,T> >& rhss,
-				     std::vector<ZIndexSpace<N,T> >& results,
+    static Event compute_intersections(const std::vector<IndexSpace<N,T> >& lhss,
+				     const std::vector<IndexSpace<N,T> >& rhss,
+				     std::vector<IndexSpace<N,T> >& results,
 				     const ProfilingRequestSet &reqs,
 				     Event wait_on = Event::NO_EVENT);
 
-    static Event compute_intersections(const ZIndexSpace<N,T>& lhs,
-				     const std::vector<ZIndexSpace<N,T> >& rhss,
-				     std::vector<ZIndexSpace<N,T> >& results,
+    static Event compute_intersections(const IndexSpace<N,T>& lhs,
+				     const std::vector<IndexSpace<N,T> >& rhss,
+				     std::vector<IndexSpace<N,T> >& results,
 				     const ProfilingRequestSet &reqs,
 				     Event wait_on = Event::NO_EVENT);
 
-    static Event compute_intersections(const std::vector<ZIndexSpace<N,T> >& lhss,
-				     const ZIndexSpace<N,T>& rhs,
-				     std::vector<ZIndexSpace<N,T> >& results,
+    static Event compute_intersections(const std::vector<IndexSpace<N,T> >& lhss,
+				     const IndexSpace<N,T>& rhs,
+				     std::vector<IndexSpace<N,T> >& results,
 				     const ProfilingRequestSet &reqs,
 				     Event wait_on = Event::NO_EVENT);
 
-    static Event compute_difference(const ZIndexSpace<N,T>& lhs,
-				    const ZIndexSpace<N,T>& rhs,
-				    ZIndexSpace<N,T>& result,
+    static Event compute_difference(const IndexSpace<N,T>& lhs,
+				    const IndexSpace<N,T>& rhs,
+				    IndexSpace<N,T>& result,
 				    const ProfilingRequestSet &reqs,
 				    Event wait_on = Event::NO_EVENT);
 
-    static Event compute_differences(const std::vector<ZIndexSpace<N,T> >& lhss,
-				     const std::vector<ZIndexSpace<N,T> >& rhss,
-				     std::vector<ZIndexSpace<N,T> >& results,
+    static Event compute_differences(const std::vector<IndexSpace<N,T> >& lhss,
+				     const std::vector<IndexSpace<N,T> >& rhss,
+				     std::vector<IndexSpace<N,T> >& results,
 				     const ProfilingRequestSet &reqs,
 				     Event wait_on = Event::NO_EVENT);
 
-    static Event compute_differences(const ZIndexSpace<N,T>& lhs,
-				     const std::vector<ZIndexSpace<N,T> >& rhss,
-				     std::vector<ZIndexSpace<N,T> >& results,
+    static Event compute_differences(const IndexSpace<N,T>& lhs,
+				     const std::vector<IndexSpace<N,T> >& rhss,
+				     std::vector<IndexSpace<N,T> >& results,
 				     const ProfilingRequestSet &reqs,
 				     Event wait_on = Event::NO_EVENT);
 
-    static Event compute_differences(const std::vector<ZIndexSpace<N,T> >& lhss,
-				     const ZIndexSpace<N,T>& rhs,
-				     std::vector<ZIndexSpace<N,T> >& results,
+    static Event compute_differences(const std::vector<IndexSpace<N,T> >& lhss,
+				     const IndexSpace<N,T>& rhs,
+				     std::vector<IndexSpace<N,T> >& results,
 				     const ProfilingRequestSet &reqs,
 				     Event wait_on = Event::NO_EVENT);
 
     // set reduction operations (union and intersection)
 
-    static Event compute_union(const std::vector<ZIndexSpace<N,T> >& subspaces,
-			       ZIndexSpace<N,T>& result,
+    static Event compute_union(const std::vector<IndexSpace<N,T> >& subspaces,
+			       IndexSpace<N,T>& result,
 			       const ProfilingRequestSet &reqs,
 			       Event wait_on = Event::NO_EVENT);
 				     
-    static Event compute_intersection(const std::vector<ZIndexSpace<N,T> >& subspaces,
-				      ZIndexSpace<N,T>& result,
+    static Event compute_intersection(const std::vector<IndexSpace<N,T> >& subspaces,
+				      IndexSpace<N,T>& result,
 				      const ProfilingRequestSet &reqs,
 				      Event wait_on = Event::NO_EVENT);
   };
 
   template <int N, typename T>
-  std::ostream& operator<<(std::ostream& os, const ZIndexSpace<N,T>& p);
+  std::ostream& operator<<(std::ostream& os, const IndexSpace<N,T>& p);
 
   // instances are based around the concept of a "linearization" of some index space, which is
   //  responsible for mapping (valid) points in the index space into a hopefully-fairly-dense
@@ -649,13 +649,13 @@ namespace Realm {
   class LinearizedIndexSpace : public LinearizedIndexSpaceIntfc {
   protected:
     // still can't be created directly
-    LinearizedIndexSpace(const ZIndexSpace<N,T>& _indexspace);
+    LinearizedIndexSpace(const IndexSpace<N,T>& _indexspace);
 
   public:
     // generic way to linearize a point
-    virtual size_t linearize(const ZPoint<N,T>& p) const = 0;
+    virtual size_t linearize(const Point<N,T>& p) const = 0;
 
-    ZIndexSpace<N,T> indexspace;
+    IndexSpace<N,T> indexspace;
   };
 
   // the simplest way to linearize an index space is build an affine translation from its
@@ -664,17 +664,17 @@ namespace Realm {
   class AffineLinearizedIndexSpace : public LinearizedIndexSpace<N,T> {
   public:
     // "fortran order" has the smallest stride in the first dimension
-    explicit AffineLinearizedIndexSpace(const ZIndexSpace<N,T>& _indexspace, bool fortran_order = true);
+    explicit AffineLinearizedIndexSpace(const IndexSpace<N,T>& _indexspace, bool fortran_order = true);
 
     virtual LinearizedIndexSpaceIntfc *clone(void) const;
     
     virtual size_t size(void) const;
 
-    virtual size_t linearize(const ZPoint<N,T>& p) const;
+    virtual size_t linearize(const Point<N,T>& p) const;
 
     size_t volume, offset;
-    ZPoint<N, ptrdiff_t> strides;
-    ZRect<N,T> dbg_bounds;
+    Point<N, ptrdiff_t> strides;
+    Rect<N,T> dbg_bounds;
   };
 
   template <int N, typename T>
@@ -682,21 +682,21 @@ namespace Realm {
 
   // an IndexSpaceIterator iterates over the valid points in an IndexSpace, rectangles at a time
   template <int N, typename T>
-  struct ZIndexSpaceIterator {
-    ZRect<N,T> rect;
-    ZIndexSpace<N,T> space;
-    ZRect<N,T> restriction;
+  struct IndexSpaceIterator {
+    Rect<N,T> rect;
+    IndexSpace<N,T> space;
+    Rect<N,T> restriction;
     bool valid;
     // for iterating over SparsityMap's
     SparsityMapPublicImpl<N,T> *s_impl;
     size_t cur_entry;
 
-    ZIndexSpaceIterator(void);
-    ZIndexSpaceIterator(const ZIndexSpace<N,T>& _space);
-    ZIndexSpaceIterator(const ZIndexSpace<N,T>& _space, const ZRect<N,T>& _restrict);
+    IndexSpaceIterator(void);
+    IndexSpaceIterator(const IndexSpace<N,T>& _space);
+    IndexSpaceIterator(const IndexSpace<N,T>& _space, const Rect<N,T>& _restrict);
 
-    void reset(const ZIndexSpace<N,T>& _space);
-    void reset(const ZIndexSpace<N,T>& _space, const ZRect<N,T>& _restrict);
+    void reset(const IndexSpace<N,T>& _space);
+    void reset(const IndexSpace<N,T>& _space, const Rect<N,T>& _restrict);
 
     // steps to the next subrect, returning true if a next subrect exists
     bool step(void);
@@ -704,22 +704,22 @@ namespace Realm {
 
 }; // namespace Realm
 
-// specializations of std::less<T> for ZPoint/ZRect/ZIndexSpace<N,T> allow
+// specializations of std::less<T> for Point/Rect/IndexSpace<N,T> allow
 //  them to be used in STL containers
 namespace std {
   template<int N, typename T>
-  struct less<Realm::ZPoint<N,T> > {
-    bool operator()(const Realm::ZPoint<N,T>& p1, const Realm::ZPoint<N,T>& p2) const;
+  struct less<Realm::Point<N,T> > {
+    bool operator()(const Realm::Point<N,T>& p1, const Realm::Point<N,T>& p2) const;
   };
 
   template<int N, typename T>
-  struct less<Realm::ZRect<N,T> > {
-    bool operator()(const Realm::ZRect<N,T>& r1, const Realm::ZRect<N,T>& r2) const;
+  struct less<Realm::Rect<N,T> > {
+    bool operator()(const Realm::Rect<N,T>& r1, const Realm::Rect<N,T>& r2) const;
   };
 
   template<int N, typename T>
-  struct less<Realm::ZIndexSpace<N,T> > {
-    bool operator()(const Realm::ZIndexSpace<N,T>& is1, const Realm::ZIndexSpace<N,T>& is2) const;
+  struct less<Realm::IndexSpace<N,T> > {
+    bool operator()(const Realm::IndexSpace<N,T>& is1, const Realm::IndexSpace<N,T>& is2) const;
   };
 };
 

@@ -26,7 +26,7 @@ namespace Legion {
     template<int DIM, typename T>
     IndexSpaceNodeT<DIM,T>::IndexSpaceNodeT(RegionTreeForest *ctx, 
         IndexSpace handle, IndexPartNode *parent, LegionColor color,
-        const Realm::ZIndexSpace<DIM,T> *is, ApEvent ready)
+        const Realm::IndexSpace<DIM,T> *is, ApEvent ready)
       : IndexSpaceNode(ctx, handle, parent, color, ready), 
         linearization_ready(false)
     //--------------------------------------------------------------------------
@@ -78,7 +78,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     inline ApEvent IndexSpaceNodeT<DIM,T>::get_realm_index_space(
-                      Realm::ZIndexSpace<DIM,T> &result, bool need_tight_result)
+                      Realm::IndexSpace<DIM,T> &result, bool need_tight_result)
     //--------------------------------------------------------------------------
     {
       if (!tight_index_space)
@@ -108,7 +108,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     inline void IndexSpaceNodeT<DIM,T>::set_realm_index_space(
-                  AddressSpaceID source, const Realm::ZIndexSpace<DIM,T> &value)
+                  AddressSpaceID source, const Realm::IndexSpace<DIM,T> &value)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -171,8 +171,8 @@ namespace Legion {
             NULL/*Operation*/, Runtime::protect_event(index_space_ready));
         return;
       }
-      Realm::ZIndexSpace<DIM,T> tight_space = realm_index_space.tighten();
-      Realm::ZIndexSpace<DIM,T> old_space;
+      Realm::IndexSpace<DIM,T> tight_space = realm_index_space.tighten();
+      Realm::IndexSpace<DIM,T> old_space;
       // Now take the lock and set everything
       {
         AutoLock n_lock(node_lock);
@@ -192,7 +192,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::set<ApEvent> preconditions;
-      std::vector<Realm::ZIndexSpace<DIM,T> > spaces(handles.size());
+      std::vector<Realm::IndexSpace<DIM,T> > spaces(handles.size());
       for (unsigned idx = 0; idx < handles.size(); idx++)
       {
         IndexSpaceNode *node = context->get_node(handles[idx]);
@@ -213,8 +213,8 @@ namespace Legion {
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_partition_request(requests,
                                       op, DEP_PART_UNION_REDUCTION);
-      Realm::ZIndexSpace<DIM,T> result_space;
-      ApEvent done(Realm::ZIndexSpace<DIM,T>::compute_union(
+      Realm::IndexSpace<DIM,T> result_space;
+      ApEvent done(Realm::IndexSpace<DIM,T>::compute_union(
             spaces, result_space, requests, precondition));
       set_realm_index_space(context->runtime->address_space, result_space);
       Runtime::trigger_event(to_trigger, done);
@@ -227,7 +227,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::set<ApEvent> preconditions;
-      std::vector<Realm::ZIndexSpace<DIM,T> > spaces(handles.size());
+      std::vector<Realm::IndexSpace<DIM,T> > spaces(handles.size());
       for (unsigned idx = 0; idx < handles.size(); idx++)
       {
         IndexSpaceNode *node = context->get_node(handles[idx]);
@@ -248,8 +248,8 @@ namespace Legion {
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_partition_request(requests,
                                       op, DEP_PART_INTERSECTION_REDUCTION);
-      Realm::ZIndexSpace<DIM,T> result_space;
-      ApEvent done(Realm::ZIndexSpace<DIM,T>::compute_intersection(
+      Realm::IndexSpace<DIM,T> result_space;
+      ApEvent done(Realm::IndexSpace<DIM,T>::compute_intersection(
             spaces, result_space, requests, precondition));
       set_realm_index_space(context->runtime->address_space, result_space);
       Runtime::trigger_event(to_trigger, done);
@@ -270,7 +270,7 @@ namespace Legion {
         static_cast<IndexSpaceNodeT<DIM,T>*>(context->get_node(left));
       IndexSpaceNodeT<DIM,T> *right_node = 
         static_cast<IndexSpaceNodeT<DIM,T>*>(context->get_node(right));
-      Realm::ZIndexSpace<DIM,T> left_space, right_space;
+      Realm::IndexSpace<DIM,T> left_space, right_space;
       ApEvent left_ready = left_node->get_realm_index_space(left_space, false);
       ApEvent right_ready = right_node->get_realm_index_space(right_space, 
                                                               false);
@@ -279,8 +279,8 @@ namespace Legion {
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_partition_request(requests,
                                           op, DEP_PART_DIFFERENCE);
-      Realm::ZIndexSpace<DIM,T> result_space;
-      ApEvent done(Realm::ZIndexSpace<DIM,T>::compute_difference(
+      Realm::IndexSpace<DIM,T> result_space;
+      ApEvent done(Realm::IndexSpace<DIM,T>::compute_difference(
            left_space, right_space, result_space, requests, precondition));
       set_realm_index_space(context->runtime->address_space, result_space);
       Runtime::trigger_event(to_trigger, done);
@@ -291,12 +291,12 @@ namespace Legion {
     void IndexSpaceNodeT<DIM,T>::log_index_space_points(void)
     //--------------------------------------------------------------------------
     {
-      Realm::ZIndexSpace<DIM,T> tight_space;
+      Realm::IndexSpace<DIM,T> tight_space;
       get_realm_index_space(tight_space, true/*tight*/);
       if (!tight_space.empty())
       {
         // Iterate over the rectangles and print them out 
-        for (Realm::ZIndexSpaceIterator<DIM,T> itr(tight_space); 
+        for (Realm::IndexSpaceIterator<DIM,T> itr(tight_space); 
               itr.valid; itr.step())
         {
           if (itr.rect.volume() == 1)
@@ -318,7 +318,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::set<ApEvent> preconditions;
-      std::vector<Realm::ZIndexSpace<DIM,T> > spaces(handles.size());
+      std::vector<Realm::IndexSpace<DIM,T> > spaces(handles.size());
       for (unsigned idx = 0; idx < handles.size(); idx++)
       {
         IndexSpaceNode *node = context->get_node(handles[idx]);
@@ -347,14 +347,14 @@ namespace Legion {
         preconditions.insert(op->get_execution_fence_event());
       // Kick this off to Realm
       ApEvent precondition = Runtime::merge_events(preconditions);
-      Realm::ZIndexSpace<DIM,T> result_space;
+      Realm::IndexSpace<DIM,T> result_space;
       if (is_union)
       {
         Realm::ProfilingRequestSet requests;
         if (context->runtime->profiler != NULL)
           context->runtime->profiler->add_partition_request(requests,
                                         op, DEP_PART_UNION_REDUCTION);
-        ApEvent result(Realm::ZIndexSpace<DIM,T>::compute_union(
+        ApEvent result(Realm::IndexSpace<DIM,T>::compute_union(
               spaces, result_space, requests, precondition));
         set_realm_index_space(context->runtime->address_space, result_space);
         return result;
@@ -365,7 +365,7 @@ namespace Legion {
         if (context->runtime->profiler != NULL)
           context->runtime->profiler->add_partition_request(requests,
                                 op, DEP_PART_INTERSECTION_REDUCTION);
-        ApEvent result(Realm::ZIndexSpace<DIM,T>::compute_intersection(
+        ApEvent result(Realm::IndexSpace<DIM,T>::compute_intersection(
               spaces, result_space, requests, precondition));
         set_realm_index_space(context->runtime->address_space, result_space);
         return result;
@@ -395,7 +395,7 @@ namespace Legion {
       }
       IndexPartNode *partition = context->get_node(part_handle);
       std::set<ApEvent> preconditions;
-      std::vector<Realm::ZIndexSpace<DIM,T> > 
+      std::vector<Realm::IndexSpace<DIM,T> > 
         spaces(partition->color_space->get_volume());
       unsigned subspace_index = 0;
       if (partition->total_children == partition->max_linearized_color)
@@ -429,14 +429,14 @@ namespace Legion {
         preconditions.insert(op->get_execution_fence_event());
       // Kick this off to Realm
       ApEvent precondition = Runtime::merge_events(preconditions);
-      Realm::ZIndexSpace<DIM,T> result_space;
+      Realm::IndexSpace<DIM,T> result_space;
       if (is_union)
       {
         Realm::ProfilingRequestSet requests;
         if (context->runtime->profiler != NULL)
           context->runtime->profiler->add_partition_request(requests,
                                         op, DEP_PART_UNION_REDUCTION);
-        ApEvent result(Realm::ZIndexSpace<DIM,T>::compute_union(
+        ApEvent result(Realm::IndexSpace<DIM,T>::compute_union(
               spaces, result_space, requests, precondition));
         set_realm_index_space(context->runtime->address_space, result_space);
         return result;
@@ -447,7 +447,7 @@ namespace Legion {
         if (context->runtime->profiler != NULL)
           context->runtime->profiler->add_partition_request(requests,
                                 op, DEP_PART_INTERSECTION_REDUCTION);
-        ApEvent result(Realm::ZIndexSpace<DIM,T>::compute_intersection(
+        ApEvent result(Realm::IndexSpace<DIM,T>::compute_intersection(
               spaces, result_space, requests, precondition));
         set_realm_index_space(context->runtime->address_space, result_space);
         return result;
@@ -470,7 +470,7 @@ namespace Legion {
                       ctx->get_unique_id())
       }
       std::set<ApEvent> preconditions;
-      std::vector<Realm::ZIndexSpace<DIM,T> > spaces(handles.size());
+      std::vector<Realm::IndexSpace<DIM,T> > spaces(handles.size());
       for (unsigned idx = 0; idx < handles.size(); idx++)
       {
         IndexSpaceNode *node = context->get_node(handles[idx]);
@@ -503,14 +503,14 @@ namespace Legion {
                                             op, DEP_PART_DIFFERENCE);
       }
       // Compute the union of the handles for the right-hand side
-      Realm::ZIndexSpace<DIM,T> rhs_space;
-      ApEvent rhs_ready(Realm::ZIndexSpace<DIM,T>::compute_union(
+      Realm::IndexSpace<DIM,T> rhs_space;
+      ApEvent rhs_ready(Realm::IndexSpace<DIM,T>::compute_union(
             spaces, rhs_space, union_requests, precondition));
       IndexSpaceNodeT<DIM,T> *lhs_node = 
         static_cast<IndexSpaceNodeT<DIM,T>*>(context->get_node(init));
-      Realm::ZIndexSpace<DIM,T> lhs_space, result_space;
+      Realm::IndexSpace<DIM,T> lhs_space, result_space;
       ApEvent lhs_ready = lhs_node->get_realm_index_space(lhs_space, false);
-      ApEvent result(Realm::ZIndexSpace<DIM,T>::compute_difference(
+      ApEvent result(Realm::IndexSpace<DIM,T>::compute_difference(
             lhs_space, rhs_space, result_space, diff_requests,
             Runtime::merge_events(lhs_ready, rhs_ready)));
       set_realm_index_space(context->runtime->address_space, result_space);
@@ -528,8 +528,8 @@ namespace Legion {
       if (type_tag != handle.get_type_tag())
         REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
             "Dynamic type mismatch in 'get_index_space_domain'")
-      Realm::ZIndexSpace<DIM,T> *target = 
-        static_cast<Realm::ZIndexSpace<DIM,T>*>(realm_is);
+      Realm::IndexSpace<DIM,T> *target = 
+        static_cast<Realm::IndexSpace<DIM,T>*>(realm_is);
       // No need to wait since we're waiting for it to be tight
       // which implies that it will be ready
       get_realm_index_space(*target, true/*tight*/);
@@ -540,7 +540,7 @@ namespace Legion {
     size_t IndexSpaceNodeT<DIM,T>::get_volume(void)
     //--------------------------------------------------------------------------
     {
-      Realm::ZIndexSpace<DIM,T> volume_space;
+      Realm::IndexSpace<DIM,T> volume_space;
       get_realm_index_space(volume_space, true/*tight*/);
       return volume_space.volume();
     }
@@ -562,9 +562,9 @@ namespace Legion {
       if (type_tag != handle.get_type_tag())
         REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
             "Dynamic type mismatch in 'safe_cast'")
-      const Realm::ZPoint<DIM,T> *point = 
-        static_cast<const Realm::ZPoint<DIM,T>*>(realm_point);
-      Realm::ZIndexSpace<DIM,T> test_space;
+      const Realm::Point<DIM,T> *point = 
+        static_cast<const Realm::Point<DIM,T>*>(realm_point);
+      Realm::IndexSpace<DIM,T> test_space;
       // Wait for a tight space on which to perform the test
       get_realm_index_space(test_space, true/*tight*/);
       return test_space.contains(*point);
@@ -572,10 +572,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool IndexSpaceNodeT<DIM,T>::contains_point(const Realm::ZPoint<DIM,T> &p)
+    bool IndexSpaceNodeT<DIM,T>::contains_point(const Realm::Point<DIM,T> &p)
     //--------------------------------------------------------------------------
     {
-      Realm::ZIndexSpace<DIM,T> test_space;
+      Realm::IndexSpace<DIM,T> test_space;
       // Wait for a tight space on which to perform the test
       get_realm_index_space(test_space, true/*tight*/);
       return test_space.contains(p);
@@ -608,7 +608,7 @@ namespace Legion {
       {
         (*it)->destroy_node(source);
       }
-      Realm::ZIndexSpace<DIM,T> local_space;
+      Realm::IndexSpace<DIM,T> local_space;
       get_realm_index_space(local_space, true/*tight*/);
       local_space.destroy();
       for (typename std::map<IndexTreeNode*,IntersectInfo>::iterator it =
@@ -624,7 +624,7 @@ namespace Legion {
     LegionColor IndexSpaceNodeT<DIM,T>::get_max_linearized_color(void)
     //--------------------------------------------------------------------------
     {
-      Realm::ZIndexSpace<DIM,T> color_bounds;
+      Realm::IndexSpace<DIM,T> color_bounds;
       get_realm_index_space(color_bounds, true/*tight*/);
       return color_bounds.bounds.volume();
     }
@@ -634,10 +634,10 @@ namespace Legion {
     void IndexSpaceNodeT<DIM,T>::compute_linearization_metadata(void)
     //--------------------------------------------------------------------------
     {
-      Realm::ZIndexSpace<DIM,T> space;
+      Realm::IndexSpace<DIM,T> space;
       get_realm_index_space(space, true/*tight*/);
       // Don't need to wait for full index space since we just need bounds
-      const Realm::ZRect<DIM,T> &bounds = space.bounds;
+      const Realm::Rect<DIM,T> &bounds = space.bounds;
       const long long volume = bounds.volume();
       if (volume > 0)
       {
@@ -674,8 +674,8 @@ namespace Legion {
 #endif
       if (!linearization_ready)
         compute_linearization_metadata();
-      Realm::ZPoint<DIM,T> point = 
-        *(static_cast<const Realm::ZPoint<DIM,T>*>(realm_color));
+      Realm::Point<DIM,T> point = 
+        *(static_cast<const Realm::Point<DIM,T>*>(realm_color));
       // First subtract the offset to get to the origin
       point -= offset;
       LegionColor color = 0;
@@ -695,8 +695,8 @@ namespace Legion {
 #endif
       if (!linearization_ready)
         compute_linearization_metadata();
-      Realm::ZPoint<DIM,T> &point = 
-        *(static_cast<Realm::ZPoint<DIM,T>*>(realm_color));
+      Realm::Point<DIM,T> &point = 
+        *(static_cast<Realm::Point<DIM,T>*>(realm_color));
       for (int idx = DIM-1; idx >= 0; idx--)
       {
         point[idx] = color/strides[idx]; // truncates
@@ -711,9 +711,9 @@ namespace Legion {
                                                 bool report_error/*=false*/)
     //--------------------------------------------------------------------------
     {
-      Realm::ZPoint<DIM,T> point;
+      Realm::Point<DIM,T> point;
       delinearize_color(color, &point, handle.get_type_tag());
-      Realm::ZIndexSpace<DIM,T> space;
+      Realm::IndexSpace<DIM,T> space;
       get_realm_index_space(space, true/*tight*/);
       if (!space.contains(point))
       {
@@ -734,12 +734,12 @@ namespace Legion {
     {
       colors.resize(get_volume());
       unsigned idx = 0;
-      Realm::ZIndexSpace<DIM,T> space;
+      Realm::IndexSpace<DIM,T> space;
       get_realm_index_space(space, true/*tight*/);
-      for (Realm::ZIndexSpaceIterator<DIM,T> rect_itr(space); 
+      for (Realm::IndexSpaceIterator<DIM,T> rect_itr(space); 
             rect_itr.valid; rect_itr.step())
       {
-        for (Realm::ZPointInRectIterator<DIM,T> itr(rect_itr.rect);
+        for (Realm::PointInRectIterator<DIM,T> itr(rect_itr.rect);
               itr.valid; itr.step(), idx++)
           colors[idx] = linearize_color(&itr.p, handle.get_type_tag());
       }
@@ -750,7 +750,7 @@ namespace Legion {
     Domain IndexSpaceNodeT<DIM,T>::get_color_space_domain(void)
     //--------------------------------------------------------------------------
     {
-      Realm::ZIndexSpace<DIM,T> space;
+      Realm::IndexSpace<DIM,T> space;
       get_realm_index_space(space, true/*tight*/);
       return Domain(DomainT<DIM,T>(space));
     }
@@ -771,7 +771,7 @@ namespace Legion {
                                                                   LegionColor c)
     //--------------------------------------------------------------------------
     {
-      Realm::ZPoint<DIM,T> color_point;
+      Realm::Point<DIM,T> color_point;
       delinearize_color(c, &color_point, handle.get_type_tag());
       return DomainPoint(Point<DIM,T>(color_point));
     }
@@ -818,21 +818,21 @@ namespace Legion {
         }
         // Otherwise we fall through and do the expensive test
       }
-      Realm::ZIndexSpace<DIM,T> lhs_space, rhs_space, intersection;
+      Realm::IndexSpace<DIM,T> lhs_space, rhs_space, intersection;
       ApEvent lhs_ready = get_realm_index_space(lhs_space, false);
       ApEvent rhs_ready = rhs_node->get_realm_index_space(rhs_space, false);
       Realm::ProfilingRequestSet requests;
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_partition_request(requests,
                     (Operation*)NULL/*op*/, DEP_PART_INTERSECTION);
-      ApEvent ready(Realm::ZIndexSpace<DIM,T>::compute_intersection(
+      ApEvent ready(Realm::IndexSpace<DIM,T>::compute_intersection(
         lhs_space, rhs_space, intersection, requests,
         Runtime::merge_events(lhs_ready, rhs_ready)));
       // Wait for the result to be ready
       if (!ready.has_triggered())
         ready.lg_wait();
       // Always tighten these tests so that they are precise
-      Realm::ZIndexSpace<DIM,T> tight_intersection = intersection.tighten();
+      Realm::IndexSpace<DIM,T> tight_intersection = intersection.tighten();
       bool result = !tight_intersection.empty();
       AutoLock n_lock(node_lock);
       if (result)
@@ -890,20 +890,20 @@ namespace Legion {
         }
         // Otherwise we fall through and do the expensive test
       }
-      Realm::ZIndexSpace<DIM,T> lhs_space, rhs_space, intersection;
+      Realm::IndexSpace<DIM,T> lhs_space, rhs_space, intersection;
       ApEvent lhs_ready = get_realm_index_space(lhs_space, false);
       ApEvent rhs_ready = rhs_node->get_union_index_space(rhs_space, false);
       Realm::ProfilingRequestSet requests;
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_partition_request(requests,
                     (Operation*)NULL/*op*/, DEP_PART_INTERSECTION);
-      ApEvent ready(Realm::ZIndexSpace<DIM,T>::compute_intersection(
+      ApEvent ready(Realm::IndexSpace<DIM,T>::compute_intersection(
             lhs_space, rhs_space, intersection, requests,
             Runtime::merge_events(lhs_ready, rhs_ready)));
       if (!ready.has_triggered())
         ready.lg_wait();
       // Always tighten these tests so that they are precise
-      Realm::ZIndexSpace<DIM,T> tight_intersection = intersection.tighten();
+      Realm::IndexSpace<DIM,T> tight_intersection = intersection.tighten();
       bool result = !tight_intersection.empty();
       AutoLock n_lock(node_lock);
       if (result)
@@ -958,7 +958,7 @@ namespace Legion {
         temp = temp->parent->parent;
       }
       // Otherwise we fall through and do the expensive test
-      Realm::ZIndexSpace<DIM,T> local_space, rhs_space, difference; 
+      Realm::IndexSpace<DIM,T> local_space, rhs_space, difference; 
       get_realm_index_space(local_space, true/*tight*/);
       bool result = false;
       if (!local_space.dense())
@@ -968,12 +968,12 @@ namespace Legion {
         if (context->runtime->profiler != NULL)
           context->runtime->profiler->add_partition_request(requests,
                         (Operation*)NULL/*op*/, DEP_PART_DIFFERENCE);
-        ApEvent ready(Realm::ZIndexSpace<DIM,T>::compute_difference(
+        ApEvent ready(Realm::IndexSpace<DIM,T>::compute_difference(
           rhs_space, local_space, difference, requests, rhs_ready));
         if (!ready.has_triggered())
           ready.lg_wait();
         // Always tighten these tests so that they are precise
-        Realm::ZIndexSpace<DIM,T> tight_difference = difference.tighten();
+        Realm::IndexSpace<DIM,T> tight_difference = difference.tighten();
         result = tight_difference.empty();
         difference.destroy();
         tight_difference.destroy();
@@ -1019,7 +1019,7 @@ namespace Legion {
         temp = temp->parent->parent;
       }
       // Otherwise we fall through and do the expensive test
-      Realm::ZIndexSpace<DIM,T> local_space, rhs_space, difference;
+      Realm::IndexSpace<DIM,T> local_space, rhs_space, difference;
       get_realm_index_space(local_space, true/*tight*/);
       bool result = false;
       if (!local_space.dense())
@@ -1029,12 +1029,12 @@ namespace Legion {
         if (context->runtime->profiler != NULL)
           context->runtime->profiler->add_partition_request(requests,
                         (Operation*)NULL/*op*/, DEP_PART_DIFFERENCE);
-        ApEvent ready(Realm::ZIndexSpace<DIM,T>::compute_difference(
+        ApEvent ready(Realm::IndexSpace<DIM,T>::compute_difference(
               rhs_space, local_space, difference, requests, rhs_ready));
         if (!ready.has_triggered())
           ready.lg_wait();
         // Always tighten these tests so that they are precise
-        Realm::ZIndexSpace<DIM,T> tight_difference = difference.tighten();
+        Realm::IndexSpace<DIM,T> tight_difference = difference.tighten();
         result = tight_difference.empty();
         difference.destroy();
         tight_difference.destroy();
@@ -1072,7 +1072,7 @@ namespace Legion {
     {
       size_t size;
       derez.deserialize(size);
-      Realm::ZIndexSpace<DIM,T> result_space;
+      Realm::IndexSpace<DIM,T> result_space;
 #ifdef DEBUG_LEGION
       assert(size == sizeof(result_space));
 #endif
@@ -1090,12 +1090,12 @@ namespace Legion {
       assert(partition->parent == this);
 #endif
       const size_t count = partition->color_space->get_volume(); 
-      std::vector<Realm::ZIndexSpace<DIM,T> > subspaces;
+      std::vector<Realm::IndexSpace<DIM,T> > subspaces;
       Realm::ProfilingRequestSet requests;
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_partition_request(requests,
                                                 op, DEP_PART_EQUAL);
-      Realm::ZIndexSpace<DIM,T> local_space;
+      Realm::IndexSpace<DIM,T> local_space;
       ApEvent ready = get_realm_index_space(local_space, false/*tight*/);
       if (op->has_execution_fence_event())
         ready = Runtime::merge_events(ready, op->get_execution_fence_event());
@@ -1156,8 +1156,8 @@ namespace Legion {
       assert(partition->parent == this);
 #endif
       const size_t count = partition->color_space->get_volume();
-      std::vector<Realm::ZIndexSpace<DIM,T> > lhs_spaces(count);
-      std::vector<Realm::ZIndexSpace<DIM,T> > rhs_spaces(count);
+      std::vector<Realm::IndexSpace<DIM,T> > lhs_spaces(count);
+      std::vector<Realm::IndexSpace<DIM,T> > rhs_spaces(count);
       std::set<ApEvent> preconditions;
       // First we need to fill in all the subspaces
       unsigned subspace_index = 0;
@@ -1210,7 +1210,7 @@ namespace Legion {
             preconditions.insert(right_ready);
         }
       }
-      std::vector<Realm::ZIndexSpace<DIM,T> > subspaces;
+      std::vector<Realm::IndexSpace<DIM,T> > subspaces;
       Realm::ProfilingRequestSet requests;
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_partition_request(requests,
@@ -1218,7 +1218,7 @@ namespace Legion {
       if (op->has_execution_fence_event())
         preconditions.insert(op->get_execution_fence_event());
       ApEvent precondition = Runtime::merge_events(preconditions);
-      ApEvent result(Realm::ZIndexSpace<DIM,T>::compute_unions(
+      ApEvent result(Realm::IndexSpace<DIM,T>::compute_unions(
             lhs_spaces, rhs_spaces, subspaces, requests, precondition));
 #ifdef LEGION_SPY
       if (!result.exists())
@@ -1276,8 +1276,8 @@ namespace Legion {
       assert(partition->parent == this);
 #endif
       const size_t count = partition->color_space->get_volume();
-      std::vector<Realm::ZIndexSpace<DIM,T> > lhs_spaces(count);
-      std::vector<Realm::ZIndexSpace<DIM,T> > rhs_spaces(count);
+      std::vector<Realm::IndexSpace<DIM,T> > lhs_spaces(count);
+      std::vector<Realm::IndexSpace<DIM,T> > rhs_spaces(count);
       std::set<ApEvent> preconditions;
       // First we need to fill in all the subspaces
       unsigned subspace_index = 0;
@@ -1330,7 +1330,7 @@ namespace Legion {
             preconditions.insert(right_ready);
         }
       }
-      std::vector<Realm::ZIndexSpace<DIM,T> > subspaces;
+      std::vector<Realm::IndexSpace<DIM,T> > subspaces;
       Realm::ProfilingRequestSet requests;
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_partition_request(requests,
@@ -1338,7 +1338,7 @@ namespace Legion {
       if (op->has_execution_fence_event())
         preconditions.insert(op->get_execution_fence_event());
       ApEvent precondition = Runtime::merge_events(preconditions);
-      ApEvent result(Realm::ZIndexSpace<DIM,T>::compute_intersections(
+      ApEvent result(Realm::IndexSpace<DIM,T>::compute_intersections(
             lhs_spaces, rhs_spaces, subspaces, requests, precondition));
 #ifdef LEGION_SPY
       if (!result.exists())
@@ -1396,7 +1396,7 @@ namespace Legion {
       assert(partition->parent == this);
 #endif
       const size_t count = partition->color_space->get_volume();
-      std::vector<Realm::ZIndexSpace<DIM,T> > rhs_spaces(count);
+      std::vector<Realm::IndexSpace<DIM,T> > rhs_spaces(count);
       std::set<ApEvent> preconditions;
       // First we need to fill in all the subspaces
       unsigned subspace_index = 0;
@@ -1435,19 +1435,19 @@ namespace Legion {
             preconditions.insert(right_ready);
         }
       }
-      std::vector<Realm::ZIndexSpace<DIM,T> > subspaces;
+      std::vector<Realm::IndexSpace<DIM,T> > subspaces;
       Realm::ProfilingRequestSet requests;
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_partition_request(requests,
                                         op, DEP_PART_INTERSECTIONS);
-      Realm::ZIndexSpace<DIM,T> lhs_space;
+      Realm::IndexSpace<DIM,T> lhs_space;
       ApEvent left_ready = get_realm_index_space(lhs_space, false/*tight*/);
       if (left_ready.exists())
         preconditions.insert(left_ready);
       if (op->has_execution_fence_event())
         preconditions.insert(op->get_execution_fence_event());
       ApEvent precondition = Runtime::merge_events(preconditions);
-      ApEvent result(Realm::ZIndexSpace<DIM,T>::compute_intersections(
+      ApEvent result(Realm::IndexSpace<DIM,T>::compute_intersections(
             lhs_space, rhs_spaces, subspaces, requests, precondition));
 #ifdef LEGION_SPY
       if (!result.exists())
@@ -1505,8 +1505,8 @@ namespace Legion {
       assert(partition->parent == this);
 #endif
       const size_t count = partition->color_space->get_volume();
-      std::vector<Realm::ZIndexSpace<DIM,T> > lhs_spaces(count);
-      std::vector<Realm::ZIndexSpace<DIM,T> > rhs_spaces(count);
+      std::vector<Realm::IndexSpace<DIM,T> > lhs_spaces(count);
+      std::vector<Realm::IndexSpace<DIM,T> > rhs_spaces(count);
       std::set<ApEvent> preconditions;
       // First we need to fill in all the subspaces
       unsigned subspace_index = 0;
@@ -1559,7 +1559,7 @@ namespace Legion {
             preconditions.insert(right_ready);
         }
       }
-      std::vector<Realm::ZIndexSpace<DIM,T> > subspaces;
+      std::vector<Realm::IndexSpace<DIM,T> > subspaces;
       Realm::ProfilingRequestSet requests;
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_partition_request(requests,
@@ -1567,7 +1567,7 @@ namespace Legion {
       if (op->has_execution_fence_event())
         preconditions.insert(op->get_execution_fence_event());
       ApEvent precondition = Runtime::merge_events(preconditions);
-      ApEvent result(Realm::ZIndexSpace<DIM,T>::compute_differences(
+      ApEvent result(Realm::IndexSpace<DIM,T>::compute_differences(
             lhs_spaces, rhs_spaces, subspaces, requests, precondition));
 #ifdef LEGION_SPY
       if (!result.exists())
@@ -1630,28 +1630,28 @@ namespace Legion {
       {
         case 1:
           {
-            const Realm::ZMatrix<1,DIM,T> *transform = 
-              static_cast<const Realm::ZMatrix<1,DIM,T>*>(tran);
-            const Realm::ZRect<1,T> *extent = 
-              static_cast<const Realm::ZRect<1,T>*>(ext);
+            const Realm::Matrix<1,DIM,T> *transform = 
+              static_cast<const Realm::Matrix<1,DIM,T>*>(tran);
+            const Realm::Rect<1,T> *extent = 
+              static_cast<const Realm::Rect<1,T>*>(ext);
             return create_by_restriction_helper<1>(partition, 
                                                    *transform, *extent);
           }
         case 2:
           {
-            const Realm::ZMatrix<2,DIM,T> *transform = 
-              static_cast<const Realm::ZMatrix<2,DIM,T>*>(tran);
-            const Realm::ZRect<2,T> *extent = 
-              static_cast<const Realm::ZRect<2,T>*>(ext);
+            const Realm::Matrix<2,DIM,T> *transform = 
+              static_cast<const Realm::Matrix<2,DIM,T>*>(tran);
+            const Realm::Rect<2,T> *extent = 
+              static_cast<const Realm::Rect<2,T>*>(ext);
             return create_by_restriction_helper<2>(partition, 
                                                    *transform, *extent);
           }
         case 3:
           {
-            const Realm::ZMatrix<3,DIM,T> *transform = 
-              static_cast<const Realm::ZMatrix<3,DIM,T>*>(tran);
-            const Realm::ZRect<3,T> *extent = 
-              static_cast<const Realm::ZRect<3,T>*>(ext);
+            const Realm::Matrix<3,DIM,T> *transform = 
+              static_cast<const Realm::Matrix<3,DIM,T>*>(tran);
+            const Realm::Rect<3,T> *extent = 
+              static_cast<const Realm::Rect<3,T>*>(ext);
             return create_by_restriction_helper<3>(partition, 
                                                    *transform, *extent);
           }
@@ -1665,27 +1665,27 @@ namespace Legion {
     template<int N, typename T> template<int M>
     ApEvent IndexSpaceNodeT<N,T>::create_by_restriction_helper(
                                         IndexPartNode *partition,
-                                        const Realm::ZMatrix<M,N,T> &transform,
-                                        const Realm::ZRect<M,T> &extent)
+                                        const Realm::Matrix<M,N,T> &transform,
+                                        const Realm::Rect<M,T> &extent)
     //--------------------------------------------------------------------------
     {
       // Get the parent index space in case it has a sparsity map
       IndexSpaceNodeT<M,T> *parent = 
                       static_cast<IndexSpaceNodeT<M,T>*>(partition->parent);
       // No need to wait since we'll just be messing with the bounds
-      Realm::ZIndexSpace<M,T> parent_is;
+      Realm::IndexSpace<M,T> parent_is;
       parent->get_realm_index_space(parent_is, true/*tight*/);
-      Realm::ZIndexSpace<N,T> local_is;
+      Realm::IndexSpace<N,T> local_is;
       get_realm_index_space(local_is, true/*tight*/);
       // Iterate over our points (colors) and fill in the bounds
-      for (Realm::ZIndexSpaceIterator<N,T> rect_itr(local_is); 
+      for (Realm::IndexSpaceIterator<N,T> rect_itr(local_is); 
             rect_itr.valid; rect_itr.step())
       {
-        for (Realm::ZPointInRectIterator<N,T> color_itr(rect_itr.rect); 
+        for (Realm::PointInRectIterator<N,T> color_itr(rect_itr.rect); 
               color_itr.valid; color_itr.step())
         {
           // Copy the index space from the parent
-          Realm::ZIndexSpace<M,T> child_is = parent_is;
+          Realm::IndexSpace<M,T> child_is = parent_is;
           // Compute the new bounds and intersect it with the parent bounds
           child_is.bounds = parent_is.bounds.intersection(
                               extent + transform * color_itr.p);
@@ -1734,15 +1734,15 @@ namespace Legion {
       IndexSpaceNodeT<COLOR_DIM,COLOR_T> *color_space = 
        static_cast<IndexSpaceNodeT<COLOR_DIM,COLOR_T>*>(partition->color_space);
       // Enumerate the color space
-      Realm::ZIndexSpace<COLOR_DIM,COLOR_T> realm_color_space;
+      Realm::IndexSpace<COLOR_DIM,COLOR_T> realm_color_space;
       color_space->get_realm_index_space(realm_color_space, true/*tight*/);
       const size_t num_colors = realm_color_space.volume();
-      std::vector<Realm::ZPoint<COLOR_DIM,COLOR_T> > colors(num_colors);
+      std::vector<Realm::Point<COLOR_DIM,COLOR_T> > colors(num_colors);
       unsigned index = 0;
-      for (Realm::ZIndexSpaceIterator<COLOR_DIM,COLOR_T> 
+      for (Realm::IndexSpaceIterator<COLOR_DIM,COLOR_T> 
             rect_iter(realm_color_space); rect_iter.valid; rect_iter.step())
       {
-        for (Realm::ZPointInRectIterator<COLOR_DIM,COLOR_T> 
+        for (Realm::PointInRectIterator<COLOR_DIM,COLOR_T> 
               itr(rect_iter.rect); itr.valid; itr.step())
         {
 #ifdef DEBUG_LEGION
@@ -1752,8 +1752,8 @@ namespace Legion {
         }
       }
       // Translate the instances to realm field data descriptors
-      typedef Realm::FieldDataDescriptor<Realm::ZIndexSpace<DIM,T>,
-                Realm::ZPoint<COLOR_DIM,COLOR_T> > RealmDescriptor;
+      typedef Realm::FieldDataDescriptor<Realm::IndexSpace<DIM,T>,
+                Realm::Point<COLOR_DIM,COLOR_T> > RealmDescriptor;
       std::vector<RealmDescriptor> descriptors(instances.size());
       std::set<ApEvent> preconditions; 
       for (unsigned idx = 0; idx < instances.size(); idx++)
@@ -1775,8 +1775,8 @@ namespace Legion {
         context->runtime->profiler->add_partition_request(requests,
                                             op, DEP_PART_BY_FIELD);
       // Perform the operation
-      std::vector<Realm::ZIndexSpace<DIM,T> > subspaces;
-      Realm::ZIndexSpace<DIM,T> local_space;
+      std::vector<Realm::IndexSpace<DIM,T> > subspaces;
+      Realm::IndexSpace<DIM,T> local_space;
       ApEvent ready = get_realm_index_space(local_space, false/*tight*/);
       if (ready.exists())
         preconditions.insert(ready);
@@ -1839,7 +1839,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Get the index spaces of the projection partition
-      std::vector<Realm::ZIndexSpace<DIM2,T2> > 
+      std::vector<Realm::IndexSpace<DIM2,T2> > 
                                 sources(projection->color_space->get_volume());
       std::set<ApEvent> preconditions; 
       if (partition->total_children == partition->max_linearized_color)
@@ -1878,8 +1878,8 @@ namespace Legion {
         }
       }
       // Translate the descriptors into realm descriptors
-      typedef Realm::FieldDataDescriptor<Realm::ZIndexSpace<DIM2,T2>,
-                                       Realm::ZPoint<DIM1,T1> > RealmDescriptor;
+      typedef Realm::FieldDataDescriptor<Realm::IndexSpace<DIM2,T2>,
+                                       Realm::Point<DIM1,T1> > RealmDescriptor;
       std::vector<RealmDescriptor> descriptors(instances.size());
       for (unsigned idx = 0; idx < instances.size(); idx++)
       {
@@ -1900,8 +1900,8 @@ namespace Legion {
         context->runtime->profiler->add_partition_request(requests,
                                             op, DEP_PART_BY_IMAGE);
       // Perform the operation
-      std::vector<Realm::ZIndexSpace<DIM1,T1> > subspaces;
-      Realm::ZIndexSpace<DIM1,T1> local_space;
+      std::vector<Realm::IndexSpace<DIM1,T1> > subspaces;
+      Realm::IndexSpace<DIM1,T1> local_space;
       ApEvent ready = get_realm_index_space(local_space, false/*tight*/);
       if (ready.exists())
         preconditions.insert(ready);
@@ -1985,7 +1985,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Get the index spaces of the projection partition
-      std::vector<Realm::ZIndexSpace<DIM2,T2> > 
+      std::vector<Realm::IndexSpace<DIM2,T2> > 
                                 sources(projection->color_space->get_volume());
       std::set<ApEvent> preconditions;
       if (partition->total_children == partition->max_linearized_color)
@@ -2024,8 +2024,8 @@ namespace Legion {
         }
       }
       // Translate the descriptors into realm descriptors
-      typedef Realm::FieldDataDescriptor<Realm::ZIndexSpace<DIM2,T2>,
-                                       Realm::ZRect<DIM1,T1> > RealmDescriptor;
+      typedef Realm::FieldDataDescriptor<Realm::IndexSpace<DIM2,T2>,
+                                       Realm::Rect<DIM1,T1> > RealmDescriptor;
       std::vector<RealmDescriptor> descriptors(instances.size());
       for (unsigned idx = 0; idx < instances.size(); idx++)
       {
@@ -2046,8 +2046,8 @@ namespace Legion {
         context->runtime->profiler->add_partition_request(requests,
                                             op, DEP_PART_BY_IMAGE_RANGE);
       // Perform the operation
-      std::vector<Realm::ZIndexSpace<DIM1,T1> > subspaces;
-      Realm::ZIndexSpace<DIM1,T1> local_space;
+      std::vector<Realm::IndexSpace<DIM1,T1> > subspaces;
+      Realm::IndexSpace<DIM1,T1> local_space;
       ApEvent ready = get_realm_index_space(local_space, false/*tight*/);
       if (ready.exists())
         preconditions.insert(ready);
@@ -2130,7 +2130,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Get the index spaces of the projection partition
-      std::vector<Realm::ZIndexSpace<DIM2,T2> > 
+      std::vector<Realm::IndexSpace<DIM2,T2> > 
                                 targets(projection->color_space->get_volume());
       std::set<ApEvent> preconditions;
       if (partition->total_children == partition->max_linearized_color)
@@ -2169,8 +2169,8 @@ namespace Legion {
         }
       }
       // Translate the descriptors into realm descriptors
-      typedef Realm::FieldDataDescriptor<Realm::ZIndexSpace<DIM1,T1>,
-                                       Realm::ZPoint<DIM2,T2> > RealmDescriptor;
+      typedef Realm::FieldDataDescriptor<Realm::IndexSpace<DIM1,T1>,
+                                       Realm::Point<DIM2,T2> > RealmDescriptor;
       std::vector<RealmDescriptor> descriptors(instances.size());
       for (unsigned idx = 0; idx < instances.size(); idx++)
       {
@@ -2191,8 +2191,8 @@ namespace Legion {
         context->runtime->profiler->add_partition_request(requests,
                                             op, DEP_PART_BY_PREIMAGE);
       // Perform the operation
-      std::vector<Realm::ZIndexSpace<DIM1,T1> > subspaces;
-      Realm::ZIndexSpace<DIM1,T1> local_space;
+      std::vector<Realm::IndexSpace<DIM1,T1> > subspaces;
+      Realm::IndexSpace<DIM1,T1> local_space;
       ApEvent ready = get_realm_index_space(local_space, false/*tight*/);
       if (ready.exists())
         preconditions.insert(ready);
@@ -2276,7 +2276,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Get the index spaces of the projection partition
-      std::vector<Realm::ZIndexSpace<DIM2,T2> > 
+      std::vector<Realm::IndexSpace<DIM2,T2> > 
                                 targets(projection->color_space->get_volume());
       std::set<ApEvent> preconditions;
       if (partition->total_children == partition->max_linearized_color)
@@ -2315,8 +2315,8 @@ namespace Legion {
         }
       }
       // Translate the descriptors into realm descriptors
-      typedef Realm::FieldDataDescriptor<Realm::ZIndexSpace<DIM1,T1>,
-                                       Realm::ZRect<DIM2,T2> > RealmDescriptor;
+      typedef Realm::FieldDataDescriptor<Realm::IndexSpace<DIM1,T1>,
+                                       Realm::Rect<DIM2,T2> > RealmDescriptor;
       std::vector<RealmDescriptor> descriptors(instances.size());
       for (unsigned idx = 0; idx < instances.size(); idx++)
       {
@@ -2337,8 +2337,8 @@ namespace Legion {
         context->runtime->profiler->add_partition_request(requests,
                                             op, DEP_PART_BY_PREIMAGE_RANGE);
       // Perform the operation
-      std::vector<Realm::ZIndexSpace<DIM1,T1> > subspaces;
-      Realm::ZIndexSpace<DIM1,T1> local_space;
+      std::vector<Realm::IndexSpace<DIM1,T1> > subspaces;
+      Realm::IndexSpace<DIM1,T1> local_space;
       ApEvent ready = get_realm_index_space(local_space, false/*tight*/);
       if (ready.exists())
         preconditions.insert(ready);
@@ -2416,8 +2416,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Translate the descriptors into realm descriptors
-      typedef Realm::FieldDataDescriptor<Realm::ZIndexSpace<DIM1,T1>,
-                                       Realm::ZPoint<DIM2,T2> > RealmDescriptor;
+      typedef Realm::FieldDataDescriptor<Realm::IndexSpace<DIM1,T1>,
+                                       Realm::Point<DIM2,T2> > RealmDescriptor;
       std::vector<RealmDescriptor> descriptors(instances.size());
       std::set<ApEvent> preconditions;
       for (unsigned idx = 0; idx < instances.size(); idx++)
@@ -2436,7 +2436,7 @@ namespace Legion {
       // Get the range index space
       IndexSpaceNodeT<DIM2,T2> *range_node = 
         static_cast<IndexSpaceNodeT<DIM2,T2>*>(range);
-      Realm::ZIndexSpace<DIM2,T2> range_space;
+      Realm::IndexSpace<DIM2,T2> range_space;
       ApEvent range_ready = range_node->get_realm_index_space(range_space,
                                                               false/*tight*/);
       if (range_ready.exists())
@@ -2446,7 +2446,7 @@ namespace Legion {
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_partition_request(requests,
                                           op, DEP_PART_ASSOCIATION);
-      Realm::ZIndexSpace<DIM1,T1> local_space;
+      Realm::IndexSpace<DIM1,T1> local_space;
       ApEvent local_ready = get_realm_index_space(local_space, false/*tight*/);
       if (local_ready.exists())
         preconditions.insert(local_ready);
@@ -2476,9 +2476,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (range)
-        return (sizeof(Realm::ZRect<DIM,T>) == field_size);
+        return (sizeof(Realm::Rect<DIM,T>) == field_size);
       else
-        return (sizeof(Realm::ZPoint<DIM,T>) == field_size);
+        return (sizeof(Realm::Point<DIM,T>) == field_size);
     }
 
     //--------------------------------------------------------------------------
@@ -2506,7 +2506,7 @@ namespace Legion {
         // Include our event precondition if necessary
         if (index_space_ready.exists())
           precondition = Runtime::merge_events(precondition, index_space_ready);
-        Realm::ZIndexSpace<DIM,T> local_space;
+        Realm::IndexSpace<DIM,T> local_space;
         get_realm_index_space(local_space, true/*tight*/);
         // Have to protect against misspeculation
         if (predicate_guard.exists())
@@ -2523,7 +2523,7 @@ namespace Legion {
       else
       {
         // This is a copy between the intersection of two nodes
-        Realm::ZIndexSpace<DIM,T> intersection;
+        Realm::IndexSpace<DIM,T> intersection;
         if (intersect->is_index_space_node())
         {
           IndexSpaceNode *intersect_node = intersect->as_index_space_node();
@@ -2621,7 +2621,7 @@ namespace Legion {
         // Include our event precondition if necessary
         if (index_space_ready.exists())
           precondition = Runtime::merge_events(precondition, index_space_ready);
-        Realm::ZIndexSpace<DIM,T> local_space;
+        Realm::IndexSpace<DIM,T> local_space;
         get_realm_index_space(local_space, true/*tight*/);
         // Have to protect against misspeculation
         if (predicate_guard.exists())
@@ -2638,7 +2638,7 @@ namespace Legion {
       else
       {
         // This is a copy between the intersection of two nodes
-        Realm::ZIndexSpace<DIM,T> intersection;
+        Realm::IndexSpace<DIM,T> intersection;
         if (intersect->is_index_space_node())
         {
           IndexSpaceNode *intersect_node = intersect->as_index_space_node();
@@ -2706,7 +2706,7 @@ namespace Legion {
                                     const Realm::InstanceLayoutConstraints &ilc)
     //--------------------------------------------------------------------------
     {
-      Realm::ZIndexSpace<DIM,T> local_is;
+      Realm::IndexSpace<DIM,T> local_is;
       get_realm_index_space(local_is, true/*tight*/);
       return Realm::InstanceLayoutGeneric::choose_instance_layout(local_is,ilc);
     }
@@ -2722,7 +2722,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(context->runtime, REALM_CREATE_INSTANCE_CALL);
       // Have to wait for the index space to be ready if necessary
-      Realm::ZIndexSpace<DIM,T> local_space;
+      Realm::IndexSpace<DIM,T> local_space;
       get_realm_index_space(local_space, true/*tight*/);
       // No profiling for these kinds of instances currently
       Realm::ProfilingRequestSet requests;
@@ -2749,7 +2749,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(context->runtime, REALM_CREATE_INSTANCE_CALL);
       // Have to wait for the index space to be ready if necessary
-      Realm::ZIndexSpace<DIM,T> local_space;
+      Realm::IndexSpace<DIM,T> local_space;
       get_realm_index_space(local_space, true/*tight*/);
       // No profiling for these kinds of instances currently
       Realm::ProfilingRequestSet requests;
@@ -2799,12 +2799,12 @@ namespace Legion {
       }
       // Iterate over the points and make sure that they exist in exactly
       // one slice space, no more, no less
-      Realm::ZIndexSpace<DIM,T> local_space;
+      Realm::IndexSpace<DIM,T> local_space;
       get_realm_index_space(local_space, true/*tight*/);
       for (PointInDomainIterator<DIM,T> itr(local_space); itr(); itr++)
       {
         bool found = false;
-        const Realm::ZPoint<DIM,T> &point = *itr;
+        const Realm::Point<DIM,T> &point = *itr;
         for (unsigned idx = 0; idx < slice_nodes.size(); idx++)
         {
           if (!slice_nodes[idx]->contains_point(point))
@@ -2834,9 +2834,9 @@ namespace Legion {
     void IndexSpaceNodeT<DIM,T>::log_launch_space(UniqueID op_id)
     //--------------------------------------------------------------------------
     {
-      Realm::ZIndexSpace<DIM,T> local_space;
+      Realm::IndexSpace<DIM,T> local_space;
       get_realm_index_space(local_space, true/*tight*/);
-      for (Realm::ZIndexSpaceIterator<DIM,T> itr(local_space); 
+      for (Realm::IndexSpaceIterator<DIM,T> itr(local_space); 
             itr.valid; itr.step())
         LegionSpy::log_launch_index_space_rect<DIM>(op_id, 
                                                     Rect<DIM,T>(itr.rect));
@@ -2911,7 +2911,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!is_disjoint());
 #endif
-      Realm::ZIndexSpace<DIM,T> parent_space, union_space, difference_space;
+      Realm::IndexSpace<DIM,T> parent_space, union_space, difference_space;
       get_union_index_space(union_space, true/*tight*/);
       ApEvent parent_ready = 
         static_cast<IndexSpaceNodeT<DIM,T>*>(parent)->get_realm_index_space(
@@ -2920,12 +2920,12 @@ namespace Legion {
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_partition_request(requests,
                       (Operation*)NULL/*op*/, DEP_PART_DIFFERENCE);
-      ApEvent diff_ready(Realm::ZIndexSpace<DIM,T>::compute_difference(
+      ApEvent diff_ready(Realm::IndexSpace<DIM,T>::compute_difference(
           parent_space, union_space, difference_space, requests, parent_ready));
       if (!diff_ready.has_triggered())
         diff_ready.lg_wait();
       // Always tighten these tests so that they are precise
-      Realm::ZIndexSpace<DIM,T> tight_space = difference_space.tighten();
+      Realm::IndexSpace<DIM,T> tight_space = difference_space.tighten();
       bool complete = tight_space.empty();
       difference_space.destroy();
       tight_space.destroy();
@@ -2968,7 +2968,7 @@ namespace Legion {
         }
         // Otherwise fall through and do the expensive test
       }
-      Realm::ZIndexSpace<DIM,T> lhs_space, rhs_space, intersection;
+      Realm::IndexSpace<DIM,T> lhs_space, rhs_space, intersection;
       ApEvent union_precondition = get_union_index_space(lhs_space, false);
       ApEvent rhs_ready = rhs_node->get_realm_index_space(rhs_space, 
                                                           false/*tight*/);
@@ -2976,13 +2976,13 @@ namespace Legion {
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_partition_request(requests,
                     (Operation*)NULL/*op*/, DEP_PART_INTERSECTION);
-      ApEvent ready(Realm::ZIndexSpace<DIM,T>::compute_intersection(
+      ApEvent ready(Realm::IndexSpace<DIM,T>::compute_intersection(
             lhs_space, rhs_space, intersection, requests,
             Runtime::merge_events(union_precondition, rhs_ready)));
       if (!ready.has_triggered())
         ready.lg_wait();
       // Always tighten these tests so that they are precise
-      Realm::ZIndexSpace<DIM,T> tight_intersection = intersection.tighten();
+      Realm::IndexSpace<DIM,T> tight_intersection = intersection.tighten();
       bool result = !tight_intersection.empty();
       AutoLock n_lock(node_lock);
       if (result)
@@ -3040,7 +3040,7 @@ namespace Legion {
           temp = temp->parent->parent;
         }
       }
-      Realm::ZIndexSpace<DIM,T> lhs_space, rhs_space, intersection;
+      Realm::IndexSpace<DIM,T> lhs_space, rhs_space, intersection;
       ApEvent union_precondition = get_union_index_space(lhs_space, 
                                                          false/*tight*/);
       ApEvent rhs_precondition = rhs_node->get_union_index_space(rhs_space, 
@@ -3049,13 +3049,13 @@ namespace Legion {
       if (context->runtime->profiler != NULL)
         context->runtime->profiler->add_partition_request(requests,
                     (Operation*)NULL/*op*/, DEP_PART_INTERSECTION);
-      ApEvent ready(Realm::ZIndexSpace<DIM,T>::compute_intersection(
+      ApEvent ready(Realm::IndexSpace<DIM,T>::compute_intersection(
             lhs_space, rhs_space, intersection, requests,
             Runtime::merge_events(union_precondition, rhs_precondition)));
       if (!ready.has_triggered())
         ready.lg_wait();
       // Always tighten these tests so that they are precise
-      Realm::ZIndexSpace<DIM,T> tight_intersection = intersection.tighten();
+      Realm::IndexSpace<DIM,T> tight_intersection = intersection.tighten();
       bool result = !tight_intersection.empty();
       AutoLock n_lock(node_lock);
       if (result)
@@ -3106,7 +3106,7 @@ namespace Legion {
         temp = temp->parent->parent;
       }
       // Otherwise fall through and do the expensive test
-      Realm::ZIndexSpace<DIM,T> union_space, rhs_space, difference;
+      Realm::IndexSpace<DIM,T> union_space, rhs_space, difference;
       get_union_index_space(union_space, true/*tight*/);
       bool result = false;
       if (!union_space.dense())
@@ -3117,12 +3117,12 @@ namespace Legion {
         if (context->runtime->profiler != NULL)
           context->runtime->profiler->add_partition_request(requests,
                           (Operation*)NULL/*op*/, DEP_PART_DIFFERENCE);
-        ApEvent ready(Realm::ZIndexSpace<DIM,T>::compute_difference(
+        ApEvent ready(Realm::IndexSpace<DIM,T>::compute_difference(
               rhs_space, union_space, difference, requests, rhs_ready));
         if (!ready.has_triggered())
           ready.lg_wait();
         // Always tighten these tests so that they are precise
-        Realm::ZIndexSpace<DIM,T> tight_difference = difference.tighten();
+        Realm::IndexSpace<DIM,T> tight_difference = difference.tighten();
         result = tight_difference.empty();
         difference.destroy();
         tight_difference.destroy();
@@ -3170,7 +3170,7 @@ namespace Legion {
         temp = temp->parent->parent;
       }
       // Otherwise we fall through and do the expensive test
-      Realm::ZIndexSpace<DIM,T> union_space, rhs_space, difference;
+      Realm::IndexSpace<DIM,T> union_space, rhs_space, difference;
       get_union_index_space(union_space, true/*tight*/);
       bool result = false;
       if (!union_space.dense())
@@ -3181,12 +3181,12 @@ namespace Legion {
         if (context->runtime->profiler != NULL)
           context->runtime->profiler->add_partition_request(requests,
                         (Operation*)NULL/*op*/, DEP_PART_DIFFERENCE);
-        ApEvent ready(Realm::ZIndexSpace<DIM,T>::compute_difference(
+        ApEvent ready(Realm::IndexSpace<DIM,T>::compute_difference(
               rhs_space, union_space, difference, requests, rhs_precondition));
         if (!ready.has_triggered())
           ready.lg_wait();
         // Always tighten these tests so that they are precise
-        Realm::ZIndexSpace<DIM,T> tight_difference = difference.tighten();
+        Realm::IndexSpace<DIM,T> tight_difference = difference.tighten();
         result = tight_difference.empty();
         difference.destroy();
         tight_difference.destroy();
@@ -3204,7 +3204,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     ApEvent IndexPartNodeT<DIM,T>::get_union_index_space(
-                      Realm::ZIndexSpace<DIM,T> &result, bool need_tight_result)
+                      Realm::IndexSpace<DIM,T> &result, bool need_tight_result)
     //--------------------------------------------------------------------------
     {
       if (!union_space_tight)
@@ -3213,7 +3213,7 @@ namespace Legion {
         {
           // Compute it and then check to see if we lost the race
           std::set<ApEvent> preconditions;
-          std::vector<Realm::ZIndexSpace<DIM,T> > subspaces(
+          std::vector<Realm::IndexSpace<DIM,T> > subspaces(
                                                     color_space->get_volume());
           unsigned subspace_index = 0;
           if (total_children == max_linearized_color)
@@ -3248,8 +3248,8 @@ namespace Legion {
           if (context->runtime->profiler != NULL)
             context->runtime->profiler->add_partition_request(requests,
                       (Operation*)NULL/*op*/, DEP_PART_UNION_REDUCTION);
-          Realm::ZIndexSpace<DIM,T> union_space;
-          ApEvent union_ready(Realm::ZIndexSpace<DIM,T>::compute_union(
+          Realm::IndexSpace<DIM,T> union_space;
+          ApEvent union_ready(Realm::IndexSpace<DIM,T>::compute_union(
                 subspaces, union_space, requests, 
                 Runtime::merge_events(preconditions)));
           bool delete_union_space = false;
@@ -3295,9 +3295,9 @@ namespace Legion {
         // If we make it here we need to tighten our result
         if (!partition_union_ready.has_triggered())
           partition_union_ready.lg_wait();
-        Realm::ZIndexSpace<DIM,T> tight_space = result.tighten();
+        Realm::IndexSpace<DIM,T> tight_space = result.tighten();
         // Retake the lock and see if we were the first to tighten
-        Realm::ZIndexSpace<DIM,T> to_destroy;
+        Realm::IndexSpace<DIM,T> to_destroy;
         {
           AutoLock n_lock(node_lock);
           if (!union_space_tight)

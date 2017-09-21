@@ -30,9 +30,9 @@ namespace Realm {
 
   template <int N, typename T>
   template <typename FT>
-  Event ZIndexSpace<N,T>::create_subspaces_by_field(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,FT> >& field_data,
+  Event IndexSpace<N,T>::create_subspaces_by_field(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,FT> >& field_data,
 						    const std::vector<FT>& colors,
-						    std::vector<ZIndexSpace<N,T> >& subspaces,
+						    std::vector<IndexSpace<N,T> >& subspaces,
 						    const ProfilingRequestSet &reqs,
 						    Event wait_on /*= Event::NO_EVENT*/) const
   {
@@ -65,8 +65,8 @@ namespace Realm {
   }
 
   template <int N, typename T, typename FT>
-  ByFieldMicroOp<N,T,FT>::ByFieldMicroOp(ZIndexSpace<N,T> _parent_space,
-					 ZIndexSpace<N,T> _inst_space,
+  ByFieldMicroOp<N,T,FT>::ByFieldMicroOp(IndexSpace<N,T> _parent_space,
+					 IndexSpace<N,T> _inst_space,
 					 RegionInstance _inst,
 					 size_t _field_offset)
     : parent_space(_parent_space)
@@ -113,22 +113,22 @@ namespace Realm {
     AffineAccessor<FT,N,T> a_data(inst, field_offset);
 
     // double iteration - use the instance's space first, since it's probably smaller
-    for(ZIndexSpaceIterator<N,T> it(inst_space); it.valid; it.step()) {
-      for(ZIndexSpaceIterator<N,T> it2(parent_space, it.rect); it2.valid; it2.step()) {
-	const ZRect<N,T>& r = it2.rect;
-	ZPoint<N,T> p = r.lo;
+    for(IndexSpaceIterator<N,T> it(inst_space); it.valid; it.step()) {
+      for(IndexSpaceIterator<N,T> it2(parent_space, it.rect); it2.valid; it2.step()) {
+	const Rect<N,T>& r = it2.rect;
+	Point<N,T> p = r.lo;
 	while(true) {
 	  FT val = a_data.read(p);
-	  ZPoint<N,T> p2 = p;
+	  Point<N,T> p2 = p;
 	  while(p2.x < r.hi.x) {
-	    ZPoint<N,T> p3 = p2;
+	    Point<N,T> p3 = p2;
 	    p3.x++;
 	    FT val2 = a_data.read(p3);
 	    if(val != val2) {
 	      // record old strip
 	      BM *&bmp = bitmasks[val];
 	      if(!bmp) bmp = new BM;
-	      bmp->add_rect(ZRect<N,T>(p,p2));
+	      bmp->add_rect(Rect<N,T>(p,p2));
 	      //std::cout << val << ": " << p << ".." << p2 << std::endl;
 	      val = val2;
 	      p = p3;
@@ -138,7 +138,7 @@ namespace Realm {
 	  // record whatever strip we have at the end
 	  BM *&bmp = bitmasks[val];
 	  if(!bmp) bmp = new BM;
-	  bmp->add_rect(ZRect<N,T>(p,p2));
+	  bmp->add_rect(Rect<N,T>(p,p2));
 	  //std::cout << val << ": " << p << ".." << p2 << std::endl;
 
 	  // are we done?
@@ -266,8 +266,8 @@ namespace Realm {
   // class ByFieldOperation<N,T,FT>
 
   template <int N, typename T, typename FT>
-  ByFieldOperation<N,T,FT>::ByFieldOperation(const ZIndexSpace<N,T>& _parent,
-					     const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,FT> >& _field_data,
+  ByFieldOperation<N,T,FT>::ByFieldOperation(const IndexSpace<N,T>& _parent,
+					     const std::vector<FieldDataDescriptor<IndexSpace<N,T>,FT> >& _field_data,
 					     const ProfilingRequestSet &reqs,
 					     Event _finish_event)
     : PartitioningOperation(reqs, _finish_event)
@@ -280,14 +280,14 @@ namespace Realm {
   {}
 
   template <int N, typename T, typename FT>
-  ZIndexSpace<N,T> ByFieldOperation<N,T,FT>::add_color(FT color)
+  IndexSpace<N,T> ByFieldOperation<N,T,FT>::add_color(FT color)
   {
     // an empty parent leads to trivially empty subspaces
     if(parent.empty())
-      return ZIndexSpace<N,T>::make_empty();
+      return IndexSpace<N,T>::make_empty();
 
     // otherwise it'll be something smaller than the current parent
-    ZIndexSpace<N,T> subspace;
+    IndexSpace<N,T> subspace;
     subspace.bounds = parent.bounds;
 
     // get a sparsity ID by round-robin'ing across the nodes that have field data
@@ -330,15 +330,15 @@ namespace Realm {
   template class ByFieldMicroOp<N,T,F>; \
   template class ByFieldOperation<N,T,F>; \
   template ByFieldMicroOp<N,T,F>::ByFieldMicroOp(gasnet_node_t, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \
-  template Event ZIndexSpace<N,T>::create_subspaces_by_field(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,F> >&, \
+  template Event IndexSpace<N,T>::create_subspaces_by_field(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,F> >&, \
 							     const std::vector<F>&, \
-							     std::vector<ZIndexSpace<N,T> >&, \
+							     std::vector<IndexSpace<N,T> >&, \
 							     const ProfilingRequestSet &, \
 							     Event) const;
   FOREACH_NTF(DOIT)
 
-#define ZP(N,T) ZPoint<N,T>
-#define ZR(N,T) ZRect<N,T>
+#define ZP(N,T) Point<N,T>
+#define ZR(N,T) Rect<N,T>
 #define DOIT2(N1,T1,N2,T2) \
   DOIT(N1,T1,ZP(N2,T2))
   //  DOIT(N1,T1,ZR(N2,T2))

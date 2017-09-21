@@ -33,7 +33,7 @@ namespace Realm {
 
     static DynamicTemplates::TagType type_tag(void);
 
-    ByFieldMicroOp(ZIndexSpace<N,T> _parent_space, ZIndexSpace<N,T> _inst_space,
+    ByFieldMicroOp(IndexSpace<N,T> _parent_space, IndexSpace<N,T> _inst_space,
 		   RegionInstance _inst, size_t _field_offset);
     virtual ~ByFieldMicroOp(void);
 
@@ -57,7 +57,7 @@ namespace Realm {
     template <typename BM>
     void populate_bitmasks(std::map<FT, BM *>& bitmasks);
 
-    ZIndexSpace<N,T> parent_space, inst_space;
+    IndexSpace<N,T> parent_space, inst_space;
     RegionInstance inst;
     size_t field_offset;
     bool value_range_valid, value_set_valid;
@@ -69,22 +69,22 @@ namespace Realm {
   template <int N, typename T, typename FT>
   class ByFieldOperation : public PartitioningOperation {
   public:
-    ByFieldOperation(const ZIndexSpace<N,T>& _parent,
-		     const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,FT> >& _field_data,
+    ByFieldOperation(const IndexSpace<N,T>& _parent,
+		     const std::vector<FieldDataDescriptor<IndexSpace<N,T>,FT> >& _field_data,
 		     const ProfilingRequestSet &reqs,
 		     Event _finish_event);
 
     virtual ~ByFieldOperation(void);
 
-    ZIndexSpace<N,T> add_color(FT color);
+    IndexSpace<N,T> add_color(FT color);
 
     virtual void execute(void);
 
     virtual void print(std::ostream& os) const;
 
   protected:
-    ZIndexSpace<N,T> parent;
-    std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,FT> > field_data;
+    IndexSpace<N,T> parent;
+    std::vector<FieldDataDescriptor<IndexSpace<N,T>,FT> > field_data;
     std::vector<FT> colors;
     std::vector<SparsityMap<N,T> > subspaces;
   };

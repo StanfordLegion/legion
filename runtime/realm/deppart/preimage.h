@@ -34,11 +34,11 @@ namespace Realm {
 
     static DynamicTemplates::TagType type_tag(void);
 
-    PreimageMicroOp(ZIndexSpace<N,T> _parent_space, ZIndexSpace<N,T> _inst_space,
+    PreimageMicroOp(IndexSpace<N,T> _parent_space, IndexSpace<N,T> _inst_space,
 		    RegionInstance _inst, size_t _field_offset, bool _is_ranged);
     virtual ~PreimageMicroOp(void);
 
-    void add_sparsity_output(ZIndexSpace<N2,T2> _target, SparsityMap<N,T> _sparsity);
+    void add_sparsity_output(IndexSpace<N2,T2> _target, SparsityMap<N,T> _sparsity);
 
     virtual void execute(void);
 
@@ -59,30 +59,30 @@ namespace Realm {
     template <typename BM>
     void populate_bitmasks_ranges(std::map<int, BM *>& bitmasks);
 
-    ZIndexSpace<N,T> parent_space, inst_space;
+    IndexSpace<N,T> parent_space, inst_space;
     RegionInstance inst;
     size_t field_offset;
     bool is_ranged;
-    std::vector<ZIndexSpace<N2,T2> > targets;
+    std::vector<IndexSpace<N2,T2> > targets;
     std::vector<SparsityMap<N,T> > sparsity_outputs;
   };
 
   template <int N, typename T, int N2, typename T2>
   class PreimageOperation : public PartitioningOperation {
   public:
-    PreimageOperation(const ZIndexSpace<N,T>& _parent,
-		      const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,ZPoint<N2,T2> > >& _field_data,
+    PreimageOperation(const IndexSpace<N,T>& _parent,
+		      const std::vector<FieldDataDescriptor<IndexSpace<N,T>,Point<N2,T2> > >& _field_data,
 		      const ProfilingRequestSet &reqs,
 		      Event _finish_event);
 
-    PreimageOperation(const ZIndexSpace<N,T>& _parent,
-		      const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,ZRect<N2,T2> > >& _field_data,
+    PreimageOperation(const IndexSpace<N,T>& _parent,
+		      const std::vector<FieldDataDescriptor<IndexSpace<N,T>,Rect<N2,T2> > >& _field_data,
 		      const ProfilingRequestSet &reqs,
 		      Event _finish_event);
 
     virtual ~PreimageOperation(void);
 
-    ZIndexSpace<N,T> add_target(const ZIndexSpace<N2,T2>& target);
+    IndexSpace<N,T> add_target(const IndexSpace<N2,T2>& target);
 
     virtual void execute(void);
 
@@ -90,17 +90,17 @@ namespace Realm {
 
     virtual void set_overlap_tester(void *tester);
 
-    void provide_sparse_image(int index, const ZRect<N2,T2> *rects, size_t count);
+    void provide_sparse_image(int index, const Rect<N2,T2> *rects, size_t count);
 
   protected:
-    ZIndexSpace<N,T> parent;
-    std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,ZPoint<N2,T2> > > ptr_data;
-    std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,ZRect<N2,T2> > > range_data;
-    std::vector<ZIndexSpace<N2,T2> > targets;
+    IndexSpace<N,T> parent;
+    std::vector<FieldDataDescriptor<IndexSpace<N,T>,Point<N2,T2> > > ptr_data;
+    std::vector<FieldDataDescriptor<IndexSpace<N,T>,Rect<N2,T2> > > range_data;
+    std::vector<IndexSpace<N2,T2> > targets;
     std::vector<SparsityMap<N,T> > preimages;
     GASNetHSL mutex;
     OverlapTester<N2,T2> *overlap_tester;
-    std::map<int, std::vector<ZRect<N2,T2> > > pending_sparse_images;
+    std::map<int, std::vector<Rect<N2,T2> > > pending_sparse_images;
     int remaining_sparse_images;
     std::vector<int> contrib_counts;
     AsyncMicroOp *dummy_overlap_uop;
@@ -126,13 +126,13 @@ namespace Realm {
 
     template <int N, typename T, int N2, typename T2>
     static void send_request(gasnet_node_t target, intptr_t output_op, int output_index,
-			     const ZRect<N2,T2> *rects, size_t count);
+			     const Rect<N2,T2> *rects, size_t count);
   };
 
   template <int N, typename T, int N2, typename T2>
   /*static*/ void ApproxImageResponseMessage::send_request(gasnet_node_t target, 
 							   intptr_t output_op, int output_index,
-							   const ZRect<N2,T2> *rects, size_t count)
+							   const Rect<N2,T2> *rects, size_t count)
   {
     RequestArgs args;
 
@@ -140,7 +140,7 @@ namespace Realm {
     args.approx_output_op = output_op;
     args.approx_output_index = output_index;
 
-    Message::request(target, args, rects, count * sizeof(ZRect<N2,T2>), PAYLOAD_COPY);
+    Message::request(target, args, rects, count * sizeof(Rect<N2,T2>), PAYLOAD_COPY);
   }
     
 };

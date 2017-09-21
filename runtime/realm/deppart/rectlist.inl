@@ -32,13 +32,13 @@ namespace Realm {
   {}
 
   template <int N, typename T>
-  inline void CoverageCounter<N,T>::add_point(const ZPoint<N,T>& p)
+  inline void CoverageCounter<N,T>::add_point(const Point<N,T>& p)
   {
     count++;
   }
 
   template <int N, typename T>
-  inline void CoverageCounter<N,T>::add_rect(const ZRect<N,T>& r)
+  inline void CoverageCounter<N,T>::add_rect(const Rect<N,T>& r)
   {
     count += r.volume();
   }
@@ -81,23 +81,23 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  inline void DenseRectangleList<N,T>::add_point(const ZPoint<N,T>& p)
+  inline void DenseRectangleList<N,T>::add_point(const Point<N,T>& p)
   {
     if(rects.empty()) {
-      rects.push_back(ZRect<N,T>(p, p));
+      rects.push_back(Rect<N,T>(p, p));
       return;
     }
 
     if(N == 1) {
       // optimize for sorted insertion (i.e. stuff at end)
       {
-	ZRect<N,T> &lr = *rects.rbegin();
+	Rect<N,T> &lr = *rects.rbegin();
 	if(p.x == (lr.hi.x + 1)) {
 	  lr.hi.x = p.x;
 	  return;
 	}
 	if(p.x > (lr.hi.x + 1)) {
-	  rects.push_back(ZRect<N,T>(p, p));
+	  rects.push_back(Rect<N,T>(p, p));
 	  if((max_rects > 0) && (rects.size() > (size_t)max_rects)) {
 	    //std::cout << "too big " << rects.size() << " > " << max_rects << "\n";
 	    merge_rects(max_rects);
@@ -147,7 +147,7 @@ namespace Realm {
 	  rects[lo].lo.x = p.x;
 	} else {
 	  // no merge - must insert
-	  rects.insert(rects.begin() + lo, ZRect<N,T>(p, p));
+	  rects.insert(rects.begin() + lo, Rect<N,T>(p, p));
 	  if((max_rects > 0) && (rects.size() > (size_t)max_rects)) {
 	    //std::cout << "too big " << rects.size() << " > " << max_rects << "\n";
 	    merge_rects(max_rects);
@@ -159,12 +159,12 @@ namespace Realm {
       // std::cout << " }}\n";
     } else {
       // just treat it as a small rectangle
-      add_rect(ZRect<N,T>(p,p));
+      add_rect(Rect<N,T>(p,p));
     }
   }
 
   template <int N, typename T>
-  inline bool can_merge(const ZRect<N,T>& r1, const ZRect<N,T>& r2)
+  inline bool can_merge(const Rect<N,T>& r1, const Rect<N,T>& r2)
   {
     // N-1 dimensions must match exactly and 1 may be adjacent
     int idx = 0;
@@ -191,13 +191,13 @@ namespace Realm {
   extern Logger log_part;
 
   template <int N, typename T>
-  inline std::ostream& operator<<(std::ostream& os, const std::vector<ZRect<N,T> >& v)
+  inline std::ostream& operator<<(std::ostream& os, const std::vector<Rect<N,T> >& v)
   {
     if(v.empty()) {
       os << "[]";
     } else {
       os << "[ ";
-      typename std::vector<ZRect<N,T> >::const_iterator it = v.begin();
+      typename std::vector<Rect<N,T> >::const_iterator it = v.begin();
       os << *it;
       while(++it != v.end())
 	os << ", " << *it;
@@ -208,7 +208,7 @@ namespace Realm {
 #endif
 
   template <int N, typename T>
-  inline void DenseRectangleList<N,T>::add_rect(const ZRect<N,T>& _r)
+  inline void DenseRectangleList<N,T>::add_rect(const Rect<N,T>& _r)
   {
     if(rects.empty()) {
       rects.push_back(_r);
@@ -217,7 +217,7 @@ namespace Realm {
 
     if(N == 1) {
       // try to optimize for sorted insertion (i.e. stuff at end)
-      ZRect<N,T> &lr = *rects.rbegin();
+      Rect<N,T> &lr = *rects.rbegin();
       if(_r.lo.x == (lr.hi.x + 1)) {
 	lr.hi.x = _r.hi.x;
 	return;
@@ -249,7 +249,7 @@ namespace Realm {
       // because of the early out tests above, 'lo' should always point at a
       //  valid index
       assert(lo < (int)rects.size());
-      ZRect<N,T> &mr = rects[lo];
+      Rect<N,T> &mr = rects[lo];
 
       // if the new rect fits entirely below the existing one, insert the new
       //  one here and we're done
@@ -274,13 +274,13 @@ namespace Realm {
     //std::cout << "slow path!\n";
     // our rectangle may break into multiple pieces that we have to 
     //  iteratively add
-    std::vector<ZRect<N,T> > to_add(1, _r);
+    std::vector<Rect<N,T> > to_add(1, _r);
 #ifdef REALM_DEBUG_RECT_MERGING
-    std::vector<ZRect<N,T> > orig_rects(rects);
+    std::vector<Rect<N,T> > orig_rects(rects);
 #endif
 
     while(!to_add.empty()) {
-      ZRect<N,T> r = to_add.back();
+      Rect<N,T> r = to_add.back();
       to_add.pop_back();
 
       // scan through rectangles, looking for containment (really good),
@@ -319,7 +319,7 @@ namespace Realm {
 	for(int j = 0; j < N; j++) {
 	  if(r.lo[j] < rects[i].lo[j]) {
 	    // leftover "below"
-	    ZRect<N,T> subr = r;
+	    Rect<N,T> subr = r;
 	    subr.hi[j] = rects[i].lo[j] - 1;
 	    r.lo[j] = rects[i].lo[j];
 	    to_add.push_back(subr);
@@ -327,7 +327,7 @@ namespace Realm {
 
 	  if(r.hi[j] > rects[i].hi[j]) {
 	    // leftover "above"
-	    ZRect<N,T> subr = r;
+	    Rect<N,T> subr = r;
 	    subr.lo[j] = rects[i].hi[j] + 1;
 	    r.hi[j] = rects[i].hi[j];
 	    to_add.push_back(subr);
@@ -383,21 +383,21 @@ namespace Realm {
   {}
 
   template <int N, typename T>
-  inline void HybridRectangleList<N,T>::add_point(const ZPoint<N,T>& p)
+  inline void HybridRectangleList<N,T>::add_point(const Point<N,T>& p)
   {
     as_vector.add_point(p);
-    //as_vector.push_back(ZRect<N,T>(p, p));
+    //as_vector.push_back(Rect<N,T>(p, p));
   }
 
   template <int N, typename T>
-  inline void HybridRectangleList<N,T>::add_rect(const ZRect<N,T>& r)
+  inline void HybridRectangleList<N,T>::add_rect(const Rect<N,T>& r)
   {
     as_vector.add_rect(r);
     //as_vector.push_back(r);
   }
 
   template <int N, typename T>
-  inline const std::vector<ZRect<N,T> >& HybridRectangleList<N,T>::convert_to_vector(void)
+  inline const std::vector<Rect<N,T> >& HybridRectangleList<N,T>::convert_to_vector(void)
   {
     return as_vector.rects;
   }
@@ -415,11 +415,11 @@ namespace Realm {
 
     HybridRectangleList(void);
 
-    void add_point(const ZPoint<1,T>& p);
+    void add_point(const Point<1,T>& p);
 
-    void add_rect(const ZRect<1,T>& r);
+    void add_rect(const Rect<1,T>& r);
 
-    const std::vector<ZRect<1,T> >& convert_to_vector(void);
+    const std::vector<Rect<1,T> >& convert_to_vector(void);
     void convert_to_map(void);
 
     bool is_vector;
@@ -432,7 +432,7 @@ namespace Realm {
   {}
 
   template <typename T>
-  void HybridRectangleList<1,T>::add_point(const ZPoint<1,T>& p)
+  void HybridRectangleList<1,T>::add_point(const Point<1,T>& p)
   {
     if(is_vector) {
       DenseRectangleList<1,T>::add_point(p);
@@ -498,7 +498,7 @@ namespace Realm {
   }
 
   template <typename T>
-  void HybridRectangleList<1,T>::add_rect(const ZRect<1,T>& r)
+  void HybridRectangleList<1,T>::add_rect(const Rect<1,T>& r)
   {
     if(is_vector) {
       DenseRectangleList<1,T>::add_rect(r);
@@ -558,7 +558,7 @@ namespace Realm {
   {
     if(!is_vector) return;
     assert(as_map.empty());
-    for(typename std::vector<ZRect<1,T> >::iterator it = this->rects.begin();
+    for(typename std::vector<Rect<1,T> >::iterator it = this->rects.begin();
 	it != this->rects.end();
 	it++)
       as_map[it->lo.x] = it->hi.x;
@@ -567,14 +567,14 @@ namespace Realm {
   }
 
   template <typename T>
-  const std::vector<ZRect<1,T> >& HybridRectangleList<1,T>::convert_to_vector(void)
+  const std::vector<Rect<1,T> >& HybridRectangleList<1,T>::convert_to_vector(void)
   {
     if(!is_vector) {
       assert(this->rects.empty());
       for(typename std::map<T, T>::iterator it = as_map.begin();
 	  it != as_map.end();
 	  it++) {
-	ZRect<1,T> r;
+	Rect<1,T> r;
 	r.lo.x = it->first;
 	r.hi.x = it->second;
 	this->rects.push_back(r);

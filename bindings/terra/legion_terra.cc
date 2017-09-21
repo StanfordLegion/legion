@@ -28,9 +28,9 @@
 
 using namespace Legion;
 
-typedef Realm::ZPoint<1,coord_t> Point1D;
-typedef Realm::ZPoint<2,coord_t> Point2D;
-typedef Realm::ZPoint<3,coord_t> Point3D;
+typedef Realm::Point<1,coord_t> Point1D;
+typedef Realm::Point<2,coord_t> Point2D;
+typedef Realm::Point<3,coord_t> Point3D;
 typedef CObjectWrapper::ArrayAccessor1D ArrayAccessor1D;
 typedef CObjectWrapper::ArrayAccessor2D ArrayAccessor2D;
 typedef CObjectWrapper::ArrayAccessor3D ArrayAccessor3D;
