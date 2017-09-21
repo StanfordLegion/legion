@@ -32,9 +32,9 @@ namespace Realm {
   public:
     CoverageCounter(void);
 
-    void add_point(const ZPoint<N,T>& p);
+    void add_point(const Point<N,T>& p);
 
-    void add_rect(const ZRect<N,T>& r);
+    void add_rect(const Rect<N,T>& r);
 
     size_t get_count(void) const;
 
@@ -47,13 +47,13 @@ namespace Realm {
   public:
     DenseRectangleList(size_t _max_rects = 0);
 
-    void add_point(const ZPoint<N,T>& p);
+    void add_point(const Point<N,T>& p);
 
-    void add_rect(const ZRect<N,T>& r);
+    void add_rect(const Rect<N,T>& r);
 
     void merge_rects(size_t upper_bound);
 
-    std::vector<ZRect<N,T> > rects;
+    std::vector<Rect<N,T> > rects;
     size_t max_rects;
   };
 
@@ -65,15 +65,15 @@ namespace Realm {
 
     HybridRectangleList(void);
 
-    void add_point(const ZPoint<N,T>& p);
+    void add_point(const Point<N,T>& p);
 
-    void add_rect(const ZRect<N,T>& r);
+    void add_rect(const Rect<N,T>& r);
 
-    const std::vector<ZRect<N,T> >& convert_to_vector(void);
+    const std::vector<Rect<N,T> >& convert_to_vector(void);
 
-    //std::vector<ZRect<N,T> > as_vector;
+    //std::vector<Rect<N,T> > as_vector;
     DenseRectangleList<N,T> as_vector;
-    //std::multimap<T, ZRect<N,T> > as_mmap;
+    //std::multimap<T, Rect<N,T> > as_mmap;
   };
     
 };

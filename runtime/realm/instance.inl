@@ -60,13 +60,13 @@ namespace Realm {
 
 #if 0		
   template <int N, typename T>
-  const ZIndexSpace<N,T>& RegionInstance::get_indexspace(void) const
+  const IndexSpace<N,T>& RegionInstance::get_indexspace(void) const
   {
     return get_lis().as_dim<N,T>().indexspace;
   }
 		
   template <int N>
-  const ZIndexSpace<N,int>& RegionInstance::get_indexspace(void) const
+  const IndexSpace<N,int>& RegionInstance::get_indexspace(void) const
   {
     return get_lis().as_dim<N,int>().indexspace;
   }
@@ -111,7 +111,7 @@ namespace Realm {
   template <int N, typename T>
   inline /*static*/ Event RegionInstance::create_instance(RegionInstance& inst,
 							  Memory memory,
-							  const ZIndexSpace<N,T>& space,
+							  const IndexSpace<N,T>& space,
 							  const std::vector<size_t> &field_sizes,
 							  size_t block_size,
 							  const ProfilingRequestSet& reqs,
@@ -125,14 +125,14 @@ namespace Realm {
     return create_instance(inst, memory, layout, reqs, wait_on);
   }
 
-  // we'd like the method above to accept a ZRect<N,T> in place of the
-  //  ZIndexSpace<N,T>, but that doesn't work unless the method template
+  // we'd like the method above to accept a Rect<N,T> in place of the
+  //  IndexSpace<N,T>, but that doesn't work unless the method template
   //  parameters are specified explicitly, so provide an overload that
-  //  takes a ZRect directly
+  //  takes a Rect directly
   template <int N, typename T>
   inline /*static*/ Event RegionInstance::create_instance(RegionInstance& inst,
 							  Memory memory,
-							  const ZRect<N,T>& rect,
+							  const Rect<N,T>& rect,
 							  const std::vector<size_t>& field_sizes,
 							  size_t block_size, // 0=SOA, 1=AOS, 2+=hybrid
 							  const ProfilingRequestSet& prs,
@@ -140,7 +140,7 @@ namespace Realm {
   {
     return RegionInstance::create_instance<N,T>(inst,
 						memory,
-						ZIndexSpace<N,T>(rect),
+						IndexSpace<N,T>(rect),
 						field_sizes,
 						block_size,
 						prs,

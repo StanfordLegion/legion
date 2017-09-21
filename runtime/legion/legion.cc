@@ -2585,7 +2585,7 @@ namespace Legion {
       assert(dom.get_dim() == 1);
 #endif
       const DomainT<1,coord_t> is = dom;
-      is_iterator = Realm::ZIndexSpaceIterator<1,coord_t>(is);
+      is_iterator = Realm::IndexSpaceIterator<1,coord_t>(is);
     }
 
     //--------------------------------------------------------------------------
@@ -2598,7 +2598,7 @@ namespace Legion {
       assert(dom.get_dim() == 1);
 #endif
       const DomainT<1,coord_t> is = dom;
-      is_iterator = Realm::ZIndexSpaceIterator<1,coord_t>(is);
+      is_iterator = Realm::IndexSpaceIterator<1,coord_t>(is);
     }
 
     //--------------------------------------------------------------------------
@@ -2611,7 +2611,7 @@ namespace Legion {
       assert(dom.get_dim() == 1);
 #endif
       const DomainT<1,coord_t> is = dom;
-      is_iterator = Realm::ZIndexSpaceIterator<1,coord_t>(is);
+      is_iterator = Realm::IndexSpaceIterator<1,coord_t>(is);
     }
 
     //--------------------------------------------------------------------------
@@ -2623,7 +2623,7 @@ namespace Legion {
       assert(dom.get_dim() == 1);
 #endif
       const DomainT<1,coord_t> is = dom;
-      is_iterator = Realm::ZIndexSpaceIterator<1,coord_t>(is);
+      is_iterator = Realm::IndexSpaceIterator<1,coord_t>(is);
     }
 
     //--------------------------------------------------------------------------
@@ -3065,31 +3065,31 @@ namespace Legion {
       {
         case 1:
           {
-            std::vector<Realm::ZPoint<1,coord_t> > realm_points(points.size());
+            std::vector<Realm::Point<1,coord_t> > realm_points(points.size());
             for (unsigned idx = 0; idx < points.size(); idx++)
               realm_points[idx] = Point<1,coord_t>(points[idx]);
             DomainT<1,coord_t> realm_is(
-                (Realm::ZIndexSpace<1,coord_t>(realm_points)));
+                (Realm::IndexSpace<1,coord_t>(realm_points)));
             return runtime->create_index_space(ctx, &realm_is,
                       Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
           }
         case 2:
           {
-            std::vector<Realm::ZPoint<2,coord_t> > realm_points(points.size());
+            std::vector<Realm::Point<2,coord_t> > realm_points(points.size());
             for (unsigned idx = 0; idx < points.size(); idx++)
               realm_points[idx] = Point<2,coord_t>(points[idx]);
             DomainT<2,coord_t> realm_is(
-                (Realm::ZIndexSpace<2,coord_t>(realm_points)));
+                (Realm::IndexSpace<2,coord_t>(realm_points)));
             return runtime->create_index_space(ctx, &realm_is,
                       Internal::NT_TemplateHelper::encode_tag<2,coord_t>());
           }
         case 3:
           {
-            std::vector<Realm::ZPoint<3,coord_t> > realm_points(points.size());
+            std::vector<Realm::Point<3,coord_t> > realm_points(points.size());
             for (unsigned idx = 0; idx < points.size(); idx++)
               realm_points[idx] = Point<3,coord_t>(points[idx]);
             DomainT<3,coord_t> realm_is(
-                (Realm::ZIndexSpace<3,coord_t>(realm_points)));
+                (Realm::IndexSpace<3,coord_t>(realm_points)));
             return runtime->create_index_space(ctx, &realm_is,
                       Internal::NT_TemplateHelper::encode_tag<3,coord_t>());
           }
@@ -3108,31 +3108,31 @@ namespace Legion {
       {
         case 1:
           {
-            std::vector<Realm::ZRect<1,coord_t> > realm_rects(rects.size());
+            std::vector<Realm::Rect<1,coord_t> > realm_rects(rects.size());
             for (unsigned idx = 0; idx < rects.size(); idx++)
               realm_rects[idx] = Rect<1,coord_t>(rects[idx]);
             DomainT<1,coord_t> realm_is(
-                (Realm::ZIndexSpace<1,coord_t>(realm_rects)));
+                (Realm::IndexSpace<1,coord_t>(realm_rects)));
             return runtime->create_index_space(ctx, &realm_is,
                       Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
           }
         case 2:
           {
-            std::vector<Realm::ZRect<2,coord_t> > realm_rects(rects.size());
+            std::vector<Realm::Rect<2,coord_t> > realm_rects(rects.size());
             for (unsigned idx = 0; idx < rects.size(); idx++)
               realm_rects[idx] = Rect<2,coord_t>(rects[idx]);
             DomainT<2,coord_t> realm_is(
-                (Realm::ZIndexSpace<2,coord_t>(realm_rects)));
+                (Realm::IndexSpace<2,coord_t>(realm_rects)));
             return runtime->create_index_space(ctx, &realm_is,
                       Internal::NT_TemplateHelper::encode_tag<2,coord_t>());
           }
         case 3:
           {
-            std::vector<Realm::ZRect<3,coord_t> > realm_rects(rects.size());
+            std::vector<Realm::Rect<3,coord_t> > realm_rects(rects.size());
             for (unsigned idx = 0; idx < rects.size(); idx++)
               realm_rects[idx] = Rect<3,coord_t>(rects[idx]);
             DomainT<3,coord_t> realm_is(
-                (Realm::ZIndexSpace<3,coord_t>(realm_rects)));
+                (Realm::IndexSpace<3,coord_t>(realm_rects)));
             return runtime->create_index_space(ctx, &realm_is,
                       Internal::NT_TemplateHelper::encode_tag<3,coord_t>());
           }

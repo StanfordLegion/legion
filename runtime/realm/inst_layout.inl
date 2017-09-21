@@ -162,7 +162,7 @@ namespace Realm {
   {}
 
   template <int N, typename T>
-  inline /*static*/ InstanceLayoutGeneric *InstanceLayoutGeneric::choose_instance_layout(ZIndexSpace<N,T> is,
+  inline /*static*/ InstanceLayoutGeneric *InstanceLayoutGeneric::choose_instance_layout(IndexSpace<N,T> is,
 											 const InstanceLayoutConstraints& ilc)
   {
     InstanceLayout<N,T> *layout = new InstanceLayout<N,T>;
@@ -171,20 +171,20 @@ namespace Realm {
     layout->alignment_reqd = 32;
     layout->space = is;
 
-    std::vector<ZRect<N,T> > piece_bounds;
+    std::vector<Rect<N,T> > piece_bounds;
     if(is.dense()) {
       // dense case is nice and simple
       if(!is.bounds.empty())
 	piece_bounds.push_back(is.bounds);
     } else {
       // we need precise data for non-dense index spaces (the original
-      //  'bounds' on the ZIndexSpace is often VERY conservative)
+      //  'bounds' on the IndexSpace is often VERY conservative)
       SparsityMapPublicImpl<N,T> *impl = is.sparsity.impl();
       const std::vector<SparsityMapEntry<N,T> >& entries = impl->get_entries();
       if(!entries.empty()) {
 	// TODO: set some sort of threshold for merging entries
 	typename std::vector<SparsityMapEntry<N,T> >::const_iterator it = entries.begin();
-	ZRect<N,T> bbox = is.bounds.intersection(it->bounds);
+	Rect<N,T> bbox = is.bounds.intersection(it->bounds);
 	while(++it != entries.end())
 	  bbox = bbox.union_bbox(is.bounds.intersection(it->bounds));
 	if(!bbox.empty())
@@ -248,12 +248,12 @@ namespace Realm {
 	fl.size_in_bytes = field_sizes[it2->first];
       }
 
-      for(typename std::vector<ZRect<N,T> >::const_iterator it = piece_bounds.begin();
+      for(typename std::vector<Rect<N,T> >::const_iterator it = piece_bounds.begin();
 	  it != piece_bounds.end();
 	  ++it) {
-	ZRect<N,T> bbox = *it;
+	Rect<N,T> bbox = *it;
 	// TODO: bloat bbox for block size if desired
-	ZRect<N,T> bloated = bbox;
+	Rect<N,T> bloated = bbox;
 
 	// always create an affine piece for now
 	AffineLayoutPiece<N,T> *piece = new AffineLayoutPiece<N,T>;
@@ -359,7 +359,7 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  inline size_t AffineLayoutPiece<N,T>::calculate_offset(const ZPoint<N,T>& p) const
+  inline size_t AffineLayoutPiece<N,T>::calculate_offset(const Point<N,T>& p) const
   {
     return offset + strides.dot(p);
   }
@@ -404,7 +404,7 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  inline const InstanceLayoutPiece<N,T> *InstancePieceList<N,T>::find_piece(ZPoint<N,T> p) const
+  inline const InstanceLayoutPiece<N,T> *InstancePieceList<N,T>::find_piece(Point<N,T> p) const
   {
     for(typename std::vector<InstanceLayoutPiece<N,T> *>::const_iterator it = pieces.begin();
 	it != pieces.end();
@@ -548,7 +548,7 @@ namespace Realm {
   // computes the offset of the specified field for an element - this
   //  is generally much less efficient than using a layout-specific accessor
   template <int N, typename T>
-  inline size_t InstanceLayout<N,T>::calculate_offset(ZPoint<N,T> p, FieldID fid) const
+  inline size_t InstanceLayout<N,T>::calculate_offset(Point<N,T> p, FieldID fid) const
   {
     // first look up the field to see which piece list it uses (and get offset)
     std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = fields.find(fid);
@@ -640,7 +640,7 @@ namespace Realm {
   template <typename FT, int N, typename T>
   inline GenericAccessor<FT,N,T>::GenericAccessor(RegionInstance inst,
 						  FieldID field_id,
-						  const ZRect<N,T>& subrect,
+						  const Rect<N,T>& subrect,
 						  size_t subfield_offset /*= 0*/)
   {
     this->inst = inst;
@@ -669,7 +669,7 @@ namespace Realm {
   template <typename FT, int N, typename T>
   inline /*static*/ bool GenericAccessor<FT,N,T>::is_compatible(RegionInstance inst,
 								ptrdiff_t field_offset,
-								const ZRect<N,T>& subrect)
+								const Rect<N,T>& subrect)
   {
     return true;
   }
@@ -686,13 +686,13 @@ namespace Realm {
   template <typename INST>
   inline /*static*/ bool GenericAccessor<FT,N,T>::is_compatible(const INST &instance,
 								unsigned field_id,
-								const ZRect<N,T>& subrect)
+								const Rect<N,T>& subrect)
   {
     return true;
   }
 
   template <typename FT, int N, typename T>
-  inline FT GenericAccessor<FT,N,T>::read(const ZPoint<N,T>& p)
+  inline FT GenericAccessor<FT,N,T>::read(const Point<N,T>& p)
   {
     size_t offset = this->get_offset(p);
     FT val;
@@ -701,7 +701,7 @@ namespace Realm {
   }
 
   template <typename FT, int N, typename T>
-  inline void GenericAccessor<FT,N,T>::write(const ZPoint<N,T>& p, FT newval)
+  inline void GenericAccessor<FT,N,T>::write(const Point<N,T>& p, FT newval)
   {
     size_t offset = this->get_offset(p);
     inst.write_untyped(offset, &newval, sizeof(FT));
@@ -710,7 +710,7 @@ namespace Realm {
   // this returns a "reference" that knows how to do a read via operator FT
   //  or a write via operator=
   template <typename FT, int N, typename T>
-  inline AccessorRefHelper<FT> GenericAccessor<FT,N,T>::operator[](const ZPoint<N,T>& p)
+  inline AccessorRefHelper<FT> GenericAccessor<FT,N,T>::operator[](const Point<N,T>& p)
   {
     size_t offset = this->get_offset(p);
     return AccessorRefHelper<FT>(inst, offset);
@@ -718,7 +718,7 @@ namespace Realm {
 
   // not a const method because of the piece caching
   template <typename FT, int N, typename T>
-  inline size_t GenericAccessor<FT,N,T>::get_offset(const ZPoint<N,T>& p)
+  inline size_t GenericAccessor<FT,N,T>::get_offset(const Point<N,T>& p)
   {
     const InstanceLayoutPiece<N,T> *mypiece = prev_piece;
     if(!mypiece || !mypiece->bounds.contains(p)) {
@@ -790,7 +790,7 @@ namespace Realm {
   // limits domain to a subrectangle
   template <typename FT, int N, typename T>
   AffineAccessor<FT,N,T>::AffineAccessor(RegionInstance inst,
-					 FieldID field_id, const ZRect<N,T>& subrect,
+					 FieldID field_id, const Rect<N,T>& subrect,
 					 size_t subfield_offset /*= 0*/)
   {
     // Special case for empty regions
@@ -849,7 +849,7 @@ namespace Realm {
   }
 
   template <typename FT, int N, typename T>
-  inline /*static*/ bool AffineAccessor<FT,N,T>::is_compatible(RegionInstance inst, ptrdiff_t field_offset, const ZRect<N,T>& subrect)
+  inline /*static*/ bool AffineAccessor<FT,N,T>::is_compatible(RegionInstance inst, ptrdiff_t field_offset, const Rect<N,T>& subrect)
   {
     const InstanceLayout<N,T> *layout = dynamic_cast<const InstanceLayout<N,T> *>(inst.get_layout());
     std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(field_offset);
@@ -883,7 +883,7 @@ namespace Realm {
 
   template <typename FT, int N, typename T>
   template <typename INST>
-  inline /*static*/ bool AffineAccessor<FT,N,T>::is_compatible(const INST &instance, unsigned field_id, const ZRect<N,T>& subrect)
+  inline /*static*/ bool AffineAccessor<FT,N,T>::is_compatible(const INST &instance, unsigned field_id, const Rect<N,T>& subrect)
   {
     ptrdiff_t field_offset = 0;
     RegionInstance inst = instance.get_instance(field_id, field_offset);
@@ -891,31 +891,31 @@ namespace Realm {
   }
 
   template <typename FT, int N, typename T>
-  inline FT *AffineAccessor<FT,N,T>::ptr(const ZPoint<N,T>& p) const
+  inline FT *AffineAccessor<FT,N,T>::ptr(const Point<N,T>& p) const
   {
     return this->get_ptr(p);
   }
 
   template <typename FT, int N, typename T> __CUDA_HD__
-  inline FT AffineAccessor<FT,N,T>::read(const ZPoint<N,T>& p) const
+  inline FT AffineAccessor<FT,N,T>::read(const Point<N,T>& p) const
   {
     return *(this->get_ptr(p));
   }
 
   template <typename FT, int N, typename T> __CUDA_HD__
-  inline void AffineAccessor<FT,N,T>::write(const ZPoint<N,T>& p, FT newval) const
+  inline void AffineAccessor<FT,N,T>::write(const Point<N,T>& p, FT newval) const
   {
     *(this->get_ptr(p)) = newval;
   }
 
   template <typename FT, int N, typename T> __CUDA_HD__
-  inline FT& AffineAccessor<FT,N,T>::operator[](const ZPoint<N,T>& p) const
+  inline FT& AffineAccessor<FT,N,T>::operator[](const Point<N,T>& p) const
   {
     return *(this->get_ptr(p));
   }
 
   template <typename FT, int N, typename T> __CUDA_HD__
-  inline bool AffineAccessor<FT,N,T>::is_dense_arbitrary(const ZRect<N,T> &bounds) const
+  inline bool AffineAccessor<FT,N,T>::is_dense_arbitrary(const Rect<N,T> &bounds) const
   {
     ptrdiff_t exp_offset = sizeof(FT);
     int used_mask = 0; // keep track of which dimensions we've already matched
@@ -936,7 +936,7 @@ namespace Realm {
   }
 
   template <typename FT, int N, typename T> __CUDA_HD__
-  inline bool AffineAccessor<FT,N,T>::is_dense_col_major(const ZRect<N,T> &bounds) const
+  inline bool AffineAccessor<FT,N,T>::is_dense_col_major(const Rect<N,T> &bounds) const
   {
     ptrdiff_t exp_offset = sizeof(FT);
     for (int i = 0; i < N; i++) {
@@ -947,7 +947,7 @@ namespace Realm {
   }
 
   template <typename FT, int N, typename T> __CUDA_HD__
-  inline bool AffineAccessor<FT,N,T>::is_dense_row_major(const ZRect<N,T> &bounds) const
+  inline bool AffineAccessor<FT,N,T>::is_dense_row_major(const Rect<N,T> &bounds) const
   {
     ptrdiff_t exp_offset = sizeof(FT);
     for (int i = N-1; i >= 0; i--) {
@@ -958,7 +958,7 @@ namespace Realm {
   }
 
   template <typename FT, int N, typename T> __CUDA_HD__
-  inline FT *AffineAccessor<FT,N,T>::get_ptr(const ZPoint<N,T>& p) const
+  inline FT *AffineAccessor<FT,N,T>::get_ptr(const Point<N,T>& p) const
   {
     intptr_t rawptr = base;
     for(int i = 0; i < N; i++) rawptr += p[i] * strides[i];

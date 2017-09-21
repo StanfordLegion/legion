@@ -29,8 +29,8 @@
 namespace Realm {
 
   // the data transfer engine has too much code to have it all be templated on the
-  //  type of ZIndexSpace that is driving the transfer, so we need a widget that
-  //  can hold an arbitrary ZIndexSpace and dispatch based on its type
+  //  type of IndexSpace that is driving the transfer, so we need a widget that
+  //  can hold an arbitrary IndexSpace and dispatch based on its type
 
   class TransferIterator {
   public:
@@ -106,7 +106,7 @@ namespace Realm {
     static TransferDomain *deserialize_new(S& deserializer);
     
     template <int N, typename T>
-    static TransferDomain *construct(const ZIndexSpace<N,T>& is);
+    static TransferDomain *construct(const IndexSpace<N,T>& is);
 
     virtual TransferDomain *clone(void) const = 0;
 

@@ -191,7 +191,7 @@ void top_level_task(const void *args, size_t arglen,
   log_app.print() << "Realm memory speed test";
 
   size_t elements = buffer_size / sizeof(void *);
-  ZIndexSpace<1> d = ZRect<1>(0, elements - 1);
+  IndexSpace<1> d = Rect<1>(0, elements - 1);
 
   // iterate over memories, create and instance, and then let each processor beat on it
   Machine machine = Machine::get_machine();

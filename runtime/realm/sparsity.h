@@ -27,8 +27,8 @@
 
 namespace Realm {
 
-  template <int N, typename T /*= int*/> struct ZPoint;
-  template <int N, typename T /*= int*/> struct ZRect;
+  template <int N, typename T /*= int*/> struct Point;
+  template <int N, typename T /*= int*/> struct Rect;
   template <int N, typename T = int> class HierarchicalBitMap;
 
   // a SparsityMap is a Realm handle to sparsity data for one or more index spaces - all
@@ -70,9 +70,9 @@ namespace Realm {
 
     // if 'always_create' is false and the points/rects completely fill their
     //  bounding box, returns NO_SPACE (i.e. id == 0)
-    static SparsityMap<N,T> construct(const std::vector<ZPoint<N,T> >& points,
+    static SparsityMap<N,T> construct(const std::vector<Point<N,T> >& points,
 				      bool always_create);
-    static SparsityMap<N,T> construct(const std::vector<ZRect<N,T> >& rects,
+    static SparsityMap<N,T> construct(const std::vector<Rect<N,T> >& rects,
 				      bool always_create);
   };
 
@@ -81,7 +81,7 @@ namespace Realm {
 
   template <int N, typename T>
   struct SparsityMapEntry {
-    ZRect<N,T> bounds;
+    Rect<N,T> bounds;
     SparsityMap<N,T> sparsity;
     HierarchicalBitMap<N,T> *bitmap;
   };
@@ -110,12 +110,12 @@ namespace Realm {
     // a sparsity map can exist in an approximate form as well - this is a bounded list of rectangles
     //  that are guaranteed to cover all actual entries
 
-    const std::vector<ZRect<N,T> >& get_approx_rects(void);
+    const std::vector<Rect<N,T> >& get_approx_rects(void);
 
   protected:
     bool entries_valid, approx_valid;
     std::vector<SparsityMapEntry<N,T> > entries;
-    std::vector<ZRect<N,T> > approx_rects;
+    std::vector<Rect<N,T> > approx_rects;
   };
 
 }; // namespace Realm

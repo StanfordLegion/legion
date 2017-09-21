@@ -74,7 +74,7 @@ namespace Realm {
   }
     
   template <int N, typename T>
-  inline const std::vector<ZRect<N,T> >& SparsityMapPublicImpl<N,T>::get_approx_rects(void)
+  inline const std::vector<Rect<N,T> >& SparsityMapPublicImpl<N,T>::get_approx_rects(void)
   {
     if(!approx_valid) {
       // TODO: warn here?

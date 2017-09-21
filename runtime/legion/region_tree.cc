@@ -670,9 +670,9 @@ namespace Legion {
         if (type_tag != NT_TemplateHelper::encode_tag<1,coord_t>())
           REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
             "Dynamic type mismatch in 'get_index_space_color'")
-        Realm::ZPoint<1,coord_t> *color = 
-          (Realm::ZPoint<1,coord_t>*)realm_color;
-        *color = Realm::ZPoint<1,coord_t>(0);
+        Realm::Point<1,coord_t> *color = 
+          (Realm::Point<1,coord_t>*)realm_color;
+        *color = Realm::Point<1,coord_t>(0);
         return;
       }
       // Otherwise we can get the color for the partition color space
@@ -1048,9 +1048,9 @@ namespace Legion {
         if (type_tag != NT_TemplateHelper::encode_tag<1,coord_t>())
           REPORT_LEGION_ERROR(ERROR_DYNAMIC_TYPE_MISMATCH,
             "Dynamic type mismatch in 'get_logical_region_color'")
-        Realm::ZPoint<1,coord_t> *color = 
-          (Realm::ZPoint<1,coord_t>*)realm_color;
-        *color = Realm::ZPoint<1,coord_t>(0);
+        Realm::Point<1,coord_t> *color = 
+          (Realm::Point<1,coord_t>*)realm_color;
+        *color = Realm::Point<1,coord_t>(0);
         return;
       }
       // Otherwise we can get the color for the partition color space

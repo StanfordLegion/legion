@@ -27,7 +27,7 @@ struct SaxpyArgs {
 public:
   RegionInstance x_inst, y_inst, z_inst;
   float alpha;
-  ZRect<1> bounds;
+  Rect<1> bounds;
 };
 
 #endif

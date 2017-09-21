@@ -366,8 +366,8 @@ namespace Legion {
     public:
       IndexIterator& operator=(const IndexIterator &rhs);
     private:
-      Realm::ZIndexSpaceIterator<1,coord_t> is_iterator;
-      Realm::ZPointInRectIterator<1,coord_t> rect_iterator;
+      Realm::IndexSpaceIterator<1,coord_t> is_iterator;
+      Realm::PointInRectIterator<1,coord_t> rect_iterator;
     };
 
     /**
@@ -3491,7 +3491,7 @@ namespace Legion {
       void create_association(Context ctx,
                               LogicalRegionT<DIM1,COORD_T1> domain,
                               LogicalRegionT<DIM1,COORD_T1> domain_parent,
-                              FieldID domain_fid, // type: ZPoint<DIM2,COORD_T2>
+                              FieldID domain_fid, // type: Point<DIM2,COORD_T2>
                               IndexSpaceT<DIM2,COORD_T2> range,
                               MapperID id = 0,
                               MappingTagID tag = 0);
@@ -3499,10 +3499,10 @@ namespace Legion {
       void create_bidirectional_association(Context ctx,
                               LogicalRegionT<DIM1,COORD_T1> domain,
                               LogicalRegionT<DIM1,COORD_T1> domain_parent,
-                              FieldID domain_fid, // type: ZPoint<DIM2,COORD_T2>
+                              FieldID domain_fid, // type: Point<DIM2,COORD_T2>
                               LogicalRegionT<DIM2,COORD_T2> range,
                               LogicalRegionT<DIM2,COORD_T2> range_parent,
-                              FieldID range_fid, // type: ZPoint<DIM1,COORD_T1>
+                              FieldID range_fid, // type: Point<DIM1,COORD_T1>
                               MapperID id = 0,
                               MappingTagID tag = 0);
       ///@}
@@ -3609,7 +3609,7 @@ namespace Legion {
       IndexPartitionT<DIM,COORD_T> create_partition_by_field(Context ctx,
                           LogicalRegionT<DIM,COORD_T> handle,
                           LogicalRegionT<DIM,COORD_T> parent,
-                          FieldID fid, // type: ZPoint<COLOR_DIM,COLOR_COORD_T>
+                          FieldID fid, // type: Point<COLOR_DIM,COLOR_COORD_T>
                           IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                           Color color = AUTO_GENERATE_ID,
                           MapperID id = 0, MappingTagID tag = 0);
@@ -3661,7 +3661,7 @@ namespace Legion {
                               IndexSpaceT<DIM2,COORD_T2> handle,
                               LogicalPartitionT<DIM1,COORD_T1> projection,
                               LogicalRegionT<DIM1,COORD_T1> parent,
-                              FieldID fid, // type: ZPoint<DIM2,COORD_T2>
+                              FieldID fid, // type: Point<DIM2,COORD_T2>
                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                               PartitionKind part_kind = COMPUTE_KIND,
                               Color color = AUTO_GENERATE_ID,
@@ -3684,7 +3684,7 @@ namespace Legion {
                               IndexSpaceT<DIM2,COORD_T2> handle,
                               LogicalPartitionT<DIM1,COORD_T1> projection,
                               LogicalRegionT<DIM1,COORD_T1> parent,
-                              FieldID fid, // type: ZRect<DIM2,COORD_T2>
+                              FieldID fid, // type: Rect<DIM2,COORD_T2>
                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                               PartitionKind part_kind = COMPUTE_KIND,
                               Color color = AUTO_GENERATE_ID,
@@ -3734,7 +3734,7 @@ namespace Legion {
                               IndexPartitionT<DIM2,COORD_T2> projection,
                               LogicalRegionT<DIM1,COORD_T1> handle,
                               LogicalRegionT<DIM1,COORD_T1> parent,
-                              FieldID fid, // type: ZPoint<DIM2,COORD_T2>
+                              FieldID fid, // type: Point<DIM2,COORD_T2>
                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                               PartitionKind part_kind = COMPUTE_KIND,
                               Color color = AUTO_GENERATE_ID,
@@ -3757,7 +3757,7 @@ namespace Legion {
                               IndexPartitionT<DIM2,COORD_T2> projection,
                               LogicalRegionT<DIM1,COORD_T1> handle,
                               LogicalRegionT<DIM1,COORD_T1> parent,
-                              FieldID fid, // type: ZRect<DIM2,COORD_T2>
+                              FieldID fid, // type: Rect<DIM2,COORD_T2>
                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                               PartitionKind part_kind = COMPUTE_KIND,
                               Color color = AUTO_GENERATE_ID,

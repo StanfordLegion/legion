@@ -51,15 +51,15 @@ namespace Realm {
   //  bounding box, returns NO_SPACE (i.e. id == 0)
   
   template <int N, typename T>
-  /*static*/ SparsityMap<N,T> SparsityMap<N,T>::construct(const std::vector<ZPoint<N,T> >& points,
+  /*static*/ SparsityMap<N,T> SparsityMap<N,T>::construct(const std::vector<Point<N,T> >& points,
 							  bool always_create)
   {
     HybridRectangleList<N,T> hrl;
-    for(typename std::vector<ZPoint<N,T> >::const_iterator it = points.begin();
+    for(typename std::vector<Point<N,T> >::const_iterator it = points.begin();
 	it != points.end();
 	++it)
       hrl.add_point(*it);
-    const std::vector<ZRect<N,T> >& dense = hrl.convert_to_vector();
+    const std::vector<Rect<N,T> >& dense = hrl.convert_to_vector();
 
     // are we allow to leave early for dense collections?
     if(!always_create && (dense.size() <= 1)) {
@@ -78,15 +78,15 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  /*static*/ SparsityMap<N,T> SparsityMap<N,T>::construct(const std::vector<ZRect<N,T> >& rects,
+  /*static*/ SparsityMap<N,T> SparsityMap<N,T>::construct(const std::vector<Rect<N,T> >& rects,
 							  bool always_create)
   {
     HybridRectangleList<N,T> hrl;
-    for(typename std::vector<ZRect<N,T> >::const_iterator it = rects.begin();
+    for(typename std::vector<Rect<N,T> >::const_iterator it = rects.begin();
 	it != rects.end();
 	++it)
       hrl.add_rect(*it);
-    const std::vector<ZRect<N,T> >& dense = hrl.convert_to_vector();
+    const std::vector<Rect<N,T> >& dense = hrl.convert_to_vector();
 
     // are we allow to leave early for dense collections?
     if(!always_create && (dense.size() <= 1)) {
@@ -287,15 +287,15 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  void SparsityMapImpl<N,T>::contribute_dense_rect_list(const std::vector<ZRect<N,T> >& rects)
+  void SparsityMapImpl<N,T>::contribute_dense_rect_list(const std::vector<Rect<N,T> >& rects)
   {
     gasnet_node_t owner = ID(me).sparsity.creator_node;
 
     if(owner != gasnet_mynode()) {
       // send the data to the owner to collect
       int seq_id = fragment_assembler.get_sequence_id();
-      const size_t max_to_send = DeppartConfig::cfg_max_bytes_per_packet / sizeof(ZRect<N,T>);
-      const ZRect<N,T> *rdata = &rects[0];
+      const size_t max_to_send = DeppartConfig::cfg_max_bytes_per_packet / sizeof(Rect<N,T>);
+      const Rect<N,T> *rdata = &rects[0];
       int seq_count = 0;
       size_t remaining = rects.size();
       // send partial messages first
@@ -317,7 +317,7 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  void SparsityMapImpl<N,T>::contribute_raw_rects(const ZRect<N,T>* rects,
+  void SparsityMapImpl<N,T>::contribute_raw_rects(const Rect<N,T>* rects,
 						  size_t count, bool last)
   {
     if(count > 0) {
@@ -375,7 +375,7 @@ namespace Realm {
 	      continue;
 	    }
 
-	    ZRect<N,T> u = rects[i].union_bbox(old_it->bounds);
+	    Rect<N,T> u = rects[i].union_bbox(old_it->bounds);
 	    // step rects, but not old_it - want sanity checks below to be done
 	    i++;
 	    while(true) {
@@ -423,7 +423,7 @@ namespace Realm {
 	size_t orig_count = this->entries.size();
 
 	for(size_t i = 0; i < count; i++) {
-	  const ZRect<N,T>& r = rects[i];
+	  const Rect<N,T>& r = rects[i];
 
 	  // index is declared outside for loop so we can detect early exits
 	  size_t idx;
@@ -578,7 +578,7 @@ namespace Realm {
       int seq_count = 0;
 
       // scan the entry list, sending bitmaps first and making a list of rects
-      std::vector<ZRect<N,T> > rects;
+      std::vector<Rect<N,T> > rects;
       for(typename std::vector<SparsityMapEntry<N,T> >::const_iterator it = this->entries.begin();
 	  it != this->entries.end();
 	  it++) {
@@ -594,9 +594,9 @@ namespace Realm {
 	}
       }
 	
-      const ZRect<N,T> *rdata = &rects[0];
+      const Rect<N,T> *rdata = &rects[0];
       size_t remaining = rects.size();
-      const size_t max_to_send = DeppartConfig::cfg_max_bytes_per_packet / sizeof(ZRect<N,T>);
+      const size_t max_to_send = DeppartConfig::cfg_max_bytes_per_packet / sizeof(Rect<N,T>);
       // send partial messages first
       while(remaining > max_to_send) {
 	RemoteSparsityContribMessage::send_request<N,T>(requestor, me, seq_id, 0,
@@ -621,7 +621,7 @@ namespace Realm {
 
   template <int N, typename T>
   static void compute_approximation(const std::vector<SparsityMapEntry<N,T> >& entries,
-				    std::vector<ZRect<N,T> >& approx_rects,
+				    std::vector<Rect<N,T> >& approx_rects,
 				    int max_rects)
   {
     size_t n = entries.size();
@@ -635,7 +635,7 @@ namespace Realm {
 
     // TODO: partial k-d tree?
     // for now, just approximate with the bounding box
-    ZRect<N,T> bbox = entries[0].bounds;
+    Rect<N,T> bbox = entries[0].bounds;
     for(size_t i = 1; i < n; i++)
       bbox = bbox.union_bbox(entries[i].bounds);
     approx_rects.resize(1);
@@ -644,7 +644,7 @@ namespace Realm {
 
   template <typename T>
   static void compute_approximation(const std::vector<SparsityMapEntry<1,T> >& entries,
-				    std::vector<ZRect<1,T> >& approx_rects,
+				    std::vector<Rect<1,T> >& approx_rects,
 				    int max_rects)
   {
     int n = entries.size();
@@ -855,12 +855,12 @@ namespace Realm {
     sparsity.id = args->sparsity_id;
 
     log_part.info() << "received remote contribution: sparsity=" << sparsity << " len=" << datalen;
-    size_t count = datalen / sizeof(ZRect<NT::N,T>);
-    assert((datalen % sizeof(ZRect<NT::N,T>)) == 0);
+    size_t count = datalen / sizeof(Rect<NT::N,T>);
+    assert((datalen % sizeof(Rect<NT::N,T>)) == 0);
     bool last_fragment = fragment_assembler.add_fragment(args->sender,
 							 args->sequence_id,
 							 args->sequence_count);
-    SparsityMapImpl<NT::N,T>::lookup(sparsity)->contribute_raw_rects((const ZRect<NT::N,T> *)data,
+    SparsityMapImpl<NT::N,T>::lookup(sparsity)->contribute_raw_rects((const Rect<NT::N,T> *)data,
 								     count,
 								     last_fragment);
   }
@@ -876,7 +876,7 @@ namespace Realm {
 							     SparsityMap<N,T> sparsity,
 							     int sequence_id,
 							     int sequence_count,
-							     const ZRect<N,T> *rects,
+							     const Rect<N,T> *rects,
 							     size_t count)
   {
     RequestArgs args;
@@ -887,7 +887,7 @@ namespace Realm {
     args.sequence_id = sequence_id;
     args.sequence_count = sequence_count;
 
-    Message::request(target, args, rects, count * sizeof(ZRect<N,T>),
+    Message::request(target, args, rects, count * sizeof(Rect<N,T>),
 		     PAYLOAD_COPY);
   }
 
@@ -970,8 +970,8 @@ namespace Realm {
     t((SparsityMapPublicImpl<N,T> *(SparsityMap<N,T>::*)(void) const),(&SparsityMap<N,T>::impl)) \
     u((SparsityMapImpl<N,T>::lookup)) \
     t((Event (SparsityMapPublicImpl<N,T>::*)(bool)),(&SparsityMapPublicImpl<N,T>::make_valid)) \
-    t((SparsityMap<N,T> (*)(const std::vector<ZPoint<N,T> >&, bool)),(&SparsityMap<N,T>::construct)) \
-    t((SparsityMap<N,T> (*)(const std::vector<ZRect<N,T> >&, bool)),(&SparsityMap<N,T>::construct)) \
+    t((SparsityMap<N,T> (*)(const std::vector<Point<N,T> >&, bool)),(&SparsityMap<N,T>::construct)) \
+    t((SparsityMap<N,T> (*)(const std::vector<Rect<N,T> >&, bool)),(&SparsityMap<N,T>::construct)) \
     t((bool (SparsityMapImpl<N,T>::*)(PartitioningMicroOp *, bool)),(&SparsityMapImpl<N,T>::add_waiter)) \
     t((void (SparsityMapImpl<N,T>::*)(void)),(&SparsityMapImpl<N,T>::contribute_nothing))
     

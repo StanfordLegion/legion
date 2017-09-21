@@ -18,7 +18,7 @@
 __global__
 void gpu_saxpy(const float alpha,
 	       //const int num_elements,
-	       ZRect<1> bounds,
+	       Rect<1> bounds,
 	       AffineAccessor<float, 1> ra_x,
 	       AffineAccessor<float, 1> ra_y,
 	       AffineAccessor<float, 1> ra_z)

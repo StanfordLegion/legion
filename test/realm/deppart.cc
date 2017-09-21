@@ -57,7 +57,7 @@ void sigalrm_handler(int sig)
 }
 
 template <int N, typename T>
-void dump_sparse_index_space(const char *pfx, ZIndexSpace<N,T> is)
+void dump_sparse_index_space(const char *pfx, IndexSpace<N,T> is)
 {
   std::cout << pfx << ": " << is << "\n";
   if(!is.sparsity.exists()) return;
@@ -75,7 +75,7 @@ void dump_sparse_index_space(const char *pfx, ZIndexSpace<N,T> is)
   }
 } 
 
-static int check_empty(Event e, const std::vector<ZIndexSpace<1> >& p, const char *pfx)
+static int check_empty(Event e, const std::vector<IndexSpace<1> >& p, const char *pfx)
 {
   int errors = 0;
   e.wait();
@@ -234,13 +234,13 @@ public:
            (int)blocks_x, (int)blocks_y, (int)blocks_z);
   }
 
-  ZIndexSpace<1> is_cells, is_faces;
+  IndexSpace<1> is_cells, is_faces;
   std::vector<RegionInstance> ri_cells;
-  std::vector<FieldDataDescriptor<ZIndexSpace<1>, int> > cell_blockid_field_data;
+  std::vector<FieldDataDescriptor<IndexSpace<1>, int> > cell_blockid_field_data;
   std::vector<RegionInstance> ri_faces;
-  std::vector<FieldDataDescriptor<ZIndexSpace<1>, ZPoint<1> > > face_left_field_data;
-  std::vector<FieldDataDescriptor<ZIndexSpace<1>, ZPoint<1> > > face_right_field_data;
-  std::vector<FieldDataDescriptor<ZIndexSpace<1>, int> > face_type_field_data;
+  std::vector<FieldDataDescriptor<IndexSpace<1>, Point<1> > > face_left_field_data;
+  std::vector<FieldDataDescriptor<IndexSpace<1>, Point<1> > > face_right_field_data;
+  std::vector<FieldDataDescriptor<IndexSpace<1>, int> > face_type_field_data;
   
   struct InitDataArgs {
     int index;
@@ -251,12 +251,12 @@ public:
 				const std::vector<Processor>& procs)
   {
     // top level index spaces
-    is_cells = ZRect<1>(FIRST_INDEX, FIRST_INDEX + n_cells - 1);
-    is_faces = ZRect<1>(FIRST_INDEX, FIRST_INDEX + n_faces - 1);
+    is_cells = Rect<1>(FIRST_INDEX, FIRST_INDEX + n_cells - 1);
+    is_faces = Rect<1>(FIRST_INDEX, FIRST_INDEX + n_faces - 1);
 
     // weighted partitions based on the distribution we already computed
-    std::vector<ZIndexSpace<1> > ss_cells_w;
-    std::vector<ZIndexSpace<1> > ss_faces_w;
+    std::vector<IndexSpace<1> > ss_cells_w;
+    std::vector<IndexSpace<1> > ss_faces_w;
 
     is_cells.create_weighted_subspaces(n_blocks, 1, cells_per_block, ss_cells_w,
 				       Realm::ProfilingRequestSet()).wait();
@@ -272,9 +272,9 @@ public:
     // create instances for each of these subspaces
     std::vector<size_t> cell_fields, face_fields;
     cell_fields.push_back(sizeof(int));  // blockid
-    assert(sizeof(int) == sizeof(ZPoint<1>));
-    face_fields.push_back(sizeof(ZPoint<1>));  // left
-    face_fields.push_back(sizeof(ZPoint<1>));  // right
+    assert(sizeof(int) == sizeof(Point<1>));
+    face_fields.push_back(sizeof(Point<1>));  // left
+    face_fields.push_back(sizeof(Point<1>));  // right
     face_fields.push_back(sizeof(int));  // type
 
     ri_cells.resize(n_blocks);
@@ -312,15 +312,15 @@ public:
 
       face_left_field_data[i].index_space = ss_faces_w[i];
       face_left_field_data[i].inst = ri_faces[i];
-      face_left_field_data[i].field_offset = 0 * sizeof(ZPoint<1>);
+      face_left_field_data[i].field_offset = 0 * sizeof(Point<1>);
       
       face_right_field_data[i].index_space = ss_faces_w[i];
       face_right_field_data[i].inst = ri_faces[i];
-      face_right_field_data[i].field_offset = 1 * sizeof(ZPoint<1>);
+      face_right_field_data[i].field_offset = 1 * sizeof(Point<1>);
 
       face_type_field_data[i].index_space = ss_faces_w[i];
       face_type_field_data[i].inst = ri_faces[i];
-      face_type_field_data[i].field_offset = 2 * sizeof(ZPoint<1>);
+      face_type_field_data[i].field_offset = 2 * sizeof(Point<1>);
     }
 
     // fire off tasks to initialize data
@@ -345,7 +345,7 @@ public:
     me->init_data_task(args, arglen, p);
   }
 
-  ZPoint<1> global_cell_pointer(int cx, int cy, int cz)
+  Point<1> global_cell_pointer(int cx, int cy, int cz)
   {
     INDEXTYPE p = FIRST_INDEX;
 
@@ -384,8 +384,8 @@ public:
 
     log_app.info() << "init task #" << i_args.index << " (ri_cells=" << i_args.ri_cells << ", ri_faces=" << i_args.ri_faces << ")";
 
-    ZIndexSpace<1> is_cells = i_args.ri_cells.get_indexspace<1>();
-    ZIndexSpace<1> is_faces = i_args.ri_faces.get_indexspace<1>();
+    IndexSpace<1> is_cells = i_args.ri_cells.get_indexspace<1>();
+    IndexSpace<1> is_faces = i_args.ri_faces.get_indexspace<1>();
 
     log_app.debug() << "C: " << is_cells;
     log_app.debug() << "F: " << is_faces;
@@ -412,7 +412,7 @@ public:
       for(int cz = zsplit[bz]; cz < zsplit[bz + 1]; cz++)
 	for(int cy = ysplit[by]; cy < ysplit[by + 1]; cy++)
 	  for(int cx = xsplit[bx]; cx < xsplit[bx + 1]; cx++) {
-	    ZPoint<1> pz = global_cell_pointer(cx, cy, cz);
+	    Point<1> pz = global_cell_pointer(cx, cy, cz);
 	    assert(is_cells.bounds.contains(pz));
 
 	    a_cell_blockid.write(pz, i_args.index);
@@ -421,11 +421,11 @@ public:
 
     // faces aren't in any globally-visible order
     {
-      AffineAccessor<ZPoint<1>,1> a_face_left(i_args.ri_faces, 0 * sizeof(ZPoint<1>) /* offset */);
-      AffineAccessor<ZPoint<1>,1> a_face_right(i_args.ri_faces, 1 * sizeof(ZPoint<1>) /* offset */);
-      AffineAccessor<int,1> a_face_type(i_args.ri_faces, 2 * sizeof(ZPoint<1>) /* offset */);
+      AffineAccessor<Point<1>,1> a_face_left(i_args.ri_faces, 0 * sizeof(Point<1>) /* offset */);
+      AffineAccessor<Point<1>,1> a_face_right(i_args.ri_faces, 1 * sizeof(Point<1>) /* offset */);
+      AffineAccessor<int,1> a_face_type(i_args.ri_faces, 2 * sizeof(Point<1>) /* offset */);
       
-      ZPoint<1> pf = is_faces.bounds.lo;
+      Point<1> pf = is_faces.bounds.lo;
 
       //  --           type 0      | type 1      | type 2
       //  --           ------      | ------      | ------
@@ -553,9 +553,9 @@ public:
       for(int i = is_cells.bounds.lo; i <= is_cells.bounds.hi; i++)
 	std::cout << "Z[" << i << "]: blockid=" << a_cell_blockid.read(i) << std::endl;
 
-      AffineAccessor<ZPoint<1>,1> a_face_left(i_args.ri_faces, 0 * sizeof(ZPoint<1>) /* offset */);
-      AffineAccessor<ZPoint<1>,1> a_face_right(i_args.ri_faces, 1 * sizeof(ZPoint<1>) /* offset */);
-      AffineAccessor<int,1> a_face_type(i_args.ri_faces, 2 * sizeof(ZPoint<1>) /* offset */);
+      AffineAccessor<Point<1>,1> a_face_left(i_args.ri_faces, 0 * sizeof(Point<1>) /* offset */);
+      AffineAccessor<Point<1>,1> a_face_right(i_args.ri_faces, 1 * sizeof(Point<1>) /* offset */);
+      AffineAccessor<int,1> a_face_type(i_args.ri_faces, 2 * sizeof(Point<1>) /* offset */);
 
       for(int i = is_faces.bounds.lo; i <= is_faces.bounds.hi; i++)
 	std::cout << "S[" << i << "]:"
@@ -572,10 +572,10 @@ public:
   //  p_facetypes[6]        - subsets of p_faces split further by face type
   //  p_ghost               - subsets of is_cells reachable by each block's boundary faces
 
-  std::vector<ZIndexSpace<1> > p_cells;
-  std::vector<ZIndexSpace<1> > p_faces;
-  std::vector<std::vector<ZIndexSpace<1> > > p_facetypes;
-  std::vector<ZIndexSpace<1> > p_ghost;
+  std::vector<IndexSpace<1> > p_cells;
+  std::vector<IndexSpace<1> > p_faces;
+  std::vector<std::vector<IndexSpace<1> > > p_facetypes;
+  std::vector<IndexSpace<1> > p_ghost;
 
   virtual Event perform_partitioning(void)
   {
@@ -604,7 +604,7 @@ public:
     for(int i = 0; i < BC_TOTAL; i++)
       ftcolors[i] = i;
     p_facetypes.resize(n_blocks);
-    std::vector<ZIndexSpace<1> > p_border_faces(n_blocks);
+    std::vector<IndexSpace<1> > p_border_faces(n_blocks);
     
     for(int idx = 0; idx < n_blocks; idx++) {
       Event e = p_faces[idx].create_subspaces_by_field(face_type_field_data,
@@ -634,14 +634,14 @@ public:
   {
     int errors = 0;
 
-    std::vector<ZIndexSpace<1> > p_int_faces, p_border_faces;
+    std::vector<IndexSpace<1> > p_int_faces, p_border_faces;
     for(int idx = 0; idx < n_blocks; idx++) {
       p_int_faces.push_back(p_facetypes[idx][BC_INTERIOR]);
       p_border_faces.push_back(p_facetypes[idx][BC_BLOCK_BORDER]);
     }
     // miniaero's checks are faster with image/diff on 1 thread, but slower on 4
 #ifdef MINIAERO_USE_IMAGE_DIFF
-    std::vector<ZIndexSpace<1> > p_l_test, p_ri_test, p_rb_test;
+    std::vector<IndexSpace<1> > p_l_test, p_ri_test, p_rb_test;
     Event e4 = is_cells.create_subspaces_by_image_with_difference(face_left_field_data,
 						  p_faces,
 						  p_cells,
@@ -658,7 +658,7 @@ public:
                                                   p_rb_test,
 						  Realm::ProfilingRequestSet());
 #else
-    std::vector<ZIndexSpace<1> > p_img_left, p_img_right_i, p_img_right_b;
+    std::vector<IndexSpace<1> > p_img_left, p_img_right_i, p_img_right_b;
     Event e1 = is_cells.create_subspaces_by_image(face_left_field_data,
 						  p_faces,
 						  p_img_left,
@@ -671,16 +671,16 @@ public:
 						  p_border_faces,
 						  p_img_right_b,
 						  Realm::ProfilingRequestSet());
-    std::vector<ZIndexSpace<1> > p_l_test, p_ri_test, p_rb_test;
-    Event e4 = ZIndexSpace<1>::compute_differences(p_img_left, p_cells,
+    std::vector<IndexSpace<1> > p_l_test, p_ri_test, p_rb_test;
+    Event e4 = IndexSpace<1>::compute_differences(p_img_left, p_cells,
 						   p_l_test,
 						   Realm::ProfilingRequestSet(),
 						   e1);
-    Event e5 = ZIndexSpace<1>::compute_differences(p_img_right_i, p_cells,
+    Event e5 = IndexSpace<1>::compute_differences(p_img_right_i, p_cells,
 						   p_ri_test,
 						   Realm::ProfilingRequestSet(),
 						   e2);
-    Event e6 = ZIndexSpace<1>::compute_differences(p_img_right_b, p_ghost,
+    Event e6 = IndexSpace<1>::compute_differences(p_img_right_b, p_ghost,
 						   p_rb_test,
 						   Realm::ProfilingRequestSet(),
 						   e3);
@@ -696,8 +696,8 @@ public:
   {
     int errors = 0;
 
-    ZPoint<1> pc = is_cells.bounds.lo;
-    ZPoint<1> pf = is_faces.bounds.lo;
+    Point<1> pc = is_cells.bounds.lo;
+    Point<1> pf = is_faces.bounds.lo;
 
     for(int blkid = 0; blkid < n_blocks; blkid++) {
       int bx = blkid % blocks_x;
@@ -874,7 +874,7 @@ public:
       subckt = idx * num_pieces / num_nodes;
   }
 
-  void random_edge_data(int idx, ZPoint<1>& in_node, ZPoint<1>& out_node)
+  void random_edge_data(int idx, Point<1>& in_node, Point<1>& out_node)
   {
     if(random_colors) {
       in_node = Philox_2x32<>::rand_int(random_seed, idx, EDGE_IN_NODE_STREAM, num_nodes);
@@ -907,8 +907,8 @@ public:
 
     log_app.info() << "init task #" << i_args.index << " (ri_nodes=" << i_args.ri_nodes << ", ri_edges=" << i_args.ri_edges << ")";
 
-    ZIndexSpace<1> is_nodes = i_args.ri_nodes.get_indexspace<1>();
-    ZIndexSpace<1> is_edges = i_args.ri_edges.get_indexspace<1>();
+    IndexSpace<1> is_nodes = i_args.ri_nodes.get_indexspace<1>();
+    IndexSpace<1> is_edges = i_args.ri_edges.get_indexspace<1>();
 
     log_app.debug() << "N: " << is_nodes;
     log_app.debug() << "E: " << is_edges;
@@ -925,14 +925,14 @@ public:
     }
     
     {
-      AffineAccessor<ZPoint<1>,1> a_in_node(i_args.ri_edges, 0 * sizeof(ZPoint<1>) /* offset */);
-      AffineAccessor<ZPoint<1>,1> a_out_node(i_args.ri_edges, 1 * sizeof(ZPoint<1>) /* offset */);
+      AffineAccessor<Point<1>,1> a_in_node(i_args.ri_edges, 0 * sizeof(Point<1>) /* offset */);
+      AffineAccessor<Point<1>,1> a_out_node(i_args.ri_edges, 1 * sizeof(Point<1>) /* offset */);
 
       //std::cout << "a_in_node = " << a_in_node << "\n";
       //std::cout << "a_out_node = " << a_out_node << "\n";
       
       for(int i = is_edges.bounds.lo; i <= is_edges.bounds.hi; i++) {
-	ZPoint<1> in_node, out_node;
+	Point<1> in_node, out_node;
 	random_edge_data(i, in_node, out_node);
 	a_in_node.write(i, in_node);
 	a_out_node.write(i, out_node);
@@ -945,24 +945,24 @@ public:
       for(int i = is_nodes.bounds.lo; i <= is_nodes.bounds.hi; i++)
 	std::cout << "subckt_id[" << i << "] = " << a_subckt_id.read(i) << std::endl;
 
-      AffineAccessor<ZPoint<1>,1> a_in_node(i_args.ri_edges, 0 * sizeof(ZPoint<1>) /* offset */);
+      AffineAccessor<Point<1>,1> a_in_node(i_args.ri_edges, 0 * sizeof(Point<1>) /* offset */);
 
       for(int i = is_edges.bounds.lo; i <= is_edges.bounds.hi; i++)
 	std::cout << "in_node[" << i << "] = " << a_in_node.read(i) << std::endl;
 
-      AffineAccessor<ZPoint<1>,1> a_out_node(i_args.ri_edges, 1 * sizeof(ZPoint<1>) /* offset */);
+      AffineAccessor<Point<1>,1> a_out_node(i_args.ri_edges, 1 * sizeof(Point<1>) /* offset */);
 
       for(int i = is_edges.bounds.lo; i <= is_edges.bounds.hi; i++)
 	std::cout << "out_node[" << i << "] = " << a_out_node.read(i) << std::endl;
     }
   }
 
-  ZIndexSpace<1> is_nodes, is_edges;
+  IndexSpace<1> is_nodes, is_edges;
   std::vector<RegionInstance> ri_nodes;
-  std::vector<FieldDataDescriptor<ZIndexSpace<1>, int> > subckt_field_data;
+  std::vector<FieldDataDescriptor<IndexSpace<1>, int> > subckt_field_data;
   std::vector<RegionInstance> ri_edges;
-  std::vector<FieldDataDescriptor<ZIndexSpace<1>, ZPoint<1> > > in_node_field_data;
-  std::vector<FieldDataDescriptor<ZIndexSpace<1>, ZPoint<1> > > out_node_field_data;
+  std::vector<FieldDataDescriptor<IndexSpace<1>, Point<1> > > in_node_field_data;
+  std::vector<FieldDataDescriptor<IndexSpace<1>, Point<1> > > out_node_field_data;
 
   virtual void print_info(void)
   {
@@ -974,12 +974,12 @@ public:
 				const std::vector<Processor>& procs)
   {
     // now create index spaces for nodes and edges
-    is_nodes = ZRect<1>(0, num_nodes - 1);
-    is_edges = ZRect<1>(0, num_edges - 1);
+    is_nodes = Rect<1>(0, num_nodes - 1);
+    is_edges = Rect<1>(0, num_edges - 1);
 
     // equal partition is used to do initial population of edges and nodes
-    std::vector<ZIndexSpace<1> > ss_nodes_eq;
-    std::vector<ZIndexSpace<1> > ss_edges_eq;
+    std::vector<IndexSpace<1> > ss_nodes_eq;
+    std::vector<IndexSpace<1> > ss_edges_eq;
 
     is_nodes.create_equal_subspaces(num_pieces, 1, ss_nodes_eq, Realm::ProfilingRequestSet()).wait();
     is_edges.create_equal_subspaces(num_pieces, 1, ss_edges_eq, Realm::ProfilingRequestSet()).wait();
@@ -993,9 +993,9 @@ public:
     // create instances for each of these subspaces
     std::vector<size_t> node_fields, edge_fields;
     node_fields.push_back(sizeof(int));  // subckt_id
-    assert(sizeof(int) == sizeof(ZPoint<1>));
-    edge_fields.push_back(sizeof(ZPoint<1>));  // in_node
-    edge_fields.push_back(sizeof(ZPoint<1>));  // out_node
+    assert(sizeof(int) == sizeof(Point<1>));
+    edge_fields.push_back(sizeof(Point<1>));  // in_node
+    edge_fields.push_back(sizeof(Point<1>));  // out_node
 
     ri_nodes.resize(num_pieces);
     subckt_field_data.resize(num_pieces);
@@ -1031,11 +1031,11 @@ public:
 
       in_node_field_data[i].index_space = ss_edges_eq[i];
       in_node_field_data[i].inst = ri_edges[i];
-      in_node_field_data[i].field_offset = 0 * sizeof(ZPoint<1>);
+      in_node_field_data[i].field_offset = 0 * sizeof(Point<1>);
       
       out_node_field_data[i].index_space = ss_edges_eq[i];
       out_node_field_data[i].inst = ri_edges[i];
-      out_node_field_data[i].field_offset = 1 * sizeof(ZPoint<1>);
+      out_node_field_data[i].field_offset = 1 * sizeof(Point<1>);
     }
 
     // fire off tasks to initialize data
@@ -1058,15 +1058,15 @@ public:
   //  p_pvt, p_shr, p_ghost - subsets of the above split by subckt
   //  p_edges               - subsets of is_edges for each subckt
 
-  ZIndexSpace<1> is_shared, is_private;
-  std::vector<ZIndexSpace<1> > p_pvt, p_shr, p_ghost;
-  std::vector<ZIndexSpace<1> > p_edges;
+  IndexSpace<1> is_shared, is_private;
+  std::vector<IndexSpace<1> > p_pvt, p_shr, p_ghost;
+  std::vector<IndexSpace<1> > p_edges;
 
   virtual Event perform_partitioning(void)
   {
     // first partition nodes by subckt id (this is the independent partition,
     //  but not actually used by the app)
-    std::vector<ZIndexSpace<1> > p_nodes;
+    std::vector<IndexSpace<1> > p_nodes;
 
     std::vector<int> colors(num_pieces);
     for(int i = 0; i < num_pieces; i++)
@@ -1097,7 +1097,7 @@ public:
 						  e2);
     if(wait_on_events) e4.wait();
 #else
-    std::vector<ZIndexSpace<1> > p_extra_nodes;
+    std::vector<IndexSpace<1> > p_extra_nodes;
 
     Event e3 = is_nodes.create_subspaces_by_image(out_node_field_data,
 						  p_edges,
@@ -1107,7 +1107,7 @@ public:
     if(wait_on_events) e3.wait();
   
     // subtracting out those private nodes gives us p_ghost
-    Event e4 = ZIndexSpace<1>::compute_differences(p_extra_nodes,
+    Event e4 = IndexSpace<1>::compute_differences(p_extra_nodes,
 						   p_nodes,
 						   p_ghost,
 						   Realm::ProfilingRequestSet(),
@@ -1116,26 +1116,26 @@ public:
 #endif
 
     // the union of everybody's ghost nodes is is_shared
-    Event e5 = ZIndexSpace<1>::compute_union(p_ghost, is_shared,
+    Event e5 = IndexSpace<1>::compute_union(p_ghost, is_shared,
 					     Realm::ProfilingRequestSet(),
 					     e4);
     if(wait_on_events) e5.wait();
 
     // and is_private is just the nodes of is_nodes that aren't in is_shared
-    Event e6 = ZIndexSpace<1>::compute_difference(is_nodes, is_shared, is_private,
+    Event e6 = IndexSpace<1>::compute_difference(is_nodes, is_shared, is_private,
 						  Realm::ProfilingRequestSet(),
 						  e5);
     if(wait_on_events) e6.wait();
 
     // the intersection of the original p_nodes with is_shared gives us p_shr
     // (note that we can do this in parallel with the computation of is_private)
-    Event e7 = ZIndexSpace<1>::compute_intersections(p_nodes, is_shared, p_shr,
+    Event e7 = IndexSpace<1>::compute_intersections(p_nodes, is_shared, p_shr,
 						     Realm::ProfilingRequestSet(),
 						     e5);
     if(wait_on_events) e7.wait();
 
     // and finally, the intersection of p_nodes with is_private gives us p_pvt
-    Event e8 = ZIndexSpace<1>::compute_intersections(p_nodes, is_private, p_pvt,
+    Event e8 = IndexSpace<1>::compute_intersections(p_nodes, is_private, p_pvt,
 						     Realm::ProfilingRequestSet(),
 						     e6);
     if(wait_on_events) e8.wait();
@@ -1150,15 +1150,15 @@ public:
 
     // compute the intermediates for the checks - these duplicate things we
     //  already have, but we're not supposed to know that here
-    std::vector<ZIndexSpace<1> > p_pvt_and_shr, p_all;
-    Event e1 = ZIndexSpace<1>::compute_unions(p_pvt, p_shr, p_pvt_and_shr,
+    std::vector<IndexSpace<1> > p_pvt_and_shr, p_all;
+    Event e1 = IndexSpace<1>::compute_unions(p_pvt, p_shr, p_pvt_and_shr,
                                               Realm::ProfilingRequestSet(),
                                               Event::NO_EVENT);
-    Event e2 = ZIndexSpace<1>::compute_unions(p_pvt_and_shr, p_ghost, p_all,
+    Event e2 = IndexSpace<1>::compute_unions(p_pvt_and_shr, p_ghost, p_all,
                                               Realm::ProfilingRequestSet(),
                                               e1);
 #ifdef USE_IMAGE_DIFF
-    std::vector<ZIndexSpace<1> > p_in_test, p_out_test;
+    std::vector<IndexSpace<1> > p_in_test, p_out_test;
     Event e5 = is_nodes.create_subspaces_by_image_with_difference(in_node_field_data,
 						  p_edges,
                                                   p_pvt_and_shr,
@@ -1172,7 +1172,7 @@ public:
 						  Realm::ProfilingRequestSet(),
 						  e2);
 #else
-    std::vector<ZIndexSpace<1> > p_in_img, p_out_img;
+    std::vector<IndexSpace<1> > p_in_img, p_out_img;
     Event e3 = is_nodes.create_subspaces_by_image(in_node_field_data,
 						  p_edges,
 						  p_in_img,
@@ -1183,12 +1183,12 @@ public:
 						  p_out_img,
 						  Realm::ProfilingRequestSet(),
 						  Event::NO_EVENT);
-    std::vector<ZIndexSpace<1> > p_in_test, p_out_test;
-    Event e5 = ZIndexSpace<1>::compute_differences(p_in_img, p_pvt_and_shr,
+    std::vector<IndexSpace<1> > p_in_test, p_out_test;
+    Event e5 = IndexSpace<1>::compute_differences(p_in_img, p_pvt_and_shr,
                                                    p_in_test,
 						   Realm::ProfilingRequestSet(),
                                                    Event::merge_events(e1, e3));
-    Event e6 = ZIndexSpace<1>::compute_differences(p_out_img, p_all,
+    Event e6 = IndexSpace<1>::compute_differences(p_out_img, p_all,
                                                    p_out_test,
 						   Realm::ProfilingRequestSet(),
                                                    Event::merge_events(e2, e4));
@@ -1220,7 +1220,7 @@ public:
     
     for(int i = 0; i < num_edges; i++) {
       // regenerate the random info for this edge and the two nodes it touches
-      ZPoint<1> in_node, out_node;
+      Point<1> in_node, out_node;
       int in_subckt, out_subckt;
       random_edge_data(i, in_node, out_node);
       random_node_data(in_node, in_subckt);
@@ -1379,14 +1379,14 @@ public:
 	   (int)nzx, (int)nzy, (int)numpcx, (int)numpcy);
   }
 
-  ZIndexSpace<1> is_zones, is_sides, is_points;
+  IndexSpace<1> is_zones, is_sides, is_points;
   std::vector<RegionInstance> ri_zones;
-  std::vector<FieldDataDescriptor<ZIndexSpace<1>, int> > zone_color_field_data;
+  std::vector<FieldDataDescriptor<IndexSpace<1>, int> > zone_color_field_data;
   std::vector<RegionInstance> ri_sides;
-  std::vector<FieldDataDescriptor<ZIndexSpace<1>, ZPoint<1> > > side_mapsz_field_data;
-  std::vector<FieldDataDescriptor<ZIndexSpace<1>, ZPoint<1> > > side_mapss3_field_data;
-  std::vector<FieldDataDescriptor<ZIndexSpace<1>, ZPoint<1> > > side_mapsp1_field_data;
-  std::vector<FieldDataDescriptor<ZIndexSpace<1>, bool > > side_ok_field_data;
+  std::vector<FieldDataDescriptor<IndexSpace<1>, Point<1> > > side_mapsz_field_data;
+  std::vector<FieldDataDescriptor<IndexSpace<1>, Point<1> > > side_mapss3_field_data;
+  std::vector<FieldDataDescriptor<IndexSpace<1>, Point<1> > > side_mapsp1_field_data;
+  std::vector<FieldDataDescriptor<IndexSpace<1>, bool > > side_ok_field_data;
 
   struct InitDataArgs {
     int index;
@@ -1397,14 +1397,14 @@ public:
 				const std::vector<Processor>& procs)
   {
     // top level index spaces
-    is_zones = ZRect<1>(FIRST_INDEX, FIRST_INDEX + nz - 1);
-    is_sides = ZRect<1>(FIRST_INDEX, FIRST_INDEX + ns - 1);
-    is_points = ZRect<1>(FIRST_INDEX, FIRST_INDEX + np - 1);
+    is_zones = Rect<1>(FIRST_INDEX, FIRST_INDEX + nz - 1);
+    is_sides = Rect<1>(FIRST_INDEX, FIRST_INDEX + ns - 1);
+    is_points = Rect<1>(FIRST_INDEX, FIRST_INDEX + np - 1);
 
     // weighted partitions based on the distribution we already computed
-    std::vector<ZIndexSpace<1> > ss_zones_w;
-    std::vector<ZIndexSpace<1> > ss_sides_w;
-    std::vector<ZIndexSpace<1> > ss_points_w;
+    std::vector<IndexSpace<1> > ss_zones_w;
+    std::vector<IndexSpace<1> > ss_sides_w;
+    std::vector<IndexSpace<1> > ss_points_w;
 
     is_zones.create_weighted_subspaces(numpc, 1, lz, ss_zones_w, Realm::ProfilingRequestSet()).wait();
     is_sides.create_weighted_subspaces(numpc, 1, ls, ss_sides_w, Realm::ProfilingRequestSet()).wait();
@@ -1421,10 +1421,10 @@ public:
     // create instances for each of these subspaces
     std::vector<size_t> zone_fields, side_fields;
     zone_fields.push_back(sizeof(int));  // color
-    assert(sizeof(int) == sizeof(ZPoint<1>));
-    side_fields.push_back(sizeof(ZPoint<1>));  // mapsz
-    side_fields.push_back(sizeof(ZPoint<1>));  // mapss3
-    side_fields.push_back(sizeof(ZPoint<1>));  // mapsp1
+    assert(sizeof(int) == sizeof(Point<1>));
+    side_fields.push_back(sizeof(Point<1>));  // mapsz
+    side_fields.push_back(sizeof(Point<1>));  // mapss3
+    side_fields.push_back(sizeof(Point<1>));  // mapsp1
     side_fields.push_back(sizeof(bool));  // ok
 
     ri_zones.resize(numpc);
@@ -1463,19 +1463,19 @@ public:
 
       side_mapsz_field_data[i].index_space = ss_sides_w[i];
       side_mapsz_field_data[i].inst = ri_sides[i];
-      side_mapsz_field_data[i].field_offset = 0 * sizeof(ZPoint<1>);
+      side_mapsz_field_data[i].field_offset = 0 * sizeof(Point<1>);
       
       side_mapss3_field_data[i].index_space = ss_sides_w[i];
       side_mapss3_field_data[i].inst = ri_sides[i];
-      side_mapss3_field_data[i].field_offset = 1 * sizeof(ZPoint<1>);
+      side_mapss3_field_data[i].field_offset = 1 * sizeof(Point<1>);
 
       side_mapsp1_field_data[i].index_space = ss_sides_w[i];
       side_mapsp1_field_data[i].inst = ri_sides[i];
-      side_mapsp1_field_data[i].field_offset = 2 * sizeof(ZPoint<1>);
+      side_mapsp1_field_data[i].field_offset = 2 * sizeof(Point<1>);
       
       side_ok_field_data[i].index_space = ss_sides_w[i];
       side_ok_field_data[i].inst = ri_sides[i];
-      side_ok_field_data[i].field_offset = 3 * sizeof(ZPoint<1>);
+      side_ok_field_data[i].field_offset = 3 * sizeof(Point<1>);
     }
 
     // fire off tasks to initialize data
@@ -1500,7 +1500,7 @@ public:
     me->init_data_task(args, arglen, p);
   }
 
-  ZPoint<1> global_point_pointer(int py, int px) const
+  Point<1> global_point_pointer(int py, int px) const
   {
     int pp = FIRST_INDEX;
 
@@ -1542,8 +1542,8 @@ public:
 
     log_app.info() << "init task #" << i_args.index << " (ri_zones=" << i_args.ri_zones << ", ri_sides=" << i_args.ri_sides << ")";
 
-    ZIndexSpace<1> is_zones = i_args.ri_zones.get_indexspace<1>();
-    ZIndexSpace<1> is_sides = i_args.ri_sides.get_indexspace<1>();
+    IndexSpace<1> is_zones = i_args.ri_zones.get_indexspace<1>();
+    IndexSpace<1> is_sides = i_args.ri_sides.get_indexspace<1>();
 
     log_app.debug() << "Z: " << is_zones;
     log_app.debug() << "S: " << is_sides;
@@ -1558,27 +1558,27 @@ public:
 
     {
       AffineAccessor<int,1> a_zone_color(i_args.ri_zones, 0 /* offset */);
-      AffineAccessor<ZPoint<1>,1> a_side_mapsz(i_args.ri_sides, 0 * sizeof(ZPoint<1>) /* offset */);
-      AffineAccessor<ZPoint<1>,1> a_side_mapss3(i_args.ri_sides, 1 * sizeof(ZPoint<1>) /* offset */);
-      AffineAccessor<ZPoint<1>,1> a_side_mapsp1(i_args.ri_sides, 2 * sizeof(ZPoint<1>) /* offset */);
-      AffineAccessor<bool,1> a_side_ok(i_args.ri_sides, 3 * sizeof(ZPoint<1>) /* offset */);
+      AffineAccessor<Point<1>,1> a_side_mapsz(i_args.ri_sides, 0 * sizeof(Point<1>) /* offset */);
+      AffineAccessor<Point<1>,1> a_side_mapss3(i_args.ri_sides, 1 * sizeof(Point<1>) /* offset */);
+      AffineAccessor<Point<1>,1> a_side_mapsp1(i_args.ri_sides, 2 * sizeof(Point<1>) /* offset */);
+      AffineAccessor<bool,1> a_side_ok(i_args.ri_sides, 3 * sizeof(Point<1>) /* offset */);
       
-      ZPoint<1> pz = is_zones.bounds.lo;
-      ZPoint<1> ps = is_sides.bounds.lo;
+      Point<1> pz = is_zones.bounds.lo;
+      Point<1> ps = is_sides.bounds.lo;
 
       for(int zy = zylo; zy < zyhi; zy++) {
 	for(int zx = zxlo; zx < zxhi; zx++) {
 	  // get 4 side pointers
-	  ZPoint<1> ps0 = ps; ps.x++;
-	  ZPoint<1> ps1 = ps; ps.x++;
-	  ZPoint<1> ps2 = ps; ps.x++;
-	  ZPoint<1> ps3 = ps; ps.x++;
+	  Point<1> ps0 = ps; ps.x++;
+	  Point<1> ps1 = ps; ps.x++;
+	  Point<1> ps2 = ps; ps.x++;
+	  Point<1> ps3 = ps; ps.x++;
 
 	  // point pointers are ugly because they can be in neighbors - use a helper
-	  ZPoint<1> pp0 = global_point_pointer(zy, zx); // go CCW
-	  ZPoint<1> pp1 = global_point_pointer(zy+1, zx);
-	  ZPoint<1> pp2 = global_point_pointer(zy+1, zx+1);
-	  ZPoint<1> pp3 = global_point_pointer(zy, zx+1);
+	  Point<1> pp0 = global_point_pointer(zy, zx); // go CCW
+	  Point<1> pp1 = global_point_pointer(zy+1, zx);
+	  Point<1> pp2 = global_point_pointer(zy+1, zx+1);
+	  Point<1> pp3 = global_point_pointer(zy, zx+1);
 
 	  a_zone_color.write(pz, i_args.index);
 
@@ -1615,10 +1615,10 @@ public:
       for(int i = is_zones.bounds.lo; i <= is_zones.bounds.hi; i++)
 	std::cout << "Z[" << i << "]: color=" << a_zone_color.read(i) << std::endl;
 
-      AffineAccessor<ZPoint<1>,1> a_side_mapsz(i_args.ri_sides, 0 * sizeof(ZPoint<1>) /* offset */);
-      AffineAccessor<ZPoint<1>,1> a_side_mapss3(i_args.ri_sides, 1 * sizeof(ZPoint<1>) /* offset */);
-      AffineAccessor<ZPoint<1>,1> a_side_mapsp1(i_args.ri_sides, 2 * sizeof(ZPoint<1>) /* offset */);
-      AffineAccessor<bool,1> a_side_ok(i_args.ri_sides, 3 * sizeof(ZPoint<1>) /* offset */);
+      AffineAccessor<Point<1>,1> a_side_mapsz(i_args.ri_sides, 0 * sizeof(Point<1>) /* offset */);
+      AffineAccessor<Point<1>,1> a_side_mapss3(i_args.ri_sides, 1 * sizeof(Point<1>) /* offset */);
+      AffineAccessor<Point<1>,1> a_side_mapsp1(i_args.ri_sides, 2 * sizeof(Point<1>) /* offset */);
+      AffineAccessor<bool,1> a_side_ok(i_args.ri_sides, 3 * sizeof(Point<1>) /* offset */);
 
       for(int i = is_sides.bounds.lo; i <= is_sides.bounds.hi; i++)
 	std::cout << "S[" << i << "]:"
@@ -1635,14 +1635,14 @@ public:
   //  p_sides               - subsets of is_sides split by piece (with bad sides removed)
   //  p_points              - subsets of is_points by piece (aliased)
 
-  std::vector<ZIndexSpace<1> > p_zones;
-  std::vector<ZIndexSpace<1> > p_sides;
-  std::vector<ZIndexSpace<1> > p_points;
+  std::vector<IndexSpace<1> > p_zones;
+  std::vector<IndexSpace<1> > p_sides;
+  std::vector<IndexSpace<1> > p_points;
 
   virtual Event perform_partitioning(void)
   {
     // first get the set of bad sides (i.e. ok == false)
-    ZIndexSpace<1> bad_sides;
+    IndexSpace<1> bad_sides;
 
     Event e1 = is_sides.create_subspace_by_field(side_ok_field_data,
 						 false,
@@ -1651,7 +1651,7 @@ public:
     if(wait_on_events) e1.wait();
 
     // map the bad sides through to bad zones
-    ZIndexSpace<1> bad_zones;
+    IndexSpace<1> bad_zones;
     Event e2 = is_zones.create_subspace_by_image(side_mapsz_field_data,
 						 bad_sides,
 						 bad_zones,
@@ -1660,8 +1660,8 @@ public:
     if(wait_on_events) e2.wait();
 
     // subtract bad zones to get good zones
-    ZIndexSpace<1> good_zones;
-    Event e3 = ZIndexSpace<1>::compute_difference(is_zones, bad_zones, good_zones,
+    IndexSpace<1> good_zones;
+    Event e3 = IndexSpace<1>::compute_difference(is_zones, bad_zones, good_zones,
 						  Realm::ProfilingRequestSet(),
 						  e2);
     if(wait_on_events) e3.wait();
@@ -1703,7 +1703,7 @@ public:
 
     // pennant's checks are actually slower with the fused image/diff
 #ifdef PENNANT_USE_IMAGE_DIFF
-    std::vector<ZIndexSpace<1> > p_z_test, p_p_test, p_s_test;
+    std::vector<IndexSpace<1> > p_z_test, p_p_test, p_s_test;
     Event e4 = is_zones.create_subspaces_by_image_with_difference(side_mapsz_field_data,
 						  p_sides,
                                                   p_zones,
@@ -1720,7 +1720,7 @@ public:
                                                   p_s_test,
 						  Realm::ProfilingRequestSet());
 #else
-    std::vector<ZIndexSpace<1> > p_img_mapsz, p_img_mapsp1, p_img_mapss3;
+    std::vector<IndexSpace<1> > p_img_mapsz, p_img_mapsp1, p_img_mapss3;
     Event e1 = is_zones.create_subspaces_by_image(side_mapsz_field_data,
 						  p_sides,
 						  p_img_mapsz,
@@ -1733,16 +1733,16 @@ public:
 						  p_sides,
 						  p_img_mapss3,
 						  Realm::ProfilingRequestSet());
-    std::vector<ZIndexSpace<1> > p_z_test, p_p_test, p_s_test;
-    Event e4 = ZIndexSpace<1>::compute_differences(p_img_mapsz, p_zones,
+    std::vector<IndexSpace<1> > p_z_test, p_p_test, p_s_test;
+    Event e4 = IndexSpace<1>::compute_differences(p_img_mapsz, p_zones,
 						   p_z_test,
 						   Realm::ProfilingRequestSet(),
 						   e1);
-    Event e5 = ZIndexSpace<1>::compute_differences(p_img_mapsp1, p_points,
+    Event e5 = IndexSpace<1>::compute_differences(p_img_mapsp1, p_points,
 						   p_p_test,
 						   Realm::ProfilingRequestSet(),
 						   e2);
-    Event e6 = ZIndexSpace<1>::compute_differences(p_img_mapss3, p_sides,
+    Event e6 = IndexSpace<1>::compute_differences(p_img_mapss3, p_sides,
 						   p_s_test,
 						   Realm::ProfilingRequestSet(),
 						   e3);
@@ -1789,7 +1789,7 @@ public:
     }
 
     // check zones
-    ZPoint<1> pz = is_zones.bounds.lo;
+    Point<1> pz = is_zones.bounds.lo;
     for(int pc = 0; pc < numpc; pc++) {
       for(int i = 0; i < lz[pc]; i++) {
 	for(int j = 0; j < numpc; j++) {
@@ -1805,7 +1805,7 @@ public:
     }
 
     // check sides
-    ZPoint<1> ps = is_sides.bounds.lo;
+    Point<1> ps = is_sides.bounds.lo;
     for(int pc = 0; pc < numpc; pc++) {
       for(int i = 0; i < ls[pc]; i++) {
 	for(int j = 0; j < numpc; j++) {
@@ -1823,7 +1823,7 @@ public:
     // check points (trickier due to ghosting)
     for(int py = 0; py < npy; py++)
       for(int px = 0; px < npx; px++) {
-	ZPoint<1> pp = global_point_pointer(py, px);
+	Point<1> pp = global_point_pointer(py, px);
 	for(int pc = 0; pc < numpc; pc++) {
 	  int pcy = pc / numpcx;
 	  int pcx = pc % numpcx;
@@ -1902,21 +1902,21 @@ public:
 
   virtual int check_partitioning(void);
 
-  void fill_instance_data(ZIndexSpace<N1,T1> ibounds, RegionInstance inst);
+  void fill_instance_data(IndexSpace<N1,T1> ibounds, RegionInstance inst);
 
 protected:
   T1 base1_min, base1_max, extent1_min, extent1_max;
   T2 base2_min, base2_max, extent2_min, extent2_max;
   int num_pieces, num_colors;
 
-  ZRect<N1,T1> bounds1;
-  ZRect<N2,T2> bounds2;
-  ZIndexSpace<N1,T1> root1;
-  ZIndexSpace<N2,T2> root2;
+  Rect<N1,T1> bounds1;
+  Rect<N2,T2> bounds2;
+  IndexSpace<N1,T1> root1;
+  IndexSpace<N2,T2> root2;
   std::vector<FT> colors;
   std::vector<RegionInstance> ri_data1;
-  std::vector<FieldDataDescriptor<ZIndexSpace<N1,T1>, FT> > fd_vals1;
-  std::vector<FieldDataDescriptor<ZIndexSpace<N1,T1>, ZPoint<N2,T2> > > fd_ptrs1;
+  std::vector<FieldDataDescriptor<IndexSpace<N1,T1>, FT> > fd_vals1;
+  std::vector<FieldDataDescriptor<IndexSpace<N1,T1>, Point<N2,T2> > > fd_ptrs1;
 };
 
 template <int N1, typename T1, int N2, typename T2, typename FT>
@@ -1954,7 +1954,7 @@ void RandomTest<N1,T1,N2,T2,FT>::print_info(void)
 }
 
 template <int N1, typename T1, int N2, typename T2, typename FT>
-void RandomTest<N1,T1,N2,T2,FT>::fill_instance_data(ZIndexSpace<N1,T1> ibounds,
+void RandomTest<N1,T1,N2,T2,FT>::fill_instance_data(IndexSpace<N1,T1> ibounds,
 						    RegionInstance inst)
 {
   {
@@ -1963,14 +1963,14 @@ void RandomTest<N1,T1,N2,T2,FT>::fill_instance_data(ZIndexSpace<N1,T1> ibounds,
 
     // iterate over all points in root1 with initial random values
     RandStream<> rs1(random_seed + 1);
-    for(ZPointInRectIterator<N1,T1> pir(bounds1); pir.valid; pir.step()) {
+    for(PointInRectIterator<N1,T1> pir(bounds1); pir.valid; pir.step()) {
       FT v = colors[rs1.rand_int(colors.size())];
       if(ibounds.contains(pir.p))
 	a_vals.write(pir.p, v);
     }
     
     // print results
-    for(ZPointInRectIterator<N1,T1> pir(bounds1); pir.valid; pir.step()) {
+    for(PointInRectIterator<N1,T1> pir(bounds1); pir.valid; pir.step()) {
       if(ibounds.contains(pir.p))
 	log_app.debug() << "v[" << pir.p << "] = " << a_vals.read(pir.p);
     }
@@ -1978,12 +1978,12 @@ void RandomTest<N1,T1,N2,T2,FT>::fill_instance_data(ZIndexSpace<N1,T1> ibounds,
 
   {
     // now pointer field
-    AffineAccessor<ZPoint<N2,T2>,N1,T1> a_ptrs(inst, 0 + sizeof(FT));
+    AffineAccessor<Point<N2,T2>,N1,T1> a_ptrs(inst, 0 + sizeof(FT));
 
     // iterate over all points in root1 with initial random values
     RandStream<> rs2(random_seed + 2);
-    for(ZPointInRectIterator<N1,T1> pir(bounds1); pir.valid; pir.step()) {
-      ZPoint<N2,T2> p2;
+    for(PointInRectIterator<N1,T1> pir(bounds1); pir.valid; pir.step()) {
+      Point<N2,T2> p2;
       for(int i = 0; i < N2; i++)
 	p2[i] = bounds2.lo[i] + rs2.rand_int(bounds2.hi[i] - bounds2.lo[i] + 1);
       if(ibounds.contains(pir.p))
@@ -1991,7 +1991,7 @@ void RandomTest<N1,T1,N2,T2,FT>::fill_instance_data(ZIndexSpace<N1,T1> ibounds,
     }
     
     // print results
-    for(ZPointInRectIterator<N1,T1> pir(bounds1); pir.valid; pir.step()) {
+    for(PointInRectIterator<N1,T1> pir(bounds1); pir.valid; pir.step()) {
       if(ibounds.contains(pir.p))
 	log_app.debug() << "p[" << pir.p << "] = " << a_ptrs.read(pir.p);
     }
@@ -2002,8 +2002,8 @@ template <int N1, typename T1, int N2, typename T2, typename FT>
 Event RandomTest<N1,T1,N2,T2,FT>::initialize_data(const std::vector<Memory>& memories,
 						  const std::vector<Processor>& procs)
 {
-  root1 = ZIndexSpace<N1,T1>(bounds1);
-  root2 = ZIndexSpace<N2,T2>(bounds2);
+  root1 = IndexSpace<N1,T1>(bounds1);
+  root2 = IndexSpace<N2,T2>(bounds2);
   log_app.debug() << "root1 = " << root1;
   log_app.debug() << "root2 = " << root2;
 
@@ -2011,13 +2011,13 @@ Event RandomTest<N1,T1,N2,T2,FT>::initialize_data(const std::vector<Memory>& mem
   size_t num_insts = memories.size();
   log_app.debug() << "procs: " << procs;
   log_app.debug() << "mems: " << memories;
-  std::vector<ZIndexSpace<N1,T1> > ss_inst1;
+  std::vector<IndexSpace<N1,T1> > ss_inst1;
   root1.create_equal_subspaces(num_insts, 1, ss_inst1,
 			       Realm::ProfilingRequestSet()).wait();
 
   std::vector<size_t> field_sizes;
   field_sizes.push_back(sizeof(FT));
-  field_sizes.push_back(sizeof(ZPoint<N2,T2>));
+  field_sizes.push_back(sizeof(Point<N2,T2>));
 
   ri_data1.resize(num_insts);
   fd_vals1.resize(num_insts);
@@ -2057,7 +2057,7 @@ Event RandomTest<N1,T1,N2,T2,FT>::perform_partitioning(void)
 {
   // start by filtering root1 by color
   std::vector<FT> piece_colors(colors.begin(), colors.begin() + num_pieces);
-  std::vector<ZIndexSpace<N1,T1> > ss_by_color(num_pieces);
+  std::vector<IndexSpace<N1,T1> > ss_by_color(num_pieces);
   Event e1 = root1.create_subspaces_by_field(fd_vals1,
 					     piece_colors,
 					     ss_by_color,
@@ -2070,7 +2070,7 @@ Event RandomTest<N1,T1,N2,T2,FT>::perform_partitioning(void)
   }
 
   // images
-  std::vector<ZIndexSpace<N2,T2> > ss_images;
+  std::vector<IndexSpace<N2,T2> > ss_images;
   Event e2 = root2.create_subspaces_by_image(fd_ptrs1,
 					     ss_by_color,
 					     ss_images,
@@ -2085,7 +2085,7 @@ Event RandomTest<N1,T1,N2,T2,FT>::perform_partitioning(void)
   }
 
   // preimages
-  std::vector<ZIndexSpace<N1,T1> > ss_preimages;
+  std::vector<IndexSpace<N1,T1> > ss_preimages;
   Event e3 = root1.create_subspaces_by_preimage(fd_ptrs1,
 						ss_images,
 						ss_preimages,

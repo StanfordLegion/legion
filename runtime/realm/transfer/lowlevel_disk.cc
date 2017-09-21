@@ -206,7 +206,7 @@ namespace Realm {
   template <int N, typename T>
   /*static*/ Event RegionInstance::create_file_instance(RegionInstance& inst,
 							const char *file_name,
-							const ZIndexSpace<N,T>& space,
+							const IndexSpace<N,T>& space,
 							const std::vector<FieldID> &field_ids,
 							const std::vector<size_t> &field_sizes,
 							legion_lowlevel_file_mode_t file_mode,
@@ -277,7 +277,7 @@ namespace Realm {
   #define DOIT(N,T) \
   template Event RegionInstance::create_file_instance<N,T>(RegionInstance&, \
 							   const char *, \
-							   const ZIndexSpace<N,T>&, \
+							   const IndexSpace<N,T>&, \
 							   const std::vector<FieldID>&, \
 							   const std::vector<size_t>&, \
                                                            legion_lowlevel_file_mode_t, \

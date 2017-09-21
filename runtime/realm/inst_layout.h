@@ -48,7 +48,7 @@ namespace Realm {
   };
 
 
-  // instance layouts are templated on the type of the ZIndexSpace used to
+  // instance layouts are templated on the type of the IndexSpace used to
   //  index them, but they all inherit from a generic version
   class InstanceLayoutGeneric {
   protected:
@@ -67,7 +67,7 @@ namespace Realm {
     virtual void print(std::ostream& os) const = 0;
 
     template <int N, typename T>
-    static InstanceLayoutGeneric *choose_instance_layout(ZIndexSpace<N,T> is,
+    static InstanceLayoutGeneric *choose_instance_layout(IndexSpace<N,T> is,
 							 const InstanceLayoutConstraints& ilc);
 
     size_t bytes_used;
@@ -111,14 +111,14 @@ namespace Realm {
 
     virtual ~InstanceLayoutPiece(void);
 
-    virtual size_t calculate_offset(const ZPoint<N,T>& p) const = 0;
+    virtual size_t calculate_offset(const Point<N,T>& p) const = 0;
 
     virtual void relocate(size_t base_offset) = 0;
 
     virtual void print(std::ostream& os) const = 0;
 
     LayoutType layout_type;
-    ZRect<N,T> bounds;
+    Rect<N,T> bounds;
   };
 
   template <int N, typename T>
@@ -132,7 +132,7 @@ namespace Realm {
     template <typename S>
     static InstanceLayoutPiece<N,T> *deserialize_new(S& deserializer);
 
-    virtual size_t calculate_offset(const ZPoint<N,T>& p) const;
+    virtual size_t calculate_offset(const Point<N,T>& p) const;
 
     virtual void relocate(size_t base_offset);
 
@@ -143,7 +143,7 @@ namespace Realm {
     template <typename S>
     bool serialize(S& serializer) const;
 
-    ZPoint<N, size_t> strides;
+    Point<N, size_t> strides;
     size_t offset;
   };
 
@@ -153,7 +153,7 @@ namespace Realm {
     InstancePieceList(void);
     ~InstancePieceList(void);
 
-    const InstanceLayoutPiece<N,T> *find_piece(ZPoint<N,T> p) const;
+    const InstanceLayoutPiece<N,T> *find_piece(Point<N,T> p) const;
 
     void relocate(size_t base_offset);
 
@@ -186,9 +186,9 @@ namespace Realm {
 
     // computes the offset of the specified field for an element - this
     //  is generally much less efficient than using a layout-specific accessor
-    size_t calculate_offset(ZPoint<N,T> p, FieldID fid) const;
+    size_t calculate_offset(Point<N,T> p, FieldID fid) const;
 
-    ZIndexSpace<N,T> space;
+    IndexSpace<N,T> space;
     std::vector<InstancePieceList<N,T> > piece_lists;
 
     static Serialization::PolymorphicSerdezSubclass<InstanceLayoutGeneric, InstanceLayout<N,T> > serdez_subclass;
@@ -230,28 +230,28 @@ namespace Realm {
 
     // limits domain to a subrectangle
     GenericAccessor(RegionInstance inst,
-		   FieldID field_id, const ZRect<N,T>& subrect,
+		   FieldID field_id, const Rect<N,T>& subrect,
 		   size_t subfield_offset = 0);
 
     ~GenericAccessor(void);
 
     static bool is_compatible(RegionInstance inst, ptrdiff_t field_offset);
-    static bool is_compatible(RegionInstance inst, ptrdiff_t field_offset, const ZRect<N,T>& subrect);
+    static bool is_compatible(RegionInstance inst, ptrdiff_t field_offset, const Rect<N,T>& subrect);
 
     template <typename INST>
     static bool is_compatible(const INST &instance, unsigned field_id);
     template <typename INST>
-    static bool is_compatible(const INST &instance, unsigned field_id, const ZRect<N,T>& subrect);
+    static bool is_compatible(const INST &instance, unsigned field_id, const Rect<N,T>& subrect);
 
     // GenericAccessor does not support returning a pointer to an element
-    //FT *ptr(const ZPoint<N,T>& p) const;
+    //FT *ptr(const Point<N,T>& p) const;
 
-    FT read(const ZPoint<N,T>& p);
-    void write(const ZPoint<N,T>& p, FT newval);
+    FT read(const Point<N,T>& p);
+    void write(const Point<N,T>& p, FT newval);
 
     // this returns a "reference" that knows how to do a read via operator FT
     //  or a write via operator=
-    AccessorRefHelper<FT> operator[](const ZPoint<N,T>& p);
+    AccessorRefHelper<FT> operator[](const Point<N,T>& p);
 
     // instead of storing the top-level layout - we narrow down to just the
     //  piece list and relative offset of the field we're interested in
@@ -263,7 +263,7 @@ namespace Realm {
 
   protected:
     // not a const method because of the piece caching
-    size_t get_offset(const ZPoint<N,T>& p);
+    size_t get_offset(const Point<N,T>& p);
   };
   
   template <typename FT, int N, typename T>
@@ -289,36 +289,36 @@ namespace Realm {
 
     // limits domain to a subrectangle
     AffineAccessor(RegionInstance inst,
-		   FieldID field_id, const ZRect<N,T>& subrect,
+		   FieldID field_id, const Rect<N,T>& subrect,
 		   size_t subfield_offset = 0);
 
     __CUDA_HD__
     ~AffineAccessor(void);
 
     static bool is_compatible(RegionInstance inst, ptrdiff_t field_offset);
-    static bool is_compatible(RegionInstance inst, ptrdiff_t field_offset, const ZRect<N,T>& subrect);
+    static bool is_compatible(RegionInstance inst, ptrdiff_t field_offset, const Rect<N,T>& subrect);
 
     template <typename INST>
     static bool is_compatible(const INST &instance, unsigned field_id);
     template <typename INST>
-    static bool is_compatible(const INST &instance, unsigned field_id, const ZRect<N,T>& subrect);
+    static bool is_compatible(const INST &instance, unsigned field_id, const Rect<N,T>& subrect);
 
     __CUDA_HD__
-    FT *ptr(const ZPoint<N,T>& p) const;
+    FT *ptr(const Point<N,T>& p) const;
     __CUDA_HD__
-    FT read(const ZPoint<N,T>& p) const;
+    FT read(const Point<N,T>& p) const;
     __CUDA_HD__
-    void write(const ZPoint<N,T>& p, FT newval) const;
+    void write(const Point<N,T>& p, FT newval) const;
 
     __CUDA_HD__
-    FT& operator[](const ZPoint<N,T>& p) const;
+    FT& operator[](const Point<N,T>& p) const;
 
     __CUDA_HD__
-    bool is_dense_arbitrary(const ZRect<N,T> &bounds) const; // any dimension ordering
+    bool is_dense_arbitrary(const Rect<N,T> &bounds) const; // any dimension ordering
     __CUDA_HD__
-    bool is_dense_col_major(const ZRect<N,T> &bounds) const; // Fortran dimension ordering
+    bool is_dense_col_major(const Rect<N,T> &bounds) const; // Fortran dimension ordering
     __CUDA_HD__
-    bool is_dense_row_major(const ZRect<N,T> &bounds) const; // C dimension ordering
+    bool is_dense_row_major(const Rect<N,T> &bounds) const; // C dimension ordering
 
   //protected:
   //friend
@@ -326,16 +326,16 @@ namespace Realm {
 //#define REALM_ACCESSOR_DEBUG
 #ifdef REALM_ACCESSOR_DEBUG
     RegionInstance dbg_inst;
-    ZRect<N,T> dbg_bounds;
+    Rect<N,T> dbg_bounds;
 #ifdef __CUDACC__
 #error "REALM_ACCESSOR_DEBUG macro for AffineAccessor not supported for GPU code"
 #endif
 #endif
     intptr_t base;
-    ZPoint<N, ptrdiff_t> strides;
+    Point<N, ptrdiff_t> strides;
   protected:
     __CUDA_HD__
-    FT* get_ptr(const ZPoint<N,T>& p) const;
+    FT* get_ptr(const Point<N,T>& p) const;
   };
 
   template <typename FT, int N, typename T>

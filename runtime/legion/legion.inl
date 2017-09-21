@@ -3793,7 +3793,7 @@ namespace Legion {
     {
       if (!rect_iterator.valid)
         rect_iterator = 
-          Realm::ZPointInRectIterator<1,coord_t>(is_iterator.rect);
+          Realm::PointInRectIterator<1,coord_t>(is_iterator.rect);
       const ptr_t result = rect_iterator.p[0];
       rect_iterator.step();
       if (!rect_iterator.valid)
@@ -3832,7 +3832,7 @@ namespace Legion {
         if (act_count > req_count)
         {
           rect_iterator = 
-            Realm::ZPointInRectIterator<1,coord_t>(is_iterator.rect);
+            Realm::PointInRectIterator<1,coord_t>(is_iterator.rect);
           rect_iterator.p[0] = result.value + req_count;
 	  act_count = req_count;
         }
@@ -3870,10 +3870,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // C++ type system is dumb
-      std::vector<Realm::ZPoint<DIM,T> > realm_points(points.size());
+      std::vector<Realm::Point<DIM,T> > realm_points(points.size());
       for (unsigned idx = 0; idx < points.size(); idx++)
         realm_points[idx] = points[idx];
-      DomainT<DIM,T> realm_is((Realm::ZIndexSpace<DIM,T>(realm_points)));
+      DomainT<DIM,T> realm_is((Realm::IndexSpace<DIM,T>(realm_points)));
       return IndexSpaceT<DIM,T>(create_index_space_internal(ctx, &realm_is,
                 Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
     }
@@ -3885,10 +3885,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // C++ type system is dumb
-      std::vector<Realm::ZRect<DIM,T> > realm_rects(rects.size());
+      std::vector<Realm::Rect<DIM,T> > realm_rects(rects.size());
       for (unsigned idx = 0; idx < rects.size(); idx++)
         realm_rects[idx] = rects[idx];
-      DomainT<DIM,T> realm_is((Realm::ZIndexSpace<DIM,T>(realm_rects)));
+      DomainT<DIM,T> realm_is((Realm::IndexSpace<DIM,T>(realm_rects)));
       return IndexSpaceT<DIM,T>(create_index_space_internal(ctx, &realm_is,
                 Internal::NT_TemplateHelper::template encode_tag<DIM,T>()));
     }
@@ -4229,7 +4229,7 @@ namespace Legion {
                               IndexSpaceT<DIM2,T2> handle,
                               LogicalPartitionT<DIM1,T1> projection,
                               LogicalRegionT<DIM1,T1> parent,
-                              FieldID fid, // type: ZPoint<DIM2,COORD_T2>
+                              FieldID fid, // type: Point<DIM2,COORD_T2>
                               IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
                               PartitionKind part_kind, Color color,
                               MapperID id, MappingTagID tag)
@@ -4249,7 +4249,7 @@ namespace Legion {
                               IndexSpaceT<DIM2,T2> handle,
                               LogicalPartitionT<DIM1,T1> projection,
                               LogicalRegionT<DIM1,T1> parent,
-                              FieldID fid, // type: ZPoint<DIM2,COORD_T2>
+                              FieldID fid, // type: Point<DIM2,COORD_T2>
                               IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
                               PartitionKind part_kind, Color color,
                               MapperID id, MappingTagID tag)
@@ -4268,7 +4268,7 @@ namespace Legion {
                               IndexPartitionT<DIM2,T2> projection,
                               LogicalRegionT<DIM1,T1> handle,
                               LogicalRegionT<DIM1,T1> parent,
-                              FieldID fid, // type: ZPoint<DIM2,COORD_T2>
+                              FieldID fid, // type: Point<DIM2,COORD_T2>
                               IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
                               PartitionKind part_kind, Color color,
                               MapperID id, MappingTagID tag)
@@ -4288,7 +4288,7 @@ namespace Legion {
                               IndexPartitionT<DIM2,T2> projection,
                               LogicalRegionT<DIM1,T1> handle,
                               LogicalRegionT<DIM1,T1> parent,
-                              FieldID fid, // type: ZRect<DIM2,COORD_T2>
+                              FieldID fid, // type: Rect<DIM2,COORD_T2>
                               IndexSpaceT<COLOR_DIM,COLOR_T> color_space,
                               PartitionKind part_kind, Color color,
                               MapperID id, MappingTagID tag)
