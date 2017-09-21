@@ -18900,7 +18900,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::check_bounds(void *impl, 
-                                          const Realm::DomainPoint &dp)
+                                          const DomainPoint &dp)
     //--------------------------------------------------------------------------
     {
       PhysicalRegionImpl *region = static_cast<PhysicalRegionImpl*>(impl);

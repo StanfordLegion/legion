@@ -2966,7 +2966,7 @@ namespace Legion {
 #ifdef BOUNDS_CHECKS
     public:
       static void check_bounds(void *impl, ptr_t ptr);
-      static void check_bounds(void *impl, const Realm::DomainPoint &dp);
+      static void check_bounds(void *impl, const DomainPoint &dp);
 #endif
     private:
       static RtEvent register_runtime_tasks(RealmRuntime &realm);
