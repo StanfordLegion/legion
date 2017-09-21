@@ -23,7 +23,7 @@
 #include <unistd.h>
 #include <math.h>
 #include <cmath>
-using namespace Legion;
+using namespace LegionRuntime::HighLevel;
 using namespace LegionRuntime::Accessor;
 using namespace LegionRuntime::Arrays;
 
