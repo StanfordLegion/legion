@@ -13,17 +13,14 @@ for branch in master deppart; do
         git pull --ff-only
         git reset --hard HEAD
         git clean -fdx
-        if [[ -d $TERRA_DIR ]]; then
-            ln -s "$TERRA_DIR" language/terra
-        fi
         popd
     else
         git clone -b $branch https://github.com/StanfordLegion/legion.git _legion_$branch
-        if [[ -d $TERRA_DIR ]]; then
-            ln -s "$TERRA_DIR" language/terra
-        fi
     fi
     pushd _legion_$branch
+    if [[ -d $TERRA_DIR ]]; then
+        ln -s "$TERRA_DIR" language/terra
+    fi
     ./test.py --test=perf
     popd
 done
