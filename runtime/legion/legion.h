@@ -386,7 +386,7 @@ namespace Legion {
      *
      * @see Runtime
      */
-    class LEGION_DEPRECATED("Dynamic IndexAllocators are no longer supported")
+    class //LEGION_DEPRECATED("Dynamic IndexAllocators are no longer supported")
       IndexAllocator : public Unserializable<IndexAllocator> {
     public:
       IndexAllocator(void);
