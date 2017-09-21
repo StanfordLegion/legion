@@ -13,6 +13,11 @@
  * limitations under the License.
  */
 
+// include this _before_ anything below to deal with weird ordering 
+//  constraints w.r.t. Legion's other definitions
+// (it will actually turn around and include this file when it's ready)
+#include <legion/legion_types.h>
+
 #ifndef RUNTIME_ACCESSOR_H
 #define RUNTIME_ACCESSOR_H
 
