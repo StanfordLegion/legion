@@ -58,6 +58,9 @@ namespace Realm {
   };
 
   template <int N, typename T>
+  std::ostream& operator<<(std::ostream& os, const DenseRectangleList<N,T>& drl);
+
+  template <int N, typename T>
   class HybridRectangleList {
   public:
     static const size_t HIGH_WATER_MARK = 64;
@@ -76,6 +79,9 @@ namespace Realm {
     //std::multimap<T, Rect<N,T> > as_mmap;
   };
     
+  template <int N, typename T>
+  std::ostream& operator<<(std::ostream& os, const HybridRectangleList<N,T>& hrl);
+
 };
 
 #endif // REALM_DEPPART_RECTLIST_H

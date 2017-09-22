@@ -264,8 +264,10 @@ namespace Realm {
       int dlo = lo + 1;
       int dhi = dlo;
       while((dhi < (int)rects.size()) &&
-	    ((mr.hi.x + 1) >= rects[dhi].lo.x))
+	    ((mr.hi.x + 1) >= rects[dhi].lo.x)) {
+	mr.hi.x = std::max(mr.hi.x, rects[dhi].hi.x);
 	dhi++;
+      }
       if(dhi > dlo)
 	rects.erase(rects.begin()+dlo, rects.begin()+dhi);
       return;
@@ -373,6 +375,23 @@ namespace Realm {
 #endif
   }
 
+  template <int N, typename T>
+  std::ostream& operator<<(std::ostream& os, const DenseRectangleList<N,T>& drl)
+  {
+    os << "drl";
+    if(drl.rects.empty()) {
+      os << "{}";
+    } else {
+      os << "{";
+      for(typename std::vector<Rect<N,T> >::const_iterator it = drl.rects.begin();
+	  it != drl.rects.end();
+	  ++it)
+	os << " " << *it;
+      os << " }";
+    }
+    return os;
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -400,6 +419,24 @@ namespace Realm {
   inline const std::vector<Rect<N,T> >& HybridRectangleList<N,T>::convert_to_vector(void)
   {
     return as_vector.rects;
+  }
+
+  template <int N, typename T>
+  std::ostream& operator<<(std::ostream& os, const HybridRectangleList<N,T>& hrl)
+  {
+    os << "hrl[]";
+    os << "hrl";
+    if(hrl.as_vector.rects.empty()) {
+      os << "{}";
+    } else {
+      os << "{ (vec)";
+      for(typename std::vector<Rect<N,T> >::const_iterator it = hrl.as_vector.rects.begin();
+	  it != hrl.as_vector.rects.end();
+	  ++it)
+	os << " " << *it;
+      os << " }";
+    }
+    return os;
   }
 
 
@@ -587,6 +624,31 @@ namespace Realm {
     return this->rects;
   }
 
+  template <typename T>
+  std::ostream& operator<<(std::ostream& os, const HybridRectangleList<1,T>& hrl)
+  {
+    os << "hrl";
+    if(hrl.is_vector) {
+      if(hrl.rects.empty()) {
+	os << "{}";
+      } else {
+	os << "{ (vec)";
+	for(typename std::vector<Rect<1,T> >::const_iterator it = hrl.rects.begin();
+	    it != hrl.rects.end();
+	    ++it)
+	  os << " " << *it;
+	os << " }";
+      }
+    } else {
+      os << "{ (map)";
+      for(typename std::map<T,T>::const_iterator it = hrl.as_map.begin();
+	  it != hrl.as_map.end();
+	  ++it)
+	os << " " << Rect<1,T>(it->first, it->second);
+      os << " }";
+    }
+    return os;
+  }
     
 };
 
