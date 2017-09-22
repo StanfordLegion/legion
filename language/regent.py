@@ -59,7 +59,7 @@ else:
     use_rdir = '1' if rdir in ['auto', 'manual'] else '0'
 
 include_path = (
-    (os.environ['INCLUDE_PATH'].split(':')
+    (os.environ['INCLUDE_PATH'].split(';')
      if 'INCLUDE_PATH' in os.environ else []) +
     [bindings_dir,
      runtime_dir,
