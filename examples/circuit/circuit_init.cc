@@ -378,7 +378,7 @@ Partitions load_circuit(Circuit &ckt, std::vector<CircuitPiece> &pieces, Context
   const AccessorRWloc fa_wire_in_loc(wires, FID_IN_LOC);
   const AccessorRWloc fa_wire_out_loc(wires, FID_OUT_LOC);
   const AccessorRWfloat fa_wire_inductance(wires, FID_INDUCTANCE);
-  const AccessorRwfloat fa_wire_resistance(wires, FID_RESISTANCE);
+  const AccessorRWfloat fa_wire_resistance(wires, FID_RESISTANCE);
   const AccessorRWfloat fa_wire_cap(wires, FID_WIRE_CAP);
   {
     for (int n = 0; n < num_pieces; n++)
