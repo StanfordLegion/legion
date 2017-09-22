@@ -130,7 +130,7 @@ def build_terra(terra_dir, llvm_dir, is_cray, thread_count):
         cwd=terra_dir,
         env=env)
 
-def install_llvm(llvm_dir, llvm_install_dir, llvm_version, cmake_exe):
+def install_llvm(llvm_dir, llvm_install_dir, llvm_version, cmake_exe, insecure):
     os.mkdir(llvm_dir)
 
     if llvm_version == '38':
@@ -253,7 +253,7 @@ def driver(llvm_version, insecure):
     conduit = discover_conduit()
     gasnet_dir = os.path.realpath(os.path.join(root_dir, 'gasnet'))
     gasnet_build_result = os.path.join(
-        gasnet_dir, 'release' '%s-conduit' % conduit,
+        gasnet_dir, 'release', '%s-conduit' % conduit,
         'libgasnet-%s-par.a' % conduit)
     if not os.path.exists(gasnet_dir):
         git_clone(gasnet_dir, 'https://github.com/StanfordLegion/gasnet.git')
@@ -283,9 +283,9 @@ def driver(llvm_version, insecure):
     llvm_build_result = os.path.join(llvm_install_dir, 'bin', 'llvm-config')
     if not os.path.exists(llvm_dir):
         try:
-            install_llvm(llvm_dir, llvm_install_dir, llvm_version)
+            install_llvm(llvm_dir, llvm_install_dir, llvm_version, cmake_exe, insecure)
         except Exception as e:
-            report_build_failure('llvm', llvm_build_result, llvm_dir)
+            report_build_failure('llvm', llvm_dir, e)
     else:
         check_dirty_build('llvm', llvm_build_result, llvm_dir)
     assert os.path.exists(llvm_build_result)
@@ -297,7 +297,7 @@ def driver(llvm_version, insecure):
         try:
             build_terra(terra_dir, llvm_install_dir, is_cray, thread_count)
         except Exception as e:
-            report_build_failure('terra', terra_build_result, terra_dir)
+            report_build_failure('terra', terra_dir, e)
     else:
         check_dirty_build('terra', terra_build_result, terra_dir)
     assert os.path.exists(terra_build_result)
