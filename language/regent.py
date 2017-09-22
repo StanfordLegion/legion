@@ -58,13 +58,15 @@ else:
     rdir = load_json_config(rdir_config_filename)
     use_rdir = '1' if rdir in ['auto', 'manual'] else '0'
 
-include_path = [
-    bindings_dir,
-    runtime_dir,
-    realm_dir,
-    mapper_dir,
-    legion_runtime_dir,
-]
+include_path = (
+    (os.environ['INCLUDE_PATH'].split(':')
+     if 'INCLUDE_PATH' in os.environ else []) +
+    [bindings_dir,
+     runtime_dir,
+     realm_dir,
+     mapper_dir,
+     legion_runtime_dir,
+])
 if cuda_include_dir is not None:
     include_path.append(cuda_include_dir)
 
@@ -77,7 +79,7 @@ lib_path = (
      if LD_LIBRARY_PATH in os.environ else []) +
     [os.path.join(terra_dir, 'build'),
      bindings_dir,
- ])
+])
 
 def root_dir():
     return os.path.dirname(runtime_dir)
