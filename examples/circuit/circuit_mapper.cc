@@ -100,19 +100,27 @@ void CircuitMapper::map_task(const MapperContext      ctx,
             }
         }
       }
-      const TaskLayoutConstraintSet &layout_constraints =
-        runtime->find_task_layout_constraints(ctx,
-                            task.task_id, output.chosen_variant);
-      std::set<FieldID> fields(task.regions[idx].privilege_fields);
-      if (!default_create_custom_instances(ctx, task.target_proc,
-              target_memory, task.regions[idx], idx, fields,
-              layout_constraints, true,
-              output.chosen_instances[idx]))
+      if (task.regions[idx].privilege == REDUCE)
       {
-        default_report_failed_instance_creation(task, idx,
+        // Reduction instances always have to make new instances
+        const TaskLayoutConstraintSet &layout_constraints =
+          runtime->find_task_layout_constraints(ctx,
+                              task.task_id, output.chosen_variant);
+        std::set<FieldID> fields(task.regions[idx].privilege_fields);
+        if (!default_create_custom_instances(ctx, task.target_proc,
+                target_memory, task.regions[idx], idx, fields,
+                layout_constraints, true,
+                output.chosen_instances[idx]))
+        {
+          default_report_failed_instance_creation(task, idx,
                                     task.target_proc, target_memory);
+        }
       }
+      else
+        map_circuit_region(ctx, task.regions[idx].region, target_memory,
+                           output.chosen_instances[idx]);
     }
+    runtime->acquire_instances(ctx, output.chosen_instances);
   }
   else
     DefaultMapper::map_task(ctx, task, input, output);
@@ -157,6 +165,49 @@ void CircuitMapper::map_inline(const MapperContext    ctx,
                  target_memory.id,
                  inline_op.parent_task->current_proc.id);
   }
+}
+
+void CircuitMapper::map_circuit_region(const MapperContext ctx,
+                                       LogicalRegion region, Memory target,
+                                       std::vector<PhysicalInstance> &instances)
+{
+  const std::pair<LogicalRegion,Memory> key(region, target);
+  std::map<std::pair<LogicalRegion,Memory>,PhysicalInstance>::const_iterator
+    finder = local_instances.find(key);
+  if (finder != local_instances.end()) {
+    instances.push_back(finder->second);
+    return;
+  }
+  // First time through, then we make an instance
+  std::vector<LogicalRegion> regions(1, region);  
+  LayoutConstraintSet layout_constraints;
+  // No specialization
+  layout_constraints.add_constraint(SpecializedConstraint());
+  // SOA-Fortran dimension ordering
+  std::vector<DimensionKind> dimension_ordering(4);
+  dimension_ordering[0] = DIM_X;
+  dimension_ordering[1] = DIM_Y;
+  dimension_ordering[2] = DIM_Z;
+  dimension_ordering[3] = DIM_F;
+  layout_constraints.add_constraint(OrderingConstraint(dimension_ordering, 
+                                                       false/*contiguous*/));
+  // Constrained for the target memory kind
+  layout_constraints.add_constraint(MemoryConstraint(target.kind()));
+  // Have all the field for the instance available
+  std::vector<FieldID> all_fields;
+  runtime->get_field_space_fields(ctx, region.get_field_space(), all_fields);
+  layout_constraints.add_constraint(FieldConstraint(all_fields, false/*contiguous*/,
+                                                    false/*inorder*/));
+
+  PhysicalInstance result; bool created;
+  if (!runtime->find_or_create_physical_instance(ctx, target, layout_constraints,
+        regions, result, created, true/*acquire*/, GC_NEVER_PRIORITY)) {
+    log_mapper.error("ERROR: Circuit Mapper failed to allocate instance");
+    assert(false);
+  }
+  instances.push_back(result);
+  // Save the result for future use
+  local_instances[key] = result;
 }
 
 void update_mappers(Machine machine, Runtime *runtime,
