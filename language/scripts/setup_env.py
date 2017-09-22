@@ -130,6 +130,65 @@ def build_terra(terra_dir, llvm_dir, is_cray, thread_count):
         cwd=terra_dir,
         env=env)
 
+def report_build_failure(name, component_dir, exception):
+    print()
+    print('#' * 68)
+    print('## Build Failed')
+    print('#' * 68)
+    print()
+    print('It appears that %s has failed to build. The failure was:' % name)
+    print()
+    print(exception)
+    print()
+    print('Given the number of things that could potentially have gone')
+    print('wrong, this script is not designed to handle this situation.')
+    print('You will need to fix the problem on your own (or ask for help')
+    print('fixing it).')
+    print()
+    print('The files are located here:')
+    print()
+    print(component_dir)
+    print()
+    print('Once you have fixed the problem, you have two options:')
+    print()
+    print(' 1. Go to the directory and rebuild it yourself. This')
+    print('    script will not touch the directory again.')
+    print()
+    print(' 2. Remove the directory. Then rerun this script.')
+    print()
+    print('Good luck and please ask for help if you get stuck!')
+    sys.exit(1)
+
+def check_dirty_build(name, build_result, component_dir):
+    if not os.path.exists(build_result):
+        print()
+        print('#' * 68)
+        print('## Dirty Previous Build Detected')
+        print('#' * 68)
+        print()
+        print('It appears that %s was not built successfully on a' % name)
+        print('previous invocation of this script. As a result, the existing')
+        print('build directory is dirty. Given the number of things that')
+        print('may have potentially gone wrong, this script is not designed')
+        print('to handle this situation.')
+        print()
+        print('You will need to fix the problem on your own (or ask for')
+        print('help fixing it).')
+        print()
+        print('The files are located here:')
+        print()
+        print(component_dir)
+        print()
+        print('Once you have fixed the problem, you have two options:')
+        print()
+        print(' 1. Go to the directory and rebuild it yourself. This')
+        print('    script will not touch the directory again.')
+        print()
+        print(' 2. Remove the directory. Then rerun this script.')
+        print()
+        print('Good luck and please ask for help if you get stuck!')
+        sys.exit(1)
+
 def driver(llvm_version, insecure):
     if 'CC' not in os.environ:
         raise Exception('Please set CC in your environment')
@@ -167,11 +226,18 @@ def driver(llvm_version, insecure):
 
     conduit = discover_conduit()
     gasnet_dir = os.path.realpath(os.path.join(root_dir, 'gasnet'))
-    gasnet_release_dir = os.path.join(gasnet_dir, 'release')
+    gasnet_build_result = os.path.join(
+        gasnet_dir, 'release' '%s-conduit' % conduit,
+        'libgasnet-%s-par.a' % conduit)
     if not os.path.exists(gasnet_dir):
         git_clone(gasnet_dir, 'https://github.com/StanfordLegion/gasnet.git')
-        build_gasnet(gasnet_dir, conduit)
-    assert os.path.exists(gasnet_release_dir)
+        try:
+            build_gasnet(gasnet_dir, conduit)
+        except Exception as e:
+            report_build_failure('gasnet', gasnet_dir, e)
+    else:
+        check_dirty_build('gasnet', gasnet_build_result, gasnet_dir)
+    assert os.path.exists(gasnet_build_result)
 
     cmake_exe = None
     if llvm_use_cmake:
