@@ -130,6 +130,91 @@ def build_terra(terra_dir, llvm_dir, is_cray, thread_count):
         cwd=terra_dir,
         env=env)
 
+def install_llvm(llvm_dir, llvm_install_dir, llvm_version, cmake_exe, insecure):
+    os.mkdir(llvm_dir)
+
+    if llvm_version == '38':
+        llvm_tarball = os.path.join(llvm_dir, 'llvm-3.8.1.src.tar.xz')
+        llvm_source_dir = os.path.join(llvm_dir, 'llvm-3.8.1.src')
+        clang_tarball = os.path.join(llvm_dir, 'cfe-3.8.1.src.tar.xz')
+        clang_source_dir = os.path.join(llvm_dir, 'cfe-3.8.1.src')
+        download(llvm_tarball, 'http://llvm.org/releases/3.8.1/llvm-3.8.1.src.tar.xz', 'e0c48c4c182424b99999367d688cd8ce7876827b', insecure=insecure)
+        download(clang_tarball, 'http://llvm.org/releases/3.8.1/cfe-3.8.1.src.tar.xz', 'b5ff24dc6ad8f84654f4859389990bace1cfb6d5', insecure=insecure)
+    elif llvm_version == '39':
+        llvm_tarball = os.path.join(llvm_dir, 'llvm-3.9.1.src.tar.xz')
+        llvm_source_dir = os.path.join(llvm_dir, 'llvm-3.9.1.src')
+        clang_tarball = os.path.join(llvm_dir, 'cfe-3.9.1.src.tar.xz')
+        clang_source_dir = os.path.join(llvm_dir, 'cfe-3.9.1.src')
+        download(llvm_tarball, 'http://llvm.org/releases/3.9.1/llvm-3.9.1.src.tar.xz', 'ce801cf456b8dacd565ce8df8288b4d90e7317ff', insecure=insecure)
+        download(clang_tarball, 'http://llvm.org/releases/3.9.1/cfe-3.9.1.src.tar.xz', '95e4be54b70f32cf98a8de36821ea5495b84add8', insecure=insecure)
+    extract(llvm_dir, llvm_tarball, 'xz')
+    extract(llvm_dir, clang_tarball, 'xz')
+    os.rename(clang_source_dir, os.path.join(llvm_source_dir, 'tools', 'clang'))
+
+    llvm_build_dir = os.path.join(llvm_dir, 'build')
+    os.mkdir(llvm_build_dir)
+    os.mkdir(llvm_install_dir)
+    build_llvm(llvm_source_dir, llvm_build_dir, llvm_install_dir, llvm_use_cmake, cmake_exe, thread_count, is_cray)
+
+def report_build_failure(name, component_dir, exception):
+    print()
+    print('#' * 68)
+    print('## Build Failed')
+    print('#' * 68)
+    print()
+    print('It appears that %s has failed to build. The failure was:' % name)
+    print()
+    print(exception)
+    print()
+    print('Given the number of things that could potentially have gone')
+    print('wrong, this script is not designed to handle this situation.')
+    print('You will need to fix the problem on your own (or ask for help')
+    print('fixing it).')
+    print()
+    print('The files are located here:')
+    print()
+    print(component_dir)
+    print()
+    print('Once you have fixed the problem, you have two options:')
+    print()
+    print(' 1. Go to the directory and rebuild it yourself. This')
+    print('    script will not touch the directory again.')
+    print()
+    print(' 2. Remove the directory. Then rerun this script.')
+    print()
+    print('Good luck and please ask for help if you get stuck!')
+    sys.exit(1)
+
+def check_dirty_build(name, build_result, component_dir):
+    if not os.path.exists(build_result):
+        print()
+        print('#' * 68)
+        print('## Dirty Previous Build Detected')
+        print('#' * 68)
+        print()
+        print('It appears that %s was not built successfully on a' % name)
+        print('previous invocation of this script. As a result, the existing')
+        print('build directory is dirty. Given the number of things that')
+        print('may have potentially gone wrong, this script is not designed')
+        print('to handle this situation.')
+        print()
+        print('You will need to fix the problem on your own (or ask for')
+        print('help fixing it).')
+        print()
+        print('The files are located here:')
+        print()
+        print(component_dir)
+        print()
+        print('Once you have fixed the problem, you have two options:')
+        print()
+        print(' 1. Go to the directory and rebuild it yourself. This')
+        print('    script will not touch the directory again.')
+        print()
+        print(' 2. Remove the directory. Then rerun this script.')
+        print()
+        print('Good luck and please ask for help if you get stuck!')
+        sys.exit(1)
+
 def driver(llvm_version, insecure):
     if 'CC' not in os.environ:
         raise Exception('Please set CC in your environment')
@@ -167,11 +252,18 @@ def driver(llvm_version, insecure):
 
     conduit = discover_conduit()
     gasnet_dir = os.path.realpath(os.path.join(root_dir, 'gasnet'))
-    gasnet_release_dir = os.path.join(gasnet_dir, 'release')
+    gasnet_build_result = os.path.join(
+        gasnet_dir, 'release', '%s-conduit' % conduit,
+        'libgasnet-%s-par.a' % conduit)
     if not os.path.exists(gasnet_dir):
         git_clone(gasnet_dir, 'https://github.com/StanfordLegion/gasnet.git')
-        build_gasnet(gasnet_dir, conduit)
-    assert os.path.exists(gasnet_release_dir)
+        try:
+            build_gasnet(gasnet_dir, conduit)
+        except Exception as e:
+            report_build_failure('gasnet', gasnet_dir, e)
+    else:
+        check_dirty_build('gasnet', gasnet_build_result, gasnet_dir)
+    assert os.path.exists(gasnet_build_result)
 
     cmake_exe = None
     if llvm_use_cmake:
@@ -188,37 +280,27 @@ def driver(llvm_version, insecure):
 
     llvm_dir = os.path.realpath(os.path.join(root_dir, 'llvm'))
     llvm_install_dir = os.path.join(llvm_dir, 'install')
+    llvm_build_result = os.path.join(llvm_install_dir, 'bin', 'llvm-config')
     if not os.path.exists(llvm_dir):
-        os.mkdir(llvm_dir)
-
-        if llvm_version == '38':
-            llvm_tarball = os.path.join(llvm_dir, 'llvm-3.8.1.src.tar.xz')
-            llvm_source_dir = os.path.join(llvm_dir, 'llvm-3.8.1.src')
-            clang_tarball = os.path.join(llvm_dir, 'cfe-3.8.1.src.tar.xz')
-            clang_source_dir = os.path.join(llvm_dir, 'cfe-3.8.1.src')
-            download(llvm_tarball, 'http://llvm.org/releases/3.8.1/llvm-3.8.1.src.tar.xz', 'e0c48c4c182424b99999367d688cd8ce7876827b', insecure=insecure)
-            download(clang_tarball, 'http://llvm.org/releases/3.8.1/cfe-3.8.1.src.tar.xz', 'b5ff24dc6ad8f84654f4859389990bace1cfb6d5', insecure=insecure)
-        elif llvm_version == '39':
-            llvm_tarball = os.path.join(llvm_dir, 'llvm-3.9.1.src.tar.xz')
-            llvm_source_dir = os.path.join(llvm_dir, 'llvm-3.9.1.src')
-            clang_tarball = os.path.join(llvm_dir, 'cfe-3.9.1.src.tar.xz')
-            clang_source_dir = os.path.join(llvm_dir, 'cfe-3.9.1.src')
-            download(llvm_tarball, 'http://llvm.org/releases/3.9.1/llvm-3.9.1.src.tar.xz', 'ce801cf456b8dacd565ce8df8288b4d90e7317ff', insecure=insecure)
-            download(clang_tarball, 'http://llvm.org/releases/3.9.1/cfe-3.9.1.src.tar.xz', '95e4be54b70f32cf98a8de36821ea5495b84add8', insecure=insecure)
-        extract(llvm_dir, llvm_tarball, 'xz')
-        extract(llvm_dir, clang_tarball, 'xz')
-        os.rename(clang_source_dir, os.path.join(llvm_source_dir, 'tools', 'clang'))
-
-        llvm_build_dir = os.path.join(llvm_dir, 'build')
-        os.mkdir(llvm_build_dir)
-        os.mkdir(llvm_install_dir)
-        build_llvm(llvm_source_dir, llvm_build_dir, llvm_install_dir, llvm_use_cmake, cmake_exe, thread_count, is_cray)
-    assert os.path.exists(llvm_install_dir)
+        try:
+            install_llvm(llvm_dir, llvm_install_dir, llvm_version, cmake_exe, insecure)
+        except Exception as e:
+            report_build_failure('llvm', llvm_dir, e)
+    else:
+        check_dirty_build('llvm', llvm_build_result, llvm_dir)
+    assert os.path.exists(llvm_build_result)
 
     terra_dir = os.path.join(root_dir, 'terra.build')
+    terra_build_result = os.path.join(terra_dir, 'release', 'bin', 'terra')
     if not os.path.exists(terra_dir):
         git_clone(terra_dir, 'https://github.com/elliottslaughter/terra.git', 'compiler-sc17-snapshot')
-        build_terra(terra_dir, llvm_install_dir, is_cray, thread_count)
+        try:
+            build_terra(terra_dir, llvm_install_dir, is_cray, thread_count)
+        except Exception as e:
+            report_build_failure('terra', terra_dir, e)
+    else:
+        check_dirty_build('terra', terra_build_result, terra_dir)
+    assert os.path.exists(terra_build_result)
 
     use_cuda = 'USE_CUDA' in os.environ and os.environ['USE_CUDA'] == '1'
     use_openmp = 'USE_OPENMP' in os.environ and os.environ['USE_OPENMP'] == '1'
