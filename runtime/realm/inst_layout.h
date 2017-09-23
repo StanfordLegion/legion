@@ -261,7 +261,7 @@ namespace Realm {
     // cache the most recently-used piece
     const InstanceLayoutPiece<N,T> *prev_piece;
 
-  protected:
+  //protected:
     // not a const method because of the piece caching
     size_t get_offset(const Point<N,T>& p);
   };
