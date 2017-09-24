@@ -233,11 +233,11 @@ gcc49_cxx98_debug_checks_gasnet_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx98_checks, *gasnet, *regent]
-gcc49_cxx98_debug_spy_gasnet_regent:
-  <<: [*linux_compute, *image, *tests]
-  variables:
-    <<: [*gcc49, *terra38, *debug, *cxx98_spy, *gasnet, *regent]
-  allow_failure: true # FIXME: some multi-node spy tests are currently failing
+### GASNet + Legion Spy disabled until issue #247 is resolved
+###gcc49_cxx98_debug_spy_gasnet_regent:
+###  <<: [*linux_compute, *image, *tests]
+###  variables:
+###    <<: [*gcc49, *terra38, *debug, *cxx98_spy, *gasnet, *regent]
 gcc49_cxx98_32bit_debug_legion:
   <<: [*linux, *image, *tests]
   variables:
