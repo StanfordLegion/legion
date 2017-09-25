@@ -25,12 +25,6 @@
 #include <realm/runtime_impl.h>
 #include <realm/inst_impl.h>
 
-namespace LegionRuntime {
-  namespace LowLevel {
-    class Request;
-  };
-};
-
 namespace Realm {
   class CoreReservationSet;
 
@@ -315,13 +309,6 @@ namespace Realm {
 
       virtual bool check_readiness(bool just_check, DmaRequestQueue *rq);
 
-#if 0
-      void perform_dma_mask(MemPairCopier *mpc);
-
-      template <unsigned DIM>
-      void perform_dma_rect(MemPairCopier *mpc);
-#endif
-
       void perform_new_dma(Memory src_mem, Memory dst_mem);
 
       virtual void perform_dma(void);
@@ -367,8 +354,8 @@ namespace Realm {
 		    int _priority);
 
       ReduceRequest(const TransferDomain *_domain, //const Domain& _domain,
-		    const std::vector<Domain::CopySrcDstField>& _srcs,
-		    const Domain::CopySrcDstField& _dst,
+		    const std::vector<CopySrcDstField>& _srcs,
+		    const CopySrcDstField& _dst,
 		    bool _inst_lock_needed,
 		    ReductionOpID _redop_id,
 		    bool _red_fold,
@@ -386,19 +373,14 @@ namespace Realm {
 
       virtual bool check_readiness(bool just_check, DmaRequestQueue *rq);
 
-      void perform_dma_mask(MemPairCopier *mpc);
-
-      template <unsigned DIM>
-      void perform_dma_rect(MemPairCopier *mpc);
-
       virtual void perform_dma(void);
 
       virtual bool handler_safe(void) { return(false); }
 
       TransferDomain *domain;
       //Domain domain;
-      std::vector<Domain::CopySrcDstField> srcs;
-      Domain::CopySrcDstField dst;
+      std::vector<CopySrcDstField> srcs;
+      CopySrcDstField dst;
       bool inst_lock_needed;
       Event inst_lock_event;
       ReductionOpID redop_id;
@@ -416,7 +398,7 @@ namespace Realm {
                   Event _after_fill,
                   int priority);
       FillRequest(const TransferDomain *_domain, //const Domain &_domain,
-                  const Domain::CopySrcDstField &_dst,
+                  const CopySrcDstField &_dst,
                   const void *fill_value, size_t fill_size,
                   Event _before_fill,
                   Event _after_fill,
@@ -443,99 +425,18 @@ namespace Realm {
 
       TransferDomain *domain;
       //Domain domain;
-      Domain::CopySrcDstField dst;
+      CopySrcDstField dst;
       void *fill_buffer;
       size_t fill_size;
       Event before_fill;
       Waiter waiter;
     };
 
-    // an interface for objects that are responsible for copying data from one instance to another
-    //  these are generally created by MemPairCopier's
-    // an InstPairCopier remembers all the addressing details of the source and destination instance,
-    //  allowing a generic "iterate over all elements in the index space to be copied" loop to work
-    //  for all copy paths
-    class InstPairCopier {
-    public:
-      InstPairCopier(void);
-      virtual ~InstPairCopier(void);
-    public:
-      virtual bool copy_all_fields(Domain d) { return false; }
-
-      virtual void copy_field(off_t src_index, off_t dst_index, off_t elem_count,
-                              unsigned offset_index) = 0;
-
-      virtual void copy_all_fields(off_t src_index, off_t dst_index, off_t elem_count) = 0;
-
-      virtual void copy_all_fields(off_t src_index, off_t dst_index, off_t count_per_line,
-				   off_t src_stride, off_t dst_stride, off_t lines);
-
-      virtual void flush(void) = 0;
-    };
-
-    // many instance pair copiers are "span-based" and the various copies can be implemented using a single
-    //  "copy_span" building block - this is provided via templating rather than inheritance to allow for
-    //  inlining the calls to copy_span that will occur in for loops
-    template <typename T>
-    class SpanBasedInstPairCopier : public InstPairCopier {
-    public:
-      SpanBasedInstPairCopier(T *_span_copier, 
-                              RegionInstance _src_inst, 
-                              RegionInstance _dst_inst,
-                              OASVec &_oas_vec);
-
-      virtual ~SpanBasedInstPairCopier(void);
-
-      virtual void copy_field(off_t src_index, off_t dst_index, off_t elem_count,
-                              unsigned offset_index);
-
-      virtual void copy_all_fields(off_t src_index, off_t dst_index, off_t elem_count);
-
-      virtual void copy_all_fields(off_t src_index, off_t dst_index, off_t count_per_line,
-				   off_t src_stride, off_t dst_stride, off_t lines);
-
-      virtual void flush(void);
-
-    protected:
-      T *span_copier;
-      RegionInstanceImpl *src_inst;
-      RegionInstanceImpl *dst_inst;
-      OASVec &oas_vec;
-      std::vector<off_t> src_start;
-      std::vector<off_t> dst_start;
-      std::vector<int> src_size;
-      std::vector<int> dst_size;
-      std::vector<bool> partial_field;
-    };
-
-    class MemPairCopier {
-    public:
-      static MemPairCopier* create_copier(Memory src_mem, Memory dst_mem,
-					  ReductionOpID redop_id = 0,
-					  CustomSerdezID serdez_id = 0,
-					  bool fold = false);
-
-      MemPairCopier(void);
-
-      virtual ~MemPairCopier(void);
-
-      virtual InstPairCopier *inst_pair(RegionInstance src_inst, RegionInstance dst_inst,
-                                        OASVec &oas_vec) = 0;
-
-      // default behavior of flush is just to report bytes (maybe)
-      virtual void flush(DmaRequest *req);
-
-      void record_bytes(size_t bytes);
-
-      size_t get_total_bytes() { return total_bytes; }
-
-    protected:
-      size_t total_reqs, total_bytes;
-    };
-
     // each DMA "channel" implements one of these to describe (implicitly) which copies it
     //  is capable of performing and then to actually construct a MemPairCopier for copies 
     //  between a given pair of memories
+    // NOTE: we no longer use MemPairCopier's, but these are left in as
+    //  placeholders for having channels be created more modularly
     class MemPairCopierFactory {
     public:
       MemPairCopierFactory(const std::string& _name);
@@ -548,14 +449,17 @@ namespace Realm {
       virtual bool can_perform_copy(Memory src_mem, Memory dst_mem,
 				    ReductionOpID redop_id, bool fold) = 0;
 
+#ifdef OLD_COPIERS
       virtual MemPairCopier *create_copier(Memory src_mem, Memory dst_mem,
 					   ReductionOpID redop_id, bool fold) = 0;
+#endif
 
     protected:
       std::string name;
     };
 
-    typedef LegionRuntime::LowLevel::Request Request;
+    class Request;
+
     class AsyncFileIOContext {
     public:
       AsyncFileIOContext(int _max_depth);
@@ -588,8 +492,5 @@ namespace Realm {
 #endif
     };
 };
-
-// implementation of templated and inline methods
-#include "lowlevel_dma.inl"
 
 #endif

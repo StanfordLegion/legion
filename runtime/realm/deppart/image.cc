@@ -31,9 +31,9 @@ namespace Realm {
 
   template <int N, typename T>
   template <int N2, typename T2>
-  Event ZIndexSpace<N,T>::create_subspaces_by_image(const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZPoint<N,T> > >& field_data,
-							   const std::vector<ZIndexSpace<N2,T2> >& sources,
-							   std::vector<ZIndexSpace<N,T> >& images,
+  Event IndexSpace<N,T>::create_subspaces_by_image(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Point<N,T> > >& field_data,
+							   const std::vector<IndexSpace<N2,T2> >& sources,
+							   std::vector<IndexSpace<N,T> >& images,
 							   const ProfilingRequestSet &reqs,
 							   Event wait_on /*= Event::NO_EVENT*/) const
   {
@@ -56,9 +56,9 @@ namespace Realm {
 
   template <int N, typename T>
   template <int N2, typename T2>
-  Event ZIndexSpace<N,T>::create_subspaces_by_image(const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZRect<N,T> > >& field_data,
-							   const std::vector<ZIndexSpace<N2,T2> >& sources,
-							   std::vector<ZIndexSpace<N,T> >& images,
+  Event IndexSpace<N,T>::create_subspaces_by_image(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Rect<N,T> > >& field_data,
+							   const std::vector<IndexSpace<N2,T2> >& sources,
+							   std::vector<IndexSpace<N,T> >& images,
 							   const ProfilingRequestSet &reqs,
 							   Event wait_on /*= Event::NO_EVENT*/) const
   {
@@ -81,10 +81,10 @@ namespace Realm {
 
   template <int N, typename T>
   template <int N2, typename T2>
-  Event ZIndexSpace<N,T>::create_subspaces_by_image_with_difference(const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZPoint<N,T> > >& field_data,
-							   const std::vector<ZIndexSpace<N2,T2> >& sources,
-							   const std::vector<ZIndexSpace<N,T> >& diff_rhss,
-							   std::vector<ZIndexSpace<N,T> >& images,
+  Event IndexSpace<N,T>::create_subspaces_by_image_with_difference(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Point<N,T> > >& field_data,
+							   const std::vector<IndexSpace<N2,T2> >& sources,
+							   const std::vector<IndexSpace<N,T> >& diff_rhss,
+							   std::vector<IndexSpace<N,T> >& images,
 							   const ProfilingRequestSet &reqs,
 							   Event wait_on /*= Event::NO_EVENT*/) const
   {
@@ -117,8 +117,8 @@ namespace Realm {
   }
 
   template <int N, typename T, int N2, typename T2>
-  ImageMicroOp<N,T,N2,T2>::ImageMicroOp(ZIndexSpace<N,T> _parent_space,
-					ZIndexSpace<N2,T2> _inst_space,
+  ImageMicroOp<N,T,N2,T2>::ImageMicroOp(IndexSpace<N,T> _parent_space,
+					IndexSpace<N2,T2> _inst_space,
 					RegionInstance _inst,
 					size_t _field_offset,
 					bool _is_ranged)
@@ -136,7 +136,7 @@ namespace Realm {
   {}
 
   template <int N, typename T, int N2, typename T2>
-  void ImageMicroOp<N,T,N2,T2>::add_sparsity_output(ZIndexSpace<N2,T2> _source,
+  void ImageMicroOp<N,T,N2,T2>::add_sparsity_output(IndexSpace<N2,T2> _source,
 						    SparsityMap<N,T> _sparsity)
   {
     sources.push_back(_source);
@@ -144,8 +144,8 @@ namespace Realm {
   }
 
   template <int N, typename T, int N2, typename T2>
-  void ImageMicroOp<N,T,N2,T2>::add_sparsity_output_with_difference(ZIndexSpace<N2,T2> _source,
-                                                    ZIndexSpace<N,T> _diff_rhs,
+  void ImageMicroOp<N,T,N2,T2>::add_sparsity_output_with_difference(IndexSpace<N2,T2> _source,
+                                                    IndexSpace<N,T> _diff_rhs,
 						    SparsityMap<N,T> _sparsity)
   {
     sources.push_back(_source);
@@ -166,17 +166,17 @@ namespace Realm {
   void ImageMicroOp<N,T,N2,T2>::populate_bitmasks_ptrs(std::map<int, BM *>& bitmasks)
   {
     // for now, one access for the whole instance
-    AffineAccessor<ZPoint<N,T>,N2,T2> a_data(inst, field_offset);
+    AffineAccessor<Point<N,T>,N2,T2> a_data(inst, field_offset);
 
     // double iteration - use the instance's space first, since it's probably smaller
-    for(ZIndexSpaceIterator<N2,T2> it(inst_space); it.valid; it.step()) {
+    for(IndexSpaceIterator<N2,T2> it(inst_space); it.valid; it.step()) {
       for(size_t i = 0; i < sources.size(); i++) {
-	for(ZIndexSpaceIterator<N2,T2> it2(sources[i], it.rect); it2.valid; it2.step()) {
+	for(IndexSpaceIterator<N2,T2> it2(sources[i], it.rect); it2.valid; it2.step()) {
 	  BM **bmpp = 0;
 
 	  // iterate over each point in the source and see if it points into the parent space	  
-	  for(ZPointInRectIterator<N2,T2> pir(it2.rect); pir.valid; pir.step()) {
-	    ZPoint<N,T> ptr = a_data.read(pir.p);
+	  for(PointInRectIterator<N2,T2> pir(it2.rect); pir.valid; pir.step()) {
+	    Point<N,T> ptr = a_data.read(pir.p);
 
 	    if(parent_space.contains(ptr)) {
               // optional filter
@@ -201,17 +201,17 @@ namespace Realm {
   void ImageMicroOp<N,T,N2,T2>::populate_bitmasks_ranges(std::map<int, BM *>& bitmasks)
   {
     // for now, one access for the whole instance
-    AffineAccessor<ZRect<N,T>,N2,T2> a_data(inst, field_offset);
+    AffineAccessor<Rect<N,T>,N2,T2> a_data(inst, field_offset);
 
     // double iteration - use the instance's space first, since it's probably smaller
-    for(ZIndexSpaceIterator<N2,T2> it(inst_space); it.valid; it.step()) {
+    for(IndexSpaceIterator<N2,T2> it(inst_space); it.valid; it.step()) {
       for(size_t i = 0; i < sources.size(); i++) {
-	for(ZIndexSpaceIterator<N2,T2> it2(sources[i], it.rect); it2.valid; it2.step()) {
+	for(IndexSpaceIterator<N2,T2> it2(sources[i], it.rect); it2.valid; it2.step()) {
 	  BM **bmpp = 0;
 
 	  // iterate over each point in the source and see if it points into the parent space	  
-	  for(ZPointInRectIterator<N2,T2> pir(it2.rect); pir.valid; pir.step()) {
-	    ZRect<N,T> rng = a_data.read(pir.p);
+	  for(PointInRectIterator<N2,T2> pir(it2.rect); pir.valid; pir.step()) {
+	    Rect<N,T> rng = a_data.read(pir.p);
 
 	    if(parent_space.contains_any(rng)) {
               // optional filter
@@ -236,14 +236,14 @@ namespace Realm {
   void ImageMicroOp<N,T,N2,T2>::populate_approx_bitmask_ptrs(BM& bitmask)
   {
     // for now, one access for the whole instance
-    AffineAccessor<ZPoint<N,T>,N2,T2> a_data(inst, field_offset);
+    AffineAccessor<Point<N,T>,N2,T2> a_data(inst, field_offset);
     //std::cout << "a_data = " << a_data << "\n";
 
     // simple image operation - project ever 
-    for(ZIndexSpaceIterator<N2,T2> it(inst_space); it.valid; it.step()) {
+    for(IndexSpaceIterator<N2,T2> it(inst_space); it.valid; it.step()) {
       // iterate over each point in the source and mark what it touches
-      for(ZPointInRectIterator<N2,T2> pir(it.rect); pir.valid; pir.step()) {
-	ZPoint<N,T> ptr = a_data.read(pir.p);
+      for(PointInRectIterator<N2,T2> pir(it.rect); pir.valid; pir.step()) {
+	Point<N,T> ptr = a_data.read(pir.p);
 
 	bitmask.add_point(ptr);
       }
@@ -255,14 +255,14 @@ namespace Realm {
   void ImageMicroOp<N,T,N2,T2>::populate_approx_bitmask_ranges(BM& bitmask)
   {
     // for now, one access for the whole instance
-    AffineAccessor<ZRect<N,T>,N2,T2> a_data(inst, field_offset);
+    AffineAccessor<Rect<N,T>,N2,T2> a_data(inst, field_offset);
     //std::cout << "a_data = " << a_data << "\n";
 
     // simple image operation - project ever 
-    for(ZIndexSpaceIterator<N2,T2> it(inst_space); it.valid; it.step()) {
+    for(IndexSpaceIterator<N2,T2> it(inst_space); it.valid; it.step()) {
       // iterate over each point in the source and mark what it touches
-      for(ZPointInRectIterator<N2,T2> pir(it.rect); pir.valid; pir.step()) {
-	ZRect<N,T> rng = a_data.read(pir.p);
+      for(PointInRectIterator<N2,T2> pir(it.rect); pir.valid; pir.step()) {
+	Rect<N,T> rng = a_data.read(pir.p);
 
 	bitmask.add_rect(rng);
       }
@@ -417,8 +417,8 @@ namespace Realm {
   // class ImageOperation<N,T,N2,T2>
 
   template <int N, typename T, int N2, typename T2>
-  ImageOperation<N,T,N2,T2>::ImageOperation(const ZIndexSpace<N,T>& _parent,
-					    const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZPoint<N,T> > >& _field_data,
+  ImageOperation<N,T,N2,T2>::ImageOperation(const IndexSpace<N,T>& _parent,
+					    const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Point<N,T> > >& _field_data,
 					    const ProfilingRequestSet &reqs,
 					    Event _finish_event)
     : PartitioningOperation(reqs, _finish_event)
@@ -427,8 +427,8 @@ namespace Realm {
   {}
 
   template <int N, typename T, int N2, typename T2>
-  ImageOperation<N,T,N2,T2>::ImageOperation(const ZIndexSpace<N,T>& _parent,
-					    const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZRect<N,T> > >& _field_data,
+  ImageOperation<N,T,N2,T2>::ImageOperation(const IndexSpace<N,T>& _parent,
+					    const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Rect<N,T> > >& _field_data,
 					    const ProfilingRequestSet &reqs,
 					    Event _finish_event)
     : PartitioningOperation(reqs, _finish_event)
@@ -441,14 +441,14 @@ namespace Realm {
   {}
 
   template <int N, typename T, int N2, typename T2>
-  ZIndexSpace<N,T> ImageOperation<N,T,N2,T2>::add_source(const ZIndexSpace<N2,T2>& source)
+  IndexSpace<N,T> ImageOperation<N,T,N2,T2>::add_source(const IndexSpace<N2,T2>& source)
   {
     // try to filter out obviously empty sources
     if(parent.empty() || source.empty())
-      return ZIndexSpace<N,T>::make_empty();
+      return IndexSpace<N,T>::make_empty();
 
     // otherwise it'll be something smaller than the current parent
-    ZIndexSpace<N,T> image;
+    IndexSpace<N,T> image;
     image.bounds = parent.bounds;
 
     // if the source has a sparsity map, use the same node - otherwise
@@ -471,15 +471,15 @@ namespace Realm {
   }
 
   template <int N, typename T, int N2, typename T2>
-  ZIndexSpace<N,T> ImageOperation<N,T,N2,T2>::add_source_with_difference(const ZIndexSpace<N2,T2>& source,
-                                                                         const ZIndexSpace<N,T>& diff_rhs)
+  IndexSpace<N,T> ImageOperation<N,T,N2,T2>::add_source_with_difference(const IndexSpace<N2,T2>& source,
+                                                                         const IndexSpace<N,T>& diff_rhs)
   {
     // try to filter out obviously empty sources
     if(parent.empty() || source.empty())
-      return ZIndexSpace<N,T>::make_empty();
+      return IndexSpace<N,T>::make_empty();
 
     // otherwise it'll be something smaller than the current parent
-    ZIndexSpace<N,T> image;
+    IndexSpace<N,T> image;
     image.bounds = parent.bounds;
 
     // if the source has a sparsity map, use the same node - otherwise
@@ -640,20 +640,20 @@ namespace Realm {
   template class ImageMicroOp<N1,T1,N2,T2>; \
   template class ImageOperation<N1,T1,N2,T2>; \
   template ImageMicroOp<N1,T1,N2,T2>::ImageMicroOp(gasnet_node_t, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \
-  template Event ZIndexSpace<N1,T1>::create_subspaces_by_image(const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZPoint<N1,T1> > >&, \
-							       const std::vector<ZIndexSpace<N2,T2> >&,	\
-							       std::vector<ZIndexSpace<N1,T1> >&, \
+  template Event IndexSpace<N1,T1>::create_subspaces_by_image(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Point<N1,T1> > >&, \
+							       const std::vector<IndexSpace<N2,T2> >&,	\
+							       std::vector<IndexSpace<N1,T1> >&, \
 							       const ProfilingRequestSet&, \
 							       Event) const; \
-  template Event ZIndexSpace<N1,T1>::create_subspaces_by_image(const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZRect<N1,T1> > >&, \
-							       const std::vector<ZIndexSpace<N2,T2> >&,	\
-							       std::vector<ZIndexSpace<N1,T1> >&, \
+  template Event IndexSpace<N1,T1>::create_subspaces_by_image(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Rect<N1,T1> > >&, \
+							       const std::vector<IndexSpace<N2,T2> >&,	\
+							       std::vector<IndexSpace<N1,T1> >&, \
 							       const ProfilingRequestSet&, \
 							       Event) const; \
-  template Event ZIndexSpace<N1,T1>::create_subspaces_by_image_with_difference(const std::vector<FieldDataDescriptor<ZIndexSpace<N2,T2>,ZPoint<N1,T1> > >&, \
-									       const std::vector<ZIndexSpace<N2,T2> >&,	\
-									       const std::vector<ZIndexSpace<N1,T1> >&,	\
-									       std::vector<ZIndexSpace<N1,T1> >&, \
+  template Event IndexSpace<N1,T1>::create_subspaces_by_image_with_difference(const std::vector<FieldDataDescriptor<IndexSpace<N2,T2>,Point<N1,T1> > >&, \
+									       const std::vector<IndexSpace<N2,T2> >&,	\
+									       const std::vector<IndexSpace<N1,T1> >&,	\
+									       std::vector<IndexSpace<N1,T1> >&, \
 									       const ProfilingRequestSet&, \
 									       Event) const;
 

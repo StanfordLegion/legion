@@ -1018,28 +1018,28 @@ namespace Legion {
           : has_intersection(false), intersection_valid(false) { }
         IntersectInfo(bool has)
           : has_intersection(has), intersection_valid(!has) { }
-        IntersectInfo(const Realm::ZIndexSpace<DIM,T> &is)
+        IntersectInfo(const Realm::IndexSpace<DIM,T> &is)
           : intersection(is), has_intersection(true), 
             intersection_valid(true) { }
       public:
-        Realm::ZIndexSpace<DIM,T> intersection;
+        Realm::IndexSpace<DIM,T> intersection;
         bool has_intersection;
         bool intersection_valid;
       };
     public:
       IndexSpaceNodeT(RegionTreeForest *ctx, IndexSpace handle,
                       IndexPartNode *parent, LegionColor color, 
-                      const Realm::ZIndexSpace<DIM,T> *realm_is,
+                      const Realm::IndexSpace<DIM,T> *realm_is,
                       ApEvent ready_event);
       IndexSpaceNodeT(const IndexSpaceNodeT &rhs);
       virtual ~IndexSpaceNodeT(void);
     public:
       IndexSpaceNodeT& operator=(const IndexSpaceNodeT &rhs);
     public:
-      inline ApEvent get_realm_index_space(Realm::ZIndexSpace<DIM,T> &result,
+      inline ApEvent get_realm_index_space(Realm::IndexSpace<DIM,T> &result,
                                            bool need_tight_result);
       inline void set_realm_index_space(AddressSpaceID source,
-                                        const Realm::ZIndexSpace<DIM,T> &value);
+                                        const Realm::IndexSpace<DIM,T> &value);
     public:
       virtual void tighten_index_space(void);
     public:
@@ -1135,8 +1135,8 @@ namespace Legion {
                                             size_t total_shards);
       template<int N>
       ApEvent create_by_restriction_helper(IndexPartNode *partition,
-                                   const Realm::ZMatrix<N,DIM,T> &transform,
-                                   const Realm::ZRect<N,T> &extent,
+                                   const Realm::Matrix<N,DIM,T> &transform,
+                                   const Realm::Rect<N,T> &extent,
                                    ShardID shard, size_t total_shards);
       virtual ApEvent create_by_field(Operation *op,
                                       IndexPartNode *partition,
@@ -1238,16 +1238,16 @@ namespace Legion {
                                             ShardID shard);
       virtual void destroy_shard_domain(const Domain &domain);
     public:
-      bool contains_point(const Realm::ZPoint<DIM,T> &point);
+      bool contains_point(const Realm::Point<DIM,T> &point);
     protected:
       void compute_linearization_metadata(void);
     protected:
-      Realm::ZIndexSpace<DIM,T> realm_index_space;
+      Realm::IndexSpace<DIM,T> realm_index_space;
     protected:
       std::map<IndexTreeNode*,IntersectInfo> intersections;
     protected: // linearization meta-data, computed on demand
-      Realm::ZPoint<DIM,long long> strides;
-      Realm::ZPoint<DIM,long long> offset;
+      Realm::Point<DIM,long long> strides;
+      Realm::Point<DIM,long long> offset;
       bool linearization_ready;
     public:
       struct CreateByFieldHelper {
@@ -1414,8 +1414,8 @@ namespace Legion {
       template<typename N, typename T>
       static inline void demux(IndexSpaceCreator *creator)
       {
-        const Realm::ZIndexSpace<N::N,T> *is = 
-          (const Realm::ZIndexSpace<N::N,T>*)creator->realm_is;
+        const Realm::IndexSpace<N::N,T> *is = 
+          (const Realm::IndexSpace<N::N,T>*)creator->realm_is;
         creator->result = new IndexSpaceNodeT<N::N,T>(creator->forest,
             creator->space, creator->parent, creator->color, is,
             creator->ready);
@@ -1611,11 +1611,11 @@ namespace Legion {
           : has_intersection(false), intersection_valid(false) { }
         IntersectInfo(bool has)
           : has_intersection(has), intersection_valid(!has) { }
-        IntersectInfo(const Realm::ZIndexSpace<DIM,T> &is)
+        IntersectInfo(const Realm::IndexSpace<DIM,T> &is)
           : intersection(is), has_intersection(true), 
             intersection_valid(true) { }
       public:
-        Realm::ZIndexSpace<DIM,T> intersection;
+        Realm::IndexSpace<DIM,T> intersection;
         bool has_intersection;
         bool intersection_valid;
       };
@@ -1642,10 +1642,10 @@ namespace Legion {
       virtual bool dominates(IndexPartNode *other);
       virtual void destroy_node(AddressSpaceID source);
     public:
-      ApEvent get_union_index_space(Realm::ZIndexSpace<DIM,T> &space,
+      ApEvent get_union_index_space(Realm::IndexSpace<DIM,T> &space,
                                     bool need_tight_result);
     protected:
-      Realm::ZIndexSpace<DIM,T> partition_union_space;
+      Realm::IndexSpace<DIM,T> partition_union_space;
       ApEvent partition_union_ready;
       bool has_union_space, union_space_tight;
     protected:

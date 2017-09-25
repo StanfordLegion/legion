@@ -16,9 +16,7 @@
 
 #include "channel_disk.h"
 
-namespace LegionRuntime {
-  namespace LowLevel {
-    typedef Realm::AsyncFileIOContext AsyncFileIOContext;
+namespace Realm {
 
     FileXferDes::FileXferDes(DmaRequest* _dma_request,
 			     gasnet_node_t _launch_node,
@@ -344,15 +342,4 @@ namespace LegionRuntime {
       return AsyncFileIOContext::get_singleton()->available();
     }
 
-#if 0
-    template class FileXferDes<0>;
-    template class FileXferDes<1>;
-    template class FileXferDes<2>;
-    template class FileXferDes<3>;
-    template class DiskXferDes<0>;
-    template class DiskXferDes<1>;
-    template class DiskXferDes<2>;
-    template class DiskXferDes<3>;
-#endif
-  } // namespace LowLevel
-} // namespace LegionRuntime
+}; // namespace Realm

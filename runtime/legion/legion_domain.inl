@@ -17,17 +17,17 @@ namespace Legion {
 
   // Specialization for 1-D Points
   template<typename T>
-  struct Point<1,T> : public Realm::ZPoint<1,T> {
+  struct Point<1,T> : public Realm::Point<1,T> {
   public:
     __CUDA_HD__
-    inline Point(void) : Realm::ZPoint<1,T>() { }
+    inline Point(void) : Realm::Point<1,T>() { }
     __CUDA_HD__
-    inline Point(const T val) : Realm::ZPoint<1,T>(val) { }
+    inline Point(const T val) : Realm::Point<1,T>(val) { }
     // copies allow type coercion (assuming the underlying type does)
     template<typename T2> __CUDA_HD__
-    inline Point(const Point<1,T2> &rhs) : Realm::ZPoint<1,T>(rhs) { }
+    inline Point(const Point<1,T2> &rhs) : Realm::Point<1,T>(rhs) { }
     template<typename T2> __CUDA_HD__
-    inline Point(const Realm::ZPoint<1,T2> &rhs) : Realm::ZPoint<1,T>(rhs) { }
+    inline Point(const Realm::Point<1,T2> &rhs) : Realm::Point<1,T>(rhs) { }
   public:
     __CUDA_HD__
     inline operator T(void) const { return this->x; }
@@ -39,63 +39,63 @@ namespace Legion {
     inline Point<1,T>& operator=(const Point<1,T2> &rhs)
       { this->x = rhs.x; return *this; }
     template<typename T2> __CUDA_HD__
-    inline Point<1,T>& operator=(const Realm::ZPoint<1,T2> &rhs)
+    inline Point<1,T>& operator=(const Realm::Point<1,T2> &rhs)
       { this->x = rhs.x; return *this; }
   };
 
   // Specialization for 2-D Points
   template<typename T>
-  struct Point<2,T> : public Realm::ZPoint<2,T> {
+  struct Point<2,T> : public Realm::Point<2,T> {
   public:
     __CUDA_HD__
-    inline Point(void) : Realm::ZPoint<2,T>() { }
+    inline Point(void) : Realm::Point<2,T>() { }
     __CUDA_HD__
-    inline Point(const T v1, const T v2) : Realm::ZPoint<2,T>(v1,v2) { }
+    inline Point(const T v1, const T v2) : Realm::Point<2,T>(v1,v2) { }
     __CUDA_HD__
-    inline explicit Point(const T vals[2]) : Realm::ZPoint<2,T>(vals) { }
+    inline explicit Point(const T vals[2]) : Realm::Point<2,T>(vals) { }
     // copies allow type coercion (assuming the underlying type does)
     template<typename T2> __CUDA_HD__
-    inline Point(const Point<2,T2> &rhs) : Realm::ZPoint<2,T>(rhs) { }
+    inline Point(const Point<2,T2> &rhs) : Realm::Point<2,T>(rhs) { }
     template<typename T2> __CUDA_HD__
-    inline Point(const Realm::ZPoint<2,T2> &rhs) : Realm::ZPoint<2,T>(rhs) { }
+    inline Point(const Realm::Point<2,T2> &rhs) : Realm::Point<2,T>(rhs) { }
   public:
     template<typename T2> __CUDA_HD__
     inline Point<2,T>& operator=(const Point<2,T2> &rhs)
       { this->x = rhs.x; this->y = rhs.y; return *this; }
     template<typename T2> __CUDA_HD__
-    inline Point<2,T>& operator=(const Realm::ZPoint<2,T2> &rhs)
+    inline Point<2,T>& operator=(const Realm::Point<2,T2> &rhs)
       { this->x = rhs.x; this->y = rhs.y; return *this; }
   };
 
   // Specialization for 3-D Points
   template<typename T>
-  struct Point<3,T> : public Realm::ZPoint<3,T> {
+  struct Point<3,T> : public Realm::Point<3,T> {
   public:
     __CUDA_HD__
-    inline Point(void) : Realm::ZPoint<3,T>() { }
+    inline Point(void) : Realm::Point<3,T>() { }
     __CUDA_HD__
     inline Point(const T v1, const T v2, const T v3) 
-      : Realm::ZPoint<3,T>(v1,v2,v3) { }
+      : Realm::Point<3,T>(v1,v2,v3) { }
     __CUDA_HD__
-    inline explicit Point(const T vals[3]) : Realm::ZPoint<3,T>(vals) { }
+    inline explicit Point(const T vals[3]) : Realm::Point<3,T>(vals) { }
     // copies allow type coercion (assuming the underlying type does)
     template<typename T2> __CUDA_HD__
-    inline Point(const Point<3,T2> &rhs) : Realm::ZPoint<3,T>(rhs) { }
+    inline Point(const Point<3,T2> &rhs) : Realm::Point<3,T>(rhs) { }
     template<typename T2> __CUDA_HD__
-    inline Point(const Realm::ZPoint<3,T2> &rhs) : Realm::ZPoint<3,T>(rhs) { }
+    inline Point(const Realm::Point<3,T2> &rhs) : Realm::Point<3,T>(rhs) { }
   public:
     template<typename T2> __CUDA_HD__
     inline Point<3,T>& operator=(const Point<3,T2> &rhs)
       { this->x = rhs.x; this->y = rhs.y; this->z = rhs.z; return *this; }
     template<typename T2> __CUDA_HD__
-    inline Point<3,T>& operator=(const Realm::ZPoint<3,T2> &rhs)
+    inline Point<3,T>& operator=(const Realm::Point<3,T2> &rhs)
       { this->x = rhs.x; this->y = rhs.y; this->z = rhs.z; return *this; }
   };
 
   //----------------------------------------------------------------------------
   template<int DIM, typename T> __CUDA_HD__
   inline Point<DIM,T>::Point(void)
-    : Realm::ZPoint<DIM,T>()
+    : Realm::Point<DIM,T>()
   //----------------------------------------------------------------------------
   {
   }
@@ -103,7 +103,7 @@ namespace Legion {
   //----------------------------------------------------------------------------
   template<int DIM, typename T> __CUDA_HD__
   inline Point<DIM,T>::Point(const T vals[DIM])
-    : Realm::ZPoint<DIM,T>(vals)
+    : Realm::Point<DIM,T>(vals)
   //----------------------------------------------------------------------------
   {
   }
@@ -111,15 +111,15 @@ namespace Legion {
   //----------------------------------------------------------------------------
   template<int DIM, typename T> template<typename T2> __CUDA_HD__
   inline Point<DIM,T>::Point(const Point<DIM,T2> &rhs)
-    : Realm::ZPoint<DIM,T>(rhs)
+    : Realm::Point<DIM,T>(rhs)
   //----------------------------------------------------------------------------
   {
   }
   
   //----------------------------------------------------------------------------
   template<int DIM, typename T> template<typename T2> __CUDA_HD__
-  inline Point<DIM,T>::Point(const Realm::ZPoint<DIM,T2> &rhs)
-    : Realm::ZPoint<DIM,T>(rhs)
+  inline Point<DIM,T>::Point(const Realm::Point<DIM,T2> &rhs)
+    : Realm::Point<DIM,T>(rhs)
   //----------------------------------------------------------------------------
   {
   }
@@ -130,24 +130,24 @@ namespace Legion {
   //----------------------------------------------------------------------------
   {
     for (int i = 0; i < DIM; i++)
-      (&Realm::ZPoint<DIM,T>::x)[i] = (&rhs.x)[i];
+      (&Realm::Point<DIM,T>::x)[i] = (&rhs.x)[i];
     return *this;
   }
 
   //----------------------------------------------------------------------------
   template<int DIM, typename T> template<typename T2> __CUDA_HD__
-  inline Point<DIM,T>& Point<DIM,T>::operator=(const Realm::ZPoint<DIM,T2> &rhs)
+  inline Point<DIM,T>& Point<DIM,T>::operator=(const Realm::Point<DIM,T2> &rhs)
   //----------------------------------------------------------------------------
   {
     for (int i = 0; i < DIM; i++)
-      (&Realm::ZPoint<DIM,T>::x)[i] = (&rhs.x)[i];
+      (&Realm::Point<DIM,T>::x)[i] = (&rhs.x)[i];
     return *this;
   }
 
   //----------------------------------------------------------------------------
   template<int DIM, typename T> __CUDA_HD__
   inline Rect<DIM,T>::Rect(void)
-    : Realm::ZRect<DIM,T>()
+    : Realm::Rect<DIM,T>()
   //----------------------------------------------------------------------------
   {
   }
@@ -155,7 +155,7 @@ namespace Legion {
   //----------------------------------------------------------------------------
   template<int DIM, typename T> __CUDA_HD__
   inline Rect<DIM,T>::Rect(const Point<DIM,T> &lo, const Point<DIM,T> &hi)
-    : Realm::ZRect<DIM,T>(lo,hi)
+    : Realm::Rect<DIM,T>(lo,hi)
   //----------------------------------------------------------------------------
   {
   }
@@ -163,15 +163,15 @@ namespace Legion {
   //----------------------------------------------------------------------------
   template<int DIM, typename T> template<typename T2> __CUDA_HD__
   inline Rect<DIM,T>::Rect(const Rect<DIM,T2> &rhs)
-    : Realm::ZRect<DIM,T>(rhs)
+    : Realm::Rect<DIM,T>(rhs)
   //----------------------------------------------------------------------------
   {
   }
   
   //----------------------------------------------------------------------------
   template<int DIM, typename T> template<typename T2> __CUDA_HD__
-  inline Rect<DIM,T>::Rect(const Realm::ZRect<DIM,T2> &rhs)
-    : Realm::ZRect<DIM,T>(rhs)
+  inline Rect<DIM,T>::Rect(const Realm::Rect<DIM,T2> &rhs)
+    : Realm::Rect<DIM,T>(rhs)
   //----------------------------------------------------------------------------
   {
   }
@@ -188,7 +188,7 @@ namespace Legion {
 
   //----------------------------------------------------------------------------
   template<int DIM, typename T> template<typename T2> __CUDA_HD__
-  inline Rect<DIM,T>& Rect<DIM,T>::operator=(const Realm::ZRect<DIM,T2> &rhs)
+  inline Rect<DIM,T>& Rect<DIM,T>::operator=(const Realm::Rect<DIM,T2> &rhs)
   //----------------------------------------------------------------------------
   {
     this->lo = rhs.lo;
@@ -199,7 +199,7 @@ namespace Legion {
   //----------------------------------------------------------------------------
   template<int M, int N, typename T> __CUDA_HD__
   inline Transform<M,N,T>::Transform(void)
-    : Realm::ZMatrix<M,N,T>()
+    : Realm::Matrix<M,N,T>()
   //----------------------------------------------------------------------------
   {
   }
@@ -207,15 +207,15 @@ namespace Legion {
   //----------------------------------------------------------------------------
   template<int M, int N, typename T> template<typename T2> __CUDA_HD__
   inline Transform<M,N,T>::Transform(const Transform<M,N,T2> &rhs)
-    : Realm::ZMatrix<M,N,T>(rhs)
+    : Realm::Matrix<M,N,T>(rhs)
   //----------------------------------------------------------------------------
   {
   }
 
   //----------------------------------------------------------------------------
   template<int M, int N, typename T> template<typename T2> __CUDA_HD__
-  inline Transform<M,N,T>::Transform(const Realm::ZMatrix<M,N,T2> &rhs)
-    : Realm::ZMatrix<M,N,T>(rhs)
+  inline Transform<M,N,T>::Transform(const Realm::Matrix<M,N,T2> &rhs)
+    : Realm::Matrix<M,N,T>(rhs)
   //----------------------------------------------------------------------------
   {
   }
@@ -234,7 +234,7 @@ namespace Legion {
   //----------------------------------------------------------------------------
   template<int M, int N, typename T> template<typename T2> __CUDA_HD__
   inline Transform<M,N,T>& Transform<M,N,T>::operator=(
-                                              const Realm::ZMatrix<M,N,T2> &rhs)
+                                              const Realm::Matrix<M,N,T2> &rhs)
   //----------------------------------------------------------------------------
   {
     for (int i = 0; i < M; i++)
@@ -245,32 +245,23 @@ namespace Legion {
   //----------------------------------------------------------------------------
   template<int DIM, typename T>
   inline DomainT<DIM,T>::DomainT(void)
-    : Realm::ZIndexSpace<DIM,T>()
+    : Realm::IndexSpace<DIM,T>()
   //----------------------------------------------------------------------------
   {
-  }
-
-  //----------------------------------------------------------------------------
-  template<int DIM, typename T>
-  inline DomainT<DIM,T>::DomainT(const Domain &domain)
-    : Realm::ZIndexSpace<DIM,T>(domain.bounds<DIM,T>())
-  //----------------------------------------------------------------------------
-  {
-    this->sparsity.id = domain.is_id;
   }
 
   //----------------------------------------------------------------------------
   template<int DIM, typename T> template<typename T2>
   inline DomainT<DIM,T>::DomainT(const Rect<DIM,T2> &_bounds)
-    : Realm::ZIndexSpace<DIM,T>(Realm::ZRect<DIM,T>(_bounds))
+    : Realm::IndexSpace<DIM,T>(Realm::Rect<DIM,T>(_bounds))
   //----------------------------------------------------------------------------
   {
   }
 
   //----------------------------------------------------------------------------
   template<int DIM, typename T> template<typename T2>
-  inline DomainT<DIM,T>::DomainT(const Realm::ZRect<DIM,T2> &_bounds)
-    : Realm::ZIndexSpace<DIM,T>(Realm::ZRect<DIM,T>(_bounds))
+  inline DomainT<DIM,T>::DomainT(const Realm::Rect<DIM,T2> &_bounds)
+    : Realm::IndexSpace<DIM,T>(Realm::Rect<DIM,T>(_bounds))
   //----------------------------------------------------------------------------
   {
   }
@@ -278,15 +269,15 @@ namespace Legion {
   //----------------------------------------------------------------------------
   template<int DIM, typename T>
   inline DomainT<DIM,T>::DomainT(const DomainT<DIM,T> &rhs)
-    : Realm::ZIndexSpace<DIM,T>(rhs)
+    : Realm::IndexSpace<DIM,T>(rhs)
   //----------------------------------------------------------------------------
   {
   }
 
   //----------------------------------------------------------------------------
   template<int DIM, typename T>
-  inline DomainT<DIM,T>::DomainT(const Realm::ZIndexSpace<DIM,T> &rhs)
-    : Realm::ZIndexSpace<DIM,T>(rhs)
+  inline DomainT<DIM,T>::DomainT(const Realm::IndexSpace<DIM,T> &rhs)
+    : Realm::IndexSpace<DIM,T>(rhs)
   //----------------------------------------------------------------------------
   {
   }
@@ -304,7 +295,7 @@ namespace Legion {
   //----------------------------------------------------------------------------
   template<int DIM, typename T> template<typename T2>
   inline DomainT<DIM,T>& DomainT<DIM,T>::operator=(
-                                               const Realm::ZRect<DIM,T2> &rect)
+                                               const Realm::Rect<DIM,T2> &rect)
   //----------------------------------------------------------------------------
   {
     this->bounds = rect;
@@ -325,7 +316,7 @@ namespace Legion {
   //----------------------------------------------------------------------------
   template<int DIM, typename T>
   inline DomainT<DIM,T>& DomainT<DIM,T>::operator=(
-                                           const Realm::ZIndexSpace<DIM,T> &rhs)
+                                           const Realm::IndexSpace<DIM,T> &rhs)
   //----------------------------------------------------------------------------
   {
     this->bounds = rhs.bounds;
@@ -362,15 +353,6 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
-  inline DomainPoint::DomainPoint(const Realm::DomainPoint &rhs)
-    : dim(rhs.dim)
-  //----------------------------------------------------------------------------
-  {
-    for (int i = 0; i < MAX_POINT_DIM; i++)
-      point_data[i] = rhs.point_data[i];
-  }
-
-  //----------------------------------------------------------------------------
   template<int DIM, typename T>
   inline DomainPoint::DomainPoint(const Point<DIM,T> &rhs)
     : dim(DIM)
@@ -388,17 +370,6 @@ namespace Legion {
     LegionRuntime::Arrays::Point<DIM> result;
     for (int i = 0; i < DIM; i++)
       result.x[i] = point_data[i];
-    return result;
-  }
-
-  //----------------------------------------------------------------------------
-  inline DomainPoint::operator Realm::DomainPoint(void) const
-  //----------------------------------------------------------------------------
-  {
-    Realm::DomainPoint result;
-    result.dim = dim;
-    for (int i = 0; i < MAX_POINT_DIM; i++)
-      result.point_data[i] = point_data[i];
     return result;
   }
 
@@ -599,27 +570,6 @@ namespace Legion {
       rect_data[i] = other.bounds.lo[i];
     for (int i = 0; i < DIM; i++)
       rect_data[DIM+i] = other.bounds.hi[i];
-  }
-
-  //----------------------------------------------------------------------------
-  inline Domain::Domain(const Realm::Domain &other)
-    : is_id(other.is_id), dim(other.dim)
-  //----------------------------------------------------------------------------
-  {
-    for(int i = 0; i < MAX_RECT_DIM*2; i++)
-      rect_data[i] = other.rect_data[i];
-  }
-
-  //----------------------------------------------------------------------------
-  inline Domain::operator Realm::Domain(void) const
-  //----------------------------------------------------------------------------
-  {
-    Realm::Domain result;
-    result.is_id = is_id;
-    result.dim = dim;
-    for(int i = 0; i < MAX_RECT_DIM*2; i++)
-      result.rect_data[i] = rect_data[i];
-    return result;
   }
 
   //----------------------------------------------------------------------------
@@ -982,14 +932,14 @@ namespace Legion {
     switch(p.get_dim()) {
     case 1:
       {
-        Realm::ZIndexSpaceIterator<1,coord_t> *is_itr = 
-          new (is_iterator) Realm::ZIndexSpaceIterator<1,coord_t>(
+        Realm::IndexSpaceIterator<1,coord_t> *is_itr = 
+          new (is_iterator) Realm::IndexSpaceIterator<1,coord_t>(
               DomainT<1,coord_t>(d));
         is_valid = is_itr->valid;
         if (is_valid) {
-          Realm::ZPointInRectIterator<1,coord_t> *rect_itr = 
+          Realm::PointInRectIterator<1,coord_t> *rect_itr = 
             new (rect_iterator) 
-              Realm::ZPointInRectIterator<1,coord_t>(is_itr->rect);
+              Realm::PointInRectIterator<1,coord_t>(is_itr->rect);
           rect_valid = rect_itr->valid;
           p = Point<1,coord_t>(rect_itr->p); 
         } else {
@@ -999,14 +949,14 @@ namespace Legion {
       }
     case 2:
       {
-        Realm::ZIndexSpaceIterator<2,coord_t> *is_itr = 
-          new (is_iterator) Realm::ZIndexSpaceIterator<2,coord_t>(
+        Realm::IndexSpaceIterator<2,coord_t> *is_itr = 
+          new (is_iterator) Realm::IndexSpaceIterator<2,coord_t>(
               DomainT<2,coord_t>(d));
         is_valid = is_itr->valid;
         if (is_valid) {
-          Realm::ZPointInRectIterator<2,coord_t> *rect_itr = 
+          Realm::PointInRectIterator<2,coord_t> *rect_itr = 
             new (rect_iterator)
-              Realm::ZPointInRectIterator<2,coord_t>(is_itr->rect);
+              Realm::PointInRectIterator<2,coord_t>(is_itr->rect);
           rect_valid = rect_itr->valid;
           p = Point<2,coord_t>(rect_itr->p); 
         } else {
@@ -1016,14 +966,14 @@ namespace Legion {
       }
     case 3:
       {
-        Realm::ZIndexSpaceIterator<3,coord_t> *is_itr = 
-          new (is_iterator) Realm::ZIndexSpaceIterator<3,coord_t>(
+        Realm::IndexSpaceIterator<3,coord_t> *is_itr = 
+          new (is_iterator) Realm::IndexSpaceIterator<3,coord_t>(
               DomainT<3,coord_t>(d));
         is_valid = is_itr->valid;
         if (is_valid) {
-          Realm::ZPointInRectIterator<3,coord_t> *rect_itr = 
+          Realm::PointInRectIterator<3,coord_t> *rect_itr = 
             new (rect_iterator) 
-              Realm::ZPointInRectIterator<3,coord_t>(is_itr->rect);
+              Realm::PointInRectIterator<3,coord_t>(is_itr->rect);
           rect_valid = rect_itr->valid;
           p = Point<3,coord_t>(rect_itr->p); 
         } else {
@@ -1045,21 +995,21 @@ namespace Legion {
     case 1:
       {
         // Step the rect iterator first
-        Realm::ZPointInRectIterator<1,coord_t> *rect_itr = 
-          (Realm::ZPointInRectIterator<1,coord_t>*)rect_iterator;
+        Realm::PointInRectIterator<1,coord_t> *rect_itr = 
+          (Realm::PointInRectIterator<1,coord_t>*)rect_iterator;
         rect_itr->step();
         rect_valid = rect_itr->valid;
         if (!rect_valid) {
           // If the rectangle iterator is not valid anymore
           // then try to start the next rectangle
-          Realm::ZIndexSpaceIterator<1,coord_t> *is_itr = 
-            (Realm::ZIndexSpaceIterator<1,coord_t>*)is_iterator;
+          Realm::IndexSpaceIterator<1,coord_t> *is_itr = 
+            (Realm::IndexSpaceIterator<1,coord_t>*)is_iterator;
           is_itr->step();
           is_valid = is_itr->valid;
           if (is_valid) {
             // Placement new on top of the old one
             new (rect_itr) 
-              Realm::ZPointInRectIterator<1,coord_t>(is_itr->rect);
+              Realm::PointInRectIterator<1,coord_t>(is_itr->rect);
             p = Point<1,coord_t>(rect_itr->p);
             rect_valid = rect_itr->valid;
           } else {
@@ -1073,21 +1023,21 @@ namespace Legion {
     case 2:
       {
         // Step the rect iterator first
-        Realm::ZPointInRectIterator<2,coord_t> *rect_itr = 
-          (Realm::ZPointInRectIterator<2,coord_t>*)rect_iterator;
+        Realm::PointInRectIterator<2,coord_t> *rect_itr = 
+          (Realm::PointInRectIterator<2,coord_t>*)rect_iterator;
         rect_itr->step();
         rect_valid = rect_itr->valid;
         if (!rect_valid) {
           // If the rectangle iterator is not valid anymore
           // then try to start the next rectangle
-          Realm::ZIndexSpaceIterator<2,coord_t> *is_itr = 
-            (Realm::ZIndexSpaceIterator<2,coord_t>*)is_iterator;
+          Realm::IndexSpaceIterator<2,coord_t> *is_itr = 
+            (Realm::IndexSpaceIterator<2,coord_t>*)is_iterator;
           is_itr->step();
           is_valid = is_itr->valid;
           if (is_valid) {
             // Placement new on top of the old one
             new (rect_itr) 
-              Realm::ZPointInRectIterator<2,coord_t>(is_itr->rect);
+              Realm::PointInRectIterator<2,coord_t>(is_itr->rect);
             p = Point<2,coord_t>(rect_itr->p);
             rect_valid = rect_itr->valid;
           } else {
@@ -1101,21 +1051,21 @@ namespace Legion {
     case 3:
       {
         // Step the rect iterator first
-        Realm::ZPointInRectIterator<3,coord_t> *rect_itr = 
-          (Realm::ZPointInRectIterator<3,coord_t>*)rect_iterator;
+        Realm::PointInRectIterator<3,coord_t> *rect_itr = 
+          (Realm::PointInRectIterator<3,coord_t>*)rect_iterator;
         rect_itr->step();
         rect_valid = rect_itr->valid;
         if (!rect_valid) {
           // If the rectangle iterator is not valid anymore
           // then try to start the next rectangle
-          Realm::ZIndexSpaceIterator<3,coord_t> *is_itr = 
-            (Realm::ZIndexSpaceIterator<3,coord_t>*)is_iterator;
+          Realm::IndexSpaceIterator<3,coord_t> *is_itr = 
+            (Realm::IndexSpaceIterator<3,coord_t>*)is_iterator;
           is_itr->step();
           is_valid = is_itr->valid;
           if (is_valid) {
             // Placement new on top of the old one
             new (rect_itr) 
-              Realm::ZPointInRectIterator<3,coord_t>(is_itr->rect);
+              Realm::PointInRectIterator<3,coord_t>(is_itr->rect);
             p = Point<3,coord_t>(rect_itr->p);
             rect_valid = rect_itr->valid;
           } else {
@@ -1172,7 +1122,7 @@ namespace Legion {
   template<int DIM, typename COORD_T>
   inline PointInRectIterator<DIM,COORD_T>::PointInRectIterator(
              const Rect<DIM,COORD_T> &r, bool column_major_order)
-    : itr(Realm::ZPointInRectIterator<DIM,COORD_T>(r, column_major_order))
+    : itr(Realm::PointInRectIterator<DIM,COORD_T>(r, column_major_order))
   //----------------------------------------------------------------------------
   {
   }
@@ -1263,7 +1213,7 @@ namespace Legion {
   template<int DIM, typename COORD_T>
   inline RectInDomainIterator<DIM,COORD_T>::RectInDomainIterator(
                                        const DomainT<DIM,COORD_T> &d)
-    : itr(Realm::ZIndexSpaceIterator<DIM,COORD_T>(d))
+    : itr(Realm::IndexSpaceIterator<DIM,COORD_T>(d))
   //----------------------------------------------------------------------------
   {
   }
@@ -1442,21 +1392,21 @@ namespace std {
   struct less<Legion::Point<DIM,T> > {
     inline bool operator()(const Legion::Point<DIM,T>& p1, 
                            const Legion::Point<DIM,T>& p2) const
-    { return std::less<Realm::ZPoint<DIM,T> >()(p1, p2); }
+    { return std::less<Realm::Point<DIM,T> >()(p1, p2); }
   };
 
   template<int DIM, typename T>
   struct less<Legion::Rect<DIM,T> > {
     inline bool operator()(const Legion::Rect<DIM,T>& r1, 
                            const Legion::Rect<DIM,T>& r2) const
-    { return std::less<Realm::ZRect<DIM,T> >()(r1, r2); }
+    { return std::less<Realm::Rect<DIM,T> >()(r1, r2); }
   };
 
   template<int DIM, typename T>
   struct less<Legion::DomainT<DIM,T> > {
     inline bool operator()(const Legion::DomainT<DIM,T>& d1, 
                            const Legion::DomainT<DIM,T>& d2) const
-    { return std::less<Realm::ZIndexSpace<DIM,T> >()(d1, d2); }
+    { return std::less<Realm::IndexSpace<DIM,T> >()(d1, d2); }
   };
 };
 

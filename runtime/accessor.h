@@ -13,6 +13,11 @@
  * limitations under the License.
  */
 
+// include this _before_ anything below to deal with weird ordering 
+//  constraints w.r.t. Legion's other definitions
+// (it will actually turn around and include this file when it's ready)
+#include <legion/legion_types.h>
+
 #ifndef RUNTIME_ACCESSOR_H
 #define RUNTIME_ACCESSOR_H
 
@@ -24,6 +29,7 @@
 
 #include "arrays.h"
 #include <realm/instance.h>
+#include <legion/legion_domain.h>
 
 #ifndef __GNUC__
 #include "atomics.h" // for __sync_fetch_and_add
@@ -141,12 +147,6 @@ public:
   static inline ptr_t nil(void) { ptr_t p; p.value = -1LL; return p; }
 };
 
-namespace Realm {
-  class DomainPoint;
-  class Domain;
-}
-
-
 namespace LegionRuntime {
 #ifdef PRIVILEGE_CHECKS
   enum AccessorPrivilege {
@@ -240,7 +240,7 @@ namespace LegionRuntime {
       //  information for debug
 
       extern void (*check_bounds_ptr)(void *region, ptr_t ptr);
-      extern void (*check_bounds_dpoint)(void *region, const Realm::DomainPoint &dp);
+      extern void (*check_bounds_dpoint)(void *region, const Legion::DomainPoint &dp);
 
       // single entry point calls the right one (if present) using overloading
       inline void check_bounds(void *region, ptr_t ptr)
@@ -249,7 +249,7 @@ namespace LegionRuntime {
 	  (check_bounds_ptr)(region, ptr);
       }
 
-      inline void check_bounds(void *region, const Realm::DomainPoint &dp)
+      inline void check_bounds(void *region, const Legion::DomainPoint &dp)
       {
 	if(check_bounds_dpoint)
 	  (check_bounds_dpoint)(region, dp);
@@ -369,104 +369,104 @@ namespace LegionRuntime {
 #endif
 	  void read_untyped(ptr_t ptr, void *dst, size_t bytes, off_t offset = 0) const
 	  {
-	    typedef Realm::AffineAccessor<char, 1, Arrays::coord_t> AT;
+	    typedef Realm::GenericAccessor<char, 1, Arrays::coord_t> AT;
 	    assert(AT::is_compatible(inst, field_id));
 	    AT acc(inst, field_id);
-	    const char *src = acc.ptr(Realm::ZPoint<1, Arrays::coord_t>(ptr.value));
-	    memcpy(dst, src + offset, bytes);
+	    size_t start = acc.get_offset(Realm::Point<1, Arrays::coord_t>(ptr.value));
+	    inst.read_untyped(start + offset, dst, bytes);
 	  }
 	  
 	  void write_untyped(ptr_t ptr, const void *src, size_t bytes, off_t offset = 0) const
 	  {
-	    typedef Realm::AffineAccessor<char, 1, Arrays::coord_t> AT;
+	    typedef Realm::GenericAccessor<char, 1, Arrays::coord_t> AT;
 	    assert(AT::is_compatible(inst, field_id));
 	    AT acc(inst, field_id);
-	    char *dst = acc.ptr(Realm::ZPoint<1, Arrays::coord_t>(ptr.value));
-	    memcpy(dst + offset, src, bytes);
+	    size_t start = acc.get_offset(Realm::Point<1, Arrays::coord_t>(ptr.value));
+	    inst.write_untyped(start + offset, src, bytes);
 	  }
 
-	  void read_untyped(const Realm::DomainPoint& dp, void *dst, size_t bytes, off_t offset = 0) const
+	  void read_untyped(const Legion::DomainPoint& dp, void *dst, size_t bytes, off_t offset = 0) const
           {
-	    const char *src = 0;
+	    size_t start = 0;
 	    switch(dp.get_dim()) {
 	    case 0: {
-	      typedef Realm::AffineAccessor<char, 1, Arrays::coord_t> AT;
+	      typedef Realm::GenericAccessor<char, 1, Arrays::coord_t> AT;
 	      assert(AT::is_compatible(inst, field_id));
 	      AT acc(inst, field_id);
-	      src = acc.ptr(Realm::ZPoint<1, Arrays::coord_t>(dp.get_index()));
+	      start = acc.get_offset(Realm::Point<1, Arrays::coord_t>(dp.get_index()));
 	      break;
 	    }
 	    case 1: {
-	      typedef Realm::AffineAccessor<char, 1, Arrays::coord_t> AT;
+	      typedef Realm::GenericAccessor<char, 1, Arrays::coord_t> AT;
 	      assert(AT::is_compatible(inst, field_id));
 	      AT acc(inst, field_id);
 	      Arrays::Point<1> p = dp.get_point<1>();
-	      src = acc.ptr(Realm::ZPoint<1, Arrays::coord_t>(p[0]));
+	      start = acc.get_offset(Realm::Point<1, Arrays::coord_t>(p[0]));
 	      break;
 	    }
 	    case 2: {
-	      typedef Realm::AffineAccessor<char, 2, Arrays::coord_t> AT;
+	      typedef Realm::GenericAccessor<char, 2, Arrays::coord_t> AT;
 	      assert(AT::is_compatible(inst, field_id));
 	      AT acc(inst, field_id);
 	      Arrays::Point<2> p = dp.get_point<2>();
-	      src = acc.ptr(Realm::ZPoint<2, Arrays::coord_t>(p[0], p[1]));
+	      start = acc.get_offset(Realm::Point<2, Arrays::coord_t>(p[0], p[1]));
 	      break;
 	    }
 	    case 3: {
-	      typedef Realm::AffineAccessor<char, 3, Arrays::coord_t> AT;
+	      typedef Realm::GenericAccessor<char, 3, Arrays::coord_t> AT;
 	      assert(AT::is_compatible(inst, field_id));
 	      AT acc(inst, field_id);
 	      Arrays::Point<3> p = dp.get_point<3>();
-	      src = acc.ptr(Realm::ZPoint<3, Arrays::coord_t>(p[0], p[1], p[2]));
+	      start = acc.get_offset(Realm::Point<3, Arrays::coord_t>(p[0], p[1], p[2]));
 	      break;
 	    }
 	    default: assert(0);
 	    }
-	    memcpy(dst, src + offset, bytes);	    
+	    inst.read_untyped(start + offset, dst, bytes);
 	  }
 
-	  void write_untyped(const Realm::DomainPoint& dp, const void *src, size_t bytes, off_t offset = 0) const
+	  void write_untyped(const Legion::DomainPoint& dp, const void *src, size_t bytes, off_t offset = 0) const
 	  {
-	    char *dst = 0;
+	    size_t start = 0;
 	    switch(dp.get_dim()) {
 	    case 0: {
-	      typedef Realm::AffineAccessor<char, 1, Arrays::coord_t> AT;
+	      typedef Realm::GenericAccessor<char, 1, Arrays::coord_t> AT;
 	      assert(AT::is_compatible(inst, field_id));
 	      AT acc(inst, field_id);
-	      dst = acc.ptr(Realm::ZPoint<1, Arrays::coord_t>(dp.get_index()));
+	      start = acc.get_offset(Realm::Point<1, Arrays::coord_t>(dp.get_index()));
 	      break;
 	    }
 	    case 1: {
-	      typedef Realm::AffineAccessor<char, 1, Arrays::coord_t> AT;
+	      typedef Realm::GenericAccessor<char, 1, Arrays::coord_t> AT;
 	      assert(AT::is_compatible(inst, field_id));
 	      AT acc(inst, field_id);
 	      Arrays::Point<1> p = dp.get_point<1>();
-	      dst = acc.ptr(Realm::ZPoint<1, Arrays::coord_t>(p[0]));
+	      start = acc.get_offset(Realm::Point<1, Arrays::coord_t>(p[0]));
 	      break;
 	    }
 	    case 2: {
-	      typedef Realm::AffineAccessor<char, 2, Arrays::coord_t> AT;
+	      typedef Realm::GenericAccessor<char, 2, Arrays::coord_t> AT;
 	      assert(AT::is_compatible(inst, field_id));
 	      AT acc(inst, field_id);
 	      Arrays::Point<2> p = dp.get_point<2>();
-	      dst = acc.ptr(Realm::ZPoint<2, Arrays::coord_t>(p[0], p[1]));
+	      start = acc.get_offset(Realm::Point<2, Arrays::coord_t>(p[0], p[1]));
 	      break;
 	    }
 	    case 3: {
-	      typedef Realm::AffineAccessor<char, 3, Arrays::coord_t> AT;
+	      typedef Realm::GenericAccessor<char, 3, Arrays::coord_t> AT;
 	      assert(AT::is_compatible(inst, field_id));
 	      AT acc(inst, field_id);
 	      Arrays::Point<3> p = dp.get_point<3>();
-	      dst = acc.ptr(Realm::ZPoint<3, Arrays::coord_t>(p[0], p[1], p[2]));
+	      start = acc.get_offset(Realm::Point<3, Arrays::coord_t>(p[0], p[1], p[2]));
 	      break;
 	    }
 	    default: assert(0);
 	    }
-	    memcpy(dst + offset, src, bytes);	    
+	    inst.write_untyped(start + offset, src, bytes);
 	  }
 
 	  void report_fault(ptr_t ptr, size_t bytes, off_t offset = 0) const;
-	  void report_fault(const Realm::DomainPoint& dp, size_t bytes, off_t offset = 0) const;
+	  void report_fault(const Legion::DomainPoint& dp, size_t bytes, off_t offset = 0) const;
 
 	  RegionAccessor<Generic, void, void> get_untyped_field_accessor(off_t _field_id, size_t _field_size)
 	  {
@@ -476,7 +476,7 @@ namespace LegionRuntime {
 	  void *raw_span_ptr(ptr_t ptr, size_t req_count, size_t& act_count, ByteOffset& stride) const
 	  {
 	    typedef Realm::AffineAccessor<char, 1, Arrays::coord_t> AT;
-	    Realm::ZRect<1, Arrays::coord_t> r;
+	    Realm::Rect<1, Arrays::coord_t> r;
 	    r.lo.x = ptr.value;
 	    r.hi.x = ptr.value + req_count - 1;
 	    assert(AT::is_compatible(inst, field_id, r));
@@ -496,7 +496,7 @@ namespace LegionRuntime {
 	      typedef Realm::AffineAccessor<char, 1, Arrays::coord_t> AT;
 	      assert(AT::is_compatible(inst, field_id));
 	      AT acc(inst, field_id);
-	      char *dst = acc.ptr(Realm::ZPoint<1, Arrays::coord_t>(0));
+	      char *dst = acc.ptr(Realm::Point<1, Arrays::coord_t>(0));
 	      offsets[0] = ByteOffset(off_t(acc.strides[0]));
 	      return dst;
 	    }
@@ -504,7 +504,7 @@ namespace LegionRuntime {
 	      typedef Realm::AffineAccessor<char, 2, Arrays::coord_t> AT;
 	      assert(AT::is_compatible(inst, field_id));
 	      AT acc(inst, field_id);
-	      char *dst = acc.ptr(Realm::ZPoint<2, Arrays::coord_t>(0, 0));
+	      char *dst = acc.ptr(Realm::Point<2, Arrays::coord_t>(0, 0));
 	      offsets[0] = ByteOffset(off_t(acc.strides[0]));
 	      offsets[1] = ByteOffset(off_t(acc.strides[1]));
 	      return dst;
@@ -513,7 +513,7 @@ namespace LegionRuntime {
 	      typedef Realm::AffineAccessor<char, 3, Arrays::coord_t> AT;
 	      assert(AT::is_compatible(inst, field_id));
 	      AT acc(inst, field_id);
-	      char *dst = acc.ptr(Realm::ZPoint<3, Arrays::coord_t>(0, 0, 0));
+	      char *dst = acc.ptr(Realm::Point<3, Arrays::coord_t>(0, 0, 0));
 	      offsets[0] = ByteOffset(off_t(acc.strides[0]));
 	      offsets[1] = ByteOffset(off_t(acc.strides[1]));
 	      offsets[2] = ByteOffset(off_t(acc.strides[2]));
@@ -530,9 +530,9 @@ namespace LegionRuntime {
 	    switch(DIM) {
 	    case 1: {
 	      typedef Realm::AffineAccessor<char, 1, Arrays::coord_t> AT;
-	      Realm::ZRect<1, Arrays::coord_t> rr;
-	      rr.lo = Realm::ZPoint<1, Arrays::coord_t>(r.lo.x[0]);
-	      rr.hi = Realm::ZPoint<1, Arrays::coord_t>(r.hi.x[0]);
+	      Realm::Rect<1, Arrays::coord_t> rr;
+	      rr.lo = Realm::Point<1, Arrays::coord_t>(r.lo.x[0]);
+	      rr.hi = Realm::Point<1, Arrays::coord_t>(r.hi.x[0]);
 	      assert(AT::is_compatible(inst, field_id, rr));
 	      AT acc(inst, field_id, rr);
 	      char *dst = acc.ptr(rr.lo);
@@ -542,9 +542,9 @@ namespace LegionRuntime {
 	    }
 	    case 2: {
 	      typedef Realm::AffineAccessor<char, 2, Arrays::coord_t> AT;
-	      Realm::ZRect<2, Arrays::coord_t> rr;
-	      rr.lo = Realm::ZPoint<2, Arrays::coord_t>(r.lo.x[0], r.lo.x[1]);
-	      rr.hi = Realm::ZPoint<2, Arrays::coord_t>(r.hi.x[0], r.hi.x[1]);
+	      Realm::Rect<2, Arrays::coord_t> rr;
+	      rr.lo = Realm::Point<2, Arrays::coord_t>(r.lo.x[0], r.lo.x[1]);
+	      rr.hi = Realm::Point<2, Arrays::coord_t>(r.hi.x[0], r.hi.x[1]);
 	      assert(AT::is_compatible(inst, field_id, rr));
 	      AT acc(inst, field_id, rr);
 	      char *dst = acc.ptr(rr.lo);
@@ -555,9 +555,9 @@ namespace LegionRuntime {
 	    }
 	    case 3: {
 	      typedef Realm::AffineAccessor<char, 3, Arrays::coord_t> AT;
-	      Realm::ZRect<3, Arrays::coord_t> rr;
-	      rr.lo = Realm::ZPoint<3, Arrays::coord_t>(r.lo.x[0], r.lo.x[1], r.lo.x[2]);
-	      rr.hi = Realm::ZPoint<3, Arrays::coord_t>(r.hi.x[0], r.hi.x[1], r.hi.x[2]);
+	      Realm::Rect<3, Arrays::coord_t> rr;
+	      rr.lo = Realm::Point<3, Arrays::coord_t>(r.lo.x[0], r.lo.x[1], r.lo.x[2]);
+	      rr.hi = Realm::Point<3, Arrays::coord_t>(r.hi.x[0], r.hi.x[1], r.hi.x[2]);
 	      assert(AT::is_compatible(inst, field_id, rr));
 	      AT acc(inst, field_id, rr);
 	      char *dst = acc.ptr(rr.lo);
@@ -751,7 +751,7 @@ namespace LegionRuntime {
 	    Untyped::report_fault(ptr, sizeof(T));
 	  }
 
-	  void report_fault(const Realm::DomainPoint& dp) const
+	  void report_fault(const Legion::DomainPoint& dp) const
 	  {
 	    Untyped::report_fault(dp, sizeof(T));
 	  }
@@ -1004,8 +1004,8 @@ namespace LegionRuntime {
 #endif
 	    return(base + (ptr.value * Stride<STRIDE>::value));
 	  }
-	  //char *elem_ptr(const Realm::DomainPoint& dp) const;
-	  //char *elem_ptr_linear(const Realm::Domain& d, Realm::Domain& subrect, ByteOffset *offsets);
+	  //char *elem_ptr(const Legion::DomainPoint& dp) const;
+	  //char *elem_ptr_linear(const Legion::Domain& d, Legion::Domain& subrect, ByteOffset *offsets);
 
 	  char *base;
 #if defined(PRIVILEGE_CHECKS) || defined(BOUNDS_CHECKS)
@@ -1095,8 +1095,8 @@ namespace LegionRuntime {
 	    REDOP::template apply<false>(*(T *)Untyped::elem_ptr(ptr), newval);
 	  }
 
-	  //T *elem_ptr(const Realm::DomainPoint& dp) const { return (T*)(Untyped::elem_ptr(dp)); }
-	  //T *elem_ptr_linear(const Realm::Domain& d, Realm::Domain& subrect, ByteOffset *offsets)
+	  //T *elem_ptr(const Legion::DomainPoint& dp) const { return (T*)(Untyped::elem_ptr(dp)); }
+	  //T *elem_ptr_linear(const Legion::Domain& d, Legion::Domain& subrect, ByteOffset *offsets)
 	  //{ return (T*)(Untyped::elem_ptr_linear(d, subrect, offsets)); }
 	};
       };

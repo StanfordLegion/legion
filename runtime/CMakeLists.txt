@@ -32,7 +32,6 @@ list(APPEND LOW_RUNTIME_SRC
   realm/transfer/channel_disk.h            realm/transfer/channel_disk.cc
   realm/transfer/transfer.h                realm/transfer/transfer.cc
   realm/transfer/lowlevel_dma.h            realm/transfer/lowlevel_dma.cc
-  realm/transfer/lowlevel_dma.inl
   realm/deppart/byfield.h                  realm/deppart/byfield.cc
   realm/deppart/deppart_config.h
   realm/deppart/image.h                    realm/deppart/image.cc
@@ -50,7 +49,6 @@ list(APPEND LOW_RUNTIME_SRC
   realm/event_impl.inl
   realm/faults.h            realm/faults.cc
   realm/faults.inl
-  realm/idx_impl.h          realm/idx_impl.cc
   realm/inst_impl.h         realm/inst_impl.cc
   realm/inst_layout.h       realm/inst_layout.inl
   realm/interval_tree.h     realm/interval_tree.inl

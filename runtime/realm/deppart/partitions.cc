@@ -67,11 +67,11 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class ZIndexSpace<N,T>
+  // class IndexSpace<N,T>
 
   template <int N, typename T>
-  Event ZIndexSpace<N,T>::create_equal_subspace(size_t count, size_t granularity,
-						unsigned index, ZIndexSpace<N,T> &subspace,
+  Event IndexSpace<N,T>::create_equal_subspace(size_t count, size_t granularity,
+						unsigned index, IndexSpace<N,T> &subspace,
 						const ProfilingRequestSet &reqs,
 						Event wait_on /*= Event::NO_EVENT*/) const
   {
@@ -105,7 +105,7 @@ namespace Realm {
 	subspace.bounds.lo.x = bounds.lo.x + rel_span_start;
 	subspace.bounds.hi.x = bounds.lo.x + rel_span_start + (rel_span_size - 1);
       } else {
-	subspace = ZIndexSpace<N,T>::make_empty();
+	subspace = IndexSpace<N,T>::make_empty();
       }
       PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
       return wait_on;
@@ -117,8 +117,8 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  Event ZIndexSpace<N,T>::create_equal_subspaces(size_t count, size_t granularity,
-						 std::vector<ZIndexSpace<N,T> >& subspaces,
+  Event IndexSpace<N,T>::create_equal_subspaces(size_t count, size_t granularity,
+						 std::vector<IndexSpace<N,T> >& subspaces,
 						 const ProfilingRequestSet &reqs,
 						 Event wait_on /*= Event::NO_EVENT*/) const
   {
@@ -137,7 +137,7 @@ namespace Realm {
       subspaces.reserve(count);
       T px = bounds.lo.x;
       for(size_t i = 0; i < count; i++) {
-	ZIndexSpace<N,T> ss(*this);
+	IndexSpace<N,T> ss(*this);
 	T nx = bounds.lo.x + (total_x * (i + 1) / count);
 	ss.bounds.lo.x = px;
 	ss.bounds.hi.x = nx - 1;
@@ -154,9 +154,9 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  Event ZIndexSpace<N,T>::create_weighted_subspaces(size_t count, size_t granularity,
+  Event IndexSpace<N,T>::create_weighted_subspaces(size_t count, size_t granularity,
 						    const std::vector<int>& weights,
-						    std::vector<ZIndexSpace<N,T> >& subspaces,
+						    std::vector<IndexSpace<N,T> >& subspaces,
 						    const ProfilingRequestSet &reqs,
 						    Event wait_on /*= Event::NO_EVENT*/) const
   {
@@ -187,7 +187,7 @@ namespace Realm {
       T px = bounds.lo.x;
       size_t cum_weight = 0;
       for(size_t i = 0; i < count; i++) {
-	ZIndexSpace<N,T> ss(*this);
+	IndexSpace<N,T> ss(*this);
 	cum_weight += weights[i];
         // if the total_weight cleanly divides into the total x, use
         //  that ratio to avoid overflow problems
@@ -214,9 +214,9 @@ namespace Realm {
 
   template <int N, typename T>
   template <int N2, typename T2>
-  Event ZIndexSpace<N,T>::create_association(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,
-					                       ZPoint<N2,T2> > >& field_data,
-					     const ZIndexSpace<N2,T2> &range,
+  Event IndexSpace<N,T>::create_association(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,
+					                       Point<N2,T2> > >& field_data,
+					     const IndexSpace<N2,T2> &range,
 					     const ProfilingRequestSet &reqs,
 					     Event wait_on /*= Event::NO_EVENT*/) const
   {
@@ -240,7 +240,7 @@ namespace Realm {
   {}
 
   template <int N, typename T>
-  void OverlapTester<N,T>::add_index_space(int label, const ZIndexSpace<N,T>& space,
+  void OverlapTester<N,T>::add_index_space(int label, const IndexSpace<N,T>& space,
 					   bool use_approx /*= true*/)
   {
     labels.push_back(label);
@@ -255,7 +255,7 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  void OverlapTester<N,T>::test_overlap(const ZRect<N,T> *rects, size_t count, std::set<int>& overlaps)
+  void OverlapTester<N,T>::test_overlap(const Rect<N,T> *rects, size_t count, std::set<int>& overlaps)
   {
     for(size_t i = 0; i < labels.size(); i++)
       if(approxs[i]) {
@@ -274,7 +274,7 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  void OverlapTester<N,T>::test_overlap(const ZIndexSpace<N,T>& space, std::set<int>& overlaps,
+  void OverlapTester<N,T>::test_overlap(const IndexSpace<N,T>& space, std::set<int>& overlaps,
 					bool approx)
   {
     for(size_t i = 0; i < labels.size(); i++)
@@ -303,20 +303,20 @@ namespace Realm {
   template <typename T>
   class RectListAdapter {
   public:
-    RectListAdapter(const std::vector<ZRect<1,T> >& _rects)
+    RectListAdapter(const std::vector<Rect<1,T> >& _rects)
       : rects(&_rects[0]), count(_rects.size()) {}
-    RectListAdapter(const ZRect<1,T> *_rects, size_t _count)
+    RectListAdapter(const Rect<1,T> *_rects, size_t _count)
       : rects(_rects), count(_count) {}
     size_t size(void) const { return count; }
     T start(size_t idx) const { return rects[idx].lo.x; }
     T end(size_t idx) const { return rects[idx].hi.x; }
   protected:
-    const ZRect<1,T> *rects;
+    const Rect<1,T> *rects;
     size_t count;
   };
 
   template <typename T>
-  void OverlapTester<1,T>::add_index_space(int label, const ZIndexSpace<1,T>& space,
+  void OverlapTester<1,T>::add_index_space(int label, const IndexSpace<1,T>& space,
 					   bool use_approx /*= true*/)
   {
     if(use_approx) {
@@ -327,7 +327,7 @@ namespace Realm {
 	interval_tree.add_intervals(RectListAdapter<T>(impl->get_approx_rects()), label);
       }
     } else {
-      for(ZIndexSpaceIterator<1,T> it(space); it.valid; it.step())
+      for(IndexSpaceIterator<1,T> it(space); it.valid; it.step())
 	interval_tree.add_interval(it.rect.lo.x, it.rect.hi.x, label);
     }
   }
@@ -339,13 +339,13 @@ namespace Realm {
   }
 
   template <typename T>
-  void OverlapTester<1,T>::test_overlap(const ZRect<1,T> *rects, size_t count, std::set<int>& overlaps)
+  void OverlapTester<1,T>::test_overlap(const Rect<1,T> *rects, size_t count, std::set<int>& overlaps)
   {
     interval_tree.test_sorted_intervals(RectListAdapter<T>(rects, count), overlaps);
   }
 
   template <typename T>
-  void OverlapTester<1,T>::test_overlap(const ZIndexSpace<1,T>& space, std::set<int>& overlaps,
+  void OverlapTester<1,T>::test_overlap(const IndexSpace<1,T>& space, std::set<int>& overlaps,
 					bool approx)
   {
     if(space.dense()) {
@@ -355,7 +355,7 @@ namespace Realm {
 	SparsityMapImpl<1,T> *impl = SparsityMapImpl<1,T>::lookup(space.sparsity);
 	interval_tree.test_sorted_intervals(RectListAdapter<T>(impl->get_approx_rects()), overlaps);
       } else {
-	for(ZIndexSpaceIterator<1,T> it(space); it.valid; it.step())
+	for(IndexSpaceIterator<1,T> it(space); it.valid; it.step())
 	  interval_tree.test_interval(it.rect.lo.x, it.rect.hi.x, overlaps);
       }
     }
@@ -471,13 +471,13 @@ namespace Realm {
   {}
 
   template <int N, typename T>
-  void ComputeOverlapMicroOp<N,T>::add_input_space(const ZIndexSpace<N,T>& input_space)
+  void ComputeOverlapMicroOp<N,T>::add_input_space(const IndexSpace<N,T>& input_space)
   {
     input_spaces.push_back(input_space);
   }
 
   template <int N, typename T>
-  void ComputeOverlapMicroOp<N,T>::add_extra_dependency(const ZIndexSpace<N,T>& dep_space)
+  void ComputeOverlapMicroOp<N,T>::add_extra_dependency(const IndexSpace<N,T>& dep_space)
   {
     if(!dep_space.dense()) {
       SparsityMapImpl<N,T> *impl = SparsityMapImpl<N,T>::lookup(dep_space.sparsity);
@@ -897,14 +897,14 @@ namespace Realm {
   }
 
 #define DOIT(N,T) \
-  template struct ZIndexSpace<N,T>; \
+  template struct IndexSpace<N,T>; \
   template void PartitioningMicroOp::sparsity_map_ready(SparsityMapImpl<N,T>*, bool); \
   template class OverlapTester<N,T>; \
   template class ComputeOverlapMicroOp<N,T>;
   FOREACH_NT(DOIT)
 
 #define DOIT2(N1,T1,N2,T2) \
-  template Event ZIndexSpace<N1,T1>::create_association(std::vector<FieldDataDescriptor<ZIndexSpace<N1,T1>, ZPoint<N2,T2> > > const&, ZIndexSpace<N2,T2> const&, ProfilingRequestSet const&, Event) const;
+  template Event IndexSpace<N1,T1>::create_association(std::vector<FieldDataDescriptor<IndexSpace<N1,T1>, Point<N2,T2> > > const&, IndexSpace<N2,T2> const&, ProfilingRequestSet const&, Event) const;
   FOREACH_NTNT(DOIT2)
 
 };

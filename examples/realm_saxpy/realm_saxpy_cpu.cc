@@ -156,7 +156,7 @@ void top_level_task(const void *args, size_t arglen,
   Memory framebuffer_mem = Memory::NO_MEMORY;
   find_memories(first_cpu, first_gpu, system_mem, framebuffer_mem);
 
-  ZRect<1> bounds(0, 16383);
+  Rect<1> bounds(0, 16383);
   std::vector<size_t> field_sizes(1, sizeof(float));
 
   RegionInstance cpu_inst_x, cpu_inst_y, cpu_inst_z;

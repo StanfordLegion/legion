@@ -19,18 +19,14 @@
 
 #include <realm/transfer/lowlevel_dma.h>
 #include <realm/mem_impl.h>
-#include <realm/idx_impl.h>
 #include <realm/inst_layout.h>
 #ifdef USE_HDF
 #include <realm/hdf5/hdf5_access.h>
 #endif
 
-TYPE_IS_SERIALIZABLE(Realm::IndexSpace);
-TYPE_IS_SERIALIZABLE(LegionRuntime::Arrays::Rect<1>);
-TYPE_IS_SERIALIZABLE(LegionRuntime::Arrays::Rect<2>);
-TYPE_IS_SERIALIZABLE(LegionRuntime::Arrays::Rect<3>);
-
 namespace Realm {
+
+  extern Logger log_dma;
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -60,8 +56,6 @@ namespace Realm {
   //
   // class TransferIteratorIndexSpace
   //
-
-  using namespace LegionRuntime::Arrays;
 
 #if 0
   class TransferIteratorIndexSpace : public TransferIterator {
@@ -978,15 +972,15 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class TransferIteratorZIndexSpace<N,T>
+  // class TransferIteratorIndexSpace<N,T>
   //
 
   template <int N, typename T>
-  class TransferIteratorZIndexSpace : public TransferIterator {
+  class TransferIteratorIndexSpace : public TransferIterator {
   protected:
-    TransferIteratorZIndexSpace(void); // used by deserializer
+    TransferIteratorIndexSpace(void); // used by deserializer
   public:
-    TransferIteratorZIndexSpace(const ZIndexSpace<N,T> &_is,
+    TransferIteratorIndexSpace(const IndexSpace<N,T> &_is,
 				RegionInstance inst,
 				const std::vector<FieldID>& _fields,
 				size_t _extra_elems);
@@ -994,7 +988,7 @@ namespace Realm {
     template <typename S>
     static TransferIterator *deserialize_new(S& deserializer);
       
-    virtual ~TransferIteratorZIndexSpace(void);
+    virtual ~TransferIteratorIndexSpace(void);
 
     virtual Event request_metadata(void);
 
@@ -1010,14 +1004,14 @@ namespace Realm {
     virtual void confirm_step(void);
     virtual void cancel_step(void);
 
-    static Serialization::PolymorphicSerdezSubclass<TransferIterator, TransferIteratorZIndexSpace<N,T> > serdez_subclass;
+    static Serialization::PolymorphicSerdezSubclass<TransferIterator, TransferIteratorIndexSpace<N,T> > serdez_subclass;
 
     template <typename S>
     bool serialize(S& serializer) const;
 
   protected:
-    ZIndexSpaceIterator<N,T> iter;
-    ZPoint<N,T> cur_point, next_point;
+    IndexSpaceIterator<N,T> iter;
+    Point<N,T> cur_point, next_point;
     bool carry;
     RegionInstanceImpl *inst_impl;
     const InstanceLayout<N,T> *inst_layout;
@@ -1028,7 +1022,7 @@ namespace Realm {
   };
 
   template <int N, typename T>
-  TransferIteratorZIndexSpace<N,T>::TransferIteratorZIndexSpace(const ZIndexSpace<N,T>& _is,
+  TransferIteratorIndexSpace<N,T>::TransferIteratorIndexSpace(const IndexSpace<N,T>& _is,
 								RegionInstance inst,
 								const std::vector<FieldID>& _fields,
 								size_t _extra_elems)
@@ -1048,16 +1042,16 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  TransferIteratorZIndexSpace<N,T>::TransferIteratorZIndexSpace(void)
+  TransferIteratorIndexSpace<N,T>::TransferIteratorIndexSpace(void)
     : field_idx(0)
     , tentative_valid(false)
   {}
 
   template <int N, typename T>
   template <typename S>
-  /*static*/ TransferIterator *TransferIteratorZIndexSpace<N,T>::deserialize_new(S& deserializer)
+  /*static*/ TransferIterator *TransferIteratorIndexSpace<N,T>::deserialize_new(S& deserializer)
   {
-    ZIndexSpace<N,T> is;
+    IndexSpace<N,T> is;
     RegionInstance inst;
     std::vector<FieldID> fields;
     size_t extra_elems;
@@ -1068,7 +1062,7 @@ namespace Realm {
 	 (deserializer >> extra_elems)))
       return 0;
 
-    TransferIteratorZIndexSpace<N,T> *tiis = new TransferIteratorZIndexSpace<N,T>;
+    TransferIteratorIndexSpace<N,T> *tiis = new TransferIteratorIndexSpace<N,T>;
     tiis->iter.reset(is);
 
     if(tiis->iter.valid && inst.exists() && !fields.empty()) {
@@ -1088,11 +1082,11 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  TransferIteratorZIndexSpace<N,T>::~TransferIteratorZIndexSpace(void)
+  TransferIteratorIndexSpace<N,T>::~TransferIteratorIndexSpace(void)
   {}
 
   template <int N, typename T>
-  Event TransferIteratorZIndexSpace<N,T>::request_metadata(void)
+  Event TransferIteratorIndexSpace<N,T>::request_metadata(void)
   {
     if(inst_impl && !inst_impl->metadata.is_valid())
       return inst_impl->request_metadata();
@@ -1101,7 +1095,7 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  void TransferIteratorZIndexSpace<N,T>::reset(void)
+  void TransferIteratorIndexSpace<N,T>::reset(void)
   {
     field_idx = 0;
     iter.reset(iter.space);
@@ -1109,13 +1103,13 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  bool TransferIteratorZIndexSpace<N,T>::done(void) const
+  bool TransferIteratorIndexSpace<N,T>::done(void) const
   {
     return(field_idx == fields.size());
   }
 
   template <int N, typename T>
-  size_t TransferIteratorZIndexSpace<N,T>::step(size_t max_bytes, AddressInfo& info,
+  size_t TransferIteratorIndexSpace<N,T>::step(size_t max_bytes, AddressInfo& info,
 						unsigned flags,
 						bool tentative /*= false*/)
   {
@@ -1147,7 +1141,7 @@ namespace Realm {
       return 0;
 
     // the subrectangle we give always starts with the current point
-    ZRect<N,T> target_subrect;
+    Rect<N,T> target_subrect;
     target_subrect.lo = cur_point;
     if(layout_piece->layout_type == InstanceLayoutPiece<N,T>::AffineLayoutType) {
       const AffineLayoutPiece<N,T> *affine = static_cast<const AffineLayoutPiece<N,T> *>(layout_piece);
@@ -1253,7 +1247,7 @@ namespace Realm {
 
 #ifdef USE_HDF
   template <int N, typename T>
-  size_t TransferIteratorZIndexSpace<N,T>::step(size_t max_bytes, AddressInfoHDF5& info,
+  size_t TransferIteratorIndexSpace<N,T>::step(size_t max_bytes, AddressInfoHDF5& info,
 						bool tentative /*= false*/)
   {
     assert(!done());
@@ -1288,7 +1282,7 @@ namespace Realm {
     // HDF5 requires we handle dimensions in order - no permutation allowed
     // using the current point, find the biggest subrectangle we want to try
     //  giving out
-    ZRect<N,T> target_subrect;
+    Rect<N,T> target_subrect;
     size_t cur_bytes = 0;
     target_subrect.lo = cur_point;
     if(layout_piece->layout_type == InstanceLayoutPiece<N,T>::HDF5LayoutType) {
@@ -1372,7 +1366,7 @@ namespace Realm {
 #endif
   
   template <int N, typename T>
-  void TransferIteratorZIndexSpace<N,T>::confirm_step(void)
+  void TransferIteratorIndexSpace<N,T>::confirm_step(void)
   {
     assert(tentative_valid);
     if(carry) {
@@ -1389,18 +1383,18 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  void TransferIteratorZIndexSpace<N,T>::cancel_step(void)
+  void TransferIteratorIndexSpace<N,T>::cancel_step(void)
   {
     assert(tentative_valid);
     tentative_valid = false;
   }
 
   template <int N, typename T>
-  /*static*/ Serialization::PolymorphicSerdezSubclass<TransferIterator, TransferIteratorZIndexSpace<N,T> > TransferIteratorZIndexSpace<N,T>::serdez_subclass;
+  /*static*/ Serialization::PolymorphicSerdezSubclass<TransferIterator, TransferIteratorIndexSpace<N,T> > TransferIteratorIndexSpace<N,T>::serdez_subclass;
 
   template <int N, typename T>
   template <typename S>
-  bool TransferIteratorZIndexSpace<N,T>::serialize(S& serializer) const
+  bool TransferIteratorIndexSpace<N,T>::serialize(S& serializer) const
   {
     return ((serializer << iter.space) &&
 	    (serializer << (inst_impl ? inst_impl->me :
@@ -1643,13 +1637,13 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class TransferDomainZIndexSpace<N,T>
+  // class TransferDomainIndexSpace<N,T>
   //
 
   template <int N, typename T>
-  class TransferDomainZIndexSpace : public TransferDomain {
+  class TransferDomainIndexSpace : public TransferDomain {
   public:
-    TransferDomainZIndexSpace(ZIndexSpace<N,T> _is);
+    TransferDomainIndexSpace(IndexSpace<N,T> _is);
 
     template <typename S>
     static TransferDomain *deserialize_new(S& deserializer);
@@ -1666,39 +1660,39 @@ namespace Realm {
 
     virtual void print(std::ostream& os) const;
 
-    static Serialization::PolymorphicSerdezSubclass<TransferDomain, TransferDomainZIndexSpace<N,T> > serdez_subclass;
+    static Serialization::PolymorphicSerdezSubclass<TransferDomain, TransferDomainIndexSpace<N,T> > serdez_subclass;
 
     template <typename S>
     bool serialize(S& serializer) const;
 
     //protected:
-    ZIndexSpace<N,T> is;
+    IndexSpace<N,T> is;
   };
 
   template <int N, typename T>
-  TransferDomainZIndexSpace<N,T>::TransferDomainZIndexSpace(ZIndexSpace<N,T> _is)
+  TransferDomainIndexSpace<N,T>::TransferDomainIndexSpace(IndexSpace<N,T> _is)
     : is(_is)
   {}
 
   template <int N, typename T>
   template <typename S>
-  /*static*/ TransferDomain *TransferDomainZIndexSpace<N,T>::deserialize_new(S& deserializer)
+  /*static*/ TransferDomain *TransferDomainIndexSpace<N,T>::deserialize_new(S& deserializer)
   {
-    ZIndexSpace<N,T> is;
+    IndexSpace<N,T> is;
     if(deserializer >> is)
-      return new TransferDomainZIndexSpace<N,T>(is);
+      return new TransferDomainIndexSpace<N,T>(is);
     else
       return 0;
   }
 
   template <int N, typename T>
-  TransferDomain *TransferDomainZIndexSpace<N,T>::clone(void) const
+  TransferDomain *TransferDomainIndexSpace<N,T>::clone(void) const
   {
-    return new TransferDomainZIndexSpace<N,T>(is);
+    return new TransferDomainIndexSpace<N,T>(is);
   }
 
   template <int N, typename T>
-  Event TransferDomainZIndexSpace<N,T>::request_metadata(void)
+  Event TransferDomainIndexSpace<N,T>::request_metadata(void)
   {
     if(!is.is_valid())
       return is.make_valid();
@@ -1707,13 +1701,13 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  size_t TransferDomainZIndexSpace<N,T>::volume(void) const
+  size_t TransferDomainIndexSpace<N,T>::volume(void) const
   {
     return is.volume();
   }
 
   template <int N, typename T>
-  TransferIterator *TransferDomainZIndexSpace<N,T>::create_iterator(RegionInstance inst,
+  TransferIterator *TransferDomainIndexSpace<N,T>::create_iterator(RegionInstance inst,
 								    RegionInstance peer,
 								    const std::vector<FieldID>& fields) const
   {
@@ -1726,29 +1720,29 @@ namespace Realm {
 #endif
 
     size_t extra_elems = 0;
-    return new TransferIteratorZIndexSpace<N,T>(is, inst, fields, extra_elems);
+    return new TransferIteratorIndexSpace<N,T>(is, inst, fields, extra_elems);
   }
   
   template <int N, typename T>
-  void TransferDomainZIndexSpace<N,T>::print(std::ostream& os) const
+  void TransferDomainIndexSpace<N,T>::print(std::ostream& os) const
   {
     os << is;
   }
 
   template <int N, typename T>
-  /*static*/ Serialization::PolymorphicSerdezSubclass<TransferDomain, TransferDomainZIndexSpace<N,T> > TransferDomainZIndexSpace<N,T>::serdez_subclass;
+  /*static*/ Serialization::PolymorphicSerdezSubclass<TransferDomain, TransferDomainIndexSpace<N,T> > TransferDomainIndexSpace<N,T>::serdez_subclass;
 
   template <int N, typename T>
   template <typename S>
-  inline bool TransferDomainZIndexSpace<N,T>::serialize(S& serializer) const
+  inline bool TransferDomainIndexSpace<N,T>::serialize(S& serializer) const
   {
     return (serializer << is);
   }
 
   template <int N, typename T>
-  inline /*static*/ TransferDomain *TransferDomain::construct(const ZIndexSpace<N,T>& is)
+  inline /*static*/ TransferDomain *TransferDomain::construct(const IndexSpace<N,T>& is)
   {
-    return new TransferDomainZIndexSpace<N,T>(is);
+    return new TransferDomainIndexSpace<N,T>(is);
   }
 
 
@@ -2055,8 +2049,8 @@ namespace Realm {
 	assert(dst_it->field_id != (FieldID)-1);
 	oas.src_subfield_offset = src_subfield_offset;
 	oas.dst_subfield_offset = dst_subfield_offset;
-	oas.size = min(src_it->size - src_subfield_offset,
-		       dst_it->size - dst_subfield_offset);
+	oas.size = std::min(src_it->size - src_subfield_offset,
+			    dst_it->size - dst_subfield_offset);
 	oas.serdez_id = src_it->serdez_id;
 
 	// This is a little bit of hack: if serdez_id != 0 we directly create a
@@ -2165,81 +2159,8 @@ namespace Realm {
   }
 
 
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class Domain
-  //
-
-  Event Domain::copy(const std::vector<CopySrcDstField>& srcs,
-		     const std::vector<CopySrcDstField>& dsts,
-		     Event wait_on,
-		     ReductionOpID redop_id, bool red_fold) const
-  {
-    Realm::ProfilingRequestSet reqs;
-    return Domain::copy(srcs, dsts, reqs, wait_on, redop_id, red_fold);
-  }
-
-  Event Domain::copy(const std::vector<CopySrcDstField>& srcs,
-		     const std::vector<CopySrcDstField>& dsts,
-		     const Realm::ProfilingRequestSet &requests,
-		     Event wait_on,
-		     ReductionOpID redop_id, bool red_fold) const
-  {
-    assert(0); // DEAD CODE
-    return wait_on;
-#if 0
-    TransferDomain *td = TransferDomain::construct(*this);
-    std::vector<TransferPlan *> plans;
-    bool ok = TransferPlan::plan_copy(plans, srcs, dsts, redop_id, red_fold);
-    assert(ok);
-    std::set<Event> finish_events;
-    for(std::vector<TransferPlan *>::iterator it = plans.begin();
-	it != plans.end();
-	++it) {
-      Event e = (*it)->execute_plan(td, requests, wait_on, 0 /*priority*/);
-      finish_events.insert(e);
-      delete *it;
-    }
-    delete td;
-    return Event::merge_events(finish_events);
-#endif
-  }
-
-  Event Domain::fill(const std::vector<CopySrcDstField> &dsts,
-		     const void *fill_value, size_t fill_value_size,
-		     Event wait_on /*= Event::NO_EVENT*/) const
-  {
-    Realm::ProfilingRequestSet reqs;
-    return Domain::fill(dsts, reqs, fill_value, fill_value_size, wait_on);
-  }
-
-  Event Domain::fill(const std::vector<CopySrcDstField> &dsts,
-		     const Realm::ProfilingRequestSet &requests,
-		     const void *fill_value, size_t fill_value_size,
-		     Event wait_on /*= Event::NO_EVENT*/) const
-  {
-    assert(0); // DEAD CODE
-    return wait_on;
-#if 0
-    TransferDomain *td = TransferDomain::construct(*this);
-    std::vector<TransferPlan *> plans;
-    bool ok = TransferPlan::plan_fill(plans, dsts, fill_value, fill_value_size);
-    assert(ok);
-    std::set<Event> finish_events;
-    for(std::vector<TransferPlan *>::iterator it = plans.begin();
-	it != plans.end();
-	++it) {
-      Event e = (*it)->execute_plan(td, requests, wait_on, 0 /*priority*/);
-      finish_events.insert(e);
-      delete *it;
-    }
-    delete td;
-    return Event::merge_events(finish_events);
-#endif
-  }
-
   template <int N, typename T>
-  Event ZIndexSpace<N,T>::copy(const std::vector<CopySrcDstField>& srcs,
+  Event IndexSpace<N,T>::copy(const std::vector<CopySrcDstField>& srcs,
 			       const std::vector<CopySrcDstField>& dsts,
 			       const Realm::ProfilingRequestSet &requests,
 			       Event wait_on,
@@ -2268,7 +2189,7 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  Event ZIndexSpace<N,T>::fill(const std::vector<CopySrcDstField> &dsts,
+  Event IndexSpace<N,T>::fill(const std::vector<CopySrcDstField> &dsts,
 			       const Realm::ProfilingRequestSet &requests,
 			       const void *fill_value, size_t fill_value_size,
 			       Event wait_on /*= Event::NO_EVENT*/) const
@@ -2296,17 +2217,17 @@ namespace Realm {
   }
 
 #define DOIT(N,T) \
-  template Event ZIndexSpace<N,T>::copy(const std::vector<CopySrcDstField>&, \
+  template Event IndexSpace<N,T>::copy(const std::vector<CopySrcDstField>&, \
 					const std::vector<CopySrcDstField>&, \
 					const ProfilingRequestSet&, \
 					Event, \
 					ReductionOpID, bool) const; \
-  template Event ZIndexSpace<N,T>::fill(const std::vector<CopySrcDstField>&, \
+  template Event IndexSpace<N,T>::fill(const std::vector<CopySrcDstField>&, \
 					const ProfilingRequestSet&, \
 					const void *, size_t, \
 					Event wait_on) const; \
-  template class TransferIteratorZIndexSpace<N,T>; \
-  template class TransferDomainZIndexSpace<N,T>;
+  template class TransferIteratorIndexSpace<N,T>; \
+  template class TransferDomainIndexSpace<N,T>;
   FOREACH_NT(DOIT)
 
 }; // namespace Realm

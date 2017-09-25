@@ -44,17 +44,17 @@ namespace Realm {
     OverlapTester(void);
     ~OverlapTester(void);
 
-    void add_index_space(int label, const ZIndexSpace<N,T>& space, bool use_approx = true);
+    void add_index_space(int label, const IndexSpace<N,T>& space, bool use_approx = true);
 
     void construct(void);
 
-    void test_overlap(const ZRect<N,T>* rects, size_t count, std::set<int>& overlaps);
-    void test_overlap(const ZIndexSpace<N,T>& space, std::set<int>& overlaps, bool approx);
+    void test_overlap(const Rect<N,T>* rects, size_t count, std::set<int>& overlaps);
+    void test_overlap(const IndexSpace<N,T>& space, std::set<int>& overlaps, bool approx);
     void test_overlap(const SparsityMapImpl<N,T> *sparsity, std::set<int>& overlaps, bool approx);
 
   protected:
     std::vector<int> labels;
-    std::vector<ZIndexSpace<N,T> > spaces;
+    std::vector<IndexSpace<N,T> > spaces;
     std::vector<bool> approxs;
   };
 
@@ -64,12 +64,12 @@ namespace Realm {
     OverlapTester(void);
     ~OverlapTester(void);
 
-    void add_index_space(int label, const ZIndexSpace<1,T>& space, bool use_approx = true);
+    void add_index_space(int label, const IndexSpace<1,T>& space, bool use_approx = true);
 
     void construct(void);
 
-    void test_overlap(const ZRect<1,T>* rects, size_t count, std::set<int>& overlaps);
-    void test_overlap(const ZIndexSpace<1,T>& space, std::set<int>& overlaps, bool approx);
+    void test_overlap(const Rect<1,T>* rects, size_t count, std::set<int>& overlaps);
+    void test_overlap(const IndexSpace<1,T>& space, std::set<int>& overlaps, bool approx);
     void test_overlap(const SparsityMapImpl<1,T> *sparsity, std::set<int>& overlaps, bool approx);
 
   protected:
@@ -131,8 +131,8 @@ namespace Realm {
     ComputeOverlapMicroOp(PartitioningOperation *_op);
     virtual ~ComputeOverlapMicroOp(void);
 
-    void add_input_space(const ZIndexSpace<N,T>& input_space);
-    void add_extra_dependency(const ZIndexSpace<N,T>& dep_space);
+    void add_input_space(const IndexSpace<N,T>& input_space);
+    void add_extra_dependency(const IndexSpace<N,T>& dep_space);
 
     virtual void execute(void);
 
@@ -140,7 +140,7 @@ namespace Realm {
 
   protected:
     PartitioningOperation *op;
-    std::vector<ZIndexSpace<N,T> > input_spaces;
+    std::vector<IndexSpace<N,T> > input_spaces;
     std::vector<SparsityMapImpl<N,T> *> extra_deps;
   };
 

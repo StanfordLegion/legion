@@ -24,7 +24,6 @@
 #include <realm/hdf5/hdf5_access.h>
 #endif
 
-TYPE_IS_SERIALIZABLE(Realm::IndexSpace);
 TYPE_IS_SERIALIZABLE(Realm::InstanceLayoutGeneric::FieldLayout);
 
 namespace Realm {
@@ -160,18 +159,6 @@ namespace Realm {
       // this does the right thing even though we're using an instance ID
       MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
       mem_impl->release_instance_storage(*this, wait_on);
-#ifdef OLD_ALLOCATORS
-      RegionInstanceImpl *i_impl = get_runtime()->get_instance_impl(*this);
-      if (!wait_on.has_triggered())
-      {
-	EventImpl::add_waiter(wait_on, new DeferredInstDestroy(i_impl));
-        return;
-      }
-
-      log_inst.info("instance destroyed: space=" IDFMT " id=" IDFMT "",
-	       i_impl->metadata.is.id, this->id);
-      get_runtime()->get_memory_impl(i_impl->memory)->destroy_instance(*this, true);
-#endif
     }
 
     void RegionInstance::destroy(const std::vector<DestroyedField>& destroyed_fields,
@@ -183,7 +170,7 @@ namespace Realm {
     }
 
     template <int N, typename T>
-    ZIndexSpace<N,T> RegionInstance::get_indexspace(void) const
+    IndexSpace<N,T> RegionInstance::get_indexspace(void) const
     {
       const InstanceLayout<N,T> *layout = dynamic_cast<const InstanceLayout<N,T> *>(this->get_layout());
       if(!layout) {
@@ -194,7 +181,7 @@ namespace Realm {
     }
 		
     template <int N>
-    ZIndexSpace<N,int> RegionInstance::get_indexspace(void) const
+    IndexSpace<N,int> RegionInstance::get_indexspace(void) const
     {
       return get_indexspace<N,int>();
     }
@@ -214,50 +201,6 @@ namespace Realm {
 	
       return LegionRuntime::Accessor::RegionAccessor<LegionRuntime::Accessor::AccessorType::Generic>(LegionRuntime::Accessor::AccessorType::Generic::Untyped(*this));
     }
-
-#if 0
-    /*static*/ RegionInstance RegionInstance::create_instance(Memory memory,
-							      const LinearizedIndexSpaceIntfc& lis,
-							      const std::vector<size_t>& field_sizes,
-							      const ProfilingRequestSet& prs)
-    {
-      size_t num_elements = lis.size();
-      size_t element_size = 0;
-      for(std::vector<size_t>::const_iterator it = field_sizes.begin();
-	  it != field_sizes.end();
-	  it++)
-	element_size += *it;
-
-      MemoryImpl *m_impl = get_runtime()->get_memory_impl(memory);
-
-      int dummy_bits[RegionInstanceImpl::MAX_LINEARIZATION_LEN];
-      for(size_t i = 0; i < RegionInstanceImpl::MAX_LINEARIZATION_LEN; i++)
-	dummy_bits[i] = 0;
-
-      RegionInstance r = m_impl->create_instance(IndexSpace::NO_SPACE,
-						 dummy_bits,
-						 num_elements * element_size,
-						 num_elements, // SOA
-						 element_size,
-						 field_sizes,
-						 0, -1, prs,
-						 RegionInstance::NO_INST);
-			
-      RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(r);
-      r_impl->lis = lis.clone();
-			 
-      return r;
-    }
-#endif
-
-#if 0
-    const LinearizedIndexSpaceIntfc& RegionInstance::get_lis(void) const
-    {
-      RegionInstanceImpl *r_impl = get_runtime()->get_instance_impl(*this);
-      assert(r_impl->lis);
-      return *(r_impl->lis);
-    }
-#endif
 
     const InstanceLayoutGeneric *RegionInstance::get_layout(void) const
     {
@@ -398,53 +341,6 @@ namespace Realm {
   //
   // class RegionInstanceImpl
   //
-
-#ifdef OLD_ALLOCATORS
-    RegionInstanceImpl::RegionInstanceImpl(RegionInstance _me, IndexSpace _is, Memory _memory, 
-					   off_t _offset, size_t _size, ReductionOpID _redopid,
-					   const DomainLinearization& _linear, size_t _block_size,
-					   size_t _elmt_size, const std::vector<size_t>& _field_sizes,
-					   const ProfilingRequestSet &reqs,
-					   off_t _count_offset /*= 0*/, off_t _red_list_size /*= 0*/,
-					   RegionInstance _parent_inst /*= NO_INST*/)
-      : me(_me), memory(_memory), lis(0)
-    {
-      metadata.linearization = _linear;
-
-      metadata.block_size = _block_size;
-      metadata.elmt_size = _elmt_size;
-
-      metadata.field_sizes = _field_sizes;
-
-      metadata.is = _is;
-      metadata.alloc_offset = _offset;
-      //metadata.access_offset = _offset + _adjust;
-      metadata.size = _size;
-      
-      //StaticAccess<IndexSpaceImpl> rdata(_is.impl());
-      //locked_data.first_elmt = rdata->first_elmt;
-      //locked_data.last_elmt = rdata->last_elmt;
-
-      metadata.redopid = _redopid;
-      metadata.count_offset = _count_offset;
-      metadata.red_list_size = _red_list_size;
-      metadata.parent_inst = _parent_inst;
-
-      metadata.mark_valid();
-
-      lock.init(ID(me).convert<Reservation>(), ID(me).instance.owner_node);
-      lock.in_use = true;
-
-      if (!reqs.empty()) {
-        requests = reqs;
-        measurements.import_requests(requests);
-        if (measurements.wants_measurement<
-                          ProfilingMeasurements::InstanceTimeline>()) {
-          timeline.record_create_time();
-        }
-      }
-    }
-#endif
 
     RegionInstanceImpl::RegionInstanceImpl(RegionInstance _me, Memory _memory)
       : me(_me), memory(_memory) //, lis(0)
@@ -619,8 +515,7 @@ namespace Realm {
     {
       Serialization::DynamicBufferSerializer dbs(128);
 
-      bool ok = ((dbs << is) &&
-		 (dbs << alloc_offset) &&
+      bool ok = ((dbs << alloc_offset) &&
 		 (dbs << size) &&
 		 (dbs << redopid) &&
 		 (dbs << count_offset) &&
@@ -642,8 +537,7 @@ namespace Realm {
     {
       Serialization::FixedBufferDeserializer fbd(in_data, in_size);
 
-      bool ok = ((fbd >> is) &&
-		 (fbd >> alloc_offset) &&
+      bool ok = ((fbd >> alloc_offset) &&
 		 (fbd >> size) &&
 		 (fbd >> redopid) &&
 		 (fbd >> count_offset) &&
@@ -727,12 +621,12 @@ namespace Realm {
   /*static*/ Serialization::PolymorphicSerdezSubclass<InstanceLayoutGeneric, InstanceLayout<N,T> > InstanceLayout<N,T>::serdez_subclass;
 
 #define DOIT(N) \
-  template ZIndexSpace<N,int> RegionInstance::get_indexspace<N>(void) const;
+  template IndexSpace<N,int> RegionInstance::get_indexspace<N>(void) const;
   FOREACH_N(DOIT)
 #undef DOIT
   
 #define DOIT(N,T) \
-  template ZIndexSpace<N,T> RegionInstance::get_indexspace<N,T>(void) const; \
+  template IndexSpace<N,T> RegionInstance::get_indexspace<N,T>(void) const; \
   template class AffineLayoutPiece<N,T>; \
   template class InstanceLayout<N,T>;
   FOREACH_NT(DOIT)

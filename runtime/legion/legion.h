@@ -326,6 +326,115 @@ namespace Legion {
     //                       Data Allocation Classes
     //==========================================================================
 
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+    /**
+     * \class IndexIterator
+     * This is a helper class for iterating over the points within
+     * an index space or the index space of a given logical region.
+     * It should never be copied and will assert fail if a copy is
+     * made of it.
+     */
+    class LEGION_DEPRECATED("Use DomainPointIterator instead") IndexIterator {
+    public:
+      IndexIterator(void);
+      IndexIterator(const Domain &dom, ptr_t start = ptr_t());
+      IndexIterator(Runtime *rt, Context ctx, 
+                    IndexSpace space, ptr_t start = ptr_t());
+      IndexIterator(Runtime *rt, Context ctx, 
+                    LogicalRegion lr, ptr_t start = ptr_t());
+      IndexIterator(Runtime *rt,
+                    IndexSpace space, ptr_t start = ptr_t());
+      IndexIterator(const IndexIterator &rhs);
+      ~IndexIterator(void);
+    public:
+      /**
+       * Check to see if the iterator has a next point
+       */
+      inline bool has_next(void) const;
+      /**
+       * Get the current point in the iterator.  Advances
+       * the iterator to the next point.
+       */
+      inline ptr_t next(void);
+      /**
+       * Get the current point in the iterator and up to 'req_count'
+       * additional points in the index space.  Returns the actual
+       * count of contiguous points in 'act_count'.
+       */
+      inline ptr_t next_span(size_t& act_count, 
+                             size_t req_count = (size_t)-1LL);
+    public:
+      IndexIterator& operator=(const IndexIterator &rhs);
+    private:
+      Realm::IndexSpaceIterator<1,coord_t> is_iterator;
+      Realm::PointInRectIterator<1,coord_t> rect_iterator;
+    };
+
+    /**
+     * \class IndexAllocator
+     * Index allocators provide objects for doing allocation on
+     * index spaces.  They must be explicitly created by the
+     * runtime so that they can be linked back to the runtime.
+     * Index allocators can be passed by value to functions
+     * and stored in data structures, but should not escape 
+     * the enclosing context in which they were created.
+     *
+     * Index space allocators operate on a single index space
+     * which is immutable.  Separate index space allocators
+     * must be made to perform allocations on different index
+     * spaces.
+     *
+     * @see Runtime
+     */
+    class //LEGION_DEPRECATED("Dynamic IndexAllocators are no longer supported")
+      IndexAllocator : public Unserializable<IndexAllocator> {
+    public:
+      IndexAllocator(void);
+      IndexAllocator(const IndexAllocator &allocator);
+      ~IndexAllocator(void);
+    protected:
+      FRIEND_ALL_RUNTIME_CLASSES
+      // Only the Runtime should be able to make these
+      IndexAllocator(IndexSpace space, IndexIterator iterator);
+    public:
+      IndexAllocator& operator=(const IndexAllocator &allocator);
+      inline bool operator<(const IndexAllocator &rhs) const;
+      inline bool operator==(const IndexAllocator &rhs) const;
+    public:
+      /**
+       * @param num_elements number of elements to allocate
+       * @return pointer to the first element in the allocated block
+       */
+      LEGION_DEPRECATED("Dynamic allocation is no longer supported")
+      ptr_t alloc(unsigned num_elements = 1);
+      /**
+       * @param ptr pointer to the first element to free
+       * @param num_elements number of elements to be freed
+       */
+      LEGION_DEPRECATED("Dynamic allocation is no longer supported")
+      void free(ptr_t ptr, unsigned num_elements = 1);
+      /**
+       * @return the index space associated with this allocator
+       */
+      inline IndexSpace get_index_space(void) const { return index_space; }
+    private:
+      IndexSpace index_space;
+      IndexIterator iterator;
+    };
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
+
     /**
      * \class FieldAllocator
      * Field allocators provide objects for performing allocation on
@@ -2148,63 +2257,6 @@ namespace Legion {
                     bool silence_warnings = false) { }
     };
  
-    /**
-     * \class IndexIterator
-     * This is a helper class for iterating over the points within
-     * an index space or the index space of a given logical region.
-     * It should never be copied and will assert fail if a copy is
-     * made of it.
-     */
-    class LEGION_DEPRECATED("Use DomainPointIterator instead") IndexIterator {
-    public:
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
-      IndexIterator(const Domain &dom, ptr_t start = ptr_t());
-      IndexIterator(Runtime *rt, Context ctx, 
-                    IndexSpace space, ptr_t start = ptr_t());
-      IndexIterator(Runtime *rt, Context ctx, 
-                    LogicalRegion lr, ptr_t start = ptr_t());
-      IndexIterator(Runtime *rt,
-                    IndexSpace space, ptr_t start = ptr_t());
-      IndexIterator(const IndexIterator &rhs);
-      ~IndexIterator(void);
-    public:
-      /**
-       * Check to see if the iterator has a next point
-       */
-      inline bool has_next(void) const;
-      /**
-       * Get the current point in the iterator.  Advances
-       * the iterator to the next point.
-       */
-      inline ptr_t next(void);
-      /**
-       * Get the current point in the iterator and up to 'req_count'
-       * additional points in the index space.  Returns the actual
-       * count of contiguous points in 'act_count'.
-       */
-      inline ptr_t next_span(size_t& act_count, 
-                             size_t req_count = (size_t)-1LL);
-    public:
-      IndexIterator& operator=(const IndexIterator &rhs);
-    private:
-      Realm::ZIndexSpaceIterator<1,coord_t> is_iterator;
-      Realm::ZPointInRectIterator<1,coord_t> rect_iterator;
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
-    };
-
- 
     //==========================================================================
     //                      Software Coherence Classes
     //==========================================================================
@@ -3510,7 +3562,7 @@ namespace Legion {
       void create_association(Context ctx,
                               LogicalRegionT<DIM1,COORD_T1> domain,
                               LogicalRegionT<DIM1,COORD_T1> domain_parent,
-                              FieldID domain_fid, // type: ZPoint<DIM2,COORD_T2>
+                              FieldID domain_fid, // type: Point<DIM2,COORD_T2>
                               IndexSpaceT<DIM2,COORD_T2> range,
                               MapperID id = 0,
                               MappingTagID tag = 0);
@@ -3518,10 +3570,10 @@ namespace Legion {
       void create_bidirectional_association(Context ctx,
                               LogicalRegionT<DIM1,COORD_T1> domain,
                               LogicalRegionT<DIM1,COORD_T1> domain_parent,
-                              FieldID domain_fid, // type: ZPoint<DIM2,COORD_T2>
+                              FieldID domain_fid, // type: Point<DIM2,COORD_T2>
                               LogicalRegionT<DIM2,COORD_T2> range,
                               LogicalRegionT<DIM2,COORD_T2> range_parent,
-                              FieldID range_fid, // type: ZPoint<DIM1,COORD_T1>
+                              FieldID range_fid, // type: Point<DIM1,COORD_T1>
                               MapperID id = 0,
                               MappingTagID tag = 0);
       ///@}
@@ -3628,7 +3680,7 @@ namespace Legion {
       IndexPartitionT<DIM,COORD_T> create_partition_by_field(Context ctx,
                           LogicalRegionT<DIM,COORD_T> handle,
                           LogicalRegionT<DIM,COORD_T> parent,
-                          FieldID fid, // type: ZPoint<COLOR_DIM,COLOR_COORD_T>
+                          FieldID fid, // type: Point<COLOR_DIM,COLOR_COORD_T>
                           IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                           Color color = AUTO_GENERATE_ID,
                           MapperID id = 0, MappingTagID tag = 0);
@@ -3680,7 +3732,7 @@ namespace Legion {
                               IndexSpaceT<DIM2,COORD_T2> handle,
                               LogicalPartitionT<DIM1,COORD_T1> projection,
                               LogicalRegionT<DIM1,COORD_T1> parent,
-                              FieldID fid, // type: ZPoint<DIM2,COORD_T2>
+                              FieldID fid, // type: Point<DIM2,COORD_T2>
                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                               PartitionKind part_kind = COMPUTE_KIND,
                               Color color = AUTO_GENERATE_ID,
@@ -3703,7 +3755,7 @@ namespace Legion {
                               IndexSpaceT<DIM2,COORD_T2> handle,
                               LogicalPartitionT<DIM1,COORD_T1> projection,
                               LogicalRegionT<DIM1,COORD_T1> parent,
-                              FieldID fid, // type: ZRect<DIM2,COORD_T2>
+                              FieldID fid, // type: Rect<DIM2,COORD_T2>
                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                               PartitionKind part_kind = COMPUTE_KIND,
                               Color color = AUTO_GENERATE_ID,
@@ -3753,7 +3805,7 @@ namespace Legion {
                               IndexPartitionT<DIM2,COORD_T2> projection,
                               LogicalRegionT<DIM1,COORD_T1> handle,
                               LogicalRegionT<DIM1,COORD_T1> parent,
-                              FieldID fid, // type: ZPoint<DIM2,COORD_T2>
+                              FieldID fid, // type: Point<DIM2,COORD_T2>
                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                               PartitionKind part_kind = COMPUTE_KIND,
                               Color color = AUTO_GENERATE_ID,
@@ -3776,7 +3828,7 @@ namespace Legion {
                               IndexPartitionT<DIM2,COORD_T2> projection,
                               LogicalRegionT<DIM1,COORD_T1> handle,
                               LogicalRegionT<DIM1,COORD_T1> parent,
-                              FieldID fid, // type: ZRect<DIM2,COORD_T2>
+                              FieldID fid, // type: Rect<DIM2,COORD_T2>
                               IndexSpaceT<COLOR_DIM,COLOR_COORD_T> color_space,
                               PartitionKind part_kind = COMPUTE_KIND,
                               Color color = AUTO_GENERATE_ID,
@@ -4714,6 +4766,19 @@ namespace Legion {
       //------------------------------------------------------------------------
       // Allocator and Argument Map Operations 
       //------------------------------------------------------------------------
+      /**
+       * @deprecated
+       * Create an index allocator object for a given index space
+       * This method is deprecated becasue index spaces no longer support
+       * dynamic allocation. This will still work only if there is exactly
+       * one allocator made for the index space throughout the duration
+       * of its lifetime.
+       * @param ctx enclosing task context
+       * @param handle for the index space to create an allocator
+       * @return a new index space allocator for the given index space
+       */
+      LEGION_DEPRECATED("Dynamic index allocation is no longer supported.")
+      IndexAllocator create_index_allocator(Context ctx, IndexSpace handle);
 
       /**
        * Create a field space allocator object for the given field space

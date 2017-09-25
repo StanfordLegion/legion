@@ -18,8 +18,8 @@
 
 #include "channel.h"
 
-namespace LegionRuntime {
-  namespace LowLevel {
+namespace Realm {
+
     class FileRequest : public Request {
     public:
       int fd;
@@ -107,6 +107,6 @@ namespace LegionRuntime {
       long available();
     };
 
-  } // namespace LowLevel
-} // namespace LegionRuntime
+}; // namespace Realm
+
 #endif /*LOWLEVEL_CHANNEL_DISK*/

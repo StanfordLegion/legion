@@ -18,18 +18,18 @@
 #include "channel_disk.h"
 #include <realm/transfer/transfer.h>
 
-TYPE_IS_SERIALIZABLE(LegionRuntime::LowLevel::XferOrder::Type);
-TYPE_IS_SERIALIZABLE(LegionRuntime::LowLevel::XferDes::XferKind);
+TYPE_IS_SERIALIZABLE(Realm::XferOrder::Type);
+TYPE_IS_SERIALIZABLE(Realm::XferDes::XferKind);
 
-namespace LegionRuntime {
-  namespace LowLevel {
-    Logger::Category log_new_dma("new_dma");
-    Logger::Category log_request("request");
-    Logger::Category log_xd("xd");
+namespace Realm {
+
+    Logger log_new_dma("new_dma");
+    Logger log_request("request");
+    Logger log_xd("xd");
 
       // TODO: currently we use dma_all_gpus to track the set of GPU* created
 #ifdef USE_CUDA
-      std::vector<GPU*> dma_all_gpus;
+      std::vector<Cuda::GPU*> dma_all_gpus;
 #endif
       // we use a single queue for all xferDes
       static XferDesQueue *xferDes_queue = 0;
@@ -206,23 +206,6 @@ namespace LegionRuntime {
 	//  locations can be freely written
 	if(next_xd_guid != XFERDES_NO_GUID)
 	  seq_next_read.add_span(0, _next_max_rw_gap);
-#if 0
-        if (domain.get_dim() == 0) {
-          li = NULL;
-          // index space instances use 1D linearizations for translation
-          me = new MaskEnumerator(domain.get_index_space(),
-                                  src_buf.linearization.get_mapping<1>(),
-                                  dst_buf.linearization.get_mapping<1>(),
-                                  order, src_buf.is_ib, dst_buf.is_ib);
-        } else {
-          li = new LayoutIterator(
-                       domain,
-                       src_buf.linearization,
-                       dst_buf.linearization,
-                       order);
-          me = NULL;
-        }
-#endif
         offset_idx = 0;
         pthread_mutex_init(&xd_lock, NULL);
         pthread_mutex_init(&update_read_lock, NULL);
@@ -236,8 +219,6 @@ namespace LegionRuntime {
         }
 	delete src_iter;
 	delete dst_iter;
-	//delete me;
-	//delete li;
         // If src_buf is intermediate buffer,
         // we need to free the buffer
         //if (src_buf.is_ib) {
@@ -1232,7 +1213,7 @@ namespace LegionRuntime {
           case XferDes::XFER_GPU_TO_FB:
           {
             src_gpu = NULL;
-            dst_gpu = ((GPUFBMemory*)dst_mem)->gpu;
+            dst_gpu = ((Cuda::GPUFBMemory*)dst_mem)->gpu;
             channel = channel_manager->get_gpu_to_fb_channel(dst_gpu);
             //src_buf_base = (char*) src_mem_impl->get_direct_ptr(_src_buf.alloc_offset, 0);
             //dst_buf_base = NULL;
@@ -1241,7 +1222,7 @@ namespace LegionRuntime {
           }
           case XferDes::XFER_GPU_FROM_FB:
           {
-            src_gpu = ((GPUFBMemory*)src_mem)->gpu;
+            src_gpu = ((Cuda::GPUFBMemory*)src_mem)->gpu;
             dst_gpu = NULL;
             channel = channel_manager->get_gpu_from_fb_channel(src_gpu);
             //src_buf_base = NULL;
@@ -1251,8 +1232,8 @@ namespace LegionRuntime {
           }
           case XferDes::XFER_GPU_IN_FB:
           {
-            src_gpu = ((GPUFBMemory*)src_mem)->gpu;
-            dst_gpu = ((GPUFBMemory*)dst_mem)->gpu;
+            src_gpu = ((Cuda::GPUFBMemory*)src_mem)->gpu;
+            dst_gpu = ((Cuda::GPUFBMemory*)dst_mem)->gpu;
             channel = channel_manager->get_gpu_in_fb_channel(src_gpu);
             //src_buf_base = dst_buf_base = NULL;
             assert(src_mem->kind == MemoryImpl::MKIND_GPUFB);
@@ -1262,8 +1243,8 @@ namespace LegionRuntime {
           }
           case XferDes::XFER_GPU_PEER_FB:
           {
-            src_gpu = ((GPUFBMemory*)src_mem)->gpu;
-            dst_gpu = ((GPUFBMemory*)dst_mem)->gpu;
+            src_gpu = ((Cuda::GPUFBMemory*)src_mem)->gpu;
+            dst_gpu = ((Cuda::GPUFBMemory*)dst_mem)->gpu;
             channel = channel_manager->get_gpu_peer_fb_channel(src_gpu);
             //src_buf_base = dst_buf_base = NULL;
             assert(src_mem->kind == MemoryImpl::MKIND_GPUFB);
@@ -1427,7 +1408,7 @@ namespace LegionRuntime {
         }
      }
 
-  Logger::Category log_hdf5("hdf5");
+     extern Logger log_hdf5;
 
       long HDFXferDes::get_requests(Request** requests, long nr)
       {
@@ -2013,7 +1994,7 @@ namespace LegionRuntime {
       }
    
 #ifdef USE_CUDA
-      GPUChannel::GPUChannel(GPU* _src_gpu, long max_nr, XferDes::XferKind _kind)
+      GPUChannel::GPUChannel(Cuda::GPU* _src_gpu, long max_nr, XferDes::XferKind _kind)
       {
         src_gpu = _src_gpu;
         kind = _kind;
@@ -2467,7 +2448,7 @@ namespace LegionRuntime {
         if (disk_write_channel)
           delete disk_write_channel;
 #ifdef USE_CUDA
-        std::map<GPU*, GPUChannel*>::iterator it;
+        std::map<Cuda::GPU*, GPUChannel*>::iterator it;
         for (it = gpu_to_fb_channels.begin(); it != gpu_to_fb_channels.end(); it++) {
           delete it->second;
         }
@@ -2483,7 +2464,7 @@ namespace LegionRuntime {
 #endif
       }
 #ifdef USE_CUDA
-      void register_gpu_in_dma_systems(GPU* gpu)
+      void register_gpu_in_dma_systems(Cuda::GPU* gpu)
       {
         dma_all_gpus.push_back(gpu);
       }
@@ -2556,7 +2537,7 @@ namespace LegionRuntime {
           count --;
         }
 #ifdef USE_CUDA
-        std::vector<GPU*>::iterator it;
+        std::vector<Cuda::GPU*>::iterator it;
         for (it = dma_all_gpus.begin(); it != dma_all_gpus.end(); it ++) {
           channels.push_back(channel_manager->create_gpu_to_fb_channel(max_nr, *it));
           channels.push_back(channel_manager->create_gpu_from_fb_channel(max_nr, *it));
@@ -2831,32 +2812,6 @@ namespace LegionRuntime {
       }
     }
 
-#if 0
-      template class MemcpyXferDes<1>;
-      template class MemcpyXferDes<2>;
-      template class MemcpyXferDes<3>;
-      template class GASNetXferDes<1>;
-      template class GASNetXferDes<2>;
-      template class GASNetXferDes<3>;
-      template class RemoteWriteXferDes<1>;
-      template class RemoteWriteXferDes<2>;
-      template class RemoteWriteXferDes<3>;
-#ifdef USE_CUDA
-      template class GPUXferDes<1>;
-      template class GPUXferDes<2>;
-      template class GPUXferDes<3>;
-#endif
-#ifdef USE_HDF
-      template class HDFXferDes<1>;
-      template class HDFXferDes<2>;
-      template class HDFXferDes<3>;
-#endif
-      template long XferDes::default_get_requests<0>(Request**, long);
-      template long XferDes::default_get_requests<1>(Request**, long);
-      template long XferDes::default_get_requests<2>(Request**, long);
-      template long XferDes::default_get_requests<3>(Request**, long);
-#endif
- } // namespace LowLevel
-} // namespace LegionRuntime
+}; // namespace Realm
 
 

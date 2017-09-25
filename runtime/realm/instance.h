@@ -23,7 +23,6 @@
 #include "event.h"
 #include "memory.h"
 
-//include "accessor.h"
 #include "custom_serdez.h"
 
 #include <vector>
@@ -49,8 +48,8 @@ namespace Realm {
 
   typedef int FieldID;
 
-  template <int N, typename T> struct ZRect;
-  template <int N, typename T> struct ZIndexSpace;
+  template <int N, typename T> struct Rect;
+  template <int N, typename T> struct IndexSpace;
   class LinearizedIndexSpaceIntfc;
   class InstanceLayoutGeneric;
   class ProfilingRequestSet;
@@ -115,20 +114,20 @@ namespace Realm {
     template <int N, typename T>
     static Event create_instance(RegionInstance& inst,
 				 Memory memory,
-				 const ZIndexSpace<N,T>& space,
+				 const IndexSpace<N,T>& space,
 				 const std::vector<size_t>& field_sizes,
 				 size_t block_size, // 0=SOA, 1=AOS, 2+=hybrid
 				 const ProfilingRequestSet& prs,
 				 Event wait_on = Event::NO_EVENT);
 
-    // we'd like the method above to accept a ZRect<N,T> in place of the
-    //  ZIndexSpace<N,T>, but that doesn't work unless the method template
+    // we'd like the method above to accept a Rect<N,T> in place of the
+    //  IndexSpace<N,T>, but that doesn't work unless the method template
     //  parameters are specified explicitly, so provide an overload that
-    //  takes a ZRect directly
+    //  takes a Rect directly
     template <int N, typename T>
     static Event create_instance(RegionInstance& inst,
 				 Memory memory,
-				 const ZRect<N,T>& rect,
+				 const Rect<N,T>& rect,
 				 const std::vector<size_t>& field_sizes,
 				 size_t block_size, // 0=SOA, 1=AOS, 2+=hybrid
 				 const ProfilingRequestSet& prs,
@@ -137,7 +136,7 @@ namespace Realm {
     template <int N, typename T>
     static Event create_file_instance(RegionInstance& inst,
 				      const char *file_name,
-				      const ZIndexSpace<N,T>& space,
+				      const IndexSpace<N,T>& space,
 				      const std::vector<FieldID> &field_ids,
 				      const std::vector<size_t> &field_sizes,
 				      legion_lowlevel_file_mode_t file_mode,
@@ -148,7 +147,7 @@ namespace Realm {
     template <int N, typename T>
     static Event create_hdf5_instance(RegionInstance& inst,
 				      const char *file_name,
-				      const ZIndexSpace<N,T>& space,
+				      const IndexSpace<N,T>& space,
 				      const std::vector<FieldID> &field_ids,
 				      const std::vector<size_t> &field_sizes,
 				      const std::vector<const char*> &field_files,
@@ -164,10 +163,10 @@ namespace Realm {
     // apparently we can't use default template parameters on methods without C++11, but we
     //  can provide templates of two different arities...
     template <int N, typename T>
-    ZIndexSpace<N,T> get_indexspace(void) const;
+    IndexSpace<N,T> get_indexspace(void) const;
 
     template <int N>
-    ZIndexSpace<N,int> get_indexspace(void) const;
+    IndexSpace<N,int> get_indexspace(void) const;
 
     LegionRuntime::Accessor::RegionAccessor<LegionRuntime::Accessor::AccessorType::Generic> get_accessor(void) const;
 

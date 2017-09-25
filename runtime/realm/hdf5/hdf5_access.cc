@@ -24,7 +24,7 @@ namespace Realm {
   template <int N, typename T>
   /*static*/ Event RegionInstance::create_hdf5_instance(RegionInstance& inst,
 							const char *file_name,
-							const ZIndexSpace<N,T>& space,
+							const IndexSpace<N,T>& space,
 							const std::vector<FieldID> &field_ids,
 							const std::vector<size_t> &field_sizes,
 							const std::vector<const char*> &field_files,
@@ -72,7 +72,7 @@ namespace Realm {
 #define DOIT(N,T) \
   template Event RegionInstance::create_hdf5_instance<N,T>(RegionInstance&, \
 							      const char *, \
-							      const ZIndexSpace<N,T>&, \
+							      const IndexSpace<N,T>&, \
 							      const std::vector<FieldID>&, \
 							      const std::vector<size_t>&, \
 							      const std::vector<const char *>&, \

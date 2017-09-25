@@ -45,16 +45,8 @@
 #define typeof decltype
 #endif
 
-// dma channels are still in old namespace
-namespace LegionRuntime {
-  namespace LowLevel {
-    class MemPairCopierFactory;
-  };
-};
-
 namespace Realm {
 
-  class IndexSpaceImpl;
   class ProcessorGroup;
   class MemoryImpl;
   class ProcessorImpl;
@@ -82,7 +74,6 @@ namespace Realm {
       static ID make_id(const BarrierImpl& dummy, int owner, int index) { return ID::make_barrier(owner, index, 0); }
       static Reservation make_id(const ReservationImpl& dummy, int owner, int index) { return ID::make_reservation(owner, index).convert<Reservation>(); }
       static Processor make_id(const ProcessorGroup& dummy, int owner, int index) { return ID::make_procgroup(owner, 0, index).convert<Processor>(); }
-      static IndexSpace make_id(const IndexSpaceImpl& dummy, int owner, int index) { return ID::make_idxspace(owner, 0, index).convert<IndexSpace>(); }
       static ID make_id(const SparsityMapImplWrapper& dummy, int owner, int index) { return ID::make_sparsity(owner, 0, index); }
       
       static LEAF_TYPE *new_leaf_node(IT first_index, IT last_index, 
@@ -115,7 +106,6 @@ namespace Realm {
     typedef DynamicTableAllocator<GenEventImpl, 10, 8> EventTableAllocator;
     typedef DynamicTableAllocator<BarrierImpl, 10, 4> BarrierTableAllocator;
     typedef DynamicTableAllocator<ReservationImpl, 10, 8> ReservationTableAllocator;
-    typedef DynamicTableAllocator<IndexSpaceImpl, 10, 4> IndexSpaceTableAllocator;
     typedef DynamicTableAllocator<ProcessorGroup, 10, 4> ProcessorGroupTableAllocator;
     typedef DynamicTableAllocator<SparsityMapImplWrapper, 10, 4> SparsityMapTableAllocator;
 
@@ -132,7 +122,6 @@ namespace Realm {
       DynamicTable<EventTableAllocator> events;
       DynamicTable<BarrierTableAllocator> barriers;
       DynamicTable<ReservationTableAllocator> reservations;
-      DynamicTable<IndexSpaceTableAllocator> index_spaces;
       DynamicTable<ProcessorGroupTableAllocator> proc_groups;
 
       // sparsity maps can be created by other nodes, so keep a
@@ -235,7 +224,6 @@ namespace Realm {
       MemoryImpl *get_memory_impl(ID id);
       ProcessorImpl *get_processor_impl(ID id);
       ProcessorGroup *get_procgroup_impl(ID id);
-      IndexSpaceImpl *get_index_space_impl(ID id);
       RegionInstanceImpl *get_instance_impl(ID id);
       SparsityMapImplWrapper *get_sparsity_impl(ID id);
       SparsityMapImplWrapper *get_available_sparsity_impl(gasnet_node_t target_node);
@@ -260,7 +248,6 @@ namespace Realm {
       EventTableAllocator::FreeList *local_event_free_list;
       BarrierTableAllocator::FreeList *local_barrier_free_list;
       ReservationTableAllocator::FreeList *local_reservation_free_list;
-      IndexSpaceTableAllocator::FreeList *local_index_space_free_list;
       ProcessorGroupTableAllocator::FreeList *local_proc_group_free_list;
 
       // keep a free list for each node we allocate maps on (i.e. indexed

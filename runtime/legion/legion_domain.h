@@ -34,7 +34,7 @@ namespace Legion {
    * into the Legion namespace without c++11 features
    */
   template<int DIM, typename T = coord_t>
-  struct Point : public Realm::ZPoint<DIM,T> {
+  struct Point : public Realm::Point<DIM,T> {
   public:
     __CUDA_HD__
     Point(void);
@@ -44,12 +44,12 @@ namespace Legion {
     template<typename T2> __CUDA_HD__
     Point(const Point<DIM,T2> &rhs);
     template<typename T2> __CUDA_HD__
-    Point(const Realm::ZPoint<DIM,T2> &rhs);
+    Point(const Realm::Point<DIM,T2> &rhs);
   public:
     template<typename T2> __CUDA_HD__
     Point<DIM,T>& operator=(const Point<DIM,T2> &rhs);
     template<typename T2> __CUDA_HD__
-    Point<DIM,T>& operator=(const Realm::ZPoint<DIM,T2> &rhs);
+    Point<DIM,T>& operator=(const Realm::Point<DIM,T2> &rhs);
   };
 
   /**
@@ -58,7 +58,7 @@ namespace Legion {
    * into the Legion namespace without c++11 features
    */
   template<int DIM, typename T = coord_t>
-  struct Rect : public Realm::ZRect<DIM,T> {
+  struct Rect : public Realm::Rect<DIM,T> {
   public:
     __CUDA_HD__
     Rect(void);
@@ -68,12 +68,12 @@ namespace Legion {
     template<typename T2> __CUDA_HD__
     Rect(const Rect<DIM,T2> &rhs);
     template<typename T2> __CUDA_HD__
-    Rect(const Realm::ZRect<DIM,T2> &rhs);
+    Rect(const Realm::Rect<DIM,T2> &rhs);
   public:
     template<typename T2> __CUDA_HD__
     Rect<DIM,T>& operator=(const Rect<DIM,T2> &rhs);
     template<typename T2> __CUDA_HD__
-    Rect<DIM,T>& operator=(const Realm::ZRect<DIM,T2> &rhs);
+    Rect<DIM,T>& operator=(const Realm::Rect<DIM,T2> &rhs);
   };
 
   /**
@@ -82,7 +82,7 @@ namespace Legion {
    * into the Legion namespace without c++11 features
    */
   template<int M, int N, typename T = coord_t>
-  struct Transform : public Realm::ZMatrix<M,N,T> {
+  struct Transform : public Realm::Matrix<M,N,T> {
   public:
     __CUDA_HD__
     Transform(void);
@@ -90,12 +90,12 @@ namespace Legion {
     template<typename T2> __CUDA_HD__
     Transform(const Transform<M,N,T2> &rhs);
     template<typename T2> __CUDA_HD__
-    Transform(const Realm::ZMatrix<M,N,T2> &rhs);
+    Transform(const Realm::Matrix<M,N,T2> &rhs);
   public:
     template<typename T2> __CUDA_HD__
     Transform<M,N,T>& operator=(const Transform<M,N,T2> &rhs);
     template<typename T2> __CUDA_HD__
-    Transform<M,N,T>& operator=(const Realm::ZMatrix<M,N,T2> &rhs);
+    Transform<M,N,T>& operator=(const Realm::Matrix<M,N,T2> &rhs);
   };
 
   /**
@@ -104,25 +104,24 @@ namespace Legion {
    * into the Legion namespace without c++11 features
    */
   template<int DIM, typename T = coord_t>
-  struct DomainT : public Realm::ZIndexSpace<DIM,T> {
+  struct DomainT : public Realm::IndexSpace<DIM,T> {
   public:
     DomainT(void);
-    DomainT(const Domain &domain);
     // Support type conversions for rects, but not other spaces
     template<typename T2>
     DomainT(const Rect<DIM,T2> &bounds);
     template<typename T2>
-    DomainT(const Realm::ZRect<DIM,T2> &bounds);
+    DomainT(const Realm::Rect<DIM,T2> &bounds);
     DomainT(const DomainT<DIM,T> &rhs);
-    DomainT(const Realm::ZIndexSpace<DIM,T> &rhs);
+    DomainT(const Realm::IndexSpace<DIM,T> &rhs);
   public:
     // Support type conversions for rects, but not other spaces
     template<typename T2>
     DomainT<DIM,T>& operator=(const Rect<DIM,T2> &bounds);
     template<typename T2>
-    DomainT<DIM,T>& operator=(const Realm::ZRect<DIM,T2> &bounds);
+    DomainT<DIM,T>& operator=(const Realm::Rect<DIM,T2> &bounds);
     DomainT<DIM,T>& operator=(const DomainT<DIM,T> &rhs);
-    DomainT<DIM,T>& operator=(const Realm::ZIndexSpace<DIM,T> &rhs);
+    DomainT<DIM,T>& operator=(const Realm::IndexSpace<DIM,T> &rhs);
   };
 
   /**
@@ -137,13 +136,11 @@ namespace Legion {
     DomainPoint(void);
     DomainPoint(coord_t index);
     DomainPoint(const DomainPoint &rhs);
-    DomainPoint(const Realm::DomainPoint &rhs);
     template<int DIM, typename T>
     DomainPoint(const Point<DIM,T> &rhs);
 
     template<unsigned DIM>
     operator LegionRuntime::Arrays::Point<DIM>(void) const;
-    operator Realm::DomainPoint(void) const;
     template<int DIM, typename T>
     operator Point<DIM,T>(void) const;
 
@@ -211,10 +208,6 @@ namespace Legion {
 
     template<int DIM, typename T>
     Domain(const DomainT<DIM,T> &other);
-
-    Domain(const Realm::Domain &other);
-
-    operator Realm::Domain(void) const;
 
     Domain& operator=(const Domain& other);
 
@@ -284,9 +277,9 @@ namespace Legion {
       // Some buffers that we will do in-place new statements to in
       // order to not have to call new/delete in our implementation
       char is_iterator[
-              sizeof(Realm::ZIndexSpaceIterator<MAX_RECT_DIM,coord_t>)];
+              sizeof(Realm::IndexSpaceIterator<MAX_RECT_DIM,coord_t>)];
       char rect_iterator[
-              sizeof(Realm::ZPointInRectIterator<MAX_RECT_DIM,coord_t>)];
+              sizeof(Realm::PointInRectIterator<MAX_RECT_DIM,coord_t>)];
       bool is_valid, rect_valid;
     };
   protected:
@@ -313,7 +306,7 @@ namespace Legion {
     inline PointInRectIterator<DIM,COORD_T>& operator++(void);
     inline PointInRectIterator<DIM,COORD_T>& operator++(int/*postfix*/);
   protected:
-    Realm::ZPointInRectIterator<DIM,COORD_T> itr;
+    Realm::PointInRectIterator<DIM,COORD_T> itr;
     mutable Point<DIM,COORD_T> current;
   };
 
@@ -332,7 +325,7 @@ namespace Legion {
     inline RectInDomainIterator<DIM,COORD_T>& operator++(void);
     inline RectInDomainIterator<DIM,COORD_T>& operator++(int/*postfix*/);
   protected:
-    Realm::ZIndexSpaceIterator<DIM,COORD_T> itr;
+    Realm::IndexSpaceIterator<DIM,COORD_T> itr;
     mutable Rect<DIM,COORD_T> current;
   };
 

@@ -2565,10 +2565,6 @@ namespace Legion {
       impl->fail_bounds_check(p, fid, mode);
     }
 
-    /////////////////////////////////////////////////////////////
-    // Index Iterator  
-    /////////////////////////////////////////////////////////////
-
 #ifdef __GNUC__
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
@@ -2577,6 +2573,16 @@ namespace Legion {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #endif
+    /////////////////////////////////////////////////////////////
+    // Index Iterator  
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    IndexIterator::IndexIterator(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
     //--------------------------------------------------------------------------
     IndexIterator::IndexIterator(const Domain &dom, ptr_t start)
     //--------------------------------------------------------------------------
@@ -2585,7 +2591,7 @@ namespace Legion {
       assert(dom.get_dim() == 1);
 #endif
       const DomainT<1,coord_t> is = dom;
-      is_iterator = Realm::ZIndexSpaceIterator<1,coord_t>(is);
+      is_iterator = Realm::IndexSpaceIterator<1,coord_t>(is);
     }
 
     //--------------------------------------------------------------------------
@@ -2598,7 +2604,7 @@ namespace Legion {
       assert(dom.get_dim() == 1);
 #endif
       const DomainT<1,coord_t> is = dom;
-      is_iterator = Realm::ZIndexSpaceIterator<1,coord_t>(is);
+      is_iterator = Realm::IndexSpaceIterator<1,coord_t>(is);
     }
 
     //--------------------------------------------------------------------------
@@ -2611,7 +2617,7 @@ namespace Legion {
       assert(dom.get_dim() == 1);
 #endif
       const DomainT<1,coord_t> is = dom;
-      is_iterator = Realm::ZIndexSpaceIterator<1,coord_t>(is);
+      is_iterator = Realm::IndexSpaceIterator<1,coord_t>(is);
     }
 
     //--------------------------------------------------------------------------
@@ -2623,15 +2629,14 @@ namespace Legion {
       assert(dom.get_dim() == 1);
 #endif
       const DomainT<1,coord_t> is = dom;
-      is_iterator = Realm::ZIndexSpaceIterator<1,coord_t>(is);
+      is_iterator = Realm::IndexSpaceIterator<1,coord_t>(is);
     }
 
     //--------------------------------------------------------------------------
     IndexIterator::IndexIterator(const IndexIterator &rhs)
+      : is_iterator(rhs.is_iterator), rect_iterator(rhs.rect_iterator)
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -2644,9 +2649,70 @@ namespace Legion {
     IndexIterator& IndexIterator::operator=(const IndexIterator &rhs)
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
+      is_iterator = rhs.is_iterator;
+      rect_iterator = rhs.rect_iterator;
       return *this;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // IndexAllocator 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    IndexAllocator::IndexAllocator(void)
+      : index_space(IndexSpace::NO_SPACE)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexAllocator::IndexAllocator(const IndexAllocator &rhs)
+      : index_space(rhs.index_space), iterator(rhs.iterator)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexAllocator::IndexAllocator(IndexSpace is, IndexIterator itr)
+      : index_space(is), iterator(itr)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexAllocator::~IndexAllocator(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndexAllocator& IndexAllocator::operator=(const IndexAllocator &rhs)
+    //--------------------------------------------------------------------------
+    {
+      index_space = rhs.index_space;
+      iterator = rhs.iterator;
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    ptr_t IndexAllocator::alloc(unsigned num_elements)
+    //--------------------------------------------------------------------------
+    {
+      size_t allocated = 0;
+      ptr_t result = iterator.next_span(allocated, num_elements);
+      if (allocated == num_elements)
+        return result;
+      else
+        return ptr_t::nil();
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexAllocator::free(ptr_t ptr, unsigned num_elements)
+    //--------------------------------------------------------------------------
+    {
+      Internal::log_run.error("Dynamic free of index space points is "
+                              "no longer supported");
+      assert(false);
     }
 #ifdef __GNUC__
 #pragma GCC diagnostic pop
@@ -3043,31 +3109,31 @@ namespace Legion {
       {
         case 1:
           {
-            std::vector<Realm::ZPoint<1,coord_t> > realm_points(points.size());
+            std::vector<Realm::Point<1,coord_t> > realm_points(points.size());
             for (unsigned idx = 0; idx < points.size(); idx++)
               realm_points[idx] = Point<1,coord_t>(points[idx]);
             DomainT<1,coord_t> realm_is(
-                (Realm::ZIndexSpace<1,coord_t>(realm_points)));
+                (Realm::IndexSpace<1,coord_t>(realm_points)));
             return runtime->create_index_space(ctx, &realm_is,
                       Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
           }
         case 2:
           {
-            std::vector<Realm::ZPoint<2,coord_t> > realm_points(points.size());
+            std::vector<Realm::Point<2,coord_t> > realm_points(points.size());
             for (unsigned idx = 0; idx < points.size(); idx++)
               realm_points[idx] = Point<2,coord_t>(points[idx]);
             DomainT<2,coord_t> realm_is(
-                (Realm::ZIndexSpace<2,coord_t>(realm_points)));
+                (Realm::IndexSpace<2,coord_t>(realm_points)));
             return runtime->create_index_space(ctx, &realm_is,
                       Internal::NT_TemplateHelper::encode_tag<2,coord_t>());
           }
         case 3:
           {
-            std::vector<Realm::ZPoint<3,coord_t> > realm_points(points.size());
+            std::vector<Realm::Point<3,coord_t> > realm_points(points.size());
             for (unsigned idx = 0; idx < points.size(); idx++)
               realm_points[idx] = Point<3,coord_t>(points[idx]);
             DomainT<3,coord_t> realm_is(
-                (Realm::ZIndexSpace<3,coord_t>(realm_points)));
+                (Realm::IndexSpace<3,coord_t>(realm_points)));
             return runtime->create_index_space(ctx, &realm_is,
                       Internal::NT_TemplateHelper::encode_tag<3,coord_t>());
           }
@@ -3086,31 +3152,31 @@ namespace Legion {
       {
         case 1:
           {
-            std::vector<Realm::ZRect<1,coord_t> > realm_rects(rects.size());
+            std::vector<Realm::Rect<1,coord_t> > realm_rects(rects.size());
             for (unsigned idx = 0; idx < rects.size(); idx++)
               realm_rects[idx] = Rect<1,coord_t>(rects[idx]);
             DomainT<1,coord_t> realm_is(
-                (Realm::ZIndexSpace<1,coord_t>(realm_rects)));
+                (Realm::IndexSpace<1,coord_t>(realm_rects)));
             return runtime->create_index_space(ctx, &realm_is,
                       Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
           }
         case 2:
           {
-            std::vector<Realm::ZRect<2,coord_t> > realm_rects(rects.size());
+            std::vector<Realm::Rect<2,coord_t> > realm_rects(rects.size());
             for (unsigned idx = 0; idx < rects.size(); idx++)
               realm_rects[idx] = Rect<2,coord_t>(rects[idx]);
             DomainT<2,coord_t> realm_is(
-                (Realm::ZIndexSpace<2,coord_t>(realm_rects)));
+                (Realm::IndexSpace<2,coord_t>(realm_rects)));
             return runtime->create_index_space(ctx, &realm_is,
                       Internal::NT_TemplateHelper::encode_tag<2,coord_t>());
           }
         case 3:
           {
-            std::vector<Realm::ZRect<3,coord_t> > realm_rects(rects.size());
+            std::vector<Realm::Rect<3,coord_t> > realm_rects(rects.size());
             for (unsigned idx = 0; idx < rects.size(); idx++)
               realm_rects[idx] = Rect<3,coord_t>(rects[idx]);
             DomainT<3,coord_t> realm_is(
-                (Realm::ZIndexSpace<3,coord_t>(realm_rects)));
+                (Realm::IndexSpace<3,coord_t>(realm_rects)));
             return runtime->create_index_space(ctx, &realm_is,
                       Internal::NT_TemplateHelper::encode_tag<3,coord_t>());
           }
@@ -5542,6 +5608,31 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return runtime->get_parent_logical_partition(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexAllocator Runtime::create_index_allocator(Context ctx, IndexSpace is)
+    //--------------------------------------------------------------------------
+    {
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+      Internal::log_run.warning("Dynamic index space allocation is no longer "
+                                "supported. You can only make one allocator "
+                                "per index space and it must always be in the "
+                                "same task that created the index space.");
+      return IndexAllocator(is, IndexIterator(this, ctx, is));
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
     }
 
     //--------------------------------------------------------------------------

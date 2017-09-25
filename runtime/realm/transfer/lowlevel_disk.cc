@@ -15,13 +15,15 @@
  */
 
 #include "realm/realm_config.h"
-#include "lowlevel_impl.h"
-#include "lowlevel.h"
+#include <realm/runtime_impl.h>
 #include <realm/deppart/inst_helper.h>
+#include <realm/mem_impl.h>
+#include <realm/inst_impl.h>
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
 #include <errno.h>
+#include <fcntl.h>
 
 namespace Realm {
   
@@ -48,31 +50,6 @@ namespace Realm {
       // attempt to delete the file
       unlink(file.c_str());
     }
-
-#ifdef OLD_ALLOCATORS
-    RegionInstance DiskMemory::create_instance(
-                     IndexSpace is,
-                     const int *linearization_bits,
-                     size_t bytes_needed,
-                     size_t block_size,
-                     size_t element_size,
-                     const std::vector<size_t>& field_sizes,
-                     ReductionOpID redopid,
-                     off_t list_size,
-                     const Realm::ProfilingRequestSet &reqs,
-                     RegionInstance parent_inst)
-    {
-      return create_instance_local(is, linearization_bits, bytes_needed,
-                     block_size, element_size, field_sizes, redopid,
-                     list_size, reqs, parent_inst);
-    }
-
-    void DiskMemory::destroy_instance(RegionInstance i,
-                                      bool local_destroy)
-    {
-      destroy_instance_local(i, local_destroy);
-    }
-#endif
 
     off_t DiskMemory::alloc_bytes(size_t size)
     {
@@ -132,116 +109,6 @@ namespace Realm {
     {
       pthread_mutex_destroy(&vector_lock);
     }
-
-#ifdef OLD_ALLOCATORS
-    RegionInstance FileMemory::create_instance(
-                     IndexSpace is,
-                     const int *linearization_bits,
-                     size_t bytes_needed,
-                     size_t block_size,
-                     size_t element_size,
-                     const std::vector<size_t>& field_sizes,
-                     ReductionOpID redopid,
-                     off_t list_size,
-                     const ProfilingRequestSet &reqs,
-                     RegionInstance parent_inst)
-    {
-      // we use a new create_instance API
-      assert(0);
-      return RegionInstance::NO_INST;
-    }
-
-    RegionInstance FileMemory::create_instance(
-                     IndexSpace is,
-                     const int *linearization_bits,
-                     size_t bytes_needed,
-                     size_t block_size,
-                     size_t element_size,
-                     const std::vector<size_t>& field_sizes,
-                     ReductionOpID redopid,
-                     off_t list_size,
-                     const ProfilingRequestSet &reqs,
-                     RegionInstance parent_inst,
-                     const char *file_name,
-                     Domain domain,
-                     legion_lowlevel_file_mode_t file_mode)
-    {
-      RegionInstance inst =  create_instance_local(is,
-                   linearization_bits, bytes_needed,
-                   block_size, element_size, field_sizes, redopid,
-                   list_size, reqs, parent_inst);
-      // figure out what offset we assigned it (indirect because we went
-      //  through MemoryImpl::create_instance_local)
-      RegionInstanceImpl *impl = get_runtime()->get_instance_impl(inst);
-      off_t inst_offset = impl->metadata.alloc_offset;
-
-      int fd;
-#ifdef REALM_USE_KERNEL_AIO
-      int direct_flag = O_DIRECT;
-#else
-      int direct_flag = 0;
-#endif
-      switch (file_mode) {
-        case LEGION_FILE_READ_ONLY:
-        {
-          fd = open(file_name, O_RDONLY | direct_flag, 00777);
-          assert(fd != -1);
-          break;
-        }
-        case LEGION_FILE_READ_WRITE:
-        {
-          fd = open(file_name, O_RDWR | direct_flag, 00777);
-          assert(fd != -1);
-          break;
-        }
-        case LEGION_FILE_CREATE:
-        {
-          fd = open(file_name, O_CREAT | O_RDWR | direct_flag, 00777);
-          assert(fd != -1);
-          // resize the file to what we want
-          size_t field_size = 0;
-          for(std::vector<size_t>::const_iterator it = field_sizes.begin(); it != field_sizes.end(); it++) {
-            field_size += *it;
-          }
-          int ret = ftruncate(fd, field_size * domain.get_volume());
-#ifdef NDEBUG
-	  (void)ret;
-#else
-          assert(ret == 0);
-#endif
-          break;
-        }
-        default:
-          assert(0);
-      }
-
-      pthread_mutex_lock(&vector_lock);
-      ID id(inst);
-      unsigned index = id.instance.inst_idx;
-      if (index < file_vec.size())
-        file_vec[index] = fd;
-      else {
-        assert(index == file_vec.size());
-        file_vec.push_back(fd);
-      }
-      offset_map[inst_offset] = index;
-      pthread_mutex_unlock(&vector_lock);
-      return inst;
-    }
-
-    void FileMemory::destroy_instance(RegionInstance i,
-                      bool local_destroy)
-    {
-      pthread_mutex_lock(&vector_lock);
-      ID id(i);
-      unsigned index = id.instance.inst_idx;
-      assert(index < file_vec.size());
-      int fd = file_vec[index];
-      pthread_mutex_unlock(&vector_lock);
-      close(fd);
-      destroy_instance_local(i, local_destroy);
-    }
-#endif
 
     off_t FileMemory::alloc_bytes(size_t size)
     {
@@ -339,7 +206,7 @@ namespace Realm {
   template <int N, typename T>
   /*static*/ Event RegionInstance::create_file_instance(RegionInstance& inst,
 							const char *file_name,
-							const ZIndexSpace<N,T>& space,
+							const IndexSpace<N,T>& space,
 							const std::vector<FieldID> &field_ids,
 							const std::vector<size_t> &field_sizes,
 							legion_lowlevel_file_mode_t file_mode,
@@ -410,7 +277,7 @@ namespace Realm {
   #define DOIT(N,T) \
   template Event RegionInstance::create_file_instance<N,T>(RegionInstance&, \
 							   const char *, \
-							   const ZIndexSpace<N,T>&, \
+							   const IndexSpace<N,T>&, \
 							   const std::vector<FieldID>&, \
 							   const std::vector<size_t>&, \
                                                            legion_lowlevel_file_mode_t, \

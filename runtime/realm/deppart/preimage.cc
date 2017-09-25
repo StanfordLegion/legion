@@ -31,9 +31,9 @@ namespace Realm {
 
   template <int N, typename T>
   template <int N2, typename T2>
-  Event ZIndexSpace<N,T>::create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,ZPoint<N2,T2> > >& field_data,
-						       const std::vector<ZIndexSpace<N2,T2> >& targets,
-						       std::vector<ZIndexSpace<N,T> >& preimages,
+  Event IndexSpace<N,T>::create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,Point<N2,T2> > >& field_data,
+						       const std::vector<IndexSpace<N2,T2> >& targets,
+						       std::vector<IndexSpace<N,T> >& preimages,
 						       const ProfilingRequestSet &reqs,
 						       Event wait_on /*= Event::NO_EVENT*/) const
   {
@@ -57,9 +57,9 @@ namespace Realm {
   template <int N, typename T>
   template <int N2, typename T2>
   __attribute__ ((noinline))
-  Event ZIndexSpace<N,T>::create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,ZRect<N2,T2> > >& field_data,
-						       const std::vector<ZIndexSpace<N2,T2> >& targets,
-						       std::vector<ZIndexSpace<N,T> >& preimages,
+  Event IndexSpace<N,T>::create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,Rect<N2,T2> > >& field_data,
+						       const std::vector<IndexSpace<N2,T2> >& targets,
+						       std::vector<IndexSpace<N,T> >& preimages,
 						       const ProfilingRequestSet &reqs,
 						       Event wait_on /*= Event::NO_EVENT*/) const
   {
@@ -92,8 +92,8 @@ namespace Realm {
   }
 
   template <int N, typename T, int N2, typename T2>
-  PreimageMicroOp<N,T,N2,T2>::PreimageMicroOp(ZIndexSpace<N,T> _parent_space,
-					 ZIndexSpace<N,T> _inst_space,
+  PreimageMicroOp<N,T,N2,T2>::PreimageMicroOp(IndexSpace<N,T> _parent_space,
+					 IndexSpace<N,T> _inst_space,
 					 RegionInstance _inst,
 					 size_t _field_offset,
 					 bool _is_ranged)
@@ -109,7 +109,7 @@ namespace Realm {
   {}
 
   template <int N, typename T, int N2, typename T2>
-  void PreimageMicroOp<N,T,N2,T2>::add_sparsity_output(ZIndexSpace<N2,T2> _target,
+  void PreimageMicroOp<N,T,N2,T2>::add_sparsity_output(IndexSpace<N2,T2> _target,
 						       SparsityMap<N,T> _sparsity)
   {
     targets.push_back(_target);
@@ -121,15 +121,15 @@ namespace Realm {
   void PreimageMicroOp<N,T,N2,T2>::populate_bitmasks_ptrs(std::map<int, BM *>& bitmasks)
   {
     // for now, one access for the whole instance
-    AffineAccessor<ZPoint<N2,T2>,N,T> a_data(inst, field_offset);
+    AffineAccessor<Point<N2,T2>,N,T> a_data(inst, field_offset);
 
     // double iteration - use the instance's space first, since it's probably smaller
-    for(ZIndexSpaceIterator<N,T> it(inst_space); it.valid; it.step()) {
-      for(ZIndexSpaceIterator<N,T> it2(parent_space, it.rect); it2.valid; it2.step()) {
+    for(IndexSpaceIterator<N,T> it(inst_space); it.valid; it.step()) {
+      for(IndexSpaceIterator<N,T> it2(parent_space, it.rect); it2.valid; it2.step()) {
 	// now iterate over each point
-	for(ZPointInRectIterator<N,T> pir(it2.rect); pir.valid; pir.step()) {
+	for(PointInRectIterator<N,T> pir(it2.rect); pir.valid; pir.step()) {
 	  // fetch the pointer and test it against every possible target (ugh)
-	  ZPoint<N2,T2> ptr = a_data.read(pir.p);
+	  Point<N2,T2> ptr = a_data.read(pir.p);
 
 	  for(size_t i = 0; i < targets.size(); i++)
 	    if(targets[i].contains(ptr)) {
@@ -147,15 +147,15 @@ namespace Realm {
   void PreimageMicroOp<N,T,N2,T2>::populate_bitmasks_ranges(std::map<int, BM *>& bitmasks)
   {
     // for now, one access for the whole instance
-    AffineAccessor<ZRect<N2,T2>,N,T> a_data(inst, field_offset);
+    AffineAccessor<Rect<N2,T2>,N,T> a_data(inst, field_offset);
 
     // double iteration - use the instance's space first, since it's probably smaller
-    for(ZIndexSpaceIterator<N,T> it(inst_space); it.valid; it.step()) {
-      for(ZIndexSpaceIterator<N,T> it2(parent_space, it.rect); it2.valid; it2.step()) {
+    for(IndexSpaceIterator<N,T> it(inst_space); it.valid; it.step()) {
+      for(IndexSpaceIterator<N,T> it2(parent_space, it.rect); it2.valid; it2.step()) {
 	// now iterate over each point
-	for(ZPointInRectIterator<N,T> pir(it2.rect); pir.valid; pir.step()) {
+	for(PointInRectIterator<N,T> pir(it2.rect); pir.valid; pir.step()) {
 	  // fetch the pointer and test it against every possible target (ugh)
-	  ZRect<N2,T2> rng = a_data.read(pir.p);
+	  Rect<N2,T2> rng = a_data.read(pir.p);
 
 	  for(size_t i = 0; i < targets.size(); i++)
 	    if(targets[i].contains_any(rng)) {
@@ -283,8 +283,8 @@ namespace Realm {
   // class PreimageOperation<N,T,N2,T2>
 
   template <int N, typename T, int N2, typename T2>
-  PreimageOperation<N,T,N2,T2>::PreimageOperation(const ZIndexSpace<N,T>& _parent,
-						  const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,ZPoint<N2,T2> > >& _field_data,
+  PreimageOperation<N,T,N2,T2>::PreimageOperation(const IndexSpace<N,T>& _parent,
+						  const std::vector<FieldDataDescriptor<IndexSpace<N,T>,Point<N2,T2> > >& _field_data,
 						  const ProfilingRequestSet &reqs,
 						  Event _finish_event)
     : PartitioningOperation(reqs, _finish_event)
@@ -295,8 +295,8 @@ namespace Realm {
   {}
 
   template <int N, typename T, int N2, typename T2>
-  PreimageOperation<N,T,N2,T2>::PreimageOperation(const ZIndexSpace<N,T>& _parent,
-						  const std::vector<FieldDataDescriptor<ZIndexSpace<N,T>,ZRect<N2,T2> > >& _field_data,
+  PreimageOperation<N,T,N2,T2>::PreimageOperation(const IndexSpace<N,T>& _parent,
+						  const std::vector<FieldDataDescriptor<IndexSpace<N,T>,Rect<N2,T2> > >& _field_data,
 						  const ProfilingRequestSet &reqs,
 						  Event _finish_event)
     : PartitioningOperation(reqs, _finish_event)
@@ -311,14 +311,14 @@ namespace Realm {
   {}
 
   template <int N, typename T, int N2, typename T2>
-  ZIndexSpace<N,T> PreimageOperation<N,T,N2,T2>::add_target(const ZIndexSpace<N2,T2>& target)
+  IndexSpace<N,T> PreimageOperation<N,T,N2,T2>::add_target(const IndexSpace<N2,T2>& target)
   {
     // try to filter out obviously empty targets
     if(parent.empty() || target.empty())
-      return ZIndexSpace<N,T>::make_empty();
+      return IndexSpace<N,T>::make_empty();
 
     // otherwise it'll be something smaller than the current parent
-    ZIndexSpace<N,T> preimage;
+    IndexSpace<N,T> preimage;
     preimage.bounds = parent.bounds;
 
     // if the target has a sparsity map, use the same node - otherwise
@@ -355,7 +355,7 @@ namespace Realm {
       add_async_work_item(dummy_overlap_uop);
 
       // add each target, but also generate a bounding box for all of them
-      ZRect<N2,T2> target_bbox;
+      Rect<N2,T2> target_bbox;
       for(size_t i = 0; i < targets.size(); i++) {
 	uop->add_input_space(targets[i]);
 	if(i == 0)
@@ -419,7 +419,7 @@ namespace Realm {
   }
 
   template <int N, typename T, int N2, typename T2>
-  void PreimageOperation<N,T,N2,T2>::provide_sparse_image(int index, const ZRect<N2,T2> *rects, size_t count)
+  void PreimageOperation<N,T,N2,T2>::provide_sparse_image(int index, const Rect<N2,T2> *rects, size_t count)
   {
     // atomically check the overlap tester's readiness and queue us if not
     bool tester_ready = false;
@@ -428,7 +428,7 @@ namespace Realm {
       if(overlap_tester != 0) {
 	tester_ready = true;
       } else {
-	std::vector<ZRect<N2,T2> >& r = pending_sparse_images[index];
+	std::vector<Rect<N2,T2> >& r = pending_sparse_images[index];
 	r.insert(r.end(), rects, rects + count);
       }
     }
@@ -487,7 +487,7 @@ namespace Realm {
   void PreimageOperation<N,T,N2,T2>::set_overlap_tester(void *tester)
   {
     // atomically set the overlap tester and see if there are any pending entries
-    std::map<int, std::vector<ZRect<N2,T2> > > pending;
+    std::map<int, std::vector<Rect<N2,T2> > > pending;
     {
       AutoHSLLock al(mutex);
       assert(overlap_tester == 0);
@@ -497,7 +497,7 @@ namespace Realm {
 
     // now issue work for any sparse images we got before the tester was ready
     if(!pending.empty()) {
-      for(typename std::map<int, std::vector<ZRect<N2,T2> > >::const_iterator it = pending.begin();
+      for(typename std::map<int, std::vector<Rect<N2,T2> > >::const_iterator it = pending.begin();
 	  it != pending.end();
 	  it++) {
 	// see which instance this is an image from
@@ -569,8 +569,8 @@ namespace Realm {
   {
     PreimageOperation<NT::N,T,N2T::N,T2> *op = reinterpret_cast<PreimageOperation<NT::N,T,N2T::N,T2> *>(args->approx_output_op);
     op->provide_sparse_image(args->approx_output_index,
-			     static_cast<const ZRect<N2T::N,T2> *>(data),
-			     datalen / sizeof(ZRect<N2T::N,T2>));
+			     static_cast<const Rect<N2T::N,T2> *>(data),
+			     datalen / sizeof(Rect<N2T::N,T2>));
   }
 
   /*static*/ void ApproxImageResponseMessage::handle_request(RequestArgs args,
@@ -586,7 +586,7 @@ namespace Realm {
   template <int N, typename T, int N2, typename T2>
   /*static*/ void ApproxImageResponseMessage::send_request(gasnet_node_t target, 
 							   intptr_t output_op, int output_index,
-							   const ZRect<N2,T2> *rects, size_t count)
+							   const Rect<N2,T2> *rects, size_t count)
   {
     RequestArgs args;
 
@@ -594,7 +594,7 @@ namespace Realm {
     args.approx_output_op = output_op;
     args.approx_output_index = output_index;
 
-    Message::request(target, args, rects, count * sizeof(ZRect<N2,T2>), PAYLOAD_COPY);
+    Message::request(target, args, rects, count * sizeof(Rect<N2,T2>), PAYLOAD_COPY);
   }
 #endif
 
@@ -603,14 +603,14 @@ namespace Realm {
   template class PreimageMicroOp<N1,T1,N2,T2>; \
   template class PreimageOperation<N1,T1,N2,T2>; \
   template PreimageMicroOp<N1,T1,N2,T2>::PreimageMicroOp(gasnet_node_t, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \
-  template Event ZIndexSpace<N1,T1>::create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<ZIndexSpace<N1,T1>,ZPoint<N2,T2> > >&, \
-								  const std::vector<ZIndexSpace<N2,T2> >&, \
-								  std::vector<ZIndexSpace<N1,T1> >&, \
+  template Event IndexSpace<N1,T1>::create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<IndexSpace<N1,T1>,Point<N2,T2> > >&, \
+								  const std::vector<IndexSpace<N2,T2> >&, \
+								  std::vector<IndexSpace<N1,T1> >&, \
 								  const ProfilingRequestSet &, \
 								  Event) const; \
-  template Event ZIndexSpace<N1,T1>::create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<ZIndexSpace<N1,T1>,ZRect<N2,T2> > >&, \
-								  const std::vector<ZIndexSpace<N2,T2> >&, \
-								  std::vector<ZIndexSpace<N1,T1> >&, \
+  template Event IndexSpace<N1,T1>::create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<IndexSpace<N1,T1>,Rect<N2,T2> > >&, \
+								  const std::vector<IndexSpace<N2,T2> >&, \
+								  std::vector<IndexSpace<N1,T1> >&, \
 								  const ProfilingRequestSet &, \
 								  Event) const;
 

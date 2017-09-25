@@ -3977,13 +3977,14 @@ function std.start(main_task, extra_setup_thunk)
 
   local args = std.args
   local argc = #args
-  local argv = terralib.newsymbol((&int8)[argc], "argv")
+  local argv = terralib.newsymbol((&int8)[argc + 1], "argv")
   local argv_setup = terralib.newlist({quote var [argv] end})
   for i, arg in ipairs(args) do
     argv_setup:insert(quote
       [argv][ [i - 1] ] = [arg]
     end)
   end
+  argv_setup:insert(quote [argv][ [argc] ] = [&int8](0) end)
 
   local terra wrapper()
     [argv_setup];

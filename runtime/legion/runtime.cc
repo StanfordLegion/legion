@@ -9180,8 +9180,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM>
     size_t CyclicShardingFunctor::linearize_point(
-                                  const Realm::ZIndexSpace<DIM,coord_t> &is,
-                                  const Realm::ZPoint<DIM,coord_t> &point) const
+                                   const Realm::IndexSpace<DIM,coord_t> &is,
+                                   const Realm::Point<DIM,coord_t> &point) const
     //--------------------------------------------------------------------------
     {
       Realm::AffineLinearizedIndexSpace<DIM,coord_t> linearizer(is);
@@ -20452,7 +20452,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void Runtime::check_bounds(void *impl, 
-                                          const Realm::DomainPoint &dp)
+                                          const DomainPoint &dp)
     //--------------------------------------------------------------------------
     {
       PhysicalRegionImpl *region = static_cast<PhysicalRegionImpl*>(impl);

@@ -1501,8 +1501,8 @@ namespace Legion {
       CyclicShardingFunctor& operator=(const CyclicShardingFunctor &rhs);
     public:
       template<int DIM>
-      size_t linearize_point(const Realm::ZIndexSpace<DIM,coord_t> &is,
-                              const Realm::ZPoint<DIM,coord_t> &point) const;
+      size_t linearize_point(const Realm::IndexSpace<DIM,coord_t> &is,
+                              const Realm::Point<DIM,coord_t> &point) const;
     public:
       virtual ShardID shard(const DomainPoint &point,
                             const Domain &full_space,
@@ -3221,7 +3221,7 @@ namespace Legion {
 #ifdef BOUNDS_CHECKS
     public:
       static void check_bounds(void *impl, ptr_t ptr);
-      static void check_bounds(void *impl, const Realm::DomainPoint &dp);
+      static void check_bounds(void *impl, const DomainPoint &dp);
 #endif
     private:
       static RtEvent register_runtime_tasks(RealmRuntime &realm);

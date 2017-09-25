@@ -12,10 +12,6 @@
 #include <unistd.h>
 
 using namespace Realm;
-using namespace LegionRuntime::Accessor;
-
-// for Point<DIM> and Rect<DIM>
-using namespace LegionRuntime::Arrays;
 
 Logger log_app("app");
 
@@ -195,7 +191,7 @@ void top_level_task(const void *args, size_t arglen,
   log_app.print() << "Realm memory speed test";
 
   size_t elements = buffer_size / sizeof(void *);
-  ZIndexSpace<1> d = ZRect<1>(0, elements - 1);
+  IndexSpace<1> d = Rect<1>(0, elements - 1);
 
   // iterate over memories, create and instance, and then let each processor beat on it
   Machine machine = Machine::get_machine();
@@ -226,7 +222,7 @@ void top_level_task(const void *args, size_t arglen,
 
     // clear the instance first - this should also take care of faulting it in
     void *fill_value = 0;
-    std::vector<Domain::CopySrcDstField> sdf(1);
+    std::vector<CopySrcDstField> sdf(1);
     sdf[0].inst = inst;
     sdf[0].field_id = 0;
     sdf[0].size = sizeof(void *);

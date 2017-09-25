@@ -28,12 +28,10 @@
 #include <assert.h>
 #include <pthread.h>
 #include <string.h>
-#include "lowlevel.h"
 #include "lowlevel_dma.h"
 
 #include <realm/id.h>
 #include <realm/runtime_impl.h>
-#include <realm/idx_impl.h>
 #include <realm/mem_impl.h>
 #include <realm/inst_impl.h>
 
@@ -45,40 +43,12 @@
 #include "realm/hdf5/hdf5_internal.h"
 #endif
 
-using namespace LegionRuntime::Arrays;
+namespace Realm {
 
-namespace LegionRuntime{
-  namespace LowLevel{
     class XferDes;
     class Channel;
 
-    typedef Realm::ID ID;
-    typedef Realm::DmaRequest DmaRequest;
-    typedef Realm::OffsetsAndSize OffsetsAndSize;
-    typedef Realm::XferDesID XferDesID;
-    typedef Realm::TransferDomain TransferDomain;
-    typedef Realm::TransferIterator TransferIterator;
-
-    typedef Realm::MemoryImpl MemoryImpl;
-    typedef Realm::RegionInstanceImpl RegionInstanceImpl;
-    
-#ifdef USE_CUDA
-    typedef Realm::Cuda::GPU GPU;
-    typedef Realm::Cuda::GPUFBMemory GPUFBMemory;
-#endif
-
-#ifdef USE_HDF
-    typedef Realm::HDF5::HDF5Memory HDF5Memory;
-    typedef Realm::HDF5::HDF5Memory::HDFMetadata HDFMetadata;
-#endif
-    typedef Realm::FileMemory FileMemory;
-
-    inline Realm::RuntimeImpl *get_runtime(void)
-    {
-      return Realm::get_runtime();
-    }
-
-    extern Logger::Category log_new_dma;
+    extern Logger log_new_dma;
 
     class Buffer {
     public:
@@ -89,25 +59,25 @@ namespace LegionRuntime{
       };
 
       enum {
-        MAX_SERIALIZATION_LEN = 5 * sizeof(int64_t) / sizeof(int) + RegionInstanceImpl::MAX_LINEARIZATION_LEN
+        MAX_SERIALIZATION_LEN = 5 * sizeof(int64_t) / sizeof(int)
       };
 
       Buffer(void)
             : alloc_offset(0), is_ib(false), block_size(0), elmt_size(0),
-              buf_size(0), linearization(), memory(Memory::NO_MEMORY) {}
+              buf_size(0), memory(Memory::NO_MEMORY) {}
 
       Buffer(RegionInstanceImpl::Metadata* metadata, Memory _memory)
             : alloc_offset(metadata->alloc_offset),
               is_ib(false), block_size(metadata->block_size), elmt_size(metadata->elmt_size),
-              buf_size(metadata->size), linearization(metadata->linearization_OLD),
+              buf_size(metadata->size),
               memory(_memory){}
 
       Buffer(off_t _alloc_offset, bool _is_ib,
              int _block_size, int _elmt_size, size_t _buf_size,
-             /*DomainLinearization _linearization,*/ Memory _memory)
+             Memory _memory)
             : alloc_offset(_alloc_offset),
               is_ib(_is_ib), block_size(_block_size), elmt_size(_elmt_size),
-              buf_size(_buf_size), linearization(/*_linearization*/),
+              buf_size(_buf_size),
               memory(_memory){}
 
       Buffer& operator=(const Buffer& other)
@@ -117,7 +87,6 @@ namespace LegionRuntime{
         block_size = other.block_size;
         elmt_size = other.elmt_size;
         buf_size = other.buf_size;
-        linearization = other.linearization;
         memory = other.memory;
         return *this;
       }
@@ -136,7 +105,6 @@ namespace LegionRuntime{
         *data64 = block_size; data64++;
         *data64 = elmt_size; data64++;
         *data64 = buf_size; data64++;
-        //linearization.serialize((int*)data64);
       }
 
       void deserialize(const int* data)
@@ -147,7 +115,6 @@ namespace LegionRuntime{
         block_size = *cur; cur++;
         elmt_size = *cur; cur++;
         buf_size = *cur; cur++;
-        //linearization.deserialize((int*)cur);
       }
 
       enum DimensionKind {
@@ -182,8 +149,6 @@ namespace LegionRuntime{
       // A number smaller than bytes_total means we need
       // to reuse the buffer.
       size_t buf_size;
-
-      DomainLinearization linearization;
 
       // The memory instance on which this buffer relies
       Memory memory;
@@ -264,7 +229,7 @@ namespace LegionRuntime{
     };
 
 #ifdef USE_CUDA
-    class GPUCompletionEvent : public Realm::Cuda::GPUCompletionNotification {
+    class GPUCompletionEvent : public Cuda::GPUCompletionNotification {
     public:
       GPUCompletionEvent(void) {triggered = false;}
       void request_completed(void) {triggered = true;}
@@ -279,7 +244,7 @@ namespace LegionRuntime{
       const void *src_base;
       void *dst_base;
       off_t src_gpu_off, dst_gpu_off;
-      GPU* dst_gpu;
+      Cuda::GPU* dst_gpu;
       GPUCompletionEvent event;
     };
 #endif
@@ -309,193 +274,6 @@ namespace LegionRuntime{
     	// ignored for now
       }
       virtual void print(std::ostream& os) const { os << "XferDesFence"; }
-    };
-
-    class MaskEnumerator {
-    public:
-      MaskEnumerator(IndexSpace _is, Mapping<1, 1> *src_m,
-                     Mapping<1, 1> *dst_m, XferOrder::Type order,
-                     bool is_src_ib, bool is_dst_ib)
-        : is(_is), src_mapping(src_m), dst_mapping(dst_m), rstart(0),
-          rlen(0), rleft(0), cur(0), src_ib(is_src_ib), dst_ib(is_dst_ib)
-      {
-        e = get_runtime()->get_index_space_impl(is)->valid_mask->enumerate_enabled();
-        e->peek_next(rstart, rlen);
-        src_idx_offset = is_src_ib ? src_mapping->image(rstart)[0] : 0;
-        dst_idx_offset = is_dst_ib ? dst_mapping->image(rstart)[0] : 0;
-      };
-
-      ~MaskEnumerator() {
-        delete e;
-      }
-
-      coord_t continuous_steps(coord_t &src_idx, coord_t &dst_idx) {
-        if (rleft == 0) {
-          e->get_next(rstart, rlen);
-          rleft = rlen;
-        }
-        src_idx = src_ib ? cur : src_mapping->image(rstart + (coord_t) rlen - (coord_t) rleft)[0] - src_idx_offset;
-        dst_idx = dst_ib ? cur : dst_mapping->image(rstart + (coord_t) rlen - (coord_t) rleft)[0] - dst_idx_offset;
-        return rleft;
-      }
-
-      void reset() {
-        delete e;
-        e = get_runtime()->get_index_space_impl(is)->valid_mask->enumerate_enabled();
-        rleft = 0; cur = 0;
-      };
-
-      bool any_left() {
-        coord_t rstart2;
-        size_t rlen2;
-        return (e->peek_next(rstart2, rlen2) || (rleft > 0));
-      };
-
-      void move(size_t steps) {
-        assert(steps <= rleft);
-        rleft -= steps;
-        cur += steps;
-      };
-    private:
-      IndexSpace is;
-      ElementMask::Enumerator* e;
-      Mapping<1, 1> *src_mapping, *dst_mapping;
-      coord_t rstart, src_idx_offset, dst_idx_offset;
-      size_t rlen, rleft, cur;
-      bool src_ib, dst_ib;
-    };
-
-    class LayoutIterator {
-    public:
-      LayoutIterator(const Domain& dm,
-                     const DomainLinearization& src_dl,
-                     const DomainLinearization& dst_dl,
-                     XferOrder::Type order)
-      : cur_idx(0)
-      {
-        //src_dl.add_local_reference();
-        //dst_dl.add_local_reference();
-        rect_size = dm.get_volume();
-        assert(dm.get_dim() == src_dl.get_dim());
-        assert(dm.get_dim() == dst_dl.get_dim());
-        Point<1> in1[3], in2[3];
-        switch (dm.get_dim()) {
-          case 1:
-          {
-            Rect<1> rect = dm.get_rect<1>(), subrect;
-            Mapping<1, 1>* src_m = src_dl.get_mapping<1>();
-            Mapping<1, 1>* dst_m = dst_dl.get_mapping<1>();
-            src_m->image_linear_subrect(rect, subrect, in1);
-            dst_m->image_linear_subrect(rect, subrect, in2);
-            src_lo = src_m->image(rect.lo);
-            dst_lo = dst_m->image(rect.lo);
-            break;
-          }
-          case 2:
-          {
-            Rect<2> rect = dm.get_rect<2>(), subrect;
-            Mapping<2, 1>* src_m = src_dl.get_mapping<2>();
-            Mapping<2, 1>* dst_m = dst_dl.get_mapping<2>();
-            src_m->image_linear_subrect(rect, subrect, in1);
-            dst_m->image_linear_subrect(rect, subrect, in2);
-            src_lo = src_m->image(rect.lo);
-            dst_lo = dst_m->image(rect.lo);
-            break;
-          }
-          case 3:
-          {
-            Rect<3> rect = dm.get_rect<3>(), subrect;
-            Mapping<3, 1>* src_m = src_dl.get_mapping<3>();
-            Mapping<3, 1>* dst_m = dst_dl.get_mapping<3>();
-            src_m->image_linear_subrect(rect, subrect, in1);
-            dst_m->image_linear_subrect(rect, subrect, in2);
-            src_lo = src_m->image(rect.lo);
-            dst_lo = dst_m->image(rect.lo);
-            break;
-          }
-          default:
-            assert(0);
-        }
-
-        // Currently we only support FortranArrayLinearization
-        assert(in1[0][0] == 1);
-        assert(in2[0][0] == 1);
-        dim = 0;
-        coord_t exp1 = 0, exp2 = 0;
-        for (int i = 0; i < dm.get_dim(); i++) {
-          coord_t e = dm.rect_data[i + dm.get_dim()] - dm.rect_data[i] + 1;
-	  //printf("%d %lld = %lld - %lld\n", i, e, dm.rect_data[i + dm.get_dim()], dm.rect_data[i]);
-          if (i && (exp1 == in1[i][0]) && (exp2 == in2[i][0]) ) {
-            //collapse and grow extent
-            extents.x[dim - 1] *= e;
-            exp1 *= e;
-            exp2 *= e;
-          } else {
-            extents.x[dim] = e;
-            exp1 = in1[i][0] * e;
-            exp2 = in2[i][0] * e;
-            src_strides[dim] = in1[i];
-            dst_strides[dim] = in2[i];
-            dim++;
-          }
-        }
-        can_perform_2d = false;
-        if (((order == XferOrder::SRC_FIFO || order == XferOrder::ANY_ORDER) && src_strides[1][0] == extents[0])
-          ||((order == XferOrder::DST_FIFO || order == XferOrder::ANY_ORDER) && dst_strides[1][0] == extents[0]))
-          can_perform_2d = (dim > 1);
-        //printf("extents: %lld %lld %lld\n", extents[0], extents[1], extents[2]);
-        //printf("src_str: %lld %lld %lld\n", src_strides[0][0], src_strides[1][0], src_strides[2][0]);
-        //printf("dst_str: %lld %lld %lld\n", dst_strides[0][0], dst_strides[1][0], dst_strides[2][0]);
-      }
-      ~LayoutIterator() {
-        //src_dl.remove_reference();
-        //dst_dl.remove_reference();
-      }
-      void reset() {cur_idx = 0;}
-      bool any_left() {return cur_idx < rect_size;}
-      coord_t continuous_steps(coord_t &src_idx, coord_t &dst_idx,
-                               coord_t &src_str, coord_t &dst_str,
-                               size_t &nitems, size_t &nlines)
-      {
-        Point<3> p;
-        coord_t idx = cur_idx;
-        src_idx = src_lo;
-        dst_idx = dst_lo;
-        for (int i = 0; i < dim; i++) {
-          p.x[i] = idx % extents[i];
-          src_idx += src_strides[i][0] * p.x[i];
-          dst_idx += dst_strides[i][0] * p.x[i];
-          idx = idx / extents[i];
-        }
-        if (dim == 1) {
-          nitems = extents[0] - p[0];
-          nlines = 1;
-          src_str = extents[0];
-          dst_str = extents[0];
-        } else {
-          if (p[0] == 0 && can_perform_2d) {
-            // can perform 2D
-            nitems = extents[0];
-            nlines = extents[1] - p[1];
-            src_str = src_strides[1][0];
-            dst_str = dst_strides[1][0];
-          } else {
-            // 1D case
-            nitems = extents[0] - p[0];
-            nlines = 1;
-            src_str = src_strides[1][0];
-            dst_str = dst_strides[1][0];
-          }
-        }
-        return nitems * nlines;
-      }
-      void move(coord_t steps) {cur_idx += steps; assert(cur_idx <= rect_size);};
-    private:
-      Point<1> src_strides[3], dst_strides[3], src_lo, dst_lo;
-      Point<3> extents;
-      int dim;
-      coord_t cur_idx, rect_size;
-      bool can_perform_2d;
     };
 
     class XferDes {
@@ -563,8 +341,6 @@ namespace LegionRuntime{
       pthread_mutex_t xd_lock, update_read_lock, update_write_lock;
       // default iterators provided to generate requests
       //Layouts::GenericLayoutIterator<DIM>* li;
-      //LayoutIterator* li;
-      //MaskEnumerator* me;
       unsigned offset_idx;
     public:
       XferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
@@ -747,7 +523,7 @@ namespace LegionRuntime{
       //GPURequest* gpu_reqs;
       //char *src_buf_base;
       //char *dst_buf_base;
-      GPU *dst_gpu, *src_gpu;
+      Cuda::GPU *dst_gpu, *src_gpu;
     };
 #endif
 
@@ -885,13 +661,13 @@ namespace LegionRuntime{
 #ifdef USE_CUDA
     class GPUChannel : public Channel {
     public:
-      GPUChannel(GPU* _src_gpu, long max_nr, XferDes::XferKind _kind);
+      GPUChannel(Cuda::GPU* _src_gpu, long max_nr, XferDes::XferKind _kind);
       ~GPUChannel();
       long submit(Request** requests, long nr);
       void pull();
       long available();
     private:
-      GPU* src_gpu;
+      Cuda::GPU* src_gpu;
       long capacity;
       std::deque<Request*> pending_copies;
     };
@@ -954,19 +730,19 @@ namespace LegionRuntime{
       FileChannel* create_file_read_channel(long max_nr);
       FileChannel* create_file_write_channel(long max_nr);
 #ifdef USE_CUDA
-      GPUChannel* create_gpu_to_fb_channel(long max_nr, GPU* src_gpu) {
+      GPUChannel* create_gpu_to_fb_channel(long max_nr, Cuda::GPU* src_gpu) {
         gpu_to_fb_channels[src_gpu] = new GPUChannel(src_gpu, max_nr, XferDes::XFER_GPU_TO_FB);
         return gpu_to_fb_channels[src_gpu];
       }
-      GPUChannel* create_gpu_from_fb_channel(long max_nr, GPU* src_gpu) {
+      GPUChannel* create_gpu_from_fb_channel(long max_nr, Cuda::GPU* src_gpu) {
         gpu_from_fb_channels[src_gpu] = new GPUChannel(src_gpu, max_nr, XferDes::XFER_GPU_FROM_FB);
         return gpu_from_fb_channels[src_gpu];
       }
-      GPUChannel* create_gpu_in_fb_channel(long max_nr, GPU* src_gpu) {
+      GPUChannel* create_gpu_in_fb_channel(long max_nr, Cuda::GPU* src_gpu) {
         gpu_in_fb_channels[src_gpu] = new GPUChannel(src_gpu, max_nr, XferDes::XFER_GPU_IN_FB);
         return gpu_in_fb_channels[src_gpu];
       }
-      GPUChannel* create_gpu_peer_fb_channel(long max_nr, GPU* src_gpu) {
+      GPUChannel* create_gpu_peer_fb_channel(long max_nr, Cuda::GPU* src_gpu) {
         gpu_peer_fb_channels[src_gpu] = new GPUChannel(src_gpu, max_nr, XferDes::XFER_GPU_PEER_FB);
         return gpu_peer_fb_channels[src_gpu];
       }
@@ -1008,26 +784,26 @@ namespace LegionRuntime{
         return file_write_channel;
       }
 #ifdef USE_CUDA
-      GPUChannel* get_gpu_to_fb_channel(GPU* gpu) {
-        std::map<GPU*, GPUChannel*>::iterator it;
+      GPUChannel* get_gpu_to_fb_channel(Cuda::GPU* gpu) {
+        std::map<Cuda::GPU*, GPUChannel*>::iterator it;
         it = gpu_to_fb_channels.find(gpu);
         assert(it != gpu_to_fb_channels.end());
         return (it->second);
       }
-      GPUChannel* get_gpu_from_fb_channel(GPU* gpu) {
-        std::map<GPU*, GPUChannel*>::iterator it;
+      GPUChannel* get_gpu_from_fb_channel(Cuda::GPU* gpu) {
+        std::map<Cuda::GPU*, GPUChannel*>::iterator it;
         it = gpu_from_fb_channels.find(gpu);
         assert(it != gpu_from_fb_channels.end());
         return (it->second);
       }
-      GPUChannel* get_gpu_in_fb_channel(GPU* gpu) {
-        std::map<GPU*, GPUChannel*>::iterator it;
+      GPUChannel* get_gpu_in_fb_channel(Cuda::GPU* gpu) {
+        std::map<Cuda::GPU*, GPUChannel*>::iterator it;
         it = gpu_in_fb_channels.find(gpu);
         assert(it != gpu_in_fb_channels.end());
         return (it->second);
       }
-      GPUChannel* get_gpu_peer_fb_channel(GPU* gpu) {
-        std::map<GPU*, GPUChannel*>::iterator it;
+      GPUChannel* get_gpu_peer_fb_channel(Cuda::GPU* gpu) {
+        std::map<Cuda::GPU*, GPUChannel*>::iterator it;
         it = gpu_peer_fb_channels.find(gpu);
         assert(it != gpu_peer_fb_channels.end());
         return (it->second);
@@ -1048,7 +824,7 @@ namespace LegionRuntime{
       DiskChannel *disk_read_channel, *disk_write_channel;
       FileChannel *file_read_channel, *file_write_channel;
 #ifdef USE_CUDA
-      std::map<GPU*, GPUChannel*> gpu_to_fb_channels, gpu_in_fb_channels, gpu_from_fb_channels, gpu_peer_fb_channels;
+      std::map<Cuda::GPU*, GPUChannel*> gpu_to_fb_channels, gpu_in_fb_channels, gpu_from_fb_channels, gpu_peer_fb_channels;
 #endif
 #ifdef USE_HDF
       HDFChannel *hdf_read_channel, *hdf_write_channel;
@@ -1349,18 +1125,18 @@ namespace LegionRuntime{
         NODE_BITS = 16,
         INDEX_BITS = 32
       };
-      XferDesQueue(int num_dma_threads, bool pinned, Realm::CoreReservationSet& crs)
-      //: core_rsrv("DMA request queue", crs, Realm::CoreReservationParameters())
+      XferDesQueue(int num_dma_threads, bool pinned, CoreReservationSet& crs)
+      //: core_rsrv("DMA request queue", crs, CoreReservationParameters())
       {
         if (pinned) {
-          Realm::CoreReservationParameters params;
+          CoreReservationParameters params;
           params.set_num_cores(num_dma_threads);
           params.set_alu_usage(params.CORE_USAGE_EXCLUSIVE);
           params.set_fpu_usage(params.CORE_USAGE_EXCLUSIVE);
           params.set_ldst_usage(params.CORE_USAGE_SHARED);
-          core_rsrv = new Realm::CoreReservation("DMA threads", crs, params);
+          core_rsrv = new CoreReservation("DMA threads", crs, params);
         } else {
-          core_rsrv = new Realm::CoreReservation("DMA threads", crs, Realm::CoreReservationParameters());
+          core_rsrv = new CoreReservation("DMA threads", crs, CoreReservationParameters());
         }
         pthread_mutex_init(&queues_lock, NULL);
         pthread_rwlock_init(&guid_lock, NULL);
@@ -1555,19 +1331,19 @@ namespace LegionRuntime{
       pthread_mutex_t queues_lock;
       pthread_rwlock_t guid_lock;
       XferDesID next_to_assign_idx;
-      Realm::CoreReservation* core_rsrv;
+      CoreReservation* core_rsrv;
       int num_threads, num_memcpy_threads;
       DMAThread** dma_threads;
       MemcpyThread** memcpy_threads;
-      std::vector<Realm::Thread*> worker_threads;
+      std::vector<Thread*> worker_threads;
     };
 
     XferDesQueue* get_xdq_singleton();
     ChannelManager* get_channel_manager();
 #ifdef USE_CUDA
-    void register_gpu_in_dma_systems(GPU* gpu);
+    void register_gpu_in_dma_systems(Cuda::GPU* gpu);
 #endif
-    void start_channel_manager(int count, bool pinned, int max_nr, Realm::CoreReservationSet& crs);
+    void start_channel_manager(int count, bool pinned, int max_nr, CoreReservationSet& crs);
     void stop_channel_manager();
 
     void create_xfer_des(DmaRequest* _dma_request,
@@ -1583,7 +1359,7 @@ namespace LegionRuntime{
                          XferDesFence* _complete_fence, RegionInstance inst = RegionInstance::NO_INST);
 
     void destroy_xfer_des(XferDesID _guid);
-  }  // namespace LowLevel
-} // namespace LegionRuntime
+}; // namespace Realm
+
 #endif
 

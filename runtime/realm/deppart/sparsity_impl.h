@@ -48,8 +48,8 @@ namespace Realm {
     void set_contributor_count(int count);
 
     void contribute_nothing(void);
-    void contribute_dense_rect_list(const std::vector<ZRect<N,T> >& rects);
-    void contribute_raw_rects(const ZRect<N,T>* rects, size_t count, bool last);
+    void contribute_dense_rect_list(const std::vector<Rect<N,T> >& rects);
+    void contribute_raw_rects(const Rect<N,T>* rects, size_t count, bool last);
 
     // adds a microop as a waiter for valid sparsity map data - returns true
     //  if the uop is added to the list (i.e. will be getting a callback at some point),
@@ -189,7 +189,7 @@ namespace Realm {
     template <int N, typename T>
     static void send_request(gasnet_node_t target, SparsityMap<N,T> sparsity,
 			     int sequence_id, int sequence_count,
-			     const ZRect<N,T> *rects, size_t count);
+			     const Rect<N,T> *rects, size_t count);
   };
 
 }; // namespace Realm

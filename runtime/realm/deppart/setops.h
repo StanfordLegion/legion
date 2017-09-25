@@ -32,8 +32,8 @@ namespace Realm {
 
     static DynamicTemplates::TagType type_tag(void);
 
-    UnionMicroOp(const std::vector<ZIndexSpace<N,T> >& _inputs);
-    UnionMicroOp(ZIndexSpace<N,T> _lhs, ZIndexSpace<N,T> _rhs);
+    UnionMicroOp(const std::vector<IndexSpace<N,T> >& _inputs);
+    UnionMicroOp(IndexSpace<N,T> _lhs, IndexSpace<N,T> _rhs);
     virtual ~UnionMicroOp(void);
 
     void add_sparsity_output(SparsityMap<N,T> _sparsity);
@@ -54,7 +54,7 @@ namespace Realm {
     template <typename BM>
     void populate_bitmask(BM& bitmask);
 
-    std::vector<ZIndexSpace<N,T> > inputs;
+    std::vector<IndexSpace<N,T> > inputs;
     SparsityMap<N,T> sparsity_output;
   };
 
@@ -68,8 +68,8 @@ namespace Realm {
 
     static DynamicTemplates::TagType type_tag(void);
 
-    IntersectionMicroOp(const std::vector<ZIndexSpace<N,T> >& _inputs);
-    IntersectionMicroOp(ZIndexSpace<N,T> _lhs, ZIndexSpace<N,T> _rhs);
+    IntersectionMicroOp(const std::vector<IndexSpace<N,T> >& _inputs);
+    IntersectionMicroOp(IndexSpace<N,T> _lhs, IndexSpace<N,T> _rhs);
     virtual ~IntersectionMicroOp(void);
 
     void add_sparsity_output(SparsityMap<N,T> _sparsity);
@@ -90,7 +90,7 @@ namespace Realm {
     template <typename BM>
     void populate_bitmask(BM& bitmask);
 
-    std::vector<ZIndexSpace<N,T> > inputs;
+    std::vector<IndexSpace<N,T> > inputs;
     SparsityMap<N,T> sparsity_output;
   };
 
@@ -104,7 +104,7 @@ namespace Realm {
 
     static DynamicTemplates::TagType type_tag(void);
 
-    DifferenceMicroOp(ZIndexSpace<N,T> _lhs, ZIndexSpace<N,T> _rhs);
+    DifferenceMicroOp(IndexSpace<N,T> _lhs, IndexSpace<N,T> _rhs);
     virtual ~DifferenceMicroOp(void);
 
     void add_sparsity_output(SparsityMap<N,T> _sparsity);
@@ -125,7 +125,7 @@ namespace Realm {
     template <typename BM>
     void populate_bitmask(BM& bitmask);
 
-    ZIndexSpace<N,T> lhs, rhs;
+    IndexSpace<N,T> lhs, rhs;
     SparsityMap<N,T> sparsity_output;
   };
 
@@ -137,15 +137,15 @@ namespace Realm {
 
     virtual ~UnionOperation(void);
 
-    ZIndexSpace<N,T> add_union(const ZIndexSpace<N,T>& lhs, const ZIndexSpace<N,T>& rhs);
-    ZIndexSpace<N,T> add_union(const std::vector<ZIndexSpace<N,T> >& ops);
+    IndexSpace<N,T> add_union(const IndexSpace<N,T>& lhs, const IndexSpace<N,T>& rhs);
+    IndexSpace<N,T> add_union(const std::vector<IndexSpace<N,T> >& ops);
 
     virtual void execute(void);
 
     virtual void print(std::ostream& os) const;
 
   protected:
-    std::vector<std::vector<ZIndexSpace<N,T> > > inputs;
+    std::vector<std::vector<IndexSpace<N,T> > > inputs;
     std::vector<SparsityMap<N,T> > outputs;
   };
 
@@ -157,15 +157,15 @@ namespace Realm {
 
     virtual ~IntersectionOperation(void);
 
-    ZIndexSpace<N,T> add_intersection(const ZIndexSpace<N,T>& lhs, const ZIndexSpace<N,T>& rhs);
-    ZIndexSpace<N,T> add_intersection(const std::vector<ZIndexSpace<N,T> >& ops);
+    IndexSpace<N,T> add_intersection(const IndexSpace<N,T>& lhs, const IndexSpace<N,T>& rhs);
+    IndexSpace<N,T> add_intersection(const std::vector<IndexSpace<N,T> >& ops);
 
     virtual void execute(void);
 
     virtual void print(std::ostream& os) const;
 
   protected:
-    std::vector<std::vector<ZIndexSpace<N,T> > > inputs;
+    std::vector<std::vector<IndexSpace<N,T> > > inputs;
     std::vector<SparsityMap<N,T> > outputs;
   };
 
@@ -177,14 +177,14 @@ namespace Realm {
 
     virtual ~DifferenceOperation(void);
 
-    ZIndexSpace<N,T> add_difference(const ZIndexSpace<N,T>& lhs, const ZIndexSpace<N,T>& rhs);
+    IndexSpace<N,T> add_difference(const IndexSpace<N,T>& lhs, const IndexSpace<N,T>& rhs);
 
     virtual void execute(void);
 
     virtual void print(std::ostream& os) const;
 
   protected:
-    std::vector<ZIndexSpace<N,T> > lhss, rhss;
+    std::vector<IndexSpace<N,T> > lhss, rhss;
     std::vector<SparsityMap<N,T> > outputs;
   };
 

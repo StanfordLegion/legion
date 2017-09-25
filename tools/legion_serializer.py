@@ -102,6 +102,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "task_id": int,
         "kind": int,
         "opkind": int,
+        "part_op": int,
         "proc_id": lambda x: int(x, 16),
         "mem_id": lambda x: int(x, 16),
         "src": lambda x: int(x, 16),
