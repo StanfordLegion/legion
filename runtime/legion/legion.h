@@ -1499,7 +1499,16 @@ namespace Legion {
     public:
       inline void add_field(FieldID fid, bool inst = true);
     public:
+      inline void add_grant(Grant g);
+      inline void add_wait_barrier(PhaseBarrier bar);
+      inline void add_arrival_barrier(PhaseBarrier bar);
+      inline void add_wait_handshake(MPILegionHandshake handshake);
+      inline void add_arrival_handshake(MPILegionHandshake handshake);
+    public:
       RegionRequirement               requirement;
+      std::vector<Grant>              grants;
+      std::vector<PhaseBarrier>       wait_barriers;
+      std::vector<PhaseBarrier>       arrive_barriers;
       MapperID                        map_id;
       MappingTagID                    tag;
     public:
@@ -2600,6 +2609,9 @@ namespace Legion {
     public:
       // Inline Launcher arguments
       RegionRequirement                 requirement;
+      std::vector<Grant>                grants;
+      std::vector<PhaseBarrier>         wait_barriers;
+      std::vector<PhaseBarrier>         arrive_barriers;
       LayoutConstraintID                layout_constraint_id; 
     public:
       // Parent task for the inline operation

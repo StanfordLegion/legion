@@ -2194,10 +2194,27 @@ namespace Legion {
                          parent_ctx->get_unique_id());
       }
       requirement = launcher.requirement;
+      termination_event = Runtime::create_ap_user_event();
+      grants = launcher.grants;
+      // Register ourselves with all the grants
+      for (unsigned idx = 0; idx < grants.size(); idx++)
+        grants[idx].impl->register_operation(termination_event);
+      wait_barriers = launcher.wait_barriers;
+#ifdef LEGION_SPY
+      for (std::vector<PhaseBarrier>::const_iterator it = 
+            launcher.arrive_barriers.begin(); it != 
+            launcher.arrive_barriers.end(); it++)
+      {
+        arrive_barriers.push_back(*it);
+        LegionSpy::log_event_dependence(it->phase_barrier,
+            arrive_barriers.back().phase_barrier);
+      }
+#else
+      arrive_barriers = launcher.arrive_barriers;
+#endif
       map_id = launcher.map_id;
       tag = launcher.tag;
       layout_constraint_id = launcher.layout_constraint_id;
-      termination_event = Runtime::create_ap_user_event();
       region = PhysicalRegion(new PhysicalRegionImpl(requirement,
                               completion_event, true/*mapped*/, ctx, 
                               map_id, tag, false/*leaf*/, 
@@ -2219,8 +2236,8 @@ namespace Legion {
       requirement = reg.impl->get_requirement();
       map_id = reg.impl->map_id;
       tag = reg.impl->tag;
-      termination_event = Runtime::create_ap_user_event();
       region = reg;
+      termination_event = Runtime::create_ap_user_event();
       region.impl->remap_region(completion_event);
       // We're only really remapping it if it already had a physical
       // instance that we can use to make a valid value
@@ -2253,6 +2270,9 @@ namespace Legion {
       deactivate_operation();
       // Remove our reference to the region
       region = PhysicalRegion();
+      grants.clear();
+      wait_barriers.clear();
+      arrive_barriers.clear();
       privilege_path.clear();
       version_info.clear();
       restrict_info.clear();
@@ -2262,7 +2282,7 @@ namespace Legion {
       acquired_instances.clear();
       atomic_locks.clear();
       map_applied_conditions.clear();
-      restrict_postconditions.clear();
+      mapped_preconditions.clear();
       profiling_requests.clear();
       // Now return this operation to the queue
       runtime->free_map_op(this);
@@ -2404,13 +2424,32 @@ namespace Legion {
 #endif 
       // We're done so apply our mapping changes
       version_info.apply_mapping(map_applied_conditions);
+      // If we have any wait preconditions from phase barriers or 
+      // grants then we can add them to the mapping preconditions
+      if (!wait_barriers.empty() || !grants.empty())
+      {
+        for (std::vector<PhaseBarrier>::const_iterator it = 
+              wait_barriers.begin(); it != wait_barriers.end(); it++)
+        {
+          ApEvent e = Runtime::get_previous_phase(*it); 
+          mapped_preconditions.insert(e);
+          if (Runtime::legion_spy_enabled)
+            LegionSpy::log_phase_barrier_wait(unique_op_id, e);
+        }
+        for (std::vector<Grant>::const_iterator it = grants.begin();
+              it != grants.end(); it++)
+        {
+          ApEvent e = it->impl->acquire_grant();
+          mapped_preconditions.insert(e);
+        }
+      }
       // Update our physical instance with the newly mapped instances
       // Have to do this before triggering the mapped event
-      if (!restrict_postconditions.empty())
+      if (!mapped_preconditions.empty())
       {
         // If we have restricted postconditions, tell the physical instance
         // that it has an event to wait for before it is unmapped
-        ApEvent wait_for = Runtime::merge_events(restrict_postconditions);
+        ApEvent wait_for = Runtime::merge_events(mapped_preconditions);
         region.impl->reset_references(mapped_instances, 
                                       termination_event, wait_for);
       }
@@ -2448,6 +2487,19 @@ namespace Legion {
                                                 map_complete_event);
           // We can also issue the release condition on our termination
           Runtime::release_reservation(it->first, termination_event);
+        }
+      }
+      // Chain all the unlock arrivals off the termination event
+      if (!arrive_barriers.empty())
+      {
+        for (std::vector<PhaseBarrier>::iterator it = 
+              arrive_barriers.begin(); it != arrive_barriers.end(); it++)
+        {
+          if (Runtime::legion_spy_enabled)
+            LegionSpy::log_phase_barrier_arrival(unique_op_id, 
+                                                 it->phase_barrier);
+          Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
+                                        termination_event);    
         }
       }
       // Remove profiling our guard and trigger the profiling event if necessary
@@ -2605,10 +2657,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapOp::record_restrict_postcondition(ApEvent postcondition)
+    void MapOp::record_restrict_postcondition(ApEvent restrict_postcondition)
     //--------------------------------------------------------------------------
     {
-      restrict_postconditions.insert(postcondition);
+      mapped_preconditions.insert(restrict_postcondition);
     }
 
     //--------------------------------------------------------------------------
