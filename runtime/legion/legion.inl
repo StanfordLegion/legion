@@ -3041,6 +3041,44 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    inline void InlineLauncher::add_grant(Grant g)
+    //--------------------------------------------------------------------------
+    {
+      grants.push_back(g);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void InlineLauncher::add_wait_barrier(PhaseBarrier bar)
+    //--------------------------------------------------------------------------
+    {
+      assert(bar.exists());
+      wait_barriers.push_back(bar);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void InlineLauncher::add_arrival_barrier(PhaseBarrier bar)
+    //--------------------------------------------------------------------------
+    {
+      assert(bar.exists());
+      arrive_barriers.push_back(bar);
+    }
+
+    //--------------------------------------------------------------------------
+    inline void InlineLauncher::add_wait_handshake(MPILegionHandshake handshake)
+    //--------------------------------------------------------------------------
+    {
+      wait_barriers.push_back(handshake.get_legion_wait_phase_barrier());
+    }
+
+    //--------------------------------------------------------------------------
+    inline void InlineLauncher::add_arrival_handshake(
+                                                   MPILegionHandshake handshake)
+    //--------------------------------------------------------------------------
+    {
+      arrive_barriers.push_back(handshake.get_legion_arrive_phase_barrier());
+    }
+
+    //--------------------------------------------------------------------------
     inline unsigned CopyLauncher::add_copy_requirements(
                      const RegionRequirement &src, const RegionRequirement &dst)
     //--------------------------------------------------------------------------

@@ -162,6 +162,7 @@ def run_test_fuzzer(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     env = dict(list(env.items()) + [('WARN_AS_ERROR', '0')])
     fuzz_dir = os.path.join(tmp_dir, 'fuzz-tester')
     cmd(['git', 'clone', 'https://github.com/StanfordLegion/fuzz-tester', fuzz_dir])
+    # TODO; Merge deppart branch into master after this makes it to stable Legion branch
     cmd(['git', 'checkout', 'deppart'], cwd=fuzz_dir)
     cmd(['python', 'main.py'], env=env, cwd=fuzz_dir)
 
@@ -209,6 +210,7 @@ def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     # SNAP
     # Contact: Mike Bauer <mbauer@nvidia.com>
     snap_dir = os.path.join(tmp_dir, 'snap')
+    # TODO: Merge deppart branch into master after this makes it to stable Legion branch
     cmd(['git', 'clone', '-b', 'deppart', 'https://github.com/StanfordLegion/Legion-SNAP.git', snap_dir])
     # This can't handle flags before application arguments, so place
     # them after.

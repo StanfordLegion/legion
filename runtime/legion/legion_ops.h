@@ -760,7 +760,7 @@ namespace Legion {
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::map<Reservation,bool> atomic_locks;
       std::set<RtEvent> map_applied_conditions;
-      std::set<ApEvent> restrict_postconditions;
+      std::set<ApEvent> mapped_preconditions;
     protected:
       MapperManager *mapper;
     protected:

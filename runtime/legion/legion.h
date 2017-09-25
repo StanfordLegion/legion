@@ -1510,7 +1510,16 @@ namespace Legion {
     public:
       inline void add_field(FieldID fid, bool inst = true);
     public:
+      inline void add_grant(Grant g);
+      inline void add_wait_barrier(PhaseBarrier bar);
+      inline void add_arrival_barrier(PhaseBarrier bar);
+      inline void add_wait_handshake(MPILegionHandshake handshake);
+      inline void add_arrival_handshake(MPILegionHandshake handshake);
+    public:
       RegionRequirement               requirement;
+      std::vector<Grant>              grants;
+      std::vector<PhaseBarrier>       wait_barriers;
+      std::vector<PhaseBarrier>       arrive_barriers;
       MapperID                        map_id;
       MappingTagID                    tag;
     public:
@@ -2219,23 +2228,25 @@ namespace Legion {
      *
      * READ_ONLY
      *  - FT read(const Point<N,T>&) const
-     *  - const FT* ptr(const Point<N,T>&) const
-     *  - const FT& operator[](const Point<N,T>&) const
+     *  - const FT* ptr(const Point<N,T>&) const (Affine Accessor only)
+     *  - const FT& operator[](const Point<N,T>&) const (Affine Accessor only)
      *
      * READ_WRITE
      *  - FT read(const Point<N,T>&) const
      *  - void write(const Point<N,T>&, FT val) const
-     *  - FT* ptr(const Point<N,T>&) const
-     *  - FT& operator[](const Point<N,T>&) const
+     *  - FT* ptr(const Point<N,T>&) const (Affine Accessor only)
+     *  - FT& operator[](const Point<N,T>&) const (Affine Accessor only)
      *  - template<typename REDOP> void reduce(const Point<N,T>&, REDOP::RHS);
+     *    (Affine Accessor only)
      *
      *  WRITE_DISCARD
      *  - void write(const Point<N,T>&, FT val) const
-     *  - FT* ptr(const Point<N,T>&) const
-     *  - FT& operator[](const Point<N,T>&) const
+     *  - FT* ptr(const Point<N,T>&) const (Affine Accessor only)
+     *  - FT& operator[](const Point<N,T>&) const (Affine Accessor only)
      *
      * REDUCE
      *  - template<typename REDOP> void reduce(const Point<N,T>&, REDOP::RHS)
+     *    (Affine Accessor only)
      */
     template<PrivilegeMode M, typename FT, int N, typename COORD_T = coord_t,
              typename A = Realm::GenericAccessor<FT,N,COORD_T>,
@@ -2614,6 +2625,9 @@ namespace Legion {
     public:
       // Inline Launcher arguments
       RegionRequirement                 requirement;
+      std::vector<Grant>                grants;
+      std::vector<PhaseBarrier>         wait_barriers;
+      std::vector<PhaseBarrier>         arrive_barriers;
       LayoutConstraintID                layout_constraint_id; 
     public:
       // Parent task for the inline operation
@@ -3981,7 +3995,7 @@ namespace Legion {
        * The resulting index space is assigned to be the index space
        * corresponding to 'color' of the 'parent' index partition.
        * It is illegal to invoke this method with a 'parent' index
-       * partition that was not created by a call to 'create_index_partition'.
+       * partition that was not created by a call to 'create_pending_partition'.
        * The 'initial' index space is the index space from which 
        * differences will be performed, and each of the index spaces in 
        * 'handles' will be subsequently subtracted from the 'initial' index
