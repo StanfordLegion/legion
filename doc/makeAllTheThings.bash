@@ -1,3 +1,4 @@
+#!/bin/bash
 #
 # Copyright 2017 Stanford University, NVIDIA Corporation
 # 
@@ -13,8 +14,11 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 #  
-#
-#!/bin/bash
+
+if [[ ! -e $LG_RT_DIR ]]; then
+  echo "LG_RT_DIR is not set or does not exist"
+  exit 1
+fi
 
 ROOT="${LG_RT_DIR}/../doc"
 PUBLISH_DIR="${ROOT}/publish"
