@@ -2702,11 +2702,13 @@ namespace Legion {
       part_op->initialize_equal_partition(this, pid, granularity);
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
-      forest->create_pending_partition(pid, parent, color_space,
-                                       partition_color, DISJOINT_KIND,
-                                       term_event);
+      RtEvent safe = forest->create_pending_partition(pid, parent, color_space,
+                                    partition_color, DISJOINT_KIND, term_event);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Wait for any notifications to occur before returning
+      if (safe.exists())
+        safe.lg_wait();
       return pid;
     }
 
@@ -2760,10 +2762,13 @@ namespace Legion {
           kind = ALIASED_KIND;
       }
       // Tell the region tree forest about this partition
-      forest->create_pending_partition(pid, parent, color_space, 
-                                       partition_color, kind, term_event);
+      RtEvent safe = forest->create_pending_partition(pid, parent, color_space, 
+                                            partition_color, kind, term_event);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Wait for any notifications to occur before returning
+      if (safe.exists())
+        safe.lg_wait();
       return pid;
     }
 
@@ -2816,10 +2821,13 @@ namespace Legion {
           kind = DISJOINT_KIND;
       }
       // Tell the region tree forest about this partition
-      forest->create_pending_partition(pid, parent, color_space, 
-                                       partition_color, kind, term_event);
+      RtEvent safe = forest->create_pending_partition(pid, parent, color_space,
+                                            partition_color, kind, term_event);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Wait for any notifications to occur before returning
+      if (safe.exists())
+        safe.lg_wait();
       return pid;
     }
 
@@ -2869,10 +2877,13 @@ namespace Legion {
           kind = DISJOINT_KIND;
       }
       // Tell the region tree forest about this partition
-      forest->create_pending_partition(pid, parent, color_space, 
-                                       partition_color, kind, term_event);
+      RtEvent safe = forest->create_pending_partition(pid, parent, color_space, 
+                                            partition_color, kind, term_event);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Wait for any notifications to occur before returning
+      if (safe.exists())
+        safe.lg_wait();
       return pid;
     }
 
@@ -2981,10 +2992,13 @@ namespace Legion {
                                 transform_size, extent, extent_size);
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
-      forest->create_pending_partition(pid, parent, color_space,
-                                       part_color, part_kind, term_event);
+      RtEvent safe = forest->create_pending_partition(pid, parent, color_space,
+                                            part_color, part_kind, term_event);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Wait for any notifications to occur before returning
+      if (safe.exists())
+        safe.lg_wait();
       return pid;
     }
 
@@ -3015,8 +3029,8 @@ namespace Legion {
         runtime->get_available_dependent_partition_op(true);
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition 
-      forest->create_pending_partition(pid, parent, color_space, part_color,
-                                       DISJOINT_KIND, term_event); 
+      RtEvent safe = forest->create_pending_partition(pid, parent, color_space,
+                                        part_color, DISJOINT_KIND, term_event); 
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
       part_op->initialize_by_field(this, pid, handle, parent_priv, fid, id,tag);
@@ -3041,6 +3055,9 @@ namespace Legion {
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
+      // Wait for any notifications to occur before returning
+      if (safe.exists())
+        safe.lg_wait();
       return pid;
     }
 
@@ -3073,8 +3090,8 @@ namespace Legion {
         runtime->get_available_dependent_partition_op(true);
       ApEvent term_event = part_op->get_completion_event(); 
       // Tell the region tree forest about this partition
-      forest->create_pending_partition(pid, handle, color_space, part_color,
-                                       part_kind, term_event); 
+      RtEvent safe = forest->create_pending_partition(pid, handle, color_space,
+                                            part_color, part_kind, term_event); 
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
       part_op->initialize_by_image(this, pid, projection, parent, fid, id, tag);
@@ -3099,6 +3116,9 @@ namespace Legion {
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
+      // Wait for any notifications to occur before returning
+      if (safe.exists())
+        safe.lg_wait();
       return pid;
     }
 
@@ -3131,8 +3151,8 @@ namespace Legion {
         runtime->get_available_dependent_partition_op(true);
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
-      forest->create_pending_partition(pid, handle, color_space, part_color,
-                                       part_kind, term_event); 
+      RtEvent safe = forest->create_pending_partition(pid, handle, color_space,
+                                            part_color, part_kind, term_event); 
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
       part_op->initialize_by_image_range(this, pid, projection, parent, 
@@ -3158,6 +3178,9 @@ namespace Legion {
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
+      // Wait for any notifications to occur before returning
+      if (safe.exists())
+        safe.lg_wait();
       return pid;
     }
 
@@ -3198,9 +3221,9 @@ namespace Legion {
           part_kind = DISJOINT_KIND;
       }
       // Tell the region tree forest about this partition
-      forest->create_pending_partition(pid, handle.get_index_space(), 
-                                       color_space, part_color, part_kind,
-                                       term_event);
+      RtEvent safe = forest->create_pending_partition(pid, 
+                                       handle.get_index_space(), color_space, 
+                                       part_color, part_kind, term_event);
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
       part_op->initialize_by_preimage(this, pid, projection, handle, 
@@ -3226,6 +3249,9 @@ namespace Legion {
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
+      // Wait for any notifications to occur before returning
+      if (safe.exists())
+        safe.lg_wait();
       return pid;
     }
 
@@ -3258,9 +3284,9 @@ namespace Legion {
         runtime->get_available_dependent_partition_op(true); 
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
-      forest->create_pending_partition(pid, handle.get_index_space(), 
-                                       color_space, part_color, part_kind,
-                                       term_event);
+      RtEvent safe = forest->create_pending_partition(pid, 
+                                       handle.get_index_space(), color_space, 
+                                       part_color, part_kind, term_event);
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
       part_op->initialize_by_preimage_range(this, pid, projection, handle,
@@ -3286,6 +3312,9 @@ namespace Legion {
       // Remap any unmapped regions
       if (!unmapped_regions.empty())
         remap_unmapped_regions(current_trace, unmapped_regions);
+      // Wait for any notifications to occur before returning
+      if (safe.exists())
+        safe.lg_wait();
       return pid;
     }
 
@@ -3309,9 +3338,11 @@ namespace Legion {
       if (color != AUTO_GENERATE_ID)
         part_color = color;
       ApUserEvent partition_ready = Runtime::create_ap_user_event();
-      forest->create_pending_partition(pid, parent, color_space, part_color,
-                                       part_kind, partition_ready, 
-                                       partition_ready);
+      RtEvent safe = forest->create_pending_partition(pid, parent, color_space, 
+                       part_color, part_kind, partition_ready, partition_ready);
+      // Wait for any notifications to occur before returning
+      if (safe.exists())
+        safe.lg_wait();
       return pid;
     }
 
