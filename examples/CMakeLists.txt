@@ -29,6 +29,8 @@ add_subdirectory(realm_saxpy)
 add_subdirectory(realm_stencil)
 add_subdirectory(spmd_cgsolver)
 add_subdirectory(virtual_map)
+add_subdirectory(attach_2darray_c_fortran_layout)
+add_subdirectory(attach_array_daxpy)
 
 if(Legion_USE_GASNet)
   add_subdirectory(mpi_interop)
