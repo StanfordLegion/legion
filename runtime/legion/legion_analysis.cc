@@ -8230,7 +8230,7 @@ namespace Legion {
       AutoLock s_lock(state_lock,1,false/*exclusive*/);
       // Any reductions we have at this level mandate a close
       FieldMask reduc_mask = test_mask & reduction_mask;
-      if (!reduc_mask)
+      if (!!reduc_mask)
       {
         result_mask |= reduc_mask;
         test_mask -= reduc_mask;
