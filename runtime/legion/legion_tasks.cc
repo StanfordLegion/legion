@@ -5909,7 +5909,6 @@ namespace Legion {
           continue;
         write_indexes.push_back(idx);
       }
-      rez.serialize(orig_task);
       rez.serialize<size_t>(write_indexes.size());
       if (!write_indexes.empty())
       {
