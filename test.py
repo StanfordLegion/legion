@@ -46,10 +46,8 @@ legion_cxx_tests = [
     ['tutorial/05_physical_regions/physical_regions', []],
     ['tutorial/06_privileges/privileges', []],
     ['tutorial/07_partitioning/partitioning', []],
-    ['tutorial/07_partitioning_attach_array/partitioning', []],
     ['tutorial/08_multiple_partitions/multiple_partitions', []],
     ['tutorial/09_custom_mapper/custom_mapper', []],
-    ['tutorial/10_attach_2darray_c_fortran_layout/attach_2darray', []],
 
     # Examples
     ['examples/circuit/circuit', []],
@@ -60,6 +58,8 @@ legion_cxx_tests = [
     ['examples/realm_stencil/realm_stencil', ['-ll:cpu', '4']],
     ['examples/spmd_cgsolver/spmd_cgsolver', ['-ll:cpu', '4', '-perproc']],
     ['examples/virtual_map/virtual_map', []],
+    ['examples/attach_2darray_c_fortran_layout/attach_2darray', []],
+    ['examples/attach_array_daxpy/attach_array_daxpy', []],
 
     # Tests
     ['test/rendering/rendering', ['-i', '2', '-n', '64', '-ll:cpu', '4']],

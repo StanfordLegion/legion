@@ -15,7 +15,7 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.1)
-project(LegionExample_10_attach_2darray_c_fortran_layout)
+project(LegionExample_attach_2darray_c_fortran_layout)
 
 include(CheckCXXCompilerFlag)
 

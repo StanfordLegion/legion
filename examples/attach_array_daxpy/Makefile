@@ -27,9 +27,9 @@ USE_HDF         ?= 0		# Include HDF5 support (requires HDF5)
 ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
 
 # Put the binary file name here
-OUTFILE		?= partitioning 
+OUTFILE		?= attach_array_daxpy 
 # List all the application source files here
-GEN_SRC		?= partitioning.cc		# .cc files
+GEN_SRC		?= attach_array_daxpy.cc		# .cc files
 GEN_GPU_SRC	?=				# .cu files
 
 # You can modify these variables, some will be appended to by the runtime makefile

@@ -15,7 +15,7 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.1)
-project(LegionExample_07_partitioning_attach_array)
+project(LegionExample_attach_array_daxpy)
 
 include(CheckCXXCompilerFlag)
 
@@ -32,8 +32,8 @@ if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_executable(partitioning partitioning.cc)
-target_link_libraries(partitioning Legion::Legion)
+add_executable(attach_array_daxpy attach_array_daxpy.cc)
+target_link_libraries(attach_array_daxpy Legion::Legion)
 if(Legion_ENABLE_TESTING)
-  add_test(NAME partitioning COMMAND $<TARGET_FILE:partitioning>) 
+  add_test(NAME attach_array_daxpy COMMAND $<TARGET_FILE:attach_array_daxpy>) 
 endif()

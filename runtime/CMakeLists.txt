@@ -155,6 +155,7 @@ list(APPEND REALM_SRC
   realm/timers.h           realm/timers.cc
   realm/timers.inl
   realm/utils.h
+  realm/attach_array.cc
 )
 find_package(Threads REQUIRED)
 add_library(RealmRuntime ${REALM_SRC})
