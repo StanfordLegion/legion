@@ -5610,10 +5610,6 @@ namespace Legion {
       return runtime->get_parent_logical_partition(handle);
     }
 
-    //--------------------------------------------------------------------------
-    IndexAllocator Runtime::create_index_allocator(Context ctx, IndexSpace is)
-    //--------------------------------------------------------------------------
-    {
 #ifdef __GNUC__
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
@@ -5622,18 +5618,22 @@ namespace Legion {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #endif
+    //--------------------------------------------------------------------------
+    IndexAllocator Runtime::create_index_allocator(Context ctx, IndexSpace is)
+    //--------------------------------------------------------------------------
+    {
       Internal::log_run.warning("Dynamic index space allocation is no longer "
                                 "supported. You can only make one allocator "
                                 "per index space and it must always be in the "
                                 "same task that created the index space.");
       return IndexAllocator(is, IndexIterator(this, ctx, is));
+    }
 #ifdef __GNUC__
 #pragma GCC diagnostic pop
 #endif
 #ifdef __clang__
 #pragma clang diagnostic pop
 #endif
-    }
 
     //--------------------------------------------------------------------------
     FieldAllocator Runtime::create_field_allocator(Context ctx, 
