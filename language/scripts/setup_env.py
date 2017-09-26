@@ -309,7 +309,7 @@ def driver(llvm_version, insecure):
     install.install(
         gasnet=True, cuda=use_cuda, openmp=use_openmp, hdf=use_hdf,
         external_terra_dir=terra_dir, gasnet_dir=gasnet_release_dir, conduit=conduit,
-        debug=debug, thread_count=thread_count)
+        rdir='auto', debug=debug, thread_count=thread_count)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
