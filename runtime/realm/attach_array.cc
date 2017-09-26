@@ -24,10 +24,10 @@ namespace Realm {
   
   template <int N, typename T>
   /*static*/ Event RegionInstance::create_array_instance_SOA(RegionInstance& inst,
-							  const ZIndexSpace<N,T>& space,
-                const std::vector<FieldID> &field_ids,
+							  const IndexSpace<N,T>& space,
+                                                          const std::vector<FieldID> &field_ids,
 							  const std::vector<size_t> &field_sizes,
-                const std::vector<void*> &field_pointers,
+                                                          const std::vector<void*> &field_pointers,
 							  int resource,
 							  const ProfilingRequestSet& reqs,
 							  Event wait_on /*= Event::NO_EVENT*/)
@@ -83,8 +83,8 @@ namespace Realm {
 
 #define DOIT_ARRAY_SOA(N,T) \
   template Event RegionInstance::create_array_instance_SOA<N,T>(RegionInstance&, \
-							      const ZIndexSpace<N,T>&, \
-                    const std::vector<FieldID>&, \
+							      const IndexSpace<N,T>&, \
+                                                              const std::vector<FieldID>&, \
 							      const std::vector<size_t>&, \
 							      const std::vector<void *>&, \
 							      int, \
@@ -94,12 +94,12 @@ namespace Realm {
     
   template <int N, typename T>
   /*static*/ Event RegionInstance::create_array_instance_AOS(RegionInstance& inst,
-							  const ZIndexSpace<N,T>& space,
-                const std::vector<FieldID> &field_ids,
+							  const IndexSpace<N,T>& space,
+                                                          const std::vector<FieldID> &field_ids,
 							  const std::vector<size_t> &field_sizes,
-                const std::vector<void*> &field_pointers,
+                                                          const std::vector<void*> &field_pointers,
 							  unsigned char* aos_base_ptr, size_t aos_stride,
-                int resource,
+                                                          int resource,
 							  const ProfilingRequestSet& reqs,
 							  Event wait_on /*= Event::NO_EVENT*/)
   {
@@ -156,12 +156,12 @@ namespace Realm {
 
 #define DOIT_ARRAY_AOS(N,T) \
   template Event RegionInstance::create_array_instance_AOS<N,T>(RegionInstance&, \
-							      const ZIndexSpace<N,T>&, \
-                    const std::vector<FieldID>&, \
+							      const IndexSpace<N,T>&, \
+                                                              const std::vector<FieldID>&, \
 							      const std::vector<size_t>&, \
 							      const std::vector<void *>&, \
 							      unsigned char*, size_t, \
-                    int, \
+                                                              int, \
 							      const ProfilingRequestSet&, \
 							      Event);
   FOREACH_NT(DOIT_ARRAY_AOS)  

@@ -2778,7 +2778,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(context->runtime, REALM_CREATE_INSTANCE_CALL);
       // Have to wait for the index space to be ready if necessary
-      Realm::ZIndexSpace<DIM,T> local_space;
+      Realm::IndexSpace<DIM,T> local_space;
       get_realm_index_space(local_space, true/*tight*/);
       // No profiling for these kinds of instances currently
       Realm::ProfilingRequestSet requests;
@@ -2789,8 +2789,8 @@ namespace Legion {
       PhysicalInstance result;
       if (layout_flag == 0) {  // SOA
         LgEvent ready(PhysicalInstance::create_array_instance_SOA(result, 
-				           local_space,
-                   field_ids,
+				                             local_space,
+                                                             field_ids,
 							     field_sizes,
 							     field_pointers,
 							     c_f_resource,
@@ -2798,12 +2798,12 @@ namespace Legion {
         ready.lg_wait();
       } else {  // AOS
         LgEvent ready(PhysicalInstance::create_array_instance_AOS(result, 
-				           local_space,
-                   field_ids,
+				                             local_space,
+                                                             field_ids,
 							     field_sizes,
 							     field_pointers,
 							     aos_base_ptr, aos_stride,
-                   c_f_resource,
+                                                             c_f_resource,
 							     requests));
         ready.lg_wait();
       }
