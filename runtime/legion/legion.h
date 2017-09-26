@@ -386,7 +386,7 @@ namespace Legion {
      *
      * @see Runtime
      */
-    class //LEGION_DEPRECATED("Dynamic IndexAllocators are no longer supported")
+    class LEGION_DEPRECATED("Dynamic IndexAllocators are no longer supported")
       IndexAllocator : public Unserializable<IndexAllocator> {
     public:
       IndexAllocator(void);
@@ -4709,6 +4709,14 @@ namespace Legion {
       //------------------------------------------------------------------------
       // Allocator and Argument Map Operations 
       //------------------------------------------------------------------------
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
       /**
        * @deprecated
        * Create an index allocator object for a given index space
@@ -4722,6 +4730,12 @@ namespace Legion {
        */
       LEGION_DEPRECATED("Dynamic index allocation is no longer supported.")
       IndexAllocator create_index_allocator(Context ctx, IndexSpace handle);
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 
       /**
        * Create a field space allocator object for the given field space
