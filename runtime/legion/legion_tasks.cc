@@ -4875,6 +4875,7 @@ namespace Legion {
       remote_completion_event = get_completion_event();
       remote_unique_id = get_unique_id();
       sent_remotely = false;
+      remote_replicate = false;
       top_level_task = false;
       need_intra_task_alias_analysis = true;
     }
@@ -5384,6 +5385,10 @@ namespace Legion {
           // Only need to send back the pointer to the task instance
           rez.serialize(orig_task);
           rez.serialize(applied_condition);
+          // Special case for control replication when we have to 
+          // also return the version numbers for broadcast
+          if (remote_replicate)
+            pack_remote_versions(rez);
           runtime->send_individual_remote_mapped(orig_proc, rez);
         }
         // Mark that we have completed mapping
@@ -5633,6 +5638,10 @@ namespace Legion {
       // Only need to send back the pointer to the task instance
       rez.serialize(orig_task);
       rez.serialize(applied_condition);
+      // Special case for control replication when we have to 
+      // also return the version numbers for broadcast
+      if (remote_replicate)
+        pack_remote_versions(rez);
       runtime->send_individual_remote_mapped(orig_proc, rez);
       // Now we can complete this task
       if (!acquired_instances.empty())
@@ -5703,6 +5712,7 @@ namespace Legion {
       rez.serialize(remote_unique_id);
       rez.serialize(remote_owner_uid);
       rez.serialize(top_level_task);
+      rez.serialize<bool>(is_repl_individual_task());
       if (!is_locally_mapped())
       {
         // have to pack all version info (e.g. split masks)
@@ -5741,6 +5751,7 @@ namespace Legion {
       set_current_proc(current);
       derez.deserialize(remote_owner_uid);
       derez.deserialize(top_level_task);
+      derez.deserialize(remote_replicate);
       unpack_version_infos(derez, version_infos, ready_events);
       unpack_restrict_infos(derez, restrict_infos, ready_events);
       // Quick check to see if we've been sent back to our original node
@@ -5876,6 +5887,50 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndividualTask::unpack_remote_versions(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      // Should only be called by inheriting classes like ReplIndividualTask
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndividualTask::pack_remote_versions(Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_remote());
+      assert(remote_replicate);
+#endif
+      std::vector<unsigned> write_indexes;
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        if (!IS_WRITE(regions[idx]))
+          continue;
+        write_indexes.push_back(idx);
+      }
+      rez.serialize(orig_task);
+      rez.serialize<size_t>(write_indexes.size());
+      if (!write_indexes.empty())
+      {
+        for (unsigned idx = 0; idx < write_indexes.size(); idx++)
+        {
+          const unsigned index = write_indexes[idx];
+          rez.serialize(index);
+          LegionMap<DistributedID,FieldMask>::aligned advance_states;
+          version_infos[index].capture_base_advance_states(advance_states);
+          rez.serialize<size_t>(advance_states.size());
+          for (LegionMap<DistributedID,FieldMask>::aligned::const_iterator 
+                it = advance_states.begin(); it != advance_states.end(); it++)
+          {
+            rez.serialize(it->first);
+            rez.serialize(it->second);
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void IndividualTask::unpack_remote_mapped(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -5883,6 +5938,8 @@ namespace Legion {
       derez.deserialize(applied);
       if (applied.exists())
         map_applied_conditions.insert(applied);
+      if (is_repl_individual_task())
+        unpack_remote_versions(derez);
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else

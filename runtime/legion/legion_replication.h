@@ -489,6 +489,9 @@ namespace Legion {
       virtual void handle_future(const void *res, size_t res_size, bool owned);
       virtual void trigger_task_complete(void);
     public:
+      virtual bool is_repl_individual_task(void) const { return true; }
+      virtual void unpack_remote_versions(Deserializer &derez);
+    public:
       void initialize_replication(ReplicateContext *ctx);
     protected:
       ShardID owner_shard;

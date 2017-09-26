@@ -204,9 +204,6 @@ namespace Legion {
 #endif
       // Now we can do the normal prepipeline stage
       IndividualTask::trigger_prepipeline_stage();
-      // Replicate individual tasks must locally map so that we can know
-      // to broadcast the version state information to other copies
-      map_locally = true;
     }
 
     //--------------------------------------------------------------------------
@@ -341,6 +338,26 @@ namespace Legion {
         future_collective.receive_future(result.impl);
       }
       IndividualTask::trigger_task_complete();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndividualTask::unpack_remote_versions(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // Then broadcast the versioning results for any region requirements
+      // that are writes which are going to advance the version numbers
+      VersioningInfoBroadcast version_broadcast(repl_ctx, 
+                    versioning_collective_id, owner_shard);
+      // Cool trick: unpack directly into the data structure
+      version_broadcast.unpack_collective(derez);
+      // Now do the broadcast
+      version_broadcast.perform_collective_async();
     }
 
     //--------------------------------------------------------------------------

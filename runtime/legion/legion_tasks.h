@@ -684,7 +684,12 @@ namespace Legion {
       virtual bool is_top_level_task(void) const { return top_level_task; }
       virtual void end_inline_task(const void *result, 
                                    size_t result_size, bool owned);
+    public:
+      // A little bit of support for control replication
+      virtual bool is_repl_individual_task(void) const { return false; }
+      virtual void unpack_remote_versions(Deserializer &derez);
     protected:
+      void pack_remote_versions(Serializer &rez);
       void pack_remote_complete(Serializer &rez);
       void pack_remote_commit(Serializer &rez);
       void unpack_remote_mapped(Deserializer &derez);
@@ -713,6 +718,7 @@ namespace Legion {
       size_t predicate_false_size;
     protected:
       bool sent_remotely;
+      bool remote_replicate;
     protected:
       friend class Internal;
       // Special field for the top level task
