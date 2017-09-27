@@ -4898,14 +4898,18 @@ namespace Legion {
         if (is_reduce_req)
           dst_requirements[idx].privilege = REDUCE;
       }
+      // Need to get the launch domain in case it is different than
+      // the original index domain due to control replication
+      Domain launch_domain;
+      runtime->forest->find_launch_space_domain(launch_space, launch_domain);
       // Now enumerate the points
-      size_t num_points = index_domain.get_volume();
+      size_t num_points = launch_domain.get_volume();
 #ifdef DEBUG_LEGION
       assert(num_points > 0);
 #endif
       unsigned point_idx = 0;
       points.resize(num_points);
-      for (Domain::DomainPointIterator itr(index_domain); 
+      for (Domain::DomainPointIterator itr(launch_domain); 
             itr; itr++, point_idx++)
       {
         PointCopyOp *point = runtime->get_available_point_copy_op(false);
@@ -11916,14 +11920,18 @@ namespace Legion {
                                                      version_info,
                                                      preconditions,
                                                      true/*partial*/);
+        // Need to get the launch domain in case it is different than
+        // the original index domain due to control replication
+        Domain launch_domain;
+        runtime->forest->find_launch_space_domain(launch_space, launch_domain);
         // Now enumerate the points and kick them off
-        size_t num_points = index_domain.get_volume();
+        size_t num_points = launch_domain.get_volume();
 #ifdef DEBUG_LEGION
         assert(num_points > 0);
 #endif
         unsigned point_idx = 0;
         points.resize(num_points);
-        for (Domain::DomainPointIterator itr(index_domain); 
+        for (Domain::DomainPointIterator itr(launch_domain); 
               itr; itr++, point_idx++)
         {
           PointDepPartOp *point = 
@@ -13633,14 +13641,18 @@ namespace Legion {
                                                      preconditions,
                                                      partial_traversal);
       }
+      // Need to get the launch domain in case it is different than
+      // the original index domain due to control replication
+      Domain launch_domain;
+      runtime->forest->find_launch_space_domain(launch_space, launch_domain);
       // Now enumerate the points
-      size_t num_points = index_domain.get_volume();
+      size_t num_points = launch_domain.get_volume();
 #ifdef DEBUG_LEGION
       assert(num_points > 0);
 #endif
       unsigned point_idx = 0;
       points.resize(num_points);
-      for (Domain::DomainPointIterator itr(index_domain); 
+      for (Domain::DomainPointIterator itr(launch_domain); 
             itr; itr++, point_idx++)
       {
         PointFillOp *point = runtime->get_available_point_fill_op(false);
