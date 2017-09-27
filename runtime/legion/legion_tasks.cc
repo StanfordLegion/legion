@@ -3528,8 +3528,8 @@ namespace Legion {
           if (output.control_replication_map.size() != total_shards)
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                           "Mapper %s specified a non-empty control replication "
-                          "map of size %ld that does not match the requested "
-                          "number of %ld shards for task %s (UID %lld).",
+                          "map of size %zd that does not match the requested "
+                          "number of %zd shards for task %s (UID %lld).",
                           mapper->get_mapper_name(), 
                           output.control_replication_map.size(), total_shards,
                           get_task_name(), get_unique_id())

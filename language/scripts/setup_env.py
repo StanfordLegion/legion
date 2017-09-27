@@ -252,8 +252,9 @@ def driver(llvm_version, insecure):
 
     conduit = discover_conduit()
     gasnet_dir = os.path.realpath(os.path.join(root_dir, 'gasnet'))
+    gasnet_release_dir = os.path.join(gasnet_dir, 'release')
     gasnet_build_result = os.path.join(
-        gasnet_dir, 'release', '%s-conduit' % conduit,
+        gasnet_release_dir, '%s-conduit' % conduit,
         'libgasnet-%s-par.a' % conduit)
     if not os.path.exists(gasnet_dir):
         git_clone(gasnet_dir, 'https://github.com/StanfordLegion/gasnet.git')
@@ -309,7 +310,7 @@ def driver(llvm_version, insecure):
     install.install(
         gasnet=True, cuda=use_cuda, openmp=use_openmp, hdf=use_hdf,
         external_terra_dir=terra_dir, gasnet_dir=gasnet_release_dir, conduit=conduit,
-        debug=debug, thread_count=thread_count)
+        rdir='auto', debug=debug, thread_count=thread_count)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(

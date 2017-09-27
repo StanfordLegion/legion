@@ -539,7 +539,6 @@ namespace Legion {
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
       FutureExchange *reduction_collective;
-      IndexSpace launch_space;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)
@@ -595,7 +594,6 @@ namespace Legion {
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
-      IndexSpace launch_space;
       MapperManager *mapper;
 #ifdef DEBUG_LEGION
     public:
@@ -668,7 +666,6 @@ namespace Legion {
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
-      IndexSpace launch_space;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)
