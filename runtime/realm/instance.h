@@ -120,7 +120,16 @@ namespace Realm {
 				 const ProfilingRequestSet& prs,
 				 Event wait_on = Event::NO_EVENT);
 
-    // we'd like the method above to accept a Rect<N,T> in place of the
+    template <int N, typename T>
+    static Event create_instance(RegionInstance& inst,
+				 Memory memory,
+				 const IndexSpace<N,T>& space,
+				 const std::map<FieldID, size_t>& field_sizes,
+				 size_t block_size, // 0=SOA, 1=AOS, 2+=hybrid
+				 const ProfilingRequestSet& prs,
+				 Event wait_on = Event::NO_EVENT);
+
+    // we'd like the methods above to accept a Rect<N,T> in place of the
     //  IndexSpace<N,T>, but that doesn't work unless the method template
     //  parameters are specified explicitly, so provide an overload that
     //  takes a Rect directly
@@ -129,6 +138,15 @@ namespace Realm {
 				 Memory memory,
 				 const Rect<N,T>& rect,
 				 const std::vector<size_t>& field_sizes,
+				 size_t block_size, // 0=SOA, 1=AOS, 2+=hybrid
+				 const ProfilingRequestSet& prs,
+				 Event wait_on = Event::NO_EVENT);
+
+    template <int N, typename T>
+    static Event create_instance(RegionInstance& inst,
+				 Memory memory,
+				 const Rect<N,T>& rect,
+				 const std::map<FieldID, size_t>& field_sizes,
 				 size_t block_size, // 0=SOA, 1=AOS, 2+=hybrid
 				 const ProfilingRequestSet& prs,
 				 Event wait_on = Event::NO_EVENT);

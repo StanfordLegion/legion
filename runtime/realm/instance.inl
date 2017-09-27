@@ -125,7 +125,24 @@ namespace Realm {
     return create_instance(inst, memory, layout, reqs, wait_on);
   }
 
-  // we'd like the method above to accept a Rect<N,T> in place of the
+  template <int N, typename T>
+  inline /*static*/ Event RegionInstance::create_instance(RegionInstance& inst,
+							  Memory memory,
+							  const IndexSpace<N,T>& space,
+							  const std::map<FieldID, size_t> &field_sizes,
+							  size_t block_size,
+							  const ProfilingRequestSet& reqs,
+							  Event wait_on /*= Event::NO_EVENT*/)
+  {
+    // smoosh hybrid block sizes back to SOA for now
+    if(block_size > 1)
+      block_size = 0;
+    InstanceLayoutConstraints ilc(field_sizes, block_size);
+    InstanceLayoutGeneric *layout = InstanceLayoutGeneric::choose_instance_layout(space, ilc);
+    return create_instance(inst, memory, layout, reqs, wait_on);
+  }
+
+  // we'd like the methods above to accept a Rect<N,T> in place of the
   //  IndexSpace<N,T>, but that doesn't work unless the method template
   //  parameters are specified explicitly, so provide an overload that
   //  takes a Rect directly
@@ -146,6 +163,25 @@ namespace Realm {
 						prs,
 						wait_on);
   }
+
+  template <int N, typename T>
+  inline /*static*/ Event RegionInstance::create_instance(RegionInstance& inst,
+							  Memory memory,
+							  const Rect<N,T>& rect,
+							  const std::map<FieldID, size_t> &field_sizes,
+							  size_t block_size, // 0=SOA, 1=AOS, 2+=hybrid
+							  const ProfilingRequestSet& prs,
+							  Event wait_on /*= Event::NO_EVENT*/)
+  {
+    return RegionInstance::create_instance<N,T>(inst,
+						memory,
+						IndexSpace<N,T>(rect),
+						field_sizes,
+						block_size,
+						prs,
+						wait_on);
+  }
+
 
   ////////////////////////////////////////////////////////////////////////
   //

@@ -22,23 +22,114 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class InstanceLayoutConstraints
+
+  InstanceLayoutConstraints::InstanceLayoutConstraints(const std::map<FieldID, size_t>& field_sizes,
+						       size_t block_size)
+  {
+    // use the field sizes to generate "offsets" as unique IDs
+    switch(block_size) {
+    case 0:
+      {
+	// SOA - each field is its own "group"
+	field_groups.resize(field_sizes.size());
+	size_t i = 0;
+	for(std::map<FieldID, size_t>::const_iterator it = field_sizes.begin();
+	    it != field_sizes.end();
+	    ++it, ++i) {
+	  field_groups[i].resize(1);
+	  field_groups[i][0].field_id = it->first;
+	  field_groups[i][0].offset = -1;
+	  field_groups[i][0].size = it->second;
+	  field_groups[i][0].alignment = it->second; // natural alignment 
+	}
+	break;
+      }
+
+    case 1:
+      {
+	// AOS - all field_groups in same group
+	field_groups.resize(1);
+	field_groups[0].resize(field_sizes.size());
+	size_t i = 0;
+	for(std::map<FieldID, size_t>::const_iterator it = field_sizes.begin();
+	    it != field_sizes.end();
+	    ++it, ++i) {
+	  field_groups[0][i].field_id = it->first;
+	  field_groups[0][i].offset = -1;
+	  field_groups[0][i].size = it->second;
+	  field_groups[0][i].alignment = it->second; // natural alignment 
+	}
+	break;
+      }
+
+    default:
+      {
+	// hybrid - blech
+	assert(0);
+      }
+    }
+  }
+
+  InstanceLayoutConstraints::InstanceLayoutConstraints(const std::vector<size_t>& field_sizes,
+						       size_t block_size)
+  {
+    // use the field sizes to generate "offsets" as unique IDs
+    switch(block_size) {
+    case 0:
+      {
+	// SOA - each field is its own "group"
+	field_groups.resize(field_sizes.size());
+	size_t offset = 0;
+	for(size_t i = 0; i < field_sizes.size(); i++) {
+	  field_groups[i].resize(1);
+	  field_groups[i][0].field_id = offset;
+	  field_groups[i][0].offset = -1;
+	  field_groups[i][0].size = field_sizes[i];
+	  field_groups[i][0].alignment = field_sizes[i]; // natural alignment 
+	  offset += field_sizes[i];
+	}
+	break;
+      }
+
+    case 1:
+      {
+	// AOS - all field_groups in same group
+	field_groups.resize(1);
+	field_groups[0].resize(field_sizes.size());
+	size_t offset = 0;
+	for(size_t i = 0; i < field_sizes.size(); i++) {
+	  field_groups[0][i].field_id = offset;
+	  field_groups[0][i].offset = -1;
+	  field_groups[0][i].size = field_sizes[i];
+	  field_groups[0][i].alignment = field_sizes[i]; // natural alignment 
+	  offset += field_sizes[i];
+	}
+	break;
+      }
+
+    default:
+      {
+	// hybrid - blech
+	assert(0);
+      }
+    }
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class InstanceLayout<N,T>
 
+  // this currently lives in inst_impl.cc - would be nice to move it back here
+#if 0
   template <int N, typename T>
   /*static*/ Serialization::PolymorphicSerdezSubclass<InstanceLayoutGeneric, InstanceLayout<N,T> > InstanceLayout<N,T>::serdez_subclass;
-
-  template <int N, typename T>
-  template <typename S>
-  bool InstanceLayout<N,T>::serialize(S& serializer) const
-  {
-    return false; /*
-    return ((serializer << space) &&
-    (serializer << piece_lists));*/
-  }
 
 #define DOIT(N,T) \
   template class InstanceLayout<N,T>;
   FOREACH_NT(DOIT)
+#endif
 
 }; // namespace Realm
 
