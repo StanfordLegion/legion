@@ -513,6 +513,7 @@ namespace Legion {
         options_.inline_task = options.inline_task;
         options_.stealable = options.stealable;
         options_.map_locally = options.map_locally;
+        options_.replicate = options.replicate;
         return options_;
       }
 
@@ -523,6 +524,7 @@ namespace Legion {
         options.inline_task = options_.inline_task;
         options.stealable = options_.stealable;
         options.map_locally = options_.map_locally;
+        options.replicate = options_.replicate;
         return options;
       }
 

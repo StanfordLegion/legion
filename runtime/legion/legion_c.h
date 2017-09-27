@@ -274,6 +274,7 @@ extern "C" {
     bool inline_task;
     bool stealable;
     bool map_locally;
+    bool replicate;
   } legion_task_options_t;
 
   typedef struct legion_slice_task_input_t {
