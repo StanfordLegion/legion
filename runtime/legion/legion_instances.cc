@@ -830,7 +830,7 @@ namespace Legion {
       if (!pointer_constraint.entails(constraints->pointer_constraint))
         return false;
       return layout->constraints->entails_without_pointer(constraints,
-                                      instance_domain->get_num_dims());
+              (instance_domain != NULL) ? instance_domain->get_num_dims() : 0);
     }
 
     //--------------------------------------------------------------------------
@@ -841,7 +841,7 @@ namespace Legion {
       if (!pointer_constraint.entails(constraints.pointer_constraint))
         return false;
       return layout->constraints->entails_without_pointer(constraints,
-                                      instance_domain->get_num_dims());
+              (instance_domain != NULL) ? instance_domain->get_num_dims() : 0);
     }
 
     //--------------------------------------------------------------------------
@@ -853,7 +853,7 @@ namespace Legion {
         return true;
       // We know our layouts don't have a pointer constraint so nothing special
       return layout->constraints->conflicts(constraints,
-                        instance_domain->get_num_dims());
+              (instance_domain != NULL) ? instance_domain->get_num_dims() : 0);
     }
 
     //--------------------------------------------------------------------------
@@ -865,7 +865,7 @@ namespace Legion {
         return true;
       // We know our layouts don't have a pointer constraint so nothing special
       return layout->constraints->conflicts(constraints,
-                        instance_domain->get_num_dims());
+              (instance_domain != NULL) ? instance_domain->get_num_dims() : 0);
     }
 
     //--------------------------------------------------------------------------

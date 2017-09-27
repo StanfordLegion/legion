@@ -51,6 +51,7 @@ list(APPEND LOW_RUNTIME_SRC
   realm/faults.inl
   realm/inst_impl.h         realm/inst_impl.cc
   realm/inst_layout.h       realm/inst_layout.inl
+  realm/inst_layout.cc
   realm/interval_tree.h     realm/interval_tree.inl
   realm/machine_impl.h      realm/machine_impl.cc
   realm/mem_impl.h          realm/mem_impl.cc
