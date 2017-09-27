@@ -3802,7 +3802,7 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Context configurations for control replicated "
                       "task %s were assigned different maximum window sizes "
-                      "of %ld and %ld by the mapper which is illegal.",
+                      "of %zd and %zd by the mapper which is illegal.",
                       context->owner_task->get_task_name(), window_size,
                       other_window_size)
       size_t num_bars;
