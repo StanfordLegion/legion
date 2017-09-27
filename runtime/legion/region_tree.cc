@@ -13845,22 +13845,6 @@ namespace Legion {
       manager.record_advance_versions(info.traversal_mask, context,
                                     info.version_info, info.map_applied_events);
       PhysicalState *state = get_physical_state(info.version_info);
-      // Get any restricted fields
-      FieldMask restricted_fields;
-      InstanceSet restricted_instances;
-      std::vector<MaterializedView*> restricted_views;
-      if (restrict_info.has_restrictions())
-      {
-        restrict_info.populate_restrict_fields(restricted_fields);
-        // We only need to get these things if we are not read-only
-        if (!IS_READ_ONLY(info.req))
-        {
-          restricted_instances = restrict_info.get_instances();
-          restricted_views.resize(restricted_instances.size());
-          convert_target_views(restricted_instances, context,
-                               restricted_views);
-        }
-      }
 #ifdef DEBUG_LEGION
       for (unsigned idx = 0; idx < targets.size(); idx++)
       {
