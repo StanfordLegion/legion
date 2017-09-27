@@ -29,6 +29,8 @@ TYPE_IS_SERIALIZABLE(Realm::RegionInstance);
 
 namespace Realm {
 
+  extern Logger log_inst;
+
   ////////////////////////////////////////////////////////////////////////
   //
   // class RegionInstance
@@ -58,19 +60,22 @@ namespace Realm {
     return os << std::hex << r.id << std::dec;
   }
 
-#if 0		
   template <int N, typename T>
-  const IndexSpace<N,T>& RegionInstance::get_indexspace(void) const
+  inline IndexSpace<N,T> RegionInstance::get_indexspace(void) const
   {
-    return get_lis().as_dim<N,T>().indexspace;
+    const InstanceLayout<N,T> *layout = dynamic_cast<const InstanceLayout<N,T> *>(this->get_layout());
+    if(!layout) {
+      log_inst.fatal() << "dimensionality mismatch between instance and index space!";
+      assert(0);
+    }
+    return layout->space;
   }
 		
   template <int N>
-  const IndexSpace<N,int>& RegionInstance::get_indexspace(void) const
+  inline IndexSpace<N,int> RegionInstance::get_indexspace(void) const
   {
-    return get_lis().as_dim<N,int>().indexspace;
+    return get_indexspace<N,int>();
   }
-#endif
 
   template <typename T>
   inline T RegionInstance::read(size_t offset) const
