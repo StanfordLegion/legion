@@ -44,6 +44,12 @@ namespace Legion {
       typedef Legion::UnsafeFieldAccessor<char,3,coord_t,
                 Realm::AffineAccessor<char,3,coord_t> >   ArrayAccessor3D;
 
+#ifdef __ICC
+// icpc complains about "error #858: type qualifier on return type is meaningless"
+// but it's pretty annoying to get this macro to handle all the cases right
+#pragma warning (push)
+#pragma warning (disable: 858)
+#endif
 #define NEW_OPAQUE_WRAPPER(T_, T)                                       \
       static T_ wrap(T t) {                                             \
         T_ t_;                                                          \
@@ -125,6 +131,11 @@ namespace Legion {
       typedef std::map<FieldID, const char *> FieldMap;
       NEW_OPAQUE_WRAPPER(legion_field_map_t, FieldMap *);
 #undef NEW_OPAQUE_WRAPPER
+#ifdef __ICC
+// icpc complains about "error #858: type qualifier on return type is meaningless"
+// but it's pretty annoying to get this macro to handle all the cases right
+#pragma warning (pop)
+#endif
 
       static legion_ptr_t
       wrap(ptr_t ptr)
@@ -353,7 +364,7 @@ namespace Legion {
         return offset_;
       }
 
-      static const ptrdiff_t
+      static ptrdiff_t
       unwrap(const legion_byte_offset_t offset_)
       {
         return offset_.offset;
