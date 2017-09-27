@@ -5474,6 +5474,7 @@ namespace Legion {
                      node, register_now), CompositeBase(view_lock),
         version_info(info), closed_tree(tree), owner_context(context),
         original_shard_view(false)
+    //--------------------------------------------------------------------------
     {
       // Add our references
       version_info->add_reference();
@@ -5661,20 +5662,27 @@ namespace Legion {
       {
         if (is_owner())
         {
-          // This should only happen once so we can now trigger our
-          // phase barrier and then if necessary defer out invalidation
-          // until all the other contexts have invalidated themselves too
-          Runtime::phase_barrier_arrive(shard_invalid_barrier, 1/*count*/);
+          // This is a guard to see if we've already been through here
+          // the first time through before arriving on the barrier
           if (!shard_invalid_barrier.has_triggered())
           {
-            DeferInvalidateArgs args;
-            args.view = this;
-            args.invalidated = Runtime::create_rt_user_event();
-            runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
-                                             NULL/*op*/, shard_invalid_barrier);
-            if (mutator != NULL)
-              mutator->record_reference_mutation_effect(args.invalidated);
-            return;
+            // This should only happen once so we can now trigger our
+            // phase barrier and then if necessary defer out invalidation
+            // until all the other contexts have invalidated themselves too
+            Runtime::phase_barrier_arrive(shard_invalid_barrier, 1/*count*/);
+            // Now check again to see if we've triggered again and skip
+            // the deferral of the invalidation
+            if (!shard_invalid_barrier.has_triggered())
+            {
+              DeferInvalidateArgs args;
+              args.view = this;
+              args.invalidated = Runtime::create_rt_user_event();
+              runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
+                                       NULL/*op*/, shard_invalid_barrier);
+              if (mutator != NULL)
+                mutator->record_reference_mutation_effect(args.invalidated);
+              return;
+            }
           }
           // Otherwise we can fall through and do the rest of the invalidation
         }
