@@ -7289,8 +7289,6 @@ namespace Legion {
       mapped_points = 0;
       complete_points = 0;
       committed_points = 0;
-      complete_received = false;
-      commit_received = false;
       need_intra_task_alias_analysis = true;
     }
 

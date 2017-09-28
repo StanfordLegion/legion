@@ -3661,15 +3661,16 @@ namespace Legion {
       /**
        * Create partition by field uses an existing field in a logical
        * region to perform a partitioning operation. The field type
-       * must be of 'Color' type (or int type) so that the runtime can 
-       * interpret the field as an enumerated function from 
-       * ptr_t -> Color. Pointers are assigned into index subspaces
-       * based on their assigned color. Pointers with negative entries
-       * will not be assigned into any index subspace. The resulting
-       * index partition is a partition of the index space of the logical 
-       * region over which the operation is performed. By definition
-       * this partition is disjoint. The 'color' argument can be used
-       * to specify an optional color for the index partition.
+       * must be of 'Point<COLOR_DIM,COLOR_COORD_T>' type so that the 
+       * runtime can interpret the field as an enumerated function from 
+       * Point<DIM,COORD_TT> -> Point<COLOR_DIM,COLOR_COORD_T>. Pointers 
+       * are assigned into index subspaces based on their assigned color. 
+       * Pointers with negative entries will not be assigned into any 
+       * index subspace. The resulting index partition is a partition 
+       * of the index space of the logical region over which the 
+       * operation is performed. By definition this partition is 
+       * disjoint. The 'color' argument can be used to specify an 
+       * optional color for the index partition.
        * @param ctx the enclosing task context
        * @param handle logical region handle containing the chosen
        *               field and of which a partition will be created
