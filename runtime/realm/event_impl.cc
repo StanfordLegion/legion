@@ -130,6 +130,12 @@ namespace Realm {
     return GenEventImpl::merge_events(wait_for, false /*!ignore faults*/);
   }
 
+  /*static*/ Event Event::merge_events(const std::vector<Event>& wait_for)
+  {
+    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
+    return GenEventImpl::merge_events(wait_for, false /*!ignore faults*/);
+  }
+
   /*static*/ Event Event::merge_events(Event ev1, Event ev2,
 				       Event ev3 /*= NO_EVENT*/, Event ev4 /*= NO_EVENT*/,
 				       Event ev5 /*= NO_EVENT*/, Event ev6 /*= NO_EVENT*/)
@@ -139,6 +145,12 @@ namespace Realm {
   }
 
   /*static*/ Event Event::merge_events_ignorefaults(const std::set<Event>& wait_for)
+  {
+    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
+    return GenEventImpl::merge_events(wait_for, true /*ignore faults*/);
+  }
+
+  /*static*/ Event Event::merge_events_ignorefaults(const std::vector<Event>& wait_for)
   {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     return GenEventImpl::merge_events(wait_for, true /*ignore faults*/);
@@ -772,6 +784,76 @@ namespace Realm {
 #endif
 
       for(std::set<Event>::const_iterator it = wait_for.begin();
+	  it != wait_for.end();
+	  it++) {
+	log_event.info() << "event merging: event=" << finish_event << " wait_on=" << *it;
+	m->add_event(*it);
+#ifdef EVENT_GRAPH_TRACE
+        log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ",%d)",
+                             finish_event.id, finish_event.gen,
+                             it->id, it->gen);
+#endif
+      }
+
+      // once they're all added - arm the thing (it might go off immediately)
+      if(m->arm())
+        delete m;
+
+      return finish_event;
+    }
+
+    // creates an event that won't trigger until all input events have
+    /*static*/ Event GenEventImpl::merge_events(const std::vector<Event>& wait_for,
+						bool ignore_faults)
+    {
+      if (wait_for.empty())
+        return Event::NO_EVENT;
+      // scan through events to see how many exist/haven't fired - we're
+      //  interested in counts of 0, 1, or 2+ - also remember the first
+      //  event we saw for the count==1 case
+      int wait_count = 0;
+      Event first_wait;
+      for(std::vector<Event>::const_iterator it = wait_for.begin();
+	  (it != wait_for.end()) && (wait_count < 2);
+	  it++) {
+	bool poisoned = false;
+	if((*it).has_triggered_faultaware(poisoned)) {
+          if(poisoned) {
+	    // if we're not ignoring faults, we need to propagate this fault, and can do
+	    //  so by just returning this poisoned event
+	    if(!ignore_faults) {
+	      log_poison.info() << "merging events - " << (*it) << " already poisoned";
+	      return *it;
+	    }
+          }
+	} else {
+	  if(!wait_count) first_wait = *it;
+	  wait_count++;
+	}
+      }
+      log_event.debug() << "merging events - at least " << wait_count << " not triggered";
+
+      // Avoid these optimizations if we are doing event graph tracing
+      // we also cannot return an input event directly in the (wait_count == 1) case
+      //  if we're ignoring faults
+#ifndef EVENT_GRAPH_TRACE
+      // counts of 0 or 1 don't require any merging
+      if(wait_count == 0) return Event::NO_EVENT;
+      if((wait_count == 1) && !ignore_faults) return first_wait;
+#else
+      if((wait_for.size() == 1) && !ignore_faults)
+        return *(wait_for.begin());
+#endif
+      // counts of 2+ require building a new event and a merger to trigger it
+      Event finish_event = GenEventImpl::create_genevent()->current_event();
+      EventMerger *m = new EventMerger(finish_event, ignore_faults);
+
+#ifdef EVENT_GRAPH_TRACE
+      log_event_graph.info("Event Merge: (" IDFMT ",%d) %ld", 
+			   finish_event.id, finish_event.gen, wait_for.size());
+#endif
+
+      for(std::vector<Event>::const_iterator it = wait_for.begin();
 	  it != wait_for.end();
 	  it++) {
 	log_event.info() << "event merging: event=" << finish_event << " wait_on=" << *it;
@@ -2120,8 +2202,19 @@ static void *bytedup(const void *data, size_t datalen)
 
     void BarrierImpl::external_wait(gen_t needed_gen, bool& poisoned)
     {
-      poisoned = POISON_FIXME;
-      assert(0);
+      GASNetCondVar cv(mutex);
+      PthreadCondWaiter w(cv);
+      add_waiter(needed_gen, &w);
+      {
+	AutoHSLLock a(mutex);
+
+	// re-check condition before going to sleep
+	while(needed_gen > generation) {
+	  // now just sleep on the condition variable - hope we wake up
+	  cv.wait();
+	}
+      }
+      poisoned = w.poisoned;
     }
 
     bool BarrierImpl::add_waiter(gen_t needed_gen, EventWaiter *waiter/*, bool pre_subscribed = false*/)

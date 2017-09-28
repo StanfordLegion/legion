@@ -20,6 +20,7 @@
 
 #include "lowlevel_config.h"
 
+#include <vector>
 #include <set>
 #include <iostream>
 
@@ -61,6 +62,7 @@ namespace Realm {
  
       // creates an event that won't trigger until all input events have
       static Event merge_events(const std::set<Event>& wait_for);
+      static Event merge_events(const std::vector<Event>& wait_for);
       static Event merge_events(Event ev1, Event ev2,
 				Event ev3 = NO_EVENT, Event ev4 = NO_EVENT,
 				Event ev5 = NO_EVENT, Event ev6 = NO_EVENT);
@@ -68,6 +70,7 @@ namespace Realm {
       // normal merged events propagate poison - this version ignores poison on
       //  inputs - use carefully!
       static Event merge_events_ignorefaults(const std::set<Event>& wait_for);
+      static Event merge_events_ignorefaults(const std::vector<Event>& wait_for);
       static Event ignorefaults(Event wait_for);
 
       // the following calls are used to give Realm bounds on when the UserEvent

@@ -101,6 +101,8 @@ namespace Realm {
       // creates an event that won't trigger until all input events have
       static Event merge_events(const std::set<Event>& wait_for,
 				bool ignore_faults);
+      static Event merge_events(const std::vector<Event>& wait_for,
+				bool ignore_faults);
       static Event merge_events(Event ev1, Event ev2,
 				Event ev3 = Event::NO_EVENT, Event ev4 = Event::NO_EVENT,
 				Event ev5 = Event::NO_EVENT, Event ev6 = Event::NO_EVENT);
