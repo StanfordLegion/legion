@@ -26,6 +26,7 @@
 #endif
 
 #include <pthread.h>
+#include <errno.h>
 // for PTHREAD_STACK_MIN
 #include <limits.h>
 #ifdef __MACH__
@@ -73,9 +74,10 @@ inline void makecontext_wrap(ucontext_t *u, void (*fn)(), int args, ...) { makec
 
 #ifndef CHECK_LIBC
 #define CHECK_LIBC(cmd) do { \
+  errno = 0; \
   int ret = (cmd); \
   if(ret != 0) { \
-    std::cerr << "ERROR: " __FILE__ ":" << __LINE__ << ": " #cmd " = " << ret << " (" << strerror(ret) << ")" << std::endl;	\
+    std::cerr << "ERROR: " __FILE__ ":" << __LINE__ << ": " #cmd " = " << ret << " (" << strerror(errno) << ")" << std::endl;	\
     assert(0); \
   } \
 } while(0)
