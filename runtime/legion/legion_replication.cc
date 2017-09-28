@@ -513,6 +513,7 @@ namespace Legion {
         complete_mapping();
         complete_execution();
         trigger_children_complete();
+        trigger_children_committed();
       }
       else // We have valid points, so it goes on the ready queue
         enqueue_ready_operation();
