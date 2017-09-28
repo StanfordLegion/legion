@@ -1191,6 +1191,9 @@ namespace Legion {
     void ReplFutureMapImpl::notify_inactive(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+#endif
       // Do the base version, then arrive on our barrier
       FutureMapImpl::notify_inactive(mutator);
       Runtime::phase_barrier_arrive(future_map_barrier, 1/*count*/);
