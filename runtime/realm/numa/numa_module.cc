@@ -286,9 +286,6 @@ namespace Realm {
 		pma.bandwidth = 80;   // "large"
 		pma.latency = 10;     // "small"
 	      }
-	      // FIXME: once the stuff in runtime_impl.cc is removed, remove
-	      //  this 'continue' so that we create affinities here
-	      continue;
 	    } else {
 	      int d = numasysif_get_distance(cpu_node, mem_node);
 	      if(d >= 0) {
