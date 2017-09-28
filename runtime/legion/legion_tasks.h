@@ -900,9 +900,6 @@ namespace Legion {
       unsigned mapped_points;
       unsigned complete_points;
       unsigned committed_points;
-      // Track whether or not we've received our commit command
-      bool complete_received;
-      bool commit_received; 
     protected:
       std::vector<RegionTreePath> privilege_paths;
       std::deque<SliceTask*> locally_mapped_slices;
