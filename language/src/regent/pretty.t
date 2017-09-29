@@ -909,10 +909,13 @@ function pretty.stat_index_launch_list(cx, node)
 end
 
 function pretty.stat_var(cx, node)
-  local symbols = commas(node.symbols:map(function(symbol) return tostring(symbol) end))
-  local types = commas(node.types:map(function(type) return tostring(type) end))
+  local decls = terralib.newlist()
+  for i,symbol in ipairs(node.symbols) do
+    local type = node.types[i]
+    decls:insert(join({tostring(symbol), ":", tostring(type)}, true))
+  end
   local assign = #node.values > 0 and "="
-  return join({"var", symbols, ":", types, assign, pretty.expr_list(cx, node.values)}, true)
+  return join({"var", commas(decls), assign, pretty.expr_list(cx, node.values)}, true)
 end
 
 function pretty.stat_var_unpack(cx, node)
