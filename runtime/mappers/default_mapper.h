@@ -307,6 +307,8 @@ namespace Legion {
                                     MapperContext ctx,
                                     const Task &task,
                                     std::vector<Processor> &target_procs);
+      virtual TaskPriority default_policy_select_task_priority(
+                                    MapperContext ctx, const Task &task);
       virtual bool default_policy_select_must_epoch_processors(
                                     MapperContext ctx,
 				    const std::vector<std::set<const Task *> > &tasks,
