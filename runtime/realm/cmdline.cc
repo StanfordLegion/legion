@@ -21,6 +21,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <limits.h>
+#include <string.h>
 
 namespace Realm {
 
@@ -180,7 +181,19 @@ namespace Realm {
 						   bool _keep,
 						   std::string& _target)
     : CommandLineOption(_optname, _keep)
-    , target(_target)
+    , target_str(&_target)
+    , target_array(0)
+    , target_arrlen(0)
+  {}
+
+  StringCommandLineOption::StringCommandLineOption(const std::string& _optname,
+						   bool _keep,
+						   char *_target,
+						   size_t _maxlen)
+    : CommandLineOption(_optname, _keep)
+    , target_str(0)
+    , target_array(_target)
+    , target_arrlen(_maxlen)
   {}
 
   bool StringCommandLineOption::parse_argument(std::vector<std::string>& cmdline,
@@ -189,8 +202,14 @@ namespace Realm {
     // requires an additional argument
     if(pos == cmdline.end()) return false;
 
-    // parse into a copy to avoid corrupting the value on failure
-    target = *pos;
+    if(target_str)
+      *target_str = *pos;
+    if(target_array) {
+      // check length first to avoid corrupting the value on failure
+      if(pos->size() >= target_arrlen)
+	return false;
+      strcpy(target_array, pos->c_str());
+    }
 
     if(keep) {
       ++pos;
@@ -206,8 +225,14 @@ namespace Realm {
     // requires an additional argument
     if(pos >= argc) return false;
 
-    // parse into a copy to avoid corrupting the value on failure
-    target = argv[pos];
+    if(target_str)
+      *target_str = argv[pos];
+    if(target_array) {
+      // check length first to avoid corrupting the value on failure
+      if(strlen(argv[pos]) >= target_arrlen)
+	return false;
+      strcpy(target_array, argv[pos]);
+    }
 
     // always keep
     ++pos;
@@ -233,7 +258,6 @@ namespace Realm {
     // requires an additional argument
     if(pos == cmdline.end()) return false;
 
-    // parse into a copy to avoid corrupting the value on failure
     target.push_back(*pos);
 
     if(keep) {
@@ -250,7 +274,6 @@ namespace Realm {
     // requires an additional argument
     if(pos >= argc) return false;
 
-    // parse into a copy to avoid corrupting the value on failure
     target.push_back(argv[pos]);
 
     // always keep
