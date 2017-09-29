@@ -330,7 +330,8 @@ function pretty.expr_partition(cx, node)
   return join({
       "partition(",
       commas({tostring(node.disjointness),
-              pretty.expr(cx, node.region), pretty.expr(cx, node.coloring)}),
+              pretty.expr(cx, node.region), pretty.expr(cx, node.coloring),
+              pretty.expr(cx, node.colors)}),
       ")"})
 end
 
