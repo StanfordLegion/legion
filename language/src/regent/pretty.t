@@ -213,6 +213,12 @@ function pretty.expr_function(cx, node)
     name = node.value:get_name():mkstring(".")
   elseif terralib.isfunction(node.value) then
     name = node.value:getname()
+  elseif node.value == _G['array'] or node.value == _G['arrayof'] then
+    name = 'array'
+  elseif node.value == _G['vector'] or node.value == _G['vectorof'] then
+    name = 'vector'
+  elseif node.value == _G['tuple'] then
+    name = 'tuple'
   else
     name = tostring(node.value)
   end
