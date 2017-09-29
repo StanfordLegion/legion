@@ -1237,7 +1237,6 @@ namespace Legion {
           LG_DEFER_COMPOSITE_VIEW_INVALIDATION_TASK_ID;
       public:
         CompositeView *view;
-        RtUserEvent invalidated;
       };
     public:
       struct NodeVersionInfo {

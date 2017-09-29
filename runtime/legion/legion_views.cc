@@ -5671,16 +5671,15 @@ namespace Legion {
             // until all the other contexts have invalidated themselves too
             Runtime::phase_barrier_arrive(shard_invalid_barrier, 1/*count*/);
             // Now check again to see if we've triggered again and skip
-            // the deferral of the invalidation
-            if (!shard_invalid_barrier.has_triggered())
+            // the deferral of the invalidation if we're the original view 
+            if (original_shard_view && !shard_invalid_barrier.has_triggered())
             {
               DeferInvalidateArgs args;
               args.view = this;
-              args.invalidated = Runtime::create_rt_user_event();
-              runtime->issue_runtime_meta_task(args, LG_LATENCY_PRIORITY,
-                                       NULL/*op*/, shard_invalid_barrier);
+              RtEvent effect = runtime->issue_runtime_meta_task(args, 
+                  LG_LATENCY_PRIORITY, NULL/*op*/, shard_invalid_barrier);
               if (mutator != NULL)
-                mutator->record_reference_mutation_effect(args.invalidated);
+                mutator->record_reference_mutation_effect(effect);
               return;
             }
           }
@@ -5703,7 +5702,7 @@ namespace Legion {
       for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
             reduction_views.begin(); it != reduction_views.end(); it++)
         it->first->remove_nested_valid_ref(did, mutator);
-      if (shard_invalid_barrier.exists() && is_owner())
+      if (shard_invalid_barrier.exists() && is_owner() && original_shard_view)
       {
 #ifdef DEBUG_LEGION
         ReplicateContext *ctx = dynamic_cast<ReplicateContext*>(owner_context);
@@ -5711,8 +5710,7 @@ namespace Legion {
 #else
         ReplicateContext *ctx = static_cast<ReplicateContext*>(owner_context);
 #endif
-        if (original_shard_view)
-          ctx->unregister_composite_view(this, shard_invalid_barrier);
+        ctx->unregister_composite_view(this, shard_invalid_barrier);
       }
     }
 
@@ -6611,14 +6609,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const DeferInvalidateArgs *iargs = (const DeferInvalidateArgs*)args;
-      std::set<RtEvent> preconditions;
-      WrapperReferenceMutator mutator(preconditions);
+      LocalReferenceMutator mutator;
       iargs->view->notify_invalid(&mutator);
-      if (!preconditions.empty())
-        Runtime::trigger_event(iargs->invalidated, 
-            Runtime::merge_events(preconditions));
-      else
-        Runtime::trigger_event(iargs->invalidated);
     }
 
     //--------------------------------------------------------------------------
