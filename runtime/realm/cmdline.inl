@@ -42,6 +42,15 @@ namespace Realm {
     return *this;
   }
 
+  inline CommandLineParser& CommandLineParser::add_option_string(const std::string& optname,
+							  char *target,
+							  size_t maxlen,
+							  bool keep /*= false*/)
+  {
+    options.push_back(new StringCommandLineOption(optname, keep, target, maxlen));
+    return *this;
+  }
+
   template <typename T>
   CommandLineParser& CommandLineParser::add_option_stringlist(const std::string& optname,
 							      T& target,

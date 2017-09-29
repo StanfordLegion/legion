@@ -4668,12 +4668,12 @@ namespace Legion {
       if (current_trace != NULL)
         op->set_trace(current_trace, !current_trace->is_fixed(), dependences);
       unsigned result = total_children_count++;
-      unsigned outstanding_count = 
+      const unsigned outstanding_count = 
         __sync_add_and_fetch(&outstanding_children_count,1);
       // Only need to check if we are not tracing by frames
       if ((context_configuration.min_frames_to_schedule == 0) && 
           (context_configuration.max_window_size > 0) && 
-            (outstanding_count >= context_configuration.max_window_size))
+            (outstanding_count > context_configuration.max_window_size))
       {
         // Try taking the lock first and see if we succeed
         RtEvent precondition = 
@@ -4735,7 +4735,16 @@ namespace Legion {
     {
       RtEvent wait_event;
       // We already hold our lock from the callsite above
-      if (outstanding_children_count >= context_configuration.max_window_size)
+      // Outstanding children count has already been incremented for the
+      // operation being launched so decrement it in case we wait and then
+      // re-increment it when we wake up again
+      const int outstanding_count = 
+        __sync_fetch_and_add(&outstanding_children_count,-1);
+      // We already decided to wait, so we need to wait for any hysteresis
+      // to play a role here
+      if (outstanding_count <=
+          int((100 - context_configuration.hysteresis_percentage) *
+              context_configuration.max_window_size / 100))
       {
 #ifdef DEBUG_LEGION
         assert(!valid_wait_event);
@@ -4747,6 +4756,8 @@ namespace Legion {
       // Release our lock now
       context_lock.release();
       wait_event.lg_wait();
+      // Re-increment the count once we are awake again
+      __sync_fetch_and_add(&outstanding_children_count,1);
     }
 
     //--------------------------------------------------------------------------
@@ -4840,7 +4851,7 @@ namespace Legion {
 #endif
         if (valid_wait_event && (context_configuration.max_window_size > 0) &&
             (outstanding_count <=
-             int(context_configuration.hysteresis_percentage * 
+             int((100 - context_configuration.hysteresis_percentage) * 
                  context_configuration.max_window_size / 100)))
         {
           to_trigger = window_wait;
@@ -4931,7 +4942,7 @@ namespace Legion {
 #endif
         if (valid_wait_event && (context_configuration.max_window_size > 0) &&
             (outstanding_count <=
-             int(context_configuration.hysteresis_percentage * 
+             int((100 - context_configuration.hysteresis_percentage) *
                  context_configuration.max_window_size / 100)))
         {
           to_trigger = window_wait;
@@ -5708,11 +5719,21 @@ namespace Legion {
       if ((context_configuration.min_tasks_to_schedule == 0) && 
           (context_configuration.min_frames_to_schedule == 0))
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-          "Invalid mapper output from call 'configure_context' "
+                      "Invalid mapper output from call 'configure_context' "
                       "on mapper %s. One of 'min_tasks_to_schedule' and "
                       "'min_frames_to_schedule' must be non-zero for task "
                       "%s (ID %lld)", mapper->get_mapper_name(),
                       get_task_name(), get_unique_id())
+      // Hysteresis percentage is an unsigned so can't be less than 0
+      if (context_configuration.hysteresis_percentage > 100)
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Invalid mapper output from call 'configure_context' "
+                      "on mapper %s. The 'hysteresis_percentage' %d is not "
+                      "a value between 0 and 100 for task %s (ID %lld)",
+                      mapper->get_mapper_name(), 
+                      context_configuration.hysteresis_percentage,
+                      get_task_name(), get_unique_id())
+
       // If we're counting by frames set min_tasks_to_schedule to zero
       if (context_configuration.min_frames_to_schedule > 0)
         context_configuration.min_tasks_to_schedule = 0;

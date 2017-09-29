@@ -807,6 +807,10 @@ namespace Realm {
 	for(std::set<Memory>::const_iterator it2 = mems.begin();
 	    it2 != mems.end();
 	    it2++) {
+	  std::vector<Machine::ProcessorMemoryAffinity> pmas;
+	  machine->get_proc_mem_affinity(pmas, *it1, *it2);
+	  if(!pmas.empty()) continue;
+	  log_runtime.debug() << "adding missing affinity: " << *it1 << " " << *it2 << " " << bandwidth << " " << latency;
 	  Machine::ProcessorMemoryAffinity pma;
 	  pma.p = *it1;
 	  pma.m = *it2;
@@ -828,6 +832,10 @@ namespace Realm {
 	for(std::set<Memory>::const_iterator it2 = mems2.begin();
 	    it2 != mems2.end();
 	    it2++) {
+	  std::vector<Machine::MemoryMemoryAffinity> mmas;
+	  machine->get_mem_mem_affinity(mmas, *it1, *it2);
+	  if(!mmas.empty()) continue;
+	  log_runtime.debug() << "adding missing affinity: " << *it1 << " " << *it2 << " " << bandwidth << " " << latency;
 	  Machine::MemoryMemoryAffinity mma;
 	  mma.m1 = *it1;
 	  mma.m2 = *it2;
