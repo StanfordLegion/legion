@@ -1330,8 +1330,7 @@ namespace Legion {
       VariantInfo chosen = default_find_preferred_variant(task, ctx,
                         true/*needs tight bound*/, true/*cache*/, target_kind);
       output.chosen_variant = chosen.variant;
-      // TODO: some criticality analysis to assign priorities
-      output.task_priority = 0;
+      output.task_priority = default_policy_select_task_priority(ctx, task);
       output.postmap_task = false;
       // Figure out our target processors
       default_policy_select_target_processors(ctx, task, output.target_procs);
@@ -1734,6 +1733,15 @@ namespace Legion {
       }
       else
         target_procs.push_back(task.target_proc);
+    }
+
+    //--------------------------------------------------------------------------
+    TaskPriority DefaultMapper::default_policy_select_task_priority(
+                                    MapperContext ctx, const Task &task)
+    //--------------------------------------------------------------------------
+    {
+      // TODO: some criticality analysis to assign priorities
+      return 0;
     }
 
     //--------------------------------------------------------------------------

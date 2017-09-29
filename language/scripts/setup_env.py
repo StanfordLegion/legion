@@ -130,7 +130,7 @@ def build_terra(terra_dir, llvm_dir, is_cray, thread_count):
         cwd=terra_dir,
         env=env)
 
-def install_llvm(llvm_dir, llvm_install_dir, llvm_version, cmake_exe, insecure):
+def install_llvm(llvm_dir, llvm_install_dir, llvm_version, llvm_use_cmake, cmake_exe, thread_count, is_cray, insecure):
     os.mkdir(llvm_dir)
 
     if llvm_version == '38':
@@ -284,7 +284,7 @@ def driver(llvm_version, insecure):
     llvm_build_result = os.path.join(llvm_install_dir, 'bin', 'llvm-config')
     if not os.path.exists(llvm_dir):
         try:
-            install_llvm(llvm_dir, llvm_install_dir, llvm_version, cmake_exe, insecure)
+            install_llvm(llvm_dir, llvm_install_dir, llvm_version, llvm_use_cmake, cmake_exe, thread_count, is_cray, insecure)
         except Exception as e:
             report_build_failure('llvm', llvm_dir, e)
     else:
