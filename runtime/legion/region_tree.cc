@@ -3044,6 +3044,7 @@ namespace Legion {
         index_nodes[sp] = result;
         index_space_requests.erase(sp);
       }
+      result->record_registered();
       if (parent != NULL)
         parent->add_child(result);
       
@@ -3080,6 +3081,7 @@ namespace Legion {
         index_nodes[sp] = result;
         index_space_requests.erase(sp);
       }
+      result->record_registered();
       if (parent != NULL)
         parent->add_child(result);
       
@@ -3118,6 +3120,7 @@ namespace Legion {
         index_parts[p] = result;
         index_part_requests.erase(p);
       }
+      result->record_registered();
       if (parent != NULL)
         parent->add_child(result);
       
@@ -3156,6 +3159,7 @@ namespace Legion {
         index_parts[p] = result;
         index_part_requests.erase(p);
       }
+      result->record_registered();
       if (parent != NULL)
         parent->add_child(result);
       
@@ -3181,6 +3185,7 @@ namespace Legion {
       }
       field_nodes[space] = result;
       field_space_requests.erase(space);
+      result->record_registered();
       return result;
     }
 
@@ -3204,6 +3209,7 @@ namespace Legion {
       }
       field_nodes[space] = result;
       field_space_requests.erase(space);
+      result->record_registered();
       return result;
     }
 
@@ -3254,6 +3260,7 @@ namespace Legion {
           region_tree_requests.erase(r.tree_id);
         }
       }
+      result->record_registered();
       // Now we can make the other ways of accessing the node available
       if (parent == NULL)
         col_src->add_instance(result);
@@ -3298,6 +3305,7 @@ namespace Legion {
         // Now we can put the node in the map
         part_nodes[p] = result;
       }
+      result->record_registered();
       // Now we can make the other ways of accessing the node available
       row_src->add_instance(result);
       parent->add_child(result);
@@ -3786,10 +3794,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock l_lock(lookup_lock);
+#ifdef DEBUG_LEGION
       std::map<IndexSpace,IndexSpaceNode*>::iterator finder = 
         index_nodes.find(space);
-      if (finder != index_nodes.end())
-        index_nodes.erase(finder);
+      assert(finder != index_nodes.end());
+      index_nodes.erase(finder);
+#else
+      index_nodes.erase(space);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3797,10 +3809,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock l_lock(lookup_lock);
+#ifdef DEBUG_LEGION
       std::map<IndexPartition,IndexPartNode*>::iterator finder = 
         index_parts.find(part);
-      if (finder != index_parts.end())
-        index_parts.erase(finder);
+      assert(finder != index_parts.end());
+      index_parts.erase(finder);
+#else
+      index_parts.erase(part);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3808,10 +3824,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock l_lock(lookup_lock);
+#ifdef DEBUG_LEGION
       std::map<FieldSpace,FieldSpaceNode*>::iterator finder = 
         field_nodes.find(space);
-      if (finder != field_nodes.end())
-        field_nodes.erase(finder);
+      assert(finder != field_nodes.end());
+      field_nodes.erase(finder);
+#else
+      field_nodes.erase(space);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3819,17 +3839,23 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock l_lock(lookup_lock);
+#ifdef DEBUG_LEGION
       if (top)
       {
         std::map<RegionTreeID,RegionNode*>::iterator finder = 
           tree_nodes.find(handle.get_tree_id());
-        if (finder != tree_nodes.end())
-          tree_nodes.erase(finder);
+        assert(finder != tree_nodes.end());
+        tree_nodes.erase(finder);
       }
       std::map<LogicalRegion,RegionNode*>::iterator finder = 
         region_nodes.find(handle);
-      if (finder != region_nodes.end())
-        region_nodes.erase(finder);
+      assert(finder != region_nodes.end());
+      region_nodes.erase(finder);
+#else
+      if (top)
+        tree_nodes.erase(handle.get_tree_id());
+      region_nodes.erase(handle);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3837,10 +3863,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock l_lock(lookup_lock);
+#ifdef DEBUG_LEGION
       std::map<LogicalPartition,PartitionNode*>::iterator finder = 
         part_nodes.find(handle);
-      if (finder != part_nodes.end())
-        part_nodes.erase(finder);
+      assert(finder != part_nodes.end());
+      part_nodes.erase(finder);
+#else
+      part_nodes.erase(handle);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -4360,14 +4390,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexTreeNode::IndexTreeNode(void)
-      : context(NULL), depth(0), color(0), destroyed(false)
+      : context(NULL), depth(0), color(0), registered(false), destroyed(false)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     IndexTreeNode::IndexTreeNode(RegionTreeForest *ctx,unsigned d,LegionColor c)
-      : context(ctx), depth(d), color(c), destroyed(false),
+      : context(ctx), depth(d), color(c), registered(false), destroyed(false),
         node_lock(Reservation::create_reservation())
     //--------------------------------------------------------------------------
     {
@@ -4387,6 +4417,16 @@ namespace Legion {
       {
         legion_free(SEMANTIC_INFO_ALLOC, it->second.buffer, it->second.size);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexTreeNode::record_registered(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!registered);
+#endif
+      registered = true;
     }
 
     //--------------------------------------------------------------------------
@@ -4617,7 +4657,8 @@ namespace Legion {
             color_map.begin(); it != color_map.end(); it++)
         delete it->second;
       // Remove ourselves from the context
-      context->remove_node(handle);
+      if (registered)
+        context->remove_node(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -5115,9 +5156,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock);
+#ifdef DEBUG_LEGION
       std::set<RegionNode*>::iterator finder = logical_nodes.find(inst);
-      if (finder != logical_nodes.end())
-        logical_nodes.erase(finder);
+      assert(finder != logical_nodes.end());
+      logical_nodes.erase(finder);
+#else
+      logical_nodes.erase(inst);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -5464,7 +5509,8 @@ namespace Legion {
             color_map.begin(); it != color_map.end(); it++)
         delete it->second;
       // Lastly we can unregister ourselves with the context
-      context->remove_node(handle);
+      if (registered)
+        context->remove_node(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -6058,9 +6104,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock);
+#ifdef DEBUG_LEGION
       std::set<PartitionNode*>::iterator finder = logical_nodes.find(inst);
-      if (finder != logical_nodes.end())
-        logical_nodes.erase(finder);
+      assert(finder != logical_nodes.end());
+      logical_nodes.erase(finder);
+#else
+      logical_nodes.erase(inst);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -6398,7 +6448,7 @@ namespace Legion {
       : handle(sp), is_owner((sp.id % ctx->runtime->runtime_stride) ==
           ctx->runtime->address_space), 
         owner(sp.id % ctx->runtime->runtime_stride), 
-        context(ctx), destroyed(false)
+        context(ctx), registered(false), destroyed(false)
     //--------------------------------------------------------------------------
     {
       this->node_lock = Reservation::create_reservation();
@@ -6415,7 +6465,7 @@ namespace Legion {
       : handle(sp), is_owner((sp.id % ctx->runtime->runtime_stride) ==
           ctx->runtime->address_space), 
         owner(sp.id % ctx->runtime->runtime_stride), 
-        context(ctx), destroyed(false)
+        context(ctx), registered(false), destroyed(false)
     //--------------------------------------------------------------------------
     {
       this->node_lock = Reservation::create_reservation();
@@ -6497,7 +6547,8 @@ namespace Legion {
         legion_free(SEMANTIC_INFO_ALLOC, it->second.buffer, it->second.size);
       }
       // Unregister ourselves from the context
-      context->remove_node(handle);
+      if (registered)
+        context->remove_node(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -6507,6 +6558,16 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldSpaceNode::record_registered(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!registered);
+#endif
+      registered = true;
     }
 
     //--------------------------------------------------------------------------
@@ -7769,9 +7830,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock);
+#ifdef DEBUG_LEGION
       std::set<RegionNode*>::iterator finder = local_trees.find(inst);
-      if (finder != local_trees.end())
-        local_trees.erase(finder);
+      assert(finder != local_trees.end());
+      local_trees.erase(finder);
+#else
+      local_trees.erase(inst);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -8589,7 +8654,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RegionTreeNode::RegionTreeNode(RegionTreeForest *ctx, 
                                    FieldSpaceNode *column_src)
-      : context(ctx), column_source(column_src), destroyed(false)
+      : context(ctx), column_source(column_src), 
+        registered(false), destroyed(false)
     //--------------------------------------------------------------------------
     {
       this->node_lock = Reservation::create_reservation(); 
@@ -8606,6 +8672,16 @@ namespace Legion {
       {
         legion_free(SEMANTIC_INFO_ALLOC, it->second.buffer, it->second.size);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::record_registered(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!registered);
+#endif
+      registered = true;
     }
 
     //--------------------------------------------------------------------------
@@ -13215,14 +13291,17 @@ namespace Legion {
       for (std::map<LegionColor,PartitionNode*>::const_iterator it = 
             color_map.begin(); it != color_map.end(); it++)
         delete it->second;
-      // Unregister oursleves with the row source
-      row_source->remove_instance(this);
-      const bool top_level = (parent == NULL);
-      // Only need to unregister ourselves with the column if we're the top
-      if (top_level)
-        column_source->remove_instance(this);
-      // Unregister ourselves with the context
-      context->remove_node(handle, top_level);
+      if (registered)
+      {
+        // Unregister oursleves with the row source
+        row_source->remove_instance(this);
+        const bool top_level = (parent == NULL);
+        // Only need to unregister ourselves with the column if we're the top
+        if (top_level)
+          column_source->remove_instance(this);
+        // Unregister ourselves with the context
+        context->remove_node(handle, top_level);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -14945,10 +15024,13 @@ namespace Legion {
       for (std::map<LegionColor,RegionNode*>::const_iterator it = 
             color_map.begin(); it != color_map.end(); it++)
         delete it->second;
-      // Unregister ourselves with our row source
-      row_source->remove_instance(this);
-      // Then unregister ourselves with the context
-      context->remove_node(handle);
+      if (registered)
+      {
+        // Unregister ourselves with our row source
+        row_source->remove_instance(this);
+        // Then unregister ourselves with the context
+        context->remove_node(handle);
+      }
     }
 
     //--------------------------------------------------------------------------

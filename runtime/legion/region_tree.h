@@ -651,6 +651,8 @@ namespace Legion {
                     LegionColor color); 
       virtual ~IndexTreeNode(void);
     public:
+      void record_registered(void);
+    public:
       virtual IndexTreeNode* get_parent(void) const = 0;
       virtual void get_colors(std::vector<LegionColor> &colors) = 0;
       virtual void send_node(AddressSpaceID target, bool up) = 0;
@@ -682,6 +684,7 @@ namespace Legion {
     public:
       NodeSet creation_set;
       NodeSet child_creation;
+      bool registered;
       bool destroyed;
     protected:
       Reservation node_lock;
@@ -1690,6 +1693,7 @@ namespace Legion {
       ~FieldSpaceNode(void);
     public:
       FieldSpaceNode& operator=(const FieldSpaceNode &rhs);
+      void record_registered(void);
       AddressSpaceID get_owner_space(void) const; 
       static AddressSpaceID get_owner_space(FieldSpace handle, Runtime *rt);
     public:
@@ -1840,6 +1844,7 @@ namespace Legion {
       RegionTreeForest *const context;
     public:
       NodeSet creation_set;
+      bool registered;
       bool destroyed;
     private:
       Reservation node_lock;
@@ -1876,6 +1881,7 @@ namespace Legion {
       RegionTreeNode(RegionTreeForest *ctx, FieldSpaceNode *column);
       virtual ~RegionTreeNode(void);
     public:
+      void record_registered(void);
       static AddressSpaceID get_owner_space(RegionTreeID tid, Runtime *rt);
     public:
       inline PhysicalState* get_physical_state(VersionInfo &info)
@@ -2265,6 +2271,7 @@ namespace Legion {
       FieldSpaceNode *const column_source;
     public:
       NodeSet creation_set;
+      bool registered;
       bool destroyed;
     protected:
       DynamicTable<LogicalStateAllocator> logical_states;
