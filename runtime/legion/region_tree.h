@@ -524,6 +524,12 @@ namespace Legion {
       bool has_tree(RegionTreeID tid, bool local_only = false);
       bool has_field(FieldSpace space, FieldID fid);
     public:
+      void remove_node(IndexSpace space);
+      void remove_node(IndexPartition part);
+      void remove_node(FieldSpace space);
+      void remove_node(LogicalRegion handle, bool top);
+      void remove_node(LogicalPartition handle);
+    public:
       bool is_top_level_index_space(IndexSpace handle);
       bool is_top_level_region(LogicalRegion handle);
     public:
@@ -784,6 +790,7 @@ namespace Legion {
     public:
       void add_instance(RegionNode *inst);
       bool has_instance(RegionTreeID tid);
+      void remove_instance(RegionNode *inst);
       void add_creation_source(AddressSpaceID source);
     public:
       static void handle_disjointness_test(IndexSpaceNode *parent,
@@ -1436,6 +1443,7 @@ namespace Legion {
     public:
       void add_instance(PartitionNode *inst);
       bool has_instance(RegionTreeID tid);
+      void remove_instance(PartitionNode *inst);
       void add_creation_source(AddressSpaceID source);
     public:
       void add_pending_child(const LegionColor child_color,
@@ -1748,8 +1756,9 @@ namespace Legion {
                          std::set<FieldID> &to_set);
     public:
       void add_instance(RegionNode *inst);
-      RtEvent add_instance(LogicalRegion top_handle, AddressSpaceID source);
+      RtEvent add_instance(LogicalRegion inst, AddressSpaceID source);
       bool has_instance(RegionTreeID tid);
+      void remove_instance(RegionNode *inst);
       void destroy_node(AddressSpaceID source);
     public:
       FieldMask get_field_mask(const std::set<FieldID> &fields) const;
@@ -1836,6 +1845,7 @@ namespace Legion {
       Reservation node_lock;
       // Top nodes in the trees for which this field space is used
       std::set<LogicalRegion> logical_trees;
+      std::set<RegionNode*> local_trees;
       std::map<FieldID,FieldInfo> fields;
       FieldMask available_indexes;
     private:

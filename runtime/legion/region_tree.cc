@@ -59,23 +59,45 @@ namespace Legion {
     RegionTreeForest::~RegionTreeForest(void)
     //--------------------------------------------------------------------------
     {
-      lookup_lock.destroy_reservation();
-      lookup_lock = Reservation::NO_RESERVATION;
-      for (std::map<LogicalPartition,PartitionNode*>::const_iterator it = 
-            part_nodes.begin(); it != part_nodes.end(); it++)
-        delete it->second;
-      for (std::map<LogicalRegion,RegionNode*>::const_iterator it = 
-            region_nodes.begin(); it != region_nodes.end(); it++)
-        delete it->second;
+      // Make copies of the data structures to delete since these data
+      // structures are going to be mutated by the deletion itself
+      std::vector<RegionNode*> regions_to_delete;
+      for (std::map<RegionTreeID,RegionNode*>::const_iterator it = 
+            tree_nodes.begin(); it != tree_nodes.end(); it++)
+        regions_to_delete.push_back(it->second);
+      // Do everything in reverse order, delete region trees first
+      for (std::vector<RegionNode*>::const_iterator it = 
+            regions_to_delete.begin(); it != regions_to_delete.end(); it++)
+        delete (*it);
+      // Then delete field spaces
+      std::vector<FieldSpaceNode*> field_spaces_to_delete;
       for (std::map<FieldSpace,FieldSpaceNode*>::const_iterator it = 
             field_nodes.begin(); it != field_nodes.end(); it++)
-        delete it->second;
-      for (std::map<IndexPartition,IndexPartNode*>::const_iterator it = 
-            index_parts.begin(); it != index_parts.end(); it++)
-        delete it->second;
+        field_spaces_to_delete.push_back(it->second);
+      for (std::vector<FieldSpaceNode*>::const_iterator it = 
+            field_spaces_to_delete.begin(); it != 
+            field_spaces_to_delete.end(); it++)
+        delete (*it);
+      // Lastly delete the index space trees
+      std::vector<IndexSpaceNode*> index_spaces_to_delete;
       for (std::map<IndexSpace,IndexSpaceNode*>::const_iterator it = 
             index_nodes.begin(); it != index_nodes.end(); it++)
-        delete it->second;
+        if (it->second->parent == NULL)
+          index_spaces_to_delete.push_back(it->second);
+      for (std::vector<IndexSpaceNode*>::const_iterator it = 
+            index_spaces_to_delete.begin(); it != 
+            index_spaces_to_delete.end(); it++)
+        delete (*it);
+      // Lastly we can delete the lookup lock now that we no longer need it
+      lookup_lock.destroy_reservation();
+      lookup_lock = Reservation::NO_RESERVATION;
+#ifdef DEBUG_LEGION
+      assert(index_nodes.empty());
+      assert(index_parts.empty());
+      assert(field_nodes.empty());
+      assert(region_nodes.empty());
+      assert(part_nodes.empty());
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3760,6 +3782,90 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RegionTreeForest::remove_node(IndexSpace space)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock l_lock(lookup_lock);
+#ifdef DEBUG_LEGION
+      std::map<IndexSpace,IndexSpaceNode*>::iterator finder = 
+        index_nodes.find(space);
+      assert(finder != index_nodes.end());
+      index_nodes.erase(finder);
+#else
+      index_nodes.erase(space);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::remove_node(IndexPartition part)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock l_lock(lookup_lock);
+#ifdef DEBUG_LEGION
+      std::map<IndexPartition,IndexPartNode*>::iterator finder = 
+        index_parts.find(part);
+      assert(finder != index_parts.end());
+      index_parts.erase(finder);
+#else
+      index_parts.erase(part);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::remove_node(FieldSpace space)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock l_lock(lookup_lock);
+#ifdef DEBUG_LEGION
+      std::map<FieldSpace,FieldSpaceNode*>::iterator finder = 
+        field_nodes.find(space);
+      assert(finder != field_nodes.end());
+      field_nodes.erase(finder);
+#else
+      field_nodes.erase(space);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::remove_node(LogicalRegion handle, bool top)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock l_lock(lookup_lock);
+#ifdef DEBUG_LEGION
+      if (top)
+      {
+        std::map<RegionTreeID,RegionNode*>::iterator finder = 
+          tree_nodes.find(handle.get_tree_id());
+        assert(finder != tree_nodes.end());
+        tree_nodes.erase(finder);
+      }
+      std::map<LogicalRegion,RegionNode*>::iterator finder = 
+        region_nodes.find(handle);
+      assert(finder != region_nodes.end());
+      region_nodes.erase(finder);
+#else
+      if (top)
+        tree_nodes.erase(handle.get_tree_id());
+      region_nodes.erase(handle);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::remove_node(LogicalPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock l_lock(lookup_lock);
+#ifdef DEBUG_LEGION
+      std::map<LogicalPartition,PartitionNode*>::iterator finder = 
+        part_nodes.find(handle);
+      assert(finder != part_nodes.end());
+      part_nodes.erase(finder);
+#else
+      part_nodes.erase(handle);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
     bool RegionTreeForest::is_top_level_index_space(IndexSpace handle)
     //--------------------------------------------------------------------------
     {
@@ -4517,6 +4623,23 @@ namespace Legion {
     IndexSpaceNode::~IndexSpaceNode(void)
     //--------------------------------------------------------------------------
     {
+      // First we can delete any logical nodes, but must make a copy first
+      if (!logical_nodes.empty())
+      {
+        std::set<RegionNode*> to_delete = logical_nodes;
+        for (std::set<RegionNode*>::const_iterator it = 
+              to_delete.begin(); it != to_delete.end(); it++)
+          delete (*it);
+#ifdef DEBUG_LEGION
+        assert(logical_nodes.empty());
+#endif
+      }
+      // Now we can delete any children that we have
+      for (std::map<LegionColor,IndexPartNode*>::const_iterator it = 
+            color_map.begin(); it != color_map.end(); it++)
+        delete it->second;
+      // Remove ourselves from the context
+      context->remove_node(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -5010,6 +5133,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndexSpaceNode::remove_instance(RegionNode *inst)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock n_lock(node_lock);
+#ifdef DEBUG_LEGION
+      std::set<RegionNode*>::iterator finder = logical_nodes.find(inst);
+      assert(finder != logical_nodes.end());
+      logical_nodes.erase(finder);
+#else
+      logical_nodes.erase(inst);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
     void IndexSpaceNode::add_creation_source(AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -5336,6 +5473,24 @@ namespace Legion {
     IndexPartNode::~IndexPartNode(void)
     //--------------------------------------------------------------------------
     {
+      // First we can delete our logical nodes if we have any
+      if (!logical_nodes.empty())
+      {
+        // Make a copy since this data structure is about to change
+        std::set<PartitionNode*> to_delete = logical_nodes;
+        for (std::set<PartitionNode*>::const_iterator it = 
+              to_delete.begin(); it != to_delete.end(); it++)
+          delete (*it);
+#ifdef DEBUG_LEGION
+        assert(logical_nodes.empty());
+#endif
+      }
+      // Now we can delete our children if we have any
+      for (std::map<LegionColor,IndexSpaceNode*>::const_iterator it = 
+            color_map.begin(); it != color_map.end(); it++)
+        delete it->second;
+      // Lastly we can unregister ourselves with the context
+      context->remove_node(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -5925,6 +6080,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndexPartNode::remove_instance(PartitionNode *inst)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock n_lock(node_lock);
+#ifdef DEBUG_LEGION
+      std::set<PartitionNode*>::iterator finder = logical_nodes.find(inst);
+      assert(finder != logical_nodes.end());
+      logical_nodes.erase(finder);
+#else
+      logical_nodes.erase(inst);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
     void IndexPartNode::add_creation_source(AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -6293,13 +6462,13 @@ namespace Legion {
         derez.deserialize(fid);
         derez.deserialize(fields[fid]);
       }
-      size_t num_top;
-      derez.deserialize(num_top);
-      for (unsigned idx = 0; idx < num_top; idx++)
+      size_t num_insts;
+      derez.deserialize(num_insts);
+      for (unsigned idx = 0; idx < num_insts; idx++)
       {
-        LogicalRegion top;
-        derez.deserialize(top);
-        logical_trees.insert(top);
+        LogicalRegion handle;
+        derez.deserialize(handle);
+        logical_trees.insert(handle);
       }
     }
 
@@ -6316,8 +6485,22 @@ namespace Legion {
     FieldSpaceNode::~FieldSpaceNode(void)
     //--------------------------------------------------------------------------
     {
+      // First we can delete any instances that we have
+      if (!local_trees.empty())
+      {
+        // Must make a copy since the data structure can change
+        std::set<RegionNode*> to_delete = local_trees;
+        for (std::set<RegionNode*>::const_iterator it = 
+              to_delete.begin(); it != to_delete.end(); it++)
+          delete (*it);
+#ifdef DEBUG_LEGION
+        assert(local_trees.empty());
+#endif
+      }
+      // Can now delete the lock since we don't need anymore
       node_lock.destroy_reservation();
-      node_lock = Reservation::NO_RESERVATION;
+      node_lock = Reservation::NO_RESERVATION; 
+      // Next we can delete our layouts
       for (std::map<LEGION_FIELD_MASK_FIELD_TYPE,LegionList<LayoutDescription*,
             LAYOUT_DESCRIPTION_ALLOC>::tracked>::iterator it =
             layouts.begin(); it != layouts.end(); it++)
@@ -6343,6 +6526,8 @@ namespace Legion {
       {
         legion_free(SEMANTIC_INFO_ALLOC, it->second.buffer, it->second.size);
       }
+      // Unregister ourselves from the context
+      context->remove_node(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -7534,12 +7719,19 @@ namespace Legion {
     {
       RtEvent wait_on = add_instance(inst->handle, 
                                      context->runtime->address_space);
+      {
+        AutoLock n_lock(node_lock);
+#ifdef DEBUG_LEGION
+        assert(local_trees.find(inst) == local_trees.end());
+#endif
+        local_trees.insert(inst);
+      }
       if (wait_on.exists())
         wait_on.lg_wait();
     }
 
     //--------------------------------------------------------------------------
-    RtEvent FieldSpaceNode::add_instance(LogicalRegion top_handle,
+    RtEvent FieldSpaceNode::add_instance(LogicalRegion inst,
                                          AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -7547,9 +7739,9 @@ namespace Legion {
       {
         AutoLock n_lock(node_lock);
         // Check to see if we already have it, if we do then we are done
-        if (logical_trees.find(top_handle) != logical_trees.end())
+        if (logical_trees.find(inst) != logical_trees.end())
           return RtEvent::NO_RT_EVENT;
-        logical_trees.insert(top_handle);
+        logical_trees.insert(inst);
         if (is_owner)
         {
           if (!!creation_set)
@@ -7576,7 +7768,7 @@ namespace Legion {
           {
             RezCheck z(rez);
             rez.serialize(handle);
-            rez.serialize(top_handle);
+            rez.serialize(inst);
             rez.serialize(done);
           }
           context->runtime->send_field_space_top_alloc(*it, rez);
@@ -7593,13 +7785,27 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
-      for (std::set<LogicalRegion>::const_iterator it = logical_trees.begin();
-            it != logical_trees.end(); it++)
+      for (std::set<LogicalRegion>::const_iterator it = 
+            logical_trees.begin(); it != logical_trees.end(); it++)
       {
         if (it->get_tree_id() == tid)
           return true;
       }
       return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldSpaceNode::remove_instance(RegionNode *inst)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock n_lock(node_lock);
+#ifdef DEBUG_LEGION
+      std::set<RegionNode*>::iterator finder = local_trees.find(inst);
+      assert(finder != local_trees.end());
+      local_trees.erase(finder);
+#else
+      local_trees.erase(inst); 
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -7616,7 +7822,7 @@ namespace Legion {
       // If we've already been destroyed then we are done
       if (destroyed)
         return;
-      std::vector<LogicalRegion> to_check;
+      std::vector<RegionNode*> to_destroy;
       {
         AutoLock n_lock(node_lock);
         if (!destroyed)
@@ -7627,16 +7833,13 @@ namespace Legion {
             DestructionFunctor functor(handle, context->runtime);
             creation_set.map(functor);
           }
-          to_check.insert(to_check.end(), 
-                          logical_trees.begin(), logical_trees.end());
+          to_destroy.insert(to_destroy.end(), 
+                            local_trees.begin(), local_trees.end());
         }
       }
-      for (std::vector<LogicalRegion>::const_iterator it = 
-            to_check.begin(); it != to_check.end(); it++)
-      {
-        if (context->has_node(*it, true/*local only*/))
-          context->get_node(*it)->destroy_node(source);
-      }
+      for (std::vector<RegionNode*>::const_iterator it = 
+            to_destroy.begin(); it != to_destroy.end(); it++)
+        (*it)->destroy_node(source);
     }
 
     //--------------------------------------------------------------------------
@@ -8095,13 +8298,11 @@ namespace Legion {
             rez.serialize(it->first);
             rez.serialize(it->second);
           }
-          // Pack the logical trees
-          rez.serialize<size_t>(logical_trees.size());
+          size_t num_instances = logical_trees.size();
+          rez.serialize<size_t>(num_instances);
           for (std::set<LogicalRegion>::const_iterator it = 
                 logical_trees.begin(); it != logical_trees.end(); it++)
-          {
             rez.serialize(*it);
-          }
           rez.serialize<size_t>(semantic_info.size());
           for (LegionMap<SemanticTag,SemanticInfo>::aligned::iterator it = 
                 semantic_info.begin(); it != semantic_info.end(); it++)
@@ -13044,6 +13245,18 @@ namespace Legion {
     RegionNode::~RegionNode(void)
     //--------------------------------------------------------------------------
     {
+      // First delete any children that we have
+      for (std::map<LegionColor,PartitionNode*>::const_iterator it = 
+            color_map.begin(); it != color_map.end(); it++)
+        delete it->second;
+      // Unregister oursleves with the row source
+      row_source->remove_instance(this);
+      const bool top_level = (parent == NULL);
+      // Only need to unregister ourselves with the column if we're the top
+      if (top_level)
+        column_source->remove_instance(this);
+      // Unregister ourselves with the context
+      context->remove_node(handle, top_level);
     }
 
     //--------------------------------------------------------------------------
@@ -14762,6 +14975,14 @@ namespace Legion {
     PartitionNode::~PartitionNode(void)
     //--------------------------------------------------------------------------
     {
+      // Recursively delete any children that we have
+      for (std::map<LegionColor,RegionNode*>::const_iterator it = 
+            color_map.begin(); it != color_map.end(); it++)
+        delete it->second;
+      // Unregister ourselves with our row source
+      row_source->remove_instance(this);
+      // Then unregister ourselves with the context
+      context->remove_node(handle);
     }
 
     //--------------------------------------------------------------------------
