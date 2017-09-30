@@ -4653,12 +4653,24 @@ namespace Legion {
 #endif
       }
       // Now we can delete any children that we have
-      for (std::map<LegionColor,IndexPartNode*>::const_iterator it = 
-            color_map.begin(); it != color_map.end(); it++)
-        delete it->second;
+      if (!color_map.empty())
+      {
+        // Have to make a copy since this will change our data structure
+        std::map<LegionColor,IndexPartNode*> children = color_map;
+        for (std::map<LegionColor,IndexPartNode*>::const_iterator it = 
+              children.begin(); it != children.end(); it++)
+          delete it->second;
+#ifdef DEBUG_LEGION
+        assert(color_map.empty());
+#endif
+      }
       // Remove ourselves from the context
       if (registered)
+      {
+        if (parent != NULL)
+          parent->remove_child(color);
         context->remove_node(handle);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -4939,7 +4951,14 @@ namespace Legion {
     void IndexSpaceNode::remove_child(const LegionColor c)
     //--------------------------------------------------------------------------
     {
-      // Do nothing for now
+      AutoLock n_lock(node_lock);
+#ifdef DEBUG_LEGION
+      std::map<LegionColor,IndexPartNode*>::iterator finder = color_map.find(c);
+      assert(finder != color_map.end());
+      color_map.erase(finder);
+#else
+      color_map.erase(c);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -5505,12 +5524,23 @@ namespace Legion {
 #endif
       }
       // Now we can delete our children if we have any
-      for (std::map<LegionColor,IndexSpaceNode*>::const_iterator it = 
-            color_map.begin(); it != color_map.end(); it++)
-        delete it->second;
+      if (!color_map.empty())
+      {
+        // Have to make a copy since this data structure can change
+        std::map<LegionColor,IndexSpaceNode*> children = color_map;
+        for (std::map<LegionColor,IndexSpaceNode*>::const_iterator it = 
+              children.begin(); it != children.end(); it++)
+          delete it->second;
+#ifdef DEBUG_LEGION
+        assert(color_map.empty());
+#endif
+      }
       // Lastly we can unregister ourselves with the context
       if (registered)
+      {
+        parent->remove_child(color);
         context->remove_node(handle);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5850,7 +5880,15 @@ namespace Legion {
     void IndexPartNode::remove_child(const LegionColor c)
     //--------------------------------------------------------------------------
     {
-      // Do nothing for the moment
+      AutoLock n_lock(node_lock);
+#ifdef DEBUG_LEGION
+      std::map<LegionColor,IndexSpaceNode*>::iterator finder = 
+        color_map.find(c);
+      assert(finder != color_map.end());
+      color_map.erase(finder);
+#else
+      color_map.erase(c);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -13288,17 +13326,28 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // First delete any children that we have
-      for (std::map<LegionColor,PartitionNode*>::const_iterator it = 
-            color_map.begin(); it != color_map.end(); it++)
-        delete it->second;
+      if (!color_map.empty())
+      {
+        // Have to make a copy since data structure can change
+        std::map<LegionColor,PartitionNode*> children = color_map;
+        for (std::map<LegionColor,PartitionNode*>::const_iterator it = 
+              children.begin(); it != children.end(); it++)
+          delete it->second;
+#ifdef DEBUG_LEGION
+        assert(color_map.empty());
+#endif
+      }
       if (registered)
       {
-        // Unregister oursleves with the row source
-        row_source->remove_instance(this);
         const bool top_level = (parent == NULL);
         // Only need to unregister ourselves with the column if we're the top
+        // otherwise we need to unregister ourselves with our parent
         if (top_level)
           column_source->remove_instance(this);
+        else
+          parent->remove_child(row_source->color);
+        // Unregister oursleves with the row source
+        row_source->remove_instance(this);
         // Unregister ourselves with the context
         context->remove_node(handle, top_level);
       }
@@ -13353,7 +13402,6 @@ namespace Legion {
       assert(color_map.find(child->row_source->color) == color_map.end());
 #endif
       color_map[child->row_source->color] = child;
-      valid_map[child->row_source->color] = child;
     }
 
     //--------------------------------------------------------------------------
@@ -13361,7 +13409,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock);
-      valid_map.erase(c);
+#ifdef DEBUG_LEGION
+      std::map<LegionColor,PartitionNode*>::iterator finder = color_map.find(c);
+      assert(finder != color_map.end());
+      color_map.erase(finder);
+#else
+      color_map.erase(c);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -13633,7 +13687,7 @@ namespace Legion {
           if (traverser->visit_only_valid())
           {
             AutoLock n_lock(node_lock,1,false/*exclusive*/);
-            children = valid_map;
+            children = color_map;
           }
           else
           {
@@ -15021,11 +15075,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Recursively delete any children that we have
-      for (std::map<LegionColor,RegionNode*>::const_iterator it = 
-            color_map.begin(); it != color_map.end(); it++)
-        delete it->second;
+      if (!color_map.empty())
+      {
+        // Need to make a copy since data structure can change
+        std::map<LegionColor,RegionNode*> children = color_map;
+        for (std::map<LegionColor,RegionNode*>::const_iterator it = 
+              children.begin(); it != children.end(); it++)
+          delete it->second;
+#ifdef DEBUG_LEGION
+        assert(color_map.empty());
+#endif
+      }
       if (registered)
       {
+        // Unregister ourselves with our parent
+        parent->remove_child(row_source->color);
         // Unregister ourselves with our row source
         row_source->remove_instance(this);
         // Then unregister ourselves with the context
@@ -15088,7 +15152,14 @@ namespace Legion {
     void PartitionNode::remove_child(const LegionColor c)
     //--------------------------------------------------------------------------
     {
-      // Don't do anything for now
+      AutoLock n_lock(node_lock);
+#ifdef DEBUG_LEGION
+      std::map<LegionColor,RegionNode*>::iterator finder = color_map.find(c);
+      assert(finder != color_map.end());
+      color_map.erase(finder);
+#else
+      color_map.erase(c);
+#endif
     }
 
     //--------------------------------------------------------------------------

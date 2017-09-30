@@ -2479,7 +2479,6 @@ namespace Legion {
       IndexSpaceNode *const row_source;
     protected:
       std::map<LegionColor,PartitionNode*> color_map;
-      std::map<LegionColor,PartitionNode*> valid_map;
     };
 
     /**
