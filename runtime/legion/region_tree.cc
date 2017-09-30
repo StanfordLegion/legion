@@ -3786,14 +3786,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock l_lock(lookup_lock);
-#ifdef DEBUG_LEGION
       std::map<IndexSpace,IndexSpaceNode*>::iterator finder = 
         index_nodes.find(space);
-      assert(finder != index_nodes.end());
-      index_nodes.erase(finder);
-#else
-      index_nodes.erase(space);
-#endif
+      if (finder != index_nodes.end())
+        index_nodes.erase(finder);
     }
 
     //--------------------------------------------------------------------------
@@ -3801,14 +3797,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock l_lock(lookup_lock);
-#ifdef DEBUG_LEGION
       std::map<IndexPartition,IndexPartNode*>::iterator finder = 
         index_parts.find(part);
-      assert(finder != index_parts.end());
-      index_parts.erase(finder);
-#else
-      index_parts.erase(part);
-#endif
+      if (finder != index_parts.end())
+        index_parts.erase(finder);
     }
 
     //--------------------------------------------------------------------------
@@ -3816,14 +3808,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock l_lock(lookup_lock);
-#ifdef DEBUG_LEGION
       std::map<FieldSpace,FieldSpaceNode*>::iterator finder = 
         field_nodes.find(space);
-      assert(finder != field_nodes.end());
-      field_nodes.erase(finder);
-#else
-      field_nodes.erase(space);
-#endif
+      if (finder != field_nodes.end())
+        field_nodes.erase(finder);
     }
 
     //--------------------------------------------------------------------------
@@ -3831,23 +3819,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock l_lock(lookup_lock);
-#ifdef DEBUG_LEGION
       if (top)
       {
         std::map<RegionTreeID,RegionNode*>::iterator finder = 
           tree_nodes.find(handle.get_tree_id());
-        assert(finder != tree_nodes.end());
-        tree_nodes.erase(finder);
+        if (finder != tree_nodes.end())
+          tree_nodes.erase(finder);
       }
       std::map<LogicalRegion,RegionNode*>::iterator finder = 
         region_nodes.find(handle);
-      assert(finder != region_nodes.end());
-      region_nodes.erase(finder);
-#else
-      if (top)
-        tree_nodes.erase(handle.get_tree_id());
-      region_nodes.erase(handle);
-#endif
+      if (finder != region_nodes.end())
+        region_nodes.erase(finder);
     }
 
     //--------------------------------------------------------------------------
@@ -3855,14 +3837,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock l_lock(lookup_lock);
-#ifdef DEBUG_LEGION
       std::map<LogicalPartition,PartitionNode*>::iterator finder = 
         part_nodes.find(handle);
-      assert(finder != part_nodes.end());
-      part_nodes.erase(finder);
-#else
-      part_nodes.erase(handle);
-#endif
+      if (finder != part_nodes.end())
+        part_nodes.erase(finder);
     }
 
     //--------------------------------------------------------------------------
@@ -5137,13 +5115,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock);
-#ifdef DEBUG_LEGION
       std::set<RegionNode*>::iterator finder = logical_nodes.find(inst);
-      assert(finder != logical_nodes.end());
-      logical_nodes.erase(finder);
-#else
-      logical_nodes.erase(inst);
-#endif
+      if (finder != logical_nodes.end())
+        logical_nodes.erase(finder);
     }
 
     //--------------------------------------------------------------------------
@@ -6084,13 +6058,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock);
-#ifdef DEBUG_LEGION
       std::set<PartitionNode*>::iterator finder = logical_nodes.find(inst);
-      assert(finder != logical_nodes.end());
-      logical_nodes.erase(finder);
-#else
-      logical_nodes.erase(inst);
-#endif
+      if (finder != logical_nodes.end())
+        logical_nodes.erase(finder);
     }
 
     //--------------------------------------------------------------------------
@@ -7799,13 +7769,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock n_lock(node_lock);
-#ifdef DEBUG_LEGION
       std::set<RegionNode*>::iterator finder = local_trees.find(inst);
-      assert(finder != local_trees.end());
-      local_trees.erase(finder);
-#else
-      local_trees.erase(inst); 
-#endif
+      if (finder != local_trees.end())
+        local_trees.erase(finder);
     }
 
     //--------------------------------------------------------------------------
