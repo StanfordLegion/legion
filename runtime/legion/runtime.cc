@@ -17185,10 +17185,14 @@ namespace Legion {
       {
         if (!forest->has_node(req.region))
           return ERROR_INVALID_REGION_HANDLE;
+        if (req.region.get_tree_id() != req.parent.get_tree_id())
+          return ERROR_INVALID_REGION_HANDLE;
       }
       else
       {
         if (!forest->has_node(req.partition))
+          return ERROR_INVALID_PARTITION_HANDLE;
+        if (req.partition.get_tree_id() != req.parent.get_tree_id())
           return ERROR_INVALID_PARTITION_HANDLE;
       }
 
