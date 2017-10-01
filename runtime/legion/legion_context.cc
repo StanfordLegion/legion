@@ -4719,7 +4719,7 @@ namespace Legion {
         __sync_fetch_and_add(&outstanding_children_count,-1);
       // We already decided to wait, so we need to wait for any hysteresis
       // to play a role here
-      if (outstanding_count <=
+      if (outstanding_count >
           int((100 - context_configuration.hysteresis_percentage) *
               context_configuration.max_window_size / 100))
       {
