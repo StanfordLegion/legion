@@ -22,7 +22,7 @@
 #include <realm/sparsity.h>
 #include <realm/id.h>
 
-#include "activemsg.h"
+#include <realm/activemsg.h>
 #include "nodeset.h"
 
 namespace Realm {

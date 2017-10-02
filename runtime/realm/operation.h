@@ -19,7 +19,7 @@
 #include "realm/profiling.h"
 #include "realm/event_impl.h"
 
-#include "activemsg.h"
+#include <realm/activemsg.h>
 
 #include <set>
 #include <iostream>

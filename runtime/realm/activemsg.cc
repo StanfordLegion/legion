@@ -13,8 +13,7 @@
  * limitations under the License.
  */
 
-#include "activemsg.h"
-#include "utilities.h"
+#include <realm/activemsg.h>
 
 #ifndef __GNUC__
 #include "atomics.h" // for __sync_add_and_fetch
@@ -26,8 +25,7 @@
 #include <math.h>
 #endif
 
-#include "lowlevel_impl.h"
-
+#include <realm/threads.h>
 #include "realm/timers.h"
 #include "realm/logging.h"
 
@@ -178,11 +176,11 @@ void send_srcptr_release(token_t token, uint64_t srcptr)
 static int payload_count = 0;
 #endif
 
-LegionRuntime::Logger::Category log_amsg("activemsg");
-LegionRuntime::Logger::Category log_spill("spill");
+Realm::Logger log_amsg("activemsg");
+Realm::Logger log_spill("spill");
 
 #ifdef ACTIVE_MESSAGE_TRACE
-LegionRuntime::Logger::Category log_amsg_trace("amtrace");
+Realm::Logger log_amsg_trace("amtrace");
 
 void record_am_handler(int handler_id, const char *description, bool reply)
 {
@@ -344,7 +342,7 @@ struct OutgoingMessage {
 #endif
 };
 
-LegionRuntime::Logger::Category log_sdp("srcdatapool");
+Realm::Logger log_sdp("srcdatapool");
 
 class SrcDataPool {
 public:
@@ -1626,7 +1624,7 @@ public:
 protected:
   void send_short(OutgoingMessage *hdr)
   {
-    LegionRuntime::LowLevel::DetailedTimer::ScopedPush sp(TIME_AM);
+    Realm::DetailedTimer::ScopedPush sp(TIME_AM);
 #ifdef DEBUG_AMREQUESTS
     printf("%d->%d: %s %d %d %p %zd / %x %x %x %x / %x %x %x %x / %x %x %x %x / %x %x %x %x\n",
 	   gasnet_mynode(), peer, 
@@ -1806,7 +1804,7 @@ protected:
   
   void send_long(OutgoingMessage *hdr, void *dest_ptr)
   {
-    LegionRuntime::LowLevel::DetailedTimer::ScopedPush sp(TIME_AM);
+    Realm::DetailedTimer::ScopedPush sp(TIME_AM);
 
     const size_t max_long_req = gasnet_AMMaxLongRequest();
 

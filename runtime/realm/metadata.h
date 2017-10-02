@@ -22,7 +22,7 @@
 #include "id.h"
 #include "nodeset.h"
 
-#include "activemsg.h"
+#include <realm/activemsg.h>
 
 namespace Realm {
 

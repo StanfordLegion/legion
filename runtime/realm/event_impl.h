@@ -23,7 +23,7 @@
 #include "nodeset.h"
 #include "faults.h"
 
-#include "activemsg.h"
+#include <realm/activemsg.h>
 
 #include <vector>
 #include <map>

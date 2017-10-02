@@ -21,7 +21,7 @@
 #include "reservation.h"
 
 #include "id.h"
-#include "activemsg.h"
+#include <realm/activemsg.h>
 #include "nodeset.h"
 
 #define REALM_RSRV_USE_CIRCQUEUE

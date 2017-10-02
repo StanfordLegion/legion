@@ -17,7 +17,7 @@
 
 #include "logging.h"
 
-#include "activemsg.h"
+#include <realm/activemsg.h>
 
 #include "cmdline.h"
 

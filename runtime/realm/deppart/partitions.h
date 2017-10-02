@@ -20,7 +20,7 @@
 
 #include "indexspace.h"
 #include "sparsity.h"
-#include "activemsg.h"
+#include <realm/activemsg.h>
 #include "id.h"
 #include "operation.h"
 #include "threads.h"

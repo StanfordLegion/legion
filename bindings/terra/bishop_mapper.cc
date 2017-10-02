@@ -15,7 +15,6 @@
 
 #include "bishop_mapper.h"
 #include "legion_c_util.h"
-#include "utilities.h"
 
 extern "C" {
 #include "legion_c.h"

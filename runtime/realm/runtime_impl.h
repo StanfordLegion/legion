@@ -21,7 +21,7 @@
 #include "runtime.h"
 #include "id.h"
 
-#include "activemsg.h"
+#include <realm/activemsg.h>
 #include "operation.h"
 #include "profiling.h"
 

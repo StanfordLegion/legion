@@ -25,7 +25,7 @@
 
 #include "realm/cuda/cudart_hijack.h"
 
-#include "activemsg.h"
+#include <realm/activemsg.h>
 #include "realm/utils.h"
 
 #include <stdio.h>

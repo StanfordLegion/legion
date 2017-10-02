@@ -16,7 +16,7 @@
 #ifndef LOWLEVEL_DMA_H
 #define LOWLEVEL_DMA_H
 
-#include "activemsg.h"
+#include <realm/activemsg.h>
 #include <realm/id.h>
 #include <realm/memory.h>
 #include <realm/redop.h>

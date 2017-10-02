@@ -22,7 +22,7 @@
 
 #include "legion_types.h"
 #include "legion_utilities.h"
-#include "activemsg.h"
+#include <realm/activemsg.h>
 
 #include <vector>
 #include <set>

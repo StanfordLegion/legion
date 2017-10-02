@@ -18,7 +18,7 @@
 #ifndef REALM_TIMERS_H
 #define REALM_TIMERS_H
 
-#include "activemsg.h"
+#include <realm/activemsg.h>
 
 #include <stdio.h>
 #include <map>

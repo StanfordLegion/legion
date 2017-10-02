@@ -20,7 +20,6 @@
 #include "legion_c_util.h"
 #include "legion_utilities.h"
 #include "lowlevel.h"
-#include "utilities.h"
 
 // Disable deprecated warnings in this file since we are also
 // trying to maintain backwards compatibility support for older
@@ -44,9 +43,10 @@
 #endif
 
 #if !USE_TLS
+typedef GASNetHSL ImmovableLock;
 class AutoImmovableLock {
 public:
-  AutoImmovableLock(LegionRuntime::ImmovableLock& _lock)
+  AutoImmovableLock(ImmovableLock& _lock)
     : lock(_lock)
   {
     lock.lock();
@@ -58,7 +58,7 @@ public:
   }
 
 protected:
-  LegionRuntime::ImmovableLock& lock;
+  ImmovableLock& lock;
 };
 #endif
 
@@ -142,7 +142,7 @@ private:
   std::map<IndexSpace, std::vector<std::pair<ptr_t, size_t> > > global_cache;
 #else
   static std::map<IndexSpace, std::vector<std::pair<ptr_t, size_t> > > global_cache;
-  static LegionRuntime::ImmovableLock global_lock;
+  static ImmovableLock global_lock;
 #endif
 };
 
@@ -152,7 +152,7 @@ thread_local std::map<IndexSpace, std::vector<std::pair<ptr_t, size_t> > >
 #else
 std::map<IndexSpace, std::vector<std::pair<ptr_t, size_t> > >
   CachedIndexIterator::global_cache;
-LegionRuntime::ImmovableLock CachedIndexIterator::global_lock(true);
+ImmovableLock CachedIndexIterator::global_lock;
 #endif
 
 class TerraCObjectWrapper {

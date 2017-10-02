@@ -28,7 +28,7 @@
 #include "memory.h"
 #include "instance.h"
 #include "faults.h"
-#include "activemsg.h"
+#include <realm/activemsg.h>
 
 namespace Realm {
 

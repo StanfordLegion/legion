@@ -20,7 +20,7 @@
 #include "mem_impl.h"
 #include "runtime_impl.h"
 
-#include "activemsg.h"
+#include <realm/activemsg.h>
 
 namespace Realm {
 

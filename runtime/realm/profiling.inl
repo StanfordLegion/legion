@@ -17,7 +17,6 @@
 
 // this is a nop, but it's for the benefit of IDEs trying to parse this file
 #include "profiling.h"
-#include "utilities.h"
 #include "serialize.h"
 
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurementID);

@@ -16,7 +16,6 @@
 #ifndef __REALM_SAXPY__
 #define __REALM_SAXPY__
 
-#include "utilities.h"
 #include "accessor.h"
 #include "arrays.h"
 #include "realm.h"

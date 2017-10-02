@@ -44,7 +44,6 @@ list(APPEND LOW_RUNTIME_SRC
   realm/deppart/sparsity_impl.h            realm/deppart/sparsity_impl.cc
   realm/deppart/sparsity_impl.inl
   lowlevel.h
-  lowlevel_impl.h
   realm/event_impl.h        realm/event_impl.cc
   realm/event_impl.inl
   realm/faults.h            realm/faults.cc
@@ -116,7 +115,7 @@ if (Legion_USE_Python)
 endif()
 
 list(APPEND LOW_RUNTIME_SRC
-  activemsg.h activemsg.cc
+  realm/activemsg.h realm/activemsg.cc
   accessor.h
   arrays.h
   atomics.h
@@ -160,7 +159,6 @@ list(APPEND LOW_RUNTIME_SRC
   realm/timers.h           realm/timers.cc
   realm/timers.inl
   realm/utils.h
-  utilities.h
 )
 find_package(Threads REQUIRED)
 add_library(LowLevelRuntime ${LOW_RUNTIME_SRC})

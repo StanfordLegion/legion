@@ -18,7 +18,6 @@
 #define __LEGION_SPY_H__
 
 #include "realm.h"
-#include "utilities.h"
 #include "legion_types.h"
 #include "legion_utilities.h"
 

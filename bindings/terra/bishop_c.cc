@@ -17,7 +17,6 @@
 #include "bishop_mapper.h"
 #include "legion.h"
 #include "legion_c_util.h"
-#include "utilities.h"
 
 #include <vector>
 #include <set>
