@@ -127,10 +127,6 @@ namespace Realm {
 #endif
 #include <gasnet_tools.h>
 
-#ifdef CHECK_REENTRANT_MESSAGES
-GASNETT_THREADKEY_DECLARE(in_handler);
-#endif
-
 // eliminate GASNet warnings for unused static functions
 static const void *ignore_gasnet_warning1 __attribute__((unused)) = (void *)_gasneti_threadkey_init;
 static const void *ignore_gasnet_warning2 __attribute__((unused)) = (void *)_gasnett_trace_printf_noop;
@@ -598,13 +594,7 @@ class ActiveMessageShortNoReply {
     enqueue_message(dest, MSGID, &args, sizeof(MSGTYPE),
 		    0, 0, PAYLOAD_NONE);
 #ifdef OLD_AM_STUFF
-#ifdef CHECK_REENTRANT_MESSAGES
-    if(gasnett_threadkey_get(in_handler)) {
-      printf("Help!  Message send inside handler!\n");
-    } else {
-#else
     {
-#endif
       union {
         MessageRawArgsType raw;
         MSGTYPE typed;
@@ -781,35 +771,6 @@ protected:
 #define GASNET_BARRIERFLAG_ANONYMOUS 0
 inline void gasnet_barrier_notify(int, int) {}
 inline void gasnet_barrier_wait(int, int) {}
-
-// threadkeys
-class ThreadKey {
-public:
-  ThreadKey(void) { pthread_key_create(&key, 0); }
-  ~ThreadKey(void) { pthread_key_delete(key); }
-  void *get(void) { return pthread_getspecific(key); }
-  void set(void *newval) { pthread_setspecific(key, newval); }
-protected:
-  pthread_key_t key;
-};
-#if 0
-#define GASNETT_THREADKEY_DECLARE(keyname) extern ThreadKey keyname
-#define GASNETT_THREADKEY_DEFINE(keyname) ThreadKey keyname
-
-inline void *gasnett_threadkey_get(ThreadKey& key) { return key.get(); }
-inline void gasnett_threadkey_set(ThreadKey& key, void *newval) { key.set(newval); }
-#else
-#define GASNETT_THREADKEY_DECLARE(keyname) extern ThreadKey& get_key_##keyname(void)
-#define GASNETT_THREADKEY_DEFINE(keyname) \
-  ThreadKey& get_key_##keyname(void) { \
-    static ThreadKey key;         \
-    return key;                   \
-  }
-
-#define gasnett_threadkey_set(keyname, value)  get_key_##keyname().set(value)
-#define gasnett_threadkey_get(keyname) get_key_##keyname().get()
-
-#endif
 
 // active message placeholders
 

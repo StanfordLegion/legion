@@ -25,8 +25,6 @@
 #include <sys/types.h>
 #include <dirent.h>
 
-GASNETT_THREADKEY_DEFINE(cur_preemptable_thread);
-
 #define CHECK_PTHREAD(cmd) do { \
   int ret = (cmd); \
   if(ret != 0) { \
