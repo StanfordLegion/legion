@@ -264,7 +264,7 @@ namespace Realm {
 
     size_t Machine::get_address_space_count(void) const
     {
-      return gasnet_nodes();
+      return max_node_id + 1;
     }
 
     void Machine::get_all_memories(std::set<Memory>& mset) const
@@ -468,7 +468,7 @@ namespace Realm {
 		  continue;
 
 		// iterate over local memories and check their kinds
-		Node *n = &(get_runtime()->nodes[gasnet_mynode()]);
+		Node *n = &(get_runtime()->nodes[my_node_id]);
 		for(std::vector<MemoryImpl *>::const_iterator it = n->memories.begin();
 		    it != n->memories.end();
 		    ++it) {		    
@@ -633,11 +633,11 @@ namespace Realm {
 	  it != proc_mem_affinities.end();
 	  it++) {
 	Processor p = (*it).p;
-	if(ID(p).proc.owner_node == gasnet_mynode())
+	if(ID(p).proc.owner_node == my_node_id)
 	  pset.insert(p);
       }
 #else
-      const MachineNodeInfo *mynode = get_nodeinfo(gasnet_mynode());
+      const MachineNodeInfo *mynode = get_nodeinfo(my_node_id);
       assert(mynode != 0);
       for(std::map<Processor, MachineProcInfo *>::const_iterator it = mynode->procs.begin();
 	  it != mynode->procs.end();
@@ -656,11 +656,11 @@ namespace Realm {
 	  it != proc_mem_affinities.end();
 	  it++) {
 	Processor p = (*it).p;
-	if((ID(p).proc.owner_node == gasnet_mynode()) && (p.kind() == kind))
+	if((ID(p).proc.owner_node == my_node_id) && (p.kind() == kind))
 	  pset.insert(p);
       }
 #else
-      const MachineNodeInfo *mynode = get_nodeinfo(gasnet_mynode());
+      const MachineNodeInfo *mynode = get_nodeinfo(my_node_id);
       assert(mynode != 0);
       std::map<Processor::Kind, std::map<Processor, MachineProcInfo *> >::const_iterator it = mynode->proc_by_kind.find(kind);
       if(it != mynode->proc_by_kind.end())
@@ -1098,7 +1098,7 @@ namespace Realm {
   Machine::ProcessorQuery& Machine::ProcessorQuery::local_address_space(void)
   {
     impl = ((ProcessorQueryImpl *)impl)->writeable_reference();
-    ((ProcessorQueryImpl *)impl)->restrict_to_node(gasnet_mynode());
+    ((ProcessorQueryImpl *)impl)->restrict_to_node(my_node_id);
     return *this;
   }
 
@@ -1196,7 +1196,7 @@ namespace Realm {
   Machine::MemoryQuery& Machine::MemoryQuery::local_address_space(void)
   {
     impl = ((MemoryQueryImpl *)impl)->writeable_reference();
-    ((MemoryQueryImpl *)impl)->restrict_to_node(gasnet_mynode());
+    ((MemoryQueryImpl *)impl)->restrict_to_node(my_node_id);
     return *this;
   }
 
@@ -2301,7 +2301,7 @@ namespace Realm {
   {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     log_annc.info("%d: received announce from %d (%d procs, %d memories)\n",
-		  gasnet_mynode(),
+		  my_node_id,
 		  args.node_id,
 		  args.num_procs,
 		  args.num_memories);
@@ -2322,7 +2322,7 @@ namespace Realm {
     }
   }
 
-  /*static*/ void NodeAnnounceMessage::send_request(gasnet_node_t target,
+  /*static*/ void NodeAnnounceMessage::send_request(NodeID target,
 						    unsigned num_procs,
 						    unsigned num_memories,
 						    unsigned num_ib_memories,
@@ -2332,7 +2332,7 @@ namespace Realm {
   {
     RequestArgs args;
 
-    args.node_id = gasnet_mynode();
+    args.node_id = my_node_id;
     args.num_procs = num_procs;
     args.num_memories = num_memories;
     args.num_ib_memories = num_ib_memories;
@@ -2342,10 +2342,10 @@ namespace Realm {
   /*static*/ void NodeAnnounceMessage::await_all_announcements(void)
   {
     // wait until we hear from everyone else?
-    while((int)announcements_received < (int)(gasnet_nodes() - 1))
+    while((int)announcements_received < max_node_id)
       do_some_polling();
 
-    log_annc.info("node %d has received all of its announcements\n", gasnet_mynode());
+    log_annc.info("node %d has received all of its announcements\n", my_node_id);
   }
 
 }; // namespace Realm

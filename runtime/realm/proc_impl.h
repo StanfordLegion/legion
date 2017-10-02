@@ -275,7 +275,7 @@ namespace Realm {
  	                                 RequestArgs,
  	                                 handle_request> Message;
 
-      static void send_request(gasnet_node_t target, Processor proc,
+      static void send_request(NodeID target, Processor proc,
 			       Processor::TaskFuncID func_id,
 			       const void *args, size_t arglen,
 			       const ProfilingRequestSet *prs,
@@ -285,7 +285,7 @@ namespace Realm {
     
     struct RegisterTaskMessage {
       struct RequestArgs : public BaseMedium {
-	gasnet_node_t sender;
+	NodeID sender;
 	Processor::TaskFuncID func_id;
 	Processor::Kind kind;
 	RemoteTaskRegistration *reg_op;
@@ -297,7 +297,7 @@ namespace Realm {
  	                                 RequestArgs,
  	                                 handle_request> Message;
 
-      static void send_request(gasnet_node_t target,
+      static void send_request(NodeID target,
 			       Processor::TaskFuncID func_id,
 			       Processor::Kind kind,
 			       const std::vector<Processor>& procs,
@@ -308,7 +308,7 @@ namespace Realm {
     
     struct RegisterTaskCompleteMessage {
       struct RequestArgs {
-	gasnet_node_t sender;
+	NodeID sender;
 	RemoteTaskRegistration *reg_op;
 	bool successful;
       };
@@ -319,7 +319,7 @@ namespace Realm {
 					RequestArgs,
 					handle_request> Message;
 
-      static void send_request(gasnet_node_t target,
+      static void send_request(NodeID target,
 			       RemoteTaskRegistration *reg_op,
 			       bool successful);
     };

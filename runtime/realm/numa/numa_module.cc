@@ -255,7 +255,7 @@ namespace Realm {
 	  // create affinities between this processor and system/reg memories
 	  // if the memory is one we created, use the kernel-reported distance
 	  // to adjust the answer
-	  std::vector<MemoryImpl *>& local_mems = runtime->nodes[gasnet_mynode()].memories;
+	  std::vector<MemoryImpl *>& local_mems = runtime->nodes[my_node_id].memories;
 	  for(std::vector<MemoryImpl *>::iterator it2 = local_mems.begin();
 	      it2 != local_mems.end();
 	      ++it2) {

@@ -97,10 +97,6 @@ if(Legion_USE_HDF5)
   )
 endif()
 
-if(Legion_USE_GASNet)
-  list(APPEND LOW_RUNTIME_SRC activemsg.h activemsg.cc)
-endif()
-
 if (REALM_USE_OPENMP)
   list(APPEND LOW_RUNTIME_SRC
     realm/openmp/openmp_module.h realm/openmp/openmp_module.cc
@@ -120,6 +116,7 @@ if (Legion_USE_Python)
 endif()
 
 list(APPEND LOW_RUNTIME_SRC
+  activemsg.h activemsg.cc
   accessor.h
   arrays.h
   atomics.h

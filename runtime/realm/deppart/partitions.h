@@ -115,12 +115,12 @@ namespace Realm {
     };
 
   protected:
-    PartitioningMicroOp(gasnet_node_t _requestor, AsyncMicroOp *_async_microop);
+    PartitioningMicroOp(NodeID _requestor, AsyncMicroOp *_async_microop);
 
     void finish_dispatch(PartitioningOperation *op, bool inline_ok);
 
     int wait_count;  // how many sparsity maps are we still waiting for?
-    gasnet_node_t requestor;
+    NodeID requestor;
     AsyncMicroOp *async_microop;
   };
 
@@ -205,7 +205,7 @@ namespace Realm {
 
   struct RemoteMicroOpMessage {
     struct RequestArgs : public BaseMedium {
-      gasnet_node_t sender;
+      NodeID sender;
       DynamicTemplates::TagType type_tag;
       PartitioningMicroOp::Opcode opcode;
       PartitioningOperation *operation;
@@ -246,18 +246,18 @@ namespace Realm {
                                        handle_request> Message;
 
     template <typename T>
-    static void send_request(gasnet_node_t target, PartitioningOperation *operation,
+    static void send_request(NodeID target, PartitioningOperation *operation,
 			     const T& microop);
   };
 
   template <typename T>
-  /*static*/ void RemoteMicroOpMessage::send_request(gasnet_node_t target, 
+  /*static*/ void RemoteMicroOpMessage::send_request(NodeID target, 
 						     PartitioningOperation *operation,
 						     const T& microop)
   {
     RequestArgs args;
 
-    args.sender = gasnet_mynode();
+    args.sender = my_node_id;
     args.type_tag = T::type_tag();
     args.opcode = T::OPCODE;
     args.operation = operation;
@@ -282,7 +282,7 @@ namespace Realm {
                                       RequestArgs,
                                       handle_request> Message;
 
-    static void send_request(gasnet_node_t target, AsyncMicroOp *async_microop);
+    static void send_request(NodeID target, AsyncMicroOp *async_microop);
   };
 
 

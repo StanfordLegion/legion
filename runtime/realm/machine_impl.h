@@ -332,7 +332,7 @@ namespace Realm {
 
   struct NodeAnnounceMessage {
     struct RequestArgs : public BaseMedium {
-      gasnet_node_t node_id;
+      NodeID node_id;
       unsigned num_procs;
       unsigned num_memories;
       unsigned num_ib_memories;
@@ -344,7 +344,7 @@ namespace Realm {
 				       RequestArgs,
 				       handle_request> Message;
 
-    static void send_request(gasnet_node_t target, unsigned num_procs,
+    static void send_request(NodeID target, unsigned num_procs,
 			     unsigned num_memories, unsigned num_ib_memories,
 			     const void *data, size_t datalen, int payload_mode);
 

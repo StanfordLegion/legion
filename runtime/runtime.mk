@@ -495,9 +495,7 @@ LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/hdf5/hdf5_module.cc \
 		   $(LG_RT_DIR)/realm/hdf5/hdf5_internal.cc \
 		   $(LG_RT_DIR)/realm/hdf5/hdf5_access.cc
 endif
-ifeq ($(strip $(USE_GASNET)),1)
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/activemsg.cc
-endif
 GPU_RUNTIME_SRC +=
 
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/logging.cc \

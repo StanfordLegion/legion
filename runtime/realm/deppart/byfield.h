@@ -52,7 +52,7 @@ namespace Realm {
 
     // construct from received packet
     template <typename S>
-    ByFieldMicroOp(gasnet_node_t _requestor, AsyncMicroOp *_async_microop, S& s);
+    ByFieldMicroOp(NodeID _requestor, AsyncMicroOp *_async_microop, S& s);
 
     template <typename BM>
     void populate_bitmasks(std::map<FT, BM *>& bitmasks);

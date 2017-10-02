@@ -109,7 +109,7 @@ namespace Realm {
 
     int HDF5Memory::get_home_node(off_t offset, size_t size)
     {
-      return gasnet_mynode();
+      return my_node_id;
     }
 
 

@@ -34,6 +34,15 @@
 #include <execinfo.h> // symbols
 #include <cxxabi.h>   // demangling
 
+#ifdef USE_GASNET
+#ifndef GASNET_PAR
+#define GASNET_PAR
+#endif
+#include <gasnet.h>
+// eliminate GASNet warnings for unused static functions
+static const void *ignore_gasnet_warning1 __attribute__((unused)) = (void *)_gasneti_threadkey_init;
+#endif
+
 #ifndef USE_GASNET
 /*extern*/ void *fake_gasnet_mem_base = 0;
 /*extern*/ size_t fake_gasnet_mem_size = 0;
@@ -55,6 +64,16 @@
     exit(1); \
   } \
 } while(0)
+
+#ifdef USE_GASNET
+#define CHECK_GASNET(cmd) do { \
+  int ret = (cmd); \
+  if(ret != GASNET_OK) { \
+    fprintf(stderr, "GASNET: %s = %d (%s, %s)\n", #cmd, ret, gasnet_ErrorName(ret), gasnet_ErrorDesc(ret)); \
+    exit(1); \
+  } \
+} while(0)
+#endif
 
 namespace LegionRuntime {
   namespace Accessor {
@@ -104,7 +123,7 @@ namespace Realm {
   void show_event_waiters(std::ostream& os)
   {
     os << "PRINTING ALL PENDING EVENTS:\n";
-    for(unsigned i = 0; i < gasnet_nodes(); i++) {
+    for(NodeID i = 0; i <= max_node_id; i++) {
       Node *n = &get_runtime()->nodes[i];
       // Iterate over all the events and get their implementations
       for (unsigned long j = 0; j < n->events.max_entries(); j++) {
@@ -180,7 +199,7 @@ namespace Realm {
 #if 0
     // // convert from events to barriers
     // fprintf(f,"PRINTING ALL PENDING EVENTS:\n");
-    // for(int i = 0; i < gasnet_nodes(); i++) {
+    // for(int i = 0; i <= max_node_id; i++) {
     // 	Node *n = &get_runtime()->nodes[i];
     //   // Iterate over all the events and get their implementations
     //   for (unsigned long j = 0; j < n->events.max_entries(); j++) {
@@ -268,7 +287,7 @@ namespace Realm {
       CodeDescriptor codedesc(taskptr);
       ProfilingRequestSet prs;
       std::set<Event> events;
-      std::vector<ProcessorImpl *>& procs = ((RuntimeImpl *)impl)->nodes[gasnet_mynode()].processors;
+      std::vector<ProcessorImpl *>& procs = ((RuntimeImpl *)impl)->nodes[my_node_id].processors;
       for(std::vector<ProcessorImpl *>::iterator it = procs.begin();
 	  it != procs.end();
 	  it++) {
@@ -429,8 +448,8 @@ namespace Realm {
       ID::ID_Types id_type = it->first;
       int batch_size = it->second;
 
-      for(gasnet_node_t i = 0; i < gasnet_nodes(); i++) {
-	if(i == gasnet_mynode()) continue;
+      for(NodeID i = 0; i <= max_node_id; i++) {
+	if(i == my_node_id) continue;
 
 	reqs_in_flight[id_type].insert(i);
 
@@ -439,7 +458,7 @@ namespace Realm {
     }
   }
 
-  ID::IDType RemoteIDAllocator::get_remote_id(gasnet_node_t target, ID::ID_Types id_type)
+  ID::IDType RemoteIDAllocator::get_remote_id(NodeID target, ID::ID_Types id_type)
   {
     assert(batch_sizes.count(id_type) > 0);
 
@@ -475,11 +494,11 @@ namespace Realm {
     return id;
   }
 
-  void RemoteIDAllocator::add_id_range(gasnet_node_t target, ID::ID_Types id_type, ID::IDType first, ID::IDType last)
+  void RemoteIDAllocator::add_id_range(NodeID target, ID::ID_Types id_type, ID::IDType first, ID::IDType last)
   {
     AutoHSLLock al(mutex);
 
-    std::set<gasnet_node_t>::iterator it = reqs_in_flight[id_type].find(target);
+    std::set<NodeID>::iterator it = reqs_in_flight[id_type].find(target);
     assert(it != reqs_in_flight[id_type].end());
     reqs_in_flight[id_type].erase(it);
 
@@ -506,8 +525,8 @@ namespace Realm {
     case ID::ID_SPARSITY: {
       assert(0);
       //get_runtime()->local_sparsity_map_free_list->alloc_range(args.count, first, last);
-      first_id = ID::make_sparsity(gasnet_mynode(), 0, first);
-      last_id = ID::make_sparsity(gasnet_mynode(), 0, last);
+      first_id = ID::make_sparsity(my_node_id, 0, first);
+      last_id = ID::make_sparsity(my_node_id, 0, last);
       break;
     }
     default: assert(0);
@@ -516,12 +535,12 @@ namespace Realm {
     RemoteIDResponseMessage::send_request(args.sender, args.id_type, first_id.id, last_id.id);
   }
 
-  /*static*/ void RemoteIDRequestMessage::send_request(gasnet_node_t target, ID::ID_Types id_type, int count)
+  /*static*/ void RemoteIDRequestMessage::send_request(NodeID target, ID::ID_Types id_type, int count)
   {
     RequestArgs args;
 
     log_remote_id.debug() << "sending remote id request: target=" << target << " type=" << id_type << " count=" << count;
-    args.sender = gasnet_mynode();
+    args.sender = my_node_id;
     args.id_type = id_type;
     args.count = count;
     Message::request(target, args);
@@ -544,7 +563,7 @@ namespace Realm {
 						    args.last_id);
   }
 
-  /*static*/ void RemoteIDResponseMessage::send_request(gasnet_node_t target, ID::ID_Types id_type,
+  /*static*/ void RemoteIDResponseMessage::send_request(NodeID target, ID::ID_Types id_type,
 							ID::IDType first_id, ID::IDType last_id)
   {
     RequestArgs args;
@@ -553,7 +572,7 @@ namespace Realm {
 			 << " type=" << id_type 
 			 << " first=" << std::hex << first_id << " last=" << last_id << std::dec;
 
-    args.responder = gasnet_mynode();
+    args.responder = my_node_id;
     args.id_type = id_type;
     args.first_id = first_id;
     args.last_id = last_id;
@@ -710,21 +729,21 @@ namespace Realm {
 
     Memory RuntimeImpl::next_local_memory_id(void)
     {
-      Memory m = ID::make_memory(gasnet_mynode(),
+      Memory m = ID::make_memory(my_node_id,
 				 num_local_memories++).convert<Memory>();
       return m;
     }
 
     Memory RuntimeImpl::next_local_ib_memory_id(void)
     {
-      Memory m = ID::make_ib_memory(gasnet_mynode(),
+      Memory m = ID::make_ib_memory(my_node_id,
                                     num_local_ib_memories++).convert<Memory>();
       return m;
     }
 
     Processor RuntimeImpl::next_local_processor_id(void)
     {
-      Processor p = ID::make_processor(gasnet_mynode(), 
+      Processor p = ID::make_processor(my_node_id, 
 				       num_local_processors++).convert<Processor>();
       return p;
     }
@@ -733,30 +752,30 @@ namespace Realm {
     {
       // right now expect this to always be for the current node and the next memory ID
       ID id(m->me);
-      assert(id.memory.owner_node == gasnet_mynode());
-      assert(id.memory.mem_idx == nodes[gasnet_mynode()].memories.size());
+      assert(id.memory.owner_node == my_node_id);
+      assert(id.memory.mem_idx == nodes[my_node_id].memories.size());
 
-      nodes[gasnet_mynode()].memories.push_back(m);
+      nodes[my_node_id].memories.push_back(m);
     }
 
     void RuntimeImpl::add_ib_memory(MemoryImpl *m)
     {
       // right now expect this to always be for the current node and the next memory ID
       ID id(m->me);
-      assert(id.memory.owner_node == gasnet_mynode());
-      assert(id.memory.mem_idx == nodes[gasnet_mynode()].ib_memories.size());
+      assert(id.memory.owner_node == my_node_id);
+      assert(id.memory.mem_idx == nodes[my_node_id].ib_memories.size());
 
-      nodes[gasnet_mynode()].ib_memories.push_back(m);
+      nodes[my_node_id].ib_memories.push_back(m);
     }
 
     void RuntimeImpl::add_processor(ProcessorImpl *p)
     {
       // right now expect this to always be for the current node and the next processor ID
       ID id(p->me);
-      assert(id.proc.owner_node == gasnet_mynode());
-      assert(id.proc.proc_idx == nodes[gasnet_mynode()].processors.size());
+      assert(id.proc.owner_node == my_node_id);
+      assert(id.proc.proc_idx == nodes[my_node_id].processors.size());
 
-      nodes[gasnet_mynode()].processors.push_back(p);
+      nodes[my_node_id].processors.push_back(p);
     }
 
     void RuntimeImpl::add_dma_channel(DMAChannel *c)
@@ -904,7 +923,6 @@ namespace Realm {
       if(!getenv("GASNET_AMRDMA_MAX_PEERS"))
         setenv("GASNET_AMRDMA_MAX_PEERS", "0", 0 /*no overwrite*/);
 #endif
-#endif
 
 #ifdef DEBUG_REALM_STARTUP
       { // we don't have rank IDs yet, so everybody gets to spew
@@ -916,6 +934,8 @@ namespace Realm {
       }
 #endif
       CHECK_GASNET( gasnet_init(argc, argv) );
+      my_node_id = gasnet_mynode();
+      max_node_id = gasnet_nodes() - 1;
 #ifdef DEBUG_REALM_STARTUP
       { // once we're convinced there isn't skew here, reduce this to rank 0
         char s[80];
@@ -924,6 +944,7 @@ namespace Realm {
         TimeStamp ts(s, false);
         fflush(stdout);
       }
+#endif
 #endif
 
       // if the REALM_DEFAULT_ARGS environment variable is set, these arguments
@@ -1084,7 +1105,7 @@ namespace Realm {
 
       if(!cmdline_ok) {
 	fprintf(stderr, "ERROR: failure parsing command line options\n");
-	gasnet_exit(1);
+	exit(1);
       }
 
 #ifndef EVENT_TRACING
@@ -1115,19 +1136,19 @@ namespace Realm {
 	}
 
       // Check that we have enough resources for the number of nodes we are using
-      if (gasnet_nodes() > MAX_NUM_NODES)
+      if (max_node_id >= MAX_NUM_NODES)
       {
         fprintf(stderr,"ERROR: Launched %d nodes, but runtime is configured "
                        "for at most %d nodes. Update the 'MAX_NUM_NODES' macro "
-                       "in legion_config.h", gasnet_nodes(), MAX_NUM_NODES);
-        gasnet_exit(1);
+                       "in legion_config.h", max_node_id+1, MAX_NUM_NODES);
+        exit(1);
       }
-      if (gasnet_nodes() > (ID::MAX_NODE_ID + 1))
+      if (max_node_id > (NodeID)(ID::MAX_NODE_ID))
       {
         fprintf(stderr,"ERROR: Launched %d nodes, but low-level IDs are only "
                        "configured for at most %d nodes. Update the allocation "
-		       "of bits in ID", gasnet_nodes(), (ID::MAX_NODE_ID + 1));
-        gasnet_exit(1);
+		       "of bits in ID", max_node_id+1, (ID::MAX_NODE_ID + 1));
+        exit(1);
       }
 
       core_map = CoreMap::discover_core_map(hyperthread_sharing);
@@ -1136,91 +1157,88 @@ namespace Realm {
       sampling_profiler.configure_from_cmdline(cmdline, *core_reservations);
 
       // initialize barrier timestamp
-      BarrierImpl::barrier_adjustment_timestamp = (((Barrier::timestamp_t)(gasnet_mynode())) << BarrierImpl::BARRIER_TIMESTAMP_NODEID_SHIFT) + 1;
+      BarrierImpl::barrier_adjustment_timestamp = (((Barrier::timestamp_t)(my_node_id)) << BarrierImpl::BARRIER_TIMESTAMP_NODEID_SHIFT) + 1;
 
-      gasnet_handlerentry_t handlers[128];
-      int hcount = 0;
-      hcount += NodeAnnounceMessage::Message::add_handler_entries(&handlers[hcount], "Node Announce AM");
-      hcount += SpawnTaskMessage::Message::add_handler_entries(&handlers[hcount], "Spawn Task AM");
-      hcount += LockRequestMessage::Message::add_handler_entries(&handlers[hcount], "Lock Request AM");
-      hcount += LockReleaseMessage::Message::add_handler_entries(&handlers[hcount], "Lock Release AM");
-      hcount += LockGrantMessage::Message::add_handler_entries(&handlers[hcount], "Lock Grant AM");
-      hcount += EventSubscribeMessage::Message::add_handler_entries(&handlers[hcount], "Event Subscribe AM");
-      hcount += EventTriggerMessage::Message::add_handler_entries(&handlers[hcount], "Event Trigger AM");
-      hcount += EventUpdateMessage::Message::add_handler_entries(&handlers[hcount], "Event Update AM");
-      hcount += RemoteMemAllocRequest::Request::add_handler_entries(&handlers[hcount], "Remote Memory Allocation Request AM");
-      hcount += RemoteMemAllocRequest::Response::add_handler_entries(&handlers[hcount], "Remote Memory Allocation Response AM");
-      //hcount += CreateInstanceRequest::Request::add_handler_entries(&handlers[hcount], "Create Instance Request AM");
-      //hcount += CreateInstanceRequest::Response::add_handler_entries(&handlers[hcount], "Create Instance Response AM");
-      hcount += RemoteCopyMessage::add_handler_entries(&handlers[hcount], "Remote Copy AM");
-      hcount += RemoteFillMessage::add_handler_entries(&handlers[hcount], "Remote Fill AM");
+      NodeAnnounceMessage::Message::add_handler_entries("Node Announce AM");
+      SpawnTaskMessage::Message::add_handler_entries("Spawn Task AM");
+      LockRequestMessage::Message::add_handler_entries("Lock Request AM");
+      LockReleaseMessage::Message::add_handler_entries("Lock Release AM");
+      LockGrantMessage::Message::add_handler_entries("Lock Grant AM");
+      EventSubscribeMessage::Message::add_handler_entries("Event Subscribe AM");
+      EventTriggerMessage::Message::add_handler_entries("Event Trigger AM");
+      EventUpdateMessage::Message::add_handler_entries("Event Update AM");
+      RemoteMemAllocRequest::Request::add_handler_entries("Remote Memory Allocation Request AM");
+      RemoteMemAllocRequest::Response::add_handler_entries("Remote Memory Allocation Response AM");
+      //CreateInstanceRequest::Request::add_handler_entries("Create Instance Request AM");
+      //CreateInstanceRequest::Response::add_handler_entries("Create Instance Response AM");
+      RemoteCopyMessage::add_handler_entries("Remote Copy AM");
+      RemoteFillMessage::add_handler_entries("Remote Fill AM");
 #ifdef DETAILED_TIMING
-      hcount += TimerDataRequestMessage::Message::add_handler_entries(&handlers[hcount], "Roll-up Request AM");
-      hcount += TimerDataResponseMessage::Message::add_handler_entries(&handlers[hcount], "Roll-up Data AM");
-      hcount += ClearTimersMessage::Message::add_handler_entries(&handlers[hcount], "Clear Timer Request AM");
+      TimerDataRequestMessage::Message::add_handler_entries("Roll-up Request AM");
+      TimerDataResponseMessage::Message::add_handler_entries("Roll-up Data AM");
+      ClearTimersMessage::Message::add_handler_entries("Clear Timer Request AM");
 #endif
-      //hcount += DestroyInstanceMessage::Message::add_handler_entries(&handlers[hcount], "Destroy Instance AM");
-      hcount += RemoteWriteMessage::Message::add_handler_entries(&handlers[hcount], "Remote Write AM");
-      hcount += RemoteReduceMessage::Message::add_handler_entries(&handlers[hcount], "Remote Reduce AM");
-      hcount += RemoteSerdezMessage::Message::add_handler_entries(&handlers[hcount], "Remote Serdez AM");
-      hcount += RemoteWriteFenceMessage::Message::add_handler_entries(&handlers[hcount], "Remote Write Fence AM");
-      hcount += RemoteWriteFenceAckMessage::Message::add_handler_entries(&handlers[hcount], "Remote Write Fence Ack AM");
-      hcount += DestroyLockMessage::Message::add_handler_entries(&handlers[hcount], "Destroy Lock AM");
-      hcount += RemoteReduceListMessage::Message::add_handler_entries(&handlers[hcount], "Remote Reduction List AM");
-      hcount += RuntimeShutdownMessage::Message::add_handler_entries(&handlers[hcount], "Machine Shutdown AM");
-      hcount += BarrierAdjustMessage::Message::add_handler_entries(&handlers[hcount], "Barrier Adjust AM");
-      hcount += BarrierSubscribeMessage::Message::add_handler_entries(&handlers[hcount], "Barrier Subscribe AM");
-      hcount += BarrierTriggerMessage::Message::add_handler_entries(&handlers[hcount], "Barrier Trigger AM");
-      hcount += BarrierMigrationMessage::Message::add_handler_entries(&handlers[hcount], "Barrier Migration AM");
-      hcount += MetadataRequestMessage::Message::add_handler_entries(&handlers[hcount], "Metadata Request AM");
-      hcount += MetadataResponseMessage::Message::add_handler_entries(&handlers[hcount], "Metadata Response AM");
-      hcount += MetadataInvalidateMessage::Message::add_handler_entries(&handlers[hcount], "Metadata Invalidate AM");
-      hcount += MetadataInvalidateAckMessage::Message::add_handler_entries(&handlers[hcount], "Metadata Inval Ack AM");
-      hcount += XferDesRemoteWriteMessage::Message::add_handler_entries(&handlers[hcount], "XferDes Remote Write AM");
-      hcount += XferDesRemoteWriteAckMessage::Message::add_handler_entries(&handlers[hcount], "XferDes Remote Write Ack AM");
-      hcount += XferDesCreateMessage::Message::add_handler_entries(&handlers[hcount], "Create XferDes Request AM");
-      hcount += XferDesDestroyMessage::Message::add_handler_entries(&handlers[hcount], "Destroy XferDes Request AM");
-      hcount += NotifyXferDesCompleteMessage::Message::add_handler_entries(&handlers[hcount], "Notify XferDes Completion Request AM");
-      hcount += UpdateBytesWriteMessage::Message::add_handler_entries(&handlers[hcount], "Update Bytes Write AM");
-      hcount += UpdateBytesReadMessage::Message::add_handler_entries(&handlers[hcount], "Update Bytes Read AM");
-      hcount += RegisterTaskMessage::Message::add_handler_entries(&handlers[hcount], "Register Task AM");
-      hcount += RegisterTaskCompleteMessage::Message::add_handler_entries(&handlers[hcount], "Register Task Complete AM");
-      hcount += RemoteMicroOpMessage::Message::add_handler_entries(&handlers[hcount], "Remote Micro Op AM");
-      hcount += RemoteMicroOpCompleteMessage::Message::add_handler_entries(&handlers[hcount], "Remote Micro Op Complete AM");
-      hcount += RemoteSparsityContribMessage::Message::add_handler_entries(&handlers[hcount], "Remote Sparsity Contrib AM");
-      hcount += RemoteSparsityRequestMessage::Message::add_handler_entries(&handlers[hcount], "Remote Sparsity Request AM");
-      hcount += ApproxImageResponseMessage::Message::add_handler_entries(&handlers[hcount], "Approx Image Response AM");
-      hcount += SetContribCountMessage::Message::add_handler_entries(&handlers[hcount], "Set Contrib Count AM");
-      hcount += RemoteIDRequestMessage::Message::add_handler_entries(&handlers[hcount], "Remote ID Request AM");
-      hcount += RemoteIDResponseMessage::Message::add_handler_entries(&handlers[hcount], "Remote ID Response AM");
-      hcount += RemoteIBAllocRequestAsync::Message::add_handler_entries(&handlers[hcount], "Remote IB Alloc Request AM");
-      hcount += RemoteIBAllocResponseAsync::Message::add_handler_entries(&handlers[hcount], "Remote IB Alloc Response AM");
-      hcount += RemoteIBFreeRequestAsync::Message::add_handler_entries(&handlers[hcount], "Remote IB Free Request AM");
-      //hcount += TestMessage::add_handler_entries(&handlers[hcount], "Test AM");
-      //hcount += TestMessage2::add_handler_entries(&handlers[hcount], "Test 2 AM");
+      //DestroyInstanceMessage::Message::add_handler_entries("Destroy Instance AM");
+      RemoteWriteMessage::Message::add_handler_entries("Remote Write AM");
+      RemoteReduceMessage::Message::add_handler_entries("Remote Reduce AM");
+      RemoteSerdezMessage::Message::add_handler_entries("Remote Serdez AM");
+      RemoteWriteFenceMessage::Message::add_handler_entries("Remote Write Fence AM");
+      RemoteWriteFenceAckMessage::Message::add_handler_entries("Remote Write Fence Ack AM");
+      DestroyLockMessage::Message::add_handler_entries("Destroy Lock AM");
+      RemoteReduceListMessage::Message::add_handler_entries("Remote Reduction List AM");
+      RuntimeShutdownMessage::Message::add_handler_entries("Machine Shutdown AM");
+      BarrierAdjustMessage::Message::add_handler_entries("Barrier Adjust AM");
+      BarrierSubscribeMessage::Message::add_handler_entries("Barrier Subscribe AM");
+      BarrierTriggerMessage::Message::add_handler_entries("Barrier Trigger AM");
+      BarrierMigrationMessage::Message::add_handler_entries("Barrier Migration AM");
+      MetadataRequestMessage::Message::add_handler_entries("Metadata Request AM");
+      MetadataResponseMessage::Message::add_handler_entries("Metadata Response AM");
+      MetadataInvalidateMessage::Message::add_handler_entries("Metadata Invalidate AM");
+      MetadataInvalidateAckMessage::Message::add_handler_entries("Metadata Inval Ack AM");
+      XferDesRemoteWriteMessage::Message::add_handler_entries("XferDes Remote Write AM");
+      XferDesRemoteWriteAckMessage::Message::add_handler_entries("XferDes Remote Write Ack AM");
+      XferDesCreateMessage::Message::add_handler_entries("Create XferDes Request AM");
+      XferDesDestroyMessage::Message::add_handler_entries("Destroy XferDes Request AM");
+      NotifyXferDesCompleteMessage::Message::add_handler_entries("Notify XferDes Completion Request AM");
+      UpdateBytesWriteMessage::Message::add_handler_entries("Update Bytes Write AM");
+      UpdateBytesReadMessage::Message::add_handler_entries("Update Bytes Read AM");
+      RegisterTaskMessage::Message::add_handler_entries("Register Task AM");
+      RegisterTaskCompleteMessage::Message::add_handler_entries("Register Task Complete AM");
+      RemoteMicroOpMessage::Message::add_handler_entries("Remote Micro Op AM");
+      RemoteMicroOpCompleteMessage::Message::add_handler_entries("Remote Micro Op Complete AM");
+      RemoteSparsityContribMessage::Message::add_handler_entries("Remote Sparsity Contrib AM");
+      RemoteSparsityRequestMessage::Message::add_handler_entries("Remote Sparsity Request AM");
+      ApproxImageResponseMessage::Message::add_handler_entries("Approx Image Response AM");
+      SetContribCountMessage::Message::add_handler_entries("Set Contrib Count AM");
+      RemoteIDRequestMessage::Message::add_handler_entries("Remote ID Request AM");
+      RemoteIDResponseMessage::Message::add_handler_entries("Remote ID Response AM");
+      RemoteIBAllocRequestAsync::Message::add_handler_entries("Remote IB Alloc Request AM");
+      RemoteIBAllocResponseAsync::Message::add_handler_entries("Remote IB Alloc Response AM");
+      RemoteIBFreeRequestAsync::Message::add_handler_entries("Remote IB Free Request AM");
+      //TestMessage::add_handler_entries("Test AM");
+      //TestMessage2::add_handler_entries("Test 2 AM");
 
-      nodes = new Node[gasnet_nodes()];
+      nodes = new Node[max_node_id + 1];
 
       // create allocators for local node events/locks/index spaces - do this before we start handling
       //  active messages
       {
-	Node& n = nodes[gasnet_mynode()];
-	local_event_free_list = new EventTableAllocator::FreeList(n.events, gasnet_mynode());
-	local_barrier_free_list = new BarrierTableAllocator::FreeList(n.barriers, gasnet_mynode());
-	local_reservation_free_list = new ReservationTableAllocator::FreeList(n.reservations, gasnet_mynode());
-	local_proc_group_free_list = new ProcessorGroupTableAllocator::FreeList(n.proc_groups, gasnet_mynode());
+	Node& n = nodes[my_node_id];
+	local_event_free_list = new EventTableAllocator::FreeList(n.events, my_node_id);
+	local_barrier_free_list = new BarrierTableAllocator::FreeList(n.barriers, my_node_id);
+	local_reservation_free_list = new ReservationTableAllocator::FreeList(n.reservations, my_node_id);
+	local_proc_group_free_list = new ProcessorGroupTableAllocator::FreeList(n.proc_groups, my_node_id);
 
-	local_sparsity_map_free_lists.resize(gasnet_nodes());
-	for(gasnet_node_t i = 0; i < gasnet_nodes(); i++) {
-	  nodes[i].sparsity_maps.resize(gasnet_nodes(), 0);
+	local_sparsity_map_free_lists.resize(max_node_id + 1);
+	for(NodeID i = 0; i <= max_node_id; i++) {
+	  nodes[i].sparsity_maps.resize(max_node_id + 1, 0);
 	  DynamicTable<SparsityMapTableAllocator> *m = new DynamicTable<SparsityMapTableAllocator>;
-	  nodes[i].sparsity_maps[gasnet_mynode()] = m;
+	  nodes[i].sparsity_maps[my_node_id] = m;
 	  local_sparsity_map_free_lists[i] = new SparsityMapTableAllocator::FreeList(*m, i /*owner_node*/);
 	}
       }
 
-      init_endpoints(handlers, hcount, 
-		     gasnet_mem_size_in_mb, reg_mem_size_in_mb, reg_ib_mem_size_in_mb,
+      init_endpoints(gasnet_mem_size_in_mb, reg_mem_size_in_mb, reg_ib_mem_size_in_mb,
 		     *core_reservations,
 		     *argc, (const char **)*argv);
 
@@ -1230,9 +1248,11 @@ namespace Realm {
       Realm::Clock::set_zero_time();
 #endif
 
+#ifdef USE_GASNET
       // Put this here so that it complies with the GASNet specification and
       // doesn't make any calls between gasnet_init and gasnet_attach
       gasnet_set_waitmode(GASNET_WAIT_BLOCK);
+#endif
 
       //remote_id_allocator.set_request_size(ID::ID_SPARSITY, 4096, 3072);
       remote_id_allocator.make_initial_requests();
@@ -1268,7 +1288,7 @@ namespace Realm {
 	  int delay = strtol(e, (char **)&pos, 10);
 	  assert(delay > 0);
 	  if(*pos == '+')
-	    delay += gasnet_mynode() * atoi(pos + 1);
+	    delay += my_node_id * atoi(pos + 1);
 	  log_runtime.info() << "setting show_event alarm for " << delay << " seconds";
 	  signal(SIGALRM, realm_show_events);
 	  alarm(delay);
@@ -1321,7 +1341,7 @@ namespace Realm {
       else
 	global_memory = 0;
 
-      Node *n = &nodes[gasnet_mynode()];
+      Node *n = &nodes[my_node_id];
 
       // create memories and processors for all loaded modules
       for(std::vector<Module *>::const_iterator it = modules.begin();
@@ -1331,10 +1351,15 @@ namespace Realm {
 
       LocalCPUMemory *regmem;
       if(reg_mem_size_in_mb > 0) {
-	gasnet_seginfo_t *seginfos = new gasnet_seginfo_t[gasnet_nodes()];
-	CHECK_GASNET( gasnet_getSegmentInfo(seginfos, gasnet_nodes()) );
-	char *regmem_base = ((char *)(seginfos[gasnet_mynode()].addr)) + (gasnet_mem_size_in_mb << 20);
+#ifdef USE_GASNET
+	gasnet_seginfo_t *seginfos = new gasnet_seginfo_t[max_node_id + 1];
+	CHECK_GASNET( gasnet_getSegmentInfo(seginfos, max_node_id + 1) );
+	char *regmem_base = ((char *)(seginfos[my_node_id].addr)) + (gasnet_mem_size_in_mb << 20);
 	delete[] seginfos;
+#else
+	char *regmem_base = (char *)(malloc(reg_mem_size_in_mb << 20));
+	assert(regmem_base != 0);
+#endif
 	Memory m = get_runtime()->next_local_memory_id();
 	regmem = new LocalCPUMemory(m,
 				    reg_mem_size_in_mb << 20,
@@ -1351,11 +1376,16 @@ namespace Realm {
 
       LocalCPUMemory *reg_ib_mem;
       if(reg_ib_mem_size_in_mb > 0) {
-	gasnet_seginfo_t *seginfos = new gasnet_seginfo_t[gasnet_nodes()];
-	CHECK_GASNET( gasnet_getSegmentInfo(seginfos, gasnet_nodes()) );
-	char *reg_ib_mem_base = ((char *)(seginfos[gasnet_mynode()].addr)) + (gasnet_mem_size_in_mb << 20)
+#ifdef USE_GASNET
+	gasnet_seginfo_t *seginfos = new gasnet_seginfo_t[max_node_id + 1];
+	CHECK_GASNET( gasnet_getSegmentInfo(seginfos, max_node_id + 1) );
+	char *reg_ib_mem_base = ((char *)(seginfos[my_node_id].addr)) + (gasnet_mem_size_in_mb << 20)
                                 + (reg_mem_size_in_mb << 20);
 	delete[] seginfos;
+#else
+	char *reg_ib_mem_base = (char *)(malloc(reg_ib_mem_size_in_mb << 20));
+	assert(reg_ib_mem_base != 0);
+#endif
 	Memory m = get_runtime()->next_local_ib_memory_id();
 	reg_ib_mem = new LocalCPUMemory(m,
 				        reg_ib_mem_size_in_mb << 20,
@@ -1369,7 +1399,7 @@ namespace Realm {
       DiskMemory *diskmem;
       if(disk_mem_size_in_mb > 0) {
         char file_name[30];
-        sprintf(file_name, "disk_file%d.tmp", gasnet_mynode());
+        sprintf(file_name, "disk_file%d.tmp", my_node_id);
         Memory m = get_runtime()->next_local_memory_id();
         diskmem = new DiskMemory(m,
                                  disk_mem_size_in_mb << 20,
@@ -1620,7 +1650,7 @@ namespace Realm {
 		it2++) {
 	      // only announce intra-node ones and only those with this memory as m1 to avoid
 	      //  duplicates
-	      if((it2->m1 != m) || (it2->m2.address_space() != gasnet_mynode()))
+	      if((it2->m1 != m) || ((NodeID)(it2->m2.address_space()) != my_node_id))
 		continue;
 
 	      adata[apos++] = NODE_ANNOUNCE_MMA;
@@ -1635,15 +1665,15 @@ namespace Realm {
 	assert(apos < ADATA_SIZE);
 
 #ifdef DEBUG_REALM_STARTUP
-	if(gasnet_mynode() == 0) {
+	if(my_node_id == 0) {
 	  TimeStamp ts("sending announcements", false);
 	  fflush(stdout);
 	}
 #endif
 
 	// now announce ourselves to everyone else
-	for(unsigned i = 0; i < gasnet_nodes(); i++)
-	  if(i != gasnet_mynode())
+	for(NodeID i = 0; i <= max_node_id; i++)
+	  if(i != my_node_id)
 	    NodeAnnounceMessage::send_request(i,
 						     num_procs,
 						     num_memories,
@@ -1654,7 +1684,7 @@ namespace Realm {
 	NodeAnnounceMessage::await_all_announcements();
 
 #ifdef DEBUG_REALM_STARTUP
-	if(gasnet_mynode() == 0) {
+	if(my_node_id == 0) {
 	  TimeStamp ts("received all announcements", false);
 	  fflush(stdout);
 	}
@@ -1695,7 +1725,7 @@ namespace Realm {
     T bval;
     gasnet_coll_broadcast(GASNET_TEAM_ALL, &bval, 0, const_cast<T *>(&val), sizeof(T), GASNET_COLL_FLAGS);
     if(val != bval) {
-      log_collective.fatal() << "collective mismatch on node " << gasnet_mynode() << " for " << name << ": " << val << " != " << bval;
+      log_collective.fatal() << "collective mismatch on node " << my_node_id << " for " << name << ": " << val << " != " << bval;
       assert(false);
     }
   }
@@ -1717,17 +1747,17 @@ namespace Realm {
       // root node will be whoever owns the target proc
       int root = ID(target_proc).proc.owner_node;
 
-      if((int)gasnet_mynode() == root) {
+      if((int)my_node_id == root) {
 	// ROOT NODE
 
 	// step 1: receive wait_on from every node
 	Event *all_events = 0;
-	all_events = new Event[gasnet_nodes()];
+	all_events = new Event[max_node_id + 1];
 	gasnet_coll_gather(GASNET_TEAM_ALL, root, all_events, &wait_on, sizeof(Event), GASNET_COLL_FLAGS);
 
 	// step 2: merge all the events
 	std::set<Event> event_set;
-	for(int i = 0; i < (int)gasnet_nodes(); i++) {
+	for(NodeID i = 0; i <= max_node_id; i++) {
 	  //log_collective.info() << "ev " << i << ": " << all_events[i];
 	  if(all_events[i].exists())
 	    event_set.insert(all_events[i]);
@@ -1791,17 +1821,17 @@ namespace Realm {
 
       Event merged_event;
 
-      if(gasnet_mynode() == 0) {
+      if(my_node_id == 0) {
 	// ROOT NODE
 
 	// step 1: receive wait_on from every node
 	Event *all_events = 0;
-	all_events = new Event[gasnet_nodes()];
+	all_events = new Event[max_node_id + 1];
 	gasnet_coll_gather(GASNET_TEAM_ALL, 0, all_events, &wait_on, sizeof(Event), GASNET_COLL_FLAGS);
 
 	// step 2: merge all the events
 	std::set<Event> event_set;
-	for(int i = 0; i < (int)gasnet_nodes(); i++) {
+	for(NodeID i = 0; i <= max_node_id; i++) {
 	  //log_collective.info() << "ev " << i << ": " << all_events[i];
 	  if(all_events[i].exists())
 	    event_set.insert(all_events[i]);
@@ -1831,7 +1861,7 @@ namespace Realm {
       // now spawn 0 or more local tasks
       std::set<Event> event_set;
 
-      const std::vector<ProcessorImpl *>& local_procs = nodes[gasnet_mynode()].processors;
+      const std::vector<ProcessorImpl *>& local_procs = nodes[my_node_id].processors;
 
       for(std::vector<ProcessorImpl *>::const_iterator it = local_procs.begin();
 	  it != local_procs.end();
@@ -1851,17 +1881,17 @@ namespace Realm {
       Event my_finish = Event::merge_events(event_set);
 
 #ifdef USE_GASNET
-      if(gasnet_mynode() == 0) {
+      if(my_node_id == 0) {
 	// ROOT NODE
 
 	// step 1: receive wait_on from every node
 	Event *all_events = 0;
-	all_events = new Event[gasnet_nodes()];
+	all_events = new Event[max_node_id + 1];
 	gasnet_coll_gather(GASNET_TEAM_ALL, 0, all_events, &my_finish, sizeof(Event), GASNET_COLL_FLAGS);
 
 	// step 2: merge all the events
 	std::set<Event> event_set;
-	for(int i = 0; i < (int)gasnet_nodes(); i++) {
+	for(NodeID i = 0; i <= max_node_id; i++) {
 	  //log_collective.info() << "ev " << i << ": " << all_events[i];
 	  if(all_events[i].exists())
 	    event_set.insert(all_events[i]);
@@ -2003,8 +2033,8 @@ namespace Realm {
 
       if(local_request) {
 	log_runtime.info("shutdown request - notifying other nodes");
-	for(unsigned i = 0; i < gasnet_nodes(); i++)
-	  if(i != gasnet_mynode())
+	for(NodeID i = 0; i <= max_node_id; i++)
+	  if(i != my_node_id)
 	    RuntimeShutdownMessage::send_request(i);
       }
 
@@ -2014,7 +2044,7 @@ namespace Realm {
 	// legacy shutdown - call shutdown task on processors
 	log_task.info("spawning processor shutdown task on local cpus");
 
-	const std::vector<ProcessorImpl *>& local_procs = nodes[gasnet_mynode()].processors;
+	const std::vector<ProcessorImpl *>& local_procs = nodes[my_node_id].processors;
 
 	spawn_on_all(local_procs, Processor::TASK_ID_PROCESSOR_SHUTDOWN, 0, 0,
 		     Event::NO_EVENT,
@@ -2069,7 +2099,7 @@ namespace Realm {
       sampling_profiler.shutdown();
 
       {
-	std::vector<ProcessorImpl *>& local_procs = nodes[gasnet_mynode()].processors;
+	std::vector<ProcessorImpl *>& local_procs = nodes[my_node_id].processors;
 	for(std::vector<ProcessorImpl *>::const_iterator it = local_procs.begin();
 	    it != local_procs.end();
 	    it++)
@@ -2098,7 +2128,7 @@ namespace Realm {
       {
         RuntimeImpl *rt = get_runtime();
         printf("node %d realm resource usage: ev=%d, rsrv=%d, idx=%d, pg=%d\n",
-               gasnet_mynode(),
+               my_node_id,
                rt->local_event_free_list->next_alloc,
                rt->local_reservation_free_list->next_alloc,
                rt->local_index_space_free_list->next_alloc,
@@ -2114,7 +2144,7 @@ namespace Realm {
 
       // delete processors, memories, nodes, etc.
       {
-	for(gasnet_node_t i = 0; i < gasnet_nodes(); i++) {
+	for(NodeID i = 0; i <= max_node_id; i++) {
 	  Node& n = nodes[i];
 
 	  delete_container_contents(n.memories);
@@ -2149,7 +2179,7 @@ namespace Realm {
       // this terminates the process, so control never gets back to caller
       // would be nice to fix this...
       //if (exit_process)
-      //  gasnet_exit(0);
+      //  exit(0);
     }
 
     EventImpl *RuntimeImpl::get_event_impl(Event e)
@@ -2222,10 +2252,10 @@ namespace Realm {
       return impl;
     }
   
-    SparsityMapImplWrapper *RuntimeImpl::get_available_sparsity_impl(gasnet_node_t target_node)
+    SparsityMapImplWrapper *RuntimeImpl::get_available_sparsity_impl(NodeID target_node)
     {
       SparsityMapImplWrapper *wrap = local_sparsity_map_free_lists[target_node]->alloc_entry();
-      wrap->me.sparsity.creator_node = gasnet_mynode();
+      wrap->me.sparsity.creator_node = my_node_id;
       return wrap;
     }
 
@@ -2333,7 +2363,7 @@ namespace Realm {
 
       // TODO: factor creator_node into lookup!
       if(id.instance.inst_idx >= mem->instances.size()) {
-	assert(id.instance.owner_node != gasnet_mynode());
+	assert(id.instance.owner_node != my_node_id);
 
 	size_t old_size = mem->instances.size();
 	if(id.instance.inst_idx >= old_size) {
@@ -2349,7 +2379,7 @@ namespace Realm {
 
       if(!mem->instances[id.instance.inst_idx]) {
 	if(!mem->instances[id.instance.inst_idx]) {
-	  //printf("[%d] creating proxy instance: inst=" IDFMT "\n", gasnet_mynode(), id.id());
+	  //printf("[%d] creating proxy instance: inst=" IDFMT "\n", my_node_id, id.id());
 	  mem->instances[id.instance.inst_idx] = new RegionInstanceImpl(id.convert<RegionInstance>(), mem->me);
 	}
       }
@@ -2420,7 +2450,7 @@ namespace Realm {
         }
       }
       fprintf(stderr,"BACKTRACE (%d, %lx)\n----------\n%s\n----------\n", 
-              gasnet_mynode(), (unsigned long)pthread_self(), buffer);
+              my_node_id, (unsigned long)pthread_self(), buffer);
       fflush(stderr);
       free(buffer);
       free(funcname);
@@ -2454,11 +2484,11 @@ namespace Realm {
     get_runtime()->shutdown(false);
   }
 
-  /*static*/ void RuntimeShutdownMessage::send_request(gasnet_node_t target)
+  /*static*/ void RuntimeShutdownMessage::send_request(NodeID target)
   {
     RequestArgs args;
 
-    args.initiating_node = gasnet_mynode();
+    args.initiating_node = my_node_id;
     args.dummy = 0;
     Message::request(target, args);
   }

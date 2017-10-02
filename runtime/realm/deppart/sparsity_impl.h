@@ -56,8 +56,8 @@ namespace Realm {
     //  or false if the sparsity map became valid before this call (i.e. no callback)
     bool add_waiter(PartitioningMicroOp *uop, bool precise);
 
-    void remote_data_request(gasnet_node_t requestor, bool send_precise, bool send_approx);
-    void remote_data_reply(gasnet_node_t requestor, bool send_precise, bool send_approx);
+    void remote_data_request(NodeID requestor, bool send_precise, bool send_approx);
+    void remote_data_reply(NodeID requestor, bool send_precise, bool send_approx);
 
     SparsityMap<N,T> me;
 
@@ -111,17 +111,17 @@ namespace Realm {
 
     // adds a fragment to the list, returning true if this is the last one from
     //  a sequence
-    bool add_fragment(gasnet_node_t sender, int sequence_id, int sequence_count);
+    bool add_fragment(NodeID sender, int sequence_id, int sequence_count);
 
   protected:
     int next_sequence_id;
     GASNetHSL mutex; // protects the fragments map
-    std::map<gasnet_node_t, std::map<int, int> > fragments;
+    std::map<NodeID, std::map<int, int> > fragments;
   };
 
   struct RemoteSparsityRequestMessage {
     struct RequestArgs {
-      gasnet_node_t sender;
+      NodeID sender;
       DynamicTemplates::TagType type_tag;
       ID::IDType sparsity_id;
       bool send_precise;
@@ -140,7 +140,7 @@ namespace Realm {
                                       handle_request> Message;
 
     template <int N, typename T>
-    static void send_request(gasnet_node_t target, SparsityMap<N,T> sparsity,
+    static void send_request(NodeID target, SparsityMap<N,T> sparsity,
 			     bool send_precise, bool send_approx);
   };
 
@@ -163,12 +163,12 @@ namespace Realm {
                                       handle_request> Message;
 
     template <int N, typename T>
-    static void send_request(gasnet_node_t target, SparsityMap<N,T> sparsity, int count);
+    static void send_request(NodeID target, SparsityMap<N,T> sparsity, int count);
   };
     
   struct RemoteSparsityContribMessage {
     struct RequestArgs : public BaseMedium {
-      gasnet_node_t sender;
+      NodeID sender;
       DynamicTemplates::TagType type_tag;
       ID::IDType sparsity_id;
       int sequence_id;
@@ -187,7 +187,7 @@ namespace Realm {
                                        handle_request> Message;
 
     template <int N, typename T>
-    static void send_request(gasnet_node_t target, SparsityMap<N,T> sparsity,
+    static void send_request(NodeID target, SparsityMap<N,T> sparsity,
 			     int sequence_id, int sequence_count,
 			     const Rect<N,T> *rects, size_t count);
   };

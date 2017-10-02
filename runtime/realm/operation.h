@@ -132,7 +132,7 @@ namespace Realm {
 
     void request_cancellation(Event finish_event, const void *reason_data, size_t reason_size);
     
-    static int register_handlers(gasnet_handlerentry_t *handlers);
+    static void register_handlers(void);
 
   protected:
     void event_triggered(Event e);

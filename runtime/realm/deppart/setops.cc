@@ -1013,9 +1013,9 @@ namespace Realm {
   void UnionMicroOp<N,T>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
     // execute wherever our sparsity output is
-    gasnet_node_t exec_node = ID(sparsity_output).sparsity.creator_node;
+    NodeID exec_node = ID(sparsity_output).sparsity.creator_node;
 
-    if(exec_node != gasnet_mynode()) {
+    if(exec_node != my_node_id) {
       // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
       //  track it
       async_microop = new AsyncMicroOp(op, this);
@@ -1052,7 +1052,7 @@ namespace Realm {
 
   template <int N, typename T>
   template <typename S>
-  UnionMicroOp<N,T>::UnionMicroOp(gasnet_node_t _requestor,
+  UnionMicroOp<N,T>::UnionMicroOp(NodeID _requestor,
 				  AsyncMicroOp *_async_microop, S& s)
     : PartitioningMicroOp(_requestor, _async_microop)
   {
@@ -1183,9 +1183,9 @@ namespace Realm {
   void IntersectionMicroOp<N,T>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
     // execute wherever our sparsity output is
-    gasnet_node_t exec_node = ID(sparsity_output).sparsity.creator_node;
+    NodeID exec_node = ID(sparsity_output).sparsity.creator_node;
 
-    if(exec_node != gasnet_mynode()) {
+    if(exec_node != my_node_id) {
       // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
       //  track it
       async_microop = new AsyncMicroOp(op, this);
@@ -1222,7 +1222,7 @@ namespace Realm {
 
   template <int N, typename T>
   template <typename S>
-  IntersectionMicroOp<N,T>::IntersectionMicroOp(gasnet_node_t _requestor,
+  IntersectionMicroOp<N,T>::IntersectionMicroOp(NodeID _requestor,
 						AsyncMicroOp *_async_microop, S& s)
     : PartitioningMicroOp(_requestor, _async_microop)
   {
@@ -1423,9 +1423,9 @@ namespace Realm {
   void DifferenceMicroOp<N,T>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
     // execute wherever our sparsity output is
-    gasnet_node_t exec_node = ID(sparsity_output).sparsity.creator_node;
+    NodeID exec_node = ID(sparsity_output).sparsity.creator_node;
 
-    if(exec_node != gasnet_mynode()) {
+    if(exec_node != my_node_id) {
       // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
       //  track it
       async_microop = new AsyncMicroOp(op, this);
@@ -1467,7 +1467,7 @@ namespace Realm {
 
   template <int N, typename T>
   template <typename S>
-  DifferenceMicroOp<N,T>::DifferenceMicroOp(gasnet_node_t _requestor,
+  DifferenceMicroOp<N,T>::DifferenceMicroOp(NodeID _requestor,
 					    AsyncMicroOp *_async_microop, S& s)
     : PartitioningMicroOp(_requestor, _async_microop)
   {
@@ -1507,7 +1507,7 @@ namespace Realm {
     int target_node;
     if(lhs.dense()) {
       if(rhs.dense()) {
-	target_node = gasnet_mynode();  // operation will be cheap anyway
+	target_node = my_node_id;  // operation will be cheap anyway
       } else {
 	target_node = ID(rhs.sparsity).sparsity.creator_node;
       }
@@ -1520,7 +1520,7 @@ namespace Realm {
 	//if(lhs_node != rhs_node)
 	//  std::cout << "UNION PICK " << lhs_node << " or " << rhs_node << "\n";
 	// if they're different, and lhs is us, choose rhs to load-balance maybe
-	target_node = (lhs_node == gasnet_mynode()) ? rhs_node : lhs_node;
+	target_node = (lhs_node == my_node_id) ? rhs_node : lhs_node;
       }
     }
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
@@ -1547,7 +1547,7 @@ namespace Realm {
       output.bounds = output.bounds.union_bbox(ops[i].bounds);
 
     // try to assign sparsity ID near the input sparsity maps (if present)
-    int target_node = gasnet_mynode();
+    int target_node = my_node_id;
     int node_count = 0;
     for(size_t i = 0; i < ops.size(); i++)
       if(!ops[i].dense()) {
@@ -1557,7 +1557,7 @@ namespace Realm {
 	  target_node = node;
 	} else if((node_count == 1) && (node != target_node)) {
 	  //std::cout << "UNION DIFF " << target_node << " or " << node << "\n";
-	  target_node = gasnet_mynode();
+	  target_node = my_node_id;
 	  break;
 	}
       }
@@ -1623,7 +1623,7 @@ namespace Realm {
     int target_node;
     if(lhs.dense()) {
       if(rhs.dense()) {
-	target_node = gasnet_mynode();  // operation will be cheap anyway
+	target_node = my_node_id;  // operation will be cheap anyway
       } else {
 	target_node = ID(rhs.sparsity).sparsity.creator_node;
       }
@@ -1636,7 +1636,7 @@ namespace Realm {
 	//if(lhs_node != rhs_node)
 	//  std::cout << "ISECT PICK " << lhs_node << " or " << rhs_node << "\n";
 	// if they're different, and lhs is us, choose rhs to load-balance maybe
-	target_node = (lhs_node == gasnet_mynode()) ? rhs_node : lhs_node;
+	target_node = (lhs_node == my_node_id) ? rhs_node : lhs_node;
       }
     }
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
@@ -1666,7 +1666,7 @@ namespace Realm {
     assert(!output.bounds.empty());
 
     // try to assign sparsity ID near the input sparsity maps (if present)
-    int target_node = gasnet_mynode();
+    int target_node = my_node_id;
     int node_count = 0;
     for(size_t i = 0; i < ops.size(); i++)
       if(!ops[i].dense()) {
@@ -1676,7 +1676,7 @@ namespace Realm {
 	  target_node = node;
 	} else if((node_count == 1) && (node != target_node)) {
 	  //std::cout << "ISECT DIFF " << target_node << " or " << node << "\n";
-	  target_node = gasnet_mynode();
+	  target_node = my_node_id;
 	  break;
 	}
       }
@@ -1742,7 +1742,7 @@ namespace Realm {
     int target_node;
     if(lhs.dense()) {
       if(rhs.dense()) {
-	target_node = gasnet_mynode();  // operation will be cheap anyway
+	target_node = my_node_id;  // operation will be cheap anyway
       } else {
 	target_node = ID(rhs.sparsity).sparsity.creator_node;
       }
@@ -1755,7 +1755,7 @@ namespace Realm {
 	//if(lhs_node != rhs_node)
 	//  std::cout << "DIFF PICK " << lhs_node << " or " << rhs_node << "\n";
 	// if they're different, and lhs is us, choose rhs to load-balance maybe
-	target_node = (lhs_node == gasnet_mynode()) ? rhs_node : lhs_node;
+	target_node = (lhs_node == my_node_id) ? rhs_node : lhs_node;
       }
     }
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
@@ -1794,9 +1794,9 @@ namespace Realm {
   template class UnionOperation<N,T>; \
   template class IntersectionOperation<N,T>; \
   template class DifferenceOperation<N,T>; \
-  template UnionMicroOp<N,T>::UnionMicroOp(gasnet_node_t, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \
-  template IntersectionMicroOp<N,T>::IntersectionMicroOp(gasnet_node_t, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \
-  template DifferenceMicroOp<N,T>::DifferenceMicroOp(gasnet_node_t, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \
+  template UnionMicroOp<N,T>::UnionMicroOp(NodeID, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \
+  template IntersectionMicroOp<N,T>::IntersectionMicroOp(NodeID, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \
+  template DifferenceMicroOp<N,T>::DifferenceMicroOp(NodeID, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \
   template Event IndexSpace<N,T>::compute_unions(const std::vector<IndexSpace<N,T> >&, \
 						  const std::vector<IndexSpace<N,T> >&, \
 						  std::vector<IndexSpace<N,T> >&, \
