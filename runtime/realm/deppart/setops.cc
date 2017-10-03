@@ -1334,8 +1334,8 @@ namespace Realm {
 	    // otherwise consume the rhs and update p
 	    p = it_rhs.rect.hi;
 	    p.x += 1;
-	    if(!it_rhs.step()) {
-	      // no rhs left - emit the rest and break out
+	    if(!it_rhs.step() || (it_lhs.rect.hi.x < it_rhs.rect.lo.x)) {
+	      // no rhs left in this lhs piece - emit the rest and break out
 	      bitmask.add_rect(Rect<N,T>(p, it_lhs.rect.hi));
 	      break;
 	    }
