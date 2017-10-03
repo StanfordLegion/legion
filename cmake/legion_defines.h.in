@@ -1,6 +1,14 @@
-// -----------------------------------------------------------------------//
-// save all Legion defines in the legion_defines.h file
-// -----------------------------------------------------------------------//
+/**
+ * \file legion_defines.h
+ * Public-facing definitions of variables configured at build time
+ */
+
+// ******************** IMPORTANT **************************
+//
+// This file is PURE C, **NOT** C++. Keep any C++-isms in
+// legion_types.h, or elsewhere.
+//
+// ******************** IMPORTANT **************************
 
 #ifndef DEBUG_REALM
 #cmakedefine DEBUG_REALM 
@@ -53,6 +61,3 @@
 #ifndef REALM_OPENMP_KMP_SUPPORT
 #cmakedefine REALM_OPENMP_KMP_SUPPORT
 #endif
-
-#include "legion.h"
-

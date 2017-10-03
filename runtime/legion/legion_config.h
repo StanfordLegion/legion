@@ -17,6 +17,10 @@
 #ifndef __LEGION_CONFIG_H__
 #define __LEGION_CONFIG_H__
 
+#ifdef LEGION_CMAKE
+#include "legion_defines.h"
+#endif
+
 // for UINT_MAX, INT_MAX, INT_MIN
 #include <limits.h>
 
