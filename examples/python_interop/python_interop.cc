@@ -18,8 +18,6 @@
 #include "realm/python/python_source.h"
 
 using namespace Legion;
-using namespace LegionRuntime::Accessor;
-using namespace LegionRuntime::Arrays;
 
 enum TaskIDs {
   TOP_LEVEL_TASK_ID = 1,
@@ -50,17 +48,15 @@ void init_task(const Task *task,
                const std::vector<PhysicalRegion> &regions,
                Context ctx, Runtime *runtime)
 {
-  RegionAccessor<AccessorType::Generic, double> acc = 
-    regions[0].get_field_accessor(X_FIELD_ID).typeify<double>();
+  const FieldAccessor<READ_WRITE,double,2> acc(regions[0], X_FIELD_ID);
 
-  Domain dom = runtime->get_index_space_domain(ctx, 
+  Rect<2> rect = runtime->get_index_space_domain(ctx,
       task->regions[0].region.get_index_space());
-  Rect<2> rect = dom.get_rect<2>();
 
   // Fill memory with some recognizable pattern.
-  for (GenericPointInRectIterator<2> pir(rect); pir; pir++) {
-    double value = (double)(pir.p[0]*(rect.hi.x[1] - rect.lo.x[1] + 1) + pir.p[1]);
-    acc.write(DomainPoint::from_point<2>(pir.p), value);
+  for (PointInRectIterator<2> pir(rect); pir(); pir++) {
+    double value = (double)((*pir)[0]*(rect.hi.y - rect.lo.y + 1) + (*pir)[1]);
+    acc[*pir] = value;
   }
 }
 
