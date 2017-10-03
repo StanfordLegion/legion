@@ -54,7 +54,9 @@ if(COMPILER_SUPPORTS_NO_STRICT_ALIASING)
 endif()
 
 if (CMAKE_BUILD_TYPE AND ( CMAKE_BUILD_TYPE STREQUAL "Debug"))
+  # define variable for realm_defines.h
   set(DEBUG_REALM ON)
+  # define variable for legion_defines.h
   set(DEBUG_LEGION ON)
 endif()
 
@@ -63,6 +65,9 @@ endif()
 #------------------------------------------------------------------------------#
 set(Legion_OUTPUT_LEVEL "DEBUG" CACHE STRING "Compile time logging level")
 set_property(CACHE Legion_OUTPUT_LEVEL PROPERTY STRINGS SPEW DEBUG INFO PRINT WARNING ERROR FATAL NONE)
+
+# define variable for realm_defines.h
+set(COMPILE_TIME_MIN_LEVEL LEVEL_${Legion_OUTPUT_LEVEL})
 
 #------------------------------------------------------------------------------#
 # HWLOC configuration
@@ -78,10 +83,19 @@ endif()
 #------------------------------------------------------------------------------#
 # OpenMP
 #------------------------------------------------------------------------------#
-option(REALM_USE_OPENMP "Use OpenMP" OFF)
-if(REALM_USE_OPENMP)
-  option(REALM_OPENMP_GOMP_SUPPORT "Gopenmp suppotr for OpenMP" ON)
-  option(REALM_OPENMP_KMP_SUPPORT "KMP support for OpenMP" ON)
+option(Legion_USE_OpenMP "Use OpenMP" OFF)
+if(Legion_USE_OpenMP)
+  option(Legion_OpenMP_GOMP_SUPPORT "Enable GOMP support for OpenMP" ON)
+  option(Legion_OpenMP_KMP_SUPPORT "Enable KMP support for OpenMP" ON)
+
+  # define variable for realm_defines.h
+  set(REALM_USE_OPENMP ON)
+  if(Legion_OpenMP_GOMP_SUPPORT)
+    set(REALM_OPENMP_GOMP_SUPPORT ON)
+  endif()
+  if(Legion_OpenMP_KMP_SUPPORT)
+    set(REALM_OPENMP_KMP_SUPPORT ON)
+  endif()
 endif()
 
 #------------------------------------------------------------------------------#
@@ -94,6 +108,9 @@ if(Legion_USE_Python)
   install(FILES ${Legion_SOURCE_DIR}/bindings/python/legion.py
     DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/python
   )
+
+  # define variable for realm_defines.h
+  set(REALM_USE_PYTHON)
 endif()
 
 #------------------------------------------------------------------------------#
@@ -111,10 +128,11 @@ if(Legion_USE_GASNet)
     DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
   )
 
-  set (GASNETI_BUG1389_WORKAROUND "1")
+  # define variable for realm_defines.h
+  set(USE_GASNET)
+  set(GASNETI_BUG1389_WORKAROUND "1")
   string(TOUPPER ${GASNet_CONDUIT} CONDUIT)
-  set (GASNET_CONDUIT_${CONDUIT} ON)
-
+  set(GASNET_CONDUIT_${CONDUIT} ON)
 endif()
 
 #------------------------------------------------------------------------------#
@@ -127,6 +145,9 @@ if(Legion_USE_LLVM)
   install(FILES ${Legion_SOURCE_DIR}/cmake/FindLLVM.cmake
     DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
   )
+
+  # define variable for realm_defines.h
+  set(REALM_USE_LLVM)
 endif()
 
 #------------------------------------------------------------------------------#
@@ -147,8 +168,8 @@ if(Legion_USE_CUDA)
     DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake/newcmake
   )
 
-  set (USE_CUDA ON)
-
+  # define variable for realm_defines.h
+  set(USE_CUDA ON)
 endif()
 
 #------------------------------------------------------------------------------#
@@ -157,6 +178,9 @@ endif()
 option(Legion_USE_HDF5 "Enable support for HDF5" OFF)
 if(Legion_USE_HDF5)
   find_package(HDF5 REQUIRED COMPONENTS C)
+
+  # define variable for realm_defines.h
+  set(REALM_USE_HDF)
 endif()
 
 #------------------------------------------------------------------------------#
@@ -165,6 +189,9 @@ endif()
 set(Legion_MAX_FIELDS 512 CACHE STRING "Maximum number of fields allocated to a single field space")
 set_property(CACHE Legion_MAX_FIELDS PROPERTY STRINGS 32 64 128 256 512 1024)
 mark_as_advanced(Legion_MAX_FIELDS)
+
+# define variable for legion_defines.h
+set(MAX_FIELDS ${Legion_MAX_FIELDS})
 
 #------------------------------------------------------------------------------#
 # Runtime library targets
@@ -246,6 +273,7 @@ export(PACKAGE Legion)
 #------------------------------------------------------------------------------#
 # Examples and Applications
 #------------------------------------------------------------------------------#
+option(Legion_BUILD_ALL "Build all Legion examples, tutorials and tests" OFF)
 option(Legion_BUILD_APPS "Build Legion sample applications" OFF)
 option(Legion_BUILD_EXAMPLES "Build Legion examples" OFF)
 option(Legion_BUILD_TUTORIAL "Build Legion tutorial" OFF)
@@ -254,7 +282,7 @@ option(Legion_ENABLE_TESTING "Build and copy testing stuff" OFF)
 if(Legion_ENABLE_TESTING)
   enable_testing()
 endif()
-if(Legion_BUILD_APPS OR Legion_BUILD_EXAMPLES OR Legion_BUILD_TUTORIAL OR Legion_BUILD_TESTS)
+if(Legion_BUILD_ALL OR Legion_BUILD_APPS OR Legion_BUILD_EXAMPLES OR Legion_BUILD_TUTORIAL OR Legion_BUILD_TESTS)
   # Make a namespaced alias so in-build examples can use it the same way as if
   # it were imported
   add_library(Legion::Legion ALIAS Legion)
@@ -271,16 +299,16 @@ if(Legion_BUILD_APPS OR Legion_BUILD_EXAMPLES OR Legion_BUILD_TUTORIAL OR Legion
     set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} $<$<BOOL:${PROP}>:-I$<JOIN:${PROP}, -I>>")
   endif()
 
-  if(Legion_BUILD_APPS)
+  if(Legion_BUILD_ALL OR Legion_BUILD_APPS)
     add_subdirectory(apps)
   endif()
-  if(Legion_BUILD_EXAMPLES)
+  if(Legion_BUILD_ALL OR Legion_BUILD_EXAMPLES)
     add_subdirectory(examples)
   endif()
-  if(Legion_BUILD_TUTORIAL)
+  if(Legion_BUILD_ALL OR Legion_BUILD_TUTORIAL)
     add_subdirectory(tutorial)
   endif()
-  if(Legion_BUILD_TESTS)
+  if(Legion_BUILD_ALL OR Legion_BUILD_TESTS)
     add_subdirectory(test)
   endif()
 endif()

@@ -13,15 +13,23 @@
 #ifndef DEBUG_LEGION
 #cmakedefine DEBUG_LEGION
 #endif
+
 #ifndef PRIVILEGE_CHECKS
 #cmakedefine PRIVILEGE_CHECKS
 #endif
+
 #ifndef BOUNDS_CHECKS
 #cmakedefine BOUNDS_CHECKS
 #endif
+
 #ifndef ENABLE_LEGION_TLS
 #cmakedefine ENABLE_LEGION_TLS
 #endif
+
+#ifndef MAX_FIELDS
+#cmakedefine MAX_FIELDS @Legion_MAX_FIELDS@
+#endif
+
 #ifndef __STDC_FORMAT_MACROS
 #cmakedefine __STDC_FORMAT_MACROS
 #endif
