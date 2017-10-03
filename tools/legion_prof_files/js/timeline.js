@@ -199,6 +199,7 @@ function getLineColor(elem) {
     "Proc Group": "orangered",
     "Proc Set": "orangered",
     "OpenMP": "orangered",
+    "Python": "olivedrab",
     "System Memory": "olivedrab",
     "GASNet Global Memory": "crimson",
     "Registered Memory": "darkmagenta",

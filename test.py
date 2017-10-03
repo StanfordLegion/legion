@@ -77,6 +77,14 @@ legion_openmp_cxx_tests = [
     ['examples/omp_saxpy/omp_saxpy', []],
 ]
 
+legion_python_cxx_tests = [
+    # Examples
+    ['examples/python_interop/python_interop', ['-ll:py', '1']],
+
+    # Tests
+    ['test/python_bindings/python_bindings', ['-ll:py', '1']],
+]
+
 legion_hdf_cxx_tests = [
     # Examples
     ['examples/attach_file/attach_file', []],
@@ -153,6 +161,10 @@ def run_test_legion_gasnet_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread
 def run_test_legion_openmp_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
     run_cxx(legion_openmp_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count)
+
+def run_test_legion_python_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
+    flags = ['-logfile', 'out_%.log']
+    run_cxx(legion_python_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count)
 
 def run_test_legion_hdf_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
@@ -381,7 +393,8 @@ def check_test_legion_cxx(root_dir):
 
     # These are the tests we ACTUALLY have coverage for.
     tests = legion_cxx_tests + legion_gasnet_cxx_tests + \
-            legion_openmp_cxx_tests + legion_hdf_cxx_tests
+            legion_openmp_cxx_tests + legion_python_cxx_tests + \
+            legion_hdf_cxx_tests
     actual_tests = set()
     for test_file, test_flags in tests:
         actual_tests.add(os.path.dirname(test_file))
@@ -477,8 +490,8 @@ class Stage(object):
 def report_mode(debug, launcher,
                 test_regent, test_legion_cxx, test_fuzzer, test_realm,
                 test_external, test_private, test_perf, use_gasnet,
-                use_cuda, use_openmp, use_llvm, use_hdf, use_spy, use_gcov,
-                use_cmake, use_rdir):
+                use_cuda, use_openmp, use_python, use_llvm, use_hdf, use_spy,
+                use_gcov, use_cmake, use_rdir):
     print()
     print('#'*60)
     print('### Test Suite Configuration')
@@ -499,6 +512,7 @@ def report_mode(debug, launcher,
     print('###   * GASNet:     %s' % use_gasnet)
     print('###   * CUDA:       %s' % use_cuda)
     print('###   * OpenMP:     %s' % use_openmp)
+    print('###   * Python:     %s' % use_python)
     print('###   * LLVM:       %s' % use_llvm)
     print('###   * HDF5:       %s' % use_hdf)
     print('###   * Spy:        %s' % use_spy)
@@ -541,6 +555,7 @@ def run_tests(test_modules=None,
     use_gasnet = feature_enabled('gasnet', False)
     use_cuda = feature_enabled('cuda', False)
     use_openmp = feature_enabled('openmp', False)
+    use_python = feature_enabled('python', False)
     use_llvm = feature_enabled('llvm', False)
     use_hdf = feature_enabled('hdf', False)
     use_spy = feature_enabled('spy', False)
@@ -566,6 +581,7 @@ def run_tests(test_modules=None,
         ('USE_CUDA', '1' if use_cuda else '0'),
         ('USE_OPENMP', '1' if use_openmp else '0'),
         ('TEST_OPENMP', '1' if use_openmp else '0'),
+        ('USE_PYTHON', '1' if use_python else '0'),
         ('USE_LLVM', '1' if use_llvm else '0'),
         ('USE_HDF', '1' if use_hdf else '0'),
         ('TEST_HDF', '1' if use_hdf else '0'),
@@ -590,8 +606,8 @@ def run_tests(test_modules=None,
     report_mode(debug, launcher,
                 test_regent, test_legion_cxx, test_fuzzer, test_realm,
                 test_external, test_private, test_perf, use_gasnet,
-                use_cuda, use_openmp, use_llvm, use_hdf, use_spy, use_gcov,
-                use_cmake, use_rdir)
+                use_cuda, use_openmp, use_python, use_llvm, use_hdf, use_spy,
+                use_gcov, use_cmake, use_rdir)
 
     tmp_dir = tempfile.mkdtemp(dir=root_dir)
     if verbose:
@@ -622,6 +638,8 @@ def run_tests(test_modules=None,
                     run_test_legion_gasnet_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
                 if use_openmp:
                     run_test_legion_openmp_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
+                if use_python:
+                    run_test_legion_python_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
                 if use_hdf:
                     run_test_legion_hdf_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
         if test_fuzzer:
@@ -670,8 +688,8 @@ def driver():
         help='Disable debug mode (equivalent to DEBUG=0).')
     parser.add_argument(
         '--use', dest='use_features', action='append',
-        choices=['gasnet', 'cuda', 'openmp', 'llvm', 'hdf', 'spy', 'gcov',
-                 'cmake', 'rdir'],
+        choices=['gasnet', 'cuda', 'openmp', 'python', 'llvm', 'hdf', 'spy',
+                 'gcov', 'cmake', 'rdir'],
         default=None,
         help='Build Legion with features (also via USE_*).')
     parser.add_argument(

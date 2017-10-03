@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2017 Kitware, Inc.
+# Copyright 2017 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,28 +15,20 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.1)
+project(LegionExample_python_interop)
 
+# Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_subdirectory(attach_file)
-add_subdirectory(circuit)
-add_subdirectory(dynamic_registration)
-add_subdirectory(ghost)
-add_subdirectory(ghost_pull)
-add_subdirectory(realm_saxpy)
-add_subdirectory(spmd_cgsolver)
-add_subdirectory(virtual_map)
+add_executable(python_interop python_interop.cc)
+target_compile_definitions(python_interop PRIVATE PYTHON_MODULES_PATH="${CMAKE_INSTALL_FULL_DATADIR}/Legion/python:${CMAKE_INSTALL_FULL_DATADIR}/Legion/python/tests")
+target_link_libraries(python_interop Legion::Legion)
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/python_interop.py
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/python/tests
+)
 
-if(Legion_USE_GASNet)
-  add_subdirectory(mpi_interop)
-endif()
-
-if(Legion_USE_CUDA)
-  add_subdirectory(thrust_interop)
-endif()
-
-if(Legion_USE_Python)
-  add_subdirectory(python_interop)
+if(Legion_ENABLE_TESTING)
+  add_test(NAME python_interop COMMAND $<TARGET_FILE:python_interop> -ll:py 1)
 endif()
