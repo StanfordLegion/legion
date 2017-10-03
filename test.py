@@ -202,8 +202,7 @@ def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     # Parallel Research Kernels: Stencil
     # Contact: Wonchan Lee <wonchan@cs.stanford.edu>
     prk_dir = os.path.join(tmp_dir, 'prk')
-    #cmd(['git', 'clone', 'https://github.com/magnatelee/PRK.git', prk_dir])
-    cmd(['git', 'clone', 'https://github.com/lightsighter/PRK.git', prk_dir])
+    cmd(['git', 'clone', 'https://github.com/magnatelee/PRK.git', prk_dir])
     # This uses a custom Makefile that requires additional
     # configuration. Rather than go to that trouble it's easier to
     # just use a copy of the standard Makefile template.
