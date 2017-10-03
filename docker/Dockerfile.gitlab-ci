@@ -13,7 +13,8 @@ RUN dpkg --add-architecture i386 && \
     add-apt-repository ppa:pypy/ppa -y && \
     apt-get update -qq && \
     apt-get install -qq \
-      build-essential git libpython-dev python-pip python-cffi pypy time wget \
+      build-essential git \
+      libpython-dev python-pip python-cffi python-numpy pypy time wget \
       g++-4.8 g++-4.9 g++-5 g++-6 \
       gcc-4.9-multilib g++-4.9-multilib \
       clang-3.5 libclang-3.5-dev llvm-3.5-dev \
