@@ -71,12 +71,14 @@ list(APPEND LOW_RUNTIME_SRC
   realm/threads.h           realm/threads.cc
   realm/threads.inl
 )
+
 if(Legion_USE_CUDA)
   list(APPEND LOW_RUNTIME_SRC
     realm/cuda/cuda_module.h    realm/cuda/cuda_module.cc
     realm/cuda/cudart_hijack.h  realm/cuda/cudart_hijack.cc
   )
 endif()
+
 if(Legion_USE_LLVM)
   list(APPEND LOW_RUNTIME_SRC
     realm/llvmjit/llvmjit.h
@@ -85,6 +87,7 @@ if(Legion_USE_LLVM)
     realm/llvmjit/llvmjit_module.h    realm/llvmjit/llvmjit_module.cc
   )
 endif()
+
 if(Legion_USE_HDF5)
   list(APPEND LOW_RUNTIME_SRC
     realm/hdf5/hdf5_module.h realm/hdf5/hdf5_module.cc
@@ -93,6 +96,7 @@ if(Legion_USE_HDF5)
     realm/hdf5/hdf5_access.cc
   )
 endif()
+
 if(Legion_USE_GASNet)
   list(APPEND LOW_RUNTIME_SRC activemsg.h activemsg.cc)
 endif()
@@ -101,8 +105,17 @@ if (REALM_USE_OPENMP)
   list(APPEND LOW_RUNTIME_SRC
     realm/openmp/openmp_module.h realm/openmp/openmp_module.cc
     realm/openmp/openmp_threadpool.h realm/openmp/openmp_threadpool.cc
-    realm/openmp/openmp_api.cc 
     realm/openmp/openmp_threadpool.inl
+    realm/openmp/openmp_api.cc
+  )
+endif()
+
+if (Legion_USE_Python)
+  list(APPEND LOW_RUNTIME_SRC
+    realm/python/python_module.h realm/python/python_module.cc
+    realm/python/python_source.h realm/python/python_source.cc
+    realm/python/python_source.inl
+    realm/python/python_internal.h
   )
 endif()
 
@@ -195,6 +208,11 @@ if(Legion_USE_HDF5)
   target_compile_definitions(LowLevelRuntime PUBLIC USE_HDF)
   target_include_directories(LowLevelRuntime PRIVATE ${HDF5_INCLUDE_DIRS})
   target_link_libraries(LowLevelRuntime PRIVATE ${HDF5_LIBRARIES})
+endif()
+
+if(Legion_USE_Python)
+  target_compile_definitions(LowLevelRuntime PUBLIC REALM_USE_PYTHON)
+  target_compile_definitions(LowLevelRuntime PUBLIC REALM_PYTHON_LIB="${PYTHON_LIBRARIES}")
 endif()
 
 set_target_properties(LowLevelRuntime PROPERTIES OUTPUT_NAME realm)

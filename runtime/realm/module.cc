@@ -38,6 +38,9 @@
 #include "realm/openmp/openmp_module.h"
 #endif
 #include "realm/procset/procset_module.h"
+#ifdef REALM_USE_PYTHON
+#include "realm/python/python_module.h"
+#endif
 #ifdef USE_CUDA
 #include "realm/cuda/cuda_module.h"
 #endif

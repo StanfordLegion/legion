@@ -149,8 +149,9 @@ namespace Realm {
       InstanceList local_instances;
 
       GASNetHSL mutex; // protection for resizing vectors
-      BasicRangeAllocator<size_t, RegionInstance> allocator;
       std::map<off_t, off_t> free_blocks;
+      GASNetHSL allocator_mutex;
+      BasicRangeAllocator<size_t, RegionInstance> allocator;
       ProfilingGauges::AbsoluteGauge<size_t> usage, peak_usage, peak_footprint;
     };
 

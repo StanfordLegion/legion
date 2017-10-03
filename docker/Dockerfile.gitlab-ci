@@ -13,7 +13,8 @@ RUN dpkg --add-architecture i386 && \
     add-apt-repository ppa:pypy/ppa -y && \
     apt-get update -qq && \
     apt-get install -qq \
-      build-essential git python-pip pypy time wget \
+      build-essential git time wget \
+      libpython-dev python-pip pypy \
       g++-4.8 g++-4.9 g++-5 g++-6 \
       gcc-4.9-multilib g++-4.9-multilib \
       clang-3.5 libclang-3.5-dev llvm-3.5-dev \
@@ -24,7 +25,7 @@ RUN dpkg --add-architecture i386 && \
       mesa-common-dev \
       libblas-dev liblapack-dev libhdf5-dev && \
     apt-get clean && \
-    pip install github3.py
+    pip install cffi github3.py numpy
 
 RUN wget https://cmake.org/files/v3.6/cmake-3.6.2-Linux-x86_64.tar.gz && \
     echo "dd9d8d57b66109d4bac6eef9209beb94608a185c  cmake-3.6.2-Linux-x86_64.tar.gz" | shasum --check && \

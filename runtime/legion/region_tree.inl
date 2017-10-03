@@ -26,8 +26,8 @@ namespace Legion {
     template<int DIM, typename T>
     IndexSpaceNodeT<DIM,T>::IndexSpaceNodeT(RegionTreeForest *ctx, 
         IndexSpace handle, IndexPartNode *parent, LegionColor color,
-        const Realm::IndexSpace<DIM,T> *is, ApEvent ready)
-      : IndexSpaceNode(ctx, handle, parent, color, ready), 
+        const Realm::IndexSpace<DIM,T> *is, DistributedID did, ApEvent ready)
+      : IndexSpaceNode(ctx, handle, parent, color, did, ready), 
         linearization_ready(false)
     //--------------------------------------------------------------------------
     {
@@ -54,13 +54,14 @@ namespace Legion {
     IndexSpaceNodeT<DIM,T>::~IndexSpaceNodeT(void)
     //--------------------------------------------------------------------------
     { 
-      // Log subspaces when we are cleaning up
-      if (Runtime::legion_spy_enabled && (parent != NULL) &&
-          (get_owner_space() == context->runtime->address_space))
+      Realm::IndexSpace<DIM,T> local_space;
+      get_realm_index_space(local_space, true/*tight*/);
+      local_space.destroy();
+      for (typename std::map<IndexTreeNode*,IntersectInfo>::iterator it =
+            intersections.begin(); it != intersections.end(); it++)
       {
-        if (!index_space_ready.has_triggered())
-          index_space_ready.lg_wait();
-        log_index_space_points();
+        if (it->second.has_intersection && it->second.intersection_valid)
+          it->second.intersection.destroy();
       }
     }
 
@@ -138,6 +139,9 @@ namespace Legion {
       }
       else
       {
+        // Log subspaces being set on the owner
+        if (Runtime::legion_spy_enabled && (parent != NULL))
+          log_index_space_points();
         // We're the owner, send messages to everyone else that we've 
         // sent this node to except the source
         Serializer rez;
@@ -149,7 +153,7 @@ namespace Legion {
         IndexSpaceSetFunctor functor(context->runtime, source, rez);
         // Hold the lock while walking over the node set
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        creation_set.map(functor); 
+        remote_instances.map(functor); 
       }
     }
 
@@ -583,40 +587,18 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    void IndexSpaceNodeT<DIM,T>::destroy_node(AddressSpaceID source)
+    bool IndexSpaceNodeT<DIM,T>::destroy_node(AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      // If we've already been destroyed then we are done
-      if (destroyed)
-        return;
-      std::set<RegionNode*> to_destroy;
+      // If we're not the owner, send a message that we're removing
+      // the application reference
+      if (!is_owner())
       {
-        AutoLock n_lock(node_lock);
-        if (!destroyed)
-        {
-          destroyed = true;
-          if (!creation_set.empty())
-          {
-            DestructionFunctor functor(handle, context->runtime);
-            creation_set.map(functor);
-          }
-          to_destroy = logical_nodes;
-        }
+        runtime->send_index_space_destruction(handle, owner_space);
+        return false;
       }
-      for (std::set<RegionNode*>::const_iterator it = to_destroy.begin();
-            it != to_destroy.end(); it++)
-      {
-        (*it)->destroy_node(source);
-      }
-      Realm::IndexSpace<DIM,T> local_space;
-      get_realm_index_space(local_space, true/*tight*/);
-      local_space.destroy();
-      for (typename std::map<IndexTreeNode*,IntersectInfo>::iterator it =
-            intersections.begin(); it != intersections.end(); it++)
-      {
-        if (it->second.has_intersection && it->second.intersection_valid)
-          it->second.intersection.destroy();
-      }
+      else
+        return remove_base_valid_ref(APPLICATION_REF, NULL/*mutator*/);
     }
 
     //--------------------------------------------------------------------------
@@ -3267,9 +3249,11 @@ namespace Legion {
                                         IndexPartition p,
                                         IndexSpaceNode *par, IndexSpaceNode *cs,
                                         LegionColor c, bool disjoint, 
+                                        DistributedID did,
                                         ApEvent partition_ready, 
                                         ApBarrier pend, ShardMapping *map)
-      : IndexPartNode(ctx, p, par, cs, c, disjoint, partition_ready, pend, map),
+      : IndexPartNode(ctx, p, par, cs, c, disjoint, did, 
+                      partition_ready, pend, map),
         has_union_space(false), union_space_tight(false)
     //--------------------------------------------------------------------------
     {
@@ -3281,9 +3265,10 @@ namespace Legion {
                                         IndexPartition p,
                                         IndexSpaceNode *par, IndexSpaceNode *cs,
                                         LegionColor c, RtEvent disjoint_event,
+                                        DistributedID did,
                                         ApEvent partition_ready, 
                                         ApBarrier pending, ShardMapping *map)
-      : IndexPartNode(ctx, p, par, cs, c, disjoint_event, 
+      : IndexPartNode(ctx, p, par, cs, c, disjoint_event, did,
                       partition_ready, pending, map),
         has_union_space(false), union_space_tight(false)
     //--------------------------------------------------------------------------
@@ -3305,6 +3290,12 @@ namespace Legion {
     IndexPartNodeT<DIM,T>::~IndexPartNodeT(void)
     //--------------------------------------------------------------------------
     { 
+      if (has_union_space && !partition_union_space.empty())
+        partition_union_space.destroy();
+      for (typename std::map<IndexTreeNode*,IntersectInfo>::iterator it = 
+            intersections.begin(); it != intersections.end(); it++)
+        if (it->second.has_intersection && it->second.intersection_valid)
+          it->second.intersection.destroy();
     }
 
     //--------------------------------------------------------------------------
@@ -3735,12 +3726,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    void IndexPartNodeT<DIM,T>::destroy_node(AddressSpaceID source) 
+    bool IndexPartNodeT<DIM,T>::destroy_node(AddressSpaceID source) 
     //--------------------------------------------------------------------------
     {
-      // If we've already been destroyed then we are done
-      if (destroyed)
-        return;
       // Clean up our partial pending barrier if we have one
       if (partial_pending.exists() && 
             (source == context->runtime->address_space))
@@ -3749,32 +3737,15 @@ namespace Legion {
         ApBarrier copy = partial_pending;
         copy.destroy_barrier();
       }
-      std::set<PartitionNode*> to_destroy;
+      // If we're not the owner send a message to do the destruction
+      // otherwise we can do it here
+      if (!is_owner())
       {
-        AutoLock n_lock(node_lock);
-        if (!destroyed)
-        {
-          destroyed = true;
-          if (!creation_set.empty())
-          {
-            DestructionFunctor functor(handle, context->runtime);
-            creation_set.map(functor);
-          }
-          to_destroy = logical_nodes;
-          
-        }
+        runtime->send_index_partition_destruction(handle, owner_space);
+        return false;
       }
-      for (std::set<PartitionNode*>::const_iterator it = 
-            to_destroy.begin(); it != to_destroy.end(); it++)
-      {
-        (*it)->destroy_node(source);
-      }
-      if (has_union_space && !partition_union_space.empty())
-        partition_union_space.destroy();
-      for (typename std::map<IndexTreeNode*,IntersectInfo>::iterator it = 
-            intersections.begin(); it != intersections.end(); it++)
-        if (it->second.has_intersection && it->second.intersection_valid)
-          it->second.intersection.destroy();
+      else
+        return remove_base_valid_ref(APPLICATION_REF, NULL/*mutator*/);
     }
 
   }; // namespace Internal

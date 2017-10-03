@@ -16651,7 +16651,8 @@ namespace Legion {
       }
       IndexSpace result(get_unique_index_space_id(),
                         get_unique_index_tree_id(), type_tag);
-      forest->create_index_space(result, realm_is);
+      DistributedID did = get_available_distributed_id(true/*continuation*/);
+      forest->create_index_space(result, realm_is, did);
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_top_index_space(result.id);
       // Overwrite and leak for now, don't care too much as this 
@@ -16843,6 +16844,7 @@ namespace Legion {
       for (std::map<Memory,MemoryManager*>::const_iterator it = 
             memory_managers.begin(); it != memory_managers.end(); it++)
         it->second->prepare_for_shutdown();
+      forest->prepare_for_shutdown();
       prepared_for_shutdown = true;
     }
 
@@ -18722,10 +18724,14 @@ namespace Legion {
       {
         if (!forest->has_node(req.region))
           return ERROR_INVALID_REGION_HANDLE;
+        if (req.region.get_tree_id() != req.parent.get_tree_id())
+          return ERROR_INVALID_REGION_HANDLE;
       }
       else
       {
         if (!forest->has_node(req.partition))
+          return ERROR_INVALID_PARTITION_HANDLE;
+        if (req.partition.get_tree_id() != req.parent.get_tree_id())
           return ERROR_INVALID_PARTITION_HANDLE;
       }
 
