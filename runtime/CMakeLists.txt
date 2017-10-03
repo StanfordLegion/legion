@@ -162,7 +162,6 @@ list(APPEND LOW_RUNTIME_SRC
 )
 find_package(Threads REQUIRED)
 add_library(LowLevelRuntime ${LOW_RUNTIME_SRC})
-target_compile_definitions(LowLevelRuntime PUBLIC __STDC_FORMAT_MACROS)
 target_compile_definitions(LowLevelRuntime PUBLIC REALM_USE_CMAKE)
 target_link_libraries(LowLevelRuntime
   PRIVATE ${CMAKE_DL_LIBS} ${CMAKE_THREAD_LIBS_INIT}
@@ -172,12 +171,7 @@ if(UNIX AND NOT APPLE)
 endif()
 set_target_properties(LowLevelRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(LowLevelRuntime PROPERTIES SOVERSION ${SOVERSION})
-target_compile_definitions(LowLevelRuntime
-  PRIVATE
-    $<$<CONFIG:Debug>:DEBUG_REALM>
-  PUBLIC
-    COMPILE_TIME_MIN_LEVEL=LEVEL_${Legion_OUTPUT_LEVEL}
-)
+target_compile_definitions(LowLevelRuntime PRIVATE $<$<CONFIG:Debug>:DEBUG_REALM>)
 
 if(Legion_USE_HWLOC)
   target_compile_definitions(LowLevelRuntime PRIVATE REALM_USE_HWLOC)
@@ -185,30 +179,25 @@ if(Legion_USE_HWLOC)
 endif()
 
 if(Legion_USE_GASNet)
-  target_compile_definitions(LowLevelRuntime PUBLIC USE_GASNET)
   target_link_libraries(LowLevelRuntime PUBLIC GASNet::GASNet)
 endif()
 
 if(Legion_USE_LLVM)
-  target_compile_definitions(LowLevelRuntime PRIVATE REALM_USE_LLVM)
   target_link_libraries(LowLevelRuntime PRIVATE LLVM::LLVM)
 endif()
 
 if(Legion_USE_CUDA)
-  target_compile_definitions(LowLevelRuntime PUBLIC USE_CUDA)
   target_include_directories(LowLevelRuntime PRIVATE ${CUDA_INCLUDE_DIRS})
   target_link_libraries(LowLevelRuntime PRIVATE ${CUDA_CUDA_LIBRARY})
 endif()
 
 if(Legion_USE_HDF5)
-  target_compile_definitions(LowLevelRuntime PUBLIC USE_HDF)
   target_include_directories(LowLevelRuntime PRIVATE ${HDF5_INCLUDE_DIRS})
   target_link_libraries(LowLevelRuntime PRIVATE ${HDF5_LIBRARIES})
 endif()
 
 if(Legion_USE_Python)
-  target_compile_definitions(LowLevelRuntime PUBLIC REALM_USE_PYTHON)
-  target_compile_definitions(LowLevelRuntime PUBLIC REALM_PYTHON_LIB="${PYTHON_LIBRARIES}")
+  target_compile_definitions(LowLevelRuntime PRIVATE REALM_PYTHON_LIB="${PYTHON_LIBRARIES}")
 endif()
 
 set_target_properties(LowLevelRuntime PROPERTIES OUTPUT_NAME realm)
@@ -282,8 +271,6 @@ target_compile_definitions(HighLevelRuntime
   PRIVATE
     ASSUME_UNALLOCABLE
     $<$<CONFIG:Debug>:DEBUG_LEGION>
-  PUBLIC
-    MAX_FIELDS=${Legion_MAX_FIELDS}
 )
 target_include_directories(HighLevelRuntime
   INTERFACE
