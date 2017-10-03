@@ -1570,6 +1570,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_INVALIDATE_CONTEXT_CALL);
+      // Handle the case where we already deleted the region tree
+      if (!has_node(handle, true/*local only*/))
+        return;
       RegionNode *top_node = get_node(handle);
       CurrentInvalidator invalidator(ctx.get_id(), users_only);
       top_node->visit_node(&invalidator);

@@ -5813,9 +5813,10 @@ namespace Legion {
             // If we're the outermost context or the requirement was
             // deleted, then we can invalidate everything
             // Otherwiswe we only invalidate the users
-            if (!was_created_requirement_deleted(created_requirements[idx]))
-              runtime->forest->invalidate_current_context(outermost_ctx,
-                          !is_outermost, created_requirements[idx].region);
+            const bool users_only = !is_outermost &&
+              !was_created_requirement_deleted(created_requirements[idx]);
+            runtime->forest->invalidate_current_context(outermost_ctx,
+                        users_only, created_requirements[idx].region);
           }
           else // Not returning so invalidate the full thing 
             runtime->forest->invalidate_current_context(tree_context,
