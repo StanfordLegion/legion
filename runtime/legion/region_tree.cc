@@ -8052,6 +8052,7 @@ namespace Legion {
     bool FieldSpaceNode::destroy_node(AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+#ifdef ENABLE_TREE_DELETION
       // If we're the owner, we can just remove the application valid
       // reference, otherwise if we're remote we do that
       if (!is_owner())
@@ -8061,6 +8062,9 @@ namespace Legion {
       }
       else
         return remove_base_valid_ref(APPLICATION_REF, NULL/*no mutator*/);
+#else
+      return false;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -13610,6 +13614,7 @@ namespace Legion {
     bool RegionNode::destroy_node(AddressSpaceID source, bool root)
     //--------------------------------------------------------------------------
     {
+#ifdef ENABLE_TREE_DELETION
 #ifdef DEBUG_LEGION
       assert(!destroyed);
 #endif
@@ -13659,6 +13664,9 @@ namespace Legion {
       destroyed = true;
       // Remove our reference
       return remove_reference();
+#else
+      return false;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -15371,6 +15379,7 @@ namespace Legion {
     bool PartitionNode::destroy_node(AddressSpaceID source, bool root)
     //--------------------------------------------------------------------------
     {
+#ifdef ENABLE_TREE_DELETION
 #ifdef DEBUG_LEGION
       assert(!destroyed);
 #endif
@@ -15416,6 +15425,9 @@ namespace Legion {
       destroyed = true;
       // Remove our reference
       return remove_reference();
+#else
+      return false;
+#endif
     }
 
     //--------------------------------------------------------------------------
