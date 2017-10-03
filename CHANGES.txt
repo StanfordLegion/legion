@@ -4,7 +4,11 @@ attempt is made to keep this list accurate for the master branch.
 Version 17.??.?
   * Legion Prof
     - Added support for minimally invasive dumping of intermediate
-      profiling data while the application is still running for long runs
+        profiling data while the application is still running for long runs
+  * Python
+    - New Python API bindings and native support for Python processors.
+        Compile with USE_PYTHON=1 and run with -ll:py 1 to enable Python.
+        Also see examples/python_interop for an example.
 
 Version 17.08.0 (August 24, 2017)
   * Build system
