@@ -70,17 +70,6 @@ set_property(CACHE Legion_OUTPUT_LEVEL PROPERTY STRINGS SPEW DEBUG INFO PRINT WA
 set(COMPILE_TIME_MIN_LEVEL LEVEL_${Legion_OUTPUT_LEVEL})
 
 #------------------------------------------------------------------------------#
-# HWLOC configuration
-#------------------------------------------------------------------------------#
-option(Legion_USE_HWLOC "Use hwloc for topology awareness" OFF)
-if(Legion_USE_HWLOC)
-  find_package(HWLOC REQUIRED)
-  install(FILES ${Legion_SOURCE_DIR}/cmake/FindHWLOC.cmake
-    DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
-  )
-endif()
-
-#------------------------------------------------------------------------------#
 # OpenMP
 #------------------------------------------------------------------------------#
 option(Legion_USE_OpenMP "Use OpenMP" OFF)
@@ -111,6 +100,28 @@ if(Legion_USE_Python)
 
   # define variable for realm_defines.h
   set(REALM_USE_PYTHON)
+endif()
+
+#------------------------------------------------------------------------------#
+# CUDA configuration
+#------------------------------------------------------------------------------#
+option(Legion_USE_CUDA "Enable support for the CUDA runtime" OFF)
+if(Legion_USE_CUDA)
+  if(NOT BUILD_SHARED_LIBS)
+    set(CUDA_USE_STATIC_CUDA_RUNTIME ON)
+  else()
+    set(CUDA_USE_STATIC_CUDA_RUNTIME OFF)
+  endif()
+  find_package(CUDA REQUIRED)
+  install(FILES ${Legion_SOURCE_DIR}/cmake/FindCUDA.cmake
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
+  )
+  install(FILES ${Legion_SOURCE_DIR}/cmake/newcmake/FindCUDA.cmake
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake/newcmake
+  )
+
+  # define variable for realm_defines.h
+  set(USE_CUDA ON)
 endif()
 
 #------------------------------------------------------------------------------#
@@ -151,28 +162,6 @@ if(Legion_USE_LLVM)
 endif()
 
 #------------------------------------------------------------------------------#
-# CUDA configuration
-#------------------------------------------------------------------------------#
-option(Legion_USE_CUDA "Enable support for the CUDA runtime" OFF)
-if(Legion_USE_CUDA)
-  if(NOT BUILD_SHARED_LIBS)
-    set(CUDA_USE_STATIC_CUDA_RUNTIME ON)
-  else()
-    set(CUDA_USE_STATIC_CUDA_RUNTIME OFF)
-  endif()
-  find_package(CUDA REQUIRED)
-  install(FILES ${Legion_SOURCE_DIR}/cmake/FindCUDA.cmake
-    DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
-  )
-  install(FILES ${Legion_SOURCE_DIR}/cmake/newcmake/FindCUDA.cmake
-    DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake/newcmake
-  )
-
-  # define variable for realm_defines.h
-  set(USE_CUDA ON)
-endif()
-
-#------------------------------------------------------------------------------#
 # HDF5 configuration
 #------------------------------------------------------------------------------#
 option(Legion_USE_HDF5 "Enable support for HDF5" OFF)
@@ -181,6 +170,17 @@ if(Legion_USE_HDF5)
 
   # define variable for realm_defines.h
   set(REALM_USE_HDF)
+endif()
+
+#------------------------------------------------------------------------------#
+# HWLOC configuration
+#------------------------------------------------------------------------------#
+option(Legion_USE_HWLOC "Use hwloc for topology awareness" OFF)
+if(Legion_USE_HWLOC)
+  find_package(HWLOC REQUIRED)
+  install(FILES ${Legion_SOURCE_DIR}/cmake/FindHWLOC.cmake
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
+  )
 endif()
 
 #------------------------------------------------------------------------------#
