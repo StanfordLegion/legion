@@ -171,7 +171,6 @@ if(UNIX AND NOT APPLE)
 endif()
 set_target_properties(RealmRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(RealmRuntime PROPERTIES SOVERSION ${SOVERSION})
-target_compile_definitions(RealmRuntime PRIVATE $<$<CONFIG:Debug>:DEBUG_REALM>)
 
 if(Legion_USE_HWLOC)
   target_compile_definitions(RealmRuntime PRIVATE REALM_USE_HWLOC)
@@ -267,11 +266,7 @@ set_target_properties(LegionRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(LegionRuntime PROPERTIES OUTPUT_NAME legion)
 set_target_properties(LegionRuntime PROPERTIES SOVERSION ${SOVERSION})
 target_compile_definitions(LegionRuntime PUBLIC LEGION_USE_CMAKE)
-target_compile_definitions(LegionRuntime
-  PRIVATE
-    ASSUME_UNALLOCABLE
-    $<$<CONFIG:Debug>:DEBUG_LEGION>
-)
+target_compile_definitions(LegionRuntime PRIVATE ASSUME_UNALLOCABLE)
 target_include_directories(LegionRuntime
   INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/legion>
