@@ -2,6 +2,9 @@
 #ifdef REALM_USE_LLVM
 #include "realm/llvmjit/llvmjit.h"
 #endif
+#ifdef REALM_USE_PYTHON
+#include "realm/python/python_source.h"
+#endif
 
 #include <cstdio>
 #include <cstdlib>
@@ -56,7 +59,6 @@ void top_level_task(const void *args, size_t arglen,
   {
     std::set<Event> finish_events;
 
-    CodeDescriptor child_task_desc(child_task);
     int count = 0;
 
     std::set<Processor> all_processors;
@@ -66,9 +68,40 @@ void top_level_task(const void *args, size_t arglen,
 	it++) {
       Processor pp = (*it);
 
-      Event e = pp.register_task(func_id, child_task_desc,
+      CodeDescriptor *task_desc = 0;
+      switch(pp.kind()) {
+      case Processor::LOC_PROC:
+      case Processor::UTIL_PROC:
+      case Processor::IO_PROC:
+	{
+	  task_desc = new CodeDescriptor(child_task);
+	  break;
+	}
+
+#ifdef REALM_USE_PYTHON
+      case Processor::PY_PROC:
+	{
+	  task_desc = new CodeDescriptor(Realm::Type::from_cpp_type<Processor::TaskFuncPtr>());
+	  task_desc->add_implementation(new PythonSourceImplementation("taskreg_helper",
+								       "task1"));
+	  break;
+	}
+#endif
+
+      default:
+	/* do nothing */
+	break;
+      }
+      if(!task_desc) {
+	log_app.warning() << "no task variant available for processor " << p << " (kind " << pp.kind() << ")";
+	continue;
+      }
+
+      Event e = pp.register_task(func_id, *task_desc,
 				 ProfilingRequestSet(),
 				 &pp, sizeof(pp));
+
+      delete task_desc;
 
       Event e2 = pp.spawn(func_id, &count, sizeof(count), e);
 
@@ -161,32 +194,29 @@ void top_level_task(const void *args, size_t arglen,
 
 int main(int argc, char **argv)
 {
+#ifdef REALM_USE_PYTHON
+  // do this before any threads are spawned
+  setenv("PYTHONPATH", ".", true /*overwrite*/);
+#endif
+
   Runtime rt;
 
   rt.init(&argc, &argv);
 
-  rt.register_task(TOP_LEVEL_TASK, top_level_task);
-
   // select a processor to run the top level task on
-  Processor p = Processor::NO_PROC;
-  {
-    std::set<Processor> all_procs;
-    Machine::get_machine().get_all_processors(all_procs);
-    for(std::set<Processor>::const_iterator it = all_procs.begin();
-	it != all_procs.end();
-	it++)
-      if(it->kind() == Processor::LOC_PROC) {
-	p = *it;
-	break;
-      }
-  }
+  Processor p = Machine::ProcessorQuery(Machine::get_machine())
+    .only_kind(Processor::LOC_PROC)
+    .first();
   assert(p.exists());
 
+  Event e1 = p.register_task(TOP_LEVEL_TASK, CodeDescriptor(top_level_task),
+			     ProfilingRequestSet());
+
   // collective launch of a single task - everybody gets the same finish event
-  Event e = rt.collective_spawn(p, TOP_LEVEL_TASK, 0, 0);
+  Event e2 = rt.collective_spawn(p, TOP_LEVEL_TASK, 0, 0, e1);
 
   // request shutdown once that task is complete
-  rt.shutdown(e);
+  rt.shutdown(e2);
 
   // now sleep this thread until that shutdown actually happens
   rt.wait_for_shutdown();

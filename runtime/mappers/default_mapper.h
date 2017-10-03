@@ -46,11 +46,13 @@ namespace Legion {
         DEFAULT_TUNABLE_LOCAL_GPUS = 2,
         DEFAULT_TUNABLE_LOCAL_IOS = 3,
         DEFAULT_TUNABLE_LOCAL_OMPS = 4,
-        DEFAULT_TUNABLE_GLOBAL_CPUS = 5,
-        DEFAULT_TUNABLE_GLOBAL_GPUS = 6,
-        DEFAULT_TUNABLE_GLOBAL_IOS = 7,
-        DEFAULT_TUNABLE_GLOBAL_OMPS = 8,
-        DEFAULT_TUNABLE_LAST = 9, // this one must always be last and unused
+        DEFAULT_TUNABLE_LOCAL_PYS = 5,
+        DEFAULT_TUNABLE_GLOBAL_CPUS = 6,
+        DEFAULT_TUNABLE_GLOBAL_GPUS = 7,
+        DEFAULT_TUNABLE_GLOBAL_IOS = 8,
+        DEFAULT_TUNABLE_GLOBAL_OMPS = 9,
+        DEFAULT_TUNABLE_GLOBAL_PYS = 10,
+        DEFAULT_TUNABLE_LAST = 11, // this one must always be last and unused
       };
       enum MappingKind {
         TASK_MAPPING,
@@ -381,6 +383,8 @@ namespace Legion {
       Processor default_get_next_global_gpu(void);
       Processor default_get_next_local_io(void);
       Processor default_get_next_global_io(void);
+      Processor default_get_next_local_py(void);
+      Processor default_get_next_global_py(void);
       Processor default_get_next_local_procset(void);
       Processor default_get_next_global_procset(void);
       Processor default_get_next_local_omp(void);
@@ -468,27 +472,30 @@ namespace Legion {
       std::vector<Processor> local_ios;
       std::vector<Processor> local_procsets;
       std::vector<Processor> local_omps;
+      std::vector<Processor> local_pys;
       std::vector<Processor> remote_gpus;
       std::vector<Processor> remote_cpus;
       std::vector<Processor> remote_ios;
       std::vector<Processor> remote_procsets;
       std::vector<Processor> remote_omps;
+      std::vector<Processor> remote_pys;
     protected:
       // For doing round-robining of tasks onto processors
       unsigned next_local_gpu, next_local_cpu, next_local_io,
-               next_local_procset, next_local_omp;
+               next_local_procset, next_local_omp, next_local_py;
       Processor next_global_gpu, next_global_cpu, next_global_io,
-                next_global_procset, next_global_omp;
+                next_global_procset, next_global_omp, next_global_py;
       Machine::ProcessorQuery *global_gpu_query, *global_cpu_query,
                               *global_io_query, *global_procset_query,
-                              *global_omp_query;
+                              *global_omp_query, *global_py_query;
     protected: 
       // Cached mapping information about the application
       std::map<Domain,std::vector<TaskSlice> > gpu_slices_cache,
                                                cpu_slices_cache,
                                                io_slices_cache,
                                                procset_slices_cache,
-                                               omp_slices_cache;
+                                               omp_slices_cache,
+                                               py_slices_cache;
       std::map<TaskID,VariantInfo>             preferred_variants; 
       std::map<std::pair<TaskID,Processor>,
                std::list<CachedTaskMapping> >  cached_task_mappings;

@@ -76,14 +76,28 @@ if(Legion_USE_HWLOC)
     DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
   )
 endif()
-#-----------------------------------------------------------------------------#
-#OpenMP
+
+#------------------------------------------------------------------------------#
+# OpenMP
 #------------------------------------------------------------------------------#
 option(REALM_USE_OPENMP "Use OpenMP" OFF)
 if(REALM_USE_OPENMP)
   option(REALM_OPENMP_GOMP_SUPPORT "Gopenmp suppotr for OpenMP" ON)
   option(REALM_OPENMP_KMP_SUPPORT "KMP support for OpenMP" ON)
 endif()
+
+#------------------------------------------------------------------------------#
+# Python
+#------------------------------------------------------------------------------#
+option(Legion_USE_Python "Use Python" OFF)
+if(Legion_USE_Python)
+  set(Python_ADDITIONAL_VERSIONS 2.7)
+  find_package(PythonLibs REQUIRED)
+  install(FILES ${Legion_SOURCE_DIR}/bindings/python/legion.py
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/python
+  )
+endif()
+
 #------------------------------------------------------------------------------#
 # GASNet configuration
 #------------------------------------------------------------------------------#
