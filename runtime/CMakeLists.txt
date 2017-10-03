@@ -163,6 +163,7 @@ list(APPEND LOW_RUNTIME_SRC
 find_package(Threads REQUIRED)
 add_library(LowLevelRuntime ${LOW_RUNTIME_SRC})
 target_compile_definitions(LowLevelRuntime PUBLIC __STDC_FORMAT_MACROS)
+target_compile_definitions(LowLevelRuntime PUBLIC REALM_USE_CMAKE)
 target_link_libraries(LowLevelRuntime
   PRIVATE ${CMAKE_DL_LIBS} ${CMAKE_THREAD_LIBS_INIT}
 )
@@ -276,6 +277,7 @@ target_link_libraries(HighLevelRuntime LowLevelRuntime)
 set_target_properties(HighLevelRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(HighLevelRuntime PROPERTIES OUTPUT_NAME legion)
 set_target_properties(HighLevelRuntime PROPERTIES SOVERSION ${SOVERSION})
+target_compile_definitions(HighLevelRuntime PUBLIC LEGION_USE_CMAKE)
 target_compile_definitions(HighLevelRuntime
   PRIVATE
     ASSUME_UNALLOCABLE

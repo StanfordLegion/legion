@@ -46,8 +46,6 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CXX_FLAGS)
 endif(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CXX_FLAGS)
 set(BUILD_SHARED_LIBS OFF   CACHE BOOL   "Whether or not to build shared libraries instead of static")
 
-add_definitions(-DLEGION_CMAKE)
-
 #https://github.com/StanfordLegion/legion/issues/168#issuecomment-244582958
 include(CheckCXXCompilerFlag)
 check_cxx_compiler_flag("-fno-strict-aliasing" COMPILER_SUPPORTS_NO_STRICT_ALIASING)
@@ -288,13 +286,18 @@ if(Legion_BUILD_APPS OR Legion_BUILD_EXAMPLES OR Legion_BUILD_TUTORIAL OR Legion
 endif()
 
 #------------------------------------------------------------------------------#
-# configure header
+# Configure definition headers
 #------------------------------------------------------------------------------#
 
-configure_file(${PROJECT_SOURCE_DIR}/cmake/legion_defines.h.in ${PROJECT_SOURCE_DIR}/runtime/legion_defines.h @ONLY)
-include_directories(${PROJECT_SOURCE_DIR}/runtime)
-install(FILES ${PROJECT_SOURCE_DIR}/runtime/legion_defines.h DESTINATION include)
+configure_file(${PROJECT_SOURCE_DIR}/cmake/legion_defines.h.in
+  ${PROJECT_SOURCE_DIR}/runtime/legion/legion_defines.h @ONLY)
+install(FILES ${PROJECT_SOURCE_DIR}/runtime/legion/legion_defines.h
+  DESTINATION include/legion)
 
+configure_file(${PROJECT_SOURCE_DIR}/cmake/realm_defines.h.in
+  ${PROJECT_SOURCE_DIR}/runtime/realm/realm_defines.h @ONLY)
+install(FILES ${PROJECT_SOURCE_DIR}/runtime/realm/realm_defines.h
+  DESTINATION include/realm)
 
 #------------------------------------------------------------------------------#
 # vim: set tabstop=2 shiftwidth=2 expandtab :
