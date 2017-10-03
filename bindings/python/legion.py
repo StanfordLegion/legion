@@ -189,10 +189,11 @@ RW = Privilege(read=True, write=True)
 WD = Privilege(write=True, discard=True)
 
 # Hack: Can't pickle static methods.
-def _Ispace_unpickle(ispace_tid, ispace_id):
+def _Ispace_unpickle(ispace_tid, ispace_id, ispace_type_tag):
     handle = ffi.new('legion_index_space_t *')
     handle[0].tid = ispace_tid
     handle[0].id = ispace_id
+    handle[0].type_tag = ispace_type_tag
     return Ispace(handle[0])
 
 class Ispace(object):
@@ -205,7 +206,8 @@ class Ispace(object):
     def __reduce__(self):
         return (_Ispace_unpickle,
                 (self.handle[0].tid,
-                 self.handle[0].id))
+                 self.handle[0].id,
+                 self.handle[0].type_tag))
 
     @staticmethod
     def create(extent, start=None):
@@ -368,8 +370,11 @@ class RegionField(numpy.ndarray):
         # Note: the accessor needs to be kept alive, to make sure to
         # save the result of this function in an instance variable.
         instance = region.instances[field_name]
-        return c.legion_physical_region_get_field_accessor_generic(
-            instance, region.fspace.field_ids[field_name])
+        domain = c.legion_index_space_get_domain(
+            _my.ctx.runtime, region.ispace.handle[0])
+        dim = domain.dim
+        get_accessor = getattr(c, 'legion_physical_region_get_field_accessor_array_{}d'.format(dim))
+        return get_accessor(instance, region.fspace.field_ids[field_name])
 
     @staticmethod
     def _get_base_and_stride(region, field_name, accessor):
@@ -380,7 +385,7 @@ class RegionField(numpy.ndarray):
         subrect = ffi.new('legion_rect_{}d_t *'.format(dim))
         offsets = ffi.new('legion_byte_offset_t[]', dim)
 
-        base_ptr = getattr(c, 'legion_accessor_generic_raw_rect_ptr_{}d'.format(dim))(
+        base_ptr = getattr(c, 'legion_accessor_array_{}d_raw_rect_ptr'.format(dim))(
             accessor, rect, subrect, offsets)
         assert base_ptr
         for i in xrange(dim):
