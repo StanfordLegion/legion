@@ -56,7 +56,9 @@ namespace Legion {
       CONTEXT_REF = 17,
       RESTRICTED_REF = 18,
       VERSION_STATE_TREE_REF = 19,
-      LAST_SOURCE_REF = 20,
+      PHYSICAL_MANAGER_REF = 20,
+      REGION_TREE_REF = 21,
+      LAST_SOURCE_REF = 22,
     };
 
     enum ReferenceKind {
@@ -87,6 +89,8 @@ namespace Legion {
       "Context Reference",                          \
       "Restricted Reference",                       \
       "Version State Tree Reference",               \
+      "Physical Manager Reference",                 \
+      "Region Tree Reference",                      \
     }
 
     extern Realm::Logger log_garbage;

@@ -478,7 +478,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (region_node != NULL)
+      {
+        region_node->add_reference();
         region_node->register_physical_manager(this);
+      }
+      if (instance_domain != NULL)
+        instance_domain->add_base_resource_ref(PHYSICAL_MANAGER_REF);
       // Add a reference to the layout
       if (layout != NULL)
         layout->add_reference();
@@ -491,7 +496,14 @@ namespace Legion {
       if (is_owner() && registered_with_runtime)
         unregister_with_runtime(MANAGER_VIRTUAL_CHANNEL);
       if (region_node != NULL)
+      {
         region_node->unregister_physical_manager(this);
+        if (region_node->remove_reference())
+          delete region_node;
+      }
+      if ((instance_domain != NULL) && 
+          instance_domain->remove_base_resource_ref(PHYSICAL_MANAGER_REF))
+        delete instance_domain;
       // Remote references removed by DistributedCollectable destructor
       if (!is_owner())
         memory_manager->unregister_remote_instance(this);
@@ -2152,7 +2164,10 @@ namespace Legion {
         IndexSpace union_space(forest->runtime->get_unique_index_space_id(),
                                ancestor->handle.index_space.get_tree_id(),
                                ancestor->handle.get_type_tag());
-        forest->create_union_space(union_space, NULL/*task op*/, union_spaces);
+        DistributedID did = 
+          forest->runtime->get_available_distributed_id(false/*continuation*/);
+        forest->create_union_space(union_space, NULL/*task op*/,
+                                   union_spaces, did);
         instance_domain = forest->get_node(union_space);
         own_domain = true;
       }

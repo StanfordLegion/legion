@@ -49,6 +49,10 @@ future_pat = re.compile(prefix + r'GC Future (?P<did>[0-9]+) (?P<node>[0-9]+)')
 future_map_pat = re.compile(prefix + r'GC Future Map (?P<did>[0-9]+) (?P<node>[0-9]+)')
 # Constraints
 constraints_pat = re.compile(prefix + r'GC Constraints (?P<did>[0-9]+) (?P<node>[0-9]+)')
+# Region Tree
+index_space_pat = re.compile(prefix + r'GC Index Space (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<handle>[0-9]+)')
+index_part_pat  = re.compile(prefix + r'GC Index Partition (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<handle>[0-9]+)')
+field_space_pat = re.compile(prefix + r'GC Field Space (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<handle>[0-9]+)')
 # Source Kinds
 source_kind_pat = re.compile(prefix + r'GC Source Kind (?P<kind>[0-9]+) (?P<name>[0-9a-zA-Z_ ]+)')
 # Deletion Pattern
@@ -587,6 +591,31 @@ class Constraints(Base):
     def __repr__(self):
         return 'Layout Constraints '+str(self.did)+' (Node='+str(self.node)+')'
 
+class IndexSpace(Base):
+    def __init__(self, did, node, handle):
+        super(IndexSpace,self).__init__(did, node)
+        self.handle = handle
+
+    def __repr__(self):
+        return 'Index Space '+str(self.did)+' (Node='+str(self.node)+') Handle '+str(self.handle)
+        
+
+class IndexPartition(Base):
+    def __init__(self, did, node, handle):
+        super(IndexPartition,self).__init__(did, node)
+        self.handle = handle
+
+    def __repr__(self):
+        return 'Index Partition '+str(self.did)+' (Node='+str(self.node)+') Handle '+str(self.handle)
+
+class FieldSpace(Base):
+    def __init__(self, did, node, handle):
+        super(FieldSpace,self).__init__(did, node)
+        self.handle = handle
+
+    def __repr__(self):
+        return 'Field Space '+str(self.did)+' (Node='+str(self.node)+') Handle '+str(self.handle)
+
 class Instance(object):
     def __init__(self, iid, mem, kind):
         self.iid = iid
@@ -607,6 +636,9 @@ class State(object):
         self.src_names = {}
         self.constraints = {}
         self.version_states = {}
+        self.index_spaces = {}
+        self.index_partitions = {}
+        self.field_spaces = {}
 
     def parse_log_file(self, file_name):
         with open(file_name, 'rb') as log:
@@ -711,6 +743,24 @@ class State(object):
                 if m is not None:
                     self.log_constraints(long(m.group('did')),
                                          long(m.group('node')))
+                    continue
+                m = index_space_pat.match(line)
+                if m is not None:
+                    self.log_index_space(long(m.group('did')),
+                                         long(m.group('node')),
+                                         long(m.group('handle')))
+                    continue
+                m = index_part_pat.match(line)
+                if m is not None:
+                    self.log_index_partition(long(m.group('did')),
+                                             long(m.group('node')),
+                                             long(m.group('handle')))
+                    continue
+                m = field_space_pat.match(line)
+                if m is not None:
+                    self.log_field_space(long(m.group('did')),
+                                         long(m.group('node')),
+                                         long(m.group('handle')))
                     continue
                 m = source_kind_pat.match(line)
                 if m is not None:
@@ -818,6 +868,15 @@ class State(object):
     def log_constraints(self, did, node):
         self.get_constraints(did, node)
 
+    def log_index_space(self, did, node, handle):
+        self.get_index_space(did, node, handle)
+
+    def log_index_partition(self, did, node, handle):
+        self.get_index_partition(did, node, handle)
+
+    def log_field_space(self, did, node, handle):
+        self.get_field_space(did, node, handle)
+
     def log_source_kind(self, kind, name):
         if kind not in self.src_names:
             self.src_names[kind] = name
@@ -885,6 +944,33 @@ class State(object):
                 del self.unknowns[key]
         return self.constraints[key]
 
+    def get_index_space(self, did, node, handle):
+        key = (did,node)
+        if key not in self.index_spaces:
+            self.index_spaces[key] = IndexSpace(did, node, handle)
+            if key in self.unknowns:
+                self.index_spaces[key].clone(self.unknowns[key])
+                del self.unknowns[key]
+        return self.index_spaces[key]
+
+    def get_index_partition(self, did, node, handle):
+        key = (did,node)
+        if key not in self.index_partitions:
+            self.index_partitions[key] = IndexPartition(did, node, handle)
+            if key in self.unknowns:
+                self.index_partitions[key].clone(self.unknowns[key])
+                del self.unknowns[key]
+        return self.index_partitions[key]
+
+    def get_field_space(self, did, node, handle):
+        key = (did,node)
+        if key not in self.field_spaces:
+            self.field_spaces[key] = FieldSpace(did, node, handle)
+            if key in self.unknowns:
+                self.field_spaces[key].clone(self.unknowns[key])
+                del self.unknowns[key]
+        return self.field_spaces[key]
+
     def get_obj(self, did, node):
         key = (did,node)
         if key in self.views:
@@ -899,6 +985,12 @@ class State(object):
             return self.version_states[key]
         if key in self.constraints:
             return self.constraints[key]
+        if key in self.index_spaces:
+            return self.index_spaces[key]
+        if key in self.index_partitions:
+            return self.index_partitions[key]
+        if key in self.field_spaces:
+            return self.field_spaces[key]
         if key in self.unknowns:
             return self.unknowns[key]
         self.unknowns[key] = Base(did, node)
@@ -923,6 +1015,15 @@ class State(object):
         for did,constraint in self.constraints.iteritems():
             print "Checking for cycles in "+repr(constraint)
             constraint.check_for_cycles()
+        for did,index_space in self.index_spaces.iteritems():
+            print "Checking for cycles in "+repr(index_space)
+            index_space.check_for_cycles()
+        for did,index_part in self.index_partitions.iteritems():
+            print "Checking for cycles in "+repr(index_part)
+            index_part.check_for_cycles()
+        for did,field_space in self.field_spaces.iteritems():
+            print "Checking for cycles in "+repr(field_space)
+            field_space.check_for_cycles();
         print "NO CYCLES"
 
     def check_for_leaks(self, verbose): 
@@ -933,6 +1034,9 @@ class State(object):
         pinned_managers = 0
         leaked_views = 0
         leaked_states = 0
+        leaked_index_spaces = 0
+        leaked_index_partitions = 0
+        leaked_field_spaces = 0
         for future in self.futures.itervalues():
             if not future.check_for_leaks(verbose):
                 leaked_futures += 1
@@ -955,6 +1059,15 @@ class State(object):
         for state in self.version_states.itervalues():
             if not state.check_for_leaks(verbose):
                 leaked_states += 1
+        for index_space in self.index_spaces.itervalues():
+            if not index_space.check_for_leaks(verbose):
+                leaked_index_spaces += 1
+        for index_part in self.index_partitions.itervalues():
+            if not index_part.check_for_leaks(verbose):
+                leaked_index_partitions += 1
+        for field_space in self.field_spaces.itervalues():
+            if not field_space.check_for_leaks(verbose):
+                leaked_field_spaces += 1
         print "LEAK SUMMARY"
         if leaked_futures > 0:
             print "  LEAKED FUTURES: "+str(leaked_futures)
@@ -984,6 +1097,18 @@ class State(object):
             print "  LEAKED VERSION STATES: "+str(leaked_states)
         else:
             print "  Leaked Version States: "+str(leaked_states)
+        if leaked_index_spaces > 0:
+            print "  LEAKED INDEX SPACES: "+str(leaked_index_spaces)
+        else:
+            print "  Leaked Index Spaces: "+str(leaked_index_spaces)
+        if leaked_index_partitions > 0:
+            print "  LEAKED INDEX PARTITIONS: "+str(leaked_index_partitions)
+        else:
+            print "  Leaked Index Partitions: "+str(leaked_index_partitions)
+        if leaked_field_spaces > 0:
+            print "  LEAKED FIELD SPACES: "+str(leaked_field_spaces)
+        else:
+            print "  Leaked Field Spaces: "+str(leaked_field_spaces)
 
 def usage():
     print 'Usage: '+sys.argv[0]+' [-c -l -v] <file_names>+'

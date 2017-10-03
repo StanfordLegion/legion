@@ -2370,6 +2370,7 @@ namespace Legion {
       region_tree_owners[node] = 
         std::pair<AddressSpaceID,bool>(source, 
                                       (source != runtime->address_space));
+      node->add_reference();
       return source;
     } 
 
@@ -2574,13 +2575,14 @@ namespace Legion {
       AutoRuntimeCall call(this); 
       IndexSpace handle(runtime->get_unique_index_space_id(),
                         runtime->get_unique_index_tree_id(), type_tag);
+      DistributedID did = runtime->get_available_distributed_id(true/*cont*/);
 #ifdef DEBUG_LEGION
       log_index.debug("Creating index space %x in task%s (ID %lld)", 
                       handle.id, get_task_name(), get_unique_id()); 
 #endif
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_top_index_space(handle.id);
-      forest->create_index_space(handle, realm_is); 
+      forest->create_index_space(handle, realm_is, did); 
       register_index_space_creation(handle);
       return handle;
     }
@@ -2596,13 +2598,14 @@ namespace Legion {
       IndexSpace handle(runtime->get_unique_index_space_id(),
                         runtime->get_unique_index_tree_id(), 
                         spaces[0].get_type_tag());
+      DistributedID did = runtime->get_available_distributed_id(true/*cont*/);
 #ifdef DEBUG_LEGION
       log_index.debug("Creating index space %x in task%s (ID %lld)", 
                       handle.id, get_task_name(), get_unique_id()); 
 #endif
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_top_index_space(handle.id);
-      forest->create_union_space(handle, owner_task, spaces); 
+      forest->create_union_space(handle, owner_task, spaces, did); 
       register_index_space_creation(handle);
       return handle;
     }
@@ -2618,13 +2621,14 @@ namespace Legion {
       IndexSpace handle(runtime->get_unique_index_space_id(),
                         runtime->get_unique_index_tree_id(), 
                         spaces[0].get_type_tag());
+      DistributedID did = runtime->get_available_distributed_id(true/*cont*/);
 #ifdef DEBUG_LEGION
       log_index.debug("Creating index space %x in task%s (ID %lld)", 
                       handle.id, get_task_name(), get_unique_id()); 
 #endif
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_top_index_space(handle.id);
-      forest->create_intersection_space(handle, owner_task, spaces); 
+      forest->create_intersection_space(handle, owner_task, spaces, did);
       register_index_space_creation(handle);
       return handle;
     }
@@ -2638,13 +2642,14 @@ namespace Legion {
       IndexSpace handle(runtime->get_unique_index_space_id(),
                         runtime->get_unique_index_tree_id(), 
                         left.get_type_tag());
+      DistributedID did = runtime->get_available_distributed_id(true/*cont*/);
 #ifdef DEBUG_LEGION
       log_index.debug("Creating index space %x in task%s (ID %lld)", 
                       handle.id, get_task_name(), get_unique_id()); 
 #endif
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_top_index_space(handle.id);
-      forest->create_difference_space(handle, owner_task, left, right); 
+      forest->create_difference_space(handle, owner_task, left, right, did);
       register_index_space_creation(handle);
       return handle;
     }
@@ -2689,6 +2694,7 @@ namespace Legion {
       AutoRuntimeCall call(this);  
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
                          parent.get_tree_id(), parent.get_type_tag());
+      DistributedID did = runtime->get_available_distributed_id(true/*cont*/);
 #ifdef DEBUG_LEGION
       log_index.debug("Creating equal partition %d with parent index space %x "
                       "in task %s (ID %lld)", pid.id, parent.id,
@@ -2703,7 +2709,7 @@ namespace Legion {
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
       RtEvent safe = forest->create_pending_partition(pid, parent, color_space,
-                                    partition_color, DISJOINT_KIND, term_event);
+                              partition_color, DISJOINT_KIND, did, term_event);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
       // Wait for any notifications to occur before returning
@@ -2725,6 +2731,7 @@ namespace Legion {
       AutoRuntimeCall call(this);
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
                          parent.get_tree_id(), parent.get_type_tag());
+      DistributedID did = runtime->get_available_distributed_id(true/*cont*/);
 #ifdef DEBUG_LEGION
       log_index.debug("Creating union partition %d with parent index "
                       "space %x in task %s (ID %lld)", pid.id, parent.id,
@@ -2763,7 +2770,7 @@ namespace Legion {
       }
       // Tell the region tree forest about this partition
       RtEvent safe = forest->create_pending_partition(pid, parent, color_space, 
-                                            partition_color, kind, term_event);
+                                        partition_color, kind, did, term_event);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
       // Wait for any notifications to occur before returning
@@ -2785,6 +2792,7 @@ namespace Legion {
       AutoRuntimeCall call(this);
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
                          parent.get_tree_id(), parent.get_type_tag());
+      DistributedID did = runtime->get_available_distributed_id(true/*cont*/);
 #ifdef DEBUG_LEGION
       log_index.debug("Creating intersection partition %d with parent "
                       "index space %x in task %s (ID %lld)", pid.id, parent.id,
@@ -2822,7 +2830,7 @@ namespace Legion {
       }
       // Tell the region tree forest about this partition
       RtEvent safe = forest->create_pending_partition(pid, parent, color_space,
-                                            partition_color, kind, term_event);
+                                        partition_color, kind, did, term_event);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
       // Wait for any notifications to occur before returning
@@ -2845,6 +2853,7 @@ namespace Legion {
       AutoRuntimeCall call(this); 
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
                          parent.get_tree_id(), parent.get_type_tag());
+      DistributedID did = runtime->get_available_distributed_id(true/*cont*/);
 #ifdef DEBUG_LEGION
       log_index.debug("Creating difference partition %d with parent "
                       "index space %x in task %s (ID %lld)", pid.id, parent.id,
@@ -2878,7 +2887,7 @@ namespace Legion {
       }
       // Tell the region tree forest about this partition
       RtEvent safe = forest->create_pending_partition(pid, parent, color_space, 
-                                            partition_color, kind, term_event);
+                                        partition_color, kind, did, term_event);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
       // Wait for any notifications to occur before returning
@@ -2979,6 +2988,7 @@ namespace Legion {
       AutoRuntimeCall call(this);
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
                          parent.get_tree_id(), parent.get_type_tag());
+      DistributedID did = runtime->get_available_distributed_id(true/*cont*/);
 #ifdef DEBUG_LEGION
       log_index.debug("Creating restricted partition in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
@@ -2993,7 +3003,7 @@ namespace Legion {
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
       RtEvent safe = forest->create_pending_partition(pid, parent, color_space,
-                                            part_color, part_kind, term_event);
+                                        part_color, part_kind, did, term_event);
       // Now we can add the operation to the queue
       runtime->add_to_dependence_queue(this, executing_processor, part_op);
       // Wait for any notifications to occur before returning
@@ -3017,6 +3027,7 @@ namespace Legion {
       IndexSpace parent = handle.get_index_space(); 
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
                          parent.get_tree_id(), parent.get_type_tag());
+      DistributedID did = runtime->get_available_distributed_id(true/*cont*/);
 #ifdef DEBUG_LEGION
       log_index.debug("Creating partition by field in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
@@ -3030,7 +3041,7 @@ namespace Legion {
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition 
       RtEvent safe = forest->create_pending_partition(pid, parent, color_space,
-                                        part_color, DISJOINT_KIND, term_event); 
+                                    part_color, DISJOINT_KIND, did, term_event);
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
       part_op->initialize_by_field(this, pid, handle, parent_priv, fid, id,tag);
@@ -3078,6 +3089,7 @@ namespace Legion {
       AutoRuntimeCall call(this); 
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
                          handle.get_tree_id(), handle.get_type_tag());
+      DistributedID did = runtime->get_available_distributed_id(true/*cont*/);
 #ifdef DEBUG_LEGION
       log_index.debug("Creating partition by image in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
@@ -3091,7 +3103,7 @@ namespace Legion {
       ApEvent term_event = part_op->get_completion_event(); 
       // Tell the region tree forest about this partition
       RtEvent safe = forest->create_pending_partition(pid, handle, color_space,
-                                            part_color, part_kind, term_event); 
+                                        part_color, part_kind, did, term_event);
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
       part_op->initialize_by_image(this, pid, projection, parent, fid, id, tag);
@@ -3139,6 +3151,7 @@ namespace Legion {
       AutoRuntimeCall call(this); 
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
                          handle.get_tree_id(), handle.get_type_tag());
+      DistributedID did = runtime->get_available_distributed_id(true/*cont*/);
 #ifdef DEBUG_LEGION
       log_index.debug("Creating partition by image range in task %s (ID %lld)",
                       get_task_name(), get_unique_id());
@@ -3152,7 +3165,7 @@ namespace Legion {
       ApEvent term_event = part_op->get_completion_event();
       // Tell the region tree forest about this partition
       RtEvent safe = forest->create_pending_partition(pid, handle, color_space,
-                                            part_color, part_kind, term_event); 
+                                        part_color, part_kind, did, term_event);
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
       part_op->initialize_by_image_range(this, pid, projection, parent, 
@@ -3201,6 +3214,7 @@ namespace Legion {
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
                          handle.get_index_space().get_tree_id(),
                          parent.get_type_tag());
+      DistributedID did = runtime->get_available_distributed_id(true/*cont*/);
 #ifdef DEBUG_LEGION
       log_index.debug("Creating partition by preimage in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
@@ -3223,7 +3237,7 @@ namespace Legion {
       // Tell the region tree forest about this partition
       RtEvent safe = forest->create_pending_partition(pid, 
                                        handle.get_index_space(), color_space, 
-                                       part_color, part_kind, term_event);
+                                       part_color, part_kind, did, term_event);
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
       part_op->initialize_by_preimage(this, pid, projection, handle, 
@@ -3272,6 +3286,7 @@ namespace Legion {
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
                          handle.get_index_space().get_tree_id(),
                          parent.get_type_tag());
+      DistributedID did = runtime->get_available_distributed_id(true/*cont*/);
 #ifdef DEBUG_LEGION
       log_index.debug("Creating partition by preimage range in task %s "
                       "(ID %lld)", get_task_name(), get_unique_id());
@@ -3286,7 +3301,7 @@ namespace Legion {
       // Tell the region tree forest about this partition
       RtEvent safe = forest->create_pending_partition(pid, 
                                        handle.get_index_space(), color_space, 
-                                       part_color, part_kind, term_event);
+                                       part_color, part_kind, did, term_event);
       // Do this after creating the pending partition so the node exists
       // in case we need to look at it during initialization
       part_op->initialize_by_preimage_range(this, pid, projection, handle,
@@ -3330,6 +3345,7 @@ namespace Legion {
       AutoRuntimeCall call(this);
       IndexPartition pid(runtime->get_unique_index_partition_id(), 
                          parent.get_tree_id(), parent.get_type_tag());
+      DistributedID did = runtime->get_available_distributed_id(true/*cont*/);
 #ifdef DEBUG_LEGION
       log_index.debug("Creating pending partition in task %s (ID %lld)", 
                       get_task_name(), get_unique_id());
@@ -3339,7 +3355,7 @@ namespace Legion {
         part_color = color;
       ApUserEvent partition_ready = Runtime::create_ap_user_event();
       RtEvent safe = forest->create_pending_partition(pid, parent, color_space, 
-                       part_color, part_kind, partition_ready, partition_ready);
+                 part_color, part_kind, did, partition_ready, partition_ready);
       // Wait for any notifications to occur before returning
       if (safe.exists())
         safe.lg_wait();
@@ -3481,6 +3497,7 @@ namespace Legion {
     {
       AutoRuntimeCall call(this);
       FieldSpace space(runtime->get_unique_field_space_id());
+      DistributedID did = runtime->get_available_distributed_id(true/*cont*/);
 #ifdef DEBUG_LEGION
       log_field.debug("Creating field space %x in task %s (ID %lld)", 
                       space.id, get_task_name(), get_unique_id());
@@ -3488,7 +3505,7 @@ namespace Legion {
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_field_space(space.id);
 
-      forest->create_field_space(space);
+      forest->create_field_space(space, did);
       register_field_space_creation(space);
       return space;
     }
@@ -5796,10 +5813,9 @@ namespace Legion {
             // If we're the outermost context or the requirement was
             // deleted, then we can invalidate everything
             // Otherwiswe we only invalidate the users
-            const bool users_only = !is_outermost && 
-              !was_created_requirement_deleted(created_requirements[idx]);
-            runtime->forest->invalidate_current_context(outermost_ctx,
-                        users_only, created_requirements[idx].region);
+            if (!was_created_requirement_deleted(created_requirements[idx]))
+              runtime->forest->invalidate_current_context(outermost_ctx,
+                          !is_outermost, created_requirements[idx].region);
           }
           else // Not returning so invalidate the full thing 
             runtime->forest->invalidate_current_context(tree_context,
@@ -5829,6 +5845,8 @@ namespace Legion {
           // If this is a remote only then we don't need to invalidate it
           if (!it->second.second)
             it->first->invalidate_version_state(tree_context.get_id()); 
+          if (it->first->remove_reference())
+            delete it->first;
         }
         region_tree_owners.clear();
       }
@@ -6376,6 +6394,7 @@ namespace Legion {
 #endif
         region_tree_owners[node] = 
           std::pair<AddressSpaceID,bool>(result, false/*remote only*/); 
+        node->add_reference();
         // Find the event to trigger
         std::map<RegionTreeNode*,RtUserEvent>::iterator finder = 
           pending_version_owner_requests.find(node);
