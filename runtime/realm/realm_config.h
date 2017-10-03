@@ -19,6 +19,10 @@
 #ifndef REALM_CONFIG_H
 #define REALM_CONFIG_H
 
+#ifdef REALM_USE_CMAKE
+#include "realm_defines.h"
+#endif
+
 // if set, uses ucontext.h for user level thread switching, otherwise falls
 //  back to POSIX threads
 #if !defined(REALM_USE_NATIVE_THREADS) && !defined(__MACH__)

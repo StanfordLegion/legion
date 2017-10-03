@@ -17,7 +17,7 @@
 #ifndef __LEGION_CONFIG_H__
 #define __LEGION_CONFIG_H__
 
-#ifdef LEGION_CMAKE
+#ifdef LEGION_USE_CMAKE
 #include "legion_defines.h"
 #endif
 
