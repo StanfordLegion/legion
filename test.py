@@ -378,7 +378,7 @@ def run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
         env=env)
 
 def check_test_legion_cxx(root_dir):
-    print('Checking that tests that SHOULD tested are ACTUALLY tested...')
+    print('Checking that tests that SHOULD be tested are ACTUALLY tested...')
     print()
 
     # These are the directories we SHOULD have coverage for.
