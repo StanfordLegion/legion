@@ -210,6 +210,12 @@ target_include_directories(RealmRuntime
     $<INSTALL_INTERFACE:include/legion>
     $<INSTALL_INTERFACE:include/realm>
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} legion realm
+
+  # Include paths for generated header files.
+  INTERFACE
+    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/runtime/realm>
+  PRIVATE
+    ${PROJECT_BINARY_DIR}/runtime/realm
 )
 
 install(TARGETS RealmRuntime EXPORT LegionTargets
@@ -267,6 +273,7 @@ set_target_properties(LegionRuntime PROPERTIES OUTPUT_NAME legion)
 set_target_properties(LegionRuntime PROPERTIES SOVERSION ${SOVERSION})
 target_compile_definitions(LegionRuntime PUBLIC LEGION_USE_CMAKE)
 target_compile_definitions(LegionRuntime PRIVATE ASSUME_UNALLOCABLE)
+
 target_include_directories(LegionRuntime
   INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/legion>
@@ -276,6 +283,14 @@ target_include_directories(LegionRuntime
     $<INSTALL_INTERFACE:include/realm>
     $<INSTALL_INTERFACE:include/mappers>
   PRIVATE legion realm mappers
+
+  # Include paths for generated header files.
+  INTERFACE
+    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/runtime/legion>
+    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/runtime/realm>
+  PRIVATE
+    ${PROJECT_BINARY_DIR}/runtime/legion
+    ${PROJECT_BINARY_DIR}/runtime/realm
 )
 
 install(TARGETS LegionRuntime EXPORT LegionTargets

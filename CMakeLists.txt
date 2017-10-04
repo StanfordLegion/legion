@@ -318,13 +318,13 @@ endif()
 #------------------------------------------------------------------------------#
 
 configure_file(${PROJECT_SOURCE_DIR}/cmake/legion_defines.h.in
-  ${PROJECT_SOURCE_DIR}/runtime/legion/legion_defines.h @ONLY)
-install(FILES ${PROJECT_SOURCE_DIR}/runtime/legion/legion_defines.h
+  ${PROJECT_BINARY_DIR}/runtime/legion/legion_defines.h @ONLY)
+install(FILES ${PROJECT_BINARY_DIR}/runtime/legion/legion_defines.h
   DESTINATION include/legion)
 
 configure_file(${PROJECT_SOURCE_DIR}/cmake/realm_defines.h.in
-  ${PROJECT_SOURCE_DIR}/runtime/realm/realm_defines.h @ONLY)
-install(FILES ${PROJECT_SOURCE_DIR}/runtime/realm/realm_defines.h
+  ${PROJECT_BINARY_DIR}/runtime/realm/realm_defines.h @ONLY)
+install(FILES ${PROJECT_BINARY_DIR}/runtime/realm/realm_defines.h
   DESTINATION include/realm)
 
 #------------------------------------------------------------------------------#
