@@ -5883,7 +5883,31 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DeletionOp::trigger_mapping(void)
+    void DeletionOp::trigger_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      // Iterate over our incoming operations and find the completion 
+      // operations that we need to wait to be done executing before
+      // we can actually perform the deletion
+      std::set<ApEvent> completion_events;
+      for (std::map<Operation*,GenerationID>::const_iterator it = 
+            incoming.begin(); it != incoming.end(); it++)
+      {
+        ApEvent complete = it->first->get_completion_event();
+        if (it->second == it->first->get_generation())
+          completion_events.insert(complete);
+      }
+      if (!completion_events.empty())
+      {
+        ApEvent completion_ready = Runtime::merge_events(completion_events);
+        complete_operation(Runtime::protect_event(completion_ready));
+      }
+      else
+        complete_operation();
+    }
+
+    //--------------------------------------------------------------------------
+    void DeletionOp::trigger_commit(void)
     //--------------------------------------------------------------------------
     {
       switch (kind)
@@ -5925,8 +5949,7 @@ namespace Legion {
         default:
           assert(false); // should never get here
       }
-      complete_mapping();
-      complete_execution();
+      commit_operation(true/*deactivate*/);
     }
 
     //--------------------------------------------------------------------------
