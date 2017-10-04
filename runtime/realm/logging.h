@@ -18,6 +18,8 @@
 #ifndef REALM_LOGGING_H
 #define REALM_LOGGING_H
 
+#include <realm/realm_config.h>
+
 #include <cstdarg>
 #include <vector>
 #include <string>
