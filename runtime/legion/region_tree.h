@@ -17,6 +17,8 @@
 #ifndef __LEGION_REGION_TREE_H__
 #define __LEGION_REGION_TREE_H__
 
+#define ENABLE_TREE_DELETION
+
 #include "legion_types.h"
 #include "legion_utilities.h"
 #include "legion_allocation.h"
