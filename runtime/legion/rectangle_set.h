@@ -24,6 +24,8 @@
 #include <cstdio>
 #include <cassert>
 
+#include "legion_config.h"
+
 namespace Legion {
   namespace Internal {
 
