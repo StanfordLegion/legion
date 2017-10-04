@@ -320,12 +320,12 @@ endif()
 configure_file(${PROJECT_SOURCE_DIR}/cmake/legion_defines.h.in
   ${PROJECT_BINARY_DIR}/runtime/legion/legion_defines.h @ONLY)
 install(FILES ${PROJECT_BINARY_DIR}/runtime/legion/legion_defines.h
-  DESTINATION include/legion)
+  DESTINATION  ${CMAKE_INSTALL_INCLUDEDIR}/legion)
 
 configure_file(${PROJECT_SOURCE_DIR}/cmake/realm_defines.h.in
   ${PROJECT_BINARY_DIR}/runtime/realm/realm_defines.h @ONLY)
 install(FILES ${PROJECT_BINARY_DIR}/runtime/realm/realm_defines.h
-  DESTINATION include/realm)
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/realm)
 
 #------------------------------------------------------------------------------#
 # vim: set tabstop=2 shiftwidth=2 expandtab :
