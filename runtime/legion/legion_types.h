@@ -604,7 +604,8 @@ namespace Legion {
       VERSION_MANAGER_VIRTUAL_CHANNEL = 13,
       ANALYSIS_VIRTUAL_CHANNEL = 14,
       FUTURE_VIRTUAL_CHANNEL = 15,
-      MAX_NUM_VIRTUAL_CHANNELS = 16, // this one must be last
+      REFERENCE_VIRTUAL_CHANNEL = 16,
+      MAX_NUM_VIRTUAL_CHANNELS = 17, // this one must be last
     };
 
     enum MessageKind {

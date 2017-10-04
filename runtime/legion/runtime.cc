@@ -286,7 +286,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (is_owner() && registered_with_runtime)
-        unregister_with_runtime(DEFAULT_VIRTUAL_CHANNEL);
+        unregister_with_runtime(REFERENCE_VIRTUAL_CHANNEL);
       // don't want to leak events
       if (!ready_event.has_triggered())
         Runtime::trigger_event(ready_event);
@@ -776,7 +776,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (is_owner() && registered_with_runtime)
-        unregister_with_runtime(DEFAULT_VIRTUAL_CHANNEL);
+        unregister_with_runtime(REFERENCE_VIRTUAL_CHANNEL);
       futures.clear();
 #ifdef LEGION_GC
       log_garbage.info("GC Deletion %lld %d", 
@@ -3163,7 +3163,7 @@ namespace Legion {
             // sending messages when it is deleted
             if ((*it)->is_registered())
               wait_for.insert(
-                  (*it)->unregister_with_runtime(DEFAULT_VIRTUAL_CHANNEL));
+                  (*it)->unregister_with_runtime(REFERENCE_VIRTUAL_CHANNEL));
             // Remove our base resource reference
             if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
               delete (*it);
@@ -12987,7 +12987,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, DISTRIBUTED_REMOTE_REGISTRATION,
-                      DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+                    REFERENCE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -12996,7 +12996,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, DISTRIBUTED_VALID_UPDATE,
-                                    DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                    REFERENCE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13005,7 +13005,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, DISTRIBUTED_GC_UPDATE,
-                                    DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                    REFERENCE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13014,7 +13014,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, DISTRIBUTED_RESOURCE_UPDATE,
-                                    DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                    REFERENCE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13023,7 +13023,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, DISTRIBUTED_CREATE_ADD,
-                                    DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                    REFERENCE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13032,7 +13032,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, DISTRIBUTED_CREATE_REMOVE,
-                                           DEFAULT_VIRTUAL_CHANNEL, flush);
+                                           REFERENCE_VIRTUAL_CHANNEL, flush);
     }
 
     //--------------------------------------------------------------------------
