@@ -23,7 +23,12 @@
 # Once llvm-config is found, it will be used to query available components
 #
 if(NOT LLVM_FOUND AND NOT TARGET_LLVM)
-  find_program(LLVM_CONFIG_EXECUTABLE llvm-config)
+  if(NOT LLVM_CONFIG_EXECUTABLE)
+    # if an explicitly-versioned llvm-config (that we've tested with) is
+    #  available, use that
+    find_program(LLVM_CONFIG_EXECUTABLE NAMES llvm-config-3.5
+                                              llvm-config)
+  endif(NOT LLVM_CONFIG_EXECUTABLE)
   if(LLVM_CONFIG_EXECUTABLE)
     # Check components
     execute_process(COMMAND ${LLVM_CONFIG_EXECUTABLE} --components
@@ -57,6 +62,11 @@ if(NOT LLVM_FOUND AND NOT TARGET_LLVM)
       OUTPUT_VARIABLE _LLVM_SYSTEM_LIBS
       OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET
     )
+    # llvm-config --system-libs gives you all the libraries you might need for anything,
+    #  which includes things we don't need, and might not be installed
+    # for example, filter out libedit
+    string(REPLACE "-ledit" "" _LLVM_SYSTEM_LIBS "${_LLVM_SYSTEM_LIBS}")
+
     string(REPLACE "-l" "" _LLVM_SYSTEM_LIBS "${_LLVM_SYSTEM_LIBS}")
     string(REPLACE " " ";" _LLVM_SYSTEM_LIBS "${_LLVM_SYSTEM_LIBS}")
     list(APPEND _LLVM_LIBS ${_LLVM_SYSTEM_LIBS})
@@ -78,7 +88,7 @@ endif()
 
 if(LLVM_FOUND AND NOT TARGET LLVM::LLVM)
   add_library(LLVM::LLVM INTERFACE IMPORTED)
-  set_target_properties(LLVM PROPERTIES
+  set_target_properties(LLVM::LLVM PROPERTIES
     INTERFACE_COMPILE_OPTIONS "--std=c++11"
     INTERFACE_INCLUDE_DIRECTORIES "${_LLVM_INCLUDE}"
     INTERFACE_LINK_LIBRARIES "${_LLVM_LIBS}"
