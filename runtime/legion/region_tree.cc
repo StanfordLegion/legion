@@ -3205,7 +3205,12 @@ namespace Legion {
       // reference that will be removed by the owner when we can be
       // safely collected
       if (result->is_owner())
+      {
         result->add_base_valid_ref(APPLICATION_REF, &mutator);
+        // Also add references to our color space
+        color_space->add_nested_valid_ref(did, &mutator);
+        color_space->add_nested_resource_ref(did);
+      }
       else
         result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
       result->register_with_runtime(&mutator);
@@ -3254,7 +3259,12 @@ namespace Legion {
       // reference that will be removed by the owner when we can be
       // safely collected
       if (result->is_owner())
+      {
         result->add_base_valid_ref(APPLICATION_REF, &mutator);
+        // Also add references to our color space
+        color_space->add_nested_valid_ref(did, &mutator);
+        color_space->add_nested_resource_ref(did);
+      }
       else
         result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
       result->register_with_runtime(&mutator);
@@ -5648,6 +5658,8 @@ namespace Legion {
       }
       if (parent->remove_nested_resource_ref(did))
         delete parent;
+      if (color_space->remove_nested_resource_ref(did))
+        delete color_space;
     }
 
     //--------------------------------------------------------------------------
@@ -5681,6 +5693,9 @@ namespace Legion {
     {
       if (is_owner())
       {
+        // Remove the valid reference that we hold on the color space
+        // No need to check for deletion since we have a resource ref too
+        color_space->remove_nested_valid_ref(did, mutator);
         // Need read-only lock while accessing these structures, 
         // we know they won't change while accessing them
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
