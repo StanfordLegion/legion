@@ -432,10 +432,7 @@ def build_cmake(root_dir, tmp_dir, env, thread_count, test_legion_cxx, test_perf
              'ON' if env['USE_HDF'] == '1' else 'OFF')] +
         (['-DCMAKE_CXX_FLAGS=%s' % env['CC_FLAGS']]
           if 'CC_FLAGS' in env else []) +
-        (['-DLegion_BUILD_TUTORIAL=ON',
-          '-DLegion_BUILD_EXAMPLES=ON',
-          '-DLegion_BUILD_TESTS=ON',
-         ] if test_legion_cxx or test_perf else []) +
+        (['-DLegion_BUILD_ALL=ON'] if test_legion_cxx or test_perf else []) +
         [root_dir],
         env=env, cwd=build_dir)
     cmd(['make', '-C', build_dir, '-j', str(thread_count)], env=env)
