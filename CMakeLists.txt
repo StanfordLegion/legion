@@ -169,7 +169,7 @@ if(Legion_USE_HDF5)
   find_package(HDF5 REQUIRED COMPONENTS C)
 
   # define variable for realm_defines.h
-  set(REALM_USE_HDF ON)
+  set(USE_HDF ON)
 endif()
 
 #------------------------------------------------------------------------------#

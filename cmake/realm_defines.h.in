@@ -65,8 +65,8 @@
 #cmakedefine REALM_USE_LLVM
 #endif
 
-#ifndef REALM_USE_HDF
-#cmakedefine REALM_USE_HDF
+#ifndef USE_HDF
+#cmakedefine USE_HDF
 #endif
 
 #ifndef __STDC_FORMAT_MACROS
