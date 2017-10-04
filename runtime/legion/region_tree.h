@@ -1020,6 +1020,7 @@ namespace Legion {
               TaskOp *op, IndexSpace left, IndexSpace right);
     public:
       virtual void log_index_space_points(void);
+      void log_index_space_points(const Realm::IndexSpace<DIM,T> &space) const;
       virtual ApEvent compute_pending_space(Operation *op,
             const std::vector<IndexSpace> &handles, bool is_union);
       virtual ApEvent compute_pending_space(Operation *op,

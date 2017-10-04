@@ -141,7 +141,7 @@ namespace Legion {
       {
         // Log subspaces being set on the owner
         if (Runtime::legion_spy_enabled && (parent != NULL))
-          log_index_space_points();
+          this->log_index_space_points(value);
         // We're the owner, send messages to everyone else that we've 
         // sent this node to except the source
         Serializer rez;
@@ -297,6 +297,15 @@ namespace Legion {
     {
       Realm::IndexSpace<DIM,T> tight_space;
       get_realm_index_space(tight_space, true/*tight*/);
+      log_index_space_points(tight_space);
+    }
+      
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void IndexSpaceNodeT<DIM,T>::log_index_space_points(
+                              const Realm::IndexSpace<DIM,T> &tight_space) const
+    //--------------------------------------------------------------------------
+    {
       if (!tight_space.empty())
       {
         // Iterate over the rectangles and print them out 
