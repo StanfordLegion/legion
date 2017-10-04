@@ -49,6 +49,16 @@ namespace Realm {
 	      (serdez & s.error_details));
     }
 
+    TYPE_IS_SERIALIZABLE(InstanceStatus::Result);
+
+    template <typename S>
+    bool serdez(S& serdez, const InstanceStatus& s)
+    {
+      return ((serdez & s.result) &&
+	      (serdez & s.error_code) &&
+	      (serdez & s.error_details));
+    }
+
 
     ////////////////////////////////////////////////////////////////////////
     //
@@ -323,14 +333,14 @@ namespace Realm {
   //
 
   template <typename T>
-  bool ProfilingResponse::has_measurement(void) const
+  inline bool ProfilingResponse::has_measurement(void) const
   {
     int offset, size; // not actually used
     return find_id((int)(T::ID), offset, size);
   }
 
   template <typename T>
-  T *ProfilingResponse::get_measurement(void) const
+  inline T *ProfilingResponse::get_measurement(void) const
   {
     int offset, size;
     if(find_id((int)(T::ID), offset, size)) {
@@ -344,6 +354,17 @@ namespace Realm {
       return m;
     } else
       return 0;
+  }
+
+  template <typename T>
+  inline bool ProfilingResponse::get_measurement(T& result) const
+  {
+    int offset, size;
+    if(find_id((int)(T::ID), offset, size)) {
+      Serialization::FixedBufferDeserializer fbd(data + offset, size);
+      return (fbd >> result);
+    } else
+      return false;
   }
 
 
