@@ -4804,7 +4804,7 @@ namespace Legion {
         // No need to check for deletion since we have resource references
         for (std::map<LegionColor,IndexPartNode*>::const_iterator it = 
               color_map.begin(); it != color_map.end(); it++)
-          it->second->remove_base_valid_ref(APPLICATION_REF, mutator);
+          it->second->destroy_node(runtime->address_space);
       }
       else // Remove the valid reference that we have on the owner
         send_remote_valid_update(owner_space, mutator, 1/*count*/,false/*add*/);
@@ -5694,7 +5694,7 @@ namespace Legion {
         // No need to check for deletion since we have resource references
         for (std::map<LegionColor,IndexSpaceNode*>::const_iterator it = 
               color_map.begin(); it != color_map.end(); it++)
-          it->second->remove_base_valid_ref(APPLICATION_REF, mutator);
+          it->second->destroy_node(runtime->address_space);
       }
       else // Remove the valid reference that we have on the owner
         send_remote_valid_update(owner_space, mutator, 1/*count*/,false/*add*/);
