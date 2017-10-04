@@ -5655,11 +5655,11 @@ namespace Legion {
       {
         parent->remove_child(color);
         context->remove_node(handle);
+        if (color_space->remove_nested_resource_ref(did))
+          delete color_space;
       }
       if (parent->remove_nested_resource_ref(did))
         delete parent;
-      if (color_space->remove_nested_resource_ref(did))
-        delete color_space;
     }
 
     //--------------------------------------------------------------------------
