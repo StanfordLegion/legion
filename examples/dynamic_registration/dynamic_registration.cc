@@ -199,8 +199,9 @@ void top_level_task(const Task *task,
 				 c_msg, sizeof(c_msg));
 
 #ifdef REALM_USE_LLVM
-  TaskVariantRegistrar wrapped_llvm_registrar(WRAPPED_LLVM_TASK_ID, true/*global*/,
-					      "wrapped_llvm_variant");
+  TaskVariantRegistrar wrapped_llvm_registrar(WRAPPED_LLVM_TASK_ID,
+					      "wrapped_llvm_variant",
+					      true /*global*/);
   wrapped_llvm_registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
   const char llvm_msg[] = "user data for llvm task";
   CodeDescriptor llvm_cd(Realm::Type::from_cpp_type<Processor::TaskFuncPtr>());
