@@ -434,15 +434,6 @@ namespace Legion {
       void destroy_user_lock(Reservation r);
       void destroy_user_barrier(ApBarrier b);
     public:
-      void analyze_destroy_index_space(IndexSpace handle, 
-                                   std::vector<RegionRequirement> &delete_reqs,
-                                   std::vector<unsigned> &parent_req_indexes);
-      void analyze_destroy_index_partition(IndexPartition handle, 
-                                   std::vector<RegionRequirement> &delete_reqs,
-                                   std::vector<unsigned> &parent_req_indexes);
-      void analyze_destroy_field_space(FieldSpace handle, 
-                                   std::vector<RegionRequirement> &delete_reqs,
-                                   std::vector<unsigned> &parent_req_indexes);
       void analyze_destroy_fields(FieldSpace handle,
                                   const std::set<FieldID> &to_delete,
                                   std::vector<RegionRequirement> &delete_reqs,

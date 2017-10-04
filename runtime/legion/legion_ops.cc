@@ -5809,27 +5809,11 @@ namespace Legion {
       std::vector<RegionRequirement> deletion_requirements;
       switch (kind)
       {
+        // No analysis for these since they don't need to defer anything
         case INDEX_SPACE_DELETION:
-          {
-            parent_ctx->analyze_destroy_index_space(index_space, 
-                                                    deletion_requirements,
-                                                    parent_req_indexes);
-            break;
-          }
         case INDEX_PARTITION_DELETION:
-          {
-            parent_ctx->analyze_destroy_index_partition(index_part, 
-                                                        deletion_requirements,
-                                                        parent_req_indexes);
-            break;
-          }
         case FIELD_SPACE_DELETION:
-          {
-            parent_ctx->analyze_destroy_field_space(field_space, 
-                                                    deletion_requirements,
-                                                    parent_req_indexes);
-            break;
-          }
+          break;
         case FIELD_DELETION:
           {
             parent_ctx->analyze_destroy_fields(field_space, free_fields, 
