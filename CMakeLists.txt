@@ -99,7 +99,7 @@ if(Legion_USE_Python)
   )
 
   # define variable for realm_defines.h
-  set(REALM_USE_PYTHON)
+  set(REALM_USE_PYTHON ON)
 endif()
 
 #------------------------------------------------------------------------------#
@@ -140,7 +140,7 @@ if(Legion_USE_GASNet)
   )
 
   # define variable for realm_defines.h
-  set(USE_GASNET)
+  set(USE_GASNET ON)
   set(GASNETI_BUG1389_WORKAROUND "1")
   string(TOUPPER ${GASNet_CONDUIT} CONDUIT)
   set(GASNET_CONDUIT_${CONDUIT} ON)
@@ -158,7 +158,7 @@ if(Legion_USE_LLVM)
   )
 
   # define variable for realm_defines.h
-  set(REALM_USE_LLVM)
+  set(REALM_USE_LLVM ON)
 endif()
 
 #------------------------------------------------------------------------------#
@@ -169,7 +169,7 @@ if(Legion_USE_HDF5)
   find_package(HDF5 REQUIRED COMPONENTS C)
 
   # define variable for realm_defines.h
-  set(REALM_USE_HDF)
+  set(REALM_USE_HDF ON)
 endif()
 
 #------------------------------------------------------------------------------#
