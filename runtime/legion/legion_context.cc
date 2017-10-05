@@ -2150,7 +2150,11 @@ namespace Legion {
       region_tree_owners[node] = 
         std::pair<AddressSpaceID,bool>(source, 
                                       (source != runtime->address_space));
+#ifdef LEGION_GC
+      node->add_base_resource_ref(CONTEXT_REF);
+#else
       node->add_reference();
+#endif
       return source;
     } 
 
@@ -5626,7 +5630,11 @@ namespace Legion {
           // If this is a remote only then we don't need to invalidate it
           if (!it->second.second)
             it->first->invalidate_version_state(tree_context.get_id()); 
+#ifdef LEGION_GC
+          if (it->first->remove_base_resource_ref(CONTEXT_REF))
+#else
           if (it->first->remove_reference())
+#endif
             delete it->first;
         }
         region_tree_owners.clear();
@@ -6175,7 +6183,11 @@ namespace Legion {
 #endif
         region_tree_owners[node] = 
           std::pair<AddressSpaceID,bool>(result, false/*remote only*/); 
+#ifdef LEGION_GC
+        node->add_base_resource_ref(CONTEXT_REF);
+#else
         node->add_reference();
+#endif
         // Find the event to trigger
         std::map<RegionTreeNode*,RtUserEvent>::iterator finder = 
           pending_version_owner_requests.find(node);

@@ -5602,7 +5602,7 @@ namespace Legion {
 #endif
 #ifdef LEGION_GC
       log_garbage.info("GC Index Partition %lld %d %d",
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space, handle.id);
+          LEGION_DISTRIBUTED_ID_FILTER(did), local_space, handle.id); 
 #endif
     }
 
@@ -8863,19 +8863,35 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RegionTreeNode::RegionTreeNode(RegionTreeForest *ctx, 
                                    FieldSpaceNode *column_src)
-      : context(ctx), column_source(column_src), 
+      : 
+#ifdef LEGION_GC
+        DistributedCollectable(ctx->runtime, 
+            ctx->runtime->get_available_distributed_id(false/*need cont*/),
+            ctx->runtime->address_space, false/*register with runtime*/),
+#endif
+        context(ctx), column_source(column_src), 
         registered(false), destroyed(false)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_GC
+      this->node_lock = gc_lock;
+#else
       this->node_lock = Reservation::create_reservation(); 
+#endif
     }
 
     //--------------------------------------------------------------------------
     RegionTreeNode::~RegionTreeNode(void)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_GC
+      remote_instances.clear();
+      log_garbage.info("GC Deletion %lld %d",
+          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
+#else
       node_lock.destroy_reservation();
       node_lock = Reservation::NO_RESERVATION;
+#endif
       for (LegionMap<SemanticTag,SemanticInfo>::aligned::iterator it = 
             semantic_info.begin(); it != semantic_info.end(); it++)
       {
@@ -13470,6 +13486,13 @@ namespace Legion {
         parent(par), row_source(row_src)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_GC
+      log_garbage.info("GC Region %lld %d %d %d %d",
+          LEGION_DISTRIBUTED_ID_FILTER(did), local_space, 
+          handle.get_index_space().get_id(),
+          handle.get_field_space().get_id(),
+          handle.get_tree_id());
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -13500,7 +13523,11 @@ namespace Legion {
         else
         {
           parent->remove_child(row_source->color);
+#ifdef LEGION_GC
+          if (parent->remove_base_resource_ref(REGION_TREE_REF))
+#else
           if (parent->remove_reference())
+#endif
             delete parent;
         }
         // Unregister oursleves with the row source
@@ -13537,14 +13564,22 @@ namespace Legion {
       }
       else
       {
+#ifdef LEGION_GC
+        parent->add_base_resource_ref(REGION_TREE_REF);
+#else
         parent->add_reference();
+#endif
         parent->add_child(this);
       }
       row_source->add_base_valid_ref(REGION_TREE_REF, &mutator);
       row_source->add_base_resource_ref(REGION_TREE_REF); 
       row_source->add_instance(this);
       // Add a reference that will be moved when we're destroyed
+#ifdef LEGION_GC
+      add_base_resource_ref(APPLICATION_REF);
+#else
       add_reference();
+#endif
       registered = true;
     }
 
@@ -13678,7 +13713,11 @@ namespace Legion {
       // Mark that it is destroyed
       destroyed = true;
       // Remove our reference
+#ifdef LEGION_GC
+      return remove_base_resource_ref(APPLICATION_REF);
+#else
       return remove_reference();
+#endif
 #else
       return false;
 #endif
@@ -15268,6 +15307,13 @@ namespace Legion {
         parent(par), row_source(row_src)
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_GC
+      log_garbage.info("GC Partition %lld %d %d %d %d",
+          LEGION_DISTRIBUTED_ID_FILTER(did), local_space, 
+          handle.get_index_partition().get_id(), 
+          handle.get_field_space().get_id(),
+          handle.get_tree_id());
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -15288,7 +15334,11 @@ namespace Legion {
       {
         // Unregister ourselves with our parent
         parent->remove_child(row_source->color);
+#ifdef LEGION_GC
+        if (parent->remove_base_resource_ref(REGION_TREE_REF))
+#else
         if (parent->remove_reference())
+#endif
           delete parent;
         // Unregister ourselves with our row source
         row_source->remove_instance(this);
@@ -15319,10 +15369,18 @@ namespace Legion {
       row_source->add_base_valid_ref(REGION_TREE_REF, &mutator);
       row_source->add_base_resource_ref(REGION_TREE_REF);
       row_source->add_instance(this);
+#ifdef LEGION_GC
+      parent->add_base_resource_ref(REGION_TREE_REF);
+#else
       parent->add_reference();
+#endif
       parent->add_child(this);
       // Add a reference that will be moved when we're destroyed
+#ifdef LEGION_GC
+      add_base_resource_ref(APPLICATION_REF);
+#else
       add_reference();
+#endif
       registered = true;
     }
 
@@ -15439,7 +15497,11 @@ namespace Legion {
       // Make that it is destroyed
       destroyed = true;
       // Remove our reference
+#ifdef LEGION_GC
+      return remove_base_resource_ref(APPLICATION_REF);
+#else
       return remove_reference();
+#endif
 #else
       return false;
 #endif

@@ -1895,10 +1895,23 @@ namespace Legion {
      * this kind of node making them general across
      * all kinds of node types.
      */
-    class RegionTreeNode : public Collectable { 
+    class RegionTreeNode
+#ifdef LEGION_GC
+      : public DistributedCollectable
+#else
+      : public Collectable
+#endif
+      {
     public:
       RegionTreeNode(RegionTreeForest *ctx, FieldSpaceNode *column);
       virtual ~RegionTreeNode(void);
+#ifdef LEGION_GC
+    public:
+      virtual void notify_active(ReferenceMutator *mutator) { assert(false); }
+      virtual void notify_inactive(ReferenceMutator *mutator) { assert(false); }
+      virtual void notify_valid(ReferenceMutator *mutator) { assert(false); }
+      virtual void notify_invalid(ReferenceMutator *mutator) { assert(false); }
+#endif
     public:
       static AddressSpaceID get_owner_space(RegionTreeID tid, Runtime *rt);
     public:
@@ -2288,7 +2301,9 @@ namespace Legion {
       RegionTreeForest *const context;
       FieldSpaceNode *const column_source;
     public:
+#ifndef LEGION_GC
       NodeSet remote_instances;
+#endif
       bool registered;
       bool destroyed;
     protected:

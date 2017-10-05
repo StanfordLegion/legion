@@ -57,8 +57,9 @@ namespace Legion {
       RESTRICTED_REF = 18,
       VERSION_STATE_TREE_REF = 19,
       PHYSICAL_MANAGER_REF = 20,
-      REGION_TREE_REF = 21,
-      LAST_SOURCE_REF = 22,
+      LOGICAL_VIEW_REF = 21,
+      REGION_TREE_REF = 22,
+      LAST_SOURCE_REF = 23,
     };
 
     enum ReferenceKind {
@@ -90,6 +91,7 @@ namespace Legion {
       "Restricted Reference",                       \
       "Version State Tree Reference",               \
       "Physical Manager Reference",                 \
+      "Logical View Reference",                     \
       "Region Tree Reference",                      \
     }
 
