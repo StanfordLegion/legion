@@ -41,6 +41,7 @@ namespace Realm {
     PMID_OP_PROC_USAGE, // processor used by task
     PMID_OP_MEM_USAGE, // memories used by a copy
     PMID_INST_STATUS,   // "completion" status of an instance
+    PMID_INST_ALLOCRESULT, // success/failure of instance allocation
     PMID_INST_TIMELINE, // timeline for a physical instance
     PMID_INST_MEM_USAGE, // memory and size used by an instance
     PMID_PCTRS_CACHE_L1I, // L1 I$ performance counters
@@ -166,6 +167,14 @@ namespace Realm {
       Result result;
       int error_code;
       ByteArray error_details;
+    };
+
+    // Simple boolean indicating whether or not allocation is expected to
+    //  succeed
+    struct InstanceAllocResult {
+      static const ProfilingMeasurementID ID = PMID_INST_ALLOCRESULT;
+      
+      bool success;
     };
 
     // Track the timeline of an instance
