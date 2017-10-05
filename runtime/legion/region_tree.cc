@@ -13517,7 +13517,11 @@ namespace Legion {
         if (top_level)
         {
           column_source->remove_instance(this);
+#ifdef LEGION_GC
+          if (column_source->remove_nested_resource_ref(did))
+#else
           if (column_source->remove_base_resource_ref(REGION_TREE_REF))
+#endif
             delete column_source;
         }
         else
@@ -13532,7 +13536,11 @@ namespace Legion {
         }
         // Unregister oursleves with the row source
         row_source->remove_instance(this);
+#ifdef LEGION_GC
+        if (row_source->remove_nested_resource_ref(did))
+#else
         if (row_source->remove_base_resource_ref(REGION_TREE_REF))
+#endif
           delete row_source;
         // Unregister ourselves with the context
         context->remove_node(handle, top_level);
@@ -13558,8 +13566,13 @@ namespace Legion {
       LocalReferenceMutator mutator;
       if (parent == NULL)
       {
+#ifdef LEGION_GC
+        column_source->add_nested_valid_ref(did, &mutator);
+        column_source->add_nested_resource_ref(did);
+#else
         column_source->add_base_valid_ref(REGION_TREE_REF, &mutator);
         column_source->add_base_resource_ref(REGION_TREE_REF);
+#endif
         column_source->add_instance(this);
       }
       else
@@ -13571,8 +13584,13 @@ namespace Legion {
 #endif
         parent->add_child(this);
       }
+#ifdef LEGION_GC
+      row_source->add_nested_valid_ref(did, &mutator);
+      row_source->add_nested_resource_ref(did);
+#else
       row_source->add_base_valid_ref(REGION_TREE_REF, &mutator);
       row_source->add_base_resource_ref(REGION_TREE_REF); 
+#endif
       row_source->add_instance(this);
       // Add a reference that will be moved when we're destroyed
 #ifdef LEGION_GC
@@ -13707,9 +13725,17 @@ namespace Legion {
       if (parent == NULL)
       {
         context->runtime->release_tree_instances(handle.get_tree_id());
+#ifdef LEGION_GC
+        column_source->remove_nested_valid_ref(did);
+#else
         column_source->remove_base_valid_ref(REGION_TREE_REF);
+#endif
       }
+#ifdef LEGION_GC
+      row_source->remove_nested_valid_ref(did);
+#else
       row_source->remove_base_valid_ref(REGION_TREE_REF);
+#endif
       // Mark that it is destroyed
       destroyed = true;
       // Remove our reference
@@ -15342,7 +15368,11 @@ namespace Legion {
           delete parent;
         // Unregister ourselves with our row source
         row_source->remove_instance(this);
+#ifdef LEGION_GC
+        if (row_source->remove_nested_resource_ref(did))
+#else
         if (row_source->remove_base_resource_ref(REGION_TREE_REF))
+#endif
           delete row_source;
         // Then unregister ourselves with the context
         context->remove_node(handle);
@@ -15366,8 +15396,13 @@ namespace Legion {
       assert(!registered);
 #endif
       LocalReferenceMutator mutator;
+#ifdef LEGION_GC
+      row_source->add_nested_valid_ref(did, &mutator);
+      row_source->add_nested_resource_ref(did);
+#else
       row_source->add_base_valid_ref(REGION_TREE_REF, &mutator);
       row_source->add_base_resource_ref(REGION_TREE_REF);
+#endif
       row_source->add_instance(this);
 #ifdef LEGION_GC
       parent->add_base_resource_ref(REGION_TREE_REF);
@@ -15493,7 +15528,11 @@ namespace Legion {
       // Invalidate our version managers
       invalidate_version_managers();
       // Remove the valid reference that we hold on our row source
+#ifdef LEGION_GC
+      row_source->remove_nested_valid_ref(did);
+#else
       row_source->remove_base_valid_ref(REGION_TREE_REF);
+#endif
       // Make that it is destroyed
       destroyed = true;
       // Remove our reference
