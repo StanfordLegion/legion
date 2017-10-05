@@ -22,7 +22,7 @@
 #include "id.h"
 #include "nodeset.h"
 
-#include "activemsg.h"
+#include <realm/activemsg.h>
 
 namespace Realm {
 
@@ -78,7 +78,7 @@ namespace Realm {
 					RequestArgs,
 					handle_request> Message;
 
-      static void send_request(gasnet_node_t target, ID::IDType id);
+      static void send_request(NodeID target, ID::IDType id);
     };
 
     struct MetadataResponseMessage {
@@ -92,7 +92,7 @@ namespace Realm {
 					 RequestArgs,
 					 handle_request> Message;
 
-      static void send_request(gasnet_node_t target, ID::IDType id, 
+      static void send_request(NodeID target, ID::IDType id, 
 			       const void *data, size_t datalen, int payload_mode);
       static void broadcast_request(const NodeSet& targets, ID::IDType id,
 				    const void *data, size_t datalen);
@@ -110,13 +110,13 @@ namespace Realm {
 					RequestArgs,
 					handle_request> Message;
 
-      static void send_request(gasnet_node_t target, ID::IDType id);
+      static void send_request(NodeID target, ID::IDType id);
       static void broadcast_request(const NodeSet& targets, ID::IDType id);
     };
 
     struct MetadataInvalidateAckMessage {
       struct RequestArgs {
-	gasnet_node_t node;
+	NodeID node;
 	ID::IDType id;
       };
 
@@ -126,7 +126,7 @@ namespace Realm {
 					RequestArgs,
 					handle_request> Message;
 
-      static void send_request(gasnet_node_t target, ID::IDType id);
+      static void send_request(NodeID target, ID::IDType id);
     };
     
 }; // namespace Realm

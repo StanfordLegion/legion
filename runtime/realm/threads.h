@@ -19,7 +19,7 @@
 #define REALM_THREADS_H
 
 #include "realm_config.h"
-#include "activemsg.h"
+#include <realm/activemsg.h>
 
 #ifdef REALM_USE_USER_THREADS
 #ifdef __MACH__

@@ -73,13 +73,13 @@ namespace Realm {
 
     class IBAllocRequest {
     public:
-      IBAllocRequest(gasnet_node_t _owner, void* _req, int _idx,
+      IBAllocRequest(NodeID _owner, void* _req, int _idx,
                      ID::IDType _src_inst_id, ID::IDType _dst_inst_id,
                      size_t _ib_size)
         : owner(_owner), req(_req), idx(_idx), src_inst_id(_src_inst_id),
           dst_inst_id(_dst_inst_id), ib_size(_ib_size) {ib_offset = -1;}
     public:
-      gasnet_node_t owner;
+      NodeID owner;
       void* req;
       int idx;
       ID::IDType src_inst_id, dst_inst_id;
@@ -179,11 +179,11 @@ namespace Realm {
     void PendingIBQueue::enqueue_request(Memory tgt_mem, IBAllocRequest* req)
     {
       AutoHSLLock al(queue_mutex);
-      assert(ID(tgt_mem).memory.owner_node == gasnet_mynode());
+      assert(ID(tgt_mem).memory.owner_node == my_node_id);
       // If we can allocate in target memory, no need to pend the request
       off_t ib_offset = get_runtime()->get_memory_impl(tgt_mem)->alloc_bytes(req->ib_size);
       if (ib_offset >= 0) {
-        if (req->owner == gasnet_mynode()) {
+        if (req->owner == my_node_id) {
           // local ib alloc request
           CopyRequest* cr = (CopyRequest*) req->req;
           RegionInstanceImpl *src_impl = get_runtime()->get_instance_impl(req->src_inst_id);
@@ -219,7 +219,7 @@ namespace Realm {
     void PendingIBQueue::dequeue_request(Memory tgt_mem)
     {
       AutoHSLLock al(queue_mutex);
-      assert(ID(tgt_mem).memory.owner_node == gasnet_mynode());
+      assert(ID(tgt_mem).memory.owner_node == my_node_id);
       std::map<Memory, std::queue<IBAllocRequest*> *>::iterator it = queues.find(tgt_mem);
       // no pending ib requests
       if (it == queues.end()) return;
@@ -231,7 +231,7 @@ namespace Realm {
         // deal with the completed ib alloc request
         log_ib_alloc.info() << "IBAllocRequest (" << req->src_inst_id << "," 
           << req->dst_inst_id << "): completed!";
-        if (req->owner == gasnet_mynode()) {
+        if (req->owner == my_node_id) {
           // local ib alloc request
           CopyRequest* cr = (CopyRequest*) req->req;
           RegionInstanceImpl *src_impl = get_runtime()->get_instance_impl(req->src_inst_id);
@@ -452,7 +452,7 @@ namespace Realm {
       delete domain;
     }
 
-    void CopyRequest::forward_request(gasnet_node_t target_node)
+    void CopyRequest::forward_request(NodeID target_node)
     {
       RemoteCopyArgs args;
       args.redop_id = 0;
@@ -524,17 +524,17 @@ namespace Realm {
 
     /*static*/ void RemoteIBAllocRequestAsync::handle_request(RequestArgs args)
     {
-      assert(ID(args.memory).memory.owner_node == gasnet_mynode());
+      assert(ID(args.memory).memory.owner_node == my_node_id);
       IBAllocRequest* ib_req
           = new IBAllocRequest(args.node, args.req, args.idx,
                                args.src_inst_id, args.dst_inst_id, args.size);
       ib_req_queue->enqueue_request(args.memory, ib_req);
     }
 
-    /*static*/ void RemoteIBAllocRequestAsync::send_request(gasnet_node_t target, Memory tgt_mem, void* req, int idx, ID::IDType src_inst_id, ID::IDType dst_inst_id, size_t ib_size)
+    /*static*/ void RemoteIBAllocRequestAsync::send_request(NodeID target, Memory tgt_mem, void* req, int idx, ID::IDType src_inst_id, ID::IDType dst_inst_id, size_t ib_size)
     {
       RequestArgs args;
-      args.node = gasnet_mynode();
+      args.node = my_node_id;
       args.memory = tgt_mem;
       args.req = req;
       args.idx = idx;
@@ -558,7 +558,7 @@ namespace Realm {
       req->handle_ib_response(args.idx, inst_pair, args.size, args.offset);
     }
 
-    /*static*/ void RemoteIBAllocResponseAsync::send_request(gasnet_node_t target, void* req, int idx, ID::IDType src_inst_id, ID::IDType dst_inst_id, size_t ib_size, off_t ib_offset)
+    /*static*/ void RemoteIBAllocResponseAsync::send_request(NodeID target, void* req, int idx, ID::IDType src_inst_id, ID::IDType dst_inst_id, size_t ib_size, off_t ib_offset)
     {
       RequestArgs args;
       args.req = req;
@@ -577,12 +577,12 @@ namespace Realm {
 
     /*static*/ void RemoteIBFreeRequestAsync::handle_request(RequestArgs args)
     {
-      assert(ID(args.memory).memory.owner_node == gasnet_mynode());
+      assert(ID(args.memory).memory.owner_node == my_node_id);
       get_runtime()->get_memory_impl(args.memory)->free_bytes(args.ib_offset, args.ib_size);
       ib_req_queue->dequeue_request(args.memory);
     }
 
-    /*static*/ void RemoteIBFreeRequestAsync::send_request(gasnet_node_t target, Memory tgt_mem, off_t ib_offset, size_t ib_size)
+    /*static*/ void RemoteIBFreeRequestAsync::send_request(NodeID target, Memory tgt_mem, off_t ib_offset, size_t ib_size)
     {
       RequestArgs args;
       args.memory = tgt_mem;
@@ -598,7 +598,7 @@ namespace Realm {
     {
       //CopyRequest* cr = (CopyRequest*) req;
       //AutoHSLLock al(cr->ib_mutex);
-      if(ID(mem).memory.owner_node == gasnet_mynode()) {
+      if(ID(mem).memory.owner_node == my_node_id) {
         get_runtime()->get_memory_impl(mem)->free_bytes(offset, size);
         ib_req_queue->dequeue_request(mem);
       } else {
@@ -624,10 +624,10 @@ namespace Realm {
       else
         ib_size = IB_MAX_SIZE;
       //log_ib_alloc.info("alloc_ib: src_inst_id(%llx) dst_inst_id(%llx) idx(%d) size(%lu) memory(%llx)", inst_pair.first.id, inst_pair.second.id, idx, ib_size, tgt_mem.id);
-      if (ID(tgt_mem).memory.owner_node == gasnet_mynode()) {
+      if (ID(tgt_mem).memory.owner_node == my_node_id) {
         // create local intermediate buffer
         IBAllocRequest* ib_req
-          = new IBAllocRequest(gasnet_mynode(), this, idx, inst_pair.first.id,
+          = new IBAllocRequest(my_node_id, this, idx, inst_pair.first.id,
                                inst_pair.second.id, ib_size);
         ib_req_queue->enqueue_request(tgt_mem, ib_req);
       } else {
@@ -714,8 +714,8 @@ namespace Realm {
 	// TODO
 	// SJT: actually, is this needed any more?
         //Memory tgt_mem = get_runtime()->get_instance_impl(oas_by_inst->begin()->first.second)->memory;
-        //gasnet_node_t tgt_node = ID(tgt_mem).memory.owner_node;
-	//assert(tgt_node == gasnet_mynode());
+        //NodeID tgt_node = ID(tgt_mem).memory.owner_node;
+	//assert(tgt_node == my_node_id);
         state = STATE_GEN_PATH;
       }
 
@@ -1603,14 +1603,14 @@ namespace Realm {
 	    Memory xd_src_mem;
 	    TransferIterator *xd_src_iter;
 	    bool mark_started;
-	    gasnet_node_t xd_target_node;
+	    NodeID xd_target_node;
 	    if(idx == 1) {
 	      // first step reads from source
 	      pre_xd_guid = XferDes::XFERDES_NO_GUID;
 	      xd_src_mem = src_inst.get_location();
 	      xd_src_iter = src_iter;
 	      mark_started = (it == oas_by_inst->begin());
-	      xd_target_node = gasnet_mynode();
+	      xd_target_node = my_node_id;
 	    } else {
 	      // reads from intermediate buffer
 	      pre_xd_guid = sub_path[idx - 2];
@@ -1665,7 +1665,7 @@ namespace Realm {
             XferDesFence* complete_fence = new XferDesFence(this);
             add_async_work_item(complete_fence);
 
-	    create_xfer_des(this, gasnet_mynode(), xd_target_node,
+	    create_xfer_des(this, my_node_id, xd_target_node,
 			    xd_guid, pre_xd_guid,
 			    next_xd_guid, next_max_rw_gap,
 			    ((idx == 1) ? 0 : ibvec[idx - 2].offset),
@@ -1783,7 +1783,7 @@ namespace Realm {
       delete domain;
     }
 
-    void ReduceRequest::forward_request(gasnet_node_t target_node)
+    void ReduceRequest::forward_request(NodeID target_node)
     {
       RemoteCopyArgs args;
       args.redop_id = redop_id;
@@ -2179,7 +2179,7 @@ namespace Realm {
       delete domain;
     }
 
-    void FillRequest::forward_request(gasnet_node_t target_node)
+    void FillRequest::forward_request(NodeID target_node)
     {
       RemoteFillArgs args;
       args.inst = dst.inst;

@@ -21,7 +21,7 @@
 #include "runtime.h"
 #include "id.h"
 
-#include "activemsg.h"
+#include <realm/activemsg.h>
 #include "operation.h"
 #include "profiling.h"
 
@@ -137,15 +137,15 @@ namespace Realm {
       void set_request_size(ID::ID_Types id_type, int batch_size, int low_water_mark);
       void make_initial_requests(void);
 
-      ID::IDType get_remote_id(gasnet_node_t target, ID::ID_Types id_type);
+      ID::IDType get_remote_id(NodeID target, ID::ID_Types id_type);
 
-      void add_id_range(gasnet_node_t target, ID::ID_Types id_type, ID::IDType first, ID::IDType last);
+      void add_id_range(NodeID target, ID::ID_Types id_type, ID::IDType first, ID::IDType last);
 
     protected:
       GASNetHSL mutex;
       std::map<ID::ID_Types, int> batch_sizes, low_water_marks;
-      std::map<ID::ID_Types, std::set<gasnet_node_t> > reqs_in_flight;
-      std::map<ID::ID_Types, std::map<gasnet_node_t, std::vector<std::pair<ID::IDType, ID::IDType> > > > id_ranges;
+      std::map<ID::ID_Types, std::set<NodeID> > reqs_in_flight;
+      std::map<ID::ID_Types, std::map<NodeID, std::vector<std::pair<ID::IDType, ID::IDType> > > > id_ranges;
     };
 
     // the "core" module provides the basic memories and processors used by Realm
@@ -226,7 +226,7 @@ namespace Realm {
       ProcessorGroup *get_procgroup_impl(ID id);
       RegionInstanceImpl *get_instance_impl(ID id);
       SparsityMapImplWrapper *get_sparsity_impl(ID id);
-      SparsityMapImplWrapper *get_available_sparsity_impl(gasnet_node_t target_node);
+      SparsityMapImplWrapper *get_available_sparsity_impl(NodeID target_node);
 
 #ifdef DEADLOCK_TRACE
       void add_thread(const pthread_t *thread);
@@ -316,7 +316,7 @@ namespace Realm {
 
     struct RemoteIDRequestMessage {
       struct RequestArgs {
-	gasnet_node_t sender;
+	NodeID sender;
 	ID::ID_Types id_type;
 	int count;
       };
@@ -327,12 +327,12 @@ namespace Realm {
 				        RequestArgs,
 				        handle_request> Message;
 
-      static void send_request(gasnet_node_t target, ID::ID_Types id_type, int count);
+      static void send_request(NodeID target, ID::ID_Types id_type, int count);
     };
 
     struct RemoteIDResponseMessage {
       struct RequestArgs {
-	gasnet_node_t responder;
+	NodeID responder;
 	ID::ID_Types id_type;
 	ID::IDType first_id, last_id;
       };
@@ -343,7 +343,7 @@ namespace Realm {
 				        RequestArgs,
 				        handle_request> Message;
 
-      static void send_request(gasnet_node_t target, ID::ID_Types id_type,
+      static void send_request(NodeID target, ID::ID_Types id_type,
 			       ID::IDType first_id, ID::IDType last_id);
     };
 
@@ -359,7 +359,7 @@ namespace Realm {
 				        RequestArgs,
 				        handle_request> Message;
 
-      static void send_request(gasnet_node_t target);
+      static void send_request(NodeID target);
     };
       
 }; // namespace Realm

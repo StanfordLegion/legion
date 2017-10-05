@@ -4361,6 +4361,12 @@ legion_get_current_time_in_micros(void)
   return Realm::Clock::current_time_in_microseconds();
 }
 
+unsigned long long
+legion_get_current_time_in_nanos(void)
+{
+  return Realm::Clock::current_time_in_nanoseconds();
+}
+
 // -----------------------------------------------------------------------
 // Machine Operations
 // -----------------------------------------------------------------------

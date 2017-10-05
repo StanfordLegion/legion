@@ -22,7 +22,7 @@
 #include "id.h"
 #include "inst_layout.h"
 
-#include "activemsg.h"
+#include <realm/activemsg.h>
 
 #include "rsrv_impl.h"
 #include "metadata.h"

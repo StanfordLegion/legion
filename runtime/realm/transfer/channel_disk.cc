@@ -19,7 +19,7 @@
 namespace Realm {
 
     FileXferDes::FileXferDes(DmaRequest* _dma_request,
-			     gasnet_node_t _launch_node,
+			     NodeID _launch_node,
 			     XferDesID _guid,
 			     XferDesID _pre_xd_guid,
 			     XferDesID _next_xd_guid,
@@ -160,7 +160,7 @@ namespace Realm {
     }
 
     DiskXferDes::DiskXferDes(DmaRequest* _dma_request,
-			     gasnet_node_t _launch_node,
+			     NodeID _launch_node,
 			     XferDesID _guid,
 			     XferDesID _pre_xd_guid,
 			     XferDesID _next_xd_guid,

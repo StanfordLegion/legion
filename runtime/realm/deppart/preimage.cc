@@ -209,9 +209,9 @@ namespace Realm {
   void PreimageMicroOp<N,T,N2,T2>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
     // a PreimageMicroOp should always be executed on whichever node the field data lives
-    gasnet_node_t exec_node = ID(inst).sparsity.creator_node;
+    NodeID exec_node = ID(inst).sparsity.creator_node;
 
-    if(exec_node != gasnet_mynode()) {
+    if(exec_node != my_node_id) {
       // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
       //  track it
       async_microop = new AsyncMicroOp(op, this);
@@ -263,7 +263,7 @@ namespace Realm {
 
   template <int N, typename T, int N2, typename T2>
   template <typename S>
-  PreimageMicroOp<N,T,N2,T2>::PreimageMicroOp(gasnet_node_t _requestor,
+  PreimageMicroOp<N,T,N2,T2>::PreimageMicroOp(NodeID _requestor,
 					      AsyncMicroOp *_async_microop, S& s)
     : PartitioningMicroOp(_requestor, _async_microop)
   {
@@ -584,7 +584,7 @@ namespace Realm {
 
 #if 0  
   template <int N, typename T, int N2, typename T2>
-  /*static*/ void ApproxImageResponseMessage::send_request(gasnet_node_t target, 
+  /*static*/ void ApproxImageResponseMessage::send_request(NodeID target, 
 							   intptr_t output_op, int output_index,
 							   const Rect<N2,T2> *rects, size_t count)
   {
@@ -602,7 +602,7 @@ namespace Realm {
 #define DOIT(N1,T1,N2,T2) \
   template class PreimageMicroOp<N1,T1,N2,T2>; \
   template class PreimageOperation<N1,T1,N2,T2>; \
-  template PreimageMicroOp<N1,T1,N2,T2>::PreimageMicroOp(gasnet_node_t, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \
+  template PreimageMicroOp<N1,T1,N2,T2>::PreimageMicroOp(NodeID, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \
   template Event IndexSpace<N1,T1>::create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<IndexSpace<N1,T1>,Point<N2,T2> > >&, \
 								  const std::vector<IndexSpace<N2,T2> >&, \
 								  std::vector<IndexSpace<N1,T1> >&, \

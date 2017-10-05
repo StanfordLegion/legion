@@ -21,7 +21,7 @@
 #include "memory.h"
 #include "id.h"
 
-#include "activemsg.h"
+#include <realm/activemsg.h>
 #include "operation.h"
 #include "profiling.h"
 #include "sampling.h"
@@ -144,7 +144,7 @@ namespace Realm {
       // we keep a dedicated instance list for locally created
       //  instances, but we use a map indexed by creator node for others,
       //  and protect lookups in it with its own mutex
-      std::map<gasnet_node_t, InstanceList *> instances_by_creator;
+      std::map<NodeID, InstanceList *> instances_by_creator;
       GASNetHSL instance_map_mutex;
       InstanceList local_instances;
 
@@ -210,7 +210,7 @@ namespace Realm {
     protected:
       int num_nodes;
       off_t memory_stride;
-      gasnet_seginfo_t *seginfos;
+      std::vector<char *> segbases;
       //std::map<off_t, off_t> free_blocks;
     };
 
@@ -316,7 +316,7 @@ namespace Realm {
  	                                ResponseArgs,
 	                                handle_response> Response;
 
-      static off_t send_request(gasnet_node_t target, Memory memory, size_t size);
+      static off_t send_request(NodeID target, Memory memory, size_t size);
     };
 
     struct RemoteWriteMessage {
@@ -388,7 +388,7 @@ namespace Realm {
 				         RequestArgs,
 				         handle_request> Message;
 
-      static void send_request(gasnet_node_t target, Memory mem, off_t offset,
+      static void send_request(NodeID target, Memory mem, off_t offset,
 			       ReductionOpID redopid,
 			       const void *data, size_t datalen, int payload_mode);
     };
@@ -417,7 +417,7 @@ namespace Realm {
 				        RequestArgs,
 				        handle_request> Message;
 
-      static void send_request(gasnet_node_t target, Memory memory,
+      static void send_request(NodeID target, Memory memory,
 			       unsigned sequence_id, unsigned num_writes,
 			       RemoteWriteFence *fence);
     };
@@ -434,7 +434,7 @@ namespace Realm {
 				        RequestArgs,
 				        handle_request> Message;
 
-      static void send_request(gasnet_node_t target,
+      static void send_request(NodeID target,
 			       RemoteWriteFence *fence);
     };
     

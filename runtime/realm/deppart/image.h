@@ -55,7 +55,7 @@ namespace Realm {
 
     // construct from received packet
     template <typename S>
-    ImageMicroOp(gasnet_node_t _requestor, AsyncMicroOp *_async_microop, S& s);
+    ImageMicroOp(NodeID _requestor, AsyncMicroOp *_async_microop, S& s);
 
     template <typename BM>
     void populate_bitmasks_ptrs(std::map<int, BM *>& bitmasks);

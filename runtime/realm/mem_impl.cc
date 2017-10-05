@@ -23,6 +23,23 @@
 #include "profiling.h"
 #include "utils.h"
 
+#ifdef USE_GASNET
+#ifndef GASNET_PAR
+#define GASNET_PAR
+#endif
+#include <gasnet.h>
+// eliminate GASNet warnings for unused static functions
+static const void *ignore_gasnet_warning1 __attribute__((unused)) = (void *)_gasneti_threadkey_init;
+#endif
+
+#define CHECK_GASNET(cmd) do { \
+  int ret = (cmd); \
+  if(ret != GASNET_OK) { \
+    fprintf(stderr, "GASNET: %s = %d (%s, %s)\n", #cmd, ret, gasnet_ErrorName(ret), gasnet_ErrorDesc(ret)); \
+    exit(1); \
+  } \
+} while(0)
+
 namespace Realm {
 
   Logger log_malloc("malloc");
@@ -84,7 +101,7 @@ namespace Realm {
 
     MemoryImpl::~MemoryImpl(void)
     {
-      for(std::map<gasnet_node_t, InstanceList *>::const_iterator it = instances_by_creator.begin();
+      for(std::map<NodeID, InstanceList *>::const_iterator it = instances_by_creator.begin();
 	  it != instances_by_creator.end();
 	  ++it)
 	delete it->second;
@@ -259,9 +276,9 @@ namespace Realm {
       ID id(i);
       assert(id.is_instance());
 
-      gasnet_node_t cnode = id.instance.creator_node;
+      NodeID cnode = id.instance.creator_node;
       unsigned idx = id.instance.inst_idx;
-      if(cnode == gasnet_mynode()) {
+      if(cnode == my_node_id) {
 	// if it was locally created, we can directly access the local_instances list
 	//  and it's a fatal error if it doesn't exist
 	AutoHSLLock al(local_instances.mutex);
@@ -330,7 +347,7 @@ namespace Realm {
       if(!inst_impl) {
 	ID mem_id(me);
 	RegionInstance i = ID::make_instance(mem_id.memory.owner_node,
-					     gasnet_mynode() /*creator*/,
+					     my_node_id /*creator*/,
 					     mem_id.memory.mem_idx,
 					     inst_idx).convert<RegionInstance>();
 	log_inst.info() << "creating new local instance: " << i;
@@ -351,7 +368,7 @@ namespace Realm {
 					       Event precondition)
     {
       // TODO: remote stuff
-      assert(ID(me).memory.owner_node == gasnet_mynode());
+      assert(ID(me).memory.owner_node == my_node_id);
 
       if(!precondition.has_triggered()) {
 	// TODO: queue things up?
@@ -367,7 +384,7 @@ namespace Realm {
 	ok = allocator.allocate(i, bytes, alignment, offset);
       }
 
-      if(ID(i).instance.creator_node == gasnet_mynode()) {
+      if(ID(i).instance.creator_node == my_node_id) {
 	// local notification of result
 	get_instance(i)->notify_allocation(ok, offset);
       } else {
@@ -383,7 +400,7 @@ namespace Realm {
 					      Event precondition)
     {
       // TODO: remote stuff
-      assert(ID(me).memory.owner_node == gasnet_mynode());
+      assert(ID(me).memory.owner_node == my_node_id);
 
       // TODO: memory needs to handle non-ready releases
       assert(precondition.has_triggered());
@@ -393,7 +410,7 @@ namespace Realm {
 	allocator.deallocate(i);
       }
 
-      if(ID(i).instance.creator_node == gasnet_mynode()) {
+      if(ID(i).instance.creator_node == my_node_id) {
 	// local notification of result
 	get_instance(i)->notify_deallocation();
       } else {
@@ -470,7 +487,7 @@ namespace Realm {
 
   int LocalCPUMemory::get_home_node(off_t offset, size_t size)
   {
-    return gasnet_mynode();
+    return my_node_id;
   }
 
   void *LocalCPUMemory::local_reg_base(void)
@@ -546,13 +563,23 @@ namespace Realm {
       : MemoryImpl(_me, 0 /* we'll calculate it below */, MKIND_GLOBAL,
 		     MEMORY_STRIDE, Memory::GLOBAL_MEM)
     {
-      num_nodes = gasnet_nodes();
-      seginfos = new gasnet_seginfo_t[num_nodes];
+      num_nodes = max_node_id + 1;
+      segbases.resize(num_nodes);
+#ifdef USE_GASNET
+      gasnet_seginfo_t *seginfos = new gasnet_seginfo_t[num_nodes];
       CHECK_GASNET( gasnet_getSegmentInfo(seginfos, num_nodes) );
       
       for(int i = 0; i < num_nodes; i++) {
 	assert(seginfos[i].size >= size_per_node);
+	segbases[i] = (char *)(seginfos[i].addr);
       }
+      delete[] seginfos;
+#else
+      for(int i = 0; i < num_nodes; i++) {
+	segbases[i] = (char *)(malloc(size_per_node));
+	assert(segbases[i] != 0);
+      }
+#endif
 
       size = size_per_node * num_nodes;
       memory_stride = MEMORY_STRIDE;
@@ -568,7 +595,7 @@ namespace Realm {
 
     off_t GASNetMemory::alloc_bytes(size_t size)
     {
-      if(gasnet_mynode() == 0) {
+      if(my_node_id == 0) {
 	return alloc_bytes_local(size);
       } else {
 	return alloc_bytes_remote(size);
@@ -577,7 +604,7 @@ namespace Realm {
 
     void GASNetMemory::free_bytes(off_t offset, size_t size)
     {
-      if(gasnet_mynode() == 0) {
+      if(my_node_id == 0) {
 	free_bytes_local(offset, size);
       } else {
 	free_bytes_remote(offset, size);
@@ -593,7 +620,11 @@ namespace Realm {
 	off_t blkoffset = offset % memory_stride;
 	size_t chunk_size = memory_stride - blkoffset;
 	if(chunk_size > size) chunk_size = size;
-	gasnet_get(dst_c, node, ((char *)seginfos[node].addr)+(blkid * memory_stride)+blkoffset, chunk_size);
+#ifdef USE_GASNET
+	gasnet_get(dst_c, node, segbases[node]+(blkid * memory_stride)+blkoffset, chunk_size);
+#else
+	memcpy(dst_c, segbases[node]+(blkid * memory_stride)+blkoffset, chunk_size);
+#endif
 	offset += chunk_size;
 	dst_c += chunk_size;
 	size -= chunk_size;
@@ -609,7 +640,11 @@ namespace Realm {
 	off_t blkoffset = offset % memory_stride;
 	size_t chunk_size = memory_stride - blkoffset;
 	if(chunk_size > size) chunk_size = size;
-	gasnet_put(node, ((char *)seginfos[node].addr)+(blkid * memory_stride)+blkoffset, src_c, chunk_size);
+#ifdef USE_GASNET
+	gasnet_put(node, segbases[node]+(blkid * memory_stride)+blkoffset, src_c, chunk_size);
+#else
+	memcpy(segbases[node]+(blkid * memory_stride)+blkoffset, src_c, chunk_size);
+#endif
 	offset += chunk_size;
 	src_c += chunk_size;
 	size -= chunk_size;
@@ -632,7 +667,7 @@ namespace Realm {
 	off_t blkid = (elem_offset / memory_stride / num_nodes);
 	off_t node = (elem_offset / memory_stride) % num_nodes;
 	off_t blkoffset = elem_offset % memory_stride;
-	assert(node == gasnet_mynode());
+	assert(node == my_node_id);
 	char *tgt_ptr = ((char *)seginfos[node].addr)+(blkid * memory_stride)+blkoffset;
 	redop->apply_list_entry(tgt_ptr, entry, 1, ptr);
 	entry += redop->sizeof_list_entry;
@@ -659,8 +694,10 @@ namespace Realm {
 				 const size_t *sizes)
     {
 #define NO_USE_NBI_ACCESSREGION
+#ifdef USE_GASNET
 #ifdef USE_NBI_ACCESSREGION
       gasnet_begin_nbi_accessregion();
+#endif
 #endif
       DetailedTimer::push_timer(10);
       for(size_t i = 0; i < batch_size; i++) {
@@ -676,12 +713,15 @@ namespace Realm {
 	  size_t chunk_size = memory_stride - blkoffset;
 	  if(chunk_size > size) chunk_size = size;
 
-	  char *src_c = (((char *)seginfos[node].addr) +
+	  char *src_c = (segbases[node] +
 			 (blkid * memory_stride) + blkoffset);
-	  if(node == gasnet_mynode()) {
-	    memcpy(dst_c, src_c, chunk_size);
-	  } else {
+#ifdef USE_GASNET
+	  if(node != my_node_id) {
 	    gasnet_get_nbi(dst_c, node, src_c, chunk_size);
+	  } else
+#endif
+	  {
+	    memcpy(dst_c, src_c, chunk_size);
 	  }
 
 	  dst_c += chunk_size;
@@ -693,6 +733,7 @@ namespace Realm {
       }
       DetailedTimer::pop_timer();
 
+#ifdef USE_GASNET
 #ifdef USE_NBI_ACCESSREGION
       DetailedTimer::push_timer(11);
       gasnet_handle_t handle = gasnet_end_nbi_accessregion();
@@ -706,6 +747,7 @@ namespace Realm {
       gasnet_wait_syncnbi_gets();
       DetailedTimer::pop_timer();
 #endif
+#endif
     }
 
     void GASNetMemory::put_batch(size_t batch_size,
@@ -713,7 +755,9 @@ namespace Realm {
 				 const void * const *srcs, 
 				 const size_t *sizes)
     {
+#ifdef USE_GASNET
       gasnet_begin_nbi_accessregion();
+#endif
 
       DetailedTimer::push_timer(14);
       for(size_t i = 0; i < batch_size; i++) {
@@ -729,12 +773,15 @@ namespace Realm {
 	  size_t chunk_size = memory_stride - blkoffset;
 	  if(chunk_size > size) chunk_size = size;
 
-	  char *dst_c = (((char *)seginfos[node].addr) +
+	  char *dst_c = (segbases[node] +
 			 (blkid * memory_stride) + blkoffset);
-	  if(node == gasnet_mynode()) {
-	    memcpy(dst_c, src_c, chunk_size);
-	  } else {
+#ifdef USE_GASNET
+	  if(node != my_node_id) {
 	    gasnet_put_nbi(node, dst_c, (void *)src_c, chunk_size);
+	  } else
+#endif
+	  {
+	    memcpy(dst_c, src_c, chunk_size);
 	  }
 
 	  src_c += chunk_size;
@@ -746,6 +793,7 @@ namespace Realm {
       }
       DetailedTimer::pop_timer();
 
+#ifdef USE_GASNET
       DetailedTimer::push_timer(15);
       gasnet_handle_t handle = gasnet_end_nbi_accessregion();
       DetailedTimer::pop_timer();
@@ -753,6 +801,7 @@ namespace Realm {
       DetailedTimer::push_timer(16);
       gasnet_wait_syncnb(handle);
       DetailedTimer::pop_timer();
+#endif
     }
 
 
@@ -764,9 +813,9 @@ namespace Realm {
   /*static*/ void RemoteMemAllocRequest::handle_request(RequestArgs args)
   {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-    //printf("[%d] handling remote alloc of size %zd\n", gasnet_mynode(), args.size);
+    //printf("[%d] handling remote alloc of size %zd\n", my_node_id, args.size);
     off_t offset = get_runtime()->get_memory_impl(args.memory)->alloc_bytes(args.size);
-    //printf("[%d] remote alloc will return %d\n", gasnet_mynode(), result);
+    //printf("[%d] remote alloc will return %d\n", my_node_id, result);
 
     ResponseArgs r_args;
     r_args.resp_ptr = args.resp_ptr;
@@ -780,14 +829,14 @@ namespace Realm {
     f->set(args.offset);
   }
 
-  /*static*/ off_t RemoteMemAllocRequest::send_request(gasnet_node_t target,
+  /*static*/ off_t RemoteMemAllocRequest::send_request(NodeID target,
 						       Memory memory,
 						       size_t size)
   {
     HandlerReplyFuture<off_t> result;
 
     RequestArgs args;
-    args.sender = gasnet_mynode();
+    args.sender = my_node_id;
     args.resp_ptr = &result;
     args.memory = memory;
     args.size = size;
@@ -883,7 +932,7 @@ namespace Realm {
 	partial_remote_writes[key] = entry;
 #ifdef DEBUG_PWT
 	printf("PWT: %d: new entry for %d/%d: %p, %d\n",
-	       gasnet_mynode(), key.sender, key.sequence_id,
+	       my_node_id, key.sender, key.sequence_id,
 	       entry.fence, entry.remaining_count);
 #endif
       } else {
@@ -891,7 +940,7 @@ namespace Realm {
 	PartialWriteEntry& entry = it->second;
 #ifdef DEBUG_PWT
 	printf("PWT: %d: have entry for %d/%d: %p, %d -> %d\n",
-	       gasnet_mynode(), key.sender, key.sequence_id,
+	       my_node_id, key.sender, key.sequence_id,
 	       entry.fence,
 	       entry.remaining_count, entry.remaining_count - 1);
 #endif
@@ -949,7 +998,7 @@ namespace Realm {
 	partial_remote_writes[key] = entry;
 #ifdef DEBUG_PWT
 	printf("PWT: %d: new entry for %d/%d: %p, %d\n",
-	       gasnet_mynode(), key.sender, key.sequence_id,
+	       my_node_id, key.sender, key.sequence_id,
 	       entry.fence, entry.remaining_count);
 #endif
       } else {
@@ -957,7 +1006,7 @@ namespace Realm {
 	PartialWriteEntry& entry = it->second;
 #ifdef DEBUG_PWT
 	printf("PWT: %d: have entry for %d/%d: %p, %d -> %d\n",
-	       gasnet_mynode(), key.sender, key.sequence_id,
+	       my_node_id, key.sender, key.sequence_id,
 	       entry.fence,
 	       entry.remaining_count, entry.remaining_count - 1);
 #endif
@@ -1032,7 +1081,7 @@ namespace Realm {
 	partial_remote_writes[key] = entry;
 #ifdef DEBUG_PWT
 	printf("PWT: %d: new entry for %d/%d: %p, %d\n",
-	       gasnet_mynode(), key.sender, key.sequence_id,
+	       my_node_id, key.sender, key.sequence_id,
 	       entry.fence, entry.remaining_count);
 #endif
       } else {
@@ -1040,7 +1089,7 @@ namespace Realm {
 	PartialWriteEntry& entry = it->second;
 #ifdef DEBUG_PWT
 	printf("PWT: %d: have entry for %d/%d: %p, %d -> %d\n",
-	       gasnet_mynode(), key.sender, key.sequence_id,
+	       my_node_id, key.sender, key.sequence_id,
 	       entry.fence,
 	       entry.remaining_count, entry.remaining_count - 1);
 #endif
@@ -1093,7 +1142,7 @@ namespace Realm {
     }
   }
 
-  /*static*/ void RemoteReduceListMessage::send_request(gasnet_node_t target,
+  /*static*/ void RemoteReduceListMessage::send_request(NodeID target,
 							Memory mem,
 							off_t offset,
 							ReductionOpID redopid,
@@ -1156,7 +1205,7 @@ namespace Realm {
 	partial_remote_writes[key] = entry;
 #ifdef DEBUG_PWT
 	printf("PWT: %d: new entry for %d/%d: %p, %d\n",
-	       gasnet_mynode(), key.sender, key.sequence_id,
+	       my_node_id, key.sender, key.sequence_id,
 	       entry.fence, entry.remaining_count);
 #endif
       } else {
@@ -1164,7 +1213,7 @@ namespace Realm {
 	PartialWriteEntry& entry = it->second;
 #ifdef DEBUG_PWT
 	printf("PWT: %d: have entry for %d/%d: %p -> %p, %d -> %d\n",
-	       gasnet_mynode(), key.sender, key.sequence_id,
+	       my_node_id, key.sender, key.sequence_id,
 	       entry.fence, args.fence,
 	       entry.remaining_count, entry.remaining_count + args.num_writes);
 #endif
@@ -1186,7 +1235,7 @@ namespace Realm {
     }
   }
 
-  /*static*/ void RemoteWriteFenceMessage::send_request(gasnet_node_t target,
+  /*static*/ void RemoteWriteFenceMessage::send_request(NodeID target,
 							Memory memory,
 							unsigned sequence_id,
 							unsigned num_writes,
@@ -1195,7 +1244,7 @@ namespace Realm {
     RequestArgs args;
 
     args.mem = memory;
-    args.sender = gasnet_mynode();
+    args.sender = my_node_id;
     args.sequence_id = sequence_id;
     args.num_writes = num_writes;
     args.fence = fence;
@@ -1216,7 +1265,7 @@ namespace Realm {
     args.fence->mark_finished(true /*successful*/);
   }
 
-  /*static*/ void RemoteWriteFenceAckMessage::send_request(gasnet_node_t target,
+  /*static*/ void RemoteWriteFenceAckMessage::send_request(NodeID target,
                                                            RemoteWriteFence *fence)
   {
     RequestArgs args;
@@ -1259,7 +1308,7 @@ namespace Realm {
 	  RemoteWriteMessage::RequestArgs args;
 	  args.mem = mem;
 	  args.offset = offset;
-	  args.sender = gasnet_mynode();
+	  args.sender = my_node_id;
 	  args.sequence_id = sequence_id;
 
 	  int count = 1;
@@ -1287,7 +1336,7 @@ namespace Realm {
 	RemoteWriteMessage::RequestArgs args;
 	args.mem = mem;
 	args.offset = offset;
-        args.sender = gasnet_mynode();
+        args.sender = my_node_id;
 	args.sequence_id = sequence_id;
 	RemoteWriteMessage::Message::request(ID(mem).memory.owner_node, args,
 					     data, datalen,
@@ -1327,7 +1376,7 @@ namespace Realm {
 	  RemoteWriteMessage::RequestArgs args;
 	  args.mem = mem;
 	  args.offset = offset;
-	  args.sender = gasnet_mynode();
+	  args.sender = my_node_id;
 	  args.sequence_id = sequence_id;
 
 	  int count = 1;
@@ -1356,7 +1405,7 @@ namespace Realm {
 	RemoteWriteMessage::RequestArgs args;
 	args.mem = mem;
 	args.offset = offset;
-        args.sender = gasnet_mynode();
+        args.sender = my_node_id;
 	args.sequence_id = sequence_id;
 
 	RemoteWriteMessage::Message::request(ID(mem).memory.owner_node, args,
@@ -1394,7 +1443,7 @@ namespace Realm {
 	  RemoteWriteMessage::RequestArgs args;
 	  args.mem = mem;
 	  args.offset = offset;
-	  args.sender = gasnet_mynode();
+	  args.sender = my_node_id;
 	  args.sequence_id = sequence_id;
 
 	  int count = 0;
@@ -1459,7 +1508,7 @@ namespace Realm {
 	RemoteWriteMessage::RequestArgs args;
 	args.mem = mem;
 	args.offset = offset;
-        args.sender = gasnet_mynode();
+        args.sender = my_node_id;
 	args.sequence_id = sequence_id;
 
 	RemoteWriteMessage::Message::request(ID(mem).memory.owner_node, args,
@@ -1510,7 +1559,7 @@ namespace Realm {
         offset = new_offset;
         args.count = cur_count;
         args.serdez_id = serdez_id;
-        args.sender = gasnet_mynode();
+        args.sender = my_node_id;
         args.sequence_id = sequence_id;
         RemoteSerdezMessage::Message::request(ID(mem).memory.owner_node, args,
                                               buffer_start, cur_size, PAYLOAD_COPY);
@@ -1552,7 +1601,7 @@ namespace Realm {
 	  // fold encoded as a negation of the redop_id
 	  args.redop_id = red_fold ? -redop_id : redop_id;
 	  //args.red_fold = red_fold;
-	  args.sender = gasnet_mynode();
+	  args.sender = my_node_id;
 	  args.sequence_id = sequence_id;
 
 	  int xfers = 1;
@@ -1585,7 +1634,7 @@ namespace Realm {
 	// fold encoded as a negation of the redop_id
 	args.redop_id = red_fold ? -redop_id : redop_id;
 	//args.red_fold = red_fold;
-	args.sender = gasnet_mynode();
+	args.sender = my_node_id;
 	args.sequence_id = sequence_id;
 
 	RemoteReduceMessage::Message::request(ID(mem).memory.owner_node, args,

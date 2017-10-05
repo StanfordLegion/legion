@@ -222,7 +222,7 @@ namespace Realm {
 
     class RemoteWriteRequest : public Request {
     public:
-      gasnet_node_t dst_node;
+      NodeID dst_node;
       const void *src_base;
       void *dst_base;
       //size_t nbytes;
@@ -303,7 +303,7 @@ namespace Realm {
       // a boolean indicating if we have marked started
       bool mark_start;
       // ID of the node that launches this XferDes
-      gasnet_node_t launch_node;
+      NodeID launch_node;
       //uint64_t /*bytes_submit, */bytes_read, bytes_write/*, bytes_total*/;
       bool iteration_completed;
       uint64_t bytes_total; // not valid until iteration_completed == true
@@ -343,7 +343,7 @@ namespace Realm {
       //Layouts::GenericLayoutIterator<DIM>* li;
       unsigned offset_idx;
     public:
-      XferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
+      XferDes(DmaRequest* _dma_request, NodeID _launch_node,
               XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
 	      uint64_t _next_max_rw_gap, size_t src_ib_offset, size_t src_ib_size,
               bool _mark_start,
@@ -415,7 +415,7 @@ namespace Realm {
 
     class MemcpyXferDes : public XferDes {
     public:
-      MemcpyXferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
+      MemcpyXferDes(DmaRequest* _dma_request, NodeID _launch_node,
                     XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
 		    uint64_t _next_max_rw_gap, size_t src_ib_offset, size_t src_ib_size,
                     bool mark_started,
@@ -441,7 +441,7 @@ namespace Realm {
 
     class GASNetXferDes : public XferDes {
     public:
-      GASNetXferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
+      GASNetXferDes(DmaRequest* _dma_request, NodeID _launch_node,
                     XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
 		    uint64_t _next_max_rw_gap, size_t src_ib_offset, size_t src_ib_size,
                     bool mark_started,
@@ -466,7 +466,7 @@ namespace Realm {
 
     class RemoteWriteXferDes : public XferDes {
     public:
-      RemoteWriteXferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
+      RemoteWriteXferDes(DmaRequest* _dma_request, NodeID _launch_node,
                          XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
 			 uint64_t _next_max_rw_gap, size_t src_ib_offset, size_t src_ib_size,
                          bool mark_started,
@@ -497,7 +497,7 @@ namespace Realm {
 #ifdef USE_CUDA
     class GPUXferDes : public XferDes {
     public:
-      GPUXferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
+      GPUXferDes(DmaRequest* _dma_request, NodeID _launch_node,
                  XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
 		 uint64_t _next_max_rw_gap, size_t src_ib_offset, size_t src_ib_size,
                  bool mark_started,
@@ -530,7 +530,7 @@ namespace Realm {
 #ifdef USE_HDF
     class HDFXferDes : public XferDes {
     public:
-      HDFXferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
+      HDFXferDes(DmaRequest* _dma_request, NodeID _launch_node,
                  XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
 		 uint64_t _next_max_rw_gap, size_t src_ib_offset, size_t src_ib_size,
                  bool mark_started,
@@ -920,7 +920,7 @@ namespace Realm {
                                         RequestArgs,
                                         handle_request> Message;
 
-      static void send_request(gasnet_node_t target, XferDesFence* fence)
+      static void send_request(NodeID target, XferDesFence* fence)
       {
         RequestArgs args;
         args.fence = fence;
@@ -932,7 +932,7 @@ namespace Realm {
       struct RequestArgs : public BaseMedium {
         //void *dst_buf;
         RemoteWriteRequest *req;
-        gasnet_node_t sender;
+        NodeID sender;
 	XferDesID next_xd_guid;
 	size_t span_start, span_size, pre_bytes_total;
       };
@@ -943,7 +943,7 @@ namespace Realm {
                                          RequestArgs,
                                          handle_request> Message;
 
-      static void send_request(gasnet_node_t target, void *dst_buf,
+      static void send_request(NodeID target, void *dst_buf,
                                const void *src_buf, size_t nbytes,
                                RemoteWriteRequest* req,
 			       XferDesID next_xd_guid,
@@ -958,12 +958,12 @@ namespace Realm {
 	args.span_start = span_start;
 	args.span_size = span_size;
 	args.pre_bytes_total = pre_bytes_total;
-        args.sender = gasnet_mynode();
+        args.sender = my_node_id;
         //TODO: need to ask Sean what payload mode we should use
         Message::request(target, args, src_buf, nbytes, PAYLOAD_KEEP, dst_buf);
       }
 
-      static void send_request(gasnet_node_t target,  void *dst_buf,
+      static void send_request(NodeID target,  void *dst_buf,
                                const void *src_buf, size_t nbytes, off_t src_str,
                                size_t nlines, RemoteWriteRequest* req,
 			       XferDesID next_xd_guid,
@@ -978,7 +978,7 @@ namespace Realm {
 	args.span_start = span_start;
 	args.span_size = span_size;
 	args.pre_bytes_total = pre_bytes_total;
-	args.sender = gasnet_mynode();
+	args.sender = my_node_id;
         //TODO: need to ask Sean what payload mode we should use
         Message::request(target, args, src_buf, nbytes, src_str, nlines,
                          PAYLOAD_KEEP, dst_buf);
@@ -995,7 +995,7 @@ namespace Realm {
                                         RequestArgs,
                                         handle_request> Message;
 
-      static void send_request(gasnet_node_t target, RemoteWriteRequest* req)
+      static void send_request(NodeID target, RemoteWriteRequest* req)
       {
         RequestArgs args;
         args.req = req;
@@ -1013,7 +1013,7 @@ namespace Realm {
       // TODO: replace with new serialization stuff
       struct Payload {
         DmaRequest* dma_request;
-        gasnet_node_t launch_node;
+        NodeID launch_node;
         XferDesID guid, pre_xd_guid, next_xd_guid;
         bool mark_started;
         uint64_t max_req_size;
@@ -1035,7 +1035,7 @@ namespace Realm {
                                          RequestArgs,
                                          handle_request> Message;
 
-      static void send_request(gasnet_node_t target, DmaRequest* dma_request, gasnet_node_t launch_node,
+      static void send_request(NodeID target, DmaRequest* dma_request, NodeID launch_node,
                                XferDesID guid, XferDesID pre_xd_guid, XferDesID next_xd_guid,
 			       uint64_t next_max_rw_gap, size_t src_ib_offset, size_t src_ib_size,
                                bool mark_started,
@@ -1057,7 +1057,7 @@ namespace Realm {
                                         RequestArgs,
                                         handle_request> Message;
 
-      static void send_request(gasnet_node_t target, XferDesID guid)
+      static void send_request(NodeID target, XferDesID guid)
       {
         RequestArgs args;
         args.guid = guid;
@@ -1077,7 +1077,7 @@ namespace Realm {
                                         RequestArgs,
                                         handle_request> Message;
 
-      static void send_request(gasnet_node_t target, XferDesID guid,
+      static void send_request(NodeID target, XferDesID guid,
 			       size_t span_start, size_t span_size,
 			       size_t pre_bytes_total)
       {
@@ -1102,7 +1102,7 @@ namespace Realm {
                                         RequestArgs,
                                         handle_request> Message;
 
-      static void send_request(gasnet_node_t target, XferDesID guid,
+      static void send_request(NodeID target, XferDesID guid,
 			       size_t span_start, size_t span_size)
       {
         RequestArgs args;
@@ -1160,22 +1160,22 @@ namespace Realm {
         pthread_rwlock_destroy(&guid_lock);
       }
 
-      XferDesID get_guid(gasnet_node_t execution_node)
+      XferDesID get_guid(NodeID execution_node)
       {
         // GUID rules:
         // First NODE_BITS indicates which node will execute this xd
         // Next NODE_BITS indicates on which node this xd is generated
         // Last INDEX_BITS means a unique idx, which is used to resolve conflicts
         XferDesID idx = __sync_fetch_and_add(&next_to_assign_idx, 1);
-        return (((XferDesID)execution_node << (NODE_BITS + INDEX_BITS)) | ((XferDesID)gasnet_mynode() << INDEX_BITS) | idx);
+        return (((XferDesID)execution_node << (NODE_BITS + INDEX_BITS)) | ((XferDesID)my_node_id << INDEX_BITS) | idx);
       }
 
       void update_pre_bytes_write(XferDesID xd_guid,
 				  size_t span_start, size_t span_size,
 				  size_t pre_bytes_total)
       {
-        gasnet_node_t execution_node = xd_guid >> (NODE_BITS + INDEX_BITS);
-        if (execution_node == gasnet_mynode()) {
+        NodeID execution_node = xd_guid >> (NODE_BITS + INDEX_BITS);
+        if (execution_node == my_node_id) {
           pthread_rwlock_wrlock(&guid_lock);
           std::map<XferDesID, XferDesWithUpdates>::iterator it = guid_to_xd.find(xd_guid);
           if (it != guid_to_xd.end()) {
@@ -1210,8 +1210,8 @@ namespace Realm {
       void update_next_bytes_read(XferDesID xd_guid,
 				  size_t span_start, size_t span_size)
       {
-        gasnet_node_t execution_node = xd_guid >> (NODE_BITS + INDEX_BITS);
-        if (execution_node == gasnet_mynode()) {
+        NodeID execution_node = xd_guid >> (NODE_BITS + INDEX_BITS);
+        if (execution_node == my_node_id) {
           pthread_rwlock_rdlock(&guid_lock);
           std::map<XferDesID, XferDesWithUpdates>::iterator it = guid_to_xd.find(xd_guid);
           if (it != guid_to_xd.end()) {
@@ -1347,8 +1347,8 @@ namespace Realm {
     void stop_channel_manager();
 
     void create_xfer_des(DmaRequest* _dma_request,
-			 gasnet_node_t _launch_node,
-			 gasnet_node_t _target_node,
+			 NodeID _launch_node,
+			 NodeID _target_node,
                          XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
 			 uint64_t _next_max_rw_gap, size_t src_ib_offset, size_t src_ib_size,
                          bool mark_started,

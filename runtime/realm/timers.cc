@@ -54,10 +54,10 @@ namespace Realm {
 
     void MultiNodeRollUp::execute(void)
     {
-      count_left = gasnet_nodes()-1;
+      count_left = max_node_id;
 
-      for(unsigned i = 0; i < gasnet_nodes(); i++)
-        if(i != gasnet_mynode())
+      for(NodeID i = 0; i <= max_node_id; i++)
+        if(i != my_node_id)
 	  TimerDataRequestMessage::send_request(i, this);
 
       // take the lock so that we can safely sleep until all the responses
@@ -158,10 +158,10 @@ namespace Realm {
       // if we've been asked to clear other nodes too, send a message
       if(all_nodes) {
 	ClearTimerRequestArgs args;
-	args.sender = gasnet_mynode();
+	args.sender = my_node_id;
 
-	for(int i = 0; i < gasnet_nodes(); i++)
-	  if(i != gasnet_mynode())
+	for(NodeID i = 0; i < max_node_id; i++)
+	  if(i != my_node_id)
 	    ClearTimerRequestMessage::request(i, args);
       }
     }
@@ -285,11 +285,11 @@ namespace Realm {
     DetailedTimer::clear_timers(false);
   }
 
-  /*static*/ void ClearTimersMessage::send_request(gasnet_node_t target)
+  /*static*/ void ClearTimersMessage::send_request(NodeID target)
   {
     RequestArgs args;
 
-    args.sender = gasnet_mynode();
+    args.sender = my_node_id;
     args.dummy = 0;
     Message::request(target, args);
   }
@@ -321,12 +321,12 @@ namespace Realm {
 					   PAYLOAD_COPY);
   }
 
-  /*static*/ void TimerDataRequestMessage::send_request(gasnet_node_t target,
+  /*static*/ void TimerDataRequestMessage::send_request(NodeID target,
 							void *rollup_ptr)
   {
     RequestArgs args;
 
-    args.sender = gasnet_mynode();
+    args.sender = my_node_id;
     args.rollup_ptr = rollup_ptr;
     Message::request(target, args);
   }
@@ -344,7 +344,7 @@ namespace Realm {
     ((MultiNodeRollUp *)args.rollup_ptr)->handle_data(data, datalen); 
   }
 
-  /*static*/ void TimerDataResponseMessage::send_request(gasnet_node_t target,
+  /*static*/ void TimerDataResponseMessage::send_request(NodeID target,
 							 void *rollup_ptr,
 							 const void *data,
 							 size_t datalen,
@@ -352,7 +352,7 @@ namespace Realm {
   {
     RequestArgs args;
 
-    args.sender = gasnet_mynode();
+    args.sender = my_node_id;
     args.rollup_ptr = rollup_ptr;
     Message::request(target, args, data, datalen, payload_mode);
   }

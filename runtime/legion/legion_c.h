@@ -3379,6 +3379,12 @@ extern "C" {
   unsigned long long
   legion_get_current_time_in_micros(void);
 
+  /**
+   * @see LegionRuntime::TimeStamp::get_current_time_in_nanos()
+   */
+  unsigned long long
+  legion_get_current_time_in_nanos(void);
+
   // -----------------------------------------------------------------------
   // Machine Operations
   // -----------------------------------------------------------------------

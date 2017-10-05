@@ -21,7 +21,7 @@
 #include "reservation.h"
 
 #include "id.h"
-#include "activemsg.h"
+#include <realm/activemsg.h>
 #include "nodeset.h"
 
 #define REALM_RSRV_USE_CIRCQUEUE
@@ -66,7 +66,7 @@ namespace Realm {
 
       //protected:
       Reservation me;
-      unsigned owner; // which node owns the lock
+      NodeID owner; // which node owns the lock
       unsigned count; // number of locks held by local threads
       unsigned mode;  // lock mode
       bool in_use;
@@ -193,7 +193,7 @@ namespace Realm {
 
   struct LockRequestMessage {
     struct RequestArgs {
-      gasnet_node_t node;
+      NodeID node;
       Reservation lock;
       unsigned mode;
     };
@@ -204,13 +204,13 @@ namespace Realm {
 				      RequestArgs, 
 				      handle_request> Message;
 
-    static void send_request(gasnet_node_t target, gasnet_node_t req_node,
+    static void send_request(NodeID target, NodeID req_node,
 			     Reservation lock, unsigned mode);
   };
 
   struct LockReleaseMessage {
     struct RequestArgs {
-      gasnet_node_t node;
+      NodeID node;
       Reservation lock;
     };
     
@@ -220,7 +220,7 @@ namespace Realm {
 				      RequestArgs,
 				      handle_request> Message;
 
-    static void send_request(gasnet_node_t target, Reservation lock);
+    static void send_request(NodeID target, Reservation lock);
   };
 
   struct LockGrantMessage {
@@ -235,7 +235,7 @@ namespace Realm {
 				       RequestArgs,
 				       handle_request> Message;
 
-    static void send_request(gasnet_node_t target, Reservation lock,
+    static void send_request(NodeID target, Reservation lock,
 			     unsigned mode, const void *data, size_t datalen,
 			     int payload_mode);
   };
@@ -252,7 +252,7 @@ namespace Realm {
 				      RequestArgs,
 				      handle_request> Message;
 
-    static void send_request(gasnet_node_t target, Reservation lock);
+    static void send_request(NodeID target, Reservation lock);
   };
 
 }; // namespace Realm
