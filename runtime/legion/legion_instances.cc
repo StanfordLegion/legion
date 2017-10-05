@@ -2149,6 +2149,7 @@ namespace Legion {
     {
       compute_ancestor_and_domain(forest); 
       compute_layout_parameters();
+      valid = true;
     }
 
     //--------------------------------------------------------------------------
