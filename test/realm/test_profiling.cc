@@ -174,6 +174,13 @@ void response_task(const void *args, size_t arglen,
   }
 
   {
+    InstanceAllocResult result;
+    if(pr.get_measurement(result)) {
+      std::cout << "inst alloc success = " << result.success << "\n";
+    }
+  }
+
+  {
     InstanceMemoryUsage usage;
     if(pr.get_measurement(usage))
       std::cout << "inst mem usage = " << usage.instance << " " << usage.memory << " " << usage.bytes << "\n";
@@ -326,6 +333,7 @@ void top_level_task(const void *args, size_t arglen,
     InstanceStatus::Result exp_result = InstanceStatus::DESTROYED_SUCCESSFULLY;
     prs.add_request(profile_cpu, RESPONSE_TASK, &exp_result, sizeof(exp_result))
       .add_measurement<InstanceStatus>()
+      .add_measurement<InstanceAllocResult>()
       .add_measurement<InstanceTimeline>()
       .add_measurement<InstanceMemoryUsage>();
     RegionInstance inst;
@@ -345,6 +353,7 @@ void top_level_task(const void *args, size_t arglen,
     InstanceStatus::Result exp_result = InstanceStatus::FAILED_ALLOCATION;
     prs.add_request(profile_cpu, RESPONSE_TASK, &exp_result, sizeof(exp_result))
       .add_measurement<InstanceStatus>()
+      .add_measurement<InstanceAllocResult>()
       .add_measurement<InstanceTimeline>()
       .add_measurement<InstanceMemoryUsage>();
     RegionInstance inst;

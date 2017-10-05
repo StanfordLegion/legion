@@ -362,14 +362,24 @@ namespace Realm {
     void RegionInstanceImpl::notify_allocation(bool success, size_t offset)
     {
       if(!success) {
-	// if somebody is listening to the status, we report a failed
-	//  allocation through that channel - if not, we explode
-	if(measurements.wants_measurement<ProfilingMeasurements::InstanceStatus>()) {
+	// if somebody is listening to profiling measurements, we report
+	//  a failed allocation through that channel - if not, we explode
+	bool report_failure = (measurements.wants_measurement<ProfilingMeasurements::InstanceStatus>() ||
+			       measurements.wants_measurement<ProfilingMeasurements::InstanceAllocResult>());
+	if(report_failure) {
 	  log_inst.info() << "allocation failed: inst=" << me;
-	  ProfilingMeasurements::InstanceStatus stat;
-	  stat.result = ProfilingMeasurements::InstanceStatus::FAILED_ALLOCATION;
-	  stat.error_code = 0;
-	  measurements.add_measurement(stat);
+	  if(measurements.wants_measurement<ProfilingMeasurements::InstanceStatus>()) {
+	    ProfilingMeasurements::InstanceStatus stat;
+	    stat.result = ProfilingMeasurements::InstanceStatus::FAILED_ALLOCATION;
+	    stat.error_code = 0;
+	    measurements.add_measurement(stat);
+	  }
+
+	  if(measurements.wants_measurement<ProfilingMeasurements::InstanceAllocResult>()) {
+	    ProfilingMeasurements::InstanceAllocResult result;
+	    result.success = false;
+	    measurements.add_measurement(result);
+	  }
 	  
 	  // send any remaining incomplete profiling responses
 	  measurements.send_responses(requests);
@@ -420,7 +430,13 @@ namespace Realm {
 	free(data);
       }
 
-      if (measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>()) {
+      if(measurements.wants_measurement<ProfilingMeasurements::InstanceAllocResult>()) {
+	ProfilingMeasurements::InstanceAllocResult result;
+	result.success = true;
+	measurements.add_measurement(result);
+      }
+
+      if(measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>()) {
 	timeline.record_ready_time();
       }
 

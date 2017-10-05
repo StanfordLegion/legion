@@ -25,6 +25,7 @@ TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationTimeline);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationEventWaits::WaitInterval);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationMemoryUsage);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationProcessorUsage);
+TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::InstanceAllocResult);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::InstanceMemoryUsage);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::InstanceTimeline);
 template <Realm::ProfilingMeasurementID _ID>
