@@ -494,21 +494,23 @@ namespace Legion {
      * \class InstanceBuilder 
      * A helper for building physical instances of logical regions
      */
-    class InstanceBuilder {
+    class InstanceBuilder : public ProfilingResponseHandler {
     public:
       InstanceBuilder(const std::vector<LogicalRegion> &regs,
                       const LayoutConstraintSet &cons, Runtime *rt,
                       MemoryManager *memory, UniqueID cid)
         : regions(regs), constraints(cons), runtime(rt), memory_manager(memory),
-          creator_id(cid), ancestor(NULL), instance_domain(NULL), 
-          own_domain(false), redop_id(0), reduction_op(NULL) 
-          , realm_layout(NULL), own_realm_layout(true)
-          , valid(false)
-        { }
-      ~InstanceBuilder(void);
+          creator_id(cid), instance(PhysicalInstance::NO_INST), ancestor(NULL), 
+          instance_domain(NULL), own_domain(false), redop_id(0), 
+          reduction_op(NULL), realm_layout(NULL), 
+          own_realm_layout(true), valid(false) { }
+      virtual ~InstanceBuilder(void);
     public:
       size_t compute_needed_size(RegionTreeForest *forest);
       PhysicalManager* create_physical_instance(RegionTreeForest *forest);
+    public:
+      virtual void handle_profiling_response(
+                    const Realm::ProfilingResponse &response);
     protected:
       void initialize(RegionTreeForest *forest);
       void compute_ancestor_and_domain(RegionTreeForest *forest);
@@ -521,6 +523,9 @@ namespace Legion {
       Runtime *const runtime;
       MemoryManager *const memory_manager;
       const UniqueID creator_id;
+    protected:
+      PhysicalInstance instance;
+      RtUserEvent profiling_ready;
     protected:
       RegionNode *ancestor;
       IndexSpaceNode *instance_domain;

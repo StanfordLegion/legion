@@ -942,7 +942,7 @@ namespace Legion {
 #else
       increment_total_outstanding_requests();
 #endif
-      ProfilingInfo info(LEGION_PROF_TASK); 
+      ProfilingInfo info(this, LEGION_PROF_TASK); 
       info.id = tid;
       info.op_id = task->get_unique_id();
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
@@ -966,7 +966,7 @@ namespace Legion {
 #else
       increment_total_outstanding_requests();
 #endif
-      ProfilingInfo info(LEGION_PROF_META); 
+      ProfilingInfo info(this, LEGION_PROF_META); 
       info.id = tid;
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
@@ -987,7 +987,7 @@ namespace Legion {
     {
       // Don't increment here, we'll increment on the remote side since we
       // that is where we know the profiler is going to handle the results
-      ProfilingInfo info(LEGION_PROF_MESSAGE);
+      ProfilingInfo info(NULL, LEGION_PROF_MESSAGE);
       Realm::ProfilingRequest &req = requests.add_request(remote_target,
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_LOW_PRIORITY);
       req.add_measurement<
@@ -1008,7 +1008,7 @@ namespace Legion {
 #else
       increment_total_outstanding_requests();
 #endif
-      ProfilingInfo info(LEGION_PROF_COPY); 
+      ProfilingInfo info(this, LEGION_PROF_COPY); 
       // No ID here
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
@@ -1030,7 +1030,7 @@ namespace Legion {
 #else
       increment_total_outstanding_requests();
 #endif
-      ProfilingInfo info(LEGION_PROF_FILL);
+      ProfilingInfo info(this, LEGION_PROF_FILL);
       // No ID here
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
@@ -1053,7 +1053,7 @@ namespace Legion {
 #else
       increment_total_outstanding_requests(2/*different requests*/);
 #endif
-      ProfilingInfo info(LEGION_PROF_INST); 
+      ProfilingInfo info(this, LEGION_PROF_INST); 
       // No ID here
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
       // Instances use two profiling requests so that we can get MemoryUsage
@@ -1081,7 +1081,7 @@ namespace Legion {
 #else
       increment_total_outstanding_requests();
 #endif
-      ProfilingInfo info(LEGION_PROF_PARTITION);
+      ProfilingInfo info(this, LEGION_PROF_PARTITION);
       // Pass the part_op as the ID
       info.id = part_op;
       info.op_id = (op != NULL) ? op->get_unique_op_id() : 0;
@@ -1102,7 +1102,7 @@ namespace Legion {
 #else
       increment_total_outstanding_requests();
 #endif
-      ProfilingInfo info(LEGION_PROF_TASK); 
+      ProfilingInfo info(this, LEGION_PROF_TASK); 
       info.id = tid;
       info.op_id = uid;
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
@@ -1126,7 +1126,7 @@ namespace Legion {
 #else
       increment_total_outstanding_requests();
 #endif
-      ProfilingInfo info(LEGION_PROF_META); 
+      ProfilingInfo info(this, LEGION_PROF_META); 
       info.id = tid;
       info.op_id = uid;
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
@@ -1150,7 +1150,7 @@ namespace Legion {
 #else
       increment_total_outstanding_requests();
 #endif
-      ProfilingInfo info(LEGION_PROF_COPY); 
+      ProfilingInfo info(this, LEGION_PROF_COPY); 
       // No ID here
       info.op_id = uid;
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
@@ -1172,7 +1172,7 @@ namespace Legion {
 #else
       increment_total_outstanding_requests();
 #endif
-      ProfilingInfo info(LEGION_PROF_FILL);
+      ProfilingInfo info(this, LEGION_PROF_FILL);
       // No ID here
       info.op_id = uid;
       Realm::ProfilingRequest &req = requests.add_request((target_proc.exists())
@@ -1195,7 +1195,7 @@ namespace Legion {
 #else
       increment_total_outstanding_requests(2/*different requests*/);
 #endif
-      ProfilingInfo info(LEGION_PROF_INST); 
+      ProfilingInfo info(this, LEGION_PROF_INST); 
       // No ID here
       info.op_id = uid;
       // Instances use two profiling requests so that we can get MemoryUsage
@@ -1223,7 +1223,7 @@ namespace Legion {
 #else
       increment_total_outstanding_requests();
 #endif
-      ProfilingInfo info(LEGION_PROF_PARTITION);
+      ProfilingInfo info(this, LEGION_PROF_PARTITION);
       // Pass the partition op kind as the ID
       info.id = part_op;
       info.op_id = uid;
@@ -1235,8 +1235,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LegionProfiler::process_results(Processor p, const void *buffer,
-                                         size_t size)
+    void LegionProfiler::handle_profiling_response(
+                                       const Realm::ProfilingResponse &response)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_PROF_SELF_PROFILE
@@ -1244,7 +1244,6 @@ namespace Legion {
 #endif
       if (thread_local_profiling_instance == NULL)
         create_thread_local_profiling_instance();
-      Realm::ProfilingResponse response(buffer, size);
 #ifdef DEBUG_LEGION
       assert(response.user_data_size() == sizeof(ProfilingInfo));
 #endif
@@ -1425,6 +1424,7 @@ namespace Legion {
       }
 #ifdef LEGION_PROF_SELF_PROFILE
       long long t_stop = Realm::Clock::current_time_in_nanoseconds();
+      const Processor p = Realm::Processor::get_executing_processor();
       thread_local_profiling_instance->record_proftask(p, info->op_id, 
                                                        t_start, t_stop);
 #endif

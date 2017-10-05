@@ -14906,17 +14906,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::process_profiling_task(Processor p, 
-                                         const void *args, size_t arglen)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(profiler != NULL);
-#endif
-      profiler->process_results(p, args, arglen);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::process_message_task(const void *args, size_t arglen)
     //--------------------------------------------------------------------------
     {
@@ -18946,7 +18935,6 @@ namespace Legion {
       CodeDescriptor shutdown_task(Runtime::shutdown_runtime);
       CodeDescriptor lg_task(Runtime::legion_runtime_task);
       CodeDescriptor rt_profiling_task(Runtime::profiling_runtime_task);
-      CodeDescriptor map_profiling_task(Runtime::profiling_mapper_task);
       CodeDescriptor launch_top_level_task(Runtime::launch_top_level);
       CodeDescriptor mpi_interop_task(Runtime::init_mpi_interop);
       CodeDescriptor startup_sync_task(Runtime::startup_sync);
@@ -18972,9 +18960,6 @@ namespace Legion {
                     LG_LEGION_PROFILING_ID, rt_profiling_task, no_requests)));
         registered_events.insert(RtEvent(
             Processor::register_task_by_kind(kinds[idx], false/*global*/,
-                   LG_MAPPER_PROFILING_ID, map_profiling_task, no_requests)));
-        registered_events.insert(RtEvent(
-            Processor::register_task_by_kind(kinds[idx], false/*global*/,
                 LG_LAUNCH_TOP_LEVEL_ID, launch_top_level_task, no_requests)));
         registered_events.insert(RtEvent(
             Processor::register_task_by_kind(kinds[idx], false/*global*/,
@@ -18995,8 +18980,6 @@ namespace Legion {
                       LG_TASK_ID);
         log_run.print("Legion runtime profiling task Realm ID %d",
                       LG_LEGION_PROFILING_ID);
-        log_run.print("Legion mapper profiling task has Realm ID %d",
-                      LG_MAPPER_PROFILING_ID);
         log_run.print("Legion launch top-level task has Realm ID %d",
                       LG_LAUNCH_TOP_LEVEL_ID);
       }
@@ -19917,23 +19900,18 @@ namespace Legion {
 				   Processor p)
     //--------------------------------------------------------------------------
     {
-      Runtime *rt = Runtime::get_runtime(p);
-      rt->process_profiling_task(p, args, arglen);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void Runtime::profiling_mapper_task(
-                                   const void *args, size_t arglen, 
-				   const void *userdata, size_t userlen,
-				   Processor p)
-    //--------------------------------------------------------------------------
-    {
       Realm::ProfilingResponse response(args, arglen);
-#ifdef DEBUG_LEGION
-      assert(response.user_data_size() == sizeof(Operation*));
-#endif
-      Operation *op = *((Operation**)response.user_data());
-      op->report_profiling_response(response);
+      const ProfilingResponseBase *base = 
+        (const ProfilingResponseBase*)response.user_data();
+      if (base->handler == NULL)
+      {
+        // If we got a NULL let's assume they meant the profiler
+        // this mainly happens with messages that cross nodes
+        Runtime *rt = Runtime::get_runtime(p);
+        rt->profiler->handle_profiling_response(response);
+      }
+      else
+        base->handler->handle_profiling_response(response);
     }
 
     //--------------------------------------------------------------------------

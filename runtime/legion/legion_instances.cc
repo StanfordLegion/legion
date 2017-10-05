@@ -1964,8 +1964,19 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(realm_layout != NULL);
 #endif
-      PhysicalInstance instance = PhysicalInstance::NO_INST;
       Realm::ProfilingRequestSet requests;
+      // Add a profiling request to see if the instance is actually allocated
+      // Make it very high priority so we get the response quickly
+      ProfilingResponseBase base(this);
+      Realm::ProfilingRequest &req = requests.add_request(
+          runtime->find_utility_group(), LG_LEGION_PROFILING_ID,
+          &base, sizeof(base), LG_RESOURCE_PRIORITY);
+      req.add_measurement<Realm::ProfilingMeasurements::InstanceAllocResult>();
+      // Create a user event to wait on for the result of the profiling response
+      profiling_ready = Runtime::create_rt_user_event();
+#ifdef DEBUG_LEGION
+      assert(!instance.exists()); // shouldn't exist before this
+#endif
       ApEvent ready;
       if (runtime->profiler != NULL)
       {
@@ -1983,6 +1994,9 @@ namespace Legion {
       else
         ready = ApEvent(PhysicalInstance::create_instance(instance,
                   memory_manager->memory, realm_layout, requests));
+      // Wait for the profiling response
+      if (!profiling_ready.has_triggered())
+        profiling_ready.lg_wait();
       // If we couldn't make it then we are done
       if (!instance.exists())
         return NULL;
@@ -2098,6 +2112,27 @@ namespace Legion {
       assert(result != NULL);
 #endif
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceBuilder::handle_profiling_response(
+                                       const Realm::ProfilingResponse &response)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(response.has_measurement<
+          Realm::ProfilingMeasurements::InstanceAllocResult>());
+#endif
+      Realm::ProfilingMeasurements::InstanceAllocResult *result = 
+        response.get_measurement<
+              Realm::ProfilingMeasurements::InstanceAllocResult>();
+      // If we failed then clear the instance name since it is not valid
+      if (!result->success)
+        instance = PhysicalInstance::NO_INST;
+      // No matter what trigger the event
+      Runtime::trigger_event(profiling_ready);
+      // Clean up our data
+      delete result;
     }
 
     //--------------------------------------------------------------------------

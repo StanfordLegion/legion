@@ -299,7 +299,7 @@ namespace Legion {
 #endif
     };
 
-    class LegionProfiler {
+    class LegionProfiler : public ProfilingResponseHandler {
     public:
       enum ProfilingKind {
         LEGION_PROF_TASK,
@@ -311,10 +311,10 @@ namespace Legion {
         LEGION_PROF_PARTITION,
         LEGION_PROF_LAST,
       };
-      struct ProfilingInfo {
+      struct ProfilingInfo : public ProfilingResponseBase {
       public:
-        ProfilingInfo(ProfilingKind k)
-          : kind(k) { }
+        ProfilingInfo(LegionProfiler *p, ProfilingKind k)
+          : ProfilingResponseBase(p), kind(k) { }
       public:
         ProfilingKind kind;
         size_t id;
@@ -340,7 +340,7 @@ namespace Legion {
                      const size_t footprint_threshold,
                      const size_t target_latency);
       LegionProfiler(const LegionProfiler &rhs);
-      ~LegionProfiler(void);
+      virtual ~LegionProfiler(void);
     public:
       LegionProfiler& operator=(const LegionProfiler &rhs);
     public:
@@ -388,7 +388,8 @@ namespace Legion {
                                  UniqueID uid, DepPartOpKind part_op);
     public:
       // Process low-level runtime profiling results
-      void process_results(Processor p, const void *buffer, size_t size);
+      virtual void handle_profiling_response(
+                            const Realm::ProfilingResponse &response);
     public:
       // Dump all the results
       void finalize(void);

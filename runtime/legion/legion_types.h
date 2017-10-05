@@ -258,11 +258,10 @@ namespace Legion {
       SHUTDOWN_TASK_ID        = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
       LG_TASK_ID              = Realm::Processor::TASK_ID_FIRST_AVAILABLE,
       LG_LEGION_PROFILING_ID  = Realm::Processor::TASK_ID_FIRST_AVAILABLE+1,
-      LG_MAPPER_PROFILING_ID  = Realm::Processor::TASK_ID_FIRST_AVAILABLE+2,
-      LG_LAUNCH_TOP_LEVEL_ID  = Realm::Processor::TASK_ID_FIRST_AVAILABLE+3,
-      LG_MPI_INTEROP_ID       = Realm::Processor::TASK_ID_FIRST_AVAILABLE+4,
-      LG_STARTUP_SYNC_ID      = Realm::Processor::TASK_ID_FIRST_AVAILABLE+5,
-      TASK_ID_AVAILABLE       = Realm::Processor::TASK_ID_FIRST_AVAILABLE+6,
+      LG_LAUNCH_TOP_LEVEL_ID  = Realm::Processor::TASK_ID_FIRST_AVAILABLE+2,
+      LG_MPI_INTEROP_ID       = Realm::Processor::TASK_ID_FIRST_AVAILABLE+3,
+      LG_STARTUP_SYNC_ID      = Realm::Processor::TASK_ID_FIRST_AVAILABLE+4,
+      TASK_ID_AVAILABLE       = Realm::Processor::TASK_ID_FIRST_AVAILABLE+5,
     };
 
     // Realm dependent partitioning kinds
@@ -1214,6 +1213,19 @@ namespace Legion {
     class GeneratorImpl;
     class ProjectionFunction;
     class Runtime;
+    // A small interface class for handling profiling responses
+    class ProfilingResponseHandler {
+    public:
+      virtual void handle_profiling_response(
+                const Realm::ProfilingResponse &response) = 0;
+    };
+    struct ProfilingResponseBase {
+    public:
+      ProfilingResponseBase(ProfilingResponseHandler *h)
+        : handler(h) { }
+    public:
+      ProfilingResponseHandler *const handler;
+    };
 
     // legion_ops.h
     class Operation;

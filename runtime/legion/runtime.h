@@ -2638,10 +2638,6 @@ namespace Legion {
                           const void *args, size_t arglen, 
 			  const void *userdata, size_t userlen,
 			  Processor p);
-      static void profiling_mapper_task(
-                          const void *args, size_t arglen, 
-			  const void *userdata, size_t userlen,
-			  Processor p);
       static void launch_top_level(
                           const void *args, size_t arglen, 
 			  const void *userdata, size_t userlen,
@@ -2661,7 +2657,6 @@ namespace Legion {
       // Internal runtime methods invoked by the above static methods
       // after the find the right runtime instance to call
       void process_schedule_request(Processor p);
-      void process_profiling_task(Processor p, const void *args, size_t arglen);
       void process_message_task(const void *args, size_t arglen);
     public:
       // The Runtime wrapper for this class
