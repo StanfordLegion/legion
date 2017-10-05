@@ -5883,7 +5883,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DeletionOp::trigger_complete(void)
+    void DeletionOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
       // Iterate over our incoming operations and find the completion 
@@ -5897,17 +5897,19 @@ namespace Legion {
         if (it->second == it->first->get_generation())
           completion_events.insert(complete);
       }
+      // Mark that we're done mapping and defer the execution as appropriate
+      complete_mapping();
       if (!completion_events.empty())
       {
         ApEvent completion_ready = Runtime::merge_events(completion_events);
-        complete_operation(Runtime::protect_event(completion_ready));
+        complete_execution(Runtime::protect_event(completion_ready));
       }
       else
-        complete_operation();
+        complete_execution();
     }
 
     //--------------------------------------------------------------------------
-    void DeletionOp::trigger_commit(void)
+    void DeletionOp::trigger_complete(void)
     //--------------------------------------------------------------------------
     {
       switch (kind)
@@ -5949,7 +5951,7 @@ namespace Legion {
         default:
           assert(false); // should never get here
       }
-      commit_operation(true/*deactivate*/);
+      complete_operation();
     }
 
     //--------------------------------------------------------------------------
