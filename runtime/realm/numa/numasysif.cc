@@ -75,7 +75,6 @@ namespace Realm {
     int detected_node_count = 8 * sizeof(unsigned long);
     const int max_supported_node_count = 1024 * sizeof(unsigned long);
   };
-#endif
 
   static bool mask_nonempty(const unsigned char *nmask, int max_count)
   {
@@ -84,6 +83,7 @@ namespace Realm {
 	return true;
     return false;
   }
+#endif
 
   // is NUMA support available in the system?
   bool numasysif_numa_available(void)
