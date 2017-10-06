@@ -683,6 +683,9 @@ class _IndexLauncher(_TaskLauncher):
         self.domain = domain
         self.local_args = c.legion_argument_map_create()
 
+    def __del__(self):
+        c.legion_argument_map_destroy(self.local_args)
+
     def spawn_task(self, *args):
         raise Exception('IndexLaunch does not support spawn_task')
 
