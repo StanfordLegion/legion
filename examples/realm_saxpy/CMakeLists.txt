@@ -24,6 +24,7 @@ endif()
 
 set(CPU_SOURCES realm_saxpy.h realm_saxpy_cpu.cc)
 if(Legion_USE_CUDA)
+  set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -Wno-deprecated-gpu-targets)
   set(GPU_SOURCES realm_saxpy_gpu.cu)
   cuda_add_executable(realm_saxpy ${CPU_SOURCES} ${GPU_SOURCES})
 else()
