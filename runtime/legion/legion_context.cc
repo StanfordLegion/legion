@@ -2075,6 +2075,16 @@ namespace Legion {
             runtime->forest->free_local_fields(it->first, to_free, indexes);
         }
       }
+      // Unregister ourselves from any tracking contexts that we might have
+      if (!region_tree_owners.empty())
+      {
+        AutoLock ctx_lock(context_lock);
+        for (std::map<RegionTreeNode*,
+                      std::pair<AddressSpaceID,bool> >::const_iterator it =
+              region_tree_owners.begin(); it != region_tree_owners.end(); it++)
+          it->first->unregister_tracking_context(this);
+        region_tree_owners.clear();
+      }
 #ifdef DEBUG_LEGION
       assert(pending_top_views.empty());
       assert(outstanding_subtasks == 0);
@@ -5625,18 +5635,7 @@ namespace Legion {
             delete (it->second);
         }
         instance_top_views.clear();
-      }
-      // Before freeing our context, see if there are any version
-      // state managers we need to reset
-      if (!region_tree_owners.empty())
-      {
-        AutoLock ctx_lock(context_lock);
-        for (std::map<RegionTreeNode*,
-                      std::pair<AddressSpaceID,bool> >::const_iterator it =
-              region_tree_owners.begin(); it != region_tree_owners.end(); it++)
-          it->first->unregister_tracking_context(this);
-        region_tree_owners.clear();
-      }
+      } 
       // Now we can free our region tree context
       runtime->free_region_tree_context(tree_context);
     }
