@@ -231,31 +231,31 @@ namespace Legion {
       void register_slice_owner(UniqueID pid, UniqueID id);
     public:
       void process_task(VariantID variant_id, UniqueID op_id, 
-                  Realm::ProfilingMeasurements::OperationTimeline *timeline,
-                  Realm::ProfilingMeasurements::OperationProcessorUsage *usage,
-                  Realm::ProfilingMeasurements::OperationEventWaits *waits);
+            const Realm::ProfilingMeasurements::OperationTimeline &timeline,
+            const Realm::ProfilingMeasurements::OperationProcessorUsage &usage,
+            const Realm::ProfilingMeasurements::OperationEventWaits &waits);
       void process_meta(size_t id, UniqueID op_id,
-                  Realm::ProfilingMeasurements::OperationTimeline *timeline,
-                  Realm::ProfilingMeasurements::OperationProcessorUsage *usage,
-                  Realm::ProfilingMeasurements::OperationEventWaits *waits);
+            const Realm::ProfilingMeasurements::OperationTimeline &timeline,
+            const Realm::ProfilingMeasurements::OperationProcessorUsage &usage,
+            const Realm::ProfilingMeasurements::OperationEventWaits &waits);
       void process_message(
-                  Realm::ProfilingMeasurements::OperationTimeline *timeline,
-                  Realm::ProfilingMeasurements::OperationProcessorUsage *usage,
-                  Realm::ProfilingMeasurements::OperationEventWaits *waits);
+            const Realm::ProfilingMeasurements::OperationTimeline &timeline,
+            const Realm::ProfilingMeasurements::OperationProcessorUsage &usage,
+            const Realm::ProfilingMeasurements::OperationEventWaits &waits);
       void process_copy(UniqueID op_id,
-                  Realm::ProfilingMeasurements::OperationTimeline *timeline,
-                  Realm::ProfilingMeasurements::OperationMemoryUsage *usage);
+            const Realm::ProfilingMeasurements::OperationTimeline &timeline,
+            const Realm::ProfilingMeasurements::OperationMemoryUsage &usage);
       void process_fill(UniqueID op_id,
-                  Realm::ProfilingMeasurements::OperationTimeline *timeline,
-                  Realm::ProfilingMeasurements::OperationMemoryUsage *usage);
+            const Realm::ProfilingMeasurements::OperationTimeline &timeline,
+            const Realm::ProfilingMeasurements::OperationMemoryUsage &usage);
       void process_inst_create(UniqueID op_id, PhysicalInstance inst,
                                timestamp_t create);
       void process_inst_usage(UniqueID op_id,
-                  Realm::ProfilingMeasurements::InstanceMemoryUsage *usage);
+            const Realm::ProfilingMeasurements::InstanceMemoryUsage &usage);
       void process_inst_timeline(UniqueID op_id,
-                  Realm::ProfilingMeasurements::InstanceTimeline *timeline);
+            const Realm::ProfilingMeasurements::InstanceTimeline &timeline);
       void process_partition(UniqueID op_id, DepPartOpKind part_op,
-                  Realm::ProfilingMeasurements::OperationTimeline *timeline);
+            const Realm::ProfilingMeasurements::OperationTimeline &timeline);
     public:
       void record_message(Processor proc, MessageKind kind, timestamp_t start,
                           timestamp_t stop);

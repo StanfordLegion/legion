@@ -2131,16 +2131,22 @@ namespace Legion {
       assert(response.has_measurement<
           Realm::ProfilingMeasurements::InstanceAllocResult>());
 #endif
-      Realm::ProfilingMeasurements::InstanceAllocResult *result = 
+      Realm::ProfilingMeasurements::InstanceAllocResult result;
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+      const bool measured =  
+#endif
+#endif
         response.get_measurement<
-              Realm::ProfilingMeasurements::InstanceAllocResult>();
+              Realm::ProfilingMeasurements::InstanceAllocResult>(result);
+#ifdef DEBUG_LEGION
+      assert(measured);
+#endif
       // If we failed then clear the instance name since it is not valid
-      if (!result->success)
+      if (!result.success)
         instance = PhysicalInstance::NO_INST;
       // No matter what trigger the event
       Runtime::trigger_event(profiling_ready);
-      // Clean up our data
-      delete result;
     }
 
     //--------------------------------------------------------------------------
