@@ -1477,8 +1477,10 @@ namespace Realm {
       if(rect.empty()) {
 	// in 1-D, our entries are sorted, so the first one whose bounds fall
 	//   outside our restriction means we're completely done
-	if(N == 1) break;
-	continue;
+	if(N == 1)
+	  break;
+	else
+	  continue;
       }
 
       assert(!e.sparsity.exists());

@@ -379,6 +379,19 @@ namespace Realm {
 
     return 0;
   }
+
+  // these pass through to CodeTranslator's definitions
+  bool DSOCodeTranslator::can_translate(const CodeDescriptor& source_codedesc,
+					const std::type_info& target_impl_type)
+  {
+    return CodeTranslator::can_translate(source_codedesc, target_impl_type);
+  }
+
+  CodeImplementation *DSOCodeTranslator::translate(const CodeDescriptor& source_codedesc,
+						   const std::type_info& target_impl_type)
+  {
+    return CodeTranslator::translate(source_codedesc, target_impl_type);
+  }
 #endif
 
 

@@ -156,6 +156,7 @@ namespace Realm {
     Rect<N,T>& operator=(const Rect<N, T2>& copy_from);
 
     // constructs a guaranteed-empty rectangle
+    __CUDA_HD__
     static Rect<N,T> make_empty(void);
 
     __CUDA_HD__

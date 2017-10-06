@@ -479,6 +479,13 @@ namespace Realm {
     virtual CodeImplementation *translate(const CodeImplementation *source,
 					  const std::type_info& target_impl_type);
 
+    // C++ considers the above a "partial override" and wants these defined too
+    virtual bool can_translate(const CodeDescriptor& source_codedesc,
+			       const std::type_info& target_impl_type);
+
+    virtual CodeImplementation *translate(const CodeDescriptor& source_codedesc,
+					  const std::type_info& target_impl_type);
+
   protected:
     std::map<std::string, void *> modules_loaded;
   };
