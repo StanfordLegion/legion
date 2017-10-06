@@ -2773,7 +2773,8 @@ namespace Legion {
                                     const std::vector<Realm::FieldID> &field_ids,
                                     const std::vector<size_t> &field_sizes,
                                     const std::vector<void*> &field_pointers,
-                                    int layout_flag, unsigned char* aos_base_ptr, size_t aos_stride)
+                                    int layout_flag, unsigned char* aos_base_ptr, 
+                                    size_t aos_stride)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REALM_CREATE_INSTANCE_CALL);
@@ -2787,28 +2788,31 @@ namespace Legion {
         c_f_resource = 1;
       }
       PhysicalInstance result;
-      if (layout_flag == 0) {  // SOA
-        LgEvent ready(PhysicalInstance::create_array_instance_SOA(result, 
-				                             local_space,
-                                                             field_ids,
-							     field_sizes,
-							     field_pointers,
-							     c_f_resource,
-							     requests));
+      if (layout_flag == 0) 
+      { // SOA
+        LgEvent ready(PhysicalInstance::
+                          create_array_instance_SOA(result, 
+				                                            local_space,
+                                                    field_ids,
+							                                      field_sizes,
+							                                      field_pointers,
+							                                      c_f_resource,
+							                                      requests));
         ready.lg_wait();
-      } else {  // AOS
-        LgEvent ready(PhysicalInstance::create_array_instance_AOS(result, 
-				                             local_space,
-                                                             field_ids,
-							     field_sizes,
-							     field_pointers,
-							     aos_base_ptr, aos_stride,
-                                                             c_f_resource,
-							     requests));
+      } 
+      else 
+      { // AOS
+        LgEvent ready(PhysicalInstance::
+                          create_array_instance_AOS(result, 
+				                                            local_space,
+                                                    field_ids,
+							                                      field_sizes,
+							                                      field_pointers,
+							                                      aos_base_ptr, aos_stride,
+                                                    c_f_resource,
+							                                      requests));
         ready.lg_wait();
       }
-     // assert(0 && "no HDF5 support");
-    //  result = PhysicalInstance::NO_INST;
       return result;
     }
 

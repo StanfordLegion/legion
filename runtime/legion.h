@@ -5215,8 +5215,8 @@ namespace Legion {
       void detach_file(Context ctx, PhysicalRegion region);
       
       PhysicalRegion attach_array_soa(Context ctx,
-                                      LogicalRegion handle, LogicalRegion parent,
-                                      const std::map<FieldID,void*> &field_pointer_map,
+                                    LogicalRegion handle, LogicalRegion parent,
+                              const std::map<FieldID,void*> &field_pointer_map,
                                       int c_f_layout_flag);
       
       void detach_array(Context ctx, PhysicalRegion region);                                       
@@ -5226,7 +5226,7 @@ namespace Legion {
                                       LogicalRegion parent,
                                       const void* array_ptr,
                                       size_t stride, 
-                                      const std::map<FieldID, size_t> &field_offset, 
+                              const std::map<FieldID, size_t> &field_offset, 
                                       int c_f_layout_flag);
     public:
       //------------------------------------------------------------------------

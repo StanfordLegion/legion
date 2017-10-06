@@ -3567,7 +3567,8 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    inline void AttachLauncher::attach_array(const std::map<FieldID,void*> &field_pointer_map,
+    inline void AttachLauncher::
+                attach_array(const std::map<FieldID,void*> &field_pointer_map,
                                 int layoutflag)
     //--------------------------------------------------------------------------
     {

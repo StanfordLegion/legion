@@ -5842,7 +5842,7 @@ namespace Legion {
     PhysicalRegion Runtime::attach_array_soa(Context ctx,
                                              LogicalRegion handle,
                                              LogicalRegion parent,
-                                             const std::map<FieldID,void*> &field_pointer_map,
+                              const std::map<FieldID,void*> &field_pointer_map,
                                              int c_f_layout_flag)
     //--------------------------------------------------------------------------
     {
@@ -5872,12 +5872,13 @@ namespace Legion {
                                              LogicalRegion parent,
                                              const void* array_ptr,
                                              size_t stride,
-                                             const std::map<FieldID, size_t> &field_offset,
+                                const std::map<FieldID, size_t> &field_offset,
                                              int c_f_layout_flag)
     //--------------------------------------------------------------------------
     {
       unsigned char* base_ptr = (unsigned char*)array_ptr; 
-      std::map<FieldID, size_t>::const_iterator it_offset = field_offset.begin();
+      std::map<FieldID, size_t>::const_iterator it_offset 
+                                                = field_offset.begin();
       std::map<FieldID,void*> field_pointer_map;
       while(it_offset != field_offset.end())
       {

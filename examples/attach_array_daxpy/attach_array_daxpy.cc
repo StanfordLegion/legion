@@ -22,9 +22,11 @@
 using namespace Legion;
 
 template<typename FT, int N, typename T = coord_t>
-using AccessorRO = FieldAccessor<READ_ONLY,FT,N,T,Realm::AffineAccessor<FT,N,T> >;
+using AccessorRO = FieldAccessor<READ_ONLY,FT,N,T,
+                                 Realm::AffineAccessor<FT,N,T> >;
 template<typename FT, int N, typename T = coord_t>
-using AccessorWD = FieldAccessor<WRITE_DISCARD,FT,N,T,Realm::AffineAccessor<FT,N,T> >;
+using AccessorWD = FieldAccessor<WRITE_DISCARD,FT,N,T,
+                                 Realm::AffineAccessor<FT,N,T> >;
 
 enum TaskIDs {
   TOP_LEVEL_TASK_ID,
@@ -115,7 +117,8 @@ void top_level_task(const Task *task,
   double *z_ptr = NULL;
   double *xyz_ptr = NULL;
 
-  if (soa_flag == 0) { // SOA
+  if (soa_flag == 0) 
+  { // SOA
     double *y_ptr = (double*)malloc(sizeof(double)*(num_elements));
     double *x_ptr = (double*)malloc(sizeof(double)*(num_elements));
     double *z_ptr = (double*)malloc(sizeof(double)*(num_elements));
@@ -127,27 +130,36 @@ void top_level_task(const Task *task,
     std::map<FieldID,void*> field_pointer_map_xy;
     field_pointer_map_xy[FID_X] = x_ptr;
     field_pointer_map_xy[FID_Y] = y_ptr;
-    printf("Attach SOA array fid %d, ptr %p, fid %d, ptr %p\n", FID_X, x_ptr, FID_Y, y_ptr);  
-    xy_pr = runtime->attach_array_soa(ctx, input_lr, input_lr, field_pointer_map_xy, 0); 
+    printf("Attach SOA array fid %d, ptr %p, fid %d, ptr %p\n", 
+           FID_X, x_ptr, FID_Y, y_ptr);  
+    xy_pr = runtime->attach_array_soa(ctx, input_lr, input_lr, 
+                                      field_pointer_map_xy, 0); 
   
     std::map<FieldID,void*> field_pointer_map_z;
     field_pointer_map_z[FID_Z] = z_ptr;
     printf("Attach SOA array fid %d, ptr %p\n", FID_Z, z_ptr);
-    z_pr = runtime->attach_array_soa(ctx, output_lr, output_lr, field_pointer_map_z, 0);
+    z_pr = runtime->attach_array_soa(ctx, output_lr, output_lr, 
+                                     field_pointer_map_z, 0);
     
-  } else { // AOS
+  } 
+  else 
+  { // AOS
     daxpy_t *xyz_ptr = (daxpy_t*)malloc(sizeof(daxpy_t)*(num_elements));
   
     std::map<FieldID, size_t> offset_input;
     offset_input[FID_X] = 0;
     offset_input[FID_Y] = sizeof(double);
 
-    xy_pr = runtime->attach_array_aos(ctx, input_lr, input_lr, xyz_ptr, sizeof(daxpy_t), offset_input, 0);
+    xy_pr = runtime->attach_array_aos(ctx, input_lr, input_lr, 
+                                      xyz_ptr, sizeof(daxpy_t), 
+                                      offset_input, 0);
   
     std::map<FieldID, size_t> offset_output;
     offset_output[FID_Z] = 2*sizeof(double);
   
-    z_pr = runtime->attach_array_aos(ctx, output_lr, output_lr, xyz_ptr, sizeof(daxpy_t), offset_output, 0);
+    z_pr = runtime->attach_array_aos(ctx, output_lr, output_lr, 
+                                     xyz_ptr, sizeof(daxpy_t), 
+                                     offset_output, 0);
     printf("Attach AOS array ptr %p\n", xyz_ptr);  
     }
   
@@ -351,7 +363,8 @@ void daxpy_task(const Task *task,
   Rect<1> rect = runtime->get_index_space_domain(ctx,
                   task->regions[0].region.get_index_space());
   printf("Running daxpy computation with alpha %.8g for point %d, xptr %p, y_ptr %p, z_ptr %p...\n", 
-          alpha, point, acc_x.ptr(rect.lo), acc_y.ptr(rect.lo), acc_z.ptr(rect.lo));
+          alpha, point, 
+          acc_x.ptr(rect.lo), acc_y.ptr(rect.lo), acc_z.ptr(rect.lo));
   for (PointInRectIterator<1> pir(rect); pir(); pir++)
     acc_z[*pir] = alpha * acc_x[*pir] + acc_y[*pir];
 }
@@ -372,7 +385,7 @@ void check_task(const Task *task,
   Rect<1> rect = runtime->get_index_space_domain(ctx,
                   task->regions[0].region.get_index_space());
   printf("Checking results... xptr %p, y_ptr %p, z_ptr %p...\n", 
-                          acc_x.ptr(rect.lo), acc_y.ptr(rect.lo), acc_z.ptr(rect.lo));
+          acc_x.ptr(rect.lo), acc_y.ptr(rect.lo), acc_z.ptr(rect.lo));
   bool all_passed = true;
   for (PointInRectIterator<1> pir(rect); pir(); pir++)
   {

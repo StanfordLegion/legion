@@ -24,13 +24,13 @@ namespace Realm {
   
   template <int N, typename T>
   /*static*/ Event RegionInstance::create_array_instance_SOA(RegionInstance& inst,
-							  const IndexSpace<N,T>& space,
-                                                          const std::vector<FieldID> &field_ids,
-							  const std::vector<size_t> &field_sizes,
-                                                          const std::vector<void*> &field_pointers,
-							  int resource,
-							  const ProfilingRequestSet& reqs,
-							  Event wait_on /*= Event::NO_EVENT*/)
+							                                       const IndexSpace<N,T>& space,
+                                            const std::vector<FieldID> &field_ids,
+							                             const std::vector<size_t> &field_sizes,
+                                         const std::vector<void*> &field_pointers,
+							                                                       int resource,
+							                                    const ProfilingRequestSet& reqs,
+							                                Event wait_on /*= Event::NO_EVENT*/)
   {
     Memory memory = Machine::MemoryQuery(Machine::get_machine())
       .local_address_space()
@@ -83,25 +83,25 @@ namespace Realm {
 
 #define DOIT_ARRAY_SOA(N,T) \
   template Event RegionInstance::create_array_instance_SOA<N,T>(RegionInstance&, \
-							      const IndexSpace<N,T>&, \
-                                                              const std::vector<FieldID>&, \
-							      const std::vector<size_t>&, \
-							      const std::vector<void *>&, \
-							      int, \
-							      const ProfilingRequestSet&, \
-							      Event);
+							                                           const IndexSpace<N,T>&, \
+                                                    const std::vector<FieldID>&, \
+							                                       const std::vector<size_t>&, \
+							                                       const std::vector<void *>&, \
+							                                                              int, \
+							                                       const ProfilingRequestSet&, \
+							                                                           Event);
   FOREACH_NT(DOIT_ARRAY_SOA)  
     
   template <int N, typename T>
   /*static*/ Event RegionInstance::create_array_instance_AOS(RegionInstance& inst,
-							  const IndexSpace<N,T>& space,
-                                                          const std::vector<FieldID> &field_ids,
-							  const std::vector<size_t> &field_sizes,
-                                                          const std::vector<void*> &field_pointers,
-							  unsigned char* aos_base_ptr, size_t aos_stride,
-                                                          int resource,
-							  const ProfilingRequestSet& reqs,
-							  Event wait_on /*= Event::NO_EVENT*/)
+							                                       const IndexSpace<N,T>& space,
+                                            const std::vector<FieldID> &field_ids,
+							                             const std::vector<size_t> &field_sizes,
+                                         const std::vector<void*> &field_pointers,
+							                     unsigned char* aos_base_ptr, size_t aos_stride,
+                                                                     int resource,
+							                                    const ProfilingRequestSet& reqs,
+							                                Event wait_on /*= Event::NO_EVENT*/)
   {
     Memory memory = Machine::MemoryQuery(Machine::get_machine())
       .local_address_space()
@@ -122,26 +122,34 @@ namespace Realm {
       InstanceLayoutGeneric::FieldLayout& fl = layout->fields[id];
       fl.list_idx = i;
       if (i > 0) {
-        fl.rel_offset = (size_t)(((unsigned char*)field_pointers[i]) - ((unsigned char*)field_pointers[i-1]));
+        fl.rel_offset = (size_t)(((unsigned char*)field_pointers[i]) - 
+                                  ((unsigned char*)field_pointers[i-1]));
       } else {
-        fl.rel_offset = (size_t)(((unsigned char*)field_pointers[i]) - aos_base_ptr);
+        fl.rel_offset = (size_t)(((unsigned char*)field_pointers[i]) - 
+                                  aos_base_ptr);
       }
       fl.size_in_bytes = field_sizes[i];
 
       // create a single piece (for non-empty index spaces)
-      if(!space.empty()) {
+      if(!space.empty()) 
+      {
 	      AffineLayoutPiece<N,T> *alp = new AffineLayoutPiece<N,T>;
 	      alp->bounds = space.bounds;
 	      alp->offset = (size_t)(aos_base_ptr - base);
         size_t stride = aos_stride;
         /* fortran layout */
-        if (resource == 0) {
-	        for(int j = 0; j < N; j++) {
+        if (resource == 0) 
+        {
+	        for(int j = 0; j < N; j++) 
+          {
 	          alp->strides[j] = stride;
             stride *= (space.bounds.hi[j] - space.bounds.lo[j] + 1);
 	        }
-        } else { /* C layout */
-	        for(int j = N-1; j >= 0; j--) {
+        } 
+        else 
+        { /* C layout */
+	        for(int j = N-1; j >= 0; j--) 
+          {
 	          alp->strides[j] = stride;
             stride *= (space.bounds.hi[j] - space.bounds.lo[j] + 1);
 	        }
@@ -156,14 +164,14 @@ namespace Realm {
 
 #define DOIT_ARRAY_AOS(N,T) \
   template Event RegionInstance::create_array_instance_AOS<N,T>(RegionInstance&, \
-							      const IndexSpace<N,T>&, \
-                                                              const std::vector<FieldID>&, \
-							      const std::vector<size_t>&, \
-							      const std::vector<void *>&, \
-							      unsigned char*, size_t, \
-                                                              int, \
-							      const ProfilingRequestSet&, \
-							      Event);
+							                                           const IndexSpace<N,T>&, \
+                                                    const std::vector<FieldID>&, \
+							                                       const std::vector<size_t>&, \
+							                                       const std::vector<void *>&, \
+							                                           unsigned char*, size_t, \
+                                                                            int, \
+							                                       const ProfilingRequestSet&, \
+							                                                           Event);
   FOREACH_NT(DOIT_ARRAY_AOS)  
 
 }; // namespace Realm

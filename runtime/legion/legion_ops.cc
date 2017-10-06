@@ -14041,14 +14041,17 @@ namespace Legion {
             std::vector<void*> field_pointers(field_pointers_map.size());
             unsigned idx = 0;
             for (std::map<FieldID,void*>::const_iterator it = 
-                  field_pointers_map.begin(); it != field_pointers_map.end(); it++, idx++)
+                  field_pointers_map.begin(); 
+                  it != field_pointers_map.end(); 
+                  it++, idx++)
             {
               field_ids[idx] = it->first;
               field_pointers[idx] = it->second;
             }
             // Now ask the low-level runtime to create the instance
-            result = node->create_array_instance(resource, field_ids, sizes, field_pointers,
-                                        layout_flag, aos_base_ptr, aos_stride);
+            result = node->create_array_instance(resource, field_ids, sizes, 
+                                                 field_pointers, layout_flag, 
+                                                 aos_base_ptr, aos_stride);
             constraints.specialized_constraint = 
               SpecializedConstraint(NORMAL_SPECIALIZE);
             break;
@@ -14060,14 +14063,17 @@ namespace Legion {
             std::vector<void*> field_pointers(field_pointers_map.size());
             unsigned idx = 0;
             for (std::map<FieldID,void*>::const_iterator it = 
-                  field_pointers_map.begin(); it != field_pointers_map.end(); it++, idx++)
+                  field_pointers_map.begin(); 
+                  it != field_pointers_map.end(); 
+                  it++, idx++)
             {
               field_ids[idx] = it->first;
               field_pointers[idx] = it->second;
             }
             // Now ask the low-level runtime to create the instance
-            result = node->create_array_instance(resource, field_ids, sizes, field_pointers,
-                                        layout_flag, aos_base_ptr, aos_stride);
+            result = node->create_array_instance(resource, field_ids, sizes, 
+                                                 field_pointers, layout_flag, 
+                                                 aos_base_ptr, aos_stride);
             constraints.specialized_constraint = 
               SpecializedConstraint(NORMAL_SPECIALIZE);
             break;
