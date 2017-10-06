@@ -3099,7 +3099,10 @@ namespace Legion {
           index_nodes.find(sp);
         if (it != index_nodes.end())
         {
-          delete result;
+          // Need to remove resource reference if not owner
+          if (result->is_owner() || 
+              result->remove_base_resource_ref(REMOTE_DID_REF))
+            delete result;
           return it->second;
         }
         index_nodes[sp] = result;
@@ -3145,7 +3148,10 @@ namespace Legion {
           index_nodes.find(sp);
         if (it != index_nodes.end())
         {
-          delete result;
+          // Need to remove resource reference if not owner
+          if (result->is_owner() || 
+              result->remove_base_resource_ref(REMOTE_DID_REF))
+            delete result;
           // Free up the event since we didn't use it
           Runtime::trigger_event(is_ready);
           return it->second;
@@ -3196,7 +3202,10 @@ namespace Legion {
           index_parts.find(p);
         if (it != index_parts.end())
         {
-          delete result;
+          // Need to remove resource reference if not owner
+          if (result->is_owner() || 
+              result->remove_base_resource_ref(REMOTE_DID_REF))
+            delete result;
           return it->second;
         }
         index_parts[p] = result;
@@ -3250,7 +3259,10 @@ namespace Legion {
           index_parts.find(p);
         if (it != index_parts.end())
         {
-          delete result;
+          // Need to remove resource reference if not owner
+          if (result->is_owner() || 
+              result->remove_base_resource_ref(REMOTE_DID_REF))
+            delete result;
           return it->second;
         }
         index_parts[p] = result;
@@ -3293,7 +3305,10 @@ namespace Legion {
           field_nodes.find(space);
         if (it != field_nodes.end())
         {
-          delete result;
+          // Need to remove resource reference if not owner
+          if (result->is_owner() || 
+              result->remove_base_resource_ref(REMOTE_DID_REF))
+            delete result;
           return it->second;
         }
         field_nodes[space] = result;
@@ -3329,7 +3344,10 @@ namespace Legion {
           field_nodes.find(space);
         if (it != field_nodes.end())
         {
-          delete result;
+          // Need to remove resource reference if not owner
+          if (result->is_owner() || 
+              result->remove_base_resource_ref(REMOTE_DID_REF))
+            delete result;
           return it->second;
         }
         field_nodes[space] = result;
@@ -3379,6 +3397,10 @@ namespace Legion {
         {
           // It already exists, delete our copy and return
           // the one that has already been made
+#ifdef LEGION_GC
+          if (result->is_owner() || 
+              result->remove_base_resource_ref(REMOTE_DID_REF))
+#endif
           delete result;
           return it->second;
         }
@@ -3428,6 +3450,10 @@ namespace Legion {
         {
           // It already exists, delete our copy and
           // return the one that has already been made
+#ifdef LEGION_GC
+          if (result->is_owner() || 
+              result->remove_base_resource_ref(REMOTE_DID_REF))
+#endif
           delete result;
           return it->second;
         }
