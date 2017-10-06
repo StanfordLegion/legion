@@ -102,7 +102,7 @@ namespace Realm {
       complete_time = Clock::current_time_in_nanoseconds();
     }
 
-    inline bool OperationTimeline::is_valid(void)
+    inline bool OperationTimeline::is_valid(void) const
     {
       return ((create_time != INVALID_TIMESTAMP) &&
 	      (ready_time != INVALID_TIMESTAMP) &&

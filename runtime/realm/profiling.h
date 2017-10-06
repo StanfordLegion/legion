@@ -112,7 +112,7 @@ namespace Realm {
       inline void record_start_time(void);
       inline void record_end_time(void);
       inline void record_complete_time(void);
-      inline bool is_valid(void);
+      inline bool is_valid(void) const;
     };
 
     // records time intervals in which the operation was waiting on events
