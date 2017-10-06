@@ -940,7 +940,7 @@ namespace Realm {
     stack_base = malloc(stack_size);
     assert(stack_base != 0);
 
-    getcontext(&ctx);
+    CHECK_LIBC( getcontext(&ctx) );
 
     ctx.uc_link = 0; // we don't expect it to ever fall through
     ctx.uc_stack.ss_sp = stack_base;
