@@ -293,7 +293,7 @@ endif()
 
 configure_file(${PROJECT_SOURCE_DIR}/cmake/legion_defines.h.in ${PROJECT_SOURCE_DIR}/runtime/legion_defines.h @ONLY)
 include_directories(${PROJECT_SOURCE_DIR}/runtime)
-install(FILES ${PROJECT_SOURCE_DIR}/runtime/legion_defines.h DESTINATION include)
+install(FILES ${PROJECT_SOURCE_DIR}/runtime/legion_defines.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 
 #------------------------------------------------------------------------------#
