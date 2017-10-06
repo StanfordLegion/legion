@@ -3386,10 +3386,13 @@ function type_check.stat_var(cx, node)
     return insert_implicit_cast(value, value_type, sym:gettype())
   end)
 
+  local value = false
+  if #values > 0 then value = values[1] end
+
   return ast.typed.stat.Var {
-    symbols = node.symbols,
-    types = types,
-    values = values,
+    symbol = node.symbols[1],
+    type = types[1],
+    value = value,
     annotations = node.annotations,
     span = node.span,
   }

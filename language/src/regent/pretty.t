@@ -944,12 +944,12 @@ end
 
 function pretty.stat_var(cx, node)
   local decls = terralib.newlist()
-  for i,symbol in ipairs(node.symbols) do
-    local type = node.types[i]
-    decls:insert(join({tostring(symbol), ":", tostring(type)}, true))
+  decls:insert(join({tostring(node.symbol), ":", tostring(node.type)}, true))
+  if node.value then
+    return join({"var", commas(decls), "=", pretty.expr(cx, node.value)}, true)
+  else
+    return join({"var", commas(decls)}, true)
   end
-  local assign = #node.values > 0 and "="
-  return join({"var", commas(decls), assign, pretty.expr_list(cx, node.values)}, true)
 end
 
 function pretty.stat_var_unpack(cx, node)
@@ -967,11 +967,11 @@ function pretty.stat_break(cx, node)
 end
 
 function pretty.stat_assignment(cx, node)
-  return join({pretty.expr_list(cx, node.lhs), "=", pretty.expr_list(cx, node.rhs)}, true)
+  return join({pretty.expr(cx, node.lhs), "=", pretty.expr(cx, node.rhs)}, true)
 end
 
 function pretty.stat_reduce(cx, node)
-  return join({pretty.expr_list(cx, node.lhs), node.op .. "=", pretty.expr_list(cx, node.rhs)}, true)
+  return join({pretty.expr(cx, node.lhs), node.op .. "=", pretty.expr(cx, node.rhs)}, true)
 end
 
 function pretty.stat_expr(cx, node)
