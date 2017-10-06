@@ -2150,13 +2150,20 @@ namespace Legion {
       region_tree_owners[node] = 
         std::pair<AddressSpaceID,bool>(source, 
                                       (source != runtime->address_space));
-#ifdef LEGION_GC
-      node->add_base_resource_ref(CONTEXT_REF);
-#else
-      node->add_reference();
-#endif
+      node->register_tracking_context(this);
       return source;
     } 
+
+    //--------------------------------------------------------------------------
+    void InnerContext::notify_region_tree_node_deletion(RegionTreeNode *node)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock ctx_lock(context_lock);
+#ifdef DEBUG_LEGION
+      assert(region_tree_owners.find(node) != region_tree_owners.end());
+#endif
+      region_tree_owners.erase(node);
+    }
 
     //--------------------------------------------------------------------------
     InnerContext* InnerContext::find_parent_logical_context(unsigned index)
@@ -5623,20 +5630,11 @@ namespace Legion {
       // state managers we need to reset
       if (!region_tree_owners.empty())
       {
+        AutoLock ctx_lock(context_lock);
         for (std::map<RegionTreeNode*,
                       std::pair<AddressSpaceID,bool> >::const_iterator it =
               region_tree_owners.begin(); it != region_tree_owners.end(); it++)
-        {
-          // If this is a remote only then we don't need to invalidate it
-          if (!it->second.second)
-            it->first->invalidate_version_state(tree_context.get_id()); 
-#ifdef LEGION_GC
-          if (it->first->remove_base_resource_ref(CONTEXT_REF))
-#else
-          if (it->first->remove_reference())
-#endif
-            delete it->first;
-        }
+          it->first->unregister_tracking_context(this);
         region_tree_owners.clear();
       }
       // Now we can free our region tree context
@@ -6183,11 +6181,7 @@ namespace Legion {
 #endif
         region_tree_owners[node] = 
           std::pair<AddressSpaceID,bool>(result, false/*remote only*/); 
-#ifdef LEGION_GC
-        node->add_base_resource_ref(CONTEXT_REF);
-#else
-        node->add_reference();
-#endif
+        node->register_tracking_context(this);
         // Find the event to trigger
         std::map<RegionTreeNode*,RtUserEvent>::iterator finder = 
           pending_version_owner_requests.find(node);

@@ -2220,6 +2220,9 @@ namespace Legion {
       void unregister_physical_manager(PhysicalManager *manager);
       PhysicalManager* find_manager(DistributedID did);
     public:
+      void register_tracking_context(InnerContext *context);
+      void unregister_tracking_context(InnerContext *context);
+    public:
       virtual unsigned get_depth(void) const = 0;
       virtual LegionColor get_color(void) const = 0;
       virtual IndexTreeNode *get_row_source(void) const = 0;
@@ -2320,6 +2323,9 @@ namespace Legion {
                 LOGICAL_VIEW_ALLOC>::tracked instance_views;
       LegionMap<DistributedID,PhysicalManager*,
                 PHYSICAL_MANAGER_ALLOC>::tracked physical_managers;
+      // Also need to track any contexts that are tracking this
+      // region tree node in case we get deleted during execution
+      std::set<InnerContext*> tracking_contexts;
     protected:
       LegionMap<SemanticTag,SemanticInfo>::aligned semantic_info;
     };

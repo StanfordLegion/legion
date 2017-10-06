@@ -1436,6 +1436,9 @@ namespace Legion {
                                                LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
+      // Check to see if this has already been deleted
+      if (!has_node(handle, true/*local only*/))
+        return;
       RegionNode *node = get_node(handle);
       VersioningInvalidator invalidator(ctx);
       node->visit_node(&invalidator);
@@ -8897,6 +8900,13 @@ namespace Legion {
       {
         legion_free(SEMANTIC_INFO_ALLOC, it->second.buffer, it->second.size);
       }
+      // Notify any contexts that were tracking us that we are now deleted
+      if (!tracking_contexts.empty())
+      {
+        for (std::set<InnerContext*>::const_iterator it = 
+              tracking_contexts.begin(); it != tracking_contexts.end(); it++)
+          (*it)->notify_region_tree_node_deletion(this);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -13132,6 +13142,28 @@ namespace Legion {
       assert(finder != physical_managers.end());
 #endif
       return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::register_tracking_context(InnerContext *context)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock n_lock(node_lock);
+#ifdef DEBUG_LEGION
+      assert(tracking_contexts.find(context) == tracking_contexts.end());
+#endif
+      tracking_contexts.insert(context);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeNode::unregister_tracking_context(InnerContext *context)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock n_lock(node_lock);
+#ifdef DEBUG_LEGION
+      assert(tracking_contexts.find(context) != tracking_contexts.end());
+#endif
+      tracking_contexts.erase(context);
     }
 
     //--------------------------------------------------------------------------

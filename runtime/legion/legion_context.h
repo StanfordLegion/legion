@@ -660,6 +660,7 @@ namespace Legion {
                                          std::set<RtEvent> &preconditions);
       virtual AddressSpaceID get_version_owner(RegionTreeNode *node,
                                                AddressSpaceID source);
+      void notify_region_tree_node_deletion(RegionTreeNode *node);
       virtual bool attempt_children_complete(void);
       virtual bool attempt_children_commit(void);
       virtual void inline_child_task(TaskOp *child);
