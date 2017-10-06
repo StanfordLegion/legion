@@ -6800,7 +6800,7 @@ local function collect_symbols(cx, node)
   local function collect_symbol_pre(node)
     if rawget(node, "node_type") then
       if node:is(ast.typed.stat.Var) then
-        node.symbols:map(function(sym) defined[sym] = true end)
+        defined[node.symbol] = true
       elseif node:is(ast.typed.stat.ForNum) or
              node:is(ast.typed.stat.ForList) then
         defined[node.symbol] = true
@@ -6838,9 +6838,8 @@ local function collect_symbols(cx, node)
               node.expr_type:bounds() ~= node.value.expr_type:bounds()) then
         accesses[node] = true
       elseif node:is(ast.typed.stat.Reduce) then
-        local lh = node.lhs[1]
-        if lh:is(ast.typed.expr.ID) then
-          reduction_variables[lh.value:getsymbol()] = node.op
+        if node.lhs:is(ast.typed.expr.ID) then
+          reduction_variables[node.lhs.value:getsymbol()] = node.op
         end
       end
     end
@@ -7883,8 +7882,8 @@ local function stat_index_launch_setup(cx, node, domain, actions)
 
     local reduce = ast.typed.stat.Reduce {
       op = node.reduce_op,
-      lhs = terralib.newlist({node.reduce_lhs}),
-      rhs = terralib.newlist({rhs}),
+      lhs = node.reduce_lhs,
+      rhs = rhs,
       annotations = node.annotations,
       span = node.span,
     }
@@ -7965,41 +7964,40 @@ function codegen.stat_index_launch_list(cx, node)
 end
 
 function codegen.stat_var(cx, node)
-  local lhs = node.symbols:map(function(lh) return lh:getsymbol() end)
+  local lhs = node.symbol:getsymbol()
 
   -- Capture rhs values (copying if necessary).
-  local rhs = terralib.newlist()
-  for i, value in pairs(node.values) do
-    local rh = codegen.expr(cx, value):read(cx, value.expr_type)
+  local rhs = false
+  if node.value then
+    local rh = codegen.expr(cx, node.value):read(cx, node.value.expr_type)
 
     local rh_value = rh.value
-    if value:is(ast.typed.expr.ID) then
+    if node.value:is(ast.typed.expr.ID) then
       -- If this is a variable, copy the value to preserve ownership.
-      rh_value = make_copy(cx, rh_value, value.expr_type)
+      rh_value = make_copy(cx, rh_value, node.value.expr_type)
     end
     rh = expr.just(rh.actions, rh_value)
 
-    rhs:insert(rh)
+    rhs = rh
   end
 
   -- Cast rhs values to lhs types.
-  local rhs_values = terralib.newlist()
-  for i, rh in ipairs(rhs) do
-    local rhs_type = std.as_read(node.values[i].expr_type)
-    local lhs_type = node.types[i]
+  local actions = terralib.newlist()
+  local rhs_value = false
+  if rhs then
+    local rhs_type = std.as_read(node.value.expr_type)
+    local lhs_type = node.type
     if lhs_type then
-      rhs_values:insert(std.implicit_cast(rhs_type, lhs_type, rh.value))
+      rhs_value = std.implicit_cast(rhs_type, lhs_type, rhs.value)
     else
-      rhs_values:insert(rh.value)
+      rhs_value = rh.value
     end
+    actions:insert(rhs.actions)
   end
-  local actions = rhs:map(function(rh) return rh.actions end)
 
   -- Register cleanup items for lhs.
-  for i, lh in ipairs(lhs) do
-    local lh_type = node.symbols[i]:gettype()
-    cx:add_cleanup_item(make_cleanup_item(cx, lh, lh_type))
-  end
+  local lhs_type = node.symbol:gettype()
+  cx:add_cleanup_item(make_cleanup_item(cx, lhs, lhs_type))
 
   local function is_partitioning_expr(node)
     if node:is(ast.typed.expr.Partition) or node:is(ast.typed.expr.PartitionEqual) or
@@ -8013,28 +8011,26 @@ function codegen.stat_var(cx, node)
   end
 
   local decls = terralib.newlist()
-  for i, lh in ipairs(lhs) do
-    if rhs_values[i] then
-      if node.values[i]:is(ast.typed.expr.Ispace) then
-        actions = quote
-          [actions]
-          c.legion_index_space_attach_name([cx.runtime], [ rhs_values[i] ].impl, [lh.displayname], false)
-        end
-      elseif node.values[i]:is(ast.typed.expr.Region) then
-        actions = quote
-          [actions]
-          c.legion_logical_region_attach_name([cx.runtime], [ rhs_values[i] ].impl, [lh.displayname], false)
-        end
-      elseif is_partitioning_expr(node.values[i]) then
-        actions = quote
-          [actions]
-          c.legion_logical_partition_attach_name([cx.runtime], [ rhs_values[i] ].impl, [lh.displayname], false)
-        end
+  if node.value then
+    if node.value:is(ast.typed.expr.Ispace) then
+      actions = quote
+        [actions]
+        c.legion_index_space_attach_name([cx.runtime], [rhs_value].impl, [lhs.displayname], false)
       end
-      decls:insert(quote var [lh] = [ rhs_values[i] ] end)
-    else
-      decls:insert(quote var [lh] end)
+    elseif node.value:is(ast.typed.expr.Region) then
+      actions = quote
+        [actions]
+        c.legion_logical_region_attach_name([cx.runtime], [rhs_value].impl, [lhs.displayname], false)
+      end
+    elseif is_partitioning_expr(node.value) then
+      actions = quote
+        [actions]
+        c.legion_logical_partition_attach_name([cx.runtime], [rhs_value].impl, [lhs.displayname], false)
+      end
     end
+    decls:insert(quote var [lhs] = [rhs_value] end)
+  else
+    decls:insert(quote var [lhs] end)
   end
   return quote [actions]; [decls] end
 end
@@ -8115,62 +8111,47 @@ end
 
 function codegen.stat_assignment(cx, node)
   local actions = terralib.newlist()
-  local lhs = codegen.expr_list(cx, node.lhs)
-  local rhs = codegen.expr_list(cx, node.rhs)
-  rhs = data.zip(rhs, node.rhs):map(
-    function(pair)
-      local rh_value, rh_node = unpack(pair)
-      local rh_expr = rh_value:read(cx, rh_node.expr_type)
+  local lhs = codegen.expr(cx, node.lhs)
+  local rhs = codegen.expr(cx, node.rhs)
 
-      -- Capture the rhs value in a temporary so that it doesn't get
-      -- overridden on assignment to the lhs (if lhs and rhs alias).
-      do
-        local rh_expr_value = rh_expr.value
-        if rh_node:is(ast.typed.expr.ID) then
-          -- If this is a variable, copy the value to preserve ownership.
-          rh_expr_value = make_copy(cx, rh_expr_value, rh_node.expr_type)
-        end
-        rh_expr = expr.once_only(rh_expr.actions, rh_expr_value, rh_node.expr_type)
-      end
+  local rhs_expr = rhs:read(cx, node.rhs.expr_type)
 
-      actions:insert(rh_expr.actions)
-      return values.value(
-        rh_node,
-        expr.just(quote end, rh_expr.value),
-        std.as_read(rh_node.expr_type))
-    end)
+  -- Capture the rhs value in a temporary so that it doesn't get
+  -- overridden on assignment to the lhs (if lhs and rhs alias).
+  do
+    local rhs_expr_value = rhs_expr.value
+    if node.rhs:is(ast.typed.expr.ID) then
+      -- If this is a variable, copy the value to preserve ownership.
+      rhs_expr_value = make_copy(cx, rhs_expr_value, node.rhs.expr_type)
+    end
+    rhs_expr = expr.once_only(rhs_expr.actions, rhs_expr_value, node.rhs.expr_type)
+  end
 
-  actions:insertall(
-    data.zip(lhs, rhs, node.lhs):map(
-      function(pair)
-        local lh, rh, lh_node = unpack(pair)
-        return lh:write(cx, rh, lh_node.expr_type).actions
-      end))
+  actions:insert(rhs_expr.actions)
+  rhs = values.value(
+    node.rhs,
+    expr.just(quote end, rhs_expr.value),
+    std.as_read(node.rhs.expr_type))
+
+  actions:insert(lhs:write(cx, rhs, node.lhs.expr_type).actions)
 
   return quote [actions] end
 end
 
 function codegen.stat_reduce(cx, node)
   local actions = terralib.newlist()
-  local lhs = codegen.expr_list(cx, node.lhs)
-  local rhs = codegen.expr_list(cx, node.rhs)
-  rhs = data.zip(rhs, node.rhs):map(
-    function(pair)
-      local rh_value, rh_node = unpack(pair)
-      local rh_expr = rh_value:read(cx, rh_node.expr_type)
-      actions:insert(rh_expr.actions)
-      return values.value(
-        node,
-        expr.just(quote end, rh_expr.value),
-        std.as_read(rh_node.expr_type))
-    end)
+  local lhs = codegen.expr(cx, node.lhs)
+  local rhs = codegen.expr(cx, node.rhs)
 
-  actions:insertall(
-    data.zip(lhs, rhs, node.lhs):map(
-      function(pair)
-        local lh, rh, lh_node = unpack(pair)
-        return lh:reduce(cx, rh, node.op, lh_node.expr_type).actions
-      end))
+  local rhs_expr = rhs:read(cx, node.rhs.expr_type)
+
+  actions:insert(rhs_expr.actions)
+  rhs = values.value(
+    node,
+    expr.just(quote end, rhs_expr.value),
+    std.as_read(node.rhs.expr_type))
+
+  actions:insert(lhs:reduce(cx, rhs, node.op, node.lhs.expr_type).actions)
 
   return quote [actions] end
 end

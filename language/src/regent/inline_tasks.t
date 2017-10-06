@@ -75,28 +75,18 @@ local function make_block(stats, annotations, span)
 end
 
 local function stat_var(lhs, rhs, node)
-  local symbols = terralib.newlist()
-  local types = terralib.newlist()
-  local values = terralib.newlist()
-
-  symbols:insert(lhs)
-  types:insert(lhs:gettype())
-  if rhs then values:insert(rhs) end
+  local value = false
+  if rhs then value = rhs end
   return ast.typed.stat.Var {
-    symbols = symbols,
-    types = types,
-    values = values,
+    symbol = lhs,
+    type = lhs:gettype(),
+    value = value,
     annotations = node.annotations,
     span = node.span,
   }
 end
 
-local function stat_asgn(lh, rh, node)
-  local lhs = terralib.newlist()
-  local rhs = terralib.newlist()
-
-  lhs:insert(lh)
-  rhs:insert(rh)
+local function stat_asgn(lhs, rhs, node)
   return ast.typed.stat.Assignment {
     lhs = lhs,
     rhs = rhs,
@@ -293,13 +283,15 @@ function inline_tasks.expr(cx, node)
       end)
 
       if #new_local_params > 0 then
-        stats:insert(ast.typed.stat.Var {
-          symbols = new_local_params,
-          types = new_local_param_types,
-          values = new_args,
-          annotations = node.annotations,
-          span = node.span
-        })
+        for i = 1, #new_local_params do
+          stats:insert(ast.typed.stat.Var {
+            symbol = new_local_params[i],
+            type = new_local_param_types[i],
+            value = new_args[i],
+            annotations = node.annotations,
+            span = node.span
+          })
+        end
       end
       local function subst_pre(node)
         if node:is(ast.typed.stat.ForList) then
@@ -339,28 +331,22 @@ function inline_tasks.expr(cx, node)
           end
           return node { expr_type = std.type_sub(node.expr_type, type_mapping) }
         elseif node:is(ast.typed.stat.Var) then
-          local new_symbols = terralib.newlist()
-          local new_types = terralib.newlist()
-
-          for i = 1, #node.symbols do
-            local new_ty = std.type_sub(node.types[i], type_mapping)
-            if new_ty ~= node.types[i] then
-              local sym = node.symbols[i]
-              local new_sym = std.newsymbol(new_ty)
-              new_symbols:insert(new_sym)
-              new_types:insert(new_ty)
-              expr_mapping[sym] = new_sym
-              if std.is_region(new_ty) then
-                type_mapping[sym] = new_sym
-              end
-            else
-              new_symbols:insert(node.symbols[i])
-              new_types:insert(node.types[i])
+          local new_symbol = nil
+          local new_type = std.type_sub(node.type, type_mapping)
+          if new_type ~= node.type then
+            local new_sym = std.newsymbol(new_type)
+            new_symbol = std.newsymbol(new_type)
+            expr_mapping[node.symbol] = new_symbol
+            if std.is_region(new_type) then
+              type_mapping[node.symbol] = new_symbol
             end
+          else
+            new_symbol = node.symbol
+            new_type = node.type
           end
           return node {
-            symbols = new_symbols,
-            types = new_types,
+            symbol = new_symbol,
+            type = new_type,
           }
         else
           return node

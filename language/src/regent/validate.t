@@ -251,12 +251,9 @@ local function validate_vars_node(cx)
       cx:pop_local_scope()
 
     elseif node:is(ast.typed.stat.Var) then
-      continuation(node.values)
-      cx:intern_variables(node, node.symbols)
-      for i, symbol in ipairs(node.symbols) do
-        local var_type = node.types[i]
-        cx:check_variable(node, symbol, var_type)
-      end
+      continuation(node.value)
+      cx:intern_variable(node, node.symbol)
+      cx:check_variable(node, node.symbol, node.type)
 
     elseif node:is(ast.typed.stat.VarUnpack) then
       continuation(node.value)
