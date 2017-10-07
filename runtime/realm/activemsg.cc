@@ -13,6 +13,43 @@
  * limitations under the License.
  */
 
+// include gasnet header files before activemsg.h to make sure we have
+//  definitions for gasnet_hsl_t and gasnett_cond_t
+#ifdef USE_GASNET
+
+// so OpenMPI borrowed gasnet's platform-detection code and didn't change
+//  the define names - work around it by undef'ing anything set via mpi.h
+//  before we include gasnet.h
+#undef __PLATFORM_COMPILER_GNU_VERSION_STR
+
+#ifndef GASNET_PAR
+#define GASNET_PAR
+#endif
+#include <gasnet.h>
+
+#ifndef GASNETT_THREAD_SAFE
+#define GASNETT_THREAD_SAFE
+#endif
+#include <gasnet_tools.h>
+
+// eliminate GASNet warnings for unused static functions
+static const void *ignore_gasnet_warning1 __attribute__((unused)) = (void *)_gasneti_threadkey_init;
+static const void *ignore_gasnet_warning2 __attribute__((unused)) = (void *)_gasnett_trace_printf_noop;
+
+#define GASNETHSL_IMPL     gasnet_hsl_t mutex
+#define GASNETCONDVAR_IMPL gasnett_cond_t condvar
+
+#else
+
+// no gasnet, so use pthread mutex/condvar
+
+#include <pthread.h>
+
+#define GASNETHSL_IMPL     pthread_mutex_t mutex
+#define GASNETCONDVAR_IMPL pthread_cond_t  condvar
+
+#endif
+
 #include <realm/activemsg.h>
 
 #ifndef __GNUC__
@@ -43,25 +80,6 @@ NodeID max_node_id = 0;
 //  points are defined at the bottom for the !USE_GASNET case
 #ifdef USE_GASNET
 
-// so OpenMPI borrowed gasnet's platform-detection code and didn't change
-//  the define names - work around it by undef'ing anything set via mpi.h
-//  before we include gasnet.h
-#undef __PLATFORM_COMPILER_GNU_VERSION_STR
-
-#ifndef GASNET_PAR
-#define GASNET_PAR
-#endif
-#include <gasnet.h>
-
-#ifndef GASNETT_THREAD_SAFE
-#define GASNETT_THREAD_SAFE
-#endif
-#include <gasnet_tools.h>
-
-// eliminate GASNet warnings for unused static functions
-static const void *ignore_gasnet_warning1 __attribute__((unused)) = (void *)_gasneti_threadkey_init;
-static const void *ignore_gasnet_warning2 __attribute__((unused)) = (void *)_gasnett_trace_printf_noop;
-
 #define CHECK_PTHREAD(cmd) do { \
   int ret = (cmd); \
   if(ret != 0) { \
@@ -81,52 +99,51 @@ static const void *ignore_gasnet_warning2 __attribute__((unused)) = (void *)_gas
 // gasnet_hsl_t in object form for templating goodness
 GASNetHSL::GASNetHSL(void)
 {
-  assert(sizeof(gasnet_hsl_t) <= 64);
-  gasnet_hsl_init((gasnet_hsl_t *)mutex_impl);
+  assert(sizeof(mutex) <= sizeof(placeholder));
+  gasnet_hsl_init(&mutex);
 }
 
 GASNetHSL::~GASNetHSL(void)
 {
-  gasnet_hsl_destroy((gasnet_hsl_t *)mutex_impl);
+  gasnet_hsl_destroy(&mutex);
 }
 
 void GASNetHSL::lock(void)
 {
-  gasnet_hsl_lock((gasnet_hsl_t *)mutex_impl);
+  gasnet_hsl_lock(&mutex);
 }
 
 void GASNetHSL::unlock(void)
 {
-  gasnet_hsl_unlock((gasnet_hsl_t *)mutex_impl);
+  gasnet_hsl_unlock(&mutex);
 }
 
 GASNetCondVar::GASNetCondVar(GASNetHSL &_mutex) 
   : mutex(_mutex)
 {
-  assert(sizeof(gasnett_cond_t) <= 64);
-  gasnett_cond_init((gasnett_cond_t *)cvar_impl);
+  assert(sizeof(condvar) <= sizeof(placeholder));
+  gasnett_cond_init(&condvar);
 }
 
 GASNetCondVar::~GASNetCondVar(void)
 {
-  gasnett_cond_destroy((gasnett_cond_t *)cvar_impl);
+  gasnett_cond_destroy(&condvar);
 }
 
 // these require that you hold the lock when you call
 void GASNetCondVar::signal(void)
 {
-  gasnett_cond_signal((gasnett_cond_t *)cvar_impl);
+  gasnett_cond_signal(&condvar);
 }
 
 void GASNetCondVar::broadcast(void)
 {
-  gasnett_cond_broadcast((gasnett_cond_t *)cvar_impl);
+  gasnett_cond_broadcast(&condvar);
 }
 
 void GASNetCondVar::wait(void)
 {
-  gasnett_cond_wait((gasnett_cond_t *)cvar_impl,
-		    &(((gasnet_hsl_t *)(mutex.mutex_impl))->lock));
+  gasnett_cond_wait(&condvar, &(mutex.mutex.lock));
 }
 
 #ifdef REALM_PROFILE_AM_HANDLERS
@@ -2177,7 +2194,7 @@ public:
     endpoints = new ActiveMessageEndpoint*[num_endpoints];
     for (int i = 0; i < num_endpoints; i++)
     {
-      if (((unsigned)i) == gasnet_mynode())
+      if (((gasnet_node_t)i) == gasnet_mynode())
         endpoints[i] = 0;
       else
         endpoints[i] = new ActiveMessageEndpoint(i);
@@ -2661,7 +2678,7 @@ void enqueue_message(NodeID target, int msgid,
 		     const void *payload, size_t payload_size,
 		     int payload_mode, void *dstptr)
 {
-  assert(target != gasnet_mynode());
+  assert((gasnet_node_t)target != gasnet_mynode());
 
   OutgoingMessage *hdr = new OutgoingMessage(msgid, 
 					     (arg_size + sizeof(int) - 1) / sizeof(int),
@@ -2692,7 +2709,7 @@ void enqueue_message(NodeID target, int msgid,
 		     off_t line_stride, size_t line_count,
 		     int payload_mode, void *dstptr)
 {
-  assert(target != gasnet_mynode());
+  assert((gasnet_node_t)target != gasnet_mynode());
 
   OutgoingMessage *hdr = new OutgoingMessage(msgid, 
 					     (arg_size + sizeof(int) - 1) / sizeof(int),
@@ -2717,7 +2734,7 @@ void enqueue_message(NodeID target, int msgid,
 		     const SpanList& spans, size_t payload_size,
 		     int payload_mode, void *dstptr)
 {
-  assert(target != gasnet_mynode());
+  assert((gasnet_node_t)target != gasnet_mynode());
 
   OutgoingMessage *hdr = new OutgoingMessage(msgid, 
   					     (arg_size + sizeof(int) - 1) / sizeof(int),
@@ -2816,7 +2833,7 @@ extern bool adjust_long_msgsize(NodeID source, void *&ptr, size_t &buffer_size,
   if(buffer_size == 0)
     return true;
 
-  assert(source != gasnet_mynode());
+  assert((gasnet_node_t)source != gasnet_mynode());
 
   return endpoint_manager->adjust_long_msgsize(source, ptr, buffer_size,
 					       message_id, chunks);
@@ -2838,52 +2855,51 @@ extern void record_message(NodeID source, bool sent_reply)
 
 GASNetHSL::GASNetHSL(void)
 {
-  assert(sizeof(pthread_mutex_t) <= 64);
-  pthread_mutex_init((pthread_mutex_t *)mutex_impl, 0);
+  assert(sizeof(mutex) <= sizeof(placeholder));
+  pthread_mutex_init(&mutex, 0);
 }
 
 GASNetHSL::~GASNetHSL(void)
 {
-  pthread_mutex_destroy((pthread_mutex_t *)mutex_impl);
+  pthread_mutex_destroy(&mutex);
 }
 
 void GASNetHSL::lock(void)
 {
-  pthread_mutex_lock((pthread_mutex_t *)mutex_impl);
+  pthread_mutex_lock(&mutex);
 }
 
 void GASNetHSL::unlock(void)
 {
-  pthread_mutex_unlock((pthread_mutex_t *)mutex_impl);
+  pthread_mutex_unlock(&mutex);
 }
 
 GASNetCondVar::GASNetCondVar(GASNetHSL &_mutex) 
   : mutex(_mutex)
 {
-  assert(sizeof(pthread_cond_t) <= 64);
-  pthread_cond_init((pthread_cond_t *)cvar_impl, 0);
+  assert(sizeof(condvar) <= sizeof(placeholder));
+  pthread_cond_init(&condvar, 0);
 }
 
 GASNetCondVar::~GASNetCondVar(void)
 {
-  pthread_cond_destroy((pthread_cond_t *)cvar_impl);
+  pthread_cond_destroy(&condvar);
 }
 
 // these require that you hold the lock when you call
 void GASNetCondVar::signal(void)
 {
-  pthread_cond_signal((pthread_cond_t *)cvar_impl);
+  pthread_cond_signal(&condvar);
 }
 
 void GASNetCondVar::broadcast(void)
 {
-  pthread_cond_broadcast((pthread_cond_t *)cvar_impl);
+  pthread_cond_broadcast(&condvar);
 }
 
 void GASNetCondVar::wait(void)
 {
-  pthread_cond_wait((pthread_cond_t *)cvar_impl,
-		    (pthread_mutex_t *)mutex.mutex_impl);
+  pthread_cond_wait(&condvar, &mutex.mutex);
 }
 
 void enqueue_message(NodeID target, int msgid,

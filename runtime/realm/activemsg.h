@@ -138,9 +138,17 @@ public:
 
 protected:
   friend class GASNetCondVar;
-  // trying to avoid declaring the gasnet-specific structure here
-  char mutex_impl[64] __attribute__ ((aligned(64)));
-  //gasnet_hsl_t mutex;
+
+  // the actual implementation of the mutex is of interest only to
+  //  activemsg.cc, but if we don't define it here, we run afoul of
+  //  rules type-punning, so use macros to let activemsg.cc's inclusion
+  //  of this file behave a little differently
+  union {
+    char placeholder[64];
+#ifdef GASNETHSL_IMPL
+    GASNETHSL_IMPL;
+#endif
+  } __attribute__ ((aligned(64)));
 };
 
 class GASNetCondVar {
@@ -158,9 +166,16 @@ public:
   GASNetHSL &mutex;
 
 protected:
-  // trying to avoid declaring the gasnet-specific structure here
-  char cvar_impl[64] __attribute__ ((aligned(64)));
-  //gasnett_cond_t cond;
+  // the actual implementation of the mutex is of interest only to
+  //  activemsg.cc, but if we don't define it here, we run afoul of
+  //  rules type-punning, so use macros to let activemsg.cc's inclusion
+  //  of this file behave a little differently
+  union {
+    char placeholder[64];
+#ifdef GASNETCONDVAR_IMPL
+    GASNETCONDVAR_IMPL;
+#endif
+  } __attribute__ ((aligned(64)));
 };
 
 extern void init_endpoints(int gasnet_mem_size_in_mb,
