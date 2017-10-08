@@ -856,7 +856,7 @@ namespace LegionRuntime {
     class Translation {
     public:
       enum { IDIM = DIM, ODIM = DIM };
-      Translation(void) : offset((coord_t)0) {}
+      Translation(void) : offset(coord_t(0)) {}
       Translation(const Point<DIM> _offset) : offset(_offset) {}
   
       Point<ODIM> image(const Point<IDIM> p) const
@@ -885,7 +885,7 @@ namespace LegionRuntime {
 	subrect = r;
 	for(unsigned i = 0; i < DIM; i++) {
 	  // strides are unit vectors
-	  strides[i] = (coord_t)0;
+	  strides[i] = coord_t(0);
 	  strides[i].x[i] = 1;
 	}
 	return r.lo + offset;

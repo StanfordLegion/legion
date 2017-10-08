@@ -2207,7 +2207,7 @@ namespace Realm {
         dst_buf.deserialize(payload->dst_buf_bits);
         dst_buf.memory = args.dst_mem;
 #else
-	DmaRequest* dma_request = 0;
+	intptr_t dma_req_as_intptr = 0;
 	NodeID launch_node = 0;
 	XferDesID guid = XferDes::XFERDES_NO_GUID;
 	XferDesID pre_xd_guid = XferDes::XFERDES_NO_GUID;
@@ -2226,7 +2226,7 @@ namespace Realm {
 
 	Realm::Serialization::FixedBufferDeserializer fbd(msgdata, msglen);
 
-	bool ok = ((fbd >> (intptr_t&)dma_request) &&
+	bool ok = ((fbd >> dma_req_as_intptr) &&
 		   (fbd >> launch_node) &&
 		   (fbd >> guid) &&
 		   (fbd >> pre_xd_guid) &&
@@ -2245,6 +2245,8 @@ namespace Realm {
 	dst_iter = TransferIterator::deserialize_new(fbd);
 	assert((src_iter != 0) && (dst_iter != 0));
 	assert(fbd.bytes_left() == 0);
+
+	DmaRequest* dma_request = reinterpret_cast<DmaRequest *>(dma_req_as_intptr);
 
 	create_xfer_des(dma_request, launch_node, my_node_id,
 			guid, pre_xd_guid, next_xd_guid,
@@ -2327,7 +2329,7 @@ namespace Realm {
         //  payload->oas_vec(i) = oas_vec[i];
 #else
 	Realm::Serialization::DynamicBufferSerializer dbs(128);
-	bool ok = ((dbs << (intptr_t)dma_request) &&
+	bool ok = ((dbs << reinterpret_cast<intptr_t>(dma_request)) &&
 		   (dbs << launch_node) &&
 		   (dbs << guid) &&
 		   (dbs << pre_xd_guid) &&

@@ -176,7 +176,7 @@ namespace Realm {
   ProfilingRequest &ProfilingRequest::add_measurement(void) 
   {
     // SJT: the typecast here is a NOP, but somehow it avoids weird linker errors
-    requested_measurements.insert((ProfilingMeasurementID)T::ID);
+    requested_measurements.insert(static_cast<ProfilingMeasurementID>(T::ID));
     return *this;
   }
 
@@ -228,20 +228,20 @@ namespace Realm {
   template <typename T>
   bool ProfilingMeasurementCollection::wants_measurement(void) const
   {
-    return requested_measurements.count((ProfilingMeasurementID)T::ID);
+    return requested_measurements.count(static_cast<ProfilingMeasurementID>(T::ID));
   } 
 
   template <typename T>
   void ProfilingMeasurementCollection::add_measurement(const T& data, bool send_complete_responses /*= true*/)
   {
-    std::map<ProfilingMeasurementID, std::vector<const ProfilingRequest *> >::const_iterator it = requested_measurements.find((ProfilingMeasurementID)T::ID);
+    std::map<ProfilingMeasurementID, std::vector<const ProfilingRequest *> >::const_iterator it = requested_measurements.find(static_cast<ProfilingMeasurementID>(T::ID));
     if(it == requested_measurements.end()) {
       // caller probably should have asked if we wanted this before measuring it...
       return;
     }
 
     // no duplicates for now
-    assert(measurements.count((ProfilingMeasurementID)T::ID) == 0);
+    assert(measurements.count(static_cast<ProfilingMeasurementID>(T::ID)) == 0);
 
     // serialize the data
     Serialization::DynamicBufferSerializer dbs(128);
@@ -252,7 +252,7 @@ namespace Realm {
     assert(ok);
 
     // measurement data is stored in a ByteArray
-    ByteArray& md = measurements[(ProfilingMeasurementID)T::ID];
+    ByteArray& md = measurements[static_cast<ProfilingMeasurementID>(T::ID)];
     ByteArray b = dbs.detach_bytearray(-1);  // no trimming
     md.swap(b);  // avoids a copy
 
@@ -336,14 +336,14 @@ namespace Realm {
   inline bool ProfilingResponse::has_measurement(void) const
   {
     int offset, size; // not actually used
-    return find_id((int)(T::ID), offset, size);
+    return find_id(static_cast<int>(T::ID), offset, size);
   }
 
   template <typename T>
   inline T *ProfilingResponse::get_measurement(void) const
   {
     int offset, size;
-    if(find_id((int)(T::ID), offset, size)) {
+    if(find_id(static_cast<int>(T::ID), offset, size)) {
       Serialization::FixedBufferDeserializer fbd(data + offset, size);
       T *m = new T;
 #ifndef NDEBUG
@@ -360,7 +360,7 @@ namespace Realm {
   inline bool ProfilingResponse::get_measurement(T& result) const
   {
     int offset, size;
-    if(find_id((int)(T::ID), offset, size)) {
+    if(find_id(static_cast<int>(T::ID), offset, size)) {
       Serialization::FixedBufferDeserializer fbd(data + offset, size);
       return (fbd >> result);
     } else

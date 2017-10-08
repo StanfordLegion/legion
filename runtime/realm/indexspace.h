@@ -55,7 +55,7 @@ namespace Realm {
   struct CopySrcDstField {
   public:
   CopySrcDstField(void) 
-    : inst(RegionInstance::NO_INST), field_id((FieldID)-1), size(0), 
+    : inst(RegionInstance::NO_INST), field_id(FieldID(-1)), size(0), 
       serdez_id(0), subfield_offset(0) { }
   public:
     RegionInstance inst;

@@ -559,7 +559,7 @@ class ActiveMessageShortNoReply {
   static void add_handler_entries(const char *description)
   {
     assert(sizeof(MessageRawArgsType) <= 64);  // max of 16 4-byte args
-    add_handler_entry(MSGID, (void (*)()) (MessageRawArgsType::handler_short));
+    add_handler_entry(MSGID, reinterpret_cast<void (*)()>(MessageRawArgsType::handler_short));
 #ifdef ACTIVE_MESSAGE_TRACE
     record_am_handler(MSGID, description);
 #endif
@@ -602,7 +602,7 @@ class ActiveMessageMediumNoReply {
   static void add_handler_entries(const char *description)
   {
     assert(sizeof(MessageRawArgsType) <= 64);  // max of 16 4-byte args
-    add_handler_entry(MSGID, (void (*)()) (MessageRawArgsType::handler_medium));
+    add_handler_entry(MSGID, reinterpret_cast<void (*)()>(MessageRawArgsType::handler_medium));
 #ifdef ACTIVE_MESSAGE_TRACE
     record_am_handler(MSGID, description);
 #endif

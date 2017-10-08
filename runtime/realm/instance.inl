@@ -194,7 +194,7 @@ namespace Realm {
 
 
   inline RegionInstance::DestroyedField::DestroyedField(void) 
-    : field_id((FieldID)-1), size(0), serdez_id(0)
+    : field_id(FieldID(-1)), size(0), serdez_id(0)
   { }
 
   inline RegionInstance::DestroyedField::DestroyedField(FieldID fid, unsigned s, CustomSerdezID sid)

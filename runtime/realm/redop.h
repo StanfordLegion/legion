@@ -107,8 +107,8 @@ namespace Realm {
       virtual void apply(void *lhs_ptr, const void *rhs_ptr, size_t count,
 			 bool exclusive = false) const
       {
-	typename REDOP::LHS *lhs = (typename REDOP::LHS *)lhs_ptr;
-	const typename REDOP::RHS *rhs = (const typename REDOP::RHS *)rhs_ptr;
+	typename REDOP::LHS *lhs = static_cast<typename REDOP::LHS *>(lhs_ptr);
+	const typename REDOP::RHS *rhs = static_cast<const typename REDOP::RHS *>(rhs_ptr);
 	if(exclusive) {
 	  for(size_t i = 0; i < count; i++)
 	    REDOP::template apply<true>(lhs[i], rhs[i]);
@@ -122,19 +122,19 @@ namespace Realm {
 				 off_t lhs_stride, off_t rhs_stride, size_t count,
 				 bool exclusive = false) const
       {
-	char *lhs = (char *)lhs_ptr;
-	const char *rhs = (const char *)rhs_ptr;
+	char *lhs = static_cast<char *>(lhs_ptr);
+	const char *rhs = static_cast<const char *>(rhs_ptr);
 	if(exclusive) {
 	  for(size_t i = 0; i < count; i++) {
-	    REDOP::template apply<true>(*(typename REDOP::LHS *)lhs,
-					*(const typename REDOP::RHS *)rhs);
+	    REDOP::template apply<true>(*static_cast<typename REDOP::LHS *>(lhs),
+					*static_cast<const typename REDOP::RHS *>(rhs));
 	    lhs += lhs_stride;
 	    rhs += rhs_stride;
 	  }
 	} else {
 	  for(size_t i = 0; i < count; i++) {
-	    REDOP::template apply<false>(*(typename REDOP::LHS *)lhs,
-					 *(const typename REDOP::RHS *)rhs);
+	    REDOP::template apply<false>(*static_cast<typename REDOP::LHS *>(lhs),
+					 *static_cast<const typename REDOP::RHS *>(rhs));
 	    lhs += lhs_stride;
 	    rhs += rhs_stride;
 	  }
@@ -144,8 +144,8 @@ namespace Realm {
       virtual void fold(void *rhs1_ptr, const void *rhs2_ptr, size_t count,
 			bool exclusive = false) const
       {
-	typename REDOP::RHS *rhs1 = (typename REDOP::RHS *)rhs1_ptr;
-	const typename REDOP::RHS *rhs2 = (const typename REDOP::RHS *)rhs2_ptr;
+	typename REDOP::RHS *rhs1 = static_cast<typename REDOP::RHS *>(rhs1_ptr);
+	const typename REDOP::RHS *rhs2 = static_cast<const typename REDOP::RHS *>(rhs2_ptr);
 	if(exclusive) {
 	  for(size_t i = 0; i < count; i++)
 	    REDOP::template fold<true>(rhs1[i], rhs2[i]);
@@ -159,19 +159,19 @@ namespace Realm {
 				off_t lhs_stride, off_t rhs_stride, size_t count,
 				bool exclusive = false) const
       {
-	char *lhs = (char *)lhs_ptr;
-	const char *rhs = (const char *)rhs_ptr;
+	char *lhs = static_cast<char *>(lhs_ptr);
+	const char *rhs = static_cast<const char *>(rhs_ptr);
 	if(exclusive) {
 	  for(size_t i = 0; i < count; i++) {
-	    REDOP::template fold<true>(*(typename REDOP::RHS *)lhs,
-				       *(const typename REDOP::RHS *)rhs);
+	    REDOP::template fold<true>(*static_cast<typename REDOP::RHS *>(lhs),
+				       *static_cast<const typename REDOP::RHS *>(rhs));
 	    lhs += lhs_stride;
 	    rhs += rhs_stride;
 	  }
 	} else {
 	  for(size_t i = 0; i < count; i++) {
-	    REDOP::template fold<false>(*(typename REDOP::RHS *)lhs,
-					*(const typename REDOP::RHS *)rhs);
+	    REDOP::template fold<false>(*static_cast<typename REDOP::RHS *>(lhs),
+					*static_cast<const typename REDOP::RHS *>(rhs));
 	    lhs += lhs_stride;
 	    rhs += rhs_stride;
 	  }
@@ -180,7 +180,7 @@ namespace Realm {
 
       virtual void init(void *ptr, size_t count) const
       {
-        typename REDOP::RHS *rhs_ptr = (typename REDOP::RHS *)ptr;
+        typename REDOP::RHS *rhs_ptr = static_cast<typename REDOP::RHS *>(ptr);
         for (size_t i = 0; i < count; i++)
           *rhs_ptr++ = REDOP::identity;
       }

@@ -17,6 +17,7 @@
 
 #include "timers.h"
 
+#include <string.h>
 #include <list>
 
 pthread_key_t thread_timer_key;
@@ -79,7 +80,8 @@ namespace Realm {
       const double *p = (const double *)data;
       int count = datalen / (2 * sizeof(double));
       for(int i = 0; i < count; i++) {
-        int kind = *(int *)(&p[2*i]);
+        int kind; // memcpy preferred over type-punning
+	memcpy(&kind, &p[2*i], sizeof(int));
         double accum = p[2*i+1];
 
         std::map<int,double>::iterator it = timerp->find(kind);
@@ -310,7 +312,10 @@ namespace Realm {
     for(std::map<int,double>::iterator it = timers.begin();
 	it != timers.end();
 	it++) {
-      *(int *)(&return_data[count]) = it->first;
+      // use memcpy instead of type-punning
+      //*(int *)(&return_data[count]) = it->first;
+      return_data[count] = 0;
+      memcpy(&return_data[count], &(it->first), sizeof(int));
       return_data[count+1] = it->second;
       count += 2;
     }

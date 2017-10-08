@@ -996,14 +996,14 @@ namespace Legion {
       {
         // Step the rect iterator first
         Realm::PointInRectIterator<1,coord_t> *rect_itr = 
-          (Realm::PointInRectIterator<1,coord_t>*)rect_iterator;
+          (Realm::PointInRectIterator<1,coord_t>*)(void *)rect_iterator;
         rect_itr->step();
         rect_valid = rect_itr->valid;
         if (!rect_valid) {
           // If the rectangle iterator is not valid anymore
           // then try to start the next rectangle
           Realm::IndexSpaceIterator<1,coord_t> *is_itr = 
-            (Realm::IndexSpaceIterator<1,coord_t>*)is_iterator;
+            (Realm::IndexSpaceIterator<1,coord_t>*)(void *)is_iterator;
           is_itr->step();
           is_valid = is_itr->valid;
           if (is_valid) {
@@ -1024,14 +1024,14 @@ namespace Legion {
       {
         // Step the rect iterator first
         Realm::PointInRectIterator<2,coord_t> *rect_itr = 
-          (Realm::PointInRectIterator<2,coord_t>*)rect_iterator;
+          (Realm::PointInRectIterator<2,coord_t>*)(void *)rect_iterator;
         rect_itr->step();
         rect_valid = rect_itr->valid;
         if (!rect_valid) {
           // If the rectangle iterator is not valid anymore
           // then try to start the next rectangle
           Realm::IndexSpaceIterator<2,coord_t> *is_itr = 
-            (Realm::IndexSpaceIterator<2,coord_t>*)is_iterator;
+            (Realm::IndexSpaceIterator<2,coord_t>*)(void *)is_iterator;
           is_itr->step();
           is_valid = is_itr->valid;
           if (is_valid) {
@@ -1052,14 +1052,14 @@ namespace Legion {
       {
         // Step the rect iterator first
         Realm::PointInRectIterator<3,coord_t> *rect_itr = 
-          (Realm::PointInRectIterator<3,coord_t>*)rect_iterator;
+          (Realm::PointInRectIterator<3,coord_t>*)(void *)rect_iterator;
         rect_itr->step();
         rect_valid = rect_itr->valid;
         if (!rect_valid) {
           // If the rectangle iterator is not valid anymore
           // then try to start the next rectangle
           Realm::IndexSpaceIterator<3,coord_t> *is_itr = 
-            (Realm::IndexSpaceIterator<3,coord_t>*)is_iterator;
+            (Realm::IndexSpaceIterator<3,coord_t>*)(void *)is_iterator;
           is_itr->step();
           is_valid = is_itr->valid;
           if (is_valid) {

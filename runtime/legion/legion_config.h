@@ -184,7 +184,7 @@
 // This statically computes an integer log base 2 for a number
 // which is guaranteed to be a power of 2. Adapted from
 // http://graphics.stanford.edu/~seander/bithacks.html#IntegerLogDeBruijn
-#define STATIC_LOG2(x)  (LOG2_LOOKUP((uint32_t)(x * 0x077CB531U) >> 27))
+#define STATIC_LOG2(x)  (LOG2_LOOKUP(uint32_t(x * 0x077CB531U) >> 27))
 #define LOG2_LOOKUP(x) ((x==0) ? 0 : (x==1) ? 1 : (x==2) ? 28 : (x==3) ? 2 : \
                    (x==4) ? 29 : (x==5) ? 14 : (x==6) ? 24 : (x==7) ? 3 : \
                    (x==8) ? 30 : (x==9) ? 22 : (x==10) ? 20 : (x==11) ? 15 : \
