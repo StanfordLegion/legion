@@ -13,6 +13,8 @@
  * limitations under the License.
  */
 
+#include <realm/realm_config.h>
+
 // include gasnet header files before activemsg.h to make sure we have
 //  definitions for gasnet_hsl_t and gasnett_cond_t
 #ifdef USE_GASNET
