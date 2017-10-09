@@ -3159,11 +3159,6 @@ namespace Legion {
           if ((*it)->try_active_deletion())
           {
             record_deleted_instance(*it);
-            // Unregister it from the runtime so that it avoids
-            // sending messages when it is deleted
-            if ((*it)->is_registered())
-              wait_for.insert(
-                  (*it)->unregister_with_runtime(REFERENCE_VIRTUAL_CHANNEL));
             // Remove our base resource reference
             if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
               delete (*it);
