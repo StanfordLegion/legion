@@ -78,9 +78,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Remove valid references from any resources that haven't been deleted
+      // First delete any region tree nodes that we own
       std::vector<RegionNode*> regions_to_delete;
-      std::vector<FieldSpaceNode*> fields_to_delete;
-      std::vector<IndexSpaceNode*> indexes_to_delete;
       {
         AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
         for (std::map<RegionTreeID,RegionNode*>::const_iterator it = 
@@ -94,6 +93,15 @@ namespace Legion {
             continue;
           regions_to_delete.push_back(it->second);
         }
+      }
+      for (std::vector<RegionNode*>::const_iterator it = 
+            regions_to_delete.begin(); it != regions_to_delete.end(); it++)
+        if ((*it)->destroy_node(runtime->address_space, true/*root*/))
+          delete (*it);
+      // Then do field space nodes
+      std::vector<FieldSpaceNode*> fields_to_delete;
+      {
+        AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
         for (std::map<FieldSpace,FieldSpaceNode*>::const_iterator it = 
               field_nodes.begin(); it != field_nodes.end(); it++)
         {
@@ -105,6 +113,15 @@ namespace Legion {
             continue;
           fields_to_delete.push_back(it->second);
         }
+      }
+      for (std::vector<FieldSpaceNode*>::const_iterator it =
+            fields_to_delete.begin(); it != fields_to_delete.end(); it++)
+        if ((*it)->destroy_node(runtime->address_space))
+          delete (*it);
+      // Then do index space nodes
+      std::vector<IndexSpaceNode*> indexes_to_delete;
+      {
+        AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
         for (std::map<IndexSpace,IndexSpaceNode*>::const_iterator it = 
               index_nodes.begin(); it != index_nodes.end(); it++)
         {
@@ -120,17 +137,6 @@ namespace Legion {
           indexes_to_delete.push_back(it->second);
         }
       }
-      // First delete any region tree nodes that we own
-      for (std::vector<RegionNode*>::const_iterator it = 
-            regions_to_delete.begin(); it != regions_to_delete.end(); it++)
-        if ((*it)->destroy_node(runtime->address_space, true/*root*/))
-          delete (*it);
-      // Then do field space nodes
-      for (std::vector<FieldSpaceNode*>::const_iterator it =
-            fields_to_delete.begin(); it != fields_to_delete.end(); it++)
-        if ((*it)->destroy_node(runtime->address_space))
-          delete (*it);
-      // Then do index space nodes
       for (std::vector<IndexSpaceNode*>::const_iterator it = 
             indexes_to_delete.begin(); it != indexes_to_delete.end(); it++)
         if ((*it)->destroy_node(runtime->address_space))
