@@ -367,8 +367,16 @@ namespace Realm {
 					       size_t bytes, size_t alignment,
 					       Event precondition)
     {
-      // TODO: remote stuff
-      assert(ID(me).memory.owner_node == my_node_id);
+      // all allocation requests are handled by the memory's owning node for
+      //  now - local caching might be possible though
+      NodeID target = ID(me).memory.owner_node;
+      if(target != my_node_id) {
+	MemStorageAllocRequest::send_request(target,
+					     me, i,
+					     bytes, alignment,
+					     precondition);
+	return false /*asynchronous notification*/;
+      }
 
       if(!precondition.has_triggered()) {
 	// TODO: queue things up?
@@ -388,8 +396,11 @@ namespace Realm {
 	// local notification of result
 	get_instance(i)->notify_allocation(ok, offset);
       } else {
-	// TODO: remote notification
-	assert(0);
+	// remote notification
+	MemStorageAllocResponse::send_request(ID(i).instance.creator_node,
+					      i,
+					      offset,
+					      ok);
       }
 
       return true /*immediate notification*/;
@@ -399,8 +410,15 @@ namespace Realm {
     void MemoryImpl::release_instance_storage(RegionInstance i,
 					      Event precondition)
     {
-      // TODO: remote stuff
-      assert(ID(me).memory.owner_node == my_node_id);
+      // all allocation requests are handled by the memory's owning node for
+      //  now - local caching might be possible though
+      NodeID target = ID(me).memory.owner_node;
+      if(target != my_node_id) {
+	MemStorageReleaseRequest::send_request(target,
+					       me, i,
+					       precondition);
+	return;
+      }
 
       // TODO: memory needs to handle non-ready releases
       assert(precondition.has_triggered());
@@ -414,8 +432,9 @@ namespace Realm {
 	// local notification of result
 	get_instance(i)->notify_deallocation();
       } else {
-	// TODO: remote notification
-	assert(0);
+	// remote notification
+	MemStorageReleaseResponse::send_request(ID(i).instance.creator_node,
+						i);
       }
     }
 
@@ -803,6 +822,115 @@ namespace Realm {
       DetailedTimer::pop_timer();
 #endif
     }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class MemStorageAllocRequest
+  //
+
+  /*static*/ void MemStorageAllocRequest::handle_request(RequestArgs args)
+  {
+    MemoryImpl *impl = get_runtime()->get_memory_impl(args.memory);
+
+    impl->allocate_instance_storage(args.inst,
+				    args.bytes, args.alignment,
+				    args.precondition);
+  }
+
+  /*static*/ void MemStorageAllocRequest::send_request(NodeID target,
+						       Memory memory, RegionInstance inst,
+						       size_t bytes, size_t alignment,
+						       Event precondition)
+  {
+    RequestArgs args;
+
+    args.memory = memory;
+    args.inst = inst;
+    args.bytes = bytes;
+    args.alignment = alignment;
+    args.precondition = precondition;
+
+    Message::request(target, args);
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class MemStorageAllocResponse
+  //
+
+  /*static*/ void MemStorageAllocResponse::handle_request(RequestArgs args)
+  {
+    RegionInstanceImpl *impl = get_runtime()->get_instance_impl(args.inst);
+
+    impl->notify_allocation(args.success, args.offset);
+  }
+
+  /*static*/ void MemStorageAllocResponse::send_request(NodeID target,
+							RegionInstance inst,
+							size_t offset,
+							bool success)
+  {
+    RequestArgs args;
+
+    args.inst = inst;
+    args.offset = offset;
+    args.success = success;
+
+    Message::request(target, args);
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class MemStorageReleaseRequest
+  //
+
+  /*static*/ void MemStorageReleaseRequest::handle_request(RequestArgs args)
+  {
+    MemoryImpl *impl = get_runtime()->get_memory_impl(args.memory);
+
+    impl->release_instance_storage(args.inst,
+				   args.precondition);
+  }
+
+  /*static*/ void MemStorageReleaseRequest::send_request(NodeID target,
+							 Memory memory,
+							 RegionInstance inst,
+							 Event precondition)
+  {
+    RequestArgs args;
+
+    args.memory = memory;
+    args.inst = inst;
+    args.precondition = precondition;
+
+    Message::request(target, args);
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class MemStorageReleaseResponse
+  //
+
+  /*static*/ void MemStorageReleaseResponse::handle_request(RequestArgs args)
+  {
+    RegionInstanceImpl *impl = get_runtime()->get_instance_impl(args.inst);
+
+    impl->notify_deallocation();
+  }
+
+  /*static*/ void MemStorageReleaseResponse::send_request(NodeID target,
+							  RegionInstance inst)
+  {
+    RequestArgs args;
+
+    args.inst = inst;
+
+    Message::request(target, args);
+  }
 
 
   ////////////////////////////////////////////////////////////////////////

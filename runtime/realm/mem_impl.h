@@ -292,6 +292,79 @@ namespace Realm {
 
     // active messages
 
+    struct MemStorageAllocRequest {
+      struct RequestArgs {
+	Memory memory;
+	RegionInstance inst;
+	size_t bytes;
+	size_t alignment;
+	Event precondition;
+      };
+
+      static void handle_request(RequestArgs args);
+
+      typedef ActiveMessageShortNoReply<MEM_STORAGE_ALLOC_REQ_MSGID,
+					RequestArgs,
+					handle_request> Message;
+
+      static void send_request(NodeID target,
+			       Memory memory, RegionInstance inst,
+			       size_t bytes, size_t alignment,
+			       Event precondition);
+    };
+
+    struct MemStorageAllocResponse {
+      struct RequestArgs {
+	RegionInstance inst;
+	size_t offset;
+	bool success;
+      };
+
+      static void handle_request(RequestArgs args);
+
+      typedef ActiveMessageShortNoReply<MEM_STORAGE_ALLOC_RESP_MSGID,
+					RequestArgs,
+					handle_request> Message;
+
+      static void send_request(NodeID target,
+			       RegionInstance inst,
+			       size_t offset, bool success);
+    };
+
+    struct MemStorageReleaseRequest {
+      struct RequestArgs {
+	Memory memory;
+	RegionInstance inst;
+	Event precondition;
+      };
+
+      static void handle_request(RequestArgs args);
+
+      typedef ActiveMessageShortNoReply<MEM_STORAGE_RELEASE_REQ_MSGID,
+					RequestArgs,
+					handle_request> Message;
+
+      static void send_request(NodeID target,
+			       Memory memory,
+			       RegionInstance inst,
+			       Event precondition);
+    };
+
+    struct MemStorageReleaseResponse {
+      struct RequestArgs {
+	RegionInstance inst;
+      };
+
+      static void handle_request(RequestArgs args);
+
+      typedef ActiveMessageShortNoReply<MEM_STORAGE_RELEASE_RESP_MSGID,
+					RequestArgs,
+					handle_request> Message;
+
+      static void send_request(NodeID target,
+			       RegionInstance inst);
+    };
+
     struct RemoteMemAllocRequest {
       struct RequestArgs {
 	int sender;

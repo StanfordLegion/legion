@@ -1238,6 +1238,10 @@ namespace Realm {
       RemoteIBAllocRequestAsync::Message::add_handler_entries("Remote IB Alloc Request AM");
       RemoteIBAllocResponseAsync::Message::add_handler_entries("Remote IB Alloc Response AM");
       RemoteIBFreeRequestAsync::Message::add_handler_entries("Remote IB Free Request AM");
+      MemStorageAllocRequest::Message::add_handler_entries("Memory Storage Alloc Request");
+      MemStorageAllocResponse::Message::add_handler_entries("Memory Storage Alloc Response");
+      MemStorageReleaseRequest::Message::add_handler_entries("Memory Storage Release Request");
+      MemStorageReleaseResponse::Message::add_handler_entries("Memory Storage Release Response");
       //TestMessage::add_handler_entries("Test AM");
       //TestMessage2::add_handler_entries("Test 2 AM");
 

@@ -141,15 +141,17 @@ namespace Realm {
 	  }
 	}
 	if(alloc_done) {
+	  // lost the race to the notification callback, so we trigger the
+	  //  ready event ourselves
 	  if(alloc_successful) {
 	    if(impl->measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>())
 	      impl->timeline.record_ready_time();
 	    GenEventImpl::trigger(ready_event, false /*!poisoned*/);
 	    ready_event = Event::NO_EVENT;
+	  } else {
+	    // poison the ready event and still return it
+	    GenEventImpl::trigger(ready_event, true /*poisoned*/);
 	  }
-	} else {
-	  // poison the ready event and still return it
-	  GenEventImpl::trigger(ready_event, true /*poisoned*/);
 	}
       }
 
