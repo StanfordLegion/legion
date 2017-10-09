@@ -2384,7 +2384,24 @@ namespace Realm {
 	  return false;
 	}
 
-        // No need to check the instance, we are on its local node 
+
+	{
+	  RegionInstanceImpl *dst_impl = get_runtime()->get_instance_impl(dst.inst);
+
+	  {
+	    Event e = dst_impl->request_metadata();
+	    if(!e.has_triggered()) {
+	      if(just_check) {
+		log_dma.debug("dma request %p - no dst instance (" IDFMT ") metadata yet", this, dst_impl->me.id);
+		return false;
+	      }
+	      log_dma.debug("request %p - dst instance metadata invalid - sleeping on event " IDFMT, this, e.id);
+	      waiter.sleep_on_event(e);
+	      return false;
+	    }
+	  }
+	}
+
         state = STATE_BEFORE_EVENT;
       }
 
