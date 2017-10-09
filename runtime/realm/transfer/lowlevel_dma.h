@@ -106,11 +106,6 @@ namespace Realm {
 
     extern void handle_remote_fill(RemoteFillArgs args, const void *data, size_t msglen);
 
-    enum DMAActiveMessageIDs {
-      REMOTE_COPY_MSGID = 200,
-      REMOTE_FILL_MSGID = 201,
-    };
-
     typedef ActiveMessageMediumNoReply<REMOTE_COPY_MSGID,
 				       RemoteCopyArgs,
 				       handle_remote_copy> RemoteCopyMessage;
