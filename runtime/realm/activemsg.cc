@@ -208,7 +208,7 @@ Realm::Logger log_amsg_trace("amtrace");
 
 void record_am_handler(int handler_id, const char *description, bool reply)
 {
-  log_amsg_trace.info("AM Handler: %d %s %s\n", handler_id, description,
+  log_amsg_trace.info("AM Handler: %d %s %s", handler_id, description,
 		      (reply ? "Reply" : "Request"));
 }
 #endif
