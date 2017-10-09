@@ -365,7 +365,7 @@ namespace Realm {
 
     class DeferredShutdown : public EventWaiter {
     public:
-      DeferredShutdown(RuntimeImpl *_runtime);
+      DeferredShutdown(RuntimeImpl *_runtime, int _result_code);
       virtual ~DeferredShutdown(void);
 
       virtual bool event_triggered(Event e, bool poisoned);
@@ -374,10 +374,12 @@ namespace Realm {
 
     protected:
       RuntimeImpl *runtime;
+      int result_code;
     };
 
-    DeferredShutdown::DeferredShutdown(RuntimeImpl *_runtime)
+    DeferredShutdown::DeferredShutdown(RuntimeImpl *_runtime, int _result_code)
       : runtime(_runtime)
+      , result_code(_result_code)
     {}
 
     DeferredShutdown::~DeferredShutdown(void)
@@ -391,7 +393,7 @@ namespace Realm {
 	assert(false);
       }
       log_runtime.info() << "triggering deferred shutdown";
-      runtime->shutdown(true);
+      runtime->shutdown(true, result_code);
       return true; // go ahead and delete us
     }
 
@@ -405,23 +407,28 @@ namespace Realm {
       return Event::NO_EVENT;
     }
 
-    void Runtime::shutdown(Event wait_on /*= Event::NO_EVENT*/)
+    void Runtime::shutdown(Event wait_on /*= Event::NO_EVENT*/,
+			   int result_code /*= 0*/)
     {
       log_runtime.info() << "shutdown requested - wait_on=" << wait_on;
       if(wait_on.has_triggered())
-	((RuntimeImpl *)impl)->shutdown(true); // local request
+	((RuntimeImpl *)impl)->shutdown(true, result_code); // local request
       else
-	EventImpl::add_waiter(wait_on, new DeferredShutdown((RuntimeImpl *)impl));
+	EventImpl::add_waiter(wait_on,
+			      new DeferredShutdown((RuntimeImpl *)impl,
+						   result_code));
     }
 
-    void Runtime::wait_for_shutdown(void)
+    int Runtime::wait_for_shutdown(void)
     {
-      ((RuntimeImpl *)impl)->wait_for_shutdown();
+      int result = ((RuntimeImpl *)impl)->wait_for_shutdown();
 
       // after the shutdown, we nuke the RuntimeImpl
       delete ((RuntimeImpl *)impl);
       impl = 0;
       runtime_singleton = 0;
+
+      return result;
     }
 
 
@@ -720,7 +727,9 @@ namespace Realm {
 	local_proc_group_free_list(0),
 	//local_sparsity_map_free_list(0),
 	run_method_called(false),
-	shutdown_requested(false), shutdown_condvar(shutdown_mutex),
+	shutdown_requested(false),
+	shutdown_result_code(0),
+	shutdown_condvar(shutdown_mutex),
 	core_map(0), core_reservations(0),
 	sampling_profiler(true /*system default*/),
 	num_local_memories(0), num_local_ib_memories(0),
@@ -2047,14 +2056,14 @@ namespace Realm {
 	log_runtime.info("shutdown request received - terminating\n");
       }
 
-      wait_for_shutdown();
-      exit(0);
+      int result = wait_for_shutdown();
+      exit(result);
     }
 
     // this is not member data of RuntimeImpl because we don't want use-after-free problems
     static int shutdown_count = 0;
 
-    void RuntimeImpl::shutdown(bool local_request /*= true*/)
+    void RuntimeImpl::shutdown(bool local_request, int result_code)
     {
       // filter out duplicate requests
       bool already_started = (__sync_fetch_and_add(&shutdown_count, 1) > 0);
@@ -2065,7 +2074,7 @@ namespace Realm {
 	log_runtime.info("shutdown request - notifying other nodes");
 	for(NodeID i = 0; i <= max_node_id; i++)
 	  if(i != my_node_id)
-	    RuntimeShutdownMessage::send_request(i);
+	    RuntimeShutdownMessage::send_request(i, result_code);
       }
 
       log_runtime.info("shutdown request - cleaning up local processors");
@@ -2083,12 +2092,13 @@ namespace Realm {
 
       {
 	AutoHSLLock al(shutdown_mutex);
+	shutdown_result_code = result_code;
 	shutdown_requested = true;
 	shutdown_condvar.broadcast();
       }
     }
 
-    void RuntimeImpl::wait_for_shutdown(void)
+    int RuntimeImpl::wait_for_shutdown(void)
     {
 #if 0
       bool exit_process = true;
@@ -2203,10 +2213,7 @@ namespace Realm {
 
       if(!Threading::cleanup()) exit(1);
 
-      // this terminates the process, so control never gets back to caller
-      // would be nice to fix this...
-      //if (exit_process)
-      //  exit(0);
+      return shutdown_result_code;
     }
 
     EventImpl *RuntimeImpl::get_event_impl(Event e)
@@ -2506,17 +2513,18 @@ namespace Realm {
 
   /*static*/ void RuntimeShutdownMessage::handle_request(RequestArgs args)
   {
-    log_runtime.info("received shutdown request from node %d", args.initiating_node);
+    log_runtime.info() << "shutdown request received: sender=" << args.initiating_node << " code=" << args.result_code;
 
-    get_runtime()->shutdown(false);
+    get_runtime()->shutdown(false, args.result_code);
   }
 
-  /*static*/ void RuntimeShutdownMessage::send_request(NodeID target)
+  /*static*/ void RuntimeShutdownMessage::send_request(NodeID target,
+						       int result_code)
   {
     RequestArgs args;
 
     args.initiating_node = my_node_id;
-    args.dummy = 0;
+    args.result_code = result_code;
     Message::request(target, args);
   }
 

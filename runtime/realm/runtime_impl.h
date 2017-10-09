@@ -209,9 +209,10 @@ namespace Realm {
 	       const void *args = 0, size_t arglen = 0, bool background = false);
 
       // requests a shutdown of the runtime
-      void shutdown(bool local_request);
+      void shutdown(bool local_request, int result_code);
 
-      void wait_for_shutdown(void);
+      // returns value of result_code passed to shutdown()
+      int wait_for_shutdown(void);
 
       // three event-related impl calls - get_event_impl() will give you either
       //  a normal event or a barrier, but you won't be able to do specific things
@@ -264,6 +265,7 @@ namespace Realm {
       unsigned thread_counts[MAX_NUM_THREADS];
 #endif
       volatile bool shutdown_requested;
+      int shutdown_result_code;
       GASNetHSL shutdown_mutex;
       GASNetCondVar shutdown_condvar;
 
@@ -347,7 +349,7 @@ namespace Realm {
     struct RuntimeShutdownMessage {
       struct RequestArgs {
 	int initiating_node;
-	int dummy; // needed to get sizeof() >= 8
+	int result_code;
       };
 
       static void handle_request(RequestArgs args);
@@ -356,7 +358,7 @@ namespace Realm {
 				        RequestArgs,
 				        handle_request> Message;
 
-      static void send_request(NodeID target);
+      static void send_request(NodeID target, int result_code);
     };
       
 }; // namespace Realm
