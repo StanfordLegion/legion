@@ -599,7 +599,6 @@ namespace Legion {
     bool IndexSpaceNodeT<DIM,T>::destroy_node(AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-#ifdef ENABLE_TREE_DELETION
       // If we're not the owner, send a message that we're removing
       // the application reference
       if (!is_owner())
@@ -609,9 +608,6 @@ namespace Legion {
       }
       else
         return remove_base_valid_ref(APPLICATION_REF, NULL/*mutator*/);
-#else
-      return false;
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -3326,7 +3322,6 @@ namespace Legion {
     bool IndexPartNodeT<DIM,T>::destroy_node(AddressSpaceID source) 
     //--------------------------------------------------------------------------
     {
-#ifdef ENABLE_TREE_DELETION
       // If we're not the owner send a message to do the destruction
       // otherwise we can do it here
       if (!is_owner())
@@ -3336,9 +3331,6 @@ namespace Legion {
       }
       else
         return remove_base_valid_ref(APPLICATION_REF, NULL/*mutator*/);
-#else
-      return false;
-#endif
     }
 
   }; // namespace Internal
