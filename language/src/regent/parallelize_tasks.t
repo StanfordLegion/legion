@@ -2212,7 +2212,8 @@ end
 
 function parallelize_task_calls.top_task(global_cx, node)
   local function parallelizable(node)
-    if not node:is(ast.typed.expr.Call) then return false end
+    if not node then return false
+    elseif not node:is(ast.typed.expr.Call) then return false end
     local fn = node.fn.value
     return not node.annotations.parallel:is(ast.annotation.Forbid) and
            std.is_task(fn) and global_cx[fn]
