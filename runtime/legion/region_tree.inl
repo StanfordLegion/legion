@@ -599,9 +599,9 @@ namespace Legion {
     bool IndexSpaceNodeT<DIM,T>::destroy_node(AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!destroyed);
-#endif
+      if (destroyed)
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_INDEX_SPACE_DELETION,
+            "Duplicate deletion of Index Space %d", handle.get_id())
       destroyed = true;
       // If we're not the owner, send a message that we're removing
       // the application reference
@@ -3326,9 +3326,9 @@ namespace Legion {
     bool IndexPartNodeT<DIM,T>::destroy_node(AddressSpaceID source) 
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!destroyed);
-#endif
+      if (destroyed)
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_INDEX_PARTITION_DELETION,
+            "Duplicate deletion of Index Partition %d", handle.get_id())
       destroyed = true;
       // If we're not the owner send a message to do the destruction
       // otherwise we can do it here

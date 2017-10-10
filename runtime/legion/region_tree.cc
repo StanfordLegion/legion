@@ -8102,9 +8102,9 @@ namespace Legion {
     bool FieldSpaceNode::destroy_node(AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!destroyed);
-#endif
+      if (destroyed)
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_DESTROY_FIELD_SPACE,
+            "Duplicate deletion of Field Space %d", handle.id)
       destroyed = true;
       // If we're the owner, we can just remove the application valid
       // reference, otherwise if we're remote we do that
@@ -13746,9 +13746,10 @@ namespace Legion {
     bool RegionNode::destroy_node(AddressSpaceID source, bool root)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!destroyed);
-#endif
+      if (destroyed)
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_REGION_DESTRUCTION,
+            "Duplicate deletion of Logical Region (%d,%d,%d)",
+            handle.index_space.id, handle.field_space.id, handle.tree_id)
       // If we're the root of the deletion then we might need to send
       // messages to other nodes
       if (root)
@@ -15547,9 +15548,10 @@ namespace Legion {
     bool PartitionNode::destroy_node(AddressSpaceID source, bool root)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!destroyed);
-#endif
+      if (destroyed)
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTITION_DESTRUCTION,
+            "Duplicate deletion of Logical Partition (%d,%d,%d)",
+            handle.index_partition.id, handle.field_space.id, handle.tree_id)
       // If we're the root of the deletion then we might need to send
       // messages to other nodes
       if (root)
