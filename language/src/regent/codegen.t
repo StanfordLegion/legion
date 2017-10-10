@@ -796,7 +796,7 @@ function value:unpack(cx, value_type, field_name, field_type)
     do
       local has_all_regions = true
       for _, region_type in ipairs(region_types) do
-        if not cx:has_region(region_type) then
+        if not (cx:has_region(region_type) or region_type == std.wild_type) then
           has_all_regions = false
           break
         end
