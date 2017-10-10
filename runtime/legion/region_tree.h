@@ -693,6 +693,7 @@ namespace Legion {
       const LegionColor color;
     public:
       NodeSet child_creation;
+      bool destroyed;
     protected:
       Reservation node_lock;
     protected:
@@ -1883,6 +1884,8 @@ namespace Legion {
     private:
       // Local field information
       std::vector<LocalFieldInfo> local_field_infos;
+    public:
+      bool destroyed;
     };
  
     /**

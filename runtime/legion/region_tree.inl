@@ -599,6 +599,10 @@ namespace Legion {
     bool IndexSpaceNodeT<DIM,T>::destroy_node(AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!destroyed);
+#endif
+      destroyed = true;
       // If we're not the owner, send a message that we're removing
       // the application reference
       if (!is_owner())
@@ -3322,6 +3326,10 @@ namespace Legion {
     bool IndexPartNodeT<DIM,T>::destroy_node(AddressSpaceID source) 
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!destroyed);
+#endif
+      destroyed = true;
       // If we're not the owner send a message to do the destruction
       // otherwise we can do it here
       if (!is_owner())

@@ -109,7 +109,7 @@ namespace Legion {
           if (!it->second->is_owner())
             continue;
           // If we can actively delete it then it isn't valid
-          if (it->second->try_active_deletion())
+          if (it->second->destroyed)
             continue;
           fields_to_delete.push_back(it->second);
         }
@@ -132,7 +132,7 @@ namespace Legion {
           if (!it->second->is_owner())
             continue;
           // If we can actively delete it then it isn't valid
-          if (it->second->try_active_deletion())
+          if (it->second->destroyed)
             continue;
           indexes_to_delete.push_back(it->second);
         }
@@ -4550,7 +4550,7 @@ namespace Legion {
     IndexTreeNode::IndexTreeNode(RegionTreeForest *ctx, unsigned d,
                          LegionColor c, DistributedID did, AddressSpaceID owner)
       : DistributedCollectable(ctx->runtime, did, owner, false/*register*/),
-        context(ctx), depth(d), color(c)
+        context(ctx), depth(d), color(c), destroyed(false)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6670,7 +6670,7 @@ namespace Legion {
                                    DistributedID did)
       : DistributedCollectable(ctx->runtime, did, 
           get_owner_space(sp, ctx->runtime), false/*register with runtime*/),
-        handle(sp), context(ctx)
+        handle(sp), context(ctx), destroyed(false)
     //--------------------------------------------------------------------------
     {
       // Can use the gc lock for the node lock as well
@@ -6691,7 +6691,7 @@ namespace Legion {
                                    DistributedID did, Deserializer &derez)
       : DistributedCollectable(ctx->runtime, did, 
           get_owner_space(sp, ctx->runtime), false/*register with runtime*/),
-        handle(sp), context(ctx)
+        handle(sp), context(ctx), destroyed(false)
     //--------------------------------------------------------------------------
     {
       // Can use the gc lock for the node lock as well
@@ -8102,6 +8102,10 @@ namespace Legion {
     bool FieldSpaceNode::destroy_node(AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!destroyed);
+#endif
+      destroyed = true;
       // If we're the owner, we can just remove the application valid
       // reference, otherwise if we're remote we do that
       if (!is_owner())
