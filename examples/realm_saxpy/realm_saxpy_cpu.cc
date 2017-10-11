@@ -28,12 +28,6 @@ enum {
   CHECK_RESULT_TASK = Processor::TASK_ID_FIRST_AVAILABLE+4,
 };
 
-enum {
-  FID_X = 101,
-  FID_Y = 102,
-  FID_Z = 103,
-};
-
 void find_processors(Processor &first_cpu, Processor &first_gpu)
 {
   // Print out our processors and their kinds

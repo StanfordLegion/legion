@@ -20,6 +20,12 @@
 
 using namespace Realm;
 
+enum {
+  FID_X = 101,
+  FID_Y = 102,
+  FID_Z = 103,
+};
+
 struct SaxpyArgs {
 public:
   RegionInstance x_inst, y_inst, z_inst;
