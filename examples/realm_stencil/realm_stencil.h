@@ -24,7 +24,7 @@
 
 struct ShardArgs {
 public:
-  Realm::RegionInstance private_inst, xp_inst, xm_inst, yp_inst, ym_inst;
+  Realm::RegionInstance xp_inst, xm_inst, yp_inst, ym_inst;
   size_t tsteps, init;
   Realm::Rect<2> interior_bounds, exterior_bounds;
 };
