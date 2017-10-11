@@ -380,6 +380,8 @@ namespace Realm {
 	      // not enough space - figure out how many elements we can
 	      //  actually take and adjust the source step
 	      size_t act_elems = dst_bytes_avail / src_serdez_op->max_serialized_size;
+	      // if there was a remainder in the division, get rid of it
+	      dst_bytes_avail = act_elems * src_serdez_op->max_serialized_size;
 	      size_t new_src_bytes = act_elems * src_serdez_op->sizeof_field_type;
 	      src_iter->cancel_step();
 	      src_bytes = src_iter->step(new_src_bytes, src_info, flags,
@@ -449,6 +451,8 @@ namespace Realm {
 		// not enough space - figure out how many elements we can
 		//  actually read and adjust the dest step
 		size_t act_elems = src_bytes_avail / dst_serdez_op->max_serialized_size;
+		// if there was a remainder in the division, get rid of it
+		src_bytes_avail = act_elems * dst_serdez_op->max_serialized_size;
 		size_t new_dst_bytes = act_elems * dst_serdez_op->sizeof_field_type;
 		dst_iter->cancel_step();
 		dst_bytes = dst_iter->step(new_dst_bytes, dst_info, flags,
@@ -469,6 +473,7 @@ namespace Realm {
 	    write_seq = write_bytes_total;
 	    write_bytes = dst_bytes;
 	    write_bytes_total += dst_bytes;
+	    write_bytes_cons = write_bytes_total; // completion detection uses this
 	  } else {
 	    // either no serialization or simultaneous serdez
 
@@ -671,6 +676,7 @@ namespace Realm {
 	    write_seq = write_bytes_total;
 	    write_bytes = act_bytes;
 	    write_bytes_total += act_bytes;
+	    write_bytes_cons = write_bytes_total; // completion detection uses this
 	  }
 
 	  Request* new_req = dequeue_request();
@@ -704,7 +710,7 @@ namespace Realm {
 
 	    assert((pre_xd_guid == XFERDES_NO_GUID) ||
 		   (pre_bytes_total == read_bytes_total) ||
-		   ((!src_serdez_op && dst_serdez_op && (read_bytes_cons > pre_bytes_total))));
+		   ((!src_serdez_op && dst_serdez_op && (read_bytes_cons >= pre_bytes_total))));
 	  }
 
 	  switch(new_req->dim) {
@@ -2023,6 +2029,9 @@ namespace Realm {
 	    req->read_seq_pos = req->xd->read_bytes_total;
 	  }
 	  {
+	    char *wrap_buffer = 0;
+	    bool wrap_buffer_malloced = false;
+	    const size_t ALLOCA_LIMIT = 4096;
 	    const char *src_p = (const char *)(req->src_base);
 	    char *dst_p = (char *)(req->dst_base);
 	    for (size_t j = 0; j < req->nplanes; j++) {
@@ -2038,7 +2047,8 @@ namespace Realm {
 		    size_t field_size = req->xd->src_serdez_op->sizeof_field_type;
 		    size_t num_elems = req->nbytes / field_size;
 		    assert((num_elems * field_size) == req->nbytes);
-		    size_t max_bytes = num_elems * req->xd->src_serdez_op->max_serialized_size;
+		    size_t maxser_size = req->xd->src_serdez_op->max_serialized_size;
+		    size_t max_bytes = num_elems * maxser_size;
 		    // ask the dst iterator (which should be a
 		    //  WrappingFIFOIterator for enough space to write all the
 		    //  serialized data in the worst case
@@ -2068,7 +2078,123 @@ namespace Realm {
 			assert(bytes_avail == bytes_used);
 		      }
 		    } else {
-		      assert(0);
+		      // we didn't get the worst case amount, but it might be
+		      //  enough
+		      void *dst = req->xd->dst_mem->get_direct_ptr(dst_info.base_offset,
+								   bytes_avail);
+		      assert(dst != 0);
+		      size_t elems_done = 0;
+		      size_t bytes_left = bytes_avail;
+		      bytes_used = 0;
+		      while((elems_done < num_elems) &&
+			    (bytes_left >= maxser_size)) {
+			size_t todo = std::min(num_elems - elems_done,
+					       bytes_left / maxser_size);
+			size_t amt = req->xd->src_serdez_op->serialize(((const char *)src) + (elems_done * field_size),
+								       field_size,
+								       todo,
+								       dst);
+			assert(amt <= bytes_left);
+			elems_done += todo;
+			bytes_left -= amt;
+			dst = ((char *)dst) + amt;
+			bytes_used += amt;
+		      }
+		      if(elems_done == num_elems) {
+			// we ended up getting all we needed without wrapping
+			if(bytes_used == bytes_avail) {
+			  req->xd->dst_iter->confirm_step();
+			} else {
+			  req->xd->dst_iter->cancel_step();
+			  bytes_avail = req->xd->dst_iter->step(bytes_used,
+								dst_info,
+								0,
+								false /*!tentative*/);
+			  assert(bytes_avail == bytes_used);
+			}
+		      } else {
+			// did we get lucky and finish on the wrap boundary?
+			if(bytes_left == 0) {
+			  req->xd->dst_iter->confirm_step();
+			} else {
+			  // need a temp buffer to deal with wraparound
+			  if(!wrap_buffer) {
+			    if(maxser_size > ALLOCA_LIMIT) {
+			      wrap_buffer_malloced = true;
+			      wrap_buffer = (char *)malloc(maxser_size);
+			    } else {
+			      wrap_buffer = (char *)alloca(maxser_size);
+			    }
+			  }
+			  while((elems_done < num_elems) && (bytes_left > 0)) {
+			    // serialize one element into our buffer
+			    size_t amt = req->xd->src_serdez_op->serialize(((const char *)src) + (elems_done * field_size),
+									   wrap_buffer);
+			    if(amt < bytes_left) {
+			      memcpy(dst, wrap_buffer, amt);
+			      bytes_left -= amt;
+			      dst = ((char *)dst) + amt;
+			    } else {
+			      memcpy(dst, wrap_buffer, bytes_left);
+			      req->xd->dst_iter->confirm_step();
+			      if(amt > bytes_left) {
+				size_t amt2 = req->xd->dst_iter->step(amt - bytes_left,
+								      dst_info,
+								      0,
+								      false /*!tentative*/);
+				assert(amt2 == (amt - bytes_left));
+				void *dst = req->xd->dst_mem->get_direct_ptr(dst_info.base_offset,
+									     amt2);
+				assert(dst != 0);
+				memcpy(dst, wrap_buffer+bytes_left, amt2);
+			      }
+			      bytes_left = 0;
+			    }
+			    elems_done++;
+			    bytes_used += amt;
+			  }
+			  // if we still finished with bytes left over, give 
+			  //  them back to the iterator
+			  if(bytes_left > 0) {
+			    assert(elems_done == num_elems);
+			    req->xd->dst_iter->cancel_step();
+			    size_t amt = req->xd->dst_iter->step(bytes_used,
+								 dst_info,
+								 0,
+								 false /*!tentative*/);
+			    assert(amt == bytes_used);
+			  }
+			}
+
+			// now that we're after the wraparound, any remaining
+			//  elements are fairly straightforward
+			if(elems_done < num_elems) {
+			  size_t max_remain = ((num_elems - elems_done) * maxser_size);
+			  size_t amt = req->xd->dst_iter->step(max_remain,
+							       dst_info,
+							       0,
+							       true /*tentative*/);
+			  assert(amt == max_remain); // no double-wrap
+			  void *dst = req->xd->dst_mem->get_direct_ptr(dst_info.base_offset,
+								       amt);
+			  assert(dst != 0);
+			  size_t amt2 = req->xd->src_serdez_op->serialize(((const char *)src) + (elems_done * field_size),
+									  field_size,
+									  num_elems - elems_done,
+									  dst);
+			  bytes_used += amt2;
+			  if(amt2 == max_remain) {
+			    req->xd->dst_iter->confirm_step();
+			  } else {
+			    req->xd->dst_iter->cancel_step();
+			    size_t amt3 = req->xd->dst_iter->step(amt2,
+								  dst_info,
+								  0,
+								  false /*!tentative*/);
+			    assert(amt3 == amt2);
+			  }
+			}
+		      }
 		    }
 		    assert(bytes_used <= max_bytes);
 		    if(bytes_used < max_bytes)
@@ -2081,7 +2207,8 @@ namespace Realm {
 		    size_t field_size = req->xd->dst_serdez_op->sizeof_field_type;
 		    size_t num_elems = req->nbytes / field_size;
 		    assert((num_elems * field_size) == req->nbytes);
-		    size_t max_bytes = num_elems * req->xd->dst_serdez_op->max_serialized_size;
+		    size_t maxser_size = req->xd->dst_serdez_op->max_serialized_size;
+		    size_t max_bytes = num_elems * maxser_size;
 		    // ask the srct iterator (which should be a
 		    //  WrappingFIFOIterator for enough space to read all the
 		    //  serialized data in the worst case
@@ -2111,12 +2238,150 @@ namespace Realm {
 			assert(bytes_avail == bytes_used);
 		      }
 		    } else {
-		      assert(0);
+		      // we didn't get the worst case amount, but it might be
+		      //  enough
+		      const void *src = req->xd->src_mem->get_direct_ptr(src_info.base_offset,
+									 bytes_avail);
+		      assert(src != 0);
+		      size_t elems_done = 0;
+		      size_t bytes_left = bytes_avail;
+		      bytes_used = 0;
+		      while((elems_done < num_elems) &&
+			    (bytes_left >= maxser_size)) {
+			size_t todo = std::min(num_elems - elems_done,
+					       bytes_left / maxser_size);
+			size_t amt = req->xd->dst_serdez_op->deserialize(((char *)dst) + (elems_done * field_size),
+									 field_size,
+									 todo,
+									 src);
+			assert(amt <= bytes_left);
+			elems_done += todo;
+			bytes_left -= amt;
+			src = ((const char *)src) + amt;
+			bytes_used += amt;
+		      }
+		      if(elems_done == num_elems) {
+			// we ended up getting all we needed without wrapping
+			if(bytes_used == bytes_avail) {
+			  req->xd->src_iter->confirm_step();
+			} else {
+			  req->xd->src_iter->cancel_step();
+			  bytes_avail = req->xd->src_iter->step(bytes_used,
+								src_info,
+								0,
+								false /*!tentative*/);
+			  assert(bytes_avail == bytes_used);
+			}
+		      } else {
+			// did we get lucky and finish on the wrap boundary?
+			if(bytes_left == 0) {
+			  req->xd->src_iter->confirm_step();
+			} else {
+			  // need a temp buffer to deal with wraparound
+			  if(!wrap_buffer) {
+			    if(maxser_size > ALLOCA_LIMIT) {
+			      wrap_buffer_malloced = true;
+			      wrap_buffer = (char *)malloc(maxser_size);
+			    } else {
+			      wrap_buffer = (char *)alloca(maxser_size);
+			    }
+			  }
+			  // keep a snapshot of the iterator in cse we don't wrap after all
+			  Serialization::DynamicBufferSerializer dbs(64);
+			  dbs << *(req->xd->src_iter);
+			  memcpy(wrap_buffer, src, bytes_left);
+			  // get pointer to data on other side of wrap
+			  req->xd->src_iter->confirm_step();
+			  size_t amt = req->xd->src_iter->step(max_bytes - bytes_avail,
+							       src_info,
+							       0,
+							       true /*tentative*/);
+			  // it's actually ok for this to appear to come up short - due to
+			  //  flow control we know we won't ever actually wrap around
+			  //assert(amt == (max_bytes - bytes_avail));
+			  const void *src = req->xd->src_mem->get_direct_ptr(src_info.base_offset,
+									     amt);
+			  assert(src != 0);
+			  memcpy(wrap_buffer + bytes_left, src, maxser_size - bytes_left);
+			  src = ((const char *)src) + (maxser_size - bytes_left);
+
+			  while((elems_done < num_elems) && (bytes_left > 0)) {
+			    // deserialize one element from our buffer
+			    amt = req->xd->dst_serdez_op->deserialize(((char *)dst) + (elems_done * field_size),
+								      wrap_buffer);
+			    if(amt < bytes_left) {
+			      // slide data, get a few more bytes
+			      memmove(wrap_buffer,
+				      wrap_buffer + amt,
+				      maxser_size - amt);
+			      memcpy(wrap_buffer + maxser_size, src, amt);
+			      bytes_left -= amt;
+			      src = ((const char *)src) + amt;
+			    } else {
+			      // update iterator to say how much wrapped data was actually used
+			      req->xd->src_iter->cancel_step();
+			      if(amt > bytes_left) {
+				size_t amt2 = req->xd->src_iter->step(amt - bytes_left,
+								      src_info,
+								      0,
+								      false /*!tentative*/);
+				assert(amt2 == (amt - bytes_left));
+			      }
+			      bytes_left = 0;
+			    }
+			    elems_done++;
+			    bytes_used += amt;
+			  }
+			  // if we still finished with bytes left, we have
+			  //  to restore the iterator because we
+			  //  can't double-cancel
+			  if(bytes_left > 0) {
+			    assert(elems_done == num_elems);
+			    delete req->xd->src_iter;
+			    Serialization::FixedBufferDeserializer fbd(dbs.get_buffer(), dbs.bytes_used());
+			    req->xd->src_iter = TransferIterator::deserialize_new(fbd);
+			    req->xd->src_iter->cancel_step();
+			    size_t amt2 = req->xd->src_iter->step(bytes_used,
+								  src_info,
+								  0,
+								  false /*!tentative*/);
+			    assert(amt2 == bytes_used);
+			  }
+			}
+
+			// now that we're after the wraparound, any remaining
+			//  elements are fairly straightforward
+			if(elems_done < num_elems) {
+			  size_t max_remain = ((num_elems - elems_done) * maxser_size);
+			  size_t amt = req->xd->src_iter->step(max_remain,
+							       src_info,
+							       0,
+							       true /*tentative*/);
+			  assert(amt == max_remain); // no double-wrap
+			  const void *src = req->xd->src_mem->get_direct_ptr(src_info.base_offset,
+									     amt);
+			  assert(src != 0);
+			  size_t amt2 = req->xd->dst_serdez_op->deserialize(((char *)dst) + (elems_done * field_size),
+									    field_size,
+									    num_elems - elems_done,
+									    src);
+			  bytes_used += amt2;
+			  if(amt2 == max_remain) {
+			    req->xd->src_iter->confirm_step();
+			  } else {
+			    req->xd->src_iter->cancel_step();
+			    size_t amt3 = req->xd->src_iter->step(amt2,
+								  src_info,
+								  0,
+								  false /*!tentative*/);
+			    assert(amt3 == amt2);
+			  }
+			}
+		      }
 		    }
 		    assert(bytes_used <= max_bytes);
 		    if(bytes_used < max_bytes)
 		      rewind_src += (max_bytes - bytes_used);
-		    src += bytes_used;
 		    req->xd->read_bytes_total += bytes_used;
 		  } else {
 		    // normal copy
@@ -2125,15 +2390,20 @@ namespace Realm {
 		}
 		if(req->dim == Request::DIM_1D) break;
 		// serdez cases update src/dst directly
-		if(!req->xd->src_serdez_op) src += req->src_str;
-		if(!req->xd->dst_serdez_op) dst += req->dst_str;
+		// NOTE: this looks backwards, but it's not - a src serdez means it's the
+		//  destination that moves unpredictably
+		if(!req->xd->dst_serdez_op) src += req->src_str;
+		if(!req->xd->src_serdez_op) dst += req->dst_str;
 	      }
 	      if((req->dim == Request::DIM_1D) ||
 		 (req->dim == Request::DIM_2D)) break;
 	      // serdez cases update src/dst directly - copy back to src/dst_p
-	      src_p = (req->xd->src_serdez_op ? src : src_p + req->src_pstr);
-	      dst_p = (req->xd->dst_serdez_op ? dst : dst_p + req->dst_pstr);
+	      src_p = (req->xd->dst_serdez_op ? src : src_p + req->src_pstr);
+	      dst_p = (req->xd->src_serdez_op ? dst : dst_p + req->dst_pstr);
 	    }
+	    // clean up our wrap buffer, if we malloc'd it
+	    if(wrap_buffer_malloced)
+	      free(wrap_buffer);
 	  }
 	  if(req->xd->src_serdez_op && !req->xd->dst_serdez_op) {
 	    // we manage write_bytes_total, write_seq_{pos,count}

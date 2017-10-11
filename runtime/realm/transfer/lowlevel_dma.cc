@@ -1561,10 +1561,19 @@ namespace Realm {
   template <typename S>
   /*static*/ TransferIterator *WrappingFIFOIterator::deserialize_new(S& deserializer)
   {
-    size_t base, size;
-    if((deserializer >> base) && (deserializer >> size))
-      return new WrappingFIFOIterator(base, size);
-    else
+    size_t base, size, offset, prev_offset;
+    bool tentative_valid;
+    if((deserializer >> base) &&
+       (deserializer >> size) &&
+       (deserializer >> offset) &&
+       (deserializer >> prev_offset) &&
+       (deserializer >> tentative_valid)) {
+      WrappingFIFOIterator *wfi = new WrappingFIFOIterator(base, size);
+      wfi->offset = offset;
+      wfi->prev_offset = prev_offset;
+      wfi->tentative_valid = tentative_valid;
+      return wfi;
+    } else
       return 0;
   }   
 
@@ -1626,7 +1635,11 @@ namespace Realm {
   template <typename S>
   bool WrappingFIFOIterator::serialize(S& serializer) const
   {
-    return (serializer << base) && (serializer << size);
+    return ((serializer << base) &&
+	    (serializer << size) &&
+	    (serializer << offset) &&
+	    (serializer << prev_offset) &&
+	    (serializer << tentative_valid));
   }
 
     void CopyRequest::perform_new_dma(Memory src_mem, Memory dst_mem)
