@@ -1478,5 +1478,4 @@ end
 task toplevel()
   test()
 end
-cpennant.register_mappers()
-regentlib.start(toplevel)
+regentlib.start(toplevel, cpennant.register_mappers)

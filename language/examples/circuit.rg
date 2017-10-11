@@ -651,7 +651,8 @@ task toplevel()
 end
 
 if os.getenv('SAVEOBJ') == '1' then
-  regentlib.saveobj(toplevel, "circuit", "executable")
+  local exe = os.getenv('OBJNAME') or "circuit"
+  regentlib.saveobj(toplevel, exe, "executable")
 else
   regentlib.start(toplevel)
 end

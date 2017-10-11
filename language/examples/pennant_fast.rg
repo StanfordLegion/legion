@@ -1913,7 +1913,8 @@ task toplevel()
 end
 if os.getenv('SAVEOBJ') == '1' then
   local root_dir = arg[0]:match(".*/") or "./"
-  local link_flags = terralib.newlist({"-L" .. root_dir, "-lpennant", "-lm"})
+  local out_dir = os.getenv('OBJNAME'):match('.*/') or root_dir
+  local link_flags = terralib.newlist({"-L" .. out_dir, "-lpennant", "-lm"})
   if os.getenv('CRAYPE_VERSION') then
     local new_flags = terralib.newlist({"-Wl,-Bdynamic"})
     new_flags:insertall(link_flags)
@@ -1928,7 +1929,8 @@ if os.getenv('SAVEOBJ') == '1' then
     link_flags = new_flags
   end
 
-  regentlib.saveobj(toplevel, "pennant", "executable", cpennant.register_mappers, link_flags)
+  local exe = os.getenv('OBJNAME') or "pennant"
+  regentlib.saveobj(toplevel, exe, "executable", cpennant.register_mappers, link_flags)
 else
   regentlib.start(toplevel, cpennant.register_mappers)
 end
