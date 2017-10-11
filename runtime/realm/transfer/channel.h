@@ -179,7 +179,8 @@ namespace Realm {
       // whether I am a 1D or 2D transfer
       Dimension dim;
       // sequence info - used to update read/write counts, handle reordering
-      size_t seq_pos, seq_count;
+      size_t read_seq_pos, read_seq_count;
+      size_t write_seq_pos, write_seq_count;
     };
 
     class SequenceAssembler {
@@ -306,13 +307,16 @@ namespace Realm {
       NodeID launch_node;
       //uint64_t /*bytes_submit, */bytes_read, bytes_write/*, bytes_total*/;
       bool iteration_completed;
-      uint64_t bytes_total; // not valid until iteration_completed == true
+      uint64_t read_bytes_total, write_bytes_total; // not valid until iteration_completed == true
+      uint64_t read_bytes_cons, write_bytes_cons; // used for serdez, updated atomically
       uint64_t pre_bytes_total;
       //uint64_t next_bytes_read;
       MemoryImpl *src_mem;
       MemoryImpl *dst_mem;
       TransferIterator *src_iter;
       TransferIterator *dst_iter;
+      const CustomSerdezUntyped *src_serdez_op;
+      const CustomSerdezUntyped *dst_serdez_op;
       size_t src_ib_offset, src_ib_size;
       // maximum size for a single request
       uint64_t max_req_size;
@@ -349,6 +353,7 @@ namespace Realm {
               bool _mark_start,
 	      Memory _src_mem, Memory _dst_mem,
 	      TransferIterator *_src_iter, TransferIterator *_dst_iter,
+	      CustomSerdezID _src_serdez_id, CustomSerdezID _dst_serdez_id,
               uint64_t _max_req_size, int _priority,
               XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence);
 
@@ -421,6 +426,7 @@ namespace Realm {
                     bool mark_started,
 		    Memory _src_mem, Memory _dst_mem,
 		    TransferIterator *_src_iter, TransferIterator *_dst_iter,
+		    CustomSerdezID _src_serdez_id, CustomSerdezID _dst_serdez_id,
                     uint64_t max_req_size, long max_nr, int _priority,
                     XferOrder::Type _order, XferDesFence* _complete_fence);
 
@@ -447,6 +453,7 @@ namespace Realm {
                     bool mark_started,
 		    Memory _src_mem, Memory _dst_mem,
 		    TransferIterator *_src_iter, TransferIterator *_dst_iter,
+		    CustomSerdezID _src_serdez_id, CustomSerdezID _dst_serdez_id,
                     uint64_t _max_req_size, long max_nr, int _priority,
                     XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence);
 
@@ -472,6 +479,7 @@ namespace Realm {
                          bool mark_started,
 			 Memory _src_mem, Memory _dst_mem,
 			 TransferIterator *_src_iter, TransferIterator *_dst_iter,
+			 CustomSerdezID _src_serdez_id, CustomSerdezID _dst_serdez_id,
                          uint64_t max_req_size, long max_nr, int _priority,
                          XferOrder::Type _order, XferDesFence* _complete_fence);
 
@@ -503,6 +511,7 @@ namespace Realm {
                  bool mark_started,
 		 Memory _src_mem, Memory _dst_mem,
 		 TransferIterator *_src_iter, TransferIterator *_dst_iter,
+		 CustomSerdezID _src_serdez_id, CustomSerdezID _dst_serdez_id,
                  uint64_t _max_req_size, long max_nr, int _priority,
                  XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence);
       ~GPUXferDes()
@@ -537,6 +546,7 @@ namespace Realm {
                  RegionInstance inst,
 		 Memory _src_mem, Memory _dst_mem,
 		 TransferIterator *_src_iter, TransferIterator *_dst_iter,
+		 CustomSerdezID _src_serdez_id, CustomSerdezID _dst_serdez_id,
                  uint64_t _max_req_size, long max_nr, int _priority,
                  XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence);
       ~HDFXferDes()
@@ -1041,6 +1051,7 @@ namespace Realm {
                                bool mark_started,
 			       Memory _src_mem, Memory _dst_mem,
 			       TransferIterator *_src_iter, TransferIterator *_dst_iter,
+			       CustomSerdezID _src_serdez_id, CustomSerdezID _dst_serdez_id,
                                uint64_t max_req_size, long max_nr, int priority,
                                XferOrder::Type order, XferDes::XferKind kind,
                                XferDesFence* fence, RegionInstance inst = RegionInstance::NO_INST);
@@ -1354,6 +1365,7 @@ namespace Realm {
                          bool mark_started,
 			 Memory _src_mem, Memory _dst_mem,
 			 TransferIterator *_src_iter, TransferIterator *_dst_iter,
+			 CustomSerdezID _src_serdez_id, CustomSerdezID _dst_serdez_id,
                          uint64_t _max_req_size, long max_nr, int _priority,
                          XferOrder::Type _order, XferDes::XferKind _kind,
                          XferDesFence* _complete_fence, RegionInstance inst = RegionInstance::NO_INST);

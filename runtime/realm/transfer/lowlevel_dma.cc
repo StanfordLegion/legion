@@ -596,7 +596,7 @@ namespace Realm {
     }
 
 
-#define IB_MAX_SIZE (64 * 1024 * 1024)
+#define IB_MAX_SIZE size_t(64 * 1024 * 1024)
 
     void free_intermediate_buffer(DmaRequest* req, Memory mem, off_t offset, size_t size)
     {
@@ -617,16 +617,21 @@ namespace Realm {
       assert(oas_by_inst->find(inst_pair) != oas_by_inst->end());
       OASVec& oasvec = (*oas_by_inst)[inst_pair];
       size_t ib_elmnt_size = 0, domain_size = 0;
+      size_t serdez_pad = 0;
       for(OASVec::const_iterator it = oasvec.begin(); it != oasvec.end(); it++) {
-        ib_elmnt_size += it->size;
+	if(it->serdez_id != 0) {
+	  const CustomSerdezUntyped *serdez_op = get_runtime()->custom_serdez_table[it->serdez_id];
+	  assert(serdez_op != 0);
+	  ib_elmnt_size += serdez_op->max_serialized_size;
+	  if(serdez_op->max_serialized_size > serdez_pad)
+	    serdez_pad = serdez_op->max_serialized_size;
+	} else
+	  ib_elmnt_size += it->size;
       }
       domain_size = domain->volume();
 
-      size_t ib_size;
-      if (domain_size * ib_elmnt_size < IB_MAX_SIZE)
-        ib_size = domain_size * ib_elmnt_size;
-      else
-        ib_size = IB_MAX_SIZE;
+      size_t ib_size = std::min(domain_size * ib_elmnt_size + serdez_pad,
+				IB_MAX_SIZE);
       //log_ib_alloc.info("alloc_ib: src_inst_id(%llx) dst_inst_id(%llx) idx(%d) size(%lu) memory(%llx)", inst_pair.first.id, inst_pair.second.id, idx, ib_size, tgt_mem.id);
       if (ID(tgt_mem).memory.owner_node == my_node_id) {
         // create local intermediate buffer
@@ -725,9 +730,12 @@ namespace Realm {
 
       if(state == STATE_GEN_PATH) {
         log_dma.debug("generate paths");
+	// SJT: this code is pretty broken if there are multiple instance pairs
+	assert(oas_by_inst->size() == 1);
         Memory src_mem = get_runtime()->get_instance_impl(oas_by_inst->begin()->first.first)->memory;
         Memory dst_mem = get_runtime()->get_instance_impl(oas_by_inst->begin()->first.second)->memory;
-        find_shortest_path(src_mem, dst_mem, mem_path);
+	CustomSerdezID serdez_id = oas_by_inst->begin()->second[0].serdez_id;
+        find_shortest_path(src_mem, dst_mem, serdez_id, mem_path);
         ib_req->mark_ready();
         ib_req->mark_started();
         // Pass 1: create IBInfo blocks
@@ -1313,15 +1321,21 @@ namespace Realm {
               || kind == Memory::Z_COPY_MEM);
     }
 
-    XferDes::XferKind get_xfer_des(Memory src_mem, Memory dst_mem)
+    XferDes::XferKind get_xfer_des(Memory src_mem, Memory dst_mem,
+				   CustomSerdezID src_serdez_id,
+				   CustomSerdezID dst_serdez_id)
     {
       Memory::Kind src_ll_kind = get_runtime()->get_memory_impl(src_mem)->lowlevel_kind;
       Memory::Kind dst_ll_kind = get_runtime()->get_memory_impl(dst_mem)->lowlevel_kind;
       if(ID(src_mem).memory.owner_node == ID(dst_mem).memory.owner_node) {
         switch(src_ll_kind) {
         case Memory::GLOBAL_MEM:
-          if (is_cpu_mem(dst_ll_kind))
+          if (is_cpu_mem(dst_ll_kind)) {
+	    // no serdez support
+	    if((src_serdez_id != 0) || (dst_serdez_id != 0))
+	      return XferDes::XFER_NONE;
             return XferDes::XFER_GASNET_READ;
+	  }
           else
             return XferDes::XFER_NONE;
         case Memory::REGDMA_MEM:
@@ -1331,12 +1345,23 @@ namespace Realm {
         case Memory::SYSTEM_MEM:
         case Memory::SOCKET_MEM:
         case Memory::Z_COPY_MEM:
-          if (is_cpu_mem(dst_ll_kind))
+          if (is_cpu_mem(dst_ll_kind)) {
+	    // can't serdez to yourself yet
+	    if((src_serdez_id != 0) && (dst_serdez_id != 0))
+	      return XferDes::XFER_NONE;
             return XferDes::XFER_MEM_CPY;
-          else if (dst_ll_kind == Memory::GLOBAL_MEM)
+	  }
+          else if (dst_ll_kind == Memory::GLOBAL_MEM) {
+	    // no serdez support
+	    if((src_serdez_id != 0) || (dst_serdez_id != 0))
+	      return XferDes::XFER_NONE;
             return XferDes::XFER_GASNET_WRITE;
+	  }
 #ifdef USE_CUDA
           else if (dst_ll_kind == Memory::GPU_FB_MEM) {
+	    // no serdez support
+	    if((src_serdez_id != 0) || (dst_serdez_id != 0))
+	      return XferDes::XFER_NONE;
 	    // find which GPU owns the destination memory and see if it
 	    //  has the source memory pinned
 	    Cuda::GPUFBMemory *fbm = static_cast<Cuda::GPUFBMemory *>(get_runtime()->get_memory_impl(dst_mem));
@@ -1347,17 +1372,32 @@ namespace Realm {
               return XferDes::XFER_NONE;
           }
 #endif
-          else if (dst_ll_kind == Memory::DISK_MEM)
+          else if (dst_ll_kind == Memory::DISK_MEM) {
+	    // no serdez support
+	    if((src_serdez_id != 0) || (dst_serdez_id != 0))
+	      return XferDes::XFER_NONE;
             return XferDes::XFER_DISK_WRITE;
-          else if (dst_ll_kind == Memory::HDF_MEM)
+	  }
+          else if (dst_ll_kind == Memory::HDF_MEM) {
+	    // no serdez support
+	    if((src_serdez_id != 0) || (dst_serdez_id != 0))
+	      return XferDes::XFER_NONE;
             return XferDes::XFER_HDF_WRITE;
-          else if (dst_ll_kind == Memory::FILE_MEM)
+	  }
+          else if (dst_ll_kind == Memory::FILE_MEM) {
+	    // no serdez support
+	    if((src_serdez_id != 0) || (dst_serdez_id != 0))
+	      return XferDes::XFER_NONE;
             return XferDes::XFER_FILE_WRITE;
+	  }
           assert(0);
           break;
 #ifdef USE_CUDA
         case Memory::GPU_FB_MEM:
         {
+	  // no serdez support
+	  if((src_serdez_id != 0) || (dst_serdez_id != 0))
+	    return XferDes::XFER_NONE;
 	  // find which GPU owns the source memory
 	  Cuda::GPUFBMemory *fbm = static_cast<Cuda::GPUFBMemory *>(get_runtime()->get_memory_impl(src_mem));
 	  assert(fbm != 0);
@@ -1381,16 +1421,25 @@ namespace Realm {
         }
 #endif
         case Memory::DISK_MEM:
+	  // no serdez support
+	  if((src_serdez_id != 0) || (dst_serdez_id != 0))
+	    return XferDes::XFER_NONE;
           if (is_cpu_mem(dst_ll_kind))
             return XferDes::XFER_DISK_READ;
           else
             return XferDes::XFER_NONE;
         case Memory::FILE_MEM:
+	  // no serdez support
+	  if((src_serdez_id != 0) || (dst_serdez_id != 0))
+	    return XferDes::XFER_NONE;
           if (is_cpu_mem(dst_ll_kind))
             return XferDes::XFER_FILE_READ;
           else
             return XferDes::XFER_NONE;
         case Memory::HDF_MEM:
+	  // no serdez support
+	  if((src_serdez_id != 0) || (dst_serdez_id != 0))
+	    return XferDes::XFER_NONE;
           if (is_cpu_mem(dst_ll_kind))
             return XferDes::XFER_HDF_READ;
           else
@@ -1399,33 +1448,48 @@ namespace Realm {
           assert(0);
         }
       } else {
-        if (is_cpu_mem(src_ll_kind) && dst_ll_kind == Memory::REGDMA_MEM)
+        if (is_cpu_mem(src_ll_kind) && dst_ll_kind == Memory::REGDMA_MEM) {
+	  // destination serdez ok, source not
+	  if(src_serdez_id != 0)
+	    return XferDes::XFER_NONE;
           return XferDes::XFER_REMOTE_WRITE;
+	}
         else
           return XferDes::XFER_NONE;
       }
       return XferDes::XFER_NONE;
     }
 
-    void find_shortest_path(Memory src_mem, Memory dst_mem, std::vector<Memory>& path)
+    void find_shortest_path(Memory src_mem, Memory dst_mem,
+			    CustomSerdezID serdez_id, std::vector<Memory>& path)
     {
+      // fast case - can we go straight from src to dst?
+      if(get_xfer_des(src_mem, dst_mem,
+		      serdez_id, serdez_id) != XferDes::XFER_NONE) {
+	path.resize(2);
+	path[0] = src_mem;
+	path[1] = dst_mem;
+	return;
+      }
       std::map<Memory, std::vector<Memory> > dist;
       std::set<Memory> all_mem;
       std::queue<Memory> active_nodes;
-      all_mem.insert(src_mem);
-      all_mem.insert(dst_mem);
       Node* node = &(get_runtime()->nodes[ID(src_mem).memory.owner_node]);
       for (std::vector<MemoryImpl*>::const_iterator it = node->ib_memories.begin();
            it != node->ib_memories.end(); it++) {
         all_mem.insert((*it)->me);
       }
-      node = &(get_runtime()->nodes[ID(dst_mem).memory.owner_node]);
-      for (std::vector<MemoryImpl*>::const_iterator it = node->ib_memories.begin();
-           it != node->ib_memories.end(); it++) {
-        all_mem.insert((*it)->me);
+      if(ID(dst_mem).memory.owner_node != ID(src_mem).memory.owner_node) {
+	node = &(get_runtime()->nodes[ID(dst_mem).memory.owner_node]);
+	for (std::vector<MemoryImpl*>::const_iterator it = node->ib_memories.begin();
+	     it != node->ib_memories.end(); it++) {
+	  all_mem.insert((*it)->me);
+	}
       }
       for (std::set<Memory>::iterator it = all_mem.begin(); it != all_mem.end(); it++) {
-        if (get_xfer_des(src_mem, *it) != XferDes::XFER_NONE) {
+	// we know we're doing at least one hop, so no dst_serdez here
+        if (get_xfer_des(src_mem, *it,
+			 serdez_id, 0) != XferDes::XFER_NONE) {
           dist[*it] = std::vector<Memory>();
           dist[*it].push_back(src_mem);
           dist[*it].push_back(*it);
@@ -1436,18 +1500,28 @@ namespace Realm {
         Memory cur = active_nodes.front();
         active_nodes.pop();
         std::vector<Memory> sub_path = dist[cur];
+
+	// can we reach the destination from here (handling potential
+	//  deserialization?
+	if (get_xfer_des(cur, dst_mem, 0, serdez_id) != XferDes::XFER_NONE) {
+	  path = sub_path;
+	  path.push_back(dst_mem);
+	  return;
+	}
+
+	// no, look for another intermediate hop
         for(std::set<Memory>::iterator it = all_mem.begin(); it != all_mem.end(); it ++) {
-          if (get_xfer_des(cur, *it) != XferDes::XFER_NONE) {
-            if (dist.find(*it) == dist.end()) {
-              dist[*it] = sub_path;
-              dist[*it].push_back(*it);
-              active_nodes.push(*it);
-            }
-          }
-        }
+	  if (get_xfer_des(cur, *it, 0, 0) != XferDes::XFER_NONE) {
+	    if (dist.find(*it) == dist.end()) {
+	      dist[*it] = sub_path;
+	      dist[*it].push_back(*it);
+	      active_nodes.push(*it);
+	    }
+	  }
+	}
       }
-      assert(dist.find(dst_mem) != dist.end());
-      path = dist[dst_mem];
+      log_new_dma.fatal() << "FATAL: no path found from " << src_mem << " to " << dst_mem << " (serdez=" << serdez_id << ")";
+      assert(0);
     }
 
 
@@ -1592,6 +1666,7 @@ namespace Realm {
 	//  know about each other so they can potentially conspire about
 	//  iteration order
 	std::vector<FieldID> src_fields, dst_fields;
+	CustomSerdezID serdez_id = 0;
 	for(OASVec::const_iterator it2 = it->second.begin();
 	    it2 != it->second.end();
 	    ++it2) {
@@ -1599,6 +1674,10 @@ namespace Realm {
 	  dst_fields.push_back(it2->dst_field_id);
 	  assert(it2->src_subfield_offset == 0);
 	  assert(it2->dst_subfield_offset == 0);
+	  if(it2->serdez_id != 0) {
+	    assert((serdez_id == 0) || (serdez_id == it2->serdez_id));
+	    serdez_id = it2->serdez_id;
+	  }
 	}
 	TransferIterator *src_iter = domain->create_iterator(src_inst,
 							     dst_inst,
@@ -1620,6 +1699,7 @@ namespace Realm {
 	    XferDesID pre_xd_guid;
 	    Memory xd_src_mem;
 	    TransferIterator *xd_src_iter;
+	    CustomSerdezID xd_src_serdez_id;
 	    bool mark_started;
 	    NodeID xd_target_node;
 	    if(idx == 1) {
@@ -1627,6 +1707,7 @@ namespace Realm {
 	      pre_xd_guid = XferDes::XFERDES_NO_GUID;
 	      xd_src_mem = src_inst.get_location();
 	      xd_src_iter = src_iter;
+	      xd_src_serdez_id = serdez_id;
 	      mark_started = (it == oas_by_inst->begin());
 	      xd_target_node = my_node_id;
 	    } else {
@@ -1635,6 +1716,7 @@ namespace Realm {
 	      xd_src_mem = ibvec[idx - 2].memory;
 	      xd_src_iter = new WrappingFIFOIterator(ibvec[idx - 2].offset,
 						     ibvec[idx - 2].size);
+	      xd_src_serdez_id = 0;
 	      mark_started = false;
 	      xd_target_node = ID(ibvec[idx - 2].memory).memory.owner_node;
 	    }
@@ -1643,12 +1725,14 @@ namespace Realm {
 	    XferDesID next_xd_guid;
 	    Memory xd_dst_mem;
 	    TransferIterator *xd_dst_iter;
+	    CustomSerdezID xd_dst_serdez_id;
 	    size_t next_max_rw_gap;
 	    if(idx == sub_path.size()) {
 	      // last step writes to target
 	      next_xd_guid = XferDes::XFERDES_NO_GUID;
 	      xd_dst_mem = dst_inst.get_location();
 	      xd_dst_iter = dst_iter;
+	      xd_dst_serdez_id = serdez_id;
 	      next_max_rw_gap = 0;  // doesn't matter
 	    } else {
 	      // writes to intermediate buffer
@@ -1656,10 +1740,16 @@ namespace Realm {
 	      xd_dst_mem = ibvec[idx - 1].memory;
 	      xd_dst_iter = new WrappingFIFOIterator(ibvec[idx - 1].offset,
 						     ibvec[idx - 1].size);
+	      xd_dst_serdez_id = 0;
 	      next_max_rw_gap = ibvec[idx - 1].size;
 	    }
 
-            XferDes::XferKind kind = get_xfer_des(mem_path[idx - 1], mem_path[idx]);
+            XferDes::XferKind kind = get_xfer_des(mem_path[idx - 1],
+						  mem_path[idx],
+						  xd_src_serdez_id,
+						  xd_dst_serdez_id);
+	    assert(kind != XferDes::XFER_NONE);
+
 	    // special case: gasnet reads must always be done from the node that
 	    //  owns the destination memory
 	    if(kind == XferDes::XFER_GASNET_READ)
@@ -1691,6 +1781,7 @@ namespace Realm {
 			    mark_started,
 			    //pre_buf, cur_buf, domain, oasvec_src,
 			    xd_src_mem, xd_dst_mem, xd_src_iter, xd_dst_iter,
+			    xd_src_serdez_id, xd_dst_serdez_id,
 			    16 * 1024 * 1024/*max_req_size*/, 100/*max_nr*/,
 			    priority, order, kind, complete_fence, attach_inst);
             //pre_buf = cur_buf;

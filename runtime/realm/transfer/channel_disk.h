@@ -43,6 +43,7 @@ namespace Realm {
           bool mark_started, RegionInstance inst,
 	  Memory _src_mem, Memory _dst_mem,
 	  TransferIterator *_src_iter, TransferIterator *_dst_iter,
+	  CustomSerdezID _src_serdez_id, CustomSerdezID _dst_serdez_id,
           uint64_t max_req_size, long max_nr, int _priority,
           XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence);
 
@@ -71,6 +72,7 @@ namespace Realm {
                   bool mark_started,
 		  Memory _src_mem, Memory _dst_mem,
 		  TransferIterator *_src_iter, TransferIterator *_dst_iter,
+		  CustomSerdezID _src_serdez_id, CustomSerdezID _dst_serdez_id,
                   uint64_t _max_req_size, long max_nr, int _priority,
                   XferOrder::Type _order, XferKind _kind, XferDesFence* _complete_fence);
 
