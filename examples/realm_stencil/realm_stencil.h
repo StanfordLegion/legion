@@ -24,9 +24,16 @@
 
 struct ShardArgs {
 public:
-  Realm::RegionInstance xp_inst, xm_inst, yp_inst, ym_inst;
-  size_t tsteps, init;
-  Realm::Rect<2> interior_bounds, exterior_bounds;
+  Realm::RegionInstance xp_inst_in, xm_inst_in, yp_inst_in, ym_inst_in;
+  Realm::RegionInstance xp_inst_out, xm_inst_out, yp_inst_out, ym_inst_out;
+  Realm::Barrier xp_empty_in, xm_empty_in, yp_empty_in, ym_empty_in;
+  Realm::Barrier xp_empty_out, xm_empty_out, yp_empty_out, ym_empty_out;
+  Realm::Barrier xp_full_in, xm_full_in, yp_full_in, ym_full_in;
+  Realm::Barrier xp_full_out, xm_full_out, yp_full_out, ym_full_out;
+  Realm::Barrier sync;
+  size_t tsteps, tprune, init;
+  Realm::Point<2> point;
+  Realm::Rect<2> interior_bounds, exterior_bounds, outer_bounds;
 };
 
 struct StencilArgs {
@@ -40,7 +47,7 @@ struct IncrementArgs {
 public:
   Realm::RegionInstance private_inst, xp_inst, xm_inst, yp_inst, ym_inst;
   bool print_ts;
-  Realm::Rect<2> exterior_bounds;
+  Realm::Rect<2> outer_bounds;
 };
 
 struct CheckArgs {
