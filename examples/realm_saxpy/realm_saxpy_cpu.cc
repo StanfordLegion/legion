@@ -360,15 +360,9 @@ int main(int argc, char **argv)
   // select a processor to run the top level task on
   Processor p = Processor::NO_PROC;
   {
-    std::set<Processor> all_procs;
-    Machine::get_machine().get_all_processors(all_procs);
-    for(std::set<Processor>::const_iterator it = all_procs.begin();
-	it != all_procs.end();
-	it++)
-      if(it->kind() == Processor::LOC_PROC) {
-	p = *it;
-	break;
-      }
+    Machine::ProcessorQuery query(Machine::get_machine());
+    query.only_kind(Processor::LOC_PROC);
+    p = query.first();
   }
   assert(p.exists());
 
