@@ -17,6 +17,8 @@
 
 #include "realm.h"
 
+#include "cpu_kernels.h"
+
 using namespace Realm;
 
 enum {

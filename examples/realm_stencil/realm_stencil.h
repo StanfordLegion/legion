@@ -16,11 +16,19 @@
 #ifndef __REALM_STENCIL__
 #define __REALM_STENCIL__
 
-#include "realm.h"
+#ifndef DTYPE
+#error DTYPE must be defined
+#endif
 
-#define RADIUS 2
-#define DTYPE double
-#define RESTRICT __restrict__
+#ifndef RESTRICT
+#error RESTRICT must be defined
+#endif
+
+#ifndef RADIUS
+#error RADIUS must be defined
+#endif
+
+#include "realm.h"
 
 struct ShardArgs {
 public:
