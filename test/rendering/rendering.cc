@@ -18,6 +18,10 @@
 #include <cassert>
 #include <cstdlib>
 #include <math.h>
+
+// this test makes use of lots of deprecated Legion API calls - ignore for now
+#define LEGION_DEPRECATED(x)
+
 #include "legion.h"
 #include "shim_mapper.h"
 #include "custom_serdez.h"
