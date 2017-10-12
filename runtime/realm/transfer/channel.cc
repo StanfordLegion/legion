@@ -1448,6 +1448,19 @@ namespace Realm {
 	      log_request.info() << "pred limits xfer: " << max_bytes << " -> " << pre_max;
 	      max_bytes = pre_max;
 	    }
+
+	    // further limit based on data that has actually shown up
+	    max_bytes = seq_pre_write.span_exists(bytes_total, max_bytes);
+	    if(max_bytes == 0)
+	      break;
+	  }
+
+	  // similarly, limit our max transfer size based on the amount the
+	  //  destination IB buffer can take (assuming there is an IB)
+	  if(next_xd_guid != XFERDES_NO_GUID) {
+	    max_bytes = seq_next_read.span_exists(bytes_total, max_bytes);
+	    if(max_bytes == 0)
+	      break;
 	  }
 
 	  // HDF5 uses its own address info, instead of src/dst, we
@@ -2143,7 +2156,7 @@ namespace Realm {
             CHECK_HDF5( H5Dread(req->dataset_id, req->datatype_id,
 				req->mem_space_id, req->file_space_id,
 				H5P_DEFAULT, req->mem_base) );
-          else
+	  else
             CHECK_HDF5( H5Dwrite(req->dataset_id, req->datatype_id,
 				 req->mem_space_id, req->file_space_id,
 				 H5P_DEFAULT, req->mem_base) );
