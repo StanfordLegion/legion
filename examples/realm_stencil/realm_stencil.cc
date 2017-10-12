@@ -23,7 +23,10 @@ using namespace Realm;
 
 enum {
   TOP_LEVEL_TASK = Processor::TASK_ID_FIRST_AVAILABLE+0,
-  SHARD_TASK = Processor::TASK_ID_FIRST_AVAILABLE+1,
+  SHARD_TASK     = Processor::TASK_ID_FIRST_AVAILABLE+1,
+  STENCIL_TASK   = Processor::TASK_ID_FIRST_AVAILABLE+2,
+  INCREMENT_TASK = Processor::TASK_ID_FIRST_AVAILABLE+3,
+  CHECK_TASK     = Processor::TASK_ID_FIRST_AVAILABLE+4,
 };
 
 enum {
@@ -73,16 +76,63 @@ AppConfig parse_config(int argc, char **argv)
   return config;
 }
 
-void shard_task(const void *args_, size_t arglen,
+Event fill(RegionInstance inst, FieldID fid, DTYPE value) {
+  CopySrcDstField field;
+  field.inst = inst;
+  field.field_id = fid;
+  field.size = sizeof(DTYPE);
+
+  std::vector<CopySrcDstField> fields;
+  fields.push_back(field);
+
+  return inst.get_indexspace<2>().fill(fields, ProfilingRequestSet(),
+                                       &value, sizeof(value));
+}
+
+void shard_task(const void *args, size_t arglen,
                 const void *userdata, size_t userlen, Processor p)
 {
   assert(arglen == sizeof(ShardArgs));
-  const ShardArgs &args = *reinterpret_cast<const ShardArgs *>(args_);
-  printf("shard %d %d running on processor " IDFMT "\n", args.point.x, args.point.y, p.id);
+  const ShardArgs &a = *reinterpret_cast<const ShardArgs *>(args);
+  printf("shard %d %d running on processor " IDFMT "\n", a.point.x, a.point.y, p.id);
 
+  // Initialize
+  RegionInstance private_inst;
+  {
+    Machine::MemoryQuery query(Machine::get_machine());
+    query.has_affinity_to(p);
+    query.only_kind(Memory::SYSTEM_MEM);
+    Memory memory = query.first();
+
+    std::map<FieldID, size_t> field_sizes;
+    field_sizes[FID_INPUT] = sizeof(DTYPE);
+    field_sizes[FID_OUTPUT] = sizeof(DTYPE);
+
+    RegionInstance::create_instance(private_inst, memory,
+                                    a.exterior_bounds, field_sizes,
+                                    0 /*SOA*/, ProfilingRequestSet()).wait();
+    assert(private_inst.exists());
+  }
+
+  {
+    std::vector<Event> events;
+    events.push_back(fill(private_inst, FID_INPUT,  a.init));
+    events.push_back(fill(private_inst, FID_OUTPUT, a.init));
+    if (a.xp_inst_in.exists()) events.push_back(fill(a.xp_inst_in, FID_INPUT,  a.init));
+    if (a.xp_inst_in.exists()) events.push_back(fill(a.xp_inst_in, FID_OUTPUT, a.init));
+    if (a.xm_inst_in.exists()) events.push_back(fill(a.xm_inst_in, FID_INPUT,  a.init));
+    if (a.xm_inst_in.exists()) events.push_back(fill(a.xm_inst_in, FID_OUTPUT, a.init));
+    if (a.yp_inst_in.exists()) events.push_back(fill(a.yp_inst_in, FID_INPUT,  a.init));
+    if (a.yp_inst_in.exists()) events.push_back(fill(a.yp_inst_in, FID_OUTPUT, a.init));
+    if (a.ym_inst_in.exists()) events.push_back(fill(a.ym_inst_in, FID_INPUT,  a.init));
+    if (a.ym_inst_in.exists()) events.push_back(fill(a.ym_inst_in, FID_OUTPUT, a.init));
+    Event::merge_events(events).wait();
+  }
+
+  // Barrier
   // Warning: If you're used to Legion barriers, please note that
   // Realm barriers DON'T WORK THE SAME WAY.
-  Barrier sync = args.sync;
+  Barrier sync = a.sync;
   sync.arrive(1);
   sync.wait();
   sync = sync.advance_barrier();
