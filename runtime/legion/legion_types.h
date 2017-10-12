@@ -44,10 +44,14 @@
 #include "realm.h"
 #include "dynamic_templates.h"
 
+// this may be set before including legion.h to eliminate deprecation warnings
+//  for just the Legion API
+#ifndef LEGION_DEPRECATED
 #if __cplusplus >= 201402L
 #define LEGION_DEPRECATED(x) [[deprecated(x)]]
 #else
 #define LEGION_DEPRECATED(x)
+#endif
 #endif
 
 namespace BindingLib { class Utility; } // BindingLib namespace
