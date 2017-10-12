@@ -13,8 +13,8 @@
  * limitations under the License.
  */
 
-#ifndef __PENNANT_H__
-#define __PENNANT_H__
+#ifndef __STENCIL_H__
+#define __STENCIL_H__
 
 #ifndef DTYPE
 #error DTYPE must be defined
@@ -48,4 +48,4 @@ void increment(DTYPE* RESTRICT inputPtr,
 }
 #endif
 
-#endif // __PENNANT_H__
+#endif // __STENCIL_H__
