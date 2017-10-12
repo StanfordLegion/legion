@@ -48,14 +48,14 @@ struct StencilArgs {
 public:
   Realm::RegionInstance private_inst, xp_inst, xm_inst, yp_inst, ym_inst;
   bool print_ts;
-  Realm::Rect<2> interior_bounds;
+  Realm::Rect<2> interior_bounds, exterior_bounds;
 };
 
 struct IncrementArgs {
 public:
   Realm::RegionInstance private_inst, xp_inst, xm_inst, yp_inst, ym_inst;
   bool print_ts;
-  Realm::Rect<2> outer_bounds;
+  Realm::Rect<2> outer_bounds, exterior_bounds;
 };
 
 struct CheckArgs {

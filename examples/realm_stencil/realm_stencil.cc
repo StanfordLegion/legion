@@ -89,6 +89,65 @@ Event fill(RegionInstance inst, FieldID fid, DTYPE value) {
                                        &value, sizeof(value));
 }
 
+void get_base_and_stride(RegionInstance inst, FieldID fid, DTYPE *&base, size_t &stride)
+{
+  AffineAccessor<DTYPE, 2> acc = AffineAccessor<DTYPE, 2>(inst, fid);
+  base = reinterpret_cast<DTYPE *>(acc.base);
+  assert(acc.strides.x == sizeof(DTYPE));
+  stride = acc.strides.y;
+}
+
+void stencil_task(const void *args, size_t arglen,
+                  const void *userdata, size_t userlen, Processor p)
+{
+  assert(arglen == sizeof(StencilArgs));
+  const StencilArgs &a = *reinterpret_cast<const StencilArgs *>(args);
+
+  DTYPE *private_base_input, *private_base_output;
+  size_t private_stride_input, private_stride_output;
+  get_base_and_stride(a.private_inst, FID_INPUT, private_base_input, private_stride_input);
+  get_base_and_stride(a.private_inst, FID_OUTPUT, private_base_output, private_stride_output);
+  assert(private_stride_input == private_stride_output);
+
+  DTYPE *weight_base = NULL; assert(false); // FIXME
+
+  Rect<2> private_bounds = a.private_inst.get_indexspace<2>().bounds;
+
+  stencil(private_base_input, private_base_output, weight_base,
+          private_stride_input/sizeof(DTYPE),
+          a.interior_bounds.lo.x - private_bounds.lo.x,
+          a.interior_bounds.hi.x - private_bounds.lo.x + 1,
+          a.interior_bounds.lo.y - private_bounds.lo.y,
+          a.interior_bounds.hi.y - private_bounds.lo.y + 1);
+}
+
+void increment_task(const void *args, size_t arglen,
+                    const void *userdata, size_t userlen, Processor p)
+{
+  assert(arglen == sizeof(IncrementArgs));
+  const IncrementArgs &a = *reinterpret_cast<const IncrementArgs *>(args);
+
+  DTYPE *private_base_input;
+  size_t private_stride_input;
+  get_base_and_stride(a.private_inst, FID_INPUT, private_base_input, private_stride_input);
+
+  Rect<2> private_bounds = a.private_inst.get_indexspace<2>().bounds;
+
+  increment(private_base_input,
+          private_stride_input/sizeof(DTYPE),
+          a.outer_bounds.lo.x - private_bounds.lo.x,
+          a.outer_bounds.hi.x - private_bounds.lo.x + 1,
+          a.outer_bounds.lo.y - private_bounds.lo.y,
+          a.outer_bounds.hi.y - private_bounds.lo.y + 1);
+}
+
+void check_task(const void *args, size_t arglen,
+                const void *userdata, size_t userlen, Processor p)
+{
+  assert(arglen == sizeof(CheckArgs));
+  const CheckArgs &a = *reinterpret_cast<const CheckArgs *>(args);
+}
+
 void shard_task(const void *args, size_t arglen,
                 const void *userdata, size_t userlen, Processor p)
 {
@@ -423,6 +482,9 @@ int main(int argc, char **argv)
 
   rt.register_task(TOP_LEVEL_TASK, top_level_task);
   rt.register_task(SHARD_TASK, shard_task);
+  rt.register_task(STENCIL_TASK, stencil_task);
+  rt.register_task(INCREMENT_TASK, increment_task);
+  rt.register_task(CHECK_TASK, check_task);
 
   // select a processor to run the top level task on
   Processor p = Processor::NO_PROC;
