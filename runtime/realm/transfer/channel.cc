@@ -331,6 +331,7 @@ namespace Realm {
 	    new_req->dst_off = 0;
 	    new_req->nbytes = 0;
 	    new_req->nlines = 1;
+	    new_req->nplanes = 1;
 	    reqs[idx++] = new_req;
 	    break;
 	  }
@@ -386,7 +387,18 @@ namespace Realm {
 	      src_iter->cancel_step();
 	      src_bytes = src_iter->step(new_src_bytes, src_info, flags,
 					 false /*!tentative*/);
-	      assert(src_bytes == new_src_bytes);
+	      // this can come up shorter than we expect if the source
+	      //  iterator is 2-D or 3-D - if that happens, re-adjust the
+	      //  dest bytes again
+	      if(src_bytes < new_src_bytes) {
+		if(src_bytes == 0) break;
+
+		num_elems = src_bytes / src_serdez_op->sizeof_field_type;
+		assert((num_elems * src_serdez_op->sizeof_field_type) == src_bytes);
+
+		// no need to recheck seq_next_read
+		dst_bytes_avail = num_elems * src_serdez_op->max_serialized_size;
+	      }
 	    }
 
 	    // since the dst_iter will be stepped later, the dst_info is a 
@@ -417,12 +429,39 @@ namespace Realm {
 	    bool input_data_done = (pre_bytes_total != size_t(-1));
 
 	    // if we don't have enough input data for a single worst-case
-	    //  element, try again later
-	    if(!input_data_done &&
-	       (seq_pre_write.span_exists(read_bytes_cons,
+	    //  element, try again later - for safety, need a consistent
+	    //  snapshot of read_bytes_cons for all this logic
+	    size_t rbc_snapshot = __sync_fetch_and_add(&read_bytes_cons, 0);
+	    if((seq_pre_write.span_exists(rbc_snapshot,
 					  dst_serdez_op->max_serialized_size) <
-		dst_serdez_op->max_serialized_size))
-	      break;
+		dst_serdez_op->max_serialized_size)) {
+	      if(!input_data_done)
+		break; // wait for more
+
+	      // cases where we know the total amount of data coming in,
+	      //  but don't necessarily have it all or know how much we've
+	      //  actually read
+	      if(rbc_snapshot > pre_bytes_total) {
+		// need to wait to see how much data we've actually read
+		//  to know if there's more
+		break;
+	      }
+
+	      if(rbc_snapshot == pre_bytes_total) {
+		// late detection of finished transfer - go around to completion
+		//   detection code above
+		continue;
+	      }
+
+	      // less data than we need in the conservative case, but if
+	      //  everything up to pre_bytes_total exists, we can charge ahead
+	      size_t read_bytes_left = pre_bytes_total - rbc_snapshot;
+	      if(seq_pre_write.span_exists(rbc_snapshot, read_bytes_left) <
+		 read_bytes_left) {
+		// data still incomplete - try again later
+		break;
+	      }
+	    }
 
 	    // some sort of per-channel max request size?
 	    size_t max_bytes = 1 << 20;
@@ -457,7 +496,18 @@ namespace Realm {
 		dst_iter->cancel_step();
 		dst_bytes = dst_iter->step(new_dst_bytes, dst_info, flags,
 					   false /*!tentative*/);
-		assert(dst_bytes == new_dst_bytes);
+		// this can come up shorter than we expect if the destination
+		//  iterator is 2-D or 3-D - if that happens, re-adjust the
+		//  source bytes again
+		if(dst_bytes < new_dst_bytes) {
+		  if(dst_bytes == 0) break;
+
+		  num_elems = dst_bytes / dst_serdez_op->sizeof_field_type;
+		  assert((num_elems * dst_serdez_op->sizeof_field_type) == dst_bytes);
+
+		  // no need to recheck seq_pre_write
+		  src_bytes_avail = num_elems * dst_serdez_op->max_serialized_size;
+		}
 	      }
 	    }
 
@@ -952,7 +1002,8 @@ namespace Realm {
 	size_t inc_amt = seq_write.add_span(offset, size);
 	log_xd.info() << "bytes_write: " << guid << " " << offset << "+" << size << " -> " << inc_amt;
 	if(next_xd_guid != XFERDES_NO_GUID) {
-	  if(inc_amt > 0) {
+	  // we can skip an update if this was empty _and_ we're not done yet
+	  if((inc_amt > 0) || (offset == write_bytes_total)) {
 	    // this update carries our bytes_total amount, if we know it
 	    //  to be final
             xferDes_queue->update_pre_bytes_write(next_xd_guid,
