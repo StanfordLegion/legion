@@ -7182,7 +7182,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void IndexCloseOp::initialize(TaskContext *ctx,const RegionRequirement &req,
                            ClosedNode *closed_tree, const TraceInfo &trace_info,
-                           int close_idx, const VersionInfo &version_info,
+                           int close_idx, const VersionInfo &ver_info,
                            const FieldMask &close_mask, Operation *create_op,
                            IndexSpaceNode* launch_node)
     //--------------------------------------------------------------------------
@@ -7192,7 +7192,10 @@ namespace Legion {
       assert(req.projection == 0); // should be the default projection funciton
 #endif
       InterCloseOp::initialize(ctx, req, closed_tree, trace_info, close_idx, 
-                               version_info, close_mask, create_op);
+                               ver_info, close_mask, create_op);
+      // We need to record the split fields on the version info since it 
+      // hasn't been done yet in this particular case
+      version_info.record_split_fields(closed_tree->node, close_mask);
       launch_node->get_launch_space_domain(point_domain);
       projection_info = ProjectionInfo(runtime,requirement,launch_node->handle);
 #ifdef LEGION_SPY
@@ -7379,6 +7382,10 @@ namespace Legion {
       initialize_operation(own->get_context(), false/*track*/, 1/*regions*/);
       point = p;
       owner = own;
+      // From Internal
+      create_op       = owner->create_op;
+      create_gen      = owner->create_gen;
+      creator_req_idx = owner->creator_req_idx;
       // From Close
       requirement = owner->get_requirement();
       parent_task = owner->parent_task;
@@ -7388,6 +7395,8 @@ namespace Legion {
       close_mask       = owner->close_mask;
       parent_req_index = owner->parent_req_index;
       restrict_info    = owner->restrict_info;
+      if (Runtime::legion_spy_enabled)
+        LegionSpy::log_index_point(owner->get_unique_op_id(), unique_op_id, p);
     } 
 
     //--------------------------------------------------------------------------
@@ -7419,6 +7428,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       version_info = owner->version_info;
+      // Resize to match the proper depth
+      version_info.resize(version_info.get_depth() + 1);
       // Perform the version info
       std::set<RtEvent> preconditions(index_preconditions);
       const UniqueID logical_context_uid = parent_ctx->get_context_uid();

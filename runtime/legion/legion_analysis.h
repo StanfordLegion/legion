@@ -239,6 +239,12 @@ namespace Legion {
         { return (node == upper_bound_node); }
       inline RegionTreeNode* get_upper_bound_node(void) const 
         { return upper_bound_node; }
+      inline size_t get_depth(void) const 
+#ifdef DEBUG_LEGION
+        { assert(!physical_states.empty()); return physical_states.size() - 1; }
+#else
+        { return physical_states.size() - 1; }
+#endif
       void set_upper_bound_node(RegionTreeNode *node);
       bool has_physical_states(void) const; 
     public:
@@ -727,7 +733,7 @@ namespace Legion {
     public:
       inline bool has_close_operations(void) const 
         { return (!!normal_close_mask) || (!!read_only_close_mask) ||
-                  (!!flush_only_close_mask); }
+                  (!!flush_only_close_mask) || (!!disjoint_close_mask); }
       // Record normal closes like this
       void record_close_operation(const FieldMask &mask, bool projection,
                                   bool disjoint_close = false);
