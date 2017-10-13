@@ -53,3 +53,19 @@ void increment(DTYPE* RESTRICT inputPtr,
 #undef OUT
 #undef WEIGHT
 }
+
+void copy2D(DTYPE* RESTRICT inputPtr,
+            DTYPE* RESTRICT outputPtr,
+            coord_t haloX, coord_t startX, coord_t endX,
+            coord_t startY, coord_t endY,
+            coord_t outputHaloX, coord_t outputStartX,
+            coord_t outputStartY)
+{
+#define IN(i, j)     inputPtr[(j) * haloX + i]
+#define OUT(i, j)    outputPtr[(j - (outputStartY - startY)) * outputHaloX + (i - (outputStartX - startX))]
+  for (coord_t j = startY; j < endY; ++j)
+    for (coord_t i = startX; i < endX; ++i)
+      OUT(i, j) = IN(i, j);
+#undef IN
+#undef OUT
+}

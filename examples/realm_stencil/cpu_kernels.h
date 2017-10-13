@@ -40,4 +40,11 @@ void increment(DTYPE* RESTRICT inputPtr,
                coord_t haloX, coord_t startX, coord_t endX,
                coord_t startY, coord_t endY);
 
+void copy2D(DTYPE* RESTRICT inputPtr,
+            DTYPE* RESTRICT outputPtr,
+            coord_t haloX, coord_t startX, coord_t endX,
+            coord_t startY, coord_t endY,
+            coord_t outputHaloX, coord_t outputStartX,
+            coord_t outputStartY);
+
 #endif // __CPU_KERNELS_H__
