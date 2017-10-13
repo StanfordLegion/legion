@@ -17,27 +17,16 @@
 
 #include "realm/logging.h"
 
-#include <iostream>
-
 // xcode's clang isn't defining these?
 #define __STDC_LIMIT_MACROS
 #define __STDC_CONSTANT_MACROS
 
-#include <cstdint>
-
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Constants.h>
-#include <llvm/IR/Module.h>
-#include <llvm/IR/DataLayout.h>
-#include <llvm/IRReader/IRReader.h>
-#include <llvm/Support/Host.h>
-#include <llvm/Support/TargetRegistry.h>
-#include <llvm/Support/TargetSelect.h>
-#include <llvm/Target/TargetMachine.h>
-#include <llvm/Support/SourceMgr.h>
-#include <llvm/Bitcode/ReaderWriter.h>
-#include <llvm/ExecutionEngine/ExecutionEngine.h>
-#include <llvm/Support/MemoryBuffer.h>
+#include <llvm-c/Core.h>
+#include <llvm-c/Initialization.h>
+#include <llvm-c/Target.h>
+#include <llvm-c/TargetMachine.h>
+#include <llvm-c/ExecutionEngine.h>
+#include <llvm-c/IRReader.h>
 
 #define LLVM_VERSION (10 * LLVM_VERSION_MAJOR) + LLVM_VERSION_MINOR
 #if REALM_LLVM_VERSION != LLVM_VERSION
@@ -45,25 +34,12 @@
 #endif
 // JIT for 3.5, MCJIT for 3.6 - 3.9
 #if LLVM_VERSION == 35
-  #define USE_JIT
-  #include <llvm/ExecutionEngine/JIT.h>
-  #include "llvm/PassManager.h"
+  //define USE_OLD_JIT
 #elif LLVM_VERSION >= 36 && LLVM_VERSION <= 39
-  #define USE_UNIQUE_PTRS
-  #define USE_MCJIT
-  #include <memory>
-  #include <llvm/ExecutionEngine/MCJIT.h>
+  // nothing special needed here - the C API is actually a lot more stable
+  // than the C++ API
 #else
   #error unsupported (or at least untested) LLVM version!
-#endif
-
-#include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/raw_os_ostream.h"
-#include "llvm/Support/FormattedStream.h"
-
-#ifdef DEBUG_MEMORY_MANAGEMENT
-#include "llvm/ExecutionEngine/SectionMemoryManager.h"
-#include <iostream>
 #endif
 
 namespace Realm {
@@ -73,6 +49,9 @@ namespace Realm {
   namespace LLVMJit {
 
 #ifdef DEBUG_MEMORY_MANAGEMENT
+    // TODO: the C API doesn't expose the default memory manager to "inherit"
+    //  from, so using this would require a complete implementation
+    //  (e.g. mmap, mprotect, ...)
     class MemoryManagerWrap : public llvm::SectionMemoryManager {
     public:
       virtual uint8_t *allocateCodeSection(uintptr_t Size, unsigned Alignment, unsigned SectionID, llvm::StringRef SectionName) override
@@ -116,78 +95,85 @@ namespace Realm {
 
     LLVMJitInternal::LLVMJitInternal(void)
     {
-      context = new llvm::LLVMContext;
+      context = LLVMContextCreate();
+
 
       // generative native target
       {
-	llvm::InitializeNativeTarget();
-#if LLVM_VERSION >= 36
-	llvm::InitializeNativeTargetAsmParser();
-	llvm::InitializeNativeTargetAsmPrinter();
+	LLVMInitializeNativeTarget();
+#ifndef USE_OLD_JIT
+	LLVMInitializeNativeAsmParser();
+	LLVMInitializeNativeAsmPrinter();
 #endif
 
-	std::string triple = llvm::sys::getDefaultTargetTriple();
+	char *triple = LLVMGetDefaultTargetTriple();
 	log_llvmjit.debug() << "default target triple = " << triple;
 
-	std::string err;
-	const llvm::Target *target = llvm::TargetRegistry::lookupTarget(triple, err);
-	if(!target) {
-	  log_llvmjit.fatal() << "target not found: triple='" << triple << "'";
+	LLVMTargetRef target;
+	char *errmsg = 0;
+	if(LLVMGetTargetFromTriple(triple, &target, &errmsg)) {
+	  log_llvmjit.fatal() << "target not found: triple='" << triple << "': " << errmsg;
+	  LLVMDisposeMessage(errmsg);
 	  assert(0);
 	}
 
 	// TODO - allow configuration options to steer these
-	llvm::Reloc::Model reloc_model = llvm::Reloc::Static;
-	llvm::CodeModel::Model code_model = llvm::CodeModel::Large;
-	llvm::CodeGenOpt::Level opt_level = llvm::CodeGenOpt::Aggressive;
+	LLVMRelocMode reloc_model = LLVMRelocStatic;
+	LLVMCodeModel code_model = LLVMCodeModelLarge;
+	LLVMCodeGenOptLevel opt_level = LLVMCodeGenLevelAggressive;
 
-	llvm::TargetOptions options;
-#if LLVM_VERSION <= 36
-	options.NoFramePointerElim = true;
-#endif
-
-	llvm::TargetMachine *host_cpu_machine = target->createTargetMachine(triple, "", 
-									    0/*HostHasAVX()*/ ? "+avx" : "", 
-									    options,
-									    reloc_model,
-									    code_model,
-									    opt_level);
+	LLVMTargetMachineRef host_cpu_machine = LLVMCreateTargetMachine(target,
+									triple,
+									"",
+									0/*HostHasAVX()*/ ? "+avx" : "", 
+									opt_level,
+									reloc_model,
+									code_model);
 	assert(host_cpu_machine != 0);
 
 	// you have to have a module to build an execution engine, so create
 	//  a dummy one
 	{
-	  llvm::Module *m = new llvm::Module("eebuilder", *context);
-	  m->setTargetTriple(triple);
-	  m->setDataLayout("e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v16:16:16-v32:32:32-v64:64:64-v128:128:128-n16:32:64");
-#ifdef USE_UNIQUE_PTRS
-	  // the extra parens matter here for some reason...
-	  llvm::EngineBuilder eb((std::unique_ptr<llvm::Module>(m)));
-#else
-	  llvm::EngineBuilder eb(m);
-#endif
+	  LLVMModuleRef m = LLVMModuleCreateWithNameInContext("eebuilder",
+							      context);
+	  LLVMSetTarget(m, triple);
+	  LLVMSetDataLayout(m, "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v16:16:16-v32:32:32-v64:64:64-v128:128:128-n16:32:64");
 
-	  std::string err;
-  
-	  eb
-	    .setErrorStr(&err)
-	    .setEngineKind(llvm::EngineKind::JIT)
-#ifdef USE_JIT
-	    .setAllocateGVsWithCode(false)
-	    .setUseMCJIT(true)
-#endif
-	    ;
-#ifdef DEBUG_MEMORY_MANAGEMENT
-	  eb.setMCJITMemoryManager(new MemoryManagerWrap);
-#endif
-	  
-	  host_exec_engine = eb.create(host_cpu_machine);
-
-	  if(!host_exec_engine) {
-	    log_llvmjit.fatal() << "failed to create execution engine: " << err;
+#ifdef USE_OLD_JIT
+	  char *errmsg = 0;
+	  LLVMLinkInJIT();
+	  if(LLVMCreateJITCompilerForModule(&host_exec_engine, m,
+					    opt_level,
+					    &errmsg)) {
+            log_llvmjit.fatal() << "failed to create execution engine: " << errmsg;
+	    LLVMDisposeMessage(errmsg);
 	    assert(0);
 	  }
+#else
+	  struct LLVMMCJITCompilerOptions options;
+	  LLVMInitializeMCJITCompilerOptions(&options, sizeof(options));
+	  options.OptLevel = opt_level;
+	  options.CodeModel = code_model;
+	  options.NoFramePointerElim = true;
+#ifdef DEBUG_MEMORY_MANAGEMENT
+	  options.MCJMM = ...;
+	  //eb.setMCJITMemoryManager(new MemoryManagerWrap);
+#endif
+	  
+	  char *errmsg = 0;
+	  LLVMLinkInMCJIT();
+	  if(LLVMCreateMCJITCompilerForModule(&host_exec_engine, m,
+					      &options, sizeof(options),
+					      &errmsg)) {
+	    log_llvmjit.fatal() << "failed to create execution engine: " << errmsg;
+	    LLVMDisposeMessage(errmsg);
+	    assert(0);
+	  }
+#endif
 	}
+
+	// should be safe to dispose of triple now?
+	LLVMDisposeMessage(triple);
       }
 
       nvptx_machine = 0;
@@ -195,8 +181,8 @@ namespace Realm {
 
     LLVMJitInternal::~LLVMJitInternal(void)
     {
-      delete host_exec_engine;
-      delete context;
+      LLVMDisposeExecutionEngine(host_exec_engine);
+      LLVMContextDispose(context);
     }
 
     void *LLVMJitInternal::llvmir_to_fnptr(const ByteArray& ir,
@@ -206,53 +192,58 @@ namespace Realm {
       if(!host_exec_engine)
 	return 0;
 
-      llvm::SMDiagnostic sm;
-      // LLVM requires that the data be null-terminated (even for bitcode?)
-      //  so make a copy and add one extra byte
-      char *nullterm = new char[ir.size() + 1];
-      memcpy(nullterm, ir.base(), ir.size());
-      nullterm[ir.size()] = 0;
-#ifdef USE_UNIQUE_PTRS
-      llvm::MemoryBuffer *mb = llvm::MemoryBuffer::getMemBuffer(nullterm).release();
-#else
-      llvm::MemoryBuffer *mb = llvm::MemoryBuffer::getMemBuffer(nullterm);
-#endif
-#if LLVM_VERSION >= 36
-      llvm::Module *m = llvm::parseIR(mb->getMemBufferRef(), sm, *context).release();
-#else
-      llvm::Module *m = llvm::ParseIR(mb, sm, *context);
-#endif
-      if(!m) {
-	std::string errstr;
-	llvm::raw_string_ostream s(errstr);
-	sm.print(entry_symbol.c_str(), s);
-	log_llvmjit.fatal() << "LLVM IR PARSE ERROR:\n" << s.str();
+      // may need to manually add null-termination here
+      LLVMMemoryBufferRef mb;
+      if((ir.size() == 0) || (((const char *)(ir.base()))[ir.size() - 1] != 0)) {
+	char *nullterm = new char[ir.size() + 1];
+	assert(nullterm != 0);
+	memcpy(nullterm, ir.base(), ir.size());
+	nullterm[ir.size()] = 0;
+	mb = LLVMCreateMemoryBufferWithMemoryRangeCopy(nullterm,
+	                                               ir.size()+1,
+	                                               "membuf");
+	delete[] nullterm;
+      } else {
+	mb = LLVMCreateMemoryBufferWithMemoryRange((const char *)(ir.base()),
+						   ir.size(),
+						   "membuf",
+						   true /*RequiresTerminator*/);
+      }
+
+      char *errmsg = 0;
+      LLVMModuleRef m;
+      if(LLVMParseIRInContext(context, mb, &m, &errmsg)) {
+	// TODO: return this via profiling interface
+	log_llvmjit.fatal() << "LLVM IR PARSE ERROR:\n" << errmsg;
+	log_llvmjit.fatal() << "IR source=\n" << std::string((const char *)(ir.base()),
+	    ir.size());
+	LLVMDisposeMessage(errmsg);
 	assert(0);
       }
 
       // get the entry function from the module before we add it to the exec engine - that way
       //  we're sure to get the one we want
-      llvm::Function *func = m->getFunction(entry_symbol.c_str());
+      LLVMValueRef func = LLVMGetNamedFunction(m, entry_symbol.c_str());
       if(!func) {
 	log_llvmjit.fatal() << "entry symbol not found: " << entry_symbol;
 	assert(0);
       }
 
-#ifdef USE_UNIQUE_PTRS
-      host_exec_engine->addModule(std::unique_ptr<llvm::Module>(m));
-#else
-      host_exec_engine->addModule(m);
-#endif
+      LLVMAddModule(host_exec_engine, m);
 
       // this actually triggers the JIT, allocating space for code and data
-      void *fnptr = host_exec_engine->getPointerToFunction(func);
+      void *fnptr = LLVMGetPointerToGlobal(host_exec_engine, func);
       assert(fnptr != 0);
 
-      // and this call actually marks that memory executable
-      host_exec_engine->finalizeObject();
+#ifndef USE_OLD_JIT
+      // so the C API doesn't expose finalizeObject, and the finalization in
+      //   GetPointerToGlobal is done BEFORE the JIT, so to finalize the JIT'd
+      //   thing we appear to have to call it twice...
+      LLVMGetPointerToGlobal(host_exec_engine, func);
+#endif
 
-      // hopefully it's ok to delete the IR source buffer now...
-      delete[] nullterm;
+      // do NOT dispose the memory buffer - it belongs to the module now
+      //LLVMDisposeMemoryBuffer(mb);
 
       return fnptr;
     }
