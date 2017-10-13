@@ -839,6 +839,11 @@ namespace Legion {
                                             IndexSpace handle,
                                             LgEvent pre, LgEvent post)
       {
+        // Realm has an optimization where if it can do the deppart op
+        // immediately it just returns the precondition as the postcondition
+        // which of course breaks Legion Spy's way of logging deppart
+        // operations uniquely as their completion event
+        assert(pre != post);
         log_spy.print("Deppart Events %llu %d " IDFMT " " IDFMT,
                       op_unique_id, handle.get_id(), pre.id, post.id);
       }
