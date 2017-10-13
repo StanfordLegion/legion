@@ -32,6 +32,7 @@ enum {
 enum {
   FID_INPUT = 101,
   FID_OUTPUT = 102,
+  FID_WEIGHT = 103,
 };
 
 struct AppConfig {
@@ -92,9 +93,37 @@ Event fill(RegionInstance inst, FieldID fid, DTYPE value) {
 void get_base_and_stride(RegionInstance inst, FieldID fid, DTYPE *&base, size_t &stride)
 {
   AffineAccessor<DTYPE, 2> acc = AffineAccessor<DTYPE, 2>(inst, fid);
-  base = reinterpret_cast<DTYPE *>(acc.base);
+  base = reinterpret_cast<DTYPE *>(acc.ptr(inst.get_indexspace<2>().bounds.lo));
   assert(acc.strides.x == sizeof(DTYPE));
   stride = acc.strides.y;
+}
+
+void dump(RegionInstance inst, FieldID fid, Rect<2> bounds, const char *prefix)
+{
+  AffineAccessor<DTYPE, 2> acc = AffineAccessor<DTYPE, 2>(inst, fid);
+  for (PointInRectIterator<2, int> it(bounds); it.valid; it.step()) {
+    printf("%s: %2d %2d value %8.3f\n", prefix, it.p.x, it.p.y, acc.read(it.p));
+  }
+}
+
+DTYPE *get_weights()
+{
+  static bool init = false;
+  static DTYPE weights[(2*RADIUS + 1) * (2*RADIUS + 1)] = {0};
+
+  if (!init) {
+#define WEIGHT(i, j) weights[(j + RADIUS) * (2 * RADIUS + 1) + (i + RADIUS)]
+    for (coord_t i = 1; i <= RADIUS; i++) {
+      WEIGHT( 0,  i) =  1.0/(2.0*i*RADIUS);
+      WEIGHT( i,  0) =  1.0/(2.0*i*RADIUS);
+      WEIGHT( 0, -i) = -1.0/(2.0*i*RADIUS);
+      WEIGHT(-i,  0) = -1.0/(2.0*i*RADIUS);
+    }
+    init = true;
+#undef WEIGHT
+  }
+
+  return weights;
 }
 
 void stencil_task(const void *args, size_t arglen,
@@ -109,21 +138,36 @@ void stencil_task(const void *args, size_t arglen,
   get_base_and_stride(a.private_inst, FID_OUTPUT, private_base_output, private_stride_output);
   assert(private_stride_input == private_stride_output);
 
-  DTYPE *weight_base = NULL; assert(false); // FIXME
+  DTYPE *weights = get_weights();
 
   Rect<2> private_bounds = a.private_inst.get_indexspace<2>().bounds;
 
-  stencil(private_base_input, private_base_output, weight_base,
+  printf("private base %p\n", private_base_input);
+  printf("private stride %lu (%lu elements)\n", private_stride_input, private_stride_input/sizeof(DTYPE));
+
+  printf("private bounds %d %d to %d %d\n",
+         private_bounds.lo.x, private_bounds.lo.y,
+         private_bounds.hi.x, private_bounds.hi.y);
+
+  printf("interior bounds %d %d to %d %d\n",
+         a.interior_bounds.lo.x, a.interior_bounds.lo.y,
+         a.interior_bounds.hi.x, a.interior_bounds.hi.y);
+
+  stencil(private_base_input, private_base_output, weights,
           private_stride_input/sizeof(DTYPE),
           a.interior_bounds.lo.x - private_bounds.lo.x,
           a.interior_bounds.hi.x - private_bounds.lo.x + 1,
           a.interior_bounds.lo.y - private_bounds.lo.y,
           a.interior_bounds.hi.y - private_bounds.lo.y + 1);
+
+  // dump(a.private_inst, FID_INPUT,  a.interior_bounds, " input");
+  // dump(a.private_inst, FID_OUTPUT, a.interior_bounds, "output");
 }
 
 void increment_task(const void *args, size_t arglen,
                     const void *userdata, size_t userlen, Processor p)
 {
+  printf("increment\n");
   assert(arglen == sizeof(IncrementArgs));
   const IncrementArgs &a = *reinterpret_cast<const IncrementArgs *>(args);
 
@@ -139,13 +183,43 @@ void increment_task(const void *args, size_t arglen,
           a.outer_bounds.hi.x - private_bounds.lo.x + 1,
           a.outer_bounds.lo.y - private_bounds.lo.y,
           a.outer_bounds.hi.y - private_bounds.lo.y + 1);
+
+  // dump(a.private_inst, FID_INPUT,  a.outer_bounds, " input");
 }
 
 void check_task(const void *args, size_t arglen,
                 const void *userdata, size_t userlen, Processor p)
 {
+  printf("check\n");
   assert(arglen == sizeof(CheckArgs));
   const CheckArgs &a = *reinterpret_cast<const CheckArgs *>(args);
+
+  DTYPE expect_input = a.init + a.tsteps;
+  DTYPE expect_output = a.init;
+
+  // Check input
+  {
+    AffineAccessor<DTYPE, 2> acc = AffineAccessor<DTYPE, 2>(a.private_inst, FID_INPUT);
+    for (PointInRectIterator<2, int> it(a.interior_bounds); it.valid; it.step()) {
+      if (acc.read(it.p) != expect_input) {
+        printf("bad value: got %f expected %f\n", acc.read(it.p), expect_input);
+        assert(false);
+        abort(); // if someone compiles with NDEBUG make sure this fails anyway
+      }
+    }
+  }
+
+  // Check output
+  {
+    AffineAccessor<DTYPE, 2> acc = AffineAccessor<DTYPE, 2>(a.private_inst, FID_OUTPUT);
+    for (PointInRectIterator<2, int> it(a.interior_bounds); it.valid; it.step()) {
+      if (acc.read(it.p) != expect_output) {
+        printf("bad value: got %f expected %f\n", acc.read(it.p), expect_output);
+        assert(false);
+        abort(); // if someone compiles with NDEBUG make sure this fails anyway
+      }
+    }
+  }
 }
 
 void shard_task(const void *args, size_t arglen,
@@ -195,6 +269,48 @@ void shard_task(const void *args, size_t arglen,
   sync.arrive(1);
   sync.wait();
   sync = sync.advance_barrier();
+
+  // Main time step loop
+  Event stencil_done;
+  Event increment_done;
+  for (size_t t = 0; t < a.tsteps; t++) {
+    {
+      StencilArgs args;
+      args.private_inst = private_inst;
+      args.xp_inst = a.xp_inst_in;
+      args.xm_inst = a.xm_inst_in;
+      args.yp_inst = a.yp_inst_in;
+      args.ym_inst = a.ym_inst_in;
+      args.print_ts = t == a.tprune;
+      args.interior_bounds = a.interior_bounds;
+      stencil_done = p.spawn(STENCIL_TASK, &args, sizeof(args), increment_done);
+    }
+
+    {
+      IncrementArgs args;
+      args.private_inst = private_inst;
+      args.xp_inst = a.xp_inst_in;
+      args.xm_inst = a.xm_inst_in;
+      args.yp_inst = a.yp_inst_in;
+      args.ym_inst = a.ym_inst_in;
+      args.print_ts = t == a.tsteps - a.tprune - 1;
+      args.outer_bounds = a.outer_bounds;
+      increment_done = p.spawn(INCREMENT_TASK, &args, sizeof(args), stencil_done);
+    }
+  }
+
+  Event check_done;
+  {
+    CheckArgs check_args;
+    check_args.private_inst = private_inst;
+    check_args.tsteps = a.tsteps;
+    check_args.init = a.init;
+    check_args.interior_bounds = a.interior_bounds;
+    check_done = p.spawn(CHECK_TASK, &check_args, sizeof(check_args), increment_done);
+  }
+
+  Event complete = check_done;
+  complete.wait();
 }
 
 void top_level_task(const void *args, size_t arglen,
