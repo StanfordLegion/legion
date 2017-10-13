@@ -159,6 +159,10 @@ if(Legion_USE_LLVM)
 
   # define variable for realm_defines.h
   set(REALM_USE_LLVM ON)
+  # just want REALM_LLVM_VERSION=<major><minor>
+  string(REPLACE "." ";" LLVM_VERSION_SPLIT ${LLVM_VERSION})
+  list(GET LLVM_VERSION_SPLIT 0 1 REALM_LLVM_VERSION_LIST)
+  string(REPLACE ";" "" REALM_LLVM_VERSION "${REALM_LLVM_VERSION_LIST}")
 endif()
 
 #------------------------------------------------------------------------------#

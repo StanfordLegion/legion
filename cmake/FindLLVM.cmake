@@ -34,6 +34,10 @@ if(NOT LLVM_FOUND AND NOT TARGET_LLVM)
   endif(NOT LLVM_CONFIG_EXECUTABLE)
   if(LLVM_CONFIG_EXECUTABLE)
     # Check components
+    execute_process(COMMAND ${LLVM_CONFIG_EXECUTABLE} --version
+      OUTPUT_VARIABLE LLVM_VERSION
+      OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET
+    )
     execute_process(COMMAND ${LLVM_CONFIG_EXECUTABLE} --components
       OUTPUT_VARIABLE LLVM_AVAILABLE_COMPONENTS
       OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET
@@ -44,6 +48,10 @@ if(NOT LLVM_FOUND AND NOT TARGET_LLVM)
     string(REPLACE " " ";"
       LLVM_AVAILABLE_COMPONENTS "${LLVM_AVAILABLE_COMPONENTS}"
     )
+    # for LLVM 3.6 and above, ignore jit in requested components
+    if(${LLVM_VERSION} VERSION_GREATER 3.5.99)
+      list(REMOVE_ITEM LLVM_FIND_COMPONENTS jit)
+    endif()
     foreach(C IN LISTS LLVM_FIND_COMPONENTS)
       list(FIND LLVM_AVAILABLE_COMPONENTS ${C} C_IDX)
       if(C_IDX EQUAL -1)
@@ -57,6 +65,10 @@ if(NOT LLVM_FOUND AND NOT TARGET_LLVM)
       OUTPUT_VARIABLE _LLVM_LIBS
       OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET
     )
+    # some versions of LLVM have a bug with libfiles where they produce 
+    #  /path/to/liblibfoo.so.so - do some string replaces to fix this
+    string(REPLACE "liblib" "lib" _LLVM_LIBS ${_LLVM_LIBS})
+    string(REPLACE ".so.so" ".so" _LLVM_LIBS ${_LLVM_LIBS})
     string(REPLACE " " ";" _LLVM_LIBS "${_LLVM_LIBS}")
 
     # LLVM system libs
