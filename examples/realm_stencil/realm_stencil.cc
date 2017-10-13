@@ -200,12 +200,11 @@ void stencil_task(const void *args, size_t arglen,
     Point<2> xp_size = xp_bounds.hi - xp_bounds.lo + Point<2>(1, 1);
 
     copy2D(xp_base_input, private_base_input,
+           xp_stride_input/sizeof(DTYPE),
+           0, xp_size.x,
+           0, xp_size.y,
            private_stride_input/sizeof(DTYPE),
-           interior_offset.x,
-           interior_offset.x + xp_size.x,
-           interior_offset.y,
-           interior_offset.y + xp_size.y,
-           xp_stride_input/sizeof(DTYPE), 0, 0);
+           interior_offset.x + interior_size.x, interior_offset.y);
   }
 
   if (a.xm_inst.exists()) {
@@ -217,12 +216,11 @@ void stencil_task(const void *args, size_t arglen,
     Point<2> xm_size = xm_bounds.hi - xm_bounds.lo + Point<2>(1, 1);
 
     copy2D(xm_base_input, private_base_input,
+           xm_stride_input/sizeof(DTYPE),
+           0, xm_size.x,
+           0, xm_size.y,
            private_stride_input/sizeof(DTYPE),
-           interior_offset.x,
-           interior_offset.x + xm_size.x,
-           interior_offset.y,
-           interior_offset.y + xm_size.y,
-           xm_stride_input/sizeof(DTYPE), 0, 0);
+           0, interior_offset.y);
   }
 
   if (a.yp_inst.exists()) {
@@ -234,12 +232,11 @@ void stencil_task(const void *args, size_t arglen,
     Point<2> yp_size = yp_bounds.hi - yp_bounds.lo + Point<2>(1, 1);
 
     copy2D(yp_base_input, private_base_input,
+           yp_stride_input/sizeof(DTYPE),
+           0, yp_size.x,
+           0, yp_size.y,
            private_stride_input/sizeof(DTYPE),
-           interior_offset.x,
-           interior_offset.x + yp_size.x,
-           interior_offset.y,
-           interior_offset.y + yp_size.y,
-           yp_stride_input/sizeof(DTYPE), 0, 0);
+           interior_offset.x, interior_offset.y + interior_size.y);
   }
 
   if (a.ym_inst.exists()) {
@@ -251,12 +248,11 @@ void stencil_task(const void *args, size_t arglen,
     Point<2> ym_size = ym_bounds.hi - ym_bounds.lo + Point<2>(1, 1);
 
     copy2D(ym_base_input, private_base_input,
+           ym_stride_input/sizeof(DTYPE),
+           0, ym_size.x,
+           0, ym_size.y,
            private_stride_input/sizeof(DTYPE),
-           interior_offset.x,
-           interior_offset.x + ym_size.x,
-           interior_offset.y,
-           interior_offset.y + ym_size.y,
-           ym_stride_input/sizeof(DTYPE), 0, 0);
+           interior_offset.x, 0);
   }
 
   DTYPE *weights = get_weights();
@@ -313,12 +309,12 @@ void increment_task(const void *args, size_t arglen,
     Rect<2> xp_bounds = a.xp_inst.get_indexspace<2>().bounds;
     Point<2> xp_size = xp_bounds.hi - xp_bounds.lo + Point<2>(1, 1);
 
-    copy2D(xp_base_input, private_base_input,
-           xp_stride_input/sizeof(DTYPE),
-           0, xp_size.x,
-           0, xp_size.y,
+    copy2D(private_base_input, xp_base_input,
            private_stride_input/sizeof(DTYPE),
-           outer_offset.x, outer_offset.y);
+           outer_offset.x + outer_size.x, xp_size.x,
+           outer_offset.y, xp_size.y,
+           xp_stride_input/sizeof(DTYPE),
+           0, 0);
   }
 
   if (a.xm_inst.exists()) {
@@ -329,12 +325,12 @@ void increment_task(const void *args, size_t arglen,
     Rect<2> xm_bounds = a.xm_inst.get_indexspace<2>().bounds;
     Point<2> xm_size = xm_bounds.hi - xm_bounds.lo + Point<2>(1, 1);
 
-    copy2D(xm_base_input, private_base_input,
-           xm_stride_input/sizeof(DTYPE),
-           0, xm_size.x,
-           0, xm_size.y,
+    copy2D(private_base_input, xm_base_input,
            private_stride_input/sizeof(DTYPE),
-           outer_offset.x, outer_offset.y);
+           0, xm_size.x,
+           outer_offset.y, xm_size.y,
+           xm_stride_input/sizeof(DTYPE),
+           0, 0);
   }
 
   if (a.yp_inst.exists()) {
@@ -345,12 +341,12 @@ void increment_task(const void *args, size_t arglen,
     Rect<2> yp_bounds = a.yp_inst.get_indexspace<2>().bounds;
     Point<2> yp_size = yp_bounds.hi - yp_bounds.lo + Point<2>(1, 1);
 
-    copy2D(yp_base_input, private_base_input,
-           yp_stride_input/sizeof(DTYPE),
-           0, yp_size.x,
-           0, yp_size.y,
+    copy2D(private_base_input, yp_base_input,
            private_stride_input/sizeof(DTYPE),
-           outer_offset.x, outer_offset.y);
+           outer_offset.x, yp_size.x,
+           outer_offset.y + outer_size.y, yp_size.y,
+           yp_stride_input/sizeof(DTYPE),
+           0, 0);
   }
 
   if (a.ym_inst.exists()) {
@@ -361,12 +357,12 @@ void increment_task(const void *args, size_t arglen,
     Rect<2> ym_bounds = a.ym_inst.get_indexspace<2>().bounds;
     Point<2> ym_size = ym_bounds.hi - ym_bounds.lo + Point<2>(1, 1);
 
-    copy2D(ym_base_input, private_base_input,
-           ym_stride_input/sizeof(DTYPE),
-           0, ym_size.x,
-           0, ym_size.y,
+    copy2D(private_base_input, ym_base_input,
            private_stride_input/sizeof(DTYPE),
-           outer_offset.x, outer_offset.y);
+           outer_offset.x, ym_size.x,
+           0, ym_size.y,
+           ym_stride_input/sizeof(DTYPE),
+           0, 0);
   }
 
   // dump(a.private_inst, FID_INPUT,  a.outer_bounds, " input");
