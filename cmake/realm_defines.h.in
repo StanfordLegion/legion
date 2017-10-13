@@ -64,6 +64,7 @@
 #ifndef REALM_USE_LLVM
 #cmakedefine REALM_USE_LLVM
 #cmakedefine REALM_LLVM_VERSION @REALM_LLVM_VERSION@
+#cmakedefine REALM_ALLOW_MISSING_LLVM_LIBS
 #endif
 
 #ifndef USE_HDF

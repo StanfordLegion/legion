@@ -42,6 +42,34 @@
   #error unsupported (or at least untested) LLVM version!
 #endif
 
+#ifdef REALM_ALLOW_MISSING_LLVM_LIBS
+// declare all of the LLVM C API calls we use as weak symbols
+#pragma weak LLVMAddModule
+#pragma weak LLVMContextCreate
+#pragma weak LLVMContextDispose
+#pragma weak LLVMCreateMCJITCompilerForModule
+#pragma weak LLVMCreateMemoryBufferWithMemoryRange
+#pragma weak LLVMCreateMemoryBufferWithMemoryRangeCopy
+#pragma weak LLVMCreateTargetMachine
+#pragma weak LLVMDisposeExecutionEngine
+#pragma weak LLVMDisposeMessage
+#pragma weak LLVMGetDefaultTargetTriple
+#pragma weak LLVMGetNamedFunction
+#pragma weak LLVMGetPointerToGlobal
+#pragma weak LLVMGetTargetFromTriple
+#pragma weak LLVMInitializeMCJITCompilerOptions
+#pragma weak LLVMInitializeX86AsmParser
+#pragma weak LLVMInitializeX86AsmPrinter
+#pragma weak LLVMInitializeX86Target
+#pragma weak LLVMInitializeX86TargetInfo
+#pragma weak LLVMInitializeX86TargetMC
+#pragma weak LLVMLinkInMCJIT
+#pragma weak LLVMModuleCreateWithNameInContext
+#pragma weak LLVMParseIRInContext
+#pragma weak LLVMSetDataLayout
+#pragma weak LLVMSetTarget
+#endif
+
 namespace Realm {
 
   extern Logger log_llvmjit;  // defined in llvmjit_module.cc
@@ -93,10 +121,19 @@ namespace Realm {
     //
     // class LLVMJitInternal
 
+#ifdef REALM_ALLOW_MISSING_LLVM_LIBS
+    /*static*/ bool LLVMJitInternal::detect_llvm_libraries(void)
+    {
+      // we have weak symbols for our LLVM references, so see if an
+      //  important one is non-null
+      void *fnptr = reinterpret_cast<void *>(&LLVMContextCreate);
+      return (fnptr != 0);
+    }
+#endif
+
     LLVMJitInternal::LLVMJitInternal(void)
     {
       context = LLVMContextCreate();
-
 
       // generative native target
       {

@@ -75,6 +75,7 @@ ifeq ($(strip $(USE_SPY)),1)
 endif
 
 # terra already includes LLVM libs, so we don't want them in our .so
+CC_FLAGS += -DREALM_ALLOW_MISSING_LLVM_LIBS
 $(OUTFILE) : LLVM_LIBS=
 
 ###########################################################################

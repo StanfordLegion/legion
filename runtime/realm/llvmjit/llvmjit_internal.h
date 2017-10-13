@@ -36,6 +36,10 @@ namespace Realm {
 
       void *llvmir_to_fnptr(const ByteArray& ir, const std::string& entry_symbol);
 
+#ifdef REALM_ALLOW_MISSING_LLVM_LIBS
+      static bool detect_llvm_libraries(void);
+#endif
+
     protected:
       LLVMContextRef context;
       LLVMExecutionEngineRef host_exec_engine;
