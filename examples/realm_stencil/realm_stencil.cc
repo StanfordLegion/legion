@@ -400,14 +400,14 @@ void top_level_task(const void *args, size_t arglen,
     std::vector<Event> events;
     for (PointInRectIterator<2, int> it(shards); it.valid; it.step()) {
       Point<2> i(it.p);
-      Rect<2> xp_bounds(Point<2>(x_blocks[i.x].hi - RADIUS + 1, y_blocks[i.y].lo),
-                        Point<2>(x_blocks[i.x].hi,              y_blocks[i.y].hi));
-      Rect<2> xm_bounds(Point<2>(x_blocks[i.x].lo,              y_blocks[i.y].lo),
-                        Point<2>(x_blocks[i.x].lo + RADIUS - 1, y_blocks[i.y].hi));
-      Rect<2> yp_bounds(Point<2>(x_blocks[i.x].lo,              y_blocks[i.y].hi - RADIUS + 1),
-                        Point<2>(x_blocks[i.x].hi,              y_blocks[i.y].hi));
-      Rect<2> ym_bounds(Point<2>(x_blocks[i.x].lo,              y_blocks[i.y].lo),
-                        Point<2>(x_blocks[i.x].hi,              y_blocks[i.y].lo + RADIUS - 1));
+      Rect<2> xp_bounds(Point<2>(x_blocks[i.x].hi + 1,      y_blocks[i.y].lo),
+                        Point<2>(x_blocks[i.x].hi + RADIUS, y_blocks[i.y].hi));
+      Rect<2> xm_bounds(Point<2>(x_blocks[i.x].lo - RADIUS, y_blocks[i.y].lo),
+                        Point<2>(x_blocks[i.x].lo - 1,      y_blocks[i.y].hi));
+      Rect<2> yp_bounds(Point<2>(x_blocks[i.x].lo,          y_blocks[i.y].hi + 1),
+                        Point<2>(x_blocks[i.x].hi,          y_blocks[i.y].hi + RADIUS));
+      Rect<2> ym_bounds(Point<2>(x_blocks[i.x].lo,          y_blocks[i.y].lo - RADIUS),
+                        Point<2>(x_blocks[i.x].hi,          y_blocks[i.y].lo - 1));
 
       Memory memory(proc_regmems[shard_procs[i]]);
       if (i.x != shards.hi.x)
@@ -553,15 +553,20 @@ void top_level_task(const void *args, size_t arglen,
       assert(args.yp_inst_in.exists() == args.yp_inst_out.exists());
       assert(args.ym_inst_in.exists() == args.ym_inst_out.exists());
 
-      if (args.xp_inst_in.exists()) assert(interior_bounds.contains(args.xp_inst_in.get_indexspace<2>().bounds));
-      if (args.xm_inst_in.exists()) assert(interior_bounds.contains(args.xm_inst_in.get_indexspace<2>().bounds));
-      if (args.yp_inst_in.exists()) assert(interior_bounds.contains(args.yp_inst_in.get_indexspace<2>().bounds));
-      if (args.ym_inst_in.exists()) assert(interior_bounds.contains(args.ym_inst_in.get_indexspace<2>().bounds));
+      if (args.xp_inst_in.exists()) assert(exterior_bounds.contains(args.xp_inst_in.get_indexspace<2>().bounds));
+      if (args.xm_inst_in.exists()) assert(exterior_bounds.contains(args.xm_inst_in.get_indexspace<2>().bounds));
+      if (args.yp_inst_in.exists()) assert(exterior_bounds.contains(args.yp_inst_in.get_indexspace<2>().bounds));
+      if (args.ym_inst_in.exists()) assert(exterior_bounds.contains(args.ym_inst_in.get_indexspace<2>().bounds));
 
-      if (args.xp_inst_out.exists()) assert(exterior_bounds.contains(args.xp_inst_out.get_indexspace<2>().bounds));
-      if (args.xm_inst_out.exists()) assert(exterior_bounds.contains(args.xm_inst_out.get_indexspace<2>().bounds));
-      if (args.yp_inst_out.exists()) assert(exterior_bounds.contains(args.yp_inst_out.get_indexspace<2>().bounds));
-      if (args.ym_inst_out.exists()) assert(exterior_bounds.contains(args.ym_inst_out.get_indexspace<2>().bounds));
+      if (args.xp_inst_in.exists()) assert(!interior_bounds.contains(args.xp_inst_in.get_indexspace<2>().bounds));
+      if (args.xm_inst_in.exists()) assert(!interior_bounds.contains(args.xm_inst_in.get_indexspace<2>().bounds));
+      if (args.yp_inst_in.exists()) assert(!interior_bounds.contains(args.yp_inst_in.get_indexspace<2>().bounds));
+      if (args.ym_inst_in.exists()) assert(!interior_bounds.contains(args.ym_inst_in.get_indexspace<2>().bounds));
+
+      if (args.xp_inst_out.exists()) assert(interior_bounds.contains(args.xp_inst_out.get_indexspace<2>().bounds));
+      if (args.xm_inst_out.exists()) assert(interior_bounds.contains(args.xm_inst_out.get_indexspace<2>().bounds));
+      if (args.yp_inst_out.exists()) assert(interior_bounds.contains(args.yp_inst_out.get_indexspace<2>().bounds));
+      if (args.ym_inst_out.exists()) assert(interior_bounds.contains(args.ym_inst_out.get_indexspace<2>().bounds));
 
       assert(args.xp_inst_in.exists() == args.xp_empty_in.exists());
       assert(args.xm_inst_in.exists() == args.xm_empty_in.exists());
