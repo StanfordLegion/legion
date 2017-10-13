@@ -271,8 +271,8 @@ void shard_task(const void *args, size_t arglen,
   sync = sync.advance_barrier();
 
   // Main time step loop
-  Event stencil_done;
-  Event increment_done;
+  Event stencil_done = Event::NO_EVENT;
+  Event increment_done = Event::NO_EVENT;
   for (size_t t = 0; t < a.tsteps; t++) {
     {
       StencilArgs args;
@@ -299,7 +299,7 @@ void shard_task(const void *args, size_t arglen,
     }
   }
 
-  Event check_done;
+  Event check_done = Event::NO_EVENT;
   {
     CheckArgs check_args;
     check_args.private_inst = private_inst;
