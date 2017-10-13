@@ -32,7 +32,9 @@ RUN wget https://cmake.org/files/v3.6/cmake-3.6.2-Linux-x86_64.tar.gz && \
     tar xfzC cmake-3.6.2-Linux-x86_64.tar.gz /usr/local --strip-components=1 && \
     rm cmake-3.6.2-Linux-x86_64.tar.gz
 
-RUN git clone https://github.com/zdevito/terra.git && \
-    cp -r terra /usr/local/terra35 && LLVM_CONFIG=llvm-config-3.5 make -C /usr/local/terra35 && \
-    cp -r terra /usr/local/terra38 && LLVM_CONFIG=llvm-config-3.8 make -C /usr/local/terra38 && \
+RUN git clone https://github.com/streichler/terra.git -b regent-tmp && \
+    cp -r terra /usr/local/terra35 && \
+    LLVM_CONFIG=llvm-config-3.5 make -C /usr/local/terra35 REEXPORT_LLVM_COMPONENTS="irreader jit mcjit x86" && \
+    cp -r terra /usr/local/terra38 && \
+    LLVM_CONFIG=llvm-config-3.8 make -C /usr/local/terra38 REEXPORT_LLVM_COMPONENTS="irreader mcjit x86" && \
     rm -rf terra
