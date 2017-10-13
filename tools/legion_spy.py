@@ -6121,6 +6121,11 @@ class Operation(object):
                 if not point.op.perform_op_physical_verification(perform_checks):
                     return False
             return True
+        elif self.points: # Handle other index space operations too
+            for point in sorted(self.points.itervalues(), key=lambda x: x.uid):
+                if not point.perform_op_physical_verification(perform_checks):
+                    return False
+            return True
         print((prefix+"Performing physical verification analysis "+
                      "for %s (UID %d)...") % (str(self),self.uid))
         # As a small performance optimization get all our reachable operations
@@ -9957,6 +9962,9 @@ class State(object):
             index_owners = set()
             for op in self.ops.itervalues():
                 if op.index_owner:
+                    # Skip close operations for transitive dependences
+                    if op.kind == INTER_CLOSE_OP_KIND:
+                        continue
                     index_owners.add(op.index_owner)
                     point_termination = op.finish_event
                     index_termination = op.index_owner.finish_event

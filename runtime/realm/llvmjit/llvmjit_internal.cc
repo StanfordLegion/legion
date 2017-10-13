@@ -43,13 +43,12 @@
 #if REALM_LLVM_VERSION != LLVM_VERSION
   #error mismatch between REALM_LLVM_VERSION and LLVM header files!
 #endif
-// JIT for 3.5, MCJIT for 3.8
+// JIT for 3.5, MCJIT for 3.6 - 3.9
 #if LLVM_VERSION == 35
   #define USE_JIT
-  #define USE_NO_FRAME_POINTER_ELIM
   #include <llvm/ExecutionEngine/JIT.h>
   #include "llvm/PassManager.h"
-#elif LLVM_VERSION == 38
+#elif LLVM_VERSION >= 36 && LLVM_VERSION <= 39
   #define USE_UNIQUE_PTRS
   #define USE_MCJIT
   #include <memory>
@@ -122,7 +121,7 @@ namespace Realm {
       // generative native target
       {
 	llvm::InitializeNativeTarget();
-#if LLVM_VERSION >= 38
+#if LLVM_VERSION >= 36
 	llvm::InitializeNativeTargetAsmParser();
 	llvm::InitializeNativeTargetAsmPrinter();
 #endif
@@ -138,12 +137,12 @@ namespace Realm {
 	}
 
 	// TODO - allow configuration options to steer these
-	llvm::Reloc::Model reloc_model = llvm::Reloc::Default;
+	llvm::Reloc::Model reloc_model = llvm::Reloc::Static;
 	llvm::CodeModel::Model code_model = llvm::CodeModel::Large;
 	llvm::CodeGenOpt::Level opt_level = llvm::CodeGenOpt::Aggressive;
 
 	llvm::TargetOptions options;
-#ifdef NO_FRAME_POINTER_ELIM
+#if LLVM_VERSION <= 36
 	options.NoFramePointerElim = true;
 #endif
 
@@ -218,9 +217,8 @@ namespace Realm {
 #else
       llvm::MemoryBuffer *mb = llvm::MemoryBuffer::getMemBuffer(nullterm);
 #endif
-      // TODO: when did this spelling actually change?
-#if LLVM_VERSION >= 38
-      llvm::Module *m = llvm::parseIR(llvm::MemoryBufferRef(*mb), sm, *context).release();
+#if LLVM_VERSION >= 36
+      llvm::Module *m = llvm::parseIR(mb->getMemBufferRef(), sm, *context).release();
 #else
       llvm::Module *m = llvm::ParseIR(mb, sm, *context);
 #endif

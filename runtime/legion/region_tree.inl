@@ -1098,7 +1098,7 @@ namespace Legion {
       ApEvent result(local_space.create_equal_subspaces(count, 
             granularity, subspaces, requests, ready));
 #ifdef LEGION_SPY
-      if (!result.exists())
+      if (!result.exists() || (result == ready))
       {
         ApUserEvent new_result = Runtime::create_ap_user_event();
         Runtime::trigger_event(new_result);
@@ -1284,7 +1284,7 @@ namespace Legion {
       ApEvent result(Realm::IndexSpace<DIM,T>::compute_unions(
             lhs_spaces, rhs_spaces, subspaces, requests, precondition));
 #ifdef LEGION_SPY
-      if (!result.exists())
+      if (!result.exists() || (result == precondition))
       {
         ApUserEvent new_result = Runtime::create_ap_user_event();
         Runtime::trigger_event(new_result);
@@ -1495,7 +1495,7 @@ namespace Legion {
       ApEvent result(Realm::IndexSpace<DIM,T>::compute_intersections(
             lhs_spaces, rhs_spaces, subspaces, requests, precondition));
 #ifdef LEGION_SPY
-      if (!result.exists())
+      if (!result.exists() || (result == precondition))
       {
         ApUserEvent new_result = Runtime::create_ap_user_event();
         Runtime::trigger_event(new_result);
@@ -1695,7 +1695,7 @@ namespace Legion {
       ApEvent result(Realm::IndexSpace<DIM,T>::compute_intersections(
             lhs_space, rhs_spaces, subspaces, requests, precondition));
 #ifdef LEGION_SPY
-      if (!result.exists())
+      if (!result.exists() || (result == precondition))
       {
         ApUserEvent new_result = Runtime::create_ap_user_event();
         Runtime::trigger_event(new_result);
@@ -1815,7 +1815,7 @@ namespace Legion {
       ApEvent result(Realm::IndexSpace<DIM,T>::compute_differences(
             lhs_spaces, rhs_spaces, subspaces, requests, precondition));
 #ifdef LEGION_SPY
-      if (!result.exists())
+      if (!result.exists() || (result == precondition))
       {
         ApUserEvent new_result = Runtime::create_ap_user_event();
         Runtime::trigger_event(new_result);
@@ -2160,7 +2160,7 @@ namespace Legion {
       ApEvent result(local_space.create_subspaces_by_field(
             descriptors, colors, subspaces, requests, precondition));
 #ifdef LEGION_SPY
-      if (!result.exists())
+      if (!result.exists() || (result == precondition))
       {
         ApUserEvent new_result = Runtime::create_ap_user_event();
         Runtime::trigger_event(new_result);
@@ -2283,7 +2283,7 @@ namespace Legion {
       ApEvent result(local_space.create_subspaces_by_image(descriptors,
             sources, subspaces, requests, precondition));
 #ifdef LEGION_SPY
-      if (!result.exists())
+      if (!result.exists() || (result == precondition))
       {
         ApUserEvent new_result = Runtime::create_ap_user_event();
         Runtime::trigger_event(new_result);
@@ -2429,7 +2429,7 @@ namespace Legion {
       ApEvent result(local_space.create_subspaces_by_image(descriptors,
             sources, subspaces, requests, precondition));
 #ifdef LEGION_SPY
-      if (!result.exists())
+      if (!result.exists() || (result == precondition))
       {
         ApUserEvent new_result = Runtime::create_ap_user_event();
         Runtime::trigger_event(new_result);
@@ -2574,7 +2574,7 @@ namespace Legion {
       ApEvent result(local_space.create_subspaces_by_preimage(
             descriptors, targets, subspaces, requests, precondition));
 #ifdef LEGION_SPY
-      if (!result.exists())
+      if (!result.exists() || (result == precondition))
       {
         ApUserEvent new_result = Runtime::create_ap_user_event();
         Runtime::trigger_event(new_result);
@@ -2720,7 +2720,7 @@ namespace Legion {
       ApEvent result(local_space.create_subspaces_by_preimage(
             descriptors, targets, subspaces, requests, precondition));
 #ifdef LEGION_SPY
-      if (!result.exists())
+      if (!result.exists() || (result == precondition))
       {
         ApUserEvent new_result = Runtime::create_ap_user_event();
         Runtime::trigger_event(new_result);
@@ -2829,7 +2829,7 @@ namespace Legion {
       ApEvent result(local_space.create_association(descriptors,
             range_space, requests, precondition));
 #ifdef LEGION_SPY
-      if (!result.exists())
+      if (!result.exists() || (result == precondition))
       {
         ApUserEvent new_result = Runtime::create_ap_user_event();
         Runtime::trigger_event(new_result);
