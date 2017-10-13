@@ -121,7 +121,9 @@ namespace Realm {
       }
 
       // if neither NUMA memory nor cpus was requested, there's no point
-      if((m->cfg_numa_mem_size_in_mb == 0) && (m->cfg_numa_nocpu_mem_size_in_mb == 0) && (m->cfg_num_numa_cpus == 0)) {
+      if((m->cfg_numa_mem_size_in_mb == 0) &&
+	 (m->cfg_numa_nocpu_mem_size_in_mb <= 0) &&
+	 (m->cfg_num_numa_cpus == 0)) {
 	log_numa.debug() << "no NUMA memory or cpus requested";
 	delete m;
 	return 0;
@@ -255,7 +257,7 @@ namespace Realm {
 	  // create affinities between this processor and system/reg memories
 	  // if the memory is one we created, use the kernel-reported distance
 	  // to adjust the answer
-	  std::vector<MemoryImpl *>& local_mems = runtime->nodes[gasnet_mynode()].memories;
+	  std::vector<MemoryImpl *>& local_mems = runtime->nodes[my_node_id].memories;
 	  for(std::vector<MemoryImpl *>::iterator it2 = local_mems.begin();
 	      it2 != local_mems.end();
 	      ++it2) {

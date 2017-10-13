@@ -1178,16 +1178,21 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DistributedCollectable::update_remote_instances(
-                                                     AddressSpaceID remote_inst)
+                                     AddressSpaceID remote_inst, bool need_lock)
     //--------------------------------------------------------------------------
     {
-      AutoLock gc(gc_lock);
-      remote_instances.add(remote_inst);
+      if (need_lock)
+      {
+        AutoLock gc(gc_lock);
+        remote_instances.add(remote_inst);
+      }
+      else
+        remote_instances.add(remote_inst);
     }
 
     //--------------------------------------------------------------------------
     void DistributedCollectable::register_with_runtime(
-                                                      ReferenceMutator *mutator)
+                                  ReferenceMutator *mutator, bool notify_remote)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1195,7 +1200,7 @@ namespace Legion {
 #endif
       registered_with_runtime = true;
       runtime->register_distributed_collectable(did, this);
-      if (!is_owner() && (mutator != NULL))
+      if (notify_remote && !is_owner() && (mutator != NULL))
         send_remote_registration(mutator);
     }
 

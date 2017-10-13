@@ -443,15 +443,6 @@ namespace Legion {
       void destroy_user_lock(Reservation r);
       void destroy_user_barrier(ApBarrier b);
     public:
-      void analyze_destroy_index_space(IndexSpace handle, 
-                                   std::vector<RegionRequirement> &delete_reqs,
-                                   std::vector<unsigned> &parent_req_indexes);
-      void analyze_destroy_index_partition(IndexPartition handle, 
-                                   std::vector<RegionRequirement> &delete_reqs,
-                                   std::vector<unsigned> &parent_req_indexes);
-      void analyze_destroy_field_space(FieldSpace handle, 
-                                   std::vector<RegionRequirement> &delete_reqs,
-                                   std::vector<unsigned> &parent_req_indexes);
       void analyze_destroy_fields(FieldSpace handle,
                                   const std::set<FieldID> &to_delete,
                                   std::vector<RegionRequirement> &delete_reqs,
@@ -679,6 +670,7 @@ namespace Legion {
                                          std::set<RtEvent> &preconditions);
       virtual AddressSpaceID get_version_owner(RegionTreeNode *node,
                                                AddressSpaceID source);
+      void notify_region_tree_node_deletion(RegionTreeNode *node);
       virtual bool attempt_children_complete(void);
       virtual bool attempt_children_commit(void);
       virtual void inline_child_task(TaskOp *child);
@@ -1122,6 +1114,30 @@ namespace Legion {
       public:
         ReplicateContext *ctx;
         ReplFutureMapImpl *impl;
+      };
+      struct ISBroadcast {
+      public:
+        ISBroadcast(void) : did(0) { }
+        ISBroadcast(IndexSpace h, DistributedID d) : handle(h), did(d) { }
+      public:
+        IndexSpace handle;
+        DistributedID did;
+      };
+      struct IPBroadcast {
+      public:
+        IPBroadcast(void) : did(0) { }
+        IPBroadcast(IndexPartition p, DistributedID d) : pid(p), did(d) { }
+      public:
+        IndexPartition pid;
+        DistributedID did;
+      };
+      struct FSBroadcast { 
+      public:
+        FSBroadcast(void) : did(0) { }
+        FSBroadcast(FieldSpace h, DistributedID d) : handle(h), did(d) { }
+      public:
+        FieldSpace handle;
+        DistributedID did;
       };
     public:
       ReplicateContext(Runtime *runtime, ShardTask *owner, bool full_inner,

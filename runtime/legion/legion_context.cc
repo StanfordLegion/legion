@@ -708,226 +708,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::analyze_destroy_index_space(IndexSpace handle,
-                                    std::vector<RegionRequirement> &delete_reqs,
-                                    std::vector<unsigned> &parent_req_indexes)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!is_leaf_context());
-#endif
-      // Iterate through our region requirements and find the
-      // ones we interfere with
-      unsigned parent_index = 0;
-      for (std::vector<RegionRequirement>::const_iterator it = 
-            regions.begin(); it != regions.end(); it++, parent_index++)
-      {
-        // Different index space trees means we can skip
-        if (handle.get_tree_id() != it->region.index_space.get_tree_id())
-          continue;
-        // Disjoint index spaces means we can skip
-        if (runtime->forest->are_disjoint(handle, it->region.index_space))
-          continue;
-        delete_reqs.resize(delete_reqs.size()+1);
-        RegionRequirement &req = delete_reqs.back();
-        std::vector<LegionColor> dummy_path;
-        // See if we dominate the deleted instance
-        if (runtime->forest->compute_index_path(it->region.index_space, 
-                                                handle, dummy_path))
-          req.region = LogicalRegion(it->region.get_tree_id(), handle, 
-                                     it->region.get_field_space());
-        else
-          req.region = it->region;
-        req.parent = it->region;
-        req.privilege = READ_WRITE;
-        req.prop = EXCLUSIVE;
-        req.privilege_fields = it->privilege_fields;
-        req.handle_type = SINGULAR;
-        parent_req_indexes.push_back(parent_index);
-      }
-      // Now do the same thing for the created requirements
-      std::deque<RegionRequirement> local_requirements;
-      std::deque<unsigned> parent_indexes;
-      {
-        AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
-        for (std::deque<RegionRequirement>::const_iterator it = 
-              created_requirements.begin(); it != 
-              created_requirements.end(); it++, parent_index++)
-        {  
-          // Different index space trees means we can skip
-          if (handle.get_tree_id() != it->region.index_space.get_tree_id())
-            continue;
-          local_requirements.push_back(*it);
-          parent_indexes.push_back(parent_index);
-        }
-      }
-      if (local_requirements.empty())
-        return;
-      unsigned local_index = 0;
-      for (std::deque<RegionRequirement>::const_iterator it = 
-            local_requirements.begin(); it !=
-            local_requirements.end(); it++, local_index++)
-      {
-        // Disjoint index spaces means we can skip
-        if (runtime->forest->are_disjoint(handle, it->region.index_space))
-          continue;
-        delete_reqs.resize(delete_reqs.size()+1);
-        RegionRequirement &req = delete_reqs.back();
-        std::vector<LegionColor> dummy_path;
-        // See if we dominate the deleted instance
-        if (runtime->forest->compute_index_path(it->region.index_space,
-                                                handle, dummy_path))
-          req.region = LogicalRegion(it->region.get_tree_id(), handle, 
-                                     it->region.get_field_space());
-        else
-          req.region = it->region;
-        req.parent = it->region;
-        req.privilege = READ_WRITE;
-        req.prop = EXCLUSIVE;
-        req.privilege_fields = it->privilege_fields;
-        req.handle_type = SINGULAR;
-        parent_req_indexes.push_back(parent_indexes[local_index]);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::analyze_destroy_index_partition(IndexPartition handle,
-                                    std::vector<RegionRequirement> &delete_reqs,
-                                    std::vector<unsigned> &parent_req_indexes)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!is_leaf_context());
-#endif
-      // Iterate through our region requirements and find the
-      // ones we interfere with
-      unsigned parent_index = 0;
-      for (std::vector<RegionRequirement>::const_iterator it = 
-            regions.begin(); it != regions.end(); it++, parent_index++)
-      {
-        // Different index space trees means we can skip
-        if (handle.get_tree_id() != it->region.index_space.get_tree_id())
-          continue;
-        // Disjoint index spaces means we can skip
-        if (runtime->forest->are_disjoint(it->region.index_space, handle))
-          continue;
-        delete_reqs.resize(delete_reqs.size()+1);
-        RegionRequirement &req = delete_reqs.back();
-        std::vector<LegionColor> dummy_path;
-        // See if we dominate the deleted instance
-        if (runtime->forest->compute_partition_path(it->region.index_space,
-                                                    handle, dummy_path))
-        {
-          req.partition = LogicalPartition(it->region.get_tree_id(), handle,
-                                           it->region.get_field_space());
-          req.handle_type = PART_PROJECTION;
-        }
-        else
-        {
-          req.region = it->region;
-          req.handle_type = SINGULAR;
-        }
-        req.parent = it->region;
-        req.privilege = READ_WRITE;
-        req.prop = EXCLUSIVE;
-        req.privilege_fields = it->privilege_fields;
-        parent_req_indexes.push_back(parent_index);
-      }
-      std::deque<RegionRequirement> local_requirements;
-      std::deque<unsigned> parent_indexes;
-      {
-        AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
-        for (std::deque<RegionRequirement>::const_iterator it = 
-              created_requirements.begin(); it != 
-              created_requirements.end(); it++, parent_index++)
-        {
-          // Different index space trees means we can skip
-          if (handle.get_tree_id() != it->region.index_space.get_tree_id())
-            continue;
-          local_requirements.push_back(*it);
-          parent_indexes.push_back(parent_index);
-        }
-      }
-      if (local_requirements.empty())
-        return;
-      unsigned local_index = 0;
-      for (std::deque<RegionRequirement>::const_iterator it = 
-            local_requirements.begin(); it != 
-            local_requirements.end(); it++, local_index++)
-      {
-        // Disjoint index spaces means we can skip
-        if (runtime->forest->are_disjoint(it->region.index_space, handle))
-          continue;
-        delete_reqs.resize(delete_reqs.size()+1);
-        RegionRequirement &req = delete_reqs.back();
-        std::vector<LegionColor> dummy_path;
-        // See if we dominate the deleted instance
-        if (runtime->forest->compute_partition_path(it->region.index_space,
-                                                    handle, dummy_path))
-        {
-          req.partition = LogicalPartition(it->region.get_tree_id(), handle,
-                                           it->region.get_field_space());
-          req.handle_type = PART_PROJECTION;
-        }
-        else
-        {
-          req.region = it->region;
-          req.handle_type = SINGULAR;
-        }
-        req.parent = it->region;
-        req.privilege = READ_WRITE;
-        req.prop = EXCLUSIVE;
-        req.privilege_fields = it->privilege_fields;
-        parent_req_indexes.push_back(parent_indexes[local_index]);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::analyze_destroy_field_space(FieldSpace handle,
-                                    std::vector<RegionRequirement> &delete_reqs,
-                                    std::vector<unsigned> &parent_req_indexes)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!is_leaf_context());
-#endif
-      unsigned parent_index = 0;
-      for (std::vector<RegionRequirement>::const_iterator it = 
-            regions.begin(); it != regions.end(); it++, parent_index++)
-      {
-        if (it->region.get_field_space() != handle)
-          continue;
-        delete_reqs.resize(delete_reqs.size()+1);
-        RegionRequirement &req = delete_reqs.back();
-        req.region = it->region;
-        req.parent = it->region;
-        req.privilege = READ_WRITE;
-        req.prop = EXCLUSIVE;
-        req.privilege_fields = it->privilege_fields;
-        req.handle_type = SINGULAR;
-        parent_req_indexes.push_back(parent_index);
-      }
-      unsigned created_index = 0;
-      AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
-      for (std::deque<RegionRequirement>::const_iterator it = 
-            created_requirements.begin(); it != 
-            created_requirements.end(); it++, parent_index++, created_index++)
-      {
-        if (it->region.get_field_space() != handle)
-          continue;
-        delete_reqs.resize(delete_reqs.size()+1);
-        RegionRequirement &req = delete_reqs.back();
-        req.region = it->region;
-        req.parent = it->region;
-        req.privilege = READ_WRITE;
-        req.prop = EXCLUSIVE;
-        req.privilege_fields = it->privilege_fields;
-        req.handle_type = SINGULAR;
-        parent_req_indexes.push_back(parent_index);
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void TaskContext::analyze_destroy_fields(FieldSpace handle,
                                              const std::set<FieldID> &to_delete,
                                     std::vector<RegionRequirement> &delete_reqs,
@@ -2317,6 +2097,16 @@ namespace Legion {
             runtime->forest->free_local_fields(it->first, to_free, indexes);
         }
       }
+      // Unregister ourselves from any tracking contexts that we might have
+      if (!region_tree_owners.empty())
+      {
+        AutoLock ctx_lock(context_lock);
+        for (std::map<RegionTreeNode*,
+                      std::pair<AddressSpaceID,bool> >::const_iterator it =
+              region_tree_owners.begin(); it != region_tree_owners.end(); it++)
+          it->first->unregister_tracking_context(this);
+        region_tree_owners.clear();
+      }
 #ifdef DEBUG_LEGION
       assert(pending_top_views.empty());
       assert(outstanding_subtasks == 0);
@@ -2392,9 +2182,20 @@ namespace Legion {
       region_tree_owners[node] = 
         std::pair<AddressSpaceID,bool>(source, 
                                       (source != runtime->address_space));
-      node->add_reference();
+      node->register_tracking_context(this);
       return source;
     } 
+
+    //--------------------------------------------------------------------------
+    void InnerContext::notify_region_tree_node_deletion(RegionTreeNode *node)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock ctx_lock(context_lock);
+#ifdef DEBUG_LEGION
+      assert(region_tree_owners.find(node) != region_tree_owners.end());
+#endif
+      region_tree_owners.erase(node);
+    }
 
     //--------------------------------------------------------------------------
     InnerContext* InnerContext::find_parent_logical_context(unsigned index)
@@ -5899,23 +5700,7 @@ namespace Legion {
             delete (it->second);
         }
         instance_top_views.clear();
-      }
-      // Before freeing our context, see if there are any version
-      // state managers we need to reset
-      if (!region_tree_owners.empty())
-      {
-        for (std::map<RegionTreeNode*,
-                      std::pair<AddressSpaceID,bool> >::const_iterator it =
-              region_tree_owners.begin(); it != region_tree_owners.end(); it++)
-        {
-          // If this is a remote only then we don't need to invalidate it
-          if (!it->second.second)
-            it->first->invalidate_version_state(tree_context.get_id()); 
-          if (it->first->remove_reference())
-            delete it->first;
-        }
-        region_tree_owners.clear();
-      }
+      } 
       // Now we can free our region tree context
       runtime->free_region_tree_context(tree_context);
     }
@@ -6452,7 +6237,7 @@ namespace Legion {
 #endif
         region_tree_owners[node] = 
           std::pair<AddressSpaceID,bool>(result, false/*remote only*/); 
-        node->add_reference();
+        node->register_tracking_context(this);
         // Find the event to trigger
         std::map<RegionTreeNode*,RtUserEvent>::iterator finder = 
           pending_version_owner_requests.find(node);
@@ -6950,14 +6735,13 @@ namespace Legion {
         // We're the owner, so make it locally and then broadcast it
         handle = IndexSpace(runtime->get_unique_index_space_id(),
                             runtime->get_unique_index_tree_id(), type_tag);
+        const DistributedID did = runtime->get_available_distributed_id(false);
         // Have to register this before broadcasting it
-        forest->create_index_space(handle, realm_is);
-        // Update the set of remote instances that exist
-        IndexSpaceNode *is_node = forest->get_node(handle);
-        is_node->update_creation_set(*shard_manager->get_mapping());
+        forest->create_index_space(handle, realm_is, did,
+                                   shard_manager->get_mapping());
         // Do our arrival on this generation, should be the last one
-        ValueBroadcast<IndexSpace> collective_space(this, COLLECTIVE_LOC_3);
-        collective_space.broadcast(handle);
+        ValueBroadcast<ISBroadcast> collective_space(this, COLLECTIVE_LOC_3);
+        collective_space.broadcast(ISBroadcast(handle, did));
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)", 
                         handle.id, get_task_name(), get_unique_id()); 
@@ -6970,13 +6754,15 @@ namespace Legion {
       else
       {
         // We need to get the barrier result 
-        ValueBroadcast<IndexSpace> collective_space(this,
+        ValueBroadcast<ISBroadcast> collective_space(this,
                             index_space_allocator_shard, COLLECTIVE_LOC_3);
-        handle = collective_space;
+        const ISBroadcast value = collective_space;
+        handle = value.handle;
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
-        forest->create_index_space(handle, realm_is);
+        forest->create_index_space(handle, realm_is, value.did,
+                                   shard_manager->get_mapping());
         // Arrive on the creation barrier
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
@@ -7003,13 +6789,12 @@ namespace Legion {
         handle = IndexSpace(runtime->get_unique_index_space_id(),
                             runtime->get_unique_index_tree_id(), 
                             spaces[0].get_type_tag());
+        const DistributedID did = runtime->get_available_distributed_id(false);
         // Have to do our registration before broadcasting the result
-        forest->create_union_space(handle, owner_task, spaces);
-        // Update the set of remote instances that exist
-        IndexSpaceNode *is_node = forest->get_node(handle);
-        is_node->update_creation_set(*shard_manager->get_mapping());
-        ValueBroadcast<IndexSpace> collective_space(this, COLLECTIVE_LOC_4);
-        collective_space.broadcast(handle);
+        forest->create_union_space(handle, owner_task, spaces, did,
+                                   shard_manager->get_mapping());
+        ValueBroadcast<ISBroadcast> collective_space(this, COLLECTIVE_LOC_4);
+        collective_space.broadcast(ISBroadcast(handle, did));
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)", 
                         handle.id, get_task_name(), get_unique_id()); 
@@ -7022,14 +6807,16 @@ namespace Legion {
       else
       {
         // We need to get the barrier result 
-        ValueBroadcast<IndexSpace> collective_space(this,
+        ValueBroadcast<ISBroadcast> collective_space(this,
                             index_space_allocator_shard, COLLECTIVE_LOC_4);
-        handle = collective_space;
+        const ISBroadcast value = collective_space;
+        handle = value.handle;
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
         // Now we can do our local registration
-        forest->create_union_space(handle, owner_task, spaces);
+        forest->create_union_space(handle, owner_task, spaces, value.did,
+                                   shard_manager->get_mapping());
         // Signal we're done our creation
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
@@ -7058,13 +6845,12 @@ namespace Legion {
         handle = IndexSpace(runtime->get_unique_index_space_id(),
                             runtime->get_unique_index_tree_id(),
                             spaces[0].get_type_tag());
+        const DistributedID did = runtime->get_available_distributed_id(false);
         // Have to do our registration before broadcasting the result
-        forest->create_intersection_space(handle, owner_task, spaces);
-        // Update the set of remote instances that exist
-        IndexSpaceNode *is_node = forest->get_node(handle);
-        is_node->update_creation_set(*shard_manager->get_mapping());
-        ValueBroadcast<IndexSpace> space_collective(this, COLLECTIVE_LOC_5);
-        space_collective.broadcast(handle);
+        forest->create_intersection_space(handle, owner_task, spaces, did,
+                                          shard_manager->get_mapping());
+        ValueBroadcast<ISBroadcast> space_collective(this, COLLECTIVE_LOC_5);
+        space_collective.broadcast(ISBroadcast(handle, did));
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)", 
                         handle.id, get_task_name(), get_unique_id()); 
@@ -7077,14 +6863,16 @@ namespace Legion {
       else
       {
         // We need to get the barrier result 
-        ValueBroadcast<IndexSpace> space_collective(this,
+        ValueBroadcast<ISBroadcast> space_collective(this,
                             index_space_allocator_shard, COLLECTIVE_LOC_5);
-        handle = space_collective;
+        const ISBroadcast value = space_collective;
+        handle = value.handle;
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
         // Once we have the answer we can do our own registration
-        forest->create_intersection_space(handle, owner_task, spaces);
+        forest->create_intersection_space(handle, owner_task, spaces,value.did,
+                                          shard_manager->get_mapping());
         // Signal that we're done our creation
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
@@ -7111,13 +6899,12 @@ namespace Legion {
         handle = IndexSpace(runtime->get_unique_index_space_id(),
                             runtime->get_unique_index_tree_id(), 
                             left.get_type_tag());
+        const DistributedID did = runtime->get_available_distributed_id(false);
         // Have to do our registration before broadcasting
-        forest->create_difference_space(handle, owner_task, left, right);
-        // Update the set of remote instances that exist
-        IndexSpaceNode *is_node = forest->get_node(handle);
-        is_node->update_creation_set(*shard_manager->get_mapping());
-        ValueBroadcast<IndexSpace> space_collective(this, COLLECTIVE_LOC_6);
-        space_collective.broadcast(handle);
+        forest->create_difference_space(handle, owner_task, left, right, did,
+                                        shard_manager->get_mapping());
+        ValueBroadcast<ISBroadcast> space_collective(this, COLLECTIVE_LOC_6);
+        space_collective.broadcast(ISBroadcast(handle, did));
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)", 
                         handle.id, get_task_name(), get_unique_id()); 
@@ -7130,14 +6917,16 @@ namespace Legion {
       else
       {
         // We need to get the barrier result 
-        ValueBroadcast<IndexSpace> space_collective(this, 
+        ValueBroadcast<ISBroadcast> space_collective(this, 
                             index_space_allocator_shard, COLLECTIVE_LOC_6);
-        handle = space_collective;
+        const ISBroadcast value = space_collective;
+        handle = value.handle;
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
         // Do our own registration
-        forest->create_difference_space(handle, owner_task, left, right);
+        forest->create_difference_space(handle, owner_task, left, right, 
+                                value.did, shard_manager->get_mapping());
         // Signal that we're done our creation
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
@@ -7205,6 +6994,7 @@ namespace Legion {
       {
         // We're the owner, so mke it locally and then broadcast it
         pid.id = runtime->get_unique_index_partition_id();
+        const DistributedID did = runtime->get_available_distributed_id(false);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating equal partition %d with parent index space %x"
                         " in task %s (ID %lld)", pid.id, parent.id,
@@ -7216,7 +7006,7 @@ namespace Legion {
                                            index_partition_allocator_shard, 
                                            this, pid, parent,
                                            color_space, partition_color, 
-                                           DISJOINT_KIND, NULL,
+                                           DISJOINT_KIND, did, NULL,
                                            pending_partition_barrier,
                                            shard_manager->get_mapping(),
                                            creation_barrier); 
@@ -7224,8 +7014,8 @@ namespace Legion {
         if (!parent_notified.has_triggered())
           parent_notified.lg_wait();
         // Then we can broadcast the name of the partition
-        ValueBroadcast<IndexPartition> pid_collective(this, COLLECTIVE_LOC_7);
-        pid_collective.broadcast(pid);
+        ValueBroadcast<IPBroadcast> pid_collective(this, COLLECTIVE_LOC_7);
+        pid_collective.broadcast(IPBroadcast(pid, did));
         if (color_generated)
         {
 #ifdef DEBUG_LEGION
@@ -7240,9 +7030,10 @@ namespace Legion {
       else
       {
         // We need to get the barrier result
-        ValueBroadcast<IndexPartition> pid_collective(this,
+        ValueBroadcast<IPBroadcast> pid_collective(this,
                           index_partition_allocator_shard, COLLECTIVE_LOC_7);
-        pid = pid_collective;
+        const IPBroadcast value = pid_collective;
+        pid = value.pid;
 #ifdef DEBUG_LEGION
         assert(pid.exists());
 #endif
@@ -7260,7 +7051,7 @@ namespace Legion {
         forest->create_pending_partition_shard(index_partition_allocator_shard, 
                                          this, pid, parent, 
                                          color_space, partition_color, 
-                                         DISJOINT_KIND, NULL,
+                                         DISJOINT_KIND, value.did, NULL,
                                          pending_partition_barrier,
                                          shard_manager->get_mapping(),
                                          creation_barrier);
@@ -7340,6 +7131,7 @@ namespace Legion {
       {
         // We're the owner, so mke it locally and then broadcast it
         pid.id = runtime->get_unique_index_partition_id();
+        const DistributedID did = runtime->get_available_distributed_id(false);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating union partition %d with parent index "
                         "space %x in task %s (ID %lld)", pid.id, parent.id,
@@ -7351,7 +7143,7 @@ namespace Legion {
                                            index_partition_allocator_shard, 
                                            this, pid, parent, 
                                            color_space, partition_color, 
-                                           kind, disjoint_result,
+                                           kind, did, disjoint_result,
                                            pending_partition_barrier,
                                            shard_manager->get_mapping(),
                                            creation_barrier);
@@ -7359,8 +7151,8 @@ namespace Legion {
         if (!parent_notified.has_triggered())
           parent_notified.lg_wait();
         // Then we can broadcast the name of the partition
-        ValueBroadcast<IndexPartition> pid_collective(this, COLLECTIVE_LOC_9);
-        pid_collective.broadcast(pid);
+        ValueBroadcast<IPBroadcast> pid_collective(this, COLLECTIVE_LOC_9);
+        pid_collective.broadcast(IPBroadcast(pid, did));
         if (color_generated)
         {
 #ifdef DEBUG_LEGION
@@ -7375,9 +7167,10 @@ namespace Legion {
       else
       {
         // We need to get the barrier result
-        ValueBroadcast<IndexPartition> pid_collective(this, 
+        ValueBroadcast<IPBroadcast> pid_collective(this, 
                             index_partition_allocator_shard, COLLECTIVE_LOC_9);
-        pid = pid_collective;
+        const IPBroadcast value = pid_collective;
+        pid = value.pid;
 #ifdef DEBUG_LEGION
         assert(pid.exists());
 #endif
@@ -7395,7 +7188,7 @@ namespace Legion {
                                          index_partition_allocator_shard,
                                          this, pid, parent, 
                                          color_space, partition_color, 
-                                         kind, disjoint_result,
+                                         kind, value.did, disjoint_result,
                                          pending_partition_barrier,
                                          shard_manager->get_mapping(),
                                          creation_barrier);
@@ -7474,6 +7267,7 @@ namespace Legion {
       {
         // We're the owner, so mke it locally and then broadcast it
         pid.id = runtime->get_unique_index_partition_id();
+        const DistributedID did = runtime->get_available_distributed_id(false);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating intersection partition %d with parent "
                         "index space %x in task %s (ID %lld)", pid.id, 
@@ -7485,7 +7279,7 @@ namespace Legion {
                                            index_partition_allocator_shard,
                                            this, pid, parent, 
                                            color_space, partition_color, 
-                                           kind, disjoint_result,
+                                           kind, did, disjoint_result,
                                            pending_partition_barrier,
                                            shard_manager->get_mapping(),
                                            creation_barrier);
@@ -7493,8 +7287,8 @@ namespace Legion {
         if (!parent_notified.has_triggered())
           parent_notified.lg_wait();
         // Then we can broadcast the name of the partition
-        ValueBroadcast<IndexPartition> pid_collective(this, COLLECTIVE_LOC_11);
-        pid_collective.broadcast(pid);
+        ValueBroadcast<IPBroadcast> pid_collective(this, COLLECTIVE_LOC_11);
+        pid_collective.broadcast(IPBroadcast(pid, did));
         if (color_generated)
         {
 #ifdef DEBUG_LEGION
@@ -7509,9 +7303,10 @@ namespace Legion {
       else
       {
         // We need to get the barrier result
-        ValueBroadcast<IndexPartition> pid_collective(this,
+        ValueBroadcast<IPBroadcast> pid_collective(this,
                           index_partition_allocator_shard, COLLECTIVE_LOC_11);
-        pid = pid_collective;
+        const IPBroadcast value = pid_collective;
+        pid = value.pid;
 #ifdef DEBUG_LEGION
         assert(pid.exists());
 #endif
@@ -7529,7 +7324,7 @@ namespace Legion {
                                          index_partition_allocator_shard,
                                          this, pid, parent, 
                                          color_space, partition_color, 
-                                         kind, disjoint_result,
+                                         kind, value.did, disjoint_result,
                                          pending_partition_barrier,
                                          shard_manager->get_mapping(),
                                          creation_barrier);
@@ -7605,6 +7400,7 @@ namespace Legion {
       {
         // We're the owner, so mke it locally and then broadcast it
         pid.id = runtime->get_unique_index_partition_id();
+        const DistributedID did = runtime->get_available_distributed_id(false);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating difference partition %d with parent "
                         "index space %x in task %s (ID %lld)", pid.id, 
@@ -7616,7 +7412,7 @@ namespace Legion {
                                            index_partition_allocator_shard,
                                            this, pid, parent, 
                                            color_space, partition_color, 
-                                           kind, disjoint_result,
+                                           kind, did, disjoint_result,
                                            pending_partition_barrier,
                                            shard_manager->get_mapping(),
                                            creation_barrier);
@@ -7624,8 +7420,8 @@ namespace Legion {
         if (!parent_notified.has_triggered())
           parent_notified.lg_wait();
         // Then we can broadcast the name of the partition
-        ValueBroadcast<IndexPartition> pid_collective(this, COLLECTIVE_LOC_13);
-        pid_collective.broadcast(pid);
+        ValueBroadcast<IPBroadcast> pid_collective(this, COLLECTIVE_LOC_13);
+        pid_collective.broadcast(IPBroadcast(pid, did));
         if (color_generated)
         {
 #ifdef DEBUG_LEGION
@@ -7640,9 +7436,10 @@ namespace Legion {
       else
       {
         // We need to get the barrier result
-        ValueBroadcast<IndexPartition> pid_collective(this,
+        ValueBroadcast<IPBroadcast> pid_collective(this,
                           index_partition_allocator_shard, COLLECTIVE_LOC_13);
-        pid = pid_collective;
+        const IPBroadcast value = pid_collective;
+        pid = value.pid;
 #ifdef DEBUG_LEGION
         assert(pid.exists());
 #endif
@@ -7660,7 +7457,7 @@ namespace Legion {
                                          index_partition_allocator_shard,
                                          this, pid, parent, 
                                          color_space, partition_color, 
-                                         kind, disjoint_result,
+                                         kind, value.did, disjoint_result,
                                          pending_partition_barrier,
                                          shard_manager->get_mapping(),
                                          creation_barrier);
@@ -7828,6 +7625,7 @@ namespace Legion {
       {
         // We're the owner, so mke it locally and then broadcast it
         pid.id = runtime->get_unique_index_partition_id();
+        const DistributedID did = runtime->get_available_distributed_id(false);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating restricted partition in task %s (ID %lld)", 
                         get_task_name(), get_unique_id());
@@ -7838,7 +7636,7 @@ namespace Legion {
                                            index_partition_allocator_shard,
                                            this, pid, parent, 
                                            color_space, part_color, 
-                                           part_kind, disjoint_result,
+                                           part_kind, did, disjoint_result,
                                            pending_partition_barrier,
                                            shard_manager->get_mapping(),
                                            creation_barrier);
@@ -7846,8 +7644,8 @@ namespace Legion {
         if (!parent_notified.has_triggered())
           parent_notified.lg_wait();
         // Then we can broadcast the name of the partition
-        ValueBroadcast<IndexPartition> pid_collective(this, COLLECTIVE_LOC_16);
-        pid_collective.broadcast(pid);
+        ValueBroadcast<IPBroadcast> pid_collective(this, COLLECTIVE_LOC_16);
+        pid_collective.broadcast(IPBroadcast(pid, did));
         if (color_generated)
         {
 #ifdef DEBUG_LEGION
@@ -7862,9 +7660,10 @@ namespace Legion {
       else
       {
         // We need to get the barrier result
-        ValueBroadcast<IndexPartition> pid_collective(this, 
+        ValueBroadcast<IPBroadcast> pid_collective(this, 
                           index_partition_allocator_shard, COLLECTIVE_LOC_16);
-        pid = pid_collective;
+        const IPBroadcast value = pid_collective;
+        pid = value.pid;
 #ifdef DEBUG_LEGION
         assert(pid.exists());
 #endif
@@ -7882,7 +7681,7 @@ namespace Legion {
                                          index_partition_allocator_shard,
                                          this, pid, parent, 
                                          color_space, part_color, 
-                                         part_kind, disjoint_result,
+                                         part_kind, value.did, disjoint_result,
                                          pending_partition_barrier,
                                          shard_manager->get_mapping(),
                                          creation_barrier);
@@ -7936,6 +7735,7 @@ namespace Legion {
       {
         // We're the owner, so mke it locally and then broadcast it
         pid.id = runtime->get_unique_index_partition_id();
+        const DistributedID did = runtime->get_available_distributed_id(false);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating partition by field in task %s (ID %lld)", 
                         get_task_name(), get_unique_id());
@@ -7946,7 +7746,7 @@ namespace Legion {
                                            index_partition_allocator_shard,
                                            this, pid, parent, 
                                            color_space, part_color,
-                                           DISJOINT_KIND, NULL,
+                                           DISJOINT_KIND, did, NULL,
                                            pending_partition_barrier,
                                            shard_manager->get_mapping(),
                                            creation_barrier);
@@ -7954,8 +7754,8 @@ namespace Legion {
         if (!parent_notified.has_triggered())
           parent_notified.lg_wait();
         // Then we can broadcast the name of the partition
-        ValueBroadcast<IndexPartition> pid_collective(this, COLLECTIVE_LOC_18);
-        pid_collective.broadcast(pid);
+        ValueBroadcast<IPBroadcast> pid_collective(this, COLLECTIVE_LOC_18);
+        pid_collective.broadcast(IPBroadcast(pid, did));
         if (color_generated)
         {
 #ifdef DEBUG_LEGION
@@ -7970,9 +7770,10 @@ namespace Legion {
       else
       {
         // We need to get the barrier result
-        ValueBroadcast<IndexPartition> pid_collective(this,
+        ValueBroadcast<IPBroadcast> pid_collective(this,
                           index_partition_allocator_shard, COLLECTIVE_LOC_18);
-        pid = pid_collective;
+        const IPBroadcast value = pid_collective;
+        pid = value.pid;
 #ifdef DEBUG_LEGION
         assert(pid.exists());
 #endif
@@ -7990,7 +7791,7 @@ namespace Legion {
                                          index_partition_allocator_shard,
                                          this, pid, parent, 
                                          color_space, part_color,
-                                         DISJOINT_KIND, NULL,
+                                         DISJOINT_KIND, value.did, NULL,
                                          pending_partition_barrier,
                                          shard_manager->get_mapping(),
                                          creation_barrier);
@@ -8072,6 +7873,7 @@ namespace Legion {
       {
         // We're the owner, so mke it locally and then broadcast it
         pid.id = runtime->get_unique_index_partition_id();
+        const DistributedID did = runtime->get_available_distributed_id(false);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating partition by image in task %s (ID %lld)", 
                         get_task_name(), get_unique_id());
@@ -8082,7 +7884,7 @@ namespace Legion {
                                            index_partition_allocator_shard,
                                            this, pid, handle, 
                                            color_space, part_color,
-                                           part_kind, disjoint_result,
+                                           part_kind, did, disjoint_result,
                                            pending_partition_barrier,
                                            shard_manager->get_mapping(),
                                            creation_barrier);
@@ -8090,8 +7892,8 @@ namespace Legion {
         if (!parent_notified.has_triggered())
           parent_notified.lg_wait();
         // Then we can broadcast the name of the partition
-        ValueBroadcast<IndexPartition> pid_collective(this, COLLECTIVE_LOC_20);
-        pid_collective.broadcast(pid);
+        ValueBroadcast<IPBroadcast> pid_collective(this, COLLECTIVE_LOC_20);
+        pid_collective.broadcast(IPBroadcast(pid, did));
         if (color_generated)
         {
 #ifdef DEBUG_LEGION
@@ -8106,9 +7908,10 @@ namespace Legion {
       else
       {
         // We need to get the barrier result
-        ValueBroadcast<IndexPartition> pid_collective(this, 
+        ValueBroadcast<IPBroadcast> pid_collective(this, 
                           index_partition_allocator_shard, COLLECTIVE_LOC_20);
-        pid = pid_collective;
+        const IPBroadcast value = pid_collective;
+        pid = value.pid;
 #ifdef DEBUG_LEGION
         assert(pid.exists());
 #endif
@@ -8126,7 +7929,7 @@ namespace Legion {
                                          index_partition_allocator_shard,
                                          this, pid, handle, 
                                          color_space, part_color,
-                                         part_kind, disjoint_result,
+                                         part_kind, value.did, disjoint_result,
                                          pending_partition_barrier,
                                          shard_manager->get_mapping(),
                                          creation_barrier);
@@ -8207,6 +8010,7 @@ namespace Legion {
       {
         // We're the owner, so mke it locally and then broadcast it
         pid.id = runtime->get_unique_index_partition_id();
+        const DistributedID did = runtime->get_available_distributed_id(false);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating partition by image range in task %s "
                         "(ID %lld)", get_task_name(), get_unique_id());
@@ -8217,7 +8021,7 @@ namespace Legion {
                                            index_partition_allocator_shard,
                                            this, pid, handle,
                                            color_space, part_color,
-                                           part_kind, disjoint_result,
+                                           part_kind, did, disjoint_result,
                                            pending_partition_barrier,
                                            shard_manager->get_mapping(),
                                            creation_barrier);
@@ -8225,8 +8029,8 @@ namespace Legion {
         if (!parent_notified.has_triggered())
           parent_notified.lg_wait();
         // Then we can broadcast the name of the partition
-        ValueBroadcast<IndexPartition> pid_collective(this, COLLECTIVE_LOC_22);
-        pid_collective.broadcast(pid);
+        ValueBroadcast<IPBroadcast> pid_collective(this, COLLECTIVE_LOC_22);
+        pid_collective.broadcast(IPBroadcast(pid, did));
         if (color_generated)
         {
 #ifdef DEBUG_LEGION
@@ -8241,9 +8045,10 @@ namespace Legion {
       else
       {
         // We need to get the barrier result
-        ValueBroadcast<IndexPartition> pid_collective(this,
+        ValueBroadcast<IPBroadcast> pid_collective(this,
                           index_partition_allocator_shard, COLLECTIVE_LOC_22);
-        pid = pid_collective;
+        const IPBroadcast value = pid_collective;
+        pid = value.pid;
 #ifdef DEBUG_LEGION
         assert(pid.exists());
 #endif
@@ -8261,7 +8066,7 @@ namespace Legion {
                                          index_partition_allocator_shard,
                                          this, pid, handle, 
                                          color_space, part_color,
-                                         part_kind, disjoint_result,
+                                         part_kind, value.did, disjoint_result,
                                          pending_partition_barrier,
                                          shard_manager->get_mapping(),
                                          creation_barrier);
@@ -8350,6 +8155,7 @@ namespace Legion {
       {
         // We're the owner, so mke it locally and then broadcast it
         pid.id = runtime->get_unique_index_partition_id();
+        const DistributedID did = runtime->get_available_distributed_id(false);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating partition by preimage in task %s (ID %lld)",
                         get_task_name(), get_unique_id());
@@ -8360,7 +8166,7 @@ namespace Legion {
                                            index_partition_allocator_shard,
                                            this, pid, handle.get_index_space(),
                                            color_space, part_color, 
-                                           part_kind, disjoint_result,
+                                           part_kind, did, disjoint_result,
                                            pending_partition_barrier,
                                            shard_manager->get_mapping(),
                                            creation_barrier);
@@ -8368,8 +8174,8 @@ namespace Legion {
         if (!parent_notified.has_triggered())
           parent_notified.lg_wait();
         // Then we can broadcast the name of the partition
-        ValueBroadcast<IndexPartition> pid_collective(this, COLLECTIVE_LOC_24);
-        pid_collective.broadcast(pid);
+        ValueBroadcast<IPBroadcast> pid_collective(this, COLLECTIVE_LOC_24);
+        pid_collective.broadcast(IPBroadcast(pid, did));
         if (color_generated)
         {
 #ifdef DEBUG_LEGION
@@ -8384,9 +8190,10 @@ namespace Legion {
       else
       {
         // We need to get the barrier result
-        ValueBroadcast<IndexPartition> pid_collective(this,
+        ValueBroadcast<IPBroadcast> pid_collective(this,
                           index_partition_allocator_shard, COLLECTIVE_LOC_24);
-        pid = pid_collective;
+        const IPBroadcast value = pid_collective;
+        pid = value.pid;
 #ifdef DEBUG_LEGION
         assert(pid.exists());
 #endif
@@ -8404,7 +8211,7 @@ namespace Legion {
                                          index_partition_allocator_shard,
                                          this, pid, handle.get_index_space(),
                                          color_space, part_color, 
-                                         part_kind, disjoint_result,
+                                         part_kind, value.did, disjoint_result,
                                          pending_partition_barrier,
                                          shard_manager->get_mapping(),
                                          creation_barrier);
@@ -8486,6 +8293,7 @@ namespace Legion {
       {
         // We're the owner, so mke it locally and then broadcast it
         pid.id = runtime->get_unique_index_partition_id();
+        const DistributedID did = runtime->get_available_distributed_id(false);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating partition by preimage range in task %s "
                         "(ID %lld)", get_task_name(), get_unique_id());
@@ -8496,7 +8304,7 @@ namespace Legion {
                                            index_partition_allocator_shard,
                                            this, pid, handle.get_index_space(),
                                            color_space, part_color, 
-                                           part_kind, disjoint_result,
+                                           part_kind, did, disjoint_result,
                                            pending_partition_barrier,
                                            shard_manager->get_mapping(),
                                            creation_barrier);
@@ -8504,8 +8312,8 @@ namespace Legion {
         if (!parent_notified.has_triggered())
           parent_notified.lg_wait();
         // Then we can broadcast the name of the partition
-        ValueBroadcast<IndexPartition> pid_collective(this, COLLECTIVE_LOC_26);
-        pid_collective.broadcast(pid);
+        ValueBroadcast<IPBroadcast> pid_collective(this, COLLECTIVE_LOC_26);
+        pid_collective.broadcast(IPBroadcast(pid, did));
         if (color_generated)
         {
 #ifdef DEBUG_LEGION
@@ -8520,9 +8328,10 @@ namespace Legion {
       else
       {
         // We need to get the barrier result
-        ValueBroadcast<IndexPartition> pid_collective(this,
+        ValueBroadcast<IPBroadcast> pid_collective(this,
                           index_partition_allocator_shard, COLLECTIVE_LOC_26);
-        pid = pid_collective;
+        const IPBroadcast value = pid_collective;
+        pid = value.pid;
 #ifdef DEBUG_LEGION
         assert(pid.exists());
 #endif
@@ -8540,7 +8349,7 @@ namespace Legion {
                                          index_partition_allocator_shard,
                                          this, pid, handle.get_index_space(),
                                          color_space, part_color, 
-                                         part_kind, disjoint_result,
+                                         part_kind, value.did, disjoint_result,
                                          pending_partition_barrier,
                                          shard_manager->get_mapping(),
                                          creation_barrier);
@@ -8614,6 +8423,7 @@ namespace Legion {
       {
         // We're the owner, so mke it locally and then broadcast it
         pid.id = runtime->get_unique_index_partition_id();
+        const DistributedID did = runtime->get_available_distributed_id(false);
 #ifdef DEBUG_LEGION
         log_index.debug("Creating pending partition in task %s (ID %lld)", 
                         get_task_name(), get_unique_id());
@@ -8628,7 +8438,7 @@ namespace Legion {
                                            index_partition_allocator_shard,
                                            this, pid, parent, 
                                            color_space, part_color, 
-                                           part_kind, disjoint_result,
+                                           part_kind, did, disjoint_result,
                                            partition_ready,
                                            shard_manager->get_mapping(),
                                            creation_barrier, partition_ready);
@@ -8637,8 +8447,8 @@ namespace Legion {
           parent_notified.lg_wait();
         // Then we can broadcast the name of the partition
         // Broadcast the partition first and then the barrier
-        ValueBroadcast<IndexPartition> pid_collective(this, COLLECTIVE_LOC_28);
-        pid_collective.broadcast(pid);
+        ValueBroadcast<IPBroadcast> pid_collective(this, COLLECTIVE_LOC_28);
+        pid_collective.broadcast(IPBroadcast(pid, did));
         ValueBroadcast<ApBarrier> bar_collective(this, COLLECTIVE_LOC_29);
         bar_collective.broadcast(partition_ready);
         if (color_generated)
@@ -8656,11 +8466,12 @@ namespace Legion {
       else
       {
         // Get the partition handle and barrier
-        ValueBroadcast<IndexPartition> pid_collective(this, 
+        ValueBroadcast<IPBroadcast> pid_collective(this, 
                             index_partition_allocator_shard, COLLECTIVE_LOC_28);
         ValueBroadcast<ApBarrier> bar_collective(this,
                             index_partition_allocator_shard, COLLECTIVE_LOC_29);
-        pid = pid_collective;
+        const IPBroadcast value = pid_collective;
+        pid = value.pid;
 #ifdef DEBUG_LEGION
         assert(pid.exists());
 #endif
@@ -8679,7 +8490,7 @@ namespace Legion {
                                          index_partition_allocator_shard,
                                          this, pid, parent, 
                                          color_space, part_color, 
-                                         part_kind, disjoint_result,
+                                         part_kind, value.did, disjoint_result,
                                          partition_ready,
                                          shard_manager->get_mapping(),
                                          creation_barrier, partition_ready);
@@ -8828,15 +8639,11 @@ namespace Legion {
       {
         // We're the owner so make it locally and then broadcast it
         space = FieldSpace(runtime->get_unique_field_space_id());
+        const DistributedID did = runtime->get_available_distributed_id(false);
         // Need to register this before broadcasting
-        forest->create_field_space(space);
-        // Before broadcastint we need to update the creation set
-        // with all the address spaces for remote shards in case
-        // we end up doing field allocation
-        FieldSpaceNode *fs_node = forest->get_node(space);
-        fs_node->update_creation_set(*shard_manager->get_mapping());
-        ValueBroadcast<FieldSpace> space_collective(this, COLLECTIVE_LOC_31);
-        space_collective.broadcast(space);
+        forest->create_field_space(space, did, shard_manager->get_mapping());
+        ValueBroadcast<FSBroadcast> space_collective(this, COLLECTIVE_LOC_31);
+        space_collective.broadcast(FSBroadcast(space, did));
 #ifdef DEBUG_LEGION
         log_field.debug("Creating field space %x in task %s (ID %lld)", 
                       space.id, get_task_name(), get_unique_id());
@@ -8849,13 +8656,15 @@ namespace Legion {
       else
       {
         // We need to get the barrier result
-        ValueBroadcast<FieldSpace> space_collective(this,
+        ValueBroadcast<FSBroadcast> space_collective(this,
                             field_space_allocator_shard, COLLECTIVE_LOC_31);
-        space = space_collective;
+        const FSBroadcast value = space_collective;
+        space = value.handle;
 #ifdef DEBUG_LEGION
         assert(space.exists());
 #endif
-        forest->create_field_space(space);
+        forest->create_field_space(space, value.did, 
+                                   shard_manager->get_mapping());
         // Signal that we are done with our creation
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         // Also have to wait for creation to be done here to avoid 
@@ -8990,9 +8799,7 @@ namespace Legion {
         // We're the owner so make it locally and then broadcast it
         handle.tree_id = runtime->get_unique_region_tree_id();
         // Have to register this before doing the broadcast
-        forest->create_logical_region(handle);
-        RegionNode *rg_node = forest->get_node(handle);
-        rg_node->update_creation_set(*shard_manager->get_mapping());
+        forest->create_logical_region(handle, shard_manager->get_mapping());
         ValueBroadcast<RegionTreeID> tree_collective(this, COLLECTIVE_LOC_34);
         tree_collective.broadcast(handle.tree_id);
 #ifdef DEBUG_LEGION
@@ -9016,7 +8823,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
-        forest->create_logical_region(handle);
+        forest->create_logical_region(handle, shard_manager->get_mapping());
         // Signal that we are done our creation
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }

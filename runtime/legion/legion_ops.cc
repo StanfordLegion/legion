@@ -506,7 +506,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::report_profiling_response(
+    void Operation::handle_profiling_response(
                                        const Realm::ProfilingResponse &response)
     //--------------------------------------------------------------------------
     {
@@ -3116,10 +3116,10 @@ namespace Legion {
       // Nothing to do if we don't have any profiling requests
       if (profiling_requests.empty())
         return;
-      Operation *proxy_this = this;
+      ProfilingResponseBase base(this);
       Realm::ProfilingRequest &request = requests.add_request( 
-          runtime->find_utility_group(), LG_MAPPER_PROFILING_ID, 
-          &proxy_this, sizeof(proxy_this), profiling_priority);
+          runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
+          &base, sizeof(base), profiling_priority);
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
@@ -3129,7 +3129,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapOp::report_profiling_response(
+    void MapOp::handle_profiling_response(
                                        const Realm::ProfilingResponse &response)
     //--------------------------------------------------------------------------
     {
@@ -4469,10 +4469,10 @@ namespace Legion {
       // Nothing to do if we don't have any profiling requests
       if (profiling_requests.empty())
         return;
-      Operation *proxy_this = this;
+      ProfilingResponseBase base(this);
       Realm::ProfilingRequest &request = requests.add_request( 
-          runtime->find_utility_group(), LG_MAPPER_PROFILING_ID, 
-          &proxy_this, sizeof(proxy_this), profiling_priority);
+          runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
+          &base, sizeof(base), profiling_priority);
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
@@ -4482,7 +4482,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::report_profiling_response(
+    void CopyOp::handle_profiling_response(
                                        const Realm::ProfilingResponse &response)
     //--------------------------------------------------------------------------
     {
@@ -5876,27 +5876,11 @@ namespace Legion {
       std::vector<RegionRequirement> deletion_requirements;
       switch (kind)
       {
+        // No analysis for these since they don't need to defer anything
         case INDEX_SPACE_DELETION:
-          {
-            parent_ctx->analyze_destroy_index_space(index_space, 
-                                                    deletion_requirements,
-                                                    parent_req_indexes);
-            break;
-          }
         case INDEX_PARTITION_DELETION:
-          {
-            parent_ctx->analyze_destroy_index_partition(index_part, 
-                                                        deletion_requirements,
-                                                        parent_req_indexes);
-            break;
-          }
         case FIELD_SPACE_DELETION:
-          {
-            parent_ctx->analyze_destroy_field_space(field_space, 
-                                                    deletion_requirements,
-                                                    parent_req_indexes);
-            break;
-          }
+          break;
         case FIELD_DELETION:
           {
             parent_ctx->analyze_destroy_fields(field_space, free_fields, 
@@ -5969,6 +5953,32 @@ namespace Legion {
     void DeletionOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
+      // Iterate over our incoming operations and find the completion 
+      // operations that we need to wait to be done executing before
+      // we can actually perform the deletion
+      std::set<ApEvent> completion_events;
+      for (std::map<Operation*,GenerationID>::const_iterator it = 
+            incoming.begin(); it != incoming.end(); it++)
+      {
+        ApEvent complete = it->first->get_completion_event();
+        if (it->second == it->first->get_generation())
+          completion_events.insert(complete);
+      }
+      // Mark that we're done mapping and defer the execution as appropriate
+      complete_mapping();
+      if (!completion_events.empty())
+      {
+        ApEvent completion_ready = Runtime::merge_events(completion_events);
+        complete_execution(Runtime::protect_event(completion_ready));
+      }
+      else
+        complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    void DeletionOp::trigger_complete(void)
+    //--------------------------------------------------------------------------
+    {
       switch (kind)
       {
         case INDEX_SPACE_DELETION:
@@ -6008,8 +6018,7 @@ namespace Legion {
         default:
           assert(false); // should never get here
       }
-      complete_mapping();
-      complete_execution();
+      complete_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -7103,10 +7112,10 @@ namespace Legion {
       // Nothing to do if we don't have any profiling requests
       if (profiling_requests.empty())
         return;
-      Operation *proxy_this = this;
+      ProfilingResponseBase base(this);
       Realm::ProfilingRequest &request = requests.add_request( 
-          runtime->find_utility_group(), LG_MAPPER_PROFILING_ID, 
-          &proxy_this, sizeof(proxy_this));
+          runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
+          &base, sizeof(base), profiling_priority);
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
@@ -7116,7 +7125,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InterCloseOp::report_profiling_response(
+    void InterCloseOp::handle_profiling_response(
                                        const Realm::ProfilingResponse &response)
     //--------------------------------------------------------------------------
     {
@@ -7829,10 +7838,10 @@ namespace Legion {
       // Nothing to do if we don't have any profiling requests
       if (profiling_requests.empty())
         return;
-      Operation *proxy_this = this;
+      ProfilingResponseBase base(this);
       Realm::ProfilingRequest &request = requests.add_request( 
-          runtime->find_utility_group(), LG_MAPPER_PROFILING_ID, 
-          &proxy_this, sizeof(proxy_this), profiling_priority);
+          runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
+          &base, sizeof(base), profiling_priority);
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
@@ -7842,7 +7851,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PostCloseOp::report_profiling_response(
+    void PostCloseOp::handle_profiling_response(
                                        const Realm::ProfilingResponse &response)
     //--------------------------------------------------------------------------
     {
@@ -8555,10 +8564,10 @@ namespace Legion {
       // Nothing to do if we don't have any profiling requests
       if (profiling_requests.empty())
         return;
-      Operation *proxy_this = this;
+      ProfilingResponseBase base(this);
       Realm::ProfilingRequest &request = requests.add_request( 
-          runtime->find_utility_group(), LG_MAPPER_PROFILING_ID, 
-          &proxy_this, sizeof(proxy_this), profiling_priority);
+          runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
+          &base, sizeof(base), profiling_priority);
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
@@ -8568,7 +8577,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AcquireOp::report_profiling_response(
+    void AcquireOp::handle_profiling_response(
                                        const Realm::ProfilingResponse &response)
     //--------------------------------------------------------------------------
     {
@@ -9224,10 +9233,10 @@ namespace Legion {
       // Nothing to do if we don't have any profiling requests
       if (profiling_requests.empty())
         return;
-      Operation *proxy_this = this;
+      ProfilingResponseBase base(this);
       Realm::ProfilingRequest &request = requests.add_request( 
-          runtime->find_utility_group(), LG_MAPPER_PROFILING_ID, 
-          &proxy_this, sizeof(proxy_this), profiling_priority);
+          runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
+          &base, sizeof(base), profiling_priority);
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
@@ -9237,7 +9246,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReleaseOp::report_profiling_response(
+    void ReleaseOp::handle_profiling_response(
                                        const Realm::ProfilingResponse &response)
     //--------------------------------------------------------------------------
     {
@@ -12563,10 +12572,10 @@ namespace Legion {
       // Nothing to do if we don't have any profiling requests
       if (profiling_requests.empty())
         return;
-      Operation *proxy_this = this;
+      ProfilingResponseBase base(this);
       Realm::ProfilingRequest &request = requests.add_request( 
-          runtime->find_utility_group(), LG_MAPPER_PROFILING_ID, 
-          &proxy_this, sizeof(proxy_this));
+          runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
+          &base, sizeof(base));
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
@@ -12576,7 +12585,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DependentPartitionOp::report_profiling_response(
+    void DependentPartitionOp::handle_profiling_response(
                                        const Realm::ProfilingResponse &response)
     //--------------------------------------------------------------------------
     {

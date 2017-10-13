@@ -27,7 +27,10 @@ do
   local mapper_dir = runtime_dir .. "mappers/"
   local realm_dir = runtime_dir .. "realm/"
   local pennant_cc = root_dir .. "pennant.cc"
-  if os.getenv('SAVEOBJ') == '1' then
+  if os.getenv('OBJNAME') then
+    local out_dir = os.getenv('OBJNAME'):match('.*/') or './'
+    pennant_so = out_dir .. "libpennant.so"
+  elseif os.getenv('SAVEOBJ') == '1' then
     pennant_so = root_dir .. "libpennant.so"
   else
     pennant_so = os.tmpname() .. ".so" -- root_dir .. "pennant.so"
@@ -54,6 +57,15 @@ do
   cpennant = terralib.includec("pennant.h", {"-I", root_dir, "-I", runtime_dir,
                                              "-I", mapper_dir, "-I", legion_dir,
                                              "-I", realm_dir})
+end
+
+-- Also copy input files into the destination directory.
+if os.getenv('OBJNAME') then
+  local root_dir = arg[0]:match(".*/") or "./"
+  local out_dir = os.getenv('OBJNAME'):match('.*/')
+  if out_dir then
+    os.execute("cp -rv " .. root_dir .. "pennant.tests " .. out_dir)
+  end
 end
 
 local c = regentlib.c

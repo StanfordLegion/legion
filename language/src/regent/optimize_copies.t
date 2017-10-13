@@ -123,13 +123,8 @@ function optimize_copies.block(node)
     -- check if the assignment defines any values that the copy group might use.
     -- if so, we cannot move the group above this assignment
     elseif node:is(ast.typed.stat.Assignment) then
-      if data.any(unpack(node.lhs:map(function(lh)
-        if lh:is(ast.typed.expr.ID) then
-          return prev_condition_variables[lh.value]
-        else -- any other expressions considered to be dangerous
-          return true
-        end
-      end))) then
+      if not node.lhs:is(ast.typed.expr.ID) or
+         prev_condition_variables[node.lhs.value] then
         prev_idx = -1
         prev_condition_variables = {}
         prev_src = false

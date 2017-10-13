@@ -55,7 +55,7 @@ namespace Realm {
   struct CopySrcDstField {
   public:
   CopySrcDstField(void) 
-    : inst(RegionInstance::NO_INST), field_id((FieldID)-1), size(0), 
+    : inst(RegionInstance::NO_INST), field_id(FieldID(-1)), size(0), 
       serdez_id(0), subfield_offset(0) { }
   public:
     RegionInstance inst;
@@ -156,6 +156,7 @@ namespace Realm {
     Rect<N,T>& operator=(const Rect<N, T2>& copy_from);
 
     // constructs a guaranteed-empty rectangle
+    __CUDA_HD__
     static Rect<N,T> make_empty(void);
 
     __CUDA_HD__

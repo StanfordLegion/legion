@@ -57,8 +57,9 @@ namespace Legion {
       RESTRICTED_REF = 18,
       VERSION_STATE_TREE_REF = 19,
       PHYSICAL_MANAGER_REF = 20,
-      REGION_TREE_REF = 21,
-      LAST_SOURCE_REF = 22,
+      LOGICAL_VIEW_REF = 21,
+      REGION_TREE_REF = 22,
+      LAST_SOURCE_REF = 23,
     };
 
     enum ReferenceKind {
@@ -90,6 +91,7 @@ namespace Legion {
       "Restricted Reference",                       \
       "Version State Tree Reference",               \
       "Physical Manager Reference",                 \
+      "Logical View Reference",                     \
       "Region Tree Reference",                      \
     }
 
@@ -341,14 +343,16 @@ namespace Legion {
       inline bool is_owner(void) const { return (owner_space == local_space); }
       inline bool is_registered(void) const { return registered_with_runtime; }
       bool has_remote_instance(AddressSpaceID remote_space) const;
-      void update_remote_instances(AddressSpaceID remote_space);
+      void update_remote_instances(AddressSpaceID remote_space, 
+                                   bool need_lock = true);
     public:
       inline bool has_remote_instances(void) const;
       template<typename FUNCTOR>
       inline void map_over_remote_instances(FUNCTOR &functor);
     public:
       // This is for the owner node only
-      void register_with_runtime(ReferenceMutator *mutator);
+      void register_with_runtime(ReferenceMutator *mutator,
+                                 bool notify_remote = true);
       RtEvent unregister_with_runtime(VirtualChannelKind vc) const;
       RtEvent send_unregister_messages(VirtualChannelKind vc) const;
     public:

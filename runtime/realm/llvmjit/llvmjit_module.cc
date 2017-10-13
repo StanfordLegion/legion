@@ -42,6 +42,13 @@ namespace Realm {
       virtual CodeImplementation *translate(const CodeImplementation *source,
 					    const std::type_info& target_impl_type);
 
+      // C++ considers the above a "partial override" and wants these defined too
+      virtual bool can_translate(const CodeDescriptor& source_codedesc,
+				 const std::type_info& target_impl_type);
+
+      virtual CodeImplementation *translate(const CodeDescriptor& source_codedesc,
+					    const std::type_info& target_impl_type);
+
     protected:
       LLVMJitModule *module;
     };
@@ -78,6 +85,19 @@ namespace Realm {
       }
 
       assert(0);
+    }
+
+    // these pass through to CodeTranslator's definitions
+    bool LLVMCodeTranslator::can_translate(const CodeDescriptor& source_codedesc,
+					   const std::type_info& target_impl_type)
+    {
+      return CodeTranslator::can_translate(source_codedesc, target_impl_type);
+    }
+
+    CodeImplementation *LLVMCodeTranslator::translate(const CodeDescriptor& source_codedesc,
+						      const std::type_info& target_impl_type)
+    {
+      return CodeTranslator::translate(source_codedesc, target_impl_type);
     }
 
 

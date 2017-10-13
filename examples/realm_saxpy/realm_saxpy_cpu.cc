@@ -157,33 +157,31 @@ void top_level_task(const void *args, size_t arglen,
   find_memories(first_cpu, first_gpu, system_mem, framebuffer_mem);
 
   Rect<1> bounds(0, 16383);
-  std::vector<size_t> field_sizes(1, sizeof(float));
 
-  RegionInstance cpu_inst_x, cpu_inst_y, cpu_inst_z;
-  RegionInstance::create_instance(cpu_inst_x, system_mem,
-				  bounds, field_sizes,
-				  0 /*SOA*/, ProfilingRequestSet()).wait();
-  RegionInstance::create_instance(cpu_inst_y, system_mem,
-				  bounds, field_sizes,
-				  0 /*SOA*/, ProfilingRequestSet()).wait();
-  RegionInstance::create_instance(cpu_inst_z, system_mem,
-				  bounds, field_sizes,
-				  0 /*SOA*/, ProfilingRequestSet()).wait();
+  std::map<FieldID, size_t> field_sizes;
+  field_sizes[FID_X] = sizeof(float);
+  field_sizes[FID_Y] = sizeof(float);
+  field_sizes[FID_Z] = sizeof(float);
 
-  printf("Created System Memory Instances: " IDFMT ", " IDFMT ", and " IDFMT "\n\n", 
-      cpu_inst_x.id, cpu_inst_y.id, cpu_inst_z.id);
+  RegionInstance cpu_inst;
+  RegionInstance::create_instance(cpu_inst, system_mem,
+                                  bounds, field_sizes,
+                                  0 /*SOA*/, ProfilingRequestSet()).wait();
+
+  printf("Created System Memory Instance: " IDFMT "\n\n",
+      cpu_inst.id);
 
   CopySrcDstField cpu_x_field, cpu_y_field, cpu_z_field;
-  cpu_x_field.inst = cpu_inst_x;
-  cpu_x_field.field_id = 0; /*offset used as field ID */
+  cpu_x_field.inst = cpu_inst;
+  cpu_x_field.field_id = FID_X;
   cpu_x_field.size = sizeof(float);
 
-  cpu_y_field.inst = cpu_inst_y;
-  cpu_y_field.field_id = 0; /*offset used as field ID */
+  cpu_y_field.inst = cpu_inst;
+  cpu_y_field.field_id = FID_Y;
   cpu_y_field.size = sizeof(float);
 
-  cpu_z_field.inst = cpu_inst_z;
-  cpu_z_field.field_id = 0; /*offset used as field ID */
+  cpu_z_field.inst = cpu_inst;
+  cpu_z_field.field_id = FID_Z;
   cpu_z_field.size = sizeof(float);
 
   float init_x_value = drand48();
@@ -206,40 +204,34 @@ void top_level_task(const void *args, size_t arglen,
 
   Event z_ready = Event::NO_EVENT;
   SaxpyArgs saxpy_args;
-  saxpy_args.x_inst = cpu_inst_x;
-  saxpy_args.y_inst = cpu_inst_y;
-  saxpy_args.z_inst = cpu_inst_z;
+  saxpy_args.x_inst = cpu_inst;
+  saxpy_args.y_inst = cpu_inst;
+  saxpy_args.z_inst = cpu_inst;
   saxpy_args.alpha = drand48();
   saxpy_args.bounds = bounds;
   if (first_gpu.exists())
   {
     // Run the computation on the GPU
     // Make instances on the GPU
-    RegionInstance gpu_inst_x, gpu_inst_y, gpu_inst_z;
-    RegionInstance::create_instance(gpu_inst_x, framebuffer_mem,
-				    bounds, field_sizes,
-				    0 /*SOA*/, ProfilingRequestSet()).wait();
-    RegionInstance::create_instance(gpu_inst_y, framebuffer_mem,
-				    bounds, field_sizes,
-				    0 /*SOA*/, ProfilingRequestSet()).wait();
-    RegionInstance::create_instance(gpu_inst_z, framebuffer_mem,
+    RegionInstance gpu_inst;
+    RegionInstance::create_instance(gpu_inst, framebuffer_mem,
 				    bounds, field_sizes,
 				    0 /*SOA*/, ProfilingRequestSet()).wait();
 
-    printf("Created Framebuffer Memory Instances: " IDFMT ", " IDFMT ", and " IDFMT "\n\n", 
-      gpu_inst_x.id, gpu_inst_y.id, gpu_inst_z.id);
+    printf("Created Framebuffer Memory Instances: " IDFMT "\n\n",
+      gpu_inst.id);
 
     CopySrcDstField gpu_x_field, gpu_y_field, gpu_z_field;
-    gpu_x_field.inst = gpu_inst_x;
-    gpu_x_field.field_id = 0; /*offset used as field ID */
+    gpu_x_field.inst = gpu_inst;
+    gpu_x_field.field_id = FID_X;
     gpu_x_field.size = sizeof(float);
 
-    gpu_y_field.inst = gpu_inst_y;
-    gpu_y_field.field_id = 0; /*offset used as field ID */
+    gpu_y_field.inst = gpu_inst;
+    gpu_y_field.field_id = FID_Y;
     gpu_y_field.size = sizeof(float);
 
-    gpu_z_field.inst = gpu_inst_z;
-    gpu_z_field.field_id = 0; /*offset used as field ID */
+    gpu_z_field.inst = gpu_inst;
+    gpu_z_field.field_id = FID_Z;
     gpu_z_field.size = sizeof(float);
 
     // Copy down
@@ -259,9 +251,9 @@ void top_level_task(const void *args, size_t arglen,
     }
 
     SaxpyArgs gpu_args;
-    gpu_args.x_inst = gpu_inst_x;
-    gpu_args.y_inst = gpu_inst_y;
-    gpu_args.z_inst = gpu_inst_z;
+    gpu_args.x_inst = gpu_inst;
+    gpu_args.y_inst = gpu_inst;
+    gpu_args.z_inst = gpu_inst;
     gpu_args.alpha  = saxpy_args.alpha;
     gpu_args.bounds = bounds;
 
@@ -300,11 +292,11 @@ void cpu_saxpy_task(const void *args, size_t arglen,
 
   // get affine accessors for each of our three instances
   AffineAccessor<float, 1> ra_x = AffineAccessor<float, 1>(saxpy_args->x_inst,
-							   0 /*offset as ID*/);
+							   FID_X);
   AffineAccessor<float, 1> ra_y = AffineAccessor<float, 1>(saxpy_args->y_inst,
-							   0 /*offset as ID*/);
+							   FID_Y);
   AffineAccessor<float, 1> ra_z = AffineAccessor<float, 1>(saxpy_args->z_inst,
-							   0 /*offset as ID*/);
+							   FID_Z);
 
   for(int i = saxpy_args->bounds.lo; i <= saxpy_args->bounds.hi; i++)
     ra_z[i] = saxpy_args->alpha * ra_x[i] + ra_y[i];
@@ -319,11 +311,11 @@ void check_result_task(const void *args, size_t arglen,
 
   // get affine accessors for each of our three instances
   AffineAccessor<float, 1> ra_x = AffineAccessor<float, 1>(saxpy_args->x_inst,
-							   0 /*offset as ID*/);
+							   FID_X);
   AffineAccessor<float, 1> ra_y = AffineAccessor<float, 1>(saxpy_args->y_inst,
-							   0 /*offset as ID*/);
+							   FID_Y);
   AffineAccessor<float, 1> ra_z = AffineAccessor<float, 1>(saxpy_args->z_inst,
-							   0 /*offset as ID*/);
+							   FID_Z);
 
   bool success = true;
   for(int i = saxpy_args->bounds.lo; i <= saxpy_args->bounds.hi; i++) {

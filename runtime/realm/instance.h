@@ -18,6 +18,8 @@
 #ifndef REALM_INSTANCE_H
 #define REALM_INSTANCE_H
 
+#include <realm/realm_config.h>
+
 #include "lowlevel_config.h"
 
 #include "event.h"

@@ -40,11 +40,11 @@ void gpu_saxpy_task(const void *args, size_t arglen,
 
   // get affine accessors for each of our three instances
   AffineAccessor<float, 1> ra_x = AffineAccessor<float, 1>(saxpy_args->x_inst,
-							   0 /*offset as ID*/);
+							   FID_X);
   AffineAccessor<float, 1> ra_y = AffineAccessor<float, 1>(saxpy_args->y_inst,
-							   0 /*offset as ID*/);
+							   FID_Y);
   AffineAccessor<float, 1> ra_z = AffineAccessor<float, 1>(saxpy_args->z_inst,
-							   0 /*offset as ID*/);
+							   FID_Z);
 
   size_t num_elements = saxpy_args->bounds.volume();
 

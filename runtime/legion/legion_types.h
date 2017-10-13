@@ -260,11 +260,10 @@ namespace Legion {
       SHUTDOWN_TASK_ID        = Realm::Processor::TASK_ID_PROCESSOR_SHUTDOWN,
       LG_TASK_ID              = Realm::Processor::TASK_ID_FIRST_AVAILABLE,
       LG_LEGION_PROFILING_ID  = Realm::Processor::TASK_ID_FIRST_AVAILABLE+1,
-      LG_MAPPER_PROFILING_ID  = Realm::Processor::TASK_ID_FIRST_AVAILABLE+2,
-      LG_LAUNCH_TOP_LEVEL_ID  = Realm::Processor::TASK_ID_FIRST_AVAILABLE+3,
-      LG_MPI_INTEROP_ID       = Realm::Processor::TASK_ID_FIRST_AVAILABLE+4,
-      LG_STARTUP_SYNC_ID      = Realm::Processor::TASK_ID_FIRST_AVAILABLE+5,
-      TASK_ID_AVAILABLE       = Realm::Processor::TASK_ID_FIRST_AVAILABLE+6,
+      LG_LAUNCH_TOP_LEVEL_ID  = Realm::Processor::TASK_ID_FIRST_AVAILABLE+2,
+      LG_MPI_INTEROP_ID       = Realm::Processor::TASK_ID_FIRST_AVAILABLE+3,
+      LG_STARTUP_SYNC_ID      = Realm::Processor::TASK_ID_FIRST_AVAILABLE+4,
+      TASK_ID_AVAILABLE       = Realm::Processor::TASK_ID_FIRST_AVAILABLE+5,
     };
 
     // Realm dependent partitioning kinds
@@ -628,8 +627,9 @@ namespace Legion {
       VERSION_MANAGER_VIRTUAL_CHANNEL = 13,
       ANALYSIS_VIRTUAL_CHANNEL = 14,
       FUTURE_VIRTUAL_CHANNEL = 15,
-      COLLECTIVE_VIRTUAL_CHANNEL = 16,
-      MAX_NUM_VIRTUAL_CHANNELS = 17, // this one must be last
+      REFERENCE_VIRTUAL_CHANNEL = 16,
+      COLLECTIVE_VIRTUAL_CHANNEL = 17,
+      MAX_NUM_VIRTUAL_CHANNELS = 18, // this one must be last
     };
 
     enum MessageKind {
@@ -1350,6 +1350,19 @@ namespace Legion {
     class ProjectionFunction;
     class ShardingFunction;
     class Runtime;
+    // A small interface class for handling profiling responses
+    class ProfilingResponseHandler {
+    public:
+      virtual void handle_profiling_response(
+                const Realm::ProfilingResponse &response) = 0;
+    };
+    struct ProfilingResponseBase {
+    public:
+      ProfilingResponseBase(ProfilingResponseHandler *h)
+        : handler(h) { }
+    public:
+      ProfilingResponseHandler *const handler;
+    };
 
     // legion_ops.h
     class Operation;

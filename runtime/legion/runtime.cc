@@ -287,7 +287,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (is_owner() && registered_with_runtime)
-        unregister_with_runtime(DEFAULT_VIRTUAL_CHANNEL);
+        unregister_with_runtime(REFERENCE_VIRTUAL_CHANNEL);
       // don't want to leak events
       if (!ready_event.has_triggered())
         Runtime::trigger_event(ready_event);
@@ -777,7 +777,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (is_owner() && registered_with_runtime)
-        unregister_with_runtime(DEFAULT_VIRTUAL_CHANNEL);
+        unregister_with_runtime(REFERENCE_VIRTUAL_CHANNEL);
       futures.clear();
 #ifdef LEGION_GC
       log_garbage.info("GC Deletion %lld %d", 
@@ -3379,11 +3379,6 @@ namespace Legion {
           if ((*it)->try_active_deletion())
           {
             record_deleted_instance(*it);
-            // Unregister it from the runtime so that it avoids
-            // sending messages when it is deleted
-            if ((*it)->is_registered())
-              wait_for.insert(
-                  (*it)->unregister_with_runtime(DEFAULT_VIRTUAL_CHANNEL));
             // Remove our base resource reference
             if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
               delete (*it);
@@ -13792,7 +13787,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, DISTRIBUTED_REMOTE_REGISTRATION,
-                      DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+                    REFERENCE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13801,7 +13796,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, DISTRIBUTED_VALID_UPDATE,
-                                    DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                    REFERENCE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13810,7 +13805,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, DISTRIBUTED_GC_UPDATE,
-                                    DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                    REFERENCE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13819,7 +13814,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, DISTRIBUTED_RESOURCE_UPDATE,
-                                    DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                    REFERENCE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13828,7 +13823,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, DISTRIBUTED_CREATE_ADD,
-                                    DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                    REFERENCE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13837,7 +13832,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, DISTRIBUTED_CREATE_REMOVE,
-                                           DEFAULT_VIRTUAL_CHANNEL, flush);
+                                           REFERENCE_VIRTUAL_CHANNEL, flush);
     }
 
     //--------------------------------------------------------------------------
@@ -16034,17 +16029,6 @@ namespace Legion {
       if ((trace_count % TRACE_ALLOCATION_FREQUENCY) == 0)
         dump_allocation_info();
 #endif
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::process_profiling_task(Processor p, 
-                                         const void *args, size_t arglen)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(profiler != NULL);
-#endif
-      profiler->process_results(p, args, arglen);
     }
 
     //--------------------------------------------------------------------------
@@ -20501,7 +20485,6 @@ namespace Legion {
       CodeDescriptor shutdown_task(Runtime::shutdown_runtime);
       CodeDescriptor lg_task(Runtime::legion_runtime_task);
       CodeDescriptor rt_profiling_task(Runtime::profiling_runtime_task);
-      CodeDescriptor map_profiling_task(Runtime::profiling_mapper_task);
       CodeDescriptor launch_top_level_task(Runtime::launch_top_level);
       CodeDescriptor mpi_interop_task(Runtime::init_mpi_interop);
       CodeDescriptor startup_sync_task(Runtime::startup_sync);
@@ -20527,9 +20510,6 @@ namespace Legion {
                     LG_LEGION_PROFILING_ID, rt_profiling_task, no_requests)));
         registered_events.insert(RtEvent(
             Processor::register_task_by_kind(kinds[idx], false/*global*/,
-                   LG_MAPPER_PROFILING_ID, map_profiling_task, no_requests)));
-        registered_events.insert(RtEvent(
-            Processor::register_task_by_kind(kinds[idx], false/*global*/,
                 LG_LAUNCH_TOP_LEVEL_ID, launch_top_level_task, no_requests)));
         registered_events.insert(RtEvent(
             Processor::register_task_by_kind(kinds[idx], false/*global*/,
@@ -20550,8 +20530,6 @@ namespace Legion {
                       LG_TASK_ID);
         log_run.print("Legion runtime profiling task Realm ID %d",
                       LG_LEGION_PROFILING_ID);
-        log_run.print("Legion mapper profiling task has Realm ID %d",
-                      LG_MAPPER_PROFILING_ID);
         log_run.print("Legion launch top-level task has Realm ID %d",
                       LG_LAUNCH_TOP_LEVEL_ID);
       }
@@ -21492,23 +21470,18 @@ namespace Legion {
 				   Processor p)
     //--------------------------------------------------------------------------
     {
-      Runtime *rt = Runtime::get_runtime(p);
-      rt->process_profiling_task(p, args, arglen);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void Runtime::profiling_mapper_task(
-                                   const void *args, size_t arglen, 
-				   const void *userdata, size_t userlen,
-				   Processor p)
-    //--------------------------------------------------------------------------
-    {
       Realm::ProfilingResponse response(args, arglen);
-#ifdef DEBUG_LEGION
-      assert(response.user_data_size() == sizeof(Operation*));
-#endif
-      Operation *op = *((Operation**)response.user_data());
-      op->report_profiling_response(response);
+      const ProfilingResponseBase *base = 
+        (const ProfilingResponseBase*)response.user_data();
+      if (base->handler == NULL)
+      {
+        // If we got a NULL let's assume they meant the profiler
+        // this mainly happens with messages that cross nodes
+        Runtime *rt = Runtime::get_runtime(p);
+        rt->profiler->handle_profiling_response(response);
+      }
+      else
+        base->handler->handle_profiling_response(response);
     }
 
     //--------------------------------------------------------------------------

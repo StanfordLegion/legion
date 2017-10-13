@@ -387,10 +387,10 @@ namespace Realm {
   // class PartitioningMicroOp
 
   PartitioningMicroOp::PartitioningMicroOp(void)
-    : wait_count(2), requestor(gasnet_mynode()), async_microop(0)
+    : wait_count(2), requestor(my_node_id), async_microop(0)
   {}
 
-  PartitioningMicroOp::PartitioningMicroOp(gasnet_node_t _requestor,
+  PartitioningMicroOp::PartitioningMicroOp(NodeID _requestor,
 					   AsyncMicroOp *_async_microop)
     : wait_count(2), requestor(_requestor), async_microop(_async_microop)
   {}
@@ -404,7 +404,7 @@ namespace Realm {
   void PartitioningMicroOp::mark_finished(void)
   {
     if(async_microop) {
-      if(requestor == gasnet_mynode())
+      if(requestor == my_node_id)
 	async_microop->mark_finished(true /*successful*/);
       else
 	RemoteMicroOpCompleteMessage::send_request(requestor, async_microop);
@@ -436,7 +436,7 @@ namespace Realm {
 
     // if the count was greater than 1, it probably has to be queued, so create an 
     //  AsyncMicroOp so that the op knows we're not done yet
-    if(requestor == gasnet_mynode()) {
+    if(requestor == my_node_id) {
       async_microop = new AsyncMicroOp(op, this);
       op->add_async_work_item(async_microop);
     } else {
@@ -650,13 +650,13 @@ namespace Realm {
   
 #if 0
   template <typename T>
-  /*static*/ void RemoteMicroOpMessage::send_request(gasnet_node_t target, 
+  /*static*/ void RemoteMicroOpMessage::send_request(NodeID target, 
 						     PartitioningOperation *operation,
 						     const T& microop)
   {
     RequestArgs args;
 
-    args.sender = gasnet_mynode();
+    args.sender = my_node_id;
     args.type_tag = T::type_tag();
     args.opcode = T::OPCODE;
     args.operation = operation;
@@ -685,7 +685,7 @@ namespace Realm {
     args.async_microop->mark_finished(true /*successful*/);
   }
 
-  /*static*/ void RemoteMicroOpCompleteMessage::send_request(gasnet_node_t target,
+  /*static*/ void RemoteMicroOpCompleteMessage::send_request(NodeID target,
 							     AsyncMicroOp *async_microop)
   {
     RequestArgs args;

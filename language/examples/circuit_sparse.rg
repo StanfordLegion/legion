@@ -31,7 +31,10 @@ do
   local realm_dir = runtime_dir .. "realm/"
   local circuit_cc = root_dir .. "circuit.cc"
   local circuit_so
-  if os.getenv('SAVEOBJ') == '1' then
+  if os.getenv('OBJNAME') then
+    local out_dir = os.getenv('OBJNAME'):match('.*/') or './'
+    circuit_so = out_dir .. "libcircuit.so"
+  elseif os.getenv('SAVEOBJ') == '1' then
     circuit_so = root_dir .. "libcircuit.so"
   else
     circuit_so = os.tmpname() .. ".so" -- root_dir .. "circuit.so"
@@ -915,7 +918,8 @@ end
 
 if os.getenv('SAVEOBJ') == '1' then
   local root_dir = arg[0]:match(".*/") or "./"
-  local link_flags = terralib.newlist({"-L" .. root_dir, "-lcircuit", "-lm"})
+  local out_dir = os.getenv('OBJNAME'):match('.*/') or root_dir
+  local link_flags = terralib.newlist({"-L" .. out_dir, "-lcircuit", "-lm"})
   if os.getenv('CRAYPE_VERSION') then
     local new_flags = terralib.newlist({"-Wl,-Bdynamic"})
     new_flags:insertall(link_flags)
@@ -930,7 +934,8 @@ if os.getenv('SAVEOBJ') == '1' then
     link_flags = new_flags
   end
 
-  regentlib.saveobj(toplevel, "circuit", "executable", ccircuit.register_mappers, link_flags)
+  local exe = os.getenv('OBJNAME') or "circuit"
+  regentlib.saveobj(toplevel, exe, "executable", ccircuit.register_mappers, link_flags)
 else
   regentlib.start(toplevel, ccircuit.register_mappers)
 end

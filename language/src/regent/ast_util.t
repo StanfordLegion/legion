@@ -234,10 +234,11 @@ end
 
 function ast_util.mk_stat_var(sym, ty, value)
   ty = ty or sym:gettype()
+  value = value or false
   return ast.typed.stat.Var {
-    symbols = terralib.newlist {sym},
-    types = terralib.newlist {ty},
-    values = terralib.newlist {value},
+    symbol = sym,
+    type = ty,
+    value = value,
     span = ast.trivial_span(),
     annotations = ast.default_annotations(),
   }
@@ -302,8 +303,8 @@ end
 
 function ast_util.mk_stat_assignment(lhs, rhs)
   return ast.typed.stat.Assignment {
-    lhs = terralib.newlist {lhs},
-    rhs = terralib.newlist {rhs},
+    lhs = lhs,
+    rhs = rhs,
     span = ast.trivial_span(),
     annotations = ast.default_annotations(),
   }
@@ -312,8 +313,8 @@ end
 function ast_util.mk_stat_reduce(op, lhs, rhs)
   return ast.typed.stat.Reduce {
     op = op,
-    lhs = terralib.newlist {lhs},
-    rhs = terralib.newlist {rhs},
+    lhs = lhs,
+    rhs = rhs,
     span = ast.trivial_span(),
     annotations = ast.default_annotations(),
   }

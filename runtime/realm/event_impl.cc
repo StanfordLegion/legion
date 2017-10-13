@@ -456,7 +456,7 @@ namespace Realm {
 #endif
     BarrierImpl *impl = get_runtime()->get_barrier_impl(*this);
     impl->adjust_arrival(ID(id).barrier.generation, delta, timestamp, Event::NO_EVENT,
-			 gasnet_mynode(), false /*!forwarded*/,
+			 my_node_id, false /*!forwarded*/,
 			 0, 0);
 
     Barrier with_ts;
@@ -490,7 +490,7 @@ namespace Realm {
     // arrival uses the timestamp stored in this barrier object
     BarrierImpl *impl = get_runtime()->get_barrier_impl(*this);
     impl->adjust_arrival(ID(id).barrier.generation, -count, timestamp, wait_on,
-			 gasnet_mynode(), false /*!forwarded*/,
+			 my_node_id, false /*!forwarded*/,
 			 reduce_value, reduce_value_size);
   }
 
@@ -1063,7 +1063,7 @@ namespace Realm {
 	  std::map<gen_t, bool>::const_iterator it = local_triggers.find(needed_gen);
 	  if(it != local_triggers.end()) {
 	    // 2) we're not the owner node, but we've locally triggered this and have correct poison info
-	    assert(owner != gasnet_mynode());
+	    assert(owner != my_node_id);
 	    trigger_now = true;
 	    trigger_poisoned = it->second;
 	  } else {
@@ -1078,12 +1078,12 @@ namespace Realm {
 	      current_local_waiters.push_back(waiter);
 	    } else {
 	      // no, put it in an appropriate future waiter list - only allowed for non-owners
-	      assert(owner != gasnet_mynode());
+	      assert(owner != my_node_id);
 	      future_local_waiters[needed_gen].push_back(waiter);
 	    }
 
 	    // do we need to subscribe to this event?
-	    if((owner != gasnet_mynode()) && (gen_subscribed < needed_gen)) {
+	    if((owner != my_node_id) && (gen_subscribed < needed_gen)) {
 	      previous_subscribe_gen = gen_subscribed;
 	      gen_subscribed = needed_gen;
 	      subscribe_owner = owner;
@@ -1126,7 +1126,7 @@ namespace Realm {
 
   template <typename T>
   struct MediumBroadcastHelper : public T::RequestArgs {
-    inline void apply(gasnet_node_t target)
+    inline void apply(NodeID target)
     {
       T::Message::request(target, *this, payload, payload_size, payload_mode);
     }
@@ -1148,19 +1148,19 @@ namespace Realm {
   };
   
 
-  /*static*/ void EventTriggerMessage::send_request(gasnet_node_t target, Event event,
+  /*static*/ void EventTriggerMessage::send_request(NodeID target, Event event,
 						    bool poisoned)
   {
     RequestArgs args;
 
-    args.node = gasnet_mynode();
+    args.node = my_node_id;
     args.event = event;
     args.poisoned = poisoned;
 
     Message::request(target, args);
   }
 
-  /*static*/ void EventUpdateMessage::send_request(gasnet_node_t target, Event event,
+  /*static*/ void EventUpdateMessage::send_request(NodeID target, Event event,
 						   int num_poisoned,
 						   const EventImpl::gen_t *poisoned_generations)
   {
@@ -1186,11 +1186,11 @@ namespace Realm {
 		   PAYLOAD_KEEP);
   }
 
-  /*static*/ void EventSubscribeMessage::send_request(gasnet_node_t target, Event event, EventImpl::gen_t previous_gen)
+  /*static*/ void EventSubscribeMessage::send_request(NodeID target, Event event, EventImpl::gen_t previous_gen)
   {
     RequestArgs args;
 
-    args.node = gasnet_mynode();
+    args.node = my_node_id;
     args.event = event;
     args.previous_subscribe_gen = previous_gen;
     Message::request(target, args);
@@ -1301,7 +1301,7 @@ namespace Realm {
 				    int new_poisoned_count)
   {
     // this event had better not belong to us...
-    assert(owner != gasnet_mynode());
+    assert(owner != my_node_id);
 
     // the result of the update may trigger multiple generations worth of waiters - keep their
     //  generation IDs straight (we'll look up the poison bits later)
@@ -1529,7 +1529,7 @@ namespace Realm {
 
       std::vector<EventWaiter *> to_wake;
 
-      if(gasnet_mynode() == owner) {
+      if(my_node_id == owner) {
 	// we own this event
 
 	NodeSet to_update;
@@ -1575,7 +1575,7 @@ namespace Realm {
 	  get_runtime()->local_event_free_list->free_entry(this);
       } else {
 	// we're triggering somebody else's event, so the first thing to do is tell them
-	assert(trigger_node == (int)gasnet_mynode());
+	assert(trigger_node == (int)my_node_id);
 	// once we send this message, it's possible we get an update from the owner before
 	//  we take the lock a few lines below here (assuming somebody on this node had 
 	//  already subscribed), so check here that we're triggering a new generation
@@ -1749,7 +1749,7 @@ namespace Realm {
 			 << " (" << args.barrier.timestamp << ")";
       BarrierImpl *impl = get_runtime()->get_barrier_impl(args.barrier);
       EventImpl::gen_t gen = ID(args.barrier).barrier.generation;
-      gasnet_node_t sender = args.sender;
+      NodeID sender = args.sender;
       bool forwarded = false;
       if(args.sender < 0) {
 	forwarded = true;
@@ -1760,8 +1760,8 @@ namespace Realm {
 			   datalen ? data : 0, datalen);
     }
 
-    /*static*/ void BarrierAdjustMessage::send_request(gasnet_node_t target, Barrier barrier, int delta, Event wait_on,
-						       gasnet_node_t sender, bool forwarded,
+    /*static*/ void BarrierAdjustMessage::send_request(NodeID target, Barrier barrier, int delta, Event wait_on,
+						       NodeID sender, bool forwarded,
 						       const void *data, size_t datalen)
     {
       RequestArgs args;
@@ -1774,8 +1774,8 @@ namespace Realm {
       Message::request(target, args, data, datalen, PAYLOAD_COPY);
     }
 
-    /*static*/ void BarrierSubscribeMessage::send_request(gasnet_node_t target, ID::IDType barrier_id, EventImpl::gen_t subscribe_gen,
-							  gasnet_node_t subscriber, bool forwarded)
+    /*static*/ void BarrierSubscribeMessage::send_request(NodeID target, ID::IDType barrier_id, EventImpl::gen_t subscribe_gen,
+							  NodeID subscriber, bool forwarded)
     {
       RequestArgs args;
 
@@ -1787,15 +1787,15 @@ namespace Realm {
       Message::request(target, args);
     }
 
-    /*static*/ void BarrierTriggerMessage::send_request(gasnet_node_t target, ID::IDType barrier_id,
+    /*static*/ void BarrierTriggerMessage::send_request(NodeID target, ID::IDType barrier_id,
 							EventImpl::gen_t trigger_gen, EventImpl::gen_t previous_gen,
 							EventImpl::gen_t first_generation, ReductionOpID redop_id,
-							gasnet_node_t migration_target,	unsigned base_arrival_count,
+							NodeID migration_target,	unsigned base_arrival_count,
 							const void *data, size_t datalen)
     {
       RequestArgs args;
 
-      args.node = gasnet_mynode();
+      args.node = my_node_id;
       args.barrier_id = barrier_id;
       args.trigger_gen = trigger_gen;
       args.previous_gen = previous_gen;
@@ -1820,7 +1820,7 @@ static void *bytedup(const void *data, size_t datalen)
     class DeferredBarrierArrival : public EventWaiter {
     public:
       DeferredBarrierArrival(Barrier _barrier, int _delta,
-			     gasnet_node_t _sender, bool _forwarded,
+			     NodeID _sender, bool _forwarded,
 			     const void *_data, size_t _datalen)
 	: barrier(_barrier), delta(_delta),
 	  sender(_sender), forwarded(_forwarded),
@@ -1860,7 +1860,7 @@ static void *bytedup(const void *data, size_t datalen)
     protected:
       Barrier barrier;
       int delta;
-      gasnet_node_t sender;
+      NodeID sender;
       bool forwarded;
       void *data;
       size_t datalen;
@@ -1927,7 +1927,7 @@ static void *bytedup(const void *data, size_t datalen)
     // if delta < 0, timestamp says which positive adjustment this arrival must wait for
     void BarrierImpl::adjust_arrival(gen_t barrier_gen, int delta, 
 				     Barrier::timestamp_t timestamp, Event wait_on,
-				     gasnet_node_t sender, bool forwarded,
+				     NodeID sender, bool forwarded,
 				     const void *reduce_value, size_t reduce_value_size)
     {
       Barrier b = make_barrier(barrier_gen, timestamp);
@@ -1936,10 +1936,10 @@ static void *bytedup(const void *data, size_t datalen)
 
 	// only forward deferred arrivals if the precondition is not one that looks like it'll
 	//  trigger here first
-        if(owner != gasnet_mynode()) {
+        if(owner != my_node_id) {
 	  ID wait_id(wait_on);
 	  int wait_node = (wait_id.is_event() ? wait_id.event.creator_node : wait_id.barrier.creator_node);
-	  if(wait_node != (int)gasnet_mynode()) {
+	  if(wait_node != (int)my_node_id) {
 	    // let deferral happen on owner node (saves latency if wait_on event
 	    //   gets triggered there)
 	    //printf("sending deferred arrival to %d for " IDFMT "/%d (" IDFMT "/%d)\n",
@@ -1947,7 +1947,7 @@ static void *bytedup(const void *data, size_t datalen)
 	    log_barrier.info() << "forwarding deferred barrier arrival: delta=" << delta
 			       << " in=" << wait_on << " out=" << b << " (" << timestamp << ")";
 	    BarrierAdjustMessage::send_request(owner, b, delta, wait_on,
-					       sender, (sender != gasnet_mynode()),
+					       sender, (sender != my_node_id),
 					       reduce_value, reduce_value_size);
 	    return;
 	  }
@@ -1981,21 +1981,21 @@ static void *bytedup(const void *data, size_t datalen)
       std::vector<RemoteNotification> remote_notifications;
       gen_t oldest_previous = 0;
       void *final_values_copy = 0;
-      gasnet_node_t migration_target = (gasnet_node_t) -1;
-      gasnet_node_t forward_to_node = (gasnet_node_t) -1;
-      gasnet_node_t inform_migration = (gasnet_node_t) -1;
+      NodeID migration_target = (NodeID) -1;
+      NodeID forward_to_node = (NodeID) -1;
+      NodeID inform_migration = (NodeID) -1;
 
       do { // so we can use 'break' from the middle
 	AutoHSLLock a(mutex);
 
 	// ownership can change, so check it inside the lock
-	if(owner != gasnet_mynode()) {
+	if(owner != my_node_id) {
 	  forward_to_node = owner;
 	  break;
 	} else {
 	  // if this message had to be forwarded to get here, tell the original sender we are the
 	  //  new owner
-	  if(forwarded && (sender != gasnet_mynode()))
+	  if(forwarded && (sender != my_node_id))
 	    inform_migration = sender;
 	}
 
@@ -2078,7 +2078,7 @@ static void *bytedup(const void *data, size_t datalen)
 	  // finally (hah!), do not migrate barriers using reduction ops
 	  if(local_notifications.empty() && (remote_notifications.size() == 1) &&
 	     generations.empty() && (redop == 0) &&
-             (ID(me).barrier.creator_node == gasnet_mynode())) {
+             (ID(me).barrier.creator_node == my_node_id)) {
 	    log_barrier.info() << "barrier migration: " << me << " -> " << remote_notifications[0].node;
 	    migration_target = remote_notifications[0].node;
 	    owner = migration_target;
@@ -2123,17 +2123,17 @@ static void *bytedup(const void *data, size_t datalen)
 	}
       } while(0);
 
-      if(forward_to_node != (gasnet_node_t) -1) {
+      if(forward_to_node != (NodeID) -1) {
 	Barrier b = make_barrier(barrier_gen, timestamp);
 	BarrierAdjustMessage::send_request(forward_to_node, b, delta, Event::NO_EVENT,
-					   sender, (sender != gasnet_mynode()),
+					   sender, (sender != my_node_id),
 					   reduce_value, reduce_value_size);
 	return;
       }
 
-      if(inform_migration != (gasnet_node_t) -1) {
+      if(inform_migration != (NodeID) -1) {
 	Barrier b = make_barrier(barrier_gen, timestamp);
-	BarrierMigrationMessage::send_request(inform_migration, b, gasnet_mynode());
+	BarrierMigrationMessage::send_request(inform_migration, b, my_node_id);
       }
 
       if(trigger_gen != 0) {
@@ -2180,7 +2180,7 @@ static void *bytedup(const void *data, size_t datalen)
       if(needed_gen <= generation) return true;
 
       // if we're not the owner, subscribe if we haven't already
-      if(owner != gasnet_mynode()) {
+      if(owner != my_node_id) {
 	gen_t previous_subscription;
 	// take lock to avoid duplicate subscriptions
 	{
@@ -2192,7 +2192,7 @@ static void *bytedup(const void *data, size_t datalen)
 
 	if(previous_subscription < needed_gen) {
 	  log_barrier.info() << "subscribing to barrier " << make_barrier(needed_gen) << " (prev=" << previous_subscription << ")";
-	  BarrierSubscribeMessage::send_request(owner, me.id, needed_gen, gasnet_mynode(), false/*!forwarded*/);
+	  BarrierSubscribeMessage::send_request(owner, me.id, needed_gen, my_node_id, false/*!forwarded*/);
 	}
       }
 
@@ -2236,7 +2236,7 @@ static void *bytedup(const void *data, size_t datalen)
 	  g->local_waiters.push_back(waiter);
 
 	  // a call to has_triggered should have already handled the necessary subscription
-	  assert((owner == gasnet_mynode()) || (gen_subscribed >= needed_gen));
+	  assert((owner == my_node_id) || (gen_subscribed >= needed_gen));
 	} else {
 	  // needed generation has already occurred - trigger this waiter once we let go of lock
 	  trigger_now = true;
@@ -2266,20 +2266,20 @@ static void *bytedup(const void *data, size_t datalen)
       EventImpl::gen_t previous_gen = 0;
       void *final_values_copy = 0;
       size_t final_values_size = 0;
-      gasnet_node_t forward_to_node = (gasnet_node_t) -1;
-      gasnet_node_t inform_migration = (gasnet_node_t) -1;
+      NodeID forward_to_node = (NodeID) -1;
+      NodeID inform_migration = (NodeID) -1;
       
       do {
 	AutoHSLLock a(impl->mutex);
 
 	// first check - are we even the current owner?
-	if(impl->owner != gasnet_mynode()) {
+	if(impl->owner != my_node_id) {
 	  forward_to_node = impl->owner;
 	  break;
 	} else {
 	  if(args.forwarded) {
 	    // our own request wrapped back around can be ignored - we've already added the local waiter
-	    if(args.subscriber == gasnet_mynode()) {
+	    if(args.subscriber == my_node_id) {
 	      break;
 	    } else {
 	      inform_migration = args.subscriber;
@@ -2334,13 +2334,13 @@ static void *bytedup(const void *data, size_t datalen)
 	}
       } while(0);
 
-      if(forward_to_node != (gasnet_node_t) -1) {
+      if(forward_to_node != (NodeID) -1) {
 	BarrierSubscribeMessage::send_request(forward_to_node, args.barrier_id, args.subscribe_gen,
-					      args.subscriber, (args.subscriber != gasnet_mynode()));
+					      args.subscriber, (args.subscriber != my_node_id));
       }
 
-      if(inform_migration != (gasnet_node_t) -1) {
-	BarrierMigrationMessage::send_request(inform_migration, b, gasnet_mynode());
+      if(inform_migration != (NodeID) -1) {
+	BarrierMigrationMessage::send_request(inform_migration, b, my_node_id);
       }
 
       // send trigger message outside of lock, if needed
@@ -2349,7 +2349,7 @@ static void *bytedup(const void *data, size_t datalen)
 			 args.barrier_id, previous_gen, trigger_gen);
 	BarrierTriggerMessage::send_request(args.subscriber, args.barrier_id, trigger_gen, previous_gen,
 					    impl->first_generation, impl->redop_id,
-					    (gasnet_node_t) -1 /*no migration*/, 0 /*dummy arrival count*/,
+					    (NodeID) -1 /*no migration*/, 0 /*dummy arrival count*/,
 					    final_values_copy, final_values_size);
       }
 
@@ -2374,7 +2374,7 @@ static void *bytedup(const void *data, size_t datalen)
 	AutoHSLLock a(impl->mutex);
 
 	// handle migration of the barrier ownership (possibly to us)
-	if(args.migration_target != (gasnet_node_t) -1) {
+	if(args.migration_target != (NodeID) -1) {
 	  log_barrier.info() << "barrier " << b << " has migrated to " << args.migration_target;
 	  impl->owner = args.migration_target;
 	  impl->base_arrival_count = args.base_arrival_count;
@@ -2482,7 +2482,7 @@ static void *bytedup(const void *data, size_t datalen)
       }
     }
 
-    /*static*/ void BarrierMigrationMessage::send_request(gasnet_node_t target, Barrier barrier, gasnet_node_t owner)
+    /*static*/ void BarrierMigrationMessage::send_request(NodeID target, Barrier barrier, NodeID owner)
     {
       RequestArgs args;
 

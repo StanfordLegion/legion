@@ -123,6 +123,11 @@ task main()
     -- end
     detach(hdf5, r2.{a, b, c})
 
+    -- FIXME: The runtime can't track dependencies across different
+    -- attach/detach pairs so we have to issue an execution fence here
+    -- to avoid interference.
+    regentlib.c.legion_runtime_issue_execution_fence(__runtime(), __context())
+
     var errors = 0
     attach(hdf5, r2.{a, b, c}, filename, regentlib.file_read_write)
     for c in cs do

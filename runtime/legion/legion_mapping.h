@@ -186,6 +186,9 @@ namespace Legion {
       template <typename T>
       inline T *get_measurement(void) const;
 
+      template <typename T>
+      inline bool get_measurement(T& result) const;
+
     protected:
       FRIEND_ALL_RUNTIME_CLASSES
       void attach_realm_profiling_response(

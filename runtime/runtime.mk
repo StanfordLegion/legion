@@ -178,15 +178,20 @@ endif
 
 USE_LLVM ?= 0
 ifeq ($(strip $(USE_LLVM)),1)
-  # prefer 3.5 (actually, require it right now)
-  LLVM_CONFIG ?= $(shell which llvm-config-3.5 llvm-config | head -1)
+  # prefer versions 3.8 and 3.5, if they can be named explicitly
+  LLVM_CONFIG ?= $(shell which llvm-config-3.8 llvm-config-3.5 llvm-config | head -1)
   ifeq ($(LLVM_CONFIG),)
     $(error cannot find llvm-config-* - set with LLVM_CONFIG if not in path)
   endif
-  CC_FLAGS += -DREALM_USE_LLVM
+  LLVM_VERSION_NUMBER := $(shell $(LLVM_CONFIG) --version | cut -c1,3)
+  CC_FLAGS += -DREALM_USE_LLVM -DREALM_LLVM_VERSION=$(LLVM_VERSION_NUMBER)
   # NOTE: do not use these for all source files - just the ones that include llvm include files
   LLVM_CXXFLAGS ?= -std=c++11 -I$(shell $(LLVM_CONFIG) --includedir)
-  LEGION_LD_FLAGS += $(shell $(LLVM_CONFIG) --ldflags --libs irreader jit mcjit x86)
+  ifeq ($(LLVM_VERSION_NUMBER),35)
+    LEGION_LD_FLAGS += $(shell $(LLVM_CONFIG) --ldflags --libs irreader jit mcjit x86)
+  else
+    LEGION_LD_FLAGS += $(shell $(LLVM_CONFIG) --ldflags --libs irreader mcjit x86)
+  endif
   # llvm-config --system-libs gives you all the libraries you might need for anything,
   #  which includes things we don't need, and might not be installed
   # by default, filter out libedit
@@ -495,9 +500,7 @@ LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/hdf5/hdf5_module.cc \
 		   $(LG_RT_DIR)/realm/hdf5/hdf5_internal.cc \
 		   $(LG_RT_DIR)/realm/hdf5/hdf5_access.cc
 endif
-ifeq ($(strip $(USE_GASNET)),1)
-LOW_RUNTIME_SRC += $(LG_RT_DIR)/activemsg.cc
-endif
+LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/activemsg.cc
 GPU_RUNTIME_SRC +=
 
 LOW_RUNTIME_SRC += $(LG_RT_DIR)/realm/logging.cc \
@@ -513,10 +516,6 @@ MAPPER_SRC	+= $(LG_RT_DIR)/mappers/default_mapper.cc \
 		   $(LG_RT_DIR)/mappers/replay_mapper.cc \
 		   $(LG_RT_DIR)/mappers/debug_mapper.cc \
 		   $(LG_RT_DIR)/mappers/wrapper_mapper.cc
-
-ifeq ($(strip $(ALT_MAPPERS)),1)
-MAPPER_SRC	+= $(LG_RT_DIR)/mappers/alt_mappers.cc
-endif
 
 HIGH_RUNTIME_SRC += $(LG_RT_DIR)/legion/legion.cc \
 		    $(LG_RT_DIR)/legion/legion_c.cc \

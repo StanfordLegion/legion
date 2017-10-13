@@ -19,10 +19,11 @@
 #include <cstdlib>
 #include <unistd.h>
 #include <sys/types.h>
+#include <fcntl.h>
+#include "legion.h"
 #ifdef USE_HDF
 #include <hdf5.h>
 #endif
-#include "legion.h"
 using namespace Legion;
 
 /*

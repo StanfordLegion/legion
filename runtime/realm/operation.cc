@@ -486,7 +486,7 @@ namespace Realm {
       // not found - who owns this event?
       int owner = ID(finish_event).event.creator_node;
 
-      if(owner == (int)gasnet_mynode()) {
+      if(owner == my_node_id) {
 	// if we're the owner, it's probably for an event that already completed successfully,
 	//  so ignore the request
 	log_optable.info() << "event " << finish_event << " cancellation ignored - not in table";
@@ -512,9 +512,8 @@ namespace Realm {
 #endif
   }
     
-  /*static*/ int OperationTable::register_handlers(gasnet_handlerentry_t *handlers)
+  /*static*/ void OperationTable::register_handlers(void)
   {
-    return 0;
   }
 
 

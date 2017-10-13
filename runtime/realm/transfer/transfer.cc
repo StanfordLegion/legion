@@ -1779,11 +1779,11 @@ namespace Realm {
     delete oas_by_inst;
   }
 
-  static gasnet_node_t select_dma_node(Memory src_mem, Memory dst_mem,
+  static NodeID select_dma_node(Memory src_mem, Memory dst_mem,
 				       ReductionOpID redop_id, bool red_fold)
   {
-    gasnet_node_t src_node = ID(src_mem).memory.owner_node;
-    gasnet_node_t dst_node = ID(dst_mem).memory.owner_node;
+    NodeID src_node = ID(src_mem).memory.owner_node;
+    NodeID dst_node = ID(dst_mem).memory.owner_node;
 
     bool src_is_rdma = get_runtime()->get_memory_impl(src_mem)->kind == MemoryImpl::MKIND_GLOBAL;
     bool dst_is_rdma = get_runtime()->get_memory_impl(dst_mem)->kind == MemoryImpl::MKIND_GLOBAL;
@@ -1791,8 +1791,8 @@ namespace Realm {
     if(src_is_rdma) {
       if(dst_is_rdma) {
 	// gasnet -> gasnet - blech
-	log_dma.warning("WARNING: gasnet->gasnet copy being serialized on local node (%d)", gasnet_mynode());
-	return gasnet_mynode();
+	log_dma.warning("WARNING: gasnet->gasnet copy being serialized on local node (%d)", my_node_id);
+	return my_node_id;
       } else {
 	// gathers by the receiver
 	return dst_node;
@@ -1830,7 +1830,7 @@ namespace Realm {
       src_mem = it->first.first.get_location();
       dst_mem = it->first.second.get_location();
     }
-    gasnet_node_t dma_node = select_dma_node(src_mem, dst_mem, 0, false);
+    NodeID dma_node = select_dma_node(src_mem, dst_mem, 0, false);
     log_dma.debug() << "copy: srcmem=" << src_mem << " dstmem=" << dst_mem
 		    << " node=" << dma_node;
 
@@ -1840,7 +1840,7 @@ namespace Realm {
     assert(oas_by_inst != 0);
     oas_by_inst = 0;
 
-    if(dma_node == gasnet_mynode()) {
+    if(dma_node == my_node_id) {
       log_dma.debug("performing copy on local node");
 
       get_runtime()->optable.add_local_operation(ev, r);
@@ -1914,8 +1914,8 @@ namespace Realm {
 					 wait_on, ev,
 					 0 /*priority*/, requests);
 
-    gasnet_node_t src_node = ID(srcs[0].inst).instance.owner_node;
-    if(src_node == gasnet_mynode()) {
+    NodeID src_node = ID(srcs[0].inst).instance.owner_node;
+    if(src_node == my_node_id) {
       log_dma.debug("performing reduction on local node");
 
       get_runtime()->optable.add_local_operation(ev, r);	  
@@ -1982,8 +1982,8 @@ namespace Realm {
     FillRequest *r = new FillRequest(td, f, data.base(), data.size(),
 				     wait_on, ev, priority, requests);
 
-    gasnet_node_t tgt_node = ID(inst).instance.owner_node;
-    if(tgt_node == gasnet_mynode()) {
+    NodeID tgt_node = ID(inst).instance.owner_node;
+    if(tgt_node == my_node_id) {
       get_runtime()->optable.add_local_operation(ev, r);
       r->check_readiness(false, dma_queue);
     } else {

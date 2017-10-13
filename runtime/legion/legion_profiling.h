@@ -17,7 +17,6 @@
 #define __LEGION_PROFILING_H__
 
 #include "realm.h"
-#include "utilities.h"
 #include "legion_types.h"
 #include "legion_utilities.h"
 #include "realm/profiling.h"
@@ -232,31 +231,31 @@ namespace Legion {
       void register_slice_owner(UniqueID pid, UniqueID id);
     public:
       void process_task(VariantID variant_id, UniqueID op_id, 
-                  Realm::ProfilingMeasurements::OperationTimeline *timeline,
-                  Realm::ProfilingMeasurements::OperationProcessorUsage *usage,
-                  Realm::ProfilingMeasurements::OperationEventWaits *waits);
+            const Realm::ProfilingMeasurements::OperationTimeline &timeline,
+            const Realm::ProfilingMeasurements::OperationProcessorUsage &usage,
+            const Realm::ProfilingMeasurements::OperationEventWaits &waits);
       void process_meta(size_t id, UniqueID op_id,
-                  Realm::ProfilingMeasurements::OperationTimeline *timeline,
-                  Realm::ProfilingMeasurements::OperationProcessorUsage *usage,
-                  Realm::ProfilingMeasurements::OperationEventWaits *waits);
+            const Realm::ProfilingMeasurements::OperationTimeline &timeline,
+            const Realm::ProfilingMeasurements::OperationProcessorUsage &usage,
+            const Realm::ProfilingMeasurements::OperationEventWaits &waits);
       void process_message(
-                  Realm::ProfilingMeasurements::OperationTimeline *timeline,
-                  Realm::ProfilingMeasurements::OperationProcessorUsage *usage,
-                  Realm::ProfilingMeasurements::OperationEventWaits *waits);
+            const Realm::ProfilingMeasurements::OperationTimeline &timeline,
+            const Realm::ProfilingMeasurements::OperationProcessorUsage &usage,
+            const Realm::ProfilingMeasurements::OperationEventWaits &waits);
       void process_copy(UniqueID op_id,
-                  Realm::ProfilingMeasurements::OperationTimeline *timeline,
-                  Realm::ProfilingMeasurements::OperationMemoryUsage *usage);
+            const Realm::ProfilingMeasurements::OperationTimeline &timeline,
+            const Realm::ProfilingMeasurements::OperationMemoryUsage &usage);
       void process_fill(UniqueID op_id,
-                  Realm::ProfilingMeasurements::OperationTimeline *timeline,
-                  Realm::ProfilingMeasurements::OperationMemoryUsage *usage);
+            const Realm::ProfilingMeasurements::OperationTimeline &timeline,
+            const Realm::ProfilingMeasurements::OperationMemoryUsage &usage);
       void process_inst_create(UniqueID op_id, PhysicalInstance inst,
                                timestamp_t create);
       void process_inst_usage(UniqueID op_id,
-                  Realm::ProfilingMeasurements::InstanceMemoryUsage *usage);
+            const Realm::ProfilingMeasurements::InstanceMemoryUsage &usage);
       void process_inst_timeline(UniqueID op_id,
-                  Realm::ProfilingMeasurements::InstanceTimeline *timeline);
+            const Realm::ProfilingMeasurements::InstanceTimeline &timeline);
       void process_partition(UniqueID op_id, DepPartOpKind part_op,
-                  Realm::ProfilingMeasurements::OperationTimeline *timeline);
+            const Realm::ProfilingMeasurements::OperationTimeline &timeline);
     public:
       void record_message(Processor proc, MessageKind kind, timestamp_t start,
                           timestamp_t stop);
@@ -299,7 +298,7 @@ namespace Legion {
 #endif
     };
 
-    class LegionProfiler {
+    class LegionProfiler : public ProfilingResponseHandler {
     public:
       enum ProfilingKind {
         LEGION_PROF_TASK,
@@ -311,10 +310,10 @@ namespace Legion {
         LEGION_PROF_PARTITION,
         LEGION_PROF_LAST,
       };
-      struct ProfilingInfo {
+      struct ProfilingInfo : public ProfilingResponseBase {
       public:
-        ProfilingInfo(ProfilingKind k)
-          : kind(k) { }
+        ProfilingInfo(LegionProfiler *p, ProfilingKind k)
+          : ProfilingResponseBase(p), kind(k) { }
       public:
         ProfilingKind kind;
         size_t id;
@@ -340,7 +339,7 @@ namespace Legion {
                      const size_t footprint_threshold,
                      const size_t target_latency);
       LegionProfiler(const LegionProfiler &rhs);
-      ~LegionProfiler(void);
+      virtual ~LegionProfiler(void);
     public:
       LegionProfiler& operator=(const LegionProfiler &rhs);
     public:
@@ -388,7 +387,8 @@ namespace Legion {
                                  UniqueID uid, DepPartOpKind part_op);
     public:
       // Process low-level runtime profiling results
-      void process_results(Processor p, const void *buffer, size_t size);
+      virtual void handle_profiling_response(
+                            const Realm::ProfilingResponse &response);
     public:
       // Dump all the results
       void finalize(void);

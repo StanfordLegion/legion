@@ -379,7 +379,7 @@ namespace Realm {
       if(lo[i] > hi[i])
 	return 0;
       else
-	v *= (size_t)(hi[i] - lo[i] + 1);
+	v *= size_t(hi[i] - lo[i] + 1);
     return v;
   }
 
@@ -842,15 +842,15 @@ namespace Realm {
   //  the index of the entry that contains the point, or the first one to appear after
   //  that point
   template <int N, typename T>
-  static int bsearch_map_entries(const std::vector<SparsityMapEntry<N,T> >& entries,
-				 const Point<N,T>& p)
+  static size_t bsearch_map_entries(const std::vector<SparsityMapEntry<N,T> >& entries,
+				    const Point<N,T>& p)
   {
     assert(N == 1);
     // search range at any given time is [lo, hi)
     int lo = 0;
     int hi = entries.size();
     while(lo < hi) {
-      int mid = (lo + hi) >> 1;  // rounding down keeps up from picking hi
+      size_t mid = (lo + hi) >> 1;  // rounding down keeps up from picking hi
       if(p.x < entries[mid].bounds.lo.x) 
 	hi = mid;
       else if(p.x > entries[mid].bounds.hi.x)
@@ -877,8 +877,8 @@ namespace Realm {
     const std::vector<SparsityMapEntry<N,T> >& entries = impl->get_entries();
     if(N == 1) {
       // binary search to find the element we want
-      int idx = bsearch_map_entries<N,T>(entries, p);
-      if(idx >= (int)(entries.size())) return false;
+      size_t idx = bsearch_map_entries<N,T>(entries, p);
+      if(idx >= entries.size()) return false;
 
       const SparsityMapEntry<N,T>& e = entries[idx];
 
@@ -1477,8 +1477,10 @@ namespace Realm {
       if(rect.empty()) {
 	// in 1-D, our entries are sorted, so the first one whose bounds fall
 	//   outside our restriction means we're completely done
-	if(N == 1) break;
-	continue;
+	if(N == 1)
+	  break;
+	else
+	  continue;
       }
 
       assert(!e.sparsity.exists());
@@ -1507,20 +1509,20 @@ namespace Realm {
   template <int N, typename T>
   inline bool LinearizedIndexSpaceIntfc::check_dim(void) const
   {
-    return (dim == N) && (idxtype == (int)sizeof(T));
+    return (dim == N) && (idxtype == int(sizeof(T)));
   }
 
   template <int N, typename T>
   inline LinearizedIndexSpace<N,T>& LinearizedIndexSpaceIntfc::as_dim(void)
   {
-    assert((dim == N) && (idxtype == (int)sizeof(T)));
+    assert((dim == N) && (idxtype == int(sizeof(T))));
     return *static_cast<LinearizedIndexSpace<N,T> *>(this);
   }
 
   template <int N, typename T>
   inline const LinearizedIndexSpace<N,T>& LinearizedIndexSpaceIntfc::as_dim(void) const
   {
-    assert((dim == N) && (idxtype == (int)sizeof(T)));
+    assert((dim == N) && (idxtype == int(sizeof(T))));
     return *static_cast<const LinearizedIndexSpace<N,T> *>(this);
   }
 
@@ -1531,7 +1533,7 @@ namespace Realm {
 
   template <int N, typename T>
   inline LinearizedIndexSpace<N,T>::LinearizedIndexSpace(const IndexSpace<N,T>& _indexspace)
-    : LinearizedIndexSpaceIntfc(N, (int)sizeof(T))
+    : LinearizedIndexSpaceIntfc(N, int(sizeof(T)))
     , indexspace(_indexspace)
   {}
 
@@ -1564,7 +1566,7 @@ namespace Realm {
 	  s *= bounds.hi[i] - bounds.lo[i] + 1;
 	}
       }
-      assert(s == (ptrdiff_t)volume);
+      assert(s == ptrdiff_t(volume));
     } else {
       offset = 0;
       for(int i = 0; i < N; i++) strides[i] = 0;

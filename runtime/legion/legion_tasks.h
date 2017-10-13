@@ -432,7 +432,7 @@ namespace Legion {
     public:
       virtual void add_copy_profiling_request(
                                       Realm::ProfilingRequestSet &requests);
-      virtual void report_profiling_response(
+      virtual void handle_profiling_response(
                                 const Realm::ProfilingResponse &respone);
     public:
       virtual void activate(void) = 0;

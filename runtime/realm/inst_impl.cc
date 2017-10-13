@@ -112,29 +112,44 @@ namespace Realm {
 					   ilg->alignment_reqd,
 					   wait_on)) {
 	assert(impl->metadata.inst_offset != (size_t)-1);
-	ready_event = Event::NO_EVENT;
-        if(impl->measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>())
-          impl->timeline.record_ready_time();
+	if(impl->metadata.inst_offset != (size_t)-2) {
+	  // successful allocation
+	  ready_event = Event::NO_EVENT;
+	  if(impl->measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>())
+	    impl->timeline.record_ready_time();
+	} else {
+	  // generate a poisoned event for completion
+	  GenEventImpl *ev = GenEventImpl::create_genevent();
+	  ready_event = ev->current_event();
+	  GenEventImpl::trigger(ready_event, true /*poisoned*/);
+	}
       } else {
 	// we will probably need an event to track when it is ready
 	GenEventImpl *ev = GenEventImpl::create_genevent();
 	ready_event = ev->current_event();
-	bool alloc_done;
+	bool alloc_done, alloc_successful;
 	// use mutex to avoid race on allocation callback
 	{
 	  AutoHSLLock al(impl->mutex);
 	  if(impl->metadata.inst_offset != (size_t)-1) {
 	    alloc_done = true;
+	    alloc_successful = (impl->metadata.inst_offset != (size_t)-2);
 	  } else {
 	    alloc_done = false;
+	    alloc_successful = false;
 	    impl->metadata.ready_event = ready_event;
 	  }
 	}
 	if(alloc_done) {
-	  if(impl->measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>())
-	    impl->timeline.record_ready_time();
-	  GenEventImpl::trigger(ready_event, false /*!poisoned*/);
-	  ready_event = Event::NO_EVENT;
+	  if(alloc_successful) {
+	    if(impl->measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>())
+	      impl->timeline.record_ready_time();
+	    GenEventImpl::trigger(ready_event, false /*!poisoned*/);
+	    ready_event = Event::NO_EVENT;
+	  }
+	} else {
+	  // poison the ready event and still return it
+	  GenEventImpl::trigger(ready_event, true /*poisoned*/);
 	}
       }
 
@@ -152,13 +167,19 @@ namespace Realm {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       // TODO: send destruction request through so memory can see it, even
       //  if it's not ready
-      if(!wait_on.has_triggered()) {
+      bool poisoned = false;
+      if(!wait_on.has_triggered_faultaware(poisoned)) {
 	EventImpl::add_waiter(wait_on, new DeferredInstDestroy(*this));
         return;
       }
-      // this does the right thing even though we're using an instance ID
-      MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
-      mem_impl->release_instance_storage(*this, wait_on);
+      // a poisoned precondition silently cancels the deletion - up to
+      //  requestor to realize this has occurred since the deletion does
+      //  not have its own completion event
+      if(!poisoned) {
+	// this does the right thing even though we're using an instance ID
+	MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
+	mem_impl->release_instance_storage(*this, wait_on);
+      }
     }
 
     void RegionInstance::destroy(const std::vector<DestroyedField>& destroyed_fields,
@@ -340,8 +361,47 @@ namespace Realm {
 
     void RegionInstanceImpl::notify_allocation(bool success, size_t offset)
     {
+      if(!success) {
+	// if somebody is listening to profiling measurements, we report
+	//  a failed allocation through that channel - if not, we explode
+	bool report_failure = (measurements.wants_measurement<ProfilingMeasurements::InstanceStatus>() ||
+			       measurements.wants_measurement<ProfilingMeasurements::InstanceAllocResult>());
+	if(report_failure) {
+	  log_inst.info() << "allocation failed: inst=" << me;
+	  if(measurements.wants_measurement<ProfilingMeasurements::InstanceStatus>()) {
+	    ProfilingMeasurements::InstanceStatus stat;
+	    stat.result = ProfilingMeasurements::InstanceStatus::FAILED_ALLOCATION;
+	    stat.error_code = 0;
+	    measurements.add_measurement(stat);
+	  }
+
+	  if(measurements.wants_measurement<ProfilingMeasurements::InstanceAllocResult>()) {
+	    ProfilingMeasurements::InstanceAllocResult result;
+	    result.success = false;
+	    measurements.add_measurement(result);
+	  }
+	  
+	  // send any remaining incomplete profiling responses
+	  measurements.send_responses(requests);
+
+	  // poison the completion event, if it exists
+	  Event ready_event = Event::NO_EVENT;
+	  {
+	    AutoHSLLock al(mutex);
+	    ready_event = metadata.ready_event;
+	    metadata.ready_event = Event::NO_EVENT;
+	    metadata.inst_offset = (size_t)-2;
+	  }
+	  if(ready_event.exists())
+	    GenEventImpl::trigger(ready_event, true /*poisoned*/);
+	  return;
+	} else {
+	  log_inst.fatal() << "instance allocation failed - out of memory in mem " << memory;
+	  exit(1);
+	}
+      }
+
       log_inst.debug() << "allocation completed: inst=" << me << " offset=" << offset;
-      assert(success);
 
       // before we publish the offset, we need to update the layout
       // SJT: or not?  that might be part of RegionInstance::get_base_address?
@@ -357,7 +417,7 @@ namespace Realm {
 	metadata.inst_offset = offset;
       }
       if(ready_event.exists())
-	GenEventImpl::trigger(ready_event, !success);
+	GenEventImpl::trigger(ready_event, false /*!poisoned*/);
 
       // metadata is now valid and can be shared
       NodeSet early_reqs;
@@ -370,7 +430,13 @@ namespace Realm {
 	free(data);
       }
 
-      if (measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>()) {
+      if(measurements.wants_measurement<ProfilingMeasurements::InstanceAllocResult>()) {
+	ProfilingMeasurements::InstanceAllocResult result;
+	result.success = true;
+	measurements.add_measurement(result);
+      }
+
+      if(measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>()) {
 	timeline.record_ready_time();
       }
 
@@ -380,7 +446,7 @@ namespace Realm {
 	ProfilingMeasurements::InstanceMemoryUsage usage;
 	usage.instance = me;
 	usage.memory = memory;
-	usage.bytes = metadata.size;
+	usage.bytes = metadata.layout->bytes_used;
 	measurements.add_measurement(usage);
       }
     }
@@ -389,8 +455,16 @@ namespace Realm {
     {
       log_inst.debug() << "deallocation completed: inst=" << me;
 
+      if (measurements.wants_measurement<ProfilingMeasurements::InstanceStatus>()) {
+	ProfilingMeasurements::InstanceStatus stat;
+	stat.result = ProfilingMeasurements::InstanceStatus::DESTROYED_SUCCESSFULLY;
+	stat.error_code = 0;
+	measurements.add_measurement(stat);
+      }
+
       if (measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>()) {
 	timeline.record_delete_time();
+	measurements.add_measurement(timeline);
       }
 
       // send any remaining incomplete profiling responses

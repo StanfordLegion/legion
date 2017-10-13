@@ -36,7 +36,7 @@ namespace Realm {
     class FileXferDes : public XferDes {
     public:
       FileXferDes(
-          DmaRequest* _dma_request, gasnet_node_t _launch_node,
+          DmaRequest* _dma_request, NodeID _launch_node,
           XferDesID _guid, XferDesID _pre_guid, XferDesID _next_guid,
 	  uint64_t next_max_rw_gap,
 	  size_t src_ib_offset, size_t src_ib_size,
@@ -64,7 +64,7 @@ namespace Realm {
 
     class DiskXferDes : public XferDes {
     public:
-      DiskXferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
+      DiskXferDes(DmaRequest* _dma_request, NodeID _launch_node,
                   XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
 		  uint64_t next_max_rw_gap,
 		  size_t src_ib_offset, size_t src_ib_size,

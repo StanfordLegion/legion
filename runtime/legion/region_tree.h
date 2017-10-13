@@ -72,13 +72,16 @@ namespace Legion {
       void prepare_for_shutdown(void);
     public:
       void create_index_space(IndexSpace handle, const void *realm_is,
-                              DistributedID did);
+                              DistributedID did, ShardMapping *mapping = NULL);
       void create_union_space(IndexSpace handle, TaskOp *op,
-            const std::vector<IndexSpace> &sources, DistributedID did);
+            const std::vector<IndexSpace> &sources, 
+            DistributedID did, ShardMapping *mapping = NULL);
       void create_intersection_space(IndexSpace handle, TaskOp *op,
-            const std::vector<IndexSpace> &source, DistributedID did);
+            const std::vector<IndexSpace> &source, 
+            DistributedID did, ShardMapping *mapping = NULL);
       void create_difference_space(IndexSpace handle, TaskOp *op,
-                 IndexSpace left, IndexSpace right, DistributedID did);
+                 IndexSpace left, IndexSpace right, 
+                 DistributedID did, ShardMapping *mapping = NULL);
       RtEvent create_pending_partition(IndexPartition pid,
                                        IndexSpace parent,
                                        IndexSpace color_space,
@@ -103,6 +106,7 @@ namespace Legion {
                                              IndexSpace color_space,
                                              LegionColor &partition_color,
                                              PartitionKind part_kind,
+                                             DistributedID did,
                                              ValueBroadcast<bool> *part_result,
                                              ApEvent partition_ready,
                                              ShardMapping *mapping,
@@ -222,7 +226,8 @@ namespace Legion {
       bool is_index_partition_complete(IndexPartition p);
       bool has_index_partition(IndexSpace parent, Color color);
     public:
-      void create_field_space(FieldSpace handle, DistributedID did);
+      void create_field_space(FieldSpace handle, DistributedID did,
+                              ShardMapping *mapping = NULL);
       void destroy_field_space(FieldSpace handle, AddressSpaceID source);
       // Return true if local is set to true and we actually performed the 
       // allocation.  It is an error if the field already existed and the
@@ -258,7 +263,8 @@ namespace Legion {
       void get_field_space_fields(FieldSpace handle, 
                                   std::vector<FieldID> &fields);
     public:
-      void create_logical_region(LogicalRegion handle);
+      void create_logical_region(LogicalRegion handle,
+                                 ShardMapping *mapping = NULL);
       void destroy_logical_region(LogicalRegion handle, 
                                   AddressSpaceID source);
       void destroy_logical_partition(LogicalPartition handle,
@@ -508,11 +514,13 @@ namespace Legion {
       IndexSpaceNode* create_node(IndexSpace is, const void *realm_is, 
                                   IndexPartNode *par, LegionColor color,
                                   DistributedID did,
-                                  ApEvent is_ready = ApEvent::NO_AP_EVENT);
+                                  ApEvent is_ready = ApEvent::NO_AP_EVENT,
+                                  ShardMapping *shard_mapping = NULL);
       IndexSpaceNode* create_node(IndexSpace is, const void *realm_is, 
                                   IndexPartNode *par, LegionColor color,
                                   DistributedID did,
-                                  ApUserEvent is_ready);
+                                  ApUserEvent is_ready,
+                                  ShardMapping *shard_mapping = NULL);
       // We know the disjointness of the index partition
       IndexPartNode*  create_node(IndexPartition p, IndexSpaceNode *par,
                                   IndexSpaceNode *color_space, 
@@ -527,10 +535,12 @@ namespace Legion {
                                   DistributedID did, ApEvent partition_ready, 
                                   ApBarrier partial_pending,
                                   ShardMapping *shard_mapping = NULL);
-      FieldSpaceNode* create_node(FieldSpace space, DistributedID did);
+      FieldSpaceNode* create_node(FieldSpace space, DistributedID did,
+                                  ShardMapping *shard_mapping = NULL);
       FieldSpaceNode* create_node(FieldSpace space, DistributedID did,
                                   Deserializer &derez);
-      RegionNode*     create_node(LogicalRegion r, PartitionNode *par);
+      RegionNode*     create_node(LogicalRegion r, PartitionNode *par,
+                                  ShardMapping *shard_mapping = NULL);
       PartitionNode*  create_node(LogicalPartition p, RegionNode *par);
     public:
       IndexSpaceNode* get_node(IndexSpace space);
@@ -714,6 +724,7 @@ namespace Legion {
       const LegionColor color;
     public:
       NodeSet child_creation;
+      bool destroyed;
     protected:
       Reservation node_lock;
     protected:
@@ -1071,6 +1082,8 @@ namespace Legion {
               TaskOp *op, IndexSpace left, IndexSpace right);
     public:
       virtual void log_index_space_points(void);
+      void log_index_space_points(const Realm::IndexSpace<DIM,T> &space) const;
+    public:
       virtual ApEvent compute_pending_space(Operation *op,
             const std::vector<IndexSpace> &handles, bool is_union);
       virtual ApEvent compute_pending_space(Operation *op,
@@ -1976,6 +1989,8 @@ namespace Legion {
     private:
       // Local field information
       std::vector<LocalFieldInfo> local_field_infos;
+    public:
+      bool destroyed;
     };
  
     /**
@@ -1986,10 +2001,23 @@ namespace Legion {
      * this kind of node making them general across
      * all kinds of node types.
      */
-    class RegionTreeNode : public Collectable { 
+    class RegionTreeNode
+#ifdef LEGION_GC
+      : public DistributedCollectable
+#else
+      : public Collectable
+#endif
+      {
     public:
       RegionTreeNode(RegionTreeForest *ctx, FieldSpaceNode *column);
       virtual ~RegionTreeNode(void);
+#ifdef LEGION_GC
+    public:
+      virtual void notify_active(ReferenceMutator *mutator) { assert(false); }
+      virtual void notify_inactive(ReferenceMutator *mutator) { assert(false); }
+      virtual void notify_valid(ReferenceMutator *mutator) { assert(false); }
+      virtual void notify_invalid(ReferenceMutator *mutator) { assert(false); }
+#endif
     public:
       static AddressSpaceID get_owner_space(RegionTreeID tid, Runtime *rt);
     public:
@@ -2296,6 +2324,9 @@ namespace Legion {
       void unregister_physical_manager(PhysicalManager *manager);
       PhysicalManager* find_manager(DistributedID did);
     public:
+      void register_tracking_context(InnerContext *context);
+      void unregister_tracking_context(InnerContext *context);
+    public:
       virtual unsigned get_depth(void) const = 0;
       virtual LegionColor get_color(void) const = 0;
       virtual IndexTreeNode *get_row_source(void) const = 0;
@@ -2379,7 +2410,9 @@ namespace Legion {
       RegionTreeForest *const context;
       FieldSpaceNode *const column_source;
     public:
+#ifndef LEGION_GC
       NodeSet remote_instances;
+#endif
       bool registered;
       bool destroyed;
     protected:
@@ -2396,6 +2429,9 @@ namespace Legion {
                 LOGICAL_VIEW_ALLOC>::tracked instance_views;
       LegionMap<DistributedID,PhysicalManager*,
                 PHYSICAL_MANAGER_ALLOC>::tracked physical_managers;
+      // Also need to track any contexts that are tracking this
+      // region tree node in case we get deleted during execution
+      std::set<InnerContext*> tracking_contexts;
     protected:
       LegionMap<SemanticTag,SemanticInfo>::aligned semantic_info;
     };

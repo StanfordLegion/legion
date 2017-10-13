@@ -49,7 +49,7 @@ namespace Realm {
 
     // construct from received packet
     template <typename S>
-    UnionMicroOp(gasnet_node_t _requestor, AsyncMicroOp *_async_microop, S& s);
+    UnionMicroOp(NodeID _requestor, AsyncMicroOp *_async_microop, S& s);
 
     template <typename BM>
     void populate_bitmask(BM& bitmask);
@@ -85,7 +85,7 @@ namespace Realm {
 
     // construct from received packet
     template <typename S>
-    IntersectionMicroOp(gasnet_node_t _requestor, AsyncMicroOp *_async_microop, S& s);
+    IntersectionMicroOp(NodeID _requestor, AsyncMicroOp *_async_microop, S& s);
 
     template <typename BM>
     void populate_bitmask(BM& bitmask);
@@ -120,7 +120,7 @@ namespace Realm {
 
     // construct from received packet
     template <typename S>
-    DifferenceMicroOp(gasnet_node_t _requestor, AsyncMicroOp *_async_microop, S& s);
+    DifferenceMicroOp(NodeID _requestor, AsyncMicroOp *_async_microop, S& s);
 
     template <typename BM>
     void populate_bitmask(BM& bitmask);

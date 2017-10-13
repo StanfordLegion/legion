@@ -140,6 +140,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    template <typename T>
+    inline bool ProfilingResponse::get_measurement(T& result) const
+    //--------------------------------------------------------------------------
+    {
+      if (realm_resp)
+        return realm_resp->template get_measurement<T>(result);
+      else
+        return false;
+    }
+
+    //--------------------------------------------------------------------------
     template<>
     inline ProfilingMeasurements::RuntimeOverhead* 
             ProfilingResponse::get_measurement<
@@ -147,6 +158,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return overhead;
+    }
+
+    //--------------------------------------------------------------------------
+    template<>
+    inline bool ProfilingResponse::get_measurement<
+                  ProfilingMeasurements::RuntimeOverhead>(
+                           ProfilingMeasurements::RuntimeOverhead& result) const
+    //--------------------------------------------------------------------------
+    {
+      result = *overhead;
+      return true;
     }
 
     namespace ProfilingMeasurements {

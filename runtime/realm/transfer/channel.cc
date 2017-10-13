@@ -175,7 +175,7 @@ namespace Realm {
 
 
 
-      XferDes::XferDes(DmaRequest* _dma_request, gasnet_node_t _launch_node,
+      XferDes::XferDes(DmaRequest* _dma_request, NodeID _launch_node,
               XferDesID _guid, XferDesID _pre_xd_guid, XferDesID _next_xd_guid,
 		       uint64_t _next_max_rw_gap, size_t _src_ib_offset, size_t _src_ib_size,
               bool _mark_start,
@@ -239,7 +239,7 @@ namespace Realm {
 
         // notify owning DmaRequest upon completion of this XferDes
         //printf("complete XD = %lu\n", guid);
-        if (launch_node == gasnet_mynode()) {
+        if (launch_node == my_node_id) {
           complete_fence->mark_finished(true/*successful*/);
         } else {
           NotifyXferDesCompleteMessage::send_request(launch_node, complete_fence);
@@ -832,7 +832,7 @@ namespace Realm {
         else {
           bytes_write += size;
         }
-        //printf("[%d] offset(%ld), size(%lu), bytes_writes(%lx): %ld\n", gasnet_mynode(), offset, size, guid, bytes_write);
+        //printf("[%d] offset(%ld), size(%lu), bytes_writes(%lx): %ld\n", my_node_id, offset, size, guid, bytes_write);
       }
 #endif
 
@@ -882,7 +882,7 @@ namespace Realm {
       }
 
       MemcpyXferDes::MemcpyXferDes(DmaRequest* _dma_request,
-                                        gasnet_node_t _launch_node,
+                                        NodeID _launch_node,
                                         XferDesID _guid,
                                         XferDesID _pre_xd_guid,
                                         XferDesID _next_xd_guid,
@@ -993,7 +993,7 @@ namespace Realm {
       }
 
       GASNetXferDes::GASNetXferDes(DmaRequest* _dma_request,
-				   gasnet_node_t _launch_node,
+				   NodeID _launch_node,
 				   XferDesID _guid,
 				   XferDesID _pre_xd_guid,
 				   XferDesID _next_xd_guid,
@@ -1090,7 +1090,7 @@ namespace Realm {
       }
 
       RemoteWriteXferDes::RemoteWriteXferDes(DmaRequest* _dma_request,
-					     gasnet_node_t _launch_node,
+					     NodeID _launch_node,
 					     XferDesID _guid,
 					     XferDesID _pre_xd_guid,
 					     XferDesID _next_xd_guid,
@@ -1178,7 +1178,7 @@ namespace Realm {
 
 #ifdef USE_CUDA
       GPUXferDes::GPUXferDes(DmaRequest* _dma_request,
-			     gasnet_node_t _launch_node,
+			     NodeID _launch_node,
 			     XferDesID _guid,
 			     XferDesID _pre_xd_guid,
 			     XferDesID _next_xd_guid,
@@ -1322,7 +1322,7 @@ namespace Realm {
 
 #ifdef USE_HDF
       HDFXferDes::HDFXferDes(DmaRequest* _dma_request,
-			     gasnet_node_t _launch_node,
+			     NodeID _launch_node,
 			     XferDesID _guid,
 			     XferDesID _pre_xd_guid,
 			     XferDesID _next_xd_guid,
@@ -1448,6 +1448,19 @@ namespace Realm {
 	      log_request.info() << "pred limits xfer: " << max_bytes << " -> " << pre_max;
 	      max_bytes = pre_max;
 	    }
+
+	    // further limit based on data that has actually shown up
+	    max_bytes = seq_pre_write.span_exists(bytes_total, max_bytes);
+	    if(max_bytes == 0)
+	      break;
+	  }
+
+	  // similarly, limit our max transfer size based on the amount the
+	  //  destination IB buffer can take (assuming there is an IB)
+	  if(next_xd_guid != XFERDES_NO_GUID) {
+	    max_bytes = seq_next_read.span_exists(bytes_total, max_bytes);
+	    if(max_bytes == 0)
+	      break;
 	  }
 
 	  // HDF5 uses its own address info, instead of src/dst, we
@@ -1994,7 +2007,7 @@ namespace Realm {
           args.mem = req->dst_mem;
           args.offset = req->dst_offset;
           args.event = req->complete_event;
-          args.sender = gasnet_mynode();
+          args.sender = my_node_id;
           args.sequence_id = 0;
 
           Realm::RemoteWriteMessage::Message::request(ID(args.mem).node(), args,
@@ -2143,7 +2156,7 @@ namespace Realm {
             CHECK_HDF5( H5Dread(req->dataset_id, req->datatype_id,
 				req->mem_space_id, req->file_space_id,
 				H5P_DEFAULT, req->mem_base) );
-          else
+	  else
             CHECK_HDF5( H5Dwrite(req->dataset_id, req->datatype_id,
 				 req->mem_space_id, req->file_space_id,
 				 H5P_DEFAULT, req->mem_base) );
@@ -2207,8 +2220,8 @@ namespace Realm {
         dst_buf.deserialize(payload->dst_buf_bits);
         dst_buf.memory = args.dst_mem;
 #else
-	DmaRequest* dma_request = 0;
-	gasnet_node_t launch_node = 0;
+	intptr_t dma_req_as_intptr = 0;
+	NodeID launch_node = 0;
 	XferDesID guid = XferDes::XFERDES_NO_GUID;
 	XferDesID pre_xd_guid = XferDes::XFERDES_NO_GUID;
 	XferDesID next_xd_guid = XferDes::XFERDES_NO_GUID;
@@ -2226,7 +2239,7 @@ namespace Realm {
 
 	Realm::Serialization::FixedBufferDeserializer fbd(msgdata, msglen);
 
-	bool ok = ((fbd >> (intptr_t&)dma_request) &&
+	bool ok = ((fbd >> dma_req_as_intptr) &&
 		   (fbd >> launch_node) &&
 		   (fbd >> guid) &&
 		   (fbd >> pre_xd_guid) &&
@@ -2246,7 +2259,9 @@ namespace Realm {
 	assert((src_iter != 0) && (dst_iter != 0));
 	assert(fbd.bytes_left() == 0);
 
-	create_xfer_des(dma_request, launch_node, gasnet_mynode(),
+	DmaRequest* dma_request = reinterpret_cast<DmaRequest *>(dma_req_as_intptr);
+
+	create_xfer_des(dma_request, launch_node, my_node_id,
 			guid, pre_xd_guid, next_xd_guid,
 			next_max_rw_gap, src_ib_offset, src_ib_size,
 			mark_started,
@@ -2292,7 +2307,7 @@ namespace Realm {
       }
 
       /*static*/
-      void XferDesCreateMessage::send_request(gasnet_node_t target, DmaRequest* dma_request, gasnet_node_t launch_node,
+      void XferDesCreateMessage::send_request(NodeID target, DmaRequest* dma_request, NodeID launch_node,
                                XferDesID guid, XferDesID pre_xd_guid, XferDesID next_xd_guid,
 					      uint64_t next_max_rw_gap,
 					      size_t src_ib_offset,
@@ -2327,7 +2342,7 @@ namespace Realm {
         //  payload->oas_vec(i) = oas_vec[i];
 #else
 	Realm::Serialization::DynamicBufferSerializer dbs(128);
-	bool ok = ((dbs << (intptr_t)dma_request) &&
+	bool ok = ((dbs << reinterpret_cast<intptr_t>(dma_request)) &&
 		   (dbs << launch_node) &&
 		   (dbs << guid) &&
 		   (dbs << pre_xd_guid) &&
@@ -2664,8 +2679,8 @@ namespace Realm {
       };
 
       void create_xfer_des(DmaRequest* _dma_request,
-                           gasnet_node_t _launch_node,
-			   gasnet_node_t _target_node,
+                           NodeID _launch_node,
+			   NodeID _target_node,
                            XferDesID _guid,
                            XferDesID _pre_xd_guid,
                            XferDesID _next_xd_guid,
@@ -2684,8 +2699,8 @@ namespace Realm {
                            XferDesFence* _complete_fence,
                            RegionInstance inst)
       {
-	//if (ID(_src_buf.memory).memory.owner_node == gasnet_mynode()) {
-	if(_target_node == gasnet_mynode()) {
+	//if (ID(_src_buf.memory).memory.owner_node == my_node_id) {
+	if(_target_node == my_node_id) {
           // size_t total_field_size = 0;
           // for (unsigned i = 0; i < _oas_vec.size(); i++) {
           //   total_field_size += _oas_vec[i].size;
@@ -2824,8 +2839,8 @@ namespace Realm {
     void destroy_xfer_des(XferDesID _guid)
     {
       log_new_dma.info("Destroy XferDes: id(" IDFMT ")", _guid);
-      gasnet_node_t execution_node = _guid >> (XferDesQueue::NODE_BITS + XferDesQueue::INDEX_BITS);
-      if (execution_node == gasnet_mynode()) {
+      NodeID execution_node = _guid >> (XferDesQueue::NODE_BITS + XferDesQueue::INDEX_BITS);
+      if (execution_node == my_node_id) {
         xferDes_queue->destroy_xferDes(_guid);
       }
       else {

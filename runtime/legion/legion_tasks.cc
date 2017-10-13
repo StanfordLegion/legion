@@ -4182,10 +4182,10 @@ namespace Legion {
         }
         if (!realm_requests.empty())
         {
-          Operation *proxy_this = this;
+          ProfilingResponseBase base(this);
           Realm::ProfilingRequest &request = profiling_requests.add_request(
-              runtime->find_utility_group(), LG_MAPPER_PROFILING_ID, 
-              &proxy_this, sizeof(proxy_this));
+              runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
+              &base, sizeof(base));
           for (std::vector<ProfilingMeasurementID>::const_iterator it = 
                 realm_requests.begin(); it != 
                 realm_requests.end(); it++)
@@ -4264,10 +4264,10 @@ namespace Legion {
       // Nothing to do if we don't have any copy profiling requests
       if (copy_profiling_requests.empty())
         return;
-      Operation *proxy_this = this;
+      ProfilingResponseBase base(this);
       Realm::ProfilingRequest &request = requests.add_request(
-        runtime->find_utility_group(), LG_MAPPER_PROFILING_ID, 
-        &proxy_this, sizeof(proxy_this));
+        runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
+        &base, sizeof(base));
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             copy_profiling_requests.begin(); it != 
             copy_profiling_requests.end(); it++)
@@ -4278,7 +4278,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::report_profiling_response(
+    void SingleTask::handle_profiling_response(
                                        const Realm::ProfilingResponse &response)
     //--------------------------------------------------------------------------
     {

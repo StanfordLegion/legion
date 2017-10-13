@@ -44,7 +44,11 @@ namespace Legion {
         view_lock(Reservation::create_reservation()) 
     //--------------------------------------------------------------------------
     {
+#ifdef LEGION_GC
+      logical_node->add_base_resource_ref(LOGICAL_VIEW_REF);
+#else
       logical_node->add_reference();
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -53,7 +57,11 @@ namespace Legion {
     {
       if (is_owner() && registered_with_runtime)
         unregister_with_runtime(VIEW_VIRTUAL_CHANNEL);
+#ifdef LEGION_GC
+      if (logical_node->remove_base_resource_ref(LOGICAL_VIEW_REF))
+#else
       if (logical_node->remove_reference())
+#endif
         delete logical_node;
       view_lock.destroy_reservation();
       view_lock = Reservation::NO_RESERVATION;

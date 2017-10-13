@@ -13,8 +13,46 @@
  * limitations under the License.
  */
 
-#include "activemsg.h"
-#include "utilities.h"
+#include <realm/realm_config.h>
+
+// include gasnet header files before activemsg.h to make sure we have
+//  definitions for gasnet_hsl_t and gasnett_cond_t
+#ifdef USE_GASNET
+
+// so OpenMPI borrowed gasnet's platform-detection code and didn't change
+//  the define names - work around it by undef'ing anything set via mpi.h
+//  before we include gasnet.h
+#undef __PLATFORM_COMPILER_GNU_VERSION_STR
+
+#ifndef GASNET_PAR
+#define GASNET_PAR
+#endif
+#include <gasnet.h>
+
+#ifndef GASNETT_THREAD_SAFE
+#define GASNETT_THREAD_SAFE
+#endif
+#include <gasnet_tools.h>
+
+// eliminate GASNet warnings for unused static functions
+static const void *ignore_gasnet_warning1 __attribute__((unused)) = (void *)_gasneti_threadkey_init;
+static const void *ignore_gasnet_warning2 __attribute__((unused)) = (void *)_gasnett_trace_printf_noop;
+
+#define GASNETHSL_IMPL     gasnet_hsl_t mutex
+#define GASNETCONDVAR_IMPL gasnett_cond_t condvar
+
+#else
+
+// no gasnet, so use pthread mutex/condvar
+
+#include <pthread.h>
+
+#define GASNETHSL_IMPL     pthread_mutex_t mutex
+#define GASNETCONDVAR_IMPL pthread_cond_t  condvar
+
+#endif
+
+#include <realm/activemsg.h>
 
 #ifndef __GNUC__
 #include "atomics.h" // for __sync_add_and_fetch
@@ -26,8 +64,7 @@
 #include <math.h>
 #endif
 
-#include "lowlevel_impl.h"
-
+#include <realm/threads.h>
 #include "realm/timers.h"
 #include "realm/logging.h"
 
@@ -37,15 +74,132 @@ enum { MSGID_LONG_EXTENSION = 253,
        MSGID_FLIP_REQ = 254,
        MSGID_FLIP_ACK = 255 };
 
+// these are changed during gasnet init (if enabled)
+NodeID my_node_id = 0;
+NodeID max_node_id = 0;
+
+// most of this file assumes the use of gasnet - stubs for a few entry
+//  points are defined at the bottom for the !USE_GASNET case
+#ifdef USE_GASNET
+
+#define CHECK_PTHREAD(cmd) do { \
+  int ret = (cmd); \
+  if(ret != 0) { \
+    fprintf(stderr, "PTHREAD: %s = %d (%s)\n", #cmd, ret, strerror(ret)); \
+    exit(1); \
+  } \
+} while(0)
+
+#define CHECK_GASNET(cmd) do { \
+  int ret = (cmd); \
+  if(ret != GASNET_OK) { \
+    fprintf(stderr, "GASNET: %s = %d (%s, %s)\n", #cmd, ret, gasnet_ErrorName(ret), gasnet_ErrorDesc(ret)); \
+    exit(1); \
+  } \
+} while(0)
+
+// gasnet_hsl_t in object form for templating goodness
+GASNetHSL::GASNetHSL(void)
+{
+  assert(sizeof(mutex) <= sizeof(placeholder));
+  gasnet_hsl_init(&mutex);
+}
+
+GASNetHSL::~GASNetHSL(void)
+{
+  gasnet_hsl_destroy(&mutex);
+}
+
+void GASNetHSL::lock(void)
+{
+  gasnet_hsl_lock(&mutex);
+}
+
+void GASNetHSL::unlock(void)
+{
+  gasnet_hsl_unlock(&mutex);
+}
+
+GASNetCondVar::GASNetCondVar(GASNetHSL &_mutex) 
+  : mutex(_mutex)
+{
+  assert(sizeof(condvar) <= sizeof(placeholder));
+  gasnett_cond_init(&condvar);
+}
+
+GASNetCondVar::~GASNetCondVar(void)
+{
+  gasnett_cond_destroy(&condvar);
+}
+
+// these require that you hold the lock when you call
+void GASNetCondVar::signal(void)
+{
+  gasnett_cond_signal(&condvar);
+}
+
+void GASNetCondVar::broadcast(void)
+{
+  gasnett_cond_broadcast(&condvar);
+}
+
+void GASNetCondVar::wait(void)
+{
+  gasnett_cond_wait(&condvar, &(mutex.mutex.lock));
+}
+
+#ifdef REALM_PROFILE_AM_HANDLERS
+struct ActiveMsgHandlerStats {
+  size_t count, sum, sum2, minval, maxval;
+
+  ActiveMsgHandlerStats(void)
+  : count(0), sum(0), sum2(0), minval(0), maxval(0) {}
+
+  void record(struct timespec& ts_start, struct timespec& ts_end)
+  {
+    size_t val = 1000000000LL * (ts_end.tv_sec - ts_start.tv_sec) + ts_end.tv_nsec - ts_start.tv_nsec;
+    if(!count || (val < minval)) minval = val;
+    if(!count || (val > maxval)) maxval = val;
+    count++;
+    sum += val;
+    sum2 += val * val;
+  }
+};
+
+static ActiveMsgHandlerStats handler_stats[256];
+
+void record_activemsg_profiling(int msgid,
+				const struct timespec& ts_start,
+				const struct timespec& ts_end)
+{
+  handler_stats[msgid].record(ts_start, ts_end);
+}
+#endif
+
+NodeID get_message_source(token_t token)
+{
+  gasnet_node_t src;
+  CHECK_GASNET( gasnet_AMGetMsgSource(token, &src) );
+#ifdef DEBUG_AMREQUESTS
+  printf("%d: source = %d\n", gasnet_mynode(), src);
+#endif
+  return src;
+}  
+
+void send_srcptr_release(token_t token, uint64_t srcptr)
+{
+  CHECK_GASNET( gasnet_AMReplyShort2(token, MSGID_RELEASE_SRCPTR, (handlerarg_t)srcptr, (handlerarg_t)(srcptr >> 32)) );
+}
+
 #ifdef DEBUG_MEM_REUSE
 static int payload_count = 0;
 #endif
 
-LegionRuntime::Logger::Category log_amsg("activemsg");
-LegionRuntime::Logger::Category log_spill("spill");
+Realm::Logger log_amsg("activemsg");
+Realm::Logger log_spill("spill");
 
 #ifdef ACTIVE_MESSAGE_TRACE
-LegionRuntime::Logger::Category log_amsg_trace("amtrace");
+Realm::Logger log_amsg_trace("amtrace");
 
 void record_am_handler(int handler_id, const char *description, bool reply)
 {
@@ -207,7 +361,7 @@ struct OutgoingMessage {
 #endif
 };
 
-LegionRuntime::Logger::Category log_sdp("srcdatapool");
+Realm::Logger log_sdp("srcdatapool");
 
 class SrcDataPool {
 public:
@@ -721,7 +875,7 @@ static int max_msgs_to_send = 8;
 
 // returns the largest payload that can be sent to a node (to a non-pinned
 //   address)
-size_t get_lmb_size(int target_node)
+size_t get_lmb_size(NodeID target_node)
 {
   // not node specific right yet
   return lmb_size;
@@ -966,8 +1120,11 @@ IncomingMessage *IncomingMessageManager::get_messages(int &sender, bool wait)
 
 static IncomingMessageManager *incoming_message_manager = 0;
 
-extern void enqueue_incoming(gasnet_node_t sender, IncomingMessage *msg)
+extern void enqueue_incoming(NodeID sender, IncomingMessage *msg)
 {
+#ifdef DEBUG_AMREQUESTS
+  printf("%d: incoming(%d, %p)\n", gasnet_mynode(), sender, msg);
+#endif
   assert(incoming_message_manager != 0);
   incoming_message_manager->add_incoming_message(sender, msg);
 }
@@ -1387,6 +1544,9 @@ public:
   bool adjust_long_msgsize(void *&ptr, size_t &buffer_size, 
                            int message_id, int chunks)
   {
+#ifdef DEBUG_AMREQUESTS
+    printf("%d: adjust(%p, %zd, %d, %d)\n", gasnet_mynode(), ptr, buffer_size, message_id, chunks);
+#endif
     // Quick out, if there was only one chunk, then we are good to go
     if (chunks == 1)
       return true;
@@ -1483,7 +1643,7 @@ public:
 protected:
   void send_short(OutgoingMessage *hdr)
   {
-    LegionRuntime::LowLevel::DetailedTimer::ScopedPush sp(TIME_AM);
+    Realm::DetailedTimer::ScopedPush sp(TIME_AM);
 #ifdef DEBUG_AMREQUESTS
     printf("%d->%d: %s %d %d %p %zd / %x %x %x %x / %x %x %x %x / %x %x %x %x / %x %x %x %x\n",
 	   gasnet_mynode(), peer, 
@@ -1663,7 +1823,7 @@ protected:
   
   void send_long(OutgoingMessage *hdr, void *dest_ptr)
   {
-    LegionRuntime::LowLevel::DetailedTimer::ScopedPush sp(TIME_AM);
+    Realm::DetailedTimer::ScopedPush sp(TIME_AM);
 
     const size_t max_long_req = gasnet_AMMaxLongRequest();
 
@@ -2036,7 +2196,7 @@ public:
     endpoints = new ActiveMessageEndpoint*[num_endpoints];
     for (int i = 0; i < num_endpoints; i++)
     {
-      if (((unsigned)i) == gasnet_mynode())
+      if (((gasnet_node_t)i) == gasnet_mynode())
         endpoints[i] = 0;
       else
         endpoints[i] = new ActiveMessageEndpoint(i);
@@ -2241,8 +2401,19 @@ static void handle_flip_ack(gasnet_token_t token,
   endpoint_manager->handle_flip_ack(src, ack_buffer);
 }
 
-void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
-		    int gasnet_mem_size_in_mb,
+static const int MAX_HANDLERS = 128;
+static gasnet_handlerentry_t handlers[MAX_HANDLERS];
+static int hcount = 0;
+
+void add_handler_entry(int msgid, void (*fnptr)())
+{
+  assert(hcount < MAX_HANDLERS);
+  handlers[hcount].index = msgid;
+  handlers[hcount].fnptr = fnptr;
+  hcount++;
+}
+			   
+void init_endpoints(int gasnet_mem_size_in_mb,
 		    int registered_mem_size_in_mb,
 		    int registered_ib_mem_size_in_mb,
 		    Realm::CoreReservationSet& crs,
@@ -2327,6 +2498,7 @@ void init_endpoints(gasnet_handlerentry_t *handlers, int hcount,
   }
 #endif
 
+  assert(hcount < (MAX_HANDLERS - 3));
   handlers[hcount].index = MSGID_FLIP_REQ;
   handlers[hcount].fnptr = (void (*)())handle_flip_req;
   hcount++;
@@ -2503,12 +2675,12 @@ void stop_activemsg_threads(void)
   srcdatapool->print_spill_data(Realm::Logger::LEVEL_INFO);
 }
 	
-void enqueue_message(gasnet_node_t target, int msgid,
+void enqueue_message(NodeID target, int msgid,
 		     const void *args, size_t arg_size,
 		     const void *payload, size_t payload_size,
 		     int payload_mode, void *dstptr)
 {
-  assert(target != gasnet_mynode());
+  assert((gasnet_node_t)target != gasnet_mynode());
 
   OutgoingMessage *hdr = new OutgoingMessage(msgid, 
 					     (arg_size + sizeof(int) - 1) / sizeof(int),
@@ -2533,13 +2705,13 @@ void enqueue_message(gasnet_node_t target, int msgid,
   endpoint_manager->enqueue_message(target, hdr, true); // TODO: decide when OOO is ok?
 }
 
-void enqueue_message(gasnet_node_t target, int msgid,
+void enqueue_message(NodeID target, int msgid,
 		     const void *args, size_t arg_size,
 		     const void *payload, size_t line_size,
 		     off_t line_stride, size_t line_count,
 		     int payload_mode, void *dstptr)
 {
-  assert(target != gasnet_mynode());
+  assert((gasnet_node_t)target != gasnet_mynode());
 
   OutgoingMessage *hdr = new OutgoingMessage(msgid, 
 					     (arg_size + sizeof(int) - 1) / sizeof(int),
@@ -2559,12 +2731,12 @@ void enqueue_message(gasnet_node_t target, int msgid,
   endpoint_manager->enqueue_message(target, hdr, true); // TODO: decide when OOO is ok?
 }
 
-void enqueue_message(gasnet_node_t target, int msgid,
+void enqueue_message(NodeID target, int msgid,
 		     const void *args, size_t arg_size,
 		     const SpanList& spans, size_t payload_size,
 		     int payload_mode, void *dstptr)
 {
-  assert(target != gasnet_mynode());
+  assert((gasnet_node_t)target != gasnet_mynode());
 
   OutgoingMessage *hdr = new OutgoingMessage(msgid, 
   					     (arg_size + sizeof(int) - 1) / sizeof(int),
@@ -2583,9 +2755,9 @@ void enqueue_message(gasnet_node_t target, int msgid,
   endpoint_manager->enqueue_message(target, hdr, true); // TODO: decide when OOO is ok?
 }
 
-void handle_long_msgptr(gasnet_node_t source, const void *ptr)
+void handle_long_msgptr(NodeID source, const void *ptr)
 {
-  assert(source != gasnet_mynode());
+  assert((gasnet_node_t)source != gasnet_mynode());
 
   endpoint_manager->handle_long_msgptr(source, ptr);
 }
@@ -2655,7 +2827,7 @@ void SpanPayload::copy_data(void *dest)
   assert(bytes_left == 0);
 }
 
-extern bool adjust_long_msgsize(gasnet_node_t source, void *&ptr, size_t &buffer_size,
+extern bool adjust_long_msgsize(NodeID source, void *&ptr, size_t &buffer_size,
 				int message_id, int chunks)
 {
   // special case: if the buffer size is zero, it's an empty message and no adjustment
@@ -2663,7 +2835,7 @@ extern bool adjust_long_msgsize(gasnet_node_t source, void *&ptr, size_t &buffer
   if(buffer_size == 0)
     return true;
 
-  assert(source != gasnet_mynode());
+  assert((gasnet_node_t)source != gasnet_mynode());
 
   return endpoint_manager->adjust_long_msgsize(source, ptr, buffer_size,
 					       message_id, chunks);
@@ -2674,10 +2846,152 @@ extern void report_activemsg_status(FILE *f)
   endpoint_manager->report_activemsg_status(f); 
 }
 
-extern void record_message(gasnet_node_t source, bool sent_reply)
+extern void record_message(NodeID source, bool sent_reply)
 {
 #ifdef TRACE_MESSAGES
   endpoint_manager->record_message(source, sent_reply);
 #endif
 }
 
+#else // defined USE_GASNET
+
+GASNetHSL::GASNetHSL(void)
+{
+  assert(sizeof(mutex) <= sizeof(placeholder));
+  pthread_mutex_init(&mutex, 0);
+}
+
+GASNetHSL::~GASNetHSL(void)
+{
+  pthread_mutex_destroy(&mutex);
+}
+
+void GASNetHSL::lock(void)
+{
+  pthread_mutex_lock(&mutex);
+}
+
+void GASNetHSL::unlock(void)
+{
+  pthread_mutex_unlock(&mutex);
+}
+
+GASNetCondVar::GASNetCondVar(GASNetHSL &_mutex) 
+  : mutex(_mutex)
+{
+  assert(sizeof(condvar) <= sizeof(placeholder));
+  pthread_cond_init(&condvar, 0);
+}
+
+GASNetCondVar::~GASNetCondVar(void)
+{
+  pthread_cond_destroy(&condvar);
+}
+
+// these require that you hold the lock when you call
+void GASNetCondVar::signal(void)
+{
+  pthread_cond_signal(&condvar);
+}
+
+void GASNetCondVar::broadcast(void)
+{
+  pthread_cond_broadcast(&condvar);
+}
+
+void GASNetCondVar::wait(void)
+{
+  pthread_cond_wait(&condvar, &mutex.mutex);
+}
+
+void enqueue_message(NodeID target, int msgid,
+		     const void *args, size_t arg_size,
+		     const void *payload, size_t payload_size,
+		     int payload_mode, void *dstptr)
+{
+  assert(0 && "compiled without USE_GASNET - active messages not available!");
+}
+
+void enqueue_message(NodeID target, int msgid,
+		     const void *args, size_t arg_size,
+		     const void *payload, size_t line_size,
+		     off_t line_stride, size_t line_count,
+		     int payload_mode, void *dstptr)
+{
+  assert(0 && "compiled without USE_GASNET - active messages not available!");
+}
+
+void enqueue_message(NodeID target, int msgid,
+		     const void *args, size_t arg_size,
+		     const SpanList& spans, size_t payload_size,
+		     int payload_mode, void *dstptr)
+{
+  assert(0 && "compiled without USE_GASNET - active messages not available!");
+}
+
+void do_some_polling(void)
+{
+  assert(0 && "compiled without USE_GASNET - active messages not available!");
+}
+
+size_t get_lmb_size(NodeID target_node)
+{
+  return 0;
+}
+
+void record_message(NodeID source, bool sent_reply)
+{
+}
+
+void send_srcptr_release(token_t token, uint64_t srcptr)
+{
+}
+
+NodeID get_message_source(token_t token)
+{
+  return 0;
+}
+
+void enqueue_incoming(NodeID sender, IncomingMessage *msg)
+{
+  assert(0 && "compiled without USE_GASNET - active messages not available!");
+}
+
+bool adjust_long_msgsize(NodeID source, void *&ptr, size_t &buffer_size,
+			 int message_id, int chunks)
+{
+  return false;
+}
+
+void handle_long_msgptr(NodeID source, const void *ptr)
+{
+  assert(0 && "compiled without USE_GASNET - active messages not available!");
+}
+
+void add_handler_entry(int msgid, void (*fnptr)())
+{
+  // ignored
+}
+
+void init_endpoints(int gasnet_mem_size_in_mb,
+		    int registered_mem_size_in_mb,
+		    int registered_ib_mem_size_in_mb,
+		    Realm::CoreReservationSet& crs,
+		    int argc, const char *argv[])
+{
+  // nothing to do without GASNet
+}
+
+void start_polling_threads(int)
+{
+}
+
+void start_handler_threads(int, Realm::CoreReservationSet&, size_t)
+{
+}
+
+void stop_activemsg_threads(void)
+{
+}
+
+#endif

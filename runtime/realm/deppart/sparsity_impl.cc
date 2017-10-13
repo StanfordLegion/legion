@@ -69,7 +69,7 @@ namespace Realm {
     }
 
     // construct and fill in a sparsity map
-    SparsityMapImplWrapper *wrap = get_runtime()->get_available_sparsity_impl(gasnet_mynode());
+    SparsityMapImplWrapper *wrap = get_runtime()->get_available_sparsity_impl(my_node_id);
     SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
     SparsityMapImpl<N,T> *impl = wrap->get_or_create<N,T>(sparsity);
     impl->set_contributor_count(1);
@@ -96,7 +96,7 @@ namespace Realm {
     }
 
     // construct and fill in a sparsity map
-    SparsityMapImplWrapper *wrap = get_runtime()->get_available_sparsity_impl(gasnet_mynode());
+    SparsityMapImplWrapper *wrap = get_runtime()->get_available_sparsity_impl(my_node_id);
     SparsityMap<N,T> sparsity = wrap->me.convert<SparsityMap<N,T> >();
     SparsityMapImpl<N,T> *impl = wrap->get_or_create<N,T>(sparsity);
     impl->set_contributor_count(1);
@@ -203,7 +203,7 @@ namespace Realm {
       if(precise) {
 	if(!this->entries_valid) {
 	  // do we need to request the data?
-	  if((ID(me).sparsity.creator_node != gasnet_mynode()) && !precise_requested) {
+	  if((ID(me).sparsity.creator_node != my_node_id) && !precise_requested) {
 	    request_precise = true;
 	    precise_requested = true;
 	    // also get approx while we're at it
@@ -221,7 +221,7 @@ namespace Realm {
       } else {
 	if(!this->approx_valid) {
 	  // do we need to request the data?
-	  if((ID(me).sparsity.creator_node != gasnet_mynode()) && !approx_requested) {
+	  if((ID(me).sparsity.creator_node != my_node_id) && !approx_requested) {
 	    request_approx = true;
 	    approx_requested = true;
 	  }
@@ -254,7 +254,7 @@ namespace Realm {
   template <int N, typename T>
   void SparsityMapImpl<N,T>::set_contributor_count(int count)
   {
-    if(ID(me).sparsity.creator_node == gasnet_mynode()) {
+    if(ID(me).sparsity.creator_node == my_node_id) {
       // increment the count atomically - if it brings the total up to 0 (which covers count == 0),
       //  immediately finalize - the contributions happened before we got here
       // just increment the count atomically
@@ -270,9 +270,9 @@ namespace Realm {
   template <int N, typename T>
   void SparsityMapImpl<N,T>::contribute_nothing(void)
   {
-    gasnet_node_t owner = ID(me).sparsity.creator_node;
+    NodeID owner = ID(me).sparsity.creator_node;
 
-    if(owner != gasnet_mynode()) {
+    if(owner != my_node_id) {
       // send (the lack of) data to the owner to collect
       int seq_id = fragment_assembler.get_sequence_id();
       RemoteSparsityContribMessage::send_request<N,T>(owner, me, seq_id, 1,
@@ -289,9 +289,9 @@ namespace Realm {
   template <int N, typename T>
   void SparsityMapImpl<N,T>::contribute_dense_rect_list(const std::vector<Rect<N,T> >& rects)
   {
-    gasnet_node_t owner = ID(me).sparsity.creator_node;
+    NodeID owner = ID(me).sparsity.creator_node;
 
-    if(owner != gasnet_mynode()) {
+    if(owner != my_node_id) {
       // send the data to the owner to collect
       int seq_id = fragment_assembler.get_sequence_id();
       const size_t max_to_send = DeppartConfig::cfg_max_bytes_per_packet / sizeof(Rect<N,T>);
@@ -463,7 +463,7 @@ namespace Realm {
     }
 
     if(last) {
-      if(ID(me).sparsity.creator_node == gasnet_mynode()) {
+      if(ID(me).sparsity.creator_node == my_node_id) {
 	// we're the owner, so remaining_contributor_count tracks our expected contributions
 	// count is allowed to go negative if we get contributions before we know the total expected
 	int left = __sync_sub_and_fetch(&remaining_contributor_count, 1);
@@ -499,7 +499,7 @@ namespace Realm {
 	  precise_waiters.push_back(uop);
 	  registered = true;
 	  // do we need to request the data?
-	  if((ID(me).sparsity.creator_node != gasnet_mynode()) && !precise_requested) {
+	  if((ID(me).sparsity.creator_node != my_node_id) && !precise_requested) {
 	    request_precise = true;
 	    precise_requested = true;
 	    // also get approx while we're at it
@@ -512,7 +512,7 @@ namespace Realm {
 	  approx_waiters.push_back(uop);
 	  registered = true;
 	  // do we need to request the data?
-	  if((ID(me).sparsity.creator_node != gasnet_mynode()) && !approx_requested) {
+	  if((ID(me).sparsity.creator_node != my_node_id) && !approx_requested) {
 	    request_approx = true;
 	    approx_requested = true;
 	  }
@@ -529,10 +529,10 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  void SparsityMapImpl<N,T>::remote_data_request(gasnet_node_t requestor, bool send_precise, bool send_approx)
+  void SparsityMapImpl<N,T>::remote_data_request(NodeID requestor, bool send_precise, bool send_approx)
   {
     // first sanity check - we should be the owner of the data
-    assert(ID(me).sparsity.creator_node == gasnet_mynode());
+    assert(ID(me).sparsity.creator_node == my_node_id);
 
     // take the long to determine atomically if we can send data or if we need to register as a listener
     bool reply_precise = false;
@@ -564,7 +564,7 @@ namespace Realm {
 
   
   template <int N, typename T>
-  void SparsityMapImpl<N,T>::remote_data_reply(gasnet_node_t requestor, bool reply_precise, bool reply_approx)
+  void SparsityMapImpl<N,T>::remote_data_reply(NodeID requestor, bool reply_precise, bool reply_approx)
   {
     if(reply_approx) {
       // TODO
@@ -717,7 +717,7 @@ namespace Realm {
     }
 
     // now that we've got our entries nice and tidy, build a bounded approximation of them
-    if(true /*ID(me).sparsity.creator_node == gasnet_mynode()*/) {
+    if(true /*ID(me).sparsity.creator_node == my_node_id*/) {
       assert(!this->approx_valid);
       compute_approximation(this->entries, this->approx_rects, DeppartConfig::cfg_max_rects_in_approximation);
       this->approx_valid = true;
@@ -766,7 +766,7 @@ namespace Realm {
       (*it)->sparsity_map_ready(this, false);
 
     if(!sendto_approx.empty()) {
-      for(gasnet_node_t i = 0; (i < gasnet_nodes()) && !sendto_approx.empty(); i++)
+      for(NodeID i = 0; (i <= max_node_id) && !sendto_approx.empty(); i++)
 	if(sendto_approx.contains(i)) {
 	  bool also_precise = sendto_precise.contains(i);
 	  if(also_precise)
@@ -777,7 +777,7 @@ namespace Realm {
     }
 
     if(!sendto_precise.empty()) {
-      for(gasnet_node_t i = 0; (i < gasnet_nodes()) && !sendto_precise.empty(); i++)
+      for(NodeID i = 0; (i <= max_node_id) && !sendto_precise.empty(); i++)
 	if(sendto_precise.contains(i)) {
 	  remote_data_reply(i, true, false);
 	  sendto_precise.remove(i);
@@ -812,7 +812,7 @@ namespace Realm {
 
   // adds a fragment to the list, returning true if this is the last one from
   //  a sequence
-  inline bool FragmentAssembler::add_fragment(gasnet_node_t sender,
+  inline bool FragmentAssembler::add_fragment(NodeID sender,
 					      int sequence_id,
 					      int sequence_count)
   {
@@ -872,7 +872,7 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  /*static*/ void RemoteSparsityContribMessage::send_request(gasnet_node_t target,
+  /*static*/ void RemoteSparsityContribMessage::send_request(NodeID target,
 							     SparsityMap<N,T> sparsity,
 							     int sequence_id,
 							     int sequence_count,
@@ -881,7 +881,7 @@ namespace Realm {
   {
     RequestArgs args;
 
-    args.sender = gasnet_mynode();
+    args.sender = my_node_id;
     args.type_tag = NT_TemplateHelper::encode_tag<N,T>();
     args.sparsity_id = sparsity.id;
     args.sequence_id = sequence_id;
@@ -912,14 +912,14 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  /*static*/ void RemoteSparsityRequestMessage::send_request(gasnet_node_t target,
+  /*static*/ void RemoteSparsityRequestMessage::send_request(NodeID target,
 							     SparsityMap<N,T> sparsity,
 							     bool send_precise,
 							     bool send_approx)
   {
     RequestArgs args;
 
-    args.sender = gasnet_mynode();
+    args.sender = my_node_id;
     args.type_tag = NT_TemplateHelper::encode_tag<N,T>();
     args.sparsity_id = sparsity.id;
     args.send_precise = send_precise;
@@ -949,7 +949,7 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  /*static*/ void SetContribCountMessage::send_request(gasnet_node_t target,
+  /*static*/ void SetContribCountMessage::send_request(NodeID target,
 						       SparsityMap<N,T> sparsity,
 						       int count)
   {

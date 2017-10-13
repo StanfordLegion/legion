@@ -616,7 +616,7 @@ namespace Realm {
     : m_type(TypeConv::from_cpp_type<T>())
   {
     assert(m_type.is<FunctionPointerType>());
-    FunctionPointerImplementation *fpi = new FunctionPointerImplementation((void(*)())(fnptr));
+    FunctionPointerImplementation *fpi = new FunctionPointerImplementation(reinterpret_cast<void(*)()>(fnptr));
     m_impls.push_back(fpi);
 #if defined(REALM_USE_DLFCN) && defined(REALM_USE_DLADDR)
     DSOReferenceImplementation *dsoref = DSOReferenceImplementation::cvt_fnptr_to_dsoref(fpi, true /*quiet*/);

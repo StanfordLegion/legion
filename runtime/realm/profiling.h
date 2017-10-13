@@ -40,6 +40,8 @@ namespace Realm {
     PMID_OP_EVENT_WAITS,  // intervals when operation is waiting on events
     PMID_OP_PROC_USAGE, // processor used by task
     PMID_OP_MEM_USAGE, // memories used by a copy
+    PMID_INST_STATUS,   // "completion" status of an instance
+    PMID_INST_ALLOCRESULT, // success/failure of instance allocation
     PMID_INST_TIMELINE, // timeline for a physical instance
     PMID_INST_MEM_USAGE, // memory and size used by an instance
     PMID_PCTRS_CACHE_L1I, // L1 I$ performance counters
@@ -110,7 +112,7 @@ namespace Realm {
       inline void record_start_time(void);
       inline void record_end_time(void);
       inline void record_complete_time(void);
-      inline bool is_valid(void);
+      inline bool is_valid(void) const;
     };
 
     // records time intervals in which the operation was waiting on events
@@ -146,6 +148,33 @@ namespace Realm {
       Memory source;
       Memory target;
       size_t size;
+    };
+
+    // Track the status of an instance
+    struct InstanceStatus {
+      static const ProfilingMeasurementID ID = PMID_INST_STATUS;
+
+      enum Result {
+	AWAITING_ALLOCATION,
+	FAILED_ALLOCATION,
+	CANCELLED_ALLOCATION,   // cancelled/poisoned before allocation
+	ALLOCATED,
+	DESTROYED_SUCCESSFULLY,
+	CORRUPTED,
+	MEMORY_LOST,
+      };
+
+      Result result;
+      int error_code;
+      ByteArray error_details;
+    };
+
+    // Simple boolean indicating whether or not allocation is expected to
+    //  succeed
+    struct InstanceAllocResult {
+      static const ProfilingMeasurementID ID = PMID_INST_ALLOCRESULT;
+      
+      bool success;
     };
 
     // Track the timeline of an instance
@@ -321,6 +350,11 @@ namespace Realm {
     //  caller should delete it when done
     template <typename T>
     T *get_measurement(void) const;
+
+    // extracts a measurement (if available), filling in a caller-allocated
+    //  result - returns true if result available, false if not
+    template <typename T>
+    bool get_measurement(T& result) const;
 
   protected:
     const char *data;

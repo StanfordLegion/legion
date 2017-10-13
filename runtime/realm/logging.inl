@@ -179,7 +179,7 @@ namespace Realm {
   {
       const char *legionURL = "http://legion.stanford.edu/messages";
       sprintf(buffer, "\nFor more information see:\n%s/%s_code.html#%s_code_%d\n",
-        legionURL, type, type, (int)messageID);
+	      legionURL, type, type, int(messageID));
       return buffer;
   }
   

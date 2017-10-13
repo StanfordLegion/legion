@@ -38,7 +38,7 @@ namespace Legion {
      * of all operations that can be performed in a Legion
      * program.
      */
-    class Operation : public ReferenceMutator {
+    class Operation : public ReferenceMutator, public ProfilingResponseHandler {
     public:
       enum OpKind {
         MAP_OP_KIND,
@@ -338,7 +338,7 @@ namespace Legion {
       virtual void add_copy_profiling_request(
                                         Realm::ProfilingRequestSet &reqeusts);
       // Report a profiling result for this operation
-      virtual void report_profiling_response(
+      virtual void handle_profiling_response(
                                   const Realm::ProfilingResponse &result);
     protected:
       void filter_copy_request_kinds(MapperManager *mapper,
@@ -747,7 +747,7 @@ namespace Legion {
                                InstanceSet &mapped_instances);
       virtual void add_copy_profiling_request(
                             Realm::ProfilingRequestSet &reqeusts);
-      virtual void report_profiling_response(
+      virtual void handle_profiling_response(
                       const Realm::ProfilingResponse &response);
     protected:
       bool remap_region;
@@ -845,7 +845,7 @@ namespace Legion {
         { current_index = idx; current_src = is_src; }
       virtual void add_copy_profiling_request(
                                       Realm::ProfilingRequestSet &reqeusts);
-      virtual void report_profiling_response(
+      virtual void handle_profiling_response(
                                 const Realm::ProfilingResponse &response);
       // Separate function for this so it can be called by base classes
       RtEvent perform_local_versioning_analysis(void);
@@ -1093,7 +1093,8 @@ namespace Legion {
       void deactivate_deletion(void);
     public:
       virtual void trigger_dependence_analysis(void);
-      virtual void trigger_mapping(void);
+      virtual void trigger_mapping(void); 
+      virtual void trigger_complete(void);
       virtual unsigned find_parent_index(unsigned idx);
     protected:
       DeletionKind kind;
@@ -1318,7 +1319,7 @@ namespace Legion {
       void invoke_mapper(const InstanceSet &valid_instances);
       virtual void add_copy_profiling_request(
                                           Realm::ProfilingRequestSet &reqeusts);
-      virtual void report_profiling_response(
+      virtual void handle_profiling_response(
                                     const Realm::ProfilingResponse &response);
       // Do nothing for now, but used by control replication close operation
       virtual void post_process_composite_view(CompositeView *view) { } 
@@ -1483,7 +1484,7 @@ namespace Legion {
     protected:
       virtual void add_copy_profiling_request(
                                           Realm::ProfilingRequestSet &reqeusts);
-      virtual void report_profiling_response(
+      virtual void handle_profiling_response(
                                     const Realm::ProfilingResponse &response);
     protected:
       unsigned parent_idx;
@@ -1583,7 +1584,7 @@ namespace Legion {
       void invoke_mapper(void);
       virtual void add_copy_profiling_request(
                                           Realm::ProfilingRequestSet &reqeusts);
-      virtual void report_profiling_response(
+      virtual void handle_profiling_response(
                                     const Realm::ProfilingResponse &response);
     protected:
       RegionRequirement requirement;
@@ -1662,7 +1663,7 @@ namespace Legion {
       void invoke_mapper(void);
       virtual void add_copy_profiling_request(
                                           Realm::ProfilingRequestSet &reqeusts);
-      virtual void report_profiling_response(
+      virtual void handle_profiling_response(
                                     const Realm::ProfilingResponse &response);
     protected:
       RegionRequirement requirement;
@@ -2525,7 +2526,7 @@ namespace Legion {
       virtual void add_copy_profiling_request(
                                         Realm::ProfilingRequestSet &reqeusts);
       // Report a profiling result for this operation
-      virtual void report_profiling_response(
+      virtual void handle_profiling_response(
                                   const Realm::ProfilingResponse &result);
     protected:
       void compute_parent_index(void);

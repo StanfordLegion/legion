@@ -5787,5 +5787,10 @@ namespace LegionRuntime {
     LEGION_DEPRECATED("Use the Legion namespace instance instead.")
     typedef Legion::Internal::TaskContext* Context; 
   };
+
+  // map old Logger::Category to new Realm::Logger
+  namespace Logger {
+    typedef Realm::Logger Category;
+  };
 };
 

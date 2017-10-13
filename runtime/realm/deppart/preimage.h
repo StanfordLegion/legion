@@ -51,7 +51,7 @@ namespace Realm {
 
     // construct from received packet
     template <typename S>
-    PreimageMicroOp(gasnet_node_t _requestor, AsyncMicroOp *_async_microop, S& s);
+    PreimageMicroOp(NodeID _requestor, AsyncMicroOp *_async_microop, S& s);
 
     template <typename BM>
     void populate_bitmasks_ptrs(std::map<int, BM *>& bitmasks);
@@ -125,12 +125,12 @@ namespace Realm {
                                        handle_request> Message;
 
     template <int N, typename T, int N2, typename T2>
-    static void send_request(gasnet_node_t target, intptr_t output_op, int output_index,
+    static void send_request(NodeID target, intptr_t output_op, int output_index,
 			     const Rect<N2,T2> *rects, size_t count);
   };
 
   template <int N, typename T, int N2, typename T2>
-  /*static*/ void ApproxImageResponseMessage::send_request(gasnet_node_t target, 
+  /*static*/ void ApproxImageResponseMessage::send_request(NodeID target, 
 							   intptr_t output_op, int output_index,
 							   const Rect<N2,T2> *rects, size_t count)
   {

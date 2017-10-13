@@ -92,7 +92,7 @@ namespace Realm {
 	return Event::NO_EVENT;
 
       // sanity-check - should never be requesting data from ourselves
-      assert(((unsigned)owner) != gasnet_mynode());
+      assert(owner != my_node_id);
 
       Event e = Event::NO_EVENT;
       bool issue_request = false;
@@ -251,11 +251,11 @@ namespace Realm {
     }
   }
 
-  /*static*/ void MetadataRequestMessage::send_request(gasnet_node_t target, ID::IDType id)
+  /*static*/ void MetadataRequestMessage::send_request(NodeID target, ID::IDType id)
   {
     RequestArgs args;
 
-    args.node = gasnet_mynode();
+    args.node = my_node_id;
     args.id = id;
     Message::request(target, args);
   }
@@ -284,7 +284,7 @@ namespace Realm {
     }
   }
 
-  /*static*/ void MetadataResponseMessage::send_request(gasnet_node_t target,
+  /*static*/ void MetadataResponseMessage::send_request(NodeID target,
 							ID::IDType id, 
 							const void *data,
 							size_t datalen,
@@ -302,7 +302,7 @@ namespace Realm {
       : data(_data), datalen(_datalen), payload_mode(_payload_mode)
     {}
 
-    inline void apply(gasnet_node_t target)
+    inline void apply(NodeID target)
     {
       T::Message::request(target, *this, data, datalen, payload_mode);
     }
@@ -352,19 +352,19 @@ namespace Realm {
     MetadataInvalidateAckMessage::send_request(args.owner, args.id);
   }
 
-  /*static*/ void MetadataInvalidateMessage::send_request(gasnet_node_t target,
+  /*static*/ void MetadataInvalidateMessage::send_request(NodeID target,
 							  ID::IDType id)
   {
     RequestArgs args;
 
-    args.owner = gasnet_mynode();
+    args.owner = my_node_id;
     args.id = id;
     Message::request(target, args);
   }
 
   template <typename T>
   struct BroadcastHelper : public T::RequestArgs {
-    inline void apply(gasnet_node_t target)
+    inline void apply(NodeID target)
     {
       T::Message::request(target, *this);
     }
@@ -380,7 +380,7 @@ namespace Realm {
   {
     BroadcastHelper<MetadataInvalidateMessage> args;
 
-    args.owner = gasnet_mynode();
+    args.owner = my_node_id;
     args.id = id;
     args.broadcast(targets);
   }
@@ -410,11 +410,11 @@ namespace Realm {
     }
   }
    
-  /*static*/ void MetadataInvalidateAckMessage::send_request(gasnet_node_t target, ID::IDType id)
+  /*static*/ void MetadataInvalidateAckMessage::send_request(NodeID target, ID::IDType id)
   {
     RequestArgs args;
 
-    args.node = gasnet_mynode();
+    args.node = my_node_id;
     args.id = id;
     Message::request(target, args);
   }

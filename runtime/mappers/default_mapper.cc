@@ -1487,6 +1487,10 @@ namespace Legion {
           return;
         }
       }
+      // Should we cache this task?
+      CachedMappingPolicy cache_policy =
+        default_policy_select_task_cache_policy(ctx, task);
+
       // First, let's see if we've cached a result of this task mapping
       const unsigned long long task_hash = compute_task_hash(task);
       std::pair<TaskID,Processor> cache_key(task.task_id, task.target_proc);
@@ -1499,7 +1503,7 @@ namespace Legion {
       bool needs_field_constraint_check = false;
       Memory target_memory = default_policy_select_target_memory(ctx, 
                                                          task.target_proc);
-      if (finder != cached_task_mappings.end())
+      if (cache_policy == DEFAULT_CACHE_POLICY_ENABLE && finder != cached_task_mappings.end())
       {
         bool found = false;
         bool has_reductions = false;
@@ -1646,20 +1650,22 @@ namespace Legion {
                                       task.target_proc, target_memory);
         }
       }
-      // Now that we are done, let's cache the result so we can use it later
-      std::list<CachedTaskMapping> &map_list = cached_task_mappings[cache_key];
-      map_list.push_back(CachedTaskMapping());
-      CachedTaskMapping &cached_result = map_list.back();
-      cached_result.task_hash = task_hash; 
-      cached_result.variant = output.chosen_variant;
-      cached_result.mapping = output.chosen_instances;
-      cached_result.has_reductions = has_reductions;
-      // We don't ever save reduction instances in our cache 
-      if (has_reductions) {
-        for (unsigned idx = 0; idx < task.regions.size(); idx++) {
-          if (task.regions[idx].privilege != REDUCE)
-            continue;
-          cached_result.mapping[idx].clear();
+      if (cache_policy == DEFAULT_CACHE_POLICY_ENABLE) {
+        // Now that we are done, let's cache the result so we can use it later
+        std::list<CachedTaskMapping> &map_list = cached_task_mappings[cache_key];
+        map_list.push_back(CachedTaskMapping());
+        CachedTaskMapping &cached_result = map_list.back();
+        cached_result.task_hash = task_hash;
+        cached_result.variant = output.chosen_variant;
+        cached_result.mapping = output.chosen_instances;
+        cached_result.has_reductions = has_reductions;
+        // We don't ever save reduction instances in our cache
+        if (has_reductions) {
+          for (unsigned idx = 0; idx < task.regions.size(); idx++) {
+            if (task.regions[idx].privilege != REDUCE)
+              continue;
+            cached_result.mapping[idx].clear();
+          }
         }
       }
     }
@@ -1852,6 +1858,16 @@ namespace Legion {
     {
       // TODO: some criticality analysis to assign priorities
       return 0;
+    }
+
+    //--------------------------------------------------------------------------
+    DefaultMapper::CachedMappingPolicy
+    DefaultMapper::default_policy_select_task_cache_policy(
+                                    MapperContext ctx, const Task &task)
+    //--------------------------------------------------------------------------
+    {
+      // Always cache task result.
+      return DEFAULT_CACHE_POLICY_ENABLE;
     }
 
     //--------------------------------------------------------------------------

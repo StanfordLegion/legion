@@ -69,7 +69,7 @@ namespace Realm {
   {
     // always range check?
     assert((offset + sizeof(T)) <= array_size);
-    return *reinterpret_cast<const T *>(reinterpret_cast<char *>(array_base) + offset);
+    return *static_cast<const T *>(static_cast<char *>(array_base) + offset);
   }
 
 
@@ -156,7 +156,7 @@ namespace Realm {
   {
     // always range check?
     assert((offset + sizeof(T)) <= array_size);
-    return *reinterpret_cast<T *>(reinterpret_cast<char *>(array_base) + offset);
+    return *static_cast<T *>(static_cast<char *>(array_base) + offset);
   }
 
   template <typename T>
@@ -164,7 +164,7 @@ namespace Realm {
   {
     // always range check?
     assert((offset + sizeof(T)) <= array_size);
-    return *reinterpret_cast<const T *>(reinterpret_cast<char *>(array_base) + offset);
+    return *static_cast<const T *>(static_cast<char *>(array_base) + offset);
   }
 
   // give ownership of a buffer to a ByteArray
@@ -230,7 +230,7 @@ namespace Realm {
   template <typename S>
   bool serialize(S& serdez, const ByteArray& a)
   {
-    return serialize(serdez, (ByteArrayRef&)a);
+    return serialize(serdez, static_cast<const ByteArrayRef&>(a));
   }
 
   template <typename S>

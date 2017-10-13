@@ -205,9 +205,9 @@ namespace Realm {
   void ByFieldMicroOp<N,T,FT>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
     // a ByFieldMicroOp should always be executed on whichever node the field data lives
-    gasnet_node_t exec_node = ID(inst).sparsity.creator_node;
+    NodeID exec_node = ID(inst).sparsity.creator_node;
 
-    if(exec_node != gasnet_mynode()) {
+    if(exec_node != my_node_id) {
       // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
       //  track it
       async_microop = new AsyncMicroOp(op, this);
@@ -247,7 +247,7 @@ namespace Realm {
 
   template <int N, typename T, typename FT>
   template <typename S>
-  ByFieldMicroOp<N,T,FT>::ByFieldMicroOp(gasnet_node_t _requestor,
+  ByFieldMicroOp<N,T,FT>::ByFieldMicroOp(NodeID _requestor,
 					 AsyncMicroOp *_async_microop, S& s)
     : PartitioningMicroOp(_requestor, _async_microop)
   {
@@ -329,7 +329,7 @@ namespace Realm {
 #define DOIT(N,T,F) \
   template class ByFieldMicroOp<N,T,F>; \
   template class ByFieldOperation<N,T,F>; \
-  template ByFieldMicroOp<N,T,F>::ByFieldMicroOp(gasnet_node_t, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \
+  template ByFieldMicroOp<N,T,F>::ByFieldMicroOp(NodeID, AsyncMicroOp *, Serialization::FixedBufferDeserializer&); \
   template Event IndexSpace<N,T>::create_subspaces_by_field(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,F> >&, \
 							     const std::vector<F>&, \
 							     std::vector<IndexSpace<N,T> >&, \

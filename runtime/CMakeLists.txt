@@ -16,16 +16,16 @@
 
 # Install headers
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/
-  DESTINATION include
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
   FILES_MATCHING PATTERN "*.h"
 )
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/
-  DESTINATION include
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
   FILES_MATCHING PATTERN "*.inl"
 )
 
 # Realm runtime
-list(APPEND LOW_RUNTIME_SRC
+list(APPEND REALM_SRC
   lowlevel_config.h
   realm/transfer/lowlevel_disk.cc
   realm/transfer/channel.h                 realm/transfer/channel.cc
@@ -44,7 +44,6 @@ list(APPEND LOW_RUNTIME_SRC
   realm/deppart/sparsity_impl.h            realm/deppart/sparsity_impl.cc
   realm/deppart/sparsity_impl.inl
   lowlevel.h
-  lowlevel_impl.h
   realm/event_impl.h        realm/event_impl.cc
   realm/event_impl.inl
   realm/faults.h            realm/faults.cc
@@ -73,14 +72,14 @@ list(APPEND LOW_RUNTIME_SRC
 )
 
 if(Legion_USE_CUDA)
-  list(APPEND LOW_RUNTIME_SRC
+  list(APPEND REALM_SRC
     realm/cuda/cuda_module.h    realm/cuda/cuda_module.cc
     realm/cuda/cudart_hijack.h  realm/cuda/cudart_hijack.cc
   )
 endif()
 
 if(Legion_USE_LLVM)
-  list(APPEND LOW_RUNTIME_SRC
+  list(APPEND REALM_SRC
     realm/llvmjit/llvmjit.h
     realm/llvmjit/llvmjit.inl
     realm/llvmjit/llvmjit_internal.h  realm/llvmjit/llvmjit_internal.cc
@@ -89,7 +88,7 @@ if(Legion_USE_LLVM)
 endif()
 
 if(Legion_USE_HDF5)
-  list(APPEND LOW_RUNTIME_SRC
+  list(APPEND REALM_SRC
     realm/hdf5/hdf5_module.h realm/hdf5/hdf5_module.cc
     realm/hdf5/hdf5_internal.h realm/hdf5/hdf5_internal.cc
     realm/hdf5/hdf5_access.h   realm/hdf5/hdf5_access.inl
@@ -97,12 +96,8 @@ if(Legion_USE_HDF5)
   )
 endif()
 
-if(Legion_USE_GASNet)
-  list(APPEND LOW_RUNTIME_SRC activemsg.h activemsg.cc)
-endif()
-
 if (REALM_USE_OPENMP)
-  list(APPEND LOW_RUNTIME_SRC
+  list(APPEND REALM_SRC
     realm/openmp/openmp_module.h realm/openmp/openmp_module.cc
     realm/openmp/openmp_threadpool.h realm/openmp/openmp_threadpool.cc
     realm/openmp/openmp_threadpool.inl
@@ -111,7 +106,7 @@ if (REALM_USE_OPENMP)
 endif()
 
 if (Legion_USE_Python)
-  list(APPEND LOW_RUNTIME_SRC
+  list(APPEND REALM_SRC
     realm/python/python_module.h realm/python/python_module.cc
     realm/python/python_source.h realm/python/python_source.cc
     realm/python/python_source.inl
@@ -119,7 +114,8 @@ if (Legion_USE_Python)
   )
 endif()
 
-list(APPEND LOW_RUNTIME_SRC
+list(APPEND REALM_SRC
+  realm/activemsg.h realm/activemsg.cc
   accessor.h
   arrays.h
   atomics.h
@@ -163,61 +159,49 @@ list(APPEND LOW_RUNTIME_SRC
   realm/timers.h           realm/timers.cc
   realm/timers.inl
   realm/utils.h
-  utilities.h
 )
 find_package(Threads REQUIRED)
-add_library(LowLevelRuntime ${LOW_RUNTIME_SRC})
-target_compile_definitions(LowLevelRuntime PUBLIC __STDC_FORMAT_MACROS)
-target_link_libraries(LowLevelRuntime
+add_library(RealmRuntime ${REALM_SRC})
+target_compile_definitions(RealmRuntime PUBLIC REALM_USE_CMAKE)
+target_link_libraries(RealmRuntime
   PRIVATE ${CMAKE_DL_LIBS} ${CMAKE_THREAD_LIBS_INIT}
 )
 if(UNIX AND NOT APPLE)
-  target_link_libraries(LowLevelRuntime PRIVATE rt)
+  target_link_libraries(RealmRuntime PRIVATE rt)
 endif()
-set_target_properties(LowLevelRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
-set_target_properties(LowLevelRuntime PROPERTIES SOVERSION ${SOVERSION})
-target_compile_definitions(LowLevelRuntime
-  PRIVATE
-    $<$<CONFIG:Debug>:DEBUG_REALM>
-  PUBLIC
-    COMPILE_TIME_MIN_LEVEL=LEVEL_${Legion_OUTPUT_LEVEL}
-)
+set_target_properties(RealmRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_target_properties(RealmRuntime PROPERTIES SOVERSION ${SOVERSION})
 
 if(Legion_USE_HWLOC)
-  target_compile_definitions(LowLevelRuntime PRIVATE REALM_USE_HWLOC)
-  target_link_libraries(LowLevelRuntime PRIVATE HWLOC::HWLOC)
+  target_compile_definitions(RealmRuntime PRIVATE REALM_USE_HWLOC)
+  target_link_libraries(RealmRuntime PRIVATE HWLOC::HWLOC)
 endif()
 
 if(Legion_USE_GASNet)
-  target_compile_definitions(LowLevelRuntime PUBLIC USE_GASNET)
-  target_link_libraries(LowLevelRuntime PUBLIC GASNet::GASNet)
+  target_link_libraries(RealmRuntime PUBLIC GASNet::GASNet)
 endif()
 
 if(Legion_USE_LLVM)
-  target_compile_definitions(LowLevelRuntime PRIVATE REALM_USE_LLVM)
-  target_link_libraries(LowLevelRuntime PRIVATE LLVM::LLVM)
+  target_link_libraries(RealmRuntime PRIVATE LLVM::LLVM)
 endif()
 
 if(Legion_USE_CUDA)
-  target_compile_definitions(LowLevelRuntime PUBLIC USE_CUDA)
-  target_include_directories(LowLevelRuntime PRIVATE ${CUDA_INCLUDE_DIRS})
-  target_link_libraries(LowLevelRuntime PRIVATE ${CUDA_CUDA_LIBRARY})
+  target_include_directories(RealmRuntime PRIVATE ${CUDA_INCLUDE_DIRS})
+  target_link_libraries(RealmRuntime PRIVATE ${CUDA_CUDA_LIBRARY})
 endif()
 
 if(Legion_USE_HDF5)
-  target_compile_definitions(LowLevelRuntime PUBLIC USE_HDF)
-  target_include_directories(LowLevelRuntime PRIVATE ${HDF5_INCLUDE_DIRS})
-  target_link_libraries(LowLevelRuntime PRIVATE ${HDF5_LIBRARIES})
+  target_include_directories(RealmRuntime PRIVATE ${HDF5_INCLUDE_DIRS})
+  target_link_libraries(RealmRuntime PRIVATE ${HDF5_LIBRARIES})
 endif()
 
 if(Legion_USE_Python)
-  target_compile_definitions(LowLevelRuntime PUBLIC REALM_USE_PYTHON)
-  target_compile_definitions(LowLevelRuntime PUBLIC REALM_PYTHON_LIB="${PYTHON_LIBRARIES}")
+  target_compile_definitions(RealmRuntime PRIVATE REALM_PYTHON_LIB="${PYTHON_LIBRARIES}")
 endif()
 
-set_target_properties(LowLevelRuntime PROPERTIES OUTPUT_NAME realm)
+set_target_properties(RealmRuntime PROPERTIES OUTPUT_NAME realm)
 
-target_include_directories(LowLevelRuntime
+target_include_directories(RealmRuntime
   INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/legion>
@@ -226,9 +210,15 @@ target_include_directories(LowLevelRuntime
     $<INSTALL_INTERFACE:include/legion>
     $<INSTALL_INTERFACE:include/realm>
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} legion realm
+
+  # Include paths for generated header files.
+  INTERFACE
+    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/runtime/realm>
+  PRIVATE
+    ${PROJECT_BINARY_DIR}/runtime/realm
 )
 
-install(TARGETS LowLevelRuntime EXPORT LegionTargets
+install(TARGETS RealmRuntime EXPORT LegionTargets
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
@@ -245,7 +235,7 @@ list(APPEND MAPPER_SRC
 )
 
 # Legion runtime
-list(APPEND HIGH_RUNTIME_SRC
+list(APPEND LEGION_SRC
   legion/field_tree.h
   legion/garbage_collection.h             legion/garbage_collection.cc
   legion/interval_tree.h                 
@@ -277,19 +267,15 @@ list(APPEND HIGH_RUNTIME_SRC
   legion/runtime.h                        legion/runtime.cc
 )
 
-add_library(HighLevelRuntime ${MAPPER_SRC} ${HIGH_RUNTIME_SRC})
-target_link_libraries(HighLevelRuntime LowLevelRuntime)
-set_target_properties(HighLevelRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
-set_target_properties(HighLevelRuntime PROPERTIES OUTPUT_NAME legion)
-set_target_properties(HighLevelRuntime PROPERTIES SOVERSION ${SOVERSION})
-target_compile_definitions(HighLevelRuntime
-  PRIVATE
-    ASSUME_UNALLOCABLE
-    $<$<CONFIG:Debug>:DEBUG_LEGION>
-  PUBLIC
-    MAX_FIELDS=${Legion_MAX_FIELDS}
-)
-target_include_directories(HighLevelRuntime
+add_library(LegionRuntime ${MAPPER_SRC} ${LEGION_SRC})
+target_link_libraries(LegionRuntime RealmRuntime)
+set_target_properties(LegionRuntime PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_target_properties(LegionRuntime PROPERTIES OUTPUT_NAME legion)
+set_target_properties(LegionRuntime PROPERTIES SOVERSION ${SOVERSION})
+target_compile_definitions(LegionRuntime PUBLIC LEGION_USE_CMAKE)
+target_compile_definitions(LegionRuntime PRIVATE ASSUME_UNALLOCABLE)
+
+target_include_directories(LegionRuntime
   INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/legion>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/realm>
@@ -298,9 +284,17 @@ target_include_directories(HighLevelRuntime
     $<INSTALL_INTERFACE:include/realm>
     $<INSTALL_INTERFACE:include/mappers>
   PRIVATE legion realm mappers
+
+  # Include paths for generated header files.
+  INTERFACE
+    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/runtime/legion>
+    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/runtime/realm>
+  PRIVATE
+    ${PROJECT_BINARY_DIR}/runtime/legion
+    ${PROJECT_BINARY_DIR}/runtime/realm
 )
 
-install(TARGETS HighLevelRuntime EXPORT LegionTargets
+install(TARGETS LegionRuntime EXPORT LegionTargets
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
@@ -308,6 +302,6 @@ install(TARGETS HighLevelRuntime EXPORT LegionTargets
 
 add_library(Legion INTERFACE)
 set_target_properties(Legion PROPERTIES
-  INTERFACE_LINK_LIBRARIES HighLevelRuntime
+  INTERFACE_LINK_LIBRARIES LegionRuntime
 )
 install(TARGETS Legion EXPORT LegionTargets)

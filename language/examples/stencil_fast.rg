@@ -32,7 +32,10 @@ local c = regentlib.c
 if USE_FOREIGN then
   local root_dir = arg[0]:match(".*/") or "./"
   local stencil_cc = root_dir .. "stencil.cc"
-  if os.getenv('SAVEOBJ') == '1' then
+  if os.getenv('OBJNAME') then
+    local out_dir = os.getenv('OBJNAME'):match('.*/') or './'
+    stencil_so = out_dir .. "libstencil.so"
+  elseif os.getenv('SAVEOBJ') == '1' then
     stencil_so = root_dir .. "libstencil.so"
   else
     stencil_so = os.tmpname() .. ".so" -- root_dir .. "stencil.so"
@@ -79,7 +82,10 @@ do
   local mapper_dir = runtime_dir .. "mappers/"
   local realm_dir = runtime_dir .. "realm/"
   local mapper_cc = root_dir .. "stencil_mapper.cc"
-  if os.getenv('SAVEOBJ') == '1' then
+  if os.getenv('OBJNAME') then
+    local out_dir = os.getenv('OBJNAME'):match('.*/') or './'
+    mapper_so = out_dir .. "libstencil_mapper.so"
+  elseif os.getenv('SAVEOBJ') == '1' then
     mapper_so = root_dir .. "libstencil_mapper.so"
   else
     mapper_so = os.tmpname() .. ".so" -- root_dir .. "stencil_mapper.so"
@@ -554,7 +560,8 @@ task main()
 end
 if os.getenv('SAVEOBJ') == '1' then
   local root_dir = arg[0]:match(".*/") or "./"
-  local link_flags = {"-L" .. root_dir, "-lstencil", "-lstencil_mapper"}
+  local out_dir = os.getenv('OBJNAME'):match('.*/') or root_dir
+  local link_flags = {"-L" .. out_dir, "-lstencil", "-lstencil_mapper"}
   if os.getenv('CRAYPE_VERSION') then
     local new_flags = terralib.newlist({"-Wl,-Bdynamic"})
     new_flags:insertall(link_flags)
@@ -568,7 +575,9 @@ if os.getenv('SAVEOBJ') == '1' then
     new_flags:insert("-ludreg")
     link_flags = new_flags
   end
-  regentlib.saveobj(main, "stencil", "executable", cmapper.register_mappers, link_flags)
+
+  local exe = os.getenv('OBJNAME') or "stencil"
+  regentlib.saveobj(main, exe, "executable", cmapper.register_mappers, link_flags)
 else
   regentlib.start(main, cmapper.register_mappers)
 end

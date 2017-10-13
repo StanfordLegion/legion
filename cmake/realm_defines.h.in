@@ -1,0 +1,74 @@
+/**
+ * \file realm_defines.h
+ * Public-facing definitions of variables configured at build time
+ */
+
+// ******************** IMPORTANT **************************
+//
+// This file is PURE C, **NOT** C++. Keep any C++-isms in
+// legion_types.h, or elsewhere.
+//
+// ******************** IMPORTANT **************************
+
+#ifndef DEBUG_REALM
+#cmakedefine DEBUG_REALM
+#endif
+
+#ifndef COMPILE_TIME_MIN_LEVEL
+#cmakedefine COMPILE_TIME_MIN_LEVEL @COMPILE_TIME_MIN_LEVEL@
+#endif
+
+#ifndef REALM_USE_OPENMP
+#cmakedefine REALM_USE_OPENMP
+#endif
+#ifndef REALM_OPENMP_GOMP_SUPPORT
+#cmakedefine REALM_OPENMP_GOMP_SUPPORT
+#endif
+#ifndef REALM_OPENMP_KMP_SUPPORT
+#cmakedefine REALM_OPENMP_KMP_SUPPORT
+#endif
+
+#ifndef REALM_USE_PYTHON
+#cmakedefine REALM_USE_PYTHON
+#endif
+
+#ifndef USE_CUDA
+#cmakedefine USE_CUDA
+#endif
+
+#ifndef USE_GASNET
+#cmakedefine USE_GASNET
+#endif
+#ifndef GASNET_CONDUIT_MPI
+#cmakedefine GASNET_CONDUIT_MPI
+#endif
+#ifndef GASNET_CONDUIT_IBV
+#cmakedefine GASNET_CONDUIT_IBV
+#endif
+#ifndef GASNET_CONDUIT_UDP
+#cmakedefine GASNET_CONDUIT_UDP
+#endif
+#ifndef GASNET_CONDUIT_ARIES
+#cmakedefine GASNET_CONDUIT_ARIES
+#endif
+#ifndef GASNET_CONDUIT_GEMINI
+#cmakedefine GASNET_CONDUIT_GEMINI
+#endif
+#ifndef GASNET_CONDUIT_PSM
+#cmakedefine GASNET_CONDUIT_PSM
+#endif
+#ifndef GASNETI_BUG1389_WORKAROUND
+#cmakedefine GASNETI_BUG1389_WORKAROUND @GASNETI_BUG1389_WORKAROUND@
+#endif
+
+#ifndef REALM_USE_LLVM
+#cmakedefine REALM_USE_LLVM
+#endif
+
+#ifndef USE_HDF
+#cmakedefine USE_HDF
+#endif
+
+#ifndef __STDC_FORMAT_MACROS
+#cmakedefine __STDC_FORMAT_MACROS
+#endif

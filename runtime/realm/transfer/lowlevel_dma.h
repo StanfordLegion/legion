@@ -16,7 +16,7 @@
 #ifndef LOWLEVEL_DMA_H
 #define LOWLEVEL_DMA_H
 
-#include "activemsg.h"
+#include <realm/activemsg.h>
 #include <realm/id.h>
 #include <realm/memory.h>
 #include <realm/redop.h>
@@ -44,7 +44,7 @@ namespace Realm {
                                         RequestArgs,
                                         handle_request> Message;
 
-      static void send_request(gasnet_node_t target, Memory tgt_mem, void* req,
+      static void send_request(NodeID target, Memory tgt_mem, void* req,
                                int idx, ID::IDType src_id, ID::IDType dst_id, size_t size);
     };
 
@@ -63,7 +63,7 @@ namespace Realm {
                                         RequestArgs,
                                         handle_request> Message;
 
-      static void send_request(gasnet_node_t target, void* req, int idx, ID::IDType src_id,
+      static void send_request(NodeID target, void* req, int idx, ID::IDType src_id,
                                ID::IDType dst_id, size_t ib_size, off_t ib_offset);
     };
 
@@ -80,7 +80,7 @@ namespace Realm {
                                         RequestArgs,
                                         handle_request> Message;
 
-      static void send_request(gasnet_node_t target, Memory tgt_mem,
+      static void send_request(NodeID target, Memory tgt_mem,
                                off_t ib_offset, size_t ib_size);
     };
 
@@ -305,7 +305,7 @@ namespace Realm {
       virtual ~CopyRequest(void);
 
     public:
-      void forward_request(gasnet_node_t target_node);
+      void forward_request(NodeID target_node);
 
       virtual bool check_readiness(bool just_check, DmaRequestQueue *rq);
 
@@ -369,7 +369,7 @@ namespace Realm {
       virtual ~ReduceRequest(void);
 
     public:
-      void forward_request(gasnet_node_t target_node);
+      void forward_request(NodeID target_node);
 
       virtual bool check_readiness(bool just_check, DmaRequestQueue *rq);
 
@@ -410,7 +410,7 @@ namespace Realm {
       virtual ~FillRequest(void);
 
     public:
-      void forward_request(gasnet_node_t target_node);
+      void forward_request(NodeID target_node);
 
       virtual bool check_readiness(bool just_check, DmaRequestQueue *rq);
 

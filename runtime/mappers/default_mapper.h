@@ -91,6 +91,11 @@ namespace Legion {
         bool                 is_inner;
         bool                 is_replicable;
       };
+      enum CachedMappingPolicy
+      {
+        DEFAULT_CACHE_POLICY_ENABLE,
+        DEFAULT_CACHE_POLICY_DISABLE,
+      };
       struct CachedTaskMapping {
       public:
         unsigned long long                          task_hash;
@@ -353,6 +358,8 @@ namespace Legion {
                                     const Task &task,
                                     std::vector<Processor> &target_procs);
       virtual TaskPriority default_policy_select_task_priority(
+                                    MapperContext ctx, const Task &task);
+      virtual CachedMappingPolicy default_policy_select_task_cache_policy(
                                     MapperContext ctx, const Task &task);
       virtual bool default_policy_select_must_epoch_processors(
                                     MapperContext ctx,

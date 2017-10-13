@@ -481,7 +481,7 @@ namespace Realm {
 
     assert(ok);
 
-    cfg_enabled = ((int)gasnet_mynode() < nodes_profiled);
+    cfg_enabled = (my_node_id < nodes_profiled);
 
     // mark that we're configured and processed deferred additions
     DelayedGaugeAddition *dga = 0;
@@ -544,7 +544,7 @@ namespace Realm {
 	// replace % with node number
 	char filename[256];
 	sprintf(filename, "%.*s%d%s",
-		(int)pct, logfile.c_str(), gasnet_mynode(), logfile.c_str() + pct + 1);
+		(int)pct, logfile.c_str(), my_node_id, logfile.c_str() + pct + 1);
 	logfile = filename;
       }
 

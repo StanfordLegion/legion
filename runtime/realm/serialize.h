@@ -75,7 +75,7 @@ public:
   class inner { public: inner(void) {} };
 public:
   template <typename T>
-  struct test { static const bool value = sizeof(inner(),*(T*)0) != sizeof(char); };
+  struct test { static const bool value = sizeof(inner(),*reinterpret_cast<T*>(0)) != sizeof(char); };
 };
 template <typename T>
 char operator,(const is_copy_serializable::inner&, const T&);

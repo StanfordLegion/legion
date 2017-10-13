@@ -25,7 +25,7 @@
 
 #include "realm/cuda/cudart_hijack.h"
 
-#include "activemsg.h"
+#include <realm/activemsg.h>
 #include "realm/utils.h"
 
 #include <stdio.h>
@@ -2443,9 +2443,9 @@ namespace Realm {
       // before we create dma channels, see how many of the system memory ranges
       //  we can register with CUDA
       if(cfg_pin_sysmem && !gpus.empty()) {
-	std::vector<MemoryImpl *>& local_mems = runtime->nodes[gasnet_mynode()].memories;
+	std::vector<MemoryImpl *>& local_mems = runtime->nodes[my_node_id].memories;
 	// <NEW_DMA> also add intermediate buffers into local_mems
-	std::vector<MemoryImpl *>& local_ib_mems = runtime->nodes[gasnet_mynode()].ib_memories;
+	std::vector<MemoryImpl *>& local_ib_mems = runtime->nodes[my_node_id].ib_memories;
 	std::vector<MemoryImpl *> all_local_mems;
 	all_local_mems.insert(all_local_mems.end(), local_mems.begin(), local_mems.end());
 	all_local_mems.insert(all_local_mems.end(), local_ib_mems.begin(), local_ib_mems.end());

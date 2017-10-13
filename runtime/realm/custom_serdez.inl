@@ -79,7 +79,7 @@ namespace Realm {
   template <typename T> 
   inline size_t CustomSerdezWrapper<T>::serialized_size(const void *field_ptr) const
   {
-    return T::serialized_size(*(const typename T::FIELD_TYPE *)field_ptr);
+    return T::serialized_size(*static_cast<const typename T::FIELD_TYPE *>(field_ptr));
   }
 
   template <typename T> 
@@ -87,8 +87,8 @@ namespace Realm {
   {
     size_t total = 0;
     for(size_t i = 0; i < count; i++) {
-      total += T::serialized_size(*(const typename T::FIELD_TYPE *)field_ptr);
-      field_ptr = (((const char *)field_ptr) + stride);
+      total += T::serialized_size(*static_cast<const typename T::FIELD_TYPE *>(field_ptr));
+      field_ptr = static_cast<const char *>(field_ptr) + stride;
     }
     return total;
   }
@@ -98,7 +98,7 @@ namespace Realm {
   template <typename T> 
   inline size_t CustomSerdezWrapper<T>::serialize(const void *field_ptr, void *buffer) const
   {
-    return T::serialize(*(const typename T::FIELD_TYPE *)field_ptr, buffer);
+    return T::serialize(*static_cast<const typename T::FIELD_TYPE *>(field_ptr), buffer);
   }
 
   template <typename T> 
@@ -107,9 +107,9 @@ namespace Realm {
   {
     size_t total = 0;
     for(size_t i = 0; i < count; i++) {
-      size_t n = T::serialize(*(const typename T::FIELD_TYPE *)field_ptr, buffer);
-      field_ptr = (((const char *)field_ptr) + stride);
-      buffer = (((char *)buffer) + n);
+      size_t n = T::serialize(*static_cast<const typename T::FIELD_TYPE *>(field_ptr), buffer);
+      field_ptr = static_cast<const char *>(field_ptr) + stride;
+      buffer = static_cast<char *>(buffer) + n;
       total += n;
     }
     return total;
@@ -122,7 +122,7 @@ namespace Realm {
   template <typename T> 
   inline size_t CustomSerdezWrapper<T>::deserialize(void *field_ptr, const void *buffer) const
   {
-    return T::deserialize(*(typename T::FIELD_TYPE *)field_ptr, buffer);
+    return T::deserialize(*static_cast<typename T::FIELD_TYPE *>(field_ptr), buffer);
   }
 
   template <typename T> 
@@ -131,9 +131,9 @@ namespace Realm {
   {
     size_t total = 0;
     for(size_t i = 0; i < count; i++) {
-      size_t n = T::deserialize(*(typename T::FIELD_TYPE *)field_ptr, buffer);
-      field_ptr = (((char *)field_ptr) + stride);
-      buffer = (((const char *)buffer) + n);
+      size_t n = T::deserialize(*static_cast<typename T::FIELD_TYPE *>(field_ptr), buffer);
+      field_ptr = static_cast<char *>(field_ptr) + stride;
+      buffer = static_cast<const char *>(buffer) + n;
       total += n;
     }
     return total;
@@ -143,15 +143,15 @@ namespace Realm {
   template <typename T> 
   inline void CustomSerdezWrapper<T>::destroy(void *field_ptr) const
   {
-    T::destroy(*(typename T::FIELD_TYPE *)field_ptr);
+    T::destroy(*static_cast<typename T::FIELD_TYPE *>(field_ptr));
   }
 
   template <typename T> 
   inline void CustomSerdezWrapper<T>::destroy(void *field_ptr, ptrdiff_t stride, size_t count)
   {
     for(size_t i = 0; i < count; i++) {
-      T::destroy(*(typename T::FIELD_TYPE *)field_ptr);
-      field_ptr = (((char *)field_ptr) + stride);
+      T::destroy(*static_cast<typename T::FIELD_TYPE *>(field_ptr));
+      field_ptr = static_cast<char *>(field_ptr) + stride;
     }
   }
 

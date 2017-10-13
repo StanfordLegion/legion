@@ -18,6 +18,8 @@
 
 #include "realm/bytearray.h"
 
+#include <string>
+
 // instead of including LLVM headers here, we just forward-declare the things that need to
 //  appear inside an LLVMJitInternal
 namespace llvm {

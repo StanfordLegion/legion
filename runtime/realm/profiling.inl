@@ -17,7 +17,6 @@
 
 // this is a nop, but it's for the benefit of IDEs trying to parse this file
 #include "profiling.h"
-#include "utilities.h"
 #include "serialize.h"
 
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurementID);
@@ -25,6 +24,7 @@ TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationTimeline);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationEventWaits::WaitInterval);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationMemoryUsage);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationProcessorUsage);
+TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::InstanceAllocResult);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::InstanceMemoryUsage);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::InstanceTimeline);
 template <Realm::ProfilingMeasurementID _ID>
@@ -43,6 +43,16 @@ namespace Realm {
 
     template <typename S>
     bool serdez(S& serdez, const OperationStatus& s)
+    {
+      return ((serdez & s.result) &&
+	      (serdez & s.error_code) &&
+	      (serdez & s.error_details));
+    }
+
+    TYPE_IS_SERIALIZABLE(InstanceStatus::Result);
+
+    template <typename S>
+    bool serdez(S& serdez, const InstanceStatus& s)
     {
       return ((serdez & s.result) &&
 	      (serdez & s.error_code) &&
@@ -92,7 +102,7 @@ namespace Realm {
       complete_time = Clock::current_time_in_nanoseconds();
     }
 
-    inline bool OperationTimeline::is_valid(void)
+    inline bool OperationTimeline::is_valid(void) const
     {
       return ((create_time != INVALID_TIMESTAMP) &&
 	      (ready_time != INVALID_TIMESTAMP) &&
@@ -166,7 +176,7 @@ namespace Realm {
   ProfilingRequest &ProfilingRequest::add_measurement(void) 
   {
     // SJT: the typecast here is a NOP, but somehow it avoids weird linker errors
-    requested_measurements.insert((ProfilingMeasurementID)T::ID);
+    requested_measurements.insert(static_cast<ProfilingMeasurementID>(T::ID));
     return *this;
   }
 
@@ -218,20 +228,20 @@ namespace Realm {
   template <typename T>
   bool ProfilingMeasurementCollection::wants_measurement(void) const
   {
-    return requested_measurements.count((ProfilingMeasurementID)T::ID);
+    return requested_measurements.count(static_cast<ProfilingMeasurementID>(T::ID));
   } 
 
   template <typename T>
   void ProfilingMeasurementCollection::add_measurement(const T& data, bool send_complete_responses /*= true*/)
   {
-    std::map<ProfilingMeasurementID, std::vector<const ProfilingRequest *> >::const_iterator it = requested_measurements.find((ProfilingMeasurementID)T::ID);
+    std::map<ProfilingMeasurementID, std::vector<const ProfilingRequest *> >::const_iterator it = requested_measurements.find(static_cast<ProfilingMeasurementID>(T::ID));
     if(it == requested_measurements.end()) {
       // caller probably should have asked if we wanted this before measuring it...
       return;
     }
 
     // no duplicates for now
-    assert(measurements.count((ProfilingMeasurementID)T::ID) == 0);
+    assert(measurements.count(static_cast<ProfilingMeasurementID>(T::ID)) == 0);
 
     // serialize the data
     Serialization::DynamicBufferSerializer dbs(128);
@@ -242,7 +252,7 @@ namespace Realm {
     assert(ok);
 
     // measurement data is stored in a ByteArray
-    ByteArray& md = measurements[(ProfilingMeasurementID)T::ID];
+    ByteArray& md = measurements[static_cast<ProfilingMeasurementID>(T::ID)];
     ByteArray b = dbs.detach_bytearray(-1);  // no trimming
     md.swap(b);  // avoids a copy
 
@@ -323,17 +333,17 @@ namespace Realm {
   //
 
   template <typename T>
-  bool ProfilingResponse::has_measurement(void) const
+  inline bool ProfilingResponse::has_measurement(void) const
   {
     int offset, size; // not actually used
-    return find_id((int)(T::ID), offset, size);
+    return find_id(static_cast<int>(T::ID), offset, size);
   }
 
   template <typename T>
-  T *ProfilingResponse::get_measurement(void) const
+  inline T *ProfilingResponse::get_measurement(void) const
   {
     int offset, size;
-    if(find_id((int)(T::ID), offset, size)) {
+    if(find_id(static_cast<int>(T::ID), offset, size)) {
       Serialization::FixedBufferDeserializer fbd(data + offset, size);
       T *m = new T;
 #ifndef NDEBUG
@@ -344,6 +354,17 @@ namespace Realm {
       return m;
     } else
       return 0;
+  }
+
+  template <typename T>
+  inline bool ProfilingResponse::get_measurement(T& result) const
+  {
+    int offset, size;
+    if(find_id(static_cast<int>(T::ID), offset, size)) {
+      Serialization::FixedBufferDeserializer fbd(data + offset, size);
+      return (fbd >> result);
+    } else
+      return false;
   }
 
 
