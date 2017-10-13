@@ -74,6 +74,9 @@ ifeq ($(strip $(USE_SPY)),1)
 	CC_FLAGS += -DLEGION_SPY
 endif
 
+# terra already includes LLVM libs, so we don't want them in our .so
+$(OUTFILE) : LLVM_LIBS=
+
 ###########################################################################
 #
 #   Don't change anything below here
