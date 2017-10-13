@@ -3777,6 +3777,9 @@ namespace Legion {
                                    trace_info, trace_info.req_idx, 
                                    ver_info, disjoint_close_mask, creator,
                                    part_node->color_space);
+        // We need to record which projection epoch we are in
+        state.capture_projection_epochs(disjoint_close_mask, 
+                                        index_close_op->projection_info);
       }
       if (!!read_only_close_mask)
       {

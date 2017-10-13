@@ -10550,6 +10550,8 @@ namespace Legion {
                            proj_info.projection, proj_info.projection_space, 
                            proj_info.sharding_function,
                            are_all_children_disjoint(), true/*dirty reduce*/));
+                  // Mark that this is a dirty reduction
+                  proj_info.set_dirty_reduction();
                   // If we are a reduction, we can go straight there
                   it->valid_fields -= overlap;
                   if (!it->valid_fields)
@@ -10621,6 +10623,8 @@ namespace Legion {
                          proj_info.projection, proj_info.projection_space, 
                          proj_info.sharding_function, 
                          are_all_children_disjoint(), true/*dirty reduce*/));
+                // Mark that this is a dirty reduction
+                proj_info.set_dirty_reduction();
                 // If we are a reduction, we can go straight there
                 it->valid_fields -= overlap;
                 if (!it->valid_fields)

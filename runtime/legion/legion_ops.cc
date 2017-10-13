@@ -7194,7 +7194,7 @@ namespace Legion {
       InterCloseOp::initialize(ctx, req, closed_tree, trace_info, close_idx, 
                                ver_info, close_mask, create_op);
       // We need to record the split fields on the version info since it 
-      // hasn't been done yet in this particular case
+      // hasn't been done yet in this particular case or we wouldn't be closing
       version_info.record_split_fields(closed_tree->node, close_mask);
       launch_node->get_launch_space_domain(point_domain);
       projection_info = ProjectionInfo(runtime,requirement,launch_node->handle);
