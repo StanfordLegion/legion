@@ -188,15 +188,15 @@ ifeq ($(strip $(USE_LLVM)),1)
   # NOTE: do not use these for all source files - just the ones that include llvm include files
   LLVM_CXXFLAGS ?= -std=c++11 -I$(shell $(LLVM_CONFIG) --includedir)
   ifeq ($(LLVM_VERSION_NUMBER),35)
-    LEGION_LD_FLAGS += $(shell $(LLVM_CONFIG) --ldflags --libs irreader jit mcjit x86)
+    LLVM_LIBS += $(shell $(LLVM_CONFIG) --ldflags --libs irreader jit mcjit x86)
   else
-    LEGION_LD_FLAGS += $(shell $(LLVM_CONFIG) --ldflags --libs irreader mcjit x86)
+    LLVM_LIBS += $(shell $(LLVM_CONFIG) --ldflags --libs irreader mcjit x86)
   endif
   # llvm-config --system-libs gives you all the libraries you might need for anything,
   #  which includes things we don't need, and might not be installed
   # by default, filter out libedit
   LLVM_SYSTEM_LIBS ?= $(filter-out -ledit,$(shell $(LLVM_CONFIG) --system-libs))
-  LEGION_LD_FLAGS += $(LLVM_SYSTEM_LIBS)
+  LEGION_LD_FLAGS += $(LLVM_LIBS) $(LLVM_SYSTEM_LIBS)
 endif
 
 USE_OPENMP ?= 0
