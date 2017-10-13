@@ -13,8 +13,8 @@
  * limitations under the License.
  */
 
-#ifndef __STENCIL_H__
-#define __STENCIL_H__
+#ifndef __CPU_KERNELS_H__
+#define __CPU_KERNELS_H__
 
 #ifndef DTYPE
 #error DTYPE must be defined
@@ -26,10 +26,6 @@
 
 #ifndef RADIUS
 #error RADIUS must be defined
-#endif
-
-#ifdef __cplusplus
-extern "C" {
 #endif
 
 typedef long long int coord_t;
@@ -44,8 +40,4 @@ void increment(DTYPE* RESTRICT inputPtr,
                coord_t haloX, coord_t startX, coord_t endX,
                coord_t startY, coord_t endY);
 
-#ifdef __cplusplus
-}
-#endif
-
-#endif // __STENCIL_H__
+#endif // __CPU_KERNELS_H__

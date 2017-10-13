@@ -29,7 +29,7 @@ ALT_MAPPERS     ?= 0		# Include alternative mappers (not recommended)
 # Put the binary file name here
 OUTFILE		?= realm_stencil
 # List all the application source files here
-GEN_SRC		?= realm_stencil.cc		# .cc files
+GEN_SRC		?= realm_stencil.cc cpu_kernels.cc		# .cc files
 GEN_GPU_SRC	?=		# .cu files
 
 # You can modify these variables, some will be appended to by the runtime makefile
@@ -38,6 +38,12 @@ CC_FLAGS	?=
 NVCC_FLAGS	?=
 GASNET_FLAGS	?=
 LD_FLAGS	?=
+
+# Stencil parameters
+DTYPE ?= double
+RESTRICT ?= __restrict__
+RADIUS ?= 2
+CC_FLAGS += -DDTYPE=$(DTYPE) -DRESTRICT=$(RESTRICT) -DRADIUS=$(RADIUS)
 
 ###########################################################################
 #
