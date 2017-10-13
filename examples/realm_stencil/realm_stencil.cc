@@ -35,6 +35,30 @@ enum {
   FID_WEIGHT = 103,
 };
 
+template <typename K, typename V>
+class DefaultMap : public std::map<K, V> {
+public:
+  DefaultMap(const V &v) : std::map<K, V>(), def(v) {}
+  V &operator[](const K &k) {
+    if (std::map<K, V>::count(k)) {
+      return std::map<K, V>::operator[](k);
+    } else {
+      V &result = std::map<K, V>::operator[](k);
+      result = def;
+      return result;
+    }
+  }
+  const V &operator[](const K &k) const {
+    if (std::map<K, V>::count(k)) {
+      return std::map<K, V>::operator[](k);
+    } else {
+      return def;
+    }
+  }
+private:
+  const V def;
+};
+
 struct AppConfig {
 public:
   AppConfig()
@@ -77,7 +101,8 @@ AppConfig parse_config(int argc, char **argv)
   return config;
 }
 
-Event fill(RegionInstance inst, FieldID fid, DTYPE value) {
+Event fill(RegionInstance inst, FieldID fid, DTYPE value)
+{
   CopySrcDstField field;
   field.inst = inst;
   field.field_id = fid;
@@ -88,6 +113,30 @@ Event fill(RegionInstance inst, FieldID fid, DTYPE value) {
 
   return inst.get_indexspace<2>().fill(fields, ProfilingRequestSet(),
                                        &value, sizeof(value));
+}
+
+Event copy(RegionInstance src_inst, RegionInstance dst_inst, FieldID fid,
+           Event wait_for)
+{
+  CopySrcDstField src_field;
+  src_field.inst = src_inst;
+  src_field.field_id = fid;
+  src_field.size = sizeof(DTYPE);
+
+  std::vector<CopySrcDstField> src_fields;
+  src_fields.push_back(src_field);
+
+  CopySrcDstField dst_field;
+  dst_field.inst = dst_inst;
+  dst_field.field_id = fid;
+  dst_field.size = sizeof(DTYPE);
+
+  std::vector<CopySrcDstField> dst_fields;
+  dst_fields.push_back(dst_field);
+
+  return dst_inst.get_indexspace<2>().copy(src_fields, dst_fields,
+                                           ProfilingRequestSet(),
+                                           wait_for);
 }
 
 void get_base_and_stride(RegionInstance inst, FieldID fid, DTYPE *&base, size_t &stride)
@@ -230,21 +279,42 @@ void shard_task(const void *args, size_t arglen,
   printf("shard %d %d running on processor " IDFMT "\n", a.point.x, a.point.y, p.id);
 
   // Initialize
-  RegionInstance private_inst;
+  RegionInstance private_inst = RegionInstance::NO_INST;
+  RegionInstance xp_inst_out_local = RegionInstance::NO_INST;
+  RegionInstance xm_inst_out_local = RegionInstance::NO_INST;
+  RegionInstance yp_inst_out_local = RegionInstance::NO_INST;
+  RegionInstance ym_inst_out_local = RegionInstance::NO_INST;
   {
-    Machine::MemoryQuery query(Machine::get_machine());
-    query.has_affinity_to(p);
-    query.only_kind(Memory::SYSTEM_MEM);
-    Memory memory = query.first();
-
     std::map<FieldID, size_t> field_sizes;
     field_sizes[FID_INPUT] = sizeof(DTYPE);
     field_sizes[FID_OUTPUT] = sizeof(DTYPE);
 
-    RegionInstance::create_instance(private_inst, memory,
-                                    a.exterior_bounds, field_sizes,
-                                    0 /*SOA*/, ProfilingRequestSet()).wait();
-    assert(private_inst.exists());
+    std::vector<Event> events;
+    events.push_back(
+      RegionInstance::create_instance(private_inst, a.sysmem,
+                                      a.exterior_bounds, field_sizes,
+                                      0 /*SOA*/, ProfilingRequestSet()));
+    if (a.xp_inst_out.exists())
+      events.push_back(
+        RegionInstance::create_instance(xp_inst_out_local, a.regmem,
+                                        a.xp_inst_out.get_indexspace<2>(), field_sizes,
+                                        0 /*SOA*/, ProfilingRequestSet()));
+    if (a.xm_inst_out.exists())
+      events.push_back(
+        RegionInstance::create_instance(xm_inst_out_local, a.regmem,
+                                        a.xm_inst_out.get_indexspace<2>(), field_sizes,
+                                        0 /*SOA*/, ProfilingRequestSet()));
+    if (a.yp_inst_out.exists())
+      events.push_back(
+        RegionInstance::create_instance(yp_inst_out_local, a.regmem,
+                                        a.yp_inst_out.get_indexspace<2>(), field_sizes,
+                                        0 /*SOA*/, ProfilingRequestSet()));
+    if (a.ym_inst_out.exists())
+      events.push_back(
+        RegionInstance::create_instance(ym_inst_out_local, a.regmem,
+                                        a.ym_inst_out.get_indexspace<2>(), field_sizes,
+                                        0 /*SOA*/, ProfilingRequestSet()));
+    Event::merge_events(events).wait();
   }
 
   {
@@ -270,9 +340,34 @@ void shard_task(const void *args, size_t arglen,
   sync.wait();
   sync = sync.advance_barrier();
 
+  // These are going to change, so give them mutable names
+  Barrier xp_empty_in = a.xp_empty_in;
+  Barrier xm_empty_in = a.xm_empty_in;
+  Barrier yp_empty_in = a.yp_empty_in;
+  Barrier ym_empty_in = a.ym_empty_in;
+
+  Barrier xp_empty_out = a.xp_empty_out;
+  Barrier xm_empty_out = a.xm_empty_out;
+  Barrier yp_empty_out = a.yp_empty_out;
+  Barrier ym_empty_out = a.ym_empty_out;
+
+  Barrier xp_full_in = a.xp_full_in;
+  Barrier xm_full_in = a.xm_full_in;
+  Barrier yp_full_in = a.yp_full_in;
+  Barrier ym_full_in = a.ym_full_in;
+
+  Barrier xp_full_out = a.xp_full_out;
+  Barrier xm_full_out = a.xm_full_out;
+  Barrier yp_full_out = a.yp_full_out;
+  Barrier ym_full_out = a.ym_full_out;
+
   // Main time step loop
   Event stencil_done = Event::NO_EVENT;
   Event increment_done = Event::NO_EVENT;
+  Event xp_copy_done = Event::NO_EVENT;
+  Event xm_copy_done = Event::NO_EVENT;
+  Event yp_copy_done = Event::NO_EVENT;
+  Event ym_copy_done = Event::NO_EVENT;
   for (size_t t = 0; t < a.tsteps; t++) {
     {
       StencilArgs args;
@@ -283,20 +378,76 @@ void shard_task(const void *args, size_t arglen,
       args.ym_inst = a.ym_inst_in;
       args.print_ts = t == a.tprune;
       args.interior_bounds = a.interior_bounds;
-      stencil_done = p.spawn(STENCIL_TASK, &args, sizeof(args), increment_done);
+      Event precondition = Event::merge_events(
+        increment_done,
+        (xp_full_in.exists() ? xp_full_in.get_previous_phase() : Event::NO_EVENT),
+        (xm_full_in.exists() ? xm_full_in.get_previous_phase() : Event::NO_EVENT),
+        (yp_full_in.exists() ? yp_full_in.get_previous_phase() : Event::NO_EVENT),
+        (ym_full_in.exists() ? ym_full_in.get_previous_phase() : Event::NO_EVENT));
+      stencil_done = p.spawn(STENCIL_TASK, &args, sizeof(args), precondition);
+      if (xp_empty_out.exists()) xp_empty_out.arrive(1, stencil_done);
+      if (xm_empty_out.exists()) xm_empty_out.arrive(1, stencil_done);
+      if (yp_empty_out.exists()) yp_empty_out.arrive(1, stencil_done);
+      if (ym_empty_out.exists()) ym_empty_out.arrive(1, stencil_done);
     }
 
     {
       IncrementArgs args;
       args.private_inst = private_inst;
-      args.xp_inst = a.xp_inst_in;
-      args.xm_inst = a.xm_inst_in;
-      args.yp_inst = a.yp_inst_in;
-      args.ym_inst = a.ym_inst_in;
+      args.xp_inst = xp_inst_out_local;
+      args.xm_inst = xm_inst_out_local;
+      args.yp_inst = yp_inst_out_local;
+      args.ym_inst = ym_inst_out_local;
       args.print_ts = t == a.tsteps - a.tprune - 1;
       args.outer_bounds = a.outer_bounds;
-      increment_done = p.spawn(INCREMENT_TASK, &args, sizeof(args), stencil_done);
+      Event precondition = Event::merge_events(
+        stencil_done, xp_copy_done, xm_copy_done, yp_copy_done, ym_copy_done);
+      increment_done = p.spawn(INCREMENT_TASK, &args, sizeof(args), precondition);
     }
+
+    if (a.xp_inst_out.exists()) {
+      xp_copy_done = copy(xp_inst_out_local, a.xp_inst_out, FID_INPUT,
+                          Event::merge_events(increment_done, xp_empty_in));
+      xp_full_out.arrive(1, xp_copy_done);
+    }
+
+    if (a.xm_inst_out.exists()) {
+      xm_copy_done = copy(xm_inst_out_local, a.xm_inst_out, FID_INPUT,
+                          Event::merge_events(increment_done, xm_empty_in));
+      xm_full_out.arrive(1, xm_copy_done);
+    }
+
+    if (a.yp_inst_out.exists()) {
+      yp_copy_done = copy(yp_inst_out_local, a.yp_inst_out, FID_INPUT,
+                          Event::merge_events(increment_done, yp_empty_in));
+      yp_full_out.arrive(1, yp_copy_done);
+    }
+
+    if (a.ym_inst_out.exists()) {
+      ym_copy_done = copy(ym_inst_out_local, a.ym_inst_out, FID_INPUT,
+                          Event::merge_events(increment_done, ym_empty_in));
+      ym_full_out.arrive(1, ym_copy_done);
+    }
+
+    if (xp_empty_in.exists()) xp_empty_in = xp_empty_in.advance_barrier();
+    if (xm_empty_in.exists()) xm_empty_in = xm_empty_in.advance_barrier();
+    if (yp_empty_in.exists()) yp_empty_in = yp_empty_in.advance_barrier();
+    if (ym_empty_in.exists()) ym_empty_in = ym_empty_in.advance_barrier();
+
+    if (xp_empty_out.exists()) xp_empty_out = xp_empty_out.advance_barrier();
+    if (xm_empty_out.exists()) xm_empty_out = xm_empty_out.advance_barrier();
+    if (yp_empty_out.exists()) yp_empty_out = yp_empty_out.advance_barrier();
+    if (ym_empty_out.exists()) ym_empty_out = ym_empty_out.advance_barrier();
+
+    if (xp_full_in.exists()) xp_full_in = xp_full_in.advance_barrier();
+    if (xm_full_in.exists()) xm_full_in = xm_full_in.advance_barrier();
+    if (yp_full_in.exists()) yp_full_in = yp_full_in.advance_barrier();
+    if (ym_full_in.exists()) ym_full_in = ym_full_in.advance_barrier();
+
+    if (xp_full_out.exists()) xp_full_out = xp_full_out.advance_barrier();
+    if (xm_full_out.exists()) xm_full_out = xm_full_out.advance_barrier();
+    if (yp_full_out.exists()) yp_full_out = yp_full_out.advance_barrier();
+    if (ym_full_out.exists()) ym_full_out = ym_full_out.advance_barrier();
   }
 
   Event check_done = Event::NO_EVENT;
@@ -387,10 +538,10 @@ void top_level_task(const void *args, size_t arglen,
   }
 
   // Create incoming exchange buffers
-  std::map<Point<2>, RegionInstance> xp_insts;
-  std::map<Point<2>, RegionInstance> xm_insts;
-  std::map<Point<2>, RegionInstance> yp_insts;
-  std::map<Point<2>, RegionInstance> ym_insts;
+  DefaultMap<Point<2>, RegionInstance> xp_insts(RegionInstance::NO_INST);
+  DefaultMap<Point<2>, RegionInstance> xm_insts(RegionInstance::NO_INST);
+  DefaultMap<Point<2>, RegionInstance> yp_insts(RegionInstance::NO_INST);
+  DefaultMap<Point<2>, RegionInstance> ym_insts(RegionInstance::NO_INST);
 
   {
     std::map<FieldID, size_t> field_sizes;
@@ -452,15 +603,15 @@ void top_level_task(const void *args, size_t arglen,
   }
 
   // Create incoming phase barriers
-  std::map<Point<2>, Barrier> xp_bars_empty;
-  std::map<Point<2>, Barrier> xm_bars_empty;
-  std::map<Point<2>, Barrier> yp_bars_empty;
-  std::map<Point<2>, Barrier> ym_bars_empty;
+  DefaultMap<Point<2>, Barrier> xp_bars_empty(Barrier::NO_BARRIER);
+  DefaultMap<Point<2>, Barrier> xm_bars_empty(Barrier::NO_BARRIER);
+  DefaultMap<Point<2>, Barrier> yp_bars_empty(Barrier::NO_BARRIER);
+  DefaultMap<Point<2>, Barrier> ym_bars_empty(Barrier::NO_BARRIER);
 
-  std::map<Point<2>, Barrier> xp_bars_full;
-  std::map<Point<2>, Barrier> xm_bars_full;
-  std::map<Point<2>, Barrier> yp_bars_full;
-  std::map<Point<2>, Barrier> ym_bars_full;
+  DefaultMap<Point<2>, Barrier> xp_bars_full(Barrier::NO_BARRIER);
+  DefaultMap<Point<2>, Barrier> xm_bars_full(Barrier::NO_BARRIER);
+  DefaultMap<Point<2>, Barrier> yp_bars_full(Barrier::NO_BARRIER);
+  DefaultMap<Point<2>, Barrier> ym_bars_full(Barrier::NO_BARRIER);
 
   for (PointInRectIterator<2, int> it(shards); it.valid; it.step()) {
     Point<2> i(it.p);
@@ -543,6 +694,9 @@ void top_level_task(const void *args, size_t arglen,
       args.interior_bounds = interior_bounds;
       args.exterior_bounds = exterior_bounds;
       args.outer_bounds = outer_bounds;
+
+      args.sysmem = proc_sysmems[shard_procs[i]];
+      args.regmem = proc_regmems[shard_procs[i]];
 
       // Sanity checks
       assert(exterior_bounds.contains(outer_bounds));
