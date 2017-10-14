@@ -232,38 +232,20 @@ void stencil_task(const void *args, size_t arglen,
   Point<2> interior_offset = a.interior_bounds.lo - private_bounds.lo;
   Point<2> interior_size = a.interior_bounds.hi - a.interior_bounds.lo + Point<2>(1, 1);
 
-  if (a.xp_inst.exists()) {
+  if (a.xp_inst.exists())
     inline_copy(a.xp_inst, a.private_inst, FID_INPUT,
                 a.xp_inst.get_indexspace<2>().bounds);
-  }
-
-  if (a.xm_inst.exists()) {
+  if (a.xm_inst.exists())
     inline_copy(a.xm_inst, a.private_inst, FID_INPUT,
                 a.xm_inst.get_indexspace<2>().bounds);
-  }
-
-  if (a.yp_inst.exists()) {
+  if (a.yp_inst.exists())
     inline_copy(a.yp_inst, a.private_inst, FID_INPUT,
                 a.yp_inst.get_indexspace<2>().bounds);
-  }
-
-  if (a.ym_inst.exists()) {
+  if (a.ym_inst.exists())
     inline_copy(a.ym_inst, a.private_inst, FID_INPUT,
                 a.ym_inst.get_indexspace<2>().bounds);
-  }
 
   DTYPE *weights = get_weights();
-
-  printf("private base %p\n", private_base_input);
-  printf("private stride %lu (%lu elements)\n", private_stride_input, private_stride_input/sizeof(DTYPE));
-
-  printf("private bounds %d %d to %d %d\n",
-         private_bounds.lo.x, private_bounds.lo.y,
-         private_bounds.hi.x, private_bounds.hi.y);
-
-  printf("interior bounds %d %d to %d %d\n",
-         a.interior_bounds.lo.x, a.interior_bounds.lo.y,
-         a.interior_bounds.hi.x, a.interior_bounds.hi.y);
 
   stencil(private_base_input, private_base_output, weights,
           private_stride_input/sizeof(DTYPE),
@@ -279,7 +261,6 @@ void stencil_task(const void *args, size_t arglen,
 void increment_task(const void *args, size_t arglen,
                     const void *userdata, size_t userlen, Processor p)
 {
-  printf("increment\n");
   assert(arglen == sizeof(IncrementArgs));
   const IncrementArgs &a = *reinterpret_cast<const IncrementArgs *>(args);
 
@@ -298,25 +279,18 @@ void increment_task(const void *args, size_t arglen,
             outer_offset.y,
             outer_offset.y + outer_size.y);
 
-  if (a.xp_inst.exists()) {
+  if (a.xp_inst.exists())
     inline_copy(a.private_inst, a.xp_inst, FID_INPUT,
                 a.xp_inst.get_indexspace<2>().bounds);
-  }
-
-  if (a.xm_inst.exists()) {
+  if (a.xm_inst.exists())
     inline_copy(a.private_inst, a.xm_inst, FID_INPUT,
                 a.xm_inst.get_indexspace<2>().bounds);
-  }
-
-  if (a.yp_inst.exists()) {
+  if (a.yp_inst.exists())
     inline_copy(a.private_inst, a.yp_inst, FID_INPUT,
                 a.yp_inst.get_indexspace<2>().bounds);
-  }
-
-  if (a.ym_inst.exists()) {
+  if (a.ym_inst.exists())
     inline_copy(a.private_inst, a.ym_inst, FID_INPUT,
                 a.ym_inst.get_indexspace<2>().bounds);
-  }
 
   // dump(a.private_inst, FID_INPUT,  a.outer_bounds, " input");
 }
@@ -324,7 +298,6 @@ void increment_task(const void *args, size_t arglen,
 void check_task(const void *args, size_t arglen,
                 const void *userdata, size_t userlen, Processor p)
 {
-  printf("check\n");
   assert(arglen == sizeof(CheckArgs));
   const CheckArgs &a = *reinterpret_cast<const CheckArgs *>(args);
 
@@ -361,7 +334,6 @@ void shard_task(const void *args, size_t arglen,
 {
   assert(arglen == sizeof(ShardArgs));
   const ShardArgs &a = *reinterpret_cast<const ShardArgs *>(args);
-  printf("shard %d %d running on processor " IDFMT "\n", a.point.x, a.point.y, p.id);
 
   // Initialize
   RegionInstance private_inst = RegionInstance::NO_INST;
@@ -666,23 +638,6 @@ void top_level_task(const void *args, size_t arglen,
           RegionInstance::create_instance(ym_insts[i], memory,
                                           ym_bounds, field_sizes,
                                           0 /*SOA*/, ProfilingRequestSet()));
-
-      printf("block %d %d\n", i.x, i.y);
-      printf("  bounds %d %d to %d %d\n",
-             x_blocks[i.x].lo.x, y_blocks[i.y].lo.x,
-             x_blocks[i.x].hi.x, y_blocks[i.y].hi.x);
-      printf("  xp %d %d to %d %d\n",
-             xp_bounds.lo.x, xp_bounds.lo.y,
-             xp_bounds.hi.x, xp_bounds.hi.y);
-      printf("  xm %d %d to %d %d\n",
-             xm_bounds.lo.x, xm_bounds.lo.y,
-             xm_bounds.hi.x, xm_bounds.hi.y);
-      printf("  yp %d %d to %d %d\n",
-             yp_bounds.lo.x, yp_bounds.lo.y,
-             yp_bounds.hi.x, yp_bounds.hi.y);
-      printf("  ym %d %d to %d %d\n",
-             ym_bounds.lo.x, ym_bounds.lo.y,
-             ym_bounds.hi.x, ym_bounds.hi.y);
     }
     Event::merge_events(events).wait();
   }
@@ -700,11 +655,6 @@ void top_level_task(const void *args, size_t arglen,
 
   for (PointInRectIterator<2, int> it(shards); it.valid; it.step()) {
     Point<2> i(it.p);
-    printf("block %d %d\n", i.x, i.y);
-    printf("  xp bars expect %d\n", i.x != shards.hi.x ? 1 : 0);
-    printf("  xm bars expect %d\n", i.x != shards.lo.x ? 1 : 0);
-    printf("  yp bars expect %d\n", i.y != shards.hi.y ? 1 : 0);
-    printf("  ym bars expect %d\n", i.y != shards.lo.y ? 1 : 0);
 
     if (i.x != shards.hi.x) xp_bars_empty[i] = Barrier::create_barrier(1);
     if (i.x != shards.lo.x) xm_bars_empty[i] = Barrier::create_barrier(1);
@@ -719,7 +669,6 @@ void top_level_task(const void *args, size_t arglen,
 
   // Create barrier to keep shard launch synchronized
   Barrier sync_bar = Barrier::create_barrier(config.ntx * config.nty);
-  printf("sync bar expects %lu arrivals\n", config.ntx * config.nty);
 
   // Launch shard tasks
   {
