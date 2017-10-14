@@ -30,6 +30,8 @@
 
 #include "realm.h"
 
+#include "cpu_kernels.h" // for coord_t
+
 struct ShardArgs {
 public:
   Realm::RegionInstance xp_inst_in, xm_inst_in, yp_inst_in, ym_inst_in;
@@ -39,7 +41,7 @@ public:
   Realm::Barrier xp_full_in, xm_full_in, yp_full_in, ym_full_in;
   Realm::Barrier xp_full_out, xm_full_out, yp_full_out, ym_full_out;
   Realm::Barrier sync;
-  size_t tsteps, tprune, init;
+  coord_t tsteps, tprune, init;
   Realm::Point<2> point;
   Realm::Rect<2> interior_bounds, exterior_bounds, outer_bounds;
   Realm::Memory sysmem, regmem;
@@ -62,7 +64,7 @@ public:
 struct CheckArgs {
 public:
   Realm::RegionInstance private_inst;
-  size_t tsteps, init;
+  coord_t tsteps, init;
   Realm::Rect<2> interior_bounds;
 };
 

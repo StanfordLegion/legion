@@ -64,17 +64,17 @@ public:
   AppConfig()
     : nx(12), ny(12), ntx(2), nty(2), tsteps(20), tprune(5), init(1000) {}
 public:
-  size_t nx;
-  size_t ny;
-  size_t ntx;
-  size_t nty;
-  size_t tsteps;
-  size_t tprune;
-  size_t init;
+  coord_t nx;
+  coord_t ny;
+  coord_t ntx;
+  coord_t nty;
+  coord_t tsteps;
+  coord_t tprune;
+  coord_t init;
 };
 
 void get_optional_arg(int argc, char **argv,
-                      const char *flag, size_t &out)
+                      const char *flag, coord_t &out)
 {
   for (int i = 0; i < argc; ++i) {
     if (strcmp(argv[i], flag) == 0) {
@@ -426,7 +426,7 @@ void shard_task(const void *args, size_t arglen,
   Event xm_copy_done = Event::NO_EVENT;
   Event yp_copy_done = Event::NO_EVENT;
   Event ym_copy_done = Event::NO_EVENT;
-  for (size_t t = 0; t < a.tsteps; t++) {
+  for (coord_t t = 0; t < a.tsteps; t++) {
     {
       StencilArgs args;
       args.private_inst = private_inst;
@@ -528,13 +528,13 @@ void top_level_task(const void *args, size_t arglen,
   assert(arglen == sizeof(AppConfig));
   const AppConfig &config = *reinterpret_cast<const AppConfig *>(args);
   printf("Stencil configuration:\n");
-  printf("      nx %lu\n", config.nx);
-  printf("      ny %lu\n", config.ny);
-  printf("     ntx %lu\n", config.ntx);
-  printf("     nty %lu\n", config.nty);
-  printf("  tsteps %lu\n", config.tsteps);
-  printf("  tprune %lu\n", config.tprune);
-  printf("    init %lu\n", config.init);
+  printf("      nx %lld\n", config.nx);
+  printf("      ny %lld\n", config.ny);
+  printf("     ntx %lld\n", config.ntx);
+  printf("     nty %lld\n", config.nty);
+  printf("  tsteps %lld\n", config.tsteps);
+  printf("  tprune %lld\n", config.tprune);
+  printf("    init %lld\n", config.init);
 
   // Discover the machine topology
   Machine machine = Machine::get_machine();
@@ -579,8 +579,8 @@ void top_level_task(const void *args, size_t arglen,
   }
 
   // Size of grid excluding the border
-  size_t nx = config.nx - 2*RADIUS;
-  size_t ny = config.ny - 2*RADIUS;
+  coord_t nx = config.nx - 2*RADIUS;
+  coord_t ny = config.ny - 2*RADIUS;
   assert(nx >= config.ntx);
   assert(ny >= config.nty);
 
@@ -588,10 +588,10 @@ void top_level_task(const void *args, size_t arglen,
   std::vector<Rect<1> > x_blocks;
   std::vector<Rect<1> > y_blocks;
 
-  for (size_t ix = 0; ix < config.ntx; ix++) {
+  for (coord_t ix = 0; ix < config.ntx; ix++) {
     x_blocks.push_back(Rect<1>(ix*nx/config.ntx, (ix+1)*nx/config.ntx - 1));
   }
-  for (size_t iy = 0; iy < config.nty; iy++) {
+  for (coord_t iy = 0; iy < config.nty; iy++) {
     y_blocks.push_back(Rect<1>(iy*ny/config.nty, (iy+1)*ny/config.nty - 1));
   }
 
