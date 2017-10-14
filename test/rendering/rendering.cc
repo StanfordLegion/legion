@@ -314,7 +314,7 @@ void main_task(const Task *task,
   Domain dom = runtime->get_index_space_domain(ctx,
       task->regions[0].region.get_index_space());
   Rect<1> rect_A = dom.get_rect<1>();
-  printf("Running graph rendering with nsize = %lu\n", rect_A.volume());
+  printf("Running graph rendering with nsize = %zd\n", rect_A.volume());
   printf("Generating iterations = %d\n", niter);
   printf("Num of partitions = %d\n", npar);
 
