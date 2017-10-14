@@ -62,7 +62,7 @@ private:
 struct AppConfig {
 public:
   AppConfig()
-    : nx(12), ny(12), ntx(4), nty(4), tsteps(20), tprune(5), init(1000) {}
+    : nx(12), ny(12), ntx(2), nty(2), tsteps(20), tprune(5), init(1000) {}
 public:
   size_t nx;
   size_t ny;
