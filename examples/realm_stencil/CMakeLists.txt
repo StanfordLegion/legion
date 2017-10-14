@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------#
-# Copyright 2017 Kitware, Inc.
+# Copyright 2017 Stanford University
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,29 +15,18 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.1)
+project(LegionExample_realm_stencil)
 
+# Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_subdirectory(attach_file)
-add_subdirectory(circuit)
-add_subdirectory(dynamic_registration)
-add_subdirectory(ghost)
-add_subdirectory(ghost_pull)
-add_subdirectory(realm_saxpy)
-add_subdirectory(realm_stencil)
-add_subdirectory(spmd_cgsolver)
-add_subdirectory(virtual_map)
-
-if(Legion_USE_GASNet)
-  add_subdirectory(mpi_interop)
-endif()
-
-if(Legion_USE_CUDA)
-  add_subdirectory(thrust_interop)
-endif()
-
-if(Legion_USE_Python)
-  add_subdirectory(python_interop)
+add_executable(realm_stencil realm_stencil.cc cpu_kernels.cc)
+target_compile_definitions(realm_stencil PRIVATE DTYPE=double)
+target_compile_definitions(realm_stencil PRIVATE RESTRICT=__restrict__)
+target_compile_definitions(realm_stencil PRIVATE RADIUS=2)
+target_link_libraries(realm_stencil Legion::Legion)
+if(Legion_ENABLE_TESTING)
+  add_test(NAME realm_stencil COMMAND $<TARGET_FILE:realm_stenil> -ll:cpu 4)
 endif()
