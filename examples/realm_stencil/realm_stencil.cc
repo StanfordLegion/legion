@@ -21,11 +21,6 @@
 
 using namespace Realm;
 
-typedef Point<1, coord_t> Point1;
-typedef Point<2, coord_t> Point2;
-typedef Rect<1, coord_t> Rect1;
-typedef Rect<2, coord_t> Rect2;
-
 enum {
   TOP_LEVEL_TASK = Processor::TASK_ID_FIRST_AVAILABLE+0,
   SHARD_TASK     = Processor::TASK_ID_FIRST_AVAILABLE+1,
