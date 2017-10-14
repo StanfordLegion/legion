@@ -222,6 +222,9 @@ void stencil_task(const void *args, size_t arglen,
   assert(arglen == sizeof(StencilArgs));
   const StencilArgs &a = *reinterpret_cast<const StencilArgs *>(args);
 
+  if (a.print_ts)
+    printf("t: %lld\n", Realm::Clock::current_time_in_microseconds());
+
   DTYPE *private_base_input, *private_base_output;
   size_t private_stride_input, private_stride_output;
   get_base_and_stride(a.private_inst, FID_INPUT, private_base_input, private_stride_input);
@@ -253,9 +256,6 @@ void stencil_task(const void *args, size_t arglen,
           interior_offset.x + interior_size.x,
           interior_offset.y,
           interior_offset.y + interior_size.y);
-
-  // dump(a.private_inst, FID_INPUT,  a.interior_bounds, " input");
-  // dump(a.private_inst, FID_OUTPUT, a.interior_bounds, "output");
 }
 
 void increment_task(const void *args, size_t arglen,
@@ -292,7 +292,8 @@ void increment_task(const void *args, size_t arglen,
     inline_copy(a.private_inst, a.ym_inst, FID_INPUT,
                 a.ym_inst.get_indexspace<2>().bounds);
 
-  // dump(a.private_inst, FID_INPUT,  a.outer_bounds, " input");
+  if (a.print_ts)
+    printf("t: %lld\n", Realm::Clock::current_time_in_microseconds());
 }
 
 void check_task(const void *args, size_t arglen,
