@@ -141,7 +141,7 @@ Event copy(RegionInstance src_inst, RegionInstance dst_inst, FieldID fid,
 
 void get_base_and_stride(RegionInstance inst, FieldID fid, DTYPE *&base, size_t &stride)
 {
-  AffineAccessor<DTYPE, 2> acc = AffineAccessor<DTYPE, 2>(inst, fid);
+  AffineAccessor<DTYPE, 2, coord_t> acc = AffineAccessor<DTYPE, 2, coord_t>(inst, fid);
   base = reinterpret_cast<DTYPE *>(acc.ptr(inst.get_indexspace<2, coord_t>().bounds.lo));
   assert(acc.strides.x == sizeof(DTYPE));
   stride = acc.strides.y;
@@ -149,7 +149,7 @@ void get_base_and_stride(RegionInstance inst, FieldID fid, DTYPE *&base, size_t 
 
 void dump(RegionInstance inst, FieldID fid, Rect2 bounds, const char *prefix)
 {
-  AffineAccessor<DTYPE, 2> acc = AffineAccessor<DTYPE, 2>(inst, fid);
+  AffineAccessor<DTYPE, 2, coord_t> acc = AffineAccessor<DTYPE, 2, coord_t>(inst, fid);
   for (PointInRectIterator<2, coord_t> it(bounds); it.valid; it.step()) {
     printf("%s: %2lld %2lld value %8.3f\n", prefix, it.p.x, it.p.y, acc.read(it.p));
   }
@@ -178,8 +178,8 @@ DTYPE *get_weights()
 void inline_copy(RegionInstance src_inst, RegionInstance dst_inst, FieldID fid,
                  Rect2 bounds)
 {
-  AffineAccessor<DTYPE, 2> src_acc = AffineAccessor<DTYPE, 2>(src_inst, fid);
-  AffineAccessor<DTYPE, 2> dst_acc = AffineAccessor<DTYPE, 2>(dst_inst, fid);
+  AffineAccessor<DTYPE, 2, coord_t> src_acc = AffineAccessor<DTYPE, 2, coord_t>(src_inst, fid);
+  AffineAccessor<DTYPE, 2, coord_t> dst_acc = AffineAccessor<DTYPE, 2, coord_t>(dst_inst, fid);
   for (PointInRectIterator<2, coord_t> it(bounds); it.valid; it.step()) {
     dst_acc.write(it.p, src_acc.read(it.p));
   }
@@ -190,12 +190,12 @@ void inline_copy_raw(RegionInstance src_inst, RegionInstance dst_inst,
 {
   // FIXME: Something is still wrong in the index arithmetic here
 
-  AffineAccessor<DTYPE, 2> src_acc = AffineAccessor<DTYPE, 2>(src_inst, fid);
+  AffineAccessor<DTYPE, 2, coord_t> src_acc = AffineAccessor<DTYPE, 2, coord_t>(src_inst, fid);
   DTYPE *src_base;
   size_t src_stride;
   get_base_and_stride(src_inst, fid, src_base, src_stride);
 
-  AffineAccessor<DTYPE, 2> dst_acc = AffineAccessor<DTYPE, 2>(dst_inst, fid);
+  AffineAccessor<DTYPE, 2, coord_t> dst_acc = AffineAccessor<DTYPE, 2, coord_t>(dst_inst, fid);
   DTYPE *dst_base;
   size_t dst_stride;
   get_base_and_stride(dst_inst, fid, dst_base, dst_stride);
@@ -307,7 +307,7 @@ void check_task(const void *args, size_t arglen,
 
   // Check input
   {
-    AffineAccessor<DTYPE, 2> acc = AffineAccessor<DTYPE, 2>(a.private_inst, FID_INPUT);
+    AffineAccessor<DTYPE, 2, coord_t> acc = AffineAccessor<DTYPE, 2, coord_t>(a.private_inst, FID_INPUT);
     for (PointInRectIterator<2, coord_t> it(a.interior_bounds); it.valid; it.step()) {
       if (acc.read(it.p) != expect_input) {
         printf("bad value: got %f expected %f\n", acc.read(it.p), expect_input);
@@ -319,7 +319,7 @@ void check_task(const void *args, size_t arglen,
 
   // Check output
   {
-    AffineAccessor<DTYPE, 2> acc = AffineAccessor<DTYPE, 2>(a.private_inst, FID_OUTPUT);
+    AffineAccessor<DTYPE, 2, coord_t> acc = AffineAccessor<DTYPE, 2, coord_t>(a.private_inst, FID_OUTPUT);
     for (PointInRectIterator<2, coord_t> it(a.interior_bounds); it.valid; it.step()) {
       if (acc.read(it.p) != expect_output) {
         printf("bad value: got %f expected %f\n", acc.read(it.p), expect_output);
