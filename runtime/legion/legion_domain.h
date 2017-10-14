@@ -39,6 +39,8 @@ namespace Legion {
     __CUDA_HD__
     Point(void);
     __CUDA_HD__
+    explicit Point(T val); // same value for all dimensions
+    __CUDA_HD__
     explicit Point(const T vals[DIM]);
     // copies allow type coercion (assuming the underlying type does)
     template<typename T2> __CUDA_HD__
@@ -50,6 +52,11 @@ namespace Legion {
     Point<DIM,T>& operator=(const Point<DIM,T2> &rhs);
     template<typename T2> __CUDA_HD__
     Point<DIM,T>& operator=(const Realm::Point<DIM,T2> &rhs);
+  public:
+    __CUDA_HD__ 
+    static Point<DIM,T> ZEROES(void);
+    __CUDA_HD__
+    static Point<DIM,T> ONES(void);
   };
 
   /**
