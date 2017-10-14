@@ -244,7 +244,6 @@ namespace Legion {
       void set_trace(LegionTrace *trace, bool is_tracing,
                      const std::vector<StaticDependence> *dependences);
       void set_must_epoch(MustEpochOp *epoch, bool do_registration);
-      void set_replicate_mapped_event(RtEvent replicate_mapped);
     public:
       // Localize a region requirement to its parent context
       // This means that region == parent and the
@@ -407,8 +406,7 @@ namespace Legion {
       // from the operation on which it is called to the target
       // Return true if the operation has committed and can be 
       // pruned out of the list of mapping dependences.
-      bool register_dependence(Operation *target, GenerationID target_gen,
-                               bool shard_only_dependence);
+      bool register_dependence(Operation *target, GenerationID target_gen);
       // This function call does everything that the previous one does, but
       // it also records information about the regions involved and how
       // whether or not they will be validated by the consuming operation.
@@ -417,8 +415,7 @@ namespace Legion {
       bool register_region_dependence(unsigned idx, Operation *target,
                               GenerationID target_gen, unsigned target_idx,
                               DependenceType dtype, bool validates,
-                              const FieldMask &dependent_mask,
-                              bool shard_only_dependence);
+                              const FieldMask &dependent_mask);
       // This method is invoked by one of the two above to perform
       // the registration.  Returns true if we have not yet commited
       // and should therefore be notified once the dependent operation
@@ -427,8 +424,7 @@ namespace Legion {
                                 Operation *op, GenerationID op_gen,
                                 bool &registered_dependence,
                                 MappingDependenceTracker *tracker,
-                                RtEvent other_commit_event,
-                                bool shard_only_dependence);
+                                RtEvent other_commit_event);
       // Check to see if the operation is still valid
       // for the given GenerationID.  This method is not precise
       // and may return false when the operation has committed.
@@ -532,10 +528,6 @@ namespace Legion {
       TaskContext *parent_ctx;
       // The mapped event for this operation
       RtUserEvent mapped_event;
-      // The replicate mapped barrier for indicating when all instances 
-      // of this operation have been mapped across all shards
-      // during a control replication execution
-      RtEvent replicate_mapped_event;
       // The resolved event for this operation
       RtUserEvent resolved_event;
       // The event for when any children this operation has are mapped
@@ -1134,8 +1126,7 @@ namespace Legion {
       void record_trace_dependence(Operation *target, GenerationID target_gen,
                                    int target_idx, int source_idx, 
                                    DependenceType dtype,
-                                   const FieldMask &dependent_mask,
-                                   bool shard_only_dependence);
+                                   const FieldMask &dependent_mask);
       virtual unsigned find_parent_index(unsigned idx);
     protected:
       // These things are really only needed for tracing

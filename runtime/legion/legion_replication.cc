@@ -261,12 +261,12 @@ namespace Legion {
                                          MustEpochOp *must_epoch_owner/*=NULL*/)
     //--------------------------------------------------------------------------
     {
-      // Do the base call  
-      RtEvent result = IndividualTask::perform_mapping(must_epoch_owner);
-      // If there is an event then the mapping isn't done so we don't have
-      // the final versions yet and can't do the broadcast
-      if (result.exists())
-        return result;
+      // See if we need to do any versioning computations first
+      RtEvent version_ready_event = perform_versioning_analysis();
+      if (version_ready_event.exists() && !version_ready_event.has_triggered())
+        return defer_perform_mapping(version_ready_event, must_epoch_owner);
+      // Next let's do everything we need to in order to capture the
+      // versioning informaton we need to send to avoid the completion race
 #ifdef DEBUG_LEGION
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
@@ -285,6 +285,16 @@ namespace Legion {
         if (IS_WRITE(regions[idx]))
           version_broadcast.pack_advance_states(idx, version_infos[idx]);
       }
+      // Grab the mapped event so we can know when to do the broadcast
+      RtEvent map_wait = get_mapped_event();
+      // Do the base call  
+      RtEvent result = IndividualTask::perform_mapping(must_epoch_owner);
+      // If there is an event then the mapping isn't done so we don't have
+      // the final versions yet and can't do the broadcast
+      if (result.exists())
+        return result;
+      if (!map_wait.has_triggered())
+        map_wait.lg_wait();
       version_broadcast.perform_collective_async();
       return RtEvent::NO_RT_EVENT;
     }
@@ -972,7 +982,7 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       // Figure out whether this shard owns this point
-      ShardID owner_shard = 
+      const ShardID owner_shard = 
         sharding_function->find_owner(index_point, index_domain); 
       if (Runtime::legion_spy_enabled)
         LegionSpy::log_owner_shard(get_unique_id(), owner_shard);
@@ -1015,18 +1025,41 @@ namespace Legion {
       {
         // Do the versioning analysis
         RtEvent ready = perform_local_versioning_analysis();
-        // Broadcast the versioning information
-        VersioningInfoBroadcast version_broadcast(repl_ctx, 
-                      versioning_collective_id, owner_shard);
-#ifdef DEBUG_LEGION
-        assert(dst_requirements.size() == dst_versions.size());
-#endif
-        for (unsigned idx = 0; idx < dst_versions.size(); idx++)
-          version_broadcast.pack_advance_states(idx, dst_versions[idx]);
-        version_broadcast.perform_collective_async();
         // Then we can do the enqueue
         enqueue_ready_operation(ready);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplCopyOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      const ShardID owner_shard = 
+        sharding_function->find_owner(index_point, index_domain);
+      // Grab the vesioning info before we do the mapping in 
+      // case that kicks off the completion process
+      VersioningInfoBroadcast version_broadcast(repl_ctx, 
+                    versioning_collective_id, owner_shard);
+#ifdef DEBUG_LEGION
+      assert(dst_requirements.size() == dst_versions.size());
+#endif
+      for (unsigned idx = 0; idx < dst_versions.size(); idx++)
+        version_broadcast.pack_advance_states(idx, dst_versions[idx]);
+      // Have to make a copy to avoid completion race
+      RtEvent map_wait = get_mapped_event();
+      // Do the base trigger mapping
+      CopyOp::trigger_mapping();
+      // Wait until we are done being mapped
+      if (!map_wait.has_triggered())
+        map_wait.lg_wait();
+      // Then broadcast the results
+      version_broadcast.perform_collective_async();
     }
 
     /////////////////////////////////////////////////////////////

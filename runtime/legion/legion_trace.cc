@@ -73,8 +73,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < operations.size(); idx++)
       {
         const std::pair<Operation*,GenerationID> &target = operations[idx];
-        op->register_dependence(target.first, target.second, 
-                                false/*shard only*/);
+        op->register_dependence(target.first, target.second); 
 #ifdef LEGION_SPY
         for (unsigned req_idx = 0; req_idx < num_regions[idx]; req_idx++)
         {
@@ -199,7 +198,7 @@ namespace Legion {
 
           if ((it->prev_idx == -1) || (it->next_idx == -1))
           {
-            op->register_dependence(target.first, target.second,it->shard_only);
+            op->register_dependence(target.first, target.second);
 #ifdef LEGION_SPY
             LegionSpy::log_mapping_dependence(
                 op->get_context()->get_unique_id(),
@@ -214,8 +213,7 @@ namespace Legion {
             op->register_region_dependence(it->next_idx, target.first,
                                            target.second, it->prev_idx,
                                            it->dtype, it->validates,
-                                           it->dependent_mask,
-                                           it->shard_only);
+                                           it->dependent_mask);
 #ifdef LEGION_SPY
             LegionSpy::log_mapping_dependence(
                 op->get_context()->get_unique_id(),
@@ -261,8 +259,7 @@ namespace Legion {
           // If this is the case we can do the normal registration
           if ((it->prev_idx == -1) || (it->next_idx == -1))
           {
-            internal_op->register_dependence(target.first, target.second, 
-                                             it->shard_only);
+            internal_op->register_dependence(target.first, target.second); 
 #ifdef LEGION_SPY
             LegionSpy::log_mapping_dependence(
                 op->get_context()->get_unique_id(),
@@ -276,8 +273,7 @@ namespace Legion {
           {
             internal_op->record_trace_dependence(target.first, target.second,
                                                it->prev_idx, it->next_idx,
-                                               it->dtype, it->dependent_mask,
-                                               it->shard_only);
+                                               it->dtype, it->dependent_mask);
 #ifdef LEGION_SPY
             LegionSpy::log_mapping_dependence(
                 internal_op->get_context()->get_unique_id(),
@@ -292,8 +288,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void StaticTrace::record_dependence(
                                      Operation *target, GenerationID target_gen,
-                                     Operation *source, GenerationID source_gen,
-                                     bool shard_only_dependence)
+                                     Operation *source, GenerationID source_gen)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -306,8 +301,7 @@ namespace Legion {
                                     Operation *source, GenerationID source_gen,
                                     unsigned target_idx, unsigned source_idx,
                                     DependenceType dtype, bool validates,
-                                    const FieldMask &dependent_mask,
-                                    bool shard_only_dependence)
+                                    const FieldMask &dependent_mask)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -356,7 +350,7 @@ namespace Legion {
             forest->get_node(field_space)->get_field_mask(it->dependent_fields);
           translation.push_back(DependenceRecord(index - it->previous_offset, 
                 it->previous_req_index, it->current_req_index, it->validates, 
-                it->shard_only, it->dependence_type, dependence_mask));
+                it->dependence_type, dependence_mask));
         }
       }
       return translated_deps[index];
@@ -524,8 +518,7 @@ namespace Legion {
 
             if ((it->prev_idx == -1) || (it->next_idx == -1))
             {
-              op->register_dependence(target.first, target.second, 
-                                      it->shard_only);
+              op->register_dependence(target.first, target.second); 
 #ifdef LEGION_SPY
               LegionSpy::log_mapping_dependence(
                   op->get_context()->get_unique_id(),
@@ -540,7 +533,7 @@ namespace Legion {
               op->register_region_dependence(it->next_idx, target.first,
                                              target.second, it->prev_idx,
                                              it->dtype, it->validates,
-                                             it->dependent_mask,it->shard_only);
+                                             it->dependent_mask);
 #ifdef LEGION_SPY
               LegionSpy::log_mapping_dependence(
                   op->get_context()->get_unique_id(),
@@ -586,8 +579,7 @@ namespace Legion {
             // If this is the case we can do the normal registration
             if ((it->prev_idx == -1) || (it->next_idx == -1))
             {
-              internal_op->register_dependence(target.first, target.second, 
-                                               it->shard_only);
+              internal_op->register_dependence(target.first, target.second); 
 #ifdef LEGION_SPY
               LegionSpy::log_mapping_dependence(
                   op->get_context()->get_unique_id(),
@@ -601,8 +593,7 @@ namespace Legion {
             {
               internal_op->record_trace_dependence(target.first, target.second,
                                                  it->prev_idx, it->next_idx,
-                                                 it->dtype, it->dependent_mask,
-                                                 it->shard_only);
+                                                 it->dtype, it->dependent_mask);
 #ifdef LEGION_SPY
               LegionSpy::log_mapping_dependence(
                   internal_op->get_context()->get_unique_id(),
@@ -617,8 +608,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DynamicTrace::record_dependence(Operation *target,GenerationID tar_gen,
-                                         Operation *source,GenerationID src_gen,
-                                         bool shard_only_dependence)
+                                         Operation *source,GenerationID src_gen)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -691,8 +681,7 @@ namespace Legion {
                                                 unsigned source_idx,
                                                 DependenceType dtype,
                                                 bool validates,
-                                                const FieldMask &dep_mask,
-                                                bool shard_only_dependence)
+                                                const FieldMask &dep_mask)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -715,7 +704,7 @@ namespace Legion {
           // Normal case
           insert_dependence(
               DependenceRecord(finder->second, target_idx, source_idx,
-                   validates, shard_only_dependence, dtype, dep_mask));
+                   validates, dtype, dep_mask));
         }
         else
         {
@@ -731,7 +720,7 @@ namespace Legion {
 #endif
             insert_dependence(src_key, 
                 DependenceRecord(finder->second, target_idx, source_idx,
-                     validates, shard_only_dependence, dtype, dep_mask));
+                     validates, dtype, dep_mask));
           }
         }
       }
@@ -759,8 +748,7 @@ namespace Legion {
                 continue;
               insert_dependence(
                   DependenceRecord(it->operation_idx, it->prev_idx,
-                     source_idx, it->validates, shard_only_dependence,
-                     it->dtype, overlap));
+                     source_idx, it->validates, it->dtype, overlap));
             }
           }
           else
@@ -782,8 +770,7 @@ namespace Legion {
                 continue;
               insert_dependence(src_key, 
                   DependenceRecord(it->operation_idx, it->prev_idx,
-                    source_idx, it->validates, shard_only_dependence,
-                    it->dtype, overlap));
+                    source_idx, it->validates, it->dtype, overlap));
             }
           }
         }

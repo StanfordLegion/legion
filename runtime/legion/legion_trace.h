@@ -35,12 +35,12 @@ namespace Legion {
       public:
         DependenceRecord(int idx)
           : operation_idx(idx), prev_idx(-1), next_idx(-1),
-            validates(false), shard_only(false), dtype(TRUE_DEPENDENCE) { }
+            validates(false), dtype(TRUE_DEPENDENCE) { }
         DependenceRecord(int op_idx, int pidx, int nidx,
-                         bool val, bool shard, DependenceType d,
+                         bool val, DependenceType d,
                          const FieldMask &m)
           : operation_idx(op_idx), prev_idx(pidx), 
-            next_idx(nidx), validates(val), shard_only(shard),
+            next_idx(nidx), validates(val),
             dtype(d), dependent_mask(m) { }
       public:
         inline bool merge(const DependenceRecord &record)
@@ -49,7 +49,6 @@ namespace Legion {
               (prev_idx != record.prev_idx) ||
               (next_idx != record.next_idx) ||
               (validates != record.validates) ||
-              (shard_only != record.shard_only) ||
               (dtype != record.dtype))
             return false;
           dependent_mask |= record.dependent_mask;
@@ -60,7 +59,6 @@ namespace Legion {
         int prev_idx; // previous region requirement index
         int next_idx; // next region requirement index
         bool validates;
-        bool shard_only;
         DependenceType dtype;
         FieldMask dependent_mask;
       };
@@ -88,15 +86,13 @@ namespace Legion {
                      const std::vector<StaticDependence> *dependences) = 0;
       virtual void register_operation(Operation *op, GenerationID gen) = 0; 
       virtual void record_dependence(Operation *target, GenerationID target_gen,
-                                Operation *source, GenerationID source_gen,
-                                bool shard_only_dependence) = 0;
+                                Operation *source, GenerationID source_gen) = 0;
       virtual void record_region_dependence(
                                     Operation *target, GenerationID target_gen,
                                     Operation *source, GenerationID source_gen,
                                     unsigned target_idx, unsigned source_idx,
                                     DependenceType dtype, bool validates,
-                                    const FieldMask &dependent_mask,
-                                    bool shard_only_dependence) = 0;
+                                    const FieldMask &dependent_mask) = 0;
       virtual void record_aliased_children(unsigned req_index, unsigned depth,
                                            const FieldMask &aliased_mask) = 0;
     public:
@@ -145,15 +141,13 @@ namespace Legion {
                               const std::vector<StaticDependence> *dependences);
       virtual void register_operation(Operation *op, GenerationID gen); 
       virtual void record_dependence(Operation *target,GenerationID target_gen,
-                                     Operation *source,GenerationID source_gen,
-                                     bool shard_only_dependence);
+                                     Operation *source,GenerationID source_gen);
       virtual void record_region_dependence(
                                     Operation *target, GenerationID target_gen,
                                     Operation *source, GenerationID source_gen,
                                     unsigned target_idx, unsigned source_idx,
                                     DependenceType dtype, bool validates,
-                                    const FieldMask &dependent_mask,
-                                    bool shard_only_dependence);
+                                    const FieldMask &dependent_mask);
       virtual void record_aliased_children(unsigned req_index, unsigned depth,
                                            const FieldMask &aliased_mask);
     protected:
@@ -209,15 +203,13 @@ namespace Legion {
       // Called by analysis thread
       virtual void register_operation(Operation *op, GenerationID gen);
       virtual void record_dependence(Operation *target,GenerationID target_gen,
-                                     Operation *source,GenerationID source_gen,
-                                     bool shard_only_dependence);
+                                     Operation *source,GenerationID source_gen);
       virtual void record_region_dependence(
                                     Operation *target, GenerationID target_gen,
                                     Operation *source, GenerationID source_gen,
                                     unsigned target_idx, unsigned source_idx,
                                     DependenceType dtype, bool validates,
-                                    const FieldMask &dependent_mask,
-                                    bool shard_only_dependence);
+                                    const FieldMask &dependent_mask);
       virtual void record_aliased_children(unsigned req_index, unsigned depth,
                                            const FieldMask &aliased_mask);
     protected:

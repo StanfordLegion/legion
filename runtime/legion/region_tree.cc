@@ -10632,13 +10632,15 @@ namespace Legion {
                 else
                   it++;
               }
-              else if (IS_READ_ONLY(closer.user.usage))
+              else if (IS_READ_ONLY(closer.user.usage) &&
+                       (it->sharding_function == NULL))
               {
                 // Read-only projections of any depth allow
                 // us to stay in disjoint shallow mode because
                 // they are not going to mutate the state at
                 // all and we can catch dependences on any
                 // index spaces without needing a close operation
+                // All this assumes we aren't control replicated
                 it++;
               }
               else if (it->can_elide_close_operation_shallow(proj_info) &&
@@ -11378,7 +11380,7 @@ namespace Legion {
 #endif
           // Do this after the logging since we 
           // are going to update the iterator
-          if (op->register_dependence(it->op, it->gen, false/*shard only*/))
+          if (op->register_dependence(it->op, it->gen))
           {
 #ifndef LEGION_SPY
             // Prune it from the list
@@ -11411,7 +11413,7 @@ namespace Legion {
 #endif
           // Do this after the logging since we are going
           // to update the iterator
-          if (op->register_dependence(it->op, it->gen, false/*shard only*/))
+          if (op->register_dependence(it->op, it->gen))
           {
 #ifndef LEGION_SPY
             // Prune it from the list
@@ -13488,8 +13490,7 @@ namespace Legion {
                 if (user.op->register_region_dependence(user.idx, it->op, 
                                                         it->gen, it->idx,
                                                         dtype, validate,
-                                                        overlap,
-                                                        false/*shard only*/))
+                                                        overlap))
                 {
 #ifndef LEGION_SPY
                   // Now we can prune it from the list and continue
@@ -13734,8 +13735,7 @@ namespace Legion {
                                                          it->op, it->gen, 
                                                          it->idx, dtype,
                                                          closer.validates,
-                                                         overlap,
-                                                         false/*shard only*/))
+                                                         overlap))
           {
 #ifndef LEGION_SPY
             it = users.erase(it);

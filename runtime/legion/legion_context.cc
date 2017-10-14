@@ -4825,8 +4825,7 @@ namespace Legion {
         // If we can prune it then go ahead and do so
         // No need to remove the mapping reference because 
         // the fence has already been committed
-        if (op->register_dependence(current_fence, fence_gen, 
-                                    false/*shard only dependence*/))
+        if (op->register_dependence(current_fence, fence_gen)) 
           current_fence = NULL;
 #endif
       }
@@ -4923,7 +4922,7 @@ namespace Legion {
       // Now record the dependences
       for (std::map<Operation*,GenerationID>::const_iterator it = 
             previous_operations.begin(); it != previous_operations.end(); it++)
-        op->register_dependence(it->first, it->second, false/*shard only*/);
+        op->register_dependence(it->first, it->second);
 
 #ifdef LEGION_SPY
       // Legion Spy still requires region tree analysis for verification
@@ -6591,7 +6590,7 @@ namespace Legion {
                                    UniqueID ctx_uid, ShardManager *manager)
       : InnerContext(rt, owner, full, reqs, parent_indexes, virt_mapped, 
           ctx_uid), owner_shard(owner), shard_manager(manager),
-        next_ap_bar_index(0), next_int_bar_index(0), next_close_bar_index(0), 
+        next_close_bar_index(0), 
         index_space_allocator_shard(0), index_partition_allocator_shard(0),
         field_space_allocator_shard(0), field_allocator_shard(0),
         logical_region_allocator_shard(0), next_available_collective_index(0)
@@ -6626,18 +6625,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // We delete the barriers that we created
-      for (unsigned idx = owner_shard->shard_id; 
-            idx < application_barriers.size(); idx+=shard_manager->total_shards)
-      {
-        Realm::Barrier bar = application_barriers[idx];
-        bar.destroy_barrier();
-      }
-      for (unsigned idx = owner_shard->shard_id; 
-            idx < internal_barriers.size(); idx += shard_manager->total_shards)
-      {
-        Realm::Barrier bar = internal_barriers[idx];
-        bar.destroy_barrier();
-      }
       for (unsigned idx = owner_shard->shard_id;
           idx < inter_close_barriers.size(); idx += shard_manager->total_shards)
       {
@@ -9437,49 +9424,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    unsigned ReplicateContext::register_new_child_operation(Operation *op,
-                               const std::vector<StaticDependence> *dependences)
-    //--------------------------------------------------------------------------
-    {
-      // perform the base version of this    
-      unsigned op_index = 
-        InnerContext::register_new_child_operation(op, dependences);
-      // Now we have to assign a phase barrier to each operation
-      // No need for a lock here since we know this the calls are serialized
-      RtBarrier &map_barrier = application_barriers[next_ap_bar_index++];
-      // Reset the index if necessary
-      if (next_ap_bar_index == application_barriers.size())
-        next_ap_bar_index = 0;
-      // Set the replicate mapped event
-      op->set_replicate_mapped_event(map_barrier);
-      // Arrive on the barrier
-      Runtime::phase_barrier_arrive(map_barrier, 1/*count*/,
-                                    op->get_mapped_event());
-      // Advance the barrier for the next operation 
-      Runtime::advance_barrier(map_barrier);
-      return op_index;
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplicateContext::register_new_internal_operation(InternalOp *op)
-    //--------------------------------------------------------------------------
-    {
-      // We have to assign a phase barrier to each operation
-      // No need for a lock here since we know this the calls are serialized
-      RtBarrier &map_barrier = internal_barriers[next_int_bar_index++];
-      // Reset the index if necessary
-      if (next_int_bar_index == internal_barriers.size())
-        next_int_bar_index = 0;
-      // Set the replicate mapped event
-      op->set_replicate_mapped_event(map_barrier);
-      // Arrive on the barrier 
-      Runtime::phase_barrier_arrive(map_barrier, 1/*count*/, 
-                                    op->get_mapped_event());
-      // Advance the barrier for the next operation 
-      Runtime::advance_barrier(map_barrier);
-    }
-
-    //--------------------------------------------------------------------------
     void ReplicateContext::record_dynamic_collective_contribution(
                                           DynamicCollective dc, const Future &f)
     //--------------------------------------------------------------------------
@@ -9649,23 +9593,12 @@ namespace Legion {
     void ReplicateContext::exchange_common_resources(void)
     //--------------------------------------------------------------------------
     {
-      const size_t window_size = context_configuration.max_window_size;
-      // Exchange the application barriers across all the shards
-      BarrierExchangeCollective application_collective(this, window_size, 
-                                 application_barriers, COLLECTIVE_LOC_50);
-      application_collective.exchange_barriers_async();
-      // Exchange the internal barriers across all the shards
-      BarrierExchangeCollective internal_collective(this, window_size,
-                                 internal_barriers, COLLECTIVE_LOC_51);
-      internal_collective.exchange_barriers_async();
       // Exchange the close operation barriers across all the shards
       BarrierExchangeCollective close_collective(this, 
           CONTROL_REPLICATION_COMMUNICATION_BARRIERS, 
-          inter_close_barriers, COLLECTIVE_LOC_52);
+          inter_close_barriers, COLLECTIVE_LOC_50);
       close_collective.exchange_barriers_async();
       // Wait for everything to be done
-      application_collective.wait_for_barrier_exchange();
-      internal_collective.wait_for_barrier_exchange();
       close_collective.wait_for_barrier_exchange();
     }
 
