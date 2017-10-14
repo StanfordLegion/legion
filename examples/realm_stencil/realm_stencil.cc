@@ -35,6 +35,30 @@ enum {
   FID_WEIGHT = 103,
 };
 
+template <typename K, typename V>
+class DefaultMap : public std::map<K, V> {
+public:
+  DefaultMap(const V &v) : std::map<K, V>(), def(v) {}
+  V &operator[](const K &k) {
+    if (std::map<K, V>::count(k)) {
+      return std::map<K, V>::operator[](k);
+    } else {
+      V &result = std::map<K, V>::operator[](k);
+      result = def;
+      return result;
+    }
+  }
+  const V &operator[](const K &k) const {
+    if (std::map<K, V>::count(k)) {
+      return std::map<K, V>::operator[](k);
+    } else {
+      return def;
+    }
+  }
+private:
+  const V def;
+};
+
 struct AppConfig {
 public:
   AppConfig()
@@ -77,7 +101,8 @@ AppConfig parse_config(int argc, char **argv)
   return config;
 }
 
-Event fill(RegionInstance inst, FieldID fid, DTYPE value) {
+Event fill(RegionInstance inst, FieldID fid, DTYPE value)
+{
   CopySrcDstField field;
   field.inst = inst;
   field.field_id = fid;
@@ -88,6 +113,30 @@ Event fill(RegionInstance inst, FieldID fid, DTYPE value) {
 
   return inst.get_indexspace<2>().fill(fields, ProfilingRequestSet(),
                                        &value, sizeof(value));
+}
+
+Event copy(RegionInstance src_inst, RegionInstance dst_inst, FieldID fid,
+           Event wait_for)
+{
+  CopySrcDstField src_field;
+  src_field.inst = src_inst;
+  src_field.field_id = fid;
+  src_field.size = sizeof(DTYPE);
+
+  std::vector<CopySrcDstField> src_fields;
+  src_fields.push_back(src_field);
+
+  CopySrcDstField dst_field;
+  dst_field.inst = dst_inst;
+  dst_field.field_id = fid;
+  dst_field.size = sizeof(DTYPE);
+
+  std::vector<CopySrcDstField> dst_fields;
+  dst_fields.push_back(dst_field);
+
+  return dst_inst.get_indexspace<2>().copy(src_fields, dst_fields,
+                                           ProfilingRequestSet(),
+                                           wait_for);
 }
 
 void get_base_and_stride(RegionInstance inst, FieldID fid, DTYPE *&base, size_t &stride)
@@ -126,6 +175,16 @@ DTYPE *get_weights()
   return weights;
 }
 
+void inline_copy(RegionInstance src_inst, RegionInstance dst_inst, FieldID fid,
+                 Rect<2> bounds)
+{
+  AffineAccessor<DTYPE, 2> src_acc = AffineAccessor<DTYPE, 2>(src_inst, fid);
+  AffineAccessor<DTYPE, 2> dst_acc = AffineAccessor<DTYPE, 2>(dst_inst, fid);
+  for (PointInRectIterator<2, int> it(bounds); it.valid; it.step()) {
+    dst_acc.write(it.p, src_acc.read(it.p));
+  }
+}
+
 void stencil_task(const void *args, size_t arglen,
                   const void *userdata, size_t userlen, Processor p)
 {
@@ -138,9 +197,99 @@ void stencil_task(const void *args, size_t arglen,
   get_base_and_stride(a.private_inst, FID_OUTPUT, private_base_output, private_stride_output);
   assert(private_stride_input == private_stride_output);
 
-  DTYPE *weights = get_weights();
-
   Rect<2> private_bounds = a.private_inst.get_indexspace<2>().bounds;
+  Point<2> interior_offset = a.interior_bounds.lo - private_bounds.lo;
+  Point<2> interior_size = a.interior_bounds.hi - a.interior_bounds.lo + Point<2>(1, 1);
+
+  if (a.xp_inst.exists()) {
+#if 1
+    inline_copy(a.xp_inst, a.private_inst, FID_INPUT,
+                a.xp_inst.get_indexspace<2>().bounds);
+#else
+    DTYPE *xp_base_input;
+    size_t xp_stride_input;
+    get_base_and_stride(a.xp_inst, FID_INPUT, xp_base_input, xp_stride_input);
+
+    Rect<2> xp_bounds = a.xp_inst.get_indexspace<2>().bounds;
+    Point<2> xp_offset = xp_bounds.lo - private_bounds.lo;
+    Point<2> xp_size = xp_bounds.hi - xp_bounds.lo + Point<2>(1, 1);
+
+    copy2D(xp_base_input, private_base_input,
+           xp_stride_input/sizeof(DTYPE),
+           0, xp_size.x,
+           0, xp_size.y,
+           private_stride_input/sizeof(DTYPE),
+           xp_offset.x, xp_offset.y);
+#endif
+  }
+
+  if (a.xm_inst.exists()) {
+#if 1
+    inline_copy(a.xm_inst, a.private_inst, FID_INPUT,
+                a.xm_inst.get_indexspace<2>().bounds);
+#else
+    DTYPE *xm_base_input;
+    size_t xm_stride_input;
+    get_base_and_stride(a.xm_inst, FID_INPUT, xm_base_input, xm_stride_input);
+
+    Rect<2> xm_bounds = a.xm_inst.get_indexspace<2>().bounds;
+    Point<2> xm_offset = xm_bounds.lo - private_bounds.lo;
+    Point<2> xm_size = xm_bounds.hi - xm_bounds.lo + Point<2>(1, 1);
+
+    copy2D(xm_base_input, private_base_input,
+           xm_stride_input/sizeof(DTYPE),
+           0, xm_size.x,
+           0, xm_size.y,
+           private_stride_input/sizeof(DTYPE),
+           xm_offset.x, xm_offset.y);
+#endif
+  }
+
+  if (a.yp_inst.exists()) {
+#if 1
+    inline_copy(a.yp_inst, a.private_inst, FID_INPUT,
+                a.yp_inst.get_indexspace<2>().bounds);
+#else
+    DTYPE *yp_base_input;
+    size_t yp_stride_input;
+    get_base_and_stride(a.yp_inst, FID_INPUT, yp_base_input, yp_stride_input);
+
+    Rect<2> yp_bounds = a.yp_inst.get_indexspace<2>().bounds;
+    Point<2> yp_offset = yp_bounds.lo - private_bounds.lo;
+    Point<2> yp_size = yp_bounds.hi - yp_bounds.lo + Point<2>(1, 1);
+
+    copy2D(yp_base_input, private_base_input,
+           yp_stride_input/sizeof(DTYPE),
+           0, yp_size.x,
+           0, yp_size.y,
+           private_stride_input/sizeof(DTYPE),
+           yp_offset.x, yp_offset.y);
+#endif
+  }
+
+  if (a.ym_inst.exists()) {
+#if 1
+    inline_copy(a.ym_inst, a.private_inst, FID_INPUT,
+                a.ym_inst.get_indexspace<2>().bounds);
+#else
+    DTYPE *ym_base_input;
+    size_t ym_stride_input;
+    get_base_and_stride(a.ym_inst, FID_INPUT, ym_base_input, ym_stride_input);
+
+    Rect<2> ym_bounds = a.ym_inst.get_indexspace<2>().bounds;
+    Point<2> ym_offset = ym_bounds.lo - private_bounds.lo;
+    Point<2> ym_size = ym_bounds.hi - ym_bounds.lo + Point<2>(1, 1);
+
+    copy2D(ym_base_input, private_base_input,
+           ym_stride_input/sizeof(DTYPE),
+           0, ym_size.x,
+           0, ym_size.y,
+           private_stride_input/sizeof(DTYPE),
+           ym_offset.x, ym_offset.y);
+#endif
+  }
+
+  DTYPE *weights = get_weights();
 
   printf("private base %p\n", private_base_input);
   printf("private stride %lu (%lu elements)\n", private_stride_input, private_stride_input/sizeof(DTYPE));
@@ -155,10 +304,10 @@ void stencil_task(const void *args, size_t arglen,
 
   stencil(private_base_input, private_base_output, weights,
           private_stride_input/sizeof(DTYPE),
-          a.interior_bounds.lo.x - private_bounds.lo.x,
-          a.interior_bounds.hi.x - private_bounds.lo.x + 1,
-          a.interior_bounds.lo.y - private_bounds.lo.y,
-          a.interior_bounds.hi.y - private_bounds.lo.y + 1);
+          interior_offset.x,
+          interior_offset.x + interior_size.x,
+          interior_offset.y,
+          interior_offset.y + interior_size.y);
 
   // dump(a.private_inst, FID_INPUT,  a.interior_bounds, " input");
   // dump(a.private_inst, FID_OUTPUT, a.interior_bounds, "output");
@@ -176,13 +325,103 @@ void increment_task(const void *args, size_t arglen,
   get_base_and_stride(a.private_inst, FID_INPUT, private_base_input, private_stride_input);
 
   Rect<2> private_bounds = a.private_inst.get_indexspace<2>().bounds;
+  Point<2> outer_offset = a.outer_bounds.lo - private_bounds.lo;
+  Point<2> outer_size = a.outer_bounds.hi - a.outer_bounds.lo + Point<2>(1, 1);
 
   increment(private_base_input,
-          private_stride_input/sizeof(DTYPE),
-          a.outer_bounds.lo.x - private_bounds.lo.x,
-          a.outer_bounds.hi.x - private_bounds.lo.x + 1,
-          a.outer_bounds.lo.y - private_bounds.lo.y,
-          a.outer_bounds.hi.y - private_bounds.lo.y + 1);
+            private_stride_input/sizeof(DTYPE),
+            outer_offset.x,
+            outer_offset.x + outer_size.x,
+            outer_offset.y,
+            outer_offset.y + outer_size.y);
+
+  if (a.xp_inst.exists()) {
+#if 1
+    inline_copy(a.private_inst, a.xp_inst, FID_INPUT,
+                a.xp_inst.get_indexspace<2>().bounds);
+#else
+    DTYPE *xp_base_input;
+    size_t xp_stride_input;
+    get_base_and_stride(a.xp_inst, FID_INPUT, xp_base_input, xp_stride_input);
+
+    Rect<2> xp_bounds = a.xp_inst.get_indexspace<2>().bounds;
+    Point<2> xp_offset = xp_bounds.lo - private_bounds.lo;
+    Point<2> xp_size = xp_bounds.hi - xp_bounds.lo + Point<2>(1, 1);
+
+    copy2D(private_base_input, xp_base_input,
+           private_stride_input/sizeof(DTYPE),
+           xp_offset.x, xp_offset.x + xp_size.x,
+           xp_offset.y, xp_offset.y + xp_size.y,
+           xp_stride_input/sizeof(DTYPE),
+           0, 0);
+#endif
+  }
+
+  if (a.xm_inst.exists()) {
+#if 1
+    inline_copy(a.private_inst, a.xm_inst, FID_INPUT,
+                a.xm_inst.get_indexspace<2>().bounds);
+#else
+    DTYPE *xm_base_input;
+    size_t xm_stride_input;
+    get_base_and_stride(a.xm_inst, FID_INPUT, xm_base_input, xm_stride_input);
+
+    Rect<2> xm_bounds = a.xm_inst.get_indexspace<2>().bounds;
+    Point<2> xm_offset = xm_bounds.lo - private_bounds.lo;
+    Point<2> xm_size = xm_bounds.hi - xm_bounds.lo + Point<2>(1, 1);
+
+    copy2D(private_base_input, xm_base_input,
+           private_stride_input/sizeof(DTYPE),
+           xm_offset.x, xm_offset.x + xm_size.x,
+           xm_offset.y, xm_offset.y + xm_size.y,
+           xm_stride_input/sizeof(DTYPE),
+           0, 0);
+#endif
+  }
+
+  if (a.yp_inst.exists()) {
+#if 1
+    inline_copy(a.private_inst, a.yp_inst, FID_INPUT,
+                a.yp_inst.get_indexspace<2>().bounds);
+#else
+    DTYPE *yp_base_input;
+    size_t yp_stride_input;
+    get_base_and_stride(a.yp_inst, FID_INPUT, yp_base_input, yp_stride_input);
+
+    Rect<2> yp_bounds = a.yp_inst.get_indexspace<2>().bounds;
+    Point<2> yp_offset = yp_bounds.lo - private_bounds.lo;
+    Point<2> yp_size = yp_bounds.hi - yp_bounds.lo + Point<2>(1, 1);
+
+    copy2D(private_base_input, yp_base_input,
+           private_stride_input/sizeof(DTYPE),
+           yp_offset.x, yp_offset.x + yp_size.x,
+           yp_offset.y, yp_offset.y + yp_size.y,
+           yp_stride_input/sizeof(DTYPE),
+           0, 0);
+#endif
+  }
+
+  if (a.ym_inst.exists()) {
+#if 1
+    inline_copy(a.private_inst, a.ym_inst, FID_INPUT,
+                a.ym_inst.get_indexspace<2>().bounds);
+#else
+    DTYPE *ym_base_input;
+    size_t ym_stride_input;
+    get_base_and_stride(a.ym_inst, FID_INPUT, ym_base_input, ym_stride_input);
+
+    Rect<2> ym_bounds = a.ym_inst.get_indexspace<2>().bounds;
+    Point<2> ym_offset = ym_bounds.lo - private_bounds.lo;
+    Point<2> ym_size = ym_bounds.hi - ym_bounds.lo + Point<2>(1, 1);
+
+    copy2D(private_base_input, ym_base_input,
+           private_stride_input/sizeof(DTYPE),
+           ym_offset.x, ym_offset.x + ym_size.x,
+           ym_offset.y, ym_offset.y + ym_size.y,
+           ym_stride_input/sizeof(DTYPE),
+           0, 0);
+#endif
+  }
 
   // dump(a.private_inst, FID_INPUT,  a.outer_bounds, " input");
 }
@@ -230,21 +469,42 @@ void shard_task(const void *args, size_t arglen,
   printf("shard %d %d running on processor " IDFMT "\n", a.point.x, a.point.y, p.id);
 
   // Initialize
-  RegionInstance private_inst;
+  RegionInstance private_inst = RegionInstance::NO_INST;
+  RegionInstance xp_inst_out_local = RegionInstance::NO_INST;
+  RegionInstance xm_inst_out_local = RegionInstance::NO_INST;
+  RegionInstance yp_inst_out_local = RegionInstance::NO_INST;
+  RegionInstance ym_inst_out_local = RegionInstance::NO_INST;
   {
-    Machine::MemoryQuery query(Machine::get_machine());
-    query.has_affinity_to(p);
-    query.only_kind(Memory::SYSTEM_MEM);
-    Memory memory = query.first();
-
     std::map<FieldID, size_t> field_sizes;
     field_sizes[FID_INPUT] = sizeof(DTYPE);
     field_sizes[FID_OUTPUT] = sizeof(DTYPE);
 
-    RegionInstance::create_instance(private_inst, memory,
-                                    a.exterior_bounds, field_sizes,
-                                    0 /*SOA*/, ProfilingRequestSet()).wait();
-    assert(private_inst.exists());
+    std::vector<Event> events;
+    events.push_back(
+      RegionInstance::create_instance(private_inst, a.sysmem,
+                                      a.exterior_bounds, field_sizes,
+                                      0 /*SOA*/, ProfilingRequestSet()));
+    if (a.xp_inst_out.exists())
+      events.push_back(
+        RegionInstance::create_instance(xp_inst_out_local, a.regmem,
+                                        a.xp_inst_out.get_indexspace<2>(), field_sizes,
+                                        0 /*SOA*/, ProfilingRequestSet()));
+    if (a.xm_inst_out.exists())
+      events.push_back(
+        RegionInstance::create_instance(xm_inst_out_local, a.regmem,
+                                        a.xm_inst_out.get_indexspace<2>(), field_sizes,
+                                        0 /*SOA*/, ProfilingRequestSet()));
+    if (a.yp_inst_out.exists())
+      events.push_back(
+        RegionInstance::create_instance(yp_inst_out_local, a.regmem,
+                                        a.yp_inst_out.get_indexspace<2>(), field_sizes,
+                                        0 /*SOA*/, ProfilingRequestSet()));
+    if (a.ym_inst_out.exists())
+      events.push_back(
+        RegionInstance::create_instance(ym_inst_out_local, a.regmem,
+                                        a.ym_inst_out.get_indexspace<2>(), field_sizes,
+                                        0 /*SOA*/, ProfilingRequestSet()));
+    Event::merge_events(events).wait();
   }
 
   {
@@ -270,9 +530,34 @@ void shard_task(const void *args, size_t arglen,
   sync.wait();
   sync = sync.advance_barrier();
 
+  // These are going to change, so give them mutable names
+  Barrier xp_empty_in = a.xp_empty_in;
+  Barrier xm_empty_in = a.xm_empty_in;
+  Barrier yp_empty_in = a.yp_empty_in;
+  Barrier ym_empty_in = a.ym_empty_in;
+
+  Barrier xp_empty_out = a.xp_empty_out;
+  Barrier xm_empty_out = a.xm_empty_out;
+  Barrier yp_empty_out = a.yp_empty_out;
+  Barrier ym_empty_out = a.ym_empty_out;
+
+  Barrier xp_full_in = a.xp_full_in;
+  Barrier xm_full_in = a.xm_full_in;
+  Barrier yp_full_in = a.yp_full_in;
+  Barrier ym_full_in = a.ym_full_in;
+
+  Barrier xp_full_out = a.xp_full_out;
+  Barrier xm_full_out = a.xm_full_out;
+  Barrier yp_full_out = a.yp_full_out;
+  Barrier ym_full_out = a.ym_full_out;
+
   // Main time step loop
-  Event stencil_done;
-  Event increment_done;
+  Event stencil_done = Event::NO_EVENT;
+  Event increment_done = Event::NO_EVENT;
+  Event xp_copy_done = Event::NO_EVENT;
+  Event xm_copy_done = Event::NO_EVENT;
+  Event yp_copy_done = Event::NO_EVENT;
+  Event ym_copy_done = Event::NO_EVENT;
   for (size_t t = 0; t < a.tsteps; t++) {
     {
       StencilArgs args;
@@ -283,23 +568,79 @@ void shard_task(const void *args, size_t arglen,
       args.ym_inst = a.ym_inst_in;
       args.print_ts = t == a.tprune;
       args.interior_bounds = a.interior_bounds;
-      stencil_done = p.spawn(STENCIL_TASK, &args, sizeof(args), increment_done);
+      Event precondition = Event::merge_events(
+        increment_done,
+        (xp_full_in.exists() ? xp_full_in.get_previous_phase() : Event::NO_EVENT),
+        (xm_full_in.exists() ? xm_full_in.get_previous_phase() : Event::NO_EVENT),
+        (yp_full_in.exists() ? yp_full_in.get_previous_phase() : Event::NO_EVENT),
+        (ym_full_in.exists() ? ym_full_in.get_previous_phase() : Event::NO_EVENT));
+      stencil_done = p.spawn(STENCIL_TASK, &args, sizeof(args), precondition);
+      if (xp_empty_out.exists()) xp_empty_out.arrive(1, stencil_done);
+      if (xm_empty_out.exists()) xm_empty_out.arrive(1, stencil_done);
+      if (yp_empty_out.exists()) yp_empty_out.arrive(1, stencil_done);
+      if (ym_empty_out.exists()) ym_empty_out.arrive(1, stencil_done);
     }
 
     {
       IncrementArgs args;
       args.private_inst = private_inst;
-      args.xp_inst = a.xp_inst_in;
-      args.xm_inst = a.xm_inst_in;
-      args.yp_inst = a.yp_inst_in;
-      args.ym_inst = a.ym_inst_in;
+      args.xp_inst = xp_inst_out_local;
+      args.xm_inst = xm_inst_out_local;
+      args.yp_inst = yp_inst_out_local;
+      args.ym_inst = ym_inst_out_local;
       args.print_ts = t == a.tsteps - a.tprune - 1;
       args.outer_bounds = a.outer_bounds;
-      increment_done = p.spawn(INCREMENT_TASK, &args, sizeof(args), stencil_done);
+      Event precondition = Event::merge_events(
+        stencil_done, xp_copy_done, xm_copy_done, yp_copy_done, ym_copy_done);
+      increment_done = p.spawn(INCREMENT_TASK, &args, sizeof(args), precondition);
     }
+
+    if (a.xp_inst_out.exists()) {
+      xp_copy_done = copy(xp_inst_out_local, a.xp_inst_out, FID_INPUT,
+                          Event::merge_events(increment_done, xp_empty_in));
+      xp_full_out.arrive(1, xp_copy_done);
+    }
+
+    if (a.xm_inst_out.exists()) {
+      xm_copy_done = copy(xm_inst_out_local, a.xm_inst_out, FID_INPUT,
+                          Event::merge_events(increment_done, xm_empty_in));
+      xm_full_out.arrive(1, xm_copy_done);
+    }
+
+    if (a.yp_inst_out.exists()) {
+      yp_copy_done = copy(yp_inst_out_local, a.yp_inst_out, FID_INPUT,
+                          Event::merge_events(increment_done, yp_empty_in));
+      yp_full_out.arrive(1, yp_copy_done);
+    }
+
+    if (a.ym_inst_out.exists()) {
+      ym_copy_done = copy(ym_inst_out_local, a.ym_inst_out, FID_INPUT,
+                          Event::merge_events(increment_done, ym_empty_in));
+      ym_full_out.arrive(1, ym_copy_done);
+    }
+
+    if (xp_empty_in.exists()) xp_empty_in = xp_empty_in.advance_barrier();
+    if (xm_empty_in.exists()) xm_empty_in = xm_empty_in.advance_barrier();
+    if (yp_empty_in.exists()) yp_empty_in = yp_empty_in.advance_barrier();
+    if (ym_empty_in.exists()) ym_empty_in = ym_empty_in.advance_barrier();
+
+    if (xp_empty_out.exists()) xp_empty_out = xp_empty_out.advance_barrier();
+    if (xm_empty_out.exists()) xm_empty_out = xm_empty_out.advance_barrier();
+    if (yp_empty_out.exists()) yp_empty_out = yp_empty_out.advance_barrier();
+    if (ym_empty_out.exists()) ym_empty_out = ym_empty_out.advance_barrier();
+
+    if (xp_full_in.exists()) xp_full_in = xp_full_in.advance_barrier();
+    if (xm_full_in.exists()) xm_full_in = xm_full_in.advance_barrier();
+    if (yp_full_in.exists()) yp_full_in = yp_full_in.advance_barrier();
+    if (ym_full_in.exists()) ym_full_in = ym_full_in.advance_barrier();
+
+    if (xp_full_out.exists()) xp_full_out = xp_full_out.advance_barrier();
+    if (xm_full_out.exists()) xm_full_out = xm_full_out.advance_barrier();
+    if (yp_full_out.exists()) yp_full_out = yp_full_out.advance_barrier();
+    if (ym_full_out.exists()) ym_full_out = ym_full_out.advance_barrier();
   }
 
-  Event check_done;
+  Event check_done = Event::NO_EVENT;
   {
     CheckArgs check_args;
     check_args.private_inst = private_inst;
@@ -387,10 +728,10 @@ void top_level_task(const void *args, size_t arglen,
   }
 
   // Create incoming exchange buffers
-  std::map<Point<2>, RegionInstance> xp_insts;
-  std::map<Point<2>, RegionInstance> xm_insts;
-  std::map<Point<2>, RegionInstance> yp_insts;
-  std::map<Point<2>, RegionInstance> ym_insts;
+  DefaultMap<Point<2>, RegionInstance> xp_insts(RegionInstance::NO_INST);
+  DefaultMap<Point<2>, RegionInstance> xm_insts(RegionInstance::NO_INST);
+  DefaultMap<Point<2>, RegionInstance> yp_insts(RegionInstance::NO_INST);
+  DefaultMap<Point<2>, RegionInstance> ym_insts(RegionInstance::NO_INST);
 
   {
     std::map<FieldID, size_t> field_sizes;
@@ -400,14 +741,14 @@ void top_level_task(const void *args, size_t arglen,
     std::vector<Event> events;
     for (PointInRectIterator<2, int> it(shards); it.valid; it.step()) {
       Point<2> i(it.p);
-      Rect<2> xp_bounds(Point<2>(x_blocks[i.x].hi - RADIUS + 1, y_blocks[i.y].lo),
-                        Point<2>(x_blocks[i.x].hi,              y_blocks[i.y].hi));
-      Rect<2> xm_bounds(Point<2>(x_blocks[i.x].lo,              y_blocks[i.y].lo),
-                        Point<2>(x_blocks[i.x].lo + RADIUS - 1, y_blocks[i.y].hi));
-      Rect<2> yp_bounds(Point<2>(x_blocks[i.x].lo,              y_blocks[i.y].hi - RADIUS + 1),
-                        Point<2>(x_blocks[i.x].hi,              y_blocks[i.y].hi));
-      Rect<2> ym_bounds(Point<2>(x_blocks[i.x].lo,              y_blocks[i.y].lo),
-                        Point<2>(x_blocks[i.x].hi,              y_blocks[i.y].lo + RADIUS - 1));
+      Rect<2> xp_bounds(Point<2>(x_blocks[i.x].hi + 1,      y_blocks[i.y].lo),
+                        Point<2>(x_blocks[i.x].hi + RADIUS, y_blocks[i.y].hi));
+      Rect<2> xm_bounds(Point<2>(x_blocks[i.x].lo - RADIUS, y_blocks[i.y].lo),
+                        Point<2>(x_blocks[i.x].lo - 1,      y_blocks[i.y].hi));
+      Rect<2> yp_bounds(Point<2>(x_blocks[i.x].lo,          y_blocks[i.y].hi + 1),
+                        Point<2>(x_blocks[i.x].hi,          y_blocks[i.y].hi + RADIUS));
+      Rect<2> ym_bounds(Point<2>(x_blocks[i.x].lo,          y_blocks[i.y].lo - RADIUS),
+                        Point<2>(x_blocks[i.x].hi,          y_blocks[i.y].lo - 1));
 
       Memory memory(proc_regmems[shard_procs[i]]);
       if (i.x != shards.hi.x)
@@ -452,15 +793,15 @@ void top_level_task(const void *args, size_t arglen,
   }
 
   // Create incoming phase barriers
-  std::map<Point<2>, Barrier> xp_bars_empty;
-  std::map<Point<2>, Barrier> xm_bars_empty;
-  std::map<Point<2>, Barrier> yp_bars_empty;
-  std::map<Point<2>, Barrier> ym_bars_empty;
+  DefaultMap<Point<2>, Barrier> xp_bars_empty(Barrier::NO_BARRIER);
+  DefaultMap<Point<2>, Barrier> xm_bars_empty(Barrier::NO_BARRIER);
+  DefaultMap<Point<2>, Barrier> yp_bars_empty(Barrier::NO_BARRIER);
+  DefaultMap<Point<2>, Barrier> ym_bars_empty(Barrier::NO_BARRIER);
 
-  std::map<Point<2>, Barrier> xp_bars_full;
-  std::map<Point<2>, Barrier> xm_bars_full;
-  std::map<Point<2>, Barrier> yp_bars_full;
-  std::map<Point<2>, Barrier> ym_bars_full;
+  DefaultMap<Point<2>, Barrier> xp_bars_full(Barrier::NO_BARRIER);
+  DefaultMap<Point<2>, Barrier> xm_bars_full(Barrier::NO_BARRIER);
+  DefaultMap<Point<2>, Barrier> yp_bars_full(Barrier::NO_BARRIER);
+  DefaultMap<Point<2>, Barrier> ym_bars_full(Barrier::NO_BARRIER);
 
   for (PointInRectIterator<2, int> it(shards); it.valid; it.step()) {
     Point<2> i(it.p);
@@ -544,6 +885,9 @@ void top_level_task(const void *args, size_t arglen,
       args.exterior_bounds = exterior_bounds;
       args.outer_bounds = outer_bounds;
 
+      args.sysmem = proc_sysmems[shard_procs[i]];
+      args.regmem = proc_regmems[shard_procs[i]];
+
       // Sanity checks
       assert(exterior_bounds.contains(outer_bounds));
       assert(outer_bounds.contains(interior_bounds));
@@ -553,15 +897,20 @@ void top_level_task(const void *args, size_t arglen,
       assert(args.yp_inst_in.exists() == args.yp_inst_out.exists());
       assert(args.ym_inst_in.exists() == args.ym_inst_out.exists());
 
-      if (args.xp_inst_in.exists()) assert(interior_bounds.contains(args.xp_inst_in.get_indexspace<2>().bounds));
-      if (args.xm_inst_in.exists()) assert(interior_bounds.contains(args.xm_inst_in.get_indexspace<2>().bounds));
-      if (args.yp_inst_in.exists()) assert(interior_bounds.contains(args.yp_inst_in.get_indexspace<2>().bounds));
-      if (args.ym_inst_in.exists()) assert(interior_bounds.contains(args.ym_inst_in.get_indexspace<2>().bounds));
+      if (args.xp_inst_in.exists()) assert(exterior_bounds.contains(args.xp_inst_in.get_indexspace<2>().bounds));
+      if (args.xm_inst_in.exists()) assert(exterior_bounds.contains(args.xm_inst_in.get_indexspace<2>().bounds));
+      if (args.yp_inst_in.exists()) assert(exterior_bounds.contains(args.yp_inst_in.get_indexspace<2>().bounds));
+      if (args.ym_inst_in.exists()) assert(exterior_bounds.contains(args.ym_inst_in.get_indexspace<2>().bounds));
 
-      if (args.xp_inst_out.exists()) assert(exterior_bounds.contains(args.xp_inst_out.get_indexspace<2>().bounds));
-      if (args.xm_inst_out.exists()) assert(exterior_bounds.contains(args.xm_inst_out.get_indexspace<2>().bounds));
-      if (args.yp_inst_out.exists()) assert(exterior_bounds.contains(args.yp_inst_out.get_indexspace<2>().bounds));
-      if (args.ym_inst_out.exists()) assert(exterior_bounds.contains(args.ym_inst_out.get_indexspace<2>().bounds));
+      if (args.xp_inst_in.exists()) assert(!interior_bounds.contains(args.xp_inst_in.get_indexspace<2>().bounds));
+      if (args.xm_inst_in.exists()) assert(!interior_bounds.contains(args.xm_inst_in.get_indexspace<2>().bounds));
+      if (args.yp_inst_in.exists()) assert(!interior_bounds.contains(args.yp_inst_in.get_indexspace<2>().bounds));
+      if (args.ym_inst_in.exists()) assert(!interior_bounds.contains(args.ym_inst_in.get_indexspace<2>().bounds));
+
+      if (args.xp_inst_out.exists()) assert(interior_bounds.contains(args.xp_inst_out.get_indexspace<2>().bounds));
+      if (args.xm_inst_out.exists()) assert(interior_bounds.contains(args.xm_inst_out.get_indexspace<2>().bounds));
+      if (args.yp_inst_out.exists()) assert(interior_bounds.contains(args.yp_inst_out.get_indexspace<2>().bounds));
+      if (args.ym_inst_out.exists()) assert(interior_bounds.contains(args.ym_inst_out.get_indexspace<2>().bounds));
 
       assert(args.xp_inst_in.exists() == args.xp_empty_in.exists());
       assert(args.xm_inst_in.exists() == args.xm_empty_in.exists());

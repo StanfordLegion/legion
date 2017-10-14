@@ -42,6 +42,7 @@ public:
   size_t tsteps, tprune, init;
   Realm::Point<2> point;
   Realm::Rect<2> interior_bounds, exterior_bounds, outer_bounds;
+  Realm::Memory sysmem, regmem;
 };
 
 struct StencilArgs {

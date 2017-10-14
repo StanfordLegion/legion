@@ -41,6 +41,11 @@ namespace Legion {
     template<typename T2> __CUDA_HD__
     inline Point<1,T>& operator=(const Realm::Point<1,T2> &rhs)
       { this->x = rhs.x; return *this; }
+  public:
+    __CUDA_HD__
+    inline static Point<1,T> ZEROES(void) { return Point<1,T>(0); }
+    __CUDA_HD__
+    inline static Point<1,T> ONES(void) { return Point<1,T>(1); }
   };
 
   // Specialization for 2-D Points
@@ -49,6 +54,8 @@ namespace Legion {
   public:
     __CUDA_HD__
     inline Point(void) : Realm::Point<2,T>() { }
+    __CUDA_HD__
+    inline explicit Point(const T v) : Realm::Point<2,T>(v,v) { }
     __CUDA_HD__
     inline Point(const T v1, const T v2) : Realm::Point<2,T>(v1,v2) { }
     __CUDA_HD__
@@ -65,6 +72,11 @@ namespace Legion {
     template<typename T2> __CUDA_HD__
     inline Point<2,T>& operator=(const Realm::Point<2,T2> &rhs)
       { this->x = rhs.x; this->y = rhs.y; return *this; }
+  public:
+    __CUDA_HD__
+    inline static Point<2,T> ZEROES(void) { return Point<2,T>(0); }
+    __CUDA_HD__
+    inline static Point<2,T> ONES(void) { return Point<2,T>(1); }
   };
 
   // Specialization for 3-D Points
@@ -73,6 +85,8 @@ namespace Legion {
   public:
     __CUDA_HD__
     inline Point(void) : Realm::Point<3,T>() { }
+    __CUDA_HD__
+    inline explicit Point(const T v) : Realm::Point<3,T>(v,v,v) { }
     __CUDA_HD__
     inline Point(const T v1, const T v2, const T v3) 
       : Realm::Point<3,T>(v1,v2,v3) { }
@@ -90,6 +104,11 @@ namespace Legion {
     template<typename T2> __CUDA_HD__
     inline Point<3,T>& operator=(const Realm::Point<3,T2> &rhs)
       { this->x = rhs.x; this->y = rhs.y; this->z = rhs.z; return *this; }
+  public:
+    __CUDA_HD__
+    inline static Point<3,T> ZEROES(void) { return Point<3,T>(0); }
+    __CUDA_HD__
+    inline static Point<3,T> ONES(void) { return Point<3,T>(1); }
   };
 
   //----------------------------------------------------------------------------
@@ -98,6 +117,20 @@ namespace Legion {
     : Realm::Point<DIM,T>()
   //----------------------------------------------------------------------------
   {
+  }
+
+  //----------------------------------------------------------------------------
+  template<int DIM, typename T> __CUDA_HD__
+  inline Point<DIM,T>::Point(const T val)
+    : Realm::Point<DIM,T>()
+  //----------------------------------------------------------------------------
+  {
+    this->x = val;
+    this->y = val;
+    this->z = val;
+    this->w = val;
+    for (int i = 4; i < DIM; i++)
+      this->rest[i-4] = val;
   }
   
   //----------------------------------------------------------------------------
@@ -142,6 +175,22 @@ namespace Legion {
     for (int i = 0; i < DIM; i++)
       (&Realm::Point<DIM,T>::x)[i] = (&rhs.x)[i];
     return *this;
+  }
+
+  //----------------------------------------------------------------------------
+  template<int DIM, typename T> __CUDA_HD__
+  /*static*/ inline Point<DIM,T> Point<DIM,T>::ZEROES(void)
+  //----------------------------------------------------------------------------
+  {
+    return Point<DIM,T>(0);
+  }
+
+  //----------------------------------------------------------------------------
+  template<int DIM, typename T> __CUDA_HD__
+  /*static*/ inline Point<DIM,T> Point<DIM,T>::ONES(void)
+  //----------------------------------------------------------------------------
+  {
+    return Point<DIM,T>(1);
   }
 
   //----------------------------------------------------------------------------
