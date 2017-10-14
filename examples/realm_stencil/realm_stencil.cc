@@ -21,6 +21,11 @@
 
 using namespace Realm;
 
+typedef Point<1, coord_t> Point1;
+typedef Point<2, coord_t> Point2;
+typedef Rect<1, coord_t> Rect1;
+typedef Rect<2, coord_t> Rect2;
+
 enum {
   TOP_LEVEL_TASK = Processor::TASK_ID_FIRST_AVAILABLE+0,
   SHARD_TASK     = Processor::TASK_ID_FIRST_AVAILABLE+1,
@@ -111,8 +116,8 @@ Event fill(RegionInstance inst, FieldID fid, DTYPE value)
   std::vector<CopySrcDstField> fields;
   fields.push_back(field);
 
-  return inst.get_indexspace<2>().fill(fields, ProfilingRequestSet(),
-                                       &value, sizeof(value));
+  return inst.get_indexspace<2, coord_t>().fill(fields, ProfilingRequestSet(),
+                                                &value, sizeof(value));
 }
 
 Event copy(RegionInstance src_inst, RegionInstance dst_inst, FieldID fid,
@@ -134,24 +139,24 @@ Event copy(RegionInstance src_inst, RegionInstance dst_inst, FieldID fid,
   std::vector<CopySrcDstField> dst_fields;
   dst_fields.push_back(dst_field);
 
-  return dst_inst.get_indexspace<2>().copy(src_fields, dst_fields,
-                                           ProfilingRequestSet(),
-                                           wait_for);
+  return dst_inst.get_indexspace<2, coord_t>().copy(src_fields, dst_fields,
+                                                    ProfilingRequestSet(),
+                                                    wait_for);
 }
 
 void get_base_and_stride(RegionInstance inst, FieldID fid, DTYPE *&base, size_t &stride)
 {
   AffineAccessor<DTYPE, 2> acc = AffineAccessor<DTYPE, 2>(inst, fid);
-  base = reinterpret_cast<DTYPE *>(acc.ptr(inst.get_indexspace<2>().bounds.lo));
+  base = reinterpret_cast<DTYPE *>(acc.ptr(inst.get_indexspace<2, coord_t>().bounds.lo));
   assert(acc.strides.x == sizeof(DTYPE));
   stride = acc.strides.y;
 }
 
-void dump(RegionInstance inst, FieldID fid, Rect<2> bounds, const char *prefix)
+void dump(RegionInstance inst, FieldID fid, Rect2 bounds, const char *prefix)
 {
   AffineAccessor<DTYPE, 2> acc = AffineAccessor<DTYPE, 2>(inst, fid);
-  for (PointInRectIterator<2, int> it(bounds); it.valid; it.step()) {
-    printf("%s: %2d %2d value %8.3f\n", prefix, it.p.x, it.p.y, acc.read(it.p));
+  for (PointInRectIterator<2, coord_t> it(bounds); it.valid; it.step()) {
+    printf("%s: %2lld %2lld value %8.3f\n", prefix, it.p.x, it.p.y, acc.read(it.p));
   }
 }
 
@@ -176,17 +181,17 @@ DTYPE *get_weights()
 }
 
 void inline_copy(RegionInstance src_inst, RegionInstance dst_inst, FieldID fid,
-                 Rect<2> bounds)
+                 Rect2 bounds)
 {
   AffineAccessor<DTYPE, 2> src_acc = AffineAccessor<DTYPE, 2>(src_inst, fid);
   AffineAccessor<DTYPE, 2> dst_acc = AffineAccessor<DTYPE, 2>(dst_inst, fid);
-  for (PointInRectIterator<2, int> it(bounds); it.valid; it.step()) {
+  for (PointInRectIterator<2, coord_t> it(bounds); it.valid; it.step()) {
     dst_acc.write(it.p, src_acc.read(it.p));
   }
 }
 
 void inline_copy_raw(RegionInstance src_inst, RegionInstance dst_inst,
-                     FieldID fid, Rect<2> bounds)
+                     FieldID fid, Rect2 bounds)
 {
   // FIXME: Something is still wrong in the index arithmetic here
 
@@ -200,13 +205,13 @@ void inline_copy_raw(RegionInstance src_inst, RegionInstance dst_inst,
   size_t dst_stride;
   get_base_and_stride(dst_inst, fid, dst_base, dst_stride);
 
-  Rect<2> src_bounds = src_inst.get_indexspace<2>().bounds;
-  Point<2> src_offset = bounds.lo - src_bounds.lo;
+  Rect2 src_bounds = src_inst.get_indexspace<2, coord_t>().bounds;
+  Point2 src_offset = bounds.lo - src_bounds.lo;
 
-  Rect<2> dst_bounds = dst_inst.get_indexspace<2>().bounds;
-  Point<2> dst_offset = bounds.lo - dst_bounds.lo;
+  Rect2 dst_bounds = dst_inst.get_indexspace<2, coord_t>().bounds;
+  Point2 dst_offset = bounds.lo - dst_bounds.lo;
 
-  Point<2> size = bounds.hi - bounds.lo + Point<2>(1, 1);
+  Point2 size = bounds.hi - bounds.lo + Point2(1, 1);
 
   copy2D(src_base, dst_base,
          src_stride/sizeof(DTYPE),
@@ -231,22 +236,22 @@ void stencil_task(const void *args, size_t arglen,
   get_base_and_stride(a.private_inst, FID_OUTPUT, private_base_output, private_stride_output);
   assert(private_stride_input == private_stride_output);
 
-  Rect<2> private_bounds = a.private_inst.get_indexspace<2>().bounds;
-  Point<2> interior_offset = a.interior_bounds.lo - private_bounds.lo;
-  Point<2> interior_size = a.interior_bounds.hi - a.interior_bounds.lo + Point<2>(1, 1);
+  Rect2 private_bounds = a.private_inst.get_indexspace<2, coord_t>().bounds;
+  Point2 interior_offset = a.interior_bounds.lo - private_bounds.lo;
+  Point2 interior_size = a.interior_bounds.hi - a.interior_bounds.lo + Point2(1, 1);
 
   if (a.xp_inst.exists())
     inline_copy(a.xp_inst, a.private_inst, FID_INPUT,
-                a.xp_inst.get_indexspace<2>().bounds);
+                a.xp_inst.get_indexspace<2, coord_t>().bounds);
   if (a.xm_inst.exists())
     inline_copy(a.xm_inst, a.private_inst, FID_INPUT,
-                a.xm_inst.get_indexspace<2>().bounds);
+                a.xm_inst.get_indexspace<2, coord_t>().bounds);
   if (a.yp_inst.exists())
     inline_copy(a.yp_inst, a.private_inst, FID_INPUT,
-                a.yp_inst.get_indexspace<2>().bounds);
+                a.yp_inst.get_indexspace<2, coord_t>().bounds);
   if (a.ym_inst.exists())
     inline_copy(a.ym_inst, a.private_inst, FID_INPUT,
-                a.ym_inst.get_indexspace<2>().bounds);
+                a.ym_inst.get_indexspace<2, coord_t>().bounds);
 
   DTYPE *weights = get_weights();
 
@@ -268,9 +273,9 @@ void increment_task(const void *args, size_t arglen,
   size_t private_stride_input;
   get_base_and_stride(a.private_inst, FID_INPUT, private_base_input, private_stride_input);
 
-  Rect<2> private_bounds = a.private_inst.get_indexspace<2>().bounds;
-  Point<2> outer_offset = a.outer_bounds.lo - private_bounds.lo;
-  Point<2> outer_size = a.outer_bounds.hi - a.outer_bounds.lo + Point<2>(1, 1);
+  Rect2 private_bounds = a.private_inst.get_indexspace<2, coord_t>().bounds;
+  Point2 outer_offset = a.outer_bounds.lo - private_bounds.lo;
+  Point2 outer_size = a.outer_bounds.hi - a.outer_bounds.lo + Point2(1, 1);
 
   increment(private_base_input,
             private_stride_input/sizeof(DTYPE),
@@ -281,16 +286,16 @@ void increment_task(const void *args, size_t arglen,
 
   if (a.xp_inst.exists())
     inline_copy(a.private_inst, a.xp_inst, FID_INPUT,
-                a.xp_inst.get_indexspace<2>().bounds);
+                a.xp_inst.get_indexspace<2, coord_t>().bounds);
   if (a.xm_inst.exists())
     inline_copy(a.private_inst, a.xm_inst, FID_INPUT,
-                a.xm_inst.get_indexspace<2>().bounds);
+                a.xm_inst.get_indexspace<2, coord_t>().bounds);
   if (a.yp_inst.exists())
     inline_copy(a.private_inst, a.yp_inst, FID_INPUT,
-                a.yp_inst.get_indexspace<2>().bounds);
+                a.yp_inst.get_indexspace<2, coord_t>().bounds);
   if (a.ym_inst.exists())
     inline_copy(a.private_inst, a.ym_inst, FID_INPUT,
-                a.ym_inst.get_indexspace<2>().bounds);
+                a.ym_inst.get_indexspace<2, coord_t>().bounds);
 
   if (a.print_ts)
     printf("t: %lld\n", Realm::Clock::current_time_in_microseconds());
@@ -308,7 +313,7 @@ void check_task(const void *args, size_t arglen,
   // Check input
   {
     AffineAccessor<DTYPE, 2> acc = AffineAccessor<DTYPE, 2>(a.private_inst, FID_INPUT);
-    for (PointInRectIterator<2, int> it(a.interior_bounds); it.valid; it.step()) {
+    for (PointInRectIterator<2, coord_t> it(a.interior_bounds); it.valid; it.step()) {
       if (acc.read(it.p) != expect_input) {
         printf("bad value: got %f expected %f\n", acc.read(it.p), expect_input);
         assert(false);
@@ -320,7 +325,7 @@ void check_task(const void *args, size_t arglen,
   // Check output
   {
     AffineAccessor<DTYPE, 2> acc = AffineAccessor<DTYPE, 2>(a.private_inst, FID_OUTPUT);
-    for (PointInRectIterator<2, int> it(a.interior_bounds); it.valid; it.step()) {
+    for (PointInRectIterator<2, coord_t> it(a.interior_bounds); it.valid; it.step()) {
       if (acc.read(it.p) != expect_output) {
         printf("bad value: got %f expected %f\n", acc.read(it.p), expect_output);
         assert(false);
@@ -355,22 +360,22 @@ void shard_task(const void *args, size_t arglen,
     if (a.xp_inst_out.exists())
       events.push_back(
         RegionInstance::create_instance(xp_inst_out_local, a.regmem,
-                                        a.xp_inst_out.get_indexspace<2>(), field_sizes,
+                                        a.xp_inst_out.get_indexspace<2, coord_t>(), field_sizes,
                                         0 /*SOA*/, ProfilingRequestSet()));
     if (a.xm_inst_out.exists())
       events.push_back(
         RegionInstance::create_instance(xm_inst_out_local, a.regmem,
-                                        a.xm_inst_out.get_indexspace<2>(), field_sizes,
+                                        a.xm_inst_out.get_indexspace<2, coord_t>(), field_sizes,
                                         0 /*SOA*/, ProfilingRequestSet()));
     if (a.yp_inst_out.exists())
       events.push_back(
         RegionInstance::create_instance(yp_inst_out_local, a.regmem,
-                                        a.yp_inst_out.get_indexspace<2>(), field_sizes,
+                                        a.yp_inst_out.get_indexspace<2, coord_t>(), field_sizes,
                                         0 /*SOA*/, ProfilingRequestSet()));
     if (a.ym_inst_out.exists())
       events.push_back(
         RegionInstance::create_instance(ym_inst_out_local, a.regmem,
-                                        a.ym_inst_out.get_indexspace<2>(), field_sizes,
+                                        a.ym_inst_out.get_indexspace<2, coord_t>(), field_sizes,
                                         0 /*SOA*/, ProfilingRequestSet()));
     Event::merge_events(events).wait();
   }
@@ -568,11 +573,11 @@ void top_level_task(const void *args, size_t arglen,
 
   // Assign shards to processors
   assert(procs.size() >= config.ntx*config.nty); // Expect one core per shard
-  Rect<2> shards(Point<2>(0, 0), Point<2>(config.ntx-1, config.nty-1));
-  std::map<Point<2>, Processor> shard_procs;
+  Rect2 shards(Point2(0, 0), Point2(config.ntx-1, config.nty-1));
+  std::map<Point2, Processor> shard_procs;
   {
     std::vector<Processor>::iterator pit = procs.begin();
-    for (PointInRectIterator<2, int> it(shards); it.valid; it.step()) {
+    for (PointInRectIterator<2, coord_t> it(shards); it.valid; it.step()) {
       assert(pit != procs.end());
       shard_procs[it.p] = *pit++;
     }
@@ -585,21 +590,21 @@ void top_level_task(const void *args, size_t arglen,
   assert(ny >= config.nty);
 
   // Choose block sizes for each shard
-  std::vector<Rect<1> > x_blocks;
-  std::vector<Rect<1> > y_blocks;
+  std::vector<Rect1> x_blocks;
+  std::vector<Rect1> y_blocks;
 
   for (coord_t ix = 0; ix < config.ntx; ix++) {
-    x_blocks.push_back(Rect<1>(ix*nx/config.ntx, (ix+1)*nx/config.ntx - 1));
+    x_blocks.push_back(Rect1(ix*nx/config.ntx, (ix+1)*nx/config.ntx - 1));
   }
   for (coord_t iy = 0; iy < config.nty; iy++) {
-    y_blocks.push_back(Rect<1>(iy*ny/config.nty, (iy+1)*ny/config.nty - 1));
+    y_blocks.push_back(Rect1(iy*ny/config.nty, (iy+1)*ny/config.nty - 1));
   }
 
   // Create incoming exchange buffers
-  DefaultMap<Point<2>, RegionInstance> xp_insts(RegionInstance::NO_INST);
-  DefaultMap<Point<2>, RegionInstance> xm_insts(RegionInstance::NO_INST);
-  DefaultMap<Point<2>, RegionInstance> yp_insts(RegionInstance::NO_INST);
-  DefaultMap<Point<2>, RegionInstance> ym_insts(RegionInstance::NO_INST);
+  DefaultMap<Point2, RegionInstance> xp_insts(RegionInstance::NO_INST);
+  DefaultMap<Point2, RegionInstance> xm_insts(RegionInstance::NO_INST);
+  DefaultMap<Point2, RegionInstance> yp_insts(RegionInstance::NO_INST);
+  DefaultMap<Point2, RegionInstance> ym_insts(RegionInstance::NO_INST);
 
   {
     std::map<FieldID, size_t> field_sizes;
@@ -607,16 +612,16 @@ void top_level_task(const void *args, size_t arglen,
     field_sizes[FID_OUTPUT] = sizeof(DTYPE);
 
     std::vector<Event> events;
-    for (PointInRectIterator<2, int> it(shards); it.valid; it.step()) {
-      Point<2> i(it.p);
-      Rect<2> xp_bounds(Point<2>(x_blocks[i.x].hi + 1,      y_blocks[i.y].lo),
-                        Point<2>(x_blocks[i.x].hi + RADIUS, y_blocks[i.y].hi));
-      Rect<2> xm_bounds(Point<2>(x_blocks[i.x].lo - RADIUS, y_blocks[i.y].lo),
-                        Point<2>(x_blocks[i.x].lo - 1,      y_blocks[i.y].hi));
-      Rect<2> yp_bounds(Point<2>(x_blocks[i.x].lo,          y_blocks[i.y].hi + 1),
-                        Point<2>(x_blocks[i.x].hi,          y_blocks[i.y].hi + RADIUS));
-      Rect<2> ym_bounds(Point<2>(x_blocks[i.x].lo,          y_blocks[i.y].lo - RADIUS),
-                        Point<2>(x_blocks[i.x].hi,          y_blocks[i.y].lo - 1));
+    for (PointInRectIterator<2, coord_t> it(shards); it.valid; it.step()) {
+      Point2 i(it.p);
+      Rect2 xp_bounds(Point2(x_blocks[i.x].hi + 1,      y_blocks[i.y].lo),
+                      Point2(x_blocks[i.x].hi + RADIUS, y_blocks[i.y].hi));
+      Rect2 xm_bounds(Point2(x_blocks[i.x].lo - RADIUS, y_blocks[i.y].lo),
+                      Point2(x_blocks[i.x].lo - 1,      y_blocks[i.y].hi));
+      Rect2 yp_bounds(Point2(x_blocks[i.x].lo,          y_blocks[i.y].hi + 1),
+                      Point2(x_blocks[i.x].hi,          y_blocks[i.y].hi + RADIUS));
+      Rect2 ym_bounds(Point2(x_blocks[i.x].lo,          y_blocks[i.y].lo - RADIUS),
+                      Point2(x_blocks[i.x].hi,          y_blocks[i.y].lo - 1));
 
       Memory memory(proc_regmems[shard_procs[i]]);
       if (i.x != shards.hi.x)
@@ -644,18 +649,18 @@ void top_level_task(const void *args, size_t arglen,
   }
 
   // Create incoming phase barriers
-  DefaultMap<Point<2>, Barrier> xp_bars_empty(Barrier::NO_BARRIER);
-  DefaultMap<Point<2>, Barrier> xm_bars_empty(Barrier::NO_BARRIER);
-  DefaultMap<Point<2>, Barrier> yp_bars_empty(Barrier::NO_BARRIER);
-  DefaultMap<Point<2>, Barrier> ym_bars_empty(Barrier::NO_BARRIER);
+  DefaultMap<Point2, Barrier> xp_bars_empty(Barrier::NO_BARRIER);
+  DefaultMap<Point2, Barrier> xm_bars_empty(Barrier::NO_BARRIER);
+  DefaultMap<Point2, Barrier> yp_bars_empty(Barrier::NO_BARRIER);
+  DefaultMap<Point2, Barrier> ym_bars_empty(Barrier::NO_BARRIER);
 
-  DefaultMap<Point<2>, Barrier> xp_bars_full(Barrier::NO_BARRIER);
-  DefaultMap<Point<2>, Barrier> xm_bars_full(Barrier::NO_BARRIER);
-  DefaultMap<Point<2>, Barrier> yp_bars_full(Barrier::NO_BARRIER);
-  DefaultMap<Point<2>, Barrier> ym_bars_full(Barrier::NO_BARRIER);
+  DefaultMap<Point2, Barrier> xp_bars_full(Barrier::NO_BARRIER);
+  DefaultMap<Point2, Barrier> xm_bars_full(Barrier::NO_BARRIER);
+  DefaultMap<Point2, Barrier> yp_bars_full(Barrier::NO_BARRIER);
+  DefaultMap<Point2, Barrier> ym_bars_full(Barrier::NO_BARRIER);
 
-  for (PointInRectIterator<2, int> it(shards); it.valid; it.step()) {
-    Point<2> i(it.p);
+  for (PointInRectIterator<2, coord_t> it(shards); it.valid; it.step()) {
+    Point2 i(it.p);
 
     if (i.x != shards.hi.x) xp_bars_empty[i] = Barrier::create_barrier(1);
     if (i.x != shards.lo.x) xm_bars_empty[i] = Barrier::create_barrier(1);
@@ -674,18 +679,18 @@ void top_level_task(const void *args, size_t arglen,
   // Launch shard tasks
   {
     std::vector<Event> events;
-    for (PointInRectIterator<2, int> it(shards); it.valid; it.step()) {
-      Point<2> i(it.p);
+    for (PointInRectIterator<2, coord_t> it(shards); it.valid; it.step()) {
+      Point2 i(it.p);
 
-      Rect<2> interior_bounds(Point<2>(x_blocks[i.x].lo, y_blocks[i.y].lo),
-                              Point<2>(x_blocks[i.x].hi, y_blocks[i.y].hi));
-      Rect<2> exterior_bounds(Point<2>(x_blocks[i.x].lo - RADIUS, y_blocks[i.y].lo - RADIUS),
-                              Point<2>(x_blocks[i.x].hi + RADIUS, y_blocks[i.y].hi + RADIUS));
+      Rect2 interior_bounds(Point2(x_blocks[i.x].lo, y_blocks[i.y].lo),
+                            Point2(x_blocks[i.x].hi, y_blocks[i.y].hi));
+      Rect2 exterior_bounds(Point2(x_blocks[i.x].lo - RADIUS, y_blocks[i.y].lo - RADIUS),
+                            Point2(x_blocks[i.x].hi + RADIUS, y_blocks[i.y].hi + RADIUS));
       // As interior, but bloated only on the outer edges
-      Rect<2> outer_bounds(Point<2>(x_blocks[i.x].lo - (i.x == shards.lo.x ? RADIUS : 0),
-                                    y_blocks[i.y].lo - (i.y == shards.lo.y ? RADIUS : 0)),
-                           Point<2>(x_blocks[i.x].hi + (i.x == shards.hi.x ? RADIUS : 0),
-                                    y_blocks[i.y].hi + (i.y == shards.hi.y ? RADIUS : 0)));
+      Rect2 outer_bounds(Point2(x_blocks[i.x].lo - (i.x == shards.lo.x ? RADIUS : 0),
+                                y_blocks[i.y].lo - (i.y == shards.lo.y ? RADIUS : 0)),
+                         Point2(x_blocks[i.x].hi + (i.x == shards.hi.x ? RADIUS : 0),
+                                y_blocks[i.y].hi + (i.y == shards.hi.y ? RADIUS : 0)));
 
       // Pack arguments
       ShardArgs args;
@@ -694,30 +699,30 @@ void top_level_task(const void *args, size_t arglen,
       args.yp_inst_in = yp_insts[i];
       args.ym_inst_in = ym_insts[i];
 
-      args.xp_inst_out = xm_insts[i + Point<2>( 1,  0)];
-      args.xm_inst_out = xp_insts[i + Point<2>(-1,  0)];
-      args.yp_inst_out = ym_insts[i + Point<2>( 0,  1)];
-      args.ym_inst_out = yp_insts[i + Point<2>( 0, -1)];
+      args.xp_inst_out = xm_insts[i + Point2( 1,  0)];
+      args.xm_inst_out = xp_insts[i + Point2(-1,  0)];
+      args.yp_inst_out = ym_insts[i + Point2( 0,  1)];
+      args.ym_inst_out = yp_insts[i + Point2( 0, -1)];
 
       args.xp_empty_in = xp_bars_empty[i];
       args.xm_empty_in = xm_bars_empty[i];
       args.yp_empty_in = yp_bars_empty[i];
       args.ym_empty_in = ym_bars_empty[i];
 
-      args.xp_empty_out = xm_bars_empty[i + Point<2>( 1,  0)];
-      args.xm_empty_out = xp_bars_empty[i + Point<2>(-1,  0)];
-      args.yp_empty_out = ym_bars_empty[i + Point<2>( 0,  1)];
-      args.ym_empty_out = yp_bars_empty[i + Point<2>( 0, -1)];
+      args.xp_empty_out = xm_bars_empty[i + Point2( 1,  0)];
+      args.xm_empty_out = xp_bars_empty[i + Point2(-1,  0)];
+      args.yp_empty_out = ym_bars_empty[i + Point2( 0,  1)];
+      args.ym_empty_out = yp_bars_empty[i + Point2( 0, -1)];
 
       args.xp_full_in = xp_bars_full[i];
       args.xm_full_in = xm_bars_full[i];
       args.yp_full_in = yp_bars_full[i];
       args.ym_full_in = ym_bars_full[i];
 
-      args.xp_full_out = xm_bars_full[i + Point<2>( 1,  0)];
-      args.xm_full_out = xp_bars_full[i + Point<2>(-1,  0)];
-      args.yp_full_out = ym_bars_full[i + Point<2>( 0,  1)];
-      args.ym_full_out = yp_bars_full[i + Point<2>( 0, -1)];
+      args.xp_full_out = xm_bars_full[i + Point2( 1,  0)];
+      args.xm_full_out = xp_bars_full[i + Point2(-1,  0)];
+      args.yp_full_out = ym_bars_full[i + Point2( 0,  1)];
+      args.ym_full_out = yp_bars_full[i + Point2( 0, -1)];
 
       args.sync = sync_bar;
 
@@ -742,20 +747,20 @@ void top_level_task(const void *args, size_t arglen,
       assert(args.yp_inst_in.exists() == args.yp_inst_out.exists());
       assert(args.ym_inst_in.exists() == args.ym_inst_out.exists());
 
-      if (args.xp_inst_in.exists()) assert(exterior_bounds.contains(args.xp_inst_in.get_indexspace<2>().bounds));
-      if (args.xm_inst_in.exists()) assert(exterior_bounds.contains(args.xm_inst_in.get_indexspace<2>().bounds));
-      if (args.yp_inst_in.exists()) assert(exterior_bounds.contains(args.yp_inst_in.get_indexspace<2>().bounds));
-      if (args.ym_inst_in.exists()) assert(exterior_bounds.contains(args.ym_inst_in.get_indexspace<2>().bounds));
+      if (args.xp_inst_in.exists()) assert(exterior_bounds.contains(args.xp_inst_in.get_indexspace<2, coord_t>().bounds));
+      if (args.xm_inst_in.exists()) assert(exterior_bounds.contains(args.xm_inst_in.get_indexspace<2, coord_t>().bounds));
+      if (args.yp_inst_in.exists()) assert(exterior_bounds.contains(args.yp_inst_in.get_indexspace<2, coord_t>().bounds));
+      if (args.ym_inst_in.exists()) assert(exterior_bounds.contains(args.ym_inst_in.get_indexspace<2, coord_t>().bounds));
 
-      if (args.xp_inst_in.exists()) assert(!interior_bounds.contains(args.xp_inst_in.get_indexspace<2>().bounds));
-      if (args.xm_inst_in.exists()) assert(!interior_bounds.contains(args.xm_inst_in.get_indexspace<2>().bounds));
-      if (args.yp_inst_in.exists()) assert(!interior_bounds.contains(args.yp_inst_in.get_indexspace<2>().bounds));
-      if (args.ym_inst_in.exists()) assert(!interior_bounds.contains(args.ym_inst_in.get_indexspace<2>().bounds));
+      if (args.xp_inst_in.exists()) assert(!interior_bounds.contains(args.xp_inst_in.get_indexspace<2, coord_t>().bounds));
+      if (args.xm_inst_in.exists()) assert(!interior_bounds.contains(args.xm_inst_in.get_indexspace<2, coord_t>().bounds));
+      if (args.yp_inst_in.exists()) assert(!interior_bounds.contains(args.yp_inst_in.get_indexspace<2, coord_t>().bounds));
+      if (args.ym_inst_in.exists()) assert(!interior_bounds.contains(args.ym_inst_in.get_indexspace<2, coord_t>().bounds));
 
-      if (args.xp_inst_out.exists()) assert(interior_bounds.contains(args.xp_inst_out.get_indexspace<2>().bounds));
-      if (args.xm_inst_out.exists()) assert(interior_bounds.contains(args.xm_inst_out.get_indexspace<2>().bounds));
-      if (args.yp_inst_out.exists()) assert(interior_bounds.contains(args.yp_inst_out.get_indexspace<2>().bounds));
-      if (args.ym_inst_out.exists()) assert(interior_bounds.contains(args.ym_inst_out.get_indexspace<2>().bounds));
+      if (args.xp_inst_out.exists()) assert(interior_bounds.contains(args.xp_inst_out.get_indexspace<2, coord_t>().bounds));
+      if (args.xm_inst_out.exists()) assert(interior_bounds.contains(args.xm_inst_out.get_indexspace<2, coord_t>().bounds));
+      if (args.yp_inst_out.exists()) assert(interior_bounds.contains(args.yp_inst_out.get_indexspace<2, coord_t>().bounds));
+      if (args.ym_inst_out.exists()) assert(interior_bounds.contains(args.ym_inst_out.get_indexspace<2, coord_t>().bounds));
 
       assert(args.xp_inst_in.exists() == args.xp_empty_in.exists());
       assert(args.xm_inst_in.exists() == args.xm_empty_in.exists());
