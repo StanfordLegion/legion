@@ -185,6 +185,37 @@ void inline_copy(RegionInstance src_inst, RegionInstance dst_inst, FieldID fid,
   }
 }
 
+void inline_copy_raw(RegionInstance src_inst, RegionInstance dst_inst,
+                     FieldID fid, Rect<2> bounds)
+{
+  // FIXME: Something is still wrong in the index arithmetic here
+
+  AffineAccessor<DTYPE, 2> src_acc = AffineAccessor<DTYPE, 2>(src_inst, fid);
+  DTYPE *src_base;
+  size_t src_stride;
+  get_base_and_stride(src_inst, fid, src_base, src_stride);
+
+  AffineAccessor<DTYPE, 2> dst_acc = AffineAccessor<DTYPE, 2>(dst_inst, fid);
+  DTYPE *dst_base;
+  size_t dst_stride;
+  get_base_and_stride(dst_inst, fid, dst_base, dst_stride);
+
+  Rect<2> src_bounds = src_inst.get_indexspace<2>().bounds;
+  Point<2> src_offset = bounds.lo - src_bounds.lo;
+
+  Rect<2> dst_bounds = dst_inst.get_indexspace<2>().bounds;
+  Point<2> dst_offset = bounds.lo - dst_bounds.lo;
+
+  Point<2> size = bounds.hi - bounds.lo + Point<2>(1, 1);
+
+  copy2D(src_base, dst_base,
+         src_stride/sizeof(DTYPE),
+         src_offset.x, src_offset.x + size.x,
+         src_offset.y, src_offset.y + size.y,
+         dst_stride/sizeof(DTYPE),
+         dst_offset.x, dst_offset.y);
+}
+
 void stencil_task(const void *args, size_t arglen,
                   const void *userdata, size_t userlen, Processor p)
 {
@@ -202,91 +233,23 @@ void stencil_task(const void *args, size_t arglen,
   Point<2> interior_size = a.interior_bounds.hi - a.interior_bounds.lo + Point<2>(1, 1);
 
   if (a.xp_inst.exists()) {
-#if 1
     inline_copy(a.xp_inst, a.private_inst, FID_INPUT,
                 a.xp_inst.get_indexspace<2>().bounds);
-#else
-    DTYPE *xp_base_input;
-    size_t xp_stride_input;
-    get_base_and_stride(a.xp_inst, FID_INPUT, xp_base_input, xp_stride_input);
-
-    Rect<2> xp_bounds = a.xp_inst.get_indexspace<2>().bounds;
-    Point<2> xp_offset = xp_bounds.lo - private_bounds.lo;
-    Point<2> xp_size = xp_bounds.hi - xp_bounds.lo + Point<2>(1, 1);
-
-    copy2D(xp_base_input, private_base_input,
-           xp_stride_input/sizeof(DTYPE),
-           0, xp_size.x,
-           0, xp_size.y,
-           private_stride_input/sizeof(DTYPE),
-           xp_offset.x, xp_offset.y);
-#endif
   }
 
   if (a.xm_inst.exists()) {
-#if 1
     inline_copy(a.xm_inst, a.private_inst, FID_INPUT,
                 a.xm_inst.get_indexspace<2>().bounds);
-#else
-    DTYPE *xm_base_input;
-    size_t xm_stride_input;
-    get_base_and_stride(a.xm_inst, FID_INPUT, xm_base_input, xm_stride_input);
-
-    Rect<2> xm_bounds = a.xm_inst.get_indexspace<2>().bounds;
-    Point<2> xm_offset = xm_bounds.lo - private_bounds.lo;
-    Point<2> xm_size = xm_bounds.hi - xm_bounds.lo + Point<2>(1, 1);
-
-    copy2D(xm_base_input, private_base_input,
-           xm_stride_input/sizeof(DTYPE),
-           0, xm_size.x,
-           0, xm_size.y,
-           private_stride_input/sizeof(DTYPE),
-           xm_offset.x, xm_offset.y);
-#endif
   }
 
   if (a.yp_inst.exists()) {
-#if 1
     inline_copy(a.yp_inst, a.private_inst, FID_INPUT,
                 a.yp_inst.get_indexspace<2>().bounds);
-#else
-    DTYPE *yp_base_input;
-    size_t yp_stride_input;
-    get_base_and_stride(a.yp_inst, FID_INPUT, yp_base_input, yp_stride_input);
-
-    Rect<2> yp_bounds = a.yp_inst.get_indexspace<2>().bounds;
-    Point<2> yp_offset = yp_bounds.lo - private_bounds.lo;
-    Point<2> yp_size = yp_bounds.hi - yp_bounds.lo + Point<2>(1, 1);
-
-    copy2D(yp_base_input, private_base_input,
-           yp_stride_input/sizeof(DTYPE),
-           0, yp_size.x,
-           0, yp_size.y,
-           private_stride_input/sizeof(DTYPE),
-           yp_offset.x, yp_offset.y);
-#endif
   }
 
   if (a.ym_inst.exists()) {
-#if 1
     inline_copy(a.ym_inst, a.private_inst, FID_INPUT,
                 a.ym_inst.get_indexspace<2>().bounds);
-#else
-    DTYPE *ym_base_input;
-    size_t ym_stride_input;
-    get_base_and_stride(a.ym_inst, FID_INPUT, ym_base_input, ym_stride_input);
-
-    Rect<2> ym_bounds = a.ym_inst.get_indexspace<2>().bounds;
-    Point<2> ym_offset = ym_bounds.lo - private_bounds.lo;
-    Point<2> ym_size = ym_bounds.hi - ym_bounds.lo + Point<2>(1, 1);
-
-    copy2D(ym_base_input, private_base_input,
-           ym_stride_input/sizeof(DTYPE),
-           0, ym_size.x,
-           0, ym_size.y,
-           private_stride_input/sizeof(DTYPE),
-           ym_offset.x, ym_offset.y);
-#endif
   }
 
   DTYPE *weights = get_weights();
@@ -336,91 +299,23 @@ void increment_task(const void *args, size_t arglen,
             outer_offset.y + outer_size.y);
 
   if (a.xp_inst.exists()) {
-#if 1
     inline_copy(a.private_inst, a.xp_inst, FID_INPUT,
                 a.xp_inst.get_indexspace<2>().bounds);
-#else
-    DTYPE *xp_base_input;
-    size_t xp_stride_input;
-    get_base_and_stride(a.xp_inst, FID_INPUT, xp_base_input, xp_stride_input);
-
-    Rect<2> xp_bounds = a.xp_inst.get_indexspace<2>().bounds;
-    Point<2> xp_offset = xp_bounds.lo - private_bounds.lo;
-    Point<2> xp_size = xp_bounds.hi - xp_bounds.lo + Point<2>(1, 1);
-
-    copy2D(private_base_input, xp_base_input,
-           private_stride_input/sizeof(DTYPE),
-           xp_offset.x, xp_offset.x + xp_size.x,
-           xp_offset.y, xp_offset.y + xp_size.y,
-           xp_stride_input/sizeof(DTYPE),
-           0, 0);
-#endif
   }
 
   if (a.xm_inst.exists()) {
-#if 1
     inline_copy(a.private_inst, a.xm_inst, FID_INPUT,
                 a.xm_inst.get_indexspace<2>().bounds);
-#else
-    DTYPE *xm_base_input;
-    size_t xm_stride_input;
-    get_base_and_stride(a.xm_inst, FID_INPUT, xm_base_input, xm_stride_input);
-
-    Rect<2> xm_bounds = a.xm_inst.get_indexspace<2>().bounds;
-    Point<2> xm_offset = xm_bounds.lo - private_bounds.lo;
-    Point<2> xm_size = xm_bounds.hi - xm_bounds.lo + Point<2>(1, 1);
-
-    copy2D(private_base_input, xm_base_input,
-           private_stride_input/sizeof(DTYPE),
-           xm_offset.x, xm_offset.x + xm_size.x,
-           xm_offset.y, xm_offset.y + xm_size.y,
-           xm_stride_input/sizeof(DTYPE),
-           0, 0);
-#endif
   }
 
   if (a.yp_inst.exists()) {
-#if 1
     inline_copy(a.private_inst, a.yp_inst, FID_INPUT,
                 a.yp_inst.get_indexspace<2>().bounds);
-#else
-    DTYPE *yp_base_input;
-    size_t yp_stride_input;
-    get_base_and_stride(a.yp_inst, FID_INPUT, yp_base_input, yp_stride_input);
-
-    Rect<2> yp_bounds = a.yp_inst.get_indexspace<2>().bounds;
-    Point<2> yp_offset = yp_bounds.lo - private_bounds.lo;
-    Point<2> yp_size = yp_bounds.hi - yp_bounds.lo + Point<2>(1, 1);
-
-    copy2D(private_base_input, yp_base_input,
-           private_stride_input/sizeof(DTYPE),
-           yp_offset.x, yp_offset.x + yp_size.x,
-           yp_offset.y, yp_offset.y + yp_size.y,
-           yp_stride_input/sizeof(DTYPE),
-           0, 0);
-#endif
   }
 
   if (a.ym_inst.exists()) {
-#if 1
     inline_copy(a.private_inst, a.ym_inst, FID_INPUT,
                 a.ym_inst.get_indexspace<2>().bounds);
-#else
-    DTYPE *ym_base_input;
-    size_t ym_stride_input;
-    get_base_and_stride(a.ym_inst, FID_INPUT, ym_base_input, ym_stride_input);
-
-    Rect<2> ym_bounds = a.ym_inst.get_indexspace<2>().bounds;
-    Point<2> ym_offset = ym_bounds.lo - private_bounds.lo;
-    Point<2> ym_size = ym_bounds.hi - ym_bounds.lo + Point<2>(1, 1);
-
-    copy2D(private_base_input, ym_base_input,
-           private_stride_input/sizeof(DTYPE),
-           ym_offset.x, ym_offset.x + ym_size.x,
-           ym_offset.y, ym_offset.y + ym_size.y,
-           ym_stride_input/sizeof(DTYPE),
-           0, 0);
-#endif
   }
 
   // dump(a.private_inst, FID_INPUT,  a.outer_bounds, " input");
