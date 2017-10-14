@@ -15,6 +15,9 @@
 
 #include "realm_stencil.h"
 
+#include <algorithm>
+#include <climits>
+
 #include "realm.h"
 
 #include "cpu_kernels.h"
@@ -27,6 +30,11 @@ enum {
   STENCIL_TASK   = Processor::TASK_ID_FIRST_AVAILABLE+2,
   INCREMENT_TASK = Processor::TASK_ID_FIRST_AVAILABLE+3,
   CHECK_TASK     = Processor::TASK_ID_FIRST_AVAILABLE+4,
+};
+
+enum {
+  REDOP_MIN = 11,
+  REDOP_MAX = 12,
 };
 
 enum {
@@ -100,6 +108,56 @@ AppConfig parse_config(int argc, char **argv)
   get_optional_arg(argc, argv, "-init", config.init);
   return config;
 }
+
+#define DECLARE_REDUCTION(CLASS, T, U, APPLY_OP, FOLD_OP, ID) \
+  class CLASS {                                                         \
+  public:                                                               \
+  typedef T LHS, RHS;                                                   \
+  template <bool EXCLUSIVE> static void apply(LHS &lhs, RHS rhs);       \
+  template <bool EXCLUSIVE> static void fold(RHS &rhs1, RHS rhs2);      \
+  static const T identity;                                              \
+  };                                                                    \
+                                                                        \
+  const T CLASS::identity = ID;                                         \
+                                                                        \
+  template <>                                                           \
+  void CLASS::apply<true>(LHS &lhs, RHS rhs)                            \
+  {                                                                     \
+    lhs = APPLY_OP(lhs, rhs);                                           \
+  }                                                                     \
+                                                                        \
+  template <>                                                           \
+  void CLASS::apply<false>(LHS &lhs, RHS rhs)                           \
+  {                                                                     \
+    volatile U *target = (U *)&(lhs);                                   \
+    union { U as_U; T as_T; } oldval, newval;                           \
+    do {                                                                \
+      oldval.as_U = *target;                                            \
+      newval.as_T = APPLY_OP(oldval.as_T, rhs);                         \
+    } while(!__sync_bool_compare_and_swap(target, oldval.as_U, newval.as_U)); \
+  }                                                                     \
+                                                                        \
+  template <>                                                           \
+  void CLASS::fold<true>(RHS &rhs1, RHS rhs2)                           \
+  {                                                                     \
+    rhs1 = FOLD_OP(rhs1, rhs2);                                         \
+  }                                                                     \
+                                                                        \
+  template <>                                                           \
+  void CLASS::fold<false>(RHS &rhs1, RHS rhs2)                          \
+  {                                                                     \
+    volatile U *target = (U *)&rhs1;                                    \
+    union { U as_U; T as_T; } oldval, newval;                           \
+    do {                                                                \
+      oldval.as_U = *target;                                            \
+      newval.as_T = FOLD_OP(oldval.as_T, rhs2);                         \
+    } while(!__sync_bool_compare_and_swap(target, oldval.as_U, newval.as_U)); \
+  }
+
+DECLARE_REDUCTION(RedopMin, long long, long long, std::min, std::min, LLONG_MAX)
+DECLARE_REDUCTION(RedopMax, long long, long long, std::max, std::max, LLONG_MIN)
+
+#undef DECLARE_REDUCTION
 
 Event fill(RegionInstance inst, FieldID fid, DTYPE value)
 {
@@ -222,9 +280,6 @@ void stencil_task(const void *args, size_t arglen,
   assert(arglen == sizeof(StencilArgs));
   const StencilArgs &a = *reinterpret_cast<const StencilArgs *>(args);
 
-  if (a.print_ts)
-    printf("t: %lld\n", Realm::Clock::current_time_in_microseconds());
-
   DTYPE *private_base_input, *private_base_output;
   size_t private_stride_input, private_stride_output;
   get_base_and_stride(a.private_inst, FID_INPUT, private_base_input, private_stride_input);
@@ -291,9 +346,6 @@ void increment_task(const void *args, size_t arglen,
   if (a.ym_inst.exists())
     inline_copy(a.private_inst, a.ym_inst, FID_INPUT,
                 a.ym_inst.get_indexspace<2, coord_t>().bounds);
-
-  if (a.print_ts)
-    printf("t: %lld\n", Realm::Clock::current_time_in_microseconds());
 }
 
 void check_task(const void *args, size_t arglen,
@@ -426,6 +478,7 @@ void shard_task(const void *args, size_t arglen,
   Event xm_copy_done = Event::NO_EVENT;
   Event yp_copy_done = Event::NO_EVENT;
   Event ym_copy_done = Event::NO_EVENT;
+  long long start;
   for (coord_t t = 0; t < a.tsteps; t++) {
     {
       StencilArgs args;
@@ -434,7 +487,6 @@ void shard_task(const void *args, size_t arglen,
       args.xm_inst = a.xm_inst_in;
       args.yp_inst = a.yp_inst_in;
       args.ym_inst = a.ym_inst_in;
-      args.print_ts = t == a.tprune;
       args.interior_bounds = a.interior_bounds;
       Event precondition = Event::merge_events(
         increment_done,
@@ -442,6 +494,10 @@ void shard_task(const void *args, size_t arglen,
         (xm_full_in.exists() ? xm_full_in.get_previous_phase() : Event::NO_EVENT),
         (yp_full_in.exists() ? yp_full_in.get_previous_phase() : Event::NO_EVENT),
         (ym_full_in.exists() ? ym_full_in.get_previous_phase() : Event::NO_EVENT));
+      if (t == a.tprune) {
+        precondition.wait();
+        start = Realm::Clock::current_time_in_microseconds();
+      }
       stencil_done = p.spawn(STENCIL_TASK, &args, sizeof(args), precondition);
       if (xp_empty_out.exists()) xp_empty_out.arrive(1, stencil_done);
       if (xm_empty_out.exists()) xm_empty_out.arrive(1, stencil_done);
@@ -456,7 +512,6 @@ void shard_task(const void *args, size_t arglen,
       args.xm_inst = xm_inst_out_local;
       args.yp_inst = yp_inst_out_local;
       args.ym_inst = ym_inst_out_local;
-      args.print_ts = t == a.tsteps - a.tprune - 1;
       args.outer_bounds = a.outer_bounds;
       Event precondition = Event::merge_events(
         stencil_done, xp_copy_done, xm_copy_done, yp_copy_done, ym_copy_done);
@@ -508,18 +563,22 @@ void shard_task(const void *args, size_t arglen,
     if (ym_full_out.exists()) ym_full_out = ym_full_out.advance_barrier();
   }
 
-  Event check_done = Event::NO_EVENT;
+  increment_done.wait();
+  long long stop = Realm::Clock::current_time_in_microseconds();
+
+  // Send start and stop times back to top level task
+  a.start.arrive(1, Event::NO_EVENT, &start, sizeof(start));
+  a.stop.arrive(1, Event::NO_EVENT, &stop, sizeof(stop));
+
   {
     CheckArgs check_args;
     check_args.private_inst = private_inst;
     check_args.tsteps = a.tsteps;
     check_args.init = a.init;
     check_args.interior_bounds = a.interior_bounds;
-    check_done = p.spawn(CHECK_TASK, &check_args, sizeof(check_args), increment_done);
+    Event check_done = p.spawn(CHECK_TASK, &check_args, sizeof(check_args), increment_done);
+    check_done.wait();
   }
-
-  Event complete = check_done;
-  complete.wait();
 }
 
 void top_level_task(const void *args, size_t arglen,
@@ -567,7 +626,8 @@ void top_level_task(const void *args, size_t arglen,
   }
 
   // Assign shards to processors
-  assert(procs.size() >= config.ntx*config.nty); // Expect one core per shard
+  coord_t nshards = config.ntx * config.nty;
+  assert(procs.size() >= static_cast<size_t>(nshards)); // Expect one core per shard
   Rect2 shards(Point2(0, 0), Point2(config.ntx-1, config.nty-1));
   std::map<Point2, Processor> shard_procs;
   {
@@ -669,7 +729,9 @@ void top_level_task(const void *args, size_t arglen,
   }
 
   // Create barrier to keep shard launch synchronized
-  Barrier sync_bar = Barrier::create_barrier(config.ntx * config.nty);
+  Barrier sync_bar = Barrier::create_barrier(nshards);
+  Barrier start_bar = Barrier::create_barrier(nshards, REDOP_MIN, &RedopMin::identity, sizeof(RedopMin::identity));
+  Barrier stop_bar = Barrier::create_barrier(nshards, REDOP_MAX, &RedopMax::identity, sizeof(RedopMax::identity));
 
   // Launch shard tasks
   {
@@ -720,6 +782,8 @@ void top_level_task(const void *args, size_t arglen,
       args.ym_full_out = yp_bars_full[i + Point2( 0, -1)];
 
       args.sync = sync_bar;
+      args.start = start_bar;
+      args.stop = stop_bar;
 
       args.tsteps = config.tsteps;
       args.tprune = config.tprune;
@@ -782,6 +846,21 @@ void top_level_task(const void *args, size_t arglen,
     }
     Event::merge_events(events).wait();
   }
+
+  // Collect start and stop times
+  long long start;
+  start_bar.wait();
+  assert(start_bar.get_result(&start, sizeof(start)));
+
+  long long stop;
+  stop_bar.wait();
+  assert(stop_bar.get_result(&stop, sizeof(stop)));
+
+  printf("\n");
+  printf("Elapsed time: %e seconds\n", (stop - start)/1e6);
+  printf("Iterations: %lld\n", config.tsteps - config.tprune);
+  printf("Time per iteration: %e seconds\n",
+         (stop - start)/1e6/(config.tsteps - config.tprune));
 }
 
 int main(int argc, char **argv)
@@ -795,6 +874,9 @@ int main(int argc, char **argv)
   rt.register_task(STENCIL_TASK, stencil_task);
   rt.register_task(INCREMENT_TASK, increment_task);
   rt.register_task(CHECK_TASK, check_task);
+
+  rt.register_reduction<RedopMin>(REDOP_MIN);
+  rt.register_reduction<RedopMax>(REDOP_MAX);
 
   // select a processor to run the top level task on
   Processor p = Processor::NO_PROC;

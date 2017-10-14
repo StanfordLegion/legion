@@ -45,7 +45,7 @@ public:
   Realm::Barrier xp_empty_out, xm_empty_out, yp_empty_out, ym_empty_out;
   Realm::Barrier xp_full_in, xm_full_in, yp_full_in, ym_full_in;
   Realm::Barrier xp_full_out, xm_full_out, yp_full_out, ym_full_out;
-  Realm::Barrier sync;
+  Realm::Barrier sync, start, stop;
   coord_t tsteps, tprune, init;
   Point2 point;
   Rect2 interior_bounds, exterior_bounds, outer_bounds;
@@ -55,14 +55,12 @@ public:
 struct StencilArgs {
 public:
   Realm::RegionInstance private_inst, xp_inst, xm_inst, yp_inst, ym_inst;
-  bool print_ts;
   Rect2 interior_bounds;
 };
 
 struct IncrementArgs {
 public:
   Realm::RegionInstance private_inst, xp_inst, xm_inst, yp_inst, ym_inst;
-  bool print_ts;
   Rect2 outer_bounds;
 };
 
