@@ -1187,7 +1187,9 @@ namespace Realm {
 	  target_subrect.hi[d] = cur_point[d] + len - 1;
 	  total_bytes *= len;
 	  act_counts[cur_dim] *= len;
-	  if(cropped)
+	  // if we didn't start this dimension at the lo point, we can't
+	  //  grow any further
+	  if(cropped || (cur_point[d] > iter.rect.lo[d]))
 	    cur_dim = max_dims;
 	} else
 	  target_subrect.hi[d] = cur_point[d];

@@ -1151,14 +1151,22 @@ namespace Realm {
         long new_nr = default_get_requests(requests, nr, flags);
         for (long i = 0; i < new_nr; i++)
         {
-          //reqs[i]->src_base = (char*)(src_buf_base + reqs[i]->src_off);
-          //reqs[i]->dst_base = (char*)(dst_buf_base + reqs[i]->dst_off);
-	  reqs[i]->src_base = src_mem->get_direct_ptr(reqs[i]->src_off,
-						      reqs[i]->nbytes);
-	  reqs[i]->dst_base = dst_mem->get_direct_ptr(reqs[i]->dst_off,
-						      reqs[i]->nbytes);
-	  assert(reqs[i]->src_base != 0);
-	  assert(reqs[i]->dst_base != 0);
+          if(!src_serdez_op && dst_serdez_op) {
+            // source offset is determined later - not safe to call get_direct_ptr now
+            reqs[i]->src_base = 0;
+          } else {
+	    reqs[i]->src_base = src_mem->get_direct_ptr(reqs[i]->src_off,
+						        reqs[i]->nbytes);
+	    assert(reqs[i]->src_base != 0);
+          }
+          if(src_serdez_op && !dst_serdez_op) {
+            // dest offset is determined later - not safe to call get_direct_ptr now
+            reqs[i]->dst_base = 0;
+          } else {
+	    reqs[i]->dst_base = dst_mem->get_direct_ptr(reqs[i]->dst_off,
+						        reqs[i]->nbytes);
+	    assert(reqs[i]->dst_base != 0);
+          }
         }
         return new_nr;
 
