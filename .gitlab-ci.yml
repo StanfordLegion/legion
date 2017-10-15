@@ -150,6 +150,8 @@ before_script:
 .tests: &tests
   script:
     - ./tools/add_github_host_key.sh
+    - grep 'model name' /proc/cpuinfo | uniq -c
+    - free
     - ./test.py
 
 # Some additional tests are only run on certain configurations.
