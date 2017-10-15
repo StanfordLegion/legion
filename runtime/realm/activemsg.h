@@ -148,7 +148,7 @@ protected:
 #ifdef GASNETHSL_IMPL
     GASNETHSL_IMPL;
 #endif
-  } __attribute__ ((aligned(64)));
+  };
 };
 
 class GASNetCondVar {
@@ -175,7 +175,7 @@ protected:
 #ifdef GASNETCONDVAR_IMPL
     GASNETCONDVAR_IMPL;
 #endif
-  } __attribute__ ((aligned(64)));
+  };
 };
 
 extern void init_endpoints(int gasnet_mem_size_in_mb,
