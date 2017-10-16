@@ -371,7 +371,7 @@ clang38_cxx98_debug_llvm_gasnet_legion:
   <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_normal, *llvm, *gasnet, *legion]
-clang38_cxx98_debug_llvm_regent:
+clang38_cxx98_debug_llvm_gasnet_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_normal, *llvm, *gasnet, *regent]
@@ -380,7 +380,7 @@ clang38_cxx98_debug_hdf5_gasnet_legion:
   <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_normal, *hdf5, *gasnet, *legion]
-clang38_cxx98_debug_hdf5_regent:
+clang38_cxx98_debug_hdf5_gasnet_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_normal, *hdf5, *gasnet, *regent]
