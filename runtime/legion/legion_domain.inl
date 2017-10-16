@@ -43,9 +43,9 @@ namespace Legion {
       { this->x = rhs.x; return *this; }
   public:
     __CUDA_HD__
-    inline static Point<1,T> ZEROES(void) { return Point<1,T>(0); }
+    inline static Point<1,T> ZEROES(void) { return Point<1,T>((T)0); }
     __CUDA_HD__
-    inline static Point<1,T> ONES(void) { return Point<1,T>(1); }
+    inline static Point<1,T> ONES(void) { return Point<1,T>((T)1); }
   };
 
   // Specialization for 2-D Points
@@ -74,9 +74,9 @@ namespace Legion {
       { this->x = rhs.x; this->y = rhs.y; return *this; }
   public:
     __CUDA_HD__
-    inline static Point<2,T> ZEROES(void) { return Point<2,T>(0); }
+    inline static Point<2,T> ZEROES(void) { return Point<2,T>((T)0); }
     __CUDA_HD__
-    inline static Point<2,T> ONES(void) { return Point<2,T>(1); }
+    inline static Point<2,T> ONES(void) { return Point<2,T>((T)1); }
   };
 
   // Specialization for 3-D Points
@@ -106,9 +106,9 @@ namespace Legion {
       { this->x = rhs.x; this->y = rhs.y; this->z = rhs.z; return *this; }
   public:
     __CUDA_HD__
-    inline static Point<3,T> ZEROES(void) { return Point<3,T>(0); }
+    inline static Point<3,T> ZEROES(void) { return Point<3,T>((T)0); }
     __CUDA_HD__
-    inline static Point<3,T> ONES(void) { return Point<3,T>(1); }
+    inline static Point<3,T> ONES(void) { return Point<3,T>((T)1); }
   };
 
   //----------------------------------------------------------------------------
