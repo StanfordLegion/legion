@@ -4805,8 +4805,7 @@ namespace Legion {
       {
 #ifdef LEGION_SPY
         // Can't prune when doing legion spy
-        op->register_dependence(current_fence, fence_gen, 
-                                false/*shard only dependence*/);
+        op->register_dependence(current_fence, fence_gen);
         unsigned num_regions = op->get_region_count();
         if (num_regions > 0)
         {
