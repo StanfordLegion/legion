@@ -760,14 +760,15 @@ namespace Realm {
 	    assert((pre_xd_guid != XFERDES_NO_GUID) || src_iter->done());
 	    assert((next_xd_guid != XFERDES_NO_GUID) || dst_iter->done());
 
+	    // we can actually hit the end of an intermediate buffer input
+	    //  even if our initial pbt_snapshot was (size_t)-1 because
+	    //  we use the asynchronously-updated seq_pre_write, so if
+	    //  we think we might be done, go ahead and resample here if
+	    //  we still have -1
+	    if((pre_xd_guid != XFERDES_NO_GUID) && (pbt_snapshot == (size_t)-1))
+	      pbt_snapshot = __sync_fetch_and_add(&pre_bytes_total, 0);
+
 	    if(!src_serdez_op && dst_serdez_op) {
-	      // in the deserialization case, we can actually hit the end
-	      //  even if our initial pbt_snapshot was (size_t)-1 because
-	      //  we use the asynchronously-updated seq_pre_write, so if
-	      //  we think we might be done, go ahead and resample here if
-	      //  we still have -1
-	      if(pbt_snapshot == (size_t)-1)
-		pbt_snapshot = __sync_fetch_and_add(&pre_bytes_total, 0);
 	      // ok to be over, due to the conservative nature of
 	      //  deserialization reads
 	      assert(rbc_snapshot >= pbt_snapshot);
