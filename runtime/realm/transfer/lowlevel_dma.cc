@@ -29,6 +29,10 @@
 #include <aio.h>
 #endif
 
+#ifdef USE_CUDA
+#include <realm/cuda/cuda_module.h>
+#endif
+
 #include <queue>
 #include <algorithm>
 #include <iomanip>
@@ -1331,13 +1335,18 @@ namespace Realm {
             return XferDes::XFER_MEM_CPY;
           else if (dst_ll_kind == Memory::GLOBAL_MEM)
             return XferDes::XFER_GASNET_WRITE;
+#ifdef USE_CUDA
           else if (dst_ll_kind == Memory::GPU_FB_MEM) {
-            std::set<Memory> visible_mems;
-            Machine::get_machine().get_visible_memories(dst_mem, visible_mems);
-            if (visible_mems.count(src_mem) == 0)
+	    // find which GPU owns the destination memory and see if it
+	    //  has the source memory pinned
+	    Cuda::GPUFBMemory *fbm = static_cast<Cuda::GPUFBMemory *>(get_runtime()->get_memory_impl(dst_mem));
+	    assert(fbm != 0);
+	    if(fbm->gpu->pinned_sysmems.count(src_mem) > 0)
+	      return XferDes::XFER_GPU_TO_FB;
+	    else
               return XferDes::XFER_NONE;
-            return XferDes::XFER_GPU_TO_FB;
           }
+#endif
           else if (dst_ll_kind == Memory::DISK_MEM)
             return XferDes::XFER_DISK_WRITE;
           else if (dst_ll_kind == Memory::HDF_MEM)
@@ -1346,22 +1355,31 @@ namespace Realm {
             return XferDes::XFER_FILE_WRITE;
           assert(0);
           break;
+#ifdef USE_CUDA
         case Memory::GPU_FB_MEM:
         {
-          std::set<Memory> visible_mems;
-          Machine::get_machine().get_visible_memories(src_mem, visible_mems);
+	  // find which GPU owns the source memory
+	  Cuda::GPUFBMemory *fbm = static_cast<Cuda::GPUFBMemory *>(get_runtime()->get_memory_impl(src_mem));
+	  assert(fbm != 0);
+	  const Cuda::GPU *gpu = fbm->gpu;
+
           if (dst_ll_kind == Memory::GPU_FB_MEM) {
             if (src_mem == dst_mem)
               return XferDes::XFER_GPU_IN_FB;
-            else if (visible_mems.count(dst_mem) != 0)
+            else if (gpu->peer_fbs.count(dst_mem) > 0)
               return XferDes::XFER_GPU_PEER_FB;
-            return XferDes::XFER_NONE;
+	    else
+	      return XferDes::XFER_NONE;
           }
-          else if (is_cpu_mem(dst_ll_kind) && visible_mems.count(dst_mem) != 0)
+	  else if (is_cpu_mem(dst_ll_kind)) {
+	    if (gpu->pinned_sysmems.count(dst_mem) > 0)
               return XferDes::XFER_GPU_FROM_FB;
-          else
+	    else
+	      return XferDes::XFER_NONE;
+	  } else
             return XferDes::XFER_NONE;
         }
+#endif
         case Memory::DISK_MEM:
           if (is_cpu_mem(dst_ll_kind))
             return XferDes::XFER_DISK_READ;
