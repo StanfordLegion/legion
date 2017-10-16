@@ -8660,6 +8660,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(redop == manager->redop);
 #endif
+#ifdef DISTRIBUTED_INSTANCE_VIEWS
       if (!is_logical_owner())
       {
         // If we are not the logical owner we have to send our result back
@@ -8680,6 +8681,7 @@ namespace Legion {
         runtime->send_view_remote_update(logical_owner, rez);
         applied_events.insert(remote_applied_event);
       }
+#endif
       // Quick test: only need to do this if copy term exists
       bool issue_collect = false;
       if (copy_term.exists())
@@ -8798,7 +8800,7 @@ namespace Legion {
       if (!term_event.exists())
         return;
       const UniqueID op_id = op->get_unique_op_id();
-#ifndef DISTRIBUTED_INSTANCE_VIEWS
+#ifdef DISTRIBUTED_INSTANCE_VIEWS
       if (!is_logical_owner())
       {
         Serializer rez;
