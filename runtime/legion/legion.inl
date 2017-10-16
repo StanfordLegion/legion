@@ -2314,9 +2314,9 @@ namespace Legion {
                                                           const IndexSpace &rhs)
     //--------------------------------------------------------------------------
     {
-      id = rhs.id;
-      tid = rhs.tid;
-      type_tag = rhs.type_tag;
+      id = rhs.get_id();
+      tid = rhs.get_tree_id();
+      type_tag = rhs.get_type_tag();
       Internal::NT_TemplateHelper::template check_type<DIM,T>(type_tag);
       return *this;
     }
@@ -2327,9 +2327,9 @@ namespace Legion {
                                                          const IndexSpaceT &rhs)
     //--------------------------------------------------------------------------
     {
-      id = rhs.id;
-      tid = rhs.tid;
-      type_tag = rhs.type_tag;
+      id = rhs.get_id();
+      tid = rhs.get_tree_id();
+      type_tag = rhs.get_type_tag();
       Internal::NT_TemplateHelper::template check_type<DIM,T>(type_tag);
       return *this;
     }
@@ -2429,9 +2429,9 @@ namespace Legion {
                                                       const IndexPartition &rhs)
     //--------------------------------------------------------------------------
     {
-      id = rhs.id;
-      tid = rhs.tid;
-      type_tag = rhs.type_tag;
+      id = rhs.get_id();
+      tid = rhs.get_tree_id();
+      type_tag = rhs.get_type_tag();
       Internal::NT_TemplateHelper::template check_type<DIM,T>(type_tag);
       return *this;
     }
@@ -2442,9 +2442,9 @@ namespace Legion {
                                                      const IndexPartitionT &rhs)
     //--------------------------------------------------------------------------
     {
-      id = rhs.id;
-      tid = rhs.tid;
-      type_tag = rhs.type_tag;
+      id = rhs.get_id();
+      tid = rhs.get_tree_id();
+      type_tag = rhs.get_type_tag();
       Internal::NT_TemplateHelper::template check_type<DIM,T>(type_tag);
       return *this;
     }
@@ -2576,9 +2576,9 @@ namespace Legion {
                                                        const LogicalRegion &rhs)
     //--------------------------------------------------------------------------
     {
-      tree_id = rhs.tree_id;
-      index_space = rhs.index_space;
-      field_space = rhs.field_space;
+      tree_id = rhs.get_tree_id();
+      index_space = rhs.get_index_space();
+      field_space = rhs.get_field_space();
       Internal::NT_TemplateHelper::template check_type<DIM,T>(
                                 rhs.get_type_tag());
       return *this;
@@ -2590,9 +2590,9 @@ namespace Legion {
                                                       const LogicalRegionT &rhs)
     //--------------------------------------------------------------------------
     {
-      tree_id = rhs.tree_id;
-      index_space = rhs.index_space;
-      field_space = rhs.field_space;
+      tree_id = rhs.get_tree_id();
+      index_space = rhs.get_index_space();
+      field_space = rhs.get_field_space();
       Internal::NT_TemplateHelper::template check_type<DIM,T>(
                                 rhs.get_type_tag());
       return *this;
@@ -2691,9 +2691,9 @@ namespace Legion {
                                                     const LogicalPartition &rhs)
     //--------------------------------------------------------------------------
     {
-      tree_id = rhs.tree_id;
-      index_partition = rhs.index_partition;
-      field_space = rhs.field_space;
+      tree_id = rhs.get_tree_id();
+      index_partition = rhs.get_index_partition();
+      field_space = rhs.get_field_space();
       Internal::NT_TemplateHelper::template check_type<DIM,T>(
                                             rhs.get_type_tag());
       return *this;
@@ -2705,9 +2705,9 @@ namespace Legion {
                                                    const LogicalPartitionT &rhs)
     //--------------------------------------------------------------------------
     {
-      tree_id = rhs.tree_id;
-      index_partition = rhs.index_partition;
-      field_space = rhs.field_space;
+      tree_id = rhs.get_tree_id();
+      index_partition = rhs.get_index_partition();
+      field_space = rhs.get_field_space();
       Internal::NT_TemplateHelper::template check_type<DIM,T>(
                                             rhs.get_type_tag());
       return *this;
