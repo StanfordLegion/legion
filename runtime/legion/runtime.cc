@@ -17014,7 +17014,17 @@ namespace Legion {
       }
       // Otherwise look up the result
       Machine::MemoryQuery visible_memories(machine);
-      visible_memories.has_affinity_to(proc);
+      // Have to handle the case where this is a processor group
+      if (proc.kind() == Processor::PROC_GROUP)
+      {
+        std::vector<Processor> group_members;
+        proc.get_group_members(group_members);
+        for (std::vector<Processor>::const_iterator it = 
+              group_members.begin(); it != group_members.end(); it++)
+          visible_memories.has_affinity_to(*it);
+      }
+      else
+        visible_memories.has_affinity_to(proc);
       for (Machine::MemoryQuery::iterator it = visible_memories.begin();
             it != visible_memories.end(); it++)
         visible.insert(*it);
