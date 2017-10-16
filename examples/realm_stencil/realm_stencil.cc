@@ -841,7 +841,7 @@ void top_level_task(const void *args, size_t arglen,
       args.start = start_bar;
       args.stop = stop_bar;
 
-      args.tsteps = config.tsteps;
+      args.tsteps = config.tsteps + config.tprune;
       args.tprune = config.tprune;
       args.init = config.init;
 
@@ -914,9 +914,9 @@ void top_level_task(const void *args, size_t arglen,
 
   printf("\n");
   printf("Elapsed time: %e seconds\n", (stop - start)/1e6);
-  printf("Iterations: %lld\n", config.tsteps - config.tprune);
+  printf("Iterations: %lld\n", config.tsteps);
   printf("Time per iteration: %e seconds\n",
-         (stop - start)/1e6/(config.tsteps - config.tprune));
+         (stop - start)/1e6/config.tsteps);
 }
 
 int main(int argc, char **argv)
