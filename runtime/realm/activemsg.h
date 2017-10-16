@@ -144,7 +144,7 @@ protected:
   //  rules type-punning, so use macros to let activemsg.cc's inclusion
   //  of this file behave a little differently
   union {
-    char placeholder[64];
+    uint64_t placeholder[8]; // 64 bytes, at least 8 byte aligned
 #ifdef GASNETHSL_IMPL
     GASNETHSL_IMPL;
 #endif
@@ -171,7 +171,7 @@ protected:
   //  rules type-punning, so use macros to let activemsg.cc's inclusion
   //  of this file behave a little differently
   union {
-    char placeholder[64];
+    uint64_t placeholder[8]; // 64 bytes, at least 8 byte aligned
 #ifdef GASNETCONDVAR_IMPL
     GASNETCONDVAR_IMPL;
 #endif
