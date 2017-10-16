@@ -432,6 +432,14 @@ namespace Legion {
     const PredEvent PredEvent::NO_PRED_EVENT = PredEvent();
     const Domain Domain::NO_DOMAIN = Domain();
 
+    // Cache static type tags so we don't need to recompute them all the time
+    static const TypeTag TYPE_TAG_1D =
+      Internal::NT_TemplateHelper::encode_tag<1,coord_t>();
+    static const TypeTag TYPE_TAG_2D =
+      Internal::NT_TemplateHelper::encode_tag<2,coord_t>();
+    static const TypeTag TYPE_TAG_3D =
+      Internal::NT_TemplateHelper::encode_tag<3,coord_t>();
+
     /////////////////////////////////////////////////////////////
     // Mappable 
     /////////////////////////////////////////////////////////////
@@ -2992,7 +3000,7 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // High Level Runtime 
+    // Legion Runtime 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
@@ -3010,8 +3018,7 @@ namespace Legion {
       Rect<1,coord_t> bounds((Point<1,coord_t>(0)),
                              (Point<1,coord_t>(max_num_elmts-1)));
       DomainT<1,coord_t> realm_index_space(bounds);
-      return create_index_space_internal(ctx, &realm_index_space,
-                          Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
+      return create_index_space_internal(ctx, &realm_index_space, TYPE_TAG_1D);
     }
 
     //--------------------------------------------------------------------------
@@ -3024,22 +3031,19 @@ namespace Legion {
           {
             Rect<1,coord_t> bounds = domain;
             DomainT<1,coord_t> realm_is(bounds);
-            return create_index_space_internal(ctx, &realm_is,
-                Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
+            return create_index_space_internal(ctx, &realm_is, TYPE_TAG_1D);
           }
         case 2:
           {
             Rect<2,coord_t> bounds = domain;
             DomainT<2,coord_t> realm_is(bounds);
-            return create_index_space_internal(ctx, &realm_is,
-                Internal::NT_TemplateHelper::encode_tag<2,coord_t>());
+            return create_index_space_internal(ctx, &realm_is, TYPE_TAG_2D);
           }
         case 3:
           {
             Rect<3,coord_t> bounds = domain;
             DomainT<3,coord_t> realm_is(bounds);
-            return create_index_space_internal(ctx, &realm_is,
-                Internal::NT_TemplateHelper::encode_tag<3,coord_t>());
+            return create_index_space_internal(ctx, &realm_is, TYPE_TAG_3D);
           }
         default:
           assert(false);
@@ -3070,8 +3074,7 @@ namespace Legion {
               realm_points[idx] = Point<1,coord_t>(points[idx]);
             DomainT<1,coord_t> realm_is(
                 (Realm::IndexSpace<1,coord_t>(realm_points)));
-            return runtime->create_index_space(ctx, &realm_is,
-                      Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
+            return runtime->create_index_space(ctx, &realm_is, TYPE_TAG_1D);
           }
         case 2:
           {
@@ -3080,8 +3083,7 @@ namespace Legion {
               realm_points[idx] = Point<2,coord_t>(points[idx]);
             DomainT<2,coord_t> realm_is(
                 (Realm::IndexSpace<2,coord_t>(realm_points)));
-            return runtime->create_index_space(ctx, &realm_is,
-                      Internal::NT_TemplateHelper::encode_tag<2,coord_t>());
+            return runtime->create_index_space(ctx, &realm_is, TYPE_TAG_2D);
           }
         case 3:
           {
@@ -3090,8 +3092,7 @@ namespace Legion {
               realm_points[idx] = Point<3,coord_t>(points[idx]);
             DomainT<3,coord_t> realm_is(
                 (Realm::IndexSpace<3,coord_t>(realm_points)));
-            return runtime->create_index_space(ctx, &realm_is,
-                      Internal::NT_TemplateHelper::encode_tag<3,coord_t>());
+            return runtime->create_index_space(ctx, &realm_is, TYPE_TAG_3D);
           }
         default:
           assert(false);
@@ -3113,8 +3114,7 @@ namespace Legion {
               realm_rects[idx] = Rect<1,coord_t>(rects[idx]);
             DomainT<1,coord_t> realm_is(
                 (Realm::IndexSpace<1,coord_t>(realm_rects)));
-            return runtime->create_index_space(ctx, &realm_is,
-                      Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
+            return runtime->create_index_space(ctx, &realm_is, TYPE_TAG_1D);
           }
         case 2:
           {
@@ -3123,8 +3123,7 @@ namespace Legion {
               realm_rects[idx] = Rect<2,coord_t>(rects[idx]);
             DomainT<2,coord_t> realm_is(
                 (Realm::IndexSpace<2,coord_t>(realm_rects)));
-            return runtime->create_index_space(ctx, &realm_is,
-                      Internal::NT_TemplateHelper::encode_tag<2,coord_t>());
+            return runtime->create_index_space(ctx, &realm_is, TYPE_TAG_2D);
           }
         case 3:
           {
@@ -3133,8 +3132,7 @@ namespace Legion {
               realm_rects[idx] = Rect<3,coord_t>(rects[idx]);
             DomainT<3,coord_t> realm_is(
                 (Realm::IndexSpace<3,coord_t>(realm_rects)));
-            return runtime->create_index_space(ctx, &realm_is,
-                      Internal::NT_TemplateHelper::encode_tag<3,coord_t>());
+            return runtime->create_index_space(ctx, &realm_is, TYPE_TAG_3D);
           }
         default:
           assert(false);
@@ -4259,22 +4257,19 @@ namespace Legion {
           {
             Point<1,coord_t> point = color;
             return runtime->create_index_space_union(ctx, parent, &point,
-                Internal::NT_TemplateHelper::encode_tag<1,coord_t>(),
-                handles);
+                                                     TYPE_TAG_1D, handles);
           }
         case 2:
           {
             Point<2,coord_t> point = color;
             return runtime->create_index_space_union(ctx, parent, &point,
-                Internal::NT_TemplateHelper::encode_tag<2,coord_t>(),
-                handles);
+                                                     TYPE_TAG_2D, handles);
           }
         case 3:
           {
             Point<3,coord_t> point = color;
             return runtime->create_index_space_union(ctx, parent, &point,
-                Internal::NT_TemplateHelper::encode_tag<3,coord_t>(),
-                handles);
+                                                     TYPE_TAG_3D, handles);
           }
         default:
           assert(false);
@@ -4304,22 +4299,19 @@ namespace Legion {
           {
             Point<1,coord_t> point = color;
             return runtime->create_index_space_union(ctx, parent, &point,
-                Internal::NT_TemplateHelper::encode_tag<1,coord_t>(),
-                handle);
+                                                     TYPE_TAG_1D, handle);
           }
         case 2:
           {
             Point<2,coord_t> point = color;
             return runtime->create_index_space_union(ctx, parent, &point,
-                Internal::NT_TemplateHelper::encode_tag<2,coord_t>(),
-                handle);
+                                                     TYPE_TAG_2D, handle);
           }
         case 3:
           {
             Point<3,coord_t> point = color;
             return runtime->create_index_space_union(ctx, parent, &point,
-                Internal::NT_TemplateHelper::encode_tag<3,coord_t>(),
-                handle);
+                                                     TYPE_TAG_3D, handle);
           }
         default:
           assert(false);
@@ -4349,22 +4341,19 @@ namespace Legion {
           {
             Point<1,coord_t> point = color;
             return runtime->create_index_space_intersection(ctx, parent, &point,
-                Internal::NT_TemplateHelper::encode_tag<1,coord_t>(),
-                handles);
+                                                          TYPE_TAG_1D, handles);
           }
         case 2:
           {
             Point<2,coord_t> point = color;
             return runtime->create_index_space_intersection(ctx, parent, &point,
-                Internal::NT_TemplateHelper::encode_tag<2,coord_t>(),
-                handles);
+                                                          TYPE_TAG_2D, handles);
           }
         case 3:
           {
             Point<3,coord_t> point = color;
             return runtime->create_index_space_intersection(ctx, parent, &point,
-                Internal::NT_TemplateHelper::encode_tag<3,coord_t>(),
-                handles);
+                                                          TYPE_TAG_3D, handles);
           }
         default:
           assert(false);
@@ -4394,22 +4383,19 @@ namespace Legion {
           {
             Point<1,coord_t> point = color;
             return runtime->create_index_space_intersection(ctx, parent, &point,
-                Internal::NT_TemplateHelper::encode_tag<1,coord_t>(),
-                handle);
+                                                           TYPE_TAG_1D, handle);
           }
         case 2:
           {
             Point<2,coord_t> point = color;
             return runtime->create_index_space_intersection(ctx, parent, &point,
-                Internal::NT_TemplateHelper::encode_tag<2,coord_t>(),
-                handle);
+                                                           TYPE_TAG_2D, handle);
           }
         case 3:
           {
             Point<3,coord_t> point = color;
             return runtime->create_index_space_intersection(ctx, parent, &point,
-                Internal::NT_TemplateHelper::encode_tag<3,coord_t>(),
-                handle);
+                                                           TYPE_TAG_3D, handle);
           }
         default:
           assert(false);
@@ -4439,22 +4425,19 @@ namespace Legion {
           {
             Point<1,coord_t> point = color;
             return runtime->create_index_space_difference(ctx, parent, &point,
-                Internal::NT_TemplateHelper::encode_tag<1,coord_t>(),
-                initial, handles);
+                                                TYPE_TAG_1D, initial, handles);
           }
         case 2:
           {
             Point<2,coord_t> point = color;
             return runtime->create_index_space_difference(ctx, parent, &point,
-                Internal::NT_TemplateHelper::encode_tag<2,coord_t>(),
-                initial, handles);
+                                                TYPE_TAG_2D, initial, handles);
           }
         case 3:
           {
             Point<3,coord_t> point = color;
             return runtime->create_index_space_difference(ctx, parent, &point,
-                Internal::NT_TemplateHelper::encode_tag<3,coord_t>(),
-                initial, handles);
+                                                TYPE_TAG_3D, initial, handles);
           }
         default:
           assert(false);
@@ -4539,8 +4522,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Point<1,coord_t> point = color;
-      return runtime->get_index_subspace(ctx, p, &point,
-              Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
+      return runtime->get_index_subspace(ctx, p, &point, TYPE_TAG_1D);
     }
 
     //--------------------------------------------------------------------------
@@ -4553,20 +4535,17 @@ namespace Legion {
         case 1:
           {
             Point<1,coord_t> point = color;
-            return runtime->get_index_subspace(ctx, p, &point,
-                Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
+            return runtime->get_index_subspace(ctx, p, &point, TYPE_TAG_1D);
           }
         case 2:
           {
             Point<2,coord_t> point = color;
-            return runtime->get_index_subspace(ctx, p, &point,
-                Internal::NT_TemplateHelper::encode_tag<2,coord_t>());
+            return runtime->get_index_subspace(ctx, p, &point, TYPE_TAG_2D);
           }
         case 3:
           {
             Point<3,coord_t> point = color;
-            return runtime->get_index_subspace(ctx, p, &point,
-                Internal::NT_TemplateHelper::encode_tag<3,coord_t>());
+            return runtime->get_index_subspace(ctx, p, &point, TYPE_TAG_3D);
           }
         default:
           assert(false);
@@ -4579,8 +4558,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Point<1,coord_t> point = color;
-      return runtime->get_index_subspace(p, &point,
-              Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
+      return runtime->get_index_subspace(p, &point, TYPE_TAG_1D);
     }
 
     //--------------------------------------------------------------------------
@@ -4593,20 +4571,17 @@ namespace Legion {
         case 1:
           {
             Point<1,coord_t> point = color;
-            return runtime->get_index_subspace(p, &point,
-                Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
+            return runtime->get_index_subspace(p, &point, TYPE_TAG_1D);
           }
         case 2:
           {
             Point<2,coord_t> point = color;
-            return runtime->get_index_subspace(p, &point,
-                Internal::NT_TemplateHelper::encode_tag<2,coord_t>());
+            return runtime->get_index_subspace(p, &point, TYPE_TAG_2D);
           }
         case 3:
           {
             Point<3,coord_t> point = color;
-            return runtime->get_index_subspace(p, &point,
-                Internal::NT_TemplateHelper::encode_tag<3,coord_t>());
+            return runtime->get_index_subspace(p, &point, TYPE_TAG_3D);
           }
         default:
           assert(false);
@@ -4624,20 +4599,17 @@ namespace Legion {
         case 1:
           {
             Point<1,coord_t> point = color;
-            return runtime->has_index_subspace(ctx, p, &point,
-                Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
+            return runtime->has_index_subspace(ctx, p, &point, TYPE_TAG_1D);
           }
         case 2:
           {
             Point<2,coord_t> point = color;
-            return runtime->has_index_subspace(ctx, p, &point,
-                Internal::NT_TemplateHelper::encode_tag<2,coord_t>());
+            return runtime->has_index_subspace(ctx, p, &point, TYPE_TAG_2D);
           }
         case 3:
           {
             Point<3,coord_t> point = color;
-            return runtime->has_index_subspace(ctx, p, &point,
-                Internal::NT_TemplateHelper::encode_tag<3,coord_t>());
+            return runtime->has_index_subspace(ctx, p, &point, TYPE_TAG_3D);
           }
         default:
           assert(false);
@@ -4654,20 +4626,17 @@ namespace Legion {
         case 1:
           {
             Point<1,coord_t> point = color;
-            return runtime->has_index_subspace(p, &point,
-                Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
+            return runtime->has_index_subspace(p, &point, TYPE_TAG_1D);
           }
         case 2:
           {
             Point<2,coord_t> point = color;
-            return runtime->has_index_subspace(p, &point,
-                Internal::NT_TemplateHelper::encode_tag<2,coord_t>());
+            return runtime->has_index_subspace(p, &point, TYPE_TAG_2D);
           }
         case 3:
           {
             Point<3,coord_t> point = color;
-            return runtime->has_index_subspace(p, &point,
-                Internal::NT_TemplateHelper::encode_tag<3,coord_t>());
+            return runtime->has_index_subspace(p, &point, TYPE_TAG_3D);
           }
         default:
           assert(false);
@@ -4889,8 +4858,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Point<1,coord_t> point;
-      runtime->get_index_space_color_point(ctx, handle, &point,
-          Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
+      runtime->get_index_space_color_point(ctx, handle, &point, TYPE_TAG_1D);
       return point[0];
     }
 
@@ -4899,8 +4867,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Point<1,coord_t> point;
-      runtime->get_index_space_color_point(handle, &point,
-          Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
+      runtime->get_index_space_color_point(handle, &point, TYPE_TAG_1D);
       return point[0];
     }
 
@@ -5039,8 +5006,7 @@ namespace Legion {
       if (pointer.is_null())
         return pointer;
       Point<1,coord_t> p(pointer.value);
-      if (runtime->safe_cast(ctx, region, &p,
-            Internal::NT_TemplateHelper::encode_tag<1,coord_t>()))
+      if (runtime->safe_cast(ctx, region, &p, TYPE_TAG_1D))
         return pointer;
       return ptr_t::nil();
     }
@@ -5055,24 +5021,21 @@ namespace Legion {
         case 1:
           {
             Point<1,coord_t> p(point);
-            if (runtime->safe_cast(ctx, region, &p, 
-                  Internal::NT_TemplateHelper::encode_tag<1,coord_t>()))
+            if (runtime->safe_cast(ctx, region, &p, TYPE_TAG_1D))
               return point;
             break;
           }
         case 2:
           {
             Point<2,coord_t> p(point);
-            if (runtime->safe_cast(ctx, region, &p, 
-                  Internal::NT_TemplateHelper::encode_tag<2,coord_t>()))
+            if (runtime->safe_cast(ctx, region, &p, TYPE_TAG_2D)) 
               return point;
             break;
           }
         case 3:
           {
             Point<3,coord_t> p(point);
-            if (runtime->safe_cast(ctx, region, &p, 
-                  Internal::NT_TemplateHelper::encode_tag<3,coord_t>()))
+            if (runtime->safe_cast(ctx, region, &p, TYPE_TAG_3D)) 
               return point;
             break;
           }
@@ -5283,8 +5246,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Point<1,coord_t> point(c);
-      return runtime->get_logical_subregion_by_color(ctx, parent, &point,
-          Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
+      return runtime->get_logical_subregion_by_color(ctx, parent, 
+                                                     &point, TYPE_TAG_1D);
     }
 
     //--------------------------------------------------------------------------
@@ -5297,20 +5260,20 @@ namespace Legion {
         case 1:
           {
             Point<1,coord_t> point(c);
-            return runtime->get_logical_subregion_by_color(ctx, parent, &point,
-                Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
+            return runtime->get_logical_subregion_by_color(ctx, parent, 
+                                                           &point, TYPE_TAG_1D);
           }
         case 2:
           {
             Point<2,coord_t> point(c);
-            return runtime->get_logical_subregion_by_color(ctx, parent, &point,
-                Internal::NT_TemplateHelper::encode_tag<2,coord_t>());
+            return runtime->get_logical_subregion_by_color(ctx, parent, 
+                                                           &point, TYPE_TAG_2D);
           }
         case 3:
           {
             Point<3,coord_t> point(c);
-            return runtime->get_logical_subregion_by_color(ctx, parent, &point,
-                Internal::NT_TemplateHelper::encode_tag<3,coord_t>());
+            return runtime->get_logical_subregion_by_color(ctx, parent, 
+                                                           &point, TYPE_TAG_3D);
           }
         default:
           assert(false);
@@ -5324,8 +5287,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Point<1,coord_t> point(c);
-      return runtime->get_logical_subregion_by_color(parent, &point,
-          Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
+      return runtime->get_logical_subregion_by_color(parent,&point,TYPE_TAG_1D);
     }
 
     //--------------------------------------------------------------------------
@@ -5339,19 +5301,19 @@ namespace Legion {
           {
             Point<1,coord_t> point(c);
             return runtime->get_logical_subregion_by_color(parent, &point,
-                Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
+                                                           TYPE_TAG_1D);
           }
         case 2:
           {
             Point<2,coord_t> point(c);
             return runtime->get_logical_subregion_by_color(parent, &point,
-                Internal::NT_TemplateHelper::encode_tag<2,coord_t>());
+                                                           TYPE_TAG_2D);
           }
         case 3:
           {
             Point<3,coord_t> point(c);
             return runtime->get_logical_subregion_by_color(parent, &point,
-                Internal::NT_TemplateHelper::encode_tag<3,coord_t>());
+                                                           TYPE_TAG_3D);
           }
         default:
           assert(false);
@@ -5379,19 +5341,19 @@ namespace Legion {
           {
             Point<1,coord_t> point(c);
             return runtime->has_logical_subregion_by_color(ctx, parent, &point,
-                Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
+                                                           TYPE_TAG_1D);
           }
         case 2:
           {
             Point<2,coord_t> point(c);
             return runtime->has_logical_subregion_by_color(ctx, parent, &point,
-                Internal::NT_TemplateHelper::encode_tag<2,coord_t>());
+                                                           TYPE_TAG_2D);
           }
         case 3:
           {
             Point<3,coord_t> point(c);
             return runtime->has_logical_subregion_by_color(ctx, parent, &point,
-                Internal::NT_TemplateHelper::encode_tag<3,coord_t>());
+                                                           TYPE_TAG_3D);
           }
         default:
           assert(false);
@@ -5410,19 +5372,19 @@ namespace Legion {
           {
             Point<1,coord_t> point(c);
             return runtime->has_logical_subregion_by_color(parent, &point,
-                Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
+                                                           TYPE_TAG_1D);
           }
         case 2:
           {
             Point<2,coord_t> point(c);
             return runtime->has_logical_subregion_by_color(parent, &point,
-                Internal::NT_TemplateHelper::encode_tag<2,coord_t>());
+                                                           TYPE_TAG_2D);
           }
         case 3:
           {
             Point<3,coord_t> point(c);
             return runtime->has_logical_subregion_by_color(parent, &point,
-                Internal::NT_TemplateHelper::encode_tag<3,coord_t>());
+                                                           TYPE_TAG_3D);
           }
         default:
           assert(false);
@@ -5460,8 +5422,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Point<1,coord_t> point;
-      runtime->get_logical_region_color(ctx, handle, &point,
-          Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
+      runtime->get_logical_region_color(ctx, handle, &point, TYPE_TAG_1D);
       return point[0];
     }
 
@@ -5478,8 +5439,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Point<1,coord_t> point;
-      runtime->get_logical_region_color(handle, &point,
-          Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
+      runtime->get_logical_region_color(handle, &point, TYPE_TAG_1D);
       return point[0];
     }
 
