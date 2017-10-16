@@ -8505,6 +8505,52 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(can_filter); // should always be able to filter reductions
 #endif
+#ifdef DISTRIBUTED_INSTANCE_VIEWS
+      if (!is_logical_owner() && reading)
+        perform_remote_valid_check();
+#else
+      if (!is_logical_owner())
+      {
+        // If this is not the logical owner send a message to the 
+        // logical owner to perform the analysis
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(redop);
+          rez.serialize<bool>(reading);
+          rez.serialize<bool>(single_copy);
+          rez.serialize<bool>(restrict_out);
+          rez.serialize(copy_mask);
+          if (!reading)
+            versions->pack_writing_version_numbers(rez);
+          else
+            versions->pack_upper_bound_node(rez);
+          rez.serialize(creator_op_id);
+          rez.serialize(index);
+          rez.serialize<bool>(can_filter);
+          // Make 1 Ap user event per field and add it to the set
+          int pop_count = FieldMask::pop_count(copy_mask);
+          int next_start = 0;
+          for (int idx = 0; idx < pop_count; idx++)
+          {
+            int field_index = copy_mask.find_next_set(next_start);
+            ApUserEvent field_ready = Runtime::create_ap_user_event();
+            rez.serialize(field_index);
+            rez.serialize(field_ready);
+            preconditions[field_ready].set_bit(field_index); 
+            // We'll start looking again at the next index after this one
+            next_start = field_index + 1;
+          }
+          // Make a Rt user event to signal when we are done
+          RtUserEvent applied_event = Runtime::create_rt_user_event();
+          rez.serialize(applied_event);
+          applied_events.insert(applied_event);
+        }
+        runtime->send_instance_view_find_copy_preconditions(logical_owner, rez);
+        return;
+      }
+#endif
       ApEvent use_event = manager->get_use_event();
       if (use_event.exists())
       {
@@ -8515,12 +8561,6 @@ namespace Legion {
         else
           finder->second |= copy_mask;
       }
-#ifdef DISTRIBUTED_INSTANCE_VIEWS
-      if (!is_logical_owner() && reading)
-        perform_remote_valid_check();
-#elif defined(DEBUG_LEGION)
-      assert(is_logical_owner());
-#endif
       AutoLock v_lock(view_lock,1,false/*exclusive*/);
       if (reading)
       {
@@ -8702,8 +8742,31 @@ namespace Legion {
 #ifdef DISTRIBUTED_INSTANCE_VIEWS
       if (!is_logical_owner() && reading)
         perform_remote_valid_check();
-#elif defined(DEBUG_LEGION)
-      assert(is_logical_owner());
+#else
+      if (!is_logical_owner())
+      {
+        ApUserEvent result = Runtime::create_ap_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(usage);
+          rez.serialize(term_event);
+          rez.serialize(user_mask);
+          rez.serialize(op_id);
+          rez.serialize(index);
+#ifdef DEBUG_LEGION
+          assert(!IS_WRITE(usage));
+#endif
+          versions->pack_upper_bound_node(rez);
+          RtUserEvent applied_event = Runtime::create_rt_user_event();
+          applied_events.insert(applied_event);
+          rez.serialize(applied_event);
+          rez.serialize(result);
+        }
+        runtime->send_instance_view_find_user_preconditions(logical_owner, rez);
+        return result;
+      }
 #endif
       std::set<ApEvent> wait_on;
       ApEvent use_event = manager->get_use_event();
