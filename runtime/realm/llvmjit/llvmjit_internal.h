@@ -20,13 +20,11 @@
 
 #include <string>
 
-// instead of including LLVM headers here, we just forward-declare the things that need to
-//  appear inside an LLVMJitInternal
-namespace llvm {
-  class LLVMContext;
-  class TargetMachine;
-  class ExecutionEngine;
-};
+// instead of including LLVM headers here, we just forward-declare the things
+//  that need to appear inside an LLVMJitInternal
+typedef struct LLVMOpaqueContext *LLVMContextRef;
+typedef struct LLVMOpaqueExecutionEngine *LLVMExecutionEngineRef;
+typedef struct LLVMTarget *LLVMTargetRef;
 
 namespace Realm {
   namespace LLVMJit {
@@ -38,10 +36,14 @@ namespace Realm {
 
       void *llvmir_to_fnptr(const ByteArray& ir, const std::string& entry_symbol);
 
+#ifdef REALM_ALLOW_MISSING_LLVM_LIBS
+      static bool detect_llvm_libraries(void);
+#endif
+
     protected:
-      llvm::LLVMContext *context;
-      llvm::ExecutionEngine *host_exec_engine;
-      llvm::TargetMachine *nvptx_machine;
+      LLVMContextRef context;
+      LLVMExecutionEngineRef host_exec_engine;
+      LLVMTargetRef nvptx_machine;
     };
 
   }; // namespace LLVMJit

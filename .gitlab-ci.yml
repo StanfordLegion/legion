@@ -60,6 +60,8 @@ variables:
   USE_PYTHON: "1"
 .hdf5: &hdf5
   USE_HDF: "1"
+.llvm: &llvm
+  USE_LLVM: "1"
 .gasnet: &gasnet
   USE_GASNET: "1"
 .cmake: &cmake
@@ -231,6 +233,15 @@ gcc49_cxx98_debug_python_legion:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx98_normal, *python, *legion]
+#   * LLVM
+gcc49_cxx98_debug_llvm_cmake_legion:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *llvm, *cmake, *legion]
+gcc49_cxx98_debug_llvm_regent:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *llvm, *regent]
 #   * HDF5
 gcc49_cxx98_debug_hdf5_cmake_legion:
   <<: [*linux, *image, *tests]
@@ -249,6 +260,15 @@ gcc49_cxx98_debug_gasnet_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx98_normal, *gasnet, *regent]
+# * Integration: LLVM + GASNet
+gcc49_cxx98_debug_llvm_gasnet_legion:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *llvm, *gasnet, *legion]
+gcc49_cxx98_debug_llvm_gasnet_regent:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *llvm, *gasnet, *regent]
 # * Integration: HDF5 + GASNet
 gcc49_cxx98_debug_hdf5_gasnet_legion:
   <<: [*linux_compute, *image, *tests]
@@ -319,6 +339,15 @@ clang38_cxx98_debug_python_legion:
   <<: [*linux, *image, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_normal, *python, *legion]
+#   * LLVM
+clang38_cxx98_debug_llvm_cmake_legion:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*clang38, *terra38, *debug, *cxx98_normal, *llvm, *cmake, *legion]
+clang38_cxx98_debug_llvm_regent:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*clang38, *terra38, *debug, *cxx98_normal, *llvm, *regent]
 #   * HDF5
 clang38_cxx98_debug_hdf5_cmake_legion:
   <<: [*linux, *image, *tests]
@@ -337,6 +366,15 @@ clang38_cxx98_debug_gasnet_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_normal, *gasnet, *regent]
+# * Integration: LLVM + GASNet
+clang38_cxx98_debug_llvm_gasnet_legion:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*clang38, *terra38, *debug, *cxx98_normal, *llvm, *gasnet, *legion]
+clang38_cxx98_debug_llvm_regent:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*clang38, *terra38, *debug, *cxx98_normal, *llvm, *gasnet, *regent]
 # * Integration: HDF5 + GASNet
 clang38_cxx98_debug_hdf5_gasnet_legion:
   <<: [*linux_compute, *image, *tests]
@@ -408,7 +446,7 @@ gcc6_cxx14_debug_regent:
 clang35_cxx98_debug_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*clang35, *terra35, *debug, *cxx98_normal, *legion]
+    <<: [*clang35, *terra35, *debug, *cxx98_normal, *llvm, *legion]
 # FIXME: Breaks on attempting to split vector-op
 # clang35_cxx98_debug_regent:
 #   <<: [*linux_compute, *image, *tests]

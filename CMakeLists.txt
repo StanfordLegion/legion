@@ -149,7 +149,8 @@ endif()
 #------------------------------------------------------------------------------#
 # LLVM configuration
 #------------------------------------------------------------------------------#
-option(Legion_USE_LLVM "Use LLVM JIT oerations" OFF)
+option(Legion_USE_LLVM "Use LLVM JIT operations" OFF)
+option(Legion_ALLOW_MISSING_LLVM_LIBS "Allow LLVM libraries to be missing at runtime" OFF)
 if(Legion_USE_LLVM)
   set(Legion_LLVM_COMPONENTS irreader jit mcjit x86)
   find_package(LLVM REQUIRED COMPONENTS ${Legion_LLVM_COMPONENTS})
@@ -157,8 +158,15 @@ if(Legion_USE_LLVM)
     DESTINATION ${CMAKE_INSTALL_DATADIR}/Legion/cmake
   )
 
-  # define variable for realm_defines.h
+  # define variables for realm_defines.h
   set(REALM_USE_LLVM ON)
+  if(Legion_ALLOW_MISSING_LLVM_LIBS)
+    set(REALM_ALLOW_MISSING_LLVM_LIBS ON)
+  endif()
+  # just want REALM_LLVM_VERSION=<major><minor>
+  string(REPLACE "." ";" LLVM_VERSION_SPLIT ${LLVM_VERSION})
+  list(GET LLVM_VERSION_SPLIT 0 1 REALM_LLVM_VERSION_LIST)
+  string(REPLACE ";" "" REALM_LLVM_VERSION "${REALM_LLVM_VERSION_LIST}")
 endif()
 
 #------------------------------------------------------------------------------#

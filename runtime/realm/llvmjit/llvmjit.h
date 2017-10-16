@@ -19,12 +19,19 @@
 // NOTE: let's try to keep LLVM include files/etc. out of here, because they bring
 //  a bunch of C++11 baggage
 
+#include <realm/realm_config.h>
 #include "realm/codedesc.h"
 #include "realm/bytearray.h"
 
 #include <string>
 
 namespace Realm {
+
+#ifdef REALM_ALLOW_MISSING_LLVM_LIBS
+  namespace LLVMJit {
+    extern bool llvmjit_available;
+  };
+#endif
 
   // a code implementation that handles LLVM IR - text only right now, but the plan
   //  is to support binary here too

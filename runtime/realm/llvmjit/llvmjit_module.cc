@@ -26,6 +26,10 @@ namespace Realm {
 
   namespace LLVMJit {
 
+#ifdef REALM_ALLOW_MISSING_LLVM_LIBS
+    /*extern*/ bool llvmjit_available = false;
+#endif
+
     ////////////////////////////////////////////////////////////////////////
     //
     // class LLVMCodeTranslator
@@ -116,6 +120,14 @@ namespace Realm {
     /*static*/ Module *LLVMJitModule::create_module(RuntimeImpl *runtime,
 						    std::vector<std::string>& cmdline)
     {
+#ifdef REALM_ALLOW_MISSING_LLVM_LIBS
+      if(LLVMJitInternal::detect_llvm_libraries()) {
+	llvmjit_available = true;
+      } else {
+	log_llvmjit.info() << "LLVM libs not found - disabling JIT functionality";
+	return 0;
+      }
+#endif
       LLVMJitModule *m = new LLVMJitModule;
       return m;
     }

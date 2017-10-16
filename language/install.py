@@ -48,8 +48,10 @@ def download(dest_path, url, sha1):
     shasum.communicate('%s  %s' % (sha1, dest_file))
     assert shasum.wait() == 0
 
-def git_clone(repo_dir, url):
-    subprocess.check_call(['git', 'clone', url, repo_dir])
+def git_clone(repo_dir, url, branch=None):
+    subprocess.check_call(['git', 'clone'] +
+                          (['-b', branch] if branch else []) +
+                          [url, repo_dir])
 
 def git_update(repo_dir):
     subprocess.check_call(
@@ -107,12 +109,13 @@ def install_rdir(rdir, legion_dir, regent_dir):
     if rdir != 'skip':
         dump_json_config(config_filename, rdir)
 
-def build_terra(terra_dir, thread_count):
+def build_terra(terra_dir, thread_count, llvm):
     subprocess.check_call(
-        ['make', 'all', '-j', str(thread_count)],
+        ['make', 'all', '-j', str(thread_count)] +
+        (['REEXPORT_LLVM_COMPONENTS=irreader mcjit x86'] if llvm else []),
         cwd = terra_dir)
 
-def install_terra(terra_dir, external_terra_dir, thread_count):
+def install_terra(terra_dir, external_terra_dir, thread_count, llvm):
     if external_terra_dir is not None:
         external_terra_dir = os.path.expanduser(external_terra_dir)
         if not os.path.isdir(external_terra_dir):
@@ -140,17 +143,19 @@ def install_terra(terra_dir, external_terra_dir, thread_count):
         return
 
     if not os.path.exists(terra_dir):
-        git_clone(terra_dir, 'https://github.com/zdevito/terra.git')
+        #git_clone(terra_dir, 'https://github.com/zdevito/terra.git')
+        git_clone(terra_dir, 'https://github.com/streichler/terra.git',
+                  branch="regent-tmp")
     else:
         git_update(terra_dir)
-    build_terra(terra_dir, thread_count)
+    build_terra(terra_dir, thread_count, llvm)
 
 def symlink(from_path, to_path):
     if not os.path.lexists(to_path):
         os.symlink(from_path, to_path)
 
 def install_bindings(bindings_dir, runtime_dir, terra_dir, debug,
-                     cuda, openmp, hdf, spy, gasnet, gasnet_dir, conduit,
+                     cuda, openmp, llvm, hdf, spy, gasnet, gasnet_dir, conduit,
                      clean_first, thread_count, extra_flags):
     env = dict(list(os.environ.items()) + [
         ('LG_RT_DIR', runtime_dir),
@@ -161,6 +166,7 @@ def install_bindings(bindings_dir, runtime_dir, terra_dir, debug,
         ['DEBUG=%s' % (1 if debug else 0),
          'USE_CUDA=%s' % (1 if cuda else 0),
          'USE_OPENMP=%s' % (1 if openmp else 0),
+         'USE_LLVM=%s' % (1 if llvm else 0),
          'USE_GASNET=%s' % (1 if gasnet else 0),
          'USE_HDF=%s' % (1 if hdf else 0),
          'USE_SPY=%s' % (1 if spy else 0),
@@ -204,7 +210,7 @@ def install_bindings(bindings_dir, runtime_dir, terra_dir, debug,
              '/usr/local/lib/libluajit-5.1.2.dylib', 'libluajit-5.1.2.dylib',
              os.path.join(bindings_dir, 'liblegion_terra.so')])
 
-def install(gasnet=False, cuda=False, openmp=False, hdf=False,
+def install(gasnet=False, cuda=False, openmp=False, hdf=False, llvm=False,
             spy=False, conduit=None, rdir=None, external_terra_dir=None, gasnet_dir=None,
             debug=False, clean_first=True, thread_count=None, extra_flags=[]):
     if spy and not debug:
@@ -226,11 +232,11 @@ def install(gasnet=False, cuda=False, openmp=False, hdf=False,
     install_rdir(rdir, legion_dir, regent_dir)
 
     terra_dir = os.path.join(regent_dir, 'terra')
-    install_terra(terra_dir, external_terra_dir, thread_count)
+    install_terra(terra_dir, external_terra_dir, thread_count, llvm)
 
     bindings_dir = os.path.join(legion_dir, 'bindings', 'terra')
     install_bindings(bindings_dir, runtime_dir, terra_dir, debug,
-                     cuda, openmp, hdf, spy, gasnet, gasnet_dir, conduit,
+                     cuda, openmp, llvm, hdf, spy, gasnet, gasnet_dir, conduit,
                      clean_first, thread_count, extra_flags)
 
 def driver():
@@ -254,6 +260,10 @@ def driver():
         '--openmp', dest = 'openmp', action = 'store_true', required = False,
         default = 'USE_OPENMP' in os.environ and os.environ['USE_OPENMP'] == '1',
         help = 'Build Legion with OpenMP support.')
+    parser.add_argument(
+        '--llvm', dest = 'llvm', action = 'store_true', required = False,
+        default = 'USE_LLVM' in os.environ and os.environ['USE_LLVM'] == '1',
+        help = 'Build Legion (and compatible Terra) with LLVM support.')
     parser.add_argument(
         '--hdf5', '--hdf', dest = 'hdf', action = 'store_true', required = False,
         default = 'USE_HDF' in os.environ and os.environ['USE_HDF'] == '1',

@@ -30,6 +30,13 @@
 
 #include "realm.h"
 
+#include "cpu_kernels.h" // for coord_t
+
+typedef Realm::Point<1, coord_t> Point1;
+typedef Realm::Point<2, coord_t> Point2;
+typedef Realm::Rect<1, coord_t> Rect1;
+typedef Realm::Rect<2, coord_t> Rect2;
+
 struct ShardArgs {
 public:
   Realm::RegionInstance xp_inst_in, xm_inst_in, yp_inst_in, ym_inst_in;
@@ -38,32 +45,30 @@ public:
   Realm::Barrier xp_empty_out, xm_empty_out, yp_empty_out, ym_empty_out;
   Realm::Barrier xp_full_in, xm_full_in, yp_full_in, ym_full_in;
   Realm::Barrier xp_full_out, xm_full_out, yp_full_out, ym_full_out;
-  Realm::Barrier sync;
-  size_t tsteps, tprune, init;
-  Realm::Point<2> point;
-  Realm::Rect<2> interior_bounds, exterior_bounds, outer_bounds;
+  Realm::Barrier sync, start, stop;
+  coord_t tsteps, tprune, init;
+  Point2 point;
+  Rect2 interior_bounds, exterior_bounds, outer_bounds;
   Realm::Memory sysmem, regmem;
 };
 
 struct StencilArgs {
 public:
   Realm::RegionInstance private_inst, xp_inst, xm_inst, yp_inst, ym_inst;
-  bool print_ts;
-  Realm::Rect<2> interior_bounds;
+  Rect2 interior_bounds;
 };
 
 struct IncrementArgs {
 public:
   Realm::RegionInstance private_inst, xp_inst, xm_inst, yp_inst, ym_inst;
-  bool print_ts;
-  Realm::Rect<2> outer_bounds;
+  Rect2 outer_bounds;
 };
 
 struct CheckArgs {
 public:
   Realm::RegionInstance private_inst;
-  size_t tsteps, init;
-  Realm::Rect<2> interior_bounds;
+  coord_t tsteps, init;
+  Rect2 interior_bounds;
 };
 
 #endif
