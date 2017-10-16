@@ -98,6 +98,9 @@ namespace Legion {
       IndexSpaceT(void);
       IndexSpaceT(const IndexSpaceT &rhs);  
       explicit IndexSpaceT(const IndexSpace &rhs);
+    public:
+      inline IndexSpaceT& operator=(const IndexSpace &rhs);
+      inline IndexSpaceT& operator=(const IndexSpaceT &rhs);
     };
 
     /**
@@ -150,6 +153,9 @@ namespace Legion {
       IndexPartitionT(void);
       IndexPartitionT(const IndexPartitionT &rhs);
       explicit IndexPartitionT(const IndexPartition &rhs);
+    public:
+      inline IndexPartitionT& operator=(const IndexPartition &rhs);
+      inline IndexPartitionT& operator=(const IndexPartitionT &rhs);
     };
 
     /**
@@ -245,6 +251,9 @@ namespace Legion {
       LogicalRegionT(void);
       LogicalRegionT(const LogicalRegionT &rhs);
       explicit LogicalRegionT(const LogicalRegion &rhs);
+    public:
+      inline LogicalRegionT& operator=(const LogicalRegion &rhs);
+      inline LogicalRegionT& operator=(const LogicalRegionT &rhs);
     };
 
     /**
@@ -310,6 +319,9 @@ namespace Legion {
       LogicalPartitionT(void);
       LogicalPartitionT(const LogicalPartitionT &rhs);
       explicit LogicalPartitionT(const LogicalPartition &rhs);
+    public:
+      inline LogicalPartitionT& operator=(const LogicalPartition &rhs);
+      inline LogicalPartitionT& operator=(const LogicalPartitionT &rhs);
     };
 
     //==========================================================================
