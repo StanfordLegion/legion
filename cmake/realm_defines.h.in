@@ -71,6 +71,10 @@
 #cmakedefine USE_HDF
 #endif
 
+#ifndef USE_LIBDL
+#cmakedefine USE_LIBDL
+#endif
+
 #ifndef __STDC_FORMAT_MACROS
 #cmakedefine __STDC_FORMAT_MACROS
 #endif

@@ -168,6 +168,7 @@ endif
 
 USE_LIBDL ?= 1
 ifeq ($(strip $(USE_LIBDL)),1)
+CC_FLAGS += -DUSE_LIBDL
 ifneq ($(shell uname -s),Darwin)
 #CC_FLAGS += -rdynamic
 LEGION_LD_FLAGS += -ldl -rdynamic

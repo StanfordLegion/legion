@@ -181,6 +181,15 @@ if(Legion_USE_HDF5)
 endif()
 
 #------------------------------------------------------------------------------#
+# libdl configuration
+#------------------------------------------------------------------------------#
+option(Legion_USE_LIBDL "Enable support for libdl" ON)
+if(Legion_USE_LIBDL)
+  # define variable for realm_defines.h
+  set(USE_LIBDL ON)
+endif()
+
+#------------------------------------------------------------------------------#
 # HWLOC configuration
 #------------------------------------------------------------------------------#
 option(Legion_USE_HWLOC "Use hwloc for topology awareness" OFF)
