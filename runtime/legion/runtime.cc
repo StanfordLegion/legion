@@ -19832,6 +19832,11 @@ namespace Legion {
             VersionManager::process_capture_dirty(args);
             break;
           }
+        case LG_VERSION_STATE_PENDING_ADVANCE_TASK_ID:
+          {
+            VersionManager::process_pending_advance(args);
+            break;
+          }
         case LG_DISJOINT_CLOSE_TASK_ID:
           {
             InterCloseOp::handle_disjoint_close(args);

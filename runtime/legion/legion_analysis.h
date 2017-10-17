@@ -890,6 +890,14 @@ namespace Legion {
         VersionState *target;
         FieldMask *capture_mask;
       };
+      struct PendingAdvanceArgs : public LgTaskArgs<PendingAdvanceArgs> {
+      public:
+        static const LgTaskID TASK_ID = 
+          LG_VERSION_STATE_PENDING_ADVANCE_TASK_ID;
+      public:
+        VersionManager *proxy_this;
+        RtEvent to_reclaim;
+      };
     public:
       static const AllocationType alloc_type = VERSION_MANAGER_ALLOC;
       static const VersionID init_version = 1;
@@ -951,6 +959,7 @@ namespace Legion {
                             ProjectionEpochID advance_epoch = 0,
                             const FieldMask *dirty_previous = NULL,
                             const ProjectionInfo *proj_info = NULL);
+      void reclaim_pending_advance(RtEvent done_event);
       void update_child_versions(InnerContext *context,
                                  LegionColor child_color,
                                  VersioningSet<> &new_states,
@@ -1019,6 +1028,7 @@ namespace Legion {
                                               Runtime *runtime);
     public:
       static void process_capture_dirty(const void *args);
+      static void process_pending_advance(const void *args);
     protected:
       void sanity_check(void);
     public:
@@ -1044,7 +1054,8 @@ namespace Legion {
       FieldMask remote_valid_fields;
       // Only used on remote nodes to track the set of pending advances
       // which may indicate that remove_valid_fields is stale
-      FieldMask pending_remote_advances;
+      FieldMask pending_remote_advance_summary;
+      LegionMap<RtEvent,FieldMask>::aligned pending_remote_advances;
     protected:
       // Owner information about which nodes have remote copies
       LegionMap<AddressSpaceID,FieldMask>::aligned remote_valid;

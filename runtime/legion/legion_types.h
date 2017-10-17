@@ -353,6 +353,7 @@ namespace Legion {
       LG_DEFER_MAP_AND_LAUNCH_TASK_ID,
       LG_ADD_VERSIONING_SET_REF_TASK_ID,
       LG_VERSION_STATE_CAPTURE_DIRTY_TASK_ID,
+      LG_VERSION_STATE_PENDING_ADVANCE_TASK_ID,
       LG_DISJOINT_CLOSE_TASK_ID,
       LG_DEFER_MATERIALIZED_VIEW_TASK_ID,
       LG_MISSPECULATE_TASK_ID,
@@ -450,6 +451,7 @@ namespace Legion {
         "Defer Task Map and Launch",                              \
         "Defer Versioning Set Reference",                         \
         "Version State Capture Dirty",                            \
+        "Version State Reclaim Pending Advance",                  \
         "Disjoint Close",                                         \
         "Defer Materialized View Creation",                       \
         "Handle Mapping Misspeculation",                          \
