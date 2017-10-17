@@ -248,6 +248,8 @@ list(APPEND LEGION_SRC
   legion/legion_c_util.h                 
   legion/legion.h                         legion/legion.cc
   legion/legion.inl                      
+  legion/legion_domain.h
+  legion/legion_domain.inl
   legion/legion_instances.h               legion/legion_instances.cc
   legion/legion_mapping.h                 legion/legion_mapping.cc
   legion/legion_ops.h                     legion/legion_ops.cc
