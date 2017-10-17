@@ -246,6 +246,7 @@ function pretty.expr_function(cx, node)
       node.value == regentlib.sin(float)    and '[regentlib.sin(float)]'    or
       node.value == regentlib.sqrt(float)   and '[regentlib.sqrt(float)]'   or
       node.value == regentlib.trunc(float)  and '[regentlib.trunc(float)]'  or
+      node.value == regentlib.sqrt(vector(double,2))   and '[regentlib.sqrt(vector(double,2))]'   or
       assert(false)
   else
     name = tostring(node.value)
