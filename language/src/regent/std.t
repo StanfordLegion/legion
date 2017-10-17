@@ -4132,6 +4132,10 @@ do
   function std.convert_math_op(op, arg_type)
     return std[to_math_op_name[op]](arg_type)
   end
+
+  function std.get_math_op_name(op, arg_type)
+    return '[regentlib.' .. to_math_op_name[op] .. '(' .. tostring(arg_type) .. ')]'
+  end
 end
 
 do
