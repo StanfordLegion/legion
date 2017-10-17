@@ -5969,6 +5969,22 @@ namespace Legion {
       {
         // First check to see what if any outstanding requests we have
         AutoLock m_lock(manager_lock);
+        // First recheck to see if we lost any races with responses
+        // already coming back to us since we computed our request mask
+        if (!!pending_remote_advances)
+        {
+          const FieldMask overlap = request_mask & pending_remote_advances;
+          // Always remove the fields that are now valid
+          request_mask -= remote_valid_fields;
+          // If we had any overlap fields we have to add them back in
+          if (!!overlap)
+            request_mask |= overlap;
+        }
+        else // No remote advances so remove any fields now valid
+          request_mask -= remote_valid_fields;
+        // If we lost races with responses then we might already be done
+        if (!request_mask)
+          return RtEvent::NO_RT_EVENT;
         for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator it =
               outstanding_requests.begin(); it != 
               outstanding_requests.end(); it++)
