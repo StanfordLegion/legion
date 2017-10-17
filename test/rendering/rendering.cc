@@ -45,6 +45,12 @@ enum SerdezIDs {
   SERDEZ_ID = 123
 };
 
+enum ColorConstant {
+  RED = 111,
+  GREEN = 222,
+  BLUE = 333
+};
+
 int num_cpus = 0;
 
 class RenderingMapper : public ShimMapper {
@@ -137,15 +143,15 @@ static void update_mappers(Machine machine, HighLevelRuntime *rt,
 }
 
 struct RGB {
-  double r, g, b;
+  int r, g, b;
 };
 
 class Object {
 public:
-  enum {dim_size = 512};
+  enum {dim_size = 32};
   Object(void) {
     for (int i = 0; i < dim_size * dim_size;i++) {
-      texture[i].r = texture[i].g = texture[i].b = 1;
+      texture[i].r = texture[i].g = texture[i].b = 0;
     }
   }
 public:
@@ -208,8 +214,8 @@ void top_level_task(const Task *task,
                     Context ctx, HighLevelRuntime *runtime)
 {
   srand(123456);
-  int nsize = 1024;
-  int niter = 20;
+  int nsize = 64;
+  int niter = 10;
   int npar = num_cpus;
   int iters_per_check = 4;
   bool cache_optimization = false;
@@ -289,9 +295,9 @@ void init_task(const Task *task,
     Object* new_rect = new Object();
     for (int x = 0; x < Object::dim_size; x++)
       for (int y = 0; y < Object::dim_size; y++) {
-        new_rect->texture[x * Object::dim_size + y].r = 1;
-        new_rect->texture[x * Object::dim_size + y].g = 0;
-        new_rect->texture[x * Object::dim_size + y].b = 0;
+        new_rect->texture[x * Object::dim_size + y].r = RED;
+        new_rect->texture[x * Object::dim_size + y].g = GREEN;
+        new_rect->texture[x * Object::dim_size + y].b = BLUE;
       }
     acc_A.write(DomainPoint::from_point<1>(pir.p), new_rect);
   }
@@ -415,12 +421,14 @@ void worker_task(const Task *task,
   RGB* bg = (RGB*) calloc(Object::dim_size * Object::dim_size, sizeof(RGB));
   for (GenericPointInRectIterator<1> pir(rect_A); pir; pir++) {
     Object* obj = acc_A.read(DomainPoint::from_point<1>(pir.p));
-    for (int times = 0; times < 10; times++)
     for (int x = 0; x < Object::dim_size; x++)
       for (int y = 0; y < Object::dim_size; y++) {
         bg[x * Object::dim_size + y].r += obj->texture[x * Object::dim_size + y].r;
+        assert(obj->texture[x * Object::dim_size + y].r == RED);
         bg[x * Object::dim_size + y].g += obj->texture[x * Object::dim_size + y].g;
+        assert(obj->texture[x * Object::dim_size + y].g == GREEN);
         bg[x * Object::dim_size + y].b += obj->texture[x * Object::dim_size + y].b;
+        assert(obj->texture[x * Object::dim_size + y].b == BLUE);
       }
   } 
   free(bg);
