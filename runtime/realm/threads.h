@@ -168,6 +168,10 @@ namespace Realm {
     // if called from a kernel thread, that thread becomes the "host" for the user thread
     // if called by a user thread with 'switch_to'==0, control returns to host
     static void user_switch(Thread *switch_to);
+
+    // some systems do not appear to support user thread switching for
+    //  reasons unknown, so allow code to test to see if it's working first
+    static bool test_user_switch_support(size_t stack_size = 1 << 20);
 #endif
 
     template <typename CONDTYPE>
