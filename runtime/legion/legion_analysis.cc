@@ -6271,7 +6271,6 @@ namespace Legion {
         AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
         sanity_check();
-        assert(remote_valid_fields * update_mask);
 #endif
         merge_send_infos(current_version_infos, current_update, &mutator);
         merge_send_infos(previous_version_infos, previous_update, &mutator);
