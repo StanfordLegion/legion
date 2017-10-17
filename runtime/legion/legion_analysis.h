@@ -1006,7 +1006,8 @@ namespace Legion {
       static void merge_send_infos(
           LegionMap<VersionID,
               VersioningSet<VERSION_MANAGER_REF> >::aligned &target_infos,
-          const LegionMap<VersionState*,FieldMask>::aligned &source_infos);
+          const LegionMap<VersionState*,FieldMask>::aligned &source_infos,
+                ReferenceMutator *mutator);
       static void handle_response(Deserializer &derez);
     public:
       void find_or_create_unversioned_states(FieldMask unversioned,

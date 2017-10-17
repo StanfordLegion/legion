@@ -6183,14 +6183,18 @@ namespace Legion {
         RtEvent wait_on = Runtime::merge_events(preconditions);
         wait_on.lg_wait();
       }
+#ifdef DEBUG_LEGION
+      assert(applied_events != NULL);
+#endif
+      WrapperReferenceMutator mutator(*applied_events);
       // Take our lock and apply our updates
       {
         AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
         sanity_check();
 #endif
-        merge_send_infos(current_version_infos, current_update);
-        merge_send_infos(previous_version_infos, previous_update);
+        merge_send_infos(current_version_infos, current_update, &mutator);
+        merge_send_infos(previous_version_infos, previous_update, &mutator);
         // Update the remote valid fields
         remote_valid_fields |= update_mask;
         // Any update that we get also filters the remote_valid_fields
@@ -6232,12 +6236,14 @@ namespace Legion {
     /*static*/ void VersionManager::merge_send_infos(
         LegionMap<VersionID,
                   VersioningSet<VERSION_MANAGER_REF> >::aligned& target_infos,
-        const LegionMap<VersionState*,FieldMask>::aligned &source_infos)
+        const LegionMap<VersionState*,FieldMask>::aligned &source_infos,
+              ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator
             it = source_infos.begin(); it != source_infos.end(); it++)
-        target_infos[it->first->version_number].insert(it->first, it->second);
+        target_infos[it->first->version_number].insert(it->first, 
+                                                       it->second, mutator);
     }
 
     //--------------------------------------------------------------------------
