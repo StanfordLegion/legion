@@ -62,7 +62,7 @@ public:
   Realm::Barrier xp_empty_out, xm_empty_out, yp_empty_out, ym_empty_out;
   Realm::Barrier xp_full_in, xm_full_in, yp_full_in, ym_full_in;
   Realm::Barrier xp_full_out, xm_full_out, yp_full_out, ym_full_out;
-  Realm::Barrier sync, start, stop;
+  Realm::Barrier sync, first_start, last_start, first_stop, last_stop;
   coord_t tsteps, tprune, init;
   Point2 point;
   Rect2 interior_bounds, exterior_bounds, outer_bounds;
