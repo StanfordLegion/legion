@@ -89,7 +89,6 @@ namespace Realm {
       , cfg_num_mp_threads(0)
       , cfg_num_mp_procs(0)
       , cfg_num_mp_cpus(0)
-      , cfg_force_kernel_threads(false)
       , cfg_stack_size_in_mb(2)
     {
     }
@@ -108,8 +107,7 @@ namespace Realm {
 
       cp.add_option_int("-ll:mp_threads", m->cfg_num_mp_threads)
         .add_option_int("-ll:mp_nodes", m->cfg_num_mp_procs)
-        .add_option_int("-ll:mp_cpu", m->cfg_num_mp_cpus)
-	.add_option_bool("-ll:force_kthreads", m->cfg_force_kernel_threads, true /*keep*/);
+        .add_option_int("-ll:mp_cpu", m->cfg_num_mp_cpus);
 
       bool ok = cp.parse_command_line(cmdline);
       if(!ok) {
@@ -150,7 +148,7 @@ namespace Realm {
           Processor p = runtime->next_local_processor_id();
           ProcessorImpl *pi = new LocalProcessorSet(p, runtime->core_reservation_set(),
 						    cfg_stack_size_in_mb << 20, cfg_num_mp_threads,
-						    cfg_force_kernel_threads);
+						    Config::force_kernel_threads);
           runtime->add_processor(pi);
         // if there are not procSets on all nodes and cfg_num_mp_cpus is set
         // then add additional LocalCPUProcessors on these nodes
@@ -159,7 +157,7 @@ namespace Realm {
             Processor p = runtime->next_local_processor_id();
             ProcessorImpl *pi = new LocalCPUProcessor(p, runtime->core_reservation_set(),
 						      cfg_stack_size_in_mb << 20,
-						      cfg_force_kernel_threads);
+						      Config::force_kernel_threads);
             runtime->add_processor(pi);
           }
         }      

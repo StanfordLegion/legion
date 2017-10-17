@@ -829,6 +829,68 @@ namespace Realm {
   // class UserThread
 
 #ifdef REALM_USE_USER_THREADS
+  namespace {
+    int uswitch_test_check_flag = 1;
+    ucontext_t uswitch_test_ctx1, uswitch_test_ctx2;
+
+    void uswitch_test_entry(int arg)
+    {
+      log_thread.debug() << "uswitch test: adding: " << uswitch_test_check_flag << " " << arg;
+      __sync_fetch_and_add(&uswitch_test_check_flag, arg);
+      errno = 0;
+      int ret = swapcontext(&uswitch_test_ctx2, &uswitch_test_ctx1);
+      if(ret != 0) {
+	log_thread.fatal() << "uswitch test: swap out failed: " << ret << " " << errno;
+	assert(0);
+      }
+    }
+  }
+
+  // some systems do not appear to support user thread switching for
+  //  reasons unknown, so allow code to test to see if it's working first
+  /*static*/ bool Thread::test_user_switch_support(size_t stack_size /*= 1 << 20*/)
+  {
+    errno = 0;
+    int ret;
+    ret = getcontext(&uswitch_test_ctx2);
+    if(ret != 0) {
+      log_thread.info() << "uswitch test: getcontext failed: " << ret << " " << errno;
+      return false;
+    }
+    void *stack_base = malloc(stack_size);
+    if(!stack_base) {
+      log_thread.info() << "uswitch test: stack malloc failed";
+      return false;
+    }
+    uswitch_test_ctx2.uc_link = 0; // we don't expect it to ever fall through
+    uswitch_test_ctx2.uc_stack.ss_sp = stack_base;
+    uswitch_test_ctx2.uc_stack.ss_size = stack_size;
+    uswitch_test_ctx2.uc_stack.ss_flags = 0;
+    makecontext(&uswitch_test_ctx2,
+		reinterpret_cast<void(*)()>(uswitch_test_entry),
+		1, 66);
+
+    // now try to swap and back
+    errno = 0;
+    ret = swapcontext(&uswitch_test_ctx1, &uswitch_test_ctx2);
+    if(ret != 0) {
+      log_thread.info() << "uswitch test: swap in failed: " << ret << " " << errno;
+      free(stack_base);
+      return false;
+    }
+
+    int val = __sync_fetch_and_add(&uswitch_test_check_flag, 0);
+    if(val != 67) {
+      log_thread.info() << "uswitch test: val mismatch: " << val << " != 67";
+      free(stack_base);
+      return false;
+    }
+
+    log_thread.debug() << "uswitch test: check succeeded";
+    free(stack_base);
+    return true;
+  }
+
   class UserThread : public Thread {
   public:
     UserThread(void *_target, void (*_entry_wrapper)(void *),

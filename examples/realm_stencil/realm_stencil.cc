@@ -516,7 +516,6 @@ void shard_task(const void *args, size_t arglen,
   Event xm_copy_done = Event::NO_EVENT;
   Event yp_copy_done = Event::NO_EVENT;
   Event ym_copy_done = Event::NO_EVENT;
-  long long start;
   for (coord_t t = 0; t < a.tsteps; t++) {
     {
       StencilArgs args;
@@ -534,7 +533,6 @@ void shard_task(const void *args, size_t arglen,
         (ym_full_in.exists() ? ym_full_in.get_previous_phase() : Event::NO_EVENT));
       if (t == a.tprune) {
         precondition.wait();
-        start = Realm::Clock::current_time_in_microseconds();
       }
       stencil_done = p.spawn(STENCIL_TASK, &args, sizeof(args), precondition);
       if (xp_empty_out.exists()) xp_empty_out.arrive(1, stencil_done);
@@ -601,6 +599,9 @@ void shard_task(const void *args, size_t arglen,
     if (ym_full_out.exists()) ym_full_out = ym_full_out.advance_barrier();
   }
 
+  // This task hasn't blocked, so no subtasks have executed yet.
+  // Only time subtask execution
+  long long start = Realm::Clock::current_time_in_microseconds();
   increment_done.wait();
   long long stop = Realm::Clock::current_time_in_microseconds();
 

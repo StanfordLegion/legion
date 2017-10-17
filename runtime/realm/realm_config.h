@@ -64,6 +64,10 @@ namespace Realm {
     // if non-zero, eagerly checks deferred user event triggers for loops up to the
     //  specified limit
     extern int event_loop_detection_limit;
+
+    // if true, worker threads that might have used user-level thread switching
+    //  fall back to kernel threading
+    extern bool force_kernel_threads;
   };
 };
 
