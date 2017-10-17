@@ -6278,7 +6278,6 @@ namespace Legion {
         remote_valid_fields |= update_mask;
         // Remove our outstanding request
 #ifdef DEBUG_LEGION
-        assert(pending_remote_advance_summary * update_mask);
         assert(outstanding_requests.find(done) != outstanding_requests.end());
         sanity_check();
 #endif
