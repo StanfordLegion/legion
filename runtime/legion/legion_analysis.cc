@@ -6172,13 +6172,17 @@ namespace Legion {
                                        const FieldMask &request_mask)
     //--------------------------------------------------------------------------
     {
-      // Do most of this in ready only mode
+      // Do most of this in read only mode
+#ifdef DEBUG_LEGION
+      FieldMask send_mask = request_mask;
+#endif
       {
         AutoLock m_lock(manager_lock,1,false/*exclusive*/);
 #ifdef DEBUG_LEGION
         sanity_check();
-#endif
+#else
         FieldMask send_mask = request_mask;
+#endif
         // We only need to send it if we know that it is not valid anymore
         LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
           finder = remote_valid.find(target);
@@ -6201,6 +6205,12 @@ namespace Legion {
       // Need exclusive access at the end to update the remote information
       AutoLock m_lock(manager_lock);
       remote_valid_fields |= request_mask;
+#ifdef DEBUG_LEGION
+      // Sanity check that no invalidations were sent while
+      // we weren't holding the lock
+      if (remote_valid.find(target) != remote_valid.end())
+        assert(send_mask == (request_mask - remote_valid[target]));
+#endif
       remote_valid[target] |= request_mask;
     }
 
