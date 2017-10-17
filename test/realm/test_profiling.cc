@@ -346,7 +346,7 @@ void top_level_task(const void *args, size_t arglen,
 
   // instance profiling #2 - allocation failure
   {
-    Rect<1> is(0, 1 << 30);
+    Rect<1> is(0, 1 << 21); // make sure total size is less than 4GB for 32 bit builds
     ProfilingRequestSet prs;
     Memory mem = Machine::MemoryQuery(machine).only_kind(Memory::SYSTEM_MEM).first();
     assert(mem.exists());
