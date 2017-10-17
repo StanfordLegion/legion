@@ -618,6 +618,10 @@ void shard_task(const void *args, size_t arglen,
     Event check_done = p.spawn(CHECK_TASK, &check_args, sizeof(check_args), increment_done);
     check_done.wait();
   }
+
+  // Make sure all operations are done before returning
+  Event::merge_events(
+    xp_copy_done, xm_copy_done, yp_copy_done, ym_copy_done).wait();
 }
 
 void top_level_task(const void *args, size_t arglen,
