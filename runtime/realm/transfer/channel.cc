@@ -1680,19 +1680,23 @@ namespace Realm {
 	    break;
 	  }
 
+	  // no support for serdez ops
+	  assert(src_serdez_op == 0);
+	  assert(dst_serdez_op == 0);
+
 	  // some sort of per-channel max request size?
 	  size_t max_bytes = 1 << 20;
 
 	  // if we're not the first in the chain, and we know the total bytes
 	  //  written by the predecessor, don't exceed that
 	  if(pre_xd_guid != XFERDES_NO_GUID) {
-	    size_t pre_max = pre_bytes_total - bytes_total;
+	    size_t pre_max = pre_bytes_total - read_bytes_total;
 	    if(pre_max == 0) {
 	      // due to unsynchronized updates to pre_bytes_total, this path
 	      //  can happen for an empty transfer reading from an intermediate
 	      //  buffer - handle it by looping around and letting the check
 	      //  at the top of the loop notice it the second time around
-	      if(bytes_total == 0)
+	      if(read_bytes_total == 0)
 		continue;
 	      // otherwise, this shouldn't happen - we should detect this case
 	      //  on the the transfer of those last bytes
@@ -1706,7 +1710,7 @@ namespace Realm {
 	    }
 
 	    // further limit based on data that has actually shown up
-	    max_bytes = seq_pre_write.span_exists(bytes_total, max_bytes);
+	    max_bytes = seq_pre_write.span_exists(read_bytes_total, max_bytes);
 	    if(max_bytes == 0)
 	      break;
 	  }
@@ -1714,7 +1718,7 @@ namespace Realm {
 	  // similarly, limit our max transfer size based on the amount the
 	  //  destination IB buffer can take (assuming there is an IB)
 	  if(next_xd_guid != XFERDES_NO_GUID) {
-	    max_bytes = seq_next_read.span_exists(bytes_total, max_bytes);
+	    max_bytes = seq_next_read.span_exists(write_bytes_total, max_bytes);
 	    if(max_bytes == 0)
 	      break;
 	  }
@@ -1814,10 +1818,14 @@ namespace Realm {
 #endif
 
 	  new_req->nbytes = hdf5_bytes;
-	  new_req->seq_pos = bytes_total;
-	  new_req->seq_count = hdf5_bytes;
 
-	  bytes_total += hdf5_bytes;
+	  new_req->read_seq_pos = read_bytes_total;
+	  new_req->read_seq_count = hdf5_bytes;
+	  read_bytes_total += hdf5_bytes;
+
+	  new_req->write_seq_pos = write_bytes_total;
+	  new_req->write_seq_count = hdf5_bytes;
+	  write_bytes_total += hdf5_bytes;
 
 	  requests[idx++] = new_req;
 	}
