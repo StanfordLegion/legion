@@ -6251,6 +6251,14 @@ namespace Legion {
       {
         rez.serialize(it->first->did);
         rez.serialize(it->second);
+        // Always add a remote valid reference in case we get invalidated
+        // by an advance before this message is received on the remote node
+#ifdef DEBUG_LEGION
+        assert(it->first->is_owner());
+#endif
+        // This reference will be removed by the remote side after
+        // it has registered the new version state
+        it->first->add_base_valid_ref(REMOTE_DID_REF);
       }
     }
 
@@ -6329,8 +6337,17 @@ namespace Legion {
     {
       for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator
             it = source_infos.begin(); it != source_infos.end(); it++)
+      {
         target_infos[it->first->version_number].insert(it->first, 
                                                        it->second, mutator);
+#ifdef DEBUG_LEGION
+        assert(!it->first->is_owner());
+#endif
+        // Remove the remote version reference that we added on the
+        // sender side, no need to track the effects, this is fire and forget
+        it->first->send_remote_valid_update(it->first->owner_space, NULL,
+                                            1/*count*/, false/*add*/);
+      }
     }
 
     //--------------------------------------------------------------------------
