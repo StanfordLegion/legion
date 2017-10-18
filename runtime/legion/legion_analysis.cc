@@ -224,13 +224,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<ReferenceSource REF_KIND, bool LOCAL>
-    void VersioningSet<REF_KIND,LOCAL>::insert(VersionState *state, 
-                               const FieldMask &mask, ReferenceMutator *mutator)
+    bool VersioningSet<REF_KIND,LOCAL>::insert(VersionState *state, 
+             const FieldMask &mask, ReferenceMutator *mutator, bool hold_remote)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!!mask);
+      assert(!hold_remote || !LOCAL);
 #endif
+      bool result = true;
       if (single)
       {
         if (versions.single_version == NULL)
@@ -239,20 +241,23 @@ namespace Legion {
           valid_fields = mask;
           if (REF_KIND != LAST_SOURCE_REF)
           {
-#ifdef DEBUG_LEGION
-            //assert(mutator != NULL);
-#endif
             // If we're not local and this is the owner we
             // have to send a remote update 
-            if (!LOCAL && !state->is_owner())
+            if (!LOCAL && !state->is_owner() && !hold_remote)
+            {
+#ifdef DEBUG_LEGION
+              assert(mutator != NULL);
+#endif
               state->send_remote_valid_update(state->owner_space, mutator,
                                               1/*count*/, true/*add*/);
+            }
             state->add_base_valid_ref(REF_KIND, mutator);
           }
         }
         else if (versions.single_version == state)
         {
           valid_fields |= mask;
+          result = false;
         }
         else
         {
@@ -266,12 +271,14 @@ namespace Legion {
           valid_fields |= mask;
           if (REF_KIND != LAST_SOURCE_REF)
           {
+            if (!LOCAL && !state->is_owner() && !hold_remote)
+            {
 #ifdef DEBUG_LEGION
-            //assert(mutator != NULL);
+              assert(mutator != NULL);
 #endif
-            if (!LOCAL && !state->is_owner())
               state->send_remote_valid_update(state->owner_space, mutator,
                                               1/*count*/, true/*add*/);
+            }
             state->add_base_valid_ref(REF_KIND, mutator);
           }
         }
@@ -288,19 +295,25 @@ namespace Legion {
           (*versions.multi_versions)[state] = mask;
           if (REF_KIND != LAST_SOURCE_REF)
           {
+            if (!LOCAL && !state->is_owner() && !hold_remote)
+            {
 #ifdef DEBUG_LEGION
-            //assert(mutator != NULL);
+              assert(mutator != NULL);
 #endif
-            if (!LOCAL && !state->is_owner())
               state->send_remote_valid_update(state->owner_space, mutator,
                                               1/*count*/, true/*add*/);
+            }
             state->add_base_valid_ref(REF_KIND, mutator);
           }
         }
         else
+        {
           finder->second |= mask;
+          result = false;
+        }
         valid_fields |= mask;
       }
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -5750,13 +5763,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void VersionManager::filter_version_info(const FieldMask &mask,
-             LegionMap<VersionID,
-                       VersioningSet<VERSION_MANAGER_REF> >::aligned &to_filter)
+                       LegionMap<VersionID,ManagerVersions>::aligned &to_filter)
     //--------------------------------------------------------------------------
     {
       std::vector<VersionID> to_delete;
-      for (LegionMap<VersionID,VersioningSet<VERSION_MANAGER_REF> >::aligned::
-            iterator vit = to_filter.begin(); vit != to_filter.end(); vit++)
+      for (LegionMap<VersionID,ManagerVersions>::aligned::iterator vit = 
+            to_filter.begin(); vit != to_filter.end(); vit++)
       {
         FieldMask overlap = vit->second.get_valid_mask() & mask;
         if (!overlap)
@@ -5766,8 +5778,8 @@ namespace Legion {
         else
         {
           std::vector<VersionState*> to_remove;
-          for (VersioningSet<VERSION_MANAGER_REF>::iterator it = 
-                vit->second.begin(); it != vit->second.end(); it++)
+          for (ManagerVersions::iterator it = vit->second.begin(); 
+                it != vit->second.end(); it++)
           {
             it->second -= overlap;
             if (!it->second)
@@ -6216,21 +6228,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void VersionManager::find_send_infos(
-                   LegionMap<VersionID,
-                             VersioningSet<VERSION_MANAGER_REF> >::aligned& 
-            version_infos, const FieldMask &request_mask, 
-          LegionMap<VersionState*,FieldMask>::aligned& send_infos)
+                   LegionMap<VersionID,ManagerVersions>::aligned &version_infos,
+                        const FieldMask &request_mask, 
+                        LegionMap<VersionState*,FieldMask>::aligned& send_infos)
     //--------------------------------------------------------------------------
     {
-      for (LegionMap<VersionID,VersioningSet<VERSION_MANAGER_REF> >::aligned::
-            const_iterator vit = version_infos.begin(); 
-            vit != version_infos.end(); vit++)
+      for (LegionMap<VersionID,ManagerVersions>::aligned::const_iterator vit = 
+            version_infos.begin(); vit != version_infos.end(); vit++)
       {
         FieldMask overlap = vit->second.get_valid_mask() & request_mask;
         if (!overlap)
           continue;
-        for (VersioningSet<VERSION_MANAGER_REF>::iterator it = 
-              vit->second.begin(); it != vit->second.end(); it++)
+        for (ManagerVersions::iterator it = vit->second.begin(); 
+              it != vit->second.end(); it++)
         {
           FieldMask state_overlap = it->second & overlap;
           if (!state_overlap)
@@ -6329,24 +6339,24 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void VersionManager::merge_send_infos(
-        LegionMap<VersionID,
-                  VersioningSet<VERSION_MANAGER_REF> >::aligned& target_infos,
-        const LegionMap<VersionState*,FieldMask>::aligned &source_infos,
-              ReferenceMutator *mutator)
+                LegionMap<VersionID,ManagerVersions>::aligned &target_infos,
+                const LegionMap<VersionState*,FieldMask>::aligned &source_infos,
+                      ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator
             it = source_infos.begin(); it != source_infos.end(); it++)
       {
-        target_infos[it->first->version_number].insert(it->first, 
-                                                       it->second, mutator);
 #ifdef DEBUG_LEGION
         assert(!it->first->is_owner());
 #endif
-        // Remove the remote version reference that we added on the
-        // sender side, no need to track the effects, this is fire and forget
-        it->first->send_remote_valid_update(it->first->owner_space, NULL,
-                                            1/*count*/, false/*add*/);
+        // If we already had the state then we can remove the duplicate
+        // reference that we are holding from the send, no need for
+        // tracking the remove since it is fire and forget
+        if (!target_infos[it->first->version_number].insert(it->first, 
+                          it->second, mutator, true/*hold reference*/))
+          it->first->send_remote_valid_update(it->first->owner_space, NULL,
+                                              1/*count*/, false/*add*/);
       }
     }
 

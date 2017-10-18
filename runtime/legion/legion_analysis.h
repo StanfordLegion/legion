@@ -140,8 +140,10 @@ namespace Legion {
     public:
       const FieldMask& operator[](VersionState *state) const;
     public:
-      void insert(VersionState *state, const FieldMask &mask, 
-                  ReferenceMutator *mutator = NULL); 
+      // Return true if we actually added the state, false if it already existed
+      bool insert(VersionState *state, const FieldMask &mask, 
+                  ReferenceMutator *mutator = NULL,
+                  bool hold_remote_reference = false);
       RtEvent insert(VersionState *state, const FieldMask &mask, 
                      Runtime *runtime, RtEvent pre);
       void erase(VersionState *to_erase);
@@ -902,6 +904,9 @@ namespace Legion {
       static const AllocationType alloc_type = VERSION_MANAGER_ALLOC;
       static const VersionID init_version = 1;
     public:
+      typedef VersioningSet<VERSION_MANAGER_REF,
+                            false/*LOCAL ONLY*/> ManagerVersions;
+    public:
       VersionManager(RegionTreeNode *node, ContextID ctx); 
       VersionManager(const VersionManager &manager);
       ~VersionManager(void);
@@ -966,8 +971,7 @@ namespace Legion {
                                  std::set<RtEvent> &applied_events);
       void invalidate_version_infos(const FieldMask &invalidate_mask);
       static void filter_version_info(const FieldMask &invalidate_mask,
-           LegionMap<VersionID,VersioningSet<VERSION_MANAGER_REF> >::aligned
-                                                                &to_filter);
+              LegionMap<VersionID,ManagerVersions>::aligned &to_filter);
     public:
       void print_physical_state(RegionTreeNode *node,
                                 const FieldMask &capture_mask,
@@ -1000,8 +1004,8 @@ namespace Legion {
       void pack_response(Serializer &rez, AddressSpaceID target,
                          const FieldMask &request_mask);
       static void find_send_infos(
-          LegionMap<VersionID,VersioningSet<VERSION_MANAGER_REF> >::aligned& 
-            version_infos, const FieldMask &request_mask, 
+          LegionMap<VersionID,ManagerVersions>::aligned &version_infos,
+                                  const FieldMask &request_mask, 
           LegionMap<VersionState*,FieldMask>::aligned& send_infos);
       static void pack_send_infos(Serializer &rez, const
           LegionMap<VersionState*,FieldMask>::aligned& send_infos);
@@ -1013,8 +1017,7 @@ namespace Legion {
           LegionMap<VersionState*,FieldMask>::aligned &infos,
           Runtime *runtime, std::set<RtEvent> &preconditions);
       static void merge_send_infos(
-          LegionMap<VersionID,
-              VersioningSet<VERSION_MANAGER_REF> >::aligned &target_infos,
+          LegionMap<VersionID,ManagerVersions>::aligned &target_infos,
           const LegionMap<VersionState*,FieldMask>::aligned &source_infos,
                 ReferenceMutator *mutator);
       static void handle_response(Deserializer &derez);
@@ -1043,8 +1046,7 @@ namespace Legion {
     protected:
       bool is_owner;
       AddressSpaceID owner_space;
-    protected:
-      typedef VersioningSet<VERSION_MANAGER_REF> ManagerVersions;
+    protected: 
       LegionMap<VersionID,ManagerVersions>::aligned current_version_infos;
       LegionMap<VersionID,ManagerVersions>::aligned previous_version_infos;
     protected:
