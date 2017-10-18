@@ -15212,11 +15212,14 @@ namespace Legion {
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
-      did &= LEGION_DISTRIBUTED_ID_MASK;
+      const DistributedID to_find = LEGION_DISTRIBUTED_ID_FILTER(did);
       AutoLock d_lock(distributed_collectable_lock,1,false/*exclusive*/);
       std::map<DistributedID,DistributedCollectable*>::const_iterator finder = 
-        dist_collectables.find(did);
+        dist_collectables.find(to_find);
 #ifdef DEBUG_LEGION
+      if (finder == dist_collectables.end())
+        log_run.error("Unable to find distributed collectable %llx "
+                    "with type %lld", did, LEGION_DISTRIBUTED_HELP_DECODE(did));
       assert(finder != dist_collectables.end());
 #endif
       return finder->second;
