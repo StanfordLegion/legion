@@ -139,7 +139,7 @@ void priority_master_task(const void *args, size_t arglen,
   UserEvent event3 = UserEvent::create_user_event();
   Barrier barrier = Barrier::create_barrier(3);
 
-  std::set<Event> finish_events;
+  std::vector<Event> finish_events;
 
   PriorityTestArgs targs;
   targs.counter = &counter;
@@ -151,17 +151,17 @@ void priority_master_task(const void *args, size_t arglen,
     targs.new_priority = 0;
     Event e = p.spawn(PRIORITY_CHILD_TASK, &targs, sizeof(targs),
 		      Event::NO_EVENT, 1);
-    finish_events.insert(e);
+    finish_events.push_back(e);
   }
 
   {
     targs.exp_val1 = 57;
     targs.exp_val2 = 59;
     targs.wait_on = event2;
-    targs.new_priority = 2;
+    targs.new_priority = -1;
     Event e = p.spawn(PRIORITY_CHILD_TASK, &targs, sizeof(targs),
 		      Event::NO_EVENT, 0);
-    finish_events.insert(e);
+    finish_events.push_back(e);
   }
 
   {
@@ -171,13 +171,15 @@ void priority_master_task(const void *args, size_t arglen,
     targs.new_priority = 1;
     Event e = p.spawn(PRIORITY_CHILD_TASK, &targs, sizeof(targs),
 		      Event::NO_EVENT, 2);
-    finish_events.insert(e);
+    finish_events.push_back(e);
   }
 
   barrier.wait();
 
   int act_val1 = __sync_fetch_and_add(&counter, 1);
   assert(act_val1 == 58);
+
+  finish_events[1].set_operation_priority(2);
 
   event1.trigger();
   event2.trigger();
@@ -192,7 +194,7 @@ void priority_master_task(const void *args, size_t arglen,
     targs.exp_val2 = 64;
     Event e = p.spawn(PRIORITY_CHILD_TASK, &targs, sizeof(targs),
 		      Event::NO_EVENT, 1);
-    finish_events.insert(e);
+    finish_events.push_back(e);
   }
 
   {
@@ -200,7 +202,7 @@ void priority_master_task(const void *args, size_t arglen,
     targs.exp_val2 = 61;
     Event e = p.spawn(PRIORITY_CHILD_TASK, &targs, sizeof(targs),
 		      Event::NO_EVENT, 2);
-    finish_events.insert(e);
+    finish_events.push_back(e);
   }
 
   Event::merge_events(finish_events).wait();

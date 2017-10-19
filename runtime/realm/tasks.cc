@@ -98,6 +98,14 @@ namespace Realm {
     return false;
   }
 
+  void Task::set_priority(int new_priority)
+  {
+    priority = new_priority;
+    Thread *t = executing_thread;
+    if(t)
+      t->set_priority(new_priority);
+  }
+
   void Task::execute_on_processor(Processor p)
   {
     // if the processor isn't specified, use what's in the task object

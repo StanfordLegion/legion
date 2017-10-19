@@ -59,6 +59,10 @@ namespace Realm {
       // attempts to cancel the operation associated with this event
       // "reason_data" will be provided to any profilers of the operation
       void cancel_operation(const void *reason_data, size_t reason_size) const;
+
+      // attempts to change the priority of the operation associated with
+      //  this event
+      void set_operation_priority(int new_priority) const;
  
       // creates an event that won't trigger until all input events have
       static Event merge_events(const std::set<Event>& wait_for);

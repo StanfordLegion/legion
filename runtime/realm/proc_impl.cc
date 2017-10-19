@@ -166,9 +166,10 @@ namespace Realm {
     // changes the priority of the currently running task
     /*static*/ void Processor::set_current_task_priority(int new_priority)
     {
-      Thread *me = Thread::self();
-      assert(me != 0);
-      me->set_priority(new_priority);
+      // set the priority field in the task object and it'll update the thread
+      Operation *op = Thread::self()->get_operation();
+      assert(op != 0);
+      op->set_priority(new_priority);
     }
 
     AddressSpace Processor::address_space(void) const

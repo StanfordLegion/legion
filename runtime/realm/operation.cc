@@ -204,6 +204,11 @@ namespace Realm {
     return false;
   }
 
+  void Operation::set_priority(int new_priority)
+  {
+    // ignored
+  }
+
   // a common reason for cancellation is a poisoned precondition - this helper takes care
   //  of recording the error code and marking the operation as (unsuccessfully) finished
   void Operation::handle_poisoned_precondition(Event pre)
@@ -505,6 +510,64 @@ namespace Realm {
       bool did_cancel = local_op->attempt_cancellation(Realm::Faults::ERROR_CANCELLED,
 						       reason_data, reason_size);
       log_optable.info() << "event " << finish_event << " - operation " << (void *)local_op << " cancelled=" << did_cancel;
+      local_op->remove_reference();
+    }
+#else
+    assert(0);
+#endif
+  }
+
+  void OperationTable::set_priority(Event finish_event, int new_priority)
+  {
+#ifdef REALM_USE_OPERATION_TABLE
+    // "hash" the id to figure out which subtable to use
+    int subtable = finish_event.id % NUM_TABLES;
+    GASNetHSL& mutex = mutexes[subtable];
+    Table& table = tables[subtable];
+
+    bool found = false;
+    Operation *local_op = 0;
+    int remote_node = -1;
+    {
+      AutoHSLLock al(mutex);
+
+      Table::iterator it = table.find(finish_event);
+
+      if(it != table.end()) {
+	found = true;
+
+	// if there's a local op, we need to take a reference in case it completes successfully
+	//  before we get to it below
+	if(it->second.local_op) {
+	  local_op = it->second.local_op;
+	  local_op->add_reference();
+	}
+	remote_node = it->second.remote_node;
+      }
+    }
+
+    if(!found) {
+      // not found - who owns this event?
+      int owner = ID(finish_event).event.creator_node;
+
+      if(owner == my_node_id) {
+	// if we're the owner, it's probably for an event that already completed successfully,
+	//  so ignore the request
+	log_optable.info() << "event " << finish_event << " priority change ignored - not in table";
+      } else {
+	// let the owner of the event deal with it
+	remote_node = owner;
+      }
+    }
+
+    if(remote_node != -1) {
+      // TODO: active message
+      assert(false);
+    }
+
+    if(local_op) {
+      local_op->set_priority(new_priority);
+      log_optable.info() << "event " << finish_event << " - operation " << (void *)local_op << " priority=" << new_priority;
       local_op->remove_reference();
     }
 #else

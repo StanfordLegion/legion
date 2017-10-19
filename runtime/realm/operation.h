@@ -54,6 +54,8 @@ namespace Realm {
     // returns false if a subclass wants to try some other means to cancel an operation
     virtual bool attempt_cancellation(int error_code, const void *reason_data, size_t reason_size);
 
+    virtual void set_priority(int new_priority);
+
     // a common reason for cancellation is a poisoned precondition - this helper takes care
     //  of recording the error code and marking the operation as (unsuccessfully) finished
     virtual void handle_poisoned_precondition(Event pre);
@@ -131,6 +133,8 @@ namespace Realm {
     void add_remote_operation(Event finish_event, int remote_note);
 
     void request_cancellation(Event finish_event, const void *reason_data, size_t reason_size);
+
+    void set_priority(Event finish_event, int new_priority);
     
     static void register_handlers(void);
 
