@@ -338,9 +338,8 @@ void main_task(const Task *task,
     runtime->get_logical_partition(ctx, lr_A, ip);
 
   // Start Computation
-  struct timespec ts_start, ts_end;
   AverageCounter total_timer, core_timer;
-  clock_gettime(CLOCK_MONOTONIC, &ts_start);
+  //double ts_start = Realm::Clock::current_time();
   // Acquire the logical reagion so that we can launch sub-operations that make copies
   if (config.cache_optimization) {
     AcquireLauncher acquire_launcher(lr_A, lr_A, pr_A);
@@ -348,8 +347,7 @@ void main_task(const Task *task,
     runtime->issue_acquire(ctx, acquire_launcher);
   }
   for (int iter = 0; iter < niter; iter++) {
-    struct timespec sub_ts_start, sub_ts_end;
-    clock_gettime(CLOCK_MONOTONIC, &sub_ts_start);
+    double sub_ts_start = Realm::Clock::current_time();
     if (!config.cache_optimization) {
       AcquireLauncher acquire_launcher(lr_A, lr_A, pr_A);
       acquire_launcher.add_field(FID_VAL);
@@ -375,9 +373,8 @@ void main_task(const Task *task,
       release_launcher.add_field(FID_VAL);
       runtime->issue_release(ctx, release_launcher);
     }
-    clock_gettime(CLOCK_MONOTONIC, &sub_ts_end);
-    double exec_time = ((1.0 * (sub_ts_end.tv_sec - sub_ts_start.tv_sec)) +
-                       (1e-9 * (sub_ts_end.tv_nsec - sub_ts_start.tv_nsec)));
+    double sub_ts_end = Realm::Clock::current_time();
+    double exec_time = sub_ts_end - sub_ts_start;
     if (config.cache_optimization && iter % iters_per_check != 0)
       core_timer.add(exec_time);
     total_timer.add(exec_time);
@@ -389,10 +386,9 @@ void main_task(const Task *task,
     release_launcher.add_field(FID_VAL);
     runtime->issue_release(ctx, release_launcher);
   }
-  clock_gettime(CLOCK_MONOTONIC, &ts_end);
+  //double ts_end = Realm::Clock::current_time();
 
-  //double exec_time = ((1.0 * (ts_end.tv_sec - ts_start.tv_sec)) +
-    //                 (1e-9 * (ts_end.tv_nsec - ts_start.tv_nsec)));
+  //double exec_time = ts_end - ts_start;
   //printf("ELAPSED TIME = %7.3f s\n", exec_time);
   if (config.cache_optimization) {
     printf("Legion+ER Time per Iter = %7.3f s\n", total_timer.result());
