@@ -548,7 +548,7 @@ namespace Legion {
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x0ULL);
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, INSTANCE_MANAGER_DC);
     }
 
     //--------------------------------------------------------------------------
@@ -556,7 +556,7 @@ namespace Legion {
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x1ULL);
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, REDUCTION_FOLD_DC);
     }
 
     //--------------------------------------------------------------------------
@@ -564,14 +564,15 @@ namespace Legion {
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x2ULL);
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, REDUCTION_LIST_DC);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ inline bool PhysicalManager::is_instance_did(DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x3) == 0x0);
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0xF) == 
+                                                        INSTANCE_MANAGER_DC);
     }
 
     //--------------------------------------------------------------------------
@@ -579,7 +580,8 @@ namespace Legion {
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x3) == 0x1);
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0xF) == 
+                                                    REDUCTION_FOLD_DC);
     }
 
     //--------------------------------------------------------------------------
@@ -587,7 +589,8 @@ namespace Legion {
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x3) == 0x2);
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0xF) == 
+                                                    REDUCTION_LIST_DC);
     }
 
     //--------------------------------------------------------------------------

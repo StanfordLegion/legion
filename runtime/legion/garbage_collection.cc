@@ -140,6 +140,10 @@ namespace Legion {
 #endif
       gc_lock.destroy_reservation();
       gc_lock = Reservation::NO_RESERVATION;
+#ifdef LEGION_GC
+      log_garbage.info("GC Deletion %lld %d", 
+          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
+#endif
     }
 
     //--------------------------------------------------------------------------

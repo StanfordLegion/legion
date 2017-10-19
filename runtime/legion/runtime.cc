@@ -252,7 +252,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureImpl::FutureImpl(Runtime *rt, bool register_now, DistributedID did,
                            AddressSpaceID own_space, Operation *o /*= NULL*/)
-      : DistributedCollectable(rt, did, own_space, register_now),
+      : DistributedCollectable(rt, 
+          LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_DC), 
+          own_space, register_now),
         producer_op(o), op_gen((o == NULL) ? 0 : o->get_generation()),
 #ifdef LEGION_SPY
         producer_uid((o == NULL) ? 0 : o->get_unique_op_id()),
@@ -298,10 +300,6 @@ namespace Legion {
       }
       if (producer_op != NULL)
         producer_op->remove_mapping_reference(op_gen);
-#ifdef LEGION_GC
-      log_garbage.info("GC Deletion %lld %d", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -735,7 +733,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureMapImpl::FutureMapImpl(TaskContext *ctx, Operation *o, Runtime *rt,
                                  DistributedID did, AddressSpaceID owner_space)
-      : DistributedCollectable(rt, did, owner_space), 
+      : DistributedCollectable(rt, 
+          LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC),  owner_space), 
         context(ctx), op(o), op_gen(o->get_generation()),
         ready_event(o->get_completion_event()), valid(true)
     //--------------------------------------------------------------------------
@@ -750,7 +749,9 @@ namespace Legion {
     FutureMapImpl::FutureMapImpl(TaskContext *ctx, Runtime *rt,
                                  DistributedID did, AddressSpaceID owner_space,
                                  bool register_now)
-      : DistributedCollectable(rt, did, owner_space, register_now), 
+      : DistributedCollectable(rt, 
+          LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC), 
+          owner_space, register_now), 
         context(ctx), op(NULL), op_gen(0),
         ready_event(ApEvent::NO_AP_EVENT), valid(!is_owner())
     //--------------------------------------------------------------------------
@@ -778,10 +779,6 @@ namespace Legion {
       if (is_owner() && registered_with_runtime)
         unregister_with_runtime(REFERENCE_VIRTUAL_CHANNEL);
       futures.clear();
-#ifdef LEGION_GC
-      log_garbage.info("GC Deletion %lld %d", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
-#endif
     }
 
     //--------------------------------------------------------------------------

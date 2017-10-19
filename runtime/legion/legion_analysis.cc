@@ -6443,7 +6443,9 @@ namespace Legion {
     VersionState::VersionState(VersionID vid, Runtime *rt, DistributedID id,
                                AddressSpaceID own_sp, 
                                RegionTreeNode *node, bool register_now)
-      : DistributedCollectable(rt, id, own_sp, register_now), 
+      : DistributedCollectable(rt, 
+          LEGION_DISTRIBUTED_HELP_ENCODE(id, VERSION_STATE_DC), 
+          own_sp, register_now),
         version_number(vid), logical_node(node), 
         state_lock(Reservation::create_reservation())
 #ifdef DEBUG_LEGION
@@ -6483,10 +6485,6 @@ namespace Legion {
       if (is_owner())
         assert(!currently_valid);
 #endif 
-#ifdef LEGION_GC
-      log_garbage.info("GC Deletion %lld %d", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
-#endif
     }
 
     //--------------------------------------------------------------------------

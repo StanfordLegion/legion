@@ -296,10 +296,6 @@ namespace Legion {
       assert(previous_epoch_users.empty());
       assert(outstanding_gc_events.empty());
 #endif
-#ifdef LEGION_GC
-      log_garbage.info("GC Deletion %lld %d", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -5003,10 +4999,6 @@ namespace Legion {
       // Remove the reference on our context
       if (owner_context->remove_reference())
         delete owner_context;
-#ifdef LEGION_GC
-      log_garbage.info("GC Deletion %lld %d", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -6480,10 +6472,6 @@ namespace Legion {
     {
       if (value->remove_reference())
         delete value;
-#ifdef LEGION_GC
-      log_garbage.info("GC Deletion %lld %d", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -6750,10 +6738,6 @@ namespace Legion {
       false_views.clear();
       if (version_info->remove_reference())
         delete version_info;
-#ifdef LEGION_GC
-      log_garbage.info("GC Deletion %lld %d", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -7309,10 +7293,6 @@ namespace Legion {
       assert(reduction_users.empty());
       assert(reading_users.empty());
       assert(outstanding_gc_events.empty());
-#endif
-#ifdef LEGION_GC
-      log_garbage.info("GC Deletion %lld %d", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
 #endif
     }
 

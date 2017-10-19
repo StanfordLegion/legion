@@ -987,10 +987,6 @@ namespace Legion {
     InstanceManager::~InstanceManager(void)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_GC
-      log_garbage.info("GC Deletion %lld %d", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
-#endif 
       // If we are the owner, we get to destroy the read only reservation
       if (is_owner())
         read_only_mapping_reservation.destroy_reservation();
@@ -1563,10 +1559,6 @@ namespace Legion {
     ListReductionManager::~ListReductionManager(void)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_GC
-      log_garbage.info("GC Deletion %lld %d", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -1708,10 +1700,6 @@ namespace Legion {
     FoldReductionManager::~FoldReductionManager(void)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_GC
-      log_garbage.info("GC Deletion %lld %d", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
-#endif
     }
 
     //--------------------------------------------------------------------------

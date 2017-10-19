@@ -4549,7 +4549,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexTreeNode::IndexTreeNode(RegionTreeForest *ctx, unsigned d,
                          LegionColor c, DistributedID did, AddressSpaceID owner)
-      : DistributedCollectable(ctx->runtime, did, owner, false/*register*/),
+      : DistributedCollectable(ctx->runtime, 
+          LEGION_DISTRIBUTED_HELP_ENCODE(did, INDEX_TREE_NODE_DC), 
+          owner, false/*register*/),
         context(ctx), depth(d), color(c), destroyed(false)
     //--------------------------------------------------------------------------
     {
@@ -4790,10 +4792,6 @@ namespace Legion {
     IndexSpaceNode::~IndexSpaceNode(void)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_GC
-      log_garbage.info("GC Deletion %lld %d",
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
-#endif
       // Remove ourselves from the context
       if (registered_with_runtime)
       {
@@ -5681,10 +5679,6 @@ namespace Legion {
     IndexPartNode::~IndexPartNode(void)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_GC
-      log_garbage.info("GC Deletion %lld %d",
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
-#endif
       // Lastly we can unregister ourselves with the context
       if (registered_with_runtime)
       {
@@ -6668,7 +6662,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldSpaceNode::FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx,
                                    DistributedID did)
-      : DistributedCollectable(ctx->runtime, did, 
+      : DistributedCollectable(ctx->runtime, 
+          LEGION_DISTRIBUTED_HELP_ENCODE(did, FIELD_SPACE_DC), 
           get_owner_space(sp, ctx->runtime), false/*register with runtime*/),
         handle(sp), context(ctx), destroyed(false)
     //--------------------------------------------------------------------------
@@ -6689,7 +6684,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldSpaceNode::FieldSpaceNode(FieldSpace sp, RegionTreeForest *ctx,
                                    DistributedID did, Deserializer &derez)
-      : DistributedCollectable(ctx->runtime, did, 
+      : DistributedCollectable(ctx->runtime, 
+          LEGION_DISTRIBUTED_HELP_ENCODE(did, FIELD_SPACE_DC), 
           get_owner_space(sp, ctx->runtime), false/*register with runtime*/),
         handle(sp), context(ctx), destroyed(false)
     //--------------------------------------------------------------------------
@@ -6737,10 +6733,6 @@ namespace Legion {
     FieldSpaceNode::~FieldSpaceNode(void)
     //--------------------------------------------------------------------------
     {
-#ifdef LEGION_GC
-      log_garbage.info("GC Deletion %lld %d",
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
-#endif
       // First we can delete any instances that we have
       if (!local_trees.empty())
       {
@@ -8901,7 +8893,9 @@ namespace Legion {
       : 
 #ifdef LEGION_GC
         DistributedCollectable(ctx->runtime, 
-            ctx->runtime->get_available_distributed_id(false/*need cont*/),
+            LEGION_DISTRIBUTED_HELP_ENCODE(
+              ctx->runtime->get_available_distributed_id(false/*need cont*/),
+              REGION_TREE_NODE_DC),
             ctx->runtime->address_space, false/*register with runtime*/),
 #endif
         context(ctx), column_source(column_src), 
@@ -8921,8 +8915,6 @@ namespace Legion {
     {
 #ifdef LEGION_GC
       remote_instances.clear();
-      log_garbage.info("GC Deletion %lld %d",
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
 #else
       node_lock.destroy_reservation();
       node_lock = Reservation::NO_RESERVATION;
