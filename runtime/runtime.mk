@@ -320,6 +320,10 @@ ifeq ($(strip $(GPU_ARCH)),pascal)
 NVCC_FLAGS	+= -arch=compute_60 -code=sm_60
 NVCC_FLAGS	+= -DPASCAL_ARCH
 endif
+ifeq ($(strip $(GPU_ARCH)),volta)
+NVCC_FLAGS	+= -arch=compute_70 -code=sm_70
+NVCC_FLAGS	+= -DVOLTA_ARCH
+endif
 NVCC_FLAGS	+= -Xptxas "-v" #-abi=no"
 endif
 
