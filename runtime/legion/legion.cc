@@ -2262,11 +2262,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future::Future(Internal::FutureImpl *i)
+    Future::Future(Internal::FutureImpl *i, bool need_reference)
       : impl(i)
     //--------------------------------------------------------------------------
     {
-      if (impl != NULL)
+      if ((impl != NULL) && need_reference)
         impl->add_base_gc_ref(Internal::FUTURE_HANDLE_REF);
     }
 
@@ -2344,11 +2344,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap::FutureMap(Internal::FutureMapImpl *i)
+    FutureMap::FutureMap(Internal::FutureMapImpl *i, bool need_reference)
       : impl(i)
     //--------------------------------------------------------------------------
     {
-      if (impl != NULL)
+      if ((impl != NULL) && need_reference)
         impl->add_base_gc_ref(Internal::FUTURE_HANDLE_REF);
     }
 

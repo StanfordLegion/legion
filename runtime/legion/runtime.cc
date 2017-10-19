@@ -922,14 +922,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureMapImpl::set_future(const DomainPoint &point, FutureImpl *impl)
+    void FutureMapImpl::set_future(const DomainPoint &point, FutureImpl *impl,
+                                   ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!is_owner()); // should never be called on the owner node
 #endif
+      // Add the reference first and then set the future
+      impl->add_base_gc_ref(FUTURE_HANDLE_REF, mutator);
       AutoLock g_lock(gc_lock);
-      futures[point] = Future(impl);
+      futures[point] = Future(impl, false/*need reference*/);
     }
 
     //--------------------------------------------------------------------------
@@ -1133,7 +1136,7 @@ namespace Legion {
       WrapperReferenceMutator mutator(done_events);
       FutureImpl *future = runtime->find_or_create_future(future_did, &mutator);
       // Add it to the map
-      impl->set_future(point, future);
+      impl->set_future(point, future, &mutator);
       // Trigger the done event
       if (!done_events.empty())
         Runtime::trigger_event(done, Runtime::merge_events(done_events));

@@ -294,7 +294,8 @@ namespace Legion {
       virtual void notify_inactive(ReferenceMutator *mutator);
     public:
       Future get_future(const DomainPoint &point, bool allow_empty = false);
-      void set_future(const DomainPoint &point, FutureImpl *impl);
+      void set_future(const DomainPoint &point, FutureImpl *impl,
+                      ReferenceMutator *mutator);
       void get_void_result(const DomainPoint &point, 
                             bool silence_warnings = true);
       void wait_all_results(bool silence_warnings = true);
