@@ -60,6 +60,7 @@ legion_cxx_tests = [
     ['examples/virtual_map/virtual_map', []],
 
     # Tests
+    ['test/rendering/rendering', ['-i', '2', '-n', '64', '-ll:cpu', '4']],
 ]
 
 if platform.system() != 'Darwin':

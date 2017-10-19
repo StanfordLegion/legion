@@ -186,7 +186,9 @@ namespace Realm {
 				 Event wait_on /*= Event::NO_EVENT*/) const
     {
       // TODO: actually call destructor
-      assert(destroyed_fields.empty());
+      if(!destroyed_fields.empty()) {
+	log_inst.warning() << "WARNING: field destructors ignored - inst=" << *this;
+      }
       destroy(wait_on);
     }
 

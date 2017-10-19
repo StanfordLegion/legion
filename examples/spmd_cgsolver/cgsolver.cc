@@ -1231,7 +1231,7 @@ void init_field_task(const Task *task,
 {
   const InitFieldArgs& args = *(const InitFieldArgs *)(task->args);
 
-  log_app.info() << "init_field task - bounds=" << args.bounds << ", fid=" << task->regions[0].instance_fields[0] << ", proc=" << runtime->get_executing_processor(ctx);
+  log_app.debug() << "init_field task - bounds=" << args.bounds << ", fid=" << task->regions[0].instance_fields[0] << ", proc=" << runtime->get_executing_processor(ctx);
 
   const AccessorWDdouble fa(regions[0], task->regions[0].instance_fields[0]);
   
@@ -1258,7 +1258,7 @@ void spmv_field_task(const Task *task,
 {
   const SpmvFieldArgs& args = *(const SpmvFieldArgs *)(task->args);
 
-  log_app.info() << "init_field task - bounds=" << args.bounds << ", fid=" << task->regions[0].instance_fields[0] << ", proc=" << runtime->get_executing_processor(ctx);
+  log_app.debug() << "init_field task - bounds=" << args.bounds << ", fid=" << task->regions[0].instance_fields[0] << ", proc=" << runtime->get_executing_processor(ctx);
 
   const AccessorRWdouble fa_out(regions[0], task->regions[0].instance_fields[0]);
   const AccessorROdouble fa_in(regions[1], task->regions[1].instance_fields[0]);

@@ -1037,7 +1037,7 @@ namespace Realm {
       size_t reg_ib_mem_size_in_mb = 256;
 #else
       size_t gasnet_mem_size_in_mb = 0;
-      size_t reg_ib_mem_size_in_mb = 0;
+      size_t reg_ib_mem_size_in_mb = 64; // for transposes/serdez
 #endif
       size_t reg_mem_size_in_mb = 0;
       size_t disk_mem_size_in_mb = 0;

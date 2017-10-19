@@ -84,7 +84,8 @@ namespace Realm {
                                off_t ib_offset, size_t ib_size);
     };
 
-    void find_shortest_path(Memory src_mem, Memory dst_mem, std::vector<Memory>& path);
+    void find_shortest_path(Memory src_mem, Memory dst_mem,
+			    CustomSerdezID serdez_id, std::vector<Memory>& path);
 
     struct RemoteCopyArgs : public BaseMedium {
       ReductionOpID redop_id;
