@@ -89,6 +89,8 @@ namespace Realm {
       virtual void thread_blocking(Thread *thread);
       virtual void thread_ready(Thread *thread);
 
+      virtual void set_thread_priority(Thread *thread, int new_priority);
+
     public:
       // the main scheduler loop - lock should be held before calling
       void scheduler_loop(void);

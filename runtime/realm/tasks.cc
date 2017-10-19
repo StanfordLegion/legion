@@ -498,6 +498,21 @@ namespace Realm {
     }
   }
 
+  void ThreadedTaskScheduler::set_thread_priority(Thread *thread, int new_priority)
+  {
+    int old_priority;
+
+    {
+      AutoHSLLock al(lock);
+      std::map<Thread *, int>::iterator it = worker_priorities.find(thread);
+      assert(it != worker_priorities.end());
+      old_priority = it->second;
+      it->second = new_priority;
+    }
+
+    log_sched.debug() << "thread priority change: thread=" << (void *)thread << " old=" << old_priority << " new=" << new_priority;
+  }
+
   // the main scheduler loop
   void ThreadedTaskScheduler::scheduler_loop(void)
   {
