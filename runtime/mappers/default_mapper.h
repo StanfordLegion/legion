@@ -77,6 +77,10 @@ namespace Legion {
 	//  the default mapper tries to make larger instances that will be
 	//  reused for other mappings)
 	EXACT_REGION = (1 << 1),
+
+	// should this task be assigned to a processor in the same address
+	//  space as the parent task
+	SAME_ADDRESS_SPACE = (1 << 2),
       };
     protected: // Internal types
       struct VariantInfo {

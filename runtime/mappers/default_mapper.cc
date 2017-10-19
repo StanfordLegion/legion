@@ -417,24 +417,29 @@ namespace Legion {
         case 1:
           {
             // First-level tasks: assume we should distribute these
-            // evenly around the machine
+            // evenly around the machine unless we've been explicitly 
+	    // told not to
             // TODO: Fix this when we implement a good stealing algorithm
             // to instead encourage locality
-            switch (info.proc_kind)
+	    if ((task.tag & SAME_ADDRESS_SPACE) == 0)
             {
-              case Processor::LOC_PROC:
-                return default_get_next_global_cpu();
-              case Processor::TOC_PROC:
-                return default_get_next_global_gpu();
-              case Processor::IO_PROC: // Don't distribute I/O
-                return default_get_next_local_io();
-              case Processor::OMP_PROC:
-                return default_get_next_global_omp();
-              case Processor::PY_PROC:
-                return default_get_next_global_py();
-              default: // make warnings go away
-                break;
+	      switch (info.proc_kind)
+              {
+                case Processor::LOC_PROC:
+                  return default_get_next_global_cpu();
+                case Processor::TOC_PROC:
+                  return default_get_next_global_gpu();
+                case Processor::IO_PROC: // Don't distribute I/O
+                  return default_get_next_local_io();
+                case Processor::OMP_PROC:
+                  return default_get_next_global_omp();
+                case Processor::PY_PROC:
+                  return default_get_next_global_py();
+                default: // make warnings go away
+                  break;
+              }
             }
+            // fall through to local assignment code below
           }
         default:
           {
@@ -1273,6 +1278,8 @@ namespace Legion {
       // simple one-level decomposition across all the processors.
       Machine::ProcessorQuery all_procs(machine);
       all_procs.only_kind(local[0].kind());
+      if ((task.tag & SAME_ADDRESS_SPACE) != 0)
+	all_procs.local_address_space();
       std::vector<Processor> procs(all_procs.begin(), all_procs.end());
 
       switch (input.domain.get_dim())
