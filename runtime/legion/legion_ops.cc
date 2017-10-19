@@ -3767,6 +3767,17 @@ namespace Legion {
     void CopyOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
+      if (memoizing)
+      {
+        PhysicalTraceInfo trace_info;
+        trace->get_physical_trace()->get_current_template(trace_info);
+        if (trace_info.tpl->is_replaying())
+        {
+          enqueue_ready_operation();
+          return;
+        }
+      }
+
       // Do our versioning analysis and then add it to the ready queue
       std::set<RtEvent> preconditions;
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
@@ -3804,6 +3815,24 @@ namespace Legion {
     {
       // TODO: Implement physical tracing for copy across operation
       PhysicalTraceInfo trace_info;
+      if (memoizing)
+      {
+        trace_info.memoizing = memoizing;
+        trace_info.trace_local_id = trace_local_id;
+        trace->get_physical_trace()->get_current_template(trace_info);
+        if (trace_info.tpl->is_replaying())
+        {
+          trace_info.tpl->execute(trace_info, this);
+          return;
+        }
+
+#ifdef DEBUG_LEGION
+        assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
+#endif
+        trace_info.tpl->record_get_copy_term_event(trace_info,
+            completion_event, this);
+      }
+
       std::vector<InstanceSet> valid_src_instances(src_requirements.size());
       std::vector<InstanceSet> valid_dst_instances(dst_requirements.size());
       Mapper::MapCopyInput input;
@@ -3862,28 +3891,17 @@ namespace Legion {
       }
       // Now we can carry out the mapping requested by the mapper
       // and issue the across copies, first set up the sync precondition
-      ApEvent sync_precondition;
-      if (!wait_barriers.empty() || !grants.empty())
+      ApEvent sync_precondition = compute_sync_precondition();
+
+      if (memoizing && sync_precondition.exists())
       {
-        std::set<ApEvent> preconditions;
-        for (std::vector<PhaseBarrier>::const_iterator it = 
-              wait_barriers.begin(); it != wait_barriers.end(); it++)
-        {
-          ApEvent e = Runtime::get_previous_phase(*it); 
-          preconditions.insert(e);
-          if (Runtime::legion_spy_enabled)
-            LegionSpy::log_phase_barrier_wait(unique_op_id, e);
-        }
-        for (std::vector<Grant>::const_iterator it = grants.begin();
-              it != grants.end(); it++)
-        {
-          ApEvent e = it->impl->acquire_grant();
-          preconditions.insert(e);
-        }
-        if (sync_precondition.exists())
-          preconditions.insert(sync_precondition);
-        sync_precondition = Runtime::merge_events(preconditions);
+#ifdef DEBUG_LEGION
+        assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
+#endif
+        trace_info.tpl->record_set_copy_sync_event(trace_info,
+            sync_precondition, this);
       }
+
       // Register the source and destination regions
       std::set<ApEvent> copy_complete_events;
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
@@ -4000,6 +4018,14 @@ namespace Legion {
                                   local_sync_precondition, predication_guard, 
                                   map_applied_conditions, trace_info);
           Runtime::trigger_event(local_completion, across_done);
+          if (memoizing)
+          {
+#ifdef DEBUG_LEGION
+            assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
+#endif
+            trace_info.tpl->record_merge_events(trace_info, local_completion,
+                                                across_done);
+          }
         }
         else
         {
@@ -4027,6 +4053,17 @@ namespace Legion {
 #endif
       }
       ApEvent copy_complete_event = Runtime::merge_events(copy_complete_events);
+      if (memoizing)
+      {
+#ifdef DEBUG_LEGION
+        assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
+#endif
+        trace_info.tpl->record_merge_events(trace_info, copy_complete_event,
+            copy_complete_events);
+        trace_info.tpl->record_trigger_copy_completion(trace_info, this,
+            copy_complete_event);
+      }
+
       if (!restrict_postconditions.empty())
       {
         restrict_postconditions.insert(copy_complete_event);
@@ -4543,6 +4580,71 @@ namespace Legion {
         else
           dst_parent_indexes[idx] = unsigned(parent_index);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent CopyOp::compute_sync_precondition(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (wait_barriers.empty() && grants.empty())
+        return ApEvent::NO_AP_EVENT;
+      std::set<ApEvent> sync_preconditions;
+      if (!wait_barriers.empty())
+      {
+        for (std::vector<PhaseBarrier>::const_iterator it = 
+              wait_barriers.begin(); it != wait_barriers.end(); it++)
+        {
+          ApEvent e = Runtime::get_previous_phase(it->phase_barrier);
+          sync_preconditions.insert(e);
+          if (Runtime::legion_spy_enabled)
+            LegionSpy::log_phase_barrier_wait(unique_op_id, e);
+        }
+      }
+      if (!grants.empty())
+      {
+        for (std::vector<Grant>::const_iterator it = grants.begin();
+              it != grants.end(); it++)
+        {
+          ApEvent e = it->impl->acquire_grant();
+          sync_preconditions.insert(e);
+        }
+      }
+      return Runtime::merge_events(sync_preconditions);
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::complete_copy_execution(ApEvent copy_complete_event)
+    //--------------------------------------------------------------------------
+    {
+      // Chain all the unlock and barrier arrivals off of the
+      // copy complete event
+      if (!arrive_barriers.empty())
+      {
+        for (std::vector<PhaseBarrier>::iterator it = 
+              arrive_barriers.begin(); it != arrive_barriers.end(); it++)
+        {
+          if (Runtime::legion_spy_enabled)
+            LegionSpy::log_phase_barrier_arrival(unique_op_id, 
+                                                 it->phase_barrier);
+          Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
+                                        completion_event);    
+        }
+      }
+      // Remove our profiling guard and trigger the profiling event if necessary
+      if ((__sync_add_and_fetch(&outstanding_profiling_requests, -1) == 0) &&
+          profiling_reported.exists())
+        Runtime::trigger_event(profiling_reported);
+      // Mark that we completed mapping
+      if (!map_applied_conditions.empty())
+        complete_mapping(Runtime::merge_events(map_applied_conditions));
+      else
+        complete_mapping();
+      if (!acquired_instances.empty())
+        release_acquired_instances(acquired_instances);
+      // Handle the case for marking when the copy completes
+      Runtime::trigger_event(completion_event, copy_complete_event);
+      need_completion_trigger = false;
+      complete_execution(Runtime::protect_event(copy_complete_event));
     }
 
     //--------------------------------------------------------------------------

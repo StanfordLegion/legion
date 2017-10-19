@@ -222,6 +222,7 @@ namespace Legion {
       inline UniqueID get_unique_op_id(void) const { return unique_op_id; } 
       inline bool is_tracing(void) const { return tracing; }
       inline bool is_memoizing(void) const { return memoizing; }
+      inline void set_memoizing(void) { memoizing = true; }
       inline bool is_tracking_parent(void) const { return track_parent; } 
       inline bool already_traced(void) const 
         { return ((trace != NULL) && !tracing); }
@@ -843,6 +844,10 @@ namespace Legion {
                                 unsigned idx, bool src,
                                 bool permit_projection = false);
       void compute_parent_indexes(void);
+    public:
+      ApEvent compute_sync_precondition(void) const;
+      void complete_copy_execution(ApEvent copy_complete_event);
+    protected:
       template<bool IS_SRC>
       int perform_conversion(unsigned idx, const RegionRequirement &req,
                              std::vector<MappingInstance> &output,

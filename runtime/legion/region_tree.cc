@@ -2838,6 +2838,14 @@ namespace Legion {
             ApEvent copy_pre = Runtime::merge_events(src_precondition,
                                                      dst_precondition,
                                                      precondition);
+            if (trace_info.tracing)
+            {
+#ifdef DEBUG_LEGION
+              assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
+#endif
+              trace_info.tpl->record_merge_events(trace_info, copy_pre,
+                  src_precondition, dst_precondition, precondition);
+            }
             ApEvent copy_post = dst_node->issue_copy(op, src_it->second,
                                        dst_it->second, copy_pre, guard,
                                        trace_info);
@@ -2846,8 +2854,17 @@ namespace Legion {
           }
         }
       }
+
+      ApEvent result = Runtime::merge_events(result_events);
+      if (trace_info.tracing)
+      {
+#ifdef DEBUG_LEGION
+        assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
+#endif
+        trace_info.tpl->record_merge_events(trace_info, result, result_events);
+      }
       // Return the merge of all the result events
-      return Runtime::merge_events(result_events);
+      return result;
     }
     
     //--------------------------------------------------------------------------

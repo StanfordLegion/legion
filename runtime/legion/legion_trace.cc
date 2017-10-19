@@ -477,6 +477,9 @@ namespace Legion {
     {
       std::pair<Operation*,GenerationID> key(op,gen);
       const unsigned index = operations.size();
+      if (op->get_operation_kind() == Operation::COPY_OP_KIND &&
+          physical_trace != NULL)
+        op->set_memoizing();
       if (op->is_memoizing())
       {
         if (physical_trace == NULL)
@@ -1428,7 +1431,7 @@ namespace Legion {
         events[fence_completion_id] = fence_completion;
         events.push_back(ApEvent::NO_AP_EVENT);
 #ifdef DEBUG_LEGION
-        for (std::map<TraceLocalId, SingleTask*>::iterator it =
+        for (std::map<TraceLocalId, Operation*>::iterator it =
              operations.begin(); it != operations.end(); ++it)
           it->second = NULL;
 #endif
@@ -1441,6 +1444,12 @@ namespace Legion {
                                                          FieldMask fields)
     //--------------------------------------------------------------------------
     {
+      {
+        const LogicalState &state = node->get_logical_state(ctx);
+        fields -= state.dirty_fields;
+        if (!fields) return true;
+      }
+
       RegionTreeNode *parent_node = node->get_parent();
       if (parent_node != NULL)
       {
@@ -1600,19 +1609,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::execute(PhysicalTraceInfo &trace_info,
-                                   SingleTask *task)
+                                   Operation *op)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(task->runtime, PHYSICAL_TRACE_EXECUTE_CALL);
-      TraceLocalId key(task->get_trace_local_id(), trace_info.color);
+      TraceLocalId key(op->get_trace_local_id(), trace_info.color);
       {
-        std::map<TraceLocalId, SingleTask*>::iterator op_finder =
+        std::map<TraceLocalId, Operation*>::iterator op_finder =
           operations.find(key);
 #ifdef DEBUG_LEGION
         assert(op_finder != operations.end());
         assert(op_finder->second == NULL);
 #endif
-        op_finder->second = task;
+        op_finder->second = op;
       }
       {
         std::map<TraceLocalId, std::vector<Instruction*> >::iterator
@@ -1751,6 +1760,28 @@ namespace Legion {
               }
               break;
             }
+          case GET_COPY_TERM_EVENT:
+          case SET_COPY_SYNC_EVENT:
+            {
+              generate[idx] = idx;
+              break;
+            }
+          case TRIGGER_COPY_COMPLETION:
+            {
+              generate[idx] = idx;
+              TriggerCopyCompletion *inst =
+                instructions[idx]->as_triger_copy_completion();
+              std::set<unsigned> &rhs_pre = preconditions[inst->rhs];
+              std::map<TraceLocalId, unsigned>::iterator finder =
+                task_entries.find(inst->lhs);
+#ifdef DEBUG_LEGION
+              assert(finder != task_entries.end());
+#endif
+              std::set<unsigned> &copy_pre = preconditions[finder->second];
+              copy_pre.insert(generate[inst->rhs]);
+              copy_pre.insert(rhs_pre.begin(), rhs_pre.end());
+              break;
+            }
 #ifdef DEBUG_LEGION
           default:
             {
@@ -1778,6 +1809,9 @@ namespace Legion {
           case GET_TERM_EVENT:
           case ISSUE_COPY:
           case ISSUE_FILL_REDUCTION:
+          case GET_COPY_TERM_EVENT:
+          case SET_COPY_SYNC_EVENT:
+          case TRIGGER_COPY_COMPLETION:
             {
 #ifdef DEBUG_LEGION
               assert(generate[idx] == idx);
@@ -1967,6 +2001,47 @@ namespace Legion {
               producers.push_back(count);
               break;
             }
+          case GET_COPY_TERM_EVENT:
+            {
+              GetCopyTermEvent *inst =
+                instructions[idx]->as_get_copy_term_event();
+#ifdef DEBUG_LEGION
+              assert(task_entries.find(inst->rhs) == task_entries.end());
+#endif
+              task_entries[inst->rhs] = idx;
+              producers.push_back(1);
+              consumers.push_back(std::vector<unsigned>());
+              break;
+            }
+          case SET_COPY_SYNC_EVENT:
+            {
+              SetCopySyncEvent *inst =
+                instructions[idx]->as_set_copy_sync_event();
+              std::map<TraceLocalId, unsigned>::iterator finder =
+                task_entries.find(inst->rhs);
+#ifdef DEBUG_LEGION
+              assert(finder != task_entries.end());
+#endif
+              consumers[finder->second].push_back(idx);
+              producers.push_back(1);
+              consumers.push_back(std::vector<unsigned>());
+              break;
+            }
+          case TRIGGER_COPY_COMPLETION:
+            {
+              TriggerCopyCompletion *inst =
+                instructions[idx]->as_triger_copy_completion();
+              std::map<TraceLocalId, unsigned>::iterator finder =
+                task_entries.find(inst->lhs);
+#ifdef DEBUG_LEGION
+              assert(finder != task_entries.end());
+#endif
+              consumers[finder->second].push_back(idx);
+              consumers[inst->rhs].push_back(idx);
+              producers.push_back(2);
+              consumers.push_back(std::vector<unsigned>());
+              break;
+            }
 #ifdef DEBUG_LEGION
           default:
             {
@@ -1976,7 +2051,7 @@ namespace Legion {
 #endif
         }
 
-      for (std::map<TraceLocalId, SingleTask*>::iterator it =
+      for (std::map<TraceLocalId, Operation*>::iterator it =
            operations.begin(); it != operations.end(); ++it)
       {
         const TraceLocalId &key = it->first;
@@ -2277,6 +2352,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_merge_events(PhysicalTraceInfo &trace_info,
+                                               ApEvent &lhs, ApEvent rhs_)
+    //--------------------------------------------------------------------------
+    {
+      std::set<ApEvent> rhs;
+      rhs.insert(rhs_);
+      record_merge_events(trace_info, lhs, rhs);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_merge_events(PhysicalTraceInfo &trace_info,
                                                ApEvent &lhs,
                                                ApEvent e1, ApEvent e2)
     //--------------------------------------------------------------------------
@@ -2284,6 +2369,19 @@ namespace Legion {
       std::set<ApEvent> rhs;
       rhs.insert(e1);
       rhs.insert(e2);
+      record_merge_events(trace_info, lhs, rhs);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_merge_events(PhysicalTraceInfo &trace_info,
+                                               ApEvent &lhs, ApEvent e1,
+                                               ApEvent e2, ApEvent e3)
+    //--------------------------------------------------------------------------
+    {
+      std::set<ApEvent> rhs;
+      rhs.insert(e1);
+      rhs.insert(e2);
+      rhs.insert(e3);
       record_merge_events(trace_info, lhs, rhs);
     }
 
@@ -2546,6 +2644,8 @@ namespace Legion {
                                                   ContextID physical_ctx)
     //--------------------------------------------------------------------------
     {
+      if (op->get_operation_kind() == Operation::COPY_OP_KIND) return;
+
       AutoLock tpl_lock(template_lock);
 
       TraceLocalId op_key(op->get_trace_local_id(), trace_info.color);
@@ -2599,6 +2699,93 @@ namespace Legion {
           physical_ctx);
     }
 
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_get_copy_term_event(
+                       PhysicalTraceInfo &trace_info, ApEvent lhs, CopyOp* copy)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(copy->is_memoizing());
+#endif
+      AutoLock tpl_lock(template_lock);
+
+      unsigned lhs_ = events.size();
+      events.push_back(lhs);
+#ifdef DEBUG_LEGION
+      assert(event_map.find(lhs) == event_map.end());
+#endif
+      event_map[lhs] = lhs_;
+
+      TraceLocalId key(copy->get_trace_local_id(), trace_info.color);
+#ifdef DEBUG_LEGION
+      assert(operations.find(key) == operations.end());
+      assert(task_entries.find(key) == task_entries.end());
+#endif
+      operations[key] = copy;
+      task_entries[key] = instructions.size();
+
+      instructions.push_back(new GetCopyTermEvent(*this, lhs_, key));
+#ifdef DEBUG_LEGION
+      assert(instructions.size() == events.size());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_set_copy_sync_event(
+                       PhysicalTraceInfo &trace_info, ApEvent lhs, CopyOp* copy)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(copy->is_memoizing());
+#endif
+      AutoLock tpl_lock(template_lock);
+
+      unsigned lhs_ = events.size();
+      events.push_back(lhs);
+#ifdef DEBUG_LEGION
+      assert(event_map.find(lhs) == event_map.end());
+#endif
+      event_map[lhs] = lhs_;
+
+      TraceLocalId key(copy->get_trace_local_id(), trace_info.color);
+#ifdef DEBUG_LEGION
+      assert(operations.find(key) != operations.end());
+      assert(task_entries.find(key) != task_entries.end());
+#endif
+      instructions.push_back(new SetCopySyncEvent(*this, lhs_, key));
+#ifdef DEBUG_LEGION
+      assert(instructions.size() == events.size());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_trigger_copy_completion(
+                       PhysicalTraceInfo &trace_info, CopyOp* copy, ApEvent rhs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(copy->is_memoizing());
+#endif
+      AutoLock tpl_lock(template_lock);
+
+      events.push_back(ApEvent());
+      TraceLocalId lhs_(copy->get_trace_local_id(), trace_info.color);
+#ifdef DEBUG_LEGION
+      assert(event_map.find(rhs) != event_map.end());
+#endif
+      unsigned rhs_ = event_map[rhs];
+
+#ifdef DEBUG_LEGION
+      assert(operations.find(lhs_) != operations.end());
+      assert(task_entries.find(lhs_) != task_entries.end());
+#endif
+      instructions.push_back(new TriggerCopyCompletion(*this, lhs_, rhs_));
+
+#ifdef DEBUG_LEGION
+      assert(instructions.size() == events.size());
+#endif
+    }
+
     /////////////////////////////////////////////////////////////
     // Instruction
     /////////////////////////////////////////////////////////////
@@ -2634,7 +2821,8 @@ namespace Legion {
       assert(operations.find(rhs) != operations.end());
       assert(operations.find(rhs)->second != NULL);
 #endif
-      events[lhs] = operations[rhs]->get_task_completion();
+      events[lhs] =
+        dynamic_cast<SingleTask*>(operations[rhs])->get_task_completion();
     }
 
     //--------------------------------------------------------------------------
@@ -2808,7 +2996,7 @@ namespace Legion {
       assert(operations.find(op_key) != operations.end());
       assert(operations.find(op_key)->second != NULL);
 #endif
-      Operation *op = dynamic_cast<Operation*>(operations[op_key]);
+      Operation *op = operations[op_key];
       ApEvent precondition = events[precondition_idx];
       PhysicalTraceInfo trace_info;
       events[lhs] = node->issue_copy(op, src_fields, dst_fields, precondition,
@@ -2937,7 +3125,7 @@ namespace Legion {
       assert(operations.find(op_key) != operations.end());
       assert(operations.find(op_key)->second != NULL);
 #endif
-      SingleTask *task = operations[op_key];
+      SingleTask *task = dynamic_cast<SingleTask*>(operations[op_key]);
       ApEvent precondition = events[precondition_idx];
 
       Realm::ProfilingRequestSet requests;
@@ -3018,7 +3206,7 @@ namespace Legion {
       assert(operations.find(op_key) != operations.end());
       assert(operations.find(op_key)->second != NULL);
 #endif
-      SingleTask *task = operations[op_key];
+      SingleTask *task = dynamic_cast<SingleTask*>(operations[op_key]);
       const std::deque<InstanceSet> &physical_instances =
         task->get_physical_instances();
       InstanceRef &ref =
@@ -3061,6 +3249,176 @@ namespace Legion {
 #endif
       return new SetReadyEvent(tpl, op_key, region_idx, inst_idx,
         finder->second, view);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // GetCopyTermEvent
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    GetCopyTermEvent::GetCopyTermEvent(PhysicalTemplate& tpl, unsigned l,
+                                       const TraceLocalId& r)
+      : Instruction(tpl), lhs(l), rhs(r)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(lhs < events.size());
+      assert(operations.find(rhs) != operations.end());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void GetCopyTermEvent::execute()
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(operations.find(rhs) != operations.end());
+      assert(operations.find(rhs)->second != NULL);
+#endif
+      events[lhs] = operations[rhs]->get_completion_event();
+    }
+
+    //--------------------------------------------------------------------------
+    std::string GetCopyTermEvent::to_string()
+    //--------------------------------------------------------------------------
+    {
+      std::stringstream ss;
+      ss << "events[" << lhs << "] = operations[(" << rhs.first << ",";
+      if (rhs.second.dim > 1) ss << "(";
+      for (int dim = 0; dim < rhs.second.dim; ++dim)
+      {
+        if (dim > 0) ss << ",";
+        ss << rhs.second[dim];
+      }
+      if (rhs.second.dim > 1) ss << ")";
+      ss << ")].get_completion_event()";
+      return ss.str();
+    }
+
+    //--------------------------------------------------------------------------
+    Instruction* GetCopyTermEvent::clone(PhysicalTemplate& tpl,
+                                    const std::map<unsigned, unsigned> &rewrite)
+    //--------------------------------------------------------------------------
+    {
+      std::map<unsigned, unsigned>::const_iterator finder = rewrite.find(lhs);
+#ifdef DEBUG_LEGION
+      assert(finder != rewrite.end());
+#endif
+      return new GetCopyTermEvent(tpl, finder->second, rhs);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // SetCopySyncEvent
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    SetCopySyncEvent::SetCopySyncEvent(PhysicalTemplate& tpl, unsigned l,
+                                       const TraceLocalId& r)
+      : Instruction(tpl), lhs(l), rhs(r)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(lhs < events.size());
+      assert(operations.find(rhs) != operations.end());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void SetCopySyncEvent::execute()
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(operations.find(rhs) != operations.end());
+      assert(operations.find(rhs)->second != NULL);
+#endif
+      events[lhs] =
+        dynamic_cast<CopyOp*>(operations[rhs])->compute_sync_precondition();
+    }
+
+    //--------------------------------------------------------------------------
+    std::string SetCopySyncEvent::to_string()
+    //--------------------------------------------------------------------------
+    {
+      std::stringstream ss;
+      ss << "events[" << lhs << "] = operations[(" << rhs.first << ",";
+      if (rhs.second.dim > 1) ss << "(";
+      for (int dim = 0; dim < rhs.second.dim; ++dim)
+      {
+        if (dim > 0) ss << ",";
+        ss << rhs.second[dim];
+      }
+      if (rhs.second.dim > 1) ss << ")";
+      ss << ")].compute_sync_precondition()";
+      return ss.str();
+    }
+
+    //--------------------------------------------------------------------------
+    Instruction* SetCopySyncEvent::clone(PhysicalTemplate& tpl,
+                                    const std::map<unsigned, unsigned> &rewrite)
+    //--------------------------------------------------------------------------
+    {
+      std::map<unsigned, unsigned>::const_iterator finder = rewrite.find(lhs);
+#ifdef DEBUG_LEGION
+      assert(finder != rewrite.end());
+#endif
+      return new SetCopySyncEvent(tpl, finder->second, rhs);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // TriggerCopyCompletion
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    TriggerCopyCompletion::TriggerCopyCompletion(PhysicalTemplate& tpl,
+                                              const TraceLocalId& l, unsigned r)
+      : Instruction(tpl), lhs(l), rhs(r)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(operations.find(lhs) != operations.end());
+      assert(rhs < events.size());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void TriggerCopyCompletion::execute()
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(operations.find(lhs) != operations.end());
+      assert(operations.find(lhs)->second != NULL);
+#endif
+      CopyOp *copy = dynamic_cast<CopyOp*>(operations[lhs]);
+      copy->complete_copy_execution(events[rhs]);
+    }
+
+    //--------------------------------------------------------------------------
+    std::string TriggerCopyCompletion::to_string()
+    //--------------------------------------------------------------------------
+    {
+      std::stringstream ss;
+      ss << "operations[" << lhs.first << ",";
+      if (lhs.second.dim > 1) ss << "(";
+      for (int dim = 0; dim < lhs.second.dim; ++dim)
+      {
+        if (dim > 0) ss << ",";
+        ss << lhs.second[dim];
+      }
+      if (lhs.second.dim > 1) ss << ")";
+      ss << ")].complete_copy_execution(events[" << rhs << "])";
+      return ss.str();
+    }
+
+    //--------------------------------------------------------------------------
+    Instruction* TriggerCopyCompletion::clone(PhysicalTemplate& tpl,
+                                    const std::map<unsigned, unsigned> &rewrite)
+    //--------------------------------------------------------------------------
+    {
+      std::map<unsigned, unsigned>::const_iterator finder = rewrite.find(rhs);
+#ifdef DEBUG_LEGION
+      assert(finder != rewrite.end());
+#endif
+      return new TriggerCopyCompletion(tpl, lhs, finder->second);
     }
 
     /////////////////////////////////////////////////////////////

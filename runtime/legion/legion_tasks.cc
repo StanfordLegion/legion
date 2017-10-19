@@ -5371,6 +5371,13 @@ namespace Legion {
           // Fence event will be added if necessary during replay
           execution_fence_event = ApEvent::NO_AP_EVENT;
           replay_map_task_output(trace_info);
+          if (!arrive_barriers.empty())
+          {
+            ApEvent done_event = get_task_completion();
+            for (std::vector<PhaseBarrier>::const_iterator it = 
+                  arrive_barriers.begin(); it != arrive_barriers.end(); it++)
+              Runtime::phase_barrier_arrive(*it, 1/*count*/, done_event);
+          }
           trace_info.tpl->execute(trace_info, this);
           if (is_leaf() && !has_virtual_instances())
             complete_mapping();

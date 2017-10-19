@@ -1265,6 +1265,9 @@ namespace Legion {
     struct IssueCopy;
     struct IssueFillReduction;
     struct SetReadyEvent;
+    struct GetCopyTermEvent;
+    struct SetCopySyncEvent;
+    struct TriggerCopyCompletion;
 
     // region_tree.h
     class RegionTreeForest;
