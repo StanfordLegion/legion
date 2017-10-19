@@ -4279,15 +4279,16 @@ namespace Legion {
         // See if we are the owner
         if (!is_owner)
         {
-          FieldMask request_mask = version_mask - remote_valid_fields;
-          // Handle the case where we have stale data from advances
-          if (!!pending_remote_advance_summary)
-            request_mask |= (pending_remote_advance_summary & version_mask);
-          if (!!request_mask)
+          const FieldMask request_mask = version_mask - remote_valid_fields;
+          // Also handle the case where we have stale data from advances
+          if (!!request_mask ||
+              !(version_mask * pending_remote_advance_summary))
           {
             // Release the lock before sending the message
             Runtime::release_reservation(manager_lock);
-            RtEvent wait_on = send_remote_version_request(request_mask,
+            // Always pass in the full mask as the call will recompute
+            // the request_mask in case we lose a race
+            RtEvent wait_on = send_remote_version_request(version_mask,
                                                           ready_events);
             // Only retake the reservation, when we are ready
             RtEvent lock_reacquired = Runtime::acquire_rt_reservation(
@@ -4342,15 +4343,16 @@ namespace Legion {
         // See if we are the owner
         if (!is_owner)
         {
-          FieldMask request_mask = version_mask - remote_valid_fields;
-          // Handle the case where we have stale data from advances
-          if (!!pending_remote_advance_summary)
-            request_mask |= (pending_remote_advance_summary & version_mask);
-          if (!!request_mask)
+          const FieldMask request_mask = version_mask - remote_valid_fields;
+          // Also handle the case where we have stale data from advances
+          if (!!request_mask ||
+              !(version_mask * pending_remote_advance_summary))
           {
             // Release the lock before sending the message
             Runtime::release_reservation(manager_lock);
-            RtEvent wait_on = send_remote_version_request(request_mask,
+            // Always pass in the full mask as the call will recompute
+            // the request_mask in case we lose a race
+            RtEvent wait_on = send_remote_version_request(version_mask,
                                                           ready_events);
             // Only retake the reservation, when we are ready
             RtEvent lock_reacquired = Runtime::acquire_rt_reservation(
@@ -4473,15 +4475,16 @@ namespace Legion {
       // See if we are the owner
       if (!is_owner)
       {
-        FieldMask request_mask = version_mask - remote_valid_fields;
-        // Handle the case where we have stale data from advances
-        if (!!pending_remote_advance_summary)
-          request_mask |= (pending_remote_advance_summary & version_mask);
-        if (!!request_mask)
+        const FieldMask request_mask = version_mask - remote_valid_fields;
+        // Also handle the case where we have stale data from advances
+        if (!!request_mask ||
+            !(version_mask * pending_remote_advance_summary))
         {
           // Release the lock before sending the message
           Runtime::release_reservation(manager_lock);
-          RtEvent wait_on = send_remote_version_request(request_mask,
+          // Always pass in the full mask as the call will recompute
+          // the request_mask in case we lose a race
+          RtEvent wait_on = send_remote_version_request(version_mask,
                                                         ready_events);
           // Retake the lock only once we're ready to
           RtEvent lock_reacquired = Runtime::acquire_rt_reservation(
@@ -4535,15 +4538,16 @@ namespace Legion {
       // See if we are the owner
       if (!is_owner)
       {
-        FieldMask request_mask = version_mask - remote_valid_fields;
-        // Handle the case where we have stale data from advances
-        if (!!pending_remote_advance_summary)
-          request_mask |= (pending_remote_advance_summary & version_mask);
-        if (!!request_mask)
+        const FieldMask request_mask = version_mask - remote_valid_fields;
+        // Also handle the case where we have stale data from advances
+        if (!!request_mask ||
+            !(version_mask * pending_remote_advance_summary))
         {
           // Release the lock before sending the message
           Runtime::release_reservation(manager_lock);
-          RtEvent wait_on = send_remote_version_request(request_mask,
+          // Always pass in the full mask as the call will recompute
+          // the request_mask in case we lose a race
+          RtEvent wait_on = send_remote_version_request(version_mask,
                                                         ready_events); 
           // Retake the lock only once we're ready to
           RtEvent lock_reacquired = Runtime::acquire_rt_reservation(
@@ -4599,15 +4603,16 @@ namespace Legion {
       // See if we are the owner
       if (!is_owner)
       {
-        FieldMask request_mask = version_mask - remote_valid_fields;
-        // Handle the case where we have stale data from advances
-        if (!!pending_remote_advance_summary)
-          request_mask |= (pending_remote_advance_summary & version_mask);
-        if (!!request_mask)
+        const FieldMask request_mask = version_mask - remote_valid_fields;
+        // Also handle the case where we have stale data from advances
+        if (!!request_mask ||
+            !(version_mask * pending_remote_advance_summary))
         {
           // Release the lock before sending the message
           Runtime::release_reservation(manager_lock);
-          RtEvent wait_on = send_remote_version_request(request_mask,
+          // Always pass in the full mask as the call will recompute
+          // the request_mask in case we lose a race
+          RtEvent wait_on = send_remote_version_request(version_mask,
                                                         ready_events); 
           // Retake the lock only once we're ready to
           RtEvent lock_reacquired = Runtime::acquire_rt_reservation(
@@ -4830,15 +4835,16 @@ namespace Legion {
       // See if we are the owner
       if (!is_owner)
       {
-        FieldMask request_mask = version_mask - remote_valid_fields;
-        // Handle the case where we have stale data from advances
-        if (!!pending_remote_advance_summary)
-          request_mask |= (pending_remote_advance_summary & version_mask);
-        if (!!request_mask)
+        const FieldMask request_mask = version_mask - remote_valid_fields;
+        // Also handle the case where we have stale data from advances
+        if (!!request_mask ||
+            !(version_mask * pending_remote_advance_summary))
         {
           // Release the lock before sending the message
           Runtime::release_reservation(manager_lock);
-          RtEvent wait_on = send_remote_version_request(request_mask,
+          // Always pass in the full mask as the call will recompute
+          // the request_mask in case we lose a race
+          RtEvent wait_on = send_remote_version_request(version_mask,
                                                         ready_events); 
           // Retake the lock only once we're ready to
           RtEvent lock_reacquired = Runtime::acquire_rt_reservation(
@@ -5625,16 +5631,16 @@ namespace Legion {
       // If we are not the owner, see if we need to issue any requests
       if (!is_owner)
       {
-        FieldMask request_mask = 
+        const FieldMask request_mask = 
           new_states.get_valid_mask() - remote_valid_fields;
-        // Handle the case where we have stale data from advances
-        if (!!pending_remote_advance_summary)
-          request_mask |= (pending_remote_advance_summary & 
-                            new_states.get_valid_mask());
-        if (!!request_mask)
+        // Also handle the case where we have stale data from advances
+        if (!!request_mask ||
+            !(new_states.get_valid_mask() * pending_remote_advance_summary))
         {
           // Release the lock before sending the message
           Runtime::release_reservation(manager_lock);
+          // Always pass in the full mask as the call will recompute
+          // the request_mask in case we lose a race
           RtEvent wait_on = send_remote_version_request(
               new_states.get_valid_mask(), applied_events);
           // Retake the lock only once we're ready to
