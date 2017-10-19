@@ -158,8 +158,8 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    template<ReferenceSource REF_KIND, bool LOCAL>
-    VersioningSet<REF_KIND,LOCAL>::VersioningSet(void)
+    template<ReferenceSource REF_KIND>
+    VersioningSet<REF_KIND>::VersioningSet(void)
       : single(true)
     //--------------------------------------------------------------------------
     {
@@ -167,8 +167,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<ReferenceSource REF_KIND, bool LOCAL>
-    VersioningSet<REF_KIND,LOCAL>::VersioningSet(const VersioningSet &rhs)
+    template<ReferenceSource REF_KIND>
+    VersioningSet<REF_KIND>::VersioningSet(const VersioningSet &rhs)
       : single(true) 
     //--------------------------------------------------------------------------
     {
@@ -181,16 +181,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<ReferenceSource REF_KIND, bool LOCAL>
-    VersioningSet<REF_KIND,LOCAL>::~VersioningSet(void)
+    template<ReferenceSource REF_KIND>
+    VersioningSet<REF_KIND>::~VersioningSet(void)
     //--------------------------------------------------------------------------
     {
       clear(); 
     }
 
     //--------------------------------------------------------------------------
-    template<ReferenceSource REF_KIND, bool LOCAL>
-    VersioningSet<REF_KIND,LOCAL>& VersioningSet<REF_KIND,LOCAL>::operator=(
+    template<ReferenceSource REF_KIND>
+    VersioningSet<REF_KIND>& VersioningSet<REF_KIND>::operator=(
                                                        const VersioningSet &rhs)
     //--------------------------------------------------------------------------
     {
@@ -199,8 +199,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<ReferenceSource REF_KIND, bool LOCAL>
-    const FieldMask& VersioningSet<REF_KIND,LOCAL>::operator[](
+    template<ReferenceSource REF_KIND>
+    const FieldMask& VersioningSet<REF_KIND>::operator[](
                                                       VersionState *state) const
     //--------------------------------------------------------------------------
     {
@@ -223,14 +223,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<ReferenceSource REF_KIND, bool LOCAL>
-    bool VersioningSet<REF_KIND,LOCAL>::insert(VersionState *state, 
-             const FieldMask &mask, ReferenceMutator *mutator, bool hold_remote)
+    template<ReferenceSource REF_KIND>
+    bool VersioningSet<REF_KIND>::insert(VersionState *state, 
+                               const FieldMask &mask, ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!!mask);
-      assert(!hold_remote || !LOCAL);
 #endif
       bool result = true;
       if (single)
@@ -240,19 +239,7 @@ namespace Legion {
           versions.single_version = state;
           valid_fields = mask;
           if (REF_KIND != LAST_SOURCE_REF)
-          {
-            // If we're not local and this is the owner we
-            // have to send a remote update 
-            if (!LOCAL && !state->is_owner() && !hold_remote)
-            {
-#ifdef DEBUG_LEGION
-              assert(mutator != NULL);
-#endif
-              state->send_remote_valid_update(state->owner_space, mutator,
-                                              1/*count*/, true/*add*/);
-            }
             state->add_base_valid_ref(REF_KIND, mutator);
-          }
         }
         else if (versions.single_version == state)
         {
@@ -270,17 +257,7 @@ namespace Legion {
           single = false;
           valid_fields |= mask;
           if (REF_KIND != LAST_SOURCE_REF)
-          {
-            if (!LOCAL && !state->is_owner() && !hold_remote)
-            {
-#ifdef DEBUG_LEGION
-              assert(mutator != NULL);
-#endif
-              state->send_remote_valid_update(state->owner_space, mutator,
-                                              1/*count*/, true/*add*/);
-            }
             state->add_base_valid_ref(REF_KIND, mutator);
-          }
         }
       }
       else
@@ -294,17 +271,7 @@ namespace Legion {
         {
           (*versions.multi_versions)[state] = mask;
           if (REF_KIND != LAST_SOURCE_REF)
-          {
-            if (!LOCAL && !state->is_owner() && !hold_remote)
-            {
-#ifdef DEBUG_LEGION
-              assert(mutator != NULL);
-#endif
-              state->send_remote_valid_update(state->owner_space, mutator,
-                                              1/*count*/, true/*add*/);
-            }
             state->add_base_valid_ref(REF_KIND, mutator);
-          }
         }
         else
         {
@@ -317,10 +284,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<ReferenceSource REF_KIND, bool LOCAL>
-    RtEvent VersioningSet<REF_KIND,LOCAL>::insert(VersionState *state,
-                                                  const FieldMask &mask, 
-                                                  Runtime *runtime, RtEvent pre)
+    template<ReferenceSource REF_KIND>
+    RtEvent VersioningSet<REF_KIND>::insert(VersionState *state,
+                                            const FieldMask &mask, 
+                                            Runtime *runtime, RtEvent pre)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -392,8 +359,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<ReferenceSource REF_KIND, bool LOCAL>
-    void VersioningSet<REF_KIND,LOCAL>::erase(VersionState *to_erase) 
+    template<ReferenceSource REF_KIND>
+    void VersioningSet<REF_KIND>::erase(VersionState *to_erase) 
     //--------------------------------------------------------------------------
     {
       if (single)
@@ -424,32 +391,21 @@ namespace Legion {
           single = true;
         }
       }
-      if (REF_KIND != LAST_SOURCE_REF)
-      {
-        if (!LOCAL && !to_erase->is_owner())
-          to_erase->send_remote_valid_update(to_erase->owner_space, 
-              NULL/*mutator*/, 1/*count*/, false/*add*/);
-        if (to_erase->remove_base_valid_ref(REF_KIND))
-          delete to_erase; 
-      }
+      if ((REF_KIND != LAST_SOURCE_REF) &&
+          to_erase->remove_base_valid_ref(REF_KIND))
+        delete to_erase; 
     }
 
     //--------------------------------------------------------------------------
-    template<ReferenceSource REF_KIND, bool LOCAL>
-    void VersioningSet<REF_KIND,LOCAL>::clear(void)
+    template<ReferenceSource REF_KIND>
+    void VersioningSet<REF_KIND>::clear(void)
     //--------------------------------------------------------------------------
     {
       if (single)
       {
-        if ((REF_KIND != LAST_SOURCE_REF) && (versions.single_version != NULL))
-        {
-          if (!LOCAL && !versions.single_version->is_owner())
-            versions.single_version->send_remote_valid_update(
-                versions.single_version->owner_space, 
-                NULL/*mutator*/, 1/*count*/, false/*add*/);
-          if (versions.single_version->remove_base_valid_ref(REF_KIND))
-            delete versions.single_version;
-        }
+        if ((REF_KIND != LAST_SOURCE_REF) && (versions.single_version != NULL) 
+            && versions.single_version->remove_base_valid_ref(REF_KIND))
+          delete versions.single_version;
         versions.single_version = NULL;
       }
       else
@@ -463,9 +419,6 @@ namespace Legion {
                 versions.multi_versions->begin(); it != 
                 versions.multi_versions->end(); it++)
           {
-            if (!LOCAL && !it->first->is_owner())
-              it->first->send_remote_valid_update(it->first->owner_space,
-                  NULL/*mutator*/, 1/*count*/, false/*add*/);
             if (it->first->remove_base_valid_ref(REF_KIND))
               delete it->first;
           }
@@ -478,8 +431,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<ReferenceSource REF_KIND, bool LOCAL>
-    size_t VersioningSet<REF_KIND,LOCAL>::size(void) const
+    template<ReferenceSource REF_KIND>
+    size_t VersioningSet<REF_KIND>::size(void) const
     //--------------------------------------------------------------------------
     {
       if (single)
@@ -494,9 +447,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<ReferenceSource REF_KIND, bool LOCAL>
+    template<ReferenceSource REF_KIND>
     std::pair<VersionState*,FieldMask>* 
-                VersioningSet<REF_KIND,LOCAL>::next(VersionState *current) const
+                      VersioningSet<REF_KIND>::next(VersionState *current) const
     //--------------------------------------------------------------------------
     {
       if (single)
@@ -523,8 +476,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<ReferenceSource REF_KIND, bool LOCAL>
-    void VersioningSet<REF_KIND,LOCAL>::move(VersioningSet &other)
+    template<ReferenceSource REF_KIND>
+    void VersioningSet<REF_KIND>::move(VersioningSet &other)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -548,9 +501,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<ReferenceSource REF_KIND, bool LOCAL>
-    typename VersioningSet<REF_KIND,LOCAL>::iterator 
-                                VersioningSet<REF_KIND,LOCAL>::begin(void) const
+    template<ReferenceSource REF_KIND>
+    typename VersioningSet<REF_KIND>::iterator 
+                                      VersioningSet<REF_KIND>::begin(void) const
     //--------------------------------------------------------------------------
     {
       // Scariness!
@@ -561,7 +514,7 @@ namespace Legion {
           return end();
         return iterator(this, 
             reinterpret_cast<std::pair<VersionState*,FieldMask>*>(
-              const_cast<VersioningSet<REF_KIND,LOCAL>*>(this)), 
+              const_cast<VersioningSet<REF_KIND>*>(this)), 
                                                     true/*single*/);
       }
       else
@@ -571,11 +524,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<ReferenceSource REF_KIND, bool LOCAL> 
-      template<ReferenceSource ARG_KIND, bool ARG_LOCAL>
-    void VersioningSet<REF_KIND,LOCAL>::reduce(const FieldMask &merge_mask, 
-                             VersioningSet<ARG_KIND,ARG_LOCAL> &new_states,
-                             ReferenceMutator *mutator)
+    template<ReferenceSource REF_KIND> template<ReferenceSource ARG_KIND>
+    void VersioningSet<REF_KIND>::reduce(const FieldMask &merge_mask, 
+                                         VersioningSet<ARG_KIND> &new_states,
+                                         ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       // If you are looking for the magical reduce function that allows
@@ -586,7 +538,7 @@ namespace Legion {
       new_states.sanity_check();
 #endif
       std::vector<VersionState*> to_erase_new;
-      for (typename VersioningSet<ARG_KIND,ARG_LOCAL>::iterator nit = 
+      for (typename VersioningSet<ARG_KIND>::iterator nit = 
             new_states.begin(); nit != new_states.end(); nit++)
       {
         LegionMap<VersionState*,FieldMask>::aligned to_add; 
@@ -601,7 +553,7 @@ namespace Legion {
         if (!nit->second)
           to_erase_new.push_back(nit->first);
         // Iterate over our states and see which ones interfere
-        for (typename VersioningSet<REF_KIND,LOCAL>::iterator it = begin();
+        for (typename VersioningSet<REF_KIND>::iterator it = begin();
               it != end(); it++)
         {
           FieldMask local_overlap = it->second & overlap;
@@ -658,8 +610,8 @@ namespace Legion {
 
 #ifdef DEBUG_LEGION
     //--------------------------------------------------------------------------
-    template<ReferenceSource REF_KIND, bool LOCAL>
-    void VersioningSet<REF_KIND,LOCAL>::sanity_check(void) const
+    template<ReferenceSource REF_KIND>
+    void VersioningSet<REF_KIND>::sanity_check(void) const
     //--------------------------------------------------------------------------
     {
       // Each field should exist exactly once
@@ -6311,6 +6263,17 @@ namespace Legion {
 #endif
         outstanding_requests.erase(done);
       }
+      // Remove the extra valid references that we added for the movement
+      // of these version state objects, but no need to track the effects
+      // these can be fire and forget
+      for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
+            current_update.begin(); it != current_update.end(); it++)
+        it->first->send_remote_valid_update(it->first->owner_space,
+                                            NULL, 1/*count*/, false/*add*/);
+      for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
+            previous_update.begin(); it != previous_update.end(); it++)
+        it->first->send_remote_valid_update(it->first->owner_space,
+                                            NULL, 1/*count*/, false/*add*/);
       // Now we can trigger our done event
       Runtime::trigger_event(done);
     }
@@ -6350,13 +6313,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(!it->first->is_owner());
 #endif
-        // If we already had the state then we can remove the duplicate
-        // reference that we are holding from the send, no need for
-        // tracking the remove since it is fire and forget
-        if (!target_infos[it->first->version_number].insert(it->first, 
-                          it->second, mutator, true/*hold reference*/))
-          it->first->send_remote_valid_update(it->first->owner_space, NULL,
-                                              1/*count*/, false/*add*/);
+        target_infos[it->first->version_number].insert(it->first, 
+                                            it->second, mutator);
       }
     }
 
@@ -6898,15 +6856,13 @@ namespace Legion {
       assert(currently_valid);
       currently_valid = false;
 #endif
-      // When we are no longer valid, remove all valid references to version
-      // state objects on remote nodes. 
-      // No need to hold the lock since no one else should be accessing us
-      if (is_owner() && !remote_instances.empty())
-      {
-        // If we're the owner, remove our valid references on remote nodes
-        UpdateReferenceFunctor<VALID_REF_KIND,false/*add*/> functor(this, NULL);
-        map_over_remote_instances(functor);
-      }
+      // When we are no longer valid we have to send a reference back
+      // to our owner to indicate that we are no longer valid
+      // This reference was given to us by the owner when it sent the
+      // information to create this version state object
+      // (see VersionState::send_version_state')
+      if (!is_owner())
+        send_remote_valid_update(owner_space, mutator, 1/*count*/,false/*add*/);
       // We can clear out our open children since we don't need them anymore
       // which will also remove the valid references
       open_children.clear();
@@ -7391,7 +7347,13 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(is_owner());
+      assert(currently_valid); // Must be currently valid
+      // We should have had a request for this already
+      assert(!has_remote_instance(target));
 #endif
+      // Add a remote valid did reference to ourselves that will be
+      // removed when the remote copy is no longer valid
+      add_base_valid_ref(REMOTE_DID_REF);
       Serializer rez;
       {
         RezCheck z(rez);
@@ -7476,6 +7438,9 @@ namespace Legion {
     {
       DETAILED_PROFILER(logical_node->context->runtime,
                         VERSION_STATE_HANDLE_REQUEST_CALL);
+#ifdef DEBUG_LEGION
+      assert(currently_valid);
+#endif
       // If we are the not the owner, the same thing happens no matter what
       if (!is_owner())
       {

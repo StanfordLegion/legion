@@ -50,6 +50,7 @@ namespace Legion {
       INDEX_TREE_NODE_DC = 0xC,
       FIELD_SPACE_DC = 0xD,
       REGION_TREE_NODE_DC = 0xE,
+      DIST_TYPE_LAST_DC,
     };
 
     enum ReferenceSource {

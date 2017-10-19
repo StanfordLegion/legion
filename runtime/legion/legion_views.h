@@ -1537,6 +1537,9 @@ namespace Legion {
                                                     DistributedID did, bool top)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(DIST_TYPE_LAST_DC < (1U << 7));
+#endif
       if (top)
         return LEGION_DISTRIBUTED_HELP_ENCODE(did, 
                 MATERIALIZED_VIEW_DC | (1ULL << 7));
@@ -1549,6 +1552,9 @@ namespace Legion {
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(DIST_TYPE_LAST_DC < (1U << 7));
+#endif
       return LEGION_DISTRIBUTED_HELP_ENCODE(did, 
                 REDUCTION_VIEW_DC | (1ULL << 7));
     }
@@ -1558,6 +1564,9 @@ namespace Legion {
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(DIST_TYPE_LAST_DC < (1U << 7));
+#endif
       return LEGION_DISTRIBUTED_HELP_ENCODE(did, 
                   COMPOSITE_VIEW_DC | (1ULL << 7));
     }
@@ -1567,6 +1576,9 @@ namespace Legion {
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(DIST_TYPE_LAST_DC < (1U << 7));
+#endif
       return LEGION_DISTRIBUTED_HELP_ENCODE(did, FILL_VIEW_DC | (1ULL << 7));
     }
 
@@ -1575,6 +1587,9 @@ namespace Legion {
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(DIST_TYPE_LAST_DC < (1U << 7));
+#endif
       return LEGION_DISTRIBUTED_HELP_ENCODE(did, PHI_VIEW_DC | (1ULL << 7));
     }
 

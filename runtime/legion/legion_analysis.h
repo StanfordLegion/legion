@@ -78,10 +78,9 @@ namespace Legion {
      * This is the same as the above class, but specialized
      * for VersionState objects explicitly
      */
-    template<ReferenceSource REF_SRC = LAST_SOURCE_REF, 
-             bool LOCAL_ONLY = true>
+    template<ReferenceSource REF_SRC = LAST_SOURCE_REF>
     class VersioningSet : 
-      public LegionHeapify<VersioningSet<REF_SRC,LOCAL_ONLY> > {
+      public LegionHeapify<VersioningSet<REF_SRC> > {
     public:
       class iterator : public std::iterator<std::input_iterator_tag,
                               std::pair<VersionState*,FieldMask> > {
@@ -142,8 +141,7 @@ namespace Legion {
     public:
       // Return true if we actually added the state, false if it already existed
       bool insert(VersionState *state, const FieldMask &mask, 
-                  ReferenceMutator *mutator = NULL,
-                  bool hold_remote_reference = false);
+                  ReferenceMutator *mutator = NULL);
       RtEvent insert(VersionState *state, const FieldMask &mask, 
                      Runtime *runtime, RtEvent pre);
       void erase(VersionState *to_erase);
@@ -157,9 +155,9 @@ namespace Legion {
       iterator begin(void) const;
       inline iterator end(void) const { return iterator(this, NULL, single); }
     public:
-      template<ReferenceSource ARG_KIND, bool ARG_LOCAL>
+      template<ReferenceSource ARG_KIND>
       void reduce(const FieldMask &reduce_mask, 
-                  VersioningSet<ARG_KIND,ARG_LOCAL> &new_states,
+                  VersioningSet<ARG_KIND> &new_states,
                   ReferenceMutator *mutator);
 #ifdef DEBUG_LEGION
       void sanity_check(void) const;
@@ -904,8 +902,7 @@ namespace Legion {
       static const AllocationType alloc_type = VERSION_MANAGER_ALLOC;
       static const VersionID init_version = 1;
     public:
-      typedef VersioningSet<VERSION_MANAGER_REF,
-                            false/*LOCAL ONLY*/> ManagerVersions;
+      typedef VersioningSet<VERSION_MANAGER_REF> ManagerVersions;
     public:
       VersionManager(RegionTreeNode *node, ContextID ctx); 
       VersionManager(const VersionManager &manager);
@@ -1277,8 +1274,7 @@ namespace Legion {
       FieldMask reduction_mask;
       // Note that we make the StateVersions type not local which
       // is how we keep the distributed version state tree live
-      typedef VersioningSet<VERSION_STATE_TREE_REF,
-                            false/*LOCAL*/> StateVersions;
+      typedef VersioningSet<VERSION_STATE_TREE_REF> StateVersions;
       LegionMap<LegionColor,StateVersions>::aligned open_children;
       // The valid instance views
       LegionMap<LogicalView*, FieldMask,
