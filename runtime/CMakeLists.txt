@@ -163,9 +163,10 @@ list(APPEND REALM_SRC
 find_package(Threads REQUIRED)
 add_library(RealmRuntime ${REALM_SRC})
 target_compile_definitions(RealmRuntime PUBLIC REALM_USE_CMAKE)
-target_link_libraries(RealmRuntime
-  PRIVATE ${CMAKE_DL_LIBS} ${CMAKE_THREAD_LIBS_INIT}
-)
+if(Legion_USE_LIBDL)
+  target_link_libraries(RealmRuntime PRIVATE ${CMAKE_DL_LIBS})
+endif()
+target_link_libraries(RealmRuntime PRIVATE ${CMAKE_THREAD_LIBS_INIT})
 if(UNIX AND NOT APPLE)
   target_link_libraries(RealmRuntime PRIVATE rt)
 endif()
