@@ -502,10 +502,7 @@ namespace Legion {
       inline void begin_runtime_call(void);
       inline void end_runtime_call(void);
       inline void begin_task_wait(bool from_runtime);
-      inline void end_task_wait(void);
-      void execute_task_launch(TaskOp *task, bool index, 
-                               LegionTrace *current_trace, 
-                               bool silence_warnings, bool inlining_enabled);
+      inline void end_task_wait(void); 
       void remap_unmapped_regions(LegionTrace *current_trace,
                            const std::vector<PhysicalRegion> &unmapped_regions);
     public:
@@ -964,6 +961,9 @@ namespace Legion {
     protected:
       // Find an index space name for a concrete launch domain
       IndexSpace find_index_launch_space(const Domain &launch_domain);
+      void execute_task_launch(TaskOp *task, bool index, 
+                               LegionTrace *current_trace, 
+                               bool silence_warnings, bool inlining_enabled);
     public:
       void clone_local_fields(
           std::map<FieldSpace,std::vector<LocalFieldInfo> > &child_local) const;
