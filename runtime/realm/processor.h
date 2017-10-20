@@ -90,6 +90,9 @@ namespace Realm {
       // changes the priority of the currently running task
       static void set_current_task_priority(int new_priority);
 
+      // returns the finish event for the currently running task
+      static Event get_current_finish_event(void);
+
       // dynamic task registration - this may be done for:
       //  1) a specific processor/group (anywhere in the system)
       //  2) for all processors of a given type, either in the local address space/process,

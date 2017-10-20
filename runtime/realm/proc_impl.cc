@@ -172,6 +172,14 @@ namespace Realm {
       op->set_priority(new_priority);
     }
 
+    // returns the finish event for the currently running task
+    /*static*/ Event Processor::get_current_finish_event(void)
+    {
+      Operation *op = Thread::self()->get_operation();
+      assert(op != 0);
+      return op->get_finish_event();
+    }
+
     AddressSpace Processor::address_space(void) const
     {
       // this is a hack for the Legion runtime, which only calls it on processor, not proc groups
