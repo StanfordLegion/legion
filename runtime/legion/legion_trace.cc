@@ -480,7 +480,8 @@ namespace Legion {
       std::pair<Operation*,GenerationID> key(op,gen);
       const unsigned index = operations.size();
       if ((op->get_operation_kind() == Operation::COPY_OP_KIND ||
-           op->get_operation_kind() == Operation::FILL_OP_KIND) &&
+           op->get_operation_kind() == Operation::FILL_OP_KIND ||
+           op->get_operation_kind() == Operation::DYNAMIC_COLLECTIVE_OP_KIND) &&
           physical_trace != NULL)
         op->set_memoizing();
       if (op->is_memoizing())
