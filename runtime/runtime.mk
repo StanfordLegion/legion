@@ -87,51 +87,32 @@ CONDUIT=ibv
 GPU_ARCH=fermi
 endif
 ifeq ($(findstring titan,$(shell uname -n)),titan)
-CXX=CC
-F90=ftn
 # without this, lapack stuff will link, but generate garbage output - thanks Cray!
 LAPACK_LIBS=-L/opt/acml/5.3.1/gfortran64_fma4/lib -Wl,-rpath=/opt/acml/5.3.1/gfortran64_fma4/lib -lacml
 MARCH=bdver1
-CC_FLAGS += -DGASNETI_BUG1389_WORKAROUND=1
 CUDA=${CUDATOOLKIT_HOME}
 CONDUIT=gemini
 GPU_ARCH=k20
-LEGION_LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
-LEGION_LD_FLAGS += ${CRAY_UDREG_POST_LINK_OPTS}
-LEGION_LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
 endif
 ifeq ($(findstring daint,$(shell uname -n)),daint)
-CXX=CC
-F90=ftn
-# Cray's magic wrappers automatically provide LAPACK goodness?
-LAPACK_LIBS=
 MARCH=corei7-avx
-CC_FLAGS += -DGASNETI_BUG1389_WORKAROUND=1
 CUDA=${CUDATOOLKIT_HOME}
 CONDUIT=aries
 GPU_ARCH=k20
-LEGION_LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
-LEGION_LD_FLAGS += ${CRAY_UDREG_POST_LINK_OPTS}
-LEGION_LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
 endif
 ifeq ($(findstring excalibur,$(shell uname -n)),excalibur)
-CXX=CC
-F90=ftn
-# Cray's magic wrappers automatically provide LAPACK goodness?
-LAPACK_LIBS=
-CC_FLAGS += -DGASNETI_BUG1389_WORKAROUND=1
 CONDUIT=aries
-LEGION_LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
-LEGION_LD_FLAGS += ${CRAY_UDREG_POST_LINK_OPTS}
-LEGION_LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
 endif
 ifeq ($(findstring cori,$(shell uname -n)),cori)
+CONDUIT=aries
+endif
+
+# Customization specific to Cray programming environment
+ifneq (${CRAY_PE},)
 CXX=CC
 F90=ftn
 # Cray's magic wrappers automatically provide LAPACK goodness?
-LAPACK_LIBS=
-CC_FLAGS += -DGASNETI_BUG1389_WORKAROUND=1
-CONDUIT=aries
+LAPACK_LIBS ?=
 LEGION_LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
 LEGION_LD_FLAGS += ${CRAY_UDREG_POST_LINK_OPTS}
 LEGION_LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
