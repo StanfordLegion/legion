@@ -2956,6 +2956,7 @@ namespace Legion {
       static bool program_order_execution;
       static bool dump_physical_traces;
       static bool reduce_fanout;
+      static bool no_tracing;
     public:
       static unsigned num_profiling_nodes;
       static const char* serializer_type;

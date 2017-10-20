@@ -5461,6 +5461,8 @@ namespace Legion {
     void InnerContext::begin_trace(TraceID tid, bool memoize)
     //--------------------------------------------------------------------------
     {
+      if (Runtime::no_tracing) return;
+
       AutoRuntimeCall call(this);
 #ifdef DEBUG_LEGION
       log_run.debug("Beginning a trace in task %s (ID %lld)",
@@ -5507,6 +5509,8 @@ namespace Legion {
     void InnerContext::end_trace(TraceID tid)
     //--------------------------------------------------------------------------
     {
+      if (Runtime::no_tracing) return;
+
       AutoRuntimeCall call(this);
 #ifdef DEBUG_LEGION
       log_run.debug("Ending a trace in task %s (ID %lld)",
@@ -5551,6 +5555,8 @@ namespace Legion {
     void InnerContext::begin_static_trace(const std::set<RegionTreeID> *trees)
     //--------------------------------------------------------------------------
     {
+      if (Runtime::no_tracing) return;
+
       AutoRuntimeCall call(this);
 #ifdef DEBUG_LEGION
       log_run.debug("Beginning a static trace in task %s (ID %lld)",
@@ -5578,6 +5584,8 @@ namespace Legion {
     void InnerContext::end_static_trace(void)
     //--------------------------------------------------------------------------
     {
+      if (Runtime::no_tracing) return;
+
       AutoRuntimeCall call(this);
 #ifdef DEBUG_LEGION
       log_run.debug("Ending a static trace in task %s (ID %lld)",
