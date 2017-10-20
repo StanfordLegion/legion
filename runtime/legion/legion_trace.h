@@ -184,7 +184,7 @@ namespace Legion {
         unsigned count;
       }; 
     public:
-      DynamicTrace(TraceID tid, TaskContext *ctx);
+      DynamicTrace(TraceID tid, TaskContext *ctx, bool memoize);
       DynamicTrace(const DynamicTrace &rhs);
       virtual ~DynamicTrace(void);
     public:
@@ -484,6 +484,13 @@ namespace Legion {
                                       ApEvent lhs, CopyOp *copy);
       void record_trigger_copy_completion(PhysicalTraceInfo &trace_info,
                                           CopyOp *copy, ApEvent rhs);
+      void record_issue_fill(PhysicalTraceInfo &trace_info,
+                             Operation *op, ApEvent lhs,
+                             const Domain &domain,
+                             const std::vector<Domain::CopySrcDstField> &fields,
+                             const void *fill_buffer, size_t fill_size,
+                             ApEvent precondition);
+
     private:
       void record_ready_view(PhysicalTraceInfo &trace_info,
                              const RegionRequirement &req,
@@ -514,6 +521,7 @@ namespace Legion {
                LegionMap<Domain, FieldMask>::aligned> previous_projections;
       LegionMap<InstanceView*, FieldMask>::aligned    valid_views;
       LegionMap<InstanceView*, FieldMask>::aligned    reduction_views;
+      LegionMap<FillView*,     FieldMask>::aligned    fill_views;
       LegionMap<InstanceView*, bool>::aligned         initialized;
       LegionMap<InstanceView*, ContextID>::aligned    logical_contexts;
       LegionMap<InstanceView*, ContextID>::aligned    physical_contexts;
@@ -547,7 +555,7 @@ namespace Legion {
       virtual MergeEvent* as_merge_event() = 0;
       virtual AssignFenceCompletion* as_assignment_fence_completion() = 0;
       virtual IssueCopy* as_issue_copy() = 0;
-      virtual IssueFillReduction* as_issue_fill_reduction() = 0;
+      virtual IssueFill* as_issue_fill() = 0;
       virtual SetReadyEvent* as_set_ready_event() = 0;
       virtual GetCopyTermEvent* as_get_copy_term_event() = 0;
       virtual SetCopySyncEvent* as_set_copy_sync_event() = 0;
@@ -581,7 +589,7 @@ namespace Legion {
         { return NULL; }
       virtual IssueCopy* as_issue_copy()
         { return NULL; }
-      virtual IssueFillReduction* as_issue_fill_reduction()
+      virtual IssueFill* as_issue_fill()
         { return NULL; }
       virtual SetReadyEvent* as_set_ready_event()
         { return NULL; }
@@ -621,7 +629,7 @@ namespace Legion {
         { return NULL; }
       virtual IssueCopy* as_issue_copy()
         { return NULL; }
-      virtual IssueFillReduction* as_issue_fill_reduction()
+      virtual IssueFill* as_issue_fill()
         { return NULL; }
       virtual SetReadyEvent* as_set_ready_event()
         { return NULL; }
@@ -660,7 +668,7 @@ namespace Legion {
         { return this; }
       virtual IssueCopy* as_issue_copy()
         { return NULL; }
-      virtual IssueFillReduction* as_issue_fill_reduction()
+      virtual IssueFill* as_issue_fill()
         { return NULL; }
       virtual SetReadyEvent* as_set_ready_event()
         { return NULL; }
@@ -681,21 +689,27 @@ namespace Legion {
     };
 
     /**
-     * \class IssueFillReduction
+     * \class IssueFill
      * This instruction has the following semantics:
      *
      *   events[lhs] = domain.fill(fields, requests,
      *                             fill_buffer, fill_size,
      *                             events[precondition_idx]);
      */
-    struct IssueFillReduction : public Instruction {
-      IssueFillReduction(PhysicalTemplate &tpl,
+    struct IssueFill : public Instruction {
+      IssueFill(PhysicalTemplate &tpl,
                          unsigned lhs, const Domain &domain,
                          const TraceLocalId &op_key,
                          const std::vector<Domain::CopySrcDstField> &fields,
                          const ReductionOp *reduction_op,
                          unsigned precondition_idx);
-      virtual ~IssueFillReduction();
+      IssueFill(PhysicalTemplate& tpl,
+                         unsigned lhs, const Domain &domain,
+                         const TraceLocalId &op_key,
+                         const std::vector<Domain::CopySrcDstField> &fields,
+                         const void *fill_buffer, size_t fill_size,
+                         unsigned precondition_idx);
+      virtual ~IssueFill();
       virtual void execute();
       virtual std::string to_string();
 
@@ -709,7 +723,7 @@ namespace Legion {
         { return NULL; }
       virtual IssueCopy* as_issue_copy()
         { return NULL; }
-      virtual IssueFillReduction* as_issue_fill_reduction()
+      virtual IssueFill* as_issue_fill()
         { return this; }
       virtual SetReadyEvent* as_set_ready_event()
         { return NULL; }
@@ -765,7 +779,7 @@ namespace Legion {
         { return NULL; }
       virtual IssueCopy* as_issue_copy()
         { return this; }
-      virtual IssueFillReduction* as_issue_fill_reduction()
+      virtual IssueFill* as_issue_fill()
         { return NULL; }
       virtual SetReadyEvent* as_set_ready_event()
         { return NULL; }
@@ -818,7 +832,7 @@ namespace Legion {
         { return NULL; }
       virtual IssueCopy* as_issue_copy()
         { return NULL; }
-      virtual IssueFillReduction* as_issue_fill_reduction()
+      virtual IssueFill* as_issue_fill()
         { return NULL; }
       virtual SetReadyEvent* as_set_ready_event()
         { return this; }
@@ -865,7 +879,7 @@ namespace Legion {
         { return NULL; }
       virtual IssueCopy* as_issue_copy()
         { return NULL; }
-      virtual IssueFillReduction* as_issue_fill_reduction()
+      virtual IssueFill* as_issue_fill()
         { return NULL; }
       virtual SetReadyEvent* as_set_ready_event()
         { return NULL; }
@@ -905,7 +919,7 @@ namespace Legion {
         { return NULL; }
       virtual IssueCopy* as_issue_copy()
         { return NULL; }
-      virtual IssueFillReduction* as_issue_fill_reduction()
+      virtual IssueFill* as_issue_fill()
         { return NULL; }
       virtual SetReadyEvent* as_set_ready_event()
         { return NULL; }
@@ -945,7 +959,7 @@ namespace Legion {
         { return NULL; }
       virtual IssueCopy* as_issue_copy()
         { return NULL; }
-      virtual IssueFillReduction* as_issue_fill_reduction()
+      virtual IssueFill* as_issue_fill()
         { return NULL; }
       virtual SetReadyEvent* as_set_ready_event()
         { return NULL; }

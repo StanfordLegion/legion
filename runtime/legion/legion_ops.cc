@@ -4040,6 +4040,14 @@ namespace Legion {
                                   local_sync_precondition, predication_guard,
                                   trace_info);
           Runtime::trigger_event(local_completion, across_done);
+          if (memoizing)
+          {
+#ifdef DEBUG_LEGION
+            assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
+#endif
+            trace_info.tpl->record_merge_events(trace_info, local_completion,
+                                                across_done);
+          }
         }
         // Apply our changes to the version states
         // Don't apply changes to the source if we have a composite instance
@@ -12438,6 +12446,17 @@ namespace Legion {
     void FillOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
+      if (memoizing)
+      {
+        PhysicalTraceInfo trace_info;
+        trace->get_physical_trace()->get_current_template(trace_info);
+        if (trace_info.tpl->is_replaying())
+        {
+          enqueue_ready_operation();
+          return;
+        }
+      }
+
       std::set<RtEvent> preconditions;
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement,
@@ -12454,6 +12473,32 @@ namespace Legion {
     void FillOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
+      PhysicalTraceInfo trace_info;
+      if (memoizing)
+      {
+        PhysicalTraceInfo trace_info;
+        trace->get_physical_trace()->get_current_template(trace_info);
+        if (trace_info.tpl->is_replaying())
+        {
+          complete_mapping();
+          // See if we have any arrivals to trigger
+          if (!arrive_barriers.empty())
+          {
+            for (std::vector<PhaseBarrier>::const_iterator it = 
+                  arrive_barriers.begin(); it != arrive_barriers.end(); it++)
+            {
+              if (Runtime::legion_spy_enabled)
+                LegionSpy::log_phase_barrier_arrival(unique_op_id, 
+                                                     it->phase_barrier);
+              Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
+                                            completion_event);
+            }
+          }
+          complete_execution();
+          return;
+        }
+      }
+
       // Tell the region tree forest to fill in this field
       // Note that the forest takes ownership of the value buffer
       if (future.impl == NULL)
@@ -12463,7 +12508,6 @@ namespace Legion {
 #endif
         InstanceSet mapped_instances;
         // TODO: Implement physical tracing for fill operation
-        PhysicalTraceInfo trace_info;
         if (restrict_info.has_restrictions())
         {
           mapped_instances = restrict_info.get_instances();

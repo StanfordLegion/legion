@@ -1263,7 +1263,7 @@ namespace Legion {
     struct MergeEvent;
     struct AssignFenceCompletion;
     struct IssueCopy;
-    struct IssueFillReduction;
+    struct IssueFill;
     struct SetReadyEvent;
     struct GetCopyTermEvent;
     struct SetCopySyncEvent;

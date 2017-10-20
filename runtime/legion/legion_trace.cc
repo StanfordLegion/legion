@@ -398,10 +398,12 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    DynamicTrace::DynamicTrace(TraceID t, TaskContext *c)
+    DynamicTrace::DynamicTrace(TraceID t, TaskContext *c, bool memoize)
       : LegionTrace(c), tid(t), fixed(false), tracing(true)
     //--------------------------------------------------------------------------
     {
+      if (memoize)
+        physical_trace = new PhysicalTrace(c->runtime);
     }
 
     //--------------------------------------------------------------------------
@@ -477,7 +479,8 @@ namespace Legion {
     {
       std::pair<Operation*,GenerationID> key(op,gen);
       const unsigned index = operations.size();
-      if (op->get_operation_kind() == Operation::COPY_OP_KIND &&
+      if ((op->get_operation_kind() == Operation::COPY_OP_KIND ||
+           op->get_operation_kind() == Operation::FILL_OP_KIND) &&
           physical_trace != NULL)
         op->set_memoizing();
       if (op->is_memoizing())
@@ -1729,8 +1732,7 @@ namespace Legion {
           case ISSUE_FILL_REDUCTION:
             {
               generate[idx] = idx;
-              IssueFillReduction *inst =
-                instructions[idx]->as_issue_fill_reduction();
+              IssueFill *inst = instructions[idx]->as_issue_fill();
               std::set<unsigned> &pre_pre = preconditions[inst->precondition_idx];
               pre.insert(generate[inst->precondition_idx]);
               pre.insert(pre_pre.begin(), pre_pre.end());
@@ -1965,8 +1967,7 @@ namespace Legion {
             }
           case ISSUE_FILL_REDUCTION:
             {
-              IssueFillReduction *inst =
-                instructions[idx]->as_issue_fill_reduction();
+              IssueFill *inst = instructions[idx]->as_issue_fill();
               consumers.push_back(std::vector<unsigned>());
               std::map<TraceLocalId, unsigned>::iterator finder =
                 task_entries.find(inst->op_key);
@@ -2134,8 +2135,7 @@ namespace Legion {
               }
             case ISSUE_FILL_REDUCTION:
               {
-                IssueFillReduction *inst =
-                  insts[idx]->as_issue_fill_reduction();
+                IssueFill *inst = insts[idx]->as_issue_fill();
                 if (inst->precondition_idx == fence_completion_id)
                 {
                   blocked_by_fence.insert(idx);
@@ -2162,8 +2162,7 @@ namespace Legion {
               }
             case ISSUE_FILL_REDUCTION:
               {
-                IssueFillReduction *inst =
-                  insts[*it]->as_issue_fill_reduction();
+                IssueFill *inst = insts[*it]->as_issue_fill();
                 if (inst->lhs != min_event_id)
                   inst->precondition_idx = min_event_id;
                 break;
@@ -2680,9 +2679,9 @@ namespace Legion {
         events.push_back(ApEvent());
 
         instructions.push_back(
-            new IssueFillReduction(*this, lhs_, manager->instance_domain,
-                                   op_key, fields, reduction_op,
-                                   ready_event_idx));
+            new IssueFill(*this, lhs_, manager->instance_domain,
+                          op_key, fields, reduction_op,
+                          ready_event_idx));
 
         ready_event_idx = lhs_;
       }
@@ -2781,6 +2780,48 @@ namespace Legion {
 #endif
       instructions.push_back(new TriggerCopyCompletion(*this, lhs_, rhs_));
 
+#ifdef DEBUG_LEGION
+      assert(instructions.size() == events.size());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_issue_fill(PhysicalTraceInfo &trace_info,
+                                             Operation *op, ApEvent lhs,
+                                             const Domain &domain,
+                             const std::vector<Domain::CopySrcDstField> &fields,
+                                             const void *fill_buffer,
+                                             size_t fill_size,
+                                             ApEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(op->is_memoizing());
+#endif
+      AutoLock tpl_lock(template_lock);
+
+      unsigned lhs_ = events.size();
+      events.push_back(lhs);
+#ifdef DEBUG_LEGION
+      assert(event_map.find(lhs) == event_map.end());
+#endif
+      event_map[lhs] = lhs_;
+
+      TraceLocalId key(op->get_trace_local_id(), trace_info.color);
+#ifdef DEBUG_LEGION
+      assert(operations.find(key) != operations.end());
+      assert(task_entries.find(key) != task_entries.end());
+#endif
+
+      std::map<ApEvent, unsigned>::iterator pre_finder =
+        event_map.find(precondition);
+#ifdef DEBUG_LEGION
+      assert(pre_finder != event_map.end());
+#endif
+      unsigned precondition_idx = pre_finder->second;
+
+      instructions.push_back(new IssueFill(*this, lhs_, domain, key,
+                             fields, fill_buffer, fill_size, precondition_idx));
 #ifdef DEBUG_LEGION
       assert(instructions.size() == events.size());
 #endif
@@ -3085,18 +3126,16 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // IssueFillReduction
+    // IssueFill
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    IssueFillReduction::IssueFillReduction(PhysicalTemplate& tpl, unsigned l,
-                                           const Domain &d,
-                                           const TraceLocalId& key,
-                                  const std::vector<Domain::CopySrcDstField>& f,
-                                           const ReductionOp *red_op,
-                                           unsigned pi)
+    IssueFill::IssueFill(PhysicalTemplate& tpl, unsigned l, const Domain &d,
+                         const TraceLocalId &key,
+                         const std::vector<Domain::CopySrcDstField> &f,
+                         const ReductionOp *reduction_op, unsigned pi)
       : Instruction(tpl), lhs(l), domain(d), op_key(key), fields(f),
-        reduction_op(red_op), precondition_idx(pi)
+        precondition_idx(pi)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3107,31 +3146,50 @@ namespace Legion {
 #endif
       fill_size = reduction_op->sizeof_rhs;
       fill_buffer = malloc(fill_size);
-      reduction_op->init(fill_buffer, 1);
     }
 
     //--------------------------------------------------------------------------
-    IssueFillReduction::~IssueFillReduction()
+    IssueFill::IssueFill(PhysicalTemplate& tpl, unsigned l, const Domain &d,
+                         const TraceLocalId &key,
+                         const std::vector<Domain::CopySrcDstField> &f,
+                         const void *fb, size_t fs, unsigned pi)
+      : Instruction(tpl), lhs(l), domain(d), op_key(key), fields(f),
+        precondition_idx(pi)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(lhs < events.size());
+      assert(operations.find(op_key) != operations.end());
+      assert(fields.size() > 0);
+      assert(precondition_idx < events.size());
+#endif
+      fill_size = fs;
+      fill_buffer = malloc(fs);
+      memcpy(fill_buffer, fb, fs);
+    }
+
+    //--------------------------------------------------------------------------
+    IssueFill::~IssueFill()
     //--------------------------------------------------------------------------
     {
       free(fill_buffer);
     }
 
     //--------------------------------------------------------------------------
-    void IssueFillReduction::execute()
+    void IssueFill::execute()
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(operations.find(op_key) != operations.end());
       assert(operations.find(op_key)->second != NULL);
 #endif
-      SingleTask *task = dynamic_cast<SingleTask*>(operations[op_key]);
+      Operation *op = operations[op_key];
       ApEvent precondition = events[precondition_idx];
 
       Realm::ProfilingRequestSet requests;
-      if (task->runtime->profiler != NULL)
-        task->runtime->profiler->add_fill_request(requests,
-            task->get_unique_op_id());
+      if (op->runtime->profiler != NULL)
+        op->runtime->profiler->add_fill_request(requests,
+                                                op->get_unique_op_id());
 
       events[lhs] = ApEvent(domain.fill(fields, requests, fill_buffer, fill_size,
             precondition));
@@ -3141,7 +3199,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    std::string IssueFillReduction::to_string()
+    std::string IssueFill::to_string()
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
@@ -3160,8 +3218,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Instruction* IssueFillReduction::clone(PhysicalTemplate& tpl,
-                                    const std::map<unsigned, unsigned> &rewrite)
+    Instruction* IssueFill::clone(PhysicalTemplate& tpl,
+                                  const std::map<unsigned, unsigned> &rewrite)
     //--------------------------------------------------------------------------
     {
       std::map<unsigned, unsigned>::const_iterator lfinder = rewrite.find(lhs);
@@ -3171,8 +3229,8 @@ namespace Legion {
       assert(lfinder != rewrite.end());
       assert(pfinder != rewrite.end());
 #endif
-      return new IssueFillReduction(tpl, lfinder->second, domain, op_key,
-          fields, reduction_op, pfinder->second);
+      return new IssueFill(tpl, lfinder->second, domain, op_key, fields,
+          fill_buffer, fill_size, pfinder->second);
     }
 
     /////////////////////////////////////////////////////////////

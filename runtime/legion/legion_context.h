@@ -305,7 +305,7 @@ namespace Legion {
       virtual void update_current_fence(FenceOp *op) = 0;
       virtual FenceOp* get_current_fence() = 0;
     public:
-      virtual void begin_trace(TraceID tid) = 0;
+      virtual void begin_trace(TraceID tid, bool memoize) = 0;
       virtual void end_trace(TraceID tid) = 0;
       virtual void begin_static_trace(
                                      const std::set<RegionTreeID> *managed) = 0;
@@ -880,7 +880,7 @@ namespace Legion {
       virtual void update_current_fence(FenceOp *op);
       virtual FenceOp* get_current_fence();
     public:
-      virtual void begin_trace(TraceID tid);
+      virtual void begin_trace(TraceID tid, bool memoize);
       virtual void end_trace(TraceID tid);
       virtual void begin_static_trace(const std::set<RegionTreeID> *managed);
       virtual void end_static_trace(void);
@@ -1390,7 +1390,7 @@ namespace Legion {
       virtual void update_current_fence(FenceOp *op);
       virtual FenceOp* get_current_fence();
     public:
-      virtual void begin_trace(TraceID tid);
+      virtual void begin_trace(TraceID tid, bool memoize);
       virtual void end_trace(TraceID tid);
       virtual void begin_static_trace(const std::set<RegionTreeID> *managed);
       virtual void end_static_trace(void);
@@ -1690,7 +1690,7 @@ namespace Legion {
       virtual void update_current_fence(FenceOp *op);
       virtual FenceOp* get_current_fence();
     public:
-      virtual void begin_trace(TraceID tid);
+      virtual void begin_trace(TraceID tid, bool memoize);
       virtual void end_trace(TraceID tid);
       virtual void begin_static_trace(const std::set<RegionTreeID> *managed);
       virtual void end_static_trace(void);

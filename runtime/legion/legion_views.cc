@@ -7058,6 +7058,14 @@ namespace Legion {
         std::vector<Domain::CopySrcDstField> dst_fields;
         dst->copy_to(pre_set.set_mask, dst_fields, across_helper);
         ApEvent fill_pre = Runtime::merge_events(pre_set.preconditions);
+        if (trace_info.tracing)
+        {
+#ifdef DEBUG_LEGION
+          assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
+#endif
+          trace_info.tpl->record_merge_events(trace_info, fill_pre,
+                                              pre_set.preconditions);
+        }
         // Issue the fill command
         // Only apply an intersection if the destination logical node
         // is different than our logical node
