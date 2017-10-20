@@ -453,14 +453,11 @@ namespace Legion {
                              ContextID dst_logical_ctx,
                              ContextID dst_physical_ctx);
       void record_issue_copy(PhysicalTraceInfo &trace_info,
-                             ApEvent lhs,
-                             RegionTreeNode* node,
-                             Operation* op,
+                             Operation* op, ApEvent &lhs,
+                             const Domain &domain,
                          const std::vector<Domain::CopySrcDstField>& src_fields,
                          const std::vector<Domain::CopySrcDstField>& dst_fields,
                              ApEvent precondition,
-                             PredEvent predicate_guard,
-                             RegionTreeNode *intersect = NULL,
                              ReductionOpID redop = 0,
                              bool reduction_fold = true);
       void record_empty_copy(CompositeView *src,
@@ -485,7 +482,7 @@ namespace Legion {
       void record_trigger_copy_completion(PhysicalTraceInfo &trace_info,
                                           CopyOp *copy, ApEvent rhs);
       void record_issue_fill(PhysicalTraceInfo &trace_info,
-                             Operation *op, ApEvent lhs,
+                             Operation *op, ApEvent &lhs,
                              const Domain &domain,
                              const std::vector<Domain::CopySrcDstField> &fields,
                              const void *fill_buffer, size_t fill_size,
@@ -513,6 +510,7 @@ namespace Legion {
       ApEvent fence_completion;
       std::map<TraceLocalId, Operation*> operations;
       std::vector<ApEvent> events;
+      std::vector<TraceLocalId> op_list;
       CachedMappings                                  cached_mappings;
       LegionMap<InstanceView*, FieldMask>::aligned    previous_valid_views;
       LegionMap<std::pair<RegionTreeNode*, ContextID>,
@@ -533,7 +531,7 @@ namespace Legion {
       MERGE_EVENT,
       ASSIGN_FENCE_COMPLETION,
       ISSUE_COPY,
-      ISSUE_FILL_REDUCTION,
+      ISSUE_FILL,
       SET_READY_EVENT,
       GET_COPY_TERM_EVENT,
       SET_COPY_SYNC_EVENT,
@@ -698,23 +696,23 @@ namespace Legion {
      */
     struct IssueFill : public Instruction {
       IssueFill(PhysicalTemplate &tpl,
-                         unsigned lhs, const Domain &domain,
-                         const TraceLocalId &op_key,
-                         const std::vector<Domain::CopySrcDstField> &fields,
-                         const ReductionOp *reduction_op,
-                         unsigned precondition_idx);
+                unsigned lhs, const Domain &domain,
+                const TraceLocalId &op_key,
+                const std::vector<Domain::CopySrcDstField> &fields,
+                const ReductionOp *reduction_op,
+                unsigned precondition_idx);
       IssueFill(PhysicalTemplate& tpl,
-                         unsigned lhs, const Domain &domain,
-                         const TraceLocalId &op_key,
-                         const std::vector<Domain::CopySrcDstField> &fields,
-                         const void *fill_buffer, size_t fill_size,
-                         unsigned precondition_idx);
+                unsigned lhs, const Domain &domain,
+                const TraceLocalId &op_key,
+                const std::vector<Domain::CopySrcDstField> &fields,
+                const void *fill_buffer, size_t fill_size,
+                unsigned precondition_idx);
       virtual ~IssueFill();
       virtual void execute();
       virtual std::string to_string();
 
       virtual InstructionKind get_kind()
-        { return ISSUE_FILL_REDUCTION; }
+        { return ISSUE_FILL; }
       virtual GetTermEvent* as_get_term_event()
         { return NULL; }
       virtual MergeEvent* as_merge_event()
@@ -759,13 +757,12 @@ namespace Legion {
      */
     struct IssueCopy : public Instruction {
       IssueCopy(PhysicalTemplate &tpl,
-                unsigned lhs, RegionTreeNode *node,
+                unsigned lhs, const Domain &domain,
                 const TraceLocalId &op_key,
-                const std::vector<Domain::CopySrcDstField> &src_fields,
-                const std::vector<Domain::CopySrcDstField> &dst_fields,
-                unsigned precondition_idx, PredEvent predicate_guard,
-                RegionTreeNode *intersect, ReductionOpID redop,
-                bool reduction_fold);
+                const std::vector<Domain::CopySrcDstField>& src_fields,
+                const std::vector<Domain::CopySrcDstField>& dst_fields,
+                unsigned precondition_idx,
+                ReductionOpID redop, bool reduction_fold);
       virtual void execute();
       virtual std::string to_string();
 
@@ -795,13 +792,11 @@ namespace Legion {
     private:
       friend struct PhysicalTemplate;
       unsigned lhs;
-      RegionTreeNode* node;
+      Domain domain;
       TraceLocalId op_key;
       std::vector<Domain::CopySrcDstField> src_fields;
       std::vector<Domain::CopySrcDstField> dst_fields;
       unsigned precondition_idx;
-      PredEvent predicate_guard;
-      RegionTreeNode *intersect;
       ReductionOpID redop;
       bool reduction_fold;
     };

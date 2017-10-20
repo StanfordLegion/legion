@@ -15908,28 +15908,53 @@ namespace Legion {
                   src_fields.size()*doms.size()-1);
           }
           if (dom_pre.exists() && !dom_pre.has_triggered())
+          {
+            ApEvent old_precondition = precondition;
             precondition = Runtime::merge_events(precondition, dom_pre);
+            if (trace_info.tracing)
+              trace_info.tpl->record_merge_events(trace_info, precondition,
+                  old_precondition, dom_pre);
+          }
           std::set<ApEvent> done_events;
           if (predicate_guard.exists())
           {
             // Have to protect against misspeculation
             ApEvent pred_pre = Runtime::merge_events(precondition,
                                                      ApEvent(predicate_guard));
+            if (trace_info.tracing)
+              trace_info.tpl->record_merge_events(trace_info, pred_pre,
+                  precondition, ApEvent(predicate_guard));
             for (std::set<Domain>::const_iterator it = doms.begin();
                   it != doms.end(); it++)
-              done_events.insert(Runtime::ignorefaults(it->copy(
-                      src_fields, dst_fields, requests, pred_pre, 
-                      redop, reduction_fold)));
+            {
+              ApEvent done_event = Runtime::ignorefaults(it->copy(
+                      src_fields, dst_fields, requests, pred_pre,
+                      redop, reduction_fold));
+              if (trace_info.tracing)
+                trace_info.tpl->record_issue_copy(trace_info, op, done_event,
+                    *it, src_fields, dst_fields, pred_pre, redop,
+                    reduction_fold);
+              done_events.insert(done_event);
+            }
           }
           else
           {
             for (std::set<Domain>::const_iterator it = doms.begin();
                   it != doms.end(); it++)
-              done_events.insert(ApEvent(it->copy(src_fields, dst_fields, 
-                                                  requests, precondition,
-                                                  redop, reduction_fold)));
+            {
+              ApEvent done_event = ApEvent(it->copy(src_fields, dst_fields,
+                    requests, precondition, redop, reduction_fold));
+              if (trace_info.tracing)
+                trace_info.tpl->record_issue_copy(trace_info, op, done_event,
+                    *it, src_fields, dst_fields, precondition, redop,
+                    reduction_fold);
+              done_events.insert(done_event);
+            }
           }
           result = Runtime::merge_events(done_events);
+          if (trace_info.tracing)
+            trace_info.tpl->record_merge_events(trace_info, result,
+                done_events);
         }
         else
         {
@@ -15944,18 +15969,36 @@ namespace Legion {
           ApEvent dom_pre;
           const Domain &dom = row_source->get_domain(dom_pre);
           if (dom_pre.exists() && !dom_pre.has_triggered())
+          {
+            ApEvent old_precondition = precondition;
             precondition = Runtime::merge_events(precondition, dom_pre);
+            if (trace_info.tracing)
+              trace_info.tpl->record_merge_events(trace_info, precondition,
+                  old_precondition, dom_pre);
+          }
           // Have to protect against misspeculation
           if (predicate_guard.exists())
           {
             ApEvent pred_pre = Runtime::merge_events(precondition,
                                                      ApEvent(predicate_guard));
+            if (trace_info.tracing)
+              trace_info.tpl->record_merge_events(trace_info, pred_pre,
+                  precondition, ApEvent(predicate_guard));
             result = Runtime::ignorefaults(dom.copy(src_fields, dst_fields,
                                 requests, pred_pre, redop, reduction_fold));
+            if (trace_info.tracing)
+              trace_info.tpl->record_issue_copy(trace_info, op, result,
+                  dom, src_fields, dst_fields, pred_pre, redop, reduction_fold);
           }
           else
+          {
             result = ApEvent(dom.copy(src_fields, dst_fields, requests, 
                                       precondition, redop, reduction_fold));
+            if (trace_info.tracing)
+              trace_info.tpl->record_issue_copy(trace_info, op, result,
+                  dom, src_fields, dst_fields, precondition, redop,
+                  reduction_fold);
+          }
         }
       }
       else
@@ -15982,21 +16025,41 @@ namespace Legion {
           // have to protect against misspeculation
           ApEvent pred_pre = Runtime::merge_events(precondition,
                                                    ApEvent(predicate_guard));
+          if (trace_info.tracing)
+            trace_info.tpl->record_merge_events(trace_info, pred_pre,
+                precondition, ApEvent(predicate_guard));
           for (std::set<Domain>::const_iterator it = intersection_doms->begin();
                 it != intersection_doms->end(); it++)
-            done_events.insert(Runtime::ignorefaults(it->copy(
+          {
+            ApEvent done_event = Runtime::ignorefaults(it->copy(
                     src_fields, dst_fields, requests, pred_pre, 
-                    redop, reduction_fold)));
+                    redop, reduction_fold));
+            if (trace_info.tracing)
+              trace_info.tpl->record_issue_copy(trace_info, op, done_event,
+                  *it, src_fields, dst_fields, pred_pre, redop,
+                  reduction_fold);
+            done_events.insert(done_event);
+          }
         }
         else
         {
           for (std::set<Domain>::const_iterator it = intersection_doms->begin();
                 it != intersection_doms->end(); it++)
-            done_events.insert(ApEvent(it->copy(src_fields, dst_fields, 
+          {
+            ApEvent done_event = ApEvent(it->copy(src_fields, dst_fields,
                                                 requests, precondition,
-                                                redop, reduction_fold)));
+                                                redop, reduction_fold));
+            if (trace_info.tracing)
+              trace_info.tpl->record_issue_copy(trace_info, op, done_event,
+                  *it, src_fields, dst_fields, precondition, redop,
+                  reduction_fold);
+            done_events.insert(done_event);
+          }
         }
         result = Runtime::merge_events(done_events);
+        if (trace_info.tracing)
+          trace_info.tpl->record_merge_events(trace_info, result,
+              done_events);
       }
 #ifdef LEGION_SPY
       if (!result.exists())
@@ -16029,15 +16092,6 @@ namespace Legion {
         }
       }
 #endif
-      if (trace_info.tracing)
-      {
-#ifdef DEBUG_LEGION
-        assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
-#endif
-        trace_info.tpl->record_issue_copy(trace_info, result, this, op,
-            src_fields, dst_fields, precondition, predicate_guard, intersect,
-            redop, reduction_fold);
-      }
       return result;
     }
 

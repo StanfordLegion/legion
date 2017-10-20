@@ -1729,7 +1729,7 @@ namespace Legion {
               pre.insert(pre_pre.begin(), pre_pre.end());
               break;
             }
-          case ISSUE_FILL_REDUCTION:
+          case ISSUE_FILL:
             {
               generate[idx] = idx;
               IssueFill *inst = instructions[idx]->as_issue_fill();
@@ -1810,7 +1810,7 @@ namespace Legion {
           case ASSIGN_FENCE_COMPLETION:
           case GET_TERM_EVENT:
           case ISSUE_COPY:
-          case ISSUE_FILL_REDUCTION:
+          case ISSUE_FILL:
           case GET_COPY_TERM_EVENT:
           case SET_COPY_SYNC_EVENT:
           case TRIGGER_COPY_COMPLETION:
@@ -1857,7 +1857,7 @@ namespace Legion {
               if (generate[idx] == idx)
               {
 #ifdef DEBUG_LEGION
-                assert(simplified[idx].size() > 1);
+                //assert(simplified[idx].size() > 1);
 #endif
                 std::set<unsigned> rhs;
                 for (std::set<unsigned>::iterator it = simplified[idx].begin();
@@ -1965,7 +1965,7 @@ namespace Legion {
               producers.push_back(2);
               break;
             }
-          case ISSUE_FILL_REDUCTION:
+          case ISSUE_FILL:
             {
               IssueFill *inst = instructions[idx]->as_issue_fill();
               consumers.push_back(std::vector<unsigned>());
@@ -2052,17 +2052,17 @@ namespace Legion {
 #endif
         }
 
-      for (std::map<TraceLocalId, Operation*>::iterator it =
-           operations.begin(); it != operations.end(); ++it)
+      for (std::vector<TraceLocalId>::iterator it = op_list.begin();
+           it != op_list.end(); ++it)
       {
-        const TraceLocalId &key = it->first;
+        const TraceLocalId &key = *it;
 #ifdef DEBUG_LEGION
         assert(inst_map.find(key) == inst_map.end());
 #endif
         std::vector<Instruction*> &insts = inst_map[key];
 
         std::map<TraceLocalId, unsigned>::iterator finder =
-          task_entries.find(it->first);
+          task_entries.find(key);
 #ifdef DEBUG_LEGION
         assert(finder != task_entries.end());
 #endif
@@ -2133,7 +2133,7 @@ namespace Legion {
                 }
                 break;
               }
-            case ISSUE_FILL_REDUCTION:
+            case ISSUE_FILL:
               {
                 IssueFill *inst = insts[idx]->as_issue_fill();
                 if (inst->precondition_idx == fence_completion_id)
@@ -2160,7 +2160,7 @@ namespace Legion {
                   inst->precondition_idx = min_event_id;
                 break;
               }
-            case ISSUE_FILL_REDUCTION:
+            case ISSUE_FILL:
               {
                 IssueFill *inst = insts[*it]->as_issue_fill();
                 if (inst->lhs != min_event_id)
@@ -2342,6 +2342,7 @@ namespace Legion {
 #endif
       operations[key] = task;
       task_entries[key] = instructions.size();
+      op_list.push_back(key);
 
       instructions.push_back(new GetTermEvent(*this, lhs_, key));
 #ifdef DEBUG_LEGION
@@ -2511,18 +2512,21 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_issue_copy(PhysicalTraceInfo &trace_info,
-                                             ApEvent lhs,
-                                             RegionTreeNode* node,
-                                             Operation* op,
+                                             Operation* op, ApEvent &lhs,
+                                             const Domain &domain,
                          const std::vector<Domain::CopySrcDstField>& src_fields,
                          const std::vector<Domain::CopySrcDstField>& dst_fields,
                                              ApEvent precondition,
-                                             PredEvent predicate_guard,
-                                             RegionTreeNode *intersect,
                                              ReductionOpID redop,
                                              bool reduction_fold)
     //--------------------------------------------------------------------------
     {
+      if (!lhs.exists())
+      {
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        lhs = ApEvent(rename);
+      }
       AutoLock tpl_lock(template_lock);
 
       unsigned lhs_ = events.size();
@@ -2545,8 +2549,8 @@ namespace Legion {
 
       unsigned precondition_idx = pre_finder->second;
       instructions.push_back(new IssueCopy(
-            *this, lhs_, node, op_key, src_fields, dst_fields, precondition_idx,
-            predicate_guard, intersect, redop, reduction_fold));
+            *this, lhs_, domain, op_key, src_fields, dst_fields,
+            precondition_idx, redop, reduction_fold));
 #ifdef DEBUG_LEGION
       assert(instructions.size() == events.size());
 #endif
@@ -2722,6 +2726,7 @@ namespace Legion {
 #endif
       operations[key] = copy;
       task_entries[key] = instructions.size();
+      op_list.push_back(key);
 
       instructions.push_back(new GetCopyTermEvent(*this, lhs_, key));
 #ifdef DEBUG_LEGION
@@ -2787,7 +2792,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_issue_fill(PhysicalTraceInfo &trace_info,
-                                             Operation *op, ApEvent lhs,
+                                             Operation *op, ApEvent &lhs,
                                              const Domain &domain,
                              const std::vector<Domain::CopySrcDstField> &fields,
                                              const void *fill_buffer,
@@ -2795,6 +2800,12 @@ namespace Legion {
                                              ApEvent precondition)
     //--------------------------------------------------------------------------
     {
+      if (!lhs.exists())
+      {
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        lhs = ApEvent(rename);
+      }
 #ifdef DEBUG_LEGION
       assert(op->is_memoizing());
 #endif
@@ -3008,20 +3019,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IssueCopy::IssueCopy(PhysicalTemplate& tpl,
-                         unsigned l, RegionTreeNode* n,
+                         unsigned l, const Domain &dom,
                          const TraceLocalId& key,
                          const std::vector<Domain::CopySrcDstField>& s,
                          const std::vector<Domain::CopySrcDstField>& d,
-                         unsigned pi, PredEvent pg,
-                         RegionTreeNode *i, ReductionOpID ro, bool rf)
-      : Instruction(tpl), lhs(l), node(n), op_key(key), src_fields(s),
-        dst_fields(d), precondition_idx(pi), predicate_guard(pg), intersect(i),
-        redop(ro), reduction_fold(rf)
+                         unsigned pi, ReductionOpID ro, bool rf)
+      : Instruction(tpl), lhs(l), domain(dom), op_key(key), src_fields(s),
+        dst_fields(d), precondition_idx(pi), redop(ro), reduction_fold(rf)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(lhs < events.size());
-      assert(node->is_region());
       assert(operations.find(op_key) != operations.end());
       assert(src_fields.size() > 0);
       assert(dst_fields.size() > 0);
@@ -3038,11 +3046,12 @@ namespace Legion {
       assert(operations.find(op_key)->second != NULL);
 #endif
       Operation *op = operations[op_key];
+      Realm::ProfilingRequestSet requests;
+      if (op->runtime->profiler != NULL)
+        op->runtime->profiler->add_copy_request(requests, op);
       ApEvent precondition = events[precondition_idx];
-      PhysicalTraceInfo trace_info;
-      events[lhs] = node->issue_copy(op, src_fields, dst_fields, precondition,
-                                     predicate_guard, trace_info, intersect,
-                                     redop, reduction_fold);
+      events[lhs] = ApEvent(domain.copy(src_fields, dst_fields, requests,
+                                        precondition, redop, reduction_fold));
     }
 
     //--------------------------------------------------------------------------
@@ -3050,12 +3059,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       std::stringstream ss;
-      ss << "events[" << lhs << "] = ";
-      LogicalRegion handle = node->as_region_node()->handle;
-      ss << "(" << handle.get_index_space().get_id()
-         << "," << handle.get_field_space().get_id()
-         << "," << handle.get_tree_id()
-         << ")->issue_copy(operations[(" << op_key.first << ",";
+      ss << "events[" << lhs << "] = copy(operations[(" << op_key.first << ",";
       if (op_key.second.dim > 1) ss << "(";
       for (int dim = 0; dim < op_key.second.dim; ++dim)
       {
@@ -3084,23 +3088,6 @@ namespace Legion {
         if (idx != dst_fields.size() - 1) ss << ",";
       }
       ss << "}, events[" << precondition_idx << "]";
-      if (intersect != NULL)
-      {
-        if (intersect->is_region())
-        {
-          LogicalRegion handle = intersect->as_region_node()->handle;
-          ss << ", lr(" << handle.get_index_space().get_id()
-             << "," << handle.get_field_space().get_id()
-             << "," << handle.get_tree_id() << ")";
-        }
-        else
-        {
-          LogicalPartition handle = intersect->as_partition_node()->handle;
-          ss << ", lp(" << handle.get_index_partition().get_id()
-             << "," << handle.get_field_space().get_id()
-             << "," << handle.get_tree_id() << ")";
-        }
-      }
 
       if (redop != 0) ss << ", " << redop;
       ss << ")";
@@ -3120,9 +3107,8 @@ namespace Legion {
       assert(lfinder != rewrite.end());
       assert(pfinder != rewrite.end());
 #endif
-      return new IssueCopy(tpl, lfinder->second, node, op_key, src_fields,
-        dst_fields, pfinder->second, predicate_guard, intersect, redop,
-        reduction_fold);
+      return new IssueCopy(tpl, lfinder->second, domain, op_key, src_fields,
+        dst_fields, pfinder->second, redop, reduction_fold);
     }
 
     /////////////////////////////////////////////////////////////
