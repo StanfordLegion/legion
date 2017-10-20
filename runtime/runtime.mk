@@ -97,6 +97,7 @@ CUDA=${CUDATOOLKIT_HOME}
 CONDUIT=gemini
 GPU_ARCH=k20
 LEGION_LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
+LEGION_LD_FLAGS += ${CRAY_UDREG_POST_LINK_OPTS}
 LEGION_LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
 endif
 ifeq ($(findstring daint,$(shell uname -n)),daint)
@@ -110,6 +111,7 @@ CUDA=${CUDATOOLKIT_HOME}
 CONDUIT=aries
 GPU_ARCH=k20
 LEGION_LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
+LEGION_LD_FLAGS += ${CRAY_UDREG_POST_LINK_OPTS}
 LEGION_LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
 endif
 ifeq ($(findstring excalibur,$(shell uname -n)),excalibur)
@@ -120,6 +122,7 @@ LAPACK_LIBS=
 CC_FLAGS += -DGASNETI_BUG1389_WORKAROUND=1
 CONDUIT=aries
 LEGION_LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
+LEGION_LD_FLAGS += ${CRAY_UDREG_POST_LINK_OPTS}
 LEGION_LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
 endif
 ifeq ($(findstring cori,$(shell uname -n)),cori)
@@ -130,6 +133,7 @@ LAPACK_LIBS=
 CC_FLAGS += -DGASNETI_BUG1389_WORKAROUND=1
 CONDUIT=aries
 LEGION_LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
+LEGION_LD_FLAGS += ${CRAY_UDREG_POST_LINK_OPTS}
 LEGION_LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
 endif
 
@@ -360,14 +364,14 @@ ifeq ($(strip $(USE_GASNET)),1)
   ifeq ($(strip $(CONDUIT)),gemini)
     INC_FLAGS	+= -I$(GASNET)/include/gemini-conduit
     CC_FLAGS	+= -DGASNET_CONDUIT_GEMINI
-    LEGION_LD_FLAGS	+= -lgasnet-gemini-par -lugni -lpmi -lhugetlbfs
+    LEGION_LD_FLAGS	+= -lgasnet-gemini-par -lugni -ludreg -lpmi -lhugetlbfs
     # GASNet needs MPI for interop support
     USE_MPI	= 1
   endif
   ifeq ($(strip $(CONDUIT)),aries)
     INC_FLAGS   += -I$(GASNET)/include/aries-conduit
     CC_FLAGS    += -DGASNET_CONDUIT_ARIES
-    LEGION_LD_FLAGS    += -lgasnet-aries-par -lugni -lpmi -lhugetlbfs
+    LEGION_LD_FLAGS    += -lgasnet-aries-par -lugni -ludreg -lpmi -lhugetlbfs
     # GASNet needs MPI for interop support
     USE_MPI	= 1
   endif
