@@ -194,8 +194,8 @@ namespace Realm {
       }
 
       // 4) dense rhs containing lhs' bounds -> rhs
-      if(r.dense() && l.bounds.contains(r.bounds)) {
-	results[i] = l;
+      if(r.dense() && r.bounds.contains(l.bounds)) {
+	results[i] = r;
 	continue;
       }
 
@@ -409,6 +409,8 @@ namespace Realm {
 	   result.bounds.contains(subspaces[i].bounds))
 	  continue;
 
+	// TODO: subspace match ought to be sufficient here - also handle
+	//  merge-into-rectangle case?
 	// rhs dense and contains lhs - take rhs
 	if(subspaces[i].dense() && subspaces[i].bounds.contains(result.bounds)) {
 	  result = subspaces[i];
