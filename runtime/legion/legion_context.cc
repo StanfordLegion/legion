@@ -34,7 +34,8 @@ namespace Legion {
                              const std::vector<RegionRequirement> &reqs)
       : runtime(rt), owner_task(owner), regions(reqs),
         executing_processor(Processor::NO_PROC), total_tunable_count(0), 
-        overhead_tracker(NULL), task_executed(false),has_inline_accessor(false),
+        overhead_tracker(NULL), task_executed(false),
+        has_inline_accessor(false), mutable_priority(false),
         children_complete_invoked(false), children_commit_invoked(false)
     //--------------------------------------------------------------------------
     {
@@ -1932,6 +1933,7 @@ namespace Legion {
       context_configuration.min_tasks_to_schedule = 
         Runtime::initial_tasks_to_schedule;
       context_configuration.min_frames_to_schedule = 0;
+      context_configuration.mutable_priority = false;
 #ifdef DEBUG_LEGION
       assert(tree_context.exists());
       runtime->forest->check_context_state(tree_context);
@@ -5415,7 +5417,27 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::configure_context(MapperManager *mapper)
+    TaskPriority InnerContext::get_current_priority(void) const
+    //--------------------------------------------------------------------------
+    {
+      return current_priority;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::set_current_priority(TaskPriority priority)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(mutable_priority);
+      assert(realm_done_event.exists());
+#endif
+      // This can be racy but that is the mappers problem
+      realm_done_event.set_operation_priority(priority);
+      current_priority = priority;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::configure_context(MapperManager *mapper, TaskPriority p)
     //--------------------------------------------------------------------------
     {
       mapper->invoke_configure_context(owner_task, &context_configuration);
@@ -5444,6 +5466,10 @@ namespace Legion {
       if (context_configuration.min_frames_to_schedule > 0)
         context_configuration.min_tasks_to_schedule = 0;
       // otherwise we know min_frames_to_schedule is zero
+
+      // See if we permit priority mutations from child operation mapppers
+      mutable_priority = context_configuration.mutable_priority; 
+      current_priority = p;
     }
 
     //--------------------------------------------------------------------------
@@ -5861,6 +5887,17 @@ namespace Legion {
         return true;
       }
       return false;
+    }
+
+    //--------------------------------------------------------------------------
+    const std::vector<PhysicalRegion>& InnerContext::begin_task(void)
+    //--------------------------------------------------------------------------
+    {
+      // If we have mutable priority we need to save our realm done event
+      if (mutable_priority)
+        realm_done_event = ApEvent(Processor::get_current_finish_event());
+      // Now do the base begin task routine
+      return TaskContext::begin_task();
     }
 
     //--------------------------------------------------------------------------
@@ -8380,6 +8417,21 @@ namespace Legion {
       assert(false);
     }
 
+    //--------------------------------------------------------------------------
+    TaskPriority LeafContext::get_current_priority(void) const
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return 0;
+    }
+
+    //--------------------------------------------------------------------------
+    void LeafContext::set_current_priority(TaskPriority priority)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+    }
+
     /////////////////////////////////////////////////////////////
     // Inline Context 
     /////////////////////////////////////////////////////////////
@@ -9416,6 +9468,20 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       enclosing->find_collective_contributions(dc, contributions);
+    }
+
+    //--------------------------------------------------------------------------
+    TaskPriority InlineContext::get_current_priority(void) const
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->get_current_priority();
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::set_current_priority(TaskPriority priority)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->set_current_priority(priority);
     }
 
   };

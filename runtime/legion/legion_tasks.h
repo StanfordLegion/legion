@@ -175,7 +175,7 @@ namespace Legion {
     public:
       void set_current_proc(Processor current);
       inline void set_locally_mapped(bool local) { map_locally = local; }
-      inline void set_target_proc(Processor next) { target_proc = next; }
+      inline void set_target_proc(Processor next) { target_proc = next; } 
     protected:
       void activate_task(void);
       void deactivate_task(void); 

@@ -990,11 +990,30 @@ namespace Legion {
       options.inline_task = false;
       options.stealable = false;
       options.map_locally = false;
+      const TaskPriority parent_priority = parent_ctx->is_priority_mutable() ?
+        parent_ctx->get_current_priority() : 0;
+      options.parent_priority = parent_priority;
       mapper->invoke_select_task_options(this, &options);
       options_selected = true;
       target_proc = options.initial_proc;
       stealable = options.stealable;
       map_locally = options.map_locally;
+      if (parent_priority != options.parent_priority)
+      {
+        // Request for priority change see if it is legal or not
+        if (parent_ctx->is_priority_mutable())
+          parent_ctx->set_current_priority(options.parent_priority);
+        else
+          REPORT_LEGION_WARNING(LEGION_WARNING_INVALID_PRIORITY_CHANGE,
+                                "Mapper %s requested change of priority "
+                                "for parent task %s (UID %lld) when launching "
+                                "child task %s (UID %lld), but the parent "
+                                "context does not support parent task priority "
+                                "mutation", mapper->get_mapper_name(),
+                                parent_ctx->get_task_name(),
+                                parent_ctx->get_unique_id(), 
+                                get_task_name(), get_unique_id())
+      }
       return options.inline_task;
     }
 
@@ -3717,7 +3736,7 @@ namespace Legion {
               virtual_mapped, unique_op_id);
           if (mapper == NULL)
             mapper = runtime->find_mapper(current_proc, map_id);
-          inner_ctx->configure_context(mapper);
+          inner_ctx->configure_context(mapper, task_priority);
           execution_context = inner_ctx;
         }
         else
