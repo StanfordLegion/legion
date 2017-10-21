@@ -64,6 +64,11 @@ static const void *ignore_gasnet_warning2 __attribute__((unused)) = (void *)_gas
 #include <math.h>
 #endif
 
+#ifdef DETAILED_MESSAGE_TIMING
+#include <sys/stat.h>
+#include <fcntl.h>
+#endif
+
 #include <realm/threads.h>
 #include "realm/timers.h"
 #include "realm/logging.h"
@@ -896,13 +901,22 @@ struct CurrentTime {
 public:
   CurrentTime(void)
   {
+#define USE_REALM_TIMER
+#ifdef USE_REALM_TIMER
+    now = Realm::Clock::current_time_in_nanoseconds();
+#else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     sec = ts.tv_sec;
     nsec = ts.tv_nsec;
+#endif
   }
 
+#ifdef USE_REALM_TIMER
+  long long now;
+#else
   unsigned sec, nsec;
+#endif
 };
 
 struct MessageTimingData {
@@ -910,7 +924,9 @@ public:
   unsigned char msg_id;
   char write_lmb;
   unsigned short target;
-  unsigned msg_size, start_sec, start_nsec, dur_nsec;
+  unsigned msg_size;
+  long long start;
+  unsigned dur_nsec;
   unsigned queue_depth;
 };
 
@@ -956,9 +972,14 @@ public:
       mtd.write_lmb = write_lmb;
       mtd.target = peer;
       mtd.msg_size = msg_size;
-      mtd.start_sec = t_start.sec;
-      mtd.start_nsec = t_start.nsec;
+#ifdef USE_REALM_TIMER
+      mtd.start = t_start.now;
+      unsigned long long delta = t_end.now - t_start.now;
+#else
+      long long now = (1000000000LL * t_start.sec) + t_start.nsec;
+      mtd.start = now;
       unsigned long long delta = (t_end.sec - t_start.sec) * 1000000000ULL + t_end.nsec - t_start.nsec;
+#endif
       mtd.dur_nsec = (delta > (unsigned)-1) ? ((unsigned)-1) : delta;
       mtd.queue_depth = queue_depth;
     }
