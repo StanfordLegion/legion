@@ -1433,7 +1433,20 @@ namespace Legion {
         events.clear();
         events.resize(num_events);
         events[fence_completion_id] = fence_completion;
-        events.push_back(ApEvent::NO_AP_EVENT);
+        pending_events.clear();
+        pending_events.resize(num_events);
+        for (std::map<TraceLocalId, unsigned>::iterator it =
+             task_entries.begin(); it !=
+             task_entries.end(); ++it)
+        {
+#ifdef DEBUG_LEGION
+          assert(instructions[it->second]->get_kind() == GET_TERM_EVENT ||
+                 instructions[it->second]->get_kind() == GET_COPY_TERM_EVENT);
+#endif
+          ApUserEvent e = ApUserEvent(Realm::UserEvent::create_user_event());
+          events[it->second] = e;
+          pending_events[it->second] = e;
+        }
 #ifdef DEBUG_LEGION
         for (std::map<TraceLocalId, Operation*>::iterator it =
              operations.begin(); it != operations.end(); ++it)
@@ -1889,6 +1902,8 @@ namespace Legion {
       }
 
       instructions.swap(new_instructions);
+      no_event_id = instructions.size();
+      events.resize(no_event_id + 1);
       for (unsigned idx = 0; idx < instructions.size(); ++idx)
         if (suppressed[idx])
         {
@@ -1899,7 +1914,7 @@ namespace Legion {
           std::map<TraceLocalId, unsigned>::iterator finder =
             num_ready_events.find(inst->op_key);
           if (--finder->second > 0)
-            inst->ready_event_idx = instructions.size();
+            inst->ready_event_idx = no_event_id;
         }
 
       for (std::vector<Instruction*>::iterator it = new_instructions.begin();
@@ -2871,7 +2886,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Instruction::Instruction(PhysicalTemplate& tpl)
-      : operations(tpl.operations), events(tpl.events)
+      : operations(tpl.operations), events(tpl.events),
+        pending_events(tpl.pending_events)
     //--------------------------------------------------------------------------
     {
     }
@@ -2899,9 +2915,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(operations.find(rhs) != operations.end());
       assert(operations.find(rhs)->second != NULL);
+      assert(pending_events[lhs] == events[lhs]);
 #endif
-      events[lhs] =
+      ApEvent completion_event =
         dynamic_cast<SingleTask*>(operations[rhs])->get_task_completion();
+      Runtime::trigger_event(pending_events[lhs], completion_event);
     }
 
     //--------------------------------------------------------------------------
@@ -2962,6 +2980,7 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(*it < events.size());
+        assert(events[*it].exists());
 #endif
         to_merge.insert(events[*it]);
       }
@@ -3421,8 +3440,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(operations.find(rhs) != operations.end());
       assert(operations.find(rhs)->second != NULL);
+      assert(pending_events[lhs] == events[lhs]);
 #endif
-      events[lhs] = operations[rhs]->get_completion_event();
+      Runtime::trigger_event(pending_events[lhs],
+          operations[rhs]->get_completion_event());
     }
 
     //--------------------------------------------------------------------------

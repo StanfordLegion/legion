@@ -509,6 +509,7 @@ namespace Legion {
       bool replayable;
       Reservation template_lock;
       unsigned fence_completion_id;
+      unsigned no_event_id;
     private:
       std::map<ApEvent, unsigned> event_map;
       std::vector<Instruction*> instructions;
@@ -518,6 +519,7 @@ namespace Legion {
       ApEvent fence_completion;
       std::map<TraceLocalId, Operation*> operations;
       std::vector<ApEvent> events;
+      std::vector<ApUserEvent> pending_events;
       std::vector<TraceLocalId> op_list;
       CachedMappings                                  cached_mappings;
       LegionMap<InstanceView*, FieldMask>::aligned    previous_valid_views;
@@ -571,7 +573,8 @@ namespace Legion {
                                const std::map<unsigned, unsigned> &rewrite) = 0;
     protected:
       std::map<TraceLocalId, Operation*> &operations;
-      std::vector<ApEvent>& events;
+      std::vector<ApEvent> &events;
+      std::vector<ApUserEvent> &pending_events;
     };
 
     /**
