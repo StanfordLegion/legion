@@ -53,8 +53,8 @@ namespace Realm {
   class RegionInstanceImpl;
   class Module;
 
-  class MemPairCopierFactory;
-  typedef MemPairCopierFactory DMAChannel;
+  class Channel; // from transfer/channel.h
+  typedef Channel DMAChannel;
 
     template <typename _ET, size_t _INNER_BITS, size_t _LEAF_BITS>
     class DynamicTableAllocator {
@@ -118,6 +118,7 @@ namespace Realm {
       std::vector<MemoryImpl *> memories;
       std::vector<MemoryImpl *> ib_memories;
       std::vector<ProcessorImpl *> processors;
+      std::vector<DMAChannel *> dma_channels;
 
       DynamicTable<EventTableAllocator> events;
       DynamicTable<BarrierTableAllocator> barriers;
@@ -289,8 +290,6 @@ namespace Realm {
       Processor next_local_processor_id(void);
       CoreReservationSet& core_reservation_set(void);
 
-      const std::vector<DMAChannel *>& get_dma_channels(void) const;
-
       const std::vector<CodeTranslator *>& get_code_translators(void) const;
 
     protected:
@@ -298,7 +297,6 @@ namespace Realm {
 
       ModuleRegistrar module_registrar;
       std::vector<Module *> modules;
-      std::vector<DMAChannel *> dma_channels;
       std::vector<CodeTranslator *> code_translators;
     };
 

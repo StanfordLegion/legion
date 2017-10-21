@@ -153,8 +153,8 @@ namespace Realm {
     {
       Module::create_dma_channels(runtime);
 
-      runtime->add_dma_channel(new HDF5WriteChannel(hdf5mem));
-      runtime->add_dma_channel(new HDF5ReadChannel(hdf5mem));
+      //runtime->add_dma_channel(new HDF5WriteChannel(hdf5mem));
+      //runtime->add_dma_channel(new HDF5ReadChannel(hdf5mem));
     }
 
     // create any code translators provided by the module (default == do nothing)

@@ -1984,6 +1984,177 @@ namespace Realm {
       }
 #endif
 
+      std::ostream& operator<<(std::ostream& os, const Channel::SupportedPath& p)
+      {
+	switch(p.src_type) {
+	case Channel::SupportedPath::SPECIFIC_MEMORY:
+	  { os << "src=" << p.src_mem; break; }
+	case Channel::SupportedPath::LOCAL_KIND:
+	  { os << "src=" << p.src_kind << "(lcl)"; break; }
+	case Channel::SupportedPath::GLOBAL_KIND:
+	  { os << "src=" << p.src_kind << "(gbl)"; break; }
+	default:
+	  assert(0);
+	}
+	switch(p.dst_type) {
+	case Channel::SupportedPath::SPECIFIC_MEMORY:
+	  { os << " dst=" << p.dst_mem; break; }
+	case Channel::SupportedPath::LOCAL_KIND:
+	  { os << " dst=" << p.dst_kind << "(lcl)"; break; }
+	case Channel::SupportedPath::GLOBAL_KIND:
+	  { os << " dst=" << p.dst_kind << "(gbl)"; break; }
+	default:
+	  assert(0);
+	}
+	os << " bw=" << p.bandwidth << " lat=" << p.latency;
+	if(p.serdez_allowed)
+	  os << " serdez";
+	if(p.redops_allowed)
+	  os << " redop";
+	return os;
+      }
+	  
+      void Channel::print(std::ostream& os) const
+      {
+	os << "channel{ node=" << node << " kind=" << kind << " paths=[";
+	if(!paths.empty()) {
+	  for(std::vector<SupportedPath>::const_iterator it = paths.begin();
+	      it != paths.end();
+	      ++it)
+	    os << "\n    " << *it;
+	  os << "\n";
+	}
+	os << "] }";
+      }
+
+      const std::vector<Channel::SupportedPath>& Channel::get_paths(void) const
+      {
+	return paths;
+      }
+	  
+      bool Channel::supports_path(Memory src_mem, Memory dst_mem,
+				  CustomSerdezID src_serdez_id,
+				  CustomSerdezID dst_serdez_id,
+				  ReductionOpID redop_id,
+				  unsigned *bw_ret /*= 0*/,
+				  unsigned *lat_ret /*= 0*/)
+      {
+	for(std::vector<SupportedPath>::const_iterator it = paths.begin();
+	    it != paths.end();
+	    ++it) {
+	  if(!it->serdez_allowed && ((src_serdez_id != 0) ||
+				     (dst_serdez_id != 0)))
+	    continue;
+	  if(!it->redops_allowed && (redop_id != 0))
+	    continue;
+
+	  if(it->src_type == SupportedPath::SPECIFIC_MEMORY) {
+	    if(src_mem != it->src_mem)
+	      continue;
+	  } else {
+	    if(src_mem.kind() != it->src_kind)
+	      continue;
+	    if((it->src_type == SupportedPath::LOCAL_KIND) &&
+	       (ID(src_mem).memory.owner_node != node))
+	      continue;
+	  }
+
+	  if(it->dst_type == SupportedPath::SPECIFIC_MEMORY) {
+	    if(dst_mem != it->dst_mem)
+	      continue;
+	  } else {
+	    if(dst_mem.kind() != it->dst_kind)
+	      continue;
+	    if((it->dst_type == SupportedPath::LOCAL_KIND) &&
+	       (ID(dst_mem).memory.owner_node != node))
+	      continue;
+	  }
+	  
+	  // match
+	  if(bw_ret) *bw_ret = it->bandwidth;
+	  if(lat_ret) *lat_ret = it->latency;
+	  return true;
+	}
+
+	return false;
+      }
+
+      void Channel::add_path(Memory src_mem, Memory dst_mem,
+			     unsigned bandwidth, unsigned latency,
+			     bool redops_allowed, bool serdez_allowed)
+      {
+	size_t idx = paths.size();
+	paths.resize(idx + 1);
+	SupportedPath &p = paths[idx];
+	p.src_type = SupportedPath::SPECIFIC_MEMORY;
+	p.src_mem = src_mem;
+	p.dst_type = SupportedPath::SPECIFIC_MEMORY;
+	p.dst_mem = dst_mem;
+	p.bandwidth = bandwidth;
+	p.latency = latency;
+	p.redops_allowed = redops_allowed;
+	p.serdez_allowed = serdez_allowed;
+      }
+
+      void Channel::add_path(Memory src_mem, Memory::Kind dst_kind, bool dst_global,
+		    unsigned bandwidth, unsigned latency,
+		    bool redops_allowed, bool serdez_allowed)
+      {
+	size_t idx = paths.size();
+	paths.resize(idx + 1);
+	SupportedPath &p = paths[idx];
+	p.src_type = SupportedPath::SPECIFIC_MEMORY;
+	p.src_mem = src_mem;
+	p.dst_type = (dst_global ? SupportedPath::GLOBAL_KIND :
+		                   SupportedPath::LOCAL_KIND);
+	p.dst_kind = dst_kind;
+	p.bandwidth = bandwidth;
+	p.latency = latency;
+	p.redops_allowed = redops_allowed;
+	p.serdez_allowed = serdez_allowed;
+      }
+
+      void Channel::add_path(Memory::Kind src_kind, bool src_global,
+		    Memory::Kind dst_kind, bool dst_global,
+		    unsigned bandwidth, unsigned latency,
+		    bool redops_allowed, bool serdez_allowed)
+      {
+	size_t idx = paths.size();
+	paths.resize(idx + 1);
+	SupportedPath &p = paths[idx];
+	p.src_type = (src_global ? SupportedPath::GLOBAL_KIND :
+		                   SupportedPath::LOCAL_KIND);
+	p.src_kind = src_kind;
+	p.dst_type = (dst_global ? SupportedPath::GLOBAL_KIND :
+		                   SupportedPath::LOCAL_KIND);
+	p.dst_kind = dst_kind;
+	p.bandwidth = bandwidth;
+	p.latency = latency;
+	p.redops_allowed = redops_allowed;
+	p.serdez_allowed = serdez_allowed;
+      }
+
+      RemoteChannel::RemoteChannel(void)
+	: Channel(XferDes::XFER_NONE)
+      {}
+
+      long RemoteChannel::submit(Request** requests, long nr)
+      {
+	assert(0);
+	return 0;
+      }
+
+      void RemoteChannel::pull()
+      {
+	assert(0);
+      }
+
+      long RemoteChannel::available()
+      {
+	assert(0);
+	return 0;
+      }
+
       /*static*/ void* MemcpyThread::start(void* arg)
       {
         MemcpyThread* worker = (MemcpyThread*) arg;
@@ -2026,9 +2197,14 @@ namespace Realm {
         channel->stop();
       }
 
+      static const Memory::Kind cpu_mem_kinds[] = { Memory::SYSTEM_MEM,
+						    Memory::REGDMA_MEM,
+						    Memory::Z_COPY_MEM };
+      static const size_t num_cpu_mem_kinds = sizeof(cpu_mem_kinds) / sizeof(cpu_mem_kinds[0]);
+
       MemcpyChannel::MemcpyChannel(long max_nr)
+	: Channel(XferDes::XFER_MEM_CPY)
       {
-        kind = XferDes::XFER_MEM_CPY;
         capacity = max_nr;
         is_stopped = false;
         sleep_threads = false;
@@ -2036,6 +2212,14 @@ namespace Realm {
         pthread_mutex_init(&finished_lock, NULL);
         pthread_cond_init(&pending_cond, NULL);
         //cbs = (MemcpyRequest**) calloc(max_nr, sizeof(MemcpyRequest*));
+	unsigned bw = 0; // TODO
+	unsigned latency = 0;
+	// any combination of SYSTEM/REGDMA/Z_COPY_MEM
+	for(size_t i = 0; i < num_cpu_mem_kinds; i++)
+	  for(size_t j = 0; j < num_cpu_mem_kinds; j++)
+	    add_path(cpu_mem_kinds[i], false,
+		     cpu_mem_kinds[j], false,
+		     bw, latency, true, true);
       }
 
       MemcpyChannel::~MemcpyChannel()
@@ -2044,6 +2228,25 @@ namespace Realm {
         pthread_mutex_destroy(&finished_lock);
         pthread_cond_destroy(&pending_cond);
         //free(cbs);
+      }
+
+      bool MemcpyChannel::supports_path(Memory src_mem, Memory dst_mem,
+					CustomSerdezID src_serdez_id,
+					CustomSerdezID dst_serdez_id,
+					ReductionOpID redop_id,
+					unsigned *bw_ret /*= 0*/,
+					unsigned *lat_ret /*= 0*/)
+      {
+	// simultaneous serialization/deserialization not
+	//  allowed anywhere right now
+	if((src_serdez_id != 0) && (dst_serdez_id != 0))
+	  return false;
+
+	// fall through to normal checks
+	return Channel::supports_path(src_mem, dst_mem,
+				      src_serdez_id, dst_serdez_id,
+				      redop_id,
+				      bw_ret, lat_ret);
       }
 
       void MemcpyChannel::stop()
@@ -2563,9 +2766,22 @@ namespace Realm {
       }
 
       GASNetChannel::GASNetChannel(long max_nr, XferDes::XferKind _kind)
+	: Channel(_kind)
       {
-        kind = _kind;
         capacity = max_nr;
+
+	unsigned bw = 0; // TODO
+	unsigned latency = 0;
+	// any combination of SYSTEM/REGDMA/Z_COPY_MEM
+	for(size_t i = 0; i < num_cpu_mem_kinds; i++)
+	  if(_kind == XferDes::XFER_GASNET_READ)
+	    add_path(Memory::GLOBAL_MEM, true,
+		     cpu_mem_kinds[i], false,
+		     bw, latency, false, false);
+	  else
+	    add_path(cpu_mem_kinds[i], false,
+		     Memory::GLOBAL_MEM, true,
+		     bw, latency, false, false);
       }
 
       GASNetChannel::~GASNetChannel()
@@ -2611,8 +2827,17 @@ namespace Realm {
       }
 
       RemoteWriteChannel::RemoteWriteChannel(long max_nr)
+	: Channel(XferDes::XFER_REMOTE_WRITE)
       {
         capacity = max_nr;
+
+	unsigned bw = 0; // TODO
+	unsigned latency = 0;
+	// any combination of SYSTEM/REGDMA/Z_COPY_MEM
+	for(size_t i = 0; i < num_cpu_mem_kinds; i++)
+	  add_path(cpu_mem_kinds[i], false,
+		   Memory::REGDMA_MEM, true,
+		   bw, latency, false, false);
       }
 
       RemoteWriteChannel::~RemoteWriteChannel() {}
@@ -2678,10 +2903,62 @@ namespace Realm {
    
 #ifdef USE_CUDA
       GPUChannel::GPUChannel(Cuda::GPU* _src_gpu, long max_nr, XferDes::XferKind _kind)
+	: Channel(_kind)
       {
         src_gpu = _src_gpu;
-        kind = _kind;
         capacity = max_nr;
+
+	Memory fbm = src_gpu->fbmem->me;
+
+	switch(_kind) {
+	case XferDes::XFER_GPU_TO_FB:
+	  {
+	    unsigned bw = 0; // TODO
+	    unsigned latency = 0;
+	    for(std::set<Memory>::const_iterator it = src_gpu->pinned_sysmems.begin();
+		it != src_gpu->pinned_sysmems.end();
+		++it)
+	      add_path(*it, fbm, bw, latency, false, false);
+
+	    break;
+	  }
+
+	case XferDes::XFER_GPU_FROM_FB:
+	  {
+	    unsigned bw = 0; // TODO
+	    unsigned latency = 0;
+	    for(std::set<Memory>::const_iterator it = src_gpu->pinned_sysmems.begin();
+		it != src_gpu->pinned_sysmems.end();
+		++it)
+	      add_path(fbm, *it, bw, latency, false, false);
+
+	    break;
+	  }
+
+	case XferDes::XFER_GPU_IN_FB:
+	  {
+	    // self-path
+	    unsigned bw = 0; // TODO
+	    unsigned latency = 0;
+	    add_path(fbm, fbm, bw, latency, false, false);
+	  }
+
+	case XferDes::XFER_GPU_PEER_FB:
+	  {
+	    // just do paths to peers - they'll do the other side
+	    unsigned bw = 0; // TODO
+	    unsigned latency = 0;
+	    for(std::set<Memory>::const_iterator it = src_gpu->peer_fbs.begin();
+		it != src_gpu->peer_fbs.end();
+		++it)
+	      add_path(fbm, *it, bw, latency, false, false);
+
+	    break;
+	  }
+
+	default:
+	  assert(0);
+	}
       }
 
       GPUChannel::~GPUChannel()
@@ -2789,9 +3066,22 @@ namespace Realm {
 
 #ifdef USE_HDF
       HDFChannel::HDFChannel(long max_nr, XferDes::XferKind _kind)
+	: Channel(_kind)
       {
-        kind = _kind;
         capacity = max_nr;
+
+	unsigned bw = 0; // TODO
+	unsigned latency = 0;
+	// any combination of SYSTEM/REGDMA/Z_COPY_MEM
+	for(size_t i = 0; i < num_cpu_mem_kinds; i++)
+	  if(_kind == XferDes::XFER_HDF_READ)
+	    add_path(Memory::HDF_MEM, false,
+		     cpu_mem_kinds[i], false,
+		     bw, latency, false, false);
+	  else
+	    add_path(cpu_mem_kinds[i], false,
+		     Memory::HDF_MEM, false,
+		     bw, latency, false, false);
       }
 
       HDFChannel::~HDFChannel() {}
@@ -3158,6 +3448,59 @@ namespace Realm {
         }
 #endif
       }
+
+      MemcpyChannel* ChannelManager::create_memcpy_channel(long max_nr)
+      {
+        assert(memcpy_channel == NULL);
+        memcpy_channel = new MemcpyChannel(max_nr);
+        return memcpy_channel;
+      }
+      GASNetChannel* ChannelManager::create_gasnet_read_channel(long max_nr) {
+        assert(gasnet_read_channel == NULL);
+        gasnet_read_channel = new GASNetChannel(max_nr, XferDes::XFER_GASNET_READ);
+        return gasnet_read_channel;
+      }
+      GASNetChannel* ChannelManager::create_gasnet_write_channel(long max_nr) {
+        assert(gasnet_write_channel == NULL);
+        gasnet_write_channel = new GASNetChannel(max_nr, XferDes::XFER_GASNET_WRITE);
+        return gasnet_write_channel;
+      }
+      RemoteWriteChannel* ChannelManager::create_remote_write_channel(long max_nr) {
+        assert(remote_write_channel == NULL);
+        remote_write_channel = new RemoteWriteChannel(max_nr);
+        return remote_write_channel;
+      }
+#ifdef USE_CUDA
+      GPUChannel* ChannelManager::create_gpu_to_fb_channel(long max_nr, Cuda::GPU* src_gpu) {
+        gpu_to_fb_channels[src_gpu] = new GPUChannel(src_gpu, max_nr, XferDes::XFER_GPU_TO_FB);
+        return gpu_to_fb_channels[src_gpu];
+      }
+      GPUChannel* ChannelManager::create_gpu_from_fb_channel(long max_nr, Cuda::GPU* src_gpu) {
+        gpu_from_fb_channels[src_gpu] = new GPUChannel(src_gpu, max_nr, XferDes::XFER_GPU_FROM_FB);
+        return gpu_from_fb_channels[src_gpu];
+      }
+      GPUChannel* ChannelManager::create_gpu_in_fb_channel(long max_nr, Cuda::GPU* src_gpu) {
+        gpu_in_fb_channels[src_gpu] = new GPUChannel(src_gpu, max_nr, XferDes::XFER_GPU_IN_FB);
+        return gpu_in_fb_channels[src_gpu];
+      }
+      GPUChannel* ChannelManager::create_gpu_peer_fb_channel(long max_nr, Cuda::GPU* src_gpu) {
+        gpu_peer_fb_channels[src_gpu] = new GPUChannel(src_gpu, max_nr, XferDes::XFER_GPU_PEER_FB);
+        return gpu_peer_fb_channels[src_gpu];
+      }
+#endif
+#ifdef USE_HDF
+      HDFChannel* ChannelManager::create_hdf_read_channel(long max_nr) {
+        assert(hdf_read_channel == NULL);
+        hdf_read_channel = new HDFChannel(max_nr, XferDes::XFER_HDF_READ);
+        return hdf_read_channel;
+      }
+      HDFChannel* ChannelManager::create_hdf_write_channel(long max_nr) {
+        assert(hdf_write_channel == NULL);
+        hdf_write_channel = new HDFChannel(max_nr, XferDes::XFER_HDF_WRITE);
+        return hdf_write_channel;
+      }
+#endif
+
 #ifdef USE_CUDA
       void register_gpu_in_dma_systems(Cuda::GPU* gpu)
       {
@@ -3240,6 +3583,14 @@ namespace Realm {
           channels.push_back(channel_manager->create_gpu_peer_fb_channel(max_nr, *it));
         }
 #endif
+
+	// tell the runtime about all the channels we created
+	RuntimeImpl *r = get_runtime();
+	for(std::vector<Channel *>::const_iterator it = channels.begin();
+	    it != channels.end();
+	    ++it)
+	  r->add_dma_channel(*it);
+
         dma_threads[idx++] = new DMAThread(max_nr, xferDes_queue, channels);
         num_threads = idx;
         for (int i = 0; i < num_threads; i++) {

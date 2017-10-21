@@ -1308,12 +1308,6 @@ namespace Realm {
     };
 
 
-    void create_builtin_dma_channels(RuntimeImpl *r)
-    {
-      r->add_dma_channel(new MemcpyMemPairCopierFactory);
-    }
-
-
     inline bool is_cpu_mem(Memory::Kind kind)
     {
       return (kind == Memory::REGDMA_MEM || kind == Memory::LEVEL3_CACHE || kind == Memory::LEVEL2_CACHE
@@ -1321,7 +1315,7 @@ namespace Realm {
               || kind == Memory::Z_COPY_MEM);
     }
 
-    XferDes::XferKind get_xfer_des(Memory src_mem, Memory dst_mem,
+    XferDes::XferKind old_get_xfer_des(Memory src_mem, Memory dst_mem,
 				   CustomSerdezID src_serdez_id,
 				   CustomSerdezID dst_serdez_id)
     {
@@ -1460,12 +1454,53 @@ namespace Realm {
       return XferDes::XFER_NONE;
     }
 
+    XferDes::XferKind get_xfer_des(Memory src_mem, Memory dst_mem,
+				   CustomSerdezID src_serdez_id,
+				   CustomSerdezID dst_serdez_id,
+				   ReductionOpID redop_id)
+    {
+      XferDes::XferKind kind = XferDes::XFER_NONE;
+
+      // look at the dma channels available on the source node
+      NodeID src_node = ID(src_mem).memory.owner_node;
+      const Node& n = get_runtime()->nodes[src_node];
+      for(std::vector<DMAChannel *>::const_iterator it = n.dma_channels.begin();
+	  it != n.dma_channels.end();
+	  ++it) {
+	unsigned bw = 0;
+	unsigned latency = 0;
+	if((*it)->supports_path(src_mem, dst_mem,
+				src_serdez_id, dst_serdez_id,
+				redop_id,
+				&bw, &latency)) {
+	  kind = (*it)->kind;
+	  break;
+	}
+      }
+
+      // check against old version
+      // exceptions:
+      //  1) old code didn't allow nodes other than 0 to
+      //       directly access GLOBAL_MEM
+      if((src_node == my_node_id) &&
+	 !((my_node_id != 0) && ((src_mem.kind() == Memory::GLOBAL_MEM) ||
+				 (dst_mem.kind() == Memory::GLOBAL_MEM)))) {
+	XferDes::XferKind old_kind = old_get_xfer_des(src_mem, dst_mem,
+						      src_serdez_id, dst_serdez_id);
+	if(old_kind != kind) {
+	  log_dma.fatal() << "kind mismatch: " << kind << " != " << old_kind << ": src=" << src_mem << " dst=" << dst_mem << " serdez=" << src_serdez_id << "," << dst_serdez_id << " redop=" << redop_id;
+	  assert(0);
+	}
+      }
+      return kind;
+    }
+
     void find_shortest_path(Memory src_mem, Memory dst_mem,
 			    CustomSerdezID serdez_id, std::vector<Memory>& path)
     {
       // fast case - can we go straight from src to dst?
       if(get_xfer_des(src_mem, dst_mem,
-		      serdez_id, serdez_id) != XferDes::XFER_NONE) {
+		      serdez_id, serdez_id, 0) != XferDes::XFER_NONE) {
 	path.resize(2);
 	path[0] = src_mem;
 	path[1] = dst_mem;
@@ -1489,7 +1524,7 @@ namespace Realm {
       for (std::set<Memory>::iterator it = all_mem.begin(); it != all_mem.end(); it++) {
 	// we know we're doing at least one hop, so no dst_serdez here
         if (get_xfer_des(src_mem, *it,
-			 serdez_id, 0) != XferDes::XFER_NONE) {
+			 serdez_id, 0, 0) != XferDes::XFER_NONE) {
           dist[*it] = std::vector<Memory>();
           dist[*it].push_back(src_mem);
           dist[*it].push_back(*it);
@@ -1503,7 +1538,7 @@ namespace Realm {
 
 	// can we reach the destination from here (handling potential
 	//  deserialization?
-	if (get_xfer_des(cur, dst_mem, 0, serdez_id) != XferDes::XFER_NONE) {
+	if (get_xfer_des(cur, dst_mem, 0, serdez_id, 0) != XferDes::XFER_NONE) {
 	  path = sub_path;
 	  path.push_back(dst_mem);
 	  return;
@@ -1511,7 +1546,7 @@ namespace Realm {
 
 	// no, look for another intermediate hop
         for(std::set<Memory>::iterator it = all_mem.begin(); it != all_mem.end(); it ++) {
-	  if (get_xfer_des(cur, *it, 0, 0) != XferDes::XFER_NONE) {
+	  if (get_xfer_des(cur, *it, 0, 0, 0) != XferDes::XFER_NONE) {
 	    if (dist.find(*it) == dist.end()) {
 	      dist[*it] = sub_path;
 	      dist[*it].push_back(*it);
@@ -1760,7 +1795,8 @@ namespace Realm {
             XferDes::XferKind kind = get_xfer_des(mem_path[idx - 1],
 						  mem_path[idx],
 						  xd_src_serdez_id,
-						  xd_dst_serdez_id);
+						  xd_dst_serdez_id,
+						  0);
 	    assert(kind != XferDes::XFER_NONE);
 
 	    // special case: gasnet reads must always be done from the node that

@@ -75,6 +75,12 @@ static const void *ignore_gasnet_warning1 __attribute__((unused)) = (void *)_gas
 } while(0)
 #endif
 
+TYPE_IS_SERIALIZABLE(Realm::NodeAnnounceTag);
+TYPE_IS_SERIALIZABLE(Realm::Memory);
+TYPE_IS_SERIALIZABLE(Realm::Memory::Kind);
+TYPE_IS_SERIALIZABLE(Realm::Channel::SupportedPath);
+TYPE_IS_SERIALIZABLE(Realm::XferDes::XferKind);
+
 namespace LegionRuntime {
   namespace Accessor {
     namespace DebugHooks {
@@ -784,7 +790,7 @@ namespace Realm {
 
     void RuntimeImpl::add_dma_channel(DMAChannel *c)
     {
-      dma_channels.push_back(c);
+      nodes[c->node].dma_channels.push_back(c);
     }
 
     void RuntimeImpl::add_code_translator(CodeTranslator *t)
@@ -806,11 +812,6 @@ namespace Realm {
     {
       assert(core_reservations);
       return *core_reservations;
-    }
-
-    const std::vector<DMAChannel *>& RuntimeImpl::get_dma_channels(void) const
-    {
-      return dma_channels;
     }
 
     const std::vector<CodeTranslator *>& RuntimeImpl::get_code_translators(void) const
@@ -1319,8 +1320,6 @@ namespace Realm {
       gasnet_coll_init(0, 0, 0, 0, 0);
 #endif
 
-      create_builtin_dma_channels(this);
-
       start_dma_worker_threads(dma_worker_threads,
 			       *core_reservations);
 
@@ -1574,13 +1573,12 @@ namespace Realm {
 	}
       }
       {
-	const unsigned ADATA_SIZE = 4096;
-	size_t adata[ADATA_SIZE];
-	unsigned apos = 0;
+	Serialization::DynamicBufferSerializer dbs(4096);
 
 	unsigned num_procs = 0;
 	unsigned num_memories = 0;
 	unsigned num_ib_memories = 0;
+	bool ok = true;
 
 	// announce each processor
 	for(std::vector<ProcessorImpl *>::const_iterator it = n->processors.begin();
@@ -1592,10 +1590,11 @@ namespace Realm {
 	    int num_cores = (*it)->num_cores;
 
 	    num_procs++;
-	    adata[apos++] = NODE_ANNOUNCE_PROC;
-	    adata[apos++] = p.id;
-	    adata[apos++] = k;
-	    adata[apos++] = num_cores;
+	    ok = (ok &&
+		  (dbs << NODE_ANNOUNCE_PROC) &&
+		  (dbs << p) &&
+		  (dbs << k) &&
+		  (dbs << num_cores));
 	  }
 
 	// now each memory
@@ -1605,13 +1604,16 @@ namespace Realm {
 	  if(*it) {
 	    Memory m = (*it)->me;
 	    Memory::Kind k = (*it)->me.kind();
+	    size_t size = (*it)->size;
+	    intptr_t regptr = reinterpret_cast<intptr_t>((*it)->local_reg_base());
 
 	    num_memories++;
-	    adata[apos++] = NODE_ANNOUNCE_MEM;
-	    adata[apos++] = m.id;
-	    adata[apos++] = k;
-	    adata[apos++] = (*it)->size;
-	    adata[apos++] = reinterpret_cast<size_t>((*it)->local_reg_base());
+	    ok = (ok &&
+		  (dbs << NODE_ANNOUNCE_MEM) &&
+		  (dbs << m) &&
+		  (dbs << k) &&
+		  (dbs << size) &&
+		  (dbs << regptr));
 	  }
 
         for (std::vector<MemoryImpl *>::const_iterator it = n->ib_memories.begin();
@@ -1620,13 +1622,16 @@ namespace Realm {
           if(*it) {
             Memory m = (*it)->me;
             Memory::Kind k = (*it)->me.kind();
+	    size_t size = (*it)->size;
+	    intptr_t regptr = reinterpret_cast<intptr_t>((*it)->local_reg_base());
 
             num_ib_memories++;
-            adata[apos++] = NODE_ANNOUNCE_IB_MEM;
-            adata[apos++] = m.id;
-            adata[apos++] = k;
-            adata[apos++] = (*it)->size;
-            adata[apos++] = reinterpret_cast<size_t>((*it)->local_reg_base());
+	    ok = (ok &&
+		  (dbs << NODE_ANNOUNCE_IB_MEM) &&
+		  (dbs << m) &&
+		  (dbs << k) &&
+		  (dbs << size) &&
+		  (dbs << regptr));
           }
 
 	// announce each processor's affinities
@@ -1641,11 +1646,12 @@ namespace Realm {
 	    for(std::vector<Machine::ProcessorMemoryAffinity>::const_iterator it2 = pmas.begin();
 		it2 != pmas.end();
 		it2++) {
-	      adata[apos++] = NODE_ANNOUNCE_PMA;
-	      adata[apos++] = it2->p.id;
-	      adata[apos++] = it2->m.id;
-	      adata[apos++] = it2->bandwidth;
-	      adata[apos++] = it2->latency;
+	      ok = (ok &&
+		    (dbs << NODE_ANNOUNCE_PMA) &&
+		    (dbs << it2->p) &&
+		    (dbs << it2->m) &&
+		    (dbs << it2->bandwidth) &&
+		    (dbs << it2->latency));
 	    }
 	  }
 
@@ -1666,16 +1672,26 @@ namespace Realm {
 	      if((it2->m1 != m) || ((NodeID)(it2->m2.address_space()) != my_node_id))
 		continue;
 
-	      adata[apos++] = NODE_ANNOUNCE_MMA;
-	      adata[apos++] = it2->m1.id;
-	      adata[apos++] = it2->m2.id;
-	      adata[apos++] = it2->bandwidth;
-	      adata[apos++] = it2->latency;
+	      ok = (ok &&
+		    (dbs << NODE_ANNOUNCE_MMA) &&
+		    (dbs << it2->m1) &&
+		    (dbs << it2->m2) &&
+		    (dbs << it2->bandwidth) &&
+		    (dbs << it2->latency));
 	    }
 	  }
 
-	adata[apos++] = NODE_ANNOUNCE_DONE;
-	assert(apos < ADATA_SIZE);
+	for(std::vector<Channel *>::const_iterator it = n->dma_channels.begin();
+	    it != n->dma_channels.end();
+	    ++it)
+	  if(*it) {
+	    ok = (ok &&
+		  (dbs << NODE_ANNOUNCE_DMA_CHANNEL) &&
+		  (*it)->serialize_remote_info(dbs));
+	  }
+
+	ok = (ok && (dbs << NODE_ANNOUNCE_DONE));
+	assert(ok);
 
 #ifdef DEBUG_REALM_STARTUP
 	if(my_node_id == 0) {
@@ -1688,11 +1704,12 @@ namespace Realm {
 	for(NodeID i = 0; i <= max_node_id; i++)
 	  if(i != my_node_id)
 	    NodeAnnounceMessage::send_request(i,
-						     num_procs,
-						     num_memories,
-						     num_ib_memories,
-						     adata, apos*sizeof(adata[0]),
-						     PAYLOAD_COPY);
+					      num_procs,
+					      num_memories,
+					      num_ib_memories,
+					      dbs.get_buffer(),
+					      dbs.bytes_used(),
+					      PAYLOAD_COPY);
 
 	NodeAnnounceMessage::await_all_announcements();
 
@@ -2170,9 +2187,6 @@ namespace Realm {
 	delete local_barrier_free_list;
 	delete local_reservation_free_list;
 	delete local_proc_group_free_list;
-
-	// delete all the DMA channels that we were given
-	delete_container_contents(dma_channels);
 
 	// same for code translators
 	delete_container_contents(code_translators);

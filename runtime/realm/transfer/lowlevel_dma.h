@@ -127,7 +127,6 @@ namespace Realm {
     extern void start_dma_system(int count, bool pinned, int max_nr, Realm::CoreReservationSet& crs);
 
     extern void stop_dma_system(void);
-    extern void create_builtin_dma_channels(Realm::RuntimeImpl *r);
 
     /*
     extern Event enqueue_dma(IndexSpace idx,

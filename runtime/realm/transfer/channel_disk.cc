@@ -266,9 +266,26 @@ namespace Realm {
       fsync(fd);
     }
 
+      static const Memory::Kind cpu_mem_kinds[] = { Memory::SYSTEM_MEM,
+						    Memory::REGDMA_MEM,
+						    Memory::Z_COPY_MEM };
+      static const size_t num_cpu_mem_kinds = sizeof(cpu_mem_kinds) / sizeof(cpu_mem_kinds[0]);
+
     FileChannel::FileChannel(long max_nr, XferDes::XferKind _kind)
+      : Channel(_kind)
     {
-      kind = _kind;
+      unsigned bw = 0; // TODO
+      unsigned latency = 0;
+      // any combination of SYSTEM/REGDMA/Z_COPY_MEM
+      for(size_t i = 0; i < num_cpu_mem_kinds; i++)
+	if(_kind == XferDes::XFER_FILE_READ)
+	  add_path(Memory::FILE_MEM, false,
+		   cpu_mem_kinds[i], false,
+		   bw, latency, false, false);
+	else
+	  add_path(cpu_mem_kinds[i], false,
+		   Memory::FILE_MEM, false,
+		   bw, latency, false, false);
     }
 
     FileChannel::~FileChannel()
@@ -308,8 +325,20 @@ namespace Realm {
     }
 
     DiskChannel::DiskChannel(long max_nr, XferDes::XferKind _kind)
+      : Channel(_kind)
     {
-      kind = _kind;
+      unsigned bw = 0; // TODO
+      unsigned latency = 0;
+      // any combination of SYSTEM/REGDMA/Z_COPY_MEM
+      for(size_t i = 0; i < num_cpu_mem_kinds; i++)
+	if(_kind == XferDes::XFER_DISK_READ)
+	  add_path(Memory::DISK_MEM, false,
+		   cpu_mem_kinds[i], false,
+		   bw, latency, false, false);
+	else
+	  add_path(cpu_mem_kinds[i], false,
+		   Memory::DISK_MEM, false,
+		   bw, latency, false, false);
     }
 
     DiskChannel::~DiskChannel()
