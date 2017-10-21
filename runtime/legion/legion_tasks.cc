@@ -1010,7 +1010,8 @@ namespace Legion {
       target_proc = options.initial_proc;
       stealable = options.stealable;
       map_locally = options.map_locally;
-      memoizing = options.memoize && !Runtime::no_tracing;
+      memoizing = options.memoize && !Runtime::no_tracing &&
+        !Runtime::no_physical_tracing;
       if (trace == NULL && memoizing)
       {
         MessageDescriptor INVALID_PHYSICAL_TRACING(3800, "undefined");

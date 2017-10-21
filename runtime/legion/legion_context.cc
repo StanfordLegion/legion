@@ -5490,7 +5490,8 @@ namespace Legion {
       if (finder == traces.end())
       {
         // Trace does not exist yet, so make one and record it
-        dynamic_trace = new DynamicTrace(tid, this, memoize);
+        dynamic_trace =
+          new DynamicTrace(tid, this, memoize && !Runtime::no_physical_tracing);
         dynamic_trace->add_reference();
         traces[tid] = dynamic_trace;
       }

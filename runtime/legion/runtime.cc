@@ -19049,6 +19049,7 @@ namespace Legion {
     /*static*/ bool Runtime::dump_physical_traces = false;
     /*static*/ bool Runtime::reduce_fanout = false;
     /*static*/ bool Runtime::no_tracing = false;
+    /*static*/ bool Runtime::no_physical_tracing = false;
 #ifdef DEBUG_LEGION
     /*static*/ bool Runtime::logging_region_tree_state = false;
     /*static*/ bool Runtime::verbose_logging = false;
@@ -19160,6 +19161,7 @@ continue;					\
         dump_physical_traces = false;
         reduce_fanout = false;
         no_tracing = false;
+        no_physical_tracing = false;
         num_profiling_nodes = 0;
         serializer_type = "binary";
         prof_logfile = NULL;
@@ -19196,6 +19198,7 @@ continue;					\
           BOOL_ARG("-lg:dump_physical_traces",dump_physical_traces);
           BOOL_ARG("-lg:reduce_fanout",reduce_fanout);
           BOOL_ARG("-lg:no_tracing",no_tracing);
+          BOOL_ARG("-lg:no_physical_tracing",no_physical_tracing);
           INT_ARG("-lg:window", initial_task_window_size);
           INT_ARG("-lg:hysteresis", initial_task_window_hysteresis);
           INT_ARG("-lg:sched", initial_tasks_to_schedule);
@@ -19271,6 +19274,7 @@ continue;					\
           BOOL_ARG("-hl:dump_physical_traces",dump_physical_traces);
           BOOL_ARG("-hl:reduce_fanout",reduce_fanout);
           BOOL_ARG("-hl:no_tracing",no_tracing);
+          BOOL_ARG("-hl:no_physical_tracing",no_physical_tracing);
           INT_ARG("-hl:window", initial_task_window_size);
           INT_ARG("-hl:hysteresis", initial_task_window_hysteresis);
           INT_ARG("-hl:sched", initial_tasks_to_schedule);
