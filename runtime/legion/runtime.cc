@@ -9209,9 +9209,8 @@ namespace Legion {
                                 RegionTreeNode *node, bool result)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(is_functional);
-#endif
+      if (!is_functional)
+        return;
       ProjectionSummary key(info);
       IndexTreeNode *row_source = node->get_row_source();
       AutoLock p_lock(projection_reservation);
