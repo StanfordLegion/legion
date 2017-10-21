@@ -1437,6 +1437,20 @@ namespace Legion {
      */
     class ProjectionFunction {
     public:
+      class ElideCloseResult {
+      public:
+        ElideCloseResult(void);
+        ElideCloseResult(IndexTreeNode *node, 
+            const std::set<ProjectionSummary> &projections, bool result);
+      public:
+        bool matches(IndexTreeNode *node, 
+                     const std::set<ProjectionSummary> &projections) const;
+      public:
+        IndexTreeNode *node;
+        std::set<ProjectionSummary> projections;
+        bool result;
+      };
+    public:
       ProjectionFunction(ProjectionID pid, ProjectionFunctor *functor);
       ProjectionFunction(const ProjectionFunction &rhs);
       ~ProjectionFunction(void);
@@ -1476,6 +1490,19 @@ namespace Legion {
                                           Operation *op, unsigned idx,
                                           LogicalRegion result, Runtime *rt);
     public:
+      bool find_elide_close_result(const ProjectionInfo &info, 
+                  const std::set<ProjectionSummary> &projections, 
+                  RegionTreeNode *node, bool &result) const;
+      void record_elide_close_result(const ProjectionInfo &info,
+                  const std::set<ProjectionSummary> &projections,
+                  RegionTreeNode *node, bool result);
+      ProjectionTree* construct_projection_tree(RegionTreeNode *root,
+                  IndexSpaceNode *launch_domain, ShardingFunction *sharding);
+      static void add_to_projection_tree(LogicalRegion region,
+                  IndexTreeNode *root, RegionTreeForest *context, 
+                  std::map<IndexTreeNode*,ProjectionTree*> &node_map,
+                  ShardID owner_shard = 0);
+    public:
       const int depth; 
       const bool is_exclusive;
       const bool is_functional;
@@ -1485,6 +1512,8 @@ namespace Legion {
       Reservation projection_reservation;
       std::map<std::pair<RegionTreeNode*,IndexSpace>,
                std::set<DomainPoint> > interfering_points;
+      std::map<ProjectionSummary,
+               std::vector<ElideCloseResult> > elide_close_results;
     }; 
 
     /**

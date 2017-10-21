@@ -2464,6 +2464,171 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // ProjectionTree 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ProjectionTree::ProjectionTree(IndexTreeNode *n, ShardID owner)
+      : node(n), owner_shard(owner)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ProjectionTree::ProjectionTree(const ProjectionTree &rhs)
+      : node(rhs.node), owner_shard(rhs.owner_shard)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ProjectionTree::~ProjectionTree(void)
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<IndexTreeNode*,ProjectionTree*>::const_iterator it = 
+            children.begin(); it != children.end(); it++)
+        delete it->second;
+    }
+
+    //--------------------------------------------------------------------------
+    ProjectionTree& ProjectionTree::operator=(const ProjectionTree &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionTree::add_child(ProjectionTree *child)
+    //--------------------------------------------------------------------------
+    {
+      children[child->node] = child;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionTree::dominates(const ProjectionTree *other) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(node == other->node);
+#endif
+      // If we have no children we definitely dominate
+      // Assuming of course that we are on the same shard
+      if (children.empty())
+      {
+        if (other->children.empty())
+          return (owner_shard == other->owner_shard);
+        return other->all_same_shard(owner_shard);
+      }
+      // If we have children and the other one doesn't then we don't
+      if (!other->children.empty())
+        return false;
+      // Check to see if we have a child that dominates each of the
+      // other trees children
+      for (std::map<IndexTreeNode*,ProjectionTree*>::const_iterator it = 
+            other->children.begin(); it != other->children.end(); it++)
+      {
+        std::map<IndexTreeNode*,ProjectionTree*>::const_iterator finder = 
+          children.find(it->first);
+        if (finder == children.end())
+          return false;
+        if (!finder->second->dominates(it->second))
+          return false;
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionTree::disjoint(const ProjectionTree *other) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(node == other->node);
+#endif
+      if (children.empty() || other->children.empty())
+        return false;
+      if (!node->is_index_space_node() && 
+          node->as_index_part_node()->is_disjoint())
+      {
+        // All children are disjoint, if there are any common ones
+        // see if they are disjoint with respect to each other
+        for (std::map<IndexTreeNode*,ProjectionTree*>::const_iterator it =
+              children.begin(); it != children.end(); it++)
+        {
+          std::map<IndexTreeNode*,ProjectionTree*>::const_iterator finder =
+            other->children.find(it->first);
+          if ((finder != other->children.end()) &&
+              !it->second->disjoint(finder->second))
+            return false;
+        }
+      }
+      else
+      {
+        // Children are not disjoint, so any that don't match
+        // cause the test to fail, otherwise we can still recurse
+        if (node->is_index_space_node())
+        {
+          IndexSpaceNode *space = node->as_index_space_node();
+          for (std::map<IndexTreeNode*,ProjectionTree*>::const_iterator it1 = 
+                children.begin(); it1 != children.end(); it1++)
+          {
+            for (std::map<IndexTreeNode*,ProjectionTree*>::const_iterator it2 =
+                  other->children.begin(); it2 != other->children.end(); it2++)
+            {
+              if (it1->first == it2->first)
+              {
+                if (!it1->second->disjoint(it2->second))
+                  return false;
+              }
+              else if (!space->are_disjoint(it1->first->color, 
+                                            it2->first->color))
+                return false;
+            }
+          }
+
+        }
+        else
+        {
+          IndexPartNode *part = node->as_index_part_node();
+          for (std::map<IndexTreeNode*,ProjectionTree*>::const_iterator it1 = 
+                children.begin(); it1 != children.end(); it1++)
+          {
+            for (std::map<IndexTreeNode*,ProjectionTree*>::const_iterator it2 =
+                  other->children.begin(); it2 != other->children.end(); it2++)
+            {
+              if (it1->first == it2->first)
+              {
+                if (!it1->second->disjoint(it2->second))
+                  return false;
+              }
+              else if (!part->are_disjoint(it1->first->color,it2->first->color))
+                return false;
+            }
+          }
+        }
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionTree::all_same_shard(ShardID other_shard) const
+    //--------------------------------------------------------------------------
+    {
+      if (children.empty())
+        return (owner_shard == other_shard);
+      for (std::map<IndexTreeNode*,ProjectionTree*>::const_iterator it = 
+            children.begin(); it != children.end(); it++)
+      {
+        if (!it->second->all_same_shard(other_shard))
+          return false;
+      }
+      return true;
+    }
+
+    /////////////////////////////////////////////////////////////
     // LogicalState 
     ///////////////////////////////////////////////////////////// 
 
@@ -2731,13 +2896,113 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Projection Summary 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ProjectionSummary::ProjectionSummary(void)
+      : domain(NULL), projection(NULL), sharding(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ProjectionSummary::ProjectionSummary(IndexSpaceNode *is, 
+                                         ProjectionFunction *p, 
+                                         ShardingFunction *s)
+      : domain(is), projection(p), sharding(s)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ProjectionSummary::ProjectionSummary(const ProjectionInfo &info) 
+      : domain(info.projection_space), projection(info.projection), 
+        sharding(info.sharding_function)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionSummary::operator<(const ProjectionSummary &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      if (domain->handle < rhs.domain->handle)
+        return true;
+      else if (domain->handle > rhs.domain->handle)
+        return false;
+      else if (projection->projection_id < rhs.projection->projection_id)
+        return true;
+      else if (projection->projection_id > rhs.projection->projection_id)
+        return false;
+      else if ((sharding == NULL) && (rhs.sharding == NULL))
+        return false;
+      else if ((sharding == NULL) && (rhs.sharding != NULL))
+        return true;
+      else if (rhs.sharding == NULL)
+        return false;
+      else
+        return (sharding->sharding_id < rhs.sharding->sharding_id);
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionSummary::operator==(const ProjectionSummary &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      if (domain->handle != rhs.domain->handle)
+        return false;
+      else if (projection->projection_id != rhs.projection->projection_id)
+        return false;
+      else if ((sharding == NULL) && (rhs.sharding == NULL))
+        return true;
+      else if ((sharding == NULL) && (rhs.sharding != NULL))
+        return false;
+      else if (rhs.sharding == NULL)
+        return false;
+      if (sharding->sharding_id != rhs.sharding->sharding_id)
+        return false;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionSummary::operator!=(const ProjectionSummary &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      return !(*this == rhs);
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionSummary::pack_summary(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(domain->handle);
+      rez.serialize(projection->projection_id);
+      // Never need to pass back the sharding function anyway
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ProjectionSummary ProjectionSummary::unpack_summary(
+                                 Deserializer &derez, RegionTreeForest *context)
+    //--------------------------------------------------------------------------
+    {
+      ProjectionSummary result;
+      IndexSpace handle;
+      derez.deserialize(handle);
+      result.domain = context->get_node(handle);
+      ProjectionID pid;
+      derez.deserialize(pid);
+      result.projection = context->runtime->find_projection_function(pid);
+      return result;
+    }
+
+    /////////////////////////////////////////////////////////////
     // FieldState 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
     FieldState::FieldState(void)
-      : open_state(NOT_OPEN), redop(0), projection(NULL), 
-        projection_space(NULL), rebuild_timeout(1)
+      : open_state(NOT_OPEN), redop(0), rebuild_timeout(1), 
+        disjoint_shallow(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -2745,8 +3010,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldState::FieldState(const GenericUser &user, const FieldMask &m, 
                            const LegionColor c)
-      : ChildState(m), redop(0), projection(NULL), 
-        projection_space(NULL), rebuild_timeout(1)
+      : ChildState(m), redop(0), rebuild_timeout(1), disjoint_shallow(false)
     //--------------------------------------------------------------------------
     {
       if (IS_READ_ONLY(user.usage))
@@ -2764,14 +3028,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldState::FieldState(const RegionUsage &usage, const FieldMask &m,
                            ProjectionFunction *proj, IndexSpaceNode *proj_space,
-                           ShardingFunction *fn, bool disjoint, 
+                           ShardingFunction *fn, RegionTreeNode *node, 
                            bool dirty_reduction)
-      : ChildState(m), redop(0), projection(proj), 
-        projection_space(proj_space), sharding_function(fn), rebuild_timeout(1)
+      : ChildState(m), redop(0), rebuild_timeout(1), disjoint_shallow(false)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(projection != NULL);
+      assert(proj != NULL);
 #endif
       if (IS_READ_ONLY(usage))
         open_state = OPEN_READ_ONLY_PROJ;
@@ -2783,10 +3046,15 @@ namespace Legion {
           open_state = OPEN_REDUCE_PROJ;
         redop = usage.redop;
       }
-      else if (disjoint && (projection->depth == 0))
-        open_state = OPEN_READ_WRITE_PROJ_DISJOINT_SHALLOW;
       else
+      {
         open_state = OPEN_READ_WRITE_PROJ;
+        projections.insert(ProjectionSummary(proj_space, proj, fn));
+        // Check for disjoint shallow completeness
+        if ((fn == NULL) && (proj->depth == 0) && !node->is_region() &&
+            node->are_all_children_disjoint())
+          disjoint_shallow = true;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2795,11 +3063,19 @@ namespace Legion {
     {
       if (redop != rhs.redop)
         return false;
-      if (projection != rhs.projection)
+      if (is_projection_state())
+      {
+        if (!rhs.is_projection_state())
+          return false;
+        // Both projection spaces, check to see if they have the same
+        // set of projections
+        if (!projections_match(rhs))
+          return false;
+        // if we make it past here they are all the same
+      }
+      else if (rhs.is_projection_state())
         return false;
-      // Only do this test if they are both projections
-      if ((projection != NULL) && (projection_space != rhs.projection_space))
-        return false;
+      // Now check the privilege states
       if (redop == 0)
         return (open_state == rhs.open_state);
       else
@@ -2821,6 +3097,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool FieldState::projections_match(const FieldState &rhs) const
+    //--------------------------------------------------------------------------
+    {
+      if (projections.size() != rhs.projections.size())
+        return false;
+      std::set<ProjectionSummary>::const_iterator it1 = projections.begin();
+      std::set<ProjectionSummary>::const_iterator it2 = rhs.projections.begin();
+      // zip the projections so we can compare them
+      while (it1 != projections.end())
+      {
+        if ((*it1) != (*it2))
+          return false;
+        it1++; it2++;
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
     void FieldState::merge(const FieldState &rhs, RegionTreeNode *node)
     //--------------------------------------------------------------------------
     {
@@ -2837,7 +3131,7 @@ namespace Legion {
       }
 #ifdef DEBUG_LEGION
       assert(redop == rhs.redop);
-      assert(projection == rhs.projection);
+      assert(projections_match(rhs));
 #endif
       if (redop > 0)
       {
@@ -2860,78 +3154,195 @@ namespace Legion {
             open_state = OPEN_MULTI_REDUCE;
         }
       }
+      // no need to merge projections, we know they are the same
     }
 
     //--------------------------------------------------------------------------
-    bool FieldState::can_elide_close_operation(const ProjectionInfo &info) const
+    bool FieldState::can_elide_close_operation(const ProjectionInfo &info,
+                                     RegionTreeNode *node, bool reduction) const
     //--------------------------------------------------------------------------
     {
-      // Different projection functions are means we can't elide it
-      if (projection != info.projection)
-        return false;
-      if (sharding_function != NULL)
-      {
 #ifdef DEBUG_LEGION
-        assert(info.sharding_function != NULL);
+      assert(!projections.empty()); // should be in a projection mode
 #endif
-        // First the shard functions must be the same
-        if (sharding_function != info.sharding_function)
-          return false;
-        // Then the index spaces must be the same
-        return (projection_space == info.projection_space);
+      // This function is super important! It decides whether this new
+      // projection info can be added to the current projection epoch, if
+      // it can't then we will need a close operation to be inserted
+      bool elide = true;
+      // We have two different paths corresponding to whether we are in
+      // a control replication context or not
+      if (info.sharding_function == NULL)
+      {
+        // If we don't have a sharding function, then we aren't in a 
+        // control replication context
+        // See if we are in a disjoint shallow complete mode
+        // If we're disjoint shallow then we can definitely always
+        // elide the close operation as we can do more writes or 
+        // reads on this epoch without any issues, for reductions
+        // though we can only go in the same epoch if we're reducing
+        // to a subset of the writes that have already been done
+        if (!disjoint_shallow || reduction)
+        {
+          // If we're not disjoint shallow complete we have more work to do
+          // Run through the list and see if all the index spaces
+          // are the same or dominate our index space and all the
+          // projection functions are the same as ours, if this is
+          // true then we know this is a totally data parallel
+          // computation and there is no need for a close
+          for (std::set<ProjectionSummary>::const_iterator it = 
+                projections.begin(); it != projections.end(); it++)
+          {
+            if (it->projection != info.projection)    
+            {
+              elide = false;
+              break;
+            }
+            if ((it->domain != info.projection_space) && 
+                !it->domain->dominates(info.projection_space))
+            {
+              elide = false;
+              break;
+            }
+          }
+          if (!elide)
+          {
+            // Next we're going to need to compute the actual interference
+            // sets so check to see if we've memoized the result or not
+            if (!info.projection->find_elide_close_result(info, projections,
+                                                          node, elide))
+            {
+              elide = expensive_elide_test(info, node, reduction); 
+              // Now memoize the results for later
+              info.projection->record_elide_close_result(info, projections,
+                                                         node, elide);
+            }
+          }
+        }
       }
       else
       {
-#ifdef DEBUG_LEGION
-        assert(info.sharding_function == NULL);
-#endif
-        // The current domain just needs to dominate the existing domain
-        return projection_domain_dominates(info.projection_space);
+        // We have a sharding function so we are in a 
+        // control replication context
+
+        // See if all the index spaces dominate, and the projection
+        // functions are all the same, and the sharding functions are
+        // all the same, in which case we know this is totally data
+        // parallel and each shard has the same subregion set
+        for (std::set<ProjectionSummary>::const_iterator it = 
+              projections.begin(); it != projections.end(); it++)
+        {
+          if (it->projection != info.projection)
+          {
+            elide = false;
+            break;
+          }
+          if (it->sharding != info.sharding_function)
+          {
+            elide = false;
+            break;
+          }
+          if ((it->domain != info.projection_space) && 
+              !it->domain->dominates(info.projection_space))
+          {
+            elide = false;
+            break;
+          }
+        }
+
+        if (!elide)
+        {
+          // Next we're going to need to compute the actual interference
+          // set so check to see if we've memoized the result or not
+          if (!info.projection->find_elide_close_result(info, projections,
+                                                        node, elide))
+          {
+            elide = expensive_elide_test(info, node, reduction); 
+            // Now memoize the results for later
+            info.projection->record_elide_close_result(info, projections,
+                                                       node, elide);
+          }
+        }
       }
+      return elide;
     }
 
     //--------------------------------------------------------------------------
-    bool FieldState::can_elide_close_operation_shallow(
-                                               const ProjectionInfo &info) const
+    void FieldState::record_projection_summary(const ProjectionInfo &info,
+                                               RegionTreeNode *node)
     //--------------------------------------------------------------------------
     {
-      // If the projection info isn't depth 0 then we can't elide it
-      if (info.projection->depth > 0)
-        return false;
-      if (sharding_function != NULL)
+      if (disjoint_shallow || projections.empty())
       {
-#ifdef DEBUG_LEGION
-        assert(info.sharding_function != NULL);
-#endif
-        // If we have different projection functions or sharding functions
-        // then we can't elide the close operation
-        if (projection != info.projection)
-          return false;
-        if (sharding_function != info.sharding_function)
-          return false;
+        if ((info.sharding_function == NULL) && 
+            (info.projection->depth == 0) && !node->is_region() &&
+            node->are_all_children_disjoint())
+          disjoint_shallow = true;
+        else
+          disjoint_shallow = false;
       }
-#ifdef DEBUG_LEGION
-      else
-        assert(info.sharding_function == NULL);
-#endif
-      return true;
+      projections.insert(ProjectionSummary(info));
     }
 
     //--------------------------------------------------------------------------
-    bool FieldState::projection_domain_dominates(
-                                               IndexSpaceNode *next_space) const
+    bool FieldState::expensive_elide_test(const ProjectionInfo &info,
+                                     RegionTreeNode *node, bool reduction) const
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(projection_space != NULL);
-#endif
-      if (projection_space == next_space)
-        return true;
-      // If the domains do not have the same type, the answer must be no
-      if (projection_space->handle.get_type_tag() != 
-          next_space->handle.get_type_tag())
+      // We can't do this test if the projection function is not functional
+      if (!info.projection->is_functional)
+      {
+        REPORT_LEGION_WARNING(LEGION_WARNING_SLOW_NON_FUNCTIONAL_PROJECTION,
+            "We strongly encourage all projection functors to be functional, "
+            "however, projection function %d is not and therefore an "
+            "expensive analysis cannot be memoized. Please consider making "
+            "it functional to avoid performance degredation.", 
+            info.projection->projection_id)
         return false;
-      return projection_space->dominates(next_space);
+      }
+      // Then check whether one of two conditions are true:
+      // 1. We can build an injective mapping for each region in
+      // the next projection where it is the same as or a subregion
+      // of every region it interferes with
+      // 2. If the new projection is not a reduction then if 
+      // every access is independent of the prior writes then 
+      // we know that we can safely add this to the epoch without
+      // needing to do a close operation
+      bool has_mapping = true; 
+      bool all_disjoint = !reduction; // no disjoint reductions
+      ProjectionTree *next = 
+        info.projection->construct_projection_tree(node, info.projection_space,
+                                                   info.sharding_function);
+      for (std::set<ProjectionSummary>::const_iterator it =
+            projections.begin(); it != projections.end(); it++)
+      {
+        ProjectionTree *prev = 
+          it->projection->construct_projection_tree(node, it->domain,
+                                                    it->sharding);
+        if (has_mapping && !prev->dominates(next))
+        {
+          has_mapping = false;
+          if (!all_disjoint)
+          {
+            delete prev;
+            break;
+          }
+        }
+        if (all_disjoint && !prev->disjoint(next))
+        {
+          all_disjoint = false;
+          if (!has_mapping)
+          {
+            delete prev;
+            break;
+          }
+        }
+        delete prev;
+      }
+      delete next;
+#ifdef DEBUG_LEGION
+      assert(!has_mapping || !all_disjoint); // can't both be true
+#endif
+      return (has_mapping || all_disjoint);
     }
 
     //--------------------------------------------------------------------------
@@ -2973,20 +3384,20 @@ namespace Legion {
           }
         case OPEN_READ_ONLY_PROJ:
           {
-            logger->log("Field State: OPEN READ-ONLY PROJECTION %d",
-                        projection);
+            logger->log("Field State: OPEN READ-ONLY PROJECTION %zd",
+                        projections.size());
             break;
           }
         case OPEN_READ_WRITE_PROJ:
           {
-            logger->log("Field State: OPEN READ WRITE PROJECTION %d",
-                        projection);
+            logger->log("Field State: OPEN READ WRITE PROJECTION %zd",
+                        projections.size());
             break;
           }
         case OPEN_REDUCE_PROJ:
           {
-            logger->log("Field State: OPEN REDUCE PROJECTION %d Mode %d",
-                        projection, redop);
+            logger->log("Field State: OPEN REDUCE PROJECTION %zd Mode %d",
+                        projections.size(), redop);
             break;
           }
         default:

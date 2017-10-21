@@ -9831,8 +9831,7 @@ namespace Legion {
       if (arrived && proj_info.is_projecting())
       {
         FieldState new_state(user.usage, open_mask, proj_info.projection,
-           proj_info.projection_space, proj_info.sharding_function,
-           are_all_children_disjoint());
+           proj_info.projection_space, proj_info.sharding_function, this);
         merge_new_field_state(state, new_state);
       }
       else if (next_child != INVALID_COLOR)
@@ -10342,7 +10341,6 @@ namespace Legion {
               break;
             }
           case OPEN_READ_WRITE_PROJ:
-          case OPEN_READ_WRITE_PROJ_DISJOINT_SHALLOW:
             {
               // Have to close up this sub-tree no matter what
               if (record_close_operations)
@@ -10535,7 +10533,8 @@ namespace Legion {
               // Can only avoid a close operation if we have the 
               // same projection function with the same or smaller
               // size domain as the original index space launch
-              if (it->can_elide_close_operation(proj_info))
+              if (it->can_elide_close_operation(proj_info, this,
+                                  IS_REDUCE(closer.user.usage)))
               {
                 // If we're a reduction we have to go into a dirty 
                 // reduction mode since we know we're already open below
@@ -10548,8 +10547,8 @@ namespace Legion {
                   // Make the new state to add
                   new_states.push_back(FieldState(closer.user.usage, overlap, 
                            proj_info.projection, proj_info.projection_space, 
-                           proj_info.sharding_function,
-                           are_all_children_disjoint(), true/*dirty reduce*/));
+                           proj_info.sharding_function, this,
+                           true/*dirty reduce*/));
                   // Mark that this is a dirty reduction
                   proj_info.set_dirty_reduction();
                   // If we are a reduction, we can go straight there
@@ -10561,8 +10560,9 @@ namespace Legion {
                 }
                 else
                 {
-                  // Update the domain  
-                  it->projection_space = proj_info.projection_space;
+                  // If we're a write we need to update the projection space
+                  if (IS_WRITE(closer.user.usage))
+                    it->record_projection_summary(proj_info, this);
                   open_below |= (it->valid_fields & current_mask);
                   it++;
                 }
@@ -10594,77 +10594,8 @@ namespace Legion {
                       as_partition_node()->row_source->color_space;
                     new_states.push_back(FieldState(close_usage, overlap,
                         context->runtime->find_projection_function(0),
-                        color_space, NULL/*sharding func*/, true/*disjoint*/));
+                        color_space, NULL/*sharding func*/, this));
                   }
-                }
-                it->valid_fields -= current_mask;
-                if (!it->valid_fields)
-                  it = state.field_states.erase(it);
-                else
-                  it++;
-              }
-              break;
-            }
-          case OPEN_READ_WRITE_PROJ_DISJOINT_SHALLOW:
-            {
-#ifdef DEBUG_LEGION
-              // Can only be here if all children are disjoint
-              assert(are_all_children_disjoint());
-#endif
-              if (IS_REDUCE(closer.user.usage) && 
-                  (it->sharding_function == NULL) &&
-                  it->projection_domain_dominates(proj_info.projection_space))
-              {
-                const FieldMask overlap = it->valid_fields & current_mask;
-                // Record that some fields are already open
-                open_below |= overlap;
-                // Make the new state to add
-                new_states.push_back(FieldState(closer.user.usage, overlap, 
-                         proj_info.projection, proj_info.projection_space, 
-                         proj_info.sharding_function, 
-                         are_all_children_disjoint(), true/*dirty reduce*/));
-                // Mark that this is a dirty reduction
-                proj_info.set_dirty_reduction();
-                // If we are a reduction, we can go straight there
-                it->valid_fields -= overlap;
-                if (!it->valid_fields)
-                  it = state.field_states.erase(it);
-                else
-                  it++;
-              }
-              else if (IS_READ_ONLY(closer.user.usage) &&
-                       (it->sharding_function == NULL))
-              {
-                // Read-only projections of any depth allow
-                // us to stay in disjoint shallow mode because
-                // they are not going to mutate the state at
-                // all and we can catch dependences on any
-                // index spaces without needing a close operation
-                // All this assumes we aren't control replicated
-                it++;
-              }
-              else if (it->can_elide_close_operation_shallow(proj_info) &&
-                        !IS_REDUCE(closer.user.usage))
-              {
-                // If we are also disjoint shallow we can stay in this mode
-                // Exception: reductions that are larger than the current
-                // domain are bad cause we can't do advances properly for
-                // our projection epoch
-                open_below |= (it->valid_fields & current_mask);
-                it++;
-              }
-              else
-              {
-                // Otherwise we need a close operation
-                if (record_close_operations)
-                {
-                  const FieldMask overlap = current_mask & it->valid_fields;
-#ifdef DEBUG_LEGION
-                  assert(!!overlap);
-#endif
-                  closer.record_close_operation(overlap, true/*projection*/);
-                  state.capture_close_epochs(overlap,
-                                             closer.find_closed_node(this));
                 }
                 it->valid_fields -= current_mask;
                 if (!it->valid_fields)
@@ -10706,7 +10637,7 @@ namespace Legion {
                       as_partition_node()->row_source->color_space;
                     new_states.push_back(FieldState(close_usage, overlap,
                         context->runtime->find_projection_function(0),
-                        color_space, NULL/*sharding func*/, true/*disjoint*/));
+                        color_space, NULL/*sharding func*/, this));
                   }
                 }
                 it->valid_fields -= current_mask;
@@ -10737,7 +10668,7 @@ namespace Legion {
       {
         new_states.push_back(FieldState(closer.user.usage, open_mask, 
               proj_info.projection, proj_info.projection_space, 
-              proj_info.sharding_function, are_all_children_disjoint()));
+              proj_info.sharding_function, this));
       }
       merge_new_field_states(state, new_states);
 #ifdef DEBUG_LEGION
@@ -11664,7 +11595,6 @@ namespace Legion {
               break;
             }
           case OPEN_READ_WRITE_PROJ:
-          case OPEN_READ_WRITE_PROJ_DISJOINT_SHALLOW:
           case OPEN_REDUCE_PROJ:
             {
               // Do the close here 
@@ -11750,15 +11680,14 @@ namespace Legion {
           rez.serialize(fit->redop);
           if (fit->open_state >= OPEN_READ_ONLY_PROJ)
           {
-#ifdef DEBUG_LEGION
-            assert(fit->projection != NULL);
-#endif
-            rez.serialize(fit->projection->projection_id);
-            rez.serialize(fit->projection_space->handle);
+            rez.serialize<size_t>(fit->projections.size());
+            for (std::set<ProjectionSummary>::const_iterator it = 
+                  fit->projections.begin(); it != fit->projections.end(); it++)
+              it->pack_summary(rez);
           }
 #ifdef DEBUG_LEGION
           else
-            assert(fit->projection == NULL);
+            assert(fit->projections.empty());
 #endif
           rez.serialize<size_t>(fit->open_children.size());
           for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it =
@@ -11836,12 +11765,11 @@ namespace Legion {
         derez.deserialize(fit->redop);
         if (fit->open_state >= OPEN_READ_ONLY_PROJ)
         {
-          ProjectionID proj_id;
-          derez.deserialize(proj_id);
-          fit->projection = context->runtime->find_projection_function(proj_id);
-          IndexSpace handle;
-          derez.deserialize(handle);
-          fit->projection_space = context->get_node(handle);
+          size_t num_summaries;
+          derez.deserialize(num_summaries);
+          for (unsigned idx = 0; idx < num_summaries; idx++)
+            fit->projections.insert(
+                ProjectionSummary::unpack_summary(derez, context));
         }
         size_t num_open_children;
         derez.deserialize(num_open_children);

@@ -535,6 +535,33 @@ namespace Legion {
     };
 
     /**
+     * \struct ProjectionSummary
+     * A small helper class that tracks the triple that 
+     * uniquely defines a set of region requirements
+     * for a projection operation
+     */
+    struct ProjectionSummary {
+    public:
+      ProjectionSummary(void);
+      ProjectionSummary(IndexSpaceNode *is, 
+                        ProjectionFunction *p, 
+                        ShardingFunction *s);
+      ProjectionSummary(const ProjectionInfo &info);
+    public:
+      bool operator<(const ProjectionSummary &rhs) const;
+      bool operator==(const ProjectionSummary &rhs) const;
+      bool operator!=(const ProjectionSummary &rhs) const;
+    public:
+      void pack_summary(Serializer &rez) const;
+      static ProjectionSummary unpack_summary(Deserializer &derez,
+                                              RegionTreeForest *context);
+    public:
+      IndexSpaceNode *domain;
+      ProjectionFunction *projection;
+      ShardingFunction *sharding;
+    };
+
+    /**
      * \struct FieldState
      * Track the field state more accurately
      * for logical traversals to figure out 
@@ -547,29 +574,33 @@ namespace Legion {
                  LegionColor child);
       FieldState(const RegionUsage &u, const FieldMask &m,
                  ProjectionFunction *proj, IndexSpaceNode *proj_space, 
-                 ShardingFunction *sharding_function, bool dis, 
+                 ShardingFunction *sharding_function, RegionTreeNode *node,
                  bool dirty_reduction = false);
     public:
       inline bool is_projection_state(void) const 
         { return (open_state >= OPEN_READ_ONLY_PROJ); } 
     public:
       bool overlaps(const FieldState &rhs) const;
+      bool projections_match(const FieldState &rhs) const;
       void merge(const FieldState &rhs, RegionTreeNode *node);
     public:
-      bool can_elide_close_operation(const ProjectionInfo &info) const;
-      bool can_elide_close_operation_shallow(const ProjectionInfo &info) const;
-      bool projection_domain_dominates(IndexSpaceNode *next_space) const;
+      bool can_elide_close_operation(const ProjectionInfo &info,
+                     RegionTreeNode *node, bool reduction) const;
+      void record_projection_summary(const ProjectionInfo &info,
+                                     RegionTreeNode *node);
+    protected:
+      bool expensive_elide_test(const ProjectionInfo &info,
+                RegionTreeNode *node, bool reduction) const;
     public:
       void print_state(TreeStateLogger *logger, 
                        const FieldMask &capture_mask) const;
     public:
       OpenState open_state;
       ReductionOpID redop;
-      ProjectionFunction *projection;
-      IndexSpaceNode *projection_space;
-      ShardingFunction *sharding_function;
+      std::set<ProjectionSummary> projections;
       unsigned rebuild_timeout;
-    };  
+      bool disjoint_shallow;
+    };
 
     /**
      * \class ProjectionEpoch
@@ -596,6 +627,31 @@ namespace Legion {
     public:
       ShardingFunction *sharding_function;
       std::map<ProjectionFunction*,std::set<IndexSpaceNode*> > projections;
+    };
+
+    /**
+     * \class ProjectionTree
+     * This is a tree that stores the summary of a region
+     * tree that is accessed by an index launch and which
+     * node owns the leaves for in the case of control replication
+     */
+    class ProjectionTree {
+    public:
+      ProjectionTree(IndexTreeNode *source,
+                     ShardID owner_shard = 0);
+      ProjectionTree(const ProjectionTree &rhs);
+      ~ProjectionTree(void);
+    public:
+      ProjectionTree& operator=(const ProjectionTree &rhs);
+    public:
+      void add_child(ProjectionTree *child);
+      bool dominates(const ProjectionTree *other) const;
+      bool disjoint(const ProjectionTree *other) const;
+      bool all_same_shard(ShardID other_shard) const;
+    public:
+      IndexTreeNode *const node;
+      const ShardID owner_shard;
+      std::map<IndexTreeNode*,ProjectionTree*> children;
     };
 
     /**

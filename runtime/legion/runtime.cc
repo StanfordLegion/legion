@@ -9138,6 +9138,180 @@ namespace Legion {
 #endif
     }
 
+    //--------------------------------------------------------------------------
+    ProjectionFunction::ElideCloseResult::ElideCloseResult(void)
+      : node(NULL), result(false)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ProjectionFunction::ElideCloseResult::ElideCloseResult(IndexTreeNode *n,
+        const std::set<ProjectionSummary> &proj, bool res)
+      : node(n), projections(proj), result(res)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionFunction::ElideCloseResult::matches(IndexTreeNode *other,
+                     const std::set<ProjectionSummary> &other_projections) const
+    //--------------------------------------------------------------------------
+    {
+      if (node != other)
+        return false;
+      if (projections.size() != other_projections.size())
+        return false;
+      std::set<ProjectionSummary>::const_iterator it1 = projections.begin();
+      std::set<ProjectionSummary>::const_iterator it2 = 
+        other_projections.begin();
+      while (it1 != projections.end())
+      {
+        if (it1 != it2)
+          return false;
+        it1++; it2++;
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProjectionFunction::find_elide_close_result(const ProjectionInfo &info,
+                                 const std::set<ProjectionSummary> &projections, 
+                                 RegionTreeNode *node, bool &result) const
+    //--------------------------------------------------------------------------
+    {
+      // No memoizing if we're not functional
+      if (!is_functional)
+        return false;
+      ProjectionSummary key(info);
+      IndexTreeNode *row_source = node->get_row_source();
+      AutoLock p_lock(projection_reservation,1,false/*exclusive*/);
+      std::map<ProjectionSummary,std::vector<ElideCloseResult> >::const_iterator
+        finder = elide_close_results.find(key);
+      if (finder == elide_close_results.end())
+        return false;
+      for (std::vector<ElideCloseResult>::const_iterator it = 
+            finder->second.begin(); it != finder->second.end(); it++)
+      {
+        if (it->matches(row_source, projections))
+        {
+          result = it->result;
+          return true;
+        }
+      }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void ProjectionFunction::record_elide_close_result(
+                                const ProjectionInfo &info,
+                                const std::set<ProjectionSummary> &projections,
+                                RegionTreeNode *node, bool result)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_functional);
+#endif
+      ProjectionSummary key(info);
+      IndexTreeNode *row_source = node->get_row_source();
+      AutoLock p_lock(projection_reservation);
+      std::vector<ElideCloseResult> &close_results = elide_close_results[key];
+      // See if someone else saved the result in between to avoid duplicates
+      for (std::vector<ElideCloseResult>::const_iterator it = 
+            close_results.begin(); it != close_results.end(); it++)
+        if (it->matches(row_source, projections))
+          return;
+      close_results.push_back(ElideCloseResult(row_source, projections,result));
+    }
+
+    //--------------------------------------------------------------------------
+    ProjectionTree* ProjectionFunction::construct_projection_tree(
+                            RegionTreeNode *root, IndexSpaceNode *launch_space,
+                            ShardingFunction *sharding_function)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_functional);
+      assert(is_exclusive);
+#endif
+      IndexTreeNode *row_source = root->get_row_source();
+      RegionTreeForest *context = root->context;
+      ProjectionTree *result = new ProjectionTree(row_source);
+      std::map<IndexTreeNode*,ProjectionTree*> node_map;
+      // Iterate over the points, compute the projections, and build the tree   
+      Domain launch_domain;
+      launch_space->get_launch_space_domain(launch_domain);
+      if (root->is_region())
+      {
+        RegionNode *region = root->as_region_node();
+        for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
+        {
+          LogicalRegion result = functor->project(region->handle, itr.p);
+          if (sharding_function != NULL)
+          {
+            ShardID owner = sharding_function->find_owner(itr.p, launch_domain);
+            add_to_projection_tree(result, row_source, context, node_map,owner);
+          }
+          else
+            add_to_projection_tree(result, row_source, context, node_map);
+        }
+      }
+      else
+      {
+        PartitionNode *partition = root->as_partition_node();
+        for (Domain::DomainPointIterator itr(launch_domain); itr; itr++)
+        {
+          LogicalRegion result = functor->project(partition->handle, itr.p);
+          if (sharding_function != NULL)
+          {
+            ShardID owner = sharding_function->find_owner(itr.p, launch_domain);
+            add_to_projection_tree(result, row_source, context, node_map,owner);
+          }
+          else
+            add_to_projection_tree(result, row_source, context, node_map);
+        }
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ProjectionFunction::add_to_projection_tree(LogicalRegion r,
+                             IndexTreeNode *root, RegionTreeForest *context,
+                             std::map<IndexTreeNode*,ProjectionTree*> &node_map,
+                             ShardID owner_shard)
+    //--------------------------------------------------------------------------
+    {
+      IndexTreeNode *child = context->get_node(r)->row_source;
+      std::map<IndexTreeNode*,ProjectionTree*>::const_iterator finder = 
+        node_map.find(child);
+      ProjectionTree *current = NULL;
+      if (finder == node_map.end())
+      {
+        current = new ProjectionTree(child, owner_shard);
+        node_map[child] = current;
+      }
+      else
+        current = finder->second;
+      while (child != root)
+      {
+        // Find the next one to add this to
+        IndexTreeNode *parent = child->get_parent();
+        finder = node_map.find(parent);
+        ProjectionTree *next = NULL;
+        if (finder == node_map.end())
+        {
+          next = new ProjectionTree(parent);
+          node_map[parent] = current;
+        }
+        else
+          next = finder->second;
+        next->add_child(current);
+        // Now we can walk up the tree
+        child = parent;
+        current = next;
+      }
+    }
+
     /////////////////////////////////////////////////////////////
     // Cyclic Sharding Functor
     /////////////////////////////////////////////////////////////

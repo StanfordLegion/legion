@@ -242,9 +242,8 @@ namespace Legion {
       // Only projection states below here
       OPEN_READ_ONLY_PROJ     = 5, // read-only projection
       OPEN_READ_WRITE_PROJ    = 6, // read-write projection
-      OPEN_READ_WRITE_PROJ_DISJOINT_SHALLOW = 7, // depth=0, children disjoint
-      OPEN_REDUCE_PROJ        = 8, // reduction-only projection
-      OPEN_REDUCE_PROJ_DIRTY  = 9, // same as above but already open dirty 
+      OPEN_REDUCE_PROJ        = 7, // reduction-only projection
+      OPEN_REDUCE_PROJ_DIRTY  = 8, // same as above but already open dirty 
     }; 
 
     // Internal reduction operators
