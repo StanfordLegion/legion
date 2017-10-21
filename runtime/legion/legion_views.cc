@@ -703,9 +703,10 @@ namespace Legion {
                                       origin_node, creator_op_id, index, 
                                       preconditions, dead_events, tracing);
       }
-      if (!dead_events.empty() || 
-          !filter_previous_users.empty() || !filter_current_users.empty() ||
-          !advance_versions.empty() || !add_versions.empty())
+      if ((!dead_events.empty() || 
+           !filter_previous_users.empty() || !filter_current_users.empty() ||
+           !advance_versions.empty() || !add_versions.empty()) &&
+          !tracing)
       {
         // Need exclusive permissions to modify data structures
         AutoLock v_lock(view_lock);
@@ -1127,8 +1128,9 @@ namespace Legion {
                                       origin_node, term_event, op_id, index,
                                       preconditions, dead_events, tracing);
       }
-      if (!dead_events.empty() || 
-          !filter_previous_users.empty() || !filter_current_users.empty())
+      if ((!dead_events.empty() || 
+           !filter_previous_users.empty() || !filter_current_users.empty()) &&
+          !tracing)
       {
         // Need exclusive permissions to modify data structures
         AutoLock v_lock(view_lock);
@@ -2675,7 +2677,7 @@ namespace Legion {
           dead_events.insert(cit->first);
           continue;
         }
-        if (preconditions.find(cit->first) != preconditions.end())
+        if (!tracing && preconditions.find(cit->first) != preconditions.end())
           continue;
 #endif
         const EventUsers &event_users = cit->second;
@@ -2749,7 +2751,7 @@ namespace Legion {
           dead_events.insert(pit->first);
           continue;
         }
-        if (preconditions.find(pit->first) != preconditions.end())
+        if (!tracing && preconditions.find(pit->first) != preconditions.end())
           continue;
 #endif
         const EventUsers &event_users = pit->second;
@@ -2815,7 +2817,7 @@ namespace Legion {
         LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
           preconditions.find(cit->first);
 #ifndef LEGION_SPY
-        if (finder != preconditions.end())
+        if (!tracing && finder != preconditions.end())
         {
           overlap -= finder->second;
           if (!overlap)
@@ -2900,7 +2902,7 @@ namespace Legion {
         LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
           preconditions.find(pit->first);
 #ifndef LEGION_SPY
-        if (finder != preconditions.end())
+        if (!tracing && finder != preconditions.end())
         {
           overlap -= finder->second;
           if (!overlap)
@@ -4338,7 +4340,15 @@ namespace Legion {
       {
         ApEvent copy_pre;
         if (it->preconditions.size() == 1)
+        {
           copy_pre = *(it->preconditions.begin());
+          if (trace_info.tracing && !copy_pre.exists())
+          {
+            Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+            rename.trigger();
+            copy_pre = ApEvent(rename);
+          }
+        }
         else if (!it->preconditions.empty())
         {
           copy_pre = Runtime::merge_events(it->preconditions);
@@ -4434,7 +4444,15 @@ namespace Legion {
         {
           ApEvent post;
           if (it->preconditions.size() == 1)
+          {
             post = *(it->preconditions.begin());
+            if (trace_info.tracing && !post.exists())
+            {
+              Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+              rename.trigger();
+              post = ApEvent(rename);
+            }
+          }
           else if (!it->preconditions.empty())
           {
             post = Runtime::merge_events(it->preconditions);
@@ -4606,7 +4624,15 @@ namespace Legion {
         {
           ApEvent post;
           if (it->preconditions.size() == 1)
+          {
             post = *(it->preconditions.begin());
+            if (trace_info.tracing && !post.exists())
+            {
+              Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+              rename.trigger();
+              post = ApEvent(rename);
+            }
+          }
           else if (!it->preconditions.empty())
           {
             post = Runtime::merge_events(it->preconditions);
@@ -5677,7 +5703,15 @@ namespace Legion {
           continue;
         ApEvent done_event;
         if (it->preconditions.size() == 1)
+        {
           done_event = *(it->preconditions.begin());
+          if (trace_info.tracing && !done_event.exists())
+          {
+            Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+            rename.trigger();
+            done_event = ApEvent(rename);
+          }
+        }
         else
         {
           done_event = Runtime::merge_events(it->preconditions);

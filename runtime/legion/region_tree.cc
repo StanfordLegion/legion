@@ -2849,13 +2849,6 @@ namespace Legion {
             ApEvent copy_post = dst_node->issue_copy(op, src_it->second,
                                        dst_it->second, copy_pre, guard,
                                        trace_info);
-            if (trace_info.tracing && !copy_post.exists())
-            {
-              Realm::UserEvent new_copy_post(
-                  Realm::UserEvent::create_user_event());
-              new_copy_post.trigger();
-              copy_post = ApEvent(new_copy_post);
-            }
             if (copy_post.exists())
               result_events.insert(copy_post);
           }
@@ -2995,12 +2988,6 @@ namespace Legion {
                             src_fields_fold, dst_fields_fold, copy_pre, 
                             predicate_guard, trace_info, NULL/*intersect*/, 
                             dst_req.redop, true/*fold*/);
-        if (trace_info.tracing && !copy_post.exists())
-        {
-          Realm::UserEvent new_copy_post(Realm::UserEvent::create_user_event());
-          new_copy_post.trigger();
-          copy_post = ApEvent(new_copy_post);
-        }
         if (copy_post.exists())
           result_events.insert(copy_post);
       }
@@ -3020,12 +3007,6 @@ namespace Legion {
                             src_fields_list, dst_fields_list, copy_pre, 
                             predicate_guard, trace_info, NULL/*intersect*/, 
                             dst_req.redop, false/*fold*/);
-        if (trace_info.tracing && !copy_post.exists())
-        {
-          Realm::UserEvent new_copy_post(Realm::UserEvent::create_user_event());
-          new_copy_post.trigger();
-          copy_post = ApEvent(new_copy_post);
-        }
         if (copy_post.exists())
           result_events.insert(copy_post);
       }

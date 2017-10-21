@@ -3893,7 +3893,7 @@ namespace Legion {
       // and issue the across copies, first set up the sync precondition
       ApEvent sync_precondition = compute_sync_precondition();
 
-      if (memoizing && sync_precondition.exists())
+      if (memoizing)
       {
 #ifdef DEBUG_LEGION
         assert(trace_info.tpl != NULL && trace_info.tpl->is_tracing());
@@ -4068,14 +4068,15 @@ namespace Legion {
 #endif
         trace_info.tpl->record_merge_events(trace_info, copy_complete_event,
             copy_complete_events);
-        trace_info.tpl->record_trigger_copy_completion(trace_info, this,
-            copy_complete_event);
       }
 
       if (!restrict_postconditions.empty())
       {
         restrict_postconditions.insert(copy_complete_event);
         copy_complete_event = Runtime::merge_events(restrict_postconditions);
+        if (memoizing)
+          trace_info.tpl->record_merge_events(trace_info, copy_complete_event,
+              copy_complete_events);
       }
 #ifdef LEGION_SPY
       if (Runtime::legion_spy_enabled)
@@ -4111,6 +4112,9 @@ namespace Legion {
       Runtime::trigger_event(completion_event, copy_complete_event);
       need_completion_trigger = false;
       complete_execution(Runtime::protect_event(copy_complete_event));
+      if (memoizing)
+        trace_info.tpl->record_trigger_copy_completion(trace_info, this,
+            copy_complete_event);
     }
 
     //--------------------------------------------------------------------------
@@ -4643,12 +4647,8 @@ namespace Legion {
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
       // Mark that we completed mapping
-      if (!map_applied_conditions.empty())
-        complete_mapping(Runtime::merge_events(map_applied_conditions));
-      else
-        complete_mapping();
-      if (!acquired_instances.empty())
-        release_acquired_instances(acquired_instances);
+      complete_mapping();
+
       // Handle the case for marking when the copy completes
       Runtime::trigger_event(completion_event, copy_complete_event);
       need_completion_trigger = false;

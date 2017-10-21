@@ -482,7 +482,7 @@ namespace Legion {
       void record_get_copy_term_event(PhysicalTraceInfo &trace_info,
                                       ApEvent lhs, CopyOp *copy);
       void record_set_copy_sync_event(PhysicalTraceInfo &trace_info,
-                                      ApEvent lhs, CopyOp *copy);
+                                      ApEvent &lhs, CopyOp *copy);
       void record_trigger_copy_completion(PhysicalTraceInfo &trace_info,
                                           CopyOp *copy, ApEvent rhs);
       void record_issue_fill(PhysicalTraceInfo &trace_info,

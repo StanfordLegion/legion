@@ -2749,9 +2749,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_set_copy_sync_event(
-                       PhysicalTraceInfo &trace_info, ApEvent lhs, CopyOp* copy)
+                      PhysicalTraceInfo &trace_info, ApEvent &lhs, CopyOp* copy)
     //--------------------------------------------------------------------------
     {
+      if (!lhs.exists())
+      {
+        Realm::UserEvent rename(Realm::UserEvent::create_user_event());
+        rename.trigger();
+        lhs = ApEvent(rename);
+      }
 #ifdef DEBUG_LEGION
       assert(copy->is_memoizing());
 #endif
