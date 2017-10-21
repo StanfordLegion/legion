@@ -458,6 +458,10 @@ namespace Legion {
                          const std::vector<Domain::CopySrcDstField>& src_fields,
                          const std::vector<Domain::CopySrcDstField>& dst_fields,
                              ApEvent precondition,
+#ifdef LEGION_SPY
+                             LogicalRegion handle,
+                             RegionTreeNode *intersect,
+#endif
                              ReductionOpID redop = 0,
                              bool reduction_fold = true);
       void record_empty_copy(CompositeView *src,
@@ -486,7 +490,11 @@ namespace Legion {
                              const Domain &domain,
                              const std::vector<Domain::CopySrcDstField> &fields,
                              const void *fill_buffer, size_t fill_size,
-                             ApEvent precondition);
+                             ApEvent precondition
+#ifdef LEGION_SPY
+                             , LogicalRegion handle
+#endif
+                             );
 
     private:
       void record_ready_view(PhysicalTraceInfo &trace_info,
@@ -700,13 +708,21 @@ namespace Legion {
                 const TraceLocalId &op_key,
                 const std::vector<Domain::CopySrcDstField> &fields,
                 const ReductionOp *reduction_op,
-                unsigned precondition_idx);
+                unsigned precondition_idx
+#ifdef LEGION_SPY
+                , LogicalRegion handle
+#endif
+                );
       IssueFill(PhysicalTemplate& tpl,
                 unsigned lhs, const Domain &domain,
                 const TraceLocalId &op_key,
                 const std::vector<Domain::CopySrcDstField> &fields,
                 const void *fill_buffer, size_t fill_size,
-                unsigned precondition_idx);
+                unsigned precondition_idx
+#ifdef LEGION_SPY
+                , LogicalRegion handle
+#endif
+                );
       virtual ~IssueFill();
       virtual void execute();
       virtual std::string to_string();
@@ -744,6 +760,9 @@ namespace Legion {
       void *fill_buffer;
       size_t fill_size;
       unsigned precondition_idx;
+#ifdef LEGION_SPY
+      LogicalRegion handle;
+#endif
     };
 
     /**
@@ -762,6 +781,10 @@ namespace Legion {
                 const std::vector<Domain::CopySrcDstField>& src_fields,
                 const std::vector<Domain::CopySrcDstField>& dst_fields,
                 unsigned precondition_idx,
+#ifdef LEGION_SPY
+                LogicalRegion handle,
+                RegionTreeNode *intersect,
+#endif
                 ReductionOpID redop, bool reduction_fold);
       virtual void execute();
       virtual std::string to_string();
@@ -797,6 +820,10 @@ namespace Legion {
       std::vector<Domain::CopySrcDstField> src_fields;
       std::vector<Domain::CopySrcDstField> dst_fields;
       unsigned precondition_idx;
+#ifdef LEGION_SPY
+      LogicalRegion handle;
+      RegionTreeNode *intersect;
+#endif
       ReductionOpID redop;
       bool reduction_fold;
     };

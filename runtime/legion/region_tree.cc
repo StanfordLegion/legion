@@ -15932,8 +15932,11 @@ namespace Legion {
                       redop, reduction_fold));
               if (trace_info.tracing)
                 trace_info.tpl->record_issue_copy(trace_info, op, done_event,
-                    *it, src_fields, dst_fields, pred_pre, redop,
-                    reduction_fold);
+                    *it, src_fields, dst_fields, pred_pre,
+#ifdef LEGION_SPY
+                    handle, intersect,
+#endif
+                    redop, reduction_fold);
               done_events.insert(done_event);
             }
           }
@@ -15946,8 +15949,11 @@ namespace Legion {
                     requests, precondition, redop, reduction_fold));
               if (trace_info.tracing)
                 trace_info.tpl->record_issue_copy(trace_info, op, done_event,
-                    *it, src_fields, dst_fields, precondition, redop,
-                    reduction_fold);
+                    *it, src_fields, dst_fields, precondition,
+#ifdef LEGION_SPY
+                    handle, intersect,
+#endif
+                    redop, reduction_fold);
               done_events.insert(done_event);
             }
           }
@@ -15988,7 +15994,11 @@ namespace Legion {
                                 requests, pred_pre, redop, reduction_fold));
             if (trace_info.tracing)
               trace_info.tpl->record_issue_copy(trace_info, op, result,
-                  dom, src_fields, dst_fields, pred_pre, redop, reduction_fold);
+                  dom, src_fields, dst_fields, pred_pre,
+#ifdef LEGION_SPY
+                  handle, intersect,
+#endif
+                  redop, reduction_fold);
           }
           else
           {
@@ -15996,8 +16006,11 @@ namespace Legion {
                                       precondition, redop, reduction_fold));
             if (trace_info.tracing)
               trace_info.tpl->record_issue_copy(trace_info, op, result,
-                  dom, src_fields, dst_fields, precondition, redop,
-                  reduction_fold);
+                  dom, src_fields, dst_fields, precondition,
+#ifdef LEGION_SPY
+                  handle, intersect,
+#endif
+                  redop, reduction_fold);
           }
         }
       }
@@ -16036,8 +16049,11 @@ namespace Legion {
                     redop, reduction_fold));
             if (trace_info.tracing)
               trace_info.tpl->record_issue_copy(trace_info, op, done_event,
-                  *it, src_fields, dst_fields, pred_pre, redop,
-                  reduction_fold);
+                  *it, src_fields, dst_fields, pred_pre,
+#ifdef LEGION_SPY
+                  handle, intersect,
+#endif
+                  redop, reduction_fold);
             done_events.insert(done_event);
           }
         }
@@ -16051,8 +16067,11 @@ namespace Legion {
                                                 redop, reduction_fold));
             if (trace_info.tracing)
               trace_info.tpl->record_issue_copy(trace_info, op, done_event,
-                  *it, src_fields, dst_fields, precondition, redop,
-                  reduction_fold);
+                  *it, src_fields, dst_fields, precondition,
+#ifdef LEGION_SPY
+                  handle, intersect,
+#endif
+                  redop, reduction_fold);
             done_events.insert(done_event);
           }
         }
@@ -16165,7 +16184,11 @@ namespace Legion {
                     requests, fill_value, fill_size, pred_pre));
               if (trace_info.tracing)
                 trace_info.tpl->record_issue_fill(trace_info, op, done_event,
-                    *it, dst_fields, fill_value, fill_size, pred_pre);
+                    *it, dst_fields, fill_value, fill_size, pred_pre
+#ifdef LEGION_SPY
+                    , handle
+#endif
+                    );
               done_events.insert(done_event);
             }
           }
@@ -16178,7 +16201,11 @@ namespace Legion {
                     fill_value, fill_size, precondition));
               if (trace_info.tracing)
                 trace_info.tpl->record_issue_fill(trace_info, op, done_event,
-                    *it, dst_fields, fill_value, fill_size, precondition);
+                    *it, dst_fields, fill_value, fill_size, precondition
+#ifdef LEGION_SPY
+                    , handle
+#endif
+                    );
               done_events.insert(done_event);
             }
           }
@@ -16214,7 +16241,11 @@ namespace Legion {
                     requests, fill_value, fill_size, pred_pre)));
             if (trace_info.tracing)
               trace_info.tpl->record_issue_fill(trace_info, op, result,
-                  dom, dst_fields, fill_value, fill_size, pred_pre);
+                  dom, dst_fields, fill_value, fill_size, pred_pre
+#ifdef LEGION_SPY
+                  , handle
+#endif
+                  );
           }
           else
           {
@@ -16222,7 +16253,11 @@ namespace Legion {
                                       fill_value, fill_size, precondition));
             if (trace_info.tracing)
               trace_info.tpl->record_issue_fill(trace_info, op, result,
-                  dom, dst_fields, fill_value, fill_size, precondition);
+                  dom, dst_fields, fill_value, fill_size, precondition
+#ifdef LEGION_SPY
+                  , handle
+#endif
+                  );
           }
         }
       }
@@ -16260,7 +16295,11 @@ namespace Legion {
                     requests, fill_value, fill_size, pred_pre));
             if (trace_info.tracing)
               trace_info.tpl->record_issue_fill(trace_info, op, done_event,
-                  *it, dst_fields, fill_value, fill_size, pred_pre);
+                  *it, dst_fields, fill_value, fill_size, pred_pre
+#ifdef LEGION_SPY
+                  , handle
+#endif
+                  );
             done_events.insert(done_event);
           }
         }
@@ -16273,7 +16312,11 @@ namespace Legion {
                                        fill_value, fill_size, precondition));
             if (trace_info.tracing)
               trace_info.tpl->record_issue_fill(trace_info, op, done_event,
-                  *it, dst_fields, fill_value, fill_size, precondition);
+                  *it, dst_fields, fill_value, fill_size, precondition
+#ifdef LEGION_SPY
+                  , handle
+#endif
+                  );
             done_events.insert(done_event);
           }
         }

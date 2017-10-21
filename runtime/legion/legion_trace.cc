@@ -2518,6 +2518,10 @@ namespace Legion {
                          const std::vector<Domain::CopySrcDstField>& src_fields,
                          const std::vector<Domain::CopySrcDstField>& dst_fields,
                                              ApEvent precondition,
+#ifdef LEGION_SPY
+                                             LogicalRegion handle,
+                                             RegionTreeNode *intersect,
+#endif
                                              ReductionOpID redop,
                                              bool reduction_fold)
     //--------------------------------------------------------------------------
@@ -2551,7 +2555,11 @@ namespace Legion {
       unsigned precondition_idx = pre_finder->second;
       instructions.push_back(new IssueCopy(
             *this, lhs_, domain, op_key, src_fields, dst_fields,
-            precondition_idx, redop, reduction_fold));
+            precondition_idx,
+#ifdef LEGION_SPY
+            handle, intersect,
+#endif
+            redop, reduction_fold));
 #ifdef DEBUG_LEGION
       assert(instructions.size() == events.size());
 #endif
@@ -2686,7 +2694,11 @@ namespace Legion {
         instructions.push_back(
             new IssueFill(*this, lhs_, manager->instance_domain,
                           op_key, fields, reduction_op,
-                          ready_event_idx));
+                          ready_event_idx
+#ifdef LEGION_SPY
+                          , manager->region_node->handle
+#endif
+                          ));
 
         ready_event_idx = lhs_;
       }
@@ -2798,7 +2810,11 @@ namespace Legion {
                              const std::vector<Domain::CopySrcDstField> &fields,
                                              const void *fill_buffer,
                                              size_t fill_size,
-                                             ApEvent precondition)
+                                             ApEvent precondition
+#ifdef LEGION_SPY
+                                             , LogicalRegion handle
+#endif
+                                             )
     //--------------------------------------------------------------------------
     {
       if (!lhs.exists())
@@ -2833,7 +2849,11 @@ namespace Legion {
       unsigned precondition_idx = pre_finder->second;
 
       instructions.push_back(new IssueFill(*this, lhs_, domain, key,
-                             fields, fill_buffer, fill_size, precondition_idx));
+                             fields, fill_buffer, fill_size, precondition_idx
+#ifdef LEGION_SPY
+                             , handle
+#endif
+                             ));
 #ifdef DEBUG_LEGION
       assert(instructions.size() == events.size());
 #endif
@@ -3024,9 +3044,17 @@ namespace Legion {
                          const TraceLocalId& key,
                          const std::vector<Domain::CopySrcDstField>& s,
                          const std::vector<Domain::CopySrcDstField>& d,
-                         unsigned pi, ReductionOpID ro, bool rf)
+                         unsigned pi,
+#ifdef LEGION_SPY
+                         LogicalRegion h, RegionTreeNode *i,
+#endif
+                         ReductionOpID ro, bool rf)
       : Instruction(tpl), lhs(l), domain(dom), op_key(key), src_fields(s),
-        dst_fields(d), precondition_idx(pi), redop(ro), reduction_fold(rf)
+        dst_fields(d), precondition_idx(pi),
+#ifdef LEGION_SPY
+        handle(h), intersect(i),
+#endif
+        redop(ro), reduction_fold(rf)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3051,8 +3079,43 @@ namespace Legion {
       if (op->runtime->profiler != NULL)
         op->runtime->profiler->add_copy_request(requests, op);
       ApEvent precondition = events[precondition_idx];
-      events[lhs] = ApEvent(domain.copy(src_fields, dst_fields, requests,
-                                        precondition, redop, reduction_fold));
+      ApEvent result = ApEvent(domain.copy(src_fields, dst_fields, requests,
+            precondition, redop, reduction_fold));
+#ifdef LEGION_SPY
+      if (!result.exists())
+      {
+        ApUserEvent new_result = Runtime::create_ap_user_event();
+        Runtime::trigger_event(new_result);
+        result = new_result;
+      }
+      LegionSpy::log_copy_events(op->get_unique_op_id(), handle, 
+                                 precondition, result);
+      for (unsigned idx = 0; idx < src_fields.size(); idx++)
+        LegionSpy::log_copy_field(result, src_fields[idx].field_id,
+                                  src_fields[idx].inst.id,
+                                  dst_fields[idx].field_id,
+                                  dst_fields[idx].inst.id, redop);
+      if (intersect != NULL)
+      {
+        if (intersect->is_region())
+        {
+          RegionNode *node = intersect->as_region_node();
+          LegionSpy::log_copy_intersect(result, 1,
+              node->handle.get_index_space().get_id(),
+              node->handle.get_field_space().get_id(),
+              node->handle.get_tree_id());
+        }
+        else
+        {
+          PartitionNode *node = intersect->as_partition_node();
+          LegionSpy::log_copy_intersect(result, 0,
+              node->handle.get_index_partition().get_id(),
+              node->handle.get_field_space().get_id(),
+              node->handle.get_tree_id());
+        }
+      }
+#endif
+      events[lhs] = result;
     }
 
     //--------------------------------------------------------------------------
@@ -3109,7 +3172,11 @@ namespace Legion {
       assert(pfinder != rewrite.end());
 #endif
       return new IssueCopy(tpl, lfinder->second, domain, op_key, src_fields,
-        dst_fields, pfinder->second, redop, reduction_fold);
+        dst_fields, pfinder->second,
+#ifdef LEGION_SPY
+        handle, intersect,
+#endif
+        redop, reduction_fold);
     }
 
     /////////////////////////////////////////////////////////////
@@ -3120,9 +3187,16 @@ namespace Legion {
     IssueFill::IssueFill(PhysicalTemplate& tpl, unsigned l, const Domain &d,
                          const TraceLocalId &key,
                          const std::vector<Domain::CopySrcDstField> &f,
-                         const ReductionOp *reduction_op, unsigned pi)
+                         const ReductionOp *reduction_op, unsigned pi
+#ifdef LEGION_SPY
+                         , LogicalRegion h
+#endif
+                         )
       : Instruction(tpl), lhs(l), domain(d), op_key(key), fields(f),
         precondition_idx(pi)
+#ifdef LEGION_SPY
+        , handle(h)
+#endif
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3139,9 +3213,16 @@ namespace Legion {
     IssueFill::IssueFill(PhysicalTemplate& tpl, unsigned l, const Domain &d,
                          const TraceLocalId &key,
                          const std::vector<Domain::CopySrcDstField> &f,
-                         const void *fb, size_t fs, unsigned pi)
+                         const void *fb, size_t fs, unsigned pi
+#ifdef LEGION_SPY
+                         , LogicalRegion h
+#endif
+                         )
       : Instruction(tpl), lhs(l), domain(d), op_key(key), fields(f),
         precondition_idx(pi)
+#ifdef LEGION_SPY
+        , handle(h)
+#endif
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3178,11 +3259,22 @@ namespace Legion {
         op->runtime->profiler->add_fill_request(requests,
                                                 op->get_unique_op_id());
 
-      events[lhs] = ApEvent(domain.fill(fields, requests, fill_buffer, fill_size,
+      ApEvent result = ApEvent(domain.fill(fields, requests, fill_buffer, fill_size,
             precondition));
 #ifdef LEGION_SPY
-      LegionSpy::log_event_dependence(precondition, events[lhs]);
+      if (!result.exists())
+      {
+        ApUserEvent new_result = Runtime::create_ap_user_event();
+        Runtime::trigger_event(new_result);
+        result = new_result;
+      }
+      LegionSpy::log_fill_events(op->get_unique_op_id(), handle,
+                                 precondition, result, op->get_unique_op_id());
+      for (unsigned idx = 0; idx < fields.size(); idx++)
+        LegionSpy::log_fill_field(result, fields[idx].field_id,
+                                  fields[idx].inst.id);
 #endif
+      events[lhs] = result;
     }
 
     //--------------------------------------------------------------------------
@@ -3217,7 +3309,11 @@ namespace Legion {
       assert(pfinder != rewrite.end());
 #endif
       return new IssueFill(tpl, lfinder->second, domain, op_key, fields,
-          fill_buffer, fill_size, pfinder->second);
+          fill_buffer, fill_size, pfinder->second
+#ifdef LEGION_SPY
+          , handle
+#endif
+          );
     }
 
     /////////////////////////////////////////////////////////////
