@@ -1837,61 +1837,7 @@ namespace Legion {
         if (it->impl->is_mapped())
           it->impl->unmap_region();
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::execute_task_launch(TaskOp *task, bool index,
-       LegionTrace *current_trace, bool silence_warnings, bool inlining_enabled)
-    //--------------------------------------------------------------------------
-    {
-      bool inline_task = false;
-      if (inlining_enabled)
-        inline_task = task->select_task_options();
-      // Now check to see if we're inling the task or just performing
-      // a normal asynchronous task launch
-      if (inline_task)
-      {
-        inline_child_task(task);
-        // After we're done we can deactivate it since we
-        // know that it will never be used again
-        task->deactivate();
-      }
-      else
-      {
-        // Normal task launch, iterate over the context task's
-        // regions and see if we need to unmap any of them
-        std::vector<PhysicalRegion> unmapped_regions;
-        if (!Runtime::unsafe_launch)
-          find_conflicting_regions(task, unmapped_regions);
-        if (!unmapped_regions.empty())
-        {
-          if (Runtime::runtime_warnings && !silence_warnings)
-          {
-            if (index)
-            {
-              REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
-                "WARNING: Runtime is unmapping and remapping "
-                  "physical regions around execute_index_space call in "
-                  "task %s (UID %lld).", get_task_name(), get_unique_id());
-            }
-            else
-            {
-              REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
-                "WARNING: Runtime is unmapping and remapping "
-                  "physical regions around execute_task call in "
-                  "task %s (UID %lld).", get_task_name(), get_unique_id());
-            }
-          }
-          for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
-            unmapped_regions[idx].impl->unmap_region();
-        }
-        // Issue the task call
-        runtime->add_to_dependence_queue(this, executing_processor, task);
-        // Remap any unmapped regions
-        if (!unmapped_regions.empty())
-          remap_unmapped_regions(current_trace, unmapped_regions);
-      }
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void TaskContext::remap_unmapped_regions(LegionTrace *trace,
@@ -6388,6 +6334,60 @@ namespace Legion {
       IndexSpace result = runtime->find_or_create_index_launch_space(domain);
       index_launch_spaces[domain] = result;
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::execute_task_launch(TaskOp *task, bool index,
+       LegionTrace *current_trace, bool silence_warnings, bool inlining_enabled)
+    //--------------------------------------------------------------------------
+    {
+      bool inline_task = false;
+      if (inlining_enabled)
+        inline_task = task->select_task_options();
+      // Now check to see if we're inling the task or just performing
+      // a normal asynchronous task launch
+      if (inline_task)
+      {
+        inline_child_task(task);
+        // After we're done we can deactivate it since we
+        // know that it will never be used again
+        task->deactivate();
+      }
+      else
+      {
+        // Normal task launch, iterate over the context task's
+        // regions and see if we need to unmap any of them
+        std::vector<PhysicalRegion> unmapped_regions;
+        if (!Runtime::unsafe_launch)
+          find_conflicting_regions(task, unmapped_regions);
+        if (!unmapped_regions.empty())
+        {
+          if (Runtime::runtime_warnings && !silence_warnings)
+          {
+            if (index)
+            {
+              REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
+                "WARNING: Runtime is unmapping and remapping "
+                  "physical regions around execute_index_space call in "
+                  "task %s (UID %lld).", get_task_name(), get_unique_id());
+            }
+            else
+            {
+              REPORT_LEGION_WARNING(LEGION_WARNING_RUNTIME_UNMAPPING_REMAPPING,
+                "WARNING: Runtime is unmapping and remapping "
+                  "physical regions around execute_task call in "
+                  "task %s (UID %lld).", get_task_name(), get_unique_id());
+            }
+          }
+          for (unsigned idx = 0; idx < unmapped_regions.size(); idx++)
+            unmapped_regions[idx].impl->unmap_region();
+        }
+        // Issue the task call
+        runtime->add_to_dependence_queue(this, executing_processor, task);
+        // Remap any unmapped regions
+        if (!unmapped_regions.empty())
+          remap_unmapped_regions(current_trace, unmapped_regions);
+      }
     }
 
     //--------------------------------------------------------------------------

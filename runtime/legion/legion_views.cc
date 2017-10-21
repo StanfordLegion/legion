@@ -588,10 +588,6 @@ namespace Legion {
       assert(previous_epoch_users.empty());
       assert(outstanding_gc_events.empty());
 #endif
-#ifdef LEGION_GC
-      log_garbage.info("GC Deletion %lld %d", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -5552,10 +5548,6 @@ namespace Legion {
       // Remove the reference on our context
       if (owner_context->remove_reference())
         delete owner_context;
-#ifdef LEGION_GC
-      log_garbage.info("GC Deletion %lld %d", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -5626,16 +5618,14 @@ namespace Legion {
     void CompositeView::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      if (!is_owner())
-        send_remote_gc_update(owner_space, mutator, 1, true/*add*/);
+      // No need to do anything
     }
 
     //--------------------------------------------------------------------------
     void CompositeView::notify_inactive(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      if (!is_owner())
-        send_remote_gc_update(owner_space, mutator, 1, false/*add*/);
+      // No need to do anything
     }
 
     //--------------------------------------------------------------------------
@@ -7239,13 +7229,7 @@ namespace Legion {
       {
         for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
               version_states.begin(); it != version_states.end(); it++)
-        {
-          if (it->first->is_owner())
-            it->first->add_nested_valid_ref(owner_did, mutator);
-          else
-            it->first->send_remote_valid_update(it->first->owner_space,
-                                      mutator, 1/*count*/, true/*add*/);
-        }
+          it->first->add_nested_valid_ref(owner_did, mutator);
       }
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
             children.begin(); it != children.end(); it++)
@@ -7270,13 +7254,7 @@ namespace Legion {
       {
         for (LegionMap<VersionState*,FieldMask>::aligned::const_iterator it = 
               version_states.begin(); it != version_states.end(); it++)
-        {
-          if (it->first->is_owner())
-            it->first->remove_nested_valid_ref(owner_did, mutator);
-          else
-            it->first->send_remote_valid_update(it->first->owner_space,
-                                    mutator, 1/*count*/, false/*add*/);
-        }
+          it->first->remove_nested_valid_ref(owner_did, mutator);
       }
       for (LegionMap<CompositeNode*,FieldMask>::aligned::const_iterator it = 
             children.begin(); it != children.end(); it++)
@@ -7384,13 +7362,7 @@ namespace Legion {
         state->add_nested_resource_ref(owner_did);
         version_states[state] = mask;
         if (root && currently_valid)
-        {
-          if (state->is_owner())
-            state->add_nested_valid_ref(owner_did, mutator);
-          else
-            state->send_remote_valid_update(state->owner_space, mutator,
-                                            1/*count*/, true/*add*/);
-        }
+          state->add_nested_valid_ref(owner_did, mutator);
       }
       else
         finder->second |= mask;
@@ -7464,10 +7436,6 @@ namespace Legion {
     {
       if (value->remove_reference())
         delete value;
-#ifdef LEGION_GC
-      log_garbage.info("GC Deletion %lld %d", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -7734,10 +7702,6 @@ namespace Legion {
       false_views.clear();
       if (version_info->remove_reference())
         delete version_info;
-#ifdef LEGION_GC
-      log_garbage.info("GC Deletion %lld %d", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -8310,10 +8274,6 @@ namespace Legion {
       assert(reduction_users.empty());
       assert(reading_users.empty());
       assert(outstanding_gc_events.empty());
-#endif
-#ifdef LEGION_GC
-      log_garbage.info("GC Deletion %lld %d", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
 #endif
     }
 

@@ -30,6 +30,8 @@ if(NOT LLVM_FOUND AND NOT TARGET_LLVM)
                                               llvm-config-3.8
                                               llvm-config-3.6
                                               llvm-config-3.5
+                                              llvm-config-4.0
+                                              llvm-config-5.0
                                               llvm-config)
   endif(NOT LLVM_CONFIG_EXECUTABLE)
   if(LLVM_CONFIG_EXECUTABLE)

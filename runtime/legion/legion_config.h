@@ -221,7 +221,7 @@
 #define LEGION_DISTRIBUTED_ID_MASK    0x00FFFFFFFFFFFFFFULL
 #define LEGION_DISTRIBUTED_ID_FILTER(x) ((x) & 0x00FFFFFFFFFFFFFFULL)
 #define LEGION_DISTRIBUTED_HELP_DECODE(x)   ((x) >> 56)
-#define LEGION_DISTRIBUTED_HELP_ENCODE(x,y) ((x) | ((y) << 56))
+#define LEGION_DISTRIBUTED_HELP_ENCODE(x,y) ((x) | (((long long)(y)) << 56))
 
 // The following enums are all re-exported by
 // namespace Legion. These versions are here to facilitate the

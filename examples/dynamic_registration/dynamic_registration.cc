@@ -19,6 +19,7 @@
 #include <cstdlib>
 #include "legion.h"
 #include "legion_c.h"
+#include <mappers/default_mapper.h>
 
 using namespace Legion;
 
@@ -171,23 +172,35 @@ void top_level_task(const Task *task,
 
   LayoutConstraintID soa_layout_id = runtime->register_layout(layout_registrar);
 
+#ifdef USE_LIBDL
+  // rely on dladdr/dlsym to make function pointers portable for global
+  //  task registration
+  bool global_taskreg = true;
+#else
+  // function pointers will not be portable, so limit tasks to local node
+  const bool global_taskreg = false;
+#endif
+
   // Dynamically register some more tasks
   TaskVariantRegistrar init_registrar(INIT_FIELD_TASK_ID,
-                                      "cpu_init_variant");
+                                      "cpu_init_variant",
+				      global_taskreg);
   // Add our constraints
   init_registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC))
       .add_layout_constraint_set(0/*index*/, soa_layout_id);
   runtime->register_task_variant<init_field_task>(init_registrar);
 
   TaskVariantRegistrar stencil_registrar(STENCIL_TASK_ID,
-                                         "cpu_stencil_variant");
+                                         "cpu_stencil_variant",
+					 global_taskreg);
   stencil_registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC))
       .add_layout_constraint_set(0/*index*/, soa_layout_id)
       .add_layout_constraint_set(1/*index*/, soa_layout_id);
   runtime->register_task_variant<stencil_task>(stencil_registrar);
 
   TaskVariantRegistrar check_registrar(CHECK_TASK_ID,
-                                       "cpu_check_variant");
+                                       "cpu_check_variant",
+				       global_taskreg);
   check_registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC))
       .add_layout_constraint_set(0/*index*/, soa_layout_id)
       .add_layout_constraint_set(1/*index*/, soa_layout_id);
@@ -195,7 +208,7 @@ void top_level_task(const Task *task,
 
   TaskVariantRegistrar wrapped_cpp_registrar(WRAPPED_CPP_TASK_ID,
 					     "wrapped_cpp_variant",
-					      true /*global*/);
+					     global_taskreg);
   wrapped_cpp_registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
   const char cpp_msg[] = "user data for cpp task";
   runtime->register_task_variant(wrapped_cpp_registrar,
@@ -204,7 +217,7 @@ void top_level_task(const Task *task,
 
   TaskVariantRegistrar wrapped_c_registrar(WRAPPED_C_TASK_ID,
 					   "wrapped_c_variant",
-					   true /*global*/);
+					   global_taskreg);
   wrapped_c_registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
   const char c_msg[] = "user data for c task";
   runtime->register_task_variant(wrapped_c_registrar,
@@ -212,6 +225,7 @@ void top_level_task(const Task *task,
 				 c_msg, sizeof(c_msg));
 
 #ifdef REALM_USE_LLVM
+  // LLVM IR is portable, so we can do global registration even without libdl
   TaskVariantRegistrar wrapped_llvm_registrar(WRAPPED_LLVM_TASK_ID,
 					      "wrapped_llvm_variant",
 					      true /*global*/);
@@ -238,6 +252,8 @@ void top_level_task(const Task *task,
   {
     int val = 55;
     TaskLauncher l(WRAPPED_CPP_TASK_ID, TaskArgument(&val, sizeof(val)));
+    if (!global_taskreg)
+      l.tag |= Legion::Mapping::DefaultMapper::SAME_ADDRESS_SPACE;
     Future f = runtime->execute_task(ctx, l);
     f.get_void_result();
   }
@@ -245,6 +261,8 @@ void top_level_task(const Task *task,
   {
     int val = 66;
     TaskLauncher l(WRAPPED_C_TASK_ID, TaskArgument(&val, sizeof(val)));
+    if (!global_taskreg)
+      l.tag |= Legion::Mapping::DefaultMapper::SAME_ADDRESS_SPACE;
     Future f = runtime->execute_task(ctx, l);
     f.get_void_result();
   }
@@ -299,6 +317,8 @@ void top_level_task(const Task *task,
 
   IndexLauncher init_launcher(INIT_FIELD_TASK_ID, color_is,
                               TaskArgument(NULL, 0), arg_map);
+  if (!global_taskreg)
+    init_launcher.tag |= Legion::Mapping::DefaultMapper::SAME_ADDRESS_SPACE;
   init_launcher.add_region_requirement(
       RegionRequirement(disjoint_lp, 0/*projection ID*/,
                         WRITE_DISCARD, EXCLUSIVE, stencil_lr));
@@ -307,6 +327,8 @@ void top_level_task(const Task *task,
 
   IndexLauncher stencil_launcher(STENCIL_TASK_ID, color_is,
        TaskArgument(&num_elements, sizeof(num_elements)), arg_map);
+  if (!global_taskreg)
+    stencil_launcher.tag |= Legion::Mapping::DefaultMapper::SAME_ADDRESS_SPACE;
   stencil_launcher.add_region_requirement(
       RegionRequirement(ghost_lp, 0/*projection ID*/,
                         READ_ONLY, EXCLUSIVE, stencil_lr));
@@ -319,6 +341,8 @@ void top_level_task(const Task *task,
 
   TaskLauncher check_launcher(CHECK_TASK_ID, 
       TaskArgument(&num_elements, sizeof(num_elements)));
+  if (!global_taskreg)
+    check_launcher.tag |= Legion::Mapping::DefaultMapper::SAME_ADDRESS_SPACE;
   check_launcher.add_region_requirement(
       RegionRequirement(stencil_lr, READ_ONLY, EXCLUSIVE, stencil_lr));
   check_launcher.add_field(0, FID_VAL);

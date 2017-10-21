@@ -35,6 +35,24 @@
 namespace Legion {
   namespace Internal {
 
+    enum DistCollectableType {
+      INSTANCE_MANAGER_DC = 0x1,
+      REDUCTION_FOLD_DC = 0x2,
+      REDUCTION_LIST_DC = 0x3,
+      MATERIALIZED_VIEW_DC = 0x4,
+      REDUCTION_VIEW_DC = 0x5,
+      COMPOSITE_VIEW_DC = 0x6,
+      FILL_VIEW_DC = 0x7,
+      PHI_VIEW_DC = 0x8,
+      VERSION_STATE_DC = 0x9,
+      FUTURE_DC = 0xA,
+      FUTURE_MAP_DC = 0xB,
+      INDEX_TREE_NODE_DC = 0xC,
+      FIELD_SPACE_DC = 0xD,
+      REGION_TREE_NODE_DC = 0xE,
+      DIST_TYPE_LAST_DC,
+    };
+
     enum ReferenceSource {
       FUTURE_HANDLE_REF = 0,
       DEFERRED_TASK_REF = 1,

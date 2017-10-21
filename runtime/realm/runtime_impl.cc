@@ -586,11 +586,16 @@ namespace Realm {
   // class CoreModule
   //
 
+  namespace Config {
+    // if true, worker threads that might have used user-level thread switching
+    //  fall back to kernel threading
+    bool force_kernel_threads = false;
+  };
+
   CoreModule::CoreModule(void)
     : Module("core")
     , num_cpu_procs(1), num_util_procs(1), num_io_procs(0)
     , concurrent_io_threads(1)  // Legion does not support values > 1 right now
-    , force_kernel_threads(false)
     , sysmem_size_in_mb(512), stack_size_in_mb(2)
   {}
 
@@ -610,7 +615,6 @@ namespace Realm {
       .add_option_int("-ll:concurrent_io", m->concurrent_io_threads)
       .add_option_int("-ll:csize", m->sysmem_size_in_mb)
       .add_option_int("-ll:stacksize", m->stack_size_in_mb, true /*keep*/)
-      .add_option_bool("-ll:force_kthreads", m->force_kernel_threads, true /*keep*/)
       .parse_command_line(cmdline);
 
     return m;
@@ -640,7 +644,7 @@ namespace Realm {
       Processor p = runtime->next_local_processor_id();
       ProcessorImpl *pi = new LocalUtilityProcessor(p, runtime->core_reservation_set(),
 						    stack_size_in_mb << 20,
-						    force_kernel_threads);
+						    Config::force_kernel_threads);
       runtime->add_processor(pi);
     }
 
@@ -656,7 +660,7 @@ namespace Realm {
       Processor p = runtime->next_local_processor_id();
       ProcessorImpl *pi = new LocalCPUProcessor(p, runtime->core_reservation_set(),
 						stack_size_in_mb << 20,
-						force_kernel_threads);
+						Config::force_kernel_threads);
       runtime->add_processor(pi);
     }
   }
@@ -1033,7 +1037,7 @@ namespace Realm {
       size_t reg_ib_mem_size_in_mb = 256;
 #else
       size_t gasnet_mem_size_in_mb = 0;
-      size_t reg_ib_mem_size_in_mb = 0;
+      size_t reg_ib_mem_size_in_mb = 64; // for transposes/serdez
 #endif
       size_t reg_mem_size_in_mb = 0;
       size_t disk_mem_size_in_mb = 0;
@@ -1086,10 +1090,10 @@ namespace Realm {
 #endif
 
       cp.add_option_int("-realm:eventloopcheck", Config::event_loop_detection_limit);
+      cp.add_option_bool("-ll:force_kthreads", Config::force_kernel_threads);
 
       // these are actually parsed in activemsg.cc, but consume them here for now
       size_t dummy = 0;
-      bool dummy_bool = false;
       cp.add_option_int("-ll:numlmbs", dummy)
 	.add_option_int("-ll:lmbsize", dummy)
 	.add_option_int("-ll:forcelong", dummy)
@@ -1097,9 +1101,6 @@ namespace Realm {
 	.add_option_int("-ll:spillwarn", dummy)
 	.add_option_int("-ll:spillstep", dummy)
 	.add_option_int("-ll:spillstall", dummy);
-
-      // used in multiple places, so consume here
-      cp.add_option_bool("-ll:force_kthreads", dummy_bool);
 
       bool cmdline_ok = cp.parse_command_line(cmdline);
 
@@ -1150,6 +1151,18 @@ namespace Realm {
 		       "of bits in ID", max_node_id+1, (ID::MAX_NODE_ID + 1));
         exit(1);
       }
+
+      // if compiled in and not explicitly disabled, check our user threading
+      //  support
+#ifdef REALM_USE_USER_THREADS
+      if(!Config::force_kernel_threads) {
+        bool ok = Thread::test_user_switch_support();
+        if(!ok) {
+          log_runtime.warning() << "user switching not working - falling back to kernel threads";
+          Config::force_kernel_threads = true;
+        }
+      }
+#endif
 
       core_map = CoreMap::discover_core_map(hyperthread_sharing);
       core_reservations = new CoreReservationSet(core_map);

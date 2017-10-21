@@ -87,49 +87,34 @@ CONDUIT=ibv
 GPU_ARCH=fermi
 endif
 ifeq ($(findstring titan,$(shell uname -n)),titan)
-CXX=CC
-F90=ftn
 # without this, lapack stuff will link, but generate garbage output - thanks Cray!
 LAPACK_LIBS=-L/opt/acml/5.3.1/gfortran64_fma4/lib -Wl,-rpath=/opt/acml/5.3.1/gfortran64_fma4/lib -lacml
 MARCH=bdver1
-CC_FLAGS += -DGASNETI_BUG1389_WORKAROUND=1
 CUDA=${CUDATOOLKIT_HOME}
 CONDUIT=gemini
 GPU_ARCH=k20
-LEGION_LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
-LEGION_LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
 endif
 ifeq ($(findstring daint,$(shell uname -n)),daint)
-CXX=CC
-F90=ftn
-# Cray's magic wrappers automatically provide LAPACK goodness?
-LAPACK_LIBS=
 MARCH=corei7-avx
-CC_FLAGS += -DGASNETI_BUG1389_WORKAROUND=1
 CUDA=${CUDATOOLKIT_HOME}
 CONDUIT=aries
 GPU_ARCH=k20
-LEGION_LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
-LEGION_LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
 endif
 ifeq ($(findstring excalibur,$(shell uname -n)),excalibur)
-CXX=CC
-F90=ftn
-# Cray's magic wrappers automatically provide LAPACK goodness?
-LAPACK_LIBS=
-CC_FLAGS += -DGASNETI_BUG1389_WORKAROUND=1
 CONDUIT=aries
-LEGION_LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
-LEGION_LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
 endif
 ifeq ($(findstring cori,$(shell uname -n)),cori)
+CONDUIT=aries
+endif
+
+# Customization specific to Cray programming environment
+ifneq (${CRAY_PE},)
 CXX=CC
 F90=ftn
 # Cray's magic wrappers automatically provide LAPACK goodness?
-LAPACK_LIBS=
-CC_FLAGS += -DGASNETI_BUG1389_WORKAROUND=1
-CONDUIT=aries
+LAPACK_LIBS ?=
 LEGION_LD_FLAGS += ${CRAY_UGNI_POST_LINK_OPTS}
+LEGION_LD_FLAGS += ${CRAY_UDREG_POST_LINK_OPTS}
 LEGION_LD_FLAGS += ${CRAY_PMI_POST_LINK_OPTS}
 endif
 
@@ -168,6 +153,7 @@ endif
 
 USE_LIBDL ?= 1
 ifeq ($(strip $(USE_LIBDL)),1)
+CC_FLAGS += -DUSE_LIBDL
 ifneq ($(shell uname -s),Darwin)
 #CC_FLAGS += -rdynamic
 LEGION_LD_FLAGS += -ldl -rdynamic
@@ -179,7 +165,7 @@ endif
 USE_LLVM ?= 0
 ifeq ($(strip $(USE_LLVM)),1)
   # prefer known-working versions, if they can be named explicitly
-  LLVM_CONFIG ?= $(shell which llvm-config-3.9 llvm-config-3.8 llvm-config-3.6 llvm-config-3.5 llvm-config | head -1)
+  LLVM_CONFIG ?= $(shell which llvm-config-3.9 llvm-config-3.8 llvm-config-3.6 llvm-config-3.5 llvm-config-4.0 llvm-config-5.0 llvm-config | head -1)
   ifeq ($(LLVM_CONFIG),)
     $(error cannot find llvm-config-* - set with LLVM_CONFIG if not in path)
   endif
@@ -319,6 +305,10 @@ ifeq ($(strip $(GPU_ARCH)),pascal)
 NVCC_FLAGS	+= -arch=compute_60 -code=sm_60
 NVCC_FLAGS	+= -DPASCAL_ARCH
 endif
+ifeq ($(strip $(GPU_ARCH)),volta)
+NVCC_FLAGS	+= -arch=compute_70 -code=sm_70
+NVCC_FLAGS	+= -DVOLTA_ARCH
+endif
 NVCC_FLAGS	+= -Xptxas "-v" #-abi=no"
 endif
 
@@ -355,14 +345,14 @@ ifeq ($(strip $(USE_GASNET)),1)
   ifeq ($(strip $(CONDUIT)),gemini)
     INC_FLAGS	+= -I$(GASNET)/include/gemini-conduit
     CC_FLAGS	+= -DGASNET_CONDUIT_GEMINI
-    LEGION_LD_FLAGS	+= -lgasnet-gemini-par -lugni -lpmi -lhugetlbfs
+    LEGION_LD_FLAGS	+= -lgasnet-gemini-par -lugni -ludreg -lpmi -lhugetlbfs
     # GASNet needs MPI for interop support
     USE_MPI	= 1
   endif
   ifeq ($(strip $(CONDUIT)),aries)
     INC_FLAGS   += -I$(GASNET)/include/aries-conduit
     CC_FLAGS    += -DGASNET_CONDUIT_ARIES
-    LEGION_LD_FLAGS    += -lgasnet-aries-par -lugni -lpmi -lhugetlbfs
+    LEGION_LD_FLAGS    += -lgasnet-aries-par -lugni -ludreg -lpmi -lhugetlbfs
     # GASNet needs MPI for interop support
     USE_MPI	= 1
   endif

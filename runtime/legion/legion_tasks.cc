@@ -451,8 +451,10 @@ namespace Legion {
       {
         DistributedID future_did;
         derez.deserialize(future_did);
-        futures[idx] = Future(
-            runtime->find_or_create_future(future_did, mutator));
+        FutureImpl *impl = 
+          runtime->find_or_create_future(future_did, mutator);
+        impl->add_base_gc_ref(FUTURE_HANDLE_REF, mutator);
+        futures[idx] = Future(impl, false/*need reference*/);
       }
       size_t num_grants;
       derez.deserialize(num_grants);
@@ -5775,8 +5777,10 @@ namespace Legion {
       if (pred_false_did != 0)
       {
         WrapperReferenceMutator mutator(ready_events);
-        predicate_false_future = Future( 
-          runtime->find_or_create_future(pred_false_did, &mutator));
+        FutureImpl *impl = 
+          runtime->find_or_create_future(pred_false_did, &mutator);
+        impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
+        predicate_false_future = Future(impl, false/*need reference*/);
       }
       derez.deserialize(predicate_false_size);
       if (predicate_false_size > 0)
@@ -8993,8 +8997,10 @@ namespace Legion {
       if (pred_false_did != 0)
       {
         WrapperReferenceMutator mutator(ready_events);
-        predicate_false_future = Future( 
-          runtime->find_or_create_future(pred_false_did, &mutator));
+        FutureImpl *impl = 
+          runtime->find_or_create_future(pred_false_did, &mutator);
+        impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
+        predicate_false_future = Future(impl, false/*need reference*/);
       }
       derez.deserialize(predicate_false_size);
       if (predicate_false_size > 0)
@@ -9024,9 +9030,10 @@ namespace Legion {
         if (future_map_did > 0)
         {
           WrapperReferenceMutator mutator(ready_events);
-          point_arguments = 
-            FutureMap(runtime->find_or_create_future_map(future_map_did, 
-                                                         parent_ctx, &mutator));
+          FutureMapImpl *impl = runtime->find_or_create_future_map(
+                                  future_map_did, parent_ctx, &mutator);
+          impl->add_base_gc_ref(FUTURE_HANDLE_REF, &mutator);
+          point_arguments = FutureMap(impl, false/*need reference*/);
         }
       }
       // Return true to add this to the ready queue

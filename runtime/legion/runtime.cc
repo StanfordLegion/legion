@@ -253,7 +253,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureImpl::FutureImpl(Runtime *rt, bool register_now, DistributedID did,
                            AddressSpaceID own_space, Operation *o /*= NULL*/)
-      : DistributedCollectable(rt, did, own_space, register_now),
+      : DistributedCollectable(rt, 
+          LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_DC), 
+          own_space, register_now),
         producer_op(o), op_gen((o == NULL) ? 0 : o->get_generation()),
 #ifdef LEGION_SPY
         producer_uid((o == NULL) ? 0 : o->get_unique_op_id()),
@@ -299,10 +301,6 @@ namespace Legion {
       }
       if (producer_op != NULL)
         producer_op->remove_mapping_reference(op_gen);
-#ifdef LEGION_GC
-      log_garbage.info("GC Deletion %lld %d", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -736,7 +734,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FutureMapImpl::FutureMapImpl(TaskContext *ctx, Operation *o, Runtime *rt,
                                  DistributedID did, AddressSpaceID owner_space)
-      : DistributedCollectable(rt, did, owner_space), 
+      : DistributedCollectable(rt, 
+          LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC),  owner_space), 
         context(ctx), op(o), op_gen(o->get_generation()),
         ready_event(o->get_completion_event()), valid(true)
     //--------------------------------------------------------------------------
@@ -751,7 +750,9 @@ namespace Legion {
     FutureMapImpl::FutureMapImpl(TaskContext *ctx, Runtime *rt,
                                  DistributedID did, AddressSpaceID owner_space,
                                  bool register_now)
-      : DistributedCollectable(rt, did, owner_space, register_now), 
+      : DistributedCollectable(rt, 
+          LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_MAP_DC), 
+          owner_space, register_now), 
         context(ctx), op(NULL), op_gen(0),
         ready_event(ApEvent::NO_AP_EVENT), valid(!is_owner())
     //--------------------------------------------------------------------------
@@ -779,10 +780,6 @@ namespace Legion {
       if (is_owner() && registered_with_runtime)
         unregister_with_runtime(REFERENCE_VIRTUAL_CHANNEL);
       futures.clear();
-#ifdef LEGION_GC
-      log_garbage.info("GC Deletion %lld %d", 
-          LEGION_DISTRIBUTED_ID_FILTER(did), local_space);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -926,11 +923,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureMapImpl::set_future(const DomainPoint &point, FutureImpl *impl)
+    void FutureMapImpl::set_future(const DomainPoint &point, FutureImpl *impl,
+                                   ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
+      // Add the reference first and then set the future
+      impl->add_base_gc_ref(FUTURE_HANDLE_REF, mutator);
       AutoLock g_lock(gc_lock);
-      futures[point] = Future(impl);
+      futures[point] = Future(impl, false/*need reference*/);
     }
 
     //--------------------------------------------------------------------------
@@ -1133,7 +1133,7 @@ namespace Legion {
       WrapperReferenceMutator mutator(done_events);
       FutureImpl *future = runtime->find_or_create_future(future_did, &mutator);
       // Add it to the map
-      impl->set_future(point, future);
+      impl->set_future(point, future, &mutator);
       // Trigger the done event
       if (!done_events.empty())
         Runtime::trigger_event(done, Runtime::merge_events(done_events));
@@ -1326,8 +1326,14 @@ namespace Legion {
         // Local future map so we should be able to find it and set it
         FutureMapImpl *target = 
           runtime->find_or_create_future_map(src_did, NULL, NULL);
-        target->set_future(point, result.impl);
-        Runtime::trigger_event(done_event);
+        std::set<RtEvent> preconditions;
+        WrapperReferenceMutator mutator(preconditions);
+        target->set_future(point, result.impl, &mutator);
+        if (!preconditions.empty())
+          Runtime::trigger_event(done_event,
+              Runtime::merge_events(preconditions));
+        else
+          Runtime::trigger_event(done_event);
       }
     }
 
@@ -1350,14 +1356,14 @@ namespace Legion {
       FutureMapImpl *target = 
         runtime->find_or_create_future_map(map_did, NULL, NULL);
       std::set<RtEvent> done_events;
+      WrapperReferenceMutator mutator(done_events);
       if (future_did > 0)
       {
-        WrapperReferenceMutator mutator(done_events);
         FutureImpl *impl = runtime->find_or_create_future(future_did, &mutator);
-        target->set_future(point, impl);
+        target->set_future(point, impl, &mutator);
       }
       else
-        target->set_future(point, NULL);
+        target->set_future(point, NULL, &mutator);
       if (!done_events.empty())
         Runtime::trigger_event(done_event, Runtime::merge_events(done_events));
       else
@@ -16516,11 +16522,14 @@ namespace Legion {
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
-      did &= LEGION_DISTRIBUTED_ID_MASK;
+      const DistributedID to_find = LEGION_DISTRIBUTED_ID_FILTER(did);
       AutoLock d_lock(distributed_collectable_lock,1,false/*exclusive*/);
       std::map<DistributedID,DistributedCollectable*>::const_iterator finder = 
-        dist_collectables.find(did);
+        dist_collectables.find(to_find);
 #ifdef DEBUG_LEGION
+      if (finder == dist_collectables.end())
+        log_run.error("Unable to find distributed collectable %llx "
+                    "with type %lld", did, LEGION_DISTRIBUTED_HELP_DECODE(did));
       assert(finder != dist_collectables.end());
 #endif
       return finder->second;
@@ -21568,6 +21577,11 @@ namespace Legion {
         case LG_VERSION_STATE_CAPTURE_DIRTY_TASK_ID:
           {
             VersionManager::process_capture_dirty(args);
+            break;
+          }
+        case LG_VERSION_STATE_PENDING_ADVANCE_TASK_ID:
+          {
+            VersionManager::process_pending_advance(args);
             break;
           }
         case LG_DEFER_MATERIALIZED_VIEW_TASK_ID:

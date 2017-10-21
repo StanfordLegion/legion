@@ -78,10 +78,9 @@ namespace Legion {
      * This is the same as the above class, but specialized
      * for VersionState objects explicitly
      */
-    template<ReferenceSource REF_SRC = LAST_SOURCE_REF, 
-             bool LOCAL_ONLY = true>
+    template<ReferenceSource REF_SRC = LAST_SOURCE_REF>
     class VersioningSet : 
-      public LegionHeapify<VersioningSet<REF_SRC,LOCAL_ONLY> > {
+      public LegionHeapify<VersioningSet<REF_SRC> > {
     public:
       class iterator : public std::iterator<std::input_iterator_tag,
                               std::pair<VersionState*,FieldMask> > {
@@ -140,8 +139,9 @@ namespace Legion {
     public:
       const FieldMask& operator[](VersionState *state) const;
     public:
-      void insert(VersionState *state, const FieldMask &mask, 
-                  ReferenceMutator *mutator = NULL); 
+      // Return true if we actually added the state, false if it already existed
+      bool insert(VersionState *state, const FieldMask &mask, 
+                  ReferenceMutator *mutator = NULL);
       RtEvent insert(VersionState *state, const FieldMask &mask, 
                      Runtime *runtime, RtEvent pre);
       void erase(VersionState *to_erase);
@@ -155,9 +155,9 @@ namespace Legion {
       iterator begin(void) const;
       inline iterator end(void) const { return iterator(this, NULL, single); }
     public:
-      template<ReferenceSource ARG_KIND, bool ARG_LOCAL>
+      template<ReferenceSource ARG_KIND>
       void reduce(const FieldMask &reduce_mask, 
-                  VersioningSet<ARG_KIND,ARG_LOCAL> &new_states,
+                  VersioningSet<ARG_KIND> &new_states,
                   ReferenceMutator *mutator);
 #ifdef DEBUG_LEGION
       void sanity_check(void) const;
@@ -977,9 +977,19 @@ namespace Legion {
         VersionState *target;
         FieldMask *capture_mask;
       };
+      struct PendingAdvanceArgs : public LgTaskArgs<PendingAdvanceArgs> {
+      public:
+        static const LgTaskID TASK_ID = 
+          LG_VERSION_STATE_PENDING_ADVANCE_TASK_ID;
+      public:
+        VersionManager *proxy_this;
+        RtEvent to_reclaim;
+      };
     public:
       static const AllocationType alloc_type = VERSION_MANAGER_ALLOC;
       static const VersionID init_version = 1;
+    public:
+      typedef VersioningSet<VERSION_MANAGER_REF> ManagerVersions;
     public:
       VersionManager(RegionTreeNode *node, ContextID ctx); 
       VersionManager(const VersionManager &manager);
@@ -1034,14 +1044,14 @@ namespace Legion {
                             const FieldMask *dirty_previous = NULL,
                             const ProjectionInfo *proj_info = NULL,
                             const VersioningSet<> *repl_states_to_use = NULL);
+      void reclaim_pending_advance(RtEvent done_event);
       void update_child_versions(InnerContext *context,
                                  LegionColor child_color,
                                  VersioningSet<> &new_states,
                                  std::set<RtEvent> &applied_events);
       void invalidate_version_infos(const FieldMask &invalidate_mask);
       static void filter_version_info(const FieldMask &invalidate_mask,
-           LegionMap<VersionID,VersioningSet<VERSION_MANAGER_REF> >::aligned
-                                                                &to_filter);
+              LegionMap<VersionID,ManagerVersions>::aligned &to_filter);
     public:
       void print_physical_state(RegionTreeNode *node,
                                 const FieldMask &capture_mask,
@@ -1075,8 +1085,8 @@ namespace Legion {
       void pack_response(Serializer &rez, AddressSpaceID target,
                          const FieldMask &request_mask);
       static void find_send_infos(
-          LegionMap<VersionID,VersioningSet<VERSION_MANAGER_REF> >::aligned& 
-            version_infos, const FieldMask &request_mask, 
+          LegionMap<VersionID,ManagerVersions>::aligned &version_infos,
+                                  const FieldMask &request_mask, 
           LegionMap<VersionState*,FieldMask>::aligned& send_infos);
       static void pack_send_infos(Serializer &rez, const
           LegionMap<VersionState*,FieldMask>::aligned& send_infos);
@@ -1088,9 +1098,9 @@ namespace Legion {
           LegionMap<VersionState*,FieldMask>::aligned &infos,
           Runtime *runtime, std::set<RtEvent> &preconditions);
       static void merge_send_infos(
-          LegionMap<VersionID,
-              VersioningSet<VERSION_MANAGER_REF> >::aligned &target_infos,
-          const LegionMap<VersionState*,FieldMask>::aligned &source_infos);
+          LegionMap<VersionID,ManagerVersions>::aligned &target_infos,
+          const LegionMap<VersionState*,FieldMask>::aligned &source_infos,
+                ReferenceMutator *mutator);
       static void handle_response(Deserializer &derez);
     public:
       void find_or_create_unversioned_states(FieldMask unversioned,
@@ -1102,6 +1112,7 @@ namespace Legion {
                                               Runtime *runtime);
     public:
       static void process_capture_dirty(const void *args);
+      static void process_pending_advance(const void *args);
     protected:
       void sanity_check(void);
     public:
@@ -1116,8 +1127,7 @@ namespace Legion {
     protected:
       bool is_owner;
       AddressSpaceID owner_space;
-    protected:
-      typedef VersioningSet<VERSION_MANAGER_REF> ManagerVersions;
+    protected: 
       LegionMap<VersionID,ManagerVersions>::aligned current_version_infos;
       LegionMap<VersionID,ManagerVersions>::aligned previous_version_infos;
     protected:
@@ -1127,7 +1137,8 @@ namespace Legion {
       FieldMask remote_valid_fields;
       // Only used on remote nodes to track the set of pending advances
       // which may indicate that remove_valid_fields is stale
-      FieldMask pending_remote_advances;
+      FieldMask pending_remote_advance_summary;
+      LegionMap<RtEvent,FieldMask>::aligned pending_remote_advances;
     protected:
       // Owner information about which nodes have remote copies
       LegionMap<AddressSpaceID,FieldMask>::aligned remote_valid;
@@ -1346,8 +1357,7 @@ namespace Legion {
       FieldMask reduction_mask;
       // Note that we make the StateVersions type is not local which
       // is how we keep the distributed version state tree live
-      typedef VersioningSet<VERSION_STATE_TREE_REF,
-                            false/*LOCAL*/> StateVersions;
+      typedef VersioningSet<VERSION_STATE_TREE_REF> StateVersions;
       LegionMap<LegionColor,StateVersions>::aligned open_children;
       // The valid instance views
       LegionMap<LogicalView*, FieldMask,

@@ -37,6 +37,23 @@ typedef Realm::Point<2, coord_t> Point2;
 typedef Realm::Rect<1, coord_t> Rect1;
 typedef Realm::Rect<2, coord_t> Rect2;
 
+struct CreateRegionArgs {
+public:
+  Rect2 bounds;
+  Realm::Memory memory;
+  Realm::Processor dest_proc;
+  // Warning: Pointers live on dest_proc
+  Realm::RegionInstance *dest_inst;
+};
+
+struct CreateRegionDoneArgs {
+public:
+  Realm::RegionInstance inst;
+  Realm::Processor dest_proc;
+  // Warning: Pointers live on dest_proc
+  Realm::RegionInstance *dest_inst;
+};
+
 struct ShardArgs {
 public:
   Realm::RegionInstance xp_inst_in, xm_inst_in, yp_inst_in, ym_inst_in;
@@ -45,7 +62,7 @@ public:
   Realm::Barrier xp_empty_out, xm_empty_out, yp_empty_out, ym_empty_out;
   Realm::Barrier xp_full_in, xm_full_in, yp_full_in, ym_full_in;
   Realm::Barrier xp_full_out, xm_full_out, yp_full_out, ym_full_out;
-  Realm::Barrier sync, start, stop;
+  Realm::Barrier sync, first_start, last_start, first_stop, last_stop;
   coord_t tsteps, tprune, init;
   Point2 point;
   Rect2 interior_bounds, exterior_bounds, outer_bounds;

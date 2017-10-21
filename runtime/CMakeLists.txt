@@ -163,9 +163,10 @@ list(APPEND REALM_SRC
 find_package(Threads REQUIRED)
 add_library(RealmRuntime ${REALM_SRC})
 target_compile_definitions(RealmRuntime PUBLIC REALM_USE_CMAKE)
-target_link_libraries(RealmRuntime
-  PRIVATE ${CMAKE_DL_LIBS} ${CMAKE_THREAD_LIBS_INIT}
-)
+if(Legion_USE_LIBDL)
+  target_link_libraries(RealmRuntime PRIVATE ${CMAKE_DL_LIBS})
+endif()
+target_link_libraries(RealmRuntime PRIVATE ${CMAKE_THREAD_LIBS_INIT})
 if(UNIX AND NOT APPLE)
   target_link_libraries(RealmRuntime PRIVATE rt)
 endif()
@@ -248,6 +249,8 @@ list(APPEND LEGION_SRC
   legion/legion_c_util.h                 
   legion/legion.h                         legion/legion.cc
   legion/legion.inl                      
+  legion/legion_domain.h
+  legion/legion_domain.inl
   legion/legion_instances.h               legion/legion_instances.cc
   legion/legion_mapping.h                 legion/legion_mapping.cc
   legion/legion_ops.h                     legion/legion_ops.cc

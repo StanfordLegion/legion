@@ -44,10 +44,14 @@
 #include "realm.h"
 #include "dynamic_templates.h"
 
+// this may be set before including legion.h to eliminate deprecation warnings
+//  for just the Legion API
+#ifndef LEGION_DEPRECATED
 #if __cplusplus >= 201402L
 #define LEGION_DEPRECATED(x) [[deprecated(x)]]
 #else
 #define LEGION_DEPRECATED(x)
+#endif
 #endif
 
 namespace BindingLib { class Utility; } // BindingLib namespace
@@ -355,6 +359,7 @@ namespace Legion {
       LG_DEFER_MAP_AND_LAUNCH_TASK_ID,
       LG_ADD_VERSIONING_SET_REF_TASK_ID,
       LG_VERSION_STATE_CAPTURE_DIRTY_TASK_ID,
+      LG_VERSION_STATE_PENDING_ADVANCE_TASK_ID,
       LG_DEFER_MATERIALIZED_VIEW_TASK_ID,
       LG_MISSPECULATE_TASK_ID,
       LG_DEFER_PHI_VIEW_REF_TASK_ID,
@@ -455,6 +460,7 @@ namespace Legion {
         "Defer Task Map and Launch",                              \
         "Defer Versioning Set Reference",                         \
         "Version State Capture Dirty",                            \
+        "Version State Reclaim Pending Advance",                  \
         "Defer Materialized View Creation",                       \
         "Handle Mapping Misspeculation",                          \
         "Defer Phi View Reference",                               \

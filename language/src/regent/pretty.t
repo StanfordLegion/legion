@@ -221,32 +221,7 @@ function pretty.expr_function(cx, node)
     name = 'tuple'
   elseif regentlib.is_math_op(node.value) then
     -- HACK: This information should be exported from std.t
-    name =
-      node.value == regentlib.ceil(double)  and '[regentlib.ceil(double)]'  or
-      node.value == regentlib.cos(double)   and '[regentlib.cos(double)]'   or
-      node.value == regentlib.exp(double)   and '[regentlib.exp(double)]'   or
-      node.value == regentlib.exp2(double)  and '[regentlib.exp2(double)]'  or
-      node.value == regentlib.fabs(double)  and '[regentlib.fabs(double)]'  or
-      node.value == regentlib.floor(double) and '[regentlib.floor(double)]' or
-      node.value == regentlib.log(double)   and '[regentlib.log(double)]'   or
-      node.value == regentlib.log2(double)  and '[regentlib.log2(double)]'  or
-      node.value == regentlib.log10(double) and '[regentlib.log10(double)]' or
-      node.value == regentlib.sin(double)   and '[regentlib.sin(double)]'   or
-      node.value == regentlib.sqrt(double)  and '[regentlib.sqrt(double)]'  or
-      node.value == regentlib.trunc(double) and '[regentlib.trunc(double)]' or
-      node.value == regentlib.ceil(float)   and '[regentlib.ceil(float)]'   or
-      node.value == regentlib.cos(float)    and '[regentlib.cos(float)]'    or
-      node.value == regentlib.exp(float)    and '[regentlib.exp(float)]'    or
-      node.value == regentlib.exp2(float)   and '[regentlib.exp2(float)]'   or
-      node.value == regentlib.fabs(float)   and '[regentlib.fabs(float)]'   or
-      node.value == regentlib.floor(float)  and '[regentlib.floor(float)]'  or
-      node.value == regentlib.log(float)    and '[regentlib.log(float)]'    or
-      node.value == regentlib.log2(float)   and '[regentlib.log2(float)]'   or
-      node.value == regentlib.log10(float)  and '[regentlib.log10(float)]'  or
-      node.value == regentlib.sin(float)    and '[regentlib.sin(float)]'    or
-      node.value == regentlib.sqrt(float)   and '[regentlib.sqrt(float)]'   or
-      node.value == regentlib.trunc(float)  and '[regentlib.trunc(float)]'  or
-      assert(false)
+    name = regentlib.get_math_op_name(node.value, node.expr_type.returntype)
   else
     name = tostring(node.value)
   end

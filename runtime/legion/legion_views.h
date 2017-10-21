@@ -1670,10 +1670,14 @@ namespace Legion {
                                                     DistributedID did, bool top)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(DIST_TYPE_LAST_DC < (1U << 7));
+#endif
       if (top)
-        return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x0ULL | (1ULL << 3));
+        return LEGION_DISTRIBUTED_HELP_ENCODE(did, 
+                MATERIALIZED_VIEW_DC | (1ULL << 7));
       else
-        return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x0ULL);
+        return LEGION_DISTRIBUTED_HELP_ENCODE(did, MATERIALIZED_VIEW_DC);
     }
 
     //--------------------------------------------------------------------------
@@ -1681,7 +1685,11 @@ namespace Legion {
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x1ULL | (1ULL << 3));
+#ifdef DEBUG_LEGION
+      assert(DIST_TYPE_LAST_DC < (1U << 7));
+#endif
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 
+                REDUCTION_VIEW_DC | (1ULL << 7));
     }
 
     //--------------------------------------------------------------------------
@@ -1689,7 +1697,11 @@ namespace Legion {
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x2ULL | (1ULL << 3));
+#ifdef DEBUG_LEGION
+      assert(DIST_TYPE_LAST_DC < (1U << 7));
+#endif
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 
+                  COMPOSITE_VIEW_DC | (1ULL << 7));
     }
 
     //--------------------------------------------------------------------------
@@ -1697,7 +1709,10 @@ namespace Legion {
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x3ULL | (1ULL << 3));
+#ifdef DEBUG_LEGION
+      assert(DIST_TYPE_LAST_DC < (1U << 7));
+#endif
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, FILL_VIEW_DC | (1ULL << 7));
     }
 
     //--------------------------------------------------------------------------
@@ -1705,49 +1720,56 @@ namespace Legion {
                                                               DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 0x4ULL | (1ULL << 3));
+#ifdef DEBUG_LEGION
+      assert(DIST_TYPE_LAST_DC < (1U << 7));
+#endif
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, PHI_VIEW_DC | (1ULL << 7));
     }
 
     //--------------------------------------------------------------------------
     /*static*/ inline bool LogicalView::is_materialized_did(DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x7ULL) == 0x0ULL);
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0xFULL) == 
+                                          MATERIALIZED_VIEW_DC);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ inline bool LogicalView::is_reduction_did(DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x7ULL) == 0x1ULL);
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0xFULL) == 
+                                              REDUCTION_VIEW_DC);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ inline bool LogicalView::is_composite_did(DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x7ULL) == 0x2ULL);
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0xFULL) == 
+                                              COMPOSITE_VIEW_DC);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ inline bool LogicalView::is_fill_did(DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x7ULL) == 0x3ULL);
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0xFULL) == 
+                                                    FILL_VIEW_DC);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ inline bool LogicalView::is_phi_did(DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x7ULL) == 0x4ULL);
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0xFULL) == PHI_VIEW_DC);
     }
 
     //--------------------------------------------------------------------------
     /*static*/ inline bool LogicalView::is_top_did(DistributedID did)
     //--------------------------------------------------------------------------
     {
-      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0x8ULL) == 0x8ULL);
+      return (((LEGION_DISTRIBUTED_HELP_DECODE(did) & (1ULL << 7)) >> 7) == 1);
     }
 
     //--------------------------------------------------------------------------

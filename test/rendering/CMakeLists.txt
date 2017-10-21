@@ -15,18 +15,25 @@
 #------------------------------------------------------------------------------#
 
 cmake_minimum_required(VERSION 3.1)
+project(LegionTest_rendering)
 
+include(CheckCXXCompilerFlag)
+
+check_cxx_compiler_flag( "-std=c++11" CXX11_COMPILER)
+
+if(CXX11_COMPILER)
+  set(CMAKE_CXX_STANDARD 11)
+else()
+  message(FATAL_ERROR "C++11 compatible compiler not found")
+endif()
+
+# Only search if were building stand-alone and not as part of Legion
 if(NOT Legion_SOURCE_DIR)
   find_package(Legion REQUIRED)
 endif()
 
-add_subdirectory(attach_file_mini)
-add_subdirectory(rendering)
-
-if(Legion_USE_HDF5)
-  add_subdirectory(hdf_attach_subregion_parallel)
-endif()
-
-if(Legion_USE_Python)
-  add_subdirectory(python_bindings)
+add_executable(rendering rendering.cc)
+target_link_libraries(rendering Legion::Legion)
+if(Legion_ENABLE_TESTING)
+  add_test(NAME rendering COMMAND $<TARGET_FILE:rendering> -i 2 -n 64 -ll:cpu 4) 
 endif()

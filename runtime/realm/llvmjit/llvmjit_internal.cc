@@ -32,14 +32,14 @@
 #if REALM_LLVM_VERSION != LLVM_VERSION
   #error mismatch between REALM_LLVM_VERSION and LLVM header files!
 #endif
-// JIT for 3.5, MCJIT for 3.6 - 3.9
+// JIT for 3.5, MCJIT for 3.6 - 5.0
 #if LLVM_VERSION == 35
   //define USE_OLD_JIT
-#elif LLVM_VERSION >= 36 && LLVM_VERSION <= 39
+#elif LLVM_VERSION >= 36 && LLVM_VERSION <= 50
   // nothing special needed here - the C API is actually a lot more stable
   // than the C++ API
 #else
-  #error unsupported (or at least untested) LLVM version!
+  #warning unsupported (or at least untested) LLVM version!
 #endif
 
 #ifdef REALM_ALLOW_MISSING_LLVM_LIBS
@@ -174,7 +174,9 @@ namespace Realm {
 	  LLVMModuleRef m = LLVMModuleCreateWithNameInContext("eebuilder",
 							      context);
 	  LLVMSetTarget(m, triple);
-	  LLVMSetDataLayout(m, "e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v16:16:16-v32:32:32-v64:64:64-v128:128:128-n16:32:64");
+	  // an empty data layout string causes it to be obtained from the target
+	  //  machine, which is nice because they have to match anyway
+	  LLVMSetDataLayout(m, "");
 
 #ifdef USE_OLD_JIT
 	  char *errmsg = 0;

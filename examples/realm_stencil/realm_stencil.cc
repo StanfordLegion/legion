@@ -25,11 +25,13 @@
 using namespace Realm;
 
 enum {
-  TOP_LEVEL_TASK = Processor::TASK_ID_FIRST_AVAILABLE+0,
-  SHARD_TASK     = Processor::TASK_ID_FIRST_AVAILABLE+1,
-  STENCIL_TASK   = Processor::TASK_ID_FIRST_AVAILABLE+2,
-  INCREMENT_TASK = Processor::TASK_ID_FIRST_AVAILABLE+3,
-  CHECK_TASK     = Processor::TASK_ID_FIRST_AVAILABLE+4,
+  TOP_LEVEL_TASK          = Processor::TASK_ID_FIRST_AVAILABLE+0,
+  CREATE_REGION_TASK      = Processor::TASK_ID_FIRST_AVAILABLE+1,
+  CREATE_REGION_DONE_TASK = Processor::TASK_ID_FIRST_AVAILABLE+2,
+  SHARD_TASK              = Processor::TASK_ID_FIRST_AVAILABLE+3,
+  STENCIL_TASK            = Processor::TASK_ID_FIRST_AVAILABLE+4,
+  INCREMENT_TASK          = Processor::TASK_ID_FIRST_AVAILABLE+5,
+  CHECK_TASK              = Processor::TASK_ID_FIRST_AVAILABLE+6,
 };
 
 enum {
@@ -40,7 +42,6 @@ enum {
 enum {
   FID_INPUT = 101,
   FID_OUTPUT = 102,
-  FID_WEIGHT = 103,
 };
 
 template <typename K, typename V>
@@ -382,6 +383,43 @@ void check_task(const void *args, size_t arglen,
   }
 }
 
+void create_region_task(const void *args, size_t arglen,
+                        const void *userdata, size_t userlen, Processor p)
+{
+  assert(arglen == sizeof(CreateRegionArgs));
+  const CreateRegionArgs &a = *reinterpret_cast<const CreateRegionArgs *>(args);
+
+  std::map<FieldID, size_t> field_sizes;
+  field_sizes[FID_INPUT] = sizeof(DTYPE);
+  field_sizes[FID_OUTPUT] = sizeof(DTYPE);
+
+  RegionInstance inst = RegionInstance::NO_INST;
+  RegionInstance::create_instance(inst, a.memory,
+                                  a.bounds, field_sizes,
+                                  0 /*SOA*/, ProfilingRequestSet()).wait();
+
+  // Send the instance back to the requesting node
+  // Important: Don't return until this is complete
+  CreateRegionDoneArgs done;
+  done.inst = inst;
+  done.dest_proc = a.dest_proc;
+  done.dest_inst = a.dest_inst;
+  a.dest_proc.spawn(CREATE_REGION_DONE_TASK, &done, sizeof(done)).wait();
+}
+
+void create_region_done_task(const void *args, size_t arglen,
+                             const void *userdata, size_t userlen, Processor p)
+{
+  assert(arglen == sizeof(CreateRegionDoneArgs));
+  const CreateRegionDoneArgs &a = *reinterpret_cast<const CreateRegionDoneArgs *>(args);
+
+  // We had better be on the destination proc, otherwise these
+  // pointer won't be valid.
+  assert(a.dest_proc == p);
+
+  *a.dest_inst = a.inst;
+}
+
 void shard_task(const void *args, size_t arglen,
                 const void *userdata, size_t userlen, Processor p)
 {
@@ -478,7 +516,6 @@ void shard_task(const void *args, size_t arglen,
   Event xm_copy_done = Event::NO_EVENT;
   Event yp_copy_done = Event::NO_EVENT;
   Event ym_copy_done = Event::NO_EVENT;
-  long long start;
   for (coord_t t = 0; t < a.tsteps; t++) {
     {
       StencilArgs args;
@@ -496,7 +533,6 @@ void shard_task(const void *args, size_t arglen,
         (ym_full_in.exists() ? ym_full_in.get_previous_phase() : Event::NO_EVENT));
       if (t == a.tprune) {
         precondition.wait();
-        start = Realm::Clock::current_time_in_microseconds();
       }
       stencil_done = p.spawn(STENCIL_TASK, &args, sizeof(args), precondition);
       if (xp_empty_out.exists()) xp_empty_out.arrive(1, stencil_done);
@@ -563,12 +599,17 @@ void shard_task(const void *args, size_t arglen,
     if (ym_full_out.exists()) ym_full_out = ym_full_out.advance_barrier();
   }
 
+  // This task hasn't blocked, so no subtasks have executed yet.
+  // Only time subtask execution
+  long long start = Realm::Clock::current_time_in_microseconds();
   increment_done.wait();
   long long stop = Realm::Clock::current_time_in_microseconds();
 
   // Send start and stop times back to top level task
-  a.start.arrive(1, Event::NO_EVENT, &start, sizeof(start));
-  a.stop.arrive(1, Event::NO_EVENT, &stop, sizeof(stop));
+  a.first_start.arrive(1, Event::NO_EVENT, &start, sizeof(start));
+  a.last_start.arrive(1, Event::NO_EVENT, &start, sizeof(start));
+  a.first_stop.arrive(1, Event::NO_EVENT, &stop, sizeof(stop));
+  a.last_stop.arrive(1, Event::NO_EVENT, &stop, sizeof(stop));
 
   {
     CheckArgs check_args;
@@ -579,6 +620,10 @@ void shard_task(const void *args, size_t arglen,
     Event check_done = p.spawn(CHECK_TASK, &check_args, sizeof(check_args), increment_done);
     check_done.wait();
   }
+
+  // Make sure all operations are done before returning
+  Event::merge_events(
+    xp_copy_done, xm_copy_done, yp_copy_done, ym_copy_done).wait();
 }
 
 void top_level_task(const void *args, size_t arglen,
@@ -678,27 +723,45 @@ void top_level_task(const void *args, size_t arglen,
       Rect2 ym_bounds(Point2(x_blocks[i.x].lo,          y_blocks[i.y].lo - RADIUS),
                       Point2(x_blocks[i.x].hi,          y_blocks[i.y].lo - 1));
 
-      Memory memory(proc_regmems[shard_procs[i]]);
-      if (i.x != shards.hi.x)
-        events.push_back(
-          RegionInstance::create_instance(xp_insts[i], memory,
-                                          xp_bounds, field_sizes,
-                                          0 /*SOA*/, ProfilingRequestSet()));
-      if (i.x != shards.lo.x)
-        events.push_back(
-          RegionInstance::create_instance(xm_insts[i], memory,
-                                          xm_bounds, field_sizes,
-                                          0 /*SOA*/, ProfilingRequestSet()));
-      if (i.y != shards.hi.y)
-        events.push_back(
-          RegionInstance::create_instance(yp_insts[i], memory,
-                                          yp_bounds, field_sizes,
-                                          0 /*SOA*/, ProfilingRequestSet()));
-      if (i.y != shards.lo.y)
-        events.push_back(
-          RegionInstance::create_instance(ym_insts[i], memory,
-                                          ym_bounds, field_sizes,
-                                          0 /*SOA*/, ProfilingRequestSet()));
+      Processor shard_proc(shard_procs[i]);
+      Memory memory(proc_regmems[shard_proc]);
+
+      // Region allocation has to be done on the remote node
+      if (i.x != shards.hi.x) {
+        CreateRegionArgs args;
+        args.bounds = xp_bounds;
+        args.memory = memory;
+        args.dest_proc = p;
+        args.dest_inst = &xp_insts[i];
+        events.push_back(shard_proc.spawn(CREATE_REGION_TASK, &args, sizeof(args)));
+      }
+
+      if (i.x != shards.lo.x) {
+        CreateRegionArgs args;
+        args.bounds = xm_bounds;
+        args.memory = memory;
+        args.dest_proc = p;
+        args.dest_inst = &xm_insts[i];
+        events.push_back(shard_proc.spawn(CREATE_REGION_TASK, &args, sizeof(args)));
+      }
+
+      if (i.y != shards.hi.y) {
+        CreateRegionArgs args;
+        args.bounds = yp_bounds;
+        args.memory = memory;
+        args.dest_proc = p;
+        args.dest_inst = &yp_insts[i];
+        events.push_back(shard_proc.spawn(CREATE_REGION_TASK, &args, sizeof(args)));
+      }
+
+      if (i.y != shards.lo.y) {
+        CreateRegionArgs args;
+        args.bounds = ym_bounds;
+        args.memory = memory;
+        args.dest_proc = p;
+        args.dest_inst = &ym_insts[i];
+        events.push_back(shard_proc.spawn(CREATE_REGION_TASK, &args, sizeof(args)));
+      }
     }
     Event::merge_events(events).wait();
   }
@@ -730,8 +793,10 @@ void top_level_task(const void *args, size_t arglen,
 
   // Create barrier to keep shard launch synchronized
   Barrier sync_bar = Barrier::create_barrier(nshards);
-  Barrier start_bar = Barrier::create_barrier(nshards, REDOP_MIN, &RedopMin::identity, sizeof(RedopMin::identity));
-  Barrier stop_bar = Barrier::create_barrier(nshards, REDOP_MAX, &RedopMax::identity, sizeof(RedopMax::identity));
+  Barrier first_start_bar = Barrier::create_barrier(nshards, REDOP_MIN, &RedopMin::identity, sizeof(RedopMin::identity));
+  Barrier first_stop_bar = Barrier::create_barrier(nshards, REDOP_MIN, &RedopMin::identity, sizeof(RedopMin::identity));
+  Barrier last_start_bar = Barrier::create_barrier(nshards, REDOP_MAX, &RedopMax::identity, sizeof(RedopMax::identity));
+  Barrier last_stop_bar = Barrier::create_barrier(nshards, REDOP_MAX, &RedopMax::identity, sizeof(RedopMax::identity));
 
   // Launch shard tasks
   {
@@ -782,10 +847,12 @@ void top_level_task(const void *args, size_t arglen,
       args.ym_full_out = yp_bars_full[i + Point2( 0, -1)];
 
       args.sync = sync_bar;
-      args.start = start_bar;
-      args.stop = stop_bar;
+      args.first_start = first_start_bar;
+      args.last_start = last_start_bar;
+      args.first_stop = first_stop_bar;
+      args.last_stop = last_stop_bar;
 
-      args.tsteps = config.tsteps;
+      args.tsteps = config.tsteps + config.tprune;
       args.tprune = config.tprune;
       args.init = config.init;
 
@@ -848,19 +915,32 @@ void top_level_task(const void *args, size_t arglen,
   }
 
   // Collect start and stop times
-  long long start;
-  start_bar.wait();
-  assert(start_bar.get_result(&start, sizeof(start)));
+  long long first_start;
+  first_start_bar.wait();
+  assert(first_start_bar.get_result(&first_start, sizeof(first_start)));
 
-  long long stop;
-  stop_bar.wait();
-  assert(stop_bar.get_result(&stop, sizeof(stop)));
+  long long last_start;
+  last_start_bar.wait();
+  assert(last_start_bar.get_result(&last_start, sizeof(last_start)));
+
+  long long first_stop;
+  first_stop_bar.wait();
+  assert(first_stop_bar.get_result(&first_stop, sizeof(first_stop)));
+
+  long long last_stop;
+  last_stop_bar.wait();
+  assert(last_stop_bar.get_result(&last_stop, sizeof(last_stop)));
+
+  long long start = first_start;
+  long long stop = last_stop;
 
   printf("\n");
   printf("Elapsed time: %e seconds\n", (stop - start)/1e6);
-  printf("Iterations: %lld\n", config.tsteps - config.tprune);
+  printf("Iterations: %lld\n", config.tsteps);
   printf("Time per iteration: %e seconds\n",
-         (stop - start)/1e6/(config.tsteps - config.tprune));
+         (stop - start)/1e6/config.tsteps);
+  printf("Start skew: %e seconds\n", (last_start - first_start)/1e6);
+  printf("Stop skew: %e seconds\n", (last_stop - first_stop)/1e6);
 }
 
 int main(int argc, char **argv)
@@ -870,6 +950,8 @@ int main(int argc, char **argv)
   rt.init(&argc, &argv);
 
   rt.register_task(TOP_LEVEL_TASK, top_level_task);
+  rt.register_task(CREATE_REGION_TASK, create_region_task);
+  rt.register_task(CREATE_REGION_DONE_TASK, create_region_done_task);
   rt.register_task(SHARD_TASK, shard_task);
   rt.register_task(STENCIL_TASK, stencil_task);
   rt.register_task(INCREMENT_TASK, increment_task);

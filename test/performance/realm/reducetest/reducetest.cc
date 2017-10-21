@@ -105,7 +105,7 @@ typedef ReductionAdd<BucketType, int> BucketReduction;
 template <class T>
 struct HistBatchArgs {
   unsigned start, count;
-  IndexSpace region;
+  IndexSpace<1, coord_t> region;
   RegionInstance inst;
   Reservation lock;
   unsigned buckets;
@@ -252,13 +252,17 @@ void top_level_task(const void *args, size_t arglen,
 
   //UserEvent start_event = UserEvent::create_user_event();
 
-  IndexSpace hist_region = IndexSpace::create_index_space(buckets);
+  IndexSpace<1, coord_t> hist_region = Rect<1, coord_t>(0, buckets - 1);
 
   Reservation lock = Reservation::create_reservation();
 
   Memory m = farthest_memory(p);
   printf("placing master instance in memory " IDFMT "\n", m.id);
-  RegionInstance hist_inst(Domain(hist_region).create_instance(m, sizeof(BucketType)));
+  RegionInstance hist_inst;
+  RegionInstance::create_instance(hist_inst, m, hist_region,
+				  std::vector<size_t>(1, sizeof(BucketType)),
+				  0, // SOA
+				  ProfilingRequestSet()).wait();
   assert(hist_inst.exists());
 
   HistBatchArgs<BucketType> hbargs;
@@ -371,15 +375,22 @@ void hist_batch_localize_task(const void *args, size_t arglen,
   // create a local full instance
   Memory m = closest_memory(p);
   RegionInstance lclinst = RegionInstance::NO_INST;
-  while (!lclinst.exists())
-    lclinst = Domain(hbargs->region).create_instance(m, sizeof(BucketType));
+  RegionInstance::create_instance(lclinst, m, hbargs->region,
+				  std::vector<size_t>(1, sizeof(BucketType)),
+				  0, // SOA
+				  ProfilingRequestSet()).wait();
   assert(lclinst.exists());
 
-  std::vector<Domain::CopySrcDstField> src;
-  std::vector<Domain::CopySrcDstField> dst;
-  src.push_back(Domain::CopySrcDstField(hbargs->inst, 0, sizeof(BucketType)));
-  dst.push_back(Domain::CopySrcDstField(lclinst, 0, sizeof(BucketType)));
-  Domain(hbargs->region).copy(src, dst).wait();
+  std::vector<CopySrcDstField> src(1);
+  src[0].inst = hbargs->inst;
+  src[0].field_id = 0;
+  src[0].size = sizeof(BucketType);
+  std::vector<CopySrcDstField> dst(1);
+  dst[0].inst = lclinst;
+  dst[0].field_id = 0;
+  dst[0].size = sizeof(BucketType);
+  hbargs->region.copy(src, dst, 
+		      ProfilingRequestSet()).wait();
 
   // get an array accessor for the instance
   RegionAccessor<AccessorType::SOA<0>,BucketType> ria = lclinst.get_accessor().typeify<BucketType>().convert<AccessorType::SOA<0> >();
@@ -392,7 +403,8 @@ void hist_batch_localize_task(const void *args, size_t arglen,
   }
 
   // now copy the local instance back to the original one
-  Event done = Domain(hbargs->region).copy(dst, src);
+  Event done = hbargs->region.copy(dst, src,
+				   ProfilingRequestSet());
 
   lclinst.destroy(done);
 
@@ -408,9 +420,20 @@ void hist_batch_redfold_task(const void *args, size_t arglen,
   // create a reduction fold instance
   Memory m = closest_memory(p);
   RegionInstance redinst = RegionInstance::NO_INST;
-  while (!redinst.exists())
-    redinst = Domain(hbargs->region).create_instance(m, sizeof(int), REDOP_BUCKET_ADD);
+  RegionInstance::create_instance(redinst, m, hbargs->region,
+				  typename std::vector<size_t>(1, sizeof(BucketReduction::RHS)),
+				  0, // SOA
+				  ProfilingRequestSet()).wait();
   assert(redinst.exists());
+
+  // clear the instance
+  std::vector<CopySrcDstField> fld(1);
+  fld[0].inst = redinst;
+  fld[0].field_id = 0;
+  fld[0].size = sizeof(BucketReduction::RHS);
+  hbargs->region.fill(fld,
+		      ProfilingRequestSet(),
+		      &BucketReduction::identity, fld[0].size).wait();
 
   // get a reduction accessor for the instance
   RegionAccessor<AccessorType::ReductionFold<REDOP>, BucketType> ria = redinst.get_accessor().typeify<BucketType>().convert<AccessorType::ReductionFold<REDOP> >();
@@ -423,17 +446,24 @@ void hist_batch_redfold_task(const void *args, size_t arglen,
   }
 
   // now copy the reduction instance back to the original one
-  std::vector<Domain::CopySrcDstField> src;
-  std::vector<Domain::CopySrcDstField> dst;
-  src.push_back(Domain::CopySrcDstField(redinst, 0, sizeof(int)));
-  dst.push_back(Domain::CopySrcDstField(hbargs->inst, 0, sizeof(int)));
-  Event done = Domain(hbargs->region).copy(src, dst, Event::NO_EVENT, REDOP_BUCKET_ADD, false);
+  std::vector<CopySrcDstField> src(1);
+  src[0].inst = redinst;
+  src[0].field_id = 0;
+  src[0].size = sizeof(BucketReduction::RHS);
+  std::vector<CopySrcDstField> dst(1);
+  dst[0].inst = hbargs->inst;
+  dst[0].field_id = 0;
+  dst[0].size = sizeof(BucketType);
+  Event done = hbargs->region.copy(src, dst, 
+				   ProfilingRequestSet(),
+				   Event::NO_EVENT,
+				   REDOP_BUCKET_ADD, false /*!fold*/);
 
   redinst.destroy(done);
 
   done.wait();
 }
-  
+
 template <class REDOP>
 void hist_batch_redlist_task(const void *args, size_t arglen, 
                              const void *userdata, size_t userlen, Processor p)

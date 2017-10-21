@@ -935,10 +935,7 @@ namespace Realm {
       update_worker_count(cfg_num_host_threads, cfg_num_host_threads);
 
       ThreadLaunchParameters tlp;
-      // SJT: seeing failures on the first user switch on some systems
-      //  (and maybe only in 32-bit mode?), so we are experimenting with
-      //  a larger stack for a while here
-      //tlp.set_stack_size(32768);  // really small stack is fine here (4KB is too small)
+      tlp.set_stack_size(32768);  // really small stack is fine here (4KB is too small)
 
       host_startups_remaining = cfg_num_host_threads;
 

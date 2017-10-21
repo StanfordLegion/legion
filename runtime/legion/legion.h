@@ -1101,7 +1101,8 @@ namespace Legion {
     protected:
       // Only the runtime should be allowed to make these
       FRIEND_ALL_RUNTIME_CLASSES
-      explicit Future(Internal::FutureImpl *impl);
+      explicit Future(Internal::FutureImpl *impl,
+                      bool need_reference = true);
     public:
       bool operator==(const Future &f) const
         { return impl == f.impl; }
@@ -1214,7 +1215,8 @@ namespace Legion {
     protected:
       // Only the runtime should be allowed to make these
       FRIEND_ALL_RUNTIME_CLASSES
-      explicit FutureMap(Internal::FutureMapImpl *impl);
+      explicit FutureMap(Internal::FutureMapImpl *impl,
+                         bool need_reference = true);
     public:
       inline bool operator==(const FutureMap &f) const
         { return impl == f.impl; }
