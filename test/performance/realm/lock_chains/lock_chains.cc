@@ -22,9 +22,9 @@
 #include <time.h>
 #include <stdlib.h>
 
-#include "lowlevel.h"
+#include <realm.h>
 
-using namespace LegionRuntime::LowLevel;
+using namespace Realm;
 
 // TASK IDs
 enum {
