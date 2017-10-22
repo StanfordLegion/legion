@@ -25,8 +25,5 @@ endif()
 add_executable(attach_file attach_file.cc)
 target_link_libraries(attach_file Legion::Legion)
 if(Legion_ENABLE_TESTING)
-  add_test(NAME attach_file COMMAND $<TARGET_FILE:attach_file>) 
+  add_test(NAME attach_file COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:attach_file>)
 endif()
-
-
-

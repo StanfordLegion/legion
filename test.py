@@ -428,26 +428,28 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     install_dir = os.path.join(tmp_dir, 'install')
     os.mkdir(build_dir)
     os.mkdir(install_dir)
-    cmd(['cmake', '-DCMAKE_INSTALL_PREFIX=%s' % install_dir,
-         '-DCMAKE_BUILD_TYPE=%s' % (
-             'Debug' if env['DEBUG'] == '1' else 'Release'),
-         '-DLegion_USE_GASNet=%s' % (
-             'ON' if env['USE_GASNET'] == '1' else 'OFF'),
-         '-DLegion_USE_CUDA=%s' % (
-             'ON' if env['USE_CUDA'] == '1' else 'OFF'),
-         '-DLegion_USE_LLVM=%s' % (
-             'ON' if env['USE_LLVM'] == '1' else 'OFF'),
-         '-DLegion_USE_HDF5=%s' % (
-             'ON' if env['USE_HDF'] == '1' else 'OFF'),
-         '-DLegion_ENABLE_TESTING=%s' % (
-             'ON' if test_ctest else 'OFF')] +
-        (['-DCMAKE_CXX_FLAGS=%s' % env['CC_FLAGS']]
-          if 'CC_FLAGS' in env else []) +
-        (['-DLegion_BUILD_ALL=ON'] if (test_legion_cxx or
-                                       test_perf or
-                                       test_ctest) else []) +
-        [root_dir],
-        env=env, cwd=build_dir)
+    cmdline = ['cmake', '-DCMAKE_INSTALL_PREFIX=%s' % install_dir ]
+    cmdline.append('-DCMAKE_BUILD_TYPE=%s' % ('Debug' if env['DEBUG'] == '1' else
+                                              'Release'))
+    cmdline.append('-DLegion_USE_GASNet=%s' % ('ON' if env['USE_GASNET'] == '1' else
+                                               'OFF'))
+    cmdline.append('-DLegion_USE_CUDA=%s' % ('ON' if env['USE_CUDA'] == '1' else 'OFF'))
+    cmdline.append('-DLegion_USE_LLVM=%s' % ('ON' if env['USE_LLVM'] == '1' else 'OFF'))
+    cmdline.append('-DLegion_USE_HDF5=%s' % ('ON' if env['USE_HDF'] == '1' else 'OFF'))
+    if test_ctest:
+        cmdline.append('-DLegion_ENABLE_TESTING=ON')
+        if 'LAUNCHER' in env:
+            cmdline.append('-DLegion_TEST_LAUNCHER=%s' % env['LAUNCHER'])
+    else:
+        cmdline.append('-DLegion_ENABLE_TESTING=OFF')
+    if 'CC_FLAGS' in env:
+        cmdline.append('-DCMAKE_CXX_FLAGS=%s' % env['CC_FLAGS'])
+    if test_legion_cxx or test_perf or test_ctest:
+        cmdline.append('-DLegion_BUILD_ALL=ON')
+    # last argument to cmake is the root of the tree
+    cmdline.append(root_dir)
+
+    cmd(cmdline, env=env, cwd=build_dir)
     cmd(['make', '-C', build_dir, '-j', str(thread_count)], env=env)
     cmd(['make', '-C', build_dir, 'install'], env=env)
     return os.path.join(build_dir, 'bin')
