@@ -58,6 +58,7 @@
 #define REALM_USE_OPERATION_TABLE
 #endif
 
+#ifdef __cplusplus
 // runtime configuration settings
 namespace Realm {
   namespace Config {
@@ -70,5 +71,6 @@ namespace Realm {
     extern bool force_kernel_threads;
   };
 };
+#endif
 
 #endif

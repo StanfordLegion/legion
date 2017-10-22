@@ -2712,7 +2712,7 @@ namespace Legion {
                                          const char *file_name,
                                          const std::vector<Realm::FieldID> &field_ids,
                                          const std::vector<size_t> &field_sizes,
-                                         legion_lowlevel_file_mode_t file_mode)
+                                         legion_file_mode_t file_mode)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(context->runtime, REALM_CREATE_INSTANCE_CALL);

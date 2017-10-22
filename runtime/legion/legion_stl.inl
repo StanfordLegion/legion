@@ -15,8 +15,8 @@
 
 // NEVER INCLUDE THIS FILE DIRECTLY, INCLUDE legion_stl.h INSTEAD!
 
-#include "arrays.h"
-#include "accessor.h"
+#include <legion/arrays.h>
+#include <legion/accessor.h>
 #include "legion_utilities.h"
 
 namespace Legion {

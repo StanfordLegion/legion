@@ -29,7 +29,6 @@
 // ******************** IMPORTANT **************************
 
 #include "legion_config.h"
-#include "lowlevel_config.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -100,7 +99,7 @@ extern "C" {
     long long int value;
   } legion_ptr_t;
 
-  typedef legion_lowlevel_coord_t coord_t;
+  typedef legion_coord_t coord_t;
 
 #define NEW_POINT_TYPE(T, DIM) typedef struct T { coord_t x[DIM]; } T
   NEW_POINT_TYPE(legion_point_1d_t, 1);
@@ -125,14 +124,14 @@ extern "C" {
    * @see Legion::Domain
    */
   typedef struct legion_domain_t {
-    legion_lowlevel_id_t is_id;
+    realm_id_t is_id;
     int dim;
 // Hack: Python CFFI isn't smart enough to do constant folding so we
 // have to do this by hand here. To avoid this bitrotting, at least
 // make the preprocessor check that the value is equal to what we
 // expect.
-#define MAX_DOMAIN_DIM 6 // 2 * REALM_MAX_RECT_DIM
-#if MAX_DOMAIN_DIM != 2 * REALM_MAX_RECT_DIM // sanity check value
+#define MAX_DOMAIN_DIM 6 // 2 * LEGION_MAX_RECT_DIM
+#if MAX_DOMAIN_DIM != 2 * LEGION_MAX_RECT_DIM // sanity check value
 #error Mismatch in MAX_DOMAIN_DIM
 #endif
     coord_t rect_data[MAX_DOMAIN_DIM];
@@ -223,14 +222,14 @@ extern "C" {
    * @see Legion::Processor
    */
   typedef struct legion_processor_t {
-    legion_lowlevel_id_t id;
+    realm_id_t id;
   } legion_processor_t;
 
   /**
    * @see Legion::Memory
    */
   typedef struct legion_memory_t {
-    legion_lowlevel_id_t id;
+    realm_id_t id;
   } legion_memory_t;
 
   /**
@@ -248,9 +247,9 @@ extern "C" {
    */
   typedef struct legion_phase_barrier_t {
     // From Realm::Event
-    legion_lowlevel_id_t id;
+    realm_id_t id;
     // From Realm::Barrier
-    legion_lowlevel_barrier_timestamp_t timestamp;
+    realm_barrier_timestamp_t timestamp;
   } legion_phase_barrier_t;
 
   /**
@@ -259,9 +258,9 @@ extern "C" {
   typedef struct legion_dynamic_collective_t {
     // From Legion::PhaseBarrier
     //   From Realm::Event
-    legion_lowlevel_id_t id;
+    realm_id_t id;
     //   From Realm::Barrier
-    legion_lowlevel_barrier_timestamp_t timestamp;
+    realm_barrier_timestamp_t timestamp;
     // From Legion::DynamicCollective
     legion_reduction_op_id_t redop;
   } legion_dynamic_collective_t;
@@ -294,7 +293,7 @@ extern "C" {
    * Interface for a Legion C task that is wrapped (i.e. this is the Realm
    * task interface)
    */
-  typedef legion_lowlevel_task_pointer_t legion_task_pointer_wrapped_t;
+  typedef realm_task_pointer_t legion_task_pointer_wrapped_t;
 
   /**
    * Interface for a Legion C projection functor (Logical Region
@@ -3343,7 +3342,7 @@ extern "C" {
   legion_task_preamble(
     const void *data,
     size_t datalen,
-    legion_lowlevel_id_t proc_id,
+    realm_id_t proc_id,
     legion_task_t *taskptr,
     const legion_physical_region_t **regionptr,
     unsigned * num_regions_ptr,

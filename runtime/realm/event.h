@@ -18,7 +18,7 @@
 #ifndef REALM_EVENT_H
 #define REALM_EVENT_H
 
-#include "lowlevel_config.h"
+#include <realm/realm_c.h>
 
 #include <vector>
 #include <set>
@@ -26,11 +26,11 @@
 
 namespace Realm {
 
-  typedef int ReductionOpID;
+  typedef ::realm_reduction_op_id_t ReductionOpID;
 
     class Event {
     public:
-      typedef ::legion_lowlevel_id_t id_t;
+      typedef ::realm_id_t id_t;
 
       id_t id;
       bool operator<(const Event& rhs) const;
@@ -103,7 +103,7 @@ namespace Realm {
     //  occurs
     class Barrier : public Event {
     public:
-      typedef ::legion_lowlevel_barrier_timestamp_t timestamp_t; // used to avoid race conditions with arrival adjustments
+      typedef ::realm_barrier_timestamp_t timestamp_t; // used to avoid race conditions with arrival adjustments
 
       timestamp_t timestamp;
 

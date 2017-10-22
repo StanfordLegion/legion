@@ -35,7 +35,7 @@
 //
 // ******************** IMPORTANT **************************
 
-#include "lowlevel_config.h"
+#include <realm/realm_c.h>
 
 //==========================================================================
 //                                Constants
@@ -791,19 +791,29 @@ typedef enum legion_specialized_constraint_t {
   HDF5_FILE_SPECIALIZE = 6,
 } legion_specialized_constraint_t;
 
+// Keep this in sync with Domain::MAX_RECT_DIM in legion_domain.h
+#define LEGION_MAX_POINT_DIM 3
+#define LEGION_MAX_RECT_DIM 3
+typedef enum legion_domain_max_rect_dim_t {
+  MAX_POINT_DIM = LEGION_MAX_POINT_DIM,
+  MAX_RECT_DIM = LEGION_MAX_RECT_DIM,
+} legion_domain_max_rect_dim_t;
+
 //==========================================================================
 //                                Types
 //==========================================================================
 
-typedef legion_lowlevel_file_mode_t legion_file_mode_t;
-typedef legion_lowlevel_processor_kind_t legion_processor_kind_t;
-typedef legion_lowlevel_memory_kind_t legion_memory_kind_t;
-typedef legion_lowlevel_domain_max_rect_dim_t legion_domain_max_rect_dim_t;
-typedef legion_lowlevel_reduction_op_id_t legion_reduction_op_id_t;
-typedef legion_lowlevel_custom_serdez_id_t legion_custom_serdez_id_t;
-typedef legion_lowlevel_address_space_t legion_address_space_t;
+typedef realm_processor_kind_t legion_processor_kind_t;
+typedef realm_memory_kind_t legion_memory_kind_t;
+typedef realm_reduction_op_id_t legion_reduction_op_id_t;
+typedef realm_custom_serdez_id_t legion_custom_serdez_id_t;
+typedef realm_address_space_t legion_address_space_t;
+typedef realm_file_mode_t legion_file_mode_t;
+typedef realm_id_t legion_proc_id_t;
+typedef realm_id_t legion_memory_id_t;
 typedef int legion_task_priority_t;
 typedef int legion_garbage_collection_priority_t;
+typedef long long legion_coord_t;
 typedef unsigned int legion_color_t;
 typedef unsigned int legion_field_id_t;
 typedef unsigned int legion_trace_id_t;
@@ -831,7 +841,7 @@ typedef unsigned long legion_semantic_tag_t;
 typedef unsigned long long legion_unique_id_t;
 typedef unsigned long long legion_version_id_t;
 typedef unsigned long long legion_projection_epoch_id_t;
-typedef legion_lowlevel_task_func_id_t legion_task_id_t;
+typedef realm_task_func_id_t legion_task_id_t;
 typedef unsigned long legion_layout_constraint_id_t;
 typedef long long legion_internal_color_t;
 

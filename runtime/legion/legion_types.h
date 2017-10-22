@@ -139,9 +139,9 @@ namespace Legion {
   struct SerdezRedopFns;
   // Some typedefs for making things nicer for users with C++11 support
 #if __cplusplus >= 201103L
-  template<typename FT, int N, typename T = ::legion_lowlevel_coord_t>
+  template<typename FT, int N, typename T = ::legion_coord_t>
   using GenericAccessor = Realm::GenericAccessor<FT,N,T>;
-  template<typename FT, int N, typename T = ::legion_lowlevel_coord_t>
+  template<typename FT, int N, typename T = ::legion_coord_t>
   using AffineAccessor = Realm::AffineAccessor<FT,N,T>;
 #endif
 
@@ -1525,7 +1525,7 @@ namespace Legion {
   typedef Realm::Machine::MemoryMemoryAffinity MemoryMemoryAffinity;
   typedef Realm::DynamicTemplates::TagType TypeTag;
   typedef Realm::Logger Logger;
-  typedef ::legion_lowlevel_coord_t coord_t;
+  typedef ::legion_coord_t coord_t;
   typedef std::map<CustomSerdezID, 
                    const Realm::CustomSerdezUntyped *> SerdezOpTable;
   typedef std::map<Realm::ReductionOpID, 
@@ -1920,7 +1920,7 @@ namespace Legion {
 
 // now that we have things like LgEvent defined, we can include accessor.h to
 // pick up ptr_t, which is used for compatibility-mode Coloring and friends
-#include "accessor.h"
+#include <legion/accessor.h>
 
 namespace Legion {
   typedef LegionRuntime::Accessor::ByteOffset ByteOffset;

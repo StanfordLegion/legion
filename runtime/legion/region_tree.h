@@ -943,7 +943,7 @@ namespace Legion {
       virtual PhysicalInstance create_file_instance(const char *file_name,
 				   const std::vector<Realm::FieldID> &field_ids,
                                    const std::vector<size_t> &field_sizes,
-                                   legion_lowlevel_file_mode_t file_mode) = 0;
+                                   legion_file_mode_t file_mode) = 0;
       virtual PhysicalInstance create_hdf5_instance(const char *file_name,
                                    const std::vector<Realm::FieldID> &field_ids,
                                    const std::vector<size_t> &field_sizes,
@@ -1165,7 +1165,7 @@ namespace Legion {
       virtual PhysicalInstance create_file_instance(const char *file_name,
                                    const std::vector<Realm::FieldID> &field_ids,
                                    const std::vector<size_t> &field_sizes,
-                                   legion_lowlevel_file_mode_t file_mode);
+                                   legion_file_mode_t file_mode);
       virtual PhysicalInstance create_hdf5_instance(const char *file_name,
                                    const std::vector<Realm::FieldID> &field_ids,
                                    const std::vector<size_t> &field_sizes,

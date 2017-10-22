@@ -54,10 +54,6 @@ static const void *ignore_gasnet_warning2 __attribute__((unused)) = (void *)_gas
 
 #include <realm/activemsg.h>
 
-#ifndef __GNUC__
-#include "atomics.h" // for __sync_add_and_fetch
-#endif
-
 #include <queue>
 #include <cassert>
 #ifdef REALM_PROFILE_AM_HANDLERS

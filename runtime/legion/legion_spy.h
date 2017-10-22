@@ -31,7 +31,7 @@ namespace Legion {
   namespace Internal {
     namespace LegionSpy {
 
-      typedef ::legion_lowlevel_id_t IDType;
+      typedef ::realm_id_t IDType;
 
       extern Realm::Logger log_spy;
 

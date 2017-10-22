@@ -2,7 +2,6 @@
 #include "runtime.h"
 //#include "legion_ops.h"
 //#include "legion_tasks.h"
-#include "lowlevel_config.h"
 
 #include <sstream>
 #include <string>

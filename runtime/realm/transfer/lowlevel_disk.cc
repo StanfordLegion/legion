@@ -209,7 +209,7 @@ namespace Realm {
 							const IndexSpace<N,T>& space,
 							const std::vector<FieldID> &field_ids,
 							const std::vector<size_t> &field_sizes,
-							legion_lowlevel_file_mode_t file_mode,
+							realm_file_mode_t file_mode,
 							const ProfilingRequestSet& prs,
 							Event wait_on /*= Event::NO_EVENT*/)
   {
@@ -280,7 +280,7 @@ namespace Realm {
 							   const IndexSpace<N,T>&, \
 							   const std::vector<FieldID>&, \
 							   const std::vector<size_t>&, \
-                                                           legion_lowlevel_file_mode_t, \
+                                                           realm_file_mode_t, \
 							   const ProfilingRequestSet&, \
 							   Event);
   FOREACH_NT(DOIT)

@@ -504,8 +504,8 @@ namespace Realm {
     {
       MemoryImpl *mem = get_runtime()->get_memory_impl(memory);
 
-      // this exists for compatibility and assumes N=1, T=coord_t
-      const InstanceLayout<1,coord_t> *inst_layout = dynamic_cast<const InstanceLayout<1,coord_t> *>(metadata.layout);
+      // this exists for compatibility and assumes N=1, T=long long
+      const InstanceLayout<1,long long> *inst_layout = dynamic_cast<const InstanceLayout<1,long long> *>(metadata.layout);
       assert(inst_layout != 0);
 
       // look up the right field
@@ -521,9 +521,9 @@ namespace Realm {
 
       // also only works for a single piece
       assert(inst_layout->piece_lists[it->second.list_idx].pieces.size() == 1);
-      const InstanceLayoutPiece<1,coord_t> *piece = inst_layout->piece_lists[it->second.list_idx].pieces[0];
-      assert((piece->layout_type == InstanceLayoutPiece<1,coord_t>::AffineLayoutType));
-      const AffineLayoutPiece<1,coord_t> *affine = static_cast<const AffineLayoutPiece<1,coord_t> *>(piece);
+      const InstanceLayoutPiece<1,long long> *piece = inst_layout->piece_lists[it->second.list_idx].pieces[0];
+      assert((piece->layout_type == InstanceLayoutPiece<1,long long>::AffineLayoutType));
+      const AffineLayoutPiece<1,long long> *affine = static_cast<const AffineLayoutPiece<1,long long> *>(piece);
 
       // if the caller wants a particular stride and we differ (and have more
       //  than one element), fail

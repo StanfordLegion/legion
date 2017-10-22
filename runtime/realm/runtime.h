@@ -22,8 +22,6 @@
 #include "redop.h"
 #include "custom_serdez.h"
 
-#include "lowlevel_config.h"
-
 namespace Realm {
 
     class Runtime {

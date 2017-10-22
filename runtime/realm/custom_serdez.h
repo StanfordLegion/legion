@@ -18,8 +18,6 @@
 #ifndef REALM_CUSTOM_SERDEZ_H
 #define REALM_CUSTOM_SERDEZ_H
 
-#include "lowlevel_config.h"
-
 #include "serialize.h"
 
 #include <sys/types.h>

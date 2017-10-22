@@ -18,8 +18,6 @@
 #ifndef REALM_MACHINE_H
 #define REALM_MACHINE_H
 
-#include "lowlevel_config.h"
-
 #include "processor.h"
 #include "memory.h"
 

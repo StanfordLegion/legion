@@ -19,7 +19,6 @@
 #include "legion.h"
 #include "legion_c_util.h"
 #include "legion_utilities.h"
-#include "lowlevel.h"
 
 // Disable deprecated warnings in this file since we are also
 // trying to maintain backwards compatibility support for older

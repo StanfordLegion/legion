@@ -20,7 +20,7 @@
 
 #include <realm/realm_config.h>
 
-#include "lowlevel_config.h"
+#include <realm/realm_c.h>
 
 #include "event.h"
 #include "memory.h"
@@ -58,7 +58,7 @@ namespace Realm {
 
   class RegionInstance {
   public:
-    typedef ::legion_lowlevel_id_t id_t;
+    typedef ::realm_id_t id_t;
     id_t id;
     bool operator<(const RegionInstance &rhs) const;
     bool operator==(const RegionInstance &rhs) const;
@@ -159,7 +159,7 @@ namespace Realm {
 				      const IndexSpace<N,T>& space,
 				      const std::vector<FieldID> &field_ids,
 				      const std::vector<size_t> &field_sizes,
-				      legion_lowlevel_file_mode_t file_mode,
+				      realm_file_mode_t file_mode,
 				      const ProfilingRequestSet& prs,
 				      Event wait_on = Event::NO_EVENT);
 

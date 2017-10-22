@@ -18,7 +18,7 @@
 #ifndef REALM_PROCESSOR_H
 #define REALM_PROCESSOR_H
 
-#include "lowlevel_config.h"
+#include <realm/realm_c.h>
 
 #include "event.h"
 
@@ -27,14 +27,14 @@
 
 namespace Realm {
 
-    typedef ::legion_lowlevel_address_space_t AddressSpace;
+    typedef ::realm_address_space_t AddressSpace;
 
     class ProfilingRequestSet;
     class CodeDescriptor;
 
     class Processor {
     public:
-      typedef ::legion_lowlevel_id_t id_t;
+      typedef ::realm_id_t id_t;
 
       id_t id;
       bool operator<(const Processor& rhs) const { return id < rhs.id; }
@@ -45,23 +45,17 @@ namespace Realm {
 
       bool exists(void) const { return id != 0; }
 
-      typedef ::legion_lowlevel_task_func_id_t TaskFuncID;
+      typedef ::realm_task_func_id_t TaskFuncID;
       typedef void (*TaskFuncPtr)(const void *args, size_t arglen,
 				  const void *user_data, size_t user_data_len,
 				  Processor proc);
 
-      // Different Processor types
-      // Keep this in sync with legion_processor_kind_t in lowlevel_config.h
+      // Different Processor types (defined in realm_c.h)
+      // can't just typedef the kind because of C/C++ enum scope rules
       enum Kind {
-	NO_KIND,
-        TOC_PROC = ::TOC_PROC, // Throughput core
-        LOC_PROC = ::LOC_PROC, // Latency core
-        UTIL_PROC = ::UTIL_PROC, // Utility core
-        IO_PROC = ::IO_PROC, // I/O core
-        PROC_GROUP = ::PROC_GROUP, // Processor group
-        PROC_SET = ::PROC_SET, // Set of Processors for OpenMP/Kokkos etc.
-	OMP_PROC = ::OMP_PROC, // OpenMP (or similar) thread pool
-	PY_PROC = ::PY_PROC, // Python interpreter
+#define C_ENUMS(name, desc) name,
+  REALM_PROCESSOR_KINDS(C_ENUMS)
+#undef C_ENUMS
       };
 
       // Return what kind of processor this is

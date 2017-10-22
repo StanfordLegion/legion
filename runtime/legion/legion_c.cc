@@ -4232,7 +4232,7 @@ void
 legion_task_preamble(
   const void *data,
   size_t datalen,
-  legion_lowlevel_id_t proc_id,
+  legion_proc_id_t proc_id,
   legion_task_t *taskptr,
   const legion_physical_region_t **regionptr,
   unsigned * num_regions_ptr,

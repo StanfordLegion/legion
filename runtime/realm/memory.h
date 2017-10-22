@@ -18,18 +18,18 @@
 #ifndef REALM_MEMORY_H
 #define REALM_MEMORY_H
 
-#include "lowlevel_config.h"
+#include <realm/realm_c.h>
 
 #include <stddef.h>
 #include <iostream>
 
 namespace Realm {
 
-    typedef ::legion_lowlevel_address_space_t AddressSpace;
+    typedef ::realm_address_space_t AddressSpace;
 
     class Memory {
     public:
-      typedef ::legion_lowlevel_id_t id_t;
+      typedef ::realm_id_t id_t;
       id_t id;
       bool operator<(const Memory &rhs) const { return id < rhs.id; }
       bool operator==(const Memory &rhs) const { return id == rhs.id; }
@@ -42,20 +42,12 @@ namespace Realm {
       // Return the address space for this memory
       AddressSpace address_space(void) const;
 
-      // Different Memory types
+      // Different Memory types (defined in realm_c.h)
+      // can't just typedef the kind because of C/C++ enum scope rules
       enum Kind {
-        GLOBAL_MEM, // Guaranteed visible to all processors on all nodes (e.g. GASNet memory, universally slow)
-        SYSTEM_MEM, // Visible to all processors on a node
-        REGDMA_MEM, // Registered memory visible to all processors on a node, can be a target of RDMA
-        SOCKET_MEM, // Memory visible to all processors within a node, better performance to processors on same socket 
-        Z_COPY_MEM, // Zero-Copy memory visible to all CPUs within a node and one or more GPUs 
-        GPU_FB_MEM,   // Framebuffer memory for one GPU and all its SMs
-        DISK_MEM,   // Disk memory visible to all processors on a node
-        HDF_MEM,    // HDF memory visible to all processors on a node
-        FILE_MEM,   // file memory visible to all processors on a node
-        LEVEL3_CACHE, // CPU L3 Visible to all processors on the node, better performance to processors on same socket 
-        LEVEL2_CACHE, // CPU L2 Visible to all processors on the node, better performance to one processor
-        LEVEL1_CACHE, // CPU L1 Visible to all processors on the node, better performance to one processor
+#define C_ENUMS(name, desc) name,
+  REALM_MEMORY_KINDS(C_ENUMS)
+#undef C_ENUMS
       };
 
       // Return what kind of memory this is

@@ -18,10 +18,7 @@
 #ifndef REALM_REDOP_H
 #define REALM_REDOP_H
 
-#include "lowlevel_config.h"
-
 #include <sys/types.h>
-#include <map>
 
 namespace Realm {
 

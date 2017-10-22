@@ -55,7 +55,7 @@ namespace Realm {
   template <int N, typename T>
   class SparsityMap {
   public:
-    typedef ::legion_lowlevel_id_t id_t;
+    typedef ::realm_id_t id_t;
     id_t id;
     bool operator<(const SparsityMap<N,T> &rhs) const;
     bool operator==(const SparsityMap<N,T> &rhs) const;
