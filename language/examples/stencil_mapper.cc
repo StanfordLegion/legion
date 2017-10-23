@@ -17,6 +17,8 @@
 
 #include "default_mapper.h"
 
+#define SPMD_SHARD_USE_IO_PROC 1
+
 using namespace Legion;
 using namespace Legion::Mapping;
 
@@ -30,17 +32,33 @@ public:
                 std::vector<Processor>* procs_list,
                 std::vector<Memory>* sysmems_list,
                 std::map<Memory, std::vector<Processor> >* sysmem_local_procs,
+#if SPMD_SHARD_USE_IO_PROC
+                std::map<Memory, std::vector<Processor> >* sysmem_local_io_procs,
+#endif
                 std::map<Processor, Memory>* proc_sysmems,
                 std::map<Processor, Memory>* proc_regmems);
   virtual void select_task_options(const MapperContext    ctx,
                                    const Task&            task,
                                          TaskOptions&     output);
+  virtual void default_policy_rank_processor_kinds(
+                                    MapperContext ctx, const Task &task,
+                                    std::vector<Processor::Kind> &ranking);
   virtual Processor default_policy_select_initial_processor(
                                     MapperContext ctx, const Task &task);
   virtual void default_policy_select_target_processors(
                                     MapperContext ctx,
                                     const Task &task,
                                     std::vector<Processor> &target_procs);
+  virtual LogicalRegion default_policy_select_instance_region(
+                                MapperContext ctx, Memory target_memory,
+                                const RegionRequirement &req,
+                                const LayoutConstraintSet &constraints,
+                                bool force_new_instances,
+                                bool meets_constraints);
+  virtual void map_task(const MapperContext ctx,
+                        const Task &task,
+                        const MapTaskInput &input,
+                        MapTaskOutput &output);
   virtual void map_copy(const MapperContext ctx,
                         const Copy &copy,
                         const MapCopyInput &input,
@@ -52,7 +70,10 @@ public:
 private:
   std::vector<Processor>& procs_list;
   // std::vector<Memory>& sysmems_list;
-  // std::map<Memory, std::vector<Processor> >& sysmem_local_procs;
+  std::map<Memory, std::vector<Processor> >& sysmem_local_procs;
+#if SPMD_SHARD_USE_IO_PROC
+  std::map<Memory, std::vector<Processor> >& sysmem_local_io_procs;
+#endif
   // std::map<Processor, Memory>& proc_sysmems;
   // std::map<Processor, Memory>& proc_regmems;
 };
@@ -62,22 +83,26 @@ StencilMapper::StencilMapper(MapperRuntime *rt, Machine machine, Processor local
                              std::vector<Processor>* _procs_list,
                              std::vector<Memory>* _sysmems_list,
                              std::map<Memory, std::vector<Processor> >* _sysmem_local_procs,
+#if SPMD_SHARD_USE_IO_PROC
+                             std::map<Memory, std::vector<Processor> >* _sysmem_local_io_procs,
+#endif
                              std::map<Processor, Memory>* _proc_sysmems,
                              std::map<Processor, Memory>* _proc_regmems)
-  : DefaultMapper(rt, machine, local, mapper_name),
-    procs_list(*_procs_list)// ,
-    // sysmems_list(*_sysmems_list),
-    // sysmem_local_procs(*_sysmem_local_procs),
-    // proc_sysmems(*_proc_sysmems),
-    // proc_regmems(*_proc_regmems)
+  : DefaultMapper(rt, machine, local, mapper_name)
+  , procs_list(*_procs_list)
+  // , sysmems_list(*_sysmems_list)
+  , sysmem_local_procs(*_sysmem_local_procs)
+#if SPMD_SHARD_USE_IO_PROC
+  , sysmem_local_io_procs(*_sysmem_local_io_procs)
+#endif
+  // , proc_sysmems(*_proc_sysmems)
+  // , proc_regmems(*_proc_regmems)
 {
 }
 
-//--------------------------------------------------------------------------
 void StencilMapper::select_task_options(const MapperContext    ctx,
                                         const Task&            task,
                                               TaskOptions&     output)
-//--------------------------------------------------------------------------
 {
   output.initial_proc = default_policy_select_initial_processor(ctx, task);
   output.inline_task = false;
@@ -86,6 +111,31 @@ void StencilMapper::select_task_options(const MapperContext    ctx,
   output.map_locally = true;
 #else
   output.map_locally = false;
+#endif
+}
+
+void StencilMapper::default_policy_rank_processor_kinds(MapperContext ctx,
+                        const Task &task, std::vector<Processor::Kind> &ranking)
+{
+#if SPMD_SHARD_USE_IO_PROC
+  const char* task_name = task.get_task_name();
+  const char* prefix = "shard_";
+  if (strncmp(task_name, prefix, strlen(prefix)) == 0) {
+    // Put shard tasks on IO processors.
+    ranking.resize(4);
+    ranking[0] = Processor::TOC_PROC;
+    ranking[1] = Processor::PROC_SET;
+    ranking[2] = Processor::IO_PROC;
+    ranking[3] = Processor::LOC_PROC;
+  } else {
+#endif
+    ranking.resize(4);
+    ranking[0] = Processor::TOC_PROC;
+    ranking[1] = Processor::PROC_SET;
+    ranking[2] = Processor::LOC_PROC;
+    ranking[3] = Processor::IO_PROC;
+#if SPMD_SHARD_USE_IO_PROC
+  }
 #endif
 }
 
@@ -101,6 +151,54 @@ void StencilMapper::default_policy_select_target_processors(
                                     std::vector<Processor> &target_procs)
 {
   target_procs.push_back(task.target_proc);
+}
+
+LogicalRegion StencilMapper::default_policy_select_instance_region(
+                              MapperContext ctx, Memory target_memory,
+                              const RegionRequirement &req,
+                              const LayoutConstraintSet &constraints,
+                              bool force_new_instances,
+                              bool meets_constraints)
+{
+  return req.region;
+}
+
+void StencilMapper::map_task(const MapperContext      ctx,
+                             const Task&              task,
+                             const MapTaskInput&      input,
+                                   MapTaskOutput&     output)
+{
+  if (task.parent_task != NULL && task.parent_task->must_epoch_task) {
+    Processor::Kind target_kind = task.target_proc.kind();
+    // Get the variant that we are going to use to map this task
+    VariantInfo chosen = default_find_preferred_variant(task, ctx,
+                                                        true/*needs tight bound*/, true/*cache*/, target_kind);
+    output.chosen_variant = chosen.variant;
+    // TODO: some criticality analysis to assign priorities
+    output.task_priority = 0;
+    output.postmap_task = false;
+    // Figure out our target processors
+    output.target_procs.push_back(task.target_proc);
+
+    for (unsigned idx = 0; idx < task.regions.size(); idx++) {
+      const RegionRequirement &req = task.regions[idx];
+
+      // Skip any empty regions
+      if ((req.privilege == NO_ACCESS) || (req.privilege_fields.empty()))
+        continue;
+
+      assert(input.valid_instances[idx].size() == 1);
+      output.chosen_instances[idx] = input.valid_instances[idx];
+      bool ok = runtime->acquire_and_filter_instances(ctx, output.chosen_instances);
+      if (!ok) {
+        log_stencil.error("failed to acquire instances");
+        assert(false);
+      }
+    }
+    return;
+  }
+
+  DefaultMapper::map_task(ctx, task, input, output);
 }
 
 void StencilMapper::map_copy(const MapperContext ctx,
@@ -208,6 +306,10 @@ static void create_mappers(Machine machine, HighLevelRuntime *runtime, const std
   std::vector<Memory>* sysmems_list = new std::vector<Memory>();
   std::map<Memory, std::vector<Processor> >* sysmem_local_procs =
     new std::map<Memory, std::vector<Processor> >();
+#if SPMD_SHARD_USE_IO_PROC
+  std::map<Memory, std::vector<Processor> >* sysmem_local_io_procs =
+    new std::map<Memory, std::vector<Processor> >();
+#endif
   std::map<Processor, Memory>* proc_sysmems = new std::map<Processor, Memory>();
   std::map<Processor, Memory>* proc_regmems = new std::map<Processor, Memory>();
 
@@ -230,8 +332,15 @@ static void create_mappers(Machine machine, HighLevelRuntime *runtime, const std
 
   for (std::map<Processor, Memory>::iterator it = proc_sysmems->begin();
        it != proc_sysmems->end(); ++it) {
-    procs_list->push_back(it->first);
-    (*sysmem_local_procs)[it->second].push_back(it->first);
+    if (it->first.kind() == Processor::LOC_PROC) {
+      procs_list->push_back(it->first);
+      (*sysmem_local_procs)[it->second].push_back(it->first);
+    }
+#if SPMD_SHARD_USE_IO_PROC
+    else if (it->first.kind() == Processor::IO_PROC) {
+      (*sysmem_local_io_procs)[it->second].push_back(it->first);
+    }
+#endif
   }
 
   for (std::map<Memory, std::vector<Processor> >::iterator it =
@@ -246,6 +355,9 @@ static void create_mappers(Machine machine, HighLevelRuntime *runtime, const std
                                               procs_list,
                                               sysmems_list,
                                               sysmem_local_procs,
+#if SPMD_SHARD_USE_IO_PROC
+                                              sysmem_local_io_procs,
+#endif
                                               proc_sysmems,
                                               proc_regmems);
     runtime->replace_default_mapper(mapper, *it);
