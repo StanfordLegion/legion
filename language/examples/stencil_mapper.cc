@@ -17,7 +17,7 @@
 
 #include "default_mapper.h"
 
-#define SPMD_SHARD_USE_IO_PROC 0
+#define SPMD_SHARD_USE_IO_PROC 1
 
 using namespace Legion;
 using namespace Legion::Mapping;
