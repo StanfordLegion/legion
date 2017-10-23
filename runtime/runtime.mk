@@ -223,11 +223,15 @@ ifeq ($(strip $(USE_PYTHON)),1)
 
     # Try searching for common locations of the Python shared library.
     ifneq ($(strip $(PYTHON_ROOT)),)
-      PYTHON_LIB := $(PYTHON_ROOT)/libpython2.7.so
+      PYTHON_EXT := so
+      ifeq ($(strip $(DARWIN)),1)
+        PYTHON_EXT := dylib
+      endif
+      PYTHON_LIB := $(PYTHON_ROOT)/libpython2.7.$(PYTHON_EXT)
       ifeq ($(wildcard $(PYTHON_LIB)),)
-        PYTHON_LIB := $(abspath $(PYTHON_ROOT)/../lib/libpython2.7.so)
+        PYTHON_LIB := $(abspath $(PYTHON_ROOT)/../lib/libpython2.7.$(PYTHON_EXT))
         ifeq ($(wildcard $(PYTHON_LIB)),)
-          $(warning cannot find libpython2.7.so - falling back to using LD_LIBRARY_PATH)
+          $(warning cannot find libpython2.7.$(PYTHON_EXT) - falling back to using LD_LIBRARY_PATH)
           PYTHON_LIB :=
         endif
       endif
@@ -237,7 +241,7 @@ ifeq ($(strip $(USE_PYTHON)),1)
   ifneq ($(strip $(PYTHON_LIB)),)
     ifndef FORCE_PYTHON
       ifeq ($(wildcard $(PYTHON_LIB)),)
-        $(error cannot find libpython2.7.so - PYTHON_LIB set but file does not exist)
+        $(error cannot find libpython2.7.$(PYTHON_EXT) - PYTHON_LIB set but file does not exist)
       else
         CC_FLAGS += -DREALM_PYTHON_LIB="\"$(PYTHON_LIB)\""
       endif
