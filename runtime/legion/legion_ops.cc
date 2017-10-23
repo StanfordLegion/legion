@@ -827,6 +827,9 @@ namespace Legion {
               resolved ? "Resolved" : "NOT Resolved",
               completed ? "Completed" : "NOT Completed",
               committed ? "Committed" : "NOT Committed");
+          if (get_operation_kind() == TASK_OP_KIND)
+            printf("Task Kind %d\n", 
+                static_cast<TaskOp*>(this)->get_task_kind());
           assert(false);
         }
 #else
