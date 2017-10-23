@@ -1099,7 +1099,8 @@ namespace Legion {
       void record_child_mapped(RtEvent child_complete, 
                                ApEvent restrict_postcondition);
       void record_child_complete(void);
-      void record_child_committed(void);
+      void record_child_committed(RtEvent commit_precondition = 
+                                  RtEvent::NO_RT_EVENT);
     protected:
       void trigger_slice_mapped(void);
       void trigger_slice_complete(void);
@@ -1161,6 +1162,7 @@ namespace Legion {
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::set<RtEvent> map_applied_conditions;
       std::set<ApEvent> restrict_postconditions;
+      std::set<RtEvent> commit_preconditions;
     };
 
   }; // namespace Internal 

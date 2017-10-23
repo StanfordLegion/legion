@@ -819,22 +819,7 @@ namespace Legion {
         AutoLock o_lock(op_lock);
 #ifdef DEBUG_LEGION
         assert(mapped);
-#if 1
-        // Debug printing for CI failures, remove this when fixed
-        if (!executed)
-        {
-          printf("%p %d %d %s %s %s\n", this, get_operation_kind(), gen,
-              resolved ? "Resolved" : "NOT Resolved",
-              completed ? "Completed" : "NOT Completed",
-              committed ? "Committed" : "NOT Committed");
-          if (get_operation_kind() == TASK_OP_KIND)
-            printf("Task Kind %d\n", 
-                static_cast<TaskOp*>(this)->get_task_kind());
-          assert(false);
-        }
-#else
         assert(executed);
-#endif
         assert(resolved);
         assert(completed);
         assert(!committed);

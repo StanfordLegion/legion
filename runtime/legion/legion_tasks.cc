@@ -6517,16 +6517,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, POINT_TASK_COMMIT_CALL);
-      // Commit this operation
-      // Don't deactivate ourselves, our slice will do that for us
-      commit_operation(false/*deactivate*/, profiling_reported);
-      // If we still have to report profiling information then we must
-      // block here to avoid a race with the slice owner deactivating
-      // us before we are done with this object
-      if (profiling_reported.exists())
-        profiling_reported.lg_wait();
-      // Then tell our slice owner that we're done
-      slice_owner->record_child_committed();
+      // A little strange here, but we don't directly commit this
+      // operation, instead we just tell our slice that we are commited
+      // In the deactivation of the slice task is when we will actually
+      // have our commit call done
+      slice_owner->record_child_committed(profiling_reported);
     }
 
     //--------------------------------------------------------------------------
@@ -8575,7 +8570,13 @@ namespace Legion {
       for (std::vector<PointTask*>::const_iterator it = points.begin();
             it != points.end(); it++)
       {
-        (*it)->deactivate(); 
+        // Check to see if we are locally mapped or not which 
+        // determines whether we should commit this operation or
+        // just deactivate it like normal
+        if (is_locally_mapped() && !is_remote())
+          (*it)->deactivate();
+        else
+          (*it)->commit_operation(true/*deactivate*/);
       }
       points.clear();
       for (std::map<DomainPoint,std::pair<void*,size_t> >::const_iterator it = 
@@ -8589,6 +8590,7 @@ namespace Legion {
       acquired_instances.clear();
       map_applied_conditions.clear();
       restrict_postconditions.clear();
+      commit_preconditions.clear();
       created_regions.clear();
       created_fields.clear();
       created_field_spaces.clear();
@@ -9286,7 +9288,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::record_child_committed(void)
+    void SliceTask::record_child_committed(RtEvent commit_precondition)
     //--------------------------------------------------------------------------
     {
       bool needs_trigger = false;
@@ -9295,6 +9297,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(num_uncommitted_points > 0);
 #endif
+        if (commit_precondition.exists())
+          commit_preconditions.insert(commit_precondition);
         num_uncommitted_points--;
         if ((num_uncommitted_points == 0) && !children_commit_invoked)
         {
@@ -9438,7 +9442,11 @@ namespace Legion {
       }
       // We can release our version infos now
       version_infos.clear();
-      commit_operation(true/*deactivate*/);
+      if (!commit_preconditions.empty())
+        commit_operation(true/*deactivate*/, 
+            Runtime::merge_events(commit_preconditions));
+      else
+        commit_operation(true/*deactivate*/);
     }
 
     //--------------------------------------------------------------------------

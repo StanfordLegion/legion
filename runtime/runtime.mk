@@ -108,7 +108,7 @@ CONDUIT=aries
 endif
 
 # Customization specific to Cray programming environment
-ifneq (${CRAY_PE},)
+ifneq (${CRAYPE_VERSION},)
 CXX=CC
 F90=ftn
 # Cray's magic wrappers automatically provide LAPACK goodness?

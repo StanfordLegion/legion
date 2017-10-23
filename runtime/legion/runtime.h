@@ -1418,6 +1418,7 @@ namespace Legion {
       virtual LogicalRegion project(LogicalPartition upper_bound,
                                     const DomainPoint &point);
       virtual bool is_functional(void) const;
+      virtual bool is_exclusive(void) const;
       virtual unsigned get_depth(void) const;
     };
 
