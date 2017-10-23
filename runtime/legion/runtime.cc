@@ -8957,13 +8957,18 @@ namespace Legion {
         delete it->second;
       }
       proc_managers.clear();
-      for (std::map<ProjectionID,ProjectionFunction*>::
-            iterator it = projection_functions.begin(); 
-            it != projection_functions.end(); it++)
+      // Avoid duplicate deletions on these for separate runtime
+      // instances by just leaking them for now
+      if (!separate_runtime_instances)
       {
-        delete it->second;
-      } 
-      projection_functions.clear();
+        for (std::map<ProjectionID,ProjectionFunction*>::
+              iterator it = projection_functions.begin(); 
+              it != projection_functions.end(); it++)
+        {
+          delete it->second;
+        } 
+        projection_functions.clear();
+      }
       for (std::deque<IndividualTask*>::const_iterator it = 
             available_individual_tasks.begin(); 
             it != available_individual_tasks.end(); it++)
