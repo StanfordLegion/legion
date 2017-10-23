@@ -215,7 +215,7 @@ def check_dirty_build(name, build_result, component_dir):
         print('Good luck and please ask for help if you get stuck!')
         sys.exit(1)
 
-def driver(llvm_version, insecure):
+def driver(prefix_dir, llvm_version, insecure):
     if 'CC' not in os.environ:
         raise Exception('Please set CC in your environment')
     if 'CXX' not in os.environ:
@@ -248,10 +248,15 @@ def driver(llvm_version, insecure):
     root_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     legion_dir = os.path.dirname(root_dir)
 
+    if prefix_dir is None:
+        prefix_dir = root_dir
+    else:
+        prefix_dir = os.path.abspath(prefix_dir)
+
     thread_count = multiprocessing.cpu_count()
 
     conduit = discover_conduit()
-    gasnet_dir = os.path.realpath(os.path.join(root_dir, 'gasnet'))
+    gasnet_dir = os.path.realpath(os.path.join(prefix_dir, 'gasnet'))
     gasnet_release_dir = os.path.join(gasnet_dir, 'release')
     gasnet_build_result = os.path.join(
         gasnet_release_dir, '%s-conduit' % conduit,
@@ -268,7 +273,7 @@ def driver(llvm_version, insecure):
 
     cmake_exe = None
     if llvm_use_cmake:
-        cmake_dir = os.path.realpath(os.path.join(root_dir, 'cmake'))
+        cmake_dir = os.path.realpath(os.path.join(prefix_dir, 'cmake'))
         cmake_install_dir = os.path.join(cmake_dir, 'cmake-3.7.2-Linux-x86_64')
         if not os.path.exists(cmake_dir):
             os.mkdir(cmake_dir)
@@ -279,7 +284,7 @@ def driver(llvm_version, insecure):
         assert os.path.exists(cmake_install_dir)
         cmake_exe = os.path.join(cmake_install_dir, 'bin', 'cmake')
 
-    llvm_dir = os.path.realpath(os.path.join(root_dir, 'llvm'))
+    llvm_dir = os.path.realpath(os.path.join(prefix_dir, 'llvm'))
     llvm_install_dir = os.path.join(llvm_dir, 'install')
     llvm_build_result = os.path.join(llvm_install_dir, 'bin', 'llvm-config')
     if not os.path.exists(llvm_dir):
@@ -291,7 +296,7 @@ def driver(llvm_version, insecure):
         check_dirty_build('llvm', llvm_build_result, llvm_dir)
     assert os.path.exists(llvm_build_result)
 
-    terra_dir = os.path.join(root_dir, 'terra.build')
+    terra_dir = os.path.join(prefix_dir, 'terra.build')
     terra_build_result = os.path.join(terra_dir, 'release', 'bin', 'terra')
     if not os.path.exists(terra_dir):
         git_clone(terra_dir, 'https://github.com/elliottslaughter/terra.git', 'compiler-sc17-snapshot')
@@ -316,6 +321,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='Setup tool for Regent.')
     parser.add_argument(
+        '--prefix', dest='prefix', required=False,
+        help='Directory in which to install dependencies.')
+    parser.add_argument(
         '--skip-certificate-check', dest='skip_certificate_check', action='store_true',
         default=discover_skip_certificate_check(),
         help='Skip certificate checks on downloads.')
@@ -324,4 +332,4 @@ if __name__ == '__main__':
         default=discover_llvm_version(),
         help='Select LLVM version.')
     args = parser.parse_args()
-    driver(args.llvm_version, args.skip_certificate_check)
+    driver(args.prefix, args.llvm_version, args.skip_certificate_check)
