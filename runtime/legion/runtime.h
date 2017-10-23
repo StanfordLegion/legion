@@ -1372,6 +1372,7 @@ namespace Legion {
       virtual LogicalRegion project(const Mappable *mappable, unsigned index,
                                     LogicalPartition upper_bound,
                                     const DomainPoint &point);
+      virtual bool is_exclusive(void) const;
       virtual unsigned get_depth(void) const;
     };
 
