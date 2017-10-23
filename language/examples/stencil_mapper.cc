@@ -17,6 +17,8 @@
 
 #include "default_mapper.h"
 
+#define SPMD_SHARD_USE_IO_PROC 0
+
 using namespace Legion;
 using namespace Legion::Mapping;
 
@@ -30,11 +32,17 @@ public:
                 std::vector<Processor>* procs_list,
                 std::vector<Memory>* sysmems_list,
                 std::map<Memory, std::vector<Processor> >* sysmem_local_procs,
+#if SPMD_SHARD_USE_IO_PROC
+                std::map<Memory, std::vector<Processor> >* sysmem_local_io_procs,
+#endif
                 std::map<Processor, Memory>* proc_sysmems,
                 std::map<Processor, Memory>* proc_regmems);
   virtual void select_task_options(const MapperContext    ctx,
                                    const Task&            task,
                                          TaskOptions&     output);
+  virtual void default_policy_rank_processor_kinds(
+                                    MapperContext ctx, const Task &task,
+                                    std::vector<Processor::Kind> &ranking);
   virtual Processor default_policy_select_initial_processor(
                                     MapperContext ctx, const Task &task);
   virtual void default_policy_select_target_processors(
@@ -52,7 +60,10 @@ public:
 private:
   std::vector<Processor>& procs_list;
   // std::vector<Memory>& sysmems_list;
-  // std::map<Memory, std::vector<Processor> >& sysmem_local_procs;
+  std::map<Memory, std::vector<Processor> >& sysmem_local_procs;
+#if SPMD_SHARD_USE_IO_PROC
+  std::map<Memory, std::vector<Processor> >& sysmem_local_io_procs;
+#endif
   // std::map<Processor, Memory>& proc_sysmems;
   // std::map<Processor, Memory>& proc_regmems;
 };
@@ -62,22 +73,26 @@ StencilMapper::StencilMapper(MapperRuntime *rt, Machine machine, Processor local
                              std::vector<Processor>* _procs_list,
                              std::vector<Memory>* _sysmems_list,
                              std::map<Memory, std::vector<Processor> >* _sysmem_local_procs,
+#if SPMD_SHARD_USE_IO_PROC
+                             std::map<Memory, std::vector<Processor> >* _sysmem_local_io_procs,
+#endif
                              std::map<Processor, Memory>* _proc_sysmems,
                              std::map<Processor, Memory>* _proc_regmems)
-  : DefaultMapper(rt, machine, local, mapper_name),
-    procs_list(*_procs_list)// ,
-    // sysmems_list(*_sysmems_list),
-    // sysmem_local_procs(*_sysmem_local_procs),
-    // proc_sysmems(*_proc_sysmems),
-    // proc_regmems(*_proc_regmems)
+  : DefaultMapper(rt, machine, local, mapper_name)
+  , procs_list(*_procs_list)
+  // , sysmems_list(*_sysmems_list)
+  , sysmem_local_procs(*_sysmem_local_procs)
+#if SPMD_SHARD_USE_IO_PROC
+  , sysmem_local_io_procs(*_sysmem_local_io_procs)
+#endif
+  // , proc_sysmems(*_proc_sysmems)
+  // , proc_regmems(*_proc_regmems)
 {
 }
 
-//--------------------------------------------------------------------------
 void StencilMapper::select_task_options(const MapperContext    ctx,
                                         const Task&            task,
                                               TaskOptions&     output)
-//--------------------------------------------------------------------------
 {
   output.initial_proc = default_policy_select_initial_processor(ctx, task);
   output.inline_task = false;
@@ -86,6 +101,31 @@ void StencilMapper::select_task_options(const MapperContext    ctx,
   output.map_locally = true;
 #else
   output.map_locally = false;
+#endif
+}
+
+void StencilMapper::default_policy_rank_processor_kinds(MapperContext ctx,
+                        const Task &task, std::vector<Processor::Kind> &ranking)
+{
+#if SPMD_SHARD_USE_IO_PROC
+  const char* task_name = task.get_task_name();
+  const char* prefix = "shard_";
+  if (strncmp(task_name, prefix, strlen(prefix)) == 0) {
+    // Put shard tasks on IO processors.
+    ranking.resize(4);
+    ranking[0] = Processor::TOC_PROC;
+    ranking[1] = Processor::PROC_SET;
+    ranking[2] = Processor::IO_PROC;
+    ranking[3] = Processor::LOC_PROC;
+  } else {
+#endif
+    ranking.resize(4);
+    ranking[0] = Processor::TOC_PROC;
+    ranking[1] = Processor::PROC_SET;
+    ranking[2] = Processor::LOC_PROC;
+    ranking[3] = Processor::IO_PROC;
+#if SPMD_SHARD_USE_IO_PROC
+  }
 #endif
 }
 
@@ -208,6 +248,10 @@ static void create_mappers(Machine machine, HighLevelRuntime *runtime, const std
   std::vector<Memory>* sysmems_list = new std::vector<Memory>();
   std::map<Memory, std::vector<Processor> >* sysmem_local_procs =
     new std::map<Memory, std::vector<Processor> >();
+#if SPMD_SHARD_USE_IO_PROC
+  std::map<Memory, std::vector<Processor> >* sysmem_local_io_procs =
+    new std::map<Memory, std::vector<Processor> >();
+#endif
   std::map<Processor, Memory>* proc_sysmems = new std::map<Processor, Memory>();
   std::map<Processor, Memory>* proc_regmems = new std::map<Processor, Memory>();
 
@@ -230,8 +274,15 @@ static void create_mappers(Machine machine, HighLevelRuntime *runtime, const std
 
   for (std::map<Processor, Memory>::iterator it = proc_sysmems->begin();
        it != proc_sysmems->end(); ++it) {
-    procs_list->push_back(it->first);
-    (*sysmem_local_procs)[it->second].push_back(it->first);
+    if (it->first.kind() == Processor::LOC_PROC) {
+      procs_list->push_back(it->first);
+      (*sysmem_local_procs)[it->second].push_back(it->first);
+    }
+#if SPMD_SHARD_USE_IO_PROC
+    else if (it->first.kind() == Processor::IO_PROC) {
+      (*sysmem_local_io_procs)[it->second].push_back(it->first);
+    }
+#endif
   }
 
   for (std::map<Memory, std::vector<Processor> >::iterator it =
@@ -246,6 +297,9 @@ static void create_mappers(Machine machine, HighLevelRuntime *runtime, const std
                                               procs_list,
                                               sysmems_list,
                                               sysmem_local_procs,
+#if SPMD_SHARD_USE_IO_PROC
+                                              sysmem_local_io_procs,
+#endif
                                               proc_sysmems,
                                               proc_regmems);
     runtime->replace_default_mapper(mapper, *it);
