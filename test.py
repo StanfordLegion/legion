@@ -188,6 +188,11 @@ def run_test_realm(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
 def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
 
+    # Realm perf test (move back to perf test when integrated with perf.py)
+    perf_dir = os.path.join(root_dir, 'test/performance/realm')
+    cmd(['make', '-C', perf_dir, 'DEBUG=0', 'clean_all'], env=env)
+    cmd(['make', '-C', perf_dir, 'DEBUG=0', 'RUNMODE=short', 'run_all'], env=env)
+
     # Fast Direct Solver
     # Contact: Chao Chen <cchen10@stanford.edu>
     solver_dir = os.path.join(tmp_dir, 'fastSolver2')
@@ -290,11 +295,6 @@ def git_branch_name(repo_dir):
     return None
 
 def run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
-    # Realm perf test results not currently records
-    perf_dir = os.path.join(root_dir, 'test/performance/realm')
-    cmd(['make', '-C', perf_dir, 'DEBUG=0', 'clean_all'], env=env)
-    cmd(['make', '-C', perf_dir, 'DEBUG=0', 'RUNMODE=short', 'run_all'], env=env)
-
     flags = ['-logfile', 'out_%.log']
 
     # Performance test configuration:
