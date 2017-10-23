@@ -30,5 +30,5 @@ install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/python_interop.py
 )
 
 if(Legion_ENABLE_TESTING)
-  add_test(NAME python_interop COMMAND $<TARGET_FILE:python_interop> -ll:py 1)
+  add_test(NAME python_interop COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:python_interop> -ll:py 1)
 endif()

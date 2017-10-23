@@ -53,8 +53,8 @@ namespace Realm {
   class RegionInstanceImpl;
   class Module;
 
-  class MemPairCopierFactory;
-  typedef MemPairCopierFactory DMAChannel;
+  class Channel; // from transfer/channel.h
+  typedef Channel DMAChannel;
 
     template <typename _ET, size_t _INNER_BITS, size_t _LEAF_BITS>
     class DynamicTableAllocator {
@@ -118,6 +118,7 @@ namespace Realm {
       std::vector<MemoryImpl *> memories;
       std::vector<MemoryImpl *> ib_memories;
       std::vector<ProcessorImpl *> processors;
+      std::vector<DMAChannel *> dma_channels;
 
       DynamicTable<EventTableAllocator> events;
       DynamicTable<BarrierTableAllocator> barriers;
@@ -208,9 +209,10 @@ namespace Realm {
 	       const void *args = 0, size_t arglen = 0, bool background = false);
 
       // requests a shutdown of the runtime
-      void shutdown(bool local_request);
+      void shutdown(bool local_request, int result_code);
 
-      void wait_for_shutdown(void);
+      // returns value of result_code passed to shutdown()
+      int wait_for_shutdown(void);
 
       // three event-related impl calls - get_event_impl() will give you either
       //  a normal event or a barrier, but you won't be able to do specific things
@@ -263,6 +265,7 @@ namespace Realm {
       unsigned thread_counts[MAX_NUM_THREADS];
 #endif
       volatile bool shutdown_requested;
+      int shutdown_result_code;
       GASNetHSL shutdown_mutex;
       GASNetCondVar shutdown_condvar;
 
@@ -289,8 +292,6 @@ namespace Realm {
       Processor next_local_processor_id(void);
       CoreReservationSet& core_reservation_set(void);
 
-      const std::vector<DMAChannel *>& get_dma_channels(void) const;
-
       const std::vector<CodeTranslator *>& get_code_translators(void) const;
 
     protected:
@@ -298,7 +299,6 @@ namespace Realm {
 
       ModuleRegistrar module_registrar;
       std::vector<Module *> modules;
-      std::vector<DMAChannel *> dma_channels;
       std::vector<CodeTranslator *> code_translators;
     };
 
@@ -349,7 +349,7 @@ namespace Realm {
     struct RuntimeShutdownMessage {
       struct RequestArgs {
 	int initiating_node;
-	int dummy; // needed to get sizeof() >= 8
+	int result_code;
       };
 
       static void handle_request(RequestArgs args);
@@ -358,7 +358,7 @@ namespace Realm {
 				        RequestArgs,
 				        handle_request> Message;
 
-      static void send_request(NodeID target);
+      static void send_request(NodeID target, int result_code);
     };
       
 }; // namespace Realm

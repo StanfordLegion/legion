@@ -20,6 +20,7 @@
 
 #include "serialize.h"
 TYPE_IS_SERIALIZABLE(Realm::Processor);
+TYPE_IS_SERIALIZABLE(Realm::Processor::Kind);
 
 namespace Realm {
 

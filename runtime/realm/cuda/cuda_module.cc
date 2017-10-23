@@ -849,8 +849,8 @@ namespace Realm {
 	return;
 
       if(!pinned_sysmems.empty()) {
-	r->add_dma_channel(new GPUDMAChannel_H2D(this));
-	r->add_dma_channel(new GPUDMAChannel_D2H(this));
+	//r->add_dma_channel(new GPUDMAChannel_H2D(this));
+	//r->add_dma_channel(new GPUDMAChannel_D2H(this));
 
 	// TODO: move into the dma channels themselves
 	for(std::set<Memory>::const_iterator it = pinned_sysmems.begin();
@@ -870,11 +870,11 @@ namespace Realm {
 	log_gpu.warning() << "GPU " << proc->me << " has no pinned system memories!?";
       }
 
-      r->add_dma_channel(new GPUDMAChannel_D2D(this));
+      //r->add_dma_channel(new GPUDMAChannel_D2D(this));
 
       // only create a p2p channel if we have peers (and an fb)
       if(!peer_fbs.empty()) {
-	r->add_dma_channel(new GPUDMAChannel_P2P(this));
+	//r->add_dma_channel(new GPUDMAChannel_P2P(this));
 
 	// TODO: move into the dma channels themselves
 	for(std::set<Memory>::const_iterator it = peer_fbs.begin();

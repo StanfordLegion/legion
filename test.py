@@ -185,11 +185,6 @@ def run_test_realm(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     cmd(['make', '-C', test_dir, 'DEBUG=0', 'USE_CUDA=0', 'USE_GASNET=0', 'clean'], env=env)
     cmd(['make', '-C', test_dir, 'DEBUG=0', 'USE_CUDA=0', 'USE_GASNET=0', 'run_all'], env=env)
 
-    # Commenting these out because Sean says not to run them in general test
-    perf_dir = os.path.join(root_dir, 'test/performance/realm')
-    cmd(['make', '-C', perf_dir, 'DEBUG=0', 'clean_all'], env=env)
-    cmd(['make', '-C', perf_dir, 'DEBUG=0', 'RUNMODE=short', 'run_all'], env=env)
-
 def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
 
@@ -272,6 +267,12 @@ def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     cmd([pennant, str(app_cores), 'test/sedovsmall/sedovsmall.pnt', '-ll:cpu', str(app_cores)],
         cwd=pennant_dir)
 
+def run_test_ctest(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
+    build_dir = os.path.join(tmp_dir, 'build')
+    cmd(['ctest', '-j', str(thread_count), '--output-on-failure'],
+        env=env,
+        cwd=build_dir)
+
 def hostname():
     return subprocess.check_output(['hostname']).strip()
 
@@ -289,6 +290,11 @@ def git_branch_name(repo_dir):
     return None
 
 def run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
+    # Realm perf test results not currently records
+    perf_dir = os.path.join(root_dir, 'test/performance/realm')
+    cmd(['make', '-C', perf_dir, 'DEBUG=0', 'clean_all'], env=env)
+    cmd(['make', '-C', perf_dir, 'DEBUG=0', 'RUNMODE=short', 'run_all'], env=env)
+
     flags = ['-logfile', 'out_%.log']
 
     # Performance test configuration:
@@ -416,27 +422,34 @@ def check_test_legion_cxx(root_dir):
         print()
         raise Exception('There are tests that are NOT in the test suite')
 
-def build_cmake(root_dir, tmp_dir, env, thread_count, test_legion_cxx, test_perf):
+def build_cmake(root_dir, tmp_dir, env, thread_count,
+                test_legion_cxx, test_perf, test_ctest):
     build_dir = os.path.join(tmp_dir, 'build')
     install_dir = os.path.join(tmp_dir, 'install')
     os.mkdir(build_dir)
     os.mkdir(install_dir)
-    cmd(['cmake', '-DCMAKE_INSTALL_PREFIX=%s' % install_dir,
-         '-DCMAKE_BUILD_TYPE=%s' % (
-             'Debug' if env['DEBUG'] == '1' else 'Release'),
-         '-DLegion_USE_GASNet=%s' % (
-             'ON' if env['USE_GASNET'] == '1' else 'OFF'),
-         '-DLegion_USE_CUDA=%s' % (
-             'ON' if env['USE_CUDA'] == '1' else 'OFF'),
-         '-DLegion_USE_LLVM=%s' % (
-             'ON' if env['USE_LLVM'] == '1' else 'OFF'),
-         '-DLegion_USE_HDF5=%s' % (
-             'ON' if env['USE_HDF'] == '1' else 'OFF')] +
-        (['-DCMAKE_CXX_FLAGS=%s' % env['CC_FLAGS']]
-          if 'CC_FLAGS' in env else []) +
-        (['-DLegion_BUILD_ALL=ON'] if test_legion_cxx or test_perf else []) +
-        [root_dir],
-        env=env, cwd=build_dir)
+    cmdline = ['cmake', '-DCMAKE_INSTALL_PREFIX=%s' % install_dir ]
+    cmdline.append('-DCMAKE_BUILD_TYPE=%s' % ('Debug' if env['DEBUG'] == '1' else
+                                              'Release'))
+    cmdline.append('-DLegion_USE_GASNet=%s' % ('ON' if env['USE_GASNET'] == '1' else
+                                               'OFF'))
+    cmdline.append('-DLegion_USE_CUDA=%s' % ('ON' if env['USE_CUDA'] == '1' else 'OFF'))
+    cmdline.append('-DLegion_USE_LLVM=%s' % ('ON' if env['USE_LLVM'] == '1' else 'OFF'))
+    cmdline.append('-DLegion_USE_HDF5=%s' % ('ON' if env['USE_HDF'] == '1' else 'OFF'))
+    if test_ctest:
+        cmdline.append('-DLegion_ENABLE_TESTING=ON')
+        if 'LAUNCHER' in env:
+            cmdline.append('-DLegion_TEST_LAUNCHER=%s' % env['LAUNCHER'])
+    else:
+        cmdline.append('-DLegion_ENABLE_TESTING=OFF')
+    if 'CC_FLAGS' in env:
+        cmdline.append('-DCMAKE_CXX_FLAGS=%s' % env['CC_FLAGS'])
+    if test_legion_cxx or test_perf or test_ctest:
+        cmdline.append('-DLegion_BUILD_ALL=ON')
+    # last argument to cmake is the root of the tree
+    cmdline.append(root_dir)
+
+    cmd(cmdline, env=env, cwd=build_dir)
     cmd(['make', '-C', build_dir, '-j', str(thread_count)], env=env)
     cmd(['make', '-C', build_dir, 'install'], env=env)
     return os.path.join(build_dir, 'bin')
@@ -487,7 +500,7 @@ class Stage(object):
 
 def report_mode(debug, launcher,
                 test_regent, test_legion_cxx, test_fuzzer, test_realm,
-                test_external, test_private, test_perf, use_gasnet,
+                test_external, test_private, test_perf, test_ctest, use_gasnet,
                 use_cuda, use_openmp, use_python, use_llvm, use_hdf, use_spy,
                 use_gcov, use_cmake, use_rdir):
     print()
@@ -505,6 +518,7 @@ def report_mode(debug, launcher,
     print('###   * External:   %s' % test_external)
     print('###   * Private:    %s' % test_private)
     print('###   * Perf:       %s' % test_perf)
+    print('###   * CTest:      %s' % test_ctest)
     print('###')
     print('### Build Flags:')
     print('###   * GASNet:     %s' % use_gasnet)
@@ -546,6 +560,7 @@ def run_tests(test_modules=None,
     test_external = module_enabled('external', False)
     test_private = module_enabled('private', False)
     test_perf = module_enabled('perf', False)
+    test_ctest = module_enabled('ctest', False)
 
     # Determine which features to build with.
     def feature_enabled(feature, default=True):
@@ -563,6 +578,9 @@ def run_tests(test_modules=None,
 
     if test_perf and debug:
         raise Exception('Performance tests requested but DEBUG is enabled')
+
+    if test_ctest and not use_cmake:
+        raise Exception('CTest cannot be used without CMake')
 
     if use_gasnet and launcher is None:
         raise Exception('GASNet is enabled but launcher is not set (use --launcher or LAUNCHER)')
@@ -603,7 +621,8 @@ def run_tests(test_modules=None,
 
     report_mode(debug, launcher,
                 test_regent, test_legion_cxx, test_fuzzer, test_realm,
-                test_external, test_private, test_perf, use_gasnet,
+                test_external, test_private, test_perf, test_ctest,
+                use_gasnet,
                 use_cuda, use_openmp, use_python, use_llvm, use_hdf, use_spy,
                 use_gcov, use_cmake, use_rdir)
 
@@ -616,7 +635,7 @@ def run_tests(test_modules=None,
         with Stage('build'):
             if use_cmake:
                 bin_dir = build_cmake(
-                    root_dir, tmp_dir, env, thread_count, test_legion_cxx, test_perf)
+                    root_dir, tmp_dir, env, thread_count, test_legion_cxx, test_perf, test_ctest)
             else:
                 # With GNU Make, builds happen inline. But clean here.
                 build_make_clean(
@@ -655,6 +674,9 @@ def run_tests(test_modules=None,
         if test_perf:
             with Stage('perf'):
                 run_test_perf(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
+        if test_ctest:
+            with Stage('ctest'):
+                run_test_ctest(launcher, root_dir, tmp_dir, bin_dir, env, thread_count)
     finally:
         if keep_tmp_dir:
             print('Leaving build directory:')
@@ -665,14 +687,49 @@ def run_tests(test_modules=None,
                 print('  %s' % tmp_dir)
             shutil.rmtree(tmp_dir)
 
+# behaves enough like a normal list for ArgumentParser's needs, except for
+#  the __contains__ method, which accepts a list of values and checks each
+#  one for membership
+class MultipleChoiceList(object):
+    def __init__(self, *args):
+        self.list = list(args)
+
+    def __contains__(self, x):
+        if type(x) is list:
+            for v in x:
+                if v not in self.list:
+                    return False
+            return True
+        else:
+            return x in self.list
+
+    def __iter__(self):
+        return self.list.__iter__()
+
+class ExtendAction(argparse.Action):
+    def __init__(self, **kwargs):
+        super(ExtendAction, self).__init__(**kwargs)
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        items = getattr(namespace, self.dest, None)
+        items = items[:] if items else []
+        if type(values) is list:
+            items.extend(values)
+        else:
+            items.append(values)
+        setattr(namespace, self.dest, items)
+
 def driver():
     parser = argparse.ArgumentParser(
         description = 'Legion test suite')
 
     # What tests to run:
     parser.add_argument(
-        '--test', dest='test_modules', action='append',
-        choices=['regent', 'legion_cxx', 'fuzzer', 'realm', 'external', 'private', 'perf'],
+        '--test', dest='test_modules', action=ExtendAction,
+        choices=MultipleChoiceList('regent', 'legion_cxx', 'fuzzer',
+                                   'realm', 'external',
+                                   'private', 'perf', 'ctest'),
+        type=lambda s: s.split(','),
         default=None,
         help='Test modules to run (also via TEST_*).')
 
@@ -685,9 +742,11 @@ def driver():
         '--no-debug', dest='debug', action='store_false',
         help='Disable debug mode (equivalent to DEBUG=0).')
     parser.add_argument(
-        '--use', dest='use_features', action='append',
-        choices=['gasnet', 'cuda', 'openmp', 'python', 'llvm', 'hdf', 'spy',
-                 'gcov', 'cmake', 'rdir'],
+        '--use', dest='use_features', action=ExtendAction,
+        choices=MultipleChoiceList('gasnet', 'cuda', 'openmp',
+                                   'python', 'llvm', 'hdf', 'spy',
+                                   'gcov', 'cmake', 'rdir'),
+        type=lambda s: s.split(','),
         default=None,
         help='Build Legion with features (also via USE_*).')
     parser.add_argument(

@@ -29,5 +29,5 @@ add_executable(spmd_cgsolver
 )
 target_link_libraries(spmd_cgsolver Legion::Legion)
 if(Legion_ENABLE_TESTING)
-  add_test(NAME spmd_cgsolver COMMAND $<TARGET_FILE:spmd_cgsolver>) 
+  add_test(NAME spmd_cgsolver COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:spmd_cgsolver>)
 endif()
