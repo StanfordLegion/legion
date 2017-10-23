@@ -49,6 +49,16 @@ public:
                                     MapperContext ctx,
                                     const Task &task,
                                     std::vector<Processor> &target_procs);
+  virtual LogicalRegion default_policy_select_instance_region(
+                                MapperContext ctx, Memory target_memory,
+                                const RegionRequirement &req,
+                                const LayoutConstraintSet &constraints,
+                                bool force_new_instances,
+                                bool meets_constraints);
+  virtual void map_task(const MapperContext ctx,
+                        const Task &task,
+                        const MapTaskInput &input,
+                        MapTaskOutput &output);
   virtual void map_copy(const MapperContext ctx,
                         const Copy &copy,
                         const MapCopyInput &input,
@@ -141,6 +151,54 @@ void StencilMapper::default_policy_select_target_processors(
                                     std::vector<Processor> &target_procs)
 {
   target_procs.push_back(task.target_proc);
+}
+
+LogicalRegion StencilMapper::default_policy_select_instance_region(
+                              MapperContext ctx, Memory target_memory,
+                              const RegionRequirement &req,
+                              const LayoutConstraintSet &constraints,
+                              bool force_new_instances,
+                              bool meets_constraints)
+{
+  return req.region;
+}
+
+void StencilMapper::map_task(const MapperContext      ctx,
+                             const Task&              task,
+                             const MapTaskInput&      input,
+                                   MapTaskOutput&     output)
+{
+  if (task.parent_task != NULL && task.parent_task->must_epoch_task) {
+    Processor::Kind target_kind = task.target_proc.kind();
+    // Get the variant that we are going to use to map this task
+    VariantInfo chosen = default_find_preferred_variant(task, ctx,
+                                                        true/*needs tight bound*/, true/*cache*/, target_kind);
+    output.chosen_variant = chosen.variant;
+    // TODO: some criticality analysis to assign priorities
+    output.task_priority = 0;
+    output.postmap_task = false;
+    // Figure out our target processors
+    output.target_procs.push_back(task.target_proc);
+
+    for (unsigned idx = 0; idx < task.regions.size(); idx++) {
+      const RegionRequirement &req = task.regions[idx];
+
+      // Skip any empty regions
+      if ((req.privilege == NO_ACCESS) || (req.privilege_fields.empty()))
+        continue;
+
+      assert(input.valid_instances[idx].size() == 1);
+      output.chosen_instances[idx] = input.valid_instances[idx];
+      bool ok = runtime->acquire_and_filter_instances(ctx, output.chosen_instances);
+      if (!ok) {
+        log_stencil.error("failed to acquire instances");
+        assert(false);
+      }
+    }
+    return;
+  }
+
+  DefaultMapper::map_task(ctx, task, input, output);
 }
 
 void StencilMapper::map_copy(const MapperContext ctx,
