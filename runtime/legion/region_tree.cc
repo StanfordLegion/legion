@@ -2633,13 +2633,10 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_CONVERT_MAPPING_CALL);
       // Can be a part projection if we are closing to a partition node
-      RegionTreeNode *tree_node = (req.handle_type != PART_PROJECTION) ? 
-        static_cast<RegionTreeNode*>(get_node(req.region)) : 
-        static_cast<RegionTreeNode*>(get_node(req.partition));      
+      FieldSpaceNode *node = get_node(req.parent.get_field_space());
       // Get the field mask for the fields we need
-      FieldMask needed_fields = 
-                tree_node->column_source->get_field_mask(req.privilege_fields);
-      const RegionTreeID local_tree = tree_node->get_tree_id();
+      FieldMask needed_fields = node->get_field_mask(req.privilege_fields);
+      const RegionTreeID local_tree = req.parent.get_tree_id();
       // Iterate over each one of the chosen instances
       bool has_composite = false;
       for (std::vector<MappingInstance>::const_iterator it = chosen.begin();
@@ -2693,7 +2690,7 @@ namespace Legion {
           // going to be reporting an error so performance no
           // longer matters
           std::set<FieldID> missing;
-          tree_node->column_source->get_field_set(needed_fields, missing);
+          node->get_field_set(needed_fields, missing);
           missing_fields.insert(missing_fields.end(), 
                                 missing.begin(), missing.end());
         }
